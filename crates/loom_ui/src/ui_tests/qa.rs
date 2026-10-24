@@ -594,6 +594,112 @@ fn time_slider_keys_and_set_frame() {
 }
 
 #[test]
+fn selection_changes_undo_and_ctrl_a_d_i() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = selected(&h);
+    h.mods = egui::Modifiers::CTRL;
+    h.key(egui::Key::A);
+    assert_eq!(h.app.state.selection.len(), 2, "Ctrl+A");
+    h.key(egui::Key::D);
+    assert!(h.app.state.selection.is_empty(), "Ctrl+D");
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.key(egui::Key::I);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![b], "Ctrl+I");
+}
+
+#[test]
+fn ctrl_v_clone_dialog_ok_copies_in_place() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.mods = egui::Modifiers::CTRL;
+    h.key(egui::Key::V);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::CloneOptions));
+    click_text(&mut h, "OK");
+    assert_eq!(h.app.state.scene.len(), 2);
+    let c = selected(&h);
+    assert_ne!(c, a, "the clone is selected");
+    assert!(pos_of(&h, c).distance(pos_of(&h, a)) < 1e-4, "a clone in place");
+    let (na, nc) = (h.app.state.scene.node(a).unwrap().name.clone(), h.app.state.scene.node(c).unwrap().name.clone());
+    assert_ne!(na, nc, "with a new name");
+}
+
+#[test]
+fn space_locks_the_selection_against_clicks() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    // Space locks only with Preferences > General > Space locks the selection.
+    h.cmd(Command::SetPreference { name: "Space Locks Selection".into(), value: 1.0 });
+    h.key(egui::Key::Space);
+    assert!(h.app.state.selection_locked);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    h.click(r.min + egui::vec2(20.0, 20.0));
+    assert!(h.app.state.selection.contains(&a), "a click on empty space keeps a locked selection");
+    h.key(egui::Key::Space);
+    h.click(r.min + egui::vec2(20.0, 20.0));
+    assert!(h.app.state.selection.is_empty());
+}
+
+#[test]
+fn isolate_selection_and_exit() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.mods = egui::Modifiers::ALT;
+    h.key(egui::Key::Q);
+    h.mods = egui::Modifiers::NONE;
+    assert!(h.app.state.scene.node(b).unwrap().hidden, "Alt+Q hides the rest");
+    h.cmd(Command::ExitIsolation);
+    assert!(!h.app.state.scene.node(b).unwrap().hidden);
+}
+
+#[test]
+fn creating_by_drag_undoes_in_one_step() {
+    let mut h = Harness::new();
+    creating(&mut h, PrimitiveKind::Box);
+    let a = ground_point(&h, Vec3::ZERO);
+    let b = ground_point(&h, Vec3::new(20.0, 20.0, 0.0));
+    h.drag(a, b);
+    let c = b + egui::vec2(0.0, -40.0);
+    hover_to(&mut h, b, c);
+    h.click(c);
+    assert_eq!(h.app.state.scene.len(), 1);
+    h.mods = egui::Modifiers::CTRL;
+    h.key(egui::Key::Z);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.scene.len(), 0, "Ctrl+Z removes the new box");
+    h.mods = egui::Modifiers::CTRL;
+    h.key(egui::Key::Y);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.scene.len(), 1, "Ctrl+Y brings it back");
+}
+
+#[test]
+fn circular_region_selects_and_ctrl_region_adds() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-40.0, 40.0, 0.0], size: [10.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::ZoomExtentsAll);
+    h.cmd(Command::SelectNone);
+    h.cmd(Command::SelectionRegion { shape: loom_commands::SelectionRegion::Circular });
+    let ca = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    h.drag(ca, ca + egui::vec2(10.0, 0.0));
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![a], "circle around the big box");
+    let cb = h.screen_of(Vec3::new(-40.0, 40.0, 5.0));
+    h.mods = egui::Modifiers::CTRL;
+    h.drag(cb, cb + egui::vec2(6.0, 0.0));
+    h.mods = egui::Modifiers::NONE;
+    assert!(h.app.state.selection.contains(&b), "Ctrl+region adds");
+    assert_eq!(h.app.state.selection.len(), 2);
+}
+
+#[test]
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();
     for (label, tab) in [("Modify", crate::Tab::Modify), ("Hierarchy", crate::Tab::Hierarchy), ("Motion", crate::Tab::Motion), ("Display", crate::Tab::Display), ("Utilities", crate::Tab::Utilities), ("Create", crate::Tab::Create)] {
