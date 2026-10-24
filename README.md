@@ -75,11 +75,16 @@ tables, one per shortcut group.
 
 ## Automation
 
-- `LOOM_CONTROL_PORT=7833 loom` opens a control socket on 127.0.0.1: one JSON
-  object per line, `{"cmd": "<command name>", "args": {...}}`, plus `ping` and
-  `{"cmd": "screenshot", "path": "..."}`.
+- Every run listens on a control socket only its user can open,
+  `$XDG_RUNTIME_DIR/3dloom/<pid>.sock` (`current` there is the newest run):
+  one JSON object per line, `{"cmd": "<command name>", "args": {...}}`, plus
+  `ping`, `screenshot`, `diagnostics`, `input` and the log requests (see
+  [CONTRIBUTING.md](CONTRIBUTING.md#live-debugging)).
+  `LOOM_CONTROL_PORT=7833 loom` also opens the same protocol on 127.0.0.1.
+- Every run writes a log to `$XDG_STATE_HOME/3dloom/logs`
+  (`~/.local/state/3dloom/logs`).
 - `cargo run -p loom_mcp` is a stdio MCP server; its tools are generated from
-  the command registry, one per command.
+  the command registry, one per command, plus the socket's own requests.
 - `tools/run-virtual.sh [port]` runs the app on a virtual X display (Xvnc or
   Xvfb), for automated and visual tests.
 
