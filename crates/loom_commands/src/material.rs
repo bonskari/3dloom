@@ -590,7 +590,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let mut m = state.scene.slot_material(f);
             // A dragged copy is a new material; a compound one copies its sub-materials too.
             fn deep_copy(lib: &mut MaterialLibrary, m: &mut StandardMaterial) {
-                let mut copy_child = |lib: &mut MaterialLibrary, c: &mut Option<MaterialId>| {
+                let copy_child = |lib: &mut MaterialLibrary, c: &mut Option<MaterialId>| {
                     if let Some(src) = c.and_then(|c| lib.get(&c).cloned()) {
                         let mut sub = src;
                         deep_copy(lib, &mut sub);

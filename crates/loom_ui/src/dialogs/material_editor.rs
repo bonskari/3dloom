@@ -411,7 +411,7 @@ fn material_label(app: &LoomApp, id: Option<MaterialId>) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
-    let window = egui::Window::new("Material Editor").id(egui::Id::new("Material Editor")).open(open).resizable(true).default_width(400.0).default_height(700.0).vscroll(true);
+    let window = egui::Window::new("Material Editor").id(egui::Id::new("Material Editor")).open(open).resizable(true).default_pos([16.0, 40.0]).default_width(400.0).default_height(740.0).vscroll(true);
     let r = window.show(ctx, |ui| {
         menu(ui, app);
         slots(ui, app);
@@ -561,7 +561,7 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
         }
     }
     if slot == active {
-        ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(2.0, egui::Color32::WHITE), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(2.0_f32, egui::Color32::WHITE), egui::StrokeKind::Inside);
     }
     let name = app.state.scene.slot_material(slot).name;
     let r = r.on_hover_text(name);
@@ -1400,7 +1400,7 @@ pub fn specify_cropping(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
         let (rect, r) = ui.allocate_exact_size(egui::vec2(w as f32 * scale, h as f32 * scale), egui::Sense::drag());
         ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         let region = egui::Rect::from_min_size(rect.min + egui::vec2(k.u * rect.width(), k.v * rect.height()), egui::vec2(k.w * rect.width(), k.h * rect.height()));
-        ui.painter().rect_stroke(region, 0.0, egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 220, 0)), egui::StrokeKind::Middle);
+        ui.painter().rect_stroke(region, 0.0, egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 220, 0)), egui::StrokeKind::Middle);
         for c in [region.left_top(), region.right_top(), region.left_bottom(), region.right_bottom()] {
             ui.painter().rect_filled(egui::Rect::from_center_size(c, egui::vec2(7.0, 7.0)), 0.0, egui::Color32::from_rgb(255, 220, 0));
         }

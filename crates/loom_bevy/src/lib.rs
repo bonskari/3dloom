@@ -28,7 +28,7 @@ use bevy::transform::components::Transform;
 use bevy::window::{ExitCondition, WindowPlugin};
 use bevy::DefaultPlugins;
 use bevy::app::PluginGroup;
-use bevy::color::{Alpha, Color};
+use bevy::color::Color;
 
 pub use convert::{diffuse_map_path, material_from_loom, material_from_surface, mesh_data, mesh_data_by_id, MeshData, ViewCamera};
 use loom_scene::material::{Map, Surface, Surfaces};
