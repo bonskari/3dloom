@@ -353,3 +353,50 @@ fn fbx_export_and_import_keep_the_layers() {
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(s.scene.layers.len(), 1, "one undo removes the imported layer too");
 }
+
+#[test]
+fn fbx_export_options_up_axis_smoothing_animation_and_cameras() {
+    let d = dir("fbx_options");
+    let mut s = AppState::new();
+    let a = named_box(&mut s, "A", 0.0);
+    execute(&mut s, Command::CreateCamera { target: false }).unwrap();
+    // A key on A.
+    execute(&mut s, Command::SelectNodes { ids: vec![a.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 0.0, 5.0], system: None }).unwrap();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    let load = |path: &std::path::Path| {
+        let bytes = std::fs::read(path).unwrap();
+        (ufbx::load_memory(&bytes, ufbx::LoadOpts::default()).unwrap(), bytes)
+    };
+    let all = d.join("all.fbx");
+    execute(&mut s, Command::ExportFile { path: p(&all) }).unwrap();
+    let (scene, bytes) = load(&all);
+    assert_eq!(scene.settings.axes.up, ufbx::CoordinateAxis::PositiveZ, "Z-up by default");
+    assert_eq!(scene.cameras.len(), 1);
+    assert!(!scene.anim_stacks.is_empty());
+    assert!(bytes.windows(21).any(|w| w == b"LayerElementSmoothing"));
+    for name in ["Y-Up"] {
+        execute(&mut s, Command::SetFbxOption { name: name.into(), value: true }).unwrap();
+    }
+    for name in ["Smoothing Groups", "Animation", "Cameras"] {
+        execute(&mut s, Command::SetFbxOption { name: name.into(), value: false }).unwrap();
+    }
+    assert!(execute(&mut s, Command::SetFbxOption { name: "Nope".into(), value: true }).is_err());
+    let some = d.join("some.fbx");
+    execute(&mut s, Command::ExportFile { path: p(&some) }).unwrap();
+    let (scene, bytes) = load(&some);
+    assert_eq!(scene.settings.axes.up, ufbx::CoordinateAxis::PositiveY);
+    assert_eq!(scene.cameras.len(), 0);
+    assert!(scene.anim_stacks.is_empty());
+    assert!(!bytes.windows(21).any(|w| w == b"LayerElementSmoothing"));
+    // Import without its animation: no keys, the time segment stays.
+    let mut t = AppState::new();
+    let range = t.frame_range;
+    execute(&mut t, Command::SetFbxOption { name: "Import Animation".into(), value: false }).unwrap();
+    execute(&mut t, Command::ImportFile { path: p(&all) }).unwrap();
+    let a2 = t.scene.nodes().find(|n| n.name == "A").unwrap();
+    assert!(!a2.transform.position.is_animated());
+    assert_eq!(t.frame_range, range);
+}

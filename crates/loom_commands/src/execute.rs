@@ -2046,6 +2046,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             })?;
             Ok(json!({}))
         }
+        C::SetFbxOption { name, value } => {
+            state.fbx_options.set(&name, value)?;
+            Ok(serde_json::to_value(state.fbx_options).unwrap_or(Value::Null))
+        }
         C::SetSelectionDisplayProperty { name, value } => {
             if loom_scene::DisplayProps::default().get(&name).is_none() {
                 return Err(format!("no display property `{name}`"));

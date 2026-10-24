@@ -218,3 +218,66 @@ pub fn group_name(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ctx.data_mut(|d| d.insert_temp(id, name));
     }
 }
+
+/// FBX Export (`selected` = Export Selected) or FBX Import (`None`): the
+/// options, then OK writes or reads the chosen file.
+pub fn fbx_options(ctx: &egui::Context, app: &mut LoomApp, selected: Option<bool>, open: &mut bool) {
+    let Some(path) = app.state.fbx_pending.clone() else {
+        *open = false;
+        return;
+    };
+    let title = if selected.is_some() { "FBX Export" } else { "FBX Import" };
+    let mut done = false;
+    let mut ok = false;
+    egui::Window::new(title).open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        ui.separator();
+        let o = app.state.fbx_options;
+        let mut flag = |ui: &mut egui::Ui, label: &str, name: &str, on: bool| {
+            let mut v = on;
+            if ui.checkbox(&mut v, label).changed() {
+                let _ = app.dispatch(Command::SetFbxOption { name: name.into(), value: v });
+            }
+        };
+        if selected.is_some() {
+            ui.label(egui::RichText::new("Include").strong());
+            flag(ui, "Smoothing Groups", "Smoothing Groups", o.smoothing_groups);
+            flag(ui, "Animation", "Animation", o.animation);
+            flag(ui, "Cameras", "Cameras", o.cameras);
+            ui.label(egui::RichText::new("Axis Conversion").strong());
+            ui.horizontal(|ui| {
+                ui.label("Up Axis:");
+                if ui.radio(o.y_up, "Y-up").clicked() && !o.y_up {
+                    let _ = app.dispatch(Command::SetFbxOption { name: "Y-Up".into(), value: true });
+                }
+                if ui.radio(!o.y_up, "Z-up").clicked() && o.y_up {
+                    let _ = app.dispatch(Command::SetFbxOption { name: "Y-Up".into(), value: false });
+                }
+            });
+        } else {
+            ui.label(egui::RichText::new("Include").strong());
+            flag(ui, "Animation", "Import Animation", o.import_animation);
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            ok = ui.button("OK").clicked();
+            done = ui.button("Cancel").clicked();
+        });
+    });
+    if ok {
+        let p = Some(path.to_string_lossy().into_owned());
+        let cmd = match selected {
+            Some(true) => Command::ExportSelected { path: p },
+            Some(false) => Command::ExportFile { path: p },
+            None => Command::ImportFile { path: p },
+        };
+        if let Err(e) = app.dispatch(cmd) {
+            app.state.status_prompt = e;
+        }
+        done = true;
+    }
+    if done {
+        app.state.fbx_pending = None;
+        *open = false;
+    }
+}

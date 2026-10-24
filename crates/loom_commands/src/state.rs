@@ -1400,6 +1400,10 @@ pub struct AppState {
     pub merge_pending: Option<(std::path::PathBuf, Vec<String>)>,
     /// Customize > Show UI > Show Layers Toolbar.
     pub show_layers_toolbar: bool,
+    /// FBX Export / Import options.
+    pub fbx_options: crate::fbx_io::FbxOptions,
+    /// The file the FBX Export / Import dialog writes or reads on OK.
+    pub fbx_pending: Option<std::path::PathBuf>,
     /// File > File Properties and Summary Info > Description (saved in the scene file).
     pub file_properties: crate::file::FileProperties,
     /// The scene's file (File > Save writes here); None = Untitled.
@@ -1582,6 +1586,8 @@ impl AppState {
             seam_point: None,
             merge_pending: None,
             show_layers_toolbar: false,
+            fbx_options: Default::default(),
+            fbx_pending: None,
             file_properties: Default::default(),
             file: None,
             mesh_dirty: false,
