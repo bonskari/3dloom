@@ -250,7 +250,7 @@ mod tests {
         assert!(!verts.is_empty() && !indices.is_empty());
         assert!(indices.iter().all(|&i| (i as usize) < verts.len()));
         assert!(verts.iter().all(|v| v.position.iter().all(|x| x.is_finite()) && v.normal.iter().all(|x| x.is_finite())));
-        assert_eq!(std::mem::size_of::<GpuVertex>(), 48);
+        assert_eq!(std::mem::size_of::<GpuVertex>(), 64);
     }
 
     #[test]
