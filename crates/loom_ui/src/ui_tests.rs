@@ -238,3 +238,28 @@ fn drag_creating_a_box_keeps_it_selected() {
         assert!(!get(p).contains("(0.0)"), "{p} was set by the drag: {}", get(p));
     }
 }
+
+#[test]
+fn alt_r_rings_on_an_edit_poly_modifier_and_a_sphere() {
+    for (kind, convert) in [(PrimitiveKind::Box, false), (PrimitiveKind::Sphere, true)] {
+        let mut h = Harness::new();
+        h.cmd(Command::CreatePrimitive { kind, position: [0.0; 3], size: [30.0; 3] });
+        if convert {
+            h.cmd(Command::ConvertToEditablePoly);
+        } else {
+            h.cmd(Command::AddModifier { name: "Edit Poly".into() });
+        }
+        framed(&mut h);
+        h.key(egui::Key::Num2);
+        let node = *h.app.state.selection.iter().next().unwrap();
+        // Pick one edge by command (picking is covered elsewhere), then ring it from the keyboard.
+        h.cmd(Command::SelectSub { node: Some(node.0), ids: vec![0], op: loom_commands::SelectOp::Replace });
+        assert_eq!(h.sub_count(), 1);
+        let p = h.screen_of(Vec3::new(0.0, 0.0, 0.0));
+        h.run(vec![egui::Event::PointerMoved(p)]);
+        h.mods = egui::Modifiers::ALT;
+        h.key(egui::Key::R);
+        h.mods = egui::Modifiers::NONE;
+        assert!(h.sub_count() > 1, "{kind:?}: Alt+R rings the edge ({} selected)", h.sub_count());
+    }
+}
