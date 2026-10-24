@@ -1062,9 +1062,6 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         let vp = &app.state.viewports[index];
         (app.state.view_label(index), vp.shading.label(), vp.disabled)
     };
-    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-        ui.memory_mut(|m| m.close_popup());
-    }
     let font = egui::FontId::proportional(13.0);
     let mut x = rect.min.x + 6.0;
     let y = rect.min.y + 4.0;
@@ -1073,22 +1070,30 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         let galley = painter.layout_no_wrap(text, font.clone(), egui::Color32::from_gray(225));
         let size = galley.size();
         let r = egui::Rect::from_min_size(egui::pos2(x, y), size);
-        let id = ui.id().with(("vp_label", index, which));
-        let resp = ui.interact(r, id, egui::Sense::click());
-        let color = if resp.hovered() { egui::Color32::WHITE } else { egui::Color32::from_gray(225) };
-        painter.galley(r.min, galley, color);
-        if resp.clicked() || resp.secondary_clicked() {
-            ui.memory_mut(|m| m.toggle_popup(id.with("popup")));
-        }
         let entries = match which {
             0 => crate::label_menus::general_entries(app, index),
             1 => crate::label_menus::pov_entries(app, index),
             _ => crate::label_menus::shading_entries(app, index),
         };
-        egui::popup::popup_below_widget(ui, id.with("popup"), &resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
-            ui.set_min_width(170.0);
-            crate::label_menus::render(ui, app, index, &entries);
-        });
+        // A real menu (submenus open to the side, picking an item or clicking
+        // elsewhere closes it); its own text is invisible, the label above is drawn on top.
+        let text = galley.text().to_owned();
+        let button = egui::Button::new(egui::RichText::new(text).font(font.clone()).color(egui::Color32::TRANSPARENT)).frame(false);
+        let resp = ui
+            .put(r, |ui: &mut egui::Ui| {
+                egui::menu::menu_custom_button(ui, button, |ui| {
+                    ui.set_min_width(170.0);
+                    crate::label_menus::render(ui, app, index, &entries);
+                })
+                .response
+            })
+            .context_menu(|ui| {
+                ui.set_min_width(170.0);
+                crate::label_menus::render(ui, app, index, &entries);
+            });
+        let hovered = resp.is_some_and(|r| r.response.hovered()) || ui.rect_contains_pointer(r);
+        let color = if hovered { egui::Color32::WHITE } else { egui::Color32::from_gray(225) };
+        painter.galley(r.min, galley, color);
         x += size.x + 10.0;
     }
     if disabled {
