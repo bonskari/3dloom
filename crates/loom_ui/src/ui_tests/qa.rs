@@ -927,6 +927,54 @@ fn menu_toggles_show_a_check_mark() {
 }
 
 #[test]
+fn display_toggle_keys() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    let i = h.app.state.active_viewport;
+    let grid = h.app.state.viewports[i].show_grid;
+    h.key(egui::Key::G);
+    assert_ne!(h.app.state.viewports[i].show_grid, grid, "G");
+    let stats = h.app.state.show_statistics;
+    h.key(egui::Key::Num7);
+    assert_ne!(h.app.state.show_statistics, stats, "7");
+    let br = h.app.state.selection_brackets;
+    h.key(egui::Key::J);
+    assert_ne!(h.app.state.selection_brackets, br, "J");
+    let shade = h.app.state.shade_selected_faces;
+    h.key(egui::Key::F2);
+    assert_ne!(h.app.state.shade_selected_faces, shade, "F2");
+    let see = h.app.state.scene.node(id).unwrap().display.see_through;
+    h.mods = egui::Modifiers::ALT;
+    h.key(egui::Key::X);
+    h.mods = egui::Modifiers::NONE;
+    assert_ne!(h.app.state.scene.node(id).unwrap().display.see_through, see, "Alt+X");
+    h.mods = egui::Modifiers::CTRL;
+    h.key(egui::Key::X);
+    assert!(h.app.state.expert_mode, "Ctrl+X");
+    h.key(egui::Key::X);
+    h.mods = egui::Modifiers::NONE;
+    assert!(!h.app.state.expert_mode, "Ctrl+X again");
+}
+
+/// Status bar X field: click it, type a value, Enter: the selection moves there.
+#[test]
+fn status_bar_type_in_moves_the_selection() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.key(egui::Key::W);
+    let x = find_text(&mut h, "X:").expect("status bar X label");
+    let field = egui::pos2(x.max.x + 22.0, x.center().y);
+    h.click(field);
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::CTRL }]);
+    h.run(vec![egui::Event::Text("25".into())]);
+    h.run(vec![egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(3);
+    assert!((pos_of(&h, id).x - 25.0).abs() < 1e-3, "X = 25: {}", pos_of(&h, id));
+    h.cmd(Command::UndoSceneOperation);
+    assert!(pos_of(&h, id).length() < 1e-4, "undoable");
+}
+
+#[test]
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();
     for (label, tab) in [("Modify", crate::Tab::Modify), ("Hierarchy", crate::Tab::Hierarchy), ("Motion", crate::Tab::Motion), ("Display", crate::Tab::Display), ("Utilities", crate::Tab::Utilities), ("Create", crate::Tab::Create)] {
