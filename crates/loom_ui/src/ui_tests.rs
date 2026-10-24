@@ -252,8 +252,17 @@ fn alt_r_rings_on_an_edit_poly_modifier_and_a_sphere() {
         framed(&mut h);
         h.key(egui::Key::Num2);
         let node = *h.app.state.selection.iter().next().unwrap();
-        // Pick one edge by command (picking is covered elsewhere), then ring it from the keyboard.
-        h.cmd(Command::SelectSub { node: Some(node.0), ids: vec![0], op: loom_commands::SelectOp::Replace });
+        // Pick one edge between two quads (a pole triangle stops a ring at once),
+        // by command (picking is covered elsewhere), then ring it from the keyboard.
+        let edge = {
+            let mesh = h.app.state.scene.node(node).unwrap().cage_mesh().into_owned();
+            let quad = |f: Option<loom_mesh::FaceId>| f.and_then(|f| mesh.face_positions(f)).is_some_and(|p| p.len() == 4);
+            (0..mesh.half_edges().len() as u32)
+                .map(loom_mesh::HalfEdgeId)
+                .find(|e| mesh.canonical_edge_id(*e) == Some(*e) && quad(mesh.half_edges()[e.0 as usize].face) && quad(mesh.half_edges()[mesh.half_edges()[e.0 as usize].twin.0 as usize].face))
+                .expect("a quad edge")
+        };
+        h.cmd(Command::SelectSub { node: Some(node.0), ids: vec![edge.0], op: loom_commands::SelectOp::Replace });
         assert_eq!(h.sub_count(), 1);
         let p = h.screen_of(Vec3::new(0.0, 0.0, 0.0));
         h.run(vec![egui::Event::PointerMoved(p)]);
