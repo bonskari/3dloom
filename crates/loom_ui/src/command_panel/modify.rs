@@ -606,6 +606,9 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                         let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: (*n).into(), value: rgb[i] as f64 });
                     }
                 }
+                if ui.button("Edit").on_hover_text("Open the VertexPaint dialog").clicked() {
+                    crate::dialogs::vertex_paint::set_hidden(ui.ctx(), false);
+                }
             });
         });
     }

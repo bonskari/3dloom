@@ -422,6 +422,34 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
+                    // VertexPaint > Pick Color From Object: drag over the object, the swatch follows.
+                    if app.state.vertex_paint_pick {
+                        if let Some((target, _)) = loom_commands::vertex_paint::entry(&app.state) {
+                            let down = pointer.button_down(egui::PointerButton::Primary) && (response.hovered() || app.deform_painting);
+                            if pointer.button_pressed(egui::PointerButton::Primary) && response.hovered() {
+                                app.deform_painting = true;
+                                app.poly_dragging = true;
+                                app.state.undo.begin("Pick Color");
+                            }
+                            if down && app.deform_painting && (pointer.is_moving() || pointer.button_pressed(egui::PointerButton::Primary)) {
+                                if let Some((hit, point, _)) = surface_hit_node(app, p, rect, view, proj) {
+                                    if hit == target {
+                                        let local = app.state.scene.object_matrix(target).inverse().transform_point3(point);
+                                        let _ = app.dispatch(Command::VertexPaintPickColor { node: target.0, point: local.to_array() });
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+                            if pointer.button_released(egui::PointerButton::Primary) && app.deform_painting {
+                                app.deform_painting = false;
+                                app.poly_dragging = false;
+                                app.state.undo.end();
+                            }
+                            if down || app.deform_painting {
+                                app.drag_select_start = None;
+                            }
+                        }
+                    }
                     // Skin > Paint Weights brush.
                     crate::poly_modes::skin_paint(app, &ctx, &painter, &pointer, response.hovered(), p, rect, view, proj, &projection);
                     // Paint Deformation brush: LMB paints on the selected poly (Ctrl inverts, Shift relaxes).
@@ -748,6 +776,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     } else if crate::poly_modes::is_poly_pick(app.state.pick_mode) {
                                         crate::poly_modes::click(app, index, p, rect, view, proj);
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::normals_pick(app, &projection, None, p, mods) {
+                                    } else if app.state.pick_mode.is_none() && crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::ffd_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_some() && !matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)) {
@@ -765,7 +794,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     }
                                 } else {
                                     let region = drag_region(app, start, p);
-                                    if !crate::poly_modes::normals_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::skin_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::ffd_pick(app, &projection, Some(&region), p, mods) {
+                                    if !crate::poly_modes::normals_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::vertex_paint_face_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::skin_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::ffd_pick(app, &projection, Some(&region), p, mods) {
                                         // Auto Window/Crossing by Direction: left-to-right = Window, right-to-left = Crossing.
                                         let window = if app.state.prefs.auto_window_crossing { p.x >= start.x } else { app.state.window_selection };
                                         let items = region_select_mode(app, &region, rect, view_proj, window);

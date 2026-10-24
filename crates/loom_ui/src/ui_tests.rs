@@ -3086,3 +3086,56 @@ fn hsds_element_button_shows_the_yellow_cage_and_the_level_list_displays_a_level
     h.click(base);
     assert_eq!(h.app.state.scene.node(id).unwrap().cage_mesh().face_count(), 6);
 }
+
+fn vertex_paint_state(h: &mut Harness) -> serde_json::Value {
+    h.app.dispatch(Command::State).unwrap()["vertex_paint"].clone()
+}
+
+#[test]
+fn vertex_paint_dialog_face_selection_paint_all_new_layer_and_eyedropper() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = selected(&h)[0];
+    h.cmd(Command::AddModifier { name: "VertexPaint".into() });
+    framed(&mut h);
+    for (n, v) in [("Color R", 1.0), ("Color G", 0.0), ("Color B", 0.0)] {
+        h.cmd(Command::SetModifierParameter { index: 0, name: n.into(), value: v });
+    }
+    // The floating dialog opens with the modifier.
+    h.click(window_text(&h, "VertexPaint", "Face Selection"));
+    assert!(h.app.state.vertex_paint_faces);
+    h.click(h.screen_of(top_face_point()));
+    let st = vertex_paint_state(&mut h);
+    assert_eq!(st["faces"].as_array().unwrap().len(), 1, "a click selects the face under it: {st}");
+    assert_eq!(segments_coloured(&h, crate::poly_modes::VERTEX_PAINT_FACE), 4, "the selected quad outlined");
+    h.click(window_text(&h, "VertexPaint", "Paint All"));
+    let m = h.app.state.scene.eval_mesh(id).value.mesh.clone();
+    for v in m.vertices() {
+        let red = v.color[0] > 0.99 && v.color[1] < 0.01;
+        assert_eq!(red, v.position.z > 29.9, "only the top face's corners red: {v:?}");
+    }
+    // Layer > New Layer > OK adds a second VertexPaint.
+    h.click(window_text(&h, "VertexPaint", "New Layer"));
+    h.click(window_text(&h, "New Layer", "OK"));
+    let n = h.app.state.scene.node(id).unwrap();
+    assert_eq!(n.modifiers.len(), 2);
+    assert_eq!(n.active_entry, Some(1));
+    // The eyedropper takes the red from the top face into the new layer's swatch.
+    h.cmd(Command::SetModifierParameter { index: 1, name: "Color R".into(), value: 0.0 });
+    h.cmd(Command::SetModifierParameter { index: 1, name: "Color G".into(), value: 1.0 });
+    h.click(window_text(&h, "VertexPaint", "Pick Color"));
+    assert!(h.app.state.vertex_paint_pick && !h.app.state.vertex_paint_faces, "one mode at a time");
+    let corner = h.screen_of(Vec3::new(14.0, 14.0, 30.0));
+    h.drag(corner - egui::vec2(3.0, 3.0), corner);
+    let c = vertex_paint_state(&mut h)["color"].clone();
+    assert!(c[0].as_f64().unwrap() > 0.9 && c[1].as_f64().unwrap() < 0.1, "picked red: {c}");
+    // Closed (its close box), the dialog stays hidden until the rollout's Edit button.
+    h.cmd(Command::VertexPaintPickColorToggle);
+    crate::dialogs::vertex_paint::set_hidden(&h.ctx, true);
+    h.frames(2);
+    assert!(h.text_centers("Paint All").is_empty(), "hidden");
+    h.click(panel_text(&h, "Edit"));
+    h.frames(1);
+    assert_eq!(h.text_centers("Paint All").len(), 1, "Edit opens it again");
+}

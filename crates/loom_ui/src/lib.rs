@@ -682,6 +682,11 @@ impl LoomApp {
             // Skin > Display > Show Colored Faces (in Edit Envelopes): the faces shade by the current bone's weight.
             let mut vertex_colors = n.display.vertex_colors;
             let mut color = color;
+            // A VertexPaint (Vertex Color channel) in the stack shows its colours shaded, unmultiplied by the object colour.
+            if !vertex_colors && n.modifiers.iter().any(|s| s.enabled && s.enabled_in_viewport && matches!(&s.modifier, loom_scene::Modifier::VertexPaint { channel, .. } if channel.get() == 0)) {
+                vertex_colors = true;
+                color = [1.0; 3];
+            }
             if let (Some(d), Some((skinned, weights))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
                 if skinned == id && d.vertex_count() == weights.len() {
                     for (v, w) in d.vertices_mut().iter_mut().zip(weights) {

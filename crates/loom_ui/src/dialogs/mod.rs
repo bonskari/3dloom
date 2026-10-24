@@ -32,6 +32,7 @@ pub mod merge;
 pub mod unwrap_dialogs;
 pub mod rig_dialogs;
 pub mod track_view_dialogs;
+pub mod vertex_paint;
 
 use crate::LoomApp;
 use eframe::egui;
@@ -98,6 +99,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             app.state.material_editor_open = false;
         }
     }
+    // The VertexPaint dialog floats while a VertexPaint entry is active in the Modify panel.
+    vertex_paint::show(ctx, app);
     let Some(dialog) = app.state.dialog else { return };
     let mut open = true;
     match dialog {

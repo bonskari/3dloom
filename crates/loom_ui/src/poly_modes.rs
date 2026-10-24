@@ -240,6 +240,7 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hov
     draw_skin(painter, app, projection);
     draw_normals(painter, app, projection);
     draw_hsds_cage(painter, app, projection);
+    draw_vertex_paint_faces(painter, app, projection);
     // Modifier gizmo: the input's bounding box in the gizmo frame, orange.
     for id in app.state.selection.iter() {
         let Some(n) = app.state.scene.node(*id) else { continue };
@@ -533,18 +534,18 @@ pub fn normals_pick(app: &mut LoomApp, projection: &Projection, region: Option<&
             None => shown.map(|n| (n.id, segment_distance(p, n.from, n.to))).filter(|(_, d)| *d <= 8.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(g, _)| vec![g]).unwrap_or_default(),
         }
     } else {
-        mesh_ids_at(app, projection, id, index, by, ignore_back, region, p)
+        let input = loom_commands::normals::input_mesh(&app.state, id, index);
+        mesh_ids_at(projection, &input, app.state.scene.object_matrix(id), by, ignore_back, region, p)
     };
     let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
     let _ = app.dispatch(Command::EditNormalsSelect { ids, op });
     true
 }
 
-/// Select By Vertex / Edge / Face: the input mesh's ids under a click or in a region.
+/// Vertex (1), edge (2) or face (3) ids of `input` (placed by `world`)
+/// under a click or in a region.
 #[allow(clippy::too_many_arguments)]
-fn mesh_ids_at(app: &LoomApp, projection: &Projection, id: NodeId, index: usize, by: u32, ignore_back: bool, region: Option<&crate::region::Region>, p: egui::Pos2) -> Vec<u32> {
-    let input = loom_commands::normals::input_mesh(&app.state, id, index);
-    let world = app.state.scene.object_matrix(id);
+fn mesh_ids_at(projection: &Projection, input: &loom_mesh::Mesh, world: Mat4, by: u32, ignore_back: bool, region: Option<&crate::region::Region>, p: egui::Pos2) -> Vec<u32> {
     let wp: Vec<Vec3> = input.vertices().iter().map(|v| world.transform_point3(v.position)).collect();
     let sp: Vec<Option<egui::Pos2>> = wp.iter().map(|q| projection.screen(*q)).collect();
     let face_front: Vec<bool> = (0..input.face_count() as u32)
@@ -591,6 +592,45 @@ fn mesh_ids_at(app: &LoomApp, projection: &Projection, id: NodeId, index: usize,
                 }).map(|(f, _, _)| f).collect(),
                 None => faces.filter(|(_, poly, _)| crate::region::Region::Polygon(poly.clone()).contains(p)).min_by(|a, b| a.2.total_cmp(&b.2)).map(|(f, _, _)| vec![f]).unwrap_or_default(),
             }
+        }
+    }
+}
+
+/// VertexPaint > Face Selection: a click or region selects faces of the
+/// entry's input (Ctrl adds, Alt removes, a click on nothing clears).
+/// False when Face Selection is off.
+pub fn vertex_paint_face_pick(app: &mut LoomApp, projection: &Projection, region: Option<&crate::region::Region>, p: egui::Pos2, mods: loom_input::Modifiers) -> bool {
+    if !app.state.vertex_paint_faces {
+        return false;
+    }
+    let Some((id, index)) = loom_commands::vertex_paint::entry(&app.state) else { return false };
+    let input = loom_commands::vertex_paint::input_mesh(&app.state, id, index);
+    let ids = mesh_ids_at(projection, &input, app.state.scene.object_matrix(id), 3, true, region, p);
+    let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
+    let _ = app.dispatch(Command::VertexPaintSelectFaces { ids, op });
+    true
+}
+
+/// VertexPaint's selected faces: red outline over a faint red fill.
+pub const VERTEX_PAINT_FACE: egui::Color32 = egui::Color32::from_rgb(255, 30, 30);
+
+fn draw_vertex_paint_faces(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
+    let Some((id, index)) = loom_commands::vertex_paint::entry(&app.state) else { return };
+    let Some(loom_scene::Modifier::VertexPaint { faces, .. }) = app.state.scene.node(id).map(|n| &n.modifiers[index].modifier) else { return };
+    if faces.is_empty() {
+        return;
+    }
+    let input = loom_commands::vertex_paint::input_mesh(&app.state, id, index);
+    let world = app.state.scene.object_matrix(id);
+    for f in faces {
+        let Some(vs) = input.face_vertex_ids(loom_mesh::FaceId(*f)) else { continue };
+        let pts: Option<Vec<egui::Pos2>> = vs.iter().map(|v| input.vertex_position(*v).and_then(|q| projection.screen(world.transform_point3(q)))).collect();
+        let Some(pts) = pts else { continue };
+        if pts.len() >= 3 {
+            painter.add(egui::Shape::convex_polygon(pts.clone(), egui::Color32::from_rgba_unmultiplied(255, 0, 0, 60), egui::Stroke::NONE));
+        }
+        for i in 0..pts.len() {
+            painter.line_segment([pts[i], pts[(i + 1) % pts.len()]], egui::Stroke::new(1.5_f32, VERTEX_PAINT_FACE));
         }
     }
 }
