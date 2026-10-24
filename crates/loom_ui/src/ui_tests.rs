@@ -3020,6 +3020,7 @@ fn normals_box(h: &mut Harness) -> loom_scene::NodeId {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
     let id = selected(h)[0];
     h.cmd(Command::AddModifier { name: "Edit Normals".into() });
+    h.app.panel_tab = crate::Tab::Modify;
     framed(h);
     id
 }
@@ -3124,7 +3125,7 @@ fn edit_normals_draws_explicit_normals_green_and_the_rotate_tool_turns_them() {
     let o = projection.screen(layout.origin).unwrap();
     assert!(o.distance(h.screen_of(normal_lines(&h).into_iter().find(|l| l.0 == g).unwrap().1)) < 1.0, "the gizmo is on the normal");
     let start = (0..360)
-        .flat_map(|deg| (10..200).step_by(2).map(move |r| (deg as f32, r as f32)))
+        .flat_map(|deg| (10..800).step_by(2).map(move |r| (deg as f32, r as f32)))
         .map(|(deg, r)| o + egui::vec2(deg.to_radians().cos(), deg.to_radians().sin()) * r)
         .find(|p| matches!(crate::gizmo::hit(&h.app, &layout, &projection, *p), Some(crate::gizmo::Handle::Axis(_))))
         .expect("an axis ring on screen");
@@ -3147,6 +3148,7 @@ fn hsds_element_button_shows_the_yellow_cage_and_the_level_list_displays_a_level
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
     let id = selected(&h)[0];
     h.cmd(Command::AddModifier { name: "HSDS".into() });
+    h.app.panel_tab = crate::Tab::Modify;
     framed(&mut h);
     assert_eq!(segments_coloured(&h, crate::poly_modes::HSDS_CAGE), 0, "no cage at the top level");
     h.click(panel_text(&h, "Element"));
@@ -3178,6 +3180,7 @@ fn vertex_paint_dialog_face_selection_paint_all_new_layer_and_eyedropper() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
     let id = selected(&h)[0];
     h.cmd(Command::AddModifier { name: "VertexPaint".into() });
+    h.app.panel_tab = crate::Tab::Modify;
     framed(&mut h);
     for (n, v) in [("Color R", 1.0), ("Color G", 0.0), ("Color B", 0.0)] {
         h.cmd(Command::SetModifierParameter { index: 0, name: n.into(), value: v });
