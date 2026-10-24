@@ -1527,3 +1527,180 @@ fn cancel_expert_mode_button_brings_the_interface_back() {
     click_text(&mut h, "Cancel Expert Mode", screen, 0.0);
     assert!(!h.app.state.expert_mode, "the button ends Expert Mode");
 }
+
+// ---- viewport navigation: ViewCube, Orbit trackball, I, camera viewport controls ----
+
+/// The ViewCube of the active viewport.
+fn cube_rect(h: &Harness) -> egui::Rect {
+    let i = h.app.state.active_viewport;
+    crate::viewport_gizmo::rect(h.app.viewport_rects[i], h.app.state.viewcube.size)
+}
+
+/// A point on the ViewCube that hits `want`, found by scanning the cube.
+fn cube_point(h: &Harness, want: crate::viewport_gizmo::Hit) -> egui::Pos2 {
+    let i = h.app.state.active_viewport;
+    let (r, cam) = (cube_rect(h), h.app.state.viewports[i].camera.clone());
+    let perspective = !h.app.state.viewports[i].is_orthographic();
+    for y in 0..56 {
+        for x in 0..56 {
+            let p = r.min + egui::vec2(x as f32 * r.width() / 56.0, y as f32 * r.height() / 56.0);
+            if crate::viewport_gizmo::hit_test(p, r, &cam, perspective) == Some(want) {
+                return p;
+            }
+        }
+    }
+    panic!("{want:?} is not on the cube");
+}
+
+fn eye_dir(h: &Harness) -> Vec3 {
+    let c = &h.app.state.active().camera;
+    (c.eye_position() - c.target).normalize()
+}
+
+#[test]
+fn viewcube_corner_click_gives_the_three_quarter_view_and_a_current_face_keeps_its_view() {
+    use crate::viewport_gizmo::Hit;
+    let mut h = Harness::new();
+    maximized(&mut h);
+    let corner = glam::IVec3::new(-1, -1, 1);
+    let p = cube_point(&h, Hit::Spot(corner));
+    h.click(p);
+    h.frames(12);
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Perspective, "Perspective stays Perspective");
+    assert!(eye_dir(&h).distance(corner.as_vec3().normalize()) < 1e-3, "looking down the corner's diagonal: {}", eye_dir(&h));
+    // Front face, then a click on the current FRONT face keeps the Front view.
+    pause(&mut h);
+    let p = cube_point(&h, Hit::Spot(glam::IVec3::new(0, -1, 0)));
+    h.click(p);
+    h.frames(12);
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Front);
+    pause(&mut h);
+    let p = cube_point(&h, Hit::Spot(glam::IVec3::new(0, -1, 0)));
+    h.click(p);
+    h.frames(12);
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Front, "the face already shown keeps its view");
+}
+
+#[test]
+fn viewcube_triangles_go_to_the_adjacent_face_and_the_arrows_roll() {
+    use crate::viewport_gizmo::{Hit, Side};
+    let mut h = Harness::new();
+    maximized(&mut h);
+    h.cmd(Command::FrontView);
+    let p = cube_point(&h, Hit::Adjacent(Side::Right));
+    h.click(p);
+    h.frames(12);
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Right);
+    pause(&mut h);
+    let p = cube_point(&h, Hit::RollRight);
+    h.click(p);
+    h.frames(12);
+    let up = h.app.state.active().camera.up();
+    assert!(up.z.abs() < 1e-3, "rolled a quarter turn: up {up}");
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Right, "a rolled face view keeps its name");
+    // Twice round to the back (the tutorial's two clicks).
+    h.cmd(Command::FrontView);
+    for _ in 0..2 {
+        pause(&mut h);
+        let p = cube_point(&h, Hit::Adjacent(Side::Left));
+        h.click(p);
+        h.frames(12);
+    }
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Back);
+}
+
+#[test]
+fn dragging_the_viewcube_orbits_and_turns_an_axis_view_orthographic() {
+    let mut h = Harness::new();
+    h.cmd(Command::ActiveViewport { index: 0 });
+    maximized(&mut h);
+    let c = cube_rect(&h).center();
+    let before = h.app.state.active().camera.clone();
+    h.drag(c, c + egui::vec2(40.0, 0.0));
+    let after = h.app.state.active().camera.clone();
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Orthographic);
+    assert!((after.yaw - before.yaw).abs() > 0.1, "the drag orbited: {} -> {}", before.yaw, after.yaw);
+    assert!(h.app.state.selection.is_empty());
+}
+
+#[test]
+fn viewcube_menu_sets_the_home_view_and_alt_ctrl_v_hides_the_cube() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    h.cmd(Command::Orbit { yaw: Some(20.0), pitch: Some(10.0), distance: Some(80.0), target: None, roll: None });
+    let c = cube_rect(&h).center();
+    right_click(&mut h, c);
+    assert!(h.app.quad_menu.is_none(), "the cube's own menu, not the quad menu");
+    let screen = h.ctx.screen_rect();
+    click_text(&mut h, "    Set Current View as Home", screen, 0.0);
+    assert!(h.app.state.home_view.is_some_and(|v| (v.distance - 80.0).abs() < 1e-3));
+    h.mods = egui::Modifiers { alt: true, ctrl: true, ..Default::default() };
+    h.key(egui::Key::V);
+    h.mods = egui::Modifiers::NONE;
+    assert!(!h.app.state.viewcube.show);
+    let kind = h.app.state.active().kind;
+    let cam = h.app.state.active().camera.clone();
+    h.click(c);
+    h.frames(12);
+    assert_eq!(h.app.state.active().kind, kind, "a hidden cube does not change the view");
+    assert_eq!(h.app.state.active().camera.yaw, cam.yaw);
+}
+
+#[test]
+fn orbit_mode_outside_the_trackball_rolls_the_view() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    h.cmd(Command::OrbitViewMode);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let (c, rad) = (r.center(), r.width().min(r.height()) * 0.375);
+    let (yaw, pitch) = (h.app.state.active().camera.yaw, h.app.state.active().camera.pitch);
+    // From the right of the circle, round toward the top, outside it.
+    let m = h.mods;
+    let at = |a: f32| c + egui::vec2(a.cos(), -a.sin()) * (rad + 40.0);
+    h.run(vec![egui::Event::PointerMoved(at(0.0))]);
+    h.run(vec![egui::Event::PointerButton { pos: at(0.0), button: egui::PointerButton::Primary, pressed: true, modifiers: m }]);
+    for i in 1..=8 {
+        h.run(vec![egui::Event::PointerMoved(at(i as f32 / 8.0 * 0.8))]);
+    }
+    h.run(vec![egui::Event::PointerButton { pos: at(0.8), button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
+    h.frames(1);
+    let cam = &h.app.state.active().camera;
+    assert!(cam.roll.abs() > 0.5, "rolled: {}", cam.roll);
+    assert_eq!((cam.yaw, cam.pitch), (yaw, pitch));
+}
+
+#[test]
+fn i_pans_the_point_under_the_cursor_to_the_centre() {
+    let mut h = Harness::new();
+    h.cmd(Command::ActiveViewport { index: 0 }); // Top
+    maximized(&mut h);
+    let p = h.screen_of(Vec3::new(20.0, 10.0, 0.0));
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.key(egui::Key::I);
+    let t = h.app.state.active().camera.target;
+    assert!((t.x - 20.0).abs() < 0.2 && (t.y - 10.0).abs() < 0.2, "{t}");
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::None, "I recentres; it does not start the Pan tool");
+}
+
+#[test]
+fn camera_view_swaps_the_navigation_buttons_and_truck_moves_the_camera_with_one_undo() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateCameraAt { target: true, position: [0.0, -100.0, 20.0], look_at: [0.0, 0.0, 20.0] }).unwrap();
+    let cam = loom_scene::NodeId(r["id"].as_u64().unwrap());
+    h.cmd(Command::CameraView);
+    maximized(&mut h);
+    h.cmd(Command::SelectNone);
+    let screen = h.ctx.screen_rect();
+    assert!(h.text_rect("Truck", screen).is_some() && h.text_rect("Roll", screen).is_some(), "camera viewport controls");
+    assert!(h.text_rect("Pan", screen).is_none());
+    click_text(&mut h, "Truck", screen, 0.0);
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::TruckCamera);
+    let eye = |h: &Harness| h.app.state.scene.world_matrix(cam).w_axis.truncate();
+    let before = eye(&h);
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center() + egui::vec2(0.0, 80.0);
+    h.drag(c, c + egui::vec2(-60.0, 0.0));
+    let after = eye(&h);
+    assert!((after.x - before.x).abs() > 1.0 && (after.y - before.y).abs() < 1e-3, "trucked sideways: {before} -> {after}");
+    h.cmd(Command::UndoSceneOperation);
+    assert!(eye(&h).distance(before) < 1e-3, "the whole drag is one undo step");
+}

@@ -100,17 +100,16 @@ fn viewcube_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     let set = |app: &mut LoomApp, c: Command| {
         let _ = app.dispatch(c);
     };
-    let none = || Command::SetViewCubeOptions { show: None, all_views: None, size: None, inactive_opacity: None, compass: None };
     let mut show = v.show;
     if ui.checkbox(&mut show, "Show the ViewCube").changed() {
         set(app, Command::ViewCubeToggle);
     }
     ui.add_enabled_ui(v.show, |ui| {
         if ui.radio(v.all_views, "In All Views").clicked() {
-            set(app, Command::SetViewCubeOptions { all_views: Some(true), ..none() });
+            set(app, cube_options(Some(true), None, None, None));
         }
         if ui.radio(!v.all_views, "Only in Active View").clicked() {
-            set(app, Command::SetViewCubeOptions { all_views: Some(false), ..none() });
+            set(app, cube_options(Some(false), None, None, None));
         }
         ui.separator();
         ui.label("Display Options");
@@ -118,7 +117,7 @@ fn viewcube_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         egui::ComboBox::from_label("ViewCube Size").selected_text(sizes[v.size.min(3) as usize]).show_ui(ui, |ui| {
             for (i, name) in sizes.iter().enumerate() {
                 if ui.selectable_label(v.size as usize == i, *name).clicked() {
-                    set(app, Command::SetViewCubeOptions { size: Some(i as u32), ..none() });
+                    set(app, cube_options(None, Some(i as u32), None, None));
                 }
             }
         });
@@ -126,16 +125,20 @@ fn viewcube_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         egui::ComboBox::from_label("Inactive Opacity").selected_text(format!("{opacity}%")).show_ui(ui, |ui| {
             for o in [0u32, 25, 50, 75, 100] {
                 if ui.selectable_label(opacity == o, format!("{o}%")).clicked() {
-                    set(app, Command::SetViewCubeOptions { inactive_opacity: Some(o as f32), ..none() });
+                    set(app, cube_options(None, None, Some(o as f32), None));
                 }
             }
         });
         ui.separator();
         let mut compass = v.compass;
         if ui.checkbox(&mut compass, "Show Compass Below the ViewCube").changed() {
-            set(app, Command::SetViewCubeOptions { compass: Some(compass), ..none() });
+            set(app, cube_options(None, None, None, Some(compass)));
         }
     });
+}
+
+fn cube_options(all_views: Option<bool>, size: Option<u32>, inactive_opacity: Option<f32>, compass: Option<bool>) -> Command {
+    Command::SetViewCubeOptions { show: None, all_views, size, inactive_opacity, compass }
 }
 
 /// Draws a layout as a mini diagram of its cells.

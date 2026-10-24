@@ -1,4 +1,4 @@
-use glam::{Mat4, Vec3};
+use glam::Mat4;
 use loom_input::OrbitCamera;
 
 /// Aspect-aware view + projection matrices derived from an OrbitCamera.
@@ -106,6 +106,7 @@ impl Camera {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Vec3;
 
     #[test]
     fn orthographic_projection_ignores_depth_for_size() {

@@ -1132,7 +1132,7 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
         let orbit_mode = matches!(app.state.nav_mode, N::Orbit | N::OrbitSelected | N::OrbitSubObject);
         let c = rect.center();
         app.camera_controller.set_trackball(orbit_mode.then(|| (Vec2::new(c.x, c.y), trackball_radius(rect))));
-        let snap = app.state.angle_snap_on.then(|| app.state.gizmos.orbit_snap_angle.to_radians());
+        let snap = app.state.angle_snap_on.then(|| app.state.prefs.gizmos.orbit_snap_angle.to_radians());
         app.camera_controller.set_orbit_snap(snap);
     }
     let camera = match app.state.viewports[index].kind {
