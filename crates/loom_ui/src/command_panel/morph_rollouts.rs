@@ -21,12 +21,12 @@ pub fn morpher(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
         ui.horizontal(|ui| {
             ui.label("Spinner Min:");
             let mut mn = d.spinner_min;
-            if ui.add(egui::DragValue::new(&mut mn).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut mn, ..).speed(1.0)).changed() {
                 let _ = app.dispatch(Command::MorpherSetGlobal { name: "Spinner Min".into(), value: mn as f64 });
             }
             ui.label("Max:");
             let mut mx = d.spinner_max;
-            if ui.add(egui::DragValue::new(&mut mx).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut mx, ..).speed(1.0)).changed() {
                 let _ = app.dispatch(Command::MorpherSetGlobal { name: "Spinner Max".into(), value: mx as f64 });
             }
         });
@@ -68,7 +68,7 @@ pub fn morpher(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                     app.state.morph_channel = i;
                 }
                 let mut v = ch.value.get();
-                if ui.add(egui::DragValue::new(&mut v).speed(0.5).range(d.spinner_min.min(d.spinner_max)..=d.spinner_max.max(d.spinner_min)).fixed_decimals(1)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut v, d.spinner_min.min(d.spinner_max)..=d.spinner_max.max(d.spinner_min)).speed(0.5).fixed_decimals(1)).changed() {
                     let _ = app.dispatch(Command::MorpherSetChannel { channel: i as u32, name: "Value".into(), value: v as f64 });
                 }
             });
@@ -114,7 +114,7 @@ pub fn morpher(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
             for (label, name, value) in [("Min:", "Min", ch.min), ("Max:", "Max", ch.max)] {
                 ui.label(label);
                 let mut v = value;
-                if ui.add(egui::DragValue::new(&mut v).speed(1.0)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut v, ..).speed(1.0)).changed() {
                     let _ = app.dispatch(Command::MorpherSetChannel { channel: i as u32, name: name.into(), value: v as f64 });
                 }
             }
@@ -122,7 +122,7 @@ pub fn morpher(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
         ui.horizontal(|ui| {
             ui.label("Tension:");
             let mut t = ch.tension;
-            if ui.add(egui::DragValue::new(&mut t).speed(0.01).range(0.0..=1.0)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut t, 0.0..=1.0).speed(0.01)).changed() {
                 let _ = app.dispatch(Command::MorpherSetChannel { channel: i as u32, name: "Tension".into(), value: t as f64 });
             }
         });
@@ -132,7 +132,7 @@ pub fn morpher(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                 let name = t.node.and_then(|n| app.state.scene.node(n)).map(|n| n.name.clone()).unwrap_or_else(|| "captured".into());
                 ui.label(format!("{k}: {name}"));
                 let mut p = t.percent;
-                if ui.add(egui::DragValue::new(&mut p).speed(1.0).range(0.0..=100.0).suffix(" %")).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut p, 0.0..=100.0).speed(1.0).suffix(" %")).changed() {
                     let _ = app.dispatch(Command::MorpherSetProgressivePercent { channel: i as u32, target: k as u32, percent: p });
                 }
             });
@@ -220,7 +220,7 @@ pub fn skin_morph(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize
                 for (label, pname, value, range) in [("Angle:", "Angle", m.angle_deg, -360.0..=360.0), ("Influence Angle:", "Influence Angle", m.influence_deg, 0.1..=360.0)] {
                     ui.label(label);
                     let mut v = value;
-                    if ui.add(egui::DragValue::new(&mut v).speed(0.5).range(range)).changed() {
+                    if ui.add(crate::spinner::spin(ui, &mut v, range).speed(0.5)).changed() {
                         let _ = app.dispatch(Command::SkinMorphSetMorph { morph: cur as u32, name: pname.into(), value: v as f64 });
                     }
                     ui.end_row();
@@ -276,7 +276,7 @@ pub fn skin_wrap(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize)
             for (label, name, value, range) in [("Falloff:", "Falloff", d.falloff as f64, 0.0..=10.0), ("Distance Infl.:", "Distance Influence", d.distance_influence as f64, 0.001..=100.0), ("Face Limit:", "Face Limit", d.face_limit as f64, 1.0..=50.0), ("Threshold:", "Threshold", d.threshold as f64, 0.0..=1e6)] {
                 ui.label(label);
                 let mut v = value;
-                if ui.add(egui::DragValue::new(&mut v).speed(speed).range(range)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut v, range).speed(speed)).changed() {
                     let _ = app.dispatch(Command::SkinWrapSetOption { name: name.into(), value: if name == "Face Limit" { v.round() } else { v } });
                 }
                 ui.end_row();

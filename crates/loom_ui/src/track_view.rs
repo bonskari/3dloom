@@ -981,7 +981,7 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
         if let Some((_, _, _, key, _)) = loom_commands::track_view::first_selected_key(&app.state) {
             let (mut t, mut v) = (key.time, key.value);
             ui.label("Time:");
-            let rt = ui.add(egui::DragValue::new(&mut t).speed(1.0));
+            let rt = ui.add(crate::spinner::spin(ui, &mut t, ..).speed(1.0));
             if focus.as_deref() == Some("time") {
                 rt.request_focus();
                 app.state.track_view.focus_field = None;
@@ -990,7 +990,7 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
                 run(app, Command::TrackViewSetKeyValues { time: Some(t), value: None, relative: Some(false) });
             }
             ui.label("Value:");
-            let rv = ui.add(egui::DragValue::new(&mut v).speed(0.1));
+            let rv = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(0.1));
             if focus.as_deref() == Some("value") {
                 rv.request_focus();
                 app.state.track_view.focus_field = None;

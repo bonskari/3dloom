@@ -14,7 +14,7 @@ fn panel(h: &Harness, id: &str) -> egui::Rect {
 
 /// The one icon `glyph` shown inside `area`.
 fn icon_in(h: &Harness, glyph: &str, area: egui::Rect) -> egui::Pos2 {
-    let all: Vec<egui::Pos2> = h.texts(glyph).into_iter().filter(|p| area.contains(*p)).collect();
+    let all: Vec<egui::Pos2> = h.texts(glyph).into_iter().map(|r| r.center()).filter(|p| area.contains(*p)).collect();
     assert_eq!(all.len(), 1, "icon {glyph:?} in {area:?} {} times", all.len());
     all[0]
 }
@@ -64,7 +64,7 @@ fn the_icon_font_is_loaded_with_the_ui() {
     for g in [icons::UNDO, icons::LINK, icons::SELECT_OBJECT, icons::MOVE, icons::ROTATE, icons::SCALE, icons::MIRROR, icons::ALIGN, icons::LAYERS, icons::CURVE_EDITOR, icons::MATERIAL_EDITOR] {
         icon_in(&h, g, bar);
     }
-    assert!(h.texts("Move").iter().all(|p| !bar.contains(*p)), "no Move label on the toolbar");
+    assert!(h.texts("Move").iter().all(|r| !bar.contains(r.center())), "no Move label on the toolbar");
 }
 
 #[test]

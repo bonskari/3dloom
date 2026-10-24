@@ -264,10 +264,12 @@ pub struct HideCategories {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dialog {
     SelectFromScene,
-    /// Rendering > Render: choose the PNG the active view renders to.
+    /// Render Setup > Render Output > Files...: the file a Production render saves to.
     RenderFile,
-    /// Rendering > Render SetUp: the output size.
+    /// Rendering > Render Setup (F10).
     RenderSetup,
+    /// Rendered Frame Window > Save Image.
+    SaveRenderedImage,
     /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).
     MaterialMap { channel: u8 },
     ViewportConfiguration,
@@ -312,6 +314,8 @@ pub enum Dialog {
     CloseSpline,
     /// Editable Spline > Refine with Connect on an existing vertex: Refine / Connect Only.
     RefineVertex,
+    /// A base parameter change under a topology-dependent modifier: Yes / Hold/Yes / No.
+    TopologyWarning,
     /// File > Import (OBJ).
     ImportFile,
     SaveAnimation,

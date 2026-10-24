@@ -46,6 +46,8 @@ pub const CROSSING: &str = ph::INTERSECT_SQUARE;
 pub const MOVE: &str = ph::ARROWS_OUT_CARDINAL;
 pub const ROTATE: &str = ph::ARROW_CLOCKWISE;
 pub const SCALE: &str = ph::ARROWS_OUT;
+pub const SCALE_NON_UNIFORM: &str = ph::ARROWS_OUT_LINE_HORIZONTAL;
+pub const SQUASH: &str = ph::ARROWS_IN_LINE_VERTICAL;
 pub const PIVOT_CENTER: &str = ph::CROSSHAIR;
 pub const SELECTION_CENTER: &str = ph::BOUNDING_BOX;
 pub const COORDINATE_CENTER: &str = ph::GPS_FIX;
@@ -66,6 +68,15 @@ pub const LAYERS: &str = ph::STACK;
 pub const GRAPHITE: &str = ph::ROWS;
 pub const CURVE_EDITOR: &str = ph::CHART_LINE;
 pub const MATERIAL_EDITOR: &str = ph::CIRCLES_FOUR;
+pub const RENDER_SETUP: &str = ph::SLIDERS_HORIZONTAL;
+pub const RENDERED_FRAME_WINDOW: &str = ph::IMAGE_SQUARE;
+/// Render Production; Render Iterative is the same glyph in the Sub-Object variant colour.
+pub const RENDER: &str = ph::APERTURE;
+
+// Quick Access toolbar.
+pub const NEW_SCENE: &str = ph::FILE;
+pub const OPEN_FILE: &str = ph::FOLDER_OPEN;
+pub const SAVE_FILE: &str = ph::FLOPPY_DISK;
 
 // Command Panel tabs.
 pub const TAB_SCENE: &str = ph::TREE_VIEW;
@@ -198,6 +209,8 @@ pub const CONTRACT_SELECTION: &str = ph::MINUS;
 // Small dialog buttons.
 pub const CLEAR: &str = ph::X;
 pub const HIGHLIGHT: &str = ph::CARET_RIGHT;
+/// The arrow after a menu entry that opens a submenu.
+pub const SUBMENU: &str = ph::CARET_RIGHT;
 
 /// The reference tells flyout variants apart by colour: the plain tool is grey,
 /// the Selected variant white, the Sub-Object variant yellow.
@@ -260,7 +273,11 @@ impl<'a> Icon<'a> {
             text = text.color(c);
         }
         let hover = self.hover_text(state);
-        ui.add_enabled(self.enabled, egui::Button::new(text).selected(self.on)).on_hover_text(&hover).on_disabled_hover_text(hover)
+        let r = ui.add_enabled(self.enabled, egui::Button::new(text).selected(self.on));
+        // Screen readers (and the UI tests) know the button by its name, not its glyph.
+        let name = self.text.unwrap_or(self.action);
+        r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, self.enabled, self.on, name));
+        r.on_hover_text(&hover).on_disabled_hover_text(hover)
     }
 }
 
@@ -290,6 +307,51 @@ mod tests {
             // The icon font only follows the text font: letters stay Ubuntu's.
             assert_eq!(f.lock().fonts.definitions().families[&egui::FontFamily::Proportional][0], "Ubuntu-Light");
         });
+    }
+
+    /// The non-ASCII characters inside string literals of `src` (comments skipped).
+    fn literal_chars(src: &str) -> Vec<char> {
+        let mut out = Vec::new();
+        for line in src.lines() {
+            let code = line.split("//").next().unwrap_or("");
+            let mut in_str = false;
+            let mut escaped = false;
+            for c in code.chars() {
+                match (in_str, escaped, c) {
+                    (true, true, _) => escaped = false,
+                    (true, false, '\\') => escaped = true,
+                    (_, _, '"') => in_str = !in_str,
+                    (true, false, c) if !c.is_ascii() => out.push(c),
+                    _ => {}
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn every_character_the_ui_draws_has_a_glyph() {
+        // Without this an icon or symbol that no loaded font has shows as an empty box.
+        let ctx = egui::Context::default();
+        for _ in 0..2 {
+            let _ = ctx.run(Default::default(), install);
+        }
+        let mut files = vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")];
+        let mut missing = Vec::new();
+        while let Some(p) = files.pop() {
+            if p.is_dir() {
+                files.extend(std::fs::read_dir(&p).unwrap().map(|e| e.unwrap().path()));
+            } else if p.extension().is_some_and(|e| e == "rs") {
+                let src = std::fs::read_to_string(&p).unwrap();
+                for c in literal_chars(&src) {
+                    if !ctx.fonts(|f| f.has_glyph(&egui::FontId::proportional(14.0), c)) {
+                        missing.push(format!("{c:?} (U+{:04X}) in {}", c as u32, p.display()));
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "characters no loaded font draws: {missing:#?}");
+        assert_eq!(literal_chars("let a = \"\u{21b6} x\"; // \"\u{23da}\""), vec!['\u{21b6}']);
     }
 
     #[test]

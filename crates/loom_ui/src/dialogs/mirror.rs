@@ -40,7 +40,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 }
                 ui.horizontal(|ui| {
                     ui.label("Offset:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.offset).speed(speed).fixed_decimals(3)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.offset, ..).speed(speed).fixed_decimals(3)).changed();
                 });
             });
             ui.group(|ui| {

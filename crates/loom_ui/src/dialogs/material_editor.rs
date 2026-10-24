@@ -71,7 +71,7 @@ fn spinner(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, value: f32, range:
     ui.horizontal(|ui| {
         ui.label(label);
         let mut v = value;
-        let r = ui.add(egui::DragValue::new(&mut v).range(range).fixed_decimals(decimals).speed(0.5));
+        let r = ui.add(crate::spinner::spin(ui, &mut v, range).fixed_decimals(decimals).speed(0.5));
         if r.drag_started() {
             app.state.undo.begin(label);
         }
@@ -174,7 +174,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     let map = m.map(channel).cloned();
                     let mut amount = map.as_ref().map(|b| b.amount).unwrap_or(0.0);
                     let range = if *channel == "Bump" { -999.0..=999.0 } else { 0.0..=100.0 };
-                    if ui.add_enabled(map.is_some(), egui::DragValue::new(&mut amount).range(range).speed(0.5)).changed() {
+                    if ui.add_enabled(map.is_some(), crate::spinner::spin(ui, &mut amount, range).speed(0.5)).changed() {
                         let _ = app.dispatch(Command::SetMaterialMap { slot: None, map: (*channel).into(), path: map.as_ref().map(|b| b.path.clone()), amount: Some(amount) });
                     }
                     ui.horizontal(|ui| {

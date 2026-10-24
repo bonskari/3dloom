@@ -8,6 +8,7 @@ use glam::Vec3;
 use loom_commands::{Command, PrimitiveKind, SelectionMode};
 
 mod icons;
+mod menus;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
@@ -16,17 +17,37 @@ struct Harness {
     app: LoomApp,
     time: f64,
     mods: egui::Modifiers,
+    /// The last frame's widgets (role, text, rect), as a screen reader sees them.
+    widgets: Vec<(egui::accesskit::Role, String, egui::Rect)>,
     /// The last frame's shapes, to find a widget by its text.
     shapes: Vec<egui::epaint::ClippedShape>,
     /// The window size (taller for panels with long rollouts).
     screen: egui::Rect,
+    /// Every output command so far (clipboard copies).
+    commands: Vec<egui::OutputCommand>,
+    /// Every texture upload so far.
+    textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, shapes: Vec::new(), screen: SCREEN };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new() };
+        h.ctx.enable_accesskit();
         h.frames(3);
         h
+    }
+
+    /// The app on a real GPU (Realistic viewports and Render run), or None
+    /// on a machine without a Vulkan / Metal / DirectX 12 adapter.
+    fn with_gpu() -> Option<Self> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let rs = pollster::block_on(egui_wgpu::RenderState::create(&crate::wgpu_configuration(), &instance, None, None, 1, false)).ok()?;
+        if !loom_bevy::supported(&rs.adapter) {
+            return None;
+        }
+        let mut h = Harness::new();
+        h.app.gpu = crate::realistic::Gpu::Ready(rs);
+        Some(h)
     }
 
     fn run(&mut self, events: Vec<egui::Event>) {
@@ -35,7 +56,93 @@ impl Harness {
         // As eframe does before each frame.
         self.app.raw_input_hook(&self.ctx, &mut input);
         let app = &mut self.app;
-        self.shapes = self.ctx.run(input, |ctx| app.frame(ctx)).shapes;
+        let out = self.ctx.run(input, |ctx| app.frame(ctx));
+        self.commands.extend(out.platform_output.commands);
+        self.textures.extend(out.textures_delta.set);
+        self.shapes = out.shapes;
+        if let Some(tree) = out.platform_output.accesskit_update {
+            self.widgets = tree
+                .nodes
+                .iter()
+                .filter_map(|(_, n)| {
+                    let b = n.bounds()?;
+                    let text = n.label().or(n.value()).unwrap_or_default().to_owned();
+                    Some((n.role(), text, egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32))))
+                })
+                .collect();
+        }
+    }
+
+    /// Every text `label` painted last frame in the Command Panel, top to bottom.
+    fn widgets_labelled(&self, label: &str) -> Vec<egui::Rect> {
+        let panel = egui::containers::panel::PanelState::load(&self.ctx, egui::Id::new("command_panel")).expect("the Command Panel").rect;
+        self.texts(label).into_iter().filter(|r| panel.contains_rect(*r)).collect()
+    }
+
+    /// Every text `label` painted last frame, top to bottom (its rect).
+    fn texts(&self, label: &str) -> Vec<egui::Rect> {
+        fn find(shape: &egui::Shape, text: &str, out: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| find(s, text, out)),
+                egui::Shape::Text(t) if t.galley.text() == text => out.push(t.galley.rect.translate(t.pos.to_vec2())),
+                _ => {}
+            }
+        }
+        let mut v = Vec::new();
+        for c in &self.shapes {
+            let mut found = Vec::new();
+            find(&c.shape, label, &mut found);
+            v.extend(found.into_iter().filter(|r| c.clip_rect.contains_rect(*r)));
+        }
+        v.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+        v
+    }
+
+    /// The one text `label` painted last frame.
+    fn widget(&self, label: &str) -> egui::Rect {
+        let v = self.widgets_labelled(label);
+        assert_eq!(v.len(), 1, "one {label:?} shown: {v:?}");
+        v[0]
+    }
+
+    /// Clicks the text `label` in the Command Panel.
+    fn click_widget(&mut self, label: &str) {
+        let r = self.widget(label);
+        self.click(r.center());
+    }
+
+    /// Clicks the one text `label` shown anywhere (a dialog's button).
+    fn click_text_anywhere(&mut self, label: &str) {
+        let v = self.texts(label);
+        assert_eq!(v.len(), 1, "one {label:?} shown: {v:?}");
+        self.click(v[0].center());
+    }
+
+    /// The rects of the widgets with this role whose text is `text`, top to bottom.
+    fn find_all(&self, role: egui::accesskit::Role, text: &str) -> Vec<egui::Rect> {
+        let mut v: Vec<egui::Rect> = self.widgets.iter().filter(|(r, t, _)| *r == role && t.trim() == text).map(|w| w.2).collect();
+        v.sort_by(|a, b| a.min.y.total_cmp(&b.min.y).then(a.min.x.total_cmp(&b.min.x)));
+        v
+    }
+
+    /// The topmost widget with this role whose text is `text`.
+    fn find(&self, role: egui::accesskit::Role, text: &str) -> egui::Rect {
+        *self.find_all(role, text).first().unwrap_or_else(|| panic!("no {role:?} \"{text}\" on screen"))
+    }
+
+    fn has(&self, role: egui::accesskit::Role, text: &str) -> bool {
+        self.widgets.iter().any(|(r, t, _)| *r == role && t.trim() == text)
+    }
+
+    /// The spinner right of the label `label` on the same row.
+    fn spinner_after(&self, label: &str) -> egui::Rect {
+        let l = self.find(egui::accesskit::Role::Label, label);
+        self.widgets
+            .iter()
+            .filter(|(r, _, w)| *r == egui::accesskit::Role::SpinButton && w.min.x >= l.max.x - 1.0 && (w.center().y - l.center().y).abs() < l.height())
+            .min_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x))
+            .map(|w| w.2)
+            .unwrap_or_else(|| panic!("no spinner after \"{label}\""))
     }
 
     fn frames(&mut self, n: usize) {
@@ -1640,6 +1747,142 @@ fn bridge_edges_dialog_takes_edges_selected_while_it_is_open() {
     assert_eq!(cage(&h, id).face_count(), 16, "the preview bridges the newly selected pair");
 }
 
+/// A 10-unit box at `x` with a Taper of Amount 1: the stack result's top is
+/// twice as wide as the box.
+fn tapered_box(h: &mut Harness, x: f32) -> loom_scene::NodeId {
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [x, 0.0, 0.0], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Taper".into() });
+    h.cmd(Command::SetModifierParameter { index: 0, name: "Amount".into(), value: 1.0 });
+    id
+}
+
+/// The X extent of what the viewports draw for `id`.
+fn drawn_width(h: &Harness, id: loom_scene::NodeId) -> f32 {
+    let i = h.app.world_meshes().iter().position(|(n, _)| *n == id).expect("drawn");
+    let (lo, hi) = h.app.world_display[i].aabb();
+    hi.x - lo.x
+}
+
+#[test]
+fn show_end_result_starts_off_and_only_the_edited_object_shows_up_to_its_active_entry() {
+    let mut h = Harness::new();
+    let b = tapered_box(&mut h, 40.0);
+    let a = tapered_box(&mut h, 0.0);
+    h.click_widget("Modify");
+    assert!(!h.app.state.show_end_result, "off by default");
+    assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3, "the top entry is active: the whole stack shows");
+    // The base object in the stack: A shows its box, B (not being edited) its end result.
+    h.click_widget("Box");
+    assert_eq!(h.app.state.scene.node(a).unwrap().active_entry, None);
+    assert!((drawn_width(&h, a) - 10.0).abs() < 1e-3, "{}", drawn_width(&h, a));
+    assert!((drawn_width(&h, b) - 20.0).abs() < 1e-3, "{}", drawn_width(&h, b));
+    // Leaving the Modify panel shows the end result again.
+    h.click_widget("Create");
+    assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3);
+    h.click_widget("Modify");
+    assert!((drawn_width(&h, a) - 10.0).abs() < 1e-3);
+    // Show End Result on: the whole stack.
+    h.click(h.find(egui::accesskit::Role::Button, "Show End Result On/Off Toggle").center());
+    assert!(h.app.state.show_end_result);
+    assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3);
+}
+
+#[test]
+fn smooth_modifier_has_32_smoothing_group_buttons() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Smooth".into() });
+    h.click_widget("Modify");
+    let groups = |h: &Harness| match &h.app.state.scene.node(id).unwrap().modifiers[0].modifier {
+        loom_scene::Modifier::Smooth { groups, .. } => groups.get(),
+        _ => panic!("Smooth"),
+    };
+    for i in 1..=32 {
+        assert_eq!(h.widgets_labelled(&i.to_string()).len(), 1, "group button {i}");
+    }
+    h.click_widget("3");
+    assert_eq!(groups(&h), 1 << 2);
+    h.click_widget("32");
+    assert_eq!(groups(&h), (1 << 2) | (1 << 31));
+    h.click_widget("3");
+    assert_eq!(groups(&h), 1 << 31, "a second click clears the group");
+    assert!(h.app.state.scene.eval_mesh(id).value.mesh.faces().iter().all(|f| f.smoothing_groups == 1 << 31));
+    assert_eq!(h.widgets_labelled("Prevent Indirect Smoothing").len(), 1);
+}
+
+/// Dragging an entry onto another row moves it; Shift-drag copies it there,
+/// Ctrl-drag puts an instance there.
+#[test]
+fn shift_and_ctrl_drag_in_the_stack_copy_and_instance_a_modifier() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.cmd(Command::AddModifier { name: "Taper".into() });
+    h.click_widget("Modify");
+    let names = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
+    let instances = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.instance_of.map(|(_, i)| i)).collect::<Vec<_>>();
+    // Shift-drag Taper down onto Bend: a copy below Bend.
+    let (taper, bend) = (h.widget("Taper"), h.widget("Bend"));
+    h.mods = egui::Modifiers::SHIFT;
+    h.drag(taper.center(), bend.center());
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(names(&h), ["Taper", "Bend", "Taper"]);
+    assert_eq!(instances(&h), [None, None, None]);
+    // Ctrl-drag Bend up onto the top Taper: an instance above it.
+    let bend = h.widget("Bend");
+    let top = h.widgets_labelled("Taper")[0];
+    h.mods = egui::Modifiers::CTRL;
+    h.drag(bend.center(), top.center());
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(names(&h), ["Taper", "Bend", "Taper", "Bend"]);
+    assert_eq!(instances(&h), [None, None, None, Some(1)]);
+    assert_eq!(h.widgets_labelled("Bend  (instanced)").len(), 1, "the new entry is marked as an instance");
+    // A plain drag moves: the lower Taper (bottom row) onto the Bend above it.
+    let rows = h.widgets_labelled("Taper");
+    h.drag(rows[1].center(), h.widget("Bend").center());
+    assert_eq!(names(&h), ["Bend", "Taper", "Taper", "Bend"]);
+    assert_eq!(instances(&h), [None, None, None, Some(0)], "the instance follows its source");
+}
+
+/// Changing a base parameter under a topology-dependent modifier asks first:
+/// Yes / Hold/Yes / No.
+#[test]
+fn base_parameter_change_under_edit_poly_asks_yes_hold_yes_no() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Edit Poly".into() });
+    h.click_widget("Modify");
+    h.click_widget("Box");
+    let height = |h: &Harness| h.app.state.scene.node(id).unwrap().object.parameters().into_iter().find(|(n, _)| *n == "Height").unwrap().1;
+    // The spinner's edit goes through dispatch, as a drag does.
+    let _ = h.app.dispatch(Command::SetParameter { id: id.0, name: "Height".into(), value: 20.0 });
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::TopologyWarning));
+    assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "nothing changes before the answer");
+    assert_eq!(h.texts("Hold/Yes").len(), 1);
+    h.click_text_anywhere("No");
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "No keeps the old value");
+    let _ = h.app.dispatch(Command::SetParameter { id: id.0, name: "Height".into(), value: 20.0 });
+    h.frames(2);
+    h.click_text_anywhere("Yes");
+    assert_eq!(height(&h), loom_scene::ParamValue::Float(20.0), "Yes applies it");
+    // Answered once for this visit to the base object: the next change applies directly.
+    let _ = h.app.dispatch(Command::SetParameter { id: id.0, name: "Height".into(), value: 25.0 });
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(height(&h), loom_scene::ParamValue::Float(25.0));
+    // A plain object without such a modifier never asks.
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
+    let other = *h.app.state.selection.iter().next().unwrap();
+    let _ = h.app.dispatch(Command::SetParameter { id: other.0, name: "Height".into(), value: 5.0 });
+    assert_eq!(h.app.state.dialog, None);
+}
+
 /// The Material Editor window's rect.
 fn material_editor_rect(h: &Harness) -> egui::Rect {
     h.ctx.memory(|m| m.area_rect(egui::Id::new("Material Editor"))).expect("the Material Editor is shown")
@@ -2039,6 +2282,302 @@ fn status_bar_flyouts_close() {
     h.click(menu_row(&h, m, 0));
     assert!(menus(&h).is_empty(), "an item closes the flyout");
     assert_context_menu_closes(&mut h, p, "status bar flyout");
+}
+
+// --- Rendering: the Rendered Frame Window, Render Setup, the render region ---
+
+fn rfw_rect(h: &Harness) -> egui::Rect {
+    h.ctx.memory(|m| m.area_rect(egui::Id::new("Rendered Frame Window"))).expect("the Rendered Frame Window is shown")
+}
+
+/// A 64 x 32 test picture: red rises to the right, green downwards, blue 200.
+fn test_picture() -> image::RgbaImage {
+    image::RgbaImage::from_fn(64, 32, |x, y| image::Rgba([(x * 4) as u8, (y * 8) as u8, 200, 255]))
+}
+
+/// The Rendered Frame Window open on the test picture.
+fn rfw_with_picture(h: &mut Harness) -> egui::Rect {
+    h.app.state.rendered.set_image(Some(std::sync::Arc::new(test_picture())));
+    h.cmd(Command::RenderedFrameWindow);
+    h.frames(3);
+    rfw_rect(h)
+}
+
+/// The window's texture as last uploaded in full.
+fn rfw_texture_pixel(h: &Harness, x: usize, y: usize) -> [u8; 3] {
+    let id = h.app.rfw.main.texture_id().expect("the image has a texture");
+    let (_, delta) = h.textures.iter().rev().find(|(t, d)| *t == id && d.pos.is_none()).expect("a full upload");
+    let egui::ImageData::Color(img) = &delta.image else { panic!("a colour image") };
+    let c = img.pixels[y * img.size[0] + x];
+    [c.r(), c.g(), c.b()]
+}
+
+#[test]
+fn shift_q_opens_the_rendered_frame_window() {
+    let mut h = Harness::new();
+    h.mods = egui::Modifiers::SHIFT;
+    h.key(egui::Key::Q);
+    h.mods = egui::Modifiers::NONE;
+    h.frames(2);
+    assert!(h.app.state.rendered.open, "Render opens the window, not a file dialog");
+    assert_eq!(h.app.state.dialog, None);
+    let win = rfw_rect(&h);
+    for label in ["Area to Render:", "Viewport:", "Lock to Viewport", "Render", "Save Image", "Copy Image", "Clone", "Clear", "R", "G", "B", "Alpha", "Mono"] {
+        assert!(h.text_rect(label, win).is_some(), "{label:?} is in the window");
+    }
+    // Headless: no GPU, reported in the status bar.
+    assert!(h.app.last_error.as_deref().is_some_and(|e| e.contains("Render")), "{:?}", h.app.last_error);
+    // The toolbar button closes and reopens it.
+    h.cmd(Command::RenderedFrameWindow);
+    assert!(!h.app.state.rendered.open);
+}
+
+#[test]
+fn channel_toggles_change_what_the_window_shows() {
+    let mut h = Harness::new();
+    let win = rfw_with_picture(&mut h);
+    assert_eq!(rfw_texture_pixel(&h, 10, 3), [40, 24, 200]);
+    click_text(&mut h, "R", win, 0.0);
+    assert!(!h.app.state.rendered.channels.red);
+    assert_eq!(rfw_texture_pixel(&h, 10, 3), [0, 24, 200], "red off");
+    click_text(&mut h, "R", win, 0.0);
+    click_text(&mut h, "Mono", win, 0.0);
+    let g = loom_commands::render::mono([40, 24, 200]);
+    assert_eq!(rfw_texture_pixel(&h, 10, 3), [g, g, g], "monochrome");
+    click_text(&mut h, "Mono", win, 0.0);
+    click_text(&mut h, "Alpha", win, 0.0);
+    assert_eq!(rfw_texture_pixel(&h, 10, 3), [255, 255, 255], "display alpha: opaque is white");
+}
+
+#[test]
+fn the_pixel_under_the_pointer_is_read_out() {
+    let mut h = Harness::new();
+    let win = rfw_with_picture(&mut h);
+    let img = h.app.rfw.main.image_rect;
+    assert_eq!(img.size(), egui::vec2(64.0, 32.0), "1:1");
+    h.run(vec![egui::Event::PointerMoved(img.min + egui::vec2(10.5, 3.5))]);
+    h.frames(2);
+    assert_eq!(h.app.rfw.main.hover, Some(([10, 3], [40, 24, 200, 255])));
+    assert!(h.text_rect("(10, 3)  R 40 G 24 B 200 A 255", win).is_some(), "the readout shows it");
+}
+
+#[test]
+fn wheel_zooms_and_middle_drag_pans_the_image() {
+    let mut h = Harness::new();
+    rfw_with_picture(&mut h);
+    let img = h.app.rfw.main.image_rect;
+    let p = img.center();
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 100.0), modifiers: egui::Modifiers::NONE }]);
+    h.frames(2);
+    let zoomed = h.app.rfw.main.image_rect;
+    assert!(h.app.rfw.main.zoom > 1.2, "zoom {}", h.app.rfw.main.zoom);
+    assert!((zoomed.center() - p).length() < 1.5, "zooms about the pointer");
+    let before = h.app.rfw.main.pan;
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Middle, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    for i in 1..=5 {
+        h.run(vec![egui::Event::PointerMoved(p + egui::vec2(6.0 * i as f32, 3.0 * i as f32))]);
+    }
+    h.run(vec![egui::Event::PointerButton { pos: p + egui::vec2(30.0, 15.0), button: egui::PointerButton::Middle, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(1);
+    let moved = h.app.rfw.main.pan - before;
+    assert!(moved.x > 20.0 && moved.y > 8.0, "pan {moved:?}");
+}
+
+#[test]
+fn save_image_writes_the_picture_through_the_file_dialog() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let win = rfw_with_picture(&mut h);
+    click_text(&mut h, "Save Image", win, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::SaveRenderedImage));
+    let path = std::env::temp_dir().join(format!("loom-rfw-save-{}.png", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    click_text(&mut h, "File name:", SCREEN, 40.0);
+    h.run(vec![egui::Event::Text(path.to_string_lossy().into_owned())]);
+    click_text(&mut h, "Save", SCREEN, 0.0);
+    let back = image::open(&path).expect("Save Image wrote the file").to_rgba8();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(back.dimensions(), (64, 32));
+    assert_eq!(back.get_pixel(10, 3).0, [40, 24, 200, 255]);
+}
+
+#[test]
+fn copy_clone_and_clear() {
+    let mut h = Harness::new();
+    let win = rfw_with_picture(&mut h);
+    click_text(&mut h, "R", win, 0.0);
+    click_text(&mut h, "Copy Image", win, 0.0);
+    let copied = h.commands.iter().find_map(|c| match c {
+        egui::OutputCommand::CopyImage(img) => Some(img.clone()),
+        _ => None,
+    });
+    let copied = copied.expect("Copy Image puts the picture on the clipboard");
+    assert_eq!(copied.size, [64, 32]);
+    let c = copied.pixels[3 * 64 + 10];
+    assert_eq!([c.r(), c.g(), c.b()], [0, 24, 200], "as displayed (red off)");
+    click_text(&mut h, "Clone", win, 0.0);
+    assert_eq!(h.app.state.rendered.clones.len(), 1);
+    h.frames(2);
+    let clone = h.ctx.memory(|m| m.area_rect(egui::Id::new(("Rendered Frame Window clone", 1u32)))).expect("the clone window shows");
+    assert!(clone.width() > 50.0);
+    let win = rfw_rect(&h);
+    click_text(&mut h, "Clear", win, 0.0);
+    assert!(h.app.state.rendered.image.is_none(), "Clear empties the window");
+    assert_eq!(h.app.state.rendered.clones[0].image.dimensions(), (64, 32), "the clone keeps its copy");
+}
+
+#[test]
+fn edit_region_drags_the_render_region_in_the_viewport() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    framed(&mut h);
+    let selected = h.app.state.selection.clone();
+    h.cmd(Command::EditRegion);
+    assert_eq!(h.app.state.scene.render.area, loom_scene::render::RenderArea::Region);
+    let index = h.app.state.active_viewport;
+    let vp = h.app.viewport_rects[index];
+    let frame = crate::rendered_frame::output_frame(&h.app, index, vp);
+    assert!((frame.height() - vp.height()).abs() < 1.0 && (frame.width() / frame.height() - 640.0 / 480.0).abs() < 1e-3, "the 4:3 output inside the view");
+    let undo = h.app.state.undo.len();
+    // Drag the top-left handle up and left.
+    let corner = frame.min + egui::vec2(0.25, 0.25) * frame.size();
+    h.drag(corner, corner - egui::vec2(frame.width() * 0.1, frame.height() * 0.1));
+    let r = h.app.state.scene.render.region;
+    assert!((r[0] - 0.15).abs() < 0.01 && (r[1] - 0.15).abs() < 0.01 && r[2] == 0.75 && r[3] == 0.75, "{r:?}");
+    assert_eq!(h.app.state.undo.len(), undo + 1, "the drag is one undo step");
+    // Drag inside moves it.
+    let inside = frame.min + egui::vec2(0.5, 0.5) * frame.size();
+    h.drag(inside, inside + egui::vec2(frame.width() * 0.1, 0.0));
+    let m = h.app.state.scene.render.region;
+    assert!((m[0] - 0.25).abs() < 0.01 && (m[2] - 0.85).abs() < 0.01 && (m[1] - 0.15).abs() < 0.01, "{m:?}");
+    assert_eq!(h.app.state.selection, selected, "the region drags do not select in the viewport");
+    h.cmd(Command::UndoSceneOperation);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.render.region, [0.25, 0.25, 0.75, 0.75]);
+}
+
+#[test]
+fn render_setup_dialog_sets_the_output_size_and_renderer() {
+    let mut h = Harness::new();
+    h.key(egui::Key::F10);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenderSetup));
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).expect("Render Setup shows");
+    for label in ["Time Output", "Output Size", "Image Aspect:", "Pixel Aspect:", "Options", "Render Hidden Geometry", "Force 2-Sided", "Render Output", "Save File", "Files...", "Assign Renderer", "Production: Bevy (PBR rasteriser)", "Viewport:", "Lock View", "Render"] {
+        assert!(h.text_rect(label, win).is_some(), "{label:?} in Render Setup");
+    }
+    click_text(&mut h, "1280x720", win, 0.0);
+    assert_eq!((h.app.state.scene.render.width, h.app.state.scene.render.height), (1280, 720));
+    click_text(&mut h, "Force 2-Sided", win, 0.0);
+    assert!(h.app.state.scene.render.force_two_sided);
+    click_text(&mut h, "Renderer", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    for label in ["Antialiasing (4x MSAA)", "Supersampling:", "Shadows", "Map Size:", "Background:", "Ambient:"] {
+        assert!(h.text_rect(label, win).is_some(), "{label:?} in the Renderer panel");
+    }
+    click_text(&mut h, "Shadows", win, 0.0);
+    assert!(!h.app.state.scene.render.bevy.shadows);
+    h.cmd(Command::UndoSceneOperation);
+    assert!(h.app.state.scene.render.bevy.shadows, "each change is an undo step");
+}
+
+/// Renders until the render in progress ends (at most `frames` frames).
+fn finish_render(h: &mut Harness, frames: usize) {
+    for _ in 0..frames {
+        h.frames(1);
+        if h.app.state.rendered.progress.is_none() && h.app.state.pending_render.is_none() {
+            return;
+        }
+    }
+    panic!("the render did not finish in {frames} frames");
+}
+
+#[test]
+fn a_render_runs_in_buckets_into_the_window_and_saves_its_file() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("a_render_runs_in_buckets_into_the_window_and_saves_its_file: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Teapot, position: [0.0; 3], size: [25.0; 3] });
+    framed(&mut h);
+    let path = std::env::temp_dir().join(format!("loom-ui-render-{}.png", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let r = h.app.dispatch_json(&serde_json::json!({ "cmd": "Render SetUp...", "args": { "width": 600, "height": 300, "output": path.to_string_lossy() } }));
+    assert_eq!(r["ok"], true, "{r}");
+    h.mods = egui::Modifiers::SHIFT;
+    h.key(egui::Key::Q);
+    h.mods = egui::Modifiers::NONE;
+    // 600 x 300 is 3 x 2 buckets: the UI keeps running between them.
+    let p = h.app.state.rendered.progress.expect("rendering");
+    assert_eq!(p.total, 6);
+    assert!(p.done < p.total, "not done in the frame it started");
+    finish_render(&mut h, 60);
+    assert_eq!(h.app.last_error, None);
+    let img = h.app.state.rendered.image.clone().expect("the image is in the window");
+    assert_eq!(img.dimensions(), (600, 300));
+    let wire = h.app.state.scene.node(*h.app.state.selection.iter().next().unwrap()).unwrap().wire_color;
+    let lit = img.pixels().filter(|p| p.0[3] == 255).count();
+    assert!(lit > 5000, "the teapot fills part of the frame: {lit} opaque pixels (wire colour {wire:?})");
+    assert_eq!(img.get_pixel(1, 1).0[3], 0, "background alpha 0");
+    let saved = image::open(&path).expect("Save File wrote the render").to_rgba8();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(saved.dimensions(), (600, 300));
+    // F9 renders again, without saving.
+    h.key(egui::Key::F9);
+    finish_render(&mut h, 60);
+    assert!(!path.exists(), "Render Last does not save");
+}
+
+#[test]
+fn cancel_stops_a_render_and_keeps_the_buckets_done() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("cancel_stops_a_render_and_keeps_the_buckets_done: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Teapot, position: [0.0; 3], size: [25.0; 3] });
+    framed(&mut h);
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Render SetUp...", "args": { "width": 2048, "height": 1536 } }));
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    h.frames(6);
+    let p = h.app.state.rendered.progress.expect("still rendering");
+    assert!(p.done > 0 && p.done < p.total, "{p:?}");
+    let win = rfw_rect(&h);
+    click_text(&mut h, "Cancel", win, 0.0);
+    assert!(h.app.state.rendered.progress.is_none(), "cancelled");
+    assert!(h.app.state.status_prompt.contains("cancelled"), "{}", h.app.state.status_prompt);
+    assert_eq!(h.app.state.rendered.image.as_ref().map(|i| i.dimensions()), Some((2048, 1536)), "the partial image stays");
+    // Esc cancels too.
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    h.frames(3);
+    assert!(h.app.state.rendered.progress.is_some());
+    h.key(egui::Key::Escape);
+    assert!(h.app.state.rendered.progress.is_none(), "Esc cancels");
+}
+
+#[test]
+fn an_iterative_region_render_keeps_the_rest_of_the_window() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("an_iterative_region_render_keeps_the_rest_of_the_window: no GPU adapter, skipped");
+        return;
+    };
+    // An empty scene: every pixel is background, so the region shows exactly.
+    maximized(&mut h);
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Render SetUp...", "args": { "width": 320, "height": 240 } }));
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Bevy Renderer Settings", "args": { "background": [0.0, 0.0, 1.0] } }));
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 60);
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Bevy Renderer Settings", "args": { "background": [0.0, 1.0, 0.0] } }));
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Area to Render", "args": { "area": "Region", "region": [0.0, 0.0, 0.25, 0.25] } }));
+    h.cmd(Command::RenderIterative);
+    finish_render(&mut h, 60);
+    let img = h.app.state.rendered.image.clone().unwrap();
+    assert_eq!(img.get_pixel(2, 2).0, [0, 255, 0, 0], "the region renders with the new background");
+    assert_eq!(img.get_pixel(300, 230).0, [0, 0, 255, 0], "outside it the earlier render stays");
+    // Production clears the window first.
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 60);
+    let img = h.app.state.rendered.image.clone().unwrap();
+    assert_eq!(img.get_pixel(300, 230).0, [0, 255, 0, 0], "Production starts from a cleared frame");
 }
 
 /// Expert Mode leaves a Cancel Expert Mode button in the bottom-right corner;
