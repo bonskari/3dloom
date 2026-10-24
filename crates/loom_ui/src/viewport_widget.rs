@@ -937,7 +937,20 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     painter.image(tex.id(), target, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 }
             }
-            let cb = egui_wgpu::Callback::new_paint_callback(
+            // Realistic: Bevy's image is the 3D view (no grid); without a GPU
+            // (the headless app) the viewport falls back to the shaded view.
+            let realistic = app.state.viewports[index].shading == loom_commands::Shading::Realistic && app.realistic_available();
+            if realistic {
+                let ppp = ctx.pixels_per_point();
+                let size = [(rect.width() * ppp).round().max(1.0) as u32, (rect.height() * ppp).round().max(1.0) as u32];
+                match app.realistic_texture(index, size, view, proj) {
+                    Some(tex) => {
+                        painter.image(tex, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    }
+                    None => ctx.request_repaint(),
+                }
+            }
+            let cb = (!realistic).then(|| egui_wgpu::Callback::new_paint_callback(
                 rect,
                 ViewportCallback {
                     slot: index,
@@ -956,8 +969,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10 }
                     },
                 },
-            );
-            painter.add(cb);
+            ));
+            if let Some(cb) = cb {
+                painter.add(cb);
+            }
 
             let hover_pos = ctx.input(|i| i.pointer.hover_pos());
             draw_shapes(&painter, app, view_proj, rect);
@@ -1082,9 +1097,6 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         let vp = &app.state.viewports[index];
         (app.state.view_label(index), vp.shading.label(), vp.disabled)
     };
-    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-        ui.memory_mut(|m| m.close_popup());
-    }
     let font = egui::FontId::proportional(13.0);
     let mut x = rect.min.x + 6.0;
     let y = rect.min.y + 4.0;
@@ -1093,22 +1105,30 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         let galley = painter.layout_no_wrap(text, font.clone(), egui::Color32::from_gray(225));
         let size = galley.size();
         let r = egui::Rect::from_min_size(egui::pos2(x, y), size);
-        let id = ui.id().with(("vp_label", index, which));
-        let resp = ui.interact(r, id, egui::Sense::click());
-        let color = if resp.hovered() { egui::Color32::WHITE } else { egui::Color32::from_gray(225) };
-        painter.galley(r.min, galley, color);
-        if resp.clicked() || resp.secondary_clicked() {
-            ui.memory_mut(|m| m.toggle_popup(id.with("popup")));
-        }
         let entries = match which {
             0 => crate::label_menus::general_entries(app, index),
             1 => crate::label_menus::pov_entries(app, index),
             _ => crate::label_menus::shading_entries(app, index),
         };
-        egui::popup::popup_below_widget(ui, id.with("popup"), &resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
-            ui.set_min_width(170.0);
-            crate::label_menus::render(ui, app, index, &entries);
-        });
+        // A real menu (submenus open to the side, picking an item or clicking
+        // elsewhere closes it); its own text is invisible, the label above is drawn on top.
+        let text = galley.text().to_owned();
+        let button = egui::Button::new(egui::RichText::new(text).font(font.clone()).color(egui::Color32::TRANSPARENT)).frame(false);
+        let resp = ui
+            .put(r, |ui: &mut egui::Ui| {
+                egui::menu::menu_custom_button(ui, button, |ui| {
+                    ui.set_min_width(170.0);
+                    crate::label_menus::render(ui, app, index, &entries);
+                })
+                .response
+            })
+            .context_menu(|ui| {
+                ui.set_min_width(170.0);
+                crate::label_menus::render(ui, app, index, &entries);
+            });
+        let hovered = resp.is_some_and(|r| r.response.hovered()) || ui.rect_contains_pointer(r);
+        let color = if hovered { egui::Color32::WHITE } else { egui::Color32::from_gray(225) };
+        painter.galley(r.min, galley, color);
         x += size.x + 10.0;
     }
     if disabled {
@@ -1514,7 +1534,7 @@ fn draw_region(painter: &egui::Painter, region: &crate::region::Region) {
     match region {
         Region::Rect(r) => {
             painter.rect_filled(*r, 0.0, fill);
-            painter.rect_stroke(*r, 0.0, stroke);
+            painter.rect_stroke(*r, 0.0, stroke, egui::StrokeKind::Middle);
         }
         Region::Circle { center, radius } => {
             painter.circle_filled(*center, *radius, fill);
@@ -1755,7 +1775,7 @@ fn draw_snap_marker(painter: &egui::Painter, app: &LoomApp, hit: &loom_commands:
             painter.line_segment([egui::pos2(c.x - r, c.y + r), egui::pos2(c.x + r, c.y - r)], stroke);
         }
         K::Vertex | K::Endpoint | K::BoundingBox => {
-            painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0)), 0.0, stroke);
+            painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0)), 0.0, stroke, egui::StrokeKind::Middle);
         }
         K::Pivot => {
             painter.circle_stroke(c, r, stroke);
@@ -1770,7 +1790,7 @@ fn draw_snap_marker(painter: &egui::Painter, app: &LoomApp, hit: &loom_commands:
             painter.add(egui::Shape::closed_line(pts, stroke));
         }
         K::Face => {
-            painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0)), 0.0, stroke);
+            painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0)), 0.0, stroke, egui::StrokeKind::Middle);
             painter.line_segment([egui::pos2(c.x - r, c.y - r), egui::pos2(c.x + r, c.y + r)], stroke);
             painter.line_segment([egui::pos2(c.x - r, c.y + r), egui::pos2(c.x + r, c.y - r)], stroke);
         }
@@ -1952,9 +1972,9 @@ fn draw_safe_frames(painter: &egui::Painter, rect: egui::Rect) {
     let aspect = 4.0 / 3.0;
     let (w, h) = if rect.width() / rect.height() > aspect { (rect.height() * aspect, rect.height()) } else { (rect.width(), rect.width() / aspect) };
     let live = egui::Rect::from_center_size(rect.center(), egui::vec2(w, h));
-    painter.rect_stroke(live, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)));
-    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.05, h * 0.05)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(90, 200, 255)));
-    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.10, h * 0.10)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 150, 60)));
+    painter.rect_stroke(live, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)), egui::StrokeKind::Middle);
+    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.05, h * 0.05)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(90, 200, 255)), egui::StrokeKind::Middle);
+    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.10, h * 0.10)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 150, 60)), egui::StrokeKind::Middle);
 }
 
 /// The soft selection gradient: red (1) → orange → yellow → blue (0).

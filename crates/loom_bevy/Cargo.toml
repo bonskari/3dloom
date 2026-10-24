@@ -1,0 +1,18 @@
+[package]
+name    = "loom_bevy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+loom_mesh   = { workspace = true }
+loom_render = { workspace = true }
+loom_scene  = { workspace = true }
+glam        = { workspace = true }
+wgpu        = { workspace = true }
+image       = { workspace = true }
+# Headless: no window, no audio, no winit. Runs on the UI's wgpu device.
+bevy = { version = "0.16", default-features = false, features = ["std", "async_executor", "bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_window"] }
+
+[dev-dependencies]
+pollster = { workspace = true }

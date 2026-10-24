@@ -95,6 +95,7 @@ pub fn shading_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
     vec![
         check("Smooth + Highlights", vp.shading == Shading::SmoothHighlights, set(Shading::SmoothHighlights)),
         check("Wireframe", vp.shading == Shading::Wireframe, set(Shading::Wireframe)),
+        check("Realistic (Bevy)", vp.shading == Shading::Realistic, set(Shading::Realistic)),
         MenuEntry {
             label: "Other".into(),
             checked: false,
@@ -167,6 +168,6 @@ mod tests {
         assert_eq!(g[0].label, "Minimize Viewport");
         assert!(g.iter().any(|e| e.label == "Show Grids" && !e.checked));
         let shading = labels(&shading_entries(&app, 3));
-        assert_eq!(shading, vec!["Smooth + Highlights", "Wireframe", "Other", "", "Edged Faces"]);
+        assert_eq!(shading, vec!["Smooth + Highlights", "Wireframe", "Realistic (Bevy)", "Other", "", "Edged Faces"]);
     }
 }

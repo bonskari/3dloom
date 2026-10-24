@@ -1306,6 +1306,19 @@ pub struct AppState {
     pub file: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
     pub mesh_dirty: bool,
+    /// Render SetUp output size in pixels.
+    pub render_size: (u32, u32),
+    /// A Render waiting for the UI's renderer (the command layer has no GPU).
+    pub pending_render: Option<RenderRequest>,
+}
+
+/// Render the active view of `viewport` to the PNG `path` at `width` x `height`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderRequest {
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
+    pub viewport: usize,
 }
 
 impl Default for AppState {
@@ -1449,6 +1462,8 @@ impl AppState {
             pending_file_action: None,
             exit_requested: false,
             uv_editor: UvEditor::default(),
+            render_size: (640, 480),
+            pending_render: None,
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,

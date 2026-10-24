@@ -65,9 +65,63 @@ pub fn ray_aabb(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
     }
 }
 
+/// Ray–triangle intersection (Möller–Trumbore), both faces; the distance `t`.
+pub fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
+    let e1 = b - a;
+    let e2 = c - a;
+    let p = dir.cross(e2);
+    let det = e1.dot(p);
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let inv = 1.0 / det;
+    let s = origin - a;
+    let u = s.dot(p) * inv;
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let q = s.cross(e1);
+    let v = dir.dot(q) * inv;
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+    let t = e2.dot(q) * inv;
+    (t > 0.0).then_some(t)
+}
+
+/// The nearest hit of a ray on a mesh's faces (each face fanned into
+/// triangles), after a bounding-box test.
+pub fn ray_mesh(origin: Vec3, dir: Vec3, mesh: &loom_mesh::Mesh) -> Option<f32> {
+    let (mn, mx) = mesh.aabb();
+    ray_aabb(origin, dir, mn, mx)?;
+    let mut best: Option<f32> = None;
+    for f in 0..mesh.face_count() {
+        let Some(pts) = mesh.face_positions(loom_mesh::FaceId(f as u32)) else { continue };
+        for i in 1..pts.len().saturating_sub(1) {
+            if let Some(t) = ray_triangle(origin, dir, pts[0], pts[i], pts[i + 1]) {
+                if best.is_none_or(|b| t < b) {
+                    best = Some(t);
+                }
+            }
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Through the hole of a torus: the box is hit, the surface is not.
+    #[test]
+    fn a_ray_through_a_hole_misses_the_mesh() {
+        let torus = loom_mesh::torus_primitive(10.0, 2.0, 24, 12, None);
+        let down = Vec3::new(0.0, 0.0, -1.0);
+        assert!(ray_aabb(Vec3::new(0.0, 0.0, 20.0), down, torus.aabb().0, torus.aabb().1).is_some());
+        assert_eq!(ray_mesh(Vec3::new(0.0, 0.0, 20.0), down, &torus), None);
+        let t = ray_mesh(Vec3::new(10.0, 0.0, 20.0), down, &torus).expect("the ring itself is hit");
+        assert!((t - 18.0).abs() < 0.3, "top of the ring at z = 2: t = {t}");
+    }
 
     #[test]
     fn ray_hits_unit_cube_from_camera_aimed_at_origin() {
