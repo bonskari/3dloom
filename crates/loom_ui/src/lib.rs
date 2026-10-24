@@ -157,6 +157,9 @@ pub struct LoomApp {
     world_meshes: Vec<(NodeId, Mesh)>,
     /// Draw styles parallel to `world_meshes`.
     world_styles: Vec<loom_render::MeshStyle>,
+    /// What the viewports draw where it differs from `world_meshes` (the
+    /// modifier stack result), parallel to it.
+    world_shown: Vec<Option<Mesh>>,
     /// Meshes and colours waiting to be uploaded to the GPU. Every viewport
     /// callback holds this; whichever runs first takes and uploads them, so
     /// the upload never depends on one particular viewport being painted.
@@ -249,6 +252,9 @@ pub struct LoomApp {
     pub drag_select_start: Option<egui::Pos2>,
     /// Alt+LMB press not yet moved 4 px: a click subtracts from the selection, a drag orbits.
     pub alt_click: Option<egui::Pos2>,
+    /// The last object click: where, the objects under it front to back, and
+    /// which of them it picked; a repeat click there picks the next one.
+    pub pick_cycle: Option<(egui::Pos2, Vec<NodeId>, usize)>,
     /// Lasso/Paint path or Fence corners being collected.
     pub region_points: Vec<egui::Pos2>,
     pub quad_menu: Option<quad_menu::Open>,
@@ -284,6 +290,7 @@ impl LoomApp {
             camera_controller: ViewportNavigator::new(),
             world_meshes: Vec::new(),
             world_styles: Vec::new(),
+            world_shown: Vec::new(),
             pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((Vec::new(), Vec::new(), Vec::new())))),
             bitmap_cache: std::collections::HashMap::new(),
             create_kind: None,
@@ -335,6 +342,7 @@ impl LoomApp {
             view_animation: None,
             drag_select_start: None,
             alt_click: None,
+            pick_cycle: None,
             region_points: Vec::new(),
             quad_menu: None,
             background_textures: std::collections::HashMap::new(),
@@ -436,6 +444,7 @@ impl LoomApp {
         let srgb = |c: u8| srgb_f(c as f32 / 255.0);
         let mut meshes = Vec::new();
         let mut display = Vec::new();
+        let mut shown_meshes = Vec::new();
         let mut styles = Vec::new();
         let mut bitmaps: Vec<(String, std::sync::Arc<loom_render::Bitmap>)> = Vec::new();
         let mut bitmap_index: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
@@ -476,9 +485,7 @@ impl LoomApp {
             } else {
                 [srgb(n.wire_color[0]), srgb(n.wire_color[1]), srgb(n.wire_color[2])]
             };
-            // Helpers (Dummy, Point, IK goals) draw see-through like wireframe helpers;
-            // a camera icon is drawn solid.
-            let see_through = n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }));
+            let see_through = draws_see_through(n);
             // An assigned material colours the faces (its diffuse, opacity and
             // highlight); edges and wireframe keep the object colour.
             let material = self.state.scene.node_material(n.id).cloned();
@@ -521,11 +528,13 @@ impl LoomApp {
             // A visibility track below 1 shows the object partly transparent (never fully hidden in shaded views).
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
             styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors: n.display.vertex_colors, texture, specular, wire_color });
+            shown_meshes.push(shown.clone());
             display.push(shown.unwrap_or_else(|| mesh.clone()));
             meshes.push((n.id, mesh));
         }
         self.world_meshes = meshes;
         self.world_styles = styles;
+        self.world_shown = shown_meshes;
         if let Ok(mut slot) = self.pending_upload.lock() {
             *slot = Some((display, self.world_styles.clone(), bitmaps));
         }
@@ -538,6 +547,12 @@ impl LoomApp {
     /// Visible nodes with their world-space meshes, in render order.
     pub fn world_meshes(&self) -> &[(NodeId, Mesh)] {
         &self.world_meshes
+    }
+
+    /// The world-space mesh the viewports draw for `world_meshes()[i]`:
+    /// what object picking hits.
+    pub fn drawn_mesh(&self, i: usize) -> &Mesh {
+        self.world_shown.get(i).and_then(|m| m.as_ref()).unwrap_or(&self.world_meshes[i].1)
     }
 
     pub fn render_camera(&self) -> Camera {
@@ -804,6 +819,12 @@ impl LoomApp {
 }
 
 /// Decodes a Show Map bitmap once per path (a failed load is remembered too).
+/// Drawn see-through: See-Through on (Alt+X), and helpers (Dummy, Point, IK
+/// goals); a camera icon is drawn solid.
+pub(crate) fn draws_see_through(n: &loom_scene::Node) -> bool {
+    n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }))
+}
+
 fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>, path: &str) -> Option<std::sync::Arc<loom_render::Bitmap>> {
     cache
         .entry(path.to_owned())
