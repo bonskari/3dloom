@@ -3,7 +3,7 @@
 
 use crate::LoomApp;
 use eframe::egui;
-use crate::shortcuts::menu_button;
+use crate::shortcuts::{menu_button, HoverShortcut};
 use loom_commands::{Command, PrimitiveKind};
 
 fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str) {
@@ -298,20 +298,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
 /// The Quick Access toolbar: New Scene, Open File, Save File, Undo, Redo.
 fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
     use loom_commands::PendingFileAction as A;
-    let tip = |app: &LoomApp, action: &str| app.keymap.chord_for(action).map(|c| format!("{action} ({})", c.label())).unwrap_or_else(|| action.to_owned());
-    if ui.button("New").on_hover_text(tip(app, "New Scene")).clicked() {
+    if ui.button("New").on_hover_name(&app.state, "New Scene").clicked() {
         app.request_file_action(A::New);
     }
-    if ui.button("Open").on_hover_text(tip(app, "Open File")).clicked() {
+    if ui.button("Open").on_hover_name(&app.state, "Open File").clicked() {
         app.request_file_action(A::Open);
     }
-    if ui.button("Save").on_hover_text(tip(app, "Save File")).clicked() {
+    if ui.button("Save").on_hover_name(&app.state, "Save File").clicked() {
         app.dispatch_named("Save File");
     }
-    if ui.add_enabled(app.state.undo.can_undo(), egui::Button::new("Undo")).on_hover_text(tip(app, "Undo Scene Operation")).clicked() {
+    if ui.add_enabled(app.state.undo.can_undo(), egui::Button::new("Undo")).on_hover_name(&app.state, "Undo Scene Operation").clicked() {
         app.dispatch_named("Undo Scene Operation");
     }
-    if ui.add_enabled(app.state.undo.can_redo(), egui::Button::new("Redo")).on_hover_text(tip(app, "Redo Scene Operation")).clicked() {
+    if ui.add_enabled(app.state.undo.can_redo(), egui::Button::new("Redo")).on_hover_name(&app.state, "Redo Scene Operation").clicked() {
         app.dispatch_named("Redo Scene Operation");
     }
 }
