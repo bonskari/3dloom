@@ -28,6 +28,12 @@ fn screen_axes(state: &AppState, viewport: usize) -> Mat3 {
 
 /// The active view's axes (X right, Y up, Z toward the viewer).
 pub fn view_axes(state: &AppState, viewport: usize) -> Mat3 {
+    let kind = state.viewports[viewport.min(state.viewports.len() - 1)].kind;
+    if kind.angles().is_some() {
+        // Axis views: exactly the view's plane.
+        let (u, v, n) = kind.construction_plane();
+        return Mat3::from_cols(u, v, n);
+    }
     screen_axes(state, viewport)
 }
 
