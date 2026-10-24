@@ -201,6 +201,14 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                     ui.label(egui::RichText::new("Rendering Control").strong());
                     ui.add_enabled(false, egui::Button::new("By Object")).on_disabled_hover_text("By Layer rendering control comes with the layer properties");
                 });
+                // For lights Renderable is the only control (off turns the light off in renders).
+                let lights_only = nodes.iter().all(|n| matches!(n.object, loom_scene::ObjectKind::Light(_)));
+                if lights_only {
+                    if let Some(v) = tri_checkbox(ui, "Renderable", nodes, |n| n.render.renderable) {
+                        let _ = app.dispatch(Command::SetRenderProperty { name: "Renderable".into(), value: v });
+                    }
+                    return;
+                }
                 ui.horizontal(|ui| {
                     ui.label("Visibility:");
                     let mut v = node.visibility.as_ref().map_or(1.0, |p| p.get());
@@ -259,12 +267,17 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
 /// radiosity settings do not apply: the Bevy renderer has no radiosity or
 /// light tracer.
 fn adv_lighting(ui: &mut egui::Ui, nodes: &[&Node]) {
-    let geometry = nodes.iter().filter(|n| !n.object.is_helper() && !n.object.is_shape() && !n.object.is_bone()).count();
+    let is_light = |n: &&&Node| matches!(n.object, loom_scene::ObjectKind::Light(_));
+    let lights = nodes.iter().filter(is_light).count();
+    let geometry = nodes.iter().filter(|n| !is_light(n) && !n.object.is_helper() && !n.object.is_shape() && !n.object.is_bone()).count();
     ui.group(|ui| {
         ui.label(egui::RichText::new("Selection Information").strong());
         egui::Grid::new("adv_lighting_info").num_columns(2).show(ui, |ui| {
             ui.label("Num. Geometric Objects:");
             ui.label(geometry.to_string());
+            ui.end_row();
+            ui.label("Num. Light Objects:");
+            ui.label(lights.to_string());
             ui.end_row();
         });
     });

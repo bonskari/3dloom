@@ -8,6 +8,7 @@ pub mod dialogs;
 pub mod gizmo;
 mod hotkeys;
 pub mod label_menus;
+mod light_overlay;
 pub mod live;
 pub mod main_toolbar;
 pub mod quad_menu;
@@ -127,6 +128,8 @@ pub enum CreateKind {
     Helper(HelperKind),
     /// Cameras > Target (drag camera to target) / Free (a click places one).
     Camera { target: bool },
+    /// Lights > Standard: target lights drag from the light to its target, the others are placed by a click.
+    Light(loom_commands::light::LightKind),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -752,6 +755,19 @@ impl LoomApp {
     pub fn camera_for(&self, index: usize) -> Camera {
         let vp = &self.state.viewports[index.min(self.state.viewports.len() - 1)];
         if let loom_commands::ViewKind::Camera(id) = vp.kind {
+            if let Some(loom_scene::ObjectKind::Light(l)) = self.state.scene.node(id).map(|n| &n.object) {
+                // Light view: a spot's falloff spans the view's width; a
+                // directional light looks orthographically over its falloff width.
+                let world = self.state.scene.world_matrix(id);
+                let eye = world.w_axis.truncate();
+                let forward = -world.z_axis.truncate().normalize_or_zero();
+                let distance = loom_scene::light::target_distance(&self.state.scene, id).unwrap_or(loom_scene::light::DEFAULT_TARGET_DISTANCE).max(1e-3);
+                let orbit = loom_input::OrbitCamera::looking(eye, eye + forward * distance, world.y_axis.truncate().normalize_or_zero());
+                let perspective = l.light_type != loom_scene::light::LightType::Directional;
+                let fov_x = if perspective { l.falloff.get().clamp(1.0, 175.0).to_radians() } else { 2.0 * (l.falloff.get().max(1e-3) * 0.5 / distance).atan() };
+                let (near, far) = (loom_scene::camera::AUTO_NEAR_CLIP, Camera::auto_clip(distance).1);
+                return Camera { orbit, perspective, fov_y_radians: vp.fov_y_radians, near, far, clip: (!perspective).then_some((near, far)), frame: Some(world), fov_x_radians: Some(fov_x) };
+            }
             if let Some(node) = self.state.scene.node(id) {
                 if let loom_scene::ObjectKind::Camera { fov, ortho, clip_manually, near_clip, far_clip, .. } = &node.object {
                     // Look through the camera node: it looks down its local -Z,

@@ -2,6 +2,7 @@
 
 pub mod biped;
 pub mod camera;
+pub mod light;
 pub mod modifier;
 pub mod ik;
 pub mod skin;

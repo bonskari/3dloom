@@ -201,6 +201,11 @@ pub enum PickMode {
     UnwrapSplineMap,
     /// Animation > Constraints / Motion panel Add … Target: the clicked object is the target.
     Constraint(crate::motion::ConstraintPick),
+    /// Reference Coordinate System > Pick: the clicked object's axes become the system.
+    CoordSystem,
+    /// Working Pivot > Place Pivot To: View (a point in the screen plane) / Surface.
+    WorkingPivotView,
+    WorkingPivotSurface,
 }
 
 /// Paint Deformation brushes.
@@ -227,6 +232,22 @@ pub enum PolyConstraint {
     Edges,
     Faces,
     Normals,
+}
+
+/// Hierarchy > Working Pivot: the scene's one working pivot (world space).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub struct WorkingPivot {
+    pub origin: Vec3,
+    pub rotation: glam::Quat,
+}
+
+/// Transform manager settings put aside while a Working Pivot mode is on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SavedManagers {
+    pub coord_by_tool: [CoordSystem; 4],
+    pub center_by_tool: [(CenterMode, CenterMode); 4],
+    pub center: (CenterMode, CenterMode),
+    pub tool: Tool,
 }
 
 /// The Slice Plane gizmo (world space).
@@ -490,10 +511,11 @@ impl SelectionFilter {
     pub fn accepts(self, node: &Node) -> bool {
         match self {
             SelectionFilter::All => true,
-            SelectionFilter::Geometry => !matches!(node.object, ObjectKind::Camera { .. }) && !node.object.is_shape(),
+            SelectionFilter::Geometry => !matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_)) && !node.object.is_shape(),
             SelectionFilter::Shapes => node.object.is_shape(),
             SelectionFilter::Cameras => matches!(node.object, ObjectKind::Camera { .. }),
-            // No lights, helpers, bones, IK chains or points exist yet.
+            SelectionFilter::Lights => matches!(node.object, ObjectKind::Light(_)),
+            // No helpers, bones, IK chains or points exist yet.
             _ => false,
         }
     }
@@ -562,11 +584,13 @@ pub enum CoordSystem {
     Local,
     Gimbal,
     Grid,
+    /// The working pivot's axes (Hierarchy > Working Pivot).
+    Working,
     Pick,
 }
 
 impl CoordSystem {
-    pub const ALL: [CoordSystem; 8] = [CoordSystem::View, CoordSystem::Screen, CoordSystem::World, CoordSystem::Parent, CoordSystem::Local, CoordSystem::Gimbal, CoordSystem::Grid, CoordSystem::Pick];
+    pub const ALL: [CoordSystem; 9] = [CoordSystem::View, CoordSystem::Screen, CoordSystem::World, CoordSystem::Parent, CoordSystem::Local, CoordSystem::Gimbal, CoordSystem::Grid, CoordSystem::Working, CoordSystem::Pick];
     pub fn label(self) -> &'static str {
         match self {
             CoordSystem::View => "View",
@@ -576,6 +600,7 @@ impl CoordSystem {
             CoordSystem::Local => "Local",
             CoordSystem::Gimbal => "Gimbal",
             CoordSystem::Grid => "Grid",
+            CoordSystem::Working => "Working",
             CoordSystem::Pick => "Pick",
         }
     }
@@ -614,6 +639,10 @@ pub struct GizmoPrefs {
 
 fn default_gizmo_size() -> f32 {
     20.0
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for GizmoPrefs {
@@ -671,6 +700,10 @@ pub struct Prefs {
     pub auto_backup_interval_min: f32,
     /// Auto Backup File Name (default "AutoBackup").
     pub auto_backup_name: String,
+    /// Preferences > Animation > Local Center During Animate: with Auto Key
+    /// on, Rotate and Scale use each object's pivot (default on).
+    #[serde(default = "default_true")]
+    pub local_center_during_animate: bool,
     /// Preferences > Files > Recent Files in File Menu (0-50, default 10).
     pub recent_files_count: usize,
 }
@@ -694,6 +727,7 @@ impl Default for Prefs {
             auto_backup_count: 3,
             auto_backup_interval_min: 5.0,
             auto_backup_name: "AutoBackup".into(),
+            local_center_during_animate: true,
             recent_files_count: 10,
         }
     }
@@ -701,13 +735,13 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 29] = [
+    pub const NAMES: [&'static str; 30] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
-        "Scale Size", "Rotation Increment", "Space Locks Selection", "Recent Files in File Menu",
+        "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -723,6 +757,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => b(self.spinner_wrap_cursor),
             "Viewport Tooltips" => b(self.viewport_tooltips),
             "Space Locks Selection" => b(self.space_selection_lock),
+            "Local Center During Animate" => b(self.local_center_during_animate),
             "Show Cross Hair Cursor" => b(self.show_cross_hair),
             "Auto Backup Enable" => b(self.auto_backup_enable),
             "Auto Backup Count" => self.auto_backup_count as f64,
@@ -761,6 +796,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => self.spinner_wrap_cursor = on,
             "Viewport Tooltips" => self.viewport_tooltips = on,
             "Space Locks Selection" => self.space_selection_lock = on,
+            "Local Center During Animate" => self.local_center_during_animate = on,
             "Auto Backup Enable" => self.auto_backup_enable = on,
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
@@ -1300,6 +1336,8 @@ pub struct AppState {
     pub coord_system: CoordSystem,
     /// Node whose coordinate system `CoordSystem::Pick` uses.
     pub pick_coord_node: Option<NodeId>,
+    /// The four most recently picked systems, newest first (names in the list).
+    pub pick_coord_recent: Vec<NodeId>,
     pub center_mode: CenterMode,
     /// The centre is remembered separately for single and multiple selections.
     pub center_single: CenterMode,
@@ -1324,6 +1362,13 @@ pub struct AppState {
     /// Reference coordinate system remembered per transform tool
     /// (Preferences > Reference Coordinate System > Constant off).
     pub coord_by_tool: [CoordSystem; 4],
+    /// Use Center (single, multiple) and axis constraint remembered per
+    /// transform tool, like `coord_by_tool`; the constraint also per level
+    /// ([object, sub-object][tool]).
+    pub center_by_tool: [(CenterMode, CenterMode); 4],
+    pub constraint_by_tool: [[AxisConstraint; 4]; 2],
+    /// Which level `axis_constraint` belongs to (true = sub-object).
+    pub constraint_level_sub: bool,
     /// Keyboard Shortcut Override Toggle: when off only Main UI shortcuts work.
     pub keyboard_override: bool,
     pub named_sets: BTreeMap<String, Vec<NodeId>>,
@@ -1373,6 +1418,19 @@ pub struct AppState {
     pub affect_pivot_only: bool,
     /// Hierarchy > Pivot: Move/Rotate act on the object offset only.
     pub affect_object_only: bool,
+    /// Hierarchy > Pivot: Rotate/Scale act on the links to the children only.
+    pub affect_hierarchy_only: bool,
+    /// Hierarchy > Adjust Transform > Don't Affect Children.
+    pub dont_affect_children: bool,
+    pub working_pivot: WorkingPivot,
+    /// Working Pivot > Edit Working Pivot: the transform tools move the working pivot.
+    pub edit_working_pivot: bool,
+    /// Working Pivot > Use Working Pivot: every transform uses the Working system.
+    pub use_working_pivot: bool,
+    /// Working Pivot > Place Pivot To > Align To View.
+    pub working_pivot_align_to_view: bool,
+    /// What Edit / Use Working Pivot restore when they end.
+    pub working_pivot_saved: (Option<SavedManagers>, Option<SavedManagers>),
     pub selection_locked: bool,
     pub snaps_on: bool,
     pub angle_snap_on: bool,
@@ -1567,6 +1625,7 @@ impl AppState {
             scale_kind: ScaleKind::Uniform,
             coord_system: CoordSystem::View,
             pick_coord_node: None,
+            pick_coord_recent: Vec::new(),
             center_mode: CenterMode::PivotPoint,
             center_single: CenterMode::PivotPoint,
             center_multi: CenterMode::Selection,
@@ -1579,6 +1638,9 @@ impl AppState {
             region_points_reset: false,
             manipulate: false,
             coord_by_tool: [CoordSystem::View; 4],
+            center_by_tool: [(CenterMode::PivotPoint, CenterMode::Selection); 4],
+            constraint_by_tool: [[AxisConstraint::XY; 4]; 2],
+            constraint_level_sub: false,
             keyboard_override: true,
             ffd_selection: BTreeSet::new(),
             vertex_paint_brush: false,
@@ -1609,6 +1671,13 @@ impl AppState {
             soft_cache: Default::default(),
             affect_pivot_only: false,
             affect_object_only: false,
+            affect_hierarchy_only: false,
+            dont_affect_children: false,
+            working_pivot: WorkingPivot::default(),
+            edit_working_pivot: false,
+            use_working_pivot: false,
+            working_pivot_align_to_view: false,
+            working_pivot_saved: (None, None),
             selection_locked: false,
             snaps_on: false,
             angle_snap_on: false,
@@ -1756,6 +1825,7 @@ impl AppState {
         let c = &self.hide_category;
         !match node.object {
             ObjectKind::Camera { .. } => c.cameras,
+            ObjectKind::Light(_) => c.lights,
             ref o if o.is_shape() => c.shapes,
             _ => c.geometry,
         }
@@ -2075,6 +2145,9 @@ impl AppState {
     pub fn selection_pivot(&self) -> Vec3 {
         if self.slice_plane_mode {
             return self.slice_plane.origin;
+        }
+        if self.edit_working_pivot {
+            return self.working_pivot.origin;
         }
         self.selection_bounds()
             .map(|(a, b)| (a + b) * 0.5)

@@ -550,6 +550,8 @@ pub enum ObjectKind {
     },
     /// Systems > Biped: the centre of mass, root of the biped's parts; holds the Structure.
     Biped(Box<crate::biped::BipedStructure>),
+    /// Create > Lights > Standard: a light proxy the renderers build their lights from.
+    Light(Box<crate::light::LightObject>),
 }
 
 /// Bone fins (Bone Tools > Fin Adjustment Tools).
@@ -800,6 +802,16 @@ impl ObjectKind {
         }
         o
     }
+    /// A standard light of type `t` (free; a target light gets its target set by the caller).
+    pub fn light_object(t: crate::light::LightType) -> Self {
+        Self::Light(Box::new(crate::light::LightObject::new(t)))
+    }
+    pub fn light(&self) -> Option<&crate::light::LightObject> {
+        match self {
+            Self::Light(l) => Some(l),
+            _ => None,
+        }
+    }
     /// A bone of `length` with the default size (width 4, height 4, taper 90 %).
     pub fn bone(length: f32) -> Self {
         Self::Bone { length: p(length), width: p(4.0), height: p(4.0), taper: p(0.9), fins: BoneFins::default(), bone_on: p(true), freeze_length: p(false), stretch: p(0), stretch_axis: p(0), axis: p(0) }
@@ -994,6 +1006,7 @@ impl ObjectKind {
             Self::Point { .. } => "Point",
             Self::IkGoal { .. } => "IK Chain",
             Self::Biped(_) => "Biped",
+            Self::Light(l) => l.base_name(),
             Self::EditableSpline(s) => if s.is_line { "Line" } else { "Shape" },
             Self::Rectangle { .. } => "Rectangle",
             Self::Circle { .. } => "Circle",
@@ -1049,6 +1062,7 @@ impl ObjectKind {
             (Self::Torus { .. }, "Smooth") => Some(&["All", "Sides", "None", "Segments"]),
             (Self::Sphere { .. }, "Chop/Squash") => Some(&["Chop", "Squash"]),
             (Self::Camera { .. }, "FOV Direction") => Some(&crate::camera::FOV_DIRECTIONS),
+            (Self::Light(l), name) => l.choices(name),
             _ => None,
         }
     }
@@ -1067,6 +1081,7 @@ impl ObjectKind {
         match self {
             Self::EditablePoly(_) => "Editable Poly",
             Self::EditableSpline(s) => if s.is_line { "Line" } else { "Editable Spline" },
+            Self::Light(l) => l.stack_name(),
             other => other.base_name(),
         }
     }
@@ -1151,6 +1166,7 @@ impl ObjectKind {
                 v.push(("Height", f(&bs.height)));
                 v
             }
+            Self::Light(l) => l.parameters(),
             Self::EditableSpline(_) => self.shape_common_params(),
             Self::Rectangle { length, width, corner_radius, .. } => [vec![("Length", f(length)), ("Width", f(width)), ("Corner Radius", f(corner_radius))], self.shape_common_params()].concat(),
             Self::Circle { radius, .. } => [vec![("Radius", f(radius))], self.shape_common_params()].concat(),
@@ -1180,6 +1196,9 @@ impl ObjectKind {
         }
         if let Self::Biped(b) = self {
             return b.set(name, value);
+        }
+        if let Self::Light(l) = self {
+            return l.set_parameter(name, value);
         }
         if let Some(r) = self.set_shape_common(name, value) {
             return r;
@@ -1383,6 +1402,7 @@ impl ObjectKind {
                 Cow::Owned(mapped(plane_segmented(length.get(), width.get(), length_segs.get(), width_segs.get()), gen_mapping.get(), AutoMap::Planar))
             }
             Self::Camera { .. } => Cow::Owned(crate::camera::icon_mesh()),
+            Self::Light(l) => Cow::Owned(l.icon_mesh()),
             Self::Group { .. } => Cow::Owned(Mesh::default()),
             Self::Bone { length, width, height, taper, fins, axis, .. } => {
                 let mut m = loom_mesh::bone_mesh(
@@ -1704,6 +1724,10 @@ impl Node {
         }
         if let ObjectKind::Camera { target, .. } = &mut self.object {
             *target = target.and_then(f);
+        }
+        if let ObjectKind::Light(l) = &mut self.object {
+            l.target = l.target.and_then(f);
+            l.exclusion.nodes = l.exclusion.nodes.iter().filter_map(|n| f(*n)).collect();
         }
         self.constraints.remap_ids(f);
     }
