@@ -22,6 +22,8 @@ pub struct ViewportSave {
     pub distance: f32,
     pub yaw: f32,
     pub pitch: f32,
+    #[serde(default)]
+    pub roll: f32,
     pub shading: Shading,
     pub edged_faces: bool,
     pub show_grid: bool,
@@ -35,6 +37,16 @@ pub struct ViewportSave {
     pub scene_lights: bool,
     pub background: Option<String>,
     pub background_locked: bool,
+    #[serde(default)]
+    pub background_anchor: Option<([f32; 3], f32)>,
+    #[serde(default)]
+    pub background_aspect: crate::viewport::BackgroundAspect,
+    #[serde(default = "yes")]
+    pub background_display: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn default_clip() -> (f32, f32) {
@@ -49,6 +61,7 @@ impl ViewportSave {
             distance: v.camera.distance,
             yaw: v.camera.yaw,
             pitch: v.camera.pitch,
+            roll: v.camera.roll,
             shading: v.shading,
             edged_faces: v.edged_faces,
             show_grid: v.show_grid,
@@ -60,6 +73,9 @@ impl ViewportSave {
             scene_lights: v.scene_lights,
             background: v.background.clone(),
             background_locked: v.background_locked,
+            background_anchor: v.background_anchor.map(|(t, d)| (t.to_array(), d)),
+            background_aspect: v.background_aspect,
+            background_display: v.background_display,
         }
     }
 
@@ -69,6 +85,7 @@ impl ViewportSave {
         v.camera.distance = self.distance;
         v.camera.yaw = self.yaw;
         v.camera.pitch = self.pitch;
+        v.camera.roll = self.roll;
         v.shading = self.shading;
         v.edged_faces = self.edged_faces;
         v.show_grid = self.show_grid;
@@ -80,6 +97,10 @@ impl ViewportSave {
         v.scene_lights = self.scene_lights;
         v.background = self.background.clone();
         v.background_locked = self.background_locked;
+        // A file from before the anchor: locked where its view is.
+        v.background_anchor = self.background_locked.then(|| self.background_anchor.map(|(t, d)| (Vec3::from_array(t), d)).unwrap_or((v.camera.target, v.camera.distance)));
+        v.background_aspect = self.background_aspect;
+        v.background_display = self.background_display;
         v
     }
 }
@@ -108,6 +129,10 @@ pub struct SceneSettings {
     pub default_tangent: (loom_scene::anim::TangentType, loom_scene::anim::TangentType),
     /// Display Color, Hide Frozen / Bone Objects, statistics, safe frames, Object Color options.
     pub display: crate::display::DisplaySettings,
+    /// The ViewCube Home view.
+    pub home_view: Option<crate::state::SavedView>,
+    /// Views > Save Active View slots.
+    pub saved_views: BTreeMap<String, crate::state::SavedView>,
 }
 
 impl Default for SceneSettings {
@@ -135,6 +160,8 @@ impl SceneSettings {
             play_direction: s.playback.direction,
             default_tangent: s.default_tangent,
             display: s.display.clone(),
+            home_view: s.home_view,
+            saved_views: s.saved_views.clone(),
         }
     }
 
@@ -162,6 +189,8 @@ impl SceneSettings {
         s.playback.direction = self.play_direction;
         s.default_tangent = self.default_tangent;
         s.display = self.display.clone();
+        s.home_view = self.home_view;
+        s.saved_views = self.saved_views.clone();
         s.scene.set_time(s.current_frame as f32);
     }
 }
