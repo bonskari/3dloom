@@ -745,11 +745,10 @@ fn shift_and_ctrl_drag_in_the_stack_copy_and_instance_a_modifier() {
     h.mods = egui::Modifiers::NONE;
     assert_eq!(names(&h), ["Taper", "Bend", "Taper", "Bend"]);
     assert_eq!(instances(&h), [None, None, None, Some(1)]);
-    // A plain drag moves: the lower Taper (bottom row) onto the lower Bend.
+    assert_eq!(h.widgets_labelled("Bend  (instanced)").len(), 1, "the new entry is marked as an instance");
+    // A plain drag moves: the lower Taper (bottom row) onto the Bend above it.
     let rows = h.widgets_labelled("Taper");
-    let bends = h.widgets_labelled("Bend");
-    assert!(rows.len() == 2 && bends.len() == 2, "{rows:?} {bends:?}");
-    h.drag(rows[1].center(), bends[1].center());
+    h.drag(rows[1].center(), h.widget("Bend").center());
     assert_eq!(names(&h), ["Bend", "Taper", "Taper", "Bend"]);
     assert_eq!(instances(&h), [None, None, None, Some(0)], "the instance follows its source");
 }
