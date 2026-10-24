@@ -215,10 +215,6 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             let proj = camera.projection_matrix(aspect);
             let view_proj = proj * view;
             let projection = Projection::new(view, proj, rect);
-            let (vp_yaw, vp_pitch) = {
-                let vp = &app.state.viewports[index];
-                (vp.camera.yaw, vp.camera.pitch)
-            };
             // Labels: [+] [Top] [Wireframe], each opening its menu.
             // Perspective views get a vertical gradient; axis views stay flat.
             // Painted first: everything else, the labels included, goes over it.
@@ -244,6 +240,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     app.manip_drag = None;
                     app.state.undo.end();
                 }
+                // A camera viewport control drag released outside the window.
+                if app.camera_nav_open && !ptr.any_down() && !ptr.any_released() {
+                    app.state.undo.end();
+                    app.camera_nav_open = false;
+                }
             }
             // --- Mouse input ---
             let mods = ctx.input(|i| Modifiers {
@@ -252,44 +253,53 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 shift: i.modifiers.shift,
             });
             let pointer = ctx.input(|i| i.pointer.clone());
-            let gizmo_rect = crate::viewport_gizmo::rect(rect);
-            let cube_shown = crate::viewport_gizmo::shows_in(is_active, app.state.viewports[index].kind);
-            let cube_hovered = cube_shown && pointer.hover_pos().is_some_and(|p| gizmo_rect.contains(p));
-            let pressed = cube_hovered && pointer.button_pressed(egui::PointerButton::Primary) && response.hovered();
-            // ViewCube Home (the house over the cube): the Home view in Perspective.
-            let home_clicked = pressed && pointer.interact_pos().is_some_and(|p| crate::viewport_gizmo::home_rect(gizmo_rect).contains(p));
-            if home_clicked {
-                let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Perspective });
-                let (yaw, pitch) = crate::viewport_gizmo::angled_perspective_angles();
-                app.start_view_animation(yaw, pitch);
-                ctx.request_repaint();
+            // --- ViewCube: a click acts on release; a drag from the cube orbits the view ---
+            let cube_settings = app.state.viewcube;
+            let gizmo_rect = crate::viewport_gizmo::rect(rect, cube_settings.size);
+            let cube_shown = crate::viewport_gizmo::shows_in(is_active, app.state.viewports[index].kind, &cube_settings);
+            // Only while nothing else is being dragged across it.
+            let cube_free = !app.camera_controller.is_dragging() && app.transform_drag.is_none() && app.drag_select_start.is_none() && app.manip_drag.is_none();
+            let over_cube = cube_shown && cube_free && response.hovered() && pointer.hover_pos().is_some_and(|p| gizmo_rect.contains(p));
+            if over_cube && pointer.button_pressed(egui::PointerButton::Primary) {
+                app.cube_press = pointer.interact_pos().map(|p| (p, false));
             }
-            let clicked_gizmo = if pressed && !home_clicked {
-                pointer
-                    .interact_pos()
-                    .and_then(|p| crate::viewport_gizmo::hit_test(p, gizmo_rect, vp_yaw, vp_pitch, !app.state.viewports[index].is_orthographic()))
-            } else {
-                None
-            };
-            if let Some(view) = clicked_gizmo {
-                // ViewCube face click sets that view; clicking
-                // the already-current face goes to Perspective.
-                let (target_yaw, target_pitch) = crate::viewport_gizmo::target_angles(view);
-                let kind = if crate::viewport_gizmo::angles_match(vp_yaw, vp_pitch, target_yaw, target_pitch) {
-                    loom_commands::ViewKind::Perspective
-                } else {
-                    crate::viewport_gizmo::view_kind(view)
-                };
-                let _ = app.dispatch(Command::ViewportView { index: index as u32, kind });
-                if kind == loom_commands::ViewKind::Perspective {
-                    let (yaw, pitch) = crate::viewport_gizmo::angled_perspective_angles();
-                    app.start_view_animation(yaw, pitch);
+            if over_cube && pointer.button_pressed(egui::PointerButton::Secondary) {
+                app.cube_menu = pointer.interact_pos().map(|p| (p, index));
+            }
+            let cube_busy = over_cube || (is_active && app.cube_press.is_some());
+            if is_active {
+                if let Some((start, mut moved)) = app.cube_press {
+                    if pointer.button_down(egui::PointerButton::Primary) {
+                        if !moved && pointer.interact_pos().is_some_and(|p| p.distance(start) > 3.0) {
+                            moved = true;
+                            app.view_animation = None;
+                            app.state.record_view();
+                            // Dragging an axis view makes it an Orthographic (User) view.
+                            if app.state.viewports[index].kind.angles().is_some() {
+                                let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
+                            }
+                        }
+                        if moved {
+                            let d = pointer.delta();
+                            app.state.viewports[index].camera.orbit(d.x * 0.006, d.y * 0.006);
+                            ctx.request_repaint();
+                        }
+                        app.cube_press = Some((start, moved));
+                    } else {
+                        app.cube_press = None;
+                        if !moved {
+                            let cam = app.state.viewports[index].camera.clone();
+                            if let Some(hit) = crate::viewport_gizmo::hit_test(start, gizmo_rect, &cam, !app.state.viewports[index].is_orthographic()) {
+                                cube_click(app, index, hit);
+                                ctx.request_repaint();
+                            }
+                        }
+                    }
                 }
-                ctx.request_repaint();
             }
             // Motion > Trajectories > Sub-Object Keys: a click on a path key selects it.
             let mut trajectory_click = false;
-            if app.state.trajectory_keys && is_active && clicked_gizmo.is_none() && !home_clicked && response.clicked() {
+            if app.state.trajectory_keys && is_active && !cube_busy && response.clicked() {
                 if let Some(p) = pointer.interact_pos() {
                     if let Some(f) = trajectory_hit(app, view_proj, rect, p) {
                         let op = if ctx.input(|i| i.modifiers.ctrl) { SelectOp::Add } else { SelectOp::Replace };
@@ -299,7 +309,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
             }
             if let Some(p) = pointer.interact_pos().filter(|_| !trajectory_click) {
-                if clicked_gizmo.is_none() && !home_clicked && is_active {
+                if !cube_busy && is_active {
                     let pos = Vec2::new(p.x, p.y);
 
                     // Paint Soft Selection brush: LMB paints weights on the selected poly.
@@ -519,10 +529,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
                             }
                             app.state.record_view();
-                            app.camera_controller.handle(
-                                InputEvent::MouseDown { button: MouseButton::Left, pos: Vec2::new(start.x, start.y), mods },
-                                &mut app.state.active_mut().camera,
-                            );
+                            nav_event(app, index, rect, InputEvent::MouseDown { button: MouseButton::Left, pos: Vec2::new(start.x, start.y), mods });
                         }
                     }
                     if app.transform_drag.is_none()
@@ -556,14 +563,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             cam.target = pivot;
                             cam.distance = eye.distance(pivot).max(0.05);
                         }
-                        app.camera_controller.handle(
-                            InputEvent::MouseDown {
+                        nav_event(app, index, rect, InputEvent::MouseDown {
                                 button: MouseButton::Left,
                                 pos,
                                 mods,
-                            },
-                            &mut app.state.active_mut().camera,
-                        );
+                            });
                         let nav = app.state.nav_mode;
                         if nav != loom_input::NavMode::None && nav != loom_input::NavMode::ZoomRegion {
                             // Modal navigation tool: the camera controller owns the drag.
@@ -663,14 +667,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                     }
                     if pointer.button_released(egui::PointerButton::Primary) {
-                        app.camera_controller.handle(
-                            InputEvent::MouseUp {
+                        nav_event(app, index, rect, InputEvent::MouseUp {
                                 button: MouseButton::Left,
                                 pos,
                                 mods,
-                            },
-                            &mut app.state.active_mut().camera,
-                        );
+                            });
                         if let Some(line) = app.line.as_mut() {
                             line.on_release();
                         }
@@ -805,7 +806,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                     // Right click cancels a creation in progress or a by-Hit mode;
                     // otherwise it opens the quad menu (on the click).
-                    if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() && !over_label {
+                    if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() && !over_label && !over_cube {
                         if let Some(session) = app.create.take() {
                             session.cancel(app);
                         } else if app.create_kind.is_some() && app.bone_points.is_empty() && app.line.is_none() {
@@ -841,31 +842,24 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
                         }
                         app.state.record_view();
-                        app.camera_controller.handle(
-                            InputEvent::MouseDown {
+                        nav_event(app, index, rect, InputEvent::MouseDown {
                                 button: MouseButton::Middle,
                                 pos,
                                 mods,
-                            },
-                            &mut app.state.active_mut().camera,
-                        );
+                            });
                     }
                     if pointer.button_released(egui::PointerButton::Middle) {
-                        app.camera_controller.handle(
-                            InputEvent::MouseUp {
+                        nav_event(app, index, rect, InputEvent::MouseUp {
                                 button: MouseButton::Middle,
                                 pos,
                                 mods,
-                            },
-                            &mut app.state.active_mut().camera,
-                        );
+                            });
                     }
                     // MouseMove fires every frame the pointer moves; the controller's internal
                     // `dragging` state decides whether to act on it.
                     if pointer.is_moving() {
                         let before = app.state.active().camera.distance;
-                        app.camera_controller
-                            .handle(InputEvent::MouseMove { pos, mods }, &mut app.state.active_mut().camera);
+                        nav_event(app, index, rect, InputEvent::MouseMove { pos, mods });
                         let after = app.state.active().camera.distance;
                         if app.camera_controller.is_dragging() && (after - before).abs() > 0.0 {
                             match app.state.nav_mode {
@@ -879,8 +873,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 loom_input::NavMode::ZoomAll => {
                                     let factor = after / before;
                                     let active = app.state.active_viewport;
+                                    // Shift leaves the Perspective views out.
                                     for (i, vp) in app.state.viewports.iter_mut().enumerate() {
-                                        if i != active {
+                                        if i != active && !(mods.shift && vp.kind == loom_commands::ViewKind::Perspective) {
                                             vp.camera.distance = (vp.camera.distance * factor).max(0.05);
                                         }
                                     }
@@ -894,14 +889,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             let scroll = ctx.input(|i| i.raw_scroll_delta.y);
             if scroll.abs() > 0.0 && response.hovered() && !disabled {
                 let delta = scroll / 50.0;
-                app.camera_controller.handle(
-                    InputEvent::Scroll {
+                nav_event(app, index, rect, InputEvent::Scroll {
                         delta_y: delta,
                         pos: Vec2::ZERO,
                         mods,
-                    },
-                    &mut app.state.viewports[index].camera,
-                );
+                    });
             }
 
             // --- Build callback and enqueue ---
@@ -1078,7 +1070,20 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
             }
             if cube_shown {
-                crate::viewport_gizmo::draw(&painter, gizmo_rect, vp_yaw, vp_pitch, !app.state.viewports[index].is_orthographic(), cube_hovered);
+                let cam = app.state.viewports[index].camera.clone();
+                let perspective = !app.state.viewports[index].is_orthographic();
+                let hovered = (over_cube || (is_active && app.cube_press.is_some())).then(|| hover_pos.and_then(|p| crate::viewport_gizmo::hit_test(p, gizmo_rect, &cam, perspective)));
+                crate::viewport_gizmo::draw(&painter, gizmo_rect, &cam, perspective, hovered, &cube_settings);
+            }
+            // The Orbit trackball: a yellow circle with handles at its quadrant points.
+            let orbit_mode = matches!(app.state.nav_mode, loom_input::NavMode::Orbit | loom_input::NavMode::OrbitSelected | loom_input::NavMode::OrbitSubObject);
+            if is_active && orbit_mode && !matches!(app.state.viewports[index].kind, loom_commands::ViewKind::Camera(_)) {
+                let (c, r) = (rect.center(), trackball_radius(rect));
+                let yellow = egui::Color32::from_rgb(230, 210, 40);
+                painter.circle_stroke(c, r, egui::Stroke::new(1.5_f32, yellow));
+                for d in [egui::vec2(-r, 0.0), egui::vec2(r, 0.0), egui::vec2(0.0, -r), egui::vec2(0.0, r)] {
+                    painter.rect_stroke(egui::Rect::from_center_size(c + d, egui::vec2(7.0, 7.0)), 0.0, egui::Stroke::new(1.5_f32, yellow), egui::StrokeKind::Middle);
+                }
             }
             if app.state.viewports[index].clipping {
                 clip_slider(ui, &painter, app, index, rect);
@@ -1097,7 +1102,191 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
                 painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(180))));
             }
+            // The ViewCube's right-click menu.
+            if let Some((at, _)) = app.cube_menu.filter(|(_, i)| *i == index) {
+                let entries = crate::label_menus::viewcube_entries(app, index);
+                let area = egui::Area::new(egui::Id::new("viewcube_menu")).fixed_pos(at).order(egui::Order::Foreground).show(&ctx, |ui| {
+                    egui::Frame::menu(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(190.0);
+                        crate::label_menus::render(ui, app, index, &entries);
+                    });
+                });
+                // Picking an item or clicking elsewhere closes it.
+                let outside = pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p));
+                if pointer.button_released(egui::PointerButton::Primary) || (outside && pointer.any_pressed()) {
+                    app.cube_menu = None;
+                }
+            }
             let _ = ui;
+    }
+}
+
+/// One navigation event for viewport `index`. Views move their own orbit;
+/// through a camera the camera viewport controls move the camera node
+/// instead (Truck for a pan, Orbit / Pan Camera, Dolly, Perspective, Roll,
+/// FOV), each drag one scene undo step. A press in an Orbit mode uses the
+/// trackball (`rect`) and Angle Snap.
+fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) -> bool {
+    use loom_input::NavMode as N;
+    if let InputEvent::MouseDown { .. } = ev {
+        let orbit_mode = matches!(app.state.nav_mode, N::Orbit | N::OrbitSelected | N::OrbitSubObject);
+        let c = rect.center();
+        app.camera_controller.set_trackball(orbit_mode.then(|| (Vec2::new(c.x, c.y), trackball_radius(rect))));
+        let snap = app.state.angle_snap_on.then(|| app.state.gizmos.orbit_snap_angle.to_radians());
+        app.camera_controller.set_orbit_snap(snap);
+    }
+    let camera = match app.state.viewports[index].kind {
+        loom_commands::ViewKind::Camera(id) => Some(id),
+        _ => None,
+    };
+    let Some(before) = camera.and_then(|id| loom_commands::camera::orbit_of(&app.state.scene, id)) else {
+        return app.camera_controller.handle(ev, &mut app.state.viewports[index].camera);
+    };
+    if app.state.active_viewport != index {
+        let _ = app.dispatch(Command::ActiveViewport { index: index as u32 });
+    }
+    let was = app.camera_controller.is_dragging();
+    let mut after = before.clone();
+    let changed = app.camera_controller.handle(ev, &mut after);
+    let now = app.camera_controller.is_dragging();
+    if now && !was && !app.camera_nav_open {
+        app.state.undo.begin("Camera Navigation");
+        app.camera_nav_open = true;
+    }
+    if changed {
+        let mode = app.state.nav_mode;
+        let (right, up, _) = before.basis();
+        let shift = after.target - before.target;
+        let factor = after.distance / before.distance.max(1e-6);
+        let deg = |a: f32, b: f32| loom_input::camera_control::wrap_angle(b - a).to_degrees();
+        let op: Option<(&str, f32, Option<f32>)> = if (factor - 1.0).abs() > 1e-6 {
+            Some(match mode {
+                N::Fov => {
+                    let fov = match app.state.scene.node(camera.unwrap()).map(|n| &n.object) {
+                        Some(loom_scene::ObjectKind::Camera { fov, .. }) => fov.get(),
+                        _ => 45.0,
+                    };
+                    ("fov", (fov * factor).clamp(1.0, 175.0), None)
+                }
+                N::DollyTarget => ("dolly_target", 1.0 / factor, None),
+                N::DollyBoth => ("dolly_both", factor, None),
+                N::Perspective => ("perspective", factor, None),
+                _ => ("dolly", factor, None),
+            })
+        } else if (after.roll - before.roll).abs() > 1e-6 {
+            Some(("roll", -deg(before.roll, after.roll), None))
+        } else if (after.yaw - before.yaw).abs() > 1e-6 || (after.pitch - before.pitch).abs() > 1e-6 {
+            let (dyaw, dpitch) = (deg(before.yaw, after.yaw), deg(before.pitch, after.pitch));
+            Some(if mode == N::PanCamera { ("pan", -dyaw, Some(dpitch)) } else { ("orbit", dyaw, Some(dpitch)) })
+        } else if shift.length_squared() > 0.0 {
+            Some(("truck", shift.dot(right), Some(shift.dot(up))))
+        } else {
+            None
+        };
+        if let Some((op, x, y)) = op {
+            let _ = app.dispatch(Command::NavigateCamera { op: op.into(), x, y });
+        }
+    }
+    if !now && app.camera_nav_open {
+        app.state.undo.end();
+        app.camera_nav_open = false;
+    }
+    changed
+}
+
+/// The world point under screen point `p` on the active view's focus plane
+/// (through its centre, facing the eye); None off the active viewport.
+pub(crate) fn view_point_under(app: &LoomApp, p: egui::Pos2) -> Option<Vec3> {
+    let i = app.state.active_viewport;
+    let rect = *app.viewport_rects.get(i)?;
+    if !rect.contains(p) || matches!(app.state.viewports[i].kind, loom_commands::ViewKind::Camera(_)) {
+        return None;
+    }
+    let camera = app.camera_for(i);
+    let (view, proj) = (camera.view_matrix(), camera.projection_matrix(rect.width() / rect.height().max(1.0)));
+    let local = Vec2::new(p.x - rect.left(), p.y - rect.top());
+    let (origin, dir) = loom_render::pick::screen_to_world_ray(local, Vec2::new(rect.width(), rect.height()), view, proj);
+    let cam = &app.state.viewports[i].camera;
+    let normal = cam.basis().2;
+    let denom = dir.dot(normal);
+    if denom.abs() < 1e-6 {
+        return None;
+    }
+    let t = (cam.target - origin).dot(normal) / denom;
+    Some(origin + dir * t)
+}
+
+/// The Orbit trackball's radius in a viewport.
+fn trackball_radius(rect: egui::Rect) -> f32 {
+    rect.width().min(rect.height()) * 0.375
+}
+
+/// Animates the active view from its angles before `change` to those after (ViewCube transitions).
+fn animate_view(app: &mut LoomApp, change: impl FnOnce(&mut LoomApp)) {
+    let before = app.state.active().camera.clone();
+    change(app);
+    let after = app.state.active().camera.clone();
+    let cam = &mut app.state.active_mut().camera;
+    (cam.yaw, cam.pitch, cam.roll) = (before.yaw, before.pitch, before.roll);
+    app.start_view_animation(after.yaw, after.pitch, after.roll);
+}
+
+/// A click on the ViewCube: a face sets that axis view (the face already
+/// shown keeps it), an edge or corner an angled view in the current
+/// projection, Home the Home view; in a face view the roll arrows turn it
+/// 90 degrees and the triangles go to the adjacent face.
+fn cube_click(app: &mut LoomApp, index: usize, hit: crate::viewport_gizmo::Hit) {
+    use crate::viewport_gizmo::{self as cube, Hit};
+    if app.state.active_viewport != index {
+        let _ = app.dispatch(Command::ActiveViewport { index: index as u32 });
+    }
+    let cam = app.state.viewports[index].camera.clone();
+    let idx = index as u32;
+    let orbit = |yaw: Option<f32>, pitch: Option<f32>, roll: f32| Command::Orbit { yaw: yaw.map(f32::to_degrees), pitch: pitch.map(f32::to_degrees), distance: None, target: None, roll: Some(roll.to_degrees()) };
+    match hit {
+        Hit::Home => animate_view(app, |app| {
+            let _ = app.dispatch(Command::HomeView);
+        }),
+        Hit::Spot(dir) => match cube::face_of(dir) {
+            Some(face) => {
+                let kind = cube::view_kind(face);
+                if app.state.viewports[index].kind == kind && cam.roll.abs() < 1e-4 {
+                    return;
+                }
+                animate_view(app, |app| {
+                    let _ = app.dispatch(Command::ViewportView { index: idx, kind });
+                });
+            }
+            None => {
+                let (yaw, pitch) = cube::spot_angles(dir);
+                let kind = if app.state.viewports[index].is_orthographic() { loom_commands::ViewKind::Orthographic } else { loom_commands::ViewKind::Perspective };
+                animate_view(app, |app| {
+                    if app.state.viewports[index].kind != kind {
+                        let _ = app.dispatch(Command::ViewportView { index: idx, kind });
+                    }
+                    let _ = app.dispatch(orbit(Some(yaw), Some(pitch), 0.0));
+                });
+            }
+        },
+        Hit::RollLeft | Hit::RollRight => {
+            // Left turns the view counterclockwise, right clockwise.
+            let turn = if hit == Hit::RollLeft { -std::f32::consts::FRAC_PI_2 } else { std::f32::consts::FRAC_PI_2 };
+            animate_view(app, |app| {
+                let _ = app.dispatch(orbit(None, None, cam.roll + turn));
+            });
+        }
+        Hit::Adjacent(side) => {
+            let (eye, up) = cube::adjacent(&cam, side);
+            if let Some(face) = cube::face_of(eye.round().as_ivec3()) {
+                let kind = cube::view_kind(face);
+                let (yaw, pitch) = kind.angles().expect("axis views have fixed angles");
+                let roll = cube::roll_for(yaw, pitch, up);
+                animate_view(app, |app| {
+                    let _ = app.dispatch(Command::ViewportView { index: idx, kind });
+                    let _ = app.dispatch(orbit(None, None, roll));
+                });
+            }
+        }
     }
 }
 

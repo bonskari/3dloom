@@ -478,7 +478,7 @@ fn create_panel_buttons_keep_their_tool_on() {
 /// The maximized Perspective view pulled back so a 200-unit area shows.
 fn wide_view(h: &mut Harness) {
     maximized(h);
-    h.app.state.active_mut().camera = loom_input::OrbitCamera { target: Vec3::ZERO, distance: 300.0, yaw: 0.75, pitch: 0.6 };
+    h.app.state.active_mut().camera = loom_input::OrbitCamera { target: Vec3::ZERO, distance: 300.0, yaw: 0.75, pitch: 0.6, roll: 0.0 };
     h.frames(2);
 }
 

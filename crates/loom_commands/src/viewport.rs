@@ -264,6 +264,8 @@ pub struct HideCategories {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dialog {
     SelectFromScene,
+    /// C with several cameras and none selected: pick the camera to look through.
+    SelectCamera,
     /// Rendering > Render: choose the PNG the active view renders to.
     RenderFile,
     /// Rendering > Render SetUp: the output size.

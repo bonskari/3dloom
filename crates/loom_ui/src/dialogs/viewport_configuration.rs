@@ -1,5 +1,5 @@
-//! Viewport Configuration dialog: Layout, Safe Frames and Rendering Method
-//! (shading only; rendering is out of scope).
+//! Viewport Configuration dialog: Rendering Method (shading and the
+//! rendering options), Layout, Safe Frames and ViewCube.
 
 use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
@@ -12,11 +12,21 @@ enum Tab {
     Layout,
     SafeFrames,
     RenderingMethod,
+    ViewCube,
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let tab_id = egui::Id::new("viewport_configuration_tab");
     let mut tab: Tab = ctx.data(|d| d.get_temp(tab_id)).unwrap_or_default();
+    // A command can open the dialog on a panel (ViewCube menu > Configure).
+    if let Some(panel) = app.state.config_panel.take() {
+        tab = match panel.as_str() {
+            "Rendering Method" => Tab::RenderingMethod,
+            "Safe Frames" => Tab::SafeFrames,
+            "ViewCube" => Tab::ViewCube,
+            _ => Tab::Layout,
+        };
+    }
     egui::Window::new("Viewport Configuration")
         .open(open)
         .resizable(false)
@@ -26,6 +36,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.selectable_value(&mut tab, Tab::RenderingMethod, "Rendering Method");
                 ui.selectable_value(&mut tab, Tab::Layout, "Layout");
                 ui.selectable_value(&mut tab, Tab::SafeFrames, "Safe Frames");
+                ui.selectable_value(&mut tab, Tab::ViewCube, "ViewCube");
             });
             ui.separator();
             match tab {
@@ -48,10 +59,83 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     if ui.checkbox(&mut edged, "Edged Faces").with_shortcut(&app.state, Command::ViewEdgedFacesToggle.name()).changed() {
                         let _ = app.dispatch(Command::ViewEdgedFacesToggle);
                     }
+                    ui.separator();
+                    ui.label("Rendering Options");
+                    let mut disabled = app.state.active().disabled;
+                    if ui.checkbox(&mut disabled, "Disable View").with_shortcut(&app.state, Command::DisableViewport.name()).changed() {
+                        let _ = app.dispatch(Command::DisableViewport);
+                    }
+                    let mut shade = app.state.shade_selected_faces;
+                    if ui.checkbox(&mut shade, "Shade Selected Faces").with_shortcut(&app.state, Command::ShadeSelectedFacesToggle.name()).changed() {
+                        let _ = app.dispatch(Command::ShadeSelectedFacesToggle);
+                    }
+                    let mut brackets = app.state.selection_brackets;
+                    if ui.checkbox(&mut brackets, "Use Selection Brackets").with_shortcut(&app.state, Command::SelectionBracketToggle.name()).changed() {
+                        let _ = app.dispatch(Command::SelectionBracketToggle);
+                    }
+                    let mut clipping = app.state.active().clipping;
+                    if ui.checkbox(&mut clipping, "Viewport Clipping").changed() {
+                        let _ = app.dispatch(Command::ViewportClipping);
+                    }
+                    ui.separator();
+                    ui.label("Perspective User View");
+                    let mut fov = app.state.active().fov_y_radians.to_degrees();
+                    ui.horizontal(|ui| {
+                        ui.label("Field Of View:");
+                        if ui.add(egui::DragValue::new(&mut fov).range(1.0..=175.0).speed(0.5).fixed_decimals(1)).changed() {
+                            let _ = app.dispatch(Command::SetFov { degrees: fov });
+                        }
+                    });
                 }
+                Tab::ViewCube => viewcube_tab(ui, app),
             }
         });
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
+}
+
+/// ViewCube panel: Show the ViewCube, in all views or the active one, size,
+/// inactive opacity, compass.
+fn viewcube_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let v = app.state.viewcube;
+    let set = |app: &mut LoomApp, c: Command| {
+        let _ = app.dispatch(c);
+    };
+    let none = || Command::SetViewCubeOptions { show: None, all_views: None, size: None, inactive_opacity: None, compass: None };
+    let mut show = v.show;
+    if ui.checkbox(&mut show, "Show the ViewCube").changed() {
+        set(app, Command::ViewCubeToggle);
+    }
+    ui.add_enabled_ui(v.show, |ui| {
+        if ui.radio(v.all_views, "In All Views").clicked() {
+            set(app, Command::SetViewCubeOptions { all_views: Some(true), ..none() });
+        }
+        if ui.radio(!v.all_views, "Only in Active View").clicked() {
+            set(app, Command::SetViewCubeOptions { all_views: Some(false), ..none() });
+        }
+        ui.separator();
+        ui.label("Display Options");
+        let sizes = ["Large", "Normal", "Small", "Tiny"];
+        egui::ComboBox::from_label("ViewCube Size").selected_text(sizes[v.size.min(3) as usize]).show_ui(ui, |ui| {
+            for (i, name) in sizes.iter().enumerate() {
+                if ui.selectable_label(v.size as usize == i, *name).clicked() {
+                    set(app, Command::SetViewCubeOptions { size: Some(i as u32), ..none() });
+                }
+            }
+        });
+        let opacity = (v.inactive_opacity * 100.0).round() as u32;
+        egui::ComboBox::from_label("Inactive Opacity").selected_text(format!("{opacity}%")).show_ui(ui, |ui| {
+            for o in [0u32, 25, 50, 75, 100] {
+                if ui.selectable_label(opacity == o, format!("{o}%")).clicked() {
+                    set(app, Command::SetViewCubeOptions { inactive_opacity: Some(o as f32), ..none() });
+                }
+            }
+        });
+        ui.separator();
+        let mut compass = v.compass;
+        if ui.checkbox(&mut compass, "Show Compass Below the ViewCube").changed() {
+            set(app, Command::SetViewCubeOptions { compass: Some(compass), ..none() });
+        }
+    });
 }
 
 /// Draws a layout as a mini diagram of its cells.

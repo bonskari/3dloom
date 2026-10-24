@@ -614,13 +614,74 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::HomeView => {
+            // The ViewCube Home view: a Perspective view, the default one or Set Current View as Home.
             state.record_view();
-            let kind = state.active().kind;
-            let fresh = Viewport::new(kind);
+            let home = state.home_view;
             let vp = state.active_mut();
-            vp.camera = fresh.camera;
+            vp.kind = ViewKind::Perspective;
+            match home {
+                Some(h) => {
+                    vp.camera = h.camera();
+                    vp.fov_y_radians = h.fov_y_radians;
+                }
+                None => vp.camera = Viewport::new(ViewKind::Perspective).camera,
+            }
             Ok(camera_json(state))
         }
+        C::SetCurrentViewAsHome => {
+            if matches!(state.active().kind, ViewKind::Camera(_)) {
+                return Err("the Home view is set from a non-camera view".into());
+            }
+            state.home_view = Some(crate::state::SavedView::of(state.active()));
+            Ok(json!({}))
+        }
+        C::ViewCubeToggle => toggle(&mut state.viewcube.show, "viewcube"),
+        C::SetViewCubeOptions { show, all_views, size, inactive_opacity, compass } => {
+            let v = &mut state.viewcube;
+            if let Some(b) = show { v.show = b; }
+            if let Some(b) = all_views { v.all_views = b; }
+            if let Some(n) = size { v.size = n.min(3) as u8; }
+            if let Some(o) = inactive_opacity { v.inactive_opacity = (o / 100.0).clamp(0.0, 1.0); }
+            if let Some(b) = compass { v.compass = b; }
+            Ok(json!({ "show": v.show, "all_views": v.all_views, "size": v.size, "inactive_opacity": v.inactive_opacity * 100.0, "compass": v.compass }))
+        }
+        C::SaveActiveView => {
+            let vp = state.active();
+            if matches!(vp.kind, ViewKind::Camera(_)) {
+                return Err("camera views are not saved".into());
+            }
+            let mut saved = crate::state::SavedView::of(vp);
+            saved.shading = Some(vp.shading);
+            let label = vp.kind.label().to_owned();
+            state.saved_views.insert(label.clone(), saved);
+            Ok(json!({ "saved": label }))
+        }
+        C::RestoreActiveView => {
+            let label = state.active().kind.label();
+            let Some(saved) = state.saved_views.get(label).copied() else {
+                return Err(format!("no saved {label} view"));
+            };
+            state.record_view();
+            let vp = state.active_mut();
+            vp.camera = saved.camera();
+            vp.fov_y_radians = saved.fov_y_radians;
+            if let Some(sh) = saved.shading {
+                vp.shading = sh;
+            }
+            Ok(camera_json(state))
+        }
+        C::ShadeSelectedToggle => {
+            state.mesh_dirty = true;
+            toggle(&mut state.shade_selected, "shade_selected")
+        }
+        C::DollyCameraMode => nav_toggle(state, NavMode::DollyCamera),
+        C::DollyTargetMode => nav_toggle(state, NavMode::DollyTarget),
+        C::DollyCameraTargetMode => nav_toggle(state, NavMode::DollyBoth),
+        C::PerspectiveMode => nav_toggle(state, NavMode::Perspective),
+        C::RollCameraMode => nav_toggle(state, NavMode::RollCamera),
+        C::TruckCameraMode => nav_toggle(state, NavMode::TruckCamera),
+        C::OrbitCameraMode => nav_toggle(state, NavMode::OrbitCamera),
+        C::PanCameraMode => nav_toggle(state, NavMode::PanCamera),
         C::TimeConfiguration => {
             state.dialog = Some(Dlg::TimeConfiguration);
             Ok(json!({}))
@@ -657,7 +718,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             frame_all(state, bounds)
         }
         C::ZoomMode => nav_toggle(state, NavMode::Zoom),
-        C::PanView | C::PanViewport => nav_toggle(state, NavMode::Pan),
+        C::PanViewport { point: Some(p) } => {
+            // The view slides (no turn, no zoom) until `p` is at its centre.
+            state.record_view();
+            let cam = &mut state.active_mut().camera;
+            let to_eye = cam.basis().2;
+            let p = Vec3::from(p);
+            cam.target = p - to_eye * to_eye.dot(p - cam.target);
+            Ok(camera_json(state))
+        }
+        C::PanView | C::PanViewport { point: None } => nav_toggle(state, NavMode::Pan),
         C::OrbitViewMode => nav_toggle(state, NavMode::Orbit),
         C::ZoomRegionMode => nav_toggle(state, NavMode::ZoomRegion),
         C::FieldOfViewMode => nav_toggle(state, NavMode::Fov),
@@ -738,8 +808,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::SelectByName => open_by_name(state, DialogPurpose::Select),
-        C::ConfigureViewports => {
+        C::ConfigureViewports { panel } => {
             state.dialog = Some(Dialog::ViewportConfiguration);
+            state.config_panel = panel;
             Ok(json!({}))
         }
         C::CloseDialog => {
@@ -782,6 +853,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 });
             match cam {
                 Some(id) => set_view(state, ViewKind::Camera(id)),
+                None if state.scene.nodes().filter(|n| matches!(n.object, ObjectKind::Camera { .. })).count() > 1 => {
+                    // Several cameras and none selected: the Select Camera list.
+                    state.dialog = Some(Dialog::SelectCamera);
+                    Ok(json!({ "camera": Value::Null, "dialog": "Select Camera" }))
+                }
                 None => Ok(json!({ "camera": Value::Null })),
             }
         }
@@ -1680,7 +1756,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. }) => crate::camera::execute(state, c),
+        c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. }) => crate::camera::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
@@ -2478,9 +2554,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             )?;
             Ok(json!({}))
         }
-        C::Orbit { yaw, pitch, distance, target } => {
+        C::Orbit { yaw, pitch, distance, target, roll } => {
             state.record_view();
             let cam = &mut state.active_mut().camera;
+            if let Some(r) = roll {
+                cam.roll = loom_input::camera_control::wrap_angle(r.to_radians());
+            }
             if let Some(y) = yaw {
                 cam.yaw = y.to_radians();
             }
@@ -2959,6 +3038,7 @@ fn set_view(state: &mut AppState, kind: ViewKind) -> Result<Value, String> {
     if let Some((yaw, pitch)) = kind.angles() {
         vp.camera.yaw = yaw;
         vp.camera.pitch = pitch;
+        vp.camera.roll = 0.0;
     }
     Ok(camera_json(state))
 }
@@ -3866,6 +3946,7 @@ fn camera_json(state: &AppState) -> Value {
         "shading": vp.shading.label(),
         "yaw_deg": c.yaw.to_degrees(),
         "pitch_deg": c.pitch.to_degrees(),
+        "roll_deg": c.roll.to_degrees(),
         "distance": c.distance,
         "target": [c.target.x, c.target.y, c.target.z],
     })

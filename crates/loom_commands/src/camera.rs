@@ -3,10 +3,11 @@
 //! rotation constraint (world Z up); a Free camera keeps its own rotation.
 
 use crate::execute::commit;
-use crate::state::AppState;
+use crate::state::{AppState, ViewKind};
 use crate::Command;
 use glam::{Mat4, Quat, Vec3};
 use loom_scene::constraint::{RotationConstraint, Target};
+use loom_input::OrbitCamera;
 use loom_scene::{Change, Node, NodeId, ObjectKind, Transform};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -128,8 +129,186 @@ pub fn target_distance(scene: &loom_scene::Scene, id: NodeId) -> Option<f32> {
     }
 }
 
+/// The view a camera node gives: its eye, the point it looks at (target node
+/// or Target Distance) and its roll, as an orbit.
+pub fn orbit_of(scene: &loom_scene::Scene, id: NodeId) -> Option<OrbitCamera> {
+    let world = scene.world_matrix(id);
+    let eye = world.w_axis.truncate();
+    let forward = -world.z_axis.truncate().normalize_or_zero();
+    let distance = target_distance(scene, id)?.max(1e-3);
+    Some(OrbitCamera::looking(eye, eye + forward * distance, world.y_axis.truncate().normalize_or_zero()))
+}
+
+/// Moves camera `id` (and its target node) so it looks as `orbit` does: the
+/// camera at the orbit's eye, the target at its target, the roll kept (on a
+/// Target camera as the LookAt constraint's offset). `fov` sets the FOV;
+/// `free_distance` writes a Free camera's Target Distance. One undo step.
+fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: Option<f32>, free_distance: bool, label: &str) -> Result<Value, String> {
+    let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+    let ObjectKind::Camera { target, .. } = &node.object else {
+        return Err(format!("{} is not a camera", node.name));
+    };
+    let target = target.filter(|t| state.scene.node(*t).is_some());
+    let eye = orbit.eye_position();
+    let (right, up, to_eye) = orbit.basis();
+    let world = Mat4::from_cols(right.extend(0.0), up.extend(0.0), to_eye.extend(0.0), eye.extend(1.0));
+    let parent_of = |n: &Node| n.parent.map(|p| state.scene.world_matrix(p)).unwrap_or(Mat4::IDENTITY);
+    let local = parent_of(node).inverse() * world;
+    let (_, rot, pos) = local.to_scale_rotation_translation();
+    let mut after = node.transform.clone();
+    after.position.set(pos);
+    let mut changes = Vec::new();
+    match target {
+        Some(t) => {
+            let tnode = state.scene.node(t).ok_or_else(|| missing(t))?;
+            let mut tafter = tnode.transform.clone();
+            tafter.position.set(parent_of(tnode).inverse().transform_point3(orbit.target));
+            changes.push(Change::SetTransform { id: t, before: tnode.transform.clone(), after: tafter });
+            // The LookAt keeps the camera upright; its offset carries the roll.
+            let upright = loom_scene::constraint::aim(orbit.target - eye, 2, true, Vec3::Z);
+            let (_, wrot, _) = world.to_scale_rotation_translation();
+            let offset = (upright.inverse() * wrot).normalize();
+            let rolled = offset.angle_between(Quat::IDENTITY) > 1e-4;
+            let mut constraints = node.constraints.clone();
+            if let Some(RotationConstraint::LookAt { keep_offset, offset: o, .. }) = constraints.rotation.as_mut() {
+                *keep_offset = rolled;
+                *o = if rolled { offset } else { Quat::IDENTITY };
+            }
+            if constraints != node.constraints {
+                changes.push(Change::SetConstraints { id, before: Box::new(node.constraints.clone()), after: Box::new(constraints) });
+            }
+        }
+        None => after.set_rotation_quat(rot),
+    }
+    changes.push(Change::SetTransform { id, before: node.transform.clone(), after });
+    let mut object = node.object.clone();
+    if let ObjectKind::Camera { fov: f, target_distance, .. } = &mut object {
+        if let Some(v) = fov {
+            f.set(v.clamp(1.0, 175.0));
+        }
+        if free_distance && target.is_none() {
+            target_distance.set(orbit.distance);
+        }
+    }
+    if object != node.object {
+        changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(object) });
+    }
+    commit(state, label, Change::Group(changes))?;
+    Ok(json!({ "eye": eye.to_array(), "target": orbit.target.to_array() }))
+}
+
+/// Horizontal FOV (degrees) of a Perspective viewport's view at the render aspect.
+fn view_fov_x(fov_y: f32) -> f32 {
+    (2.0 * ((fov_y * 0.5).tan() * loom_scene::camera::RENDER_ASPECT).atan()).to_degrees()
+}
+
+/// Views > Create Camera From View: a Target camera matching the active
+/// Perspective view (the viewport then looks through it), or, with a camera
+/// selected, that camera moved to the view.
+fn create_from_view(state: &mut AppState) -> Result<Value, String> {
+    let vp = state.active();
+    if vp.kind != ViewKind::Perspective {
+        return Err("Create Camera From View needs an active Perspective viewport".into());
+    }
+    let orbit = vp.camera.clone();
+    let fov = view_fov_x(vp.fov_y_radians);
+    let selected: Vec<NodeId> = state.selection.iter().copied().filter(|id| matches!(state.scene.node(*id).map(|n| &n.object), Some(ObjectKind::Camera { .. }))).collect();
+    if let [id] = selected[..] {
+        return place(state, id, &orbit, Some(fov), true, "Match Camera to View");
+    }
+    state.undo.begin("Create Camera From View");
+    let made = create(state, true, orbit.eye_position(), orbit.target).and_then(|r| {
+        let id = NodeId(r["id"].as_u64().ok_or("no camera id")?);
+        place(state, id, &orbit, Some(fov), false, "Create Camera From View")?;
+        Ok(id)
+    });
+    state.undo.end();
+    let id = made?;
+    state.record_view();
+    state.active_mut().kind = ViewKind::Camera(id);
+    Ok(json!({ "id": id.0 }))
+}
+
+/// The camera viewport controls (see `Command::NavigateCamera`).
+fn navigate(state: &mut AppState, op: &str, x: f32, y: f32) -> Result<Value, String> {
+    use loom_input::camera_control::wrap_angle;
+    let ViewKind::Camera(id) = state.active().kind else {
+        return Err("the active viewport is not a camera view".into());
+    };
+    let mut o = orbit_of(&state.scene, id).ok_or_else(|| missing(id))?;
+    let has_target = matches!(state.scene.node(id).map(|n| &n.object), Some(ObjectKind::Camera { target: Some(t), .. }) if state.scene.node(*t).is_some());
+    let forward = -o.basis().2;
+    let d = o.distance;
+    let factor = x.max(1e-3);
+    let mut fov = None;
+    let mut free_distance = false;
+    let label = match op {
+        "dolly" => {
+            if has_target {
+                o.distance = (d * factor).max(1e-3);
+            } else {
+                // A Free camera keeps its Target Distance: its implied target moves with it.
+                o.target += forward * d * (1.0 - factor);
+            }
+            "Dolly Camera"
+        }
+        "dolly_target" | "dolly_both" if !has_target => return Err("Dolly Target needs a Target camera".into()),
+        "dolly_target" => {
+            let eye = o.eye_position();
+            o.distance = (d * factor).max(1e-3);
+            o.target = eye + forward * o.distance;
+            "Dolly Target"
+        }
+        "dolly_both" => {
+            o.target += forward * d * (1.0 - factor);
+            "Dolly Camera + Target"
+        }
+        "perspective" => {
+            // Keep the frame's width at the target: distance * tan(fov / 2) stays.
+            let current = match state.scene.node(id).map(|n| &n.object) {
+                Some(ObjectKind::Camera { fov, .. }) => fov.get(),
+                _ => return Err(missing(id)),
+            };
+            o.distance = (d * factor).max(1e-3);
+            let half = ((current.to_radians() * 0.5).tan() * d / o.distance).atan();
+            fov = Some((2.0 * half).to_degrees().min(175.0));
+            free_distance = true;
+            "Perspective"
+        }
+        "roll" => {
+            o.roll = wrap_angle(o.roll - x.to_radians());
+            "Roll Camera"
+        }
+        "truck" => {
+            let (right, up, _) = o.basis();
+            o.target += right * x + up * y;
+            "Truck Camera"
+        }
+        "orbit" => {
+            o.yaw = wrap_angle(o.yaw + x.to_radians());
+            o.pitch = wrap_angle(o.pitch + y.to_radians());
+            "Orbit Camera"
+        }
+        "pan" => {
+            let eye = o.eye_position();
+            o.yaw = wrap_angle(o.yaw + x.to_radians());
+            o.pitch = wrap_angle(o.pitch - y.to_radians());
+            o.target = eye - o.basis().2 * d;
+            "Pan Camera"
+        }
+        "fov" => {
+            fov = Some(x);
+            "Field-of-View"
+        }
+        other => return Err(format!("unknown camera control `{other}` (dolly, dolly_target, dolly_both, perspective, roll, truck, orbit, pan, fov)")),
+    };
+    place(state, id, &o, fov, free_distance, label)
+}
+
 pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     match cmd {
+        Command::CreateCameraFromView => create_from_view(state),
+        Command::NavigateCamera { op, x, y } => navigate(state, &op, x, y.unwrap_or(0.0)),
         Command::CreateCamera { target } => {
             let cam = state.active().camera.clone();
             create(state, target, cam.eye_position(), cam.target)

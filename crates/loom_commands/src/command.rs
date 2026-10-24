@@ -673,7 +673,7 @@ commands! {
     ZoomOut2X => "Zoom Out 2X", MainUI, "Zoom the active viewport out by a factor of two (Alt+Shift+Z).";
     ZoomMode => "Zoom Mode", MainUI, "Toggle the modal Zoom tool (Alt+Z).";
     PanView => "Pan View", MainUI, "Toggle the modal Pan View tool (Ctrl+P).";
-    PanViewport => "Pan Viewport", MainUI, "Pan the active viewport interactively (I).";
+    PanViewport => "Pan Viewport", MainUI, "I: pan the active view so `point` (the world point under the cursor) becomes its centre; without a point, toggle the Pan tool." { point: Option<[f32; 3]> };
     OrbitViewMode => "Orbit View Mode", MainUI, "Toggle the modal Orbit tool (Ctrl+R).";
     ZoomRegionMode => "Zoom Region Mode", MainUI, "Toggle the modal Zoom Region tool (Ctrl+W).";
     FieldOfViewMode => "Field-of-View Mode", Loom, "Toggle the modal Field-of-View tool (Perspective viewports).";
@@ -800,10 +800,26 @@ commands! {
     HideShapesToggle => "Hide Shapes Toggle", MainUI, "Hide or show all shapes (Shift+S).";
     IsolateSelection => "Isolate Selection", MainUI, "Hide everything but the selection, or exit isolation (Alt+Q).";
     ExitIsolation => "Exit Isolation", Loom, "Leave Isolate Selection mode and unhide what it hid.";
-    ConfigureViewports => "Configure Viewports", Loom, "Open the Viewport Configuration dialog.";
+    ConfigureViewports => "Configure Viewports", Loom, "Open the Viewport Configuration dialog, optionally on a panel (\"Rendering Method\", \"Layout\", \"Safe Frames\", \"ViewCube\")." { panel: Option<String> };
     CloseDialog => "Close Dialog", Loom, "Close the open modeless dialog.";
     SelectByName => "Select By Name", MainUI, "Open the Select From Scene dialog (H).";
-    CameraView => "Camera View", MainUI, "Switch the active viewport to the selected or only camera (C).";
+    CameraView => "Camera View", MainUI, "Switch the active viewport to the selected or only camera (C); with several cameras and none selected, open the Select Camera list.";
+    ViewCubeToggle => "Show the ViewCube Toggle", MainUI, "Show or hide the ViewCube (Alt+Ctrl+V).";
+    SetViewCubeOptions => "Set ViewCube Options", Loom, "Viewport Configuration > ViewCube: show it, in all views or the active one only, size (0 Large, 1 Normal, 2 Small, 3 Tiny), inactive opacity 0-100, compass." { show: Option<bool>, all_views: Option<bool>, size: Option<u32>, inactive_opacity: Option<f32>, compass: Option<bool> };
+    SetCurrentViewAsHome => "Set Current View as Home", MainUI, "ViewCube menu: the active view becomes the Home view (saved with the scene).";
+    SaveActiveView => "Save Active View", MainUI, "Views > Save Active <View> View: store the active view (one slot per view: Top, Front, Perspective...).";
+    RestoreActiveView => "Restore Active View", MainUI, "Views > Restore Active <View> View: bring back the view saved for the active view's kind.";
+    ShadeSelectedToggle => "Shade Selected", MainUI, "Views > Shade Selected: selected objects are shaded in wireframe viewports.";
+    CreateCameraFromView => "Create Camera From View", MainUI, "Views > Create Camera From View (Ctrl+C): a Target camera matching the active Perspective view, which then looks through it; with a camera selected, that camera is moved to match the view.";
+    DollyCameraMode => "Dolly Camera Mode", MainUI, "Camera viewport: drag to move the camera along its line of sight.";
+    DollyTargetMode => "Dolly Target Mode", MainUI, "Camera viewport: drag to move the target along the line of sight (Target cameras).";
+    DollyCameraTargetMode => "Dolly Camera + Target Mode", MainUI, "Camera viewport: drag to move camera and target together (Target cameras).";
+    PerspectiveMode => "Perspective Mode", MainUI, "Camera viewport: drag to change FOV and dolly together, keeping the composition.";
+    RollCameraMode => "Roll Camera Mode", MainUI, "Camera viewport: drag horizontally to roll the camera about its line of sight.";
+    TruckCameraMode => "Truck Camera Mode", MainUI, "Camera viewport: drag to move the camera (and target) parallel to the view plane.";
+    OrbitCameraMode => "Orbit Camera Mode", MainUI, "Camera viewport: drag to rotate the camera about its target.";
+    PanCameraMode => "Pan Camera Mode", MainUI, "Camera viewport: drag to rotate the target about the camera.";
+    NavigateCamera => "Navigate Camera", Loom, "Camera viewport controls on the active viewport's camera (one scene undo step): op dolly / dolly_target / dolly_both / perspective (x = factor on the target distance, < 1 closer), roll (x degrees), truck (x, y world units along the view's right / up), orbit / pan (x degrees about world Z, y degrees vertically), fov (x degrees)." { op: String, x: f32, y: Option<f32> };
     ViewportBackground => "Viewport Background", MainUI, "Open the Viewport Background dialog (Alt+B).";
     BackgroundLockToggle => "Background Lock Toggle", MainUI, "Lock the background image to the view (Alt+Ctrl+B).";
     UpdateBackgroundImage => "Update Background Image", MainUI, "Reload the active viewport's background image (Alt+Shift+Ctrl+B).";
@@ -1536,7 +1552,7 @@ commands! {
     ConnectEdgeRing => "Connect Edge Ring", Loom, "Connect the selected edge ring with a new loop.";
     Rename => "Rename", Loom, "Rename a node." { id: u64, name: String };
     SetParent => "Set Parent", Loom, "Link a node to a parent (null unlinks), keeping its world transform." { id: u64, parent: Option<u64> };
-    Orbit => "Orbit", Loom, "Set the orbit camera (degrees for angles)." { yaw: Option<f32>, pitch: Option<f32>, distance: Option<f32>, target: Option<[f32; 3]> };
+    Orbit => "Orbit", Loom, "Set the orbit camera (degrees for angles; roll turns the view about its line of sight)." { yaw: Option<f32>, pitch: Option<f32>, distance: Option<f32>, target: Option<[f32; 3]>, roll: Option<f32> };
     Hotkey => "Hotkey", Loom, "Press a keyboard shortcut by name, e.g. \"W\", \"Ctrl+Z\", \"Alt+Ctrl+Z\"." { chord: String };
     Overlays => "Overlays", Loom, "Toggle edge and vertex overlays." { edges: Option<bool>, vertices: Option<bool> };
 }

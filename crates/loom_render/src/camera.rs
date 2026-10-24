@@ -64,7 +64,7 @@ impl Camera {
             let dir = (self.orbit.eye_position() - self.orbit.target).normalize_or_zero();
             self.orbit.target + dir * Self::ORTHO_EYE
         };
-        Mat4::look_at_rh(eye, self.orbit.target, Vec3::Z)
+        Mat4::look_at_rh(eye, self.orbit.target, self.orbit.up())
     }
 
     pub fn projection_matrix(&self, aspect: f32) -> Mat4 {
@@ -168,6 +168,19 @@ mod tests {
         assert!((0.0..=1.0).contains(&depth(50.0)), "the target (50 from the eye) is kept");
         assert!(depth(30.0) < 0.0, "nearer than near is cut");
         assert!(depth(70.0) > 1.0, "farther than far is cut");
+    }
+
+    /// The view keeps the orbit's roll and turns upside down past a pole.
+    #[test]
+    fn view_matrix_follows_roll_and_pitch_over_the_pole() {
+        let mut cam = Camera::default();
+        cam.orbit = OrbitCamera { target: Vec3::ZERO, distance: 10.0, yaw: 0.0, pitch: 0.0, roll: std::f32::consts::FRAC_PI_2 };
+        let ndc = cam.view_projection(1.0).project_point3(Vec3::Z);
+        assert!(ndc.x > 0.1 && ndc.y.abs() < 1e-4, "world up lands screen-right when rolled 90 degrees: {ndc}");
+        cam.orbit.roll = 0.0;
+        cam.orbit.pitch = 2.0;
+        let ndc = cam.view_projection(1.0).project_point3(Vec3::Z * 0.1);
+        assert!(ndc.y < 0.0, "upside down past the pole: {ndc}");
     }
 
     #[test]
