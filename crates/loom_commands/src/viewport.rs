@@ -297,6 +297,8 @@ pub enum Dialog {
     PolySettings(PolySettingsKind),
     /// Editable Poly > Detach.
     Detach,
+    /// Deleting polygons would leave vertices with no polygon: "Delete isolated vertices?"
+    DeleteIsolatedVertices,
     LayerManager,
     /// File > Open.
     OpenFile,
@@ -306,6 +308,10 @@ pub enum Dialog {
     SaveFileAsCopy,
     /// "Save changes?" before the pending action discards the scene.
     SaveChanges(PendingFileAction),
+    /// Line tool: "Close spline?" when the first vertex is clicked.
+    CloseSpline,
+    /// Editable Spline > Refine with Connect on an existing vertex: Refine / Connect Only.
+    RefineVertex,
     /// File > Import (OBJ).
     ImportFile,
     SaveAnimation,
@@ -331,6 +337,8 @@ pub enum Dialog {
     WeightTable,
     /// Skin > Weight Tool.
     WeightTool,
+    /// Skin > Weight Properties > Painter Options.
+    PainterOptions,
     /// Display > Show Map in Viewport > Bitmap: pick the image file.
     PickTexture,
     /// UVW Map > Bitmap Fit: pick the image whose aspect the gizmo takes.

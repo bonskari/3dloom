@@ -21,6 +21,8 @@ fn named_paste_drops_stale_ids_instead_of_panicking() {
     execute(&mut s, Command::NamedSubSelectionCopy { name: "all".into() }).unwrap();
     execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![1, 2, 3, 4, 5], op: SelectOp::Replace }).unwrap();
     execute(&mut s, Command::DeleteObjects).unwrap();
+    // Four vertices would be left alone: the Delete prompt asks; Yes.
+    execute(&mut s, Command::DeletePolygons { delete_isolated: true }).unwrap();
     assert_eq!(faces(&s, a), 1);
     execute(&mut s, Command::NamedSubSelectionPaste { name: "all".into() }).unwrap();
     assert_eq!(s.sub_selection.len(), 1, "only the surviving polygon");

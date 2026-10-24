@@ -365,6 +365,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     if crate::spline_modes::handle_drag(app, &ctx, &pointer, response.hovered(), p, &projection) {
                         app.drag_select_start = None;
                     }
+                    // Editable Spline > Fillet / Chamfer mode: dragging on a selected vertex.
+                    if crate::spline_modes::fillet_drag(app, &ctx, &pointer, response.hovered(), p, &projection) {
+                        app.drag_select_start = None;
+                    }
                     // VertexPaint brush: LMB paints the active VertexPaint entry's colour.
                     if app.state.vertex_paint_brush {
                         if let Some((target, brush)) = app.state.selection.iter().next().and_then(|id| {
@@ -404,6 +408,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
+                    // Skin > Paint Weights brush.
+                    crate::poly_modes::skin_paint(app, &ctx, &painter, &pointer, response.hovered(), p, rect, view, proj, &projection);
                     // Paint Deformation brush: LMB paints on the selected poly (Ctrl inverts, Shift relaxes).
                     if let Some(mode) = app.state.paint_deform {
                         if let Some(target) = app.state.selection.iter().next().copied() {
@@ -470,6 +476,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && app.manip_drag.is_none()
                         && app.state.active_tool != Tool::Select
                         && app.has_selection()
+                        && !(app.poly_dragging && matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)))
                     {
                         let layout = gizmo::layout_for(app, index, rect.height());
                         if let Some(handle) = gizmo::hit(app, &layout, &projection, p) {
@@ -617,8 +624,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     }
                                 }
                             } else if app.create_kind == Some(crate::CreateKind::Line) {
-                                // Line tool: every click is a knot on the construction plane.
-                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                // Line tool: every click is a knot on the construction plane
+                                // (none while "Close spline?" waits for its answer).
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj).filter(|_| app.state.dialog != Some(loom_commands::Dialog::CloseSpline)) {
                                     if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
                                         anchor = hit.point;
                                         app.consume_snap_override();
@@ -626,6 +634,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     match app.line.take() {
                                         None => app.line = crate::create_tool::LineSession::begin(app, anchor, basis.2),
                                         Some(mut line) => {
+                                            if mods.shift {
+                                                anchor = line.constrained(app, anchor, basis);
+                                            }
                                             let first = line.first_knot_screen(app, &projection);
                                             if !line.on_press(app, anchor, p, first) {
                                                 app.line = Some(line);
@@ -680,8 +691,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             session.finish(app, hit, p);
                         }
                         if app.alt_click.take().is_some() {
-                            let picked = picks_at(app, p, rect, view, proj, view_proj);
-                            apply_picks(app, picked, mods);
+                            // Alt+click removes: Skin vertices at Edit Envelopes, else the picked items.
+                            if !(app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods)) {
+                                let picked = picks_at(app, p, rect, view, proj, view_proj);
+                                apply_picks(app, picked, mods);
+                            }
                         } else if app.transform_drag.is_none() {
                             if let Some(mut session) = app.create.take() {
                                 if !session.on_release(app, p) {
@@ -730,7 +744,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         crate::poly_modes::click(app, index, p, rect, view, proj);
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::ffd_pick(app, &projection, None, p, mods) {
-                                    } else if app.state.pick_mode.is_some() {
+                                    } else if app.state.pick_mode.is_some() && !matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)) {
                                         if let Some(Pick::Object(i)) = pick_object(app, p, rect, view, proj) {
                                             let id = app.world_meshes()[i].0;
                                             let _ = app.dispatch(Command::PickHit { id: id.0 });
@@ -813,6 +827,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             if points.len() >= 2 {
                                 let _ = app.dispatch(Command::CreateBoneChain { points, name: None });
                             }
+                        } else if loom_commands::skin::painting(&app.state) {
+                            // Right-click ends Paint Weights.
+                            let _ = app.dispatch(Command::SkinPaintWeightsToggle);
                         } else if app.state.pick_mode.is_some() {
                             let _ = app.dispatch(Command::ExitPickMode);
                         } else if app.state.nav_mode != loom_input::NavMode::None {

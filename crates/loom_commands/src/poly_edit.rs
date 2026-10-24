@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
     if matches!(
         cmd,
-        C::Remove | C::Break | C::SplitEdges | C::Weld { .. } | C::Chamfer { .. } | C::ConnectEdges { .. } | C::ConnectVertices | C::Connect | C::Cap | C::Bridge { .. } | C::Extrude { .. } | C::Turn | C::RemoveIsolatedVertices
+        C::Remove | C::CleanRemove | C::Break | C::SplitEdges | C::Weld { .. } | C::Chamfer { .. } | C::ConnectEdges { .. } | C::ConnectVertices | C::Connect | C::Cap | C::Bridge { .. } | C::Extrude { .. } | C::Turn | C::RemoveIsolatedVertices
             | C::Inset { .. } | C::Bevel { .. } | C::Outline { .. } | C::HingeFromEdge { .. } | C::FlipNormals | C::MakePlanar | C::MakePlanarAxis { .. } | C::ViewAlign | C::AlignToGrid
             | C::Slice | C::MSmooth { .. } | C::TessellateFaces { .. } | C::Relax { .. } | C::MeshSmooth | C::Tessellate
     ) {
@@ -203,10 +203,42 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             state.poly_settings.bridge_twist1 = twist1;
             state.poly_settings.bridge_twist2 = twist2;
             let mut new_faces: Vec<(NodeId, Vec<FaceId>)> = Vec::new();
+            let edge_level = state.selection_mode == SelectionMode::Edge;
+            let specific = edge_level && state.poly_settings.bridge_specific;
+            // Edge level keeps the bridged edges selected (by position, ids change).
+            let mut keep_sel: Vec<(NodeId, Vec<(glam::Vec3, glam::Vec3)>)> = Vec::new();
             match state.selection_mode {
                 SelectionMode::Border | SelectionMode::Edge => {
-                    let edges = selected_edges(state);
+                    let edges = if specific {
+                        match state.poly_settings.bridge_edges {
+                            [Some((n1, e1)), Some((n2, e2))] if n1 == n2 => vec![(n1, vec![HalfEdgeId(e1), HalfEdgeId(e2)])],
+                            _ => return Err("Bridge Specific Edges: pick Edge 1 and Edge 2 on one object first".into()),
+                        }
+                    } else {
+                        selected_edges(state)
+                    };
                     edit_meshes(state, "Bridge", edges, |mesh, node, ids| {
+                        if edge_level {
+                            // Runs of selected border edges, paired in increasing order of id.
+                            let runs = t::border_runs(mesh, &ids);
+                            if runs.iter().any(|r| !r.1) {
+                                if runs.iter().any(|r| r.1) {
+                                    return Err("Bridge: a whole border cannot be bridged to part of a border".into());
+                                }
+                                if runs.len() < 2 {
+                                    return Err(format!("Bridge needs two border edge selections ({} found)", runs.len()));
+                                }
+                                let ends: Vec<(glam::Vec3, glam::Vec3)> = ids
+                                    .iter()
+                                    .filter_map(|e| mesh.edge_vertices(*e))
+                                    .filter_map(|(a, b)| Some((mesh.vertex_position(a)?, mesh.vertex_position(b)?)))
+                                    .collect();
+                                let pairs: Vec<(Vec<HalfEdgeId>, Vec<HalfEdgeId>)> = runs.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].0.clone(), c[1].0.clone())).collect();
+                                new_faces.push((node, t::bridge_edge_runs(mesh, &pairs, segments.max(1))?));
+                                keep_sel.push((node, ends));
+                                return Ok(());
+                            }
+                        }
                         let loops = border_loops(mesh, &ids);
                         if loops.len() != 2 {
                             return Err(format!("Bridge needs exactly two borders selected ({} found)", loops.len()));
@@ -234,10 +266,54 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                         state.sub_selection.insert(n, SubObjectId::Face(f));
                     }
                 }
+            } else if !specific {
+                for (n, ends) in keep_sel {
+                    let Some(node) = state.scene.node(n) else { continue };
+                    let mesh = node.cage_mesh().into_owned();
+                    for (a, b) in ends {
+                        if let Some(e) = edge_at(&mesh, a, b) {
+                            state.sub_selection.insert(n, SubObjectId::Edge(e));
+                        }
+                    }
+                }
             }
             Ok(selection_json(state))
         }
         C::BridgeSettings => open_settings(state, PolySettingsKind::Bridge),
+        C::BridgeSpecificEdges { on } => {
+            state.poly_settings.bridge_specific = on;
+            Ok(json!({ "specific": on }))
+        }
+        C::PickBridgeEdge { which } => {
+            state.poly_settings.bridge_specific = true;
+            state.pick_mode = Some(if which == 2 { PickMode::BridgeEdge2 } else { PickMode::BridgeEdge1 });
+            Ok(json!({ "pick": format!("{:?}", state.pick_mode) }))
+        }
+        C::CleanRemove => {
+            if !state.selection_mode.is_edge_level() {
+                return Err("Clean Remove (Ctrl+Remove) works at Edge level".into());
+            }
+            let edges = selected_edges(state);
+            let mut removed = 0;
+            edit_meshes(state, "Remove", edges, |mesh, _, ids| {
+                removed += t::clean_remove_edges(mesh, &ids)?;
+                Ok(())
+            })?;
+            state.sub_selection.clear();
+            Ok(json!({ "vertices_removed": removed }))
+        }
+        C::SwiftLoopMode => toggle_pick(state, PickMode::SwiftLoop, &[PickMode::SwiftLoop]),
+        C::SwiftLoop { node, edge, t } => {
+            let id = NodeId(node);
+            edit_meshes(state, "Swift Loop", vec![(id, vec![HalfEdgeId(edge)])], |mesh, _, ids| t::swift_loop(mesh, ids[0], t).map(|_| ()))?;
+            state.sub_selection.clear();
+            Ok(selection_json(state))
+        }
+        C::LoopMode => {
+            state.loop_mode = !state.loop_mode;
+            Ok(json!({ "loop_mode": state.loop_mode }))
+        }
+        C::SelectByHalf { axis, invert } => select_by_half(state, axis, invert),
         C::Extrude { height, width, kind } => {
             state.poly_settings.extrude_height = height;
             state.poly_settings.extrude_width = width.max(0.0);
@@ -547,6 +623,15 @@ fn pick_sub(state: &mut AppState, node: NodeId, id: u32) -> Result<Value, String
             state.pick_mode = None;
             Ok(json!({ "hinge": id }))
         }
+        Some(m @ (PickMode::BridgeEdge1 | PickMode::BridgeEdge2)) => {
+            let mesh = state.scene.node(node).ok_or("missing node")?.cage_mesh().into_owned();
+            if (id as usize) >= mesh.half_edges().len() || !loom_mesh::select_ops::is_border_edge(&mesh, HalfEdgeId(id)) {
+                return Err("Bridge connects border edges: pick an edge with a polygon on one side only".into());
+            }
+            state.poly_settings.bridge_edges[if m == PickMode::BridgeEdge1 { 0 } else { 1 }] = Some((node, id));
+            state.pick_mode = None;
+            Ok(json!({ "bridge_edges": state.poly_settings.bridge_edges.map(|e| e.map(|(_, e)| e)) }))
+        }
         Some(PickMode::CreatePolygon) => {
             if state.create_verts.first() == Some(&(node, id)) && state.create_verts.len() >= 3 {
                 return finish_create(state);
@@ -797,6 +882,22 @@ fn pick_face_point(state: &mut AppState, node: NodeId, face: u32, point: glam::V
                 new_edges = go::cut(mesh, go::SurfacePoint { face: FaceId(f0), point: a }, go::SurfacePoint { face: FaceId(face), point: b }, view_local)?;
                 Ok(())
             })?;
+            // The cut goes on from where this one ended until a right-click.
+            let local_end = b;
+            if let Some(mesh) = state.scene.node(node).map(|n| n.cage_mesh().into_owned()) {
+                let end = new_edges
+                    .iter()
+                    .filter_map(|e| mesh.edge_vertices(*e))
+                    .flat_map(|(x, y)| [x, y])
+                    .filter_map(|v| Some((v, mesh.vertex_position(v)?.distance(local_end))))
+                    .min_by(|x, y| x.1.total_cmp(&y.1));
+                if let Some((v, _)) = end {
+                    if let (Some(f), Some(p)) = (mesh.faces_around_vertex(v).first().copied(), mesh.vertex_position(v)) {
+                        state.pick_point_a = Some((node, f.0, state.scene.object_matrix(node).transform_point3(p)));
+                        state.pick_mode = Some(PickMode::CutB);
+                    }
+                }
+            }
             if state.selection_mode.is_edge_level() {
                 state.sub_selection.clear();
                 for e in new_edges {
@@ -807,6 +908,64 @@ fn pick_face_point(state: &mut AppState, node: NodeId, face: u32, point: glam::V
         }
         _ => Err("no face-point pick mode active".into()),
     }
+}
+
+/// Selection > By Half: at the current level, the sub-objects whose centre
+/// lies on the positive side of the pivot along `axis` (`invert`: the
+/// negative side), in the object's pivot frame.
+fn select_by_half(state: &mut AppState, axis: crate::Axis, invert: bool) -> Result<Value, String> {
+    let mode = state.selection_mode;
+    if mode == SelectionMode::Object {
+        return Err("Select By Half works at a sub-object level".into());
+    }
+    let k = match axis {
+        crate::Axis::X => 0,
+        crate::Axis::Y => 1,
+        crate::Axis::Z => 2,
+    };
+    let mut picked: Vec<(NodeId, SubObjectId)> = Vec::new();
+    for n in selected_polys(state) {
+        let Some(node) = state.scene.node(n) else { continue };
+        let offset = node.object_offset.matrix();
+        let mesh = node.cage_mesh().into_owned();
+        let side = |pts: &[glam::Vec3]| -> bool {
+            let c = pts.iter().map(|p| offset.transform_point3(*p)).sum::<glam::Vec3>() / pts.len().max(1) as f32;
+            if invert { c[k] < -1e-5 } else { c[k] > 1e-5 }
+        };
+        let pos = |vs: Vec<VertexId>| -> Vec<glam::Vec3> { vs.into_iter().filter_map(|v| mesh.vertex_position(v)).collect() };
+        match mode {
+            SelectionMode::Vertex => {
+                for v in (0..mesh.vertex_count() as u32).map(VertexId) {
+                    if side(&pos(vec![v])) {
+                        picked.push((n, SubObjectId::Vertex(v)));
+                    }
+                }
+            }
+            SelectionMode::Edge | SelectionMode::Border => {
+                for e in (0..mesh.half_edges().len() as u32).map(HalfEdgeId) {
+                    if mesh.canonical_edge_id(e) != Some(e) || (mode == SelectionMode::Border && !loom_mesh::select_ops::is_border_edge(&mesh, e)) {
+                        continue;
+                    }
+                    let Some((a, b)) = mesh.edge_vertices(e) else { continue };
+                    if side(&pos(vec![a, b])) {
+                        picked.push((n, SubObjectId::Edge(e)));
+                    }
+                }
+            }
+            _ => {
+                for f in (0..mesh.face_count() as u32).map(FaceId) {
+                    if side(&pos(mesh.face_vertex_ids(f).unwrap_or_default())) {
+                        picked.push((n, SubObjectId::Face(f)));
+                    }
+                }
+            }
+        }
+    }
+    state.sub_selection.clear();
+    for (n, id) in picked {
+        state.sub_selection.insert(n, id);
+    }
+    Ok(selection_json(state))
 }
 
 fn attach_node(state: &mut AppState, other: NodeId) -> Result<Value, String> {
