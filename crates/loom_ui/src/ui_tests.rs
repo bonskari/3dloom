@@ -354,7 +354,7 @@ fn ground_point(h: &Harness, world: Vec3) -> egui::Pos2 {
 fn drag_creating_a_sphere_centres_it_on_the_click_and_selects_it() {
     let mut h = Harness::new();
     maximized(&mut h);
-    h.cmd(Command::KeepCreatingToggle);
+    keep_creating(&mut h, true);
     h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Sphere));
     let r = h.app.viewport_rects[h.app.state.active_viewport];
     let a = r.center() + egui::vec2(0.0, 80.0);
@@ -438,7 +438,7 @@ fn right_click_or_the_select_tool_ends_the_create_mode() {
     let mut h = Harness::new();
     maximized(&mut h);
     let r = h.app.viewport_rects[h.app.state.active_viewport];
-    h.cmd(Command::KeepCreatingToggle);
+    keep_creating(&mut h, true);
     // Make a sphere, then right-click: the create mode ends (no quad menu, no new object).
     h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Sphere));
     let a = r.center() + egui::vec2(0.0, 80.0);
@@ -591,6 +591,11 @@ fn create_panel_buttons_keep_their_tool_on() {
     assert!(h.app.create_kind.is_none());
 }
 
+/// Sets Keep Creating (tests do not lean on its default).
+fn keep_creating(h: &mut Harness, on: bool) {
+    h.cmd(Command::SetPreference { name: "Keep Creating".into(), value: if on { 1.0 } else { 0.0 } });
+}
+
 /// Drags out a box (base, then height and a click), `dx` pixels right of the
 /// viewport centre.
 fn drag_a_box(h: &mut Harness, dx: f32) {
@@ -609,7 +614,7 @@ fn drag_a_box(h: &mut Harness, dx: f32) {
 fn a_box_drag_ends_the_create_mode_when_keep_creating_is_off() {
     let mut h = Harness::new();
     maximized(&mut h);
-    assert!(!h.app.state.prefs.keep_creating, "off by default");
+    keep_creating(&mut h, false);
     h.click_widget("Box");
     assert_eq!(h.app.create_kind, Some(crate::CreateKind::Primitive(PrimitiveKind::Box)));
     drag_a_box(&mut h, -100.0);
@@ -630,7 +635,7 @@ fn a_box_drag_ends_the_create_mode_when_keep_creating_is_off() {
 fn a_box_drag_keeps_the_tool_on_when_keep_creating_is_on() {
     let mut h = Harness::new();
     maximized(&mut h);
-    h.cmd(Command::KeepCreatingToggle);
+    keep_creating(&mut h, true);
     h.click_widget("Box");
     drag_a_box(&mut h, -100.0);
     assert_eq!(h.app.create_kind, Some(crate::CreateKind::Primitive(PrimitiveKind::Box)), "still creating boxes");
@@ -643,7 +648,7 @@ fn a_box_drag_keeps_the_tool_on_when_keep_creating_is_on() {
 #[test]
 fn the_object_type_pin_toggles_keep_creating_in_every_category() {
     let mut h = Harness::new();
-    let mut on = false;
+    let mut on = loom_commands::state::KEEP_CREATING_DEFAULT;
     for category in ["Geometry", "Shapes", "Lights", "Cameras", "Helpers", "Systems"] {
         h.click_widget(category);
         h.click_widget("Pin");
@@ -657,6 +662,7 @@ fn the_object_type_pin_toggles_keep_creating_in_every_category() {
 #[test]
 fn cylinder_and_line_end_the_create_mode_only_when_finished() {
     let mut h = Harness::new();
+    keep_creating(&mut h, false);
     creating(&mut h, PrimitiveKind::Cylinder);
     let a = ground_point(&h, Vec3::ZERO);
     let b = ground_point(&h, Vec3::new(3.0, 0.0, 0.0));
@@ -668,6 +674,7 @@ fn cylinder_and_line_end_the_create_mode_only_when_finished() {
     assert!(h.app.create_kind.is_none(), "the height click finished the cylinder and the mode");
 
     let mut h = Harness::new();
+    keep_creating(&mut h, false);
     wide_view(&mut h);
     h.app.start_create(Some(crate::CreateKind::Line));
     h.frames(1);
@@ -688,6 +695,7 @@ fn cylinder_and_line_end_the_create_mode_only_when_finished() {
 #[test]
 fn keyboard_entry_camera_and_helper_creation_end_the_create_mode() {
     let mut h = Harness::new();
+    keep_creating(&mut h, false);
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1400.0));
     h.click_widget("Box");
     h.click_widget("Keyboard Entry");
@@ -697,6 +705,7 @@ fn keyboard_entry_camera_and_helper_creation_end_the_create_mode() {
     assert!(h.app.create_kind.is_none(), "Keyboard Entry Create ends the mode");
 
     let mut h = Harness::new();
+    keep_creating(&mut h, false);
     wide_view(&mut h);
     h.app.start_create(Some(crate::CreateKind::Camera { target: true }));
     let (a, b) = (h.screen_of(Vec3::new(-40.0, -40.0, 0.0)), h.screen_of(Vec3::new(30.0, 20.0, 0.0)));
@@ -704,6 +713,7 @@ fn keyboard_entry_camera_and_helper_creation_end_the_create_mode() {
     assert!(h.app.create_kind.is_none(), "the target drag ends the mode");
 
     let mut h = Harness::new();
+    keep_creating(&mut h, false);
     wide_view(&mut h);
     h.app.start_create(Some(crate::CreateKind::Helper(crate::HelperKind::Dummy)));
     let p = h.screen_of(Vec3::new(10.0, 10.0, 0.0));
@@ -716,6 +726,7 @@ fn keyboard_entry_camera_and_helper_creation_end_the_create_mode() {
 #[test]
 fn keep_creating_in_the_create_menu_and_preferences() {
     let mut h = Harness::new();
+    keep_creating(&mut h, false);
     h.click(h.find(egui::accesskit::Role::Button, "Create").center());
     h.click(h.find(egui::accesskit::Role::CheckBox, "Keep Creating").center());
     assert!(h.app.state.prefs.keep_creating);
@@ -1102,6 +1113,7 @@ fn an_imported_skinned_character_brackets_the_posed_mesh() {
 #[test]
 fn dragging_a_biped_sets_its_height_from_the_feet() {
     let mut h = Harness::new();
+    keep_creating(&mut h, false);
     maximized(&mut h);
     h.cmd(Command::FrontView);
     let cam = &mut h.app.state.active_mut().camera;

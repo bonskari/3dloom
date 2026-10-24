@@ -638,6 +638,10 @@ impl Default for GizmoPrefs {
     }
 }
 
+/// Keep Creating's default (the reference keeps the create tool on; this
+/// build makes one object, then returns to Select).
+pub const KEEP_CREATING_DEFAULT: bool = false;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
@@ -693,7 +697,7 @@ impl Default for Prefs {
             viewport_tooltips: true,
             show_cross_hair: false,
             space_selection_lock: false,
-            keep_creating: false,
+            keep_creating: KEEP_CREATING_DEFAULT,
             auto_backup_enable: true,
             auto_backup_count: 3,
             auto_backup_interval_min: 5.0,
