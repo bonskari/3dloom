@@ -79,7 +79,7 @@ pub struct MeshBuffer {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
     pub index_count: u32,
-    /// Pre-built line buffer of every unique edge, colored orange — used to draw
+    /// Pre-built line buffer of every unique edge, colored white — used to draw
     /// the selection wireframe overlay when this mesh is selected.
     pub edge_vertex_buffer: Buffer,
     pub selected_edge_vertex_buffer: Buffer,
@@ -113,7 +113,7 @@ impl MeshBuffer {
         let selected_edge_vertex_buffer = edge_buffer(
             device,
             &edges,
-            [1.0, 0.55, 0.15],
+            [1.0, 1.0, 1.0],
             "loom_mesh_selected_edge_buffer",
         );
 
