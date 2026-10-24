@@ -9,6 +9,7 @@ pub mod gizmo;
 mod hotkeys;
 pub mod icons;
 pub mod label_menus;
+pub mod live;
 pub mod main_toolbar;
 pub mod quad_menu;
 mod realistic;
@@ -276,6 +277,8 @@ pub struct LoomApp {
     /// Show Map in Viewport bitmaps decoded once per path.
     pub bitmap_cache: std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>,
     pub last_error: Option<String>,
+    /// The last raw input events (live diagnostics).
+    pub input_log: live::InputLog,
 }
 
 impl LoomApp {
@@ -365,6 +368,7 @@ impl LoomApp {
             quad_menu: None,
             background_textures: std::collections::HashMap::new(),
             last_error: None,
+            input_log: Default::default(),
         }
     }
 
@@ -398,7 +402,11 @@ impl LoomApp {
         }
         self.end_create_mode_for(cmd.name());
         let opens_editor = matches!(&cmd, Command::AddModifier { name } if name == "Unwrap UVW") && self.state.uv_editor.always_bring_up;
+        let logged = log::log_enabled!(target: "loom::cmd", log::Level::Info).then(|| serde_json::to_value(&cmd).unwrap_or_default());
         let r = loom_commands::execute(&mut self.state, cmd);
+        if let Some(body) = logged {
+            live::log_command(&body, r.as_ref().map_err(String::as_str));
+        }
         match &r {
             Err(e) => self.last_error = Some(e.clone()),
             Ok(_) => self.last_error = None,
@@ -416,6 +424,7 @@ impl LoomApp {
             self.end_create_mode_for(name);
         }
         let r = loom_commands::execute_json(&mut self.state, body);
+        live::log_command(body, if r["ok"] == true { Ok(&r) } else { Err(r["error"].as_str().unwrap_or("failed")) });
         self.sync_after_command();
         r
     }
@@ -659,6 +668,46 @@ impl LoomApp {
         self.state.undo.end();
     }
 
+    /// Runs before egui reads a frame's input (eframe's `raw_input_hook`).
+    /// When the window loses the focus (screen lock, another window) with a
+    /// mouse button held, the release goes elsewhere and never arrives: egui
+    /// would keep the button down and the viewport keep its drag, so moving
+    /// the pointer afterwards went on orbiting or panning. Every press-held
+    /// interaction ends here and egui gets the releases it missed.
+    pub fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if !raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))) {
+            return;
+        }
+        let (down, pos) = ctx.input(|i| {
+            let down: Vec<egui::PointerButton> = [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle, egui::PointerButton::Extra1, egui::PointerButton::Extra2]
+                .into_iter()
+                .filter(|b| i.pointer.button_down(*b))
+                .collect();
+            (down, i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(egui::Pos2::ZERO))
+        });
+        let up = loom_input::InputEvent::MouseUp { button: loom_input::MouseButton::Left, pos: glam::Vec2::new(pos.x, pos.y), mods: loom_input::Modifiers::default() };
+        self.camera_controller.handle(up, &mut self.state.active_mut().camera);
+        self.alt_click = None;
+        self.drag_select_start = None;
+        self.region_points.clear();
+        if self.transform_drag.is_some() {
+            self.end_transform_drag();
+            self.shift_sources.clear();
+        }
+        if self.manip_drag.take().is_some() {
+            self.state.undo.end();
+        }
+        self.soft_painting = false;
+        if self.deform_painting {
+            self.deform_painting = false;
+            self.poly_dragging = false;
+            self.state.undo.end();
+        }
+        for button in down {
+            raw.events.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: raw.modifiers });
+        }
+    }
+
     /// Display-unit factor and suffix (Units Setup) for length spinners.
     pub fn unit_display(&self) -> (f64, String) {
         self.state.units.display_factor()
@@ -666,15 +715,7 @@ impl LoomApp {
 
     /// A length spinner in display units: the value stays in scene units.
     pub fn length_drag<'a>(&self, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
-        let (factor, suffix) = self.unit_display();
-        let decimals = self.state.prefs.spinner_precision;
-        egui::DragValue::new(value)
-            .speed(speed)
-            .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
-            .custom_parser(move |text| {
-                let t = text.trim().trim_end_matches(|c: char| c.is_alphabetic() || c == '"' || c == '\'');
-                t.parse::<f64>().ok().map(|v| v / factor)
-            })
+        length_drag_value(&self.state.units, self.state.prefs.spinner_precision, value, speed)
     }
 
     /// Spinner drag speed: the Preferences snap value when Spinner Snap is on.
@@ -793,6 +834,10 @@ impl eframe::App for LoomApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame(ctx);
     }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        LoomApp::raw_input_hook(self, ctx, raw_input);
+    }
 }
 
 impl LoomApp {
@@ -800,6 +845,7 @@ impl LoomApp {
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
         icons::install(ctx);
+        ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_file_action(loom_commands::PendingFileAction::Exit);
@@ -827,6 +873,14 @@ impl LoomApp {
             self.saved_modifier_usage = self.state.modifier_usage.clone();
         }
         hotkeys::handle(ctx, self);
+        // "Close spline?" answered Yes: the line is closed, so the Line tool ends it.
+        if let Some(line) = self.line.take() {
+            if line.is_closed(self) {
+                line.finish(self);
+            } else {
+                self.line = Some(line);
+            }
+        }
         // Playback: advance by the wall clock (Real Time) or a frame per redraw.
         if self.state.playing {
             let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.25);
@@ -905,4 +959,15 @@ fn modifier_usage_path() -> Option<std::path::PathBuf> {
         .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from))
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
     Some(base.join("3dloom").join("modifier-usage.json"))
+}
+
+/// A length spinner in display units (Units Setup); typed values may carry a
+/// unit (7", -3.5", 2.5cm). The value stays in scene units.
+pub fn length_drag_value<'a>(units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
+    let (factor, suffix) = units.display_factor();
+    let units = units.clone();
+    egui::DragValue::new(value)
+        .speed(speed)
+        .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
+        .custom_parser(move |text| units.parse(text))
 }

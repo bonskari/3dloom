@@ -354,6 +354,14 @@ impl Mesh {
         Some(if id.0 <= he.twin.0 { id } else { he.twin })
     }
 
+    /// The 1-based edge number the reference shows ("Edge 12"): edges counted
+    /// in the order the polygons first use them.
+    pub fn edge_number(&self, id: HalfEdgeId) -> Option<u32> {
+        let c = self.canonical_edge_id(id)?;
+        let before = (0..c.0).filter(|i| self.canonical_edge_id(HalfEdgeId(*i)) == Some(HalfEdgeId(*i))).count();
+        Some(before as u32 + 1)
+    }
+
     pub fn face_vertex_ids(&self, id: FaceId) -> Option<Vec<VertexId>> {
         let face = self.faces.get(id.0 as usize)?;
         let mut ids = Vec::new();

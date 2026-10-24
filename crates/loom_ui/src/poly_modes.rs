@@ -14,7 +14,8 @@ pub fn is_poly_pick(mode: Option<PickMode>) -> bool {
     matches!(
         mode,
         Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::CreateVertex
-            | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB)
+            | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB
+            | PickMode::SwiftLoop | PickMode::BridgeEdge1 | PickMode::BridgeEdge2 | PickMode::HingeEdge)
     )
 }
 
@@ -62,6 +63,17 @@ pub fn click(app: &mut LoomApp, index: usize, p: egui::Pos2, rect: egui::Rect, v
                 }
             }
         }
+        Some(PickMode::BridgeEdge1 | PickMode::BridgeEdge2 | PickMode::HingeEdge) => {
+            if let Some(Pick::SubObject { mesh, id: SubObjectId::Edge(e) }) = pick_edge(app, p, rect, view_proj) {
+                let node = app.world_meshes()[mesh].0;
+                let _ = app.dispatch(Command::PickSub { node: node.0, id: e.0 });
+            }
+        }
+        Some(PickMode::SwiftLoop) => {
+            if let Some((node, edge, t)) = swift_loop_target(app, p, &Projection::new(view, proj, rect)) {
+                let _ = app.dispatch(Command::SwiftLoop { node: node.0, edge: edge.0, t });
+            }
+        }
         Some(PickMode::CreateVertex) => {
             let Some(node) = app.state.selection.iter().next().copied() else { return };
             let point = surface_hit_node(app, p, rect, view, proj).map(|h| h.1).or_else(|| creation_anchor(app, index, p, rect, view, proj).map(|(a, _)| a));
@@ -71,6 +83,40 @@ pub fn click(app: &mut LoomApp, index: usize, p: egui::Pos2, rect: egui::Rect, v
         }
         _ => {}
     }
+}
+
+/// Swift Loop under the pointer: the edge of the polygon there nearest the
+/// pointer on screen (or the nearest edge when no polygon is hit), and the
+/// pointer's place along it from its canonical origin.
+fn swift_loop_target(app: &LoomApp, p: egui::Pos2, pr: &Projection) -> Option<(NodeId, loom_mesh::HalfEdgeId, f32)> {
+    let along = |sa: egui::Pos2, sb: egui::Pos2| -> (f32, f32) {
+        let ab = sb - sa;
+        let t = if ab.length_sq() < 1e-6 { 0.5 } else { ((p - sa).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+        ((sa + ab * t).distance(p), t)
+    };
+    let (mesh_i, edge) = match pick_face(app, p, pr.rect, pr.view, pr.proj) {
+        Some(Pick::SubObject { mesh, id: SubObjectId::Face(f) }) => {
+            let m = &app.world_meshes()[mesh].1;
+            let best = m
+                .face_corners(f)?
+                .into_iter()
+                .filter_map(|h| {
+                    let (a, b) = m.edge_vertices(h)?;
+                    let (sa, sb) = (pr.screen(m.vertex_position(a)?)?, pr.screen(m.vertex_position(b)?)?);
+                    Some((along(sa, sb).0, h))
+                })
+                .min_by(|x, y| x.0.total_cmp(&y.0))?;
+            (mesh, m.canonical_edge_id(best.1)?)
+        }
+        _ => match pick_edge(app, p, pr.rect, pr.proj * pr.view) {
+            Some(Pick::SubObject { mesh, id: SubObjectId::Edge(e) }) => (mesh, e),
+            _ => return None,
+        },
+    };
+    let (node, m) = &app.world_meshes()[mesh_i];
+    let (a, b) = m.edge_vertices(edge)?;
+    let (sa, sb) = (pr.screen(m.vertex_position(a)?)?, pr.screen(m.vertex_position(b)?)?);
+    Some((*node, edge, along(sa, sb).1))
 }
 
 #[derive(Clone, Copy)]
@@ -364,6 +410,21 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hov
                     painter.line_segment([sa, h], stroke);
                     painter.circle_stroke(sa, 4.0, stroke);
                 }
+            }
+        }
+        Some(PickMode::SwiftLoop) => {
+            // The green loop a click would insert.
+            let Some(h) = hover else { return };
+            let Some((node, edge, t)) = swift_loop_target(app, h, projection) else { return };
+            let Some((_, m)) = app.world_meshes().iter().find(|(n, _)| *n == node) else { return };
+            let (pts, closed) = loom_mesh::topo_ops::swift_loop_points(m, edge, t);
+            let sp: Vec<egui::Pos2> = pts.iter().filter_map(|q| projection.screen(*q)).collect();
+            let green = egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(60, 230, 60));
+            for w in sp.windows(2) {
+                painter.line_segment([w[0], w[1]], green);
+            }
+            if closed && sp.len() > 2 {
+                painter.line_segment([sp[sp.len() - 1], sp[0]], green);
             }
         }
         Some(PickMode::TargetWeldTarget | PickMode::EditTriangulationB) => {

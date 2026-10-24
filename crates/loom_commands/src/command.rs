@@ -740,6 +740,9 @@ commands! {
     SubtractSpline => "Subtract (Spline)", MainUI, "Editable Spline > Boolean Subtract the second selected closed spline from the first.";
     WeldVerticesSpline => "Weld Vertices (Spline)", MainUI, "Editable Spline > Weld the selected vertices within the Weld threshold.";
     SplineRefine => "Spline Refine", Loom, "Editable Spline: add a knot at parameter `t` of flat segment `segment` of node `node`." { node: u64, segment: u32, t: f32 };
+    SplineRefineAtVertex => "Spline Refine At Vertex", Loom, "Editable Spline > Refine with Connect: a click on existing flat knot `knot` (`segment`/`t` is the segment point there) asks Refine / Connect Only, or runs the remembered choice." { node: u64, knot: u32, segment: u32, t: f32 };
+    SplineRefineReply => "Spline Refine Reply", Loom, "Answer the open Refine prompt: Connect Only joins the existing vertex to the connection, Refine adds a vertex next to it; `dont_show` remembers the answer." { connect_only: bool, dont_show: bool };
+    SplineFilletMode => "Spline Fillet Mode", Loom, "Editable Spline > Geometry > Fillet (or Chamfer) button: dragging on a selected vertex rounds (cuts) the selected vertices." { chamfer: bool };
     SplineFillet => "Spline Fillet", Loom, "Editable Spline: fillet the selected vertices by `amount`." { amount: f32 };
     SplineChamfer => "Spline Chamfer", Loom, "Editable Spline: chamfer the selected vertices by `amount`." { amount: f32 };
     SetVertexType => "Set Vertex Type", Loom, "Editable Spline: Corner / Smooth / Bezier / Bezier Corner for the selected vertices." { kind: String };
@@ -756,7 +759,7 @@ commands! {
     SplineExplode => "Spline Explode", Loom, "Editable Spline: explode the selected splines into segments, as splines or objects." { to_objects: bool };
     SplineSettings => "Spline Settings", Loom, "Editable Spline rollout settings by name (Weld Threshold, Fillet, Chamfer, Outline, Outline Center, Divisions, Boolean, Mirror Axis, Mirror Copy, Mirror About Pivot, New Vertex Type, Refine Connect, Refine Linear, Lock Handles, Area Selection, …)." { name: String, value: f64 };
     CreateShapeFromEdges => "Create Shape From Edges", EditablePoly, "Editable Poly > Create Shape From Selection: the selected edges become a new Editable Spline (Smooth or Linear)." { name: Option<String>, smooth: bool };
-    ExtrudeAlongSpline => "Extrude Along Spline", Loom, "Editable Poly: sweep the selected polygons along shape `spline`'s first spline." { spline: u64, segments: u32, taper: f32, twist: f32, align: bool };
+    ExtrudeAlongSpline => "Extrude Along Spline", Loom, "Editable Poly: sweep the selected polygons along shape `spline`'s first spline: the end scales by 1 + `taper`, `taper_curve` bulges (+) or pinches (−) the middle, `twist` degrees along it, and with `align` the path starts along the face normal, turned `rotation` degrees about it." { spline: u64, segments: u32, taper: f32, taper_curve: f32, twist: f32, rotation: f32, align: bool };
     CreateBoolean => "Create Boolean", Loom, "Compound Objects > Boolean: the selected object (A) and `operand_b` become a Boolean (operation 0 Union, 1 Intersection, 2 A-B, 3 B-A, 4-7 Cut); `move_operand` removes B." { operand_b: u64, operation: u32, move_operand: bool };
     PickOperandB => "Pick Operand B", Loom, "Compound Objects > Boolean > Pick Operand B: click the second object.";
     CreateProBoolean => "Create ProBoolean", Loom, "Compound Objects > ProBoolean: the selected object becomes a ProBoolean base.";
@@ -889,7 +892,7 @@ commands! {
     PreviewSelectMode => "Preview Select Mode", EditablePoly, "Cycle Preview Selection: Off, SubObj, Multi.";
     Hide => "Hide", EditablePoly, "Hide the selected vertices or polygons (Alt+H).";
     Connect => "Connect", EditablePoly, "Vertex level: connect the selected vertex pairs across their polygons. Edge / Border level: Connect Edges with the current settings (Shift+Ctrl+E).";
-    Remove => "Remove", EditablePoly, "Vertex level: remove the selected vertices and merge their polygons. Edge level: remove the edges (Backspace).";
+    Remove => "Remove", EditablePoly, "Vertex level: remove the selected vertices and merge their polygons (Backspace). Edge level: remove the edges (Backspace).";
     Break => "Break", EditablePoly, "Break the selected vertices so every polygon gets its own corner.";
     SplitEdges => "Split Edges", EditablePoly, "Split the mesh along the selected edges (open them into borders).";
     TargetWeldMode => "Target Weld Mode", EditablePoly, "Toggle Target Weld: pick a vertex, then the vertex to weld it onto (Shift+Ctrl+W). Picks arrive as Pick Sub.";
@@ -929,7 +932,7 @@ commands! {
     Slice => "Slice", EditablePoly, "Slice the mesh (or the selected polygons) with the Slice Plane.";
     ResetSlicePlane => "Reset Slice Plane", EditablePoly, "Put the Slice Plane back at the selection's centre, level.";
     QuickSliceMode => "Quickslice Mode", EditablePoly, "Toggle QuickSlice: click two points; the plane through them and the view direction slices the mesh (Shift+Ctrl+Q).";
-    Cut => "Cut", EditablePoly, "Toggle Cut: click a start point and an end point on the surface (Alt+C).";
+    Cut => "Cut", EditablePoly, "Toggle Cut: click a start point, then each click cuts on from the last point; right-click ends the cut, a second right-click leaves Cut (Alt+C).";
     MeshSmooth => "MeshSmooth", EditablePoly, "MSmooth the selection with the current settings.";
     MeshSmoothSettings => "MeshSmooth Settings", EditablePoly, "Open the MeshSmooth settings window.";
     Tessellate => "Tessellate", EditablePoly, "Tessellate the selected polygons with the current settings.";
@@ -960,7 +963,7 @@ commands! {
     Chamfer => "Chamfer", Loom, "Chamfer the selected vertices (amount, open) or edges (amount, segments, open); sets the Chamfer settings." { amount: f32, segments: u32, open: bool };
     ConnectEdges => "Connect Edges", Loom, "Connect the selected edges with `segments` new edges; pinch and slide; sets the Connect settings." { segments: u32, pinch: f32, slide: f32 };
     ConnectVertices => "Connect Vertices", Loom, "Connect the selected vertex pairs that share a polygon.";
-    Bridge => "Bridge", Loom, "Bridge two selected borders or two selected polygons; sets the Bridge settings." { segments: u32, smooth: f32, bridge_adjacent: f32, twist1: i32, twist2: i32 };
+    Bridge => "Bridge", Loom, "Bridge two selected borders or two selected polygons; at Edge level the selected border edges pair up in increasing order of id (or the two picked edges with Bridge Specific Edges); sets the Bridge settings." { segments: u32, smooth: f32, bridge_adjacent: f32, twist1: i32, twist2: i32 };
     Extrude => "Extrude", Loom, "Extrude the selection: vertices / edges by height and base width, polygons by height with `kind`; sets the Extrude settings." { height: f32, width: f32, kind: crate::state::ExtrudeKind };
     Inset => "Inset", Loom, "Inset the selected polygons by `amount`, as a group or by polygon; sets the Inset settings." { amount: f32, by_polygon: bool };
     Bevel => "Bevel", Loom, "Bevel the selected polygons: extrude by `height`, then outline by `outline`; sets the Bevel settings." { height: f32, outline: f32, kind: crate::state::ExtrudeKind };
@@ -1318,6 +1321,8 @@ commands! {
     LineRemoveLastKnot => "Line Remove Last Knot", Loom, "Line tool: Backspace removes the last knot." { node: u64 };
     LineEnd => "Line End", Loom, "Line tool: the line ends; a line with fewer than two knots is removed." { node: u64 };
     LineClose => "Line Close", Loom, "Line tool: clicking the first knot closes the spline." { node: u64 };
+    LineCloseAsk => "Line Close Ask", Loom, "Line tool: a click on the first knot asks \"Close spline?\"; `point`/`smooth` are the knot a No adds there." { node: u64, point: [f32; 3], smooth: bool };
+    LineCloseReply => "Line Close Reply", Loom, "Answer \"Close spline?\": Yes closes the line (the Line tool then ends it), No adds the clicked knot and drawing goes on." { close: bool };
     CreateCamera => "Create Camera", Loom, "Create a camera at the active viewport's eye looking at its target (Target camera gets a target node)." { target: bool };
     CreateCameraAt => "Create Camera At", Loom, "Create > Cameras: a camera at `position` looking at `look_at`; a Target camera puts its target node there, a Free camera keeps the gap as its Target Distance." { target: bool, position: [f32; 3], look_at: [f32; 3] };
     CameraType => "Camera Type", Loom, "Camera Parameters > Type: make a camera a Target camera (adds a target at Target Distance) or a Free camera (removes its target, keeps its aim)." { id: u64, target: bool };
@@ -1532,6 +1537,14 @@ commands! {
     EdgeLoop => "Edge Loop", Loom, "Grow the selected edges into their loops.";
     ExtrudeFaces => "Extrude Faces", Loom, "Extrude the selected faces along their normals." { distance: f32 };
     DissolveEdges => "Dissolve Edges", Loom, "Remove the selected edges, merging their faces.";
+    CleanRemove => "Clean Remove", Loom, "Ctrl+Remove at Edge level (also Ctrl+Backspace): remove the selected edges and the vertices they leave with only two edges.";
+    SwiftLoopMode => "Swift Loop Mode", Loom, "Toggle Swift Loop: each click on the surface inserts an edge loop across the ring of the nearest edge; right-click exits.";
+    SwiftLoop => "Swift Loop", Loom, "Insert the edge loop through raw edge `edge` of `node`, `t` along it from its canonical origin (what a Swift Loop click does)." { node: u64, edge: u32, t: f32 };
+    LoopMode => "Loop Mode", Loom, "Toggle Modify Selection > Loop Mode: a clicked edge selects its loop (Alt deselects it); two adjacent vertices or polygons select their loop.";
+    SelectByHalf => "Select By Half", Loom, "Selection > By Half: select the sub-objects whose centre is on the positive side of the pivot along `axis`; `invert` selects the negative side (Invert Axis)." { axis: Axis, invert: bool };
+    BridgeSpecificEdges => "Bridge Specific Edges", Loom, "Bridge Edges dialog: on bridges the two picked edges (Pick Edge 1 / 2), off bridges the edge selection (Use Edge Selection)." { on: bool };
+    PickBridgeEdge => "Pick Bridge Edge", Loom, "Bridge Edges dialog > Pick Edge 1 (`which` 1) / Pick Edge 2 (2): the next edge pick (Pick Sub) becomes that edge." { which: u32 };
+    DeletePolygons => "Delete Polygons", Loom, "Delete the selected polygons; `delete_isolated` also deletes the vertices left with no polygon (the answer to the Delete prompt)." { delete_isolated: bool };
     Collapse => "Collapse", Loom, "Collapse the selected sub-objects to their centre.";
     ConnectEdgeRing => "Connect Edge Ring", Loom, "Connect the selected edge ring with a new loop.";
     Rename => "Rename", Loom, "Rename a node." { id: u64, name: String };
