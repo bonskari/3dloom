@@ -10,6 +10,7 @@ mod hotkeys;
 pub mod label_menus;
 pub mod main_toolbar;
 pub mod quad_menu;
+mod realistic;
 pub mod region;
 pub mod time_slider;
 mod menubar;
@@ -53,7 +54,7 @@ pub struct ViewAnimation {
 }
 
 /// Meshes and colours waiting for GPU upload, shared with the viewport callbacks.
-pub type PendingUpload = std::sync::Arc<std::sync::Mutex<Option<(Vec<Mesh>, Vec<loom_render::MeshStyle>, Vec<(String, std::sync::Arc<loom_render::Bitmap>)>)>>>;
+pub type PendingUpload = std::sync::Arc<std::sync::Mutex<Option<(std::sync::Arc<Vec<Mesh>>, Vec<loom_render::MeshStyle>, Vec<(String, std::sync::Arc<loom_render::Bitmap>)>)>>>;
 
 /// Keyboard Entry rollout values.
 #[derive(Debug, Clone, Copy)]
@@ -157,9 +158,12 @@ pub struct LoomApp {
     world_meshes: Vec<(NodeId, Mesh)>,
     /// Draw styles parallel to `world_meshes`.
     world_styles: Vec<loom_render::MeshStyle>,
-    /// World bounds of what each of `world_meshes` draws (a Skin's deformed
-    /// result, not the cage), `None` for an empty mesh.
-    world_display_bounds: Vec<Option<(Vec3, Vec3)>>,
+    /// What the viewports draw (the stack result), parallel to `world_meshes`.
+    world_display: std::sync::Arc<Vec<Mesh>>,
+    /// Bumped by every `world_meshes` rebuild.
+    world_version: u64,
+    /// The wgpu device and, once a Realistic view or a Render needs it, Bevy.
+    gpu: realistic::Gpu,
     /// Meshes and colours waiting to be uploaded to the GPU. Every viewport
     /// callback holds this; whichever runs first takes and uploads them, so
     /// the upload never depends on one particular viewport being painted.
@@ -270,6 +274,7 @@ impl LoomApp {
             .expect("wgpu backend required");
         viewport_widget::init_render_resources(wgpu);
         let mut app = Self::headless();
+        app.gpu = realistic::Gpu::Ready(wgpu.clone());
         // The Modifier List's use counts live with the user, not the scene.
         if let Some(text) = modifier_usage_path().and_then(|p| std::fs::read_to_string(p).ok()) {
             app.state.modifier_usage = loom_commands::modifier_list::usage_from_json(&text);
@@ -287,8 +292,10 @@ impl LoomApp {
             camera_controller: ViewportNavigator::new(),
             world_meshes: Vec::new(),
             world_styles: Vec::new(),
-            world_display_bounds: Vec::new(),
-            pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((Vec::new(), Vec::new(), Vec::new())))),
+            world_display: std::sync::Arc::new(Vec::new()),
+            world_version: 0,
+            gpu: realistic::Gpu::None,
+            pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(Vec::new()), Vec::new(), Vec::new())))),
             bitmap_cache: std::collections::HashMap::new(),
             create_kind: None,
             create_compound: false,
@@ -441,7 +448,6 @@ impl LoomApp {
         let mut meshes = Vec::new();
         let mut display = Vec::new();
         let mut styles = Vec::new();
-        let mut display_bounds = Vec::new();
         let mut bitmaps: Vec<(String, std::sync::Arc<loom_render::Bitmap>)> = Vec::new();
         let mut bitmap_index: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         let bones_only = self.state.display_bones_only;
@@ -526,16 +532,15 @@ impl LoomApp {
             // A visibility track below 1 shows the object partly transparent (never fully hidden in shaded views).
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
             styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors: n.display.vertex_colors, texture, specular, wire_color });
-            let shown = shown.unwrap_or_else(|| mesh.clone());
-            display_bounds.push((shown.vertex_count() > 0).then(|| shown.aabb()));
-            display.push(shown);
+            display.push(shown.unwrap_or_else(|| mesh.clone()));
             meshes.push((n.id, mesh));
         }
         self.world_meshes = meshes;
         self.world_styles = styles;
-        self.world_display_bounds = display_bounds;
+        self.world_display = std::sync::Arc::new(display);
+        self.world_version += 1;
         if let Ok(mut slot) = self.pending_upload.lock() {
-            *slot = Some((display, self.world_styles.clone(), bitmaps));
+            *slot = Some((self.world_display.clone(), self.world_styles.clone(), bitmaps));
         }
     }
 
@@ -548,9 +553,10 @@ impl LoomApp {
         &self.world_meshes
     }
 
-    /// World bounds of what each of `world_meshes` draws, in the same order.
-    pub fn world_display_bounds(&self) -> &[Option<(Vec3, Vec3)>] {
-        &self.world_display_bounds
+    /// What the viewports draw for each of `world_meshes` (a Skin's posed
+    /// result, not the cage), in the same order.
+    pub fn world_display(&self) -> &[Mesh] {
+        &self.world_display
     }
 
     pub fn render_camera(&self) -> Camera {
@@ -813,6 +819,26 @@ impl LoomApp {
         dialogs::show(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
+        self.finish_realistic_frame(ctx);
+    }
+}
+
+/// The wgpu setup the app's window uses: a device with what the Realistic
+/// (Bevy) renderer needs, which shares it.
+pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
+    egui_wgpu::WgpuConfiguration {
+        wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
+            device_descriptor: std::sync::Arc::new(|adapter: &wgpu::Adapter| {
+                if loom_bevy::supported(adapter) {
+                    loom_bevy::device_descriptor(adapter)
+                } else {
+                    // The GL fallback: egui's own defaults (no Realistic shading).
+                    wgpu::DeviceDescriptor { label: Some("3dLoom device"), required_features: wgpu::Features::default(), required_limits: wgpu::Limits { max_texture_dimension_2d: 8192, ..wgpu::Limits::downlevel_webgl2_defaults() }, memory_hints: Default::default() }
+                }
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
     }
 }
 
