@@ -376,3 +376,200 @@ fn every_primitive_drag_creates_in_every_viewport() {
         }
     }
 }
+
+fn face_count(h: &Harness, id: loom_scene::NodeId) -> usize {
+    h.app.state.scene.node(id).unwrap().cage_mesh().face_count()
+}
+
+fn edge_count(h: &Harness, id: loom_scene::NodeId) -> usize {
+    h.app.state.scene.node(id).unwrap().cage_mesh().edge_count()
+}
+
+/// Editable Poly box, Modify tab, framed.
+fn poly_scene(h: &mut Harness) -> loom_scene::NodeId {
+    let id = box_scene(h);
+    h.cmd(Command::ConvertToEditablePoly);
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    id
+}
+
+#[test]
+fn extrude_button_then_drag_on_the_face_extrudes_it() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    assert_eq!(h.sub_count(), 1);
+    let before = face_count(&h, id);
+    click_text(&mut h, "Extrude");
+    h.drag(p, p + egui::vec2(0.0, -40.0));
+    assert_eq!(face_count(&h, id), before + 4, "the extrusion adds four side faces");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(face_count(&h, id), before, "one undo step");
+}
+
+#[test]
+fn ring_loop_and_connect_buttons_on_edges() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num2);
+    let p = h.screen_of(Vec3::new(15.0, 0.0, 30.0));
+    h.click(p);
+    assert_eq!(h.sub_count(), 1);
+    click_text(&mut h, "Ring");
+    assert_eq!(h.sub_count(), 4, "Ring");
+    let before = edge_count(&h, id);
+    // The Connect button sits below the fold of the panel here; use its shortcut.
+    h.mods = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+    h.key(egui::Key::E);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(edge_count(&h, id), before + 8, "Connect splits the four ring edges and joins them with four new edges");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(edge_count(&h, id), before);
+}
+
+#[test]
+fn chamfer_mode_drag_on_an_edge_chamfers_it() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num2);
+    let p = h.screen_of(Vec3::new(15.0, 0.0, 30.0));
+    h.click(p);
+    let before = face_count(&h, id);
+    click_text(&mut h, "Chamfer");
+    h.drag(p, p + egui::vec2(0.0, -30.0));
+    assert_eq!(face_count(&h, id), before + 1, "a one-segment chamfer adds a face");
+}
+
+#[test]
+fn grid_snap_moves_onto_grid_points() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.cmd(Command::SetTransform { id: id.0, position: Some([3.0, 4.0, 0.0]), rotation_deg: None, scale: None });
+    h.key(egui::Key::W);
+    h.key(egui::Key::S);
+    assert!(h.app.state.snaps_on, "S toggles snaps");
+    // Release a few pixels off the grid point (40, 0, 0), inside the snap strength.
+    let p = h.screen_of(Vec3::new(13.0, -11.0, 20.0));
+    h.drag(p, h.screen_of(Vec3::new(40.0, 0.0, 0.0)) + egui::vec2(3.0, -2.0));
+    let q = pos_of(&h, id);
+    let g = h.app.state.home_grid.spacing;
+    for c in [q.x, q.y] {
+        assert!((c / g - (c / g).round()).abs() < 1e-3, "on the {g}-unit grid: {q}");
+    }
+}
+
+#[test]
+fn angle_snap_rotates_in_whole_steps() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.key(egui::Key::E);
+    h.key(egui::Key::A);
+    assert!(h.app.state.angle_snap_on, "A toggles angle snap");
+    h.key(egui::Key::F7);
+    let p = body_point(&h);
+    h.drag(p, p + egui::vec2(-37.0, -23.0));
+    let r = h.app.state.scene.node(id).unwrap().transform.rotation.get();
+    let deg = r.z;
+    assert!(deg.abs() > 1.0, "rotated: {deg}");
+    assert!((deg / 5.0 - (deg / 5.0).round()).abs() < 1e-3, "in 5 degree steps: {deg}");
+}
+
+#[test]
+fn local_coordinate_system_moves_along_the_rotated_axis() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.cmd(Command::SetTransform { id: id.0, position: None, rotation_deg: Some([0.0, 0.0, 90.0]), scale: None });
+    // Each transform tool keeps its own reference system: pick the tool first.
+    h.key(egui::Key::W);
+    h.cmd(Command::ReferenceCoordinateSystem { system: loom_commands::CoordSystem::Local });
+    h.key(egui::Key::F5);
+    let p = body_point(&h);
+    h.drag(p, p + egui::vec2(60.0, -40.0));
+    let q = pos_of(&h, id);
+    assert!(q.y.abs() > 1.0 && q.x.abs() < 1e-3, "local X of a box turned 90 degrees is world Y: {q}");
+}
+
+#[test]
+fn selection_center_rotates_two_objects_about_their_middle() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [30.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::SelectNodes { ids: vec![a.0, b.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::UseCenter { mode: loom_commands::CenterMode::Selection });
+    h.cmd(Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 180.0, system: Some(loom_commands::CoordSystem::World) });
+    assert!(pos_of(&h, a).distance(Vec3::new(60.0, 0.0, 0.0)) < 1e-2, "{}", pos_of(&h, a));
+    assert!(pos_of(&h, b).distance(Vec3::ZERO) < 1e-2, "{}", pos_of(&h, b));
+}
+
+#[test]
+fn modifier_reorder_and_delete_with_undo() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.cmd(Command::AddModifier { name: "Taper".into() });
+    let names = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
+    let start = names(&h);
+    h.cmd(Command::MoveModifier { from: 1, to: 0 });
+    assert_eq!(names(&h), vec![start[1].clone(), start[0].clone()]);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(names(&h), start);
+    h.cmd(Command::DeleteModifier { index: 0 });
+    assert_eq!(names(&h).len(), 1);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(names(&h), start);
+}
+
+#[test]
+fn save_new_open_export_import_merge_round_trip() {
+    let dir = std::env::temp_dir().join(format!("loom-qa-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let scene = dir.join("a.loom").to_string_lossy().into_owned();
+    let obj = dir.join("a.obj").to_string_lossy().into_owned();
+    let mut h = Harness::new();
+    box_scene(&mut h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Sphere, position: [60.0, 0.0, 0.0], size: [10.0; 3] });
+    h.cmd(Command::SaveFileAs { path: Some(scene.clone()) });
+    h.cmd(Command::ExportFile { path: Some(obj.clone()) });
+    h.cmd(Command::NewScene);
+    h.frames(2);
+    assert_eq!(h.app.state.scene.len(), 0, "New empties the scene");
+    h.cmd(Command::OpenFile { path: Some(scene.clone()) });
+    assert_eq!(h.app.state.scene.len(), 2, "Open loads both objects");
+    h.cmd(Command::ImportFile { path: Some(obj.clone()) });
+    h.frames(2);
+    assert_eq!(h.app.state.scene.len(), 4, "Import adds the two OBJ objects");
+    h.cmd(Command::MergeFile { path: Some(scene.clone()), names: None });
+    h.frames(2);
+    assert_eq!(h.app.state.scene.len(), 6, "Merge adds the file's two objects");
+    let names: std::collections::BTreeSet<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    assert_eq!(names.len(), 6, "merged names do not collide");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn time_slider_keys_and_set_frame() {
+    let mut h = Harness::new();
+    h.cmd(Command::SetFrame { frame: 50 });
+    assert_eq!(h.app.state.current_frame, 50);
+    h.key(egui::Key::Period);
+    assert_eq!(h.app.state.current_frame, 51, ". steps forward");
+    h.key(egui::Key::Comma);
+    assert_eq!(h.app.state.current_frame, 50, ", steps back");
+    h.key(egui::Key::End);
+    assert_eq!(h.app.state.current_frame, h.app.state.frame_range.1);
+    h.key(egui::Key::Home);
+    assert_eq!(h.app.state.current_frame, h.app.state.frame_range.0);
+}
+
+#[test]
+fn command_panel_tabs_switch_on_click() {
+    let mut h = Harness::new();
+    for (label, tab) in [("Modify", crate::Tab::Modify), ("Hierarchy", crate::Tab::Hierarchy), ("Motion", crate::Tab::Motion), ("Display", crate::Tab::Display), ("Utilities", crate::Tab::Utilities), ("Create", crate::Tab::Create)] {
+        click_text(&mut h, label);
+        assert_eq!(h.app.panel_tab, tab, "{label}");
+    }
+}
