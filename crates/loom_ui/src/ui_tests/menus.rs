@@ -144,8 +144,10 @@ fn the_scale_type_decides_what_an_axis_handle_drag_scales() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
     framed(&mut h);
     h.key(egui::Key::R);
+    // The reference: axis and plane handles scale non-uniformly without
+    // changing the flyout (its tutorial scales one local axis with Uniform Scale).
     let s = drag_scale_x_handle(&mut h);
-    assert!(s.x > 1.01 && (s.x - s.y).abs() < 1e-4 && (s.x - s.z).abs() < 1e-4, "Uniform: all axes alike {s}");
+    assert!(s.x > 1.01 && s.y == 1.0 && s.z == 1.0, "Uniform Scale tool, X handle: X only {s}");
     h.cmd(Command::ScaleType { kind: loom_commands::ScaleKind::NonUniform });
     let s = drag_scale_x_handle(&mut h);
     assert!(s.x > 1.01 && s.y == 1.0 && s.z == 1.0, "Non-Uniform: X only {s}");

@@ -115,6 +115,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     item(ui, app, "Spinner Snap Toggle", "Spinner Snap Toggle");
                 });
                 ui.separator();
+                cmd(ui, app, "Light Lister...", Command::LightLister);
+                ui.separator();
                 cmd(ui, app, "Measure", Command::Measure);
             });
             ui.menu_button("Group", |ui| {
@@ -220,6 +222,23 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             ui.close_menu();
                         }
                     }
+                });
+                ui.menu_button("Lights", |ui| {
+                    ui.menu_button("Standard Lights", |ui| {
+                        for (kind, label) in [
+                            (loom_commands::light::LightKind::TargetSpot, "Target Spotlight"), (loom_commands::light::LightKind::FreeSpot, "Free Spotlight"),
+                            (loom_commands::light::LightKind::TargetDirect, "Target Directional"), (loom_commands::light::LightKind::FreeDirect, "Directional"),
+                            (loom_commands::light::LightKind::Omni, "Omni"), (loom_commands::light::LightKind::Skylight, "Skylight"),
+                        ] {
+                            if ui.button(label).clicked() {
+                                let _ = app.dispatch(Command::SelectObject);
+                                app.create_kind = Some(crate::CreateKind::Light(kind));
+                                app.create_category = crate::Category::Lights;
+                                app.panel_tab = crate::Tab::Create;
+                                ui.close_menu();
+                            }
+                        }
+                    });
                 });
                 ui.menu_button("Cameras", |ui| {
                     // Turns on the creation tool: drag (Target) or click (Free) in a viewport.

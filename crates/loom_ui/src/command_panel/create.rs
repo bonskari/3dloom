@@ -202,6 +202,29 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             name_and_color(ui, app);
             parameters(ui, app);
         }
+        Category::Lights => {
+            egui::ComboBox::from_id_salt("create_light_class").selected_text("Standard").show_ui(ui, |ui| {
+                let _ = ui.selectable_label(true, "Standard");
+            });
+            rollout(ui, "Object Type", true, |ui| {
+                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                egui::Grid::new("light_type").num_columns(2).show(ui, |ui| {
+                    for (i, kind) in loom_commands::light::LightKind::ALL.iter().enumerate() {
+                        let on = app.create_kind == Some(CreateKind::Light(*kind));
+                        if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, kind.label())).clicked() {
+                            // Select Object first: it ends any create mode, then this one starts.
+                            let _ = app.dispatch(Command::SelectObject);
+                            app.create_kind = if on { None } else { Some(CreateKind::Light(*kind)) };
+                        }
+                        if i % 2 == 1 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            });
+            name_and_color(ui, app);
+            parameters(ui, app);
+        }
         Category::Helpers => {
             rollout(ui, "Object Type", true, |ui| {
                 ui.checkbox(&mut app.autogrid, "AutoGrid");
@@ -250,7 +273,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             parameters(ui, app);
         }
-        // Lights and Space Warps have no object types (out of scope); they show an empty Object Type rollout.
+        // Space Warps have no object types (out of scope); they show an empty Object Type rollout.
         _ => {
             rollout(ui, "Object Type", true, |_ui| {});
         }
@@ -320,6 +343,10 @@ pub fn parameters(ui: &mut egui::Ui, app: &mut LoomApp) {
     let params = node.object.parameters();
     if matches!(node.object, loom_scene::ObjectKind::Camera { .. }) {
         camera_parameters(ui, app, id);
+        return;
+    }
+    if matches!(node.object, loom_scene::ObjectKind::Light(_)) {
+        super::light_rollouts::show(ui, app, id);
         return;
     }
     let (is_compound, is_shape) = (node.object.is_compound(), node.object.is_shape());
@@ -392,7 +419,7 @@ fn param_grid(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, salt
     }
 }
 
-fn spin(app: &mut LoomApp, id: loom_scene::NodeId, name: &str, r: &egui::Response, new: f64, old: f64) {
+pub(super) fn spin(app: &mut LoomApp, id: loom_scene::NodeId, name: &str, r: &egui::Response, new: f64, old: f64) {
     if r.drag_started() {
         app.state.undo.begin(name);
     }

@@ -5,6 +5,7 @@ pub mod compound;
 pub mod create;
 pub mod display;
 pub mod hierarchy;
+pub mod light_rollouts;
 pub mod modify;
 pub mod modify_poly;
 pub mod modify_spline;
