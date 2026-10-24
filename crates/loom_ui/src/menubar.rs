@@ -216,7 +216,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             });
             ui.menu_button("Rendering", |ui| {
                 cmd(ui, app, "Render", Command::Render { path: None, width: None, height: None });
-                cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None });
+                cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
+                cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
                 ui.separator();
                 cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
             });

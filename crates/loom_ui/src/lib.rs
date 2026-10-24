@@ -11,6 +11,7 @@ pub mod label_menus;
 pub mod main_toolbar;
 pub mod quad_menu;
 mod realistic;
+pub mod rendered_frame;
 pub mod region;
 pub mod time_slider;
 mod menubar;
@@ -166,6 +167,10 @@ pub struct LoomApp {
     world_version: u64,
     /// The wgpu device and, once a Realistic view or a Render needs it, Bevy.
     gpu: realistic::Gpu,
+    /// The render in progress (one bucket per frame).
+    pub(crate) render_job: Option<realistic::RenderJob>,
+    /// The Rendered Frame Window's and its clones' zoom, pan and textures.
+    pub rfw: rendered_frame::FrameViews,
     /// Meshes and colours waiting to be uploaded to the GPU. Every viewport
     /// callback holds this; whichever runs first takes and uploads them, so
     /// the upload never depends on one particular viewport being painted.
@@ -302,6 +307,8 @@ impl LoomApp {
             world_display: std::sync::Arc::new(Vec::new()),
             world_version: 0,
             gpu: realistic::Gpu::None,
+            render_job: None,
+            rfw: Default::default(),
             pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(Vec::new()), Vec::new(), Vec::new())))),
             bitmap_cache: std::collections::HashMap::new(),
             create_kind: None,
@@ -803,6 +810,10 @@ impl LoomApp {
             }
             self.saved_modifier_usage = self.state.modifier_usage.clone();
         }
+        // Esc stops a render in progress (before the hotkeys see it).
+        if self.state.rendered.progress.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            let _ = self.dispatch(Command::CancelRender);
+        }
         hotkeys::handle(ctx, self);
         // Playback: advance by the wall clock (Real Time) or a frame per redraw.
         if self.state.playing {
@@ -829,6 +840,7 @@ impl LoomApp {
         dialogs::show(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
+        rendered_frame::show(ctx, self);
         self.finish_realistic_frame(ctx);
     }
 }
