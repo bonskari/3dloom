@@ -1145,7 +1145,7 @@ fn material_editor_stays_open_across_a_map_pick_and_cancel() {
     // The Maps rollout (closed by default), below the collapsed Blinn Basic Parameters.
     let win = material_editor_rect(&h);
     click_text(&mut h, "Blinn Basic Parameters", win, 0.0);
-    click_text(&mut h, "Maps", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Maps", 0.0);
     // Diffuse Color's map button goes through the Material/Map Browser first.
     h.click(row_text(&h, "Diffuse Color", "None", material_editor_rect(&h)));
     h.frames(2);
@@ -1179,13 +1179,19 @@ fn material_editor_stays_open_across_a_map_pick_and_cancel() {
     let map = editor_material(&h).map("Diffuse Color").cloned().unwrap();
     assert!(map.path.ends_with("wood.png"), "{}", map.path);
     // Go to Parent: back at the material, its map button shows the bitmap.
-    click_text(&mut h, "Go to Parent", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Go to Parent", 0.0);
     assert!(h.app.state.scene.material_editor.path.is_empty(), "Go to Parent goes up to the material");
     assert!(h.text_rect("Shader Basic Parameters", material_editor_rect(&h)).is_some());
     assert!(h.text_rect("wood.png", material_editor_rect(&h)).is_some(), "the button shows the bitmap");
     // The map button goes back down to the map.
-    click_text(&mut h, "wood.png", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "wood.png", 0.0);
     assert_eq!(h.app.state.scene.material_editor.path, vec![loom_scene::material::NavStep::Map("Diffuse Color".into())]);
+}
+
+/// Clicks the text `label` in the Material Editor window.
+fn click_in_editor(h: &mut Harness, label: &str, dx: f32) {
+    let win = material_editor_rect(h);
+    click_text(h, label, win, dx);
 }
 
 /// The text `text` on the same row as the label `row` inside `within`.
@@ -1236,11 +1242,11 @@ fn only_the_map_buttons_open_a_chooser_from_the_material_editor() {
     h.key(egui::Key::Escape);
     stays(&h, "Escape");
     // Get Material and the Type button open the Material/Map Browser, as in the reference.
-    click_text(&mut h, "Get Material", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Get Material", 0.0);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialBrowser(loom_commands::BrowserFor::GetMaterial)));
     click_text(&mut h, "Cancel", SCREEN, 0.0);
     stays(&h, "the Browser's Cancel");
-    click_text(&mut h, "Standard", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Standard", 0.0);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialBrowser(loom_commands::BrowserFor::MaterialType)));
 }
 
@@ -1253,7 +1259,7 @@ fn multi_sub_from_the_type_button_colours_faces_by_material_id() {
     material_editor(&mut h);
     let node = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
-    click_text(&mut h, "Standard", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Standard", 0.0);
     h.click(window_text(&h, "Material/Map Browser", "Multi/Sub-Object"));
     h.click(window_text(&h, "Material/Map Browser", "OK"));
     h.frames(2);
@@ -1267,13 +1273,13 @@ fn multi_sub_from_the_type_button_colours_faces_by_material_id() {
     assert_eq!(list.len(), 10);
     assert!(h.text_rect("Multi/Sub-Object Basic Parameters", material_editor_rect(&h)).is_some());
     // Set Number opens its dialog; 2 sub-materials.
-    click_text(&mut h, "Set Number", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Set Number", 0.0);
     window_text(&h, "Set Number of Materials", "Number of Materials:");
     h.click(window_text(&h, "Set Number of Materials", "Cancel"));
     assert!(h.texts("Number of Materials:").is_empty(), "Cancel closes it");
     h.cmd(Command::MultiSubSetNumber { number: 2 });
     h.cmd(Command::MultiSubSetEntry { index: 1, id: None, name: None, enabled: None, color: Some([0, 0, 255]) });
-    click_text(&mut h, "Assign to Selection", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Assign to Selection", 0.0);
     assert!(h.app.state.scene.node(node).unwrap().material.is_some());
     // Polygon level: Set ID 2 on two faces.
     h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Face });
@@ -1311,10 +1317,10 @@ fn multi_sub_from_the_type_button_colours_faces_by_material_id() {
     let loom_scene::material::MaterialKind::MultiSub(list) = &editor_material(&h).kind else { unreachable!() };
     let sub = list[1].material.unwrap();
     let sub_label = format!("{} (Standard)", h.app.state.scene.materials[&sub].name);
-    click_text(&mut h, &sub_label, material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, &sub_label, 0.0);
     assert_eq!(h.app.state.scene.material_editor.path, vec![loom_scene::material::NavStep::Sub(1)]);
     assert!(h.text_rect("Blinn Basic Parameters", material_editor_rect(&h)).is_some(), "the sub-material's rollouts");
-    click_text(&mut h, "Go to Parent", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Go to Parent", 0.0);
     assert!(h.app.state.scene.material_editor.path.is_empty());
 }
 
@@ -1330,7 +1336,7 @@ fn browser_get_material_eyedropper_and_dragging_a_slot_onto_an_object() {
     h.cmd(Command::AssignMaterialToSelection);
     let brick = h.app.state.scene.material_editor.slots[0].unwrap();
     h.cmd(Command::MaterialEditorSlot { slot: 3 });
-    click_text(&mut h, "Get Material", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Get Material", 0.0);
     let entry = window_text(&h, "Material/Map Browser", "Brick [Standard]");
     h.click(entry);
     h.click(entry);
@@ -1347,7 +1353,7 @@ fn browser_get_material_eyedropper_and_dragging_a_slot_onto_an_object() {
         .expect("part of the box is outside the editor window");
     // Eyedropper.
     h.cmd(Command::MaterialEditorSlot { slot: 5 });
-    click_text(&mut h, "Pick", material_editor_rect(&h), 0.0);
+    click_in_editor(&mut h, "Pick", 0.0);
     assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::PickMaterial));
     h.click(on_box);
     assert_eq!(h.app.state.scene.material_editor.slots[5], Some(brick), "the eyedropper picked the box's material");
