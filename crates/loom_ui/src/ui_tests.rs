@@ -29,7 +29,9 @@ impl Harness {
 
     fn run(&mut self, events: Vec<egui::Event>) {
         self.time += 1.0 / 30.0;
-        let input = egui::RawInput { screen_rect: Some(self.screen), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
+        let mut input = egui::RawInput { screen_rect: Some(self.screen), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
+        // As eframe does before each frame.
+        self.app.raw_input_hook(&self.ctx, &mut input);
         let app = &mut self.app;
         self.shapes = self.ctx.run(input, |ctx| app.frame(ctx)).shapes;
     }
@@ -61,13 +63,17 @@ impl Harness {
     }
 
     fn drag(&mut self, a: egui::Pos2, b: egui::Pos2) {
+        self.drag_with(egui::PointerButton::Primary, a, b);
+    }
+
+    fn drag_with(&mut self, button: egui::PointerButton, a: egui::Pos2, b: egui::Pos2) {
         let m = self.mods;
         self.run(vec![egui::Event::PointerMoved(a)]);
-        self.run(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: m }]);
+        self.run(vec![egui::Event::PointerButton { pos: a, button, pressed: true, modifiers: m }]);
         for i in 1..=8 {
             self.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 8.0))]);
         }
-        self.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
+        self.run(vec![egui::Event::PointerButton { pos: b, button, pressed: false, modifiers: m }]);
         self.frames(1);
     }
 
@@ -1249,6 +1255,146 @@ fn extrude_along_spline_dialog_previews_the_picked_spline() {
     h.cmd(Command::CloseDialog);
     h.frames(2);
     assert_eq!(faces(&h), before, "closing without OK takes the preview back");
+}
+
+fn camera(h: &Harness) -> (f32, f32, f32, Vec3) {
+    let c = &h.app.state.active().camera;
+    (c.yaw, c.pitch, c.distance, c.target)
+}
+
+#[test]
+fn viewport_navigation_orbits_pans_and_zooms() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center() + egui::vec2(150.0, 100.0);
+    // Alt+MMB orbits.
+    let before = camera(&h);
+    h.mods = egui::Modifiers::ALT;
+    h.drag_with(egui::PointerButton::Middle, c, c + egui::vec2(120.0, 40.0));
+    h.mods = egui::Modifiers::NONE;
+    let after = camera(&h);
+    assert!(after.0 != before.0 && after.1 != before.1, "Alt+MMB orbits: {before:?} -> {after:?}");
+    // MMB pans.
+    let before = camera(&h);
+    h.drag_with(egui::PointerButton::Middle, c, c + egui::vec2(80.0, 30.0));
+    let after = camera(&h);
+    assert_ne!(after.3, before.3, "MMB pans");
+    assert_eq!(after.0, before.0, "a pan does not orbit");
+    // The wheel zooms.
+    let before = camera(&h);
+    h.run(vec![egui::Event::PointerMoved(c)]);
+    h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: egui::vec2(0.0, 3.0), modifiers: egui::Modifiers::NONE }]);
+    h.frames(1);
+    assert_ne!(camera(&h).2, before.2, "the wheel zooms");
+    // Alt+LMB drag orbits.
+    let before = camera(&h);
+    h.mods = egui::Modifiers::ALT;
+    h.drag(c, c + egui::vec2(-100.0, 50.0));
+    h.mods = egui::Modifiers::NONE;
+    assert_ne!(camera(&h).0, before.0, "Alt+LMB drag orbits");
+}
+
+/// A button pressed with `mods` at `a`, moved to `b`, then the window loses the
+/// pointer and the focus (screen lock, Alt+Tab) and the release never arrives;
+/// the windowing layer has cleared the modifiers. Focus comes back with no
+/// button down.
+/// `apart`: the pointer leaves some frames before the focus goes.
+fn press_then_lose_focus(h: &mut Harness, button: egui::PointerButton, mods: egui::Modifiers, a: egui::Pos2, b: egui::Pos2, apart: bool) {
+    h.mods = mods;
+    h.run(vec![egui::Event::PointerMoved(a)]);
+    h.run(vec![egui::Event::PointerButton { pos: a, button, pressed: true, modifiers: mods }]);
+    for i in 1..=4 {
+        h.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 4.0))]);
+    }
+    h.mods = egui::Modifiers::NONE;
+    if apart {
+        h.run(vec![egui::Event::PointerGone]);
+        h.frames(3);
+        h.run(vec![egui::Event::WindowFocused(false)]);
+    } else {
+        h.run(vec![egui::Event::PointerGone, egui::Event::WindowFocused(false)]);
+    }
+    h.frames(3);
+    h.run(vec![egui::Event::WindowFocused(true)]);
+    h.frames(1);
+}
+
+/// After the lost release: hovering does not navigate, and Alt+MMB, MMB,
+/// Alt+LMB drag and Alt+click work as before.
+fn navigation_works_again(h: &mut Harness, c: egui::Pos2, label: &str) {
+    let before = camera(h);
+    hover_to(h, c, c + egui::vec2(60.0, 40.0));
+    assert_eq!(camera(h), before, "{label}: moving the pointer with no button down does not navigate");
+    let before = camera(h);
+    h.mods = egui::Modifiers::ALT;
+    h.drag_with(egui::PointerButton::Middle, c, c + egui::vec2(120.0, 40.0));
+    h.mods = egui::Modifiers::NONE;
+    assert_ne!(camera(h).0, before.0, "{label}: Alt+MMB orbits");
+    let before = camera(h);
+    h.drag_with(egui::PointerButton::Middle, c, c + egui::vec2(60.0, 20.0));
+    assert_ne!(camera(h).3, before.3, "{label}: MMB pans");
+    assert_eq!(camera(h).0, before.0, "{label}: MMB does not orbit");
+    let before = camera(h);
+    h.mods = egui::Modifiers::ALT;
+    h.drag(c, c + egui::vec2(-100.0, 30.0));
+    h.mods = egui::Modifiers::NONE;
+    assert_ne!(camera(h).0, before.0, "{label}: Alt+LMB drag orbits");
+    // Alt+click on the box removes it from the selection.
+    h.cmd(Command::ZoomExtentsAll);
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    h.click(p);
+    assert_eq!(h.app.state.selection.len(), 1, "{label}: a click selects the box");
+    let before = camera(h);
+    h.mods = egui::Modifiers::ALT;
+    h.click(p);
+    h.mods = egui::Modifiers::NONE;
+    assert!(h.app.state.selection.is_empty(), "{label}: Alt+click subtracts");
+    assert_eq!(camera(h), before, "{label}: Alt+click does not orbit");
+    // A plain drag is a selection drag, not navigation.
+    let before = camera(h);
+    h.drag(c + egui::vec2(-200.0, -150.0), c + egui::vec2(-180.0, -130.0));
+    assert_eq!(camera(h), before, "{label}: plain LMB drag does not navigate");
+}
+
+#[test]
+fn a_move_drag_ends_when_the_focus_is_lost() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    h.key(egui::Key::W);
+    let a = h.screen_of(pivot(&h));
+    press_then_lose_focus(&mut h, egui::PointerButton::Primary, egui::Modifiers::NONE, a, a + egui::vec2(40.0, 0.0), true);
+    assert!(h.app.transform_drag.is_none(), "the move drag ended with the focus");
+    let moved = pivot(&h);
+    assert_ne!(moved, Vec3::ZERO, "the drag before the focus loss moved the box");
+    hover_to(&mut h, a + egui::vec2(40.0, 0.0), a + egui::vec2(120.0, 30.0));
+    assert_eq!(pivot(&h), moved, "moving the pointer afterwards does not move the box");
+}
+
+#[test]
+fn navigation_recovers_after_a_release_lost_to_focus_loss() {
+    use egui::PointerButton::{Middle, Primary};
+    let cases = [
+        ("Alt+MMB orbit", Middle, egui::Modifiers::ALT),
+        ("MMB pan", Middle, egui::Modifiers::NONE),
+        ("Alt+LMB orbit", Primary, egui::Modifiers::ALT),
+        ("Alt+LMB press", Primary, egui::Modifiers::ALT),
+        ("LMB region", Primary, egui::Modifiers::NONE),
+    ];
+    let mut failures = Vec::new();
+    for ((label, button, mods), apart) in cases.into_iter().flat_map(|c| [(c, false), (c, true)]) {
+        let result = std::panic::catch_unwind(|| {
+            let mut h = Harness::new();
+            poly_box(&mut h);
+            let c = h.app.viewport_rects[h.app.state.active_viewport].center() + egui::vec2(150.0, 100.0);
+            let b = if label == "Alt+LMB press" { c + egui::vec2(1.0, 0.0) } else { c + egui::vec2(80.0, 30.0) };
+            press_then_lose_focus(&mut h, button, mods, c, b, apart);
+            navigation_works_again(&mut h, c, &format!("{label} (pointer left first: {apart})"));
+        });
+        if let Err(e) = result {
+            failures.push(e.downcast_ref::<String>().cloned().unwrap_or_else(|| label.to_string()));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 /// The Material Editor window's rect.

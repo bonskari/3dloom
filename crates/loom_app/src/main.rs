@@ -152,6 +152,10 @@ impl eframe::App for ControlledApp {
         }
         self.inner.update(ctx, frame);
     }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.inner.raw_input_hook(ctx, raw_input);
+    }
 }
 
 impl ControlledApp {
