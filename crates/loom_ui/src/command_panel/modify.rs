@@ -23,6 +23,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let entries: Vec<(String, bool, bool, Option<(loom_scene::NodeId, usize)>, &'static [&'static str], u32)> =
         node.modifiers.iter().map(|s| (s.name.clone(), s.enabled, s.enabled_in_viewport, s.instance_of, s.modifier.sub_levels(), s.sub_level)).collect();
     let base_levels = loom_commands::base_sub_levels(&node.object);
+    let base_object = node.object.clone();
     let active = node.active_entry;
     let warnings = app.state.scene.eval_mesh(id).warnings.clone();
 
@@ -190,9 +191,25 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = app.dispatch(Command::SelectionMode { mode: SelectionMode::Object });
             }
             let base = if active.is_none() { egui::RichText::new(&stack_name).strong() } else { egui::RichText::new(&stack_name) };
-            if ui.add(egui::SelectableLabel::new(active.is_none(), base)).clicked() {
+            let r = ui.add(egui::SelectableLabel::new(active.is_none(), base));
+            if r.clicked() {
                 select = Some(None);
             }
+            // Right-click on the base object: Convert To, Collapse All.
+            r.context_menu(|ui| {
+                ui.menu_button("Convert To", |ui| {
+                    for (label, cmd) in base_convert_entries(&base_object) {
+                        if ui.button(label).clicked() {
+                            let _ = app.dispatch(cmd);
+                            ui.close_menu();
+                        }
+                    }
+                });
+                if ui.add_enabled(!entries.is_empty(), egui::Button::new("Collapse All")).clicked() {
+                    let _ = app.dispatch(Command::CollapseAll);
+                    ui.close_menu();
+                }
+            });
         });
         if base_open {
             for (l, m) in &base_levels {
@@ -817,4 +834,33 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             }
         });
     });
+}
+
+/// The stack's base-object Convert To entries for this object.
+pub(crate) fn base_convert_entries(object: &loom_scene::ObjectKind) -> Vec<(&'static str, Command)> {
+    let mut v = Vec::new();
+    if object.poly().is_none() {
+        v.push(("Editable Poly", Command::ConvertToEditablePoly));
+    }
+    if object.shape().is_some() && object.spline().is_none() {
+        v.push(("Editable Spline", Command::ConvertToEditableSpline));
+    }
+    v
+}
+
+#[cfg(test)]
+mod convert_tests {
+    use super::*;
+
+    #[test]
+    fn a_primitive_converts_to_editable_poly_from_the_stack() {
+        let mut s = loom_commands::AppState::new();
+        loom_commands::execute(&mut s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
+        let id = *s.selection.iter().next().unwrap();
+        let entries = base_convert_entries(&s.scene.node(id).unwrap().object);
+        assert_eq!(entries.iter().map(|(l, _)| *l).collect::<Vec<_>>(), ["Editable Poly"]);
+        loom_commands::execute(&mut s, entries[0].1.clone()).unwrap();
+        assert!(s.scene.node(id).unwrap().object.poly().is_some());
+        assert!(base_convert_entries(&s.scene.node(id).unwrap().object).is_empty(), "already Editable Poly");
+    }
 }
