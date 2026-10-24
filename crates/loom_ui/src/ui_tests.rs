@@ -554,6 +554,38 @@ fn an_imported_skinned_character_brackets_the_posed_mesh() {
     assert!((cmax - cmin).z > (pmax - pmin).z * 1.3, "the sitting pose is lower than the standing bind pose: cage {:?}, posed {:?}", (cmin, cmax), (pmin, pmax));
 }
 
+/// Create > Systems > Biped: in the Front view the press puts the feet down
+/// and the drag up sets the height; one undo removes the whole biped.
+#[test]
+fn dragging_a_biped_sets_its_height_from_the_feet() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    h.cmd(Command::FrontView);
+    let cam = &mut h.app.state.active_mut().camera;
+    cam.target = Vec3::new(0.0, 0.0, 30.0);
+    cam.distance = 150.0;
+    h.frames(2);
+    h.app.start_create(Some(crate::CreateKind::Biped));
+    h.frames(1);
+    let (feet, top) = (Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 60.0));
+    let (a, b) = (h.screen_of(feet), h.screen_of(top));
+    assert!(a.y - b.y > 100.0, "the drag is long enough on screen: {a:?} {b:?}");
+    h.drag(a, b);
+    let root = *h.app.state.selection.iter().next().expect("the centre of mass is selected");
+    assert_eq!(h.app.state.selection.len(), 1);
+    let node = h.app.state.scene.node(root).unwrap();
+    assert_eq!(node.name, "Bip001");
+    let loom_scene::ObjectKind::Biped(s) = &node.object else { panic!("not a biped") };
+    assert!((s.height.get() - 60.0).abs() < 1.5, "height {}", s.height.get());
+    assert!(s.figure_mode);
+    let head_top = h.app.state.scene.nodes().find(|n| n.name == "Bip001 HeadNub").map(|n| h.app.state.scene.world_matrix(n.id).w_axis.truncate()).unwrap();
+    assert!(head_top.distance(top) < 2.0, "the head reaches the release point: {head_top}");
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Biped), "the Biped tool stays on");
+    assert_eq!(h.app.state.scene.len(), 35);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.len(), 0, "the drag is one undo step");
+}
+
 #[test]
 fn realistic_shading_from_the_label_menu_runs_without_a_gpu() {
     let mut h = Harness::new();

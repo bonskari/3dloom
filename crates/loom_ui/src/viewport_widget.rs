@@ -594,6 +594,16 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     }
                                     let _ = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() });
                                 }
+                            } else if app.create_kind == Some(crate::CreateKind::Biped) {
+                                // Biped: the press puts the feet down, the drag sets the height.
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                    if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
+                                        anchor = hit.point;
+                                        app.consume_snap_override();
+                                    }
+                                    let upp = units_per_pixel(app, index, rect);
+                                    app.biped_create = crate::create_tool::BipedSession::begin(app, anchor, basis.2, p, upp);
+                                }
                             } else if let Some(crate::CreateKind::Camera { target }) = app.create_kind {
                                 if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
                                     if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
@@ -664,6 +674,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                         if let Some(session) = app.camera_create.take() {
                             session.finish(app);
+                        }
+                        if let Some(session) = app.biped_create.take() {
+                            let hit = plane_hit(p, rect, view, proj, session.normal);
+                            session.finish(app, hit, p);
                         }
                         if app.alt_click.take().is_some() {
                             let picked = picks_at(app, p, rect, view, proj, view_proj);
@@ -754,6 +768,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                     }
                     if pointer.is_moving() {
+                        if let Some(mut session) = app.biped_create.take() {
+                            let hit = plane_hit(p, rect, view, proj, session.normal);
+                            session.on_drag(app, hit, p);
+                            app.biped_create = Some(session);
+                            ctx.request_repaint();
+                        }
                         if let Some(session) = app.camera_create.clone() {
                             let mut hit = plane_hit(p, rect, view, proj, session.normal);
                             if let Some(snap) = snap_at(app, index, &projection, p, None, false) {

@@ -116,6 +116,8 @@ pub enum CreateKind {
     Line,
     /// Systems > Bones: clicks lay joints, a right-click ends the chain.
     Bones,
+    /// Systems > Biped: drag from the feet to set the height.
+    Biped,
     /// Helpers > Dummy / Point: a click places one.
     Helper(HelperKind),
     /// Cameras > Target (drag camera to target) / Free (a click places one).
@@ -195,6 +197,12 @@ pub struct LoomApp {
     pub create: Option<CreateSession>,
     /// A Target camera being dragged out.
     pub camera_create: Option<create_tool::CameraSession>,
+    /// A biped being dragged out.
+    pub biped_create: Option<create_tool::BipedSession>,
+    /// Create Biped rollout: the structure the next biped gets.
+    pub biped_defaults: loom_scene::biped::BipedStructure,
+    /// The biped made last; the Create Biped rollout still edits it.
+    pub last_biped: Option<NodeId>,
     pub panel_tab: Tab,
     pub hierarchy_sub: HierarchySub,
     pub utility: Utility,
@@ -311,6 +319,9 @@ impl LoomApp {
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
             camera_create: None,
+            biped_create: None,
+            biped_defaults: loom_scene::biped::BipedStructure::new(1.0),
+            last_biped: None,
             panel_tab: Tab::Create,
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
