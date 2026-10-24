@@ -100,9 +100,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.add_enabled_ui(vertex && has, |ui| act(ui, app, "Cycle", "Select the next vertex", Command::CycleVerticesSpline));
         });
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(vertex && has, |ui| act(ui, app, "Fillet", "Round the selected vertices", Command::FilletSpline));
+            // Fillet / Chamfer: modes; drag up on a selected vertex.
+            ui.add_enabled_ui(vertex && has, |ui| pick(ui, app, "Fillet", "Fillet: drag on a selected vertex to round the selected vertices", PickMode::SplineFillet, Command::SplineFilletMode { chamfer: false }));
             setting_spin(ui, app, "Fillet", ss.fillet_amount, 0.05, 0.0);
-            ui.add_enabled_ui(vertex && has, |ui| act(ui, app, "Chamfer", "Cut the selected vertices", Command::ChamferVertexSpline));
+            ui.add_enabled_ui(vertex && has, |ui| pick(ui, app, "Chamfer", "Chamfer: drag on a selected vertex to cut the selected vertices", PickMode::SplineChamfer, Command::SplineFilletMode { chamfer: true }));
             setting_spin(ui, app, "Chamfer", ss.chamfer_amount, 0.05, 0.0);
         });
         ui.horizontal(|ui| {

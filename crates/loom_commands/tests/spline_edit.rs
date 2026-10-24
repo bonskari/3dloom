@@ -150,7 +150,7 @@ fn create_shape_from_edges_and_extrude_along_spline() {
     level(&mut s, SelectionMode::Face);
     let topf = (0..mesh.face_count() as u32).find(|f| mesh.face_normal(loom_mesh::FaceId(*f)).z > 0.9).unwrap();
     execute(&mut s, Command::SelectSub { node: None, ids: vec![topf], op: SelectOp::Replace }).unwrap();
-    execute(&mut s, Command::ExtrudeAlongSpline { spline: line.0, segments: 4, taper: 0.0, twist: 0.0, align: true }).unwrap();
+    execute(&mut s, Command::ExtrudeAlongSpline { spline: line.0, segments: 4, taper: 0.0, taper_curve: 0.0, twist: 0.0, rotation: 0.0, align: true }).unwrap();
     let m = s.scene.node(b).unwrap().object.mesh().into_owned();
     m.check_invariants().unwrap();
     assert_eq!(m.face_count(), 6 + 4 * 4, "four segments of four sides: {}", m.face_count());

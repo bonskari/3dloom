@@ -165,29 +165,51 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                     ui.label("Segments:");
                     if ui.add(egui::DragValue::new(&mut segs).range(1..=100)).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Segments".into(), value: segs as f64 });
+                        changed = true;
                     }
                     ui.end_row();
                     let mut taper = ss.extrude_taper;
                     ui.label("Taper Amount:");
-                    if ui.add(egui::DragValue::new(&mut taper).speed(0.01).range(-10.0..=1.0).fixed_decimals(2)).changed() {
+                    if ui.add(egui::DragValue::new(&mut taper).speed(0.01).range(-1.0..=10.0).fixed_decimals(2)).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Taper".into(), value: taper as f64 });
+                        changed = true;
+                    }
+                    ui.end_row();
+                    let mut curve = ss.extrude_taper_curve;
+                    ui.label("Taper Curve:");
+                    if ui.add(egui::DragValue::new(&mut curve).speed(0.01).range(-10.0..=10.0).fixed_decimals(2)).changed() {
+                        let _ = app.dispatch(Command::SplineSettings { name: "Extrude Taper Curve".into(), value: curve as f64 });
+                        changed = true;
                     }
                     ui.end_row();
                     let mut twist = ss.extrude_twist;
                     ui.label("Twist:");
                     if ui.add(egui::DragValue::new(&mut twist).speed(1.0).suffix("°")).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Twist".into(), value: twist as f64 });
+                        changed = true;
                     }
                     ui.end_row();
                     let mut align = ss.extrude_align;
                     ui.label("");
                     if ui.checkbox(&mut align, "Align to face normal").changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Align".into(), value: if align { 1.0 } else { 0.0 } });
+                        changed = true;
+                    }
+                    ui.end_row();
+                    let mut rotation = ss.extrude_rotation;
+                    ui.label("Rotation:");
+                    if ui.add_enabled(align, egui::DragValue::new(&mut rotation).speed(1.0).suffix("°")).changed() {
+                        let _ = app.dispatch(Command::SplineSettings { name: "Extrude Rotation".into(), value: rotation as f64 });
+                        changed = true;
                     }
                     ui.end_row();
                     ui.label("Spline:");
                     let picking = app.state.pick_mode == Some(loom_commands::PickMode::ExtrudeAlongSpline);
-                    if ui.selectable_label(picking, "Pick Spline").on_hover_text("Click a shape in a viewport").clicked() {
+                    let label = match ss.extrude_path.and_then(|p| app.state.scene.node(p)) {
+                        Some(n) => n.name.clone(),
+                        None => "Pick Spline".to_owned(),
+                    };
+                    if ui.selectable_label(picking, label).on_hover_text("Click a shape in a viewport").clicked() {
                         let _ = app.dispatch(Command::ExtrudeAlongSplineMode);
                     }
                     ui.end_row();
@@ -232,10 +254,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
         PolySettingsKind::MSmooth => Command::MSmooth { smoothness: st.msmooth_smoothness, separate_by_smoothing: st.msmooth_separate_by_smoothing, separate_by_materials: st.msmooth_separate_by_materials },
         PolySettingsKind::Tessellate => Command::TessellateFaces { kind: st.tess_kind, tension: st.tess_tension },
         PolySettingsKind::Relax => Command::Relax { amount: st.relax_amount, iterations: st.relax_iterations, hold_boundary: st.relax_hold_boundary, hold_outer: st.relax_hold_outer },
-        // Extrude Along Spline runs when its spline is picked; the dialog only holds the settings.
-        PolySettingsKind::ExtrudeAlongSpline => Command::ExtrudeAlongSplineMode,
+        // Extrude Along Spline previews once its spline is picked.
+        PolySettingsKind::ExtrudeAlongSpline => {
+            let ss = app.state.spline_settings;
+            Command::ExtrudeAlongSpline { spline: ss.extrude_path.map(|p| p.0).unwrap_or(0), segments: ss.extrude_segments, taper: ss.extrude_taper, taper_curve: ss.extrude_taper_curve, twist: ss.extrude_twist, rotation: ss.extrude_rotation, align: ss.extrude_align }
+        }
     };
-    let can_preview = can_preview && kind != PolySettingsKind::ExtrudeAlongSpline;
+    let can_preview = can_preview && (kind != PolySettingsKind::ExtrudeAlongSpline || app.state.spline_settings.extrude_path.is_some_and(|p| app.state.scene.node(p).is_some()));
     let restore = |app: &mut LoomApp, sel: &[(u64, SubObjectId)]| {
         app.state.sub_selection.clear();
         for (n, s) in sel {

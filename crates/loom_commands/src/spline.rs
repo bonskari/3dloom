@@ -48,6 +48,15 @@ pub struct SplineSettings {
     pub extrude_taper: f32,
     pub extrude_twist: f32,
     pub extrude_align: bool,
+    /// Extrude Along Spline Taper Curve: bulges (+) or pinches (−) the middle of the taper.
+    pub extrude_taper_curve: f32,
+    /// Extrude Along Spline Rotation (degrees about the face normal, with Align on).
+    pub extrude_rotation: f32,
+    /// The spline picked in the open Extrude Along Spline dialog (its preview path).
+    pub extrude_path: Option<NodeId>,
+    /// Refine on an existing vertex with "Do not show this message again":
+    /// Some(true) = Connect Only, Some(false) = Refine; None = ask.
+    pub refine_vertex_choice: Option<bool>,
     /// Cross Insert threshold.
     pub cross_threshold: f32,
     /// Cross Section: 0 Linear, 1 Smooth, 2 Bezier, 3 Bezier Corner.
@@ -64,8 +73,9 @@ impl Default for SplineSettings {
             weld_threshold: 0.1, fillet_amount: 0.0, chamfer_amount: 0.0, outline_amount: 0.0, outline_center: false, divide_count: 1, boolean_op: 0,
             mirror_axis: 0, mirror_copy: false, mirror_about_pivot: false, new_vertex_type: 0, refine_connect: false, refine_linear: false,
             end_point_auto_weld: true, auto_weld_threshold: 6.0, detach_same_shape: false, detach_reorient: false, detach_copy: false, attach_reorient: false,
-            explode_to_objects: false, lock_handles: false, area_selection: false, area_threshold: 1.0, segment_end: false, show_vertex_numbers: false,
+            explode_to_objects: false, lock_handles: false, area_selection: false, area_threshold: 0.1, segment_end: false, show_vertex_numbers: false,
             show_selected_segs: true, create_shape_smooth: false, extrude_segments: 6, extrude_taper: 0.0, extrude_twist: 0.0, extrude_align: true,
+            extrude_taper_curve: 0.0, extrude_rotation: 0.0, extrude_path: None, refine_vertex_choice: None,
             cross_threshold: 0.1, cross_section_kind: 2, paste_length: false, trim_extend_op: 0,
         }
     }
@@ -342,6 +352,11 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 shape.splines[si].knots[new].kind = KnotKind::Corner;
             }
             let flat = shape.knot_index(si, new);
+            if state.spline_settings.refine_connect {
+                let p = shape.splines[si].knots[new].pos;
+                refine_connect(state, id, &mut shape, p);
+            }
+            let n = state.scene.node(id).ok_or("missing node")?;
             commit_change(state, "Refine", crate::execute::replace_shape_change(n, shape))?;
             if state.selection_mode == SelectionMode::Vertex {
                 state.sub_selection.clear();
@@ -349,7 +364,45 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             Ok(json!({ "knot": flat }))
         }
+        C::SplineRefineAtVertex { node, knot, segment, t } => {
+            if !state.spline_settings.refine_connect {
+                return execute(state, C::SplineRefine { node, segment, t });
+            }
+            match state.spline_settings.refine_vertex_choice {
+                Some(true) => connect_only(state, NodeId(node), knot),
+                Some(false) => execute(state, C::SplineRefine { node, segment, t }),
+                None => {
+                    state.refine_pending = Some((NodeId(node), knot, segment, t));
+                    state.dialog = Some(crate::Dialog::RefineVertex);
+                    Ok(json!({ "dialog": "RefineVertex" }))
+                }
+            }
+        }
+        C::SplineRefineReply { connect_only: only, dont_show } => {
+            let (id, knot, segment, t) = state.refine_pending.take().ok_or("no Refine prompt is open")?;
+            if state.dialog == Some(crate::Dialog::RefineVertex) {
+                state.dialog = None;
+            }
+            if dont_show {
+                state.spline_settings.refine_vertex_choice = Some(only);
+            }
+            if only {
+                connect_only(state, id, knot)
+            } else {
+                execute(state, C::SplineRefine { node: id.0, segment, t })
+            }
+        }
+        C::SplineFilletMode { chamfer } => {
+            if selected_splines(state).is_empty() {
+                return Err("select an Editable Spline first".into());
+            }
+            let mode = if chamfer { PickMode::SplineChamfer } else { PickMode::SplineFillet };
+            state.pick_mode = if state.pick_mode == Some(mode) { None } else { Some(mode) };
+            Ok(json!({ "pick": state.pick_mode.map(|m| format!("{m:?}")) }))
+        }
         C::RefineSpline => {
+            // Each Refine session connects its own vertices.
+            state.refine_chain = None;
             state.pick_mode = if state.pick_mode == Some(PickMode::SplineRefine) { None } else { Some(PickMode::SplineRefine) };
             Ok(json!({ "pick": state.pick_mode.map(|m| format!("{m:?}")) }))
         }
@@ -614,14 +667,54 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 "Extrude Taper" => s.extrude_taper = f,
                 "Extrude Twist" => s.extrude_twist = f,
                 "Extrude Align" => s.extrude_align = b,
+                "Extrude Taper Curve" => s.extrude_taper_curve = f,
+                "Extrude Rotation" => s.extrude_rotation = f,
                 other => return Err(format!("unknown spline setting {other:?}")),
             }
             Ok(json!({}))
         }
         C::CreateShapeFromEdges { name, smooth } => create_shape_from_edges(state, name, smooth),
-        C::ExtrudeAlongSpline { spline, segments, taper, twist, align } => extrude_along_spline(state, NodeId(spline), segments, taper, twist, align),
+        C::ExtrudeAlongSpline { spline, segments, taper, taper_curve, twist, rotation, align } => extrude_along_spline(state, NodeId(spline), segments, [taper, taper_curve], twist, rotation, align),
         other => Err(format!("not an Editable Spline command: {other:?}")),
     }
+}
+
+/// Refine with Connect: `p` (object space) joins the previous connected point
+/// of this node by a segment, all of a session's points in one spline (the
+/// first point only starts it). Returns true when the shape changed.
+fn refine_connect(state: &mut AppState, id: NodeId, shape: &mut Shape, p: Vec3) -> bool {
+    let knot = if state.spline_settings.refine_linear { Knot::corner(p) } else { Knot::smooth(p) };
+    let (next, changed) = match state.refine_chain.filter(|(n, _, _)| *n == id) {
+        // An undo can take the chain's end away: then a new chain starts here.
+        Some((_, Some(ci), last)) => match shape.splines.get_mut(ci).filter(|c| !c.closed && c.knots.last().is_some_and(|k| k.pos.distance(last) < 1e-4)) {
+            Some(c) => {
+                c.knots.push(knot);
+                (Some(ci), true)
+            }
+            None => (None, false),
+        },
+        Some((_, None, last)) => {
+            let first = if state.spline_settings.refine_linear { Knot::corner(last) } else { Knot::smooth(last) };
+            shape.splines.push(Spline::new(vec![first, knot], false));
+            (Some(shape.splines.len() - 1), true)
+        }
+        None => (None, false),
+    };
+    state.refine_chain = Some((id, next, p));
+    changed
+}
+
+/// Connect Only: the existing knot joins the Refine connection without a new vertex.
+fn connect_only(state: &mut AppState, id: NodeId, knot: u32) -> Result<Value, String> {
+    let n = state.scene.node(id).ok_or("missing node")?;
+    let mut shape = n.edit_shape().ok_or("not a shape")?;
+    let (si, k) = shape.knot_at(knot as usize).ok_or("no such vertex")?;
+    let p = shape.splines[si].knots[k].pos;
+    if refine_connect(state, id, &mut shape, p) {
+        let n = state.scene.node(id).ok_or("missing node")?;
+        commit_change(state, "Refine", crate::execute::replace_shape_change(n, shape))?;
+    }
+    Ok(json!({ "knot": knot }))
 }
 
 fn for_selected_splines(state: &mut AppState, label: &str, f: impl Fn(&mut Spline)) -> Result<Value, String> {
@@ -754,7 +847,8 @@ fn hidden_change(node: &Node, hidden: BTreeSet<usize>) -> Change {
     }
 }
 
-/// Line End: a line with fewer than two knots is dropped.
+/// Line End: a line with fewer than two knots is dropped; a finished line's
+/// pivot moves to the centre of its bounds (the knots stay where they were drawn).
 pub fn line_end(state: &mut AppState, id: NodeId) -> Result<Value, String> {
     let node = state.scene.node(id).ok_or("missing node")?;
     let knots = node.object.spline().map(|s| s.shape.knot_count()).unwrap_or(0);
@@ -762,6 +856,24 @@ pub fn line_end(state: &mut AppState, id: NodeId) -> Result<Value, String> {
         commit_change(state, "Line", Change::RemoveNode(id))?;
         state.selection.remove(&id);
         return Ok(json!({ "removed": true }));
+    }
+    if let Some(so) = node.object.spline() {
+        let (lo, hi) = so.shape.aabb();
+        let c = (lo + hi) * 0.5;
+        if c.length() > 1e-6 {
+            let mut shape = so.shape.clone();
+            for s in &mut shape.splines {
+                s.translate(-c);
+            }
+            let before = node.transform.clone();
+            let mut after = before.clone();
+            after.position.set(before.position.get() + before.matrix().transform_vector3(node.object_offset.matrix().transform_vector3(c)));
+            let changes = vec![
+                Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(node.object.with_shape(shape)) },
+                Change::SetTransform { id, before, after },
+            ];
+            commit_change(state, "Line", Change::Group(changes))?;
+        }
     }
     Ok(json!({ "removed": false, "knots": knots }))
 }
@@ -980,9 +1092,11 @@ fn create_shape_from_edges(state: &mut AppState, name: Option<String>, smooth: b
 }
 
 /// Extrude Along Spline: the selected polygons sweep along the picked
-/// shape's first spline (`segments` steps, taper, twist; `align` turns the
-/// path so it starts along the face normal).
-fn extrude_along_spline(state: &mut AppState, spline: NodeId, segments: u32, taper: f32, twist: f32, align: bool) -> Result<Value, String> {
+/// shape's first spline (`segments` steps; `taper` = [amount, curve] scales
+/// by `1 + amount·t + curve·t·(1−t)` like the Taper modifier; twist; `align`
+/// turns the path so it starts along the face normal, then `rotation`
+/// degrees about it).
+fn extrude_along_spline(state: &mut AppState, spline: NodeId, segments: u32, taper: [f32; 2], twist: f32, rotation: f32, align: bool) -> Result<Value, String> {
     let snode = state.scene.node(spline).ok_or("missing spline node")?;
     let shape = snode.edit_shape().ok_or("the picked object is not a shape")?;
     let path = shape.splines.first().ok_or("the shape has no spline")?;
@@ -1021,11 +1135,11 @@ fn extrude_along_spline(state: &mut AppState, spline: NodeId, segments: u32, tap
             let pk = inv.transform_point3(pts[k]);
             let t0 = inv.transform_vector3(tangents[0]).normalize_or_zero();
             let tk = inv.transform_vector3(tangents[k]).normalize_or_zero();
-            let base_rot = if align { Quat::from_rotation_arc(t0, n) } else { Quat::IDENTITY };
+            let base_rot = if align { Quat::from_axis_angle(n, rotation.to_radians()) * Quat::from_rotation_arc(t0, n) } else { Quat::IDENTITY };
             let turn = Quat::from_rotation_arc(t0, tk);
             let axis = base_rot * tk;
             let spin = Quat::from_axis_angle(axis.normalize_or_zero(), (twist * t).to_radians());
-            let scale = 1.0 - taper * t;
+            let scale = 1.0 + taper[0] * t + taper[1] * t * (1.0 - t);
             let offset = base_rot * (pk - start);
             c + offset + spin * (base_rot * (turn * (base_rot.inverse() * ((p - c) * scale))))
         };

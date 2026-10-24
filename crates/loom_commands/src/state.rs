@@ -124,6 +124,9 @@ pub enum PickMode {
     SplineRefine,
     /// Editable Spline > Insert: click a segment, the new knot follows the mouse.
     SplineInsert,
+    /// Editable Spline > Fillet / Chamfer: drag on a selected vertex.
+    SplineFillet,
+    SplineChamfer,
     /// Editable Poly > Extrude Along Spline: click a shape.
     ExtrudeAlongSpline,
     HideByHit,
@@ -1242,6 +1245,13 @@ pub struct AppState {
     pub trajectory_selected: BTreeSet<i32>,
     /// Editable Spline > Tangent Copy: the copied handle.
     pub tangent_clipboard: Option<Vec3>,
+    /// Refine with Connect: the node, its connecting spline once it exists, and
+    /// the last connected point (object space).
+    pub refine_chain: Option<(NodeId, Option<usize>, Vec3)>,
+    /// The Refine prompt's click: node, flat knot, flat segment and parameter.
+    pub refine_pending: Option<(NodeId, u32, u32, f32)>,
+    /// The "Close spline?" prompt's click: line node, point, Initial Type smooth.
+    pub line_close_pending: Option<(NodeId, [f32; 3], bool)>,
     /// What the last File > Import left out (the Import Summary window lists it; empty = nothing to show).
     pub import_report: Vec<String>,
     /// Soft Selection > Edit Soft Selection: viewport drags set Falloff / Pinch / Bubble.
@@ -1431,6 +1441,9 @@ impl AppState {
             trajectory_keys: false,
             trajectory_selected: BTreeSet::new(),
             tangent_clipboard: None,
+            refine_chain: None,
+            refine_pending: None,
+            line_close_pending: None,
             import_report: Vec::new(),
             soft_edit: false,
             track_view: Default::default(),

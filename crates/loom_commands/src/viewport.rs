@@ -302,6 +302,10 @@ pub enum Dialog {
     SaveFileAsCopy,
     /// "Save changes?" before the pending action discards the scene.
     SaveChanges(PendingFileAction),
+    /// Line tool: "Close spline?" when the first vertex is clicked.
+    CloseSpline,
+    /// Editable Spline > Refine with Connect on an existing vertex: Refine / Connect Only.
+    RefineVertex,
     /// File > Import (OBJ).
     ImportFile,
     SaveAnimation,
