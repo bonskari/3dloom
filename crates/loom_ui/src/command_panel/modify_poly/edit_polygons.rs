@@ -23,13 +23,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             let on = app.state.poly_drag == Some(PolyDrag::Extrude);
-            mode_with_settings(ui, app, "Extrude", "Extrude Mode (Shift+E): drag the selected polygons", on, Command::ExtrudeMode, Command::ExtrudeSettings);
+            mode_with_settings(ui, app, "Extrude", "Extrude Mode: drag the selected polygons", on, Command::ExtrudeMode, Command::ExtrudeSettings);
             let on = app.state.poly_drag == Some(PolyDrag::Outline);
             mode_with_settings(ui, app, "Outline", "Outline Mode: drag to grow or shrink the outline", on, Command::OutlineMode, Command::OutlineSettings);
         });
         ui.horizontal(|ui| {
             let on = app.state.poly_drag == Some(PolyDrag::Bevel);
-            mode_with_settings(ui, app, "Bevel", "Bevel Mode (Shift+Ctrl+B): drag up for height, sideways for outline", on, Command::BevelMode, Command::BevelSettings);
+            mode_with_settings(ui, app, "Bevel", "Bevel Mode: drag up for height, sideways for outline", on, Command::BevelMode, Command::BevelSettings);
             let on = app.state.poly_drag == Some(PolyDrag::Inset);
             mode_with_settings(ui, app, "Inset", "Inset Mode: drag to inset", on, Command::InsetMode, Command::InsetSettings);
         });

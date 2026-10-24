@@ -1810,62 +1810,54 @@ impl AppState {
         format!("{name}{star} - 3dLoom")
     }
 
+    /// The shortcut groups live in this state, highest priority first; Main UI is last.
+    /// With Keyboard Shortcut Override off only Main UI is live.
+    pub fn active_keymaps(&self) -> Vec<&'static crate::keymap::Keymap> {
+        use crate::keymap::cached;
+        let mut maps = Vec::new();
+        if self.keyboard_override {
+            if crate::normals::entry(self).is_some_and(|(id, i)| self.scene.node(id).is_some_and(|n| n.active_entry == Some(i) && n.modifiers[i].sub_level == 1)) {
+                maps.push(cached::edit_normals());
+            }
+            // A focused Track View window takes its own group first.
+            if self.track_view.open && self.track_view.focused {
+                maps.push(cached::track_view());
+            }
+            if self.unwrap_active() {
+                maps.push(cached::unwrap_uvw());
+            }
+            if self.skin_active() {
+                maps.push(cached::skin());
+            }
+            if self.spline_selected() {
+                maps.push(cached::editable_spline());
+            }
+            if self.ffd_active().is_some() {
+                maps.push(cached::ffd());
+            }
+            if self.edit_poly_active() {
+                maps.push(cached::edit_poly());
+            }
+            if self.poly_selected() {
+                maps.push(cached::editable_poly());
+            }
+        }
+        maps.push(cached::main_ui());
+        maps
+    }
+
     pub fn hotkey(&self, chord: crate::keymap::Chord) -> Option<&'static str> {
-        static MAIN: std::sync::OnceLock<crate::keymap::Keymap> = std::sync::OnceLock::new();
-        static POLY: std::sync::OnceLock<crate::keymap::Keymap> = std::sync::OnceLock::new();
-        static FFD: std::sync::OnceLock<crate::keymap::Keymap> = std::sync::OnceLock::new();
-        static SPLINE: std::sync::OnceLock<crate::keymap::Keymap> = std::sync::OnceLock::new();
-        static UNWRAP: std::sync::OnceLock<crate::keymap::Keymap> = std::sync::OnceLock::new();
-        static EDIT_NORMALS: std::sync::OnceLock<crate::keymap::Keymap> = std::sync::OnceLock::new();
-        if self.keyboard_override && crate::normals::entry(self).is_some_and(|(id, i)| self.scene.node(id).is_some_and(|n| n.active_entry == Some(i) && n.modifiers[i].sub_level == 1)) {
-            if let Some(a) = EDIT_NORMALS.get_or_init(crate::keymap::Keymap::edit_normals).lookup(chord) {
-                return Some(a);
-            }
-        }
-        // A focused Track View window takes its own group first (Keyboard Shortcut Override).
-        static TRACK_VIEW: std::sync::OnceLock<crate::keymap::Keymap> = std::sync::OnceLock::new();
-        if self.keyboard_override && self.track_view.open && self.track_view.focused {
-            if let Some(a) = TRACK_VIEW.get_or_init(crate::keymap::Keymap::track_view).lookup(chord) {
-                return Some(a);
-            }
-        }
-        if self.keyboard_override && self.unwrap_active() {
-            if let Some(a) = UNWRAP.get_or_init(crate::keymap::Keymap::unwrap_uvw).lookup(chord) {
-                return Some(a);
-            }
-        }
-        static SKIN: std::sync::OnceLock<crate::keymap::Keymap> = std::sync::OnceLock::new();
-        if self.keyboard_override && self.skin_active() {
-            if let Some(a) = SKIN.get_or_init(crate::keymap::Keymap::skin).lookup(chord) {
-                return Some(a);
-            }
-        }
-        if self.keyboard_override && self.spline_selected() {
-            if let Some(a) = SPLINE.get_or_init(crate::keymap::Keymap::editable_spline).lookup(chord) {
-                return Some(a);
-            }
-        }
-        if self.keyboard_override && self.ffd_active().is_some() {
-            if let Some(a) = FFD.get_or_init(crate::keymap::Keymap::ffd).lookup(chord) {
-                return Some(a);
-            }
-        }
-        static EDIT_POLY: std::sync::OnceLock<crate::keymap::Keymap> = std::sync::OnceLock::new();
-        if self.keyboard_override && self.edit_poly_active() {
-            if let Some(a) = EDIT_POLY.get_or_init(crate::keymap::Keymap::edit_poly).lookup(chord) {
-                return Some(a);
-            }
-        }
-        if self.keyboard_override && self.poly_selected() {
-            if let Some(a) = POLY.get_or_init(crate::keymap::Keymap::editable_poly).lookup(chord) {
-                return Some(a);
-            }
-        }
-        let action = MAIN.get_or_init(crate::keymap::Keymap::main_ui).lookup(chord);
+        let action = self.active_keymaps().into_iter().find_map(|km| km.lookup(chord));
         if action == Some("Selection Lock Toggle") && !self.prefs.space_selection_lock {
             return None;
         }
         action
+    }
+
+    /// The chord that runs `action` here, as a label ("W", "Ctrl+Z"), from the live
+    /// groups in priority order. `None` when no live group binds it.
+    pub fn shortcut_label(&self, action: &str) -> Option<String> {
+        self.active_keymaps().into_iter().find_map(|km| km.chord_for(action)).map(|c| c.label())
     }
 
     /// World-space pivot of the current selection (centre of bounds).

@@ -2,6 +2,7 @@
 //! Items whose command lands in a later plan carry that plan and are not
 //! drawn until it ships (a dead button would be a placeholder).
 
+use crate::shortcuts::{menu_widget, tip, HoverShortcut};
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{CenterMode, Command, CoordSystem, SelectionFilter, SelectionRegion, Tool};
@@ -58,17 +59,14 @@ pub const ITEMS: &[Item] = &[
 ];
 
 fn tool_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, action: &str) {
-    let chord = app.keymap.chord_for(action).map(|c| c.label()).unwrap_or_default();
-    let tip = if chord.is_empty() { action.to_owned() } else { format!("{action} ({chord})") };
-    if ui.selectable_label(on, label).on_hover_text(tip).clicked() {
+    if ui.selectable_label(on, label).on_hover_name(&app.state, action).clicked() {
         app.dispatch_named(action);
     }
 }
 
 /// Snap toggles: right-click opens Grid and Snap Settings.
 fn snap_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, action: &str) {
-    let chord = app.keymap.chord_for(action).map(|c| c.label()).unwrap_or_default();
-    let r = ui.selectable_label(on, label).on_hover_text(format!("{action} ({chord}); right-click: Grid and Snap Settings"));
+    let r = ui.selectable_label(on, label).on_hover_text(format!("{}; right-click: Grid and Snap Settings", tip(&app.state, action, action)));
     if r.clicked() {
         app.dispatch_named(action);
     }
@@ -79,8 +77,7 @@ fn snap_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, acti
 
 /// Transform buttons: click selects the tool, right-click opens Transform Type-In.
 fn transform_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, tool: Tool, action: &str) {
-    let chord = app.keymap.chord_for(action).map(|c| c.label()).unwrap_or_default();
-    let r = ui.selectable_label(app.state.active_tool == tool, label).on_hover_text(format!("{action} ({chord}); right-click: Transform Type-In"));
+    let r = ui.selectable_label(app.state.active_tool == tool, label).on_hover_text(format!("{}; right-click: Transform Type-In", tip(&app.state, action, action)));
     if r.clicked() {
         app.dispatch_named(action);
     }
@@ -102,19 +99,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             for it in ITEMS.iter().filter(|i| i.since == Plan::Now) {
                 match it.name {
                     "Undo" => {
-                        if ui.add_enabled(app.state.undo.can_undo(), egui::Button::new("↶")).on_hover_text("Undo Scene Operation (Ctrl+Z)").clicked() {
+                        if ui.add_enabled(app.state.undo.can_undo(), egui::Button::new("↶")).on_hover_name(&app.state, "Undo Scene Operation").clicked() {
                             app.dispatch_named("Undo Scene Operation");
                         }
                     }
                     "Redo" => {
-                        if ui.add_enabled(app.state.undo.can_redo(), egui::Button::new("↷")).on_hover_text("Redo Scene Operation (Ctrl+Y)").clicked() {
+                        if ui.add_enabled(app.state.undo.can_redo(), egui::Button::new("↷")).on_hover_name(&app.state, "Redo Scene Operation").clicked() {
                             app.dispatch_named("Redo Scene Operation");
                         }
                         ui.separator();
                     }
                     "Select and Link" => tool_button(ui, app, "Link", app.state.pick_mode == Some(loom_commands::PickMode::Link), "Select and Link"),
                     "Unlink Selection" => {
-                        if ui.button("Unlink").on_hover_text("Unlink Selection").clicked() {
+                        if ui.button("Unlink").on_hover_name(&app.state, "Unlink Selection").clicked() {
                             let _ = app.dispatch(Command::UnlinkSelection);
                         }
                         ui.separator();
@@ -131,7 +128,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                     "Select Object" => tool_button(ui, app, "Select", app.state.active_tool == Tool::Select && app.state.pick_mode.is_none(), "Select Object"),
                     "Select From Scene" => {
-                        if ui.button("By Name").on_hover_text("Select From Scene (H)").clicked() {
+                        if ui.button("By Name").on_hover_cmd(&app.state, "Select From Scene", "Select By Name").clicked() {
                             let _ = app.dispatch(Command::SelectByName);
                         }
                     }
@@ -148,7 +145,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                     "Window/Crossing Selection Toggle" => {
                         let w = app.state.window_selection;
-                        if ui.selectable_label(w, if w { "Window" } else { "Crossing" }).on_hover_text("Window/Crossing Selection Toggle").clicked() {
+                        if ui.selectable_label(w, if w { "Window" } else { "Crossing" }).on_hover_name(&app.state, "Window/Crossing Selection Toggle").clicked() {
                             let _ = app.dispatch(Command::WindowCrossingSelectionToggle);
                         }
                         ui.separator();
@@ -186,7 +183,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     "Snaps Toggle" => {
                         // Flyout: 2D / 2.5D / 3D (Alt+S cycles); right-click opens Grid and Snap Settings.
                         let mode = app.state.snaps.mode;
-                        let r = ui.selectable_label(app.state.snaps_on, mode.label()).on_hover_text("Snaps Toggle (S); right-click: Grid and Snap Settings");
+                        let r = ui.selectable_label(app.state.snaps_on, mode.label()).on_hover_text(format!("{}; right-click: Grid and Snap Settings", tip(&app.state, "Snaps Toggle", "Snaps Toggle")));
                         if r.clicked() {
                             app.dispatch_named("Snaps Toggle");
                         }
@@ -208,23 +205,23 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         ui.separator();
                     }
                     "Manage Layers" => {
-                        if ui.selectable_label(app.state.dialog == Some(loom_commands::Dialog::LayerManager), "Layers").on_hover_text("Manage Layers (Layer Manager)").clicked() {
+                        if ui.selectable_label(app.state.dialog == Some(loom_commands::Dialog::LayerManager), "Layers").on_hover_cmd(&app.state, "Manage Layers (Layer Manager)", Command::LayerManager.name()).clicked() {
                             let _ = app.dispatch(Command::LayerManager);
                         }
                     }
                     "Graphite Modeling Tools" => {
-                        if ui.selectable_label(app.state.show_ribbon, "Graphite").on_hover_text("Graphite Modeling Tools (show / hide the ribbon)").clicked() {
+                        if ui.selectable_label(app.state.show_ribbon, "Graphite").on_hover_cmd(&app.state, "Graphite Modeling Tools (show / hide the ribbon)", Command::ShowRibbonToggle.name()).clicked() {
                             let _ = app.dispatch(Command::ShowRibbonToggle);
                         }
                     }
                     "Mirror" => {
-                        if ui.button("Mirror").on_hover_text("Mirror").clicked() {
+                        if ui.button("Mirror").on_hover_name(&app.state, "Mirror").clicked() {
                             let _ = app.dispatch(Command::Mirror);
                         }
                     }
                     "Align" => {
                         // Align flyout: Align, Quick Align, Normal Align, Align Camera, Align to View.
-                        let r = ui.button("Align").on_hover_text("Align (Alt+A); right-click: Align flyout");
+                        let r = ui.button("Align").on_hover_text(format!("{}; right-click: Align flyout", tip(&app.state, "Align", "Align")));
                         if r.clicked() {
                             app.dispatch_named("Align");
                         }
@@ -235,8 +232,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
                             ui.set_min_width(140.0);
                             for (l, a) in [("Align", "Align"), ("Quick Align", "Quick Align"), ("Normal Align", "Normal Align "), ("Align Camera", "Align Camera"), ("Align to View", "Align to View Dialog")] {
-                                let chord = app.keymap.chord_for(a).map(|c| c.label()).unwrap_or_default();
-                                if ui.button(if chord.is_empty() { l.to_owned() } else { format!("{l}    {chord}") }).clicked() {
+                                if ui.add(menu_widget(&app.state, l, a)).on_hover_name(&app.state, a).clicked() {
                                     app.dispatch_named(a);
                                 }
                             }
@@ -244,7 +240,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         ui.separator();
                     }
                     "Edit Named Selection Sets" => {
-                        if ui.button("{}").on_hover_text("Edit Named Selection Sets").clicked() {
+                        if ui.button("{}").on_hover_name(&app.state, "Edit Named Selection Sets").clicked() {
                             let _ = app.dispatch(Command::EditNamedSelectionSets);
                         }
                     }
