@@ -589,6 +589,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 let mut session = session.clone();
                                 if session.on_click(app, p) {
                                     app.create = None;
+                                    app.creation_finished();
                                 } else {
                                     app.create = Some(session);
                                 }
@@ -607,7 +608,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         anchor = hit.point;
                                         app.consume_snap_override();
                                     }
-                                    let _ = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() });
+                                    if app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() }).is_ok() {
+                                        app.creation_finished();
+                                    }
                                 }
                             } else if app.create_kind == Some(crate::CreateKind::Biped) {
                                 // Biped: the press puts the feet down, the drag sets the height.
@@ -629,6 +632,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         app.camera_create = crate::create_tool::CameraSession::begin(app, anchor, basis.2);
                                     } else {
                                         crate::create_tool::CameraSession::place_free(app, anchor, basis.2);
+                                        app.creation_finished();
                                     }
                                 }
                             } else if app.create_kind == Some(crate::CreateKind::Line) {
@@ -690,10 +694,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                         if let Some(session) = app.camera_create.take() {
                             session.finish(app);
+                            app.creation_finished();
                         }
                         if let Some(session) = app.biped_create.take() {
                             let hit = plane_hit(p, rect, view, proj, session.normal);
                             session.finish(app, hit, p);
+                            app.creation_finished();
                         }
                         if app.alt_click.take().is_some() {
                             // Alt+click removes: Skin vertices at Edit Envelopes, else the picked items.
@@ -703,7 +709,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         } else if app.transform_drag.is_none() {
                             if let Some(mut session) = app.create.take() {
-                                if !session.on_release(app, p) {
+                                if session.on_release(app, p) {
+                                    app.creation_finished();
+                                } else {
                                     app.create = Some(session);
                                 }
                             } else if let Some(start) = app.drag_select_start.filter(|_| app.state.nav_mode == loom_input::NavMode::ZoomRegion) {
@@ -827,10 +835,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.create_kind = None;
                         } else if let Some(line) = app.line.take() {
                             line.finish(app);
+                            app.creation_finished();
                         } else if !app.bone_points.is_empty() {
                             let points: Vec<[f32; 3]> = app.bone_points.drain(..).map(|p| p.to_array()).collect();
-                            if points.len() >= 2 {
-                                let _ = app.dispatch(Command::CreateBoneChain { points, name: None });
+                            if points.len() >= 2 && app.dispatch(Command::CreateBoneChain { points, name: None }).is_ok() {
+                                app.creation_finished();
                             }
                         } else if loom_commands::skin::painting(&app.state) {
                             // Right-click ends Paint Weights.

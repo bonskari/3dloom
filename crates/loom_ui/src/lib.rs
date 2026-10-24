@@ -476,6 +476,20 @@ impl LoomApp {
         self.create_kind = kind;
     }
 
+    /// The create tool finished an object. Keep Creating off: the create mode
+    /// ends, the Select tool comes on and the Modify panel shows the new
+    /// object; on, the tool stays for the next one.
+    pub fn creation_finished(&mut self) {
+        if self.state.prefs.keep_creating || self.create_kind.is_none() {
+            return;
+        }
+        self.create_kind = None;
+        let _ = self.dispatch(Command::SelectObject);
+        if !self.state.selection.is_empty() {
+            self.panel_tab = Tab::Modify;
+        }
+    }
+
     /// Picking a transform tool (Select, Move, Rotate, Scale) ends the create
     /// mode, cancelling an object still being dragged out.
     fn end_create_mode_for(&mut self, command: &str) {
@@ -1013,6 +1027,7 @@ impl LoomApp {
         if let Some(line) = self.line.take() {
             if line.is_closed(self) {
                 line.finish(self);
+                self.creation_finished();
             } else {
                 self.line = Some(line);
             }
