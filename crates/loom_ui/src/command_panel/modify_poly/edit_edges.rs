@@ -2,7 +2,7 @@
 //! Split, Extrude, Weld, Chamfer, Target Weld, Bridge, Connect, Create Shape
 //! From Selection (phase 3), Edit Tri / Turn.
 
-use super::{action, mode_with_settings, pick_on};
+use super::{action, action_keyed, mode_with_settings, pick_on};
 use crate::command_panel::rollout;
 use crate::LoomApp;
 use eframe::egui;
@@ -29,7 +29,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             let on = app.state.poly_drag == Some(PolyDrag::Extrude);
-            mode_with_settings(ui, app, "Extrude", "Extrude Mode (Shift+E): drag a selected edge", on, Command::ExtrudeMode, Command::ExtrudeSettings);
+            mode_with_settings(ui, app, "Extrude", "Extrude Mode: drag a selected edge", on, Command::ExtrudeMode, Command::ExtrudeSettings);
             ui.add_enabled_ui(has, |ui| action(ui, app, "Weld", "Weld the selected edges' vertices within the threshold", Command::Weld { threshold: ps.weld_threshold }));
             if ui.small_button("□").on_hover_text("Weld Settings").clicked() {
                 let _ = app.dispatch(Command::WeldSettings);
@@ -37,9 +37,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             let on = app.state.poly_drag == Some(PolyDrag::Chamfer);
-            mode_with_settings(ui, app, "Chamfer", "Chamfer Mode (Shift+Ctrl+C): drag a selected edge", on, Command::ChamferMode, Command::ChamferSettings);
+            mode_with_settings(ui, app, "Chamfer", "Chamfer Mode: drag a selected edge", on, Command::ChamferMode, Command::ChamferSettings);
             let on = pick_on(app, &[PickMode::TargetWeldSource, PickMode::TargetWeldTarget]);
-            if ui.selectable_label(on, "Target Weld").on_hover_text("Target Weld Mode (Shift+Ctrl+W)").clicked() {
+            if ui.selectable_label(on, "Target Weld").on_hover_text(crate::shortcuts::name_tip(&app.state, "Target Weld Mode")).clicked() {
                 let _ = app.dispatch(Command::TargetWeldMode);
             }
         });
@@ -48,7 +48,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.small_button("□").on_hover_text("Bridge Settings").clicked() {
                 let _ = app.dispatch(Command::BridgeSettings);
             }
-            ui.add_enabled_ui(has, |ui| action(ui, app, "Connect", "Connect (Shift+Ctrl+E): new edges across the selected edges", Command::ConnectEdges { segments: ps.connect_segments, pinch: ps.connect_pinch, slide: ps.connect_slide }));
+            ui.add_enabled_ui(has, |ui| action_keyed(ui, app, "Connect", "Connect: new edges across the selected edges", "Connect", Command::ConnectEdges { segments: ps.connect_segments, pinch: ps.connect_pinch, slide: ps.connect_slide }));
             if ui.small_button("□").on_hover_text("Connect Edge Settings").clicked() {
                 let _ = app.dispatch(Command::ConnectEdgeSettings);
             }

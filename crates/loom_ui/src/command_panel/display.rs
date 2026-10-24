@@ -2,6 +2,7 @@
 //! Properties rollouts.
 
 use super::rollout;
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{Command, PickMode};
@@ -10,7 +11,7 @@ use loom_scene::DisplayProps;
 fn wide(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, enabled: bool, cmd: Command) {
     let w = ui.available_width();
     ui.add_enabled_ui(enabled, |ui| {
-        if ui.add_sized([w, 22.0], egui::Button::new(label)).clicked() {
+        if ui.add_sized([w, 22.0], egui::Button::new(label)).with_shortcut(&app.state, cmd.name()).clicked() {
             let _ = app.dispatch(cmd);
         }
     });
@@ -19,7 +20,7 @@ fn wide(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, enabled: bool, cmd: C
 fn mode_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, mode: PickMode, cmd: Command) {
     let w = ui.available_width();
     let on = app.state.pick_mode == Some(mode);
-    if ui.add_sized([w, 22.0], egui::SelectableLabel::new(on, label)).clicked() {
+    if ui.add_sized([w, 22.0], egui::SelectableLabel::new(on, label)).with_shortcut(&app.state, cmd.name()).clicked() {
         let _ = app.dispatch(if on { Command::ExitPickMode } else { cmd });
     }
 }
@@ -36,7 +37,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ("Helpers", c.helpers, Command::HideHelpersToggle),
         ] {
             let mut v = on;
-            if ui.checkbox(&mut v, label).changed() {
+            if ui.checkbox(&mut v, label).with_shortcut(&app.state, cmd.name()).changed() {
                 let _ = app.dispatch(cmd);
             }
         }

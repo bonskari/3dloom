@@ -121,7 +121,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, entries: &[Men
             }
             Action::Command(cmd) => {
                 let label = if e.checked { format!("✔ {}", e.label) } else { format!("    {}", e.label) };
-                if ui.button(label).clicked() {
+                if crate::shortcuts::menu_button(ui, &app.state, &label, crate::shortcuts::action_of(cmd)).clicked() {
                     if app.state.active_viewport != index {
                         let _ = app.dispatch(Command::ActiveViewport { index: index as u32 });
                     }

@@ -2,6 +2,7 @@
 //! toolbars, the controller hierarchy, the Curve Editor key window and the
 //! Dope Sheet. The window only draws and turns mouse input into commands.
 
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::track_view::{highlighted_tracks, track_id, tree, DopeMode, KeyArg, TvItemKind, TvMode, TvTool};
@@ -70,7 +71,7 @@ fn run(app: &mut LoomApp, cmd: Command) {
 }
 
 fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, cmd: Command) {
-    if ui.button(label).clicked() {
+    if crate::shortcuts::menu_button(ui, &app.state, label, cmd.name()).clicked() {
         run(app, cmd);
         ui.close_menu();
     }
@@ -78,7 +79,7 @@ fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, cmd: Command) {
 
 fn check(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, cmd: Command) {
     let mut v = on;
-    if ui.checkbox(&mut v, label).clicked() {
+    if ui.checkbox(&mut v, label).with_shortcut(&app.state, cmd.name()).clicked() {
         run(app, cmd);
         ui.close_menu();
     }
@@ -258,7 +259,7 @@ fn menus(ui: &mut egui::Ui, app: &mut LoomApp) {
 }
 
 fn tool_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, tip: &str, on: bool, cmd: Command) {
-    if ui.add(egui::Button::new(label).selected(on).min_size(egui::vec2(26.0, 22.0))).on_hover_text(tip).clicked() {
+    if ui.add(egui::Button::new(label).selected(on).min_size(egui::vec2(26.0, 22.0))).on_hover_cmd(&app.state, tip, cmd.name()).clicked() {
         run(app, cmd);
     }
 }
@@ -266,14 +267,14 @@ fn tool_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, tip: &str, on:
 fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
     let tv = app.state.track_view.clone();
     ui.horizontal_wrapped(|ui| {
-        tool_button(ui, app, "Flt", "Filters (Q)", false, Command::Filters);
+        tool_button(ui, app, "Flt", "Filters", false, Command::Filters);
         ui.separator();
         if tv.mode == TvMode::DopeSheet {
             tool_button(ui, app, "Keys", "Edit Keys", tv.dope == DopeMode::EditKeys, Command::EditKeysMode);
             tool_button(ui, app, "Rng", "Edit Ranges", tv.dope == DopeMode::EditRanges, Command::EditRangesMode);
             ui.separator();
         }
-        tool_button(ui, app, "Mov", "Move Keys (M)", tv.tool == TvTool::Move, Command::MoveKeys);
+        tool_button(ui, app, "Mov", "Move Keys", tv.tool == TvTool::Move, Command::MoveKeys);
         tool_button(ui, app, "MvH", "Move Keys Horizontal", tv.tool == TvTool::MoveHorizontal, Command::MoveKeysHorizontal);
         if tv.mode == TvMode::CurveEditor {
             tool_button(ui, app, "MvV", "Move Keys Vertical", tv.tool == TvTool::MoveVertical, Command::MoveKeysVertical);
@@ -283,7 +284,7 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         if tv.mode == TvMode::CurveEditor {
             tool_button(ui, app, "ScV", "Scale Values", tv.tool == TvTool::ScaleValues, Command::ScaleValues);
         }
-        tool_button(ui, app, "Add", "Add Keys (A)", tv.tool == TvTool::AddKeys, Command::AddKeys);
+        tool_button(ui, app, "Add", "Add Keys", tv.tool == TvTool::AddKeys, Command::AddKeys);
         if tv.mode == TvMode::CurveEditor {
             tool_button(ui, app, "Drw", "Draw Curves", tv.tool == TvTool::DrawCurves, Command::DrawCurves);
             tool_button(ui, app, "Rgn", "Region Tool", tv.tool == TvTool::Region, Command::RegionKeysTool);
@@ -315,24 +316,24 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
             tool_button(ui, app, "PsT", "Paste Time", false, Command::PasteTime);
         }
         ui.separator();
-        tool_button(ui, app, "Snp", "Snap Frames (S)", tv.snap_frames, Command::SnapFrames);
-        tool_button(ui, app, "LkS", "Lock Selection (Space)", tv.lock_selection, Command::LockSelection);
+        tool_button(ui, app, "Snp", "Snap Frames", tv.snap_frames, Command::SnapFrames);
+        tool_button(ui, app, "LkS", "Lock Selection", tv.lock_selection, Command::LockSelection);
         tool_button(ui, app, "ORT", "Parameter Curve Out-of-Range Types", false, Command::ParameterCurveOutOfRangeTypes);
         if tv.mode == TvMode::CurveEditor {
-            tool_button(ui, app, "LkT", "Lock Tangents (L)", tv.lock_tangents, Command::LockTangentsToggle);
+            tool_button(ui, app, "LkT", "Lock Tangents", tv.lock_tangents, Command::LockTangentsToggle);
             tool_button(ui, app, "Tan", "Show Tangents", tv.show_tangents, Command::ShowTangentsToggle);
         } else {
             tool_button(ui, app, "Sub", "Modify Subtree", tv.modify_subtree, Command::ModifySubtreeToggle);
         }
         ui.separator();
-        tool_button(ui, app, "Pan", "Pan (Ctrl+P)", tv.tool == TvTool::Pan, Command::PanTrackView);
+        tool_button(ui, app, "Pan", "Pan", tv.tool == TvTool::Pan, Command::PanTrackView);
         tool_button(ui, app, "HEx", "Zoom Horizontal Extents", false, Command::FrameHorizontalExtents);
-        tool_button(ui, app, "HEK", "Zoom Horizontal Extents Keys (Alt+X)", false, Command::FrameHorizontalExtentsKeys);
+        tool_button(ui, app, "HEK", "Zoom Horizontal Extents Keys", false, Command::FrameHorizontalExtentsKeys);
         if tv.mode == TvMode::CurveEditor {
             tool_button(ui, app, "VEx", "Zoom Value Extents", false, Command::FrameValueExtents);
         }
-        tool_button(ui, app, "Zm", "Zoom (Alt+Z)", tv.tool == TvTool::Zoom, Command::Zoom);
-        tool_button(ui, app, "ZmR", "Zoom Region (Ctrl+W)", tv.tool == TvTool::ZoomRegion, Command::ZoomRegion);
+        tool_button(ui, app, "Zm", "Zoom", tv.tool == TvTool::Zoom, Command::Zoom);
+        tool_button(ui, app, "ZmR", "Zoom Region", tv.tool == TvTool::ZoomRegion, Command::ZoomRegion);
     });
 }
 

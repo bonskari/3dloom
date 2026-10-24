@@ -17,9 +17,16 @@ use crate::LoomApp;
 use eframe::egui;
 use loom_commands::Command;
 
-/// A rollout action button that dispatches one command.
+/// A rollout action button that dispatches one command; the hover text carries its chord.
 pub fn action(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, hover: &str, cmd: Command) {
-    if ui.button(label).on_hover_text(hover).clicked() {
+    let key = crate::shortcuts::action_of(&cmd);
+    action_keyed(ui, app, label, hover, key, cmd);
+}
+
+/// [`action`] for a command whose chord belongs to another action name (the
+/// Connect button dispatches Connect Edges with its settings; Shift+Ctrl+E runs Connect).
+pub fn action_keyed(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, hover: &str, key: &str, cmd: Command) {
+    if ui.button(label).on_hover_text(crate::shortcuts::tip(&app.state, hover, key)).clicked() {
         let _ = app.dispatch(cmd);
     }
 }
@@ -27,6 +34,7 @@ pub fn action(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, hover: &str, cm
 /// A mode button (drawn pressed while the mode is on) and its
 /// Settings box, as in the Edit rollouts.
 pub fn mode_with_settings(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, hover: &str, on: bool, mode: Command, settings: Command) {
+    let hover = crate::shortcuts::tip(&app.state, hover, crate::shortcuts::action_of(&mode));
     if ui.selectable_label(on, label).on_hover_text(hover).clicked() {
         let _ = app.dispatch(mode);
     }

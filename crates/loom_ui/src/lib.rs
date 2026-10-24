@@ -20,6 +20,7 @@ mod viewport_widget;
 pub mod poly_modes;
 pub mod spline_modes;
 pub mod ribbon;
+pub mod shortcuts;
 pub mod viewports;
 pub mod uv_editor;
 pub mod track_view;
@@ -29,7 +30,7 @@ mod ui_tests;
 
 use eframe::egui;
 use glam::Vec3;
-use loom_commands::{AppState, Command, Keymap, PrimitiveKind, ShapeKind, Tool};
+use loom_commands::{AppState, Command, PrimitiveKind, ShapeKind, Tool};
 pub use command_panel::create::Category;
 pub use command_panel::Tab;
 pub use command_panel::hierarchy::Sub as HierarchySub;
@@ -151,7 +152,6 @@ pub enum LineDrag {
 
 pub struct LoomApp {
     pub state: AppState,
-    pub keymap: Keymap,
     pub camera_controller: ViewportNavigator,
     /// World-space meshes of visible nodes, rebuilt when `state.mesh_dirty`.
     world_meshes: Vec<(NodeId, Mesh)>,
@@ -280,7 +280,6 @@ impl LoomApp {
     pub fn headless() -> Self {
         Self {
             state: AppState::new(),
-            keymap: Keymap::main_ui(),
             camera_controller: ViewportNavigator::new(),
             world_meshes: Vec::new(),
             world_styles: Vec::new(),

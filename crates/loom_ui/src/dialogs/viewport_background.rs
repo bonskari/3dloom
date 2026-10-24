@@ -1,6 +1,7 @@
 //! Viewport Background dialog (Alt+B): a PNG for the active viewport,
 //! with a Lock Zoom/Pan option.
 
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::Command;
@@ -20,7 +21,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         }
         let locked = app.state.active().background_locked;
         let mut l = locked;
-        if ui.checkbox(&mut l, "Lock Zoom/Pan").on_hover_text("Background Lock Toggle (Alt+Ctrl+B)").changed() {
+        if ui.checkbox(&mut l, "Lock Zoom/Pan").on_hover_text(crate::shortcuts::name_tip(&app.state, "Background Lock Toggle")).changed() {
             let _ = app.dispatch(Command::BackgroundLockToggle);
         }
         ui.horizontal(|ui| {
@@ -32,7 +33,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 path.clear();
                 let _ = app.dispatch(Command::SetViewportBackground { path: None });
             }
-            if ui.button("Update").clicked() {
+            if ui.button("Update").with_shortcut(&app.state, Command::UpdateBackgroundImage.name()).clicked() {
                 let _ = app.dispatch(Command::UpdateBackgroundImage);
             }
         });
