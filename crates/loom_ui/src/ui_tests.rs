@@ -450,7 +450,7 @@ fn m_opens_the_material_editor_and_an_assigned_material_colours_the_viewport() {
     h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
     h.cmd(Command::SetMaterialParameter { slot: None, name: "Specular Level".into(), value: 80.0 });
     h.cmd(Command::AssignMaterialToSelection);
-    let style = h.app.world_styles[0];
+    let style = h.app.world_styles[0].clone();
     assert!(style.color[0] > 0.9 && style.color[1] < 0.05, "faces take the diffuse colour: {:?}", style.color);
     assert!(style.specular[3] > 0.0, "and the highlight");
     assert!(style.wire_color.is_some(), "edges keep the object colour");

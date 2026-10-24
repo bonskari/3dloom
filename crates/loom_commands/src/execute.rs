@@ -2033,6 +2033,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.pick_mode = None;
                     return crate::motion::pick_constraint(state, kind, id);
                 }
+                Some(PickMode::PickMaterial) => {
+                    state.pick_mode = None;
+                    return crate::material::execute(state, C::GetMaterialFromObject { node: Some(id.0) });
+                }
                 Some(PickMode::HideByHit) => set_flags(state, "Hide by Hit", vec![id], |_, f| (true, f))?,
                 Some(PickMode::FreezeByHit) => set_flags(state, "Freeze by Hit", vec![id], |h, _| (h, true))?,
                 Some(PickMode::UnfreezeByHit) => set_flags(state, "Unfreeze by Hit", vec![id], |h, _| (h, false))?,

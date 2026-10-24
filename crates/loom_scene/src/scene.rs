@@ -88,6 +88,12 @@ impl Scene {
         self.node(id).and_then(|n| n.material).and_then(|m| self.materials.get(&m))
     }
 
+    /// What a node's faces draw with: its material resolved through
+    /// Multi/Sub-Object (per face material ID) and Blend.
+    pub fn node_surfaces(&self, id: NodeId) -> Option<crate::material::Surfaces> {
+        self.node(id).and_then(|n| n.material).and_then(|m| crate::material::surfaces(&self.materials, m))
+    }
+
     pub fn new() -> Self {
         Self {
             nodes: BTreeMap::new(),

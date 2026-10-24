@@ -42,6 +42,6 @@ pub use state::{RenderRequest, TvLevel, TvMode, UvEditor, UvTexture, ExtrudeKind
 pub mod keymap;
 pub use keymap::{parse_chord, Chord, Key, Keymap};
 pub mod viewport;
-pub use viewport::{default_kinds, HideCategories, LayoutSplits, NavMode, Shading, Viewport, ViewportLayout, Dialog, PendingFileAction, PolySettingsKind};
+pub use viewport::{default_kinds, HideCategories, LayoutSplits, NavMode, Shading, Viewport, ViewportLayout, BrowserFor, Dialog, PendingFileAction, PolySettingsKind};
 pub use transform::{frame_for, frame_for_system, TransformFrame};
 pub use keymap::{keyboard_chart, write_keyboard_chart, ChartRow};

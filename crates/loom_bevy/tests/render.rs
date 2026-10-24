@@ -22,7 +22,7 @@ fn renders_a_lit_red_box() {
     };
     let mut r = BevyRenderer::new(adapter, device, queue);
     let mesh = loom_mesh::box_primitive(Vec3::splat(5.0));
-    r.sync(&[SceneObject { id: 1, mesh: &mesh, wire_color: [220, 30, 30], material: None }]);
+    r.sync(&[SceneObject { id: 1, mesh: &mesh, wire_color: [220, 30, 30], surfaces: None }]);
     let eye = Vec3::new(-18.0, -24.0, 16.0);
     let camera = ViewCamera { view: Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Z), projection: Mat4::perspective_rh(45f32.to_radians(), 1.0, 0.1, 1000.0) };
     let img = r.render_image(128, 128, &camera).expect("render");
@@ -42,7 +42,7 @@ fn renders_a_lit_red_box() {
         let _ = loom_mesh::edit_ops::translate_mesh(&mut m, Vec3::new(200.0, 0.0, 0.0));
         m
     };
-    r.sync(&[SceneObject { id: 1, mesh: &moved, wire_color: [220, 30, 30], material: None }]);
+    r.sync(&[SceneObject { id: 1, mesh: &moved, wire_color: [220, 30, 30], surfaces: None }]);
     let img = r.render_image(64, 64, &camera).expect("render");
     assert_eq!(&img.get_pixel(32, 32).0[..3], &[0, 0, 0], "the box moved out of view");
 }
@@ -57,7 +57,7 @@ fn a_view_follows_its_camera() {
     };
     let mut r = BevyRenderer::new(adapter, device, queue);
     let mesh = loom_mesh::teapot_primitive(12.5, 4, Default::default());
-    r.sync(&[SceneObject { id: 1, mesh: &mesh, wire_color: [220, 30, 30], material: None }]);
+    r.sync(&[SceneObject { id: 1, mesh: &mesh, wire_color: [220, 30, 30], surfaces: None }]);
     let target = Vec3::new(0.0, 0.0, 8.0);
     let at = |eye: Vec3| ViewCamera { view: Mat4::look_at_rh(eye, target, Vec3::Z), projection: Mat4::perspective_rh(45f32.to_radians(), 1.6, 0.05, 5000.0) };
     let close = at(Vec3::new(400.0, 0.0, 8.0));

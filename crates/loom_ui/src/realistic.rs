@@ -12,6 +12,8 @@ pub struct BevyView {
     render_state: egui_wgpu::RenderState,
     /// `LoomApp::world_version` last synced into Bevy.
     synced: Option<u64>,
+    /// `AppState::bitmap_generation` Bevy last read its image files at.
+    bitmap_generation: u64,
     /// Egui texture per viewport, with the Bevy view generation it shows.
     textures: HashMap<u32, (u64, egui::TextureId)>,
 }
@@ -31,7 +33,7 @@ impl LoomApp {
             self.gpu = if loom_bevy::supported(&rs.adapter) {
                 let rs = rs.clone();
                 let renderer = loom_bevy::BevyRenderer::new(rs.adapter.clone(), rs.device.clone(), rs.queue.clone());
-                Gpu::Running(Box::new(BevyView { renderer, render_state: rs, synced: None, textures: HashMap::new() }))
+                Gpu::Running(Box::new(BevyView { renderer, render_state: rs, synced: None, bitmap_generation: 0, textures: HashMap::new() }))
             } else {
                 self.last_error = Some("Realistic shading needs a Vulkan, Metal or DirectX 12 GPU".into());
                 Gpu::Failed
@@ -58,14 +60,20 @@ impl LoomApp {
             .collect();
         let display = self.world_display.clone();
         let scene = &self.state.scene;
+        let generation = self.state.bitmap_generation;
         let Gpu::Running(b) = &mut self.gpu else { return };
         if b.synced == Some(version) {
             return;
         }
+        if b.bitmap_generation != generation {
+            // Bitmap > Reload: Bevy reads the image files again too.
+            b.renderer.reload_bitmaps();
+            b.bitmap_generation = generation;
+        }
         let list: Vec<loom_bevy::SceneObject> = objects
             .iter()
             .filter_map(|(id, i, wire)| {
-                Some(loom_bevy::SceneObject { id: *id, mesh: display.get(*i)?, wire_color: *wire, material: scene.node_material(loom_scene::NodeId(*id)) })
+                Some(loom_bevy::SceneObject { id: *id, mesh: display.get(*i)?, wire_color: *wire, surfaces: scene.node_surfaces(loom_scene::NodeId(*id)) })
             })
             .collect();
         b.renderer.sync(&list);

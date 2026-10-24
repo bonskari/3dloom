@@ -144,7 +144,7 @@ impl ViewportRenderer {
                     buffers: &[VertexBufferLayout {
                         array_stride: std::mem::size_of::<GpuVertex>() as u64,
                         step_mode: VertexStepMode::Vertex,
-                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4],
+                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4],
                     }],
                 },
                 fragment: Some(FragmentState {
@@ -233,22 +233,25 @@ impl ViewportRenderer {
             self.grid.record(pass, bind_group, plane, orthographic);
         }
         if shaded {
-            // Opaque meshes first (per-object cull setting), then see-through.
+            // Opaque faces first (per-surface cull setting), then see-through;
+            // one draw per range (texture / transparency / culling).
             for transparent in [false, true] {
-                for mb in meshes.iter().filter(|mb| mb.index_count > 0 && (mb.style.alpha < 1.0) == transparent) {
-                    let pipeline = if transparent {
-                        &self.mesh_pipeline_blend
-                    } else if mb.style.backface_cull {
-                        &self.mesh_pipeline_cull
-                    } else {
-                        &self.mesh_pipeline
-                    };
-                    pass.set_pipeline(pipeline);
-                    pass.set_bind_group(0, bind_group, &[]);
-                    pass.set_bind_group(1, textures.bind_group(mb.style.texture), &[]);
-                    pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
-                    pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);
-                    pass.draw_indexed(0..mb.index_count, 0, 0..1);
+                for mb in meshes.iter().filter(|mb| mb.index_count > 0) {
+                    for r in mb.ranges.iter().filter(|r| r.count > 0 && r.transparent == transparent) {
+                        let pipeline = if transparent {
+                            &self.mesh_pipeline_blend
+                        } else if r.cull {
+                            &self.mesh_pipeline_cull
+                        } else {
+                            &self.mesh_pipeline
+                        };
+                        pass.set_pipeline(pipeline);
+                        pass.set_bind_group(0, bind_group, &[]);
+                        pass.set_bind_group(1, textures.bind_group(r.texture), &[]);
+                        pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
+                        pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);
+                        pass.draw_indexed(r.start..r.start + r.count, 0, 0..1);
+                    }
                 }
             }
         }

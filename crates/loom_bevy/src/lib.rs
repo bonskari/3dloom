@@ -30,22 +30,24 @@ use bevy::DefaultPlugins;
 use bevy::app::PluginGroup;
 use bevy::color::{Alpha, Color};
 
-pub use convert::{diffuse_map_path, material_from_loom, mesh_data, MeshData, ViewCamera};
+pub use convert::{diffuse_map_path, material_from_loom, material_from_surface, mesh_data, mesh_data_by_id, MeshData, ViewCamera};
+use loom_scene::material::{Map, Surface, Surfaces};
 
-/// One visible object: its world-space mesh and how it is coloured.
+/// One visible object: its world-space mesh and how it is coloured (its
+/// material resolved per face material ID, `Scene::node_surfaces`).
 pub struct SceneObject<'a> {
     pub id: u64,
     pub mesh: &'a loom_mesh::Mesh,
     pub wire_color: [u8; 3],
-    pub material: Option<&'a loom_scene::material::StandardMaterial>,
+    pub surfaces: Option<Surfaces>,
 }
 
 struct Object {
-    entity: Entity,
+    /// One entity per material ID drawn (one for a single material).
+    entities: Vec<Entity>,
     mesh_hash: u64,
-    material: Option<loom_scene::material::StandardMaterial>,
+    surfaces: Option<Surfaces>,
     wire_color: [u8; 3],
-    material_handle: Handle<StandardMaterial>,
 }
 
 struct View {
@@ -90,6 +92,8 @@ pub struct BevyRenderer {
     objects: HashMap<u64, Object>,
     views: HashMap<u32, View>,
     textures: HashMap<String, Option<Handle<Image>>>,
+    /// Image files as maps read them, by path.
+    images: loom_scene::maps::Images,
     light: Entity,
     /// Scene bounds (centre, radius) for the shadow range.
     bounds: Option<(Vec3, f32)>,
@@ -132,11 +136,13 @@ impl BevyRenderer {
                 Transform::from_translation(KEY_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
             ))
             .id();
-        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), light, bounds: None, settle: 3 }
+        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, bounds: None, settle: 3 }
     }
 
     /// Brings the Bevy scene in line with `objects`: new nodes are spawned,
-    /// changed meshes or materials rebuilt, removed nodes despawned.
+    /// changed meshes or materials rebuilt, removed nodes despawned. A
+    /// Multi/Sub-Object material splits the mesh into one entity per face
+    /// material ID, each with its sub-material.
     pub fn sync(&mut self, objects: &[SceneObject]) {
         let mut seen = HashSet::new();
         let mut lo = Vec3::splat(f32::MAX);
@@ -148,82 +154,155 @@ impl BevyRenderer {
                 lo = lo.min(Vec3::from(b.min()));
                 hi = hi.max(Vec3::from(b.max()));
             }
-            let hash = data.content_hash();
-            let material_changed = |obj: &Object| obj.material.as_ref() != o.material || obj.wire_color != o.wire_color;
-            match self.objects.get(&o.id) {
-                Some(obj) if obj.mesh_hash == hash && !material_changed(obj) => continue,
-                Some(obj) if obj.mesh_hash == hash => {
-                    let handle = obj.material_handle.clone();
-                    let mat = self.material(o);
-                    self.app.world_mut().resource_mut::<Assets<StandardMaterial>>().insert(&handle, mat);
-                    let obj = self.objects.get_mut(&o.id).expect("present");
-                    obj.material = o.material.cloned();
-                    obj.wire_color = o.wire_color;
-                }
-                _ => {
-                    let mat = self.material(o);
-                    let world = self.app.world_mut();
-                    let mesh = world.resource_mut::<Assets<Mesh>>().add(data.to_bevy());
-                    let material_handle = world.resource_mut::<Assets<StandardMaterial>>().add(mat);
-                    let mut e = match self.objects.get(&o.id) {
-                        Some(obj) => world.entity_mut(obj.entity),
-                        None => world.spawn(Transform::IDENTITY),
-                    };
-                    e.insert((Mesh3d(mesh), MeshMaterial3d(material_handle.clone())));
-                    // Bevy computes bounds only once per entity: keep them current.
-                    match data.aabb() {
-                        Some(b) => {
-                            e.insert(b);
-                        }
-                        None => {
-                            e.remove::<bevy::render::primitives::Aabb>();
-                        }
-                    }
-                    let entity = e.id();
-                    self.objects.insert(o.id, Object { entity, mesh_hash: hash, material: o.material.cloned(), wire_color: o.wire_color, material_handle });
+            let hash = data.content_hash() ^ convert::material_ids_hash(o.mesh).rotate_left(1);
+            if let Some(obj) = self.objects.get(&o.id) {
+                if obj.mesh_hash == hash && obj.surfaces == o.surfaces && obj.wire_color == o.wire_color {
+                    continue;
                 }
             }
+            // (material ID drawn or all faces, its surface)
+            let parts: Vec<(Option<u16>, Option<Surface>)> = match &o.surfaces {
+                Some(Surfaces::PerId(_)) => mesh_data_by_id(o.mesh).into_iter().map(|(id, _)| (Some(id), o.surfaces.as_ref().map(|s| s.for_face(id).into_owned()))).collect(),
+                Some(Surfaces::Single(s)) => vec![(None, Some(s.clone()))],
+                None => vec![(None, None)],
+            };
+            let old = self.objects.remove(&o.id).map(|obj| obj.entities).unwrap_or_default();
+            for e in old {
+                self.app.world_mut().despawn(e);
+            }
+            let mut entities = Vec::new();
+            for (id, surface) in parts {
+                let mat = self.material(surface.as_ref(), o.wire_color);
+                let faceted = surface.as_ref().is_some_and(|s| s.faceted);
+                let d = if id.is_none() && !faceted {
+                    data.clone()
+                } else {
+                    let mut part = o.mesh.clone();
+                    for f in part.faces_mut() {
+                        f.hidden |= id.is_some_and(|id| f.material_id != id);
+                        // Faceted: flat normals whatever the smoothing groups.
+                        if faceted {
+                            f.smoothing_groups = 0;
+                        }
+                    }
+                    mesh_data(&part)
+                };
+                let mut mesh = d.to_bevy();
+                if mat.normal_map_texture.is_some() {
+                    // A normal map needs tangents (from the UVs).
+                    let _ = mesh.generate_tangents();
+                }
+                let world = self.app.world_mut();
+                let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
+                let material_handle = world.resource_mut::<Assets<StandardMaterial>>().add(mat);
+                let mut e = world.spawn((Transform::IDENTITY, Mesh3d(mesh), MeshMaterial3d(material_handle)));
+                // Bevy computes bounds only once per entity: keep them current.
+                if let Some(b) = d.aabb() {
+                    e.insert(b);
+                }
+                entities.push(e.id());
+            }
+            self.objects.insert(o.id, Object { entities, mesh_hash: hash, surfaces: o.surfaces.clone(), wire_color: o.wire_color });
             self.settle = self.settle.max(3);
         }
         let gone: Vec<u64> = self.objects.keys().filter(|id| !seen.contains(id)).copied().collect();
         for id in gone {
             if let Some(obj) = self.objects.remove(&id) {
-                self.app.world_mut().despawn(obj.entity);
+                for e in obj.entities {
+                    self.app.world_mut().despawn(e);
+                }
             }
             self.settle = self.settle.max(3);
         }
         self.bounds = (lo.x <= hi.x).then(|| ((lo + hi) * 0.5, ((hi - lo) * 0.5).length().max(1e-3)));
     }
 
-    fn material(&mut self, o: &SceneObject) -> StandardMaterial {
-        let mut m = material_from_loom(o.material, o.wire_color);
-        if let Some(path) = diffuse_map_path(o.material) {
-            m.base_color_texture = self.texture(path);
-            if m.base_color_texture.is_some() && o.material.is_some() {
-                // The map replaces the diffuse colour, as in the shaded viewport.
-                m.base_color = Color::srgba(1.0, 1.0, 1.0, m.base_color.alpha());
+    /// Reads the image files again (Bitmap > Reload): textures are rebuilt on the next sync.
+    pub fn reload_bitmaps(&mut self) {
+        self.images.clear();
+        self.textures.clear();
+        for obj in self.objects.values_mut() {
+            obj.mesh_hash = 0;
+        }
+    }
+
+    /// A surface as a PBR material with its maps: Diffuse (over the colour,
+    /// with the Opacity map as alpha), Bump as a normal map, Specular Level
+    /// and Self-Illumination maps. All maps use the Diffuse (else first) map's
+    /// Coordinates, as Bevy has one UV transform per material.
+    fn material(&mut self, surface: Option<&Surface>, wire_color: [u8; 3]) -> StandardMaterial {
+        let mut m = material_from_surface(surface, wire_color);
+        let Some(s) = surface else { return m };
+        let diffuse = s.diffuse_map.as_ref().and_then(|map| self.baked(map).map(|img| (img, map.clone())));
+        let opacity = s.opacity_map.as_ref().and_then(|map| self.baked(map).map(|img| (img, map.clone())));
+        if diffuse.is_some() || opacity.is_some() {
+            let key = format!("base:{:?}:{}:{}:{}", s.diffuse, s.opacity, diffuse.as_ref().map(|(_, m)| loom_scene::maps::texture_key(m) + &m.amount.to_string()).unwrap_or_default(), opacity.as_ref().map(|(_, m)| loom_scene::maps::texture_key(m) + &m.amount.to_string()).unwrap_or_default());
+            let decal = diffuse.as_ref().map(|(_, m)| m.coords.decal()).unwrap_or([false; 2]);
+            m.base_color_texture = self.texture_from(&key, TextureFormat::Rgba8UnormSrgb, decal, || convert::compose_base(s.diffuse, diffuse.as_ref().map(|(i, m)| (i.as_ref(), m)), s.opacity, opacity.as_ref().map(|(i, m)| (i.as_ref(), m))));
+            if m.base_color_texture.is_some() {
+                // The texture carries the colour (and the alpha); only the self-lit share is taken off.
+                let k = 1.0 - s.self_illum;
+                m.base_color = Color::srgba(k, k, k, 1.0);
+                if opacity.is_some() {
+                    m.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
+                }
+            }
+            let coords = diffuse.as_ref().or(opacity.as_ref()).map(|(_, m)| m);
+            if let Some(c) = coords {
+                m.uv_transform = convert::uv_transform(c);
+            }
+        }
+        if let Some(map) = s.bump_map.as_ref() {
+            if let Some(img) = self.baked(map) {
+                let key = format!("bump:{}:{}", loom_scene::maps::texture_key(map), map.amount);
+                m.normal_map_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || loom_scene::maps::bump_to_normal(&img, map.amount / 100.0));
+            }
+        }
+        if let Some(map) = s.specular_level_map.as_ref() {
+            if let Some(img) = self.baked(map) {
+                let key = format!("spec:{}:{}", loom_scene::maps::texture_key(map), map.amount);
+                m.specular_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::luminance(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
+                // The texture's alpha 0–1 maps to reflectance 0–0.5 times this.
+                m.reflectance = (s.specular_level / 100.0).clamp(0.0, 2.0);
+            }
+        }
+        if let Some(map) = s.self_illum_map.as_ref() {
+            if let Some(img) = self.baked(map) {
+                let key = format!("illum:{}:{}", loom_scene::maps::texture_key(map), map.amount);
+                m.emissive_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::luminance(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
+                let d = Color::srgb(s.diffuse.x, s.diffuse.y, s.diffuse.z).to_linear();
+                m.emissive = bevy::color::LinearRgba::rgb(d.red, d.green, d.blue);
             }
         }
         m
     }
 
-    /// A bitmap loaded once per path (None when it cannot be read).
-    fn texture(&mut self, path: &str) -> Option<Handle<Image>> {
-        if let Some(t) = self.textures.get(path) {
+    /// A map baked to pixels (one map-space tile), its bitmaps read once per path.
+    fn baked(&mut self, map: &Map) -> Option<std::sync::Arc<loom_scene::maps::Image>> {
+        loom_scene::maps::load_images(map, &mut self.images, &mut |path| {
+            image::open(path).ok().map(|img| {
+                let rgba = img.to_rgba8();
+                std::sync::Arc::new(loom_scene::maps::Image { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
+            })
+        });
+        let plain = map.kind == loom_scene::material::MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1];
+        if plain {
+            return self.images.get(&map.path).cloned().flatten();
+        }
+        loom_scene::maps::bake(map, &self.images).map(std::sync::Arc::new)
+    }
+
+    /// An image as a Bevy texture, made once per key; decal axes clamp.
+    fn texture_from(&mut self, key: &str, format: TextureFormat, decal: [bool; 2], make: impl FnOnce() -> loom_scene::maps::Image) -> Option<Handle<Image>> {
+        if let Some(t) = self.textures.get(key) {
             return t.clone();
         }
-        let handle = image::open(path).ok().map(|img| {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let mut image = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, rgba.into_raw(), TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
-            image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-                address_mode_u: ImageAddressMode::Repeat,
-                address_mode_v: ImageAddressMode::Repeat,
-                ..ImageSamplerDescriptor::linear()
-            });
-            self.app.world_mut().resource_mut::<Assets<Image>>().add(image)
-        });
-        self.textures.insert(path.to_owned(), handle.clone());
+        let img = make();
+        let mut image = Image::new(Extent3d { width: img.width.max(1), height: img.height.max(1), depth_or_array_layers: 1 }, TextureDimension::D2, img.rgba.clone(), format, RenderAssetUsages::RENDER_WORLD);
+        let mode = |d: bool| if d { ImageAddressMode::ClampToEdge } else { ImageAddressMode::Repeat };
+        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { address_mode_u: mode(decal[0]), address_mode_v: mode(decal[1]), ..ImageSamplerDescriptor::linear() });
+        let handle = Some(self.app.world_mut().resource_mut::<Assets<Image>>().add(image));
+        self.textures.insert(key.to_owned(), handle.clone());
         handle
     }
 

@@ -131,6 +131,8 @@ pub enum PickMode {
     UnfreezeByHit,
     /// Select and Link: the next clicked object becomes the selection's parent.
     Link,
+    /// Material Editor > Pick Material From Object: the eyedropper.
+    PickMaterial,
     /// Align (Alt+A): pick the target object, then the Align dialog opens.
     AlignTarget,
     /// Quick Align (Shift+A): pick the target object.
@@ -1128,6 +1130,10 @@ pub struct AppState {
     /// Rendering > Material Editor (M): its own modeless window, open beside
     /// `dialog` so the bitmap chooser its Maps buttons open does not close it.
     pub material_editor_open: bool,
+    /// Material Editor > Material/Map Navigator: its own modeless window.
+    pub material_navigator_open: bool,
+    /// Bumped by Reload Bitmaps: the viewports read their image files again.
+    pub bitmap_generation: u64,
     /// What a Select From Scene style dialog is for (Hide/Freeze by Name...).
     pub dialog_purpose: DialogPurpose,
     pub pick_mode: Option<PickMode>,
@@ -1371,6 +1377,8 @@ impl AppState {
             hide_category: HideCategories::default(),
             dialog: None,
             material_editor_open: false,
+            material_navigator_open: false,
+            bitmap_generation: 0,
             dialog_purpose: DialogPurpose::Select,
             pick_mode: None,
             align_target: None,

@@ -16,6 +16,9 @@ pub struct GpuVertex {
     pub color: [f32; 4],
     /// Blinn highlight: specular colour × level (rgb) and the exponent (a); 0 = none.
     pub spec: [f32; 4],
+    /// x = Self-Illumination 0–1, y = the map's Amount 0–1, z / w = decal
+    /// (Tile off) on U / V: outside 0–1 the map leaves the colour.
+    pub extra: [f32; 4],
 }
 
 /// What the fragment shader samples with map channel 1.
@@ -28,8 +31,46 @@ pub enum TextureSel {
     Bitmap(u32),
 }
 
-/// How one mesh is drawn (Display panel properties).
+/// How one material ID's faces draw (a Multi/Sub-Object sub-material).
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurfaceStyle {
+    pub color: [f32; 3],
+    pub alpha: f32,
+    pub specular: [f32; 4],
+    pub self_illum: f32,
+    pub texture: TextureSel,
+    /// The map's Offset / Tiling / Angle as a 2×3 UV matrix (see `GpuVertex::uv`).
+    pub uv: [f32; 6],
+    pub decal: [bool; 2],
+    /// The map's Amount, 0–1.
+    pub texture_amount: f32,
+    /// Faceted: flat normals whatever the smoothing groups.
+    pub faceted: bool,
+    /// 2-Sided: never culled.
+    pub two_sided: bool,
+}
+
+/// Per face material ID styles; IDs without one draw `missing`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubStyles {
+    pub by_id: std::collections::BTreeMap<u16, SurfaceStyle>,
+    pub missing: SurfaceStyle,
+}
+
+pub const UV_IDENTITY: [f32; 6] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+
+/// One draw call's slice of a mesh's index buffer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawRange {
+    pub start: u32,
+    pub count: u32,
+    pub texture: TextureSel,
+    pub transparent: bool,
+    pub cull: bool,
+}
+
+/// How one mesh is drawn (Display panel properties).
+#[derive(Debug, Clone, PartialEq)]
 pub struct MeshStyle {
     pub color: [f32; 3],
     /// 1.0 = opaque; See-Through draws at 0.35.
@@ -43,11 +84,62 @@ pub struct MeshStyle {
     pub specular: [f32; 4],
     /// Edges and wireframe: the object (wire) colour even when a material colours the faces.
     pub wire_color: Option<[f32; 3]>,
+    /// The material's Self-Illumination, 0–1.
+    pub self_illum: f32,
+    /// The shown map's UV transform, decal axes and Amount (see `SurfaceStyle`).
+    pub uv: [f32; 6],
+    pub decal: [bool; 2],
+    pub texture_amount: f32,
+    pub faceted: bool,
+    pub two_sided: bool,
+    /// A Multi/Sub-Object material: each face draws with its material ID's style.
+    pub sub: Option<std::sync::Arc<SubStyles>>,
 }
 
 impl Default for MeshStyle {
     fn default() -> Self {
-        Self { color: [0.7, 0.7, 0.7], alpha: 1.0, backface_cull: false, vertex_colors: false, texture: TextureSel::None, specular: [0.0; 4], wire_color: None }
+        Self {
+            color: [0.7, 0.7, 0.7],
+            alpha: 1.0,
+            backface_cull: false,
+            vertex_colors: false,
+            texture: TextureSel::None,
+            specular: [0.0; 4],
+            wire_color: None,
+            self_illum: 0.0,
+            uv: UV_IDENTITY,
+            decal: [false; 2],
+            texture_amount: 1.0,
+            faceted: false,
+            two_sided: false,
+            sub: None,
+        }
+    }
+}
+
+impl MeshStyle {
+    /// The style of the whole mesh as one surface.
+    pub fn surface(&self) -> SurfaceStyle {
+        SurfaceStyle {
+            color: self.color,
+            alpha: self.alpha,
+            specular: self.specular,
+            self_illum: self.self_illum,
+            texture: self.texture,
+            uv: self.uv,
+            decal: self.decal,
+            texture_amount: self.texture_amount,
+            faceted: self.faceted,
+            two_sided: self.two_sided,
+        }
+    }
+
+    /// The style a face with material ID `id` (0-based) draws with.
+    pub fn for_face(&self, id: u16) -> SurfaceStyle {
+        match &self.sub {
+            Some(sub) => sub.by_id.get(&id).copied().unwrap_or(sub.missing),
+            None => self.surface(),
+        }
     }
 }
 
@@ -88,14 +180,13 @@ pub struct MeshBuffer {
     pub aabb_min: Vec3,
     pub aabb_max: Vec3,
     pub style: MeshStyle,
+    /// Draw calls: faces grouped by texture, transparency and culling.
+    pub ranges: Vec<DrawRange>,
 }
 
 impl MeshBuffer {
     pub fn from_mesh(device: &Device, mesh: &Mesh, style: MeshStyle) -> Self {
-        let (mut verts, indices) = triangulate_with_face_normals(mesh, [style.color[0], style.color[1], style.color[2], style.alpha], style.vertex_colors);
-        for v in &mut verts {
-            v.spec = style.specular;
-        }
+        let (verts, indices, ranges) = triangulate_styled(mesh, &style);
         let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("loom_mesh_vertex_buffer"),
             contents: bytemuck::cast_slice(&verts),
@@ -129,6 +220,7 @@ impl MeshBuffer {
             aabb_min,
             aabb_max,
             style,
+            ranges,
         }
     }
 }
@@ -157,8 +249,20 @@ fn edge_buffer(device: &Device, edges: &[(Vec3, Vec3)], color: [f32; 3], label: 
 /// the corner normal follows the face's smoothing groups (flat where a
 /// face has none). Hidden faces are skipped.
 pub fn triangulate_with_face_normals(mesh: &Mesh, color: [f32; 4], vertex_colors: bool) -> (Vec<GpuVertex>, Vec<u32>) {
+    let style = MeshStyle { color: [color[0], color[1], color[2]], alpha: color[3], vertex_colors, ..Default::default() };
+    let (verts, indices, _) = triangulate_styled(mesh, &style);
+    (verts, indices)
+}
+
+/// As `triangulate_with_face_normals`, each face coloured by its material
+/// ID's style (`MeshStyle::for_face`), its UVs through that style's map
+/// transform; the indices come grouped into one draw range per texture,
+/// transparency and culling.
+pub fn triangulate_styled(mesh: &Mesh, style: &MeshStyle) -> (Vec<GpuVertex>, Vec<u32>, Vec<DrawRange>) {
+    let vertex_colors = style.vertex_colors;
     let mut verts = Vec::new();
-    let mut indices = Vec::new();
+    // Triangles per draw group, in first-seen order.
+    let mut groups: Vec<(DrawRange, Vec<u32>)> = Vec::new();
 
     for (face_i, face) in mesh.faces().iter().enumerate() {
         if face.hidden {
@@ -188,7 +292,11 @@ pub fn triangulate_with_face_normals(mesh: &Mesh, color: [f32; 4], vertex_colors
             continue;
         }
 
-        let flat = face.smoothing_groups == 0;
+        let look = style.for_face(face.material_id);
+        let color = [look.color[0], look.color[1], look.color[2], look.alpha];
+        let m = look.uv;
+        let extra = [look.self_illum, look.texture_amount, if look.decal[0] { 1.0 } else { 0.0 }, if look.decal[1] { 1.0 } else { 0.0 }];
+        let flat = face.smoothing_groups == 0 || look.faceted;
         let n = mesh.face_normal(face_id);
 
         let base = verts.len() as u32;
@@ -203,22 +311,38 @@ pub fn triangulate_with_face_normals(mesh: &Mesh, color: [f32; 4], vertex_colors
             let color = if vertex_colors { [color[0] * vc[0], color[1] * vc[1], color[2] * vc[2], color[3]] } else { color };
             // Map channel 1 at this corner; (0, 0) when the mesh has none.
             let uv = mesh.corner_uv(1, loop_hes[i]).map(|t| [t.x, t.y]).unwrap_or([0.0, 0.0]);
+            let uv = [m[0] * uv[0] + m[1] * uv[1] + m[2], m[3] * uv[0] + m[4] * uv[1] + m[5]];
             verts.push(GpuVertex {
                 position: (*p).into(),
                 normal: normal.into(),
                 uv,
                 color,
-                spec: [0.0; 4],
+                spec: look.specular,
+                extra,
             });
         }
+        let key = DrawRange { start: 0, count: 0, texture: look.texture, transparent: look.alpha < 1.0, cull: style.backface_cull && !look.two_sided };
+        let g = match groups.iter().position(|(r, _)| (r.texture, r.transparent, r.cull) == (key.texture, key.transparent, key.cull)) {
+            Some(g) => g,
+            None => {
+                groups.push((key, Vec::new()));
+                groups.len() - 1
+            }
+        };
         for i in 1..(loop_verts.len() as u32 - 1) {
-            indices.push(base);
-            indices.push(base + i);
-            indices.push(base + i + 1);
+            groups[g].1.extend([base, base + i, base + i + 1]);
         }
     }
 
-    (verts, indices)
+    let mut indices = Vec::new();
+    let mut ranges = Vec::new();
+    for (mut r, idx) in groups {
+        r.start = indices.len() as u32;
+        r.count = idx.len() as u32;
+        indices.extend(idx);
+        ranges.push(r);
+    }
+    (verts, indices, ranges)
 }
 
 #[cfg(test)]
@@ -250,7 +374,7 @@ mod tests {
         assert!(!verts.is_empty() && !indices.is_empty());
         assert!(indices.iter().all(|&i| (i as usize) < verts.len()));
         assert!(verts.iter().all(|v| v.position.iter().all(|x| x.is_finite()) && v.normal.iter().all(|x| x.is_finite())));
-        assert_eq!(std::mem::size_of::<GpuVertex>(), 64);
+        assert_eq!(std::mem::size_of::<GpuVertex>(), 80);
     }
 
     #[test]
@@ -295,5 +419,50 @@ mod tests {
         assert_eq!(plain[0].color, [1.0, 1.0, 1.0, 1.0]);
         let (tinted, _) = triangulate_with_face_normals(&m, [1.0, 1.0, 1.0, 1.0], true);
         assert_eq!(tinted[0].color, [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn multi_sub_faces_take_their_material_id_colour_and_group_by_texture() {
+        let mut m = box_primitive(Vec3::splat(0.5));
+        for (i, f) in m.faces_mut().iter_mut().enumerate() {
+            f.material_id = if i < 2 { 0 } else if i < 4 { 1 } else { 7 };
+        }
+        let red = SurfaceStyle { color: [1.0, 0.0, 0.0], ..MeshStyle::default().surface() };
+        let green = SurfaceStyle { color: [0.0, 1.0, 0.0], texture: TextureSel::Bitmap(0), self_illum: 0.5, ..MeshStyle::default().surface() };
+        let black = SurfaceStyle { color: [0.0; 3], ..MeshStyle::default().surface() };
+        let style = MeshStyle { sub: Some(std::sync::Arc::new(SubStyles { by_id: [(0, red), (1, green)].into_iter().collect(), missing: black })), ..Default::default() };
+        let (verts, indices, ranges) = triangulate_styled(&m, &style);
+        assert_eq!(verts.len(), 24);
+        let colour_of_face = |f: usize| verts[f * 4].color;
+        assert_eq!(colour_of_face(0), [1.0, 0.0, 0.0, 1.0], "ID 1 faces are red");
+        assert_eq!(colour_of_face(2), [0.0, 1.0, 0.0, 1.0], "ID 2 faces are green");
+        assert_eq!(verts[8].extra[0], 0.5, "with their Self-Illumination");
+        assert_eq!(colour_of_face(5), [0.0, 0.0, 0.0, 1.0], "an ID without a sub-material is black");
+        // Two draws: the untextured faces (red and black) and the green bitmap ones.
+        assert_eq!(ranges.len(), 2);
+        let bitmap = ranges.iter().find(|r| r.texture == TextureSel::Bitmap(0)).unwrap();
+        assert_eq!(bitmap.count, 12);
+        assert_eq!(ranges.iter().map(|r| r.count).sum::<u32>() as usize, indices.len());
+        // Every index of the bitmap range belongs to a green face.
+        for i in &indices[bitmap.start as usize..(bitmap.start + bitmap.count) as usize] {
+            assert_eq!(verts[*i as usize].color[1], 1.0);
+        }
+    }
+
+    #[test]
+    fn map_uv_transform_and_faceted() {
+        let mut m = loom_mesh::sphere_segmented(1.0, 8, 0.0);
+        loom_mesh::uvmap::auto_map(&mut m, loom_mesh::uvmap::AutoMap::Box, 1);
+        for f in m.faces_mut() {
+            f.smoothing_groups = 1;
+        }
+        let plain = triangulate_styled(&m, &MeshStyle::default()).0;
+        let tiled = triangulate_styled(&m, &MeshStyle { uv: [2.0, 0.0, 0.5, 0.0, 3.0, 0.0], faceted: true, ..Default::default() }).0;
+        for (a, b) in plain.iter().zip(&tiled) {
+            assert!((b.uv[0] - (2.0 * a.uv[0] + 0.5)).abs() < 1e-5 && (b.uv[1] - 3.0 * a.uv[1]).abs() < 1e-5);
+        }
+        // Faceted: the corners of a face share the face normal.
+        assert_eq!(tiled[0].normal, tiled[1].normal);
+        assert_ne!(plain[0].normal, plain[1].normal);
     }
 }

@@ -95,10 +95,22 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             app.state.material_editor_open = false;
         }
     }
+    if app.state.material_navigator_open {
+        let mut open = true;
+        material_editor::navigator(ctx, app, &mut open);
+        if !open {
+            app.state.material_navigator_open = false;
+        }
+    }
     let Some(dialog) = app.state.dialog else { return };
     let mut open = true;
     match dialog {
-        Dialog::MaterialMap { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::MaterialMap { .. } | Dialog::MaterialBitmap => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::MaterialBrowser(for_) => material_editor::browser(ctx, app, for_, &mut open),
+        Dialog::ReplaceMaterial { kind, map } => material_editor::replace_material(ctx, app, kind, map, &mut open),
+        Dialog::MaterialEditorOptions => material_editor::options(ctx, app, &mut open),
+        Dialog::SpecifyCropping => material_editor::specify_cropping(ctx, app, &mut open),
+        Dialog::CopyMap { from, to } => material_editor::copy_map(ctx, app, from, to, &mut open),
         Dialog::RenderFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
         Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),

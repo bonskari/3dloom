@@ -145,7 +145,7 @@ impl CallbackTrait for ViewportCallback {
             res.mesh_buffers = meshes
                 .iter()
                 .enumerate()
-                .map(|(i, m)| MeshBuffer::from_mesh(device, m, styles.get(i).copied().unwrap_or_default()))
+                .map(|(i, m)| MeshBuffer::from_mesh(device, m, styles.get(i).cloned().unwrap_or_default()))
                 .collect();
             // The clear and checker textures are made once; bitmaps once per path.
             let (none, checker) = res.base_textures.get_or_insert_with(|| res.renderer.base_textures(device, queue)).clone();
@@ -1271,6 +1271,16 @@ fn pick_object(
     proj: Mat4,
 ) -> Option<Pick> {
     object_hits(app, p, rect, view, proj).first().map(|&i| Pick::Object(i))
+}
+
+/// The object drawn under screen point `p` in whichever viewport holds it
+/// (a sample slot dragged from the Material Editor onto an object).
+pub(crate) fn node_at(app: &LoomApp, p: egui::Pos2) -> Option<NodeId> {
+    let index = if app.state.maximized { app.state.active_viewport } else { app.viewport_rects.iter().position(|r| r.contains(p))? };
+    let rect = *app.viewport_rects.get(index).filter(|r| r.contains(p))?;
+    let camera = app.camera_for(index);
+    let aspect = (rect.width() / rect.height().max(1.0)).max(0.01);
+    object_hits(app, p, rect, camera.view_matrix(), camera.projection_matrix(aspect)).first().map(|&i| app.world_meshes()[i].0)
 }
 
 /// Objects under `p` in pick order, as indices into `world_meshes`: a shape
