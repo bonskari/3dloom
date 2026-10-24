@@ -96,6 +96,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::ExportSelected => ("Export Selected", "fbx,obj", "Save"),
         Dialog::MergeFile => ("Merge File", "loom", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", "png", "Open"),
+        Dialog::BackgroundFile => ("Select Background Image", "png", "Open"),
         Dialog::MaterialMap { .. } | Dialog::MaterialBitmap => ("Select Bitmap Image File", "png", "Open"),
         Dialog::PickUvTexture => ("Pick Texture", "png", "Open"),
         Dialog::SaveUvw => ("Save UVW", "uvw", "Save"),
@@ -265,6 +266,12 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
     }
     if let Some(parent) = path.parent() {
         app.file_dir = parent.to_path_buf();
+    }
+    if dialog == Dialog::BackgroundFile {
+        // Back to the Viewport Background dialog with the file in its field.
+        app.background_pick = Some(path.to_string_lossy().into_owned());
+        app.state.dialog = Some(Dialog::ViewportBackground);
+        return true;
     }
     if dialog == Dialog::PickTexture {
         // Show Map in Viewport > Bitmap on the selected object.

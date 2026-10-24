@@ -118,6 +118,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
         Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),
         Dialog::SelectFromScene => select_from_scene::show(ctx, app, &mut open),
+        Dialog::SelectCamera => select_camera(ctx, app, &mut open),
         Dialog::NamedSelectionSets => named_selection_sets::show(ctx, app, &mut open),
         Dialog::TimeConfiguration => time_configuration::show(ctx, app, &mut open),
         Dialog::ViewportBackground => viewport_background::show(ctx, app, &mut open),
@@ -143,7 +144,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
-        Dialog::PickTexture | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
@@ -165,6 +166,49 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         if matches!(dialog, Dialog::SaveShortcuts | Dialog::LoadShortcuts) {
             let _ = app.dispatch(Command::CustomizeUserInterface);
         }
+    }
+}
+
+/// Select Camera (C with several cameras and none selected): double-click
+/// or OK looks through the chosen camera in the active viewport.
+fn select_camera(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let cams: Vec<(loom_scene::NodeId, String)> = app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).map(|n| (n.id, n.name.clone())).collect();
+    let id = egui::Id::new("select_camera_pick");
+    let mut pick: Option<loom_scene::NodeId> = ctx.data(|d| d.get_temp(id)).or(cams.first().map(|c| c.0));
+    let mut chosen = None;
+    let mut cancel = false;
+    egui::Window::new("Select Camera").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+            for (cid, name) in &cams {
+                let r = ui.selectable_label(pick == Some(*cid), name);
+                if r.clicked() {
+                    pick = Some(*cid);
+                }
+                if r.double_clicked() {
+                    chosen = Some(*cid);
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                chosen = pick;
+            }
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
+        });
+    });
+    if let Some(p) = pick {
+        ctx.data_mut(|d| d.insert_temp(id, p));
+    }
+    if let Some(cid) = chosen {
+        let index = app.state.active_viewport as u32;
+        let _ = app.dispatch(Command::ViewportView { index, kind: loom_commands::ViewKind::Camera(cid) });
+        cancel = true;
+    }
+    if cancel {
+        ctx.data_mut(|d| d.remove::<loom_scene::NodeId>(id));
+        *open = false;
     }
 }
 
