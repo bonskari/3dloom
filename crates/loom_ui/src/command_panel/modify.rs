@@ -832,9 +832,17 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
     if params.is_empty() || matches!(modifier, Modifier::Skin(_) | Modifier::Morpher(_) | Modifier::SkinMorph(_) | Modifier::SkinWrap(_) | Modifier::EditNormals(_)) {
         return;
     }
+    // Smooth: the smoothing groups are 32 buttons under the other parameters.
+    let smooth_groups = match &modifier {
+        Modifier::Smooth { groups, .. } => Some(groups.get()),
+        _ => None,
+    };
     rollout(ui, "Parameters", true, |ui| {
         egui::Grid::new(("modifier_params", id.0, index)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             for (pname, value) in params {
+                if smooth_groups.is_some() && pname == "Smoothing Groups" {
+                    continue;
+                }
                 let r = ui.label(pname);
                 crate::probe::note(ui, pname, &r);
                 match value {
@@ -850,22 +858,6 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                         if r.drag_stopped() {
                             app.state.undo.end();
                         }
-                    }
-                    loom_scene::ParamValue::Int(bits) if matches!(modifier, Modifier::Smooth { .. }) && pname == "Smoothing Groups" => {
-                        // The 32 group buttons, 8 to a row; a click toggles that group.
-                        egui::Grid::new(("smooth_groups", id.0, index)).spacing([2.0, 2.0]).show(ui, |ui| {
-                            for g in 0..32u32 {
-                                let on = bits & (1 << g) != 0;
-                                let r = ui.add(egui::SelectableLabel::new(on, (g + 1).to_string()));
-                                crate::probe::note(ui, &(g + 1).to_string(), &r);
-                                if r.clicked() {
-                                    let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: pname.into(), value: (bits ^ (1 << g)) as f64 });
-                                }
-                                if g % 8 == 7 {
-                                    ui.end_row();
-                                }
-                            }
-                        });
                     }
                     loom_scene::ParamValue::Int(i) if modifier.choices(pname).is_some() => {
                         let choices = modifier.choices(pname).unwrap();
@@ -900,6 +892,22 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 ui.end_row();
             }
         });
+        if let Some(bits) = smooth_groups {
+            ui.label("Smoothing Groups:");
+            // 8 to a row; a click toggles that group.
+            egui::Grid::new(("smooth_groups", id.0, index)).spacing([2.0, 2.0]).show(ui, |ui| {
+                for g in 0..32u32 {
+                    let r = ui.add(egui::SelectableLabel::new(bits & (1 << g) != 0, (g + 1).to_string()));
+                    crate::probe::note(ui, &(g + 1).to_string(), &r);
+                    if r.clicked() {
+                        let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: "Smoothing Groups".into(), value: (bits ^ (1 << g)) as f64 });
+                    }
+                    if g % 8 == 7 {
+                        ui.end_row();
+                    }
+                }
+            });
+        }
     });
 }
 
