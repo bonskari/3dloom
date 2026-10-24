@@ -152,6 +152,19 @@ impl Projection {
         self.inv_view.z_axis.truncate().normalize_or_zero()
     }
 
+    /// Unit vector from `at` toward the eye: the camera position in a
+    /// perspective view, the view direction in an orthographic one.
+    pub fn toward_viewer_at(&self, at: Vec3) -> Vec3 {
+        if self.proj.w_axis.w.abs() < 0.5 {
+            let eye = self.inv_view.w_axis.truncate();
+            let d = (eye - at).normalize_or_zero();
+            if d != Vec3::ZERO {
+                return d;
+            }
+        }
+        self.toward_viewer()
+    }
+
     pub fn camera_right(&self) -> Vec3 {
         self.inv_view.x_axis.truncate().normalize_or_zero()
     }

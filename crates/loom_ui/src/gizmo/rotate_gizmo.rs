@@ -1,26 +1,42 @@
-//! Rotate gizmo: X/Y/Z rings (back halves dimmed), a grey Screen ring
-//! and the Free trackball inside, with a pie slice and degree readout while
-//! dragging.
+//! Rotate gizmo: X/Y/Z rings drawn as 3D circles with only their front
+//! halves shown, the Free sphere's outline, a grey Screen ring around it and
+//! a small grey tripod at the centre; while dragging, a translucent pie slice
+//! in the ring's plane and an [x, y, z] degree readout.
 
 use super::*;
 
 const SCREEN_RING: f32 = 1.25;
 const SEGMENTS: usize = 64;
+/// Centre tripod length, as a fraction of the sphere radius.
+const TRIPOD: f32 = 0.3;
+
+const SCREEN_GREY: egui::Color32 = egui::Color32::from_gray(170);
+const SPHERE_GREY: egui::Color32 = egui::Color32::from_gray(100);
+const FILL_GREY: egui::Color32 = egui::Color32::from_gray(214);
+
+/// Whether the ring point in direction `dir` from the centre is on the
+/// half of the sphere facing the eye.
+pub fn faces_viewer(l: &GizmoLayout, p: &Projection, dir: Vec3) -> bool {
+    dir.dot(p.toward_viewer_at(l.origin)) >= -0.05
+}
 
 /// Points on the ring around `axis`, each with whether it faces the viewer.
 pub fn ring_points(l: &GizmoLayout, p: &Projection, a: Axis) -> Vec<(egui::Pos2, bool)> {
     let len = l.world_len(p);
-    let n = l.axis(a);
-    let (u, v) = basis(n);
-    let tv = p.toward_viewer();
+    let (u, v) = basis(l.axis(a));
     (0..=SEGMENTS)
         .filter_map(|i| {
             let t = i as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
             let dir = u * t.cos() + v * t.sin();
-            let w = l.origin + dir * len;
-            p.screen(w).map(|s| (s, dir.dot(tv) >= -0.05))
+            p.screen(l.origin + dir * len).map(|s| (s, faces_viewer(l, p, dir)))
         })
         .collect()
+}
+
+/// A ring seen (nearly) edge-on projects to a line through the centre and
+/// is not offered as a handle.
+fn ring_usable(l: &GizmoLayout, p: &Projection, a: Axis) -> bool {
+    l.axis(a).dot(p.toward_viewer_at(l.origin)).abs() > 0.1
 }
 
 fn basis(n: Vec3) -> (Vec3, Vec3) {
@@ -39,16 +55,15 @@ fn ring_distance(pts: &[(egui::Pos2, bool)], pointer: egui::Pos2) -> f32 {
 
 pub fn hit(l: &GizmoLayout, p: &Projection, pointer: egui::Pos2) -> Option<Handle> {
     let o = p.screen(l.origin)?;
-    // A ring seen edge-on projects to a line through the centre; it is
-    // not offered as a handle, so skip it here.
-    let tv = p.toward_viewer();
     let best = [Axis::X, Axis::Y, Axis::Z]
         .into_iter()
-        .filter(|a| l.axis(*a).dot(tv).abs() > 0.1)
+        .filter(|a| ring_usable(l, p, *a))
         .map(|a| (a, ring_distance(&ring_points(l, p, a), pointer)))
-        .min_by(|a, b| a.1.total_cmp(&b.1))?;
-    if best.1 <= HIT_PX {
-        return Some(Handle::Axis(best.0));
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+    if let Some((a, d)) = best {
+        if d <= HIT_PX {
+            return Some(Handle::Axis(a));
+        }
     }
     let d = pointer.distance(o);
     if l.screen_handle && (d - l.size_px * SCREEN_RING).abs() <= HIT_PX {
@@ -60,7 +75,7 @@ pub fn hit(l: &GizmoLayout, p: &Projection, pointer: egui::Pos2) -> Option<Handl
 /// Signed angle (degrees, right-hand rule about the axis) the pointer swept
 /// around the gizmo centre.
 pub fn drag_angle_deg(l: &GizmoLayout, p: &Projection, a: Axis, last: egui::Pos2, now: egui::Pos2) -> f32 {
-    let sign = if l.axis(a).dot(p.toward_viewer()) >= 0.0 { 1.0 } else { -1.0 };
+    let sign = if l.axis(a).dot(p.toward_viewer_at(l.origin)) >= 0.0 { 1.0 } else { -1.0 };
     screen_sweep_deg(l, p, last, now) * sign
 }
 
@@ -104,38 +119,94 @@ pub fn trackball(l: &GizmoLayout, p: &Projection, last: egui::Pos2, now: egui::P
 pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option<Handle>, drag: Option<&DragState>) {
     let Some(o) = p.screen(l.origin) else { return };
     let free_active = hl == Some(Handle::Free);
-    painter.circle_filled(o, l.size_px, if free_active { HOVER.gamma_multiply(0.25) } else { egui::Color32::from_white_alpha(14) });
+    if free_active {
+        painter.circle_filled(o, l.size_px, FILL_GREY.gamma_multiply(0.35));
+    }
+    if let Some(d) = drag {
+        if l.pie_slice && d.angle_deg.abs() > 0.0 {
+            pie_slice(painter, l, p, d);
+        }
+    }
+    if l.free_rotation || free_active {
+        painter.circle_stroke(o, l.size_px, egui::Stroke::new(if free_active { 2.0_f32 } else { 1.0 }, if free_active { HOVER } else { SPHERE_GREY }));
+    }
     for a in [Axis::X, Axis::Y, Axis::Z] {
         let active = hl == Some(Handle::Axis(a));
-        let color = if active { HOVER } else { axis_color(a) };
+        let stroke = egui::Stroke::new(if active { 3.0_f32 } else { 2.0 }, if active { HOVER } else { axis_color(a) });
+        // Only the half facing the viewer is drawn; the back half is behind the sphere.
         let pts = ring_points(l, p, a);
+        let mut run: Vec<egui::Pos2> = Vec::new();
         for w in pts.windows(2) {
-            let front = w[0].1 && w[1].1;
-            let stroke = if front { egui::Stroke::new(if active { 3.0 } else { 2.0 }, color) } else { egui::Stroke::new(1.0_f32, color.gamma_multiply(0.3)) };
-            painter.line_segment([w[0].0, w[1].0], stroke);
+            if w[0].1 && w[1].1 {
+                if run.is_empty() {
+                    run.push(w[0].0);
+                }
+                run.push(w[1].0);
+            } else if !run.is_empty() {
+                painter.add(egui::Shape::line(std::mem::take(&mut run), stroke));
+            }
+        }
+        if !run.is_empty() {
+            painter.add(egui::Shape::line(run, stroke));
         }
     }
     let screen_active = hl == Some(Handle::Screen);
     if l.screen_handle {
-        painter.circle_stroke(o, l.size_px * SCREEN_RING, egui::Stroke::new(if screen_active { 3.0 } else { 1.5 }, if screen_active { HOVER } else { egui::Color32::from_gray(170) }));
+        painter.circle_stroke(o, l.size_px * SCREEN_RING, egui::Stroke::new(if screen_active { 2.0_f32 } else { 1.0 }, if screen_active { HOVER } else { SCREEN_GREY }));
+    }
+    let tl = GizmoLayout { size_px: l.size_px * TRIPOD, ..*l };
+    for a in [Axis::X, Axis::Y, Axis::Z] {
+        if let Some((s, e)) = axis_segment(&tl, p, a, 0.0, 1.0) {
+            painter.line_segment([s, e], egui::Stroke::new(1.0_f32, SCREEN_GREY));
+            if l.axis_labels {
+                let d = pos_sub(e, s).normalize_or_zero();
+                painter.text(egui::pos2(e.x + d.x * 6.0, e.y + d.y * 6.0), egui::Align2::CENTER_CENTER, a.label().to_lowercase(), egui::FontId::proportional(10.0), SCREEN_GREY);
+            }
+        }
     }
     if let Some(d) = drag {
-        if l.pie_slice && d.angle_deg.abs() > 0.0 && d.handle != Handle::Free {
-            let start = pos_sub(d.start, o);
-            let r = start.length().max(1.0);
-            let a0 = (-start.y).atan2(start.x);
-            let sweep = d.angle_deg.to_radians() * if let Handle::Axis(a) = d.handle { if l.axis(a).dot(p.toward_viewer()) >= 0.0 { 1.0 } else { -1.0 } } else { 1.0 };
-            let n = ((sweep.abs() / 0.05).ceil() as usize).clamp(2, 720);
-            let mut pts = vec![o];
-            for i in 0..=n {
-                let t = a0 + sweep * i as f32 / n as f32;
-                pts.push(egui::pos2(o.x + r * t.cos(), o.y - r * t.sin()));
-            }
-            painter.add(egui::Shape::convex_polygon(pts.clone(), HOVER.gamma_multiply(0.35), egui::Stroke::NONE));
-            painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0_f32, HOVER)));
-        }
         if l.angle_data {
-            painter.text(egui::pos2(o.x + 14.0, o.y + 14.0), egui::Align2::LEFT_TOP, format!("{:.1}°", d.angle_deg), egui::FontId::proportional(11.0), HOVER);
+            let deg = match d.handle {
+                Handle::Axis(_) => d.rotate_deg,
+                // Screen / Free: the accumulated rotation in the reference system.
+                _ => {
+                    let frame = Quat::from_mat3(&l.axes);
+                    let (x, y, z) = (frame.inverse() * d.quat * frame).to_euler(glam::EulerRot::XYZ);
+                    Vec3::new(x, y, z) * (180.0 / std::f32::consts::PI)
+                }
+            };
+            let top = egui::pos2(o.x, o.y - l.size_px * if l.screen_handle { SCREEN_RING } else { 1.0 } - 4.0);
+            painter.text(top, egui::Align2::CENTER_BOTTOM, format!("[{:.2}, {:.2}, {:.2}]", deg.x, deg.y, deg.z), egui::FontId::proportional(11.0), HOVER);
         }
     }
+}
+
+/// The swept angle as a translucent slice in the plane of the dragged ring
+/// (or the screen plane), starting where the drag began. Turns beyond 360°
+/// overlap and the shading gets more opaque.
+fn pie_slice(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, d: &DragState) {
+    let (n, radius, color) = match d.handle {
+        Handle::Axis(a) => (l.axis(a), l.world_len(p), axis_color(a)),
+        Handle::Screen => (p.toward_viewer_at(l.origin), l.world_len(p) * SCREEN_RING, SCREEN_GREY),
+        _ => return,
+    };
+    let (u, v) = basis(n);
+    let Some(start) = p.hit_plane(d.start, l.origin, n) else { return };
+    let w = start - l.origin;
+    let a0 = w.dot(v).atan2(w.dot(u));
+    let sweep = d.angle_deg.to_radians();
+    let Some(o) = p.screen(l.origin) else { return };
+    let fill = color.gamma_multiply(0.25);
+    let steps = ((sweep.abs() / 0.05).ceil() as usize).clamp(2, 2880);
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(o, fill);
+    for i in 0..=steps {
+        let t = a0 + sweep * i as f32 / steps as f32;
+        let Some(q) = p.screen(l.origin + (u * t.cos() + v * t.sin()) * radius) else { return };
+        mesh.colored_vertex(q, fill);
+    }
+    for i in 1..=steps as u32 {
+        mesh.add_triangle(0, i, i + 1);
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }

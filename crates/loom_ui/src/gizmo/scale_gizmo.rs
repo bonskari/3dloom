@@ -1,35 +1,52 @@
-//! Scale gizmo: axes ending in small boxes, triangles between axis pairs
-//! for non-uniform (plane) scale, and a centre triangle for uniform scale.
+//! Scale gizmo: a triangle. Three axes ending in small boxes, an inner
+//! triangle between them for uniform scale and, for each axis pair, the band
+//! between the inner and the outer triangle edge for two-axis scale. Each
+//! triangle edge is half one axis's colour, half the other's.
 
 use super::*;
 
-const PLANE_FROM: f32 = 0.35;
-const PLANE_TO: f32 = 0.6;
-const UNIFORM: f32 = 0.3;
+/// Inner triangle corners, as a fraction of the axis length.
+const INNER: f32 = 0.5;
+/// Outer triangle corners: the plane bands span INNER..OUTER.
+const OUTER: f32 = 0.7;
+const END_BOX_PX: f32 = 6.0;
 
-fn triangle(l: &GizmoLayout, p: &Projection, plane: Plane, from: f32, to: f32) -> Option<[egui::Pos2; 4]> {
-    let len = l.world_len(p);
+const FILL_GREY: egui::Color32 = egui::Color32::from_gray(214);
+
+/// The layout the gizmo is drawn and hit with: Preferences > Gizmos > Scale size applied.
+fn sized(l: &GizmoLayout) -> GizmoLayout {
+    GizmoLayout { size_px: l.size_px * (l.scale_size / 100.0), ..*l }
+}
+
+fn corner(l: &GizmoLayout, p: &Projection, a: Axis, at: f32) -> Option<egui::Pos2> {
+    p.screen(l.origin + l.axis(a) * (l.world_len(p) * at))
+}
+
+/// The two-axis handle: the band between the inner and outer edge of `plane`.
+pub fn plane_band(l: &GizmoLayout, p: &Projection, plane: Plane) -> Option<[egui::Pos2; 4]> {
     let (ua, va) = plane.axes();
-    let (u, v) = (l.axis(ua) * len, l.axis(va) * len);
-    let o = l.origin;
-    Some([p.screen(o + u * from)?, p.screen(o + u * to)?, p.screen(o + v * to)?, p.screen(o + v * from)?])
+    Some([corner(l, p, ua, INNER)?, corner(l, p, ua, OUTER)?, corner(l, p, va, OUTER)?, corner(l, p, va, INNER)?])
 }
 
 pub fn uniform_polygon(l: &GizmoLayout, p: &Projection) -> Option<Vec<egui::Pos2>> {
-    let len = l.world_len(p) * UNIFORM;
-    let pts: Option<Vec<_>> = [Axis::X, Axis::Y, Axis::Z].into_iter().map(|a| p.screen(l.origin + l.axis(a) * len)).collect();
-    pts
+    [Axis::X, Axis::Y, Axis::Z].into_iter().map(|a| corner(l, p, a, INNER)).collect()
 }
 
 pub fn hit(l: &GizmoLayout, p: &Projection, pointer: egui::Pos2) -> Option<Handle> {
+    let l = &sized(l);
     let o = p.screen(l.origin)?;
+    // Uniform: inside the inner triangle, including the axis lines within it.
+    let on_inner_axis = [Axis::X, Axis::Y, Axis::Z]
+        .into_iter()
+        .filter_map(|a| axis_segment(l, p, a, 0.0, INNER))
+        .any(|(s, e)| distance_to_segment(pointer, s, e) <= HIT_PX);
     if let Some(poly) = uniform_polygon(l, p) {
-        if point_in_polygon(pointer, &poly) || pointer.distance(o) <= 5.0 {
+        if point_in_polygon(pointer, &poly) || on_inner_axis || pointer.distance(o) <= 5.0 {
             return Some(Handle::Uniform);
         }
     }
     for plane in Plane::ALL {
-        if let Some(t) = triangle(l, p, plane, PLANE_FROM, PLANE_TO) {
+        if let Some(t) = plane_band(l, p, plane) {
             if point_in_polygon(pointer, &t) {
                 return Some(Handle::Plane(plane));
             }
@@ -58,35 +75,65 @@ pub fn factors(h: Handle, f: f32) -> Vec3 {
     }
 }
 
+/// Whether axis `a` is part of handle `h`.
+fn involves(h: Option<Handle>, a: Axis) -> bool {
+    match h {
+        Some(Handle::Axis(b)) => a == b,
+        Some(Handle::Plane(pl)) => pl.axes().0 == a || pl.axes().1 == a,
+        Some(Handle::Uniform) => true,
+        _ => false,
+    }
+}
+
 pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option<Handle>, drag: Option<&DragState>) {
-    let stretch = drag.map(|d| d.factor.clamp(0.2, 3.0)).unwrap_or(1.0);
-    let sl = GizmoLayout { size_px: l.size_px * stretch * (l.scale_size / 100.0), ..*l };
-    if let Some(poly) = uniform_polygon(&sl, p) {
-        let active = hl == Some(Handle::Uniform);
-        painter.add(egui::Shape::convex_polygon(poly, if active { HOVER.gamma_multiply(0.6) } else { egui::Color32::from_gray(180).gamma_multiply(0.4) }, egui::Stroke::new(1.0_f32, if active { HOVER } else { egui::Color32::from_gray(200) })));
+    // While dragging, the gizmo stretches along the scaled axes.
+    let mut sl = sized(l);
+    if let Some(d) = drag {
+        let f = factors(d.handle, d.factor.clamp(0.2, 3.0));
+        sl.axes = Mat3::from_cols(sl.axes.x_axis * f.x, sl.axes.y_axis * f.y, sl.axes.z_axis * f.z);
+    }
+    let sl = &sl;
+    let uniform_active = hl == Some(Handle::Uniform);
+    if uniform_active {
+        if let Some(poly) = uniform_polygon(sl, p) {
+            painter.add(egui::Shape::convex_polygon(poly, FILL_GREY.gamma_multiply(0.6), egui::Stroke::NONE));
+        }
     }
     for plane in Plane::ALL {
-        if let Some(t) = triangle(&sl, p, plane, PLANE_FROM, PLANE_TO) {
-            let active = hl == Some(Handle::Plane(plane));
-            let (ua, va) = plane.axes();
-            let fill = if active { HOVER.gamma_multiply(0.45) } else { egui::Color32::from_gray(160).gamma_multiply(0.25) };
-            painter.add(egui::Shape::convex_polygon(t.to_vec(), fill, egui::Stroke::NONE));
-            painter.line_segment([t[0], t[1]], egui::Stroke::new(1.5, if active { HOVER } else { axis_color(ua) }));
-            painter.line_segment([t[2], t[3]], egui::Stroke::new(1.5, if active { HOVER } else { axis_color(va) }));
-            painter.line_segment([t[1], t[2]], egui::Stroke::new(1.5, if active { HOVER } else { egui::Color32::from_gray(190) }));
-            painter.line_segment([t[3], t[0]], egui::Stroke::new(1.5, if active { HOVER } else { egui::Color32::from_gray(190) }));
+        let active = hl == Some(Handle::Plane(plane));
+        if active {
+            if let Some(t) = plane_band(sl, p, plane) {
+                painter.add(egui::Shape::convex_polygon(t.to_vec(), FILL_GREY.gamma_multiply(0.6), egui::Stroke::NONE));
+            }
+        }
+        let (ua, va) = plane.axes();
+        for at in [INNER, OUTER] {
+            let (Some(a), Some(b)) = (corner(sl, p, ua, at), corner(sl, p, va, at)) else { continue };
+            if active || uniform_active {
+                painter.line_segment([a, b], egui::Stroke::new(1.5_f32, HOVER));
+            } else {
+                let m = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+                painter.line_segment([a, m], egui::Stroke::new(1.5_f32, axis_color(ua)));
+                painter.line_segment([m, b], egui::Stroke::new(1.5_f32, axis_color(va)));
+            }
         }
     }
     for a in [Axis::X, Axis::Y, Axis::Z] {
-        if let Some((s, e)) = axis_segment(&sl, p, a, 0.0, 1.0) {
-            let active = hl == Some(Handle::Axis(a));
-            let color = if active { HOVER } else { axis_color(a) };
-            painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
-            painter.rect_filled(egui::Rect::from_center_size(e, egui::vec2(7.0, 7.0)), 0.0, color);
-            if l.axis_labels {
-                let d = pos_sub(e, s).normalize_or_zero();
-                painter.text(egui::pos2(e.x + d.x * 10.0, e.y + d.y * 10.0), egui::Align2::CENTER_CENTER, a.label(), egui::FontId::proportional(11.0), color);
+        let Some((s, e)) = axis_segment(sl, p, a, 0.0, 1.0) else { continue };
+        let involved = involves(hl, a);
+        let color = if involved && !uniform_active { HOVER } else { axis_color(a) };
+        let width = if hl == Some(Handle::Axis(a)) { 3.0_f32 } else { 2.0 };
+        painter.line_segment([s, e], egui::Stroke::new(width, color));
+        if uniform_active {
+            if let Some((s, m)) = axis_segment(sl, p, a, 0.0, INNER) {
+                painter.line_segment([s, m], egui::Stroke::new(width, HOVER));
             }
+        }
+        painter.rect_filled(egui::Rect::from_center_size(e, egui::vec2(END_BOX_PX, END_BOX_PX)), 0.0, axis_color(a));
+        if l.axis_labels {
+            let d = pos_sub(e, s).normalize_or_zero();
+            let label = if involved { HOVER } else { axis_color(a) };
+            painter.text(egui::pos2(e.x + d.x * 10.0, e.y + d.y * 10.0), egui::Align2::CENTER_CENTER, a.label(), egui::FontId::proportional(11.0), label);
         }
     }
     if let (Some(d), Some(o)) = (drag, p.screen(l.origin)) {

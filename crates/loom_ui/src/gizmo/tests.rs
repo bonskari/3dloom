@@ -66,6 +66,69 @@ fn scale_uniform_hit_centre() {
     assert_eq!(scale_gizmo::hit(&l, &p, egui::pos2(438.0, 300.0)), Some(Handle::Axis(Axis::X)));
 }
 
+/// Orthographic view from the front-top-right, 10 px per unit, origin at the centre.
+fn tilted_projection() -> Projection {
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let view = Mat4::look_at_rh(Vec3::new(40.0, -100.0, 100.0), Vec3::ZERO, Vec3::Z);
+    let proj = Mat4::orthographic_rh(-40.0, 40.0, -30.0, 30.0, 0.1, 1000.0);
+    Projection::new(view, proj, rect)
+}
+
+#[test]
+fn rotate_ring_back_half_is_not_hittable() {
+    let p = tilted_projection();
+    let l = layout();
+    let r = l.world_len(&p);
+    let tv = p.toward_viewer();
+    let toward = Vec3::new(tv.x, tv.y, 0.0).normalize();
+    // The Z ring point nearest the viewer is a handle; the one farthest away is behind the sphere.
+    let front = p.screen(toward * r).unwrap();
+    let back = p.screen(-toward * r).unwrap();
+    assert_eq!(rotate_gizmo::hit(&l, &p, front), Some(Handle::Axis(Axis::Z)));
+    assert_ne!(rotate_gizmo::hit(&l, &p, back), Some(Handle::Axis(Axis::Z)));
+}
+
+#[test]
+fn rotate_ring_front_half_faces_the_eye_in_perspective() {
+    // Perspective camera, gizmo away from the view centre: which half of a
+    // ring is in front depends on the direction to the eye, not the camera axis.
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let view = Mat4::look_at_rh(Vec3::new(0.0, -10.0, 10.0), Vec3::ZERO, Vec3::Z);
+    let proj = Mat4::perspective_rh(60f32.to_radians(), 800.0 / 600.0, 0.1, 1000.0);
+    let p = Projection::new(view, proj, rect);
+    let l = GizmoLayout { origin: Vec3::new(6.0, 0.0, 0.0), ..layout() };
+    let toward_eye = Vec3::new(-1.0, 0.15, 0.0).normalize();
+    let away = Vec3::new(1.0, -0.15, 0.0).normalize();
+    assert!(toward_eye.dot(p.toward_viewer()) < -0.1 && away.dot(p.toward_viewer()) > 0.1);
+    assert!(rotate_gizmo::faces_viewer(&l, &p, toward_eye));
+    assert!(!rotate_gizmo::faces_viewer(&l, &p, away));
+    // Orthographic: the view direction decides.
+    let o = tilted_projection();
+    assert!(rotate_gizmo::faces_viewer(&layout(), &o, o.toward_viewer()));
+    assert!(!rotate_gizmo::faces_viewer(&layout(), &o, -o.toward_viewer()));
+}
+
+#[test]
+fn scale_triangle_handles() {
+    let p = top_projection();
+    let l = layout();
+    // Inner triangle reaches 50 % of the axis (20 px), the plane band ends at 70 % (28 px).
+    assert_eq!(scale_gizmo::hit(&l, &p, egui::pos2(408.0, 292.0)), Some(Handle::Uniform));
+    assert_eq!(scale_gizmo::hit(&l, &p, egui::pos2(413.0, 287.0)), Some(Handle::Plane(Plane::XY)));
+    assert_eq!(scale_gizmo::hit(&l, &p, egui::pos2(419.0, 281.0)), None);
+    // The axis line inside the inner triangle belongs to the uniform handle, beyond it to the axis.
+    assert_eq!(scale_gizmo::hit(&l, &p, egui::pos2(415.0, 300.0)), Some(Handle::Uniform));
+    assert_eq!(scale_gizmo::hit(&l, &p, egui::pos2(436.0, 300.0)), Some(Handle::Axis(Axis::X)));
+}
+
+#[test]
+fn scale_hit_follows_the_scale_size_preference() {
+    let p = top_projection();
+    let l = GizmoLayout { scale_size: 200.0, ..layout() };
+    // Twice the size: the axis reaches 80 px.
+    assert_eq!(scale_gizmo::hit(&l, &p, egui::pos2(476.0, 300.0)), Some(Handle::Axis(Axis::X)));
+}
+
 #[test]
 fn rotate_drag_angle_is_signed_by_axis_toward_viewer() {
     let p = top_projection();
