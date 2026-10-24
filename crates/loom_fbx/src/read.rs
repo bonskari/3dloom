@@ -262,6 +262,11 @@ fn read_take(scene: &ufbx::Scene, index_of: &BTreeMap<u32, usize>) -> Option<cra
     Some(crate::document::FbxTake { name: stack.element.name.to_string(), fps: fps as f32, start, end, tracks })
 }
 
+/// Metres per unit of the file's own distances (UnitScaleFactor is in centimetres).
+fn file_unit_metres(scene: &ufbx::Scene) -> f64 {
+    scene.settings.props.find_prop("UnitScaleFactor").map_or(0.01, |p| p.value_vec4.x * 0.01)
+}
+
 /// An FBX light; `unit` scales the file's distances to document units.
 fn convert_light(l: &ufbx::Light, unit: f32) -> crate::document::FbxLight {
     let prop = |name: &str| l.element.props.find_prop(name);
@@ -322,7 +327,7 @@ pub fn read(bytes: &[u8], target_unit_metres: f64) -> Result<FbxDocument, String
         } else if let Some(c) = n.camera.as_ref() {
             FbxKind::Camera { fov_deg: c.field_of_view_deg.y as f32 }
         } else if let Some(l) = n.light.as_ref() {
-            FbxKind::Light(convert_light(l, (scene.settings.original_unit_meters / target_unit_metres) as f32))
+            FbxKind::Light(convert_light(l, (file_unit_metres(&scene) / target_unit_metres) as f32))
         } else if let Some(b) = n.bone.as_ref() {
             FbxKind::Bone { length: 0.0, size: (b.radius as f32).max(0.01) }
         } else {
