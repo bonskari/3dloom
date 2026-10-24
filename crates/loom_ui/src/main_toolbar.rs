@@ -271,7 +271,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         }
                     }
                     "Material Editor" => {
-                        if Icon::new(icons::MATERIAL_EDITOR, Command::MaterialEditorToggle.name()).tip("Material Editor").on(app.state.material_editor_open).show(ui, &app.state).clicked() {
+                        let r = Icon::new(icons::MATERIAL_EDITOR, Command::MaterialEditorToggle.name()).tip("Material Editor").on(app.state.material_editor_open).show(ui, &app.state);
+                        if r.clicked() {
                             let _ = app.dispatch(Command::MaterialEditorToggle);
                         }
                     }
