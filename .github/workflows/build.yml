@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo build --release -p loom_app --bin loom
+        env:
+          LOOM_UPDATE_CHANNEL: nightly
       - uses: actions/upload-artifact@v4
         with:
           name: loom-linux-x64
@@ -27,20 +29,32 @@ jobs:
           retention-days: 14
       # Windows: cross-compiled on the same runner (x86_64-pc-windows-gnu, mingw-w64).
       - run: cargo build --release -p loom_app --bin loom --target x86_64-pc-windows-gnu
+        env:
+          LOOM_UPDATE_CHANNEL: nightly
       - uses: actions/upload-artifact@v4
         with:
           name: loom-windows-x64
           path: target/x86_64-pc-windows-gnu/release/loom.exe
           retention-days: 14
-      # A rolling "nightly" release with both binaries: one stable link to share.
+      # A rolling "nightly" release with both binaries and the signed update
+      # manifest the programs check on start (see crates/loom_app/src/update.rs).
       - name: Publish the nightly release
         env:
           GH_TOKEN: ${{ github.token }}
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
+          set -euo pipefail
           cp target/x86_64-pc-windows-gnu/release/loom.exe loom-windows-x64.exe
           cp target/release/loom loom-linux-x64
+          cat > latest.json <<JSON
+          {"commit":"${GITHUB_SHA}","assets":{"linux-x64":{"name":"loom-linux-x64","sha256":"$(sha256sum loom-linux-x64 | cut -d' ' -f1)"},"windows-x64":{"name":"loom-windows-x64.exe","sha256":"$(sha256sum loom-windows-x64.exe | cut -d' ' -f1)"}}}
+          JSON
+          key=$(mktemp)
+          trap 'shred -u "$key"' EXIT
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key"
+          openssl pkeyutl -sign -rawin -inkey "$key" -in latest.json -out latest.json.sig
           git tag -f nightly
           git push -f origin nightly
           gh release view nightly >/dev/null 2>&1 || gh release create nightly --prerelease --title "3dLoom nightly" --notes "Newest build of main."
           gh release edit nightly --notes "Newest build of main: ${GITHUB_SHA::7}"
-          gh release upload nightly loom-windows-x64.exe loom-linux-x64 --clobber
+          gh release upload nightly loom-windows-x64.exe loom-linux-x64 latest.json latest.json.sig --clobber
