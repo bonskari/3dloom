@@ -12,10 +12,12 @@ pub mod live;
 pub mod main_toolbar;
 pub mod quad_menu;
 mod realistic;
+pub mod rendered_frame;
 pub mod region;
 pub mod time_slider;
 mod menubar;
 mod statusbar;
+pub mod spinner;
 pub mod tools;
 pub mod viewport_gizmo;
 mod viewport_widget;
@@ -50,8 +52,10 @@ pub use loom_commands;
 pub struct ViewAnimation {
     start_yaw: f32,
     start_pitch: f32,
+    start_roll: f32,
     end_yaw: f32,
     end_pitch: f32,
+    end_roll: f32,
     t: f32,
 }
 
@@ -173,6 +177,10 @@ pub struct LoomApp {
     pub(crate) topology_ack: Option<NodeId>,
     /// The wgpu device and, once a Realistic view or a Render needs it, Bevy.
     gpu: realistic::Gpu,
+    /// The render in progress (one bucket per frame).
+    pub(crate) render_job: Option<realistic::RenderJob>,
+    /// The Rendered Frame Window's and its clones' zoom, pan and textures.
+    pub rfw: rendered_frame::FrameViews,
     /// Meshes and colours waiting to be uploaded to the GPU. Every viewport
     /// callback holds this; whichever runs first takes and uploads them, so
     /// the upload never depends on one particular viewport being painted.
@@ -272,6 +280,14 @@ pub struct LoomApp {
     /// Originals of a Shift+drag in progress.
     pub shift_sources: Vec<loom_scene::NodeId>,
     pub view_animation: Option<ViewAnimation>,
+    /// A press on the ViewCube: where it started and whether it has dragged (orbiting).
+    pub cube_press: Option<(egui::Pos2, bool)>,
+    /// Viewport Background > Files...: the file picked, for the dialog's field.
+    pub background_pick: Option<String>,
+    /// The ViewCube's right-click menu: where it opened, for which viewport.
+    pub cube_menu: Option<(egui::Pos2, usize)>,
+    /// A camera viewport control drag is open as one scene undo step.
+    pub camera_nav_open: bool,
     pub drag_select_start: Option<egui::Pos2>,
     /// Alt+LMB press not yet moved 4 px: a click subtracts from the selection, a drag orbits.
     pub alt_click: Option<egui::Pos2>,
@@ -378,6 +394,8 @@ impl LoomApp {
             pending_topology: None,
             topology_ack: None,
             gpu: realistic::Gpu::None,
+            render_job: None,
+            rfw: Default::default(),
             pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(Vec::new()), Vec::new(), Vec::new())))),
             bitmap_cache: std::collections::HashMap::new(),
             create_kind: None,
@@ -432,6 +450,10 @@ impl LoomApp {
             named_sub_selection_name: String::new(),
             shift_sources: Vec::new(),
             view_animation: None,
+            cube_press: None,
+            background_pick: None,
+            cube_menu: None,
+            camera_nav_open: false,
             drag_select_start: None,
             alt_click: None,
             pick_cycle: None,
@@ -719,8 +741,7 @@ impl LoomApp {
                     let eye = world.w_axis.truncate();
                     let forward = -world.z_axis.truncate().normalize_or_zero();
                     let distance = loom_commands::camera::target_distance(&self.state.scene, id).unwrap_or(loom_scene::camera::DEFAULT_TARGET_DISTANCE).max(1e-3);
-                    let dir = -forward;
-                    let orbit = loom_input::OrbitCamera { target: eye + forward * distance, distance, yaw: dir.y.atan2(dir.x), pitch: dir.z.clamp(-1.0, 1.0).asin() };
+                    let orbit = loom_input::OrbitCamera::looking(eye, eye + forward * distance, world.y_axis.truncate().normalize_or_zero());
                     // Clip Manually off: nothing nearer than 3 units shows.
                     let (near, far) = if clip_manually.get() {
                         (near_clip.get().max(loom_scene::camera::MIN_NEAR_CLIP), far_clip.get().max(near_clip.get() + 1e-3))
@@ -791,6 +812,11 @@ impl LoomApp {
         });
         let up = loom_input::InputEvent::MouseUp { button: loom_input::MouseButton::Left, pos: glam::Vec2::new(pos.x, pos.y), mods: loom_input::Modifiers::default() };
         self.camera_controller.handle(up, &mut self.state.active_mut().camera);
+        if self.camera_nav_open {
+            self.camera_nav_open = false;
+            self.state.undo.end();
+        }
+        self.cube_press = None;
         self.alt_click = None;
         self.drag_select_start = None;
         self.region_points.clear();
@@ -818,8 +844,9 @@ impl LoomApp {
     }
 
     /// A length spinner in display units: the value stays in scene units.
-    pub fn length_drag<'a>(&self, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
-        length_drag_value(&self.state.units, self.state.prefs.spinner_precision, value, speed)
+    /// Add it right away: it is a [`spinner::spin`] (right-click sets 0).
+    pub fn length_drag<'a>(&self, ui: &egui::Ui, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
+        length_drag_value(ui, &self.state.units, self.state.prefs.spinner_precision, value, .., speed)
     }
 
     /// Spinner drag speed: the Preferences snap value when Spinner Snap is on.
@@ -869,12 +896,16 @@ impl LoomApp {
 
     // ---- view animation ----------------------------------------------------
 
-    pub fn start_view_animation(&mut self, yaw: f32, pitch: f32) {
+    /// Animates the active view to (yaw, pitch, roll) (ViewCube transitions).
+    pub fn start_view_animation(&mut self, yaw: f32, pitch: f32, roll: f32) {
+        let cam = &self.state.active().camera;
         self.view_animation = Some(ViewAnimation {
-            start_yaw: self.state.active().camera.yaw,
-            start_pitch: self.state.active().camera.pitch,
+            start_yaw: cam.yaw,
+            start_pitch: cam.pitch,
+            start_roll: cam.roll,
             end_yaw: yaw,
             end_pitch: pitch,
+            end_roll: roll,
             t: 0.0,
         });
     }
@@ -885,17 +916,14 @@ impl LoomApp {
         };
         anim.t = (anim.t + dt / 0.25).min(1.0);
         let s = anim.t * anim.t * (3.0 - 2.0 * anim.t);
-        let mut dyaw = anim.end_yaw - anim.start_yaw;
-        while dyaw > std::f32::consts::PI {
-            dyaw -= std::f32::consts::TAU;
-        }
-        while dyaw < -std::f32::consts::PI {
-            dyaw += std::f32::consts::TAU;
-        }
+        // Each angle takes the short way round.
+        let lerp = |a: f32, b: f32| a + loom_input::camera_control::wrap_angle(b - a) * s;
         let cam = &mut self.state.active_mut().camera;
-        cam.yaw = anim.start_yaw + dyaw * s;
-        cam.pitch = anim.start_pitch + (anim.end_pitch - anim.start_pitch) * s;
+        cam.yaw = lerp(anim.start_yaw, anim.end_yaw);
+        cam.pitch = lerp(anim.start_pitch, anim.end_pitch);
+        cam.roll = lerp(anim.start_roll, anim.end_roll);
         if anim.t >= 1.0 {
+            (cam.yaw, cam.pitch, cam.roll) = (anim.end_yaw, anim.end_pitch, anim.end_roll);
             self.view_animation = None;
         } else {
             self.view_animation = Some(anim);
@@ -976,6 +1004,10 @@ impl LoomApp {
             self.saved_modifier_usage = self.state.modifier_usage.clone();
         }
         self.persist_settings();
+        // Esc stops a render in progress (before the hotkeys see it).
+        if self.state.rendered.progress.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            let _ = self.dispatch(Command::CancelRender);
+        }
         hotkeys::handle(ctx, self);
         // "Close spline?" answered Yes: the line is closed, so the Line tool ends it.
         if let Some(line) = self.line.take() {
@@ -1014,6 +1046,7 @@ impl LoomApp {
         dialogs::show(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
+        rendered_frame::show(ctx, self);
         self.finish_realistic_frame(ctx);
     }
 }
@@ -1066,11 +1099,12 @@ fn modifier_usage_path() -> Option<std::path::PathBuf> {
 }
 
 /// A length spinner in display units (Units Setup); typed values may carry a
-/// unit (7", -3.5", 2.5cm). The value stays in scene units.
-pub fn length_drag_value<'a>(units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
+/// unit (7", -3.5", 2.5cm). The value stays in scene units. It is a
+/// [`spinner::spin`]: add it right away; right-click sets 0 or the minimum.
+pub fn length_drag_value<'a>(ui: &egui::Ui, units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, range: impl std::ops::RangeBounds<f32>, speed: f64) -> egui::DragValue<'a> {
     let (factor, suffix) = units.display_factor();
     let units = units.clone();
-    egui::DragValue::new(value)
+    spinner::spin(ui, value, range)
         .speed(speed)
         .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
         .custom_parser(move |text| units.parse(text))

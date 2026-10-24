@@ -115,8 +115,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     });
 }
 
-/// Viewport navigation controls, a 2 × 4 block.
+/// Viewport navigation controls, a 2 × 4 block. A camera view swaps in the
+/// camera viewport controls, which move the camera itself.
 fn navigation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
+    if let loom_commands::ViewKind::Camera(id) = app.state.active().kind {
+        return camera_controls(ui, app, id);
+    }
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             nav(ui, app, "Zoom", "Zoom Mode", NavMode::Zoom, Command::ZoomMode);
@@ -134,7 +138,12 @@ fn navigation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
             if app.state.active().is_orthographic() {
                 nav(ui, app, "Region", "Zoom Region Mode", NavMode::ZoomRegion, Command::ZoomRegionMode);
             } else {
-                nav(ui, app, "FOV", "Field-of-View", NavMode::Fov, Command::FieldOfViewMode);
+                // Perspective: the Field-of-View / Zoom Region flyout.
+                let current = usize::from(app.state.nav_mode == NavMode::ZoomRegion);
+                flyout(ui, app, "fov_region", current, [
+                    ("FOV", "Field-of-View", Command::FieldOfViewMode),
+                    ("Region", "Zoom Region Mode", Command::ZoomRegionMode),
+                ]);
             }
             nav(ui, app, "Pan", "Pan View", NavMode::Pan, Command::PanView);
             let orbit_current = match app.state.nav_mode { NavMode::OrbitSelected => 1, NavMode::OrbitSubObject => 2, _ => 0 };
@@ -142,6 +151,46 @@ fn navigation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
                 ("Orbit", "Orbit View Mode", Command::OrbitViewMode),
                 ("Orbit Selected", "Orbit Selected", Command::OrbitSelectedMode),
                 ("Orbit SubObject", "Orbit SubObject", Command::OrbitSubObjectMode),
+            ]);
+            let max = app.state.maximized;
+            if ui.selectable_label(max, "⛶").on_hover_name(&app.state, "Maximize Viewport Toggle").clicked() {
+                let _ = app.dispatch(Command::MaximizeViewportToggle);
+            }
+        });
+    });
+}
+
+/// Camera viewport controls: Dolly flyout (Target cameras also Dolly Target
+/// and Dolly Camera + Target), Perspective, Roll Camera, Zoom Extents All;
+/// Field-of-View, Truck Camera, Orbit / Pan Camera, Maximize.
+fn camera_controls(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
+    let has_target = matches!(app.state.scene.node(id).map(|n| &n.object), Some(loom_scene::ObjectKind::Camera { target: Some(t), .. }) if app.state.scene.node(*t).is_some());
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            if has_target {
+                let current = match app.state.nav_mode { NavMode::DollyTarget => 1, NavMode::DollyBoth => 2, _ => 0 };
+                flyout(ui, app, "dolly", current, [
+                    ("Dolly", "Dolly Camera Mode", Command::DollyCameraMode),
+                    ("Dolly Target", "Dolly Target Mode", Command::DollyTargetMode),
+                    ("Dolly Both", "Dolly Camera + Target Mode", Command::DollyCameraTargetMode),
+                ]);
+            } else {
+                nav(ui, app, "Dolly", "Dolly Camera Mode", NavMode::DollyCamera, Command::DollyCameraMode);
+            }
+            nav(ui, app, "Persp", "Perspective Mode", NavMode::Perspective, Command::PerspectiveMode);
+            nav(ui, app, "Roll", "Roll Camera Mode", NavMode::RollCamera, Command::RollCameraMode);
+            flyout(ui, app, "zoom_extents_all", 0, [
+                ("Extents All", "Zoom Extents All", Command::ZoomExtentsAll),
+                ("Extents All Selected", "Zoom Extents All Selected", Command::ZoomExtentsAllSelected),
+            ]);
+        });
+        ui.horizontal(|ui| {
+            nav(ui, app, "FOV", "Field-of-View", NavMode::Fov, Command::FieldOfViewMode);
+            nav(ui, app, "Truck", "Truck Camera Mode", NavMode::TruckCamera, Command::TruckCameraMode);
+            let current = usize::from(app.state.nav_mode == NavMode::PanCamera);
+            flyout(ui, app, "orbit_camera", current, [
+                ("Orbit Cam", "Orbit Camera Mode", Command::OrbitCameraMode),
+                ("Pan Cam", "Pan Camera Mode", Command::PanCameraMode),
             ]);
             let max = app.state.maximized;
             if ui.selectable_label(max, "⛶").on_hover_name(&app.state, "Maximize Viewport Toggle").clicked() {
@@ -168,11 +217,11 @@ fn coordinate_fields(ui: &mut egui::Ui, app: &mut LoomApp) {
         for (c, label) in [(&mut v.x, "X:"), (&mut v.y, "Y:"), (&mut v.z, "Z:")] {
             ui.label(label);
             let r = if tool == Tool::Move || tool == Tool::Select {
-                ui.add(app.length_drag(c, app.spinner_speed(0.1)))
+                ui.add(app.length_drag(ui, c, app.spinner_speed(0.1)))
             } else {
-                ui.add(egui::DragValue::new(c).speed(app.spinner_speed(0.1)).fixed_decimals(app.state.prefs.spinner_precision))
+                ui.add(crate::spinner::spin(ui, c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(app.state.prefs.spinner_precision))
             };
-            changed |= r.lost_focus() || r.drag_stopped();
+            changed |= r.lost_focus() || r.drag_stopped() || r.secondary_clicked();
             focused |= r.has_focus() || r.dragged();
         }
     });
@@ -221,7 +270,7 @@ fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = app.dispatch(Command::NextPreviousKeyModeToggle);
             }
             let mut frame = app.state.current_frame;
-            if ui.add(egui::DragValue::new(&mut frame).range(app.state.frame_range.0..=app.state.frame_range.1)).on_hover_text("Current Frame (Go To Frame)").changed() {
+            if ui.add(crate::spinner::spin(ui, &mut frame, app.state.frame_range.0..=app.state.frame_range.1)).on_hover_text("Current Frame (Go To Frame)").changed() {
                 let _ = app.dispatch(Command::SetFrame { frame });
             }
             if ui.small_button("⚙").on_hover_text("Time Configuration").clicked() {

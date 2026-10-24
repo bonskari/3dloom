@@ -56,7 +56,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.add_enabled(has, egui::Button::new("Set ID:")).clicked() {
                 let _ = app.dispatch(Command::SetMaterialId { id: st.mat_id });
             }
-            ui.add(egui::DragValue::new(&mut st.mat_id).speed(0.1).range(1..=65535));
+            ui.add(crate::spinner::spin(ui, &mut st.mat_id, 1..=65535).speed(0.1));
         });
         ui.horizontal(|ui| {
             if ui.button("Select ID").on_hover_text("Select the polygons with this material id (Ctrl adds)").clicked() {
@@ -104,7 +104,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = app.dispatch(Command::AutoSmooth);
             }
             let mut t = app.state.poly_settings.auto_smooth_threshold;
-            if ui.add(egui::DragValue::new(&mut t).speed(0.5).range(0.0..=180.0).suffix("°")).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut t, 0.0..=180.0).speed(0.5).suffix("°")).changed() {
                 let _ = app.dispatch(Command::AutoSmoothThreshold { degrees: t });
             }
         });
@@ -124,7 +124,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             ui.end_row();
             ui.label("Alpha:");
-            if ui.add_enabled(has, egui::DragValue::new(&mut st.alpha).speed(1.0).range(0.0..=100.0).suffix(" %")).changed() {
+            if ui.add_enabled(has, crate::spinner::spin(ui, &mut st.alpha, 0.0..=100.0).speed(1.0).suffix(" %")).changed() {
                 let _ = app.dispatch(Command::SetVertexAlpha { alpha: st.alpha });
             }
             ui.end_row();

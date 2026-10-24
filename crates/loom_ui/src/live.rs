@@ -303,6 +303,9 @@ impl LoomApp {
             self.camera_controller.cancel_drag();
             cleared.push("camera_drag");
         }
+        // A camera viewport control drag's undo step is ended just below.
+        self.camera_nav_open = false;
+        self.cube_press = None;
         if self.state.undo.in_transaction() {
             self.state.undo.end();
             cleared.push("undo_transaction");

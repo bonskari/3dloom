@@ -483,10 +483,10 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             });
             egui::Grid::new("hsds_adaptive_grid").num_columns(2).show(ui, |ui| {
                 ui.label("Max Level:");
-                ui.add(egui::DragValue::new(&mut lvl).range(1..=8));
+                ui.add(crate::spinner::spin(ui, &mut lvl, 1..=8));
                 ui.end_row();
                 ui.label("Max Angle:");
-                ui.add(egui::DragValue::new(&mut ang).speed(0.5).range(0.0..=180.0));
+                ui.add(crate::spinner::spin(ui, &mut ang, 0.0..=180.0).speed(0.5));
                 ui.end_row();
             });
             ui.ctx().data_mut(|m| m.insert_temp(id, (lvl, ang)));
@@ -657,7 +657,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Planar Angle").clicked() {
                     let _ = app.dispatch(Command::PlanarThreshold);
                 }
-                if ui.add(egui::DragValue::new(&mut a).speed(0.5).range(0.0..=180.0).fixed_decimals(1)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut a, 0.0..=180.0).speed(0.5).fixed_decimals(1)).changed() {
                     set(app, "Planar Angle", a as f64);
                 }
             });
@@ -666,7 +666,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Select MatID").clicked() {
                     let _ = app.dispatch(Command::SelectByMaterialIdUnwrap);
                 }
-                if ui.add(egui::DragValue::new(&mut m).range(1..=65535)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut m, 1..=65535)).changed() {
                     set(app, "Select MatID", m as f64);
                 }
             });
@@ -675,7 +675,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Select SG").clicked() {
                     let _ = app.dispatch(Command::SelectBySmoothingGroupUnwrap);
                 }
-                if ui.add(egui::DragValue::new(&mut g).range(1..=32)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut g, 1..=32)).changed() {
                     set(app, "Select SG", g as f64);
                 }
             });
@@ -702,7 +702,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                     let _ = app.dispatch(Command::UnwrapMapChannel { channel: 1 });
                 }
                 let mut c = ch.max(1);
-                if ui.add_enabled(ch > 0, egui::DragValue::new(&mut c).range(1..=99)).changed() {
+                if ui.add_enabled(ch > 0, crate::spinner::spin(ui, &mut c, 1..=99)).changed() {
                     let _ = app.dispatch(Command::UnwrapMapChannel { channel: c });
                 }
                 if ui.radio(ch == 0, "Vertex Color Channel").clicked() && ch != 0 {
@@ -842,7 +842,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 ui.horizontal(|ui| {
                     for (i, label) in (if kind == 4 { ["Side", "Radial", "Height"] } else { ["Length", "Width", "Height"] }).iter().enumerate() {
                         ui.label(*label);
-                        ui.add(egui::DragValue::new(&mut d[i]).range(2..=32));
+                        ui.add(crate::spinner::spin(ui, &mut d[i], 2..=32));
                     }
                 });
                 ui.ctx().data_mut(|m| m.insert_temp(key, d));
@@ -880,7 +880,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 match value {
                     loom_scene::ParamValue::Float(f) => {
                         let mut v = f;
-                        let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision));
+                        let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision));
                         if r.drag_started() {
                             app.state.undo.begin(pname);
                         }
@@ -903,7 +903,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                     }
                     loom_scene::ParamValue::Int(i) => {
                         let mut v = i;
-                        let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.1)));
+                        let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.1)));
                         if r.drag_started() {
                             app.state.undo.begin(pname);
                         }
