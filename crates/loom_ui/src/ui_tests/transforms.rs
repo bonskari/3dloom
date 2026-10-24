@@ -101,7 +101,7 @@ fn pick_in_the_coordinate_list_takes_the_clicked_object() {
     h.cmd(Command::ReferenceCoordinateSystem { system: loom_commands::CoordSystem::World });
     click_text(&mut h, "World", bar, 0.0);
     let m = menus(&h)[0];
-    eprintln!("DEBUG menus {:?} texts {:?} pick {:?} recent {:?}", menus(&h), h.texts(&name), h.texts("Pick"), h.app.state.pick_coord_recent);
+    eprintln!("DEBUG menus {:?} texts {:?} view {:?} working {:?} pick {:?}", menus(&h), h.texts(&name), h.texts("View"), h.texts("Working"), h.texts("Pick"));
     click_text(&mut h, &name, m, 0.0);
     assert_eq!(h.app.state.coord_system, loom_commands::CoordSystem::Pick);
 }
