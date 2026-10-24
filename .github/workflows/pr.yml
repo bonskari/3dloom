@@ -1,0 +1,19 @@
+name: pull request
+
+# Pull requests build and test on GitHub-hosted runners only: code from forks
+# never runs on the project's self-hosted machine.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y xvfb xdotool mesa-vulkan-drivers libxkbcommon-x11-0
+      - run: cargo build --workspace
+      - run: xvfb-run -a cargo test --workspace

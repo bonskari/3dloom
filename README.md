@@ -4,6 +4,10 @@ A standalone 3D modelling application written in Rust, built for game
 asset work: polygon modelling, a modifier stack, UV unwrapping, rigging,
 skinning and keyframe animation, with FBX and OBJ in and out.
 
+The interface and workflow aim to feel familiar to users of 3ds Max: the
+viewport layout, command panel, modifier stack, quad menus and default
+shortcuts follow the same conventions.
+
 Every action is a command in one registry, so everything the UI does can
 also be done from a script, the built-in control socket or an MCP client.
 
@@ -87,3 +91,6 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+3ds Max is a trademark of Autodesk, Inc. 3dLoom is an independent project and
+is not affiliated with or endorsed by Autodesk.
