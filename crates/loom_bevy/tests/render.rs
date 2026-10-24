@@ -120,7 +120,7 @@ fn buckets_join_into_the_full_frame() {
     let joined = render_buckets(&mut r, &camera, 128, 64);
     let bad = whole.pixels().zip(joined.pixels()).filter(|(a, b)| (0..4).any(|i| (a.0[i] as i32 - b.0[i] as i32).abs() > 24)).count();
     assert!(bad < 128 * 128 / 100, "{bad} pixels differ between the buckets and the full frame");
-    assert!(joined.pixels().filter(|p| p.0[3] > 0 && p.0[0] > 2 * p.0[1]).count() > 300, "the teapot shows");
+    assert!(joined.pixels().filter(|p| p.0[3] > 0 && p.0[0] as u32 > 2 * p.0[1] as u32).count() > 300, "the teapot shows");
 }
 
 /// Selected renders only the selection; helpers never render; hidden

@@ -596,7 +596,7 @@ mod tests {
         for (name, _) in DEFERRED {
             assert!(!km.bindings().any(|(_, n)| n == *name), "deferred action {name} must not be bound");
         }
-        assert_eq!(km.lookup(parse_chord("F9").unwrap()), None, "out-of-scope actions are not bound");
+        assert_eq!(km.lookup(parse_chord("F9").unwrap()), Some("Render Last"));
         assert_eq!(km.lookup(parse_chord("Shift+Q").unwrap()), Some("Render"));
         assert_eq!(km.lookup(parse_chord("F10").unwrap()), Some("Render SetUp..."));
     }

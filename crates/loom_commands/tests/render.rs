@@ -225,10 +225,11 @@ fn render_viewport_lock_keeps_the_chosen_view() {
     assert!(execute(&mut s, Command::RenderViewport { viewport: Some(9), lock: None, iterative: None }).is_err());
 }
 
+/// 16 x 8, orange, with one transparent pixel in the far corner (JPEG
+/// blends 8 x 8 blocks, so the corner block's colour stays clean).
 fn with_image(s: &mut AppState) {
-    let mut img = image::RgbaImage::new(4, 2);
-    img.put_pixel(0, 0, image::Rgba([200, 100, 50, 255]));
-    img.put_pixel(1, 0, image::Rgba([10, 20, 30, 0]));
+    let mut img = image::RgbaImage::from_pixel(16, 8, image::Rgba([200, 100, 50, 255]));
+    img.put_pixel(15, 7, image::Rgba([10, 20, 30, 0]));
     s.rendered.set_image(Some(Arc::new(img)));
 }
 
@@ -245,12 +246,18 @@ fn save_image_writes_every_format_by_extension() {
         let p = dir.join(format!("frame.{ext}"));
         execute(&mut s, Command::SaveRenderedImage { path: Some(p.to_string_lossy().into()) }).unwrap();
         let back = image::open(&p).unwrap_or_else(|e| panic!("{ext}: {e}"));
-        assert_eq!((back.width(), back.height()), (4, 2), "{ext}");
-        let px = back.to_rgba8().get_pixel(0, 0).0;
-        assert!(px[0] > 180 && px[1] > 80 && px[1] < 120, "{ext}: {px:?}");
+        assert_eq!((back.width(), back.height()), (16, 8), "{ext}");
+        if ext == "exr" {
+            // OpenEXR holds linear light: sRGB 200 is 0.578.
+            let px = back.to_rgba32f().get_pixel(0, 0).0;
+            assert!((px[0] - 0.578).abs() < 0.01 && (px[3] - 1.0).abs() < 1e-3, "{ext}: {px:?}");
+        } else {
+            let px = back.to_rgba8().get_pixel(0, 0).0;
+            assert!(px[0] > 185 && px[1] > 85 && px[1] < 115 && px[2] < 65, "{ext}: {px:?}");
+        }
     }
     let png = image::open(dir.join("frame.png")).unwrap().to_rgba8();
-    assert_eq!(png.get_pixel(1, 0).0, [10, 20, 30, 0], "PNG keeps the alpha");
+    assert_eq!(png.get_pixel(15, 7).0, [10, 20, 30, 0], "PNG keeps the alpha");
     assert!(execute(&mut s, Command::SaveRenderedImage { path: Some(dir.join("frame.xyz").to_string_lossy().into()) }).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -280,7 +287,7 @@ fn channels_clone_clear_and_copy() {
     let v = s.rendered.version;
     execute(&mut s, Command::ClearRenderedFrameWindow).unwrap();
     assert!(s.rendered.image.is_none() && s.rendered.version > v);
-    assert!(s.rendered.clones[0].image.width() == 4, "clones keep their copy");
+    assert!(s.rendered.clones[0].image.width() == 16, "clones keep their copy");
 }
 
 #[test]
