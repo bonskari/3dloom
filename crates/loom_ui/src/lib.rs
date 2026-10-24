@@ -162,6 +162,12 @@ pub struct LoomApp {
     world_display: std::sync::Arc<Vec<Mesh>>,
     /// Bumped by every `world_meshes` rebuild.
     world_version: u64,
+    /// What Show End Result off applied to at the last rebuild (`end_result_key`).
+    shown_end_result_key: Option<Vec<NodeId>>,
+    /// A base parameter change held back by the topology-dependence warning.
+    pub(crate) pending_topology: Option<Command>,
+    /// The node whose topology warning was answered Yes while its base object stays active.
+    pub(crate) topology_ack: Option<NodeId>,
     /// The wgpu device and, once a Realistic view or a Render needs it, Bevy.
     gpu: realistic::Gpu,
     /// Meshes and colours waiting to be uploaded to the GPU. Every viewport
@@ -294,6 +300,9 @@ impl LoomApp {
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
             world_version: 0,
+            shown_end_result_key: None,
+            pending_topology: None,
+            topology_ack: None,
             gpu: realistic::Gpu::None,
             pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(Vec::new()), Vec::new(), Vec::new())))),
             bitmap_cache: std::collections::HashMap::new(),
@@ -382,6 +391,21 @@ impl LoomApp {
             self.state.undo.end();
         }
         self.end_create_mode_for(cmd.name());
+        if let Command::SetParameter { id, .. } = &cmd {
+            // A base parameter under a topology-dependent modifier: ask first.
+            let id = NodeId(*id);
+            if let Some(a) = self.topology_ack {
+                if !self.state.selection.contains(&a) || self.state.scene.node(a).is_none_or(|n| n.active_entry.is_some()) {
+                    self.topology_ack = None;
+                }
+            }
+            let dependent = self.state.scene.node(id).is_some_and(|n| n.modifiers.iter().any(|s| s.modifier.topology_dependent()));
+            if dependent && self.topology_ack != Some(id) {
+                self.pending_topology = Some(cmd);
+                self.state.dialog = Some(loom_commands::Dialog::TopologyWarning);
+                return Ok(serde_json::json!({ "asked": "topology warning" }));
+            }
+        }
         let opens_editor = matches!(&cmd, Command::AddModifier { name } if name == "Unwrap UVW") && self.state.uv_editor.always_bring_up;
         let r = loom_commands::execute(&mut self.state, cmd);
         match &r {
@@ -415,6 +439,11 @@ impl LoomApp {
     }
 
     pub(crate) fn sync_after_command(&mut self) {
+        let key = self.end_result_key();
+        if key != self.shown_end_result_key {
+            self.shown_end_result_key = key;
+            self.state.mesh_dirty = true;
+        }
         if self.state.mesh_dirty {
             self.rebuild_world_meshes();
             self.state.mesh_dirty = false;
@@ -442,6 +471,18 @@ impl LoomApp {
         self.sync_after_command();
     }
 
+    /// Show End Result off: the selected object, while the Modify panel edits
+    /// it, shows its stack only up to the active entry.
+    pub(crate) fn below_end_result(&self, id: NodeId) -> bool {
+        !self.state.show_end_result && self.panel_tab == command_panel::Tab::Modify && self.state.selection.contains(&id)
+    }
+
+    /// The objects `below_end_result` applies to (None: none); the drawn
+    /// meshes are rebuilt when it changes.
+    fn end_result_key(&self) -> Option<Vec<NodeId>> {
+        (!self.state.show_end_result && self.panel_tab == command_panel::Tab::Modify).then(|| self.state.selection.iter().copied().collect())
+    }
+
     fn rebuild_world_meshes(&mut self) {
         let srgb_f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
         let srgb = |c: u8| srgb_f(c as f32 / 255.0);
@@ -456,12 +497,13 @@ impl LoomApp {
             let n = self.state.scene.node(id).expect("collected above");
             let mut mesh = n.cage_mesh().into_owned();
             // What the GPU draws: the stack result (NURMS included), or with
-            // Show End Result off only up to the active entry; the cage stays
-            // the base mesh for sub-object picking.
+            // Show End Result off only up to the active entry of the object
+            // the Modify panel edits; the cage stays the base mesh for
+            // sub-object picking.
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
             let mut shown = if n.modifiers.is_empty() && !nurms {
                 None
-            } else if !self.state.show_end_result {
+            } else if self.below_end_result(id) {
                 match n.active_entry {
                     None => Some(n.object.display_output()),
                     Some(a) => Some(self.state.scene.evaluated(id, Some(a)).value.mesh.clone()),
@@ -804,6 +846,10 @@ impl LoomApp {
         statusbar::show(ctx, self);
         time_slider::show(ctx, self);
         command_panel::show(ctx, self);
+        if self.end_result_key() != self.shown_end_result_key {
+            // A tab switch changes what Show End Result off shows.
+            self.sync_after_command();
+        }
         viewports::show(ctx, self);
         if let Some(open) = self.quad_menu {
             if quad_menu::show(ctx, self, open) {

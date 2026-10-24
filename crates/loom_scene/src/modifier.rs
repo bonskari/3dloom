@@ -20,11 +20,18 @@ pub struct Deformer {
     pub limit: Param<bool>,
     pub upper: Param<f32>,
     pub lower: Param<f32>,
+    /// The Center sub-object, in gizmo space: the deformation is measured from it.
+    #[serde(default = "param_origin")]
+    pub center: Param<Vec3>,
+}
+
+fn param_origin() -> Param<Vec3> {
+    Param::new(Vec3::ZERO)
 }
 
 impl Default for Deformer {
     fn default() -> Self {
-        Self { gizmo: Transform::default(), axis: Param::new(2), limit: Param::new(false), upper: Param::new(0.0), lower: Param::new(0.0) }
+        Self { gizmo: Transform::default(), axis: Param::new(2), limit: Param::new(false), upper: Param::new(0.0), lower: Param::new(0.0), center: param_origin() }
     }
 }
 
@@ -242,6 +249,10 @@ fn apply_vertex_colour_channel(out: &mut Mesh, edits: &loom_mesh::half_edge::Map
     }
 }
 
+fn param_off() -> Param<bool> {
+    Param::new(false)
+}
+
 fn face_centroid(m: &Mesh, f: loom_mesh::FaceId) -> Vec3 {
     let pts = m.face_positions(f).unwrap_or_default();
     if pts.is_empty() { Vec3::ZERO } else { pts.iter().sum::<Vec3>() / pts.len() as f32 }
@@ -380,7 +391,14 @@ pub enum Modifier {
     /// Normal: Unify / Flip.
     Normal { flip: Param<bool> },
     /// Smooth: Auto Smooth by threshold, or explicit smoothing group bits.
-    Smooth { auto_smooth: Param<bool>, threshold: Param<f32>, groups: Param<u32> },
+    Smooth {
+        auto_smooth: Param<bool>,
+        threshold: Param<f32>,
+        groups: Param<u32>,
+        /// Auto Smooth: faces meeting only at a vertex get different groups too.
+        #[serde(default = "param_off")]
+        prevent_indirect: Param<bool>,
+    },
     /// Poly Select: passes a stored sub-object selection up the stack.
     PolySelect { selection: StoredSelection },
     /// Mesh Select: Vertex / Edge / Face / Polygon / Element (Face and Polygon both select polygons).
@@ -584,7 +602,7 @@ impl Modifier {
             "Linked XForm" => Modifier::LinkedXForm { control: None, control_inverse_at_pick: None },
             "Preserve" => Modifier::Preserve { original: None, iterations: Param::new(10), weight: f(0.5) },
             "Normal" => Modifier::Normal { flip: Param::new(false) },
-            "Smooth" => Modifier::Smooth { auto_smooth: Param::new(false), threshold: Param::new(30.0), groups: Param::new(0) },
+            "Smooth" => Modifier::Smooth { auto_smooth: Param::new(false), threshold: Param::new(30.0), groups: Param::new(0), prevent_indirect: Param::new(false) },
             "Poly Select" => Modifier::PolySelect { selection: StoredSelection::default() },
             "Mesh Select" => Modifier::MeshSelect { selection: StoredSelection::default() },
             "Vol. Select" => Modifier::VolSelect(Box::default()),
@@ -742,6 +760,12 @@ impl Modifier {
         matches!(self, Modifier::EditSpline { .. } | Modifier::SplineSelect { .. } | Modifier::DeleteSpline | Modifier::NormalizeSpline { .. } | Modifier::RenderableSpline(_) | Modifier::FilletChamfer(_) | Modifier::TrimExtend { .. } | Modifier::CrossSection { .. } | Modifier::SplineIkControl(_))
     }
 
+    /// Modifiers holding sub-object data by index (edits, selections, maps),
+    /// which a topology change below breaks.
+    pub fn topology_dependent(&self) -> bool {
+        matches!(self, Modifier::EditPoly { .. } | Modifier::EditSpline { .. } | Modifier::PolySelect { .. } | Modifier::MeshSelect { .. } | Modifier::SplineSelect { .. } | Modifier::UnwrapUVW(_) | Modifier::EditNormals(_) | Modifier::Hsds(_) | Modifier::VertexPaint { .. } | Modifier::FilletChamfer(_))
+    }
+
     /// Edit Spline: the shape data the entry edits.
     pub fn edit_spline(&self) -> Option<&ShapeObject> {
         match self {
@@ -896,6 +920,15 @@ impl Modifier {
             Modifier::AffectRegion(d) => Some(&d.gizmo),
             Modifier::Bend { d, .. } | Modifier::Taper { d, .. } | Modifier::Twist { d, .. } | Modifier::Noise { d, .. } | Modifier::Stretch { d, .. } | Modifier::Squeeze { d, .. }
             | Modifier::Wave { d, .. } | Modifier::Ripple { d, .. } | Modifier::Melt { d, .. } | Modifier::Skew { d, .. } => Some(&d.gizmo),
+            _ => None,
+        }
+    }
+
+    /// The gizmo, Limits and Center of the deformation modifiers.
+    pub fn deformer(&self) -> Option<&Deformer> {
+        match self {
+            Modifier::Bend { d, .. } | Modifier::Taper { d, .. } | Modifier::Twist { d, .. } | Modifier::Noise { d, .. } | Modifier::Stretch { d, .. } | Modifier::Squeeze { d, .. }
+            | Modifier::Wave { d, .. } | Modifier::Ripple { d, .. } | Modifier::Melt { d, .. } | Modifier::Skew { d, .. } => Some(d),
             _ => None,
         }
     }
@@ -1091,8 +1124,9 @@ impl Modifier {
             Modifier::LinkedXForm { .. } => Vec::new(),
             Modifier::Preserve { iterations, weight, .. } => vec![("Iterations", Int(iterations.get())), ("Weight", Float(weight.get()))],
             Modifier::Normal { flip } => vec![("Flip Normals", Bool(flip.get()))],
-            Modifier::Smooth { auto_smooth, threshold, groups } => vec![
+            Modifier::Smooth { auto_smooth, threshold, groups, prevent_indirect } => vec![
                 ("Auto Smooth", Bool(auto_smooth.get())),
+                ("Prevent Indirect Smoothing", Bool(prevent_indirect.get())),
                 ("Threshold", Float(threshold.get())),
                 ("Smoothing Groups", Int(groups.get())),
             ],
@@ -1372,6 +1406,7 @@ impl Modifier {
             (Modifier::Preserve { weight, .. }, "Weight") => weight.set(v.clamp(0.0, 1.0)),
             (Modifier::Normal { flip, .. }, "Flip Normals") => flip.set(b),
             (Modifier::Smooth { auto_smooth, .. }, "Auto Smooth") => auto_smooth.set(b),
+            (Modifier::Smooth { prevent_indirect, .. }, "Prevent Indirect Smoothing") => prevent_indirect.set(b),
             (Modifier::Smooth { threshold, .. }, "Threshold") => threshold.set(v.clamp(0.0, 180.0)),
             (Modifier::Smooth { groups, .. }, "Smoothing Groups") => groups.set(value.max(0.0) as u32),
             (Modifier::FFD { deform, .. }, "Deform") => deform.set(u.min(1)),
@@ -1484,7 +1519,7 @@ impl Modifier {
         )
     }
 
-    fn deformer_mut(&mut self) -> Option<&mut Deformer> {
+    pub fn deformer_mut(&mut self) -> Option<&mut Deformer> {
         match self {
             Modifier::Bend { d, .. } | Modifier::Taper { d, .. } | Modifier::Twist { d, .. } | Modifier::Noise { d, .. } | Modifier::Stretch { d, .. } | Modifier::Squeeze { d, .. }
             | Modifier::Wave { d, .. } | Modifier::Ripple { d, .. } | Modifier::Melt { d, .. } | Modifier::Skew { d, .. } => Some(d),
@@ -1709,6 +1744,10 @@ impl Modifier {
                     None => (0..v.mesh.vertex_count() as u32).map(loom_mesh::VertexId).collect(),
                 };
                 loom_mesh::edit_ops::transform_vertices(&mut v.mesh, &ids, m)?;
+                // A shape flowing up is transformed too (and passed on).
+                if let Some(shape) = v.shape.take() {
+                    v.shape = Some(shape.transformed(m));
+                }
                 Ok(v)
             }
             Modifier::Normal { flip } => {
@@ -1728,13 +1767,13 @@ impl Modifier {
                 }
                 Ok(v)
             }
-            Modifier::Smooth { auto_smooth, threshold, groups, .. } => {
+            Modifier::Smooth { auto_smooth, threshold, groups, prevent_indirect } => {
                 let faces: Vec<loom_mesh::FaceId> = match &v.selection {
                     Some((SubLevel::Face | SubLevel::Element, ids)) => ids.iter().map(|i| loom_mesh::FaceId(*i)).collect(),
                     _ => (0..v.mesh.face_count() as u32).map(loom_mesh::FaceId).collect(),
                 };
                 if auto_smooth.get() {
-                    v.mesh.auto_smooth_faces(&faces, threshold.get());
+                    v.mesh.auto_smooth_faces_with(&faces, threshold.get(), prevent_indirect.get());
                 } else {
                     let bits = groups.get();
                     for f in &faces {
@@ -2150,7 +2189,8 @@ impl Modifier {
             return Ok(None);
         };
         let mut out = v.clone();
-        let g = d.gizmo.matrix();
+        // Gizmo space shifted to the Center: the deformation is measured from it.
+        let g = d.gizmo.matrix() * Mat4::from_translation(d.center.get());
         let inv = g.inverse();
         let (to_z, from_z) = deform::axis_frame(d.axis.get() as u8);
         // Extents in the deformation frame.

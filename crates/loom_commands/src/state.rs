@@ -276,7 +276,7 @@ pub struct CompoundSettings {
 
 impl Default for CompoundSettings {
     fn default() -> Self {
-        Self { boolean_op: 0, move_operand: true, proboolean_op: 0, loft_path_percent: 0.0 }
+        Self { boolean_op: 2, move_operand: true, proboolean_op: 0, loft_path_percent: 0.0 }
     }
 }
 
@@ -1348,7 +1348,7 @@ impl AppState {
             expert_mode: false,
             show_main_toolbar: true,
             show_ribbon: false,
-            show_end_result: true,
+            show_end_result: false,
             pin_stack: false,
             show_modifier_set: false,
             modifier_set: vec!["XForm".into(), "Normal".into(), "Smooth".into(), "Poly Select".into()],

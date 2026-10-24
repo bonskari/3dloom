@@ -453,7 +453,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SpinnerSnapToggle => toggle(&mut state.prefs.spinner_snap, "spinner_snap"),
         C::ShowRibbonToggle => toggle(&mut state.show_ribbon, "show_ribbon"),
-        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
+        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
         | C::RenameModifier { .. } | C::SelectStackEntry { .. } | C::SetModifierParameter { .. } | C::ModifierSubobjectLevel { .. } | C::ShowEndResultToggle | C::PinStackToggle
         | C::MakeUnique | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
         | C::PickModifierNode { .. } | C::SwitchToControlPointLevel | C::SwitchToLatticeLevel | C::SwitchToSetVolumeLevel | C::SwitchToTopLevel | C::SelectControlPoints { .. }
@@ -2089,20 +2089,27 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let mut changes = Vec::new();
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-                if matches!(node.object, ObjectKind::Camera { .. }) {
+                if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
                     continue;
                 }
+                // As the reference: rotation and scale (and the pivot offset) go into
+                // a new XForm modifier on top of the stack; collapsing bakes them.
                 let t = &node.transform;
-                let bake = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
-                let mut mesh = node.cage_mesh().into_owned();
-                edit_ops::transform_mesh(&mut mesh, bake)?;
+                let held = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
+                let mut xform = Modifier::by_name("XForm").ok_or("no XForm modifier")?;
+                if let Some(g) = xform.gizmo_mut() {
+                    *g = Transform::from_matrix(held);
+                }
+                let mut stack = node.modifiers.clone();
+                let at = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
+                stack.insert(at, loom_scene::ModifierSlot::new(xform));
                 let mut after_t = t.clone();
                 after_t.rotation.set(Vec3::ZERO);
                 after_t.scale.set(Vec3::ONE);
                 let mut props = node.props();
                 props.object_offset = Transform::default();
                 let new_world = state.scene.parent_frame(id) * after_t.matrix();
-                changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(node.object.with_mesh(mesh)) });
+                changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.extend(keep_children(state, id, new_world));
                 changes.push(Change::SetTransform { id, before: t.clone(), after: after_t });
@@ -2679,9 +2686,48 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 }
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
+    let change = share_with_instances(&state.scene, change);
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
     Ok(())
+}
+
+/// Instances share one object: a replaced object (a sub-object edit, a
+/// parameter, an attach) is replaced on every member of the node's instance
+/// group that the change does not already cover.
+fn share_with_instances(scene: &loom_scene::Scene, change: Change) -> Change {
+    fn replaced(c: &Change, out: &mut Vec<(NodeId, ObjectKind)>, removed: &mut BTreeSet<NodeId>) {
+        match c {
+            Change::ReplaceObject { id, after, .. } => out.push((*id, (**after).clone())),
+            Change::RemoveNode(id) => {
+                removed.insert(*id);
+            }
+            Change::Group(cs) => cs.iter().for_each(|c| replaced(c, out, removed)),
+            _ => {}
+        }
+    }
+    let mut objects = Vec::new();
+    let mut done = BTreeSet::new();
+    replaced(&change, &mut objects, &mut done);
+    if objects.is_empty() {
+        return change;
+    }
+    done.extend(objects.iter().map(|(id, _)| *id));
+    let mut extra = Vec::new();
+    for (id, after) in objects {
+        let Some(node) = scene.node(id) else { continue };
+        let root = node.instance_of.unwrap_or(id);
+        for member in scene.nodes().filter(|n| n.id == root || n.instance_of == Some(root)) {
+            if done.insert(member.id) {
+                extra.push(Change::ReplaceObject { id: member.id, before: Box::new(member.object.clone()), after: Box::new(after.clone()) });
+            }
+        }
+    }
+    if extra.is_empty() {
+        return change;
+    }
+    extra.insert(0, change);
+    Change::Group(extra)
 }
 
 /// Commits a structural edit (link, unlink, group) that only re-expresses a
@@ -3340,6 +3386,16 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 *gizmo = Transform::from_matrix_near(local_m * gizmo.matrix(), gizmo, Vec3::ZERO);
                 changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 continue;
+            }
+            if level == 2 {
+                if let Some(d) = stack[a].modifier.deformer_mut() {
+                    // Center: only the center point moves; the gizmo stays.
+                    let g = d.gizmo.matrix();
+                    let c = g.inverse().transform_point3(local_m.transform_point3(g.transform_point3(d.center.get())));
+                    d.center.set(c);
+                    changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+                    continue;
+                }
             }
             if let Some(gizmo) = stack[a].modifier.gizmo_mut() {
                 let cur = gizmo.matrix();
