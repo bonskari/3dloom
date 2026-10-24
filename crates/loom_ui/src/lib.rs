@@ -553,6 +553,12 @@ impl LoomApp {
         &self.world_meshes
     }
 
+    /// What the viewports draw for each of `world_meshes` (a Skin's posed
+    /// result, not the cage), in the same order.
+    pub fn world_display(&self) -> &[Mesh] {
+        &self.world_display
+    }
+
     pub fn render_camera(&self) -> Camera {
         self.camera_for(self.state.active_viewport)
     }
