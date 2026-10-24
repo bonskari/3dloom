@@ -148,9 +148,9 @@ fn status_bar_icons_run_their_commands() {
     assert_eq!(h.app.state.current_frame, h.app.state.frame_range.0 + 1);
     click_icon(&mut h, "statusbar", icons::KEY_MODE, "Key Mode Toggle");
     assert!(h.app.state.key_step_mode);
-    click_icon(&mut h, "statusbar", icons::PLAY, "Play / Stop Animation (/)");
+    click_icon(&mut h, "statusbar", icons::PLAY, "Play / Stop Animation (Slash)");
     assert!(h.app.state.playing);
-    click_icon(&mut h, "statusbar", icons::STOP, "Play / Stop Animation (/)");
+    click_icon(&mut h, "statusbar", icons::STOP, "Play / Stop Animation (Slash)");
     assert!(!h.app.state.playing);
 }
 
