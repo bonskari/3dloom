@@ -200,7 +200,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             });
             ui.add_enabled_ui(segment && has, |ui| act(ui, app, "Divide", "Add vertices along the selected segments", Command::DivideSpline));
             let mut n = ss.divide_count;
-            if ui.add(egui::DragValue::new(&mut n).range(1..=100)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut n, 1..=100)).changed() {
                 let _ = app.dispatch(Command::SplineSettings { name: "Divisions".into(), value: n as f64 });
             }
         });

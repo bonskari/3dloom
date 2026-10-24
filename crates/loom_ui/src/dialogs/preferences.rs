@@ -28,7 +28,7 @@ fn check(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str) {
 fn number(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str, range: std::ops::RangeInclusive<f64>, decimals: usize) {
     let mut v = app.state.prefs.get(name).unwrap_or(0.0);
     ui.label(label);
-    if ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.1)).range(range).fixed_decimals(decimals)).changed() {
+    if ui.add(crate::spinner::spin(ui, &mut v, range).speed(app.spinner_speed(0.1)).fixed_decimals(decimals)).changed() {
         set(app, name, v);
     }
 }

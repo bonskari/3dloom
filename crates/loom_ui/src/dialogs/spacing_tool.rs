@@ -47,16 +47,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.label(egui::RichText::new("Parameters").strong());
         egui::Grid::new("spacing_params").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             ui.label("Count:");
-            ui.add(egui::DragValue::new(&mut st.count).speed(0.1).range(1..=10_000));
+            ui.add(crate::spinner::spin(ui, &mut st.count, 1..=10_000).speed(0.1));
             ui.end_row();
             ui.checkbox(&mut st.use_spacing, "Spacing:");
-            ui.add_enabled(st.use_spacing, egui::DragValue::new(&mut st.spacing).speed(speed).fixed_decimals(3));
+            ui.add_enabled(st.use_spacing, crate::spinner::spin(ui, &mut st.spacing, ..).speed(speed).fixed_decimals(3));
             ui.end_row();
             ui.label("Start Offset:");
-            ui.add(egui::DragValue::new(&mut st.start_offset).speed(speed).fixed_decimals(3));
+            ui.add(crate::spinner::spin(ui, &mut st.start_offset, ..).speed(speed).fixed_decimals(3));
             ui.end_row();
             ui.label("End Offset:");
-            ui.add(egui::DragValue::new(&mut st.end_offset).speed(speed).fixed_decimals(3));
+            ui.add(crate::spinner::spin(ui, &mut st.end_offset, ..).speed(speed).fixed_decimals(3));
             ui.end_row();
         });
         ui.horizontal(|ui| {

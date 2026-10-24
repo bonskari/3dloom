@@ -19,7 +19,7 @@ pub fn setting_check(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, name: &s
 /// A Spline Settings spinner bound to one named setting.
 pub fn setting_spin(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, value: f32, speed: f32, min: f32) {
     let mut v = value;
-    if ui.add(egui::DragValue::new(&mut v).speed(speed).range(min..=f32::MAX).fixed_decimals(2)).changed() {
+    if ui.add(crate::spinner::spin(ui, &mut v, min..=f32::MAX).speed(speed).fixed_decimals(2)).changed() {
         let _ = app.dispatch(Command::SplineSettings { name: name.into(), value: v as f64 });
     }
 }

@@ -42,7 +42,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             ui.end_row();
             ui.label("Alpha:");
-            let r = ui.add_enabled(has, egui::DragValue::new(&mut st.alpha).speed(1.0).range(0.0..=100.0).suffix(" %"));
+            let r = ui.add_enabled(has, crate::spinner::spin(ui, &mut st.alpha, 0.0..=100.0).speed(1.0).suffix(" %"));
             if r.changed() {
                 let _ = app.dispatch(Command::SetVertexAlpha { alpha: st.alpha });
             }
@@ -77,7 +77,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.label("Range:");
             for (i, l) in ["R", "G", "B"].iter().enumerate() {
                 ui.label(*l);
-                ui.add(egui::DragValue::new(&mut st.range[i]).speed(1.0).range(0..=255));
+                ui.add(crate::spinner::spin(ui, &mut st.range[i], 0..=255).speed(1.0));
             }
         });
         if ui.button("Select").on_hover_text("Select the vertices whose colour is within the range of the swatch").clicked() {

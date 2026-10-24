@@ -15,6 +15,7 @@ pub mod region;
 pub mod time_slider;
 mod menubar;
 mod statusbar;
+pub mod spinner;
 pub mod tools;
 pub mod viewport_gizmo;
 mod viewport_widget;
@@ -627,10 +628,11 @@ impl LoomApp {
     }
 
     /// A length spinner in display units: the value stays in scene units.
-    pub fn length_drag<'a>(&self, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
+    /// Add it right away: it is a [`spinner::spin`] (right-click sets 0).
+    pub fn length_drag<'a>(&self, ui: &egui::Ui, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
         let (factor, suffix) = self.unit_display();
         let decimals = self.state.prefs.spinner_precision;
-        egui::DragValue::new(value)
+        spinner::spin(ui, value, ..)
             .speed(speed)
             .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
             .custom_parser(move |text| {

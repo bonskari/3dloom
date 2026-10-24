@@ -161,11 +161,11 @@ fn coordinate_fields(ui: &mut egui::Ui, app: &mut LoomApp) {
         for (c, label) in [(&mut v.x, "X:"), (&mut v.y, "Y:"), (&mut v.z, "Z:")] {
             ui.label(label);
             let r = if tool == Tool::Move || tool == Tool::Select {
-                ui.add(app.length_drag(c, app.spinner_speed(0.1)))
+                ui.add(app.length_drag(ui, c, app.spinner_speed(0.1)))
             } else {
-                ui.add(egui::DragValue::new(c).speed(app.spinner_speed(0.1)).fixed_decimals(app.state.prefs.spinner_precision))
+                ui.add(crate::spinner::spin(ui, c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(app.state.prefs.spinner_precision))
             };
-            changed |= r.lost_focus() || r.drag_stopped();
+            changed |= r.lost_focus() || r.drag_stopped() || r.secondary_clicked();
             focused |= r.has_focus() || r.dragged();
         }
     });
@@ -214,7 +214,7 @@ fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = app.dispatch(Command::NextPreviousKeyModeToggle);
             }
             let mut frame = app.state.current_frame;
-            if ui.add(egui::DragValue::new(&mut frame).range(app.state.frame_range.0..=app.state.frame_range.1)).on_hover_text("Current Frame (Go To Frame)").changed() {
+            if ui.add(crate::spinner::spin(ui, &mut frame, app.state.frame_range.0..=app.state.frame_range.1)).on_hover_text("Current Frame (Go To Frame)").changed() {
                 let _ = app.dispatch(Command::SetFrame { frame });
             }
             if ui.small_button("⚙").on_hover_text("Time Configuration").clicked() {

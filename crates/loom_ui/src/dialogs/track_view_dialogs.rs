@@ -69,7 +69,7 @@ pub fn reduce_keys(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     egui::Window::new("Reduce Keys").open(open).resizable(false).show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label("Threshold:");
-            ui.add(egui::DragValue::new(&mut threshold).speed(0.05).range(0.0..=1000.0));
+            ui.add(crate::spinner::spin(ui, &mut threshold, 0.0..=1000.0).speed(0.05));
         });
         ui.horizontal(|ui| {
             if ui.button("OK").clicked() {
@@ -216,12 +216,12 @@ pub fn key_info(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         let (mut t, mut v) = (key.time, key.value);
         ui.horizontal(|ui| {
             ui.label("Time:");
-            if ui.add(egui::DragValue::new(&mut t).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut t, ..).speed(1.0)).changed() {
                 let r = app.dispatch(Command::TrackViewSetKeyValues { time: Some(t), value: None, relative: Some(false) });
                 report(app, r);
             }
             ui.label("Value:");
-            if ui.add(egui::DragValue::new(&mut v).speed(0.1)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut v, ..).speed(0.1)).changed() {
                 let r = app.dispatch(Command::TrackViewSetKeyValues { time: None, value: Some(v), relative: Some(false) });
                 report(app, r);
             }
@@ -248,11 +248,11 @@ pub fn key_info(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let (mut i, mut o) = (key.in_tan, key.out_tan);
                 ui.horizontal(|ui| {
                     ui.label("In:");
-                    if ui.add_enabled(key.in_type == TangentType::Custom, egui::DragValue::new(&mut i).speed(0.01)).changed() {
+                    if ui.add_enabled(key.in_type == TangentType::Custom, crate::spinner::spin(ui, &mut i, ..).speed(0.01)).changed() {
                         set(app, info(None, None, Some(i), if key.broken { None } else { Some(i) }, None, None, None, None, None));
                     }
                     ui.label("Out:");
-                    if ui.add_enabled(key.out_type == TangentType::Custom, egui::DragValue::new(&mut o).speed(0.01)).changed() {
+                    if ui.add_enabled(key.out_type == TangentType::Custom, crate::spinner::spin(ui, &mut o, ..).speed(0.01)).changed() {
                         set(app, info(None, None, if key.broken { None } else { Some(o) }, Some(o), None, None, None, None, None));
                     }
                 });
@@ -271,7 +271,7 @@ pub fn key_info(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 for (i, l) in ["Tension:", "Continuity:", "Bias:", "Ease To:", "Ease From:"].iter().enumerate() {
                     ui.horizontal(|ui| {
                         ui.label(*l);
-                        if ui.add(egui::DragValue::new(&mut vals[i]).speed(0.5).range(0.0..=50.0)).changed() {
+                        if ui.add(crate::spinner::spin(ui, &mut vals[i], 0.0..=50.0).speed(0.5)).changed() {
                             let mut o = [None; 5];
                             o[i] = Some(vals[i]);
                             set(app, info(None, None, None, None, o[0], o[1], o[2], o[3], o[4]));
@@ -337,7 +337,7 @@ pub fn utilities(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let mut spin = |ui: &mut egui::Ui, l: &str, v: &mut f32| {
                     ui.horizontal(|ui| {
                         ui.label(l);
-                        ui.add(egui::DragValue::new(v).speed(0.5));
+                        ui.add(crate::spinner::spin(ui, v, ..).speed(0.5));
                     });
                 };
                 let mut run: Option<Command> = None;

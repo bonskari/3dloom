@@ -61,7 +61,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
 }
 
 pub struct FieldState {
-    /// A field was committed (Enter, focus lost or spinner drag ended).
+    /// A field was committed (Enter, focus lost, spinner drag ended or right-click reset).
     pub committed: bool,
     /// A field is being edited.
     pub focused: bool,
@@ -75,8 +75,8 @@ fn group(ui: &mut egui::Ui, label: &str, v: &mut [f32; 3], app: &LoomApp, one_de
         for (c, l) in v.iter_mut().zip(["X:", "Y:", "Z:"]) {
             ui.horizontal(|ui| {
                 ui.label(l);
-                let r = ui.add(egui::DragValue::new(c).speed(app.spinner_speed(0.1)).fixed_decimals(if one_decimal { 1 } else { 3 }).min_decimals(1));
-                st.committed |= r.lost_focus() || r.drag_stopped();
+                let r = ui.add(crate::spinner::spin(ui, c, ..).speed(app.spinner_speed(0.1)).fixed_decimals(if one_decimal { 1 } else { 3 }).min_decimals(1));
+                st.committed |= r.lost_focus() || r.drag_stopped() || r.secondary_clicked();
                 st.focused |= r.has_focus() || r.dragged();
             });
         }

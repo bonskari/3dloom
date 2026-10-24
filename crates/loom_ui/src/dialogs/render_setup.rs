@@ -10,9 +10,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.label(egui::RichText::new("Output Size").strong());
         ui.horizontal(|ui| {
             ui.label("Width:");
-            let a = ui.add(egui::DragValue::new(&mut w).range(1..=8192));
+            let a = ui.add(crate::spinner::spin(ui, &mut w, 1..=8192));
             ui.label("Height:");
-            let b = ui.add(egui::DragValue::new(&mut h).range(1..=8192));
+            let b = ui.add(crate::spinner::spin(ui, &mut h, 1..=8192));
             if a.changed() || b.changed() {
                 let _ = app.dispatch(Command::RenderSetup { width: Some(w), height: Some(h) });
             }

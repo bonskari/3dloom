@@ -69,7 +69,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         let mut th = st["threshold"].as_f64().unwrap_or(0.1) as f32;
         ui.horizontal(|ui| {
             ui.label("Threshold:");
-            if ui.add(egui::DragValue::new(&mut th).speed(0.01).range(0.0..=1.0e6)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut th, 0.0..=1.0e6).speed(0.01)).changed() {
                 run(app, Command::SetModifierParameter { index, name: "Threshold".into(), value: th as f64 });
             }
         });
@@ -84,7 +84,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         let mut dl = st["display_length"].as_f64().unwrap_or(10.0) as f32;
         ui.horizontal(|ui| {
             ui.label("Display Length:");
-            if ui.add(egui::DragValue::new(&mut dl).speed(0.1).range(0.0..=1.0e6)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut dl, 0.0..=1.0e6).speed(0.1)).changed() {
                 run(app, Command::SetModifierParameter { index, name: "Display Length".into(), value: dl as f64 });
             }
         });

@@ -4,7 +4,7 @@
 
 use crate::LoomApp;
 use eframe::egui;
-use loom_commands::{CenterMode, Command, CoordSystem, SelectionFilter, SelectionRegion, Tool};
+use loom_commands::{CenterMode, Command, CoordSystem, ScaleKind, SelectionFilter, SelectionRegion, Tool};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Plan {
@@ -92,6 +92,41 @@ fn transform_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, tool: Too
     }
 }
 
+/// Named Selection Sets: type a name and press Enter to name the selection
+/// (the sub-object selection at a sub-object level); the list next to it
+/// holds the object sets, or at a sub-object level the selected objects'
+/// sets of that level.
+fn named_selection_sets(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let sub_level = app.state.selection_mode != loom_commands::SelectionMode::Object;
+    let text_id = egui::Id::new("named_sets_field");
+    let mut text: String = ui.ctx().data(|d| d.get_temp(text_id)).unwrap_or_default();
+    let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text("Named Sel. Sets").desired_width(100.0)).on_hover_text("Named Selection Sets: type a name and press Enter");
+    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !text.trim().is_empty() {
+        let name = text.trim().to_owned();
+        let c = if sub_level { Command::NamedSubSelectionCopy { name } } else { Command::NamedSelectionSet { name } };
+        if let Err(e) = app.dispatch(c) {
+            app.state.status_prompt = e;
+        }
+    }
+    let names: Vec<String> = if sub_level { loom_commands::named_sub_sets(&app.state) } else { app.state.named_sets.keys().cloned().collect() };
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt("named_sets").selected_text("").width(14.0).show_ui(ui, |ui| {
+        for n in names {
+            if ui.button(&n).clicked() {
+                chosen = Some(n);
+            }
+        }
+    });
+    if let Some(name) = chosen {
+        text = name.clone();
+        let c = if sub_level { Command::NamedSubSelectionPaste { name } } else { Command::SelectNamedSet { name } };
+        if let Err(e) = app.dispatch(c) {
+            app.state.status_prompt = e;
+        }
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(text_id, text));
+}
+
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     if app.state.expert_mode || !app.state.show_main_toolbar {
         return;
@@ -155,7 +190,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                     "Select and Move" => transform_button(ui, app, "Move", Tool::Move, "Select and Move"),
                     "Select and Rotate" => transform_button(ui, app, "Rotate", Tool::Rotate, "Select and Rotate"),
-                    "Select and Scale" => transform_button(ui, app, "Scale", Tool::Scale, "Select and Scale"),
+                    "Select and Scale" => {
+                        // Scale flyout: Uniform / Non-Uniform / Squash (Ctrl+E cycles).
+                        let kind = app.state.scale_kind;
+                        let label = match kind { ScaleKind::Uniform => "Scale", ScaleKind::NonUniform => "Scale NU", ScaleKind::Squash => "Squash" };
+                        transform_button(ui, app, label, Tool::Scale, "Select and Scale");
+                        egui::ComboBox::from_id_salt("scale_kind").selected_text("").width(14.0).show_ui(ui, |ui| {
+                            for k in ScaleKind::ALL {
+                                if ui.selectable_label(kind == k, k.label()).clicked() {
+                                    let _ = app.dispatch(Command::ScaleType { kind: k });
+                                }
+                            }
+                        });
+                    }
                     "Reference Coordinate System" => {
                         let cur = app.state.coord_system;
                         egui::ComboBox::from_id_salt("coord_system").selected_text(cur.label()).width(70.0).show_ui(ui, |ui| {
@@ -248,16 +295,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             let _ = app.dispatch(Command::EditNamedSelectionSets);
                         }
                     }
-                    "Named Selection Sets" => {
-                        let names: Vec<String> = app.state.named_sets.keys().cloned().collect();
-                        egui::ComboBox::from_id_salt("named_sets").selected_text("Named Sel. Sets").width(100.0).show_ui(ui, |ui| {
-                            for n in names {
-                                if ui.button(&n).clicked() {
-                                    let _ = app.dispatch(Command::SelectNamedSet { name: n.clone() });
-                                }
-                            }
-                        });
-                    }
+                    "Named Selection Sets" => named_selection_sets(ui, app),
                     _ => {}
                 }
             }

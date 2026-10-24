@@ -32,14 +32,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.horizontal(|ui| {
             for (c, l) in st.offset.iter_mut().zip(["X:", "Y:", "Z:"]) {
                 ui.label(l);
-                let r = ui.add(egui::DragValue::new(c).speed(speed).fixed_decimals(3));
+                let r = ui.add(crate::spinner::spin(ui, c, ..).speed(speed).fixed_decimals(3));
                 changed |= r.changed();
             }
         });
         ui.label(egui::RichText::new("Rotation Offset:").strong());
         ui.horizontal(|ui| {
             ui.label("Angle:");
-            changed |= ui.add(egui::DragValue::new(&mut st.angle).speed(speed).fixed_decimals(1).suffix("°")).changed();
+            changed |= ui.add(crate::spinner::spin(ui, &mut st.angle, ..).speed(speed).fixed_decimals(1).suffix("°")).changed();
             changed |= ui.checkbox(&mut st.flip, "Flip Normal").changed();
         });
         ui.horizontal(|ui| {

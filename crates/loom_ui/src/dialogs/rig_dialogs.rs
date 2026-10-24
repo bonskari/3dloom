@@ -70,7 +70,7 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 }
                 ui.label("Offset:");
                 let speed = app.spinner_speed(0.1);
-                ui.add(egui::DragValue::new(&mut app.bone_mirror_offset).speed(speed));
+                ui.add(crate::spinner::spin(ui, &mut app.bone_mirror_offset, ..).speed(speed));
             });
             if ui.add_enabled(!bones.is_empty(), egui::Button::new("Mirror").min_size(egui::vec2(w, 22.0))).clicked() {
                 let _ = app.dispatch(Command::MirrorBones { axis: app.bone_mirror_axis, offset: app.bone_mirror_offset, flip: 0 });
@@ -87,7 +87,7 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 for (label, name, value, range) in [("Width:", "Width", width.get(), 0.0..=1e6), ("Height:", "Height", height.get(), 0.0..=1e6), ("Taper:", "Taper", taper.get() * 100.0, 0.0..=100.0)] {
                     ui.label(label);
                     let mut v = value;
-                    if ui.add(egui::DragValue::new(&mut v).speed(speed).range(range)).changed() {
+                    if ui.add(crate::spinner::spin(ui, &mut v, range).speed(speed)).changed() {
                         set_all(app, &bones, name, if name == "Taper" { (v / 100.0) as f64 } else { v as f64 });
                     }
                     ui.end_row();
@@ -107,7 +107,7 @@ pub fn bone_tools(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     for (label, suffix, value, scale) in [("Size:", " Size", size, 1.0), ("Start Taper:", " Start Taper", start * 100.0, 0.01), ("End Taper:", " End Taper", end * 100.0, 0.01)] {
                         ui.label(label);
                         let mut x = value;
-                        if ui.add_enabled(on, egui::DragValue::new(&mut x).speed(speed).range(0.0..=if scale < 1.0 { 100.0 } else { 1e6 })).changed() {
+                        if ui.add_enabled(on, crate::spinner::spin(ui, &mut x, 0.0..=if scale < 1.0 { 100.0 } else { 1e6 }).speed(speed)).changed() {
                             set_all(app, &bones, &format!("{stem}{suffix}"), (x * scale) as f64);
                         }
                         ui.end_row();
@@ -178,7 +178,7 @@ pub fn weight_table(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         for (i, _) in &bones {
                             let cur = w.iter().find(|(b, _)| *b as usize == *i).map(|x| x.1).unwrap_or(0.0);
                             let mut x = cur;
-                            let r = ui.add_sized([CELL, row_h], egui::DragValue::new(&mut x).speed(0.01).range(0.0..=1.0).fixed_decimals(3));
+                            let r = ui.add_sized([CELL, row_h], crate::spinner::spin(ui, &mut x, 0.0..=1.0).speed(0.01).fixed_decimals(3));
                             // A drag is one undo entry.
                             if r.drag_started() {
                                 app.state.undo.begin("Weight Table");
@@ -230,7 +230,7 @@ pub fn weight_tool(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let _ = app.dispatch(Command::SetWeightCustomSkin);
             }
             let mut v = app.state.skin_custom_weight;
-            if ui.add(egui::DragValue::new(&mut v).speed(0.01).range(0.0..=1.0).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
                 let _ = app.dispatch(Command::SkinSetCustomWeight { value: v });
             }
             if ui.button("+").clicked() {

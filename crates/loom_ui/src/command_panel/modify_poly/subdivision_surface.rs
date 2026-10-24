@@ -33,13 +33,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         egui::Grid::new("subdiv_display").num_columns(2).show(ui, |ui| {
             ui.label("Iterations:");
             let mut it = sub.iterations.get();
-            if ui.add(egui::DragValue::new(&mut it).speed(0.1).range(0..=4)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut it, 0..=4).speed(0.1)).changed() {
                 let _ = app.dispatch(Command::SubdivisionSurface { use_nurms: None, smooth_result: None, isoline_display: None, show_cage: None, iterations: Some(it), smoothness: None, separate_by_smoothing: None, separate_by_materials: None });
             }
             ui.end_row();
             ui.label("Smoothness:");
             let mut sm = sub.smoothness.get();
-            if ui.add(egui::DragValue::new(&mut sm).speed(0.01).range(0.0..=1.0).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut sm, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
                 let _ = app.dispatch(Command::SubdivisionSurface { use_nurms: None, smooth_result: None, isoline_display: None, show_cage: None, iterations: None, smoothness: Some(sm), separate_by_smoothing: None, separate_by_materials: None });
             }
             ui.end_row();

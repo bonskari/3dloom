@@ -138,7 +138,7 @@ fn key_info(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, track: &str) {
         let mut tm = time;
         ui.horizontal(|ui| {
             ui.label("Time:");
-            if ui.add(egui::DragValue::new(&mut tm).speed(1.0)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut tm, ..).speed(1.0)).changed() {
                 select_all(app);
                 run(app, Command::TrackViewSetKeyValues { time: Some(tm), value: None, relative: Some(false) });
             }
@@ -152,7 +152,7 @@ fn key_info(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, track: &str) {
             let mut v = key.value;
             ui.horizontal(|ui| {
                 ui.label(format!("{axis} Value:"));
-                if ui.add(egui::DragValue::new(&mut v).speed(0.1)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut v, ..).speed(0.1)).changed() {
                     select_comp(app, c as u32);
                     run(app, Command::TrackViewSetKeyValues { time: None, value: Some(v), relative: Some(false) });
                 }
@@ -177,12 +177,12 @@ fn key_info(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, track: &str) {
                 let (mut i, mut o) = (key.in_tan, key.out_tan);
                 ui.horizontal(|ui| {
                     ui.label("In:");
-                    if ui.add_enabled(key.in_type == TangentType::Custom, egui::DragValue::new(&mut i).speed(0.01)).changed() {
+                    if ui.add_enabled(key.in_type == TangentType::Custom, crate::spinner::spin(ui, &mut i, ..).speed(0.01)).changed() {
                         select_all(app);
                         run(app, Command::TrackViewSetKeyInfo { in_type: None, out_type: None, in_tan: Some(i), out_tan: None, tension: None, continuity: None, bias: None, ease_to: None, ease_from: None });
                     }
                     ui.label("Out:");
-                    if ui.add_enabled(key.out_type == TangentType::Custom, egui::DragValue::new(&mut o).speed(0.01)).changed() {
+                    if ui.add_enabled(key.out_type == TangentType::Custom, crate::spinner::spin(ui, &mut o, ..).speed(0.01)).changed() {
                         select_all(app);
                         run(app, Command::TrackViewSetKeyInfo { in_type: None, out_type: None, in_tan: None, out_tan: Some(o), tension: None, continuity: None, bias: None, ease_to: None, ease_from: None });
                     }
@@ -209,7 +209,7 @@ fn target_list(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, targets: &[loom
         ui.horizontal(|ui| {
             ui.label(name);
             let mut w = t.weight.get();
-            if ui.add(egui::DragValue::new(&mut w).range(0.0..=100.0)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut w, 0.0..=100.0)).changed() {
                 run(app, Command::SetConstraintWeight { id: id.0, rotation, index: i as u32, weight: w });
             }
             if ui.small_button("Delete").clicked() {
@@ -230,7 +230,7 @@ fn param_value(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, val
     ui.horizontal(|ui| {
         ui.label(format!("{name}:"));
         let mut v = value;
-        if ui.add(egui::DragValue::new(&mut v).speed(speed)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, ..).speed(speed)).changed() {
             run(app, Command::SetConstraintParameter { id: id.0, name: name.into(), value: v as f64 });
         }
     });
@@ -346,15 +346,15 @@ fn trajectories(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.label("Sample Range");
         ui.horizontal(|ui| {
             ui.label("Start Time:");
-            ui.add(egui::DragValue::new(&mut range.0));
+            ui.add(crate::spinner::spin(ui, &mut range.0, ..));
         });
         ui.horizontal(|ui| {
             ui.label("End Time:");
-            ui.add(egui::DragValue::new(&mut range.1));
+            ui.add(crate::spinner::spin(ui, &mut range.1, ..));
         });
         ui.horizontal(|ui| {
             ui.label("Samples:");
-            ui.add(egui::DragValue::new(&mut range.2).range(1..=10000));
+            ui.add(crate::spinner::spin(ui, &mut range.2, 1..=10000));
         });
         ui.label("Spline Conversion");
         ui.horizontal(|ui| {

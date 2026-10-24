@@ -25,4 +25,4 @@ rfd         = "0.17"
 
 [dev-dependencies]
 # The UI tests find widgets by their label, as a screen reader would.
-egui        = { workspace = true, features = ["accesskit"] }
+eframe      = { workspace = true, features = ["accesskit"] }
