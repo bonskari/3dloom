@@ -48,6 +48,8 @@ pub struct SurfaceStyle {
     pub faceted: bool,
     /// 2-Sided: never culled.
     pub two_sided: bool,
+    /// Wire: the faces draw as their edges, in the material colour.
+    pub wire: bool,
 }
 
 /// Per face material ID styles; IDs without one draw `missing`.
@@ -92,6 +94,7 @@ pub struct MeshStyle {
     pub texture_amount: f32,
     pub faceted: bool,
     pub two_sided: bool,
+    pub wire: bool,
     /// A Multi/Sub-Object material: each face draws with its material ID's style.
     pub sub: Option<std::sync::Arc<SubStyles>>,
 }
@@ -112,6 +115,7 @@ impl Default for MeshStyle {
             texture_amount: 1.0,
             faceted: false,
             two_sided: false,
+            wire: false,
             sub: None,
         }
     }
@@ -131,6 +135,7 @@ impl MeshStyle {
             texture_amount: self.texture_amount,
             faceted: self.faceted,
             two_sided: self.two_sided,
+            wire: self.wire,
         }
     }
 
@@ -182,11 +187,22 @@ pub struct MeshBuffer {
     pub style: MeshStyle,
     /// Draw calls: faces grouped by texture, transparency and culling.
     pub ranges: Vec<DrawRange>,
+    /// Faces of a Wire material: their edges, always drawn in shaded views.
+    pub wire_vertex_buffer: Buffer,
+    pub wire_vertex_count: u32,
 }
 
 impl MeshBuffer {
     pub fn from_mesh(device: &Device, mesh: &Mesh, style: MeshStyle) -> Self {
         let (verts, indices, ranges) = triangulate_styled(mesh, &style);
+        let wire = wire_lines(mesh, &style);
+        let wire_vertex_count = wire.len() as u32;
+        let wire_vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("loom_mesh_wire_buffer"),
+            // wgpu rejects an empty vertex buffer: one unused vertex.
+            contents: bytemuck::cast_slice(if wire.is_empty() { &[crate::grid::LineVertex { position: [0.0; 3], color: [0.0; 3] }][..] } else { &wire[..] }),
+            usage: BufferUsages::VERTEX,
+        });
         let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("loom_mesh_vertex_buffer"),
             contents: bytemuck::cast_slice(&verts),
@@ -221,6 +237,8 @@ impl MeshBuffer {
             aabb_max,
             style,
             ranges,
+            wire_vertex_buffer,
+            wire_vertex_count,
         }
     }
 }
@@ -252,6 +270,25 @@ pub fn triangulate_with_face_normals(mesh: &Mesh, color: [f32; 4], vertex_colors
     let style = MeshStyle { color: [color[0], color[1], color[2]], alpha: color[3], vertex_colors, ..Default::default() };
     let (verts, indices, _) = triangulate_styled(mesh, &style);
     (verts, indices)
+}
+
+/// The edges of the faces whose style is Wire, as line-list vertices in the
+/// material colour.
+pub fn wire_lines(mesh: &Mesh, style: &MeshStyle) -> Vec<crate::grid::LineVertex> {
+    let mut out = Vec::new();
+    for (i, face) in mesh.faces().iter().enumerate() {
+        let look = style.for_face(face.material_id);
+        if face.hidden || !look.wire {
+            continue;
+        }
+        let Some(pts) = mesh.face_positions(loom_mesh::FaceId(i as u32)) else { continue };
+        for k in 0..pts.len() {
+            for p in [pts[k], pts[(k + 1) % pts.len()]] {
+                out.push(crate::grid::LineVertex { position: p.into(), color: look.color });
+            }
+        }
+    }
+    out
 }
 
 /// As `triangulate_with_face_normals`, each face coloured by its material
@@ -293,6 +330,9 @@ pub fn triangulate_styled(mesh: &Mesh, style: &MeshStyle) -> (Vec<GpuVertex>, Ve
         }
 
         let look = style.for_face(face.material_id);
+        if look.wire {
+            continue;
+        }
         let color = [look.color[0], look.color[1], look.color[2], look.alpha];
         let m = look.uv;
         let extra = [look.self_illum, look.texture_amount, if look.decal[0] { 1.0 } else { 0.0 }, if look.decal[1] { 1.0 } else { 0.0 }];
@@ -464,5 +504,19 @@ mod tests {
         // Faceted: the corners of a face share the face normal.
         assert_eq!(tiled[0].normal, tiled[1].normal);
         assert_ne!(plain[0].normal, plain[1].normal);
+    }
+
+    #[test]
+    fn wire_faces_draw_as_edges_in_the_material_colour() {
+        let mut m = box_primitive(Vec3::splat(0.5));
+        m.faces_mut()[0].material_id = 1;
+        let wire = SurfaceStyle { color: [0.0, 1.0, 0.0], wire: true, ..MeshStyle::default().surface() };
+        let style = MeshStyle { sub: Some(std::sync::Arc::new(SubStyles { by_id: [(1, wire)].into_iter().collect(), missing: MeshStyle::default().surface() })), ..Default::default() };
+        let (verts, _, _) = triangulate_styled(&m, &style);
+        assert_eq!(verts.len(), 20, "the wire face is not filled");
+        let lines = wire_lines(&m, &style);
+        assert_eq!(lines.len(), 8, "its four edges");
+        assert!(lines.iter().all(|v| v.color == [0.0, 1.0, 0.0]));
+        assert!(wire_lines(&m, &MeshStyle::default()).is_empty());
     }
 }

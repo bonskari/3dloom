@@ -595,7 +595,7 @@ impl LoomApp {
         match &surfaces {
             Some(loom_scene::material::Surfaces::Single(s)) => {
                 let st = self.surface_style(s, bitmaps, index);
-                base = loom_render::MeshStyle { color: st.color, alpha: st.alpha, specular: st.specular, self_illum: st.self_illum, texture: st.texture, uv: st.uv, decal: st.decal, texture_amount: st.texture_amount, faceted: st.faceted, two_sided: st.two_sided, ..Default::default() };
+                base = loom_render::MeshStyle { color: st.color, alpha: st.alpha, specular: st.specular, self_illum: st.self_illum, texture: st.texture, uv: st.uv, decal: st.decal, texture_amount: st.texture_amount, faceted: st.faceted, two_sided: st.two_sided, wire: st.wire, ..Default::default() };
             }
             Some(loom_scene::material::Surfaces::PerId(list)) => {
                 let mut by_id = std::collections::BTreeMap::new();
@@ -707,7 +707,7 @@ impl LoomApp {
             Some(m) => (self.map_texture(m, bitmaps, index), m.coords.matrix(), m.coords.decal(), (m.amount / 100.0).clamp(0.0, 1.0)),
             None => (loom_render::TextureSel::None, loom_render::UV_IDENTITY, [false; 2], 1.0),
         };
-        loom_render::SurfaceStyle { color: lin(s.diffuse), alpha: s.opacity, specular: spec, self_illum: s.self_illum, texture, uv, decal, texture_amount: amount, faceted: s.faceted, two_sided: s.two_sided }
+        loom_render::SurfaceStyle { color: lin(s.diffuse), alpha: s.opacity, specular: spec, self_illum: s.self_illum, texture, uv, decal, texture_amount: amount, faceted: s.faceted, two_sided: s.two_sided, wire: s.wire }
     }
 
     pub fn world_styles(&self) -> &[loom_render::MeshStyle] {

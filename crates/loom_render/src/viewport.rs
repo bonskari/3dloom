@@ -254,6 +254,13 @@ impl ViewportRenderer {
                     }
                 }
             }
+            // Wire materials: their faces' edges.
+            pass.set_pipeline(self.grid.line_pipeline());
+            pass.set_bind_group(0, bind_group, &[]);
+            for mb in meshes.iter().filter(|mb| mb.wire_vertex_count > 0) {
+                pass.set_vertex_buffer(0, mb.wire_vertex_buffer.slice(..));
+                pass.draw(0..mb.wire_vertex_count, 0..1);
+            }
         }
         if show_edges || !selected.is_empty() {
             pass.set_pipeline(self.grid.line_pipeline());
