@@ -170,7 +170,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
                 let label = if instance.is_some() { format!("{name}  (instanced)") } else { name.clone() };
                 let text = if active == Some(i) { egui::RichText::new(label).strong() } else { egui::RichText::new(label) };
-                let r = ui.add(egui::SelectableLabel::new(active == Some(i), text));
+                // A selectable label senses clicks only: add drag so the reorder below can start.
+                let r = ui.add(egui::SelectableLabel::new(active == Some(i), text)).interact(egui::Sense::click_and_drag());
                 if r.clicked() {
                     select = Some(Some(i));
                 }

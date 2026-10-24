@@ -974,6 +974,29 @@ fn status_bar_type_in_moves_the_selection() {
     assert!(pos_of(&h, id).length() < 1e-4, "undoable");
 }
 
+/// Modify panel stack: dragging an entry onto another row moves it there; the
+/// trash button removes the active entry; clicking an entry makes it active.
+#[test]
+fn modifier_stack_drag_reorders_and_trash_removes() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.cmd(Command::AddModifier { name: "Taper".into() });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let names = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&h), vec!["Bend".to_string(), "Taper".to_string()]);
+    let taper = find_text(&mut h, "Taper").expect("Taper row").center();
+    let bend = find_text(&mut h, "Bend").expect("Bend row").center();
+    h.drag(taper, bend);
+    h.frames(2);
+    assert_eq!(names(&h), vec!["Taper".to_string(), "Bend".to_string()], "dragging Taper onto Bend puts it below");
+    click_text(&mut h, "Bend");
+    assert_eq!(h.app.state.scene.node(id).unwrap().active_entry, Some(1), "Bend (now on top) is active");
+    click_text(&mut h, "🗑");
+    assert_eq!(names(&h), vec!["Taper".to_string()], "the trash removes the active entry");
+}
+
 #[test]
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();
