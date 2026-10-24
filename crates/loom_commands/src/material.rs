@@ -241,7 +241,7 @@ fn users(state: &AppState, id: MaterialId) -> usize {
 
 /// Drag-and-drop of material `dropped` onto the selected polygons of `node`
 /// (Drag and Drop Sub-Object Material Assignment): returns the node's new
-/// material and the ID (1-based) the faces get.
+/// material, the ID (1-based) the faces get and whether the other faces keep their IDs.
 fn drop_on_faces(state: &AppState, lib: &mut MaterialLibrary, node: NodeId, faces: &[loom_mesh::FaceId], dropped: MaterialId) -> Result<(MaterialId, u16, bool), String> {
     let n = state.scene.node(node).ok_or("missing node")?;
     let mesh = n.cage_mesh();
@@ -256,7 +256,7 @@ fn drop_on_faces(state: &AppState, lib: &mut MaterialLibrary, node: NodeId, face
             let mut m = StandardMaterial::new(format!("Material #{}", multi.0));
             m.kind = MaterialKind::MultiSub(vec![SubMaterial { id, name: String::new(), material: Some(dropped), enabled: true }]);
             lib.insert(multi, m);
-            Ok((multi, id, face_ids.len() != 1))
+            Ok((multi, id, true))
         }
         Some((old, MaterialKind::MultiSub(_))) => {
             // Shared by other objects: work on a copy.
@@ -298,7 +298,7 @@ fn drop_on_faces(state: &AppState, lib: &mut MaterialLibrary, node: NodeId, face
                 SubMaterial { id: 2, name: String::new(), material: Some(dropped), enabled: true },
             ]);
             lib.insert(multi, m);
-            Ok((multi, 2, true))
+            Ok((multi, 2, false))
         }
     }
 }
