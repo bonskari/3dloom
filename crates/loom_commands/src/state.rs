@@ -583,6 +583,7 @@ impl CoordSystem {
 
 /// Preferences > Gizmos (the settings the gizmos read).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GizmoPrefs {
     /// "Transform Gizmos: On" (Shift+Ctrl+X toggles).
     pub enabled: bool,
@@ -638,6 +639,7 @@ impl Default for GizmoPrefs {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Prefs {
     pub gizmos: GizmoPrefs,
     /// Preferences > General > Spinners > Use Snap (Spinner Snap Toggle).
@@ -669,6 +671,8 @@ pub struct Prefs {
     pub auto_backup_interval_min: f32,
     /// Auto Backup File Name (default "AutoBackup").
     pub auto_backup_name: String,
+    /// Preferences > Files > Recent Files in File Menu (0-50, default 10).
+    pub recent_files_count: usize,
 }
 
 impl Default for Prefs {
@@ -690,19 +694,20 @@ impl Default for Prefs {
             auto_backup_count: 3,
             auto_backup_interval_min: 5.0,
             auto_backup_name: "AutoBackup".into(),
+            recent_files_count: 10,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 28] = [
+    pub const NAMES: [&'static str; 29] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
-        "Scale Size", "Rotation Increment", "Space Locks Selection",
+        "Scale Size", "Rotation Increment", "Space Locks Selection", "Recent Files in File Menu",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -722,6 +727,7 @@ impl Prefs {
             "Auto Backup Enable" => b(self.auto_backup_enable),
             "Auto Backup Count" => self.auto_backup_count as f64,
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
+            "Recent Files in File Menu" => self.recent_files_count as f64,
             "Transform Gizmos" => b(self.gizmos.enabled),
             "Show Axis Labels" => b(self.gizmos.show_axis_labels),
             "Allow Multiple Gizmos" => b(self.gizmos.allow_multiple),
@@ -758,6 +764,7 @@ impl Prefs {
             "Auto Backup Enable" => self.auto_backup_enable = on,
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
+            "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
             "Transform Gizmos" => self.gizmos.enabled = on,
             "Show Axis Labels" => self.gizmos.show_axis_labels = on,
@@ -1194,6 +1201,10 @@ pub struct AppState {
     pub expert_mode: bool,
     pub show_main_toolbar: bool,
     pub show_ribbon: bool,
+    /// Customize > Show UI > Show Command Panel.
+    pub show_command_panel: bool,
+    /// The Show UI toggles as loaded at startup (Revert to Startup Layout).
+    pub startup_ui: crate::settings::UiLayout,
     /// Modify panel: Show End Result, Pin Stack, modifier button set.
     pub show_end_result: bool,
     pub pin_stack: bool,
@@ -1238,6 +1249,13 @@ pub struct AppState {
     pub prefs: Prefs,
     /// Customize > Units Setup.
     pub units: UnitsSetup,
+    /// The units Units Setup last set: new and reset scenes start with them
+    /// and the settings file keeps them (an opened file's units do not).
+    pub default_units: UnitsSetup,
+    /// Customize User Interface > Keyboard: the user's shortcut edits.
+    pub custom_keys: crate::keymap::CustomKeys,
+    /// File > Recent: opened and saved scenes, newest first.
+    pub recent_files: Vec<std::path::PathBuf>,
     /// Set when the selection region shape changes so the UI drops a
     /// half-drawn fence/lasso.
     pub region_points_reset: bool,
@@ -1452,6 +1470,8 @@ impl AppState {
             expert_mode: false,
             show_main_toolbar: true,
             show_ribbon: false,
+            show_command_panel: true,
+            startup_ui: crate::settings::UiLayout::DEFAULT,
             show_end_result: true,
             pin_stack: false,
             show_modifier_set: false,
@@ -1482,6 +1502,9 @@ impl AppState {
             axis_constraint: AxisConstraint::XY,
             prefs: Prefs::default(),
             units: UnitsSetup::default(),
+            default_units: UnitsSetup::default(),
+            custom_keys: Default::default(),
+            recent_files: Vec::new(),
             region_points_reset: false,
             manipulate: false,
             coord_by_tool: [CoordSystem::View; 4],
@@ -1926,38 +1949,37 @@ impl AppState {
 
     /// The shortcut groups live in this state, highest priority first; Main UI is last.
     /// With Keyboard Shortcut Override off only Main UI is live.
-    pub fn active_keymaps(&self) -> Vec<&'static crate::keymap::Keymap> {
-        use crate::keymap::cached;
-        let mut maps = Vec::new();
+    pub fn active_keymaps(&self) -> Vec<&crate::keymap::Keymap> {
+        let mut groups = Vec::new();
         if self.keyboard_override {
             if crate::normals::entry(self).is_some_and(|(id, i)| self.scene.node(id).is_some_and(|n| n.active_entry == Some(i) && n.modifiers[i].sub_level == 1)) {
-                maps.push(cached::edit_normals());
+                groups.push("Edit Normals");
             }
             // A focused Track View window takes its own group first.
             if self.track_view.open && self.track_view.focused {
-                maps.push(cached::track_view());
+                groups.push("Track View");
             }
             if self.unwrap_active() {
-                maps.push(cached::unwrap_uvw());
+                groups.push("Unwrap UVW");
             }
             if self.skin_active() {
-                maps.push(cached::skin());
+                groups.push("Skin");
             }
             if self.spline_selected() {
-                maps.push(cached::editable_spline());
+                groups.push("Editable Spline");
             }
             if self.ffd_active().is_some() {
-                maps.push(cached::ffd());
+                groups.push("FFD");
             }
             if self.edit_poly_active() {
-                maps.push(cached::edit_poly());
+                groups.push("Edit Poly");
             }
             if self.poly_selected() {
-                maps.push(cached::editable_poly());
+                groups.push("Editable Poly");
             }
         }
-        maps.push(cached::main_ui());
-        maps
+        groups.push("Main UI");
+        groups.into_iter().map(|g| self.custom_keys.get(g)).collect()
     }
 
     pub fn hotkey(&self, chord: crate::keymap::Chord) -> Option<&'static str> {

@@ -35,8 +35,8 @@ fn free_port() -> u16 {
     std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
 }
 
-/// A fresh directory for a launched instance's control socket and log, so
-/// tests never touch the user's (`current`, log files).
+/// A fresh directory for a launched instance's control socket, log and
+/// settings, so tests never touch the user's (`current`, log files, settings.json).
 fn private_dir(name: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("loom-e2e-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
@@ -62,6 +62,7 @@ impl App {
             .env("LOOM_CONTROL_PORT", port.to_string())
             .env("XDG_RUNTIME_DIR", &dir)
             .env("XDG_STATE_HOME", &dir)
+            .env("LOOM_CONFIG_DIR", &dir)
             .env("DISPLAY", ":90")
             .env_remove("WAYLAND_DISPLAY")
             .env("XDG_SESSION_TYPE", "x11")
@@ -99,6 +100,7 @@ impl App {
             .env("LOOM_CONTROL_PORT", port.to_string())
             .env("XDG_RUNTIME_DIR", &dir)
             .env("XDG_STATE_HOME", &dir)
+            .env("LOOM_CONFIG_DIR", &dir)
             // winit prefers Wayland when WAYLAND_DISPLAY is set and would
             // open the window on the user's real screen instead of Xvfb.
             .env_remove("WAYLAND_DISPLAY")

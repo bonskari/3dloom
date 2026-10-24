@@ -82,6 +82,7 @@ fn main() -> eframe::Result<()> {
         Box::new(move |cc| {
             let mut inner = loom_ui::LoomApp::new(cc);
             inner.update = update.clone();
+            inner.open_command_line(std::env::args().skip(1));
             let _ = waker.set(cc.egui_ctx.clone());
             Ok(Box::new(ControlledApp {
                 inner,

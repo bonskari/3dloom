@@ -42,6 +42,7 @@ pub use execute::{execute, execute_json, is_hidden, selected_vertices, type_in_v
 pub use state::{RenderRequest, TvLevel, TvMode, UvEditor, UvTexture, ExtrudeKind, PolyDrag, PolySettings, TessKind, PaintMode, PolyConstraint, SlicePlane, AlignPoint, AppState, PreviewSelect, SoftPaint, AxisConstraint, CenterMode, CloneKind, CoordSystem, GizmoPrefs, DisplayUnits, MirrorAxis, NormalAlignPicks, Prefs, SpacingContext, SystemUnit, UnitsSetup, DialogPurpose, PickMode, SelectionFilter, SelectionMode, SelectionRegion, ScaleKind, SubObjectId, SubSelection, Tool, ViewKind, ViewState};
 pub use poly::named_sub_sets;
 pub mod keymap;
+pub mod settings;
 pub use keymap::{parse_chord, Chord, Key, Keymap};
 pub mod viewport;
 pub use viewport::{default_kinds, HideCategories, LayoutSplits, NavMode, Shading, Viewport, ViewportLayout, Dialog, PendingFileAction, PolySettingsKind};

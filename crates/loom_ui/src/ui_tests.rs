@@ -2096,3 +2096,102 @@ fn cancel_expert_mode_button_brings_the_interface_back() {
     click_text(&mut h, "Cancel Expert Mode", screen, 0.0);
     assert!(!h.app.state.expert_mode, "the button ends Expert Mode");
 }
+
+fn customize_ui_rect(h: &Harness) -> egui::Rect {
+    h.ctx.memory(|m| m.area_rect(egui::Id::new("Customize User Interface"))).expect("the Customize User Interface dialog is shown")
+}
+
+/// Customize User Interface > Keyboard: pick an action, press a key in the
+/// Hotkey field (it names the action that has it), Assign, Remove.
+#[test]
+fn keyboard_panel_assigns_a_pressed_hotkey_and_names_its_current_owner() {
+    let mut h = Harness::new();
+    h.cmd(Command::CustomizeUserInterface);
+    let win = customize_ui_rect(&h);
+    click_text(&mut h, "Search:", win, 40.0);
+    h.run(vec![egui::Event::Text("and Move".into())]);
+    h.frames(2);
+    let win = customize_ui_rect(&h);
+    click_text(&mut h, "Select and Move", win, 0.0);
+    let hotkey = h.text_rect("Hotkey:", win).expect("the Hotkey field's label");
+    h.click(egui::pos2(hotkey.left() + 40.0, hotkey.bottom() + 14.0));
+    h.frames(1);
+    assert!(h.ctx.memory(|m| m.has_focus(egui::Id::new(crate::dialogs::customize_ui::HOTKEY_FIELD))), "the click focuses the Hotkey field");
+    h.key(egui::Key::E);
+    assert_eq!(h.app.state.active_tool, loom_commands::Tool::Select, "the key went to the field, not to Select and Rotate");
+    assert!(h.text_rect("Select and Rotate", win).is_some(), "Assigned to: names the action E runs now");
+    h.mods = egui::Modifiers::ALT | egui::Modifiers::SHIFT;
+    h.key(egui::Key::M);
+    h.mods = egui::Modifiers::NONE;
+    assert!(h.text_rect("Alt+Shift+M", win).is_some(), "the field shows the pressed chord");
+    let alt_shift_m = loom_commands::parse_chord("Alt+Shift+M").unwrap();
+    assert_eq!(h.app.state.hotkey(alt_shift_m), None);
+    click_text(&mut h, "Assign", win, 0.0);
+    assert_eq!(h.app.state.hotkey(alt_shift_m), Some("Select and Move"));
+    assert!(h.text_rect("Alt+Shift+M, W", customize_ui_rect(&h)).is_some(), "the action list shows both keys");
+    // The new key works in the viewports once the dialog is closed.
+    h.cmd(Command::CloseDialog);
+    h.mods = egui::Modifiers::ALT | egui::Modifiers::SHIFT;
+    h.key(egui::Key::M);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.active_tool, loom_commands::Tool::Move);
+    h.cmd(Command::CustomizeUserInterface);
+    h.frames(2);
+    let win = customize_ui_rect(&h);
+    click_text(&mut h, "Remove", win, 0.0);
+    assert_eq!(h.app.state.hotkey(loom_commands::parse_chord("W").unwrap()), None, "Remove clears every key of the action");
+    assert_eq!(h.app.state.hotkey(alt_shift_m), None);
+}
+
+/// The settings file is written when a setting changes and read back by the next start.
+#[test]
+fn settings_are_written_on_change_and_read_at_the_next_start() {
+    let dir = std::env::temp_dir().join("loom-ui-settings-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("settings.json");
+    let mut h = Harness::new();
+    h.app.use_settings_file(path.clone());
+    h.frames(1);
+    assert!(!path.exists(), "nothing changed, nothing written");
+    h.cmd(Command::SetPreference { name: "Gizmo Size".into(), value: 33.0 });
+    h.cmd(Command::ShowMainToolbarToggle);
+    h.cmd(Command::AssignShortcut { group: "Main UI".into(), action: "Select and Move".into(), chord: "Alt+Shift+M".into() });
+    assert!(path.exists(), "a change writes the file");
+    let mut next = Harness::new();
+    next.app.use_settings_file(path);
+    next.frames(2);
+    assert_eq!(next.app.state.prefs.gizmos.size, 33.0);
+    assert!(!next.app.state.show_main_toolbar);
+    next.mods = egui::Modifiers::ALT | egui::Modifiers::SHIFT;
+    next.key(egui::Key::M);
+    assert_eq!(next.app.state.active_tool, loom_commands::Tool::Move, "the saved shortcut works after a restart");
+}
+
+/// Customize > Show UI > Show Command Panel hides the panel and the viewports take its room.
+#[test]
+fn hiding_the_command_panel_widens_the_viewports() {
+    let mut h = Harness::new();
+    let right = |h: &Harness| h.app.viewport_rects.iter().map(|r| r.max.x).fold(0.0, f32::max);
+    let before = right(&h);
+    h.cmd(Command::ShowCommandPanelToggle);
+    assert!(right(&h) > before + 100.0, "{} -> {}", before, right(&h));
+    h.cmd(Command::ShowCommandPanelToggle);
+    assert!((right(&h) - before).abs() < 1.0);
+}
+
+/// `loom scene.loom` opens the scene (flags are skipped) and lists it under File > Recent.
+#[test]
+fn a_scene_named_on_the_command_line_opens() {
+    let dir = std::env::temp_dir().join("loom-ui-command-line-test");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("start.loom");
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::SaveFile { path: Some(path.to_string_lossy().into_owned()) });
+    let mut next = Harness::new();
+    next.app.open_command_line(["-q".to_owned(), path.to_string_lossy().into_owned()]);
+    next.frames(2);
+    assert_eq!(next.app.state.scene.len(), 1);
+    assert_eq!(next.app.state.file.as_deref(), Some(path.as_path()));
+    assert_eq!(next.app.state.recent_files.first(), Some(&path));
+}

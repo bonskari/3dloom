@@ -43,6 +43,18 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     app.request_file_action(A::Open);
                     ui.close_menu();
                 }
+                ui.menu_button("Recent", |ui| {
+                    if app.state.recent_files.is_empty() {
+                        ui.label("(none)");
+                    }
+                    for (i, path) in app.state.recent_files.clone().iter().enumerate() {
+                        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        if ui.button(format!("{} {name}", i + 1)).on_hover_text(path.display().to_string()).clicked() {
+                            app.request_file_action(A::OpenRecent(i));
+                            ui.close_menu();
+                        }
+                    }
+                });
                 item(ui, app, "Save", "Save File");
                 item(ui, app, "Save As...", "Save File As");
                 item(ui, app, "Save Copy As...", "Save File As Copy");
@@ -267,8 +279,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             ui.menu_button("Customize", |ui| {
                 cmd(ui, app, "Customize User Interface...", Command::CustomizeUserInterface);
                 ui.separator();
-                item(ui, app, "Show Main Toolbar", "Show Main Toolbar Toggle");
-                item(ui, app, "Show Ribbon", "Show Ribbon Toggle");
+                cmd(ui, app, "Load Custom UI Scheme...", Command::LoadCustomUiScheme { path: None });
+                cmd(ui, app, "Save Custom UI Scheme...", Command::SaveCustomUiScheme { path: None });
+                item(ui, app, "Revert to Startup Layout", "Revert to Startup UI");
+                ui.separator();
+                ui.menu_button("Show UI", |ui| {
+                    item(ui, app, "Show Command Panel", "Show Command Panel Toggle");
+                    item(ui, app, "Show Main Toolbar", "Show Main Toolbar Toggle");
+                    item(ui, app, "Show Track Bar", "Show Track Bar Toggle");
+                    item(ui, app, "Show Ribbon", "Show Ribbon Toggle");
+                });
                 item(ui, app, "Lock UI Layout", "Lock User Interface Toggle");
                 ui.separator();
                 cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
