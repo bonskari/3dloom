@@ -78,3 +78,75 @@ fn a_view_follows_its_camera() {
     // Transparent background around the object.
     assert_eq!(img.get_pixel(1, 1).0[3], 0);
 }
+
+/// A red spot light straight down onto a white plane: the scene light
+/// replaces the default key light and lights only inside its cone; a box
+/// under it shadows the plane unless it is excluded from shadow casting.
+#[test]
+fn a_red_spot_lights_a_plane_only_inside_its_cone() {
+    let Some((adapter, device, queue)) = gpu() else {
+        eprintln!("a_red_spot_lights_a_plane_only_inside_its_cone: no GPU adapter, skipped");
+        return;
+    };
+    use loom_scene::light::{default_lights, Emitter, Exclusion};
+    let mut r = BevyRenderer::new(adapter, device, queue);
+    let plane = loom_mesh::plane_segmented(400.0, 400.0, 1, 1);
+    let mut blocker = loom_mesh::box_primitive(Vec3::splat(5.0));
+    let _ = loom_mesh::edit_ops::translate_mesh(&mut blocker, Vec3::new(0.0, 0.0, 50.0));
+    let objects = |with_box: bool| {
+        let mut v = vec![SceneObject { id: 1, mesh: &plane, wire_color: [255, 255, 255], material: None }];
+        if with_box {
+            v.push(SceneObject { id: 2, mesh: &blocker, wire_color: [255, 255, 255], material: None });
+        }
+        v
+    };
+    let mut spot = default_lights(1, Mat4::IDENTITY)[0].clone();
+    spot.id = loom_scene::NodeId(10);
+    spot.emitter = Emitter::Spot { hotspot: 30.0, falloff: 40.0 };
+    spot.position = Vec3::new(0.0, 0.0, 100.0);
+    spot.direction = Vec3::NEG_Z;
+    spot.color = Vec3::new(1.0, 0.0, 0.0);
+    spot.shadows = true;
+    // From the side, low enough to see the ground under the box.
+    let eye = Vec3::new(150.0, 0.0, 60.0);
+    let (w, h) = (160u32, 120u32);
+    let camera = ViewCamera { view: Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Z), projection: Mat4::perspective_rh(50f32.to_radians(), w as f32 / h as f32, 1.0, 2000.0) };
+    let pixel = |p: Vec3| {
+        let c = camera.projection * camera.view * p.extend(1.0);
+        let n = c.truncate() / c.w;
+        (((n.x + 1.0) * 0.5 * w as f32) as u32, ((1.0 - n.y) * 0.5 * h as f32) as u32)
+    };
+    let at = |img: &image::RgbaImage, p: Vec3| {
+        let (x, y) = pixel(p);
+        img.get_pixel(x, y).0
+    };
+
+    r.sync(&objects(false));
+    r.sync_lights(std::slice::from_ref(&spot));
+    assert!(!r.default_lighting(), "a scene light replaces the default lighting");
+    let img = r.render_image(w, h, &camera).expect("render");
+    let inside = at(&img, Vec3::new(0.0, 10.0, 0.0));
+    let outside = at(&img, Vec3::new(-20.0, 100.0, 0.0));
+    assert!(inside[0] > 80 && inside[1] < 30 && inside[2] < 30, "red inside the cone: {inside:?}");
+    assert!(outside[0] < 15 && outside[1] < 15 && outside[2] < 15, "dark outside the cone: {outside:?}");
+
+    // A box above the centre shadows it ...
+    r.sync(&objects(true));
+    r.sync_lights(std::slice::from_ref(&spot));
+    let img = r.render_image(w, h, &camera).expect("render");
+    let under = at(&img, Vec3::ZERO);
+    assert!(under[0] < 40, "the box shadows the centre: {under:?}");
+    // ... unless the spot excludes it from shadow casting.
+    spot.exclusion = Exclusion { include: false, scope: 1, nodes: vec![loom_scene::NodeId(2)] };
+    r.sync_lights(std::slice::from_ref(&spot));
+    let img = r.render_image(w, h, &camera).expect("render");
+    let under = at(&img, Vec3::ZERO);
+    assert!(under[0] > 80, "an excluded box casts no shadow: {under:?}");
+
+    // No lights again: the default lighting comes back.
+    r.sync_lights(&[]);
+    assert!(r.default_lighting());
+    let img = r.render_image(w, h, &camera).expect("render");
+    let c = at(&img, Vec3::new(-20.0, 100.0, 0.0));
+    assert!(c[0] > 60 && c[1] > 60 && c[2] > 60, "the default key light lights the plane white: {c:?}");
+}
