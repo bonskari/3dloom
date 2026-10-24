@@ -2052,3 +2052,5 @@ fn cancel_expert_mode_button_brings_the_interface_back() {
     click_text(&mut h, "Cancel Expert Mode", screen, 0.0);
     assert!(!h.app.state.expert_mode, "the button ends Expert Mode");
 }
+
+mod qa;

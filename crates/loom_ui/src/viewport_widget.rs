@@ -491,6 +491,40 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             set_constraint_from_handle(app, handle);
                         }
                     }
+                    // Select and Move / Rotate / Scale: pressing on an object (not on the
+                    // gizmo) selects it if needed and drags it under the active axis constraint.
+                    if pointer.button_pressed(egui::PointerButton::Primary)
+                        && response.hovered()
+                        && app.transform_drag.is_none()
+                        && app.manip_drag.is_none()
+                        && app.state.active_tool != Tool::Select
+                        && app.state.selection_mode == SelectionMode::Object
+                        && !mods.alt
+                        && !mods.ctrl
+                        && app.state.nav_mode == loom_input::NavMode::None
+                        && app.state.pick_mode.is_none()
+                        && app.create_kind.is_none()
+                        && app.create.is_none()
+                        && !app.poly_dragging
+                        && app.state.paint_deform.is_none()
+                        && !app.state.vertex_paint_brush
+                    {
+                        if let Some(Pick::Object(i)) = pick_object(app, p, rect, view, proj) {
+                            let node = app.world_meshes()[i].0;
+                            if !app.state.selection.contains(&node) {
+                                apply_picks(app, vec![Pick::Object(i)], mods);
+                            }
+                            if app.has_selection() {
+                                let mut drag = DragState::new(body_drag_handle(app.state.active_tool, app.state.axis_constraint), p);
+                                drag.shift = mods.shift;
+                                app.begin_transform_drag(drag);
+                                if mods.shift {
+                                    app.shift_sources = app.state.selection.iter().copied().collect();
+                                    let _ = app.dispatch(Command::CloneOptions { kind: loom_commands::CloneKind::Copy, copies: 1, name: None, offset: None, rotate_deg: None, scale: None });
+                                }
+                            }
+                        }
+                    }
                     if pointer.button_released(egui::PointerButton::Primary) {
                         if let Some(drag) = app.transform_drag {
                             app.end_transform_drag();
@@ -1981,6 +2015,28 @@ fn draw_manipulator(painter: &egui::Painter, p: &Projection, m: &Manipulator, ho
 }
 
 /// Picking a gizmo handle also sets the Axis Constraints toolbar.
+/// The gizmo handle a drag on the object body uses: the active axis constraint
+/// (Rotate turns about a plane's normal; an XYZ constraint is the screen plane,
+/// screen rotation or uniform scale).
+fn body_drag_handle(tool: Tool, c: loom_commands::AxisConstraint) -> gizmo::Handle {
+    use gizmo::{Handle as H, Plane as P};
+    use loom_commands::AxisConstraint as C;
+    match (tool, c) {
+        (_, C::X) => H::Axis(Axis::X),
+        (_, C::Y) => H::Axis(Axis::Y),
+        (_, C::Z) => H::Axis(Axis::Z),
+        (Tool::Rotate, C::XY) => H::Axis(Axis::Z),
+        (Tool::Rotate, C::YZ) => H::Axis(Axis::X),
+        (Tool::Rotate, C::ZX) => H::Axis(Axis::Y),
+        (Tool::Rotate, C::XYZ) => H::Screen,
+        (Tool::Scale, C::XYZ) => H::Uniform,
+        (_, C::XYZ) => H::CenterBox,
+        (_, C::XY) => H::Plane(P::XY),
+        (_, C::YZ) => H::Plane(P::YZ),
+        (_, C::ZX) => H::Plane(P::ZX),
+    }
+}
+
 fn set_constraint_from_handle(app: &mut LoomApp, handle: gizmo::Handle) {
     use loom_commands::AxisConstraint as C;
     let c = match handle {
