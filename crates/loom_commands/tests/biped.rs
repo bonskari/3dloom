@@ -236,7 +236,8 @@ fn figure_mode_keeps_the_figure_pose_apart_from_the_animated_pose() {
 fn root_name_renames_the_whole_biped() {
     let mut s = AppState::new();
     let root = create(&mut s);
-    execute(&mut s, Command::BipedRootName { id: id_of(&s, "Bip001 L Hand").0, name: "Hero".into() }).unwrap();
+    let hand = id_of(&s, "Bip001 L Hand");
+    execute(&mut s, Command::BipedRootName { id: hand.0, name: "Hero".into() }).unwrap();
     let t = tree(&s, root);
     assert!(t.contains_key("Hero") && t.contains_key("Hero L Hand") && t.contains_key("Hero Spine3"));
     assert!(!t.keys().any(|n| n.starts_with("Bip001")));
