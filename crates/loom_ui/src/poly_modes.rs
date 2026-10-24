@@ -390,7 +390,9 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hov
                 painter.line_segment([p, q], egui::Stroke::new(1.0_f32, col));
             }
         }
-        if let Some(c) = projection.screen(world.transform_point3(Vec3::ZERO)) {
+        // The Center: a deformation modifier's own point, else the gizmo origin.
+        let center = slot.modifier.deformer().map(|d| d.center.get()).unwrap_or(Vec3::ZERO);
+        if let Some(c) = projection.screen(world.transform_point3(center)) {
             painter.circle_stroke(c, 4.0, egui::Stroke::new(1.5_f32, col));
         }
     }

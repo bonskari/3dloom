@@ -312,6 +312,8 @@ pub enum Dialog {
     CloseSpline,
     /// Editable Spline > Refine with Connect on an existing vertex: Refine / Connect Only.
     RefineVertex,
+    /// A base parameter change under a topology-dependent modifier: Yes / Hold/Yes / No.
+    TopologyWarning,
     /// File > Import (OBJ).
     ImportFile,
     SaveAnimation,

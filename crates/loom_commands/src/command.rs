@@ -685,6 +685,7 @@ commands! {
     AddModifier => "Add Modifier", Loom, "Add a modifier from the Modifier List above the active entry of the selected objects." { name: String };
     DeleteModifier => "Delete Modifier", Loom, "Remove stack entry `index` (0 = bottom) from the selected objects." { index: u32 };
     MoveModifier => "Move Modifier", Loom, "Reorder the stack: entry `from` goes to position `to`." { from: u32, to: u32 };
+    CopyModifier => "Copy Modifier", Loom, "Shift-drag (copy) / Ctrl-drag (`instance`) in the stack: a copy of entry `from` is inserted so it ends up at position `to` (0 = bottom, up to the stack length)." { from: u32, to: u32, instance: bool };
     ToggleModifier => "Toggle Modifier", Loom, "Modifier on / off (the stack lightbulb)." { index: u32, on: bool };
     ToggleModifierInViewport => "Toggle Modifier In Viewport", Loom, "Modifier on / off in viewports only." { index: u32, on: bool };
     RenameModifier => "Rename Modifier", Loom, "Rename a stack entry." { index: u32, name: String };
@@ -1520,7 +1521,7 @@ commands! {
     UnhideByName => "Unhide By Name", Loom, "Open the Select From Scene dialog to unhide objects by name.";
     FreezeByName => "Freeze By Name", Loom, "Open the Select From Scene dialog to freeze objects by name.";
     UnfreezeByName => "Unfreeze By Name", Loom, "Open the Select From Scene dialog to unfreeze objects by name.";
-    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm: bake rotation and scale into the mesh and reset the node transform (position kept).";
+    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm > Reset Selected: the node's rotation and scale (and pivot offset) move into a new XForm modifier on top of the stack, the node keeps only its position; collapse the stack to bake them.";
     RescaleWorldUnits => "Rescale World Units", Loom, "Utilities > Rescale World Units: scale the whole scene by a factor." { factor: f32 };
     Measure => "Measure", Loom, "Utilities > Measure: dimensions, surface area, volume and centre of mass of the selection.";
     SetWireColor => "Set Wire Color", Loom, "Set a node's object colour (Name and Color rollout)." { id: u64, rgb: [u8; 3] };

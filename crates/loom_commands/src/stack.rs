@@ -58,6 +58,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 }
             })
         }
+        C::CopyModifier { from, to, instance } => copy_modifier(state, from as usize, to as usize, instance),
         C::ToggleModifier { index, on } => edit_stack(state, "Modifier On/Off", |stack| {
             stack.get_mut(index as usize).ok_or_else(|| format!("no stack entry {index}"))?.enabled = on;
             Ok(())
@@ -582,10 +583,71 @@ fn edit_stack_repointing(state: &mut AppState, label: &str, f: impl Fn(&mut Vec<
         let node = state.scene.node(id).ok_or("missing node")?;
         let mut stack = node.modifiers.clone();
         f(&mut stack)?;
+        repoint_own(&mut stack, &node.modifiers, id, map);
         changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
         changes.extend(repoint_instances(state, id, map));
     }
     commit_change(state, label, Change::Group(changes))?;
+    Ok(stack_json(state))
+}
+
+/// `repoint_instances` for instances inside the node's own stack (Ctrl-drag
+/// in the stack): `old` is the stack before the edit.
+fn repoint_own(stack: &mut [ModifierSlot], old: &[ModifierSlot], id: NodeId, map: &dyn Fn(usize) -> Option<usize>) {
+    for slot in stack.iter_mut() {
+        let Some((o, i)) = slot.instance_of else { continue };
+        if o != id {
+            continue;
+        }
+        match map(i) {
+            Some(j) => slot.instance_of = Some((id, j)),
+            None => {
+                if let Some(m) = old.get(i).map(|s| s.modifier.clone()) {
+                    slot.modifier = m;
+                }
+                slot.instance_of = None;
+            }
+        }
+    }
+}
+
+/// Copy Modifier: a copy (or an instance) of entry `from` inserted at `to`.
+fn copy_modifier(state: &mut AppState, from: usize, to: usize, instance: bool) -> Result<Value, String> {
+    let ids = selected_ids(state)?;
+    let mut changes = Vec::new();
+    for id in ids {
+        let node = state.scene.node(id).ok_or("missing node")?;
+        let len = node.modifiers.len();
+        if from >= len || to > len {
+            return Err("stack index out of range".into());
+        }
+        let map = |i: usize| Some(if i >= to { i + 1 } else { i });
+        let mut stack = node.modifiers.clone();
+        repoint_own(&mut stack, &node.modifiers, id, &map);
+        let source = &node.modifiers[from];
+        let mut slot = source.clone();
+        slot.sub_level = 0;
+        if instance {
+            // Instances share one source: an instance of an instance points at the same.
+            slot.instance_of = Some(match source.instance_of {
+                Some((o, i)) if o == id => (id, if i >= to { i + 1 } else { i }),
+                Some(other) => other,
+                None => (id, if from >= to { from + 1 } else { from }),
+            });
+        } else {
+            if source.instance_of.is_some() {
+                slot.modifier = state.scene.resolved_modifier(id, from).unwrap_or_else(|| source.modifier.clone());
+            }
+            slot.instance_of = None;
+        }
+        stack.insert(to, slot);
+        if stack.windows(2).any(|w| w[0].modifier.is_wsm() && !w[1].modifier.is_wsm()) {
+            return Err("world-space modifiers stay above the object-space modifiers".into());
+        }
+        changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+        changes.extend(repoint_instances(state, id, &map));
+    }
+    commit_change(state, if instance { "Instance Modifier" } else { "Copy Modifier" }, Change::Group(changes))?;
     Ok(stack_json(state))
 }
 
@@ -624,7 +686,8 @@ fn collapse(state: &mut AppState, upto: Option<usize>) -> Result<Value, String> 
         // NURMS was baked into the result.
         poly.subdiv.use_nurms.set(false);
         let keep_from = upto.map(|u| u + 1).unwrap_or(node.modifiers.len());
-        let rest: Vec<ModifierSlot> = node.modifiers.iter().skip(keep_from).cloned().collect();
+        let mut rest: Vec<ModifierSlot> = node.modifiers.iter().skip(keep_from).cloned().collect();
+        repoint_own(&mut rest, &node.modifiers, *id, &|i| if i < keep_from { None } else { Some(i - keep_from) });
         changes.push(Change::ReplaceObject { id: *id, before: Box::new(node.object.clone()), after: Box::new(ObjectKind::EditablePoly(poly)) });
         changes.push(Change::SetStack { id: *id, before: node.modifiers.clone(), after: rest });
         changes.extend(repoint_instances(state, *id, &|i| if i < keep_from { None } else { Some(i - keep_from) }));

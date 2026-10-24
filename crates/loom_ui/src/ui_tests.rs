@@ -36,6 +36,51 @@ impl Harness {
         self.shapes = self.ctx.run(input, |ctx| app.frame(ctx)).shapes;
     }
 
+    /// Every text `label` painted last frame in the Command Panel, top to bottom.
+    fn widgets_labelled(&self, label: &str) -> Vec<egui::Rect> {
+        let panel = egui::containers::panel::PanelState::load(&self.ctx, egui::Id::new("command_panel")).expect("the Command Panel").rect;
+        self.texts(label).into_iter().filter(|r| panel.contains_rect(*r)).collect()
+    }
+
+    /// Every text `label` painted last frame, top to bottom (its rect).
+    fn texts(&self, label: &str) -> Vec<egui::Rect> {
+        fn find(shape: &egui::Shape, text: &str, out: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| find(s, text, out)),
+                egui::Shape::Text(t) if t.galley.text() == text => out.push(t.galley.rect.translate(t.pos.to_vec2())),
+                _ => {}
+            }
+        }
+        let mut v = Vec::new();
+        for c in &self.shapes {
+            let mut found = Vec::new();
+            find(&c.shape, label, &mut found);
+            v.extend(found.into_iter().filter(|r| c.clip_rect.contains_rect(*r)));
+        }
+        v.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+        v
+    }
+
+    /// The one text `label` painted last frame.
+    fn widget(&self, label: &str) -> egui::Rect {
+        let v = self.widgets_labelled(label);
+        assert_eq!(v.len(), 1, "one {label:?} shown: {v:?}");
+        v[0]
+    }
+
+    /// Clicks the text `label` in the Command Panel.
+    fn click_widget(&mut self, label: &str) {
+        let r = self.widget(label);
+        self.click(r.center());
+    }
+
+    /// Clicks the one text `label` shown anywhere (a dialog's button).
+    fn click_text_anywhere(&mut self, label: &str) {
+        let v = self.texts(label);
+        assert_eq!(v.len(), 1, "one {label:?} shown: {v:?}");
+        self.click(v[0].center());
+    }
+
     fn frames(&mut self, n: usize) {
         for _ in 0..n {
             self.run(Vec::new());
@@ -1636,6 +1681,142 @@ fn bridge_edges_dialog_takes_edges_selected_while_it_is_open() {
     h.mods = egui::Modifiers::NONE;
     h.frames(2);
     assert_eq!(cage(&h, id).face_count(), 16, "the preview bridges the newly selected pair");
+}
+
+/// A 10-unit box at `x` with a Taper of Amount 1: the stack result's top is
+/// twice as wide as the box.
+fn tapered_box(h: &mut Harness, x: f32) -> loom_scene::NodeId {
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [x, 0.0, 0.0], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Taper".into() });
+    h.cmd(Command::SetModifierParameter { index: 0, name: "Amount".into(), value: 1.0 });
+    id
+}
+
+/// The X extent of what the viewports draw for `id`.
+fn drawn_width(h: &Harness, id: loom_scene::NodeId) -> f32 {
+    let i = h.app.world_meshes().iter().position(|(n, _)| *n == id).expect("drawn");
+    let (lo, hi) = h.app.world_display[i].aabb();
+    hi.x - lo.x
+}
+
+#[test]
+fn show_end_result_starts_off_and_only_the_edited_object_shows_up_to_its_active_entry() {
+    let mut h = Harness::new();
+    let b = tapered_box(&mut h, 40.0);
+    let a = tapered_box(&mut h, 0.0);
+    h.click_widget("Modify");
+    assert!(!h.app.state.show_end_result, "off by default");
+    assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3, "the top entry is active: the whole stack shows");
+    // The base object in the stack: A shows its box, B (not being edited) its end result.
+    h.click_widget("Box");
+    assert_eq!(h.app.state.scene.node(a).unwrap().active_entry, None);
+    assert!((drawn_width(&h, a) - 10.0).abs() < 1e-3, "{}", drawn_width(&h, a));
+    assert!((drawn_width(&h, b) - 20.0).abs() < 1e-3, "{}", drawn_width(&h, b));
+    // Leaving the Modify panel shows the end result again.
+    h.click_widget("Create");
+    assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3);
+    h.click_widget("Modify");
+    assert!((drawn_width(&h, a) - 10.0).abs() < 1e-3);
+    // Show End Result on: the whole stack.
+    h.click_widget("⏚");
+    assert!(h.app.state.show_end_result);
+    assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3);
+}
+
+#[test]
+fn smooth_modifier_has_32_smoothing_group_buttons() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Smooth".into() });
+    h.click_widget("Modify");
+    let groups = |h: &Harness| match &h.app.state.scene.node(id).unwrap().modifiers[0].modifier {
+        loom_scene::Modifier::Smooth { groups, .. } => groups.get(),
+        _ => panic!("Smooth"),
+    };
+    for i in 1..=32 {
+        assert_eq!(h.widgets_labelled(&i.to_string()).len(), 1, "group button {i}");
+    }
+    h.click_widget("3");
+    assert_eq!(groups(&h), 1 << 2);
+    h.click_widget("32");
+    assert_eq!(groups(&h), (1 << 2) | (1 << 31));
+    h.click_widget("3");
+    assert_eq!(groups(&h), 1 << 31, "a second click clears the group");
+    assert!(h.app.state.scene.eval_mesh(id).value.mesh.faces().iter().all(|f| f.smoothing_groups == 1 << 31));
+    assert_eq!(h.widgets_labelled("Prevent Indirect Smoothing").len(), 1);
+}
+
+/// Dragging an entry onto another row moves it; Shift-drag copies it there,
+/// Ctrl-drag puts an instance there.
+#[test]
+fn shift_and_ctrl_drag_in_the_stack_copy_and_instance_a_modifier() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.cmd(Command::AddModifier { name: "Taper".into() });
+    h.click_widget("Modify");
+    let names = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
+    let instances = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.instance_of.map(|(_, i)| i)).collect::<Vec<_>>();
+    // Shift-drag Taper down onto Bend: a copy below Bend.
+    let (taper, bend) = (h.widget("Taper"), h.widget("Bend"));
+    h.mods = egui::Modifiers::SHIFT;
+    h.drag(taper.center(), bend.center());
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(names(&h), ["Taper", "Bend", "Taper"]);
+    assert_eq!(instances(&h), [None, None, None]);
+    // Ctrl-drag Bend up onto the top Taper: an instance above it.
+    let bend = h.widget("Bend");
+    let top = h.widgets_labelled("Taper")[0];
+    h.mods = egui::Modifiers::CTRL;
+    h.drag(bend.center(), top.center());
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(names(&h), ["Taper", "Bend", "Taper", "Bend"]);
+    assert_eq!(instances(&h), [None, None, None, Some(1)]);
+    assert_eq!(h.widgets_labelled("Bend  (instanced)").len(), 1, "the new entry is marked as an instance");
+    // A plain drag moves: the lower Taper (bottom row) onto the Bend above it.
+    let rows = h.widgets_labelled("Taper");
+    h.drag(rows[1].center(), h.widget("Bend").center());
+    assert_eq!(names(&h), ["Bend", "Taper", "Taper", "Bend"]);
+    assert_eq!(instances(&h), [None, None, None, Some(0)], "the instance follows its source");
+}
+
+/// Changing a base parameter under a topology-dependent modifier asks first:
+/// Yes / Hold/Yes / No.
+#[test]
+fn base_parameter_change_under_edit_poly_asks_yes_hold_yes_no() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Edit Poly".into() });
+    h.click_widget("Modify");
+    h.click_widget("Box");
+    let height = |h: &Harness| h.app.state.scene.node(id).unwrap().object.parameters().into_iter().find(|(n, _)| *n == "Height").unwrap().1;
+    // The spinner's edit goes through dispatch, as a drag does.
+    let _ = h.app.dispatch(Command::SetParameter { id: id.0, name: "Height".into(), value: 20.0 });
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::TopologyWarning));
+    assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "nothing changes before the answer");
+    assert_eq!(h.texts("Hold/Yes").len(), 1);
+    h.click_text_anywhere("No");
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "No keeps the old value");
+    let _ = h.app.dispatch(Command::SetParameter { id: id.0, name: "Height".into(), value: 20.0 });
+    h.frames(2);
+    h.click_text_anywhere("Yes");
+    assert_eq!(height(&h), loom_scene::ParamValue::Float(20.0), "Yes applies it");
+    // Answered once for this visit to the base object: the next change applies directly.
+    let _ = h.app.dispatch(Command::SetParameter { id: id.0, name: "Height".into(), value: 25.0 });
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(height(&h), loom_scene::ParamValue::Float(25.0));
+    // A plain object without such a modifier never asks.
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
+    let other = *h.app.state.selection.iter().next().unwrap();
+    let _ = h.app.dispatch(Command::SetParameter { id: other.0, name: "Height".into(), value: 5.0 });
+    assert_eq!(h.app.state.dialog, None);
 }
 
 /// The Material Editor window's rect.
