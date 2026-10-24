@@ -30,6 +30,7 @@ pub mod light;
 pub mod skin;
 pub mod morph;
 pub mod autosave;
+pub mod live;
 pub mod anim_cmds;
 pub mod controllers;
 pub mod track_view;

@@ -50,7 +50,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::UnwrapUvwModifier => crate::unwrap::execute(state, cmd),
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
         c if c.group() == crate::Group::Skin => crate::skin::execute(state, c),
-        c @ (C::SkinAddBones { .. } | C::SkinRemoveBone { .. } | C::SkinSelectBone { .. } | C::SkinSelectVertices { .. } | C::SkinSetVertexWeight { .. } | C::SkinSetEnvelope { .. } | C::SkinSetCustomWeight { .. } | C::SkinNormalize | C::SkinRigidToggle | C::SkinBakeSelectedVerts | C::MirrorModeSkin | C::PasteGreenToBlue | C::PasteBlueToGreen | C::MirrorPaste | C::SkinAddGizmo { .. } | C::SkinRemoveGizmo | C::SkinSelectGizmo { .. } | C::SkinAddGizmoKey | C::SkinSetGizmoKey { .. } | C::SkinSetGizmoDelta { .. } | C::SkinSetGizmoOption { .. }) => crate::skin::execute(state, c),
+        c @ (C::SkinAddBones { .. } | C::SkinRemoveBone { .. } | C::SkinSelectBone { .. } | C::SkinSelectVertices { .. } | C::SkinSetVertexWeight { .. } | C::SkinSetEnvelope { .. } | C::SkinSetCustomWeight { .. } | C::SkinNormalize | C::SkinRigidToggle | C::SkinBakeSelectedVerts | C::MirrorModeSkin | C::PasteGreenToBlue | C::PasteBlueToGreen | C::MirrorPaste | C::SkinAddGizmo { .. } | C::SkinRemoveGizmo | C::SkinSelectGizmo { .. } | C::SkinAddGizmoKey | C::SkinSetGizmoKey { .. } | C::SkinSetGizmoDelta { .. } | C::SkinSetGizmoOption { .. } | C::SkinSetVertexWeights { .. } | C::SkinSetScaleWeight { .. } | C::SkinSetPasteTolerance { .. } | C::SkinSelectBoneByName { .. } | C::SkinEnvelopeVisibility | C::SkinPaintWeightsToggle | C::SkinPaintStroke { .. } | C::SkinSetPainterOption { .. } | C::SkinPainterOptionsDialog) => crate::skin::execute(state, c),
         c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin) => crate::morph::execute(state, c),
         C::NewScene => {
             let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
@@ -373,7 +373,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(selection_json(state))
         }
-        C::DeleteObjects => delete(state),
+        C::DeleteObjects => delete(state, None),
+        C::DeletePolygons { delete_isolated } => {
+            if state.dialog == Some(Dialog::DeleteIsolatedVertices) {
+                state.dialog = None;
+            }
+            if !state.selection_mode.is_face_level() {
+                return Err("Delete Polygons works at Polygon and Element level".into());
+            }
+            delete(state, Some(delete_isolated))
+        }
         C::Clone => {
             if state.selection.is_empty() {
                 return Ok(json!({}));
@@ -461,7 +470,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::AttachSpline | C::AttachMultipleSpline | C::BreakVerticesSpline | C::ChamferVertexSpline | C::CloseSpline | C::ConnectSpline | C::CreateLineSpline | C::CycleVerticesSpline
         | C::DeleteSegmentSpline | C::DeleteSplineSpline | C::DeleteVertexSpline | C::DetachSegmentSpline | C::DetachSplineSpline | C::DivideSpline | C::ExplodeSpline | C::FilletSpline
         | C::FuseVerticesSpline | C::HideSpline | C::UnhideAllSpline | C::InsertSelectionSpline | C::MakeFirstSpline | C::MirrorBothSpline | C::MirrorHorizontallySpline | C::MirrorVerticallySpline
-        | C::OutlineSpline | C::RefineSpline | C::RefineConnectSpline | C::ReverseSpline | C::SubtractSpline | C::WeldVerticesSpline | C::SplineRefine { .. } | C::SplineFillet { .. }
+        | C::OutlineSpline | C::RefineSpline | C::RefineConnectSpline | C::ReverseSpline | C::SubtractSpline | C::WeldVerticesSpline | C::SplineRefine { .. } | C::SplineRefineAtVertex { .. } | C::SplineRefineReply { .. } | C::SplineFilletMode { .. } | C::SplineFillet { .. }
         | C::SplineChamfer { .. } | C::SetVertexType { .. } | C::SetKnotHandle { .. } | C::SplineOutline { .. } | C::SplineBoolean { .. } | C::SplineMirror { .. } | C::SplineDivide { .. }
         | C::SplineWeld { .. } | C::SplineFuse | C::SplineConnect { .. } | C::SplineAttach { .. } | C::SplineDetach { .. } | C::SplineExplode { .. } | C::SplineSettings { .. }
         | C::CreateShapeFromEdges { .. } | C::ExtrudeAlongSpline { .. } | C::BindSpline | C::UnbindSpline | C::TrimSpline | C::ExtendSpline | C::CrossInsertSpline
@@ -1384,7 +1393,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         | C::MSmooth { .. } | C::TessellateFaces { .. } | C::Relax { .. } | C::RelaxSettings | C::FullInteractivity { .. } | C::PreserveUVs { .. } | C::DeleteIsolatedVertices
         | C::AutoSmooth | C::PaintDeformPushPull | C::PaintDeformRelax | C::SetMaterialId { .. } | C::SelectByMaterialId { .. } | C::SetSmoothingGroups { .. } | C::ClearSmoothingGroups
         | C::SelectBySmoothingGroup { .. } | C::AutoSmoothThreshold { .. } | C::SetVertexColor { .. } | C::SetVertexIllumination { .. } | C::SetVertexAlpha { .. } | C::SelectByVertexColor { .. }
-        | C::SubdivisionSurface { .. } | C::PaintDeformRevert | C::PaintDeformCommit | C::PaintDeformCancel | C::PaintDeformSettings { .. } | C::PaintDeformStroke { .. } => {
+        | C::SubdivisionSurface { .. } | C::PaintDeformRevert | C::PaintDeformCommit | C::PaintDeformCancel | C::PaintDeformSettings { .. } | C::PaintDeformStroke { .. }
+        | C::CleanRemove | C::SwiftLoopMode | C::SwiftLoop { .. } | C::LoopMode | C::SelectByHalf { .. } | C::BridgeSpecificEdges { .. } | C::PickBridgeEdge { .. } => {
             crate::poly::execute(state, cmd)
         }
         C::SnapsToggle => toggle(&mut state.snaps_on, "snaps"),
@@ -1585,6 +1595,23 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(())
         }, None),
         C::LineEnd { node } => crate::spline::line_end(state, NodeId(node)),
+        C::LineCloseAsk { node, point, smooth } => {
+            state.scene.node(NodeId(node)).ok_or_else(|| missing(NodeId(node)))?;
+            state.line_close_pending = Some((NodeId(node), point, smooth));
+            state.dialog = Some(Dlg::CloseSpline);
+            Ok(json!({ "dialog": "CloseSpline" }))
+        }
+        C::LineCloseReply { close } => {
+            let (node, point, smooth) = state.line_close_pending.take().ok_or("no Close spline prompt is open")?;
+            if state.dialog == Some(Dlg::CloseSpline) {
+                state.dialog = None;
+            }
+            if close {
+                execute(state, C::LineClose { node: node.0 })
+            } else {
+                execute(state, C::LineAddKnot { node: node.0, point, smooth })
+            }
+        }
         C::LineClose { node } => edit_line(state, NodeId(node), "Line Close", |spline, _| {
             if spline.knots.len() < 3 {
                 return Err("a spline needs three knots to close".into());
@@ -1985,7 +2012,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::ExitPickMode => {
+            // Cut: the first right-click ends the current cut, the second leaves Cut.
+            if state.pick_mode == Some(PickMode::CutB) {
+                state.pick_mode = Some(PickMode::CutA);
+                state.pick_point_a = None;
+                return Ok(json!({ "pick": "CutA" }));
+            }
             state.pick_mode = None;
+            state.refine_chain = None;
             state.pick_source = None;
             if !state.create_verts.is_empty() {
                 return crate::poly_edit::finish_create(state);
@@ -2000,6 +2034,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     return crate::poly_edit::execute(state, C::AttachNode { id: id.0 });
                 }
                 Some(PickMode::SplineRefine | PickMode::SplineInsert) => return Err("Refine / Insert pick a segment, not an object".into()),
+                Some(PickMode::SplineFillet | PickMode::SplineChamfer) => return Err("Fillet / Chamfer drag on a selected vertex, not an object".into()),
                 Some(PickMode::UnwrapSplineMap) => {
                     let mapping = state.uv_editor.spline_map_mapping;
                     let normalize = state.unwrap_entry().and_then(|(n, i)| match &state.scene.node(n)?.modifiers[i].modifier {
@@ -2027,8 +2062,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     return crate::spline::execute(state, C::SplineAttach { node: id.0, reorient });
                 }
                 Some(PickMode::ExtrudeAlongSpline) => {
+                    if state.dialog == Some(Dlg::PolySettings(crate::PolySettingsKind::ExtrudeAlongSpline)) {
+                        // The open dialog keeps the path; its preview runs the extrusion.
+                        state.scene.node(id).and_then(|n| n.edit_shape()).ok_or("the picked object is not a shape")?;
+                        state.spline_settings.extrude_path = Some(id);
+                        state.pick_mode = None;
+                        return Ok(json!({ "path": id.0 }));
+                    }
                     let ss = state.spline_settings;
-                    return crate::spline::execute(state, C::ExtrudeAlongSpline { spline: id.0, segments: ss.extrude_segments, taper: ss.extrude_taper, twist: ss.extrude_twist, align: ss.extrude_align });
+                    return crate::spline::execute(state, C::ExtrudeAlongSpline { spline: id.0, segments: ss.extrude_segments, taper: ss.extrude_taper, taper_curve: ss.extrude_taper_curve, twist: ss.extrude_twist, rotation: ss.extrude_rotation, align: ss.extrude_align });
                 }
                 Some(PickMode::GroupAttach) => {
                     return crate::groups::attach_to_group(state, id);
@@ -2094,7 +2136,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex) => {
                     return Err("this pick mode needs a point pick (Pick Point)".into());
                 }
-                Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB) => {
+                Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB | PickMode::SwiftLoop | PickMode::BridgeEdge1 | PickMode::BridgeEdge2) => {
                     return Err("this pick mode needs a sub-object pick (Pick Sub)".into());
                 }
                 None => return Err("no pick mode active".into()),
@@ -2348,9 +2390,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 state.sub_selection.clear();
             }
             let mesh = state.scene.node(node).ok_or_else(|| missing(node))?.cage_mesh().into_owned();
+            let loop_mode = state.loop_mode;
+            let clicked = ids.clone();
             for raw in ids {
                 let expanded: Vec<SubObjectId> = match mode {
                     SelectionMode::Element => element_of(&mesh, FaceId(raw)).into_iter().map(SubObjectId::Face).collect(),
+                    // Loop Mode: an edge brings its whole loop (Alt takes the loop away).
+                    SelectionMode::Edge if loop_mode => loom_mesh::select_ops::edge_loop(&mesh, &[HalfEdgeId(raw)]).into_iter().map(SubObjectId::Edge).collect(),
                     SelectionMode::Border => match mesh.canonical_edge_id(HalfEdgeId(raw)) {
                         Some(e) if is_border_edge(&mesh, e) => vec![SubObjectId::Edge(e)],
                         _ => vec![],
@@ -2364,6 +2410,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         state.sub_selection.insert(node, id);
                     }
                 }
+            }
+            if loop_mode && op != SelectOp::Subtract {
+                loop_mode_select(state, node, &mesh, mode, &clicked);
             }
             Ok(selection_json(state))
         }
@@ -3067,7 +3116,56 @@ fn base_of(name: &str) -> &str {
     name.trim_end_matches(|c: char| c.is_ascii_digit())
 }
 
-fn delete(state: &mut AppState) -> Result<Value, String> {
+/// Loop Mode at Vertex / Polygon level: a clicked vertex or polygon next to
+/// an already selected one brings the loop the two of them run along.
+fn loop_mode_select(state: &mut AppState, node: NodeId, mesh: &Mesh, mode: SelectionMode, clicked: &[u32]) {
+    use loom_mesh::select_ops::{edge_loop, edge_ring, vertex_edges};
+    let mut add: Vec<SubObjectId> = Vec::new();
+    for &raw in clicked {
+        match mode {
+            SelectionMode::Vertex => {
+                let v = VertexId(raw);
+                for e in vertex_edges(mesh, v) {
+                    let Some((a, b)) = mesh.edge_vertices(e) else { continue };
+                    let other = if a == v { b } else { a };
+                    if !state.sub_selection.contains(node, SubObjectId::Vertex(other)) {
+                        continue;
+                    }
+                    for l in edge_loop(mesh, &[e]) {
+                        if let Some((x, y)) = mesh.edge_vertices(l) {
+                            add.extend([SubObjectId::Vertex(x), SubObjectId::Vertex(y)]);
+                        }
+                    }
+                }
+            }
+            SelectionMode::Face => {
+                let hes = mesh.half_edges();
+                for c in mesh.face_corners(FaceId(raw)).unwrap_or_default() {
+                    let Some(g) = hes[hes[c.0 as usize].twin.0 as usize].face else { continue };
+                    if !state.sub_selection.contains(node, SubObjectId::Face(g)) {
+                        continue;
+                    }
+                    // The polygons between the ring edges of the shared edge.
+                    for r in edge_ring(mesh, &[c]) {
+                        let h = &hes[r.0 as usize];
+                        add.extend(h.face.into_iter().chain(hes[h.twin.0 as usize].face).map(SubObjectId::Face));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for id in add {
+        if !is_hidden(mesh, id) {
+            state.sub_selection.insert(node, id);
+        }
+    }
+}
+
+/// Delete. Deleting polygons that would leave vertices with no polygon asks
+/// first (`delete_isolated` None opens the prompt); the answer comes back as
+/// Delete Polygons.
+fn delete(state: &mut AppState, delete_isolated: Option<bool>) -> Result<Value, String> {
     if state.selection_mode != SelectionMode::Object && state.sub_selection.is_empty() {
         return Ok(json!({}));
     }
@@ -3102,13 +3200,29 @@ fn delete(state: &mut AppState) -> Result<Value, String> {
         }
     }
     let nodes: BTreeSet<NodeId> = faces.keys().chain(edges.keys()).chain(verts.keys()).copied().collect();
+    if delete_isolated.is_none() && edges.is_empty() && verts.is_empty() {
+        let leaves_isolated = faces.iter().any(|(n, fs)| {
+            let Some(node) = state.scene.node(*n) else { return false };
+            let mesh = node.cage_mesh();
+            let set: BTreeSet<FaceId> = fs.iter().copied().collect();
+            fs.iter().flat_map(|f| mesh.face_vertex_ids(*f).unwrap_or_default()).any(|v| mesh.faces_around_vertex(v).iter().all(|g| set.contains(g)))
+        });
+        if leaves_isolated {
+            state.dialog = Some(Dialog::DeleteIsolatedVertices);
+            return Ok(json!({ "ask": "Delete isolated vertices?" }));
+        }
+    }
     let mut changes = Vec::new();
     for n in nodes {
         let node = state.scene.node(n).ok_or_else(|| missing(n))?;
         let before = node.object.clone();
         let mut mesh = node.cage_mesh().into_owned();
         if let Some(f) = faces.get(&n) {
-            edit_ops::delete_faces(&mut mesh, f)?;
+            if delete_isolated == Some(false) {
+                edit_ops::delete_faces_keep_vertices(&mut mesh, f)?;
+            } else {
+                edit_ops::delete_faces(&mut mesh, f)?;
+            }
         }
         if let Some(e) = edges.get(&n) {
             edit_ops::delete_edges(&mut mesh, e)?;

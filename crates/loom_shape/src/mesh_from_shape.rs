@@ -323,11 +323,12 @@ pub fn lathe(shape: &Shape, degrees: f32, segments: u32, cap_start: bool, cap_en
     let segs = segments.max(3) as usize;
     let full = (degrees - 360.0).abs() < 1e-3 || degrees >= 360.0;
     let axis_dir = match axis { 0 => Vec3::X, 1 => Vec3::Y, _ => Vec3::Z };
-    // Alignment: the axis passes through the min / centre / max of the shape across it.
+    // Alignment: the axis passes through the min / centre / max of the shape
+    // across it, or (3, before an Align button is pressed) the pivot.
     let (lo, hi) = shape.aabb();
     let across = if axis == 0 { Vec3::Y } else { Vec3::X };
     let pick = |v: Vec3| v.dot(across);
-    let a0 = match align { 0 => pick(lo), 2 => pick(hi), _ => (pick(lo) + pick(hi)) * 0.5 };
+    let a0 = match align { 0 => pick(lo), 2 => pick(hi), 3 => 0.0, _ => (pick(lo) + pick(hi)) * 0.5 };
     let origin = across * a0;
     let mut im = IndexedMesh::default();
     let steps = segs;

@@ -352,9 +352,10 @@ impl CreateSession {
     }
 }
 
-/// The Line tool: each click adds a knot (Initial Type), a drag after the
-/// click shapes it (Drag Type), Backspace removes the last knot, clicking
-/// the first knot closes the spline and a right-click ends the line.
+/// The Line tool: each click adds a knot (Initial Type; Shift lines it up
+/// with the last), a drag after the click shapes it (Drag Type), Backspace
+/// removes the last knot, clicking the first knot asks "Close spline?" and a
+/// right-click ends the line.
 #[derive(Debug, Clone)]
 pub struct LineSession {
     pub node: NodeId,
@@ -384,13 +385,30 @@ impl LineSession {
         projection.screen(app.state.scene.object_matrix(self.node).transform_point3(k))
     }
 
-    /// A click at `point`: closes on the first knot, else adds a knot. Returns true when the line closed (and ended).
+    /// Shift: the new knot lines up with the last one horizontally or
+    /// vertically on the construction plane (`basis` = right, up, normal).
+    pub fn constrained(&self, app: &LoomApp, point: Vec3, basis: (Vec3, Vec3, Vec3)) -> Vec3 {
+        let Some(n) = app.state.scene.node(self.node) else { return point };
+        let Some(last) = n.edit_spline().and_then(|s| s.shape.splines.first()?.knots.last().map(|k| k.pos)) else { return point };
+        let last = app.state.scene.object_matrix(self.node).transform_point3(last);
+        let d = point - last;
+        let (u, v) = (d.dot(basis.0), d.dot(basis.1));
+        if u.abs() >= v.abs() { last + basis.0 * u } else { last + basis.1 * v }
+    }
+
+    /// The line was closed (the "Close spline?" prompt was answered Yes).
+    pub fn is_closed(&self, app: &LoomApp) -> bool {
+        app.state.scene.node(self.node).and_then(|n| n.edit_spline().and_then(|s| s.shape.splines.first().map(|s| s.closed))).unwrap_or(false)
+    }
+
+    /// A click at `point`: on the first knot it asks "Close spline?", else adds a knot. Returns true when the line ended.
     pub fn on_press(&mut self, app: &mut LoomApp, point: Vec3, pointer: egui::Pos2, first_knot: Option<egui::Pos2>) -> bool {
         let knots = app.state.scene.node(self.node).and_then(|n| n.edit_spline().map(|s| s.shape.splines[0].knots.len())).unwrap_or(0);
         if knots >= 3 && first_knot.is_some_and(|f| f.distance(pointer) <= 8.0) {
-            let _ = app.dispatch(Command::LineClose { node: self.node.0 });
-            self.finish(app);
-            return true;
+            // Yes closes the line (and the frame loop ends it); No adds this knot.
+            let _ = app.dispatch(Command::LineCloseAsk { node: self.node.0, point: point.to_array(), smooth: app.line_initial_smooth });
+            self.press = None;
+            return false;
         }
         let _ = app.dispatch(Command::LineAddKnot { node: self.node.0, point: point.to_array(), smooth: app.line_initial_smooth });
         self.press = Some(pointer);

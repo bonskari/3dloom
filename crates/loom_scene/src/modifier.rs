@@ -640,7 +640,7 @@ impl Modifier {
             // Edit Mesh is edited as an Edit Poly (spec §6.3).
             "Edit Poly" | "Edit Mesh" => Modifier::EditPoly { poly: PolyObject::from_mesh(Mesh::default()), input_vertices: 0, input_faces: 0, snapshot: Vec::new() },
             "Extrude" => Modifier::Extrude { amount: f(0.0), segments: Param::new(1), cap_start: Param::new(true), cap_end: Param::new(true) },
-            "Lathe" => Modifier::Lathe { degrees: f(360.0), segments: Param::new(16), cap_start: Param::new(true), cap_end: Param::new(true), weld_core: Param::new(false), flip_normals: Param::new(false), direction: Param::new(1), align: Param::new(1) },
+            "Lathe" => Modifier::Lathe { degrees: f(360.0), segments: Param::new(16), cap_start: Param::new(true), cap_end: Param::new(true), weld_core: Param::new(false), flip_normals: Param::new(false), direction: Param::new(1), align: Param::new(3) },
             "Bevel" => Modifier::Bevel { start_outline: f(0.0), level1: [f(0.0), f(0.0)], level2_on: Param::new(false), level2: [f(0.0), f(0.0)], level3_on: Param::new(false), level3: [f(0.0), f(0.0)], cap_start: Param::new(true), cap_end: Param::new(true) },
             "Sweep" => Modifier::Sweep { section: Param::new(0), length: f(3.0), width: f(3.0), thickness: f(0.5), radius: f(1.0), custom: None, mirror: Param::new(false), offset_x: f(0.0), offset_y: f(0.0), angle: f(0.0), banking: Param::new(true), smooth_section: Param::new(true), smooth_path: Param::new(true) },
             "Edit Spline" => Modifier::EditSpline { spline: ShapeObject::from_shape(loom_shape::Shape::default()), input_knots: 0, snapshot: Vec::new() },
