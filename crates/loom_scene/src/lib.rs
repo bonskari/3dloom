@@ -1,5 +1,6 @@
 //! Scene graph: nodes with animatable parameters, parametric objects, undo.
 
+pub mod biped;
 pub mod camera;
 pub mod modifier;
 pub mod ik;

@@ -4,6 +4,7 @@
 //! rollouts, or the modifier's parameters and sub-object levels).
 
 use super::{create, rollout};
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{Command, SelectionMode};
@@ -143,10 +144,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             });
             (open, leave)
         };
-        let level_row = |ui: &mut egui::Ui, label: &str, current: bool| -> bool {
+        let level_row = |ui: &mut egui::Ui, label: &str, current: bool, chord: Option<String>| -> bool {
             ui.horizontal(|ui| {
                 ui.add_space(40.0);
-                ui.add(egui::SelectableLabel::new(current, label)).clicked()
+                let r = ui.add(egui::SelectableLabel::new(current, label));
+                match chord {
+                    Some(c) => r.on_hover_text(format!("{label} ({c})")),
+                    None => r,
+                }
+                .clicked()
             })
             .inner
         };
@@ -214,7 +220,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 for (j, l) in levels.iter().enumerate() {
                     let level = j as u32 + 1;
                     let current = active == Some(i) && *lvl == level;
-                    if level_row(ui, l, current) {
+                    if level_row(ui, l, current, None) {
                         let _ = app.dispatch(Command::ModifierSubobjectLevel { index: i as u32, level: if current { 0 } else { level } });
                     }
                 }
@@ -253,7 +259,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         if base_open {
             for (l, m) in &base_levels {
                 let current = base_in_level && mode == *m;
-                if level_row(ui, l, current) {
+                if level_row(ui, l, current, crate::shortcuts::chord(&app.state, crate::shortcuts::level_action(*m))) {
                     if active.is_some() {
                         let _ = app.dispatch(Command::SelectStackEntry { index: None });
                     }
@@ -638,7 +644,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         });
         rollout(ui, "Parameters", true, |ui| {
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Edit...").clicked() {
+                if ui.button("Edit...").on_hover_cmd(&app.state, "Open the Edit UVWs window", Command::EditUvws.name()).clicked() {
                     let _ = app.dispatch(Command::EditUvws);
                 }
                 if ui.button("Reset UVWs").clicked() {
@@ -647,7 +653,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Save...").clicked() {
                     let _ = app.dispatch(Command::SaveUvw { path: None });
                 }
-                if ui.button("Load...").clicked() {
+                if ui.button("Load...").with_shortcut(&app.state, Command::LoadUvw { path: None }.name()).clicked() {
                     let _ = app.dispatch(Command::LoadUvw { path: None });
                 }
             });
@@ -667,7 +673,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             });
             ui.label(egui::RichText::new("Display:").strong());
             let mut ss = u.show_seams.get();
-            if ui.checkbox(&mut ss, "Show Seams").changed() {
+            if ui.checkbox(&mut ss, "Show Seams").with_shortcut(&app.state, Command::ShowSeamsInViewport.name()).changed() {
                 let _ = app.dispatch(Command::ShowSeamsInViewport);
             }
             ui.horizontal(|ui| {
@@ -691,7 +697,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         rollout(ui, "Map Parameters", true, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (label, cmd) in [("Planar", Command::PlanarMapFaces), ("Pelt", Command::PeltDialog), ("Cylindrical", Command::CylindricalMap), ("Spherical", Command::SphericalMap), ("Box", Command::BoxMap)] {
-                    if ui.button(label).clicked() {
+                    if ui.button(label).with_shortcut(&app.state, cmd.name()).clicked() {
                         let _ = app.dispatch(cmd);
                     }
                 }

@@ -1,6 +1,7 @@
 //! Viewport Configuration dialog: Layout, Safe Frames and Rendering Method
 //! (shading only; rendering is out of scope).
 
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{Command, Shading, ViewKind, ViewportLayout};
@@ -31,7 +32,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 Tab::Layout => layout_tab(ui, app),
                 Tab::SafeFrames => {
                     let mut on = app.state.active().safe_frames;
-                    if ui.checkbox(&mut on, "Show Safe Frames in Active View").changed() {
+                    if ui.checkbox(&mut on, "Show Safe Frames in Active View").with_shortcut(&app.state, Command::ViewportSafeframesToggle.name()).changed() {
                         let _ = app.dispatch(Command::ViewportSafeframesToggle);
                     }
                 }
@@ -44,7 +45,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         }
                     }
                     let mut edged = app.state.active().edged_faces;
-                    if ui.checkbox(&mut edged, "Edged Faces").changed() {
+                    if ui.checkbox(&mut edged, "Edged Faces").with_shortcut(&app.state, Command::ViewEdgedFacesToggle.name()).changed() {
                         let _ = app.dispatch(Command::ViewEdgedFacesToggle);
                     }
                 }

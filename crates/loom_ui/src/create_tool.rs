@@ -87,7 +87,7 @@ impl CreateSession {
         let (kind, shape) = match what {
             CreateKind::Primitive(k) => (k, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
-            CreateKind::Line | CreateKind::Bones | CreateKind::Helper(_) | CreateKind::Camera { .. } => return None,
+            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } => return None,
         };
         let label = format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label()));
         app.state.undo.begin(&label);
@@ -499,5 +499,74 @@ impl CameraSession {
     pub fn place_free(app: &mut LoomApp, anchor: Vec3, normal: Vec3) {
         let look = anchor - normal * loom_scene::camera::DEFAULT_TARGET_DISTANCE;
         let _ = app.dispatch(Command::CreateCameraAt { target: false, position: anchor.to_array(), look_at: look.to_array() });
+    }
+}
+
+/// Systems > Biped, Drag Height: the press puts the feet on the construction
+/// plane and the drag sets the height; the whole creation is one undo entry.
+#[derive(Debug, Clone)]
+pub struct BipedSession {
+    pub root: NodeId,
+    pub feet: Vec3,
+    /// Normal of the construction plane the feet stand on.
+    pub normal: Vec3,
+    start: egui::Pos2,
+    units_per_px: f32,
+    height: f32,
+}
+
+impl BipedSession {
+    pub fn begin(app: &mut LoomApp, feet: Vec3, normal: Vec3, pointer: egui::Pos2, units_per_px: f32) -> Option<Self> {
+        app.state.undo.begin("Create Biped");
+        let d = app.biped_defaults.clone();
+        let r = app.dispatch(Command::CreateBiped {
+            position: feet.to_array(),
+            height: Some(units_per_px.max(loom_scene::biped::MIN_HEIGHT)),
+            name: None,
+            arms: Some(d.arms.get()),
+            neck_links: Some(d.neck_links.get()),
+            spine_links: Some(d.spine_links.get()),
+            leg_links: Some(d.leg_links.get()),
+            tail_links: Some(d.tail_links.get()),
+            fingers: Some(d.fingers.get()),
+            finger_links: Some(d.finger_links.get()),
+            toes: Some(d.toes.get()),
+            toe_links: Some(d.toe_links.get()),
+        });
+        let root = r.ok().and_then(|v| v["root"].as_u64()).map(NodeId);
+        let Some(root) = root else {
+            app.state.undo.end();
+            return None;
+        };
+        app.last_biped = Some(root);
+        Some(Self { root, feet, normal, start: pointer, units_per_px, height: 0.0 })
+    }
+
+    /// The height for the pointer: in the axis views (an upright construction
+    /// plane) the world height of the pointer above the feet, elsewhere the
+    /// upward screen drag.
+    fn height_at(&self, hit: Option<Vec3>, pointer: egui::Pos2) -> f32 {
+        match hit {
+            Some(h) if self.normal.z.abs() < 0.5 => (h - self.feet).dot(Vec3::Z),
+            _ => (self.start.y - pointer.y) * self.units_per_px,
+        }
+    }
+
+    pub fn on_drag(&mut self, app: &mut LoomApp, hit: Option<Vec3>, pointer: egui::Pos2) {
+        let h = self.height_at(hit, pointer).abs();
+        if h > self.units_per_px && (h - self.height).abs() > 1e-4 {
+            self.height = h;
+            let _ = app.dispatch(Command::SetBipedStructure { id: self.root.0, height: Some(h), arms: None, neck_links: None, spine_links: None, leg_links: None, tail_links: None, fingers: None, finger_links: None, toes: None, toe_links: None });
+        }
+    }
+
+    /// Release: a click without a drag makes a biped of the default height.
+    pub fn finish(mut self, app: &mut LoomApp, hit: Option<Vec3>, pointer: egui::Pos2) {
+        self.on_drag(app, hit, pointer);
+        if self.height <= self.units_per_px * 2.0 {
+            let h = loom_commands::biped::default_height(&app.state);
+            let _ = app.dispatch(Command::SetBipedStructure { id: self.root.0, height: Some(h), arms: None, neck_links: None, spine_links: None, leg_links: None, tail_links: None, fingers: None, finger_links: None, toes: None, toe_links: None });
+        }
+        app.state.undo.end();
     }
 }

@@ -225,7 +225,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             if app.state.viewports[index].background.is_none() && !app.state.viewports[index].is_orthographic() {
                 draw_background_gradient(&painter, rect);
             }
-            draw_labels(ui, app, index, rect);
+            let over_label = draw_labels(ui, app, index, rect);
 
             if app.state.region_points_reset {
                 app.state.region_points_reset = false;
@@ -599,6 +599,16 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     }
                                     let _ = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() });
                                 }
+                            } else if app.create_kind == Some(crate::CreateKind::Biped) {
+                                // Biped: the press puts the feet down, the drag sets the height.
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                    if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
+                                        anchor = hit.point;
+                                        app.consume_snap_override();
+                                    }
+                                    let upp = units_per_pixel(app, index, rect);
+                                    app.biped_create = crate::create_tool::BipedSession::begin(app, anchor, basis.2, p, upp);
+                                }
                             } else if let Some(crate::CreateKind::Camera { target }) = app.create_kind {
                                 if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
                                     if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
@@ -673,6 +683,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                         if let Some(session) = app.camera_create.take() {
                             session.finish(app);
+                        }
+                        if let Some(session) = app.biped_create.take() {
+                            let hit = plane_hit(p, rect, view, proj, session.normal);
+                            session.finish(app, hit, p);
                         }
                         if app.alt_click.take().is_some() {
                             let picked = picks_at(app, p, rect, view, proj, view_proj);
@@ -763,6 +777,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                     }
                     if pointer.is_moving() {
+                        if let Some(mut session) = app.biped_create.take() {
+                            let hit = plane_hit(p, rect, view, proj, session.normal);
+                            session.on_drag(app, hit, p);
+                            app.biped_create = Some(session);
+                            ctx.request_repaint();
+                        }
                         if let Some(session) = app.camera_create.clone() {
                             let mut hit = plane_hit(p, rect, view, proj, session.normal);
                             if let Some(snap) = snap_at(app, index, &projection, p, None, false) {
@@ -785,7 +805,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                     // Right click cancels a creation in progress or a by-Hit mode;
                     // otherwise it opens the quad menu (on the click).
-                    if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() {
+                    if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() && !over_label {
                         if let Some(session) = app.create.take() {
                             session.cancel(app);
                         } else if app.create_kind.is_some() && app.bone_points.is_empty() && app.line.is_none() {
@@ -804,7 +824,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.state.nav_mode = loom_input::NavMode::None;
                         } else if !app.region_points.is_empty() && app.drag_select_start.is_none() {
                             app.region_points.clear();
-                        } else if app.quad_menu.is_none() {
+                        } else {
+                            // A right-click elsewhere while one is open reopens it there.
                             let mut open = crate::quad_menu::Open::new(p, index);
                             open.kind = if mods.shift { crate::quad_menu::QuadKind::Snaps } else if mods.ctrl { crate::quad_menu::QuadKind::Create } else if mods.alt { crate::quad_menu::QuadKind::Animation } else { crate::quad_menu::QuadKind::Default };
                             app.quad_menu = Some(open);
@@ -1078,7 +1099,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
 }
 
 /// The three viewport label menus (General, POV, Shading).
-fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::Rect) {
+/// Returns true when the pointer is over a label (its right-click is the label's menu, not the quad menu).
+fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::Rect) -> bool {
+    let mut over = false;
     // The labels sit over the 3D image (drawn later in the viewport's own
     // layer): their own background layer, painted after the panel.
     let painter = &ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("viewport_labels"))).with_clip_rect(rect);
@@ -1116,6 +1139,7 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
                 crate::label_menus::render(ui, app, index, &entries);
             });
         let hovered = resp.is_some_and(|r| r.response.hovered()) || ui.rect_contains_pointer(r);
+        over |= hovered;
         let color = if hovered { egui::Color32::WHITE } else { egui::Color32::from_gray(225) };
         painter.galley(r.min, galley, color);
         x += size.x + 10.0;
@@ -1123,6 +1147,7 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
     if disabled {
         painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font, egui::Color32::from_gray(225));
     }
+    over
 }
 
 /// World units per screen pixel at the view's focus distance.
@@ -1878,25 +1903,36 @@ fn set_constraint_from_handle(app: &mut LoomApp, handle: gizmo::Handle) {
     app.state.axis_constraint = c;
 }
 
-fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
-    let stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
-    // Group heads have no mesh: bracket the members' bounds instead.
+/// World boxes the selection brackets go around: each selected object's drawn
+/// result (a skinned mesh as posed, not its bind-pose cage); a group head, which
+/// has no mesh, gets its members' bounds.
+pub(crate) fn selection_bracket_boxes(app: &LoomApp) -> Vec<(Vec3, Vec3)> {
+    let bounds = |i: usize| app.world_display().get(i).filter(|m| m.vertex_count() > 0).map(|m| m.aabb());
+    let drawn = |id: NodeId| app.world_meshes().iter().position(|(n, _)| *n == id).and_then(bounds);
     let mut boxes: Vec<(Vec3, Vec3)> = Vec::new();
     for id in app.state.selection.iter() {
         let Some(n) = app.state.scene.node(*id) else { continue };
         if matches!(n.object, loom_scene::ObjectKind::Group { .. }) {
-            if let Some(b) = app.state.bounds_of(app.state.scene.descendants(*id).into_iter()) {
+            let members = app.state.scene.descendants(*id).into_iter().filter_map(drawn);
+            if let Some(b) = members.reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))) {
                 boxes.push(b);
             }
         }
     }
-    for (id, mesh) in app.world_meshes() {
-        if !app.state.selection.contains(id) || mesh.vertex_count() == 0 {
+    for (i, (id, _)) in app.world_meshes().iter().enumerate() {
+        if !app.state.selection.contains(id) {
             continue;
         }
-        boxes.push(mesh.aabb());
+        if let Some(b) = bounds(i) {
+            boxes.push(b);
+        }
     }
-    for (mn, mx) in boxes {
+    boxes
+}
+
+fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
+    let stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
+    for (mn, mx) in selection_bracket_boxes(app) {
         let mut bounds: Option<egui::Rect> = None;
         for i in 0..8 {
             let c = Vec3::new(if i & 1 == 0 { mn.x } else { mx.x }, if i & 2 == 0 { mn.y } else { mx.y }, if i & 4 == 0 { mn.z } else { mx.z });

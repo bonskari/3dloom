@@ -1,7 +1,7 @@
 //! Editable Poly > Edit Borders rollout: Extrude, Insert Vertex,
 //! Chamfer, Cap, Bridge, Connect, Create Shape, Edit Tri / Turn.
 
-use super::{action, mode_with_settings, pick_on};
+use super::{action, action_keyed, mode_with_settings, pick_on};
 use crate::command_panel::rollout;
 use crate::LoomApp;
 use eframe::egui;
@@ -16,7 +16,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         let ps = app.state.poly_settings;
         ui.horizontal(|ui| {
             let on = app.state.poly_drag == Some(PolyDrag::Extrude);
-            mode_with_settings(ui, app, "Extrude", "Extrude Mode (Shift+E): drag a selected border", on, Command::ExtrudeMode, Command::ExtrudeSettings);
+            mode_with_settings(ui, app, "Extrude", "Extrude Mode: drag a selected border", on, Command::ExtrudeMode, Command::ExtrudeSettings);
             let on = pick_on(app, &[PickMode::InsertVertex]);
             if ui.selectable_label(on, "Insert Vertex").on_hover_text("Insert Vertex Mode: click a border edge").clicked() {
                 let _ = app.dispatch(Command::InsertVertexMode);
@@ -24,7 +24,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             let on = app.state.poly_drag == Some(PolyDrag::Chamfer);
-            mode_with_settings(ui, app, "Chamfer", "Chamfer Mode (Shift+Ctrl+C): drag a selected border", on, Command::ChamferMode, Command::ChamferSettings);
+            mode_with_settings(ui, app, "Chamfer", "Chamfer Mode: drag a selected border", on, Command::ChamferMode, Command::ChamferSettings);
             ui.add_enabled_ui(has, |ui| action(ui, app, "Cap", "Cap the selected borders", Command::Cap));
         });
         ui.horizontal(|ui| {
@@ -32,7 +32,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.small_button("□").on_hover_text("Bridge Settings").clicked() {
                 let _ = app.dispatch(Command::BridgeSettings);
             }
-            ui.add_enabled_ui(has, |ui| action(ui, app, "Connect", "Connect (Shift+Ctrl+E)", Command::ConnectEdges { segments: ps.connect_segments, pinch: ps.connect_pinch, slide: ps.connect_slide }));
+            ui.add_enabled_ui(has, |ui| action_keyed(ui, app, "Connect", "Connect", "Connect", Command::ConnectEdges { segments: ps.connect_segments, pinch: ps.connect_pinch, slide: ps.connect_slide }));
             if ui.small_button("□").on_hover_text("Connect Edge Settings").clicked() {
                 let _ = app.dispatch(Command::ConnectEdgeSettings);
             }
