@@ -185,3 +185,47 @@ fn alt_r_rings_from_the_keyboard() {
     h.mods = egui::Modifiers::NONE;
     assert_eq!(h.sub_count(), 4, "the ring of a box edge is four edges");
 }
+
+/// Where the active viewport's construction plane (z = 0) is under a screen point,
+/// found by searching: good enough to aim drags at known ground points.
+fn ground_point(h: &Harness, world: Vec3) -> egui::Pos2 {
+    h.screen_of(world)
+}
+
+#[test]
+fn drag_creating_a_sphere_centres_it_on_the_click_and_selects_it() {
+    let mut h = Harness::new();
+    framed(&mut h);
+    h.cmd(Command::ZoomExtentsAll);
+    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Sphere));
+    let a = ground_point(&h, Vec3::new(0.0, 0.0, 0.0));
+    let b = ground_point(&h, Vec3::new(10.0, 0.0, 0.0));
+    h.drag(a, b);
+    let id = *h.app.state.selection.iter().next().expect("the new sphere is selected");
+    let n = h.app.state.scene.node(id).unwrap();
+    let p = n.transform.position.get();
+    assert!(p.z.abs() < 0.5, "the pivot stays on the construction plane (Base To Pivot off): z = {}", p.z);
+    assert!(p.x.abs() < 1.0 && p.y.abs() < 1.0, "centred on the click: {p:?}");
+    assert!(h.app.create_kind.is_some(), "the create mode stays on for the next sphere");
+}
+
+#[test]
+fn drag_creating_a_box_keeps_it_selected() {
+    let mut h = Harness::new();
+    framed(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
+    let a = ground_point(&h, Vec3::new(-10.0, -10.0, 0.0));
+    let b = ground_point(&h, Vec3::new(10.0, 10.0, 0.0));
+    h.drag(a, b);
+    // Height: move the mouse up, then click.
+    let c = b + egui::vec2(0.0, -60.0);
+    for i in 1..=6 {
+        h.run(vec![egui::Event::PointerMoved(b + (c - b) * (i as f32 / 6.0))]);
+    }
+    h.click(c);
+    assert_eq!(h.app.state.scene.len(), 1, "one box");
+    assert_eq!(h.app.state.selection.len(), 1, "the new box stays selected");
+    let id = *h.app.state.selection.iter().next().unwrap();
+    let height = h.app.state.scene.node(id).unwrap().object.parameters().iter().find(|(n, _)| *n == "Height").map(|(_, v)| format!("{v:?}"));
+    assert!(height.is_some_and(|h| !h.contains("0.0)")), "the height step gave it a height: {height:?}");
+}
