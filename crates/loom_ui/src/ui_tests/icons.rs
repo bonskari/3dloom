@@ -26,10 +26,24 @@ fn tooltip_shows(h: &mut Harness, p: egui::Pos2, tip: &str) -> bool {
     !h.texts(tip).is_empty()
 }
 
+/// The texts painted last frame that start with `prefix` (for failure messages).
+fn painted(h: &Harness, prefix: &str) -> Vec<String> {
+    fn walk(shape: &egui::Shape, prefix: &str, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, prefix, out)),
+            egui::Shape::Text(t) if t.galley.text().starts_with(prefix) => out.push(t.galley.text().to_owned()),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    h.shapes.iter().for_each(|s| walk(&s.shape, prefix, &mut out));
+    out
+}
+
 /// Hovers the icon (checking its tooltip), then clicks it.
 fn click_icon(h: &mut Harness, panel_id: &str, glyph: &str, tip: &str) {
     let p = icon_in(h, glyph, panel(h, panel_id));
-    assert!(tooltip_shows(h, p, tip), "hovering {glyph:?} in {panel_id} shows {tip:?}");
+    assert!(tooltip_shows(h, p, tip), "hovering {glyph:?} in {panel_id} shows {tip:?}; painted: {:?}", painted(h, tip.split(' ').next().unwrap_or("")));
     h.click(p);
 }
 
