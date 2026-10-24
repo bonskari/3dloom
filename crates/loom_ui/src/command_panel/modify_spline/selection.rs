@@ -11,9 +11,9 @@ use loom_commands::{Command, SelectionMode};
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     rollout(ui, "Selection", true, |ui| {
         ui.horizontal(|ui| {
-            for (mode, label, key) in [(SelectionMode::Vertex, "Vertex", 1), (SelectionMode::Edge, "Segment", 2), (SelectionMode::Face, "Spline", 3)] {
+            for (mode, label) in [(SelectionMode::Vertex, "Vertex"), (SelectionMode::Edge, "Segment"), (SelectionMode::Face, "Spline")] {
                 let selected = app.state.selection_mode == mode;
-                if ui.selectable_label(selected, label).on_hover_text(format!("{label} level ({key})")).clicked() {
+                if ui.selectable_label(selected, label).on_hover_text(crate::shortcuts::tip(&app.state, &format!("{label} level"), crate::shortcuts::level_action(mode))).clicked() {
                     let mode = if selected { SelectionMode::Object } else { mode };
                     let _ = app.dispatch(Command::SelectionMode { mode });
                 }

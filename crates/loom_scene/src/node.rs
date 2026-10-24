@@ -548,6 +548,8 @@ pub enum ObjectKind {
     IkGoal {
         chain: u32,
     },
+    /// Systems > Biped: the centre of mass, root of the biped's parts; holds the Structure.
+    Biped(Box<crate::biped::BipedStructure>),
 }
 
 /// Bone fins (Bone Tools > Fin Adjustment Tools).
@@ -810,7 +812,7 @@ impl ObjectKind {
     }
     /// Helpers and other non-geometry nodes (Dummy, Point, IK goal, Group, Camera).
     pub fn is_helper(&self) -> bool {
-        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. })
+        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
     }
     pub fn is_bone(&self) -> bool {
         matches!(self, Self::Bone { .. })
@@ -991,6 +993,7 @@ impl ObjectKind {
             Self::Dummy { .. } => "Dummy",
             Self::Point { .. } => "Point",
             Self::IkGoal { .. } => "IK Chain",
+            Self::Biped(_) => "Biped",
             Self::EditableSpline(s) => if s.is_line { "Line" } else { "Shape" },
             Self::Rectangle { .. } => "Rectangle",
             Self::Circle { .. } => "Circle",
@@ -1142,6 +1145,12 @@ impl ObjectKind {
             Self::Dummy { size } => vec![("Size", f(size))],
             Self::Point { size, axis_tripod, cross, box_ } => vec![("Size", f(size)), ("Axis Tripod", b(axis_tripod)), ("Cross", b(cross)), ("Box", b(box_))],
             Self::IkGoal { .. } => Vec::new(),
+            Self::Biped(bs) => {
+                let mut v = vec![("Arms", b(&bs.arms))];
+                v.extend(crate::biped::BipedStructure::LINKS.iter().map(|(n, _, _)| (*n, Int(bs.count(n).unwrap_or(0)))));
+                v.push(("Height", f(&bs.height)));
+                v
+            }
             Self::EditableSpline(_) => self.shape_common_params(),
             Self::Rectangle { length, width, corner_radius, .. } => [vec![("Length", f(length)), ("Width", f(width)), ("Corner Radius", f(corner_radius))], self.shape_common_params()].concat(),
             Self::Circle { radius, .. } => [vec![("Radius", f(radius))], self.shape_common_params()].concat(),
@@ -1168,6 +1177,9 @@ impl ObjectKind {
                 "Smoothness" => { p.subdiv.smoothness.set((value as f32).clamp(0.0, 1.0)); Ok(()) }
                 _ => Err(format!("Editable Poly has no parameter {name:?}")),
             };
+        }
+        if let Self::Biped(b) = self {
+            return b.set(name, value);
         }
         if let Some(r) = self.set_shape_common(name, value) {
             return r;
@@ -1399,6 +1411,8 @@ impl ObjectKind {
             // Point: a small cube a tenth of its size; the tripod/cross draw as an overlay.
             Self::Point { size, .. } => Cow::Owned(box_primitive(Vec3::splat(size.get() * 0.1))),
             Self::IkGoal { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
+            // The centre of mass: an octahedron.
+            Self::Biped(b) => Cow::Owned(loom_mesh::standard_primitives::geosphere_primitive(crate::biped::root_size(b.height.get()), 1, loom_mesh::standard_primitives::GeoBase::Octa)),
             Self::Boolean { a, b, display, .. } => {
                 if display.get() == 1 {
                     let mut both = a.clone();
