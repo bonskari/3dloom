@@ -743,8 +743,7 @@ impl LoomApp {
                 let eye = world.w_axis.truncate();
                 let forward = -world.z_axis.truncate().normalize_or_zero();
                 let distance = loom_scene::light::target_distance(&self.state.scene, id).unwrap_or(loom_scene::light::DEFAULT_TARGET_DISTANCE).max(1e-3);
-                let dir = -forward;
-                let orbit = loom_input::OrbitCamera { target: eye + forward * distance, distance, yaw: dir.y.atan2(dir.x), pitch: dir.z.clamp(-1.0, 1.0).asin() };
+                let orbit = loom_input::OrbitCamera::looking(eye, eye + forward * distance, world.y_axis.truncate().normalize_or_zero());
                 let perspective = l.light_type != loom_scene::light::LightType::Directional;
                 let fov_x = if perspective { l.falloff.get().clamp(1.0, 175.0).to_radians() } else { 2.0 * (l.falloff.get().max(1e-3) * 0.5 / distance).atan() };
                 let (near, far) = (loom_scene::camera::AUTO_NEAR_CLIP, Camera::auto_clip(distance).1);
