@@ -333,6 +333,7 @@ pub enum TorusSmooth {
 
 /// Torus with explicit smoothing groups per the Smooth option. Slice caps
 /// get a group of their own.
+#[allow(clippy::too_many_arguments)]
 pub fn torus_smoothed(radius1: f32, radius2: f32, rotation_deg: f32, twist_deg: f32, segments: u32, sides: u32, slice: Slice, smooth: TorusSmooth) -> Mesh {
     let (polys, columns, sides) = torus_polys(radius1, radius2, rotation_deg, twist_deg, segments, sides, slice);
     let wrap = slice_range(slice).2;
