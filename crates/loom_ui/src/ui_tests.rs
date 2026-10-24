@@ -299,3 +299,105 @@ fn right_click_or_the_select_tool_ends_the_create_mode() {
     h.key(egui::Key::Q);
     assert!(h.app.create_kind.is_none(), "the Select tool ends the create mode");
 }
+
+fn param(h: &Harness, name: &str) -> f64 {
+    let id = *h.app.state.selection.iter().next().expect("the new object is selected");
+    let params = h.app.state.scene.node(id).unwrap().object.parameters();
+    params.iter().find(|(n, _)| *n == name).map(|(_, v)| v.as_f64()).unwrap_or_else(|| panic!("no parameter {name}"))
+}
+
+fn pivot(h: &Harness) -> Vec3 {
+    let id = *h.app.state.selection.iter().next().expect("the new object is selected");
+    h.app.state.scene.node(id).unwrap().transform.position.get()
+}
+
+/// Moves the pointer (no button) in steps, as during a height or radius step.
+fn hover_to(h: &mut Harness, from: egui::Pos2, to: egui::Pos2) {
+    for i in 1..=6 {
+        h.run(vec![egui::Event::PointerMoved(from + (to - from) * (i as f32 / 6.0))]);
+    }
+}
+
+fn creating(h: &mut Harness, kind: PrimitiveKind) {
+    maximized(h);
+    h.app.create_kind = Some(crate::CreateKind::Primitive(kind));
+}
+
+#[test]
+fn drag_creating_a_cylinder_downwards_gives_a_negative_height() {
+    let mut h = Harness::new();
+    creating(&mut h, PrimitiveKind::Cylinder);
+    let a = ground_point(&h, Vec3::ZERO);
+    let b = ground_point(&h, Vec3::new(3.0, 0.0, 0.0));
+    h.drag(a, b);
+    let c = b + egui::vec2(0.0, 60.0);
+    hover_to(&mut h, b, c);
+    h.click(c);
+    assert!(param(&h, "Height") < -0.3, "moving down builds below the plane: {}", param(&h, "Height"));
+    assert!(pivot(&h).length() < 1e-2, "pivot at the base centre, on the click: {}", pivot(&h));
+}
+
+#[test]
+fn edge_creation_method_draws_a_sphere_edge_to_edge() {
+    let mut h = Harness::new();
+    creating(&mut h, PrimitiveKind::Sphere);
+    h.app.set_creation_method(PrimitiveKind::Sphere, "Edge");
+    let a = ground_point(&h, Vec3::new(-3.0, 0.0, 0.0));
+    let b = ground_point(&h, Vec3::new(3.0, 0.0, 0.0));
+    h.drag(a, b);
+    assert!((param(&h, "Radius") - 3.0).abs() < 0.1, "radius is half the drag: {}", param(&h, "Radius"));
+    assert!(pivot(&h).length() < 0.1, "the centre is midway: {}", pivot(&h));
+}
+
+#[test]
+fn cone_second_radius_starts_at_the_first_and_decreases_towards_a_point() {
+    let mut h = Harness::new();
+    creating(&mut h, PrimitiveKind::Cone);
+    let a = ground_point(&h, Vec3::ZERO);
+    let b = ground_point(&h, Vec3::new(3.0, 0.0, 0.0));
+    h.drag(a, b);
+    assert!((param(&h, "Radius 2") - param(&h, "Radius 1")).abs() < 1e-3, "a straight side while the height is set");
+    let c = b + egui::vec2(0.0, -60.0);
+    hover_to(&mut h, b, c);
+    h.click(c);
+    let r1 = param(&h, "Radius 1");
+    let d = c + egui::vec2(0.0, 30.0);
+    hover_to(&mut h, c, d);
+    let r2 = param(&h, "Radius 2");
+    assert!(r2 < r1 && r2 >= 0.0, "moving down narrows the top: r1 {r1} r2 {r2}");
+    h.click(d);
+    assert!(h.app.create.is_none(), "the third click finishes the cone");
+}
+
+#[test]
+fn cube_creation_method_is_one_drag_with_equal_sides() {
+    let mut h = Harness::new();
+    creating(&mut h, PrimitiveKind::Box);
+    h.app.set_creation_method(PrimitiveKind::Box, "Cube");
+    let a = ground_point(&h, Vec3::ZERO);
+    let b = ground_point(&h, Vec3::new(3.0, 1.5, 0.0));
+    h.drag(a, b);
+    assert!(h.app.create.is_none(), "a cube is a one-step operation");
+    let (l, w, ht) = (param(&h, "Length"), param(&h, "Width"), param(&h, "Height"));
+    assert!(l > 0.5 && (l - w).abs() < 1e-4 && (l - ht).abs() < 1e-4, "{l} {w} {ht}");
+}
+
+#[test]
+fn square_plane_and_centre_pyramid_creation_methods() {
+    let mut h = Harness::new();
+    creating(&mut h, PrimitiveKind::Plane);
+    h.app.set_creation_method(PrimitiveKind::Plane, "Square");
+    let a = ground_point(&h, Vec3::ZERO);
+    let b = ground_point(&h, Vec3::new(3.0, 1.5, 0.0));
+    h.drag(a, b);
+    assert!((param(&h, "Length") - param(&h, "Width")).abs() < 1e-4 && param(&h, "Width") > 0.5);
+
+    let mut h = Harness::new();
+    creating(&mut h, PrimitiveKind::Pyramid);
+    h.app.set_creation_method(PrimitiveKind::Pyramid, "Center");
+    let a = ground_point(&h, Vec3::ZERO);
+    let b = ground_point(&h, Vec3::new(3.0, 1.5, 0.0));
+    h.drag(a, b);
+    assert!((param(&h, "Width") - 6.0).abs() < 0.1 && (param(&h, "Depth") - 3.0).abs() < 0.1, "base drawn from the centre out");
+    assert!(pivot(&h).length() < 1e-2, "pivot stays at the click: {}", pivot(&h));
+}

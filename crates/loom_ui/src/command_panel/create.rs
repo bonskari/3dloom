@@ -100,6 +100,14 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             });
             name_and_color(ui, app);
             if let Some(CreateKind::Primitive(kind)) = app.create_kind {
+                rollout(ui, "Creation Method", true, |ui| {
+                    let current = app.creation_method(kind);
+                    for m in crate::create_tool::creation_methods(kind) {
+                        if ui.radio(current == *m, *m).clicked() {
+                            app.set_creation_method(kind, m);
+                        }
+                    }
+                });
                 keyboard_entry(ui, app, kind);
             }
             parameters(ui, app);

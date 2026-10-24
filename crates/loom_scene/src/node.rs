@@ -345,6 +345,9 @@ pub enum ObjectKind {
         slice_on: Param<bool>,
         slice_from: Param<f32>,
         slice_to: Param<f32>,
+        /// Smooth: blends the faces into a smooth surface (off: faceted).
+        #[serde(default = "yes")]
+        smooth: Param<bool>,
         /// Generate Mapping Coords.: channel 1 from the object's own projection.
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
@@ -353,6 +356,21 @@ pub enum ObjectKind {
         radius: Param<f32>,
         segments: Param<u32>,
         hemisphere: Param<f32>,
+        /// Hemisphere cut: 0 = Chop (removes the cut part), 1 = Squash (keeps every vertex and face).
+        #[serde(default = "zero")]
+        chop_squash: Param<u32>,
+        #[serde(default = "no")]
+        slice_on: Param<bool>,
+        #[serde(default = "zero_f")]
+        slice_from: Param<f32>,
+        #[serde(default = "zero_f")]
+        slice_to: Param<f32>,
+        /// Base To Pivot: moves the sphere up its local Z so the pivot is at its base.
+        #[serde(default = "no")]
+        base_to_pivot: Param<bool>,
+        /// Smooth: blends the faces into a smooth surface (off: faceted).
+        #[serde(default = "yes")]
+        smooth: Param<bool>,
         /// Generate Mapping Coords.: channel 1 from the object's own projection.
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
@@ -362,6 +380,12 @@ pub enum ObjectKind {
         segments: Param<u32>,
         /// 0 = Tetra, 1 = Octa, 2 = Icosa (Geodesic Base Type)
         base_type: Param<u32>,
+        /// Base To Pivot: the pivot at the bottom of the geosphere (off: at its centre).
+        #[serde(default = "no")]
+        base_to_pivot: Param<bool>,
+        /// Smooth: blends the faces into a smooth surface (off: faceted).
+        #[serde(default = "yes")]
+        smooth: Param<bool>,
         /// Generate Mapping Coords.: channel 1 from the object's own projection.
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
@@ -375,6 +399,9 @@ pub enum ObjectKind {
         slice_on: Param<bool>,
         slice_from: Param<f32>,
         slice_to: Param<f32>,
+        /// Smooth: blends the faces into a smooth surface (off: faceted).
+        #[serde(default = "yes")]
+        smooth: Param<bool>,
         /// Generate Mapping Coords.: channel 1 from the object's own projection.
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
@@ -389,6 +416,9 @@ pub enum ObjectKind {
         slice_on: Param<bool>,
         slice_from: Param<f32>,
         slice_to: Param<f32>,
+        /// Smooth: blends the faces into a smooth surface (off: faceted).
+        #[serde(default = "yes")]
+        smooth: Param<bool>,
         /// Generate Mapping Coords.: channel 1 from the object's own projection.
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
@@ -403,6 +433,9 @@ pub enum ObjectKind {
         slice_on: Param<bool>,
         slice_from: Param<f32>,
         slice_to: Param<f32>,
+        /// Smooth: 0 All, 1 Sides, 2 None, 3 Segments.
+        #[serde(default = "zero")]
+        smooth: Param<u32>,
         /// Generate Mapping Coords.: channel 1 from the object's own projection.
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
@@ -425,6 +458,9 @@ pub enum ObjectKind {
         handle: Param<bool>,
         spout: Param<bool>,
         lid: Param<bool>,
+        /// Smooth: blends the faces into a smooth surface (off: faceted).
+        #[serde(default = "yes")]
+        smooth: Param<bool>,
         /// Generate Mapping Coords.: channel 1 from the object's own projection.
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
@@ -645,6 +681,27 @@ fn yes() -> Param<bool> {
     p(true)
 }
 
+fn zero_f() -> Param<f32> {
+    p(0.0)
+}
+
+/// Moves every vertex up local Z (Base To Pivot).
+fn lift(m: &mut Mesh, dz: f32) {
+    for v in m.vertices_mut() {
+        v.position.z += dz;
+    }
+}
+
+/// Smooth off: every face loses its smoothing groups.
+fn smoothed(mut m: Mesh, on: bool) -> Mesh {
+    if !on {
+        for f in m.faces_mut() {
+            f.smoothing_groups = 0;
+        }
+    }
+    m
+}
+
 fn slice(on: bool, from: f32, to: f32) -> loom_mesh::Slice {
     on.then_some((from, to))
 }
@@ -654,28 +711,28 @@ impl ObjectKind {
         Self::Box { length: p(length), width: p(width), height: p(height), length_segs: p(1), width_segs: p(1), height_segs: p(1), gen_mapping: p(true) }
     }
     pub fn cone_object(radius1: f32, radius2: f32, height: f32) -> Self {
-        Self::Cone { radius1: p(radius1), radius2: p(radius2), height: p(height), height_segs: p(5), cap_segs: p(1), sides: p(24), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), gen_mapping: p(true) }
+        Self::Cone { radius1: p(radius1), radius2: p(radius2), height: p(height), height_segs: p(5), cap_segs: p(1), sides: p(24), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), smooth: p(true), gen_mapping: p(true) }
     }
     pub fn sphere_object(radius: f32) -> Self {
-        Self::Sphere { radius: p(radius), segments: p(32), hemisphere: p(0.0), gen_mapping: p(true) }
+        Self::Sphere { radius: p(radius), segments: p(32), hemisphere: p(0.0), chop_squash: p(0), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), base_to_pivot: p(false), smooth: p(true), gen_mapping: p(true) }
     }
     pub fn geosphere_object(radius: f32) -> Self {
-        Self::GeoSphere { radius: p(radius), segments: p(4), base_type: p(2), gen_mapping: p(true) }
+        Self::GeoSphere { radius: p(radius), segments: p(4), base_type: p(2), base_to_pivot: p(false), smooth: p(true), gen_mapping: p(true) }
     }
     pub fn cylinder_object(radius: f32, height: f32) -> Self {
-        Self::Cylinder { radius: p(radius), height: p(height), height_segs: p(5), cap_segs: p(1), sides: p(18), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), gen_mapping: p(true) }
+        Self::Cylinder { radius: p(radius), height: p(height), height_segs: p(5), cap_segs: p(1), sides: p(18), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), smooth: p(true), gen_mapping: p(true) }
     }
     pub fn tube_object(radius1: f32, radius2: f32, height: f32) -> Self {
-        Self::Tube { radius1: p(radius1), radius2: p(radius2), height: p(height), height_segs: p(5), cap_segs: p(1), sides: p(18), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), gen_mapping: p(true) }
+        Self::Tube { radius1: p(radius1), radius2: p(radius2), height: p(height), height_segs: p(5), cap_segs: p(1), sides: p(18), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), smooth: p(true), gen_mapping: p(true) }
     }
     pub fn torus_object(radius1: f32, radius2: f32) -> Self {
-        Self::Torus { radius1: p(radius1), radius2: p(radius2), rotation: p(0.0), twist: p(0.0), segments: p(24), sides: p(12), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), gen_mapping: p(true) }
+        Self::Torus { radius1: p(radius1), radius2: p(radius2), rotation: p(0.0), twist: p(0.0), segments: p(24), sides: p(12), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), smooth: p(0), gen_mapping: p(true) }
     }
     pub fn pyramid_object(width: f32, depth: f32, height: f32) -> Self {
         Self::Pyramid { width: p(width), depth: p(depth), height: p(height), width_segs: p(1), depth_segs: p(1), height_segs: p(1), gen_mapping: p(true) }
     }
     pub fn teapot_object(radius: f32) -> Self {
-        Self::Teapot { radius: p(radius), segments: p(4), body: p(true), handle: p(true), spout: p(true), lid: p(true), gen_mapping: p(true) }
+        Self::Teapot { radius: p(radius), segments: p(4), body: p(true), handle: p(true), spout: p(true), lid: p(true), smooth: p(true), gen_mapping: p(true) }
     }
     pub fn plane_object(length: f32, width: f32) -> Self {
         Self::Plane { length: p(length), width: p(width), length_segs: p(4), width_segs: p(4), gen_mapping: p(true) }
@@ -927,6 +984,9 @@ impl ObjectKind {
         match (self, name) {
             (Self::Boolean { .. }, "Operation") => Some(&["Union", "Intersection", "Subtraction (A-B)", "Subtraction (B-A)", "Cut Refine", "Cut Split", "Cut Remove Inside", "Cut Remove Outside"]),
             (Self::Boolean { .. }, "Display") => Some(&["Result", "Operands"]),
+            (Self::GeoSphere { .. }, "Geodesic Base Type") => Some(&["Tetra", "Octa", "Icosa"]),
+            (Self::Torus { .. }, "Smooth") => Some(&["All", "Sides", "None", "Segments"]),
+            (Self::Sphere { .. }, "Chop/Squash") => Some(&["Chop", "Squash"]),
             _ => None,
         }
     }
@@ -962,26 +1022,33 @@ impl ObjectKind {
                 ("Length Segs", i(length_segs)), ("Width Segs", i(width_segs)), ("Height Segs", i(height_segs)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
-            Self::Cone { radius1, radius2, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, gen_mapping } => vec![
+            Self::Cone { radius1, radius2, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, smooth, gen_mapping } => vec![
                 ("Radius 1", f(radius1)), ("Radius 2", f(radius2)), ("Height", f(height)), ("Height Segments", i(height_segs)),
-                ("Cap Segments", i(cap_segs)), ("Sides", i(sides)), ("Slice On", b(slice_on)), ("Slice From", f(slice_from)), ("Slice To", f(slice_to)),
+                ("Cap Segments", i(cap_segs)), ("Sides", i(sides)), ("Smooth", b(smooth)), ("Slice On", b(slice_on)), ("Slice From", f(slice_from)), ("Slice To", f(slice_to)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
-            Self::Sphere { radius, segments, hemisphere, gen_mapping } => vec![("Radius", f(radius)), ("Segments", i(segments)), ("Hemisphere", f(hemisphere)), ("Generate Mapping Coords.", b(gen_mapping))],
-            Self::GeoSphere { radius, segments, base_type, gen_mapping } => vec![("Radius", f(radius)), ("Segments", i(segments)), ("Geodesic Base Type", i(base_type)), ("Generate Mapping Coords.", b(gen_mapping))],
-            Self::Cylinder { radius, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, gen_mapping } => vec![
+            Self::Sphere { radius, segments, hemisphere, chop_squash, slice_on, slice_from, slice_to, base_to_pivot, smooth, gen_mapping } => vec![
+                ("Radius", f(radius)), ("Segments", i(segments)), ("Smooth", b(smooth)), ("Hemisphere", f(hemisphere)), ("Chop/Squash", i(chop_squash)),
+                ("Slice On", b(slice_on)), ("Slice From", f(slice_from)), ("Slice To", f(slice_to)), ("Base To Pivot", b(base_to_pivot)),
+                ("Generate Mapping Coords.", b(gen_mapping)),
+            ],
+            Self::GeoSphere { radius, segments, base_type, base_to_pivot, smooth, gen_mapping } => vec![
+                ("Radius", f(radius)), ("Segments", i(segments)), ("Geodesic Base Type", i(base_type)), ("Smooth", b(smooth)),
+                ("Base To Pivot", b(base_to_pivot)), ("Generate Mapping Coords.", b(gen_mapping)),
+            ],
+            Self::Cylinder { radius, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, smooth, gen_mapping } => vec![
                 ("Radius", f(radius)), ("Height", f(height)), ("Height Segments", i(height_segs)), ("Cap Segments", i(cap_segs)),
-                ("Sides", i(sides)), ("Slice On", b(slice_on)), ("Slice From", f(slice_from)), ("Slice To", f(slice_to)),
+                ("Sides", i(sides)), ("Smooth", b(smooth)), ("Slice On", b(slice_on)), ("Slice From", f(slice_from)), ("Slice To", f(slice_to)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
-            Self::Tube { radius1, radius2, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, gen_mapping } => vec![
+            Self::Tube { radius1, radius2, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, smooth, gen_mapping } => vec![
                 ("Radius 1", f(radius1)), ("Radius 2", f(radius2)), ("Height", f(height)), ("Height Segments", i(height_segs)),
-                ("Cap Segments", i(cap_segs)), ("Sides", i(sides)), ("Slice On", b(slice_on)), ("Slice From", f(slice_from)), ("Slice To", f(slice_to)),
+                ("Cap Segments", i(cap_segs)), ("Sides", i(sides)), ("Smooth", b(smooth)), ("Slice On", b(slice_on)), ("Slice From", f(slice_from)), ("Slice To", f(slice_to)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
-            Self::Torus { radius1, radius2, rotation, twist, segments, sides, slice_on, slice_from, slice_to, gen_mapping } => vec![
+            Self::Torus { radius1, radius2, rotation, twist, segments, sides, slice_on, slice_from, slice_to, smooth, gen_mapping } => vec![
                 ("Radius 1", f(radius1)), ("Radius 2", f(radius2)), ("Rotation", f(rotation)), ("Twist", f(twist)),
-                ("Segments", i(segments)), ("Sides", i(sides)), ("Slice On", b(slice_on)), ("Slice From", f(slice_from)), ("Slice To", f(slice_to)),
+                ("Segments", i(segments)), ("Sides", i(sides)), ("Smooth", i(smooth)), ("Slice On", b(slice_on)), ("Slice From", f(slice_from)), ("Slice To", f(slice_to)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
             Self::Pyramid { width, depth, height, width_segs, depth_segs, height_segs, gen_mapping } => vec![
@@ -989,8 +1056,8 @@ impl ObjectKind {
                 ("Width Segs", i(width_segs)), ("Depth Segs", i(depth_segs)), ("Height Segs", i(height_segs)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
-            Self::Teapot { radius, segments, body, handle, spout, lid, gen_mapping } => vec![
-                ("Radius", f(radius)), ("Segments", i(segments)), ("Body", b(body)), ("Handle", b(handle)), ("Spout", b(spout)), ("Lid", b(lid)),
+            Self::Teapot { radius, segments, body, handle, spout, lid, smooth, gen_mapping } => vec![
+                ("Radius", f(radius)), ("Segments", i(segments)), ("Smooth", b(smooth)), ("Body", b(body)), ("Handle", b(handle)), ("Spout", b(spout)), ("Lid", b(lid)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
             Self::Plane { length, width, length_segs, width_segs, gen_mapping } => vec![
@@ -1064,17 +1131,24 @@ impl ObjectKind {
             (Self::Box { height_segs, .. }, "Height Segs") => { int(height_segs, 1); ok }
             (Self::Cone { radius1, .. }, "Radius 1") | (Self::Tube { radius1, .. }, "Radius 1") | (Self::Torus { radius1, .. }, "Radius 1") => { fl(radius1, 0.0); ok }
             (Self::Cone { radius2, .. }, "Radius 2") | (Self::Tube { radius2, .. }, "Radius 2") | (Self::Torus { radius2, .. }, "Radius 2") => { fl(radius2, 0.0); ok }
-            (Self::Cone { height, .. }, "Height") | (Self::Cylinder { height, .. }, "Height") | (Self::Tube { height, .. }, "Height") | (Self::Pyramid { height, .. }, "Height") => { fl(height, 0.0); ok }
+            // Negative heights build below the construction plane.
+            (Self::Cone { height, .. }, "Height") | (Self::Cylinder { height, .. }, "Height") | (Self::Tube { height, .. }, "Height") => { height.set(v); ok }
+            (Self::Pyramid { height, .. }, "Height") => { fl(height, 0.0); ok }
+            (Self::Cone { smooth, .. }, "Smooth") | (Self::Sphere { smooth, .. }, "Smooth") | (Self::GeoSphere { smooth, .. }, "Smooth") | (Self::Cylinder { smooth, .. }, "Smooth") | (Self::Tube { smooth, .. }, "Smooth") | (Self::Teapot { smooth, .. }, "Smooth") => { bl(smooth); ok }
+            (Self::Torus { smooth, .. }, "Smooth") => { smooth.set((value.round().max(0.0) as u32).min(3)); ok }
+            (Self::Sphere { chop_squash, .. }, "Chop/Squash") => { chop_squash.set((value.round().max(0.0) as u32).min(1)); ok }
+            (Self::Sphere { base_to_pivot, .. }, "Base To Pivot") | (Self::GeoSphere { base_to_pivot, .. }, "Base To Pivot") => { bl(base_to_pivot); ok }
             (Self::Cone { height_segs, .. }, "Height Segments") | (Self::Cylinder { height_segs, .. }, "Height Segments") | (Self::Tube { height_segs, .. }, "Height Segments") => { int(height_segs, 1); ok }
             (Self::Cone { cap_segs, .. }, "Cap Segments") | (Self::Cylinder { cap_segs, .. }, "Cap Segments") | (Self::Tube { cap_segs, .. }, "Cap Segments") => { int(cap_segs, 1); ok }
             (Self::Cone { sides, .. }, "Sides") | (Self::Cylinder { sides, .. }, "Sides") | (Self::Tube { sides, .. }, "Sides") | (Self::Torus { sides, .. }, "Sides") => { int(sides, 3); ok }
-            (Self::Cone { slice_on, .. }, "Slice On") | (Self::Cylinder { slice_on, .. }, "Slice On") | (Self::Tube { slice_on, .. }, "Slice On") | (Self::Torus { slice_on, .. }, "Slice On") => { bl(slice_on); ok }
-            (Self::Cone { slice_from, .. }, "Slice From") | (Self::Cylinder { slice_from, .. }, "Slice From") | (Self::Tube { slice_from, .. }, "Slice From") | (Self::Torus { slice_from, .. }, "Slice From") => { slice_from.set(v); ok }
-            (Self::Cone { slice_to, .. }, "Slice To") | (Self::Cylinder { slice_to, .. }, "Slice To") | (Self::Tube { slice_to, .. }, "Slice To") | (Self::Torus { slice_to, .. }, "Slice To") => { slice_to.set(v); ok }
+            (Self::Cone { slice_on, .. }, "Slice On") | (Self::Cylinder { slice_on, .. }, "Slice On") | (Self::Tube { slice_on, .. }, "Slice On") | (Self::Torus { slice_on, .. }, "Slice On") | (Self::Sphere { slice_on, .. }, "Slice On") => { bl(slice_on); ok }
+            (Self::Cone { slice_from, .. }, "Slice From") | (Self::Cylinder { slice_from, .. }, "Slice From") | (Self::Tube { slice_from, .. }, "Slice From") | (Self::Torus { slice_from, .. }, "Slice From") | (Self::Sphere { slice_from, .. }, "Slice From") => { slice_from.set(v); ok }
+            (Self::Cone { slice_to, .. }, "Slice To") | (Self::Cylinder { slice_to, .. }, "Slice To") | (Self::Tube { slice_to, .. }, "Slice To") | (Self::Torus { slice_to, .. }, "Slice To") | (Self::Sphere { slice_to, .. }, "Slice To") => { slice_to.set(v); ok }
             (Self::Sphere { radius, .. }, "Radius") | (Self::GeoSphere { radius, .. }, "Radius") | (Self::Cylinder { radius, .. }, "Radius") | (Self::Teapot { radius, .. }, "Radius") => { fl(radius, 0.0); ok }
             (Self::Sphere { segments, .. }, "Segments") => { int(segments, 4); ok }
             (Self::Sphere { hemisphere, .. }, "Hemisphere") => { hemisphere.set(v.clamp(0.0, 1.0)); ok }
-            (Self::GeoSphere { segments, .. }, "Segments") | (Self::Teapot { segments, .. }, "Segments") => { int(segments, 1); ok }
+            (Self::GeoSphere { segments, .. }, "Segments") => { segments.set((value.round().max(1.0) as u32).min(200)); ok }
+            (Self::Teapot { segments, .. }, "Segments") => { int(segments, 1); ok }
             (Self::GeoSphere { base_type, .. }, "Geodesic Base Type") => { base_type.set((value.round().max(0.0) as u32).min(2)); ok }
             (Self::Torus { rotation, .. }, "Rotation") => { rotation.set(v); ok }
             (Self::Torus { twist, .. }, "Twist") => { twist.set(v); ok }
@@ -1180,29 +1254,42 @@ impl ObjectKind {
             Self::Box { length, width, height, length_segs, width_segs, height_segs, gen_mapping } => {
                 Cow::Owned(mapped(box_segmented(length.get(), width.get(), height.get(), [length_segs.get(), width_segs.get(), height_segs.get()]), gen_mapping.get(), AutoMap::Box))
             }
-            Self::Cone { radius1, radius2, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, gen_mapping } => Cow::Owned(mapped(cone_primitive(
+            Self::Cone { radius1, radius2, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, smooth, gen_mapping } => Cow::Owned(smoothed(mapped(cone_primitive(
                 radius1.get(), radius2.get(), height.get(), height_segs.get(), cap_segs.get(), sides.get(), slice(slice_on.get(), slice_from.get(), slice_to.get()),
-            ), gen_mapping.get(), AutoMap::Cylindrical { cap: true })),
-            Self::Sphere { radius, segments, hemisphere, gen_mapping } => Cow::Owned(mapped(sphere_segmented(radius.get(), segments.get(), hemisphere.get()), gen_mapping.get(), AutoMap::Spherical)),
-            Self::GeoSphere { radius, segments, base_type, gen_mapping } => {
-                let base = match base_type.get() { 0 => GeoBase::Tetra, 1 => GeoBase::Octa, _ => GeoBase::Icosa };
-                Cow::Owned(mapped(geosphere_primitive(radius.get(), segments.get(), base), gen_mapping.get(), AutoMap::Spherical))
+            ), gen_mapping.get(), AutoMap::Cylindrical { cap: true }), smooth.get())),
+            Self::Sphere { radius, segments, hemisphere, chop_squash, slice_on, slice_from, slice_to, base_to_pivot, smooth, gen_mapping } => {
+                let mut m = sphere_full(radius.get(), segments.get(), hemisphere.get(), chop_squash.get() == 1, slice(slice_on.get(), slice_from.get(), slice_to.get()));
+                if base_to_pivot.get() {
+                    lift(&mut m, radius.get().max(0.0));
+                }
+                Cow::Owned(smoothed(mapped(m, gen_mapping.get(), AutoMap::Spherical), smooth.get()))
             }
-            Self::Cylinder { radius, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, gen_mapping } => Cow::Owned(mapped(cylinder_segmented(
+            Self::GeoSphere { radius, segments, base_type, base_to_pivot, smooth, gen_mapping } => {
+                let base = match base_type.get() { 0 => GeoBase::Tetra, 1 => GeoBase::Octa, _ => GeoBase::Icosa };
+                let mut m = geosphere_primitive(radius.get(), segments.get(), base);
+                if base_to_pivot.get() {
+                    lift(&mut m, radius.get().max(0.0));
+                }
+                Cow::Owned(smoothed(mapped(m, gen_mapping.get(), AutoMap::Spherical), smooth.get()))
+            }
+            Self::Cylinder { radius, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, smooth, gen_mapping } => Cow::Owned(smoothed(mapped(cylinder_segmented(
                 radius.get(), height.get(), height_segs.get(), cap_segs.get(), sides.get(), slice(slice_on.get(), slice_from.get(), slice_to.get()),
-            ), gen_mapping.get(), AutoMap::Cylindrical { cap: true })),
-            Self::Tube { radius1, radius2, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, gen_mapping } => Cow::Owned(mapped(tube_primitive(
+            ), gen_mapping.get(), AutoMap::Cylindrical { cap: true }), smooth.get())),
+            Self::Tube { radius1, radius2, height, height_segs, cap_segs, sides, slice_on, slice_from, slice_to, smooth, gen_mapping } => Cow::Owned(smoothed(mapped(tube_primitive(
                 radius1.get(), radius2.get(), height.get(), height_segs.get(), cap_segs.get(), sides.get(), slice(slice_on.get(), slice_from.get(), slice_to.get()),
-            ), gen_mapping.get(), AutoMap::Cylindrical { cap: true })),
-            Self::Torus { radius1, radius2, rotation, twist, segments, sides, slice_on, slice_from, slice_to, gen_mapping } => Cow::Owned(mapped(torus_full(
-                radius1.get(), radius2.get(), rotation.get(), twist.get(), segments.get(), sides.get(), slice(slice_on.get(), slice_from.get(), slice_to.get()),
-            ), gen_mapping.get(), AutoMap::Torus)),
+            ), gen_mapping.get(), AutoMap::Cylindrical { cap: true }), smooth.get())),
+            Self::Torus { radius1, radius2, rotation, twist, segments, sides, slice_on, slice_from, slice_to, smooth, gen_mapping } => {
+                let mode = match smooth.get() { 1 => TorusSmooth::Sides, 2 => TorusSmooth::None, 3 => TorusSmooth::Segments, _ => TorusSmooth::All };
+                Cow::Owned(mapped(torus_smoothed(
+                    radius1.get(), radius2.get(), rotation.get(), twist.get(), segments.get(), sides.get(), slice(slice_on.get(), slice_from.get(), slice_to.get()), mode,
+                ), gen_mapping.get(), AutoMap::Torus))
+            }
             Self::Pyramid { width, depth, height, width_segs, depth_segs, height_segs, gen_mapping } => {
                 Cow::Owned(mapped(pyramid_primitive(width.get(), depth.get(), height.get(), [width_segs.get(), depth_segs.get(), height_segs.get()]), gen_mapping.get(), AutoMap::Box))
             }
-            Self::Teapot { radius, segments, body, handle, spout, lid, gen_mapping } => Cow::Owned(mapped(teapot_primitive(
+            Self::Teapot { radius, segments, body, handle, spout, lid, smooth, gen_mapping } => Cow::Owned(smoothed(mapped(teapot_primitive(
                 radius.get(), segments.get(), TeapotParts { body: body.get(), handle: handle.get(), spout: spout.get(), lid: lid.get() },
-            ), gen_mapping.get(), AutoMap::Spherical)),
+            ), gen_mapping.get(), AutoMap::Spherical), smooth.get())),
             Self::Plane { length, width, length_segs, width_segs, gen_mapping } => {
                 Cow::Owned(mapped(plane_segmented(length.get(), width.get(), length_segs.get(), width_segs.get()), gen_mapping.get(), AutoMap::Planar))
             }

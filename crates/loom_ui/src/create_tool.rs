@@ -9,6 +9,44 @@ use glam::Vec3;
 use loom_commands::{Command, PrimitiveKind, ShapeKind};
 use loom_scene::NodeId;
 
+/// Creation Method rollout choices of a standard primitive, in rollout order.
+pub fn creation_methods(kind: PrimitiveKind) -> &'static [&'static str] {
+    match kind {
+        PrimitiveKind::Box => &["Cube", "Box"],
+        PrimitiveKind::GeoSphere => &["Diameter", "Center"],
+        PrimitiveKind::Pyramid => &["Base/Apex", "Center"],
+        PrimitiveKind::Plane => &["Rectangle", "Square"],
+        _ => &["Edge", "Center"],
+    }
+}
+
+/// The choice selected when the rollout has not been touched.
+fn default_creation_method(kind: PrimitiveKind) -> usize {
+    match kind {
+        PrimitiveKind::Pyramid | PrimitiveKind::Plane => 0,
+        _ => 1,
+    }
+}
+
+fn kind_index(kind: PrimitiveKind) -> usize {
+    PrimitiveKind::ALL.iter().position(|k| *k == kind).unwrap_or(0)
+}
+
+impl LoomApp {
+    /// The Creation Method in use for `kind`.
+    pub fn creation_method(&self, kind: PrimitiveKind) -> &'static str {
+        let methods = creation_methods(kind);
+        methods[self.creation_method[kind_index(kind)].unwrap_or(default_creation_method(kind)).min(methods.len() - 1)]
+    }
+
+    /// Picks a Creation Method by its rollout label; unknown labels are ignored.
+    pub fn set_creation_method(&mut self, kind: PrimitiveKind, method: &str) {
+        if let Some(i) = creation_methods(kind).iter().position(|m| *m == method) {
+            self.creation_method[kind_index(kind)] = Some(i);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Step {
     /// Button held: dragging the base or the first radius.
@@ -38,6 +76,8 @@ pub struct CreateSession {
     units_per_px: f32,
     radius1: f32,
     height: f32,
+    /// Creation Method rollout choice for this object.
+    method: &'static str,
 }
 
 impl CreateSession {
@@ -60,7 +100,8 @@ impl CreateSession {
             app.state.undo.end();
             return None;
         };
-        let session = Self { kind, shape, node, label, step: Step::Dragging, anchor, basis, step_origin: pointer, units_per_px, radius1: 0.0, height: 0.0 };
+        let method = if shape.is_some() { "" } else { app.creation_method(kind) };
+        let session = Self { kind, shape, node, label, step: Step::Dragging, anchor, basis, step_origin: pointer, units_per_px, radius1: 0.0, height: 0.0, method };
         // Orient the object to the construction plane (local Z = plane normal).
         let rot = glam::Quat::from_rotation_arc(Vec3::Z, basis.2);
         let e = rot.to_euler(glam::EulerRot::XYZ);
@@ -100,11 +141,25 @@ impl CreateSession {
             Step::Dragging => {
                 let Some(g) = ground else { return };
                 match self.kind {
+                    K::Box | K::Plane if matches!(self.method, "Cube" | "Square") => {
+                        // Equal sides, corner to corner towards the pointer.
+                        let (u, v) = self.plane_uv(g);
+                        let side = u.abs().max(v.abs());
+                        let centre = self.anchor + self.basis.0 * (side * 0.5 * u.signum()) + self.basis.1 * (side * 0.5 * v.signum());
+                        self.place(app, centre);
+                        self.set(app, "Width", side);
+                        self.set(app, "Length", side);
+                        if self.kind == K::Box {
+                            self.set(app, "Height", side);
+                        }
+                    }
                     K::Box | K::Plane | K::Pyramid => {
                         let (u, v) = self.plane_uv(g);
-                        let centre = self.anchor + self.basis.0 * (u * 0.5) + self.basis.1 * (v * 0.5);
+                        // Base/Apex and Box draw corner to corner; Center draws from the centre out.
+                        let from_centre = self.method == "Center";
+                        let centre = if from_centre { self.anchor } else { self.anchor + self.basis.0 * (u * 0.5) + self.basis.1 * (v * 0.5) };
                         self.place(app, centre);
-                        let (w, l) = (u.abs(), v.abs());
+                        let (w, l) = if from_centre { (u.abs() * 2.0, v.abs() * 2.0) } else { (u.abs(), v.abs()) };
                         match self.kind {
                             K::Pyramid => {
                                 self.set(app, "Width", w);
@@ -117,7 +172,13 @@ impl CreateSession {
                         }
                     }
                     K::Sphere | K::GeoSphere | K::Teapot | K::Cylinder | K::Cone | K::Tube | K::Torus => {
-                        self.radius1 = (g - self.anchor).length();
+                        if matches!(self.method, "Edge" | "Diameter") {
+                            // Edge to edge: the centre follows the midpoint of the drag.
+                            self.place(app, (self.anchor + g) * 0.5);
+                            self.radius1 = (g - self.anchor).length() * 0.5;
+                        } else {
+                            self.radius1 = (g - self.anchor).length();
+                        }
                         let name = match self.kind {
                             K::Cone | K::Tube | K::Torus => "Radius 1",
                             _ => "Radius",
@@ -149,7 +210,8 @@ impl CreateSession {
             },
             Step::Third => match self.kind {
                 K::Cone => {
-                    let r2 = (dy_px * self.units_per_px).max(0.0);
+                    // Starts at Radius 1; moving down narrows the top towards a point.
+                    let r2 = (self.radius1 + dy_px * self.units_per_px).max(0.0);
                     self.set(app, "Radius 2", r2);
                 }
                 K::Tube => {
@@ -228,9 +290,15 @@ impl CreateSession {
                 self.finish(app);
                 true
             }
+            // Cube is a one-step operation.
+            K::Box if self.method == "Cube" => {
+                self.finish(app);
+                true
+            }
             K::Box | K::Pyramid | K::Cylinder | K::Cone | K::Tube | K::Torus => {
                 if self.kind == K::Cone {
-                    self.set(app, "Radius 2", 0.0);
+                    // Straight sides while the height is set.
+                    self.set(app, "Radius 2", self.radius1);
                 }
                 self.step = Step::Second;
                 self.step_origin = pointer;
