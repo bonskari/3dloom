@@ -12,7 +12,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal_wrapped(|ui| {
             for mode in SelectionMode::ALL {
                 let selected = app.state.selection_mode == mode;
-                let r = ui.selectable_label(selected, mode.label()).on_hover_text(format!("{} ({}); Ctrl-click converts touching, Shift-click contained", mode.label(), SelectionMode::ALL.iter().position(|m| *m == mode).unwrap_or(0) + 1));
+                let r = ui.selectable_label(selected, mode.label()).on_hover_text(format!("{}; Ctrl-click converts touching, Shift-click contained", crate::shortcuts::tip(&app.state, mode.label(), crate::shortcuts::level_action(mode))));
                 if r.clicked() {
                     let mods = ui.input(|i| i.modifiers);
                     if (mods.ctrl || mods.shift) && app.state.selection_mode != SelectionMode::Object && !selected {
@@ -48,17 +48,17 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         let sub = app.state.selection_mode != SelectionMode::Object;
         ui.add_enabled_ui(sub, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("Shrink").on_hover_text("Shrink Selection (Ctrl+PageDown)").clicked() {
+                if ui.button("Shrink").on_hover_text(crate::shortcuts::name_tip(&app.state, "Shrink Selection")).clicked() {
                     let _ = app.dispatch(Command::ShrinkSelection);
                 }
-                if ui.button("Grow").on_hover_text("Grow Selection (Ctrl+PageUp)").clicked() {
+                if ui.button("Grow").on_hover_text(crate::shortcuts::name_tip(&app.state, "Grow Selection")).clicked() {
                     let _ = app.dispatch(Command::GrowSelection);
                 }
             });
             let edges = app.state.selection_mode.is_edge_level();
             ui.add_enabled_ui(edges, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Ring").on_hover_text("Select Edge Ring (Alt+R)").clicked() {
+                    if ui.button("Ring").on_hover_text(crate::shortcuts::name_tip(&app.state, "Select Edge Ring")).clicked() {
                         let _ = app.dispatch(Command::SelectEdgeRing);
                     }
                     if ui.small_button("^").on_hover_text("Ring Up (Ctrl: add, Alt: subtract)").clicked() {
@@ -69,7 +69,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         let m = ui.input(|i| i.modifiers);
                         let _ = app.dispatch(if m.ctrl { Command::SelectEdgeRingDownAdd } else if m.alt { Command::SelectEdgeRingDownSubtract } else { Command::SelectEdgeRingDown });
                     }
-                    if ui.button("Loop").on_hover_text("Select Edge Loop (Alt+L)").clicked() {
+                    if ui.button("Loop").on_hover_text(crate::shortcuts::name_tip(&app.state, "Select Edge Loop")).clicked() {
                         let _ = app.dispatch(Command::SelectEdgeLoop);
                     }
                     if ui.small_button("^").on_hover_text("Loop Up (Ctrl: add, Alt: subtract)").clicked() {

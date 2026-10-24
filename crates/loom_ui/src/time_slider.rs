@@ -48,7 +48,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         let (start, end) = app.state.frame_range;
         let frame = app.state.current_frame;
         ui.horizontal(|ui| {
-            if ui.small_button("◀").on_hover_text("Backup Time One Unit (,)").clicked() {
+            if ui.small_button("◀").on_hover_text(crate::shortcuts::name_tip(&app.state, "Backup Time One Unit")).clicked() {
                 run(app, Command::BackupTimeOneUnit);
             }
             let avail = ui.available_width() - 40.0;
@@ -68,7 +68,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                 }
             }
-            if ui.small_button("▶").on_hover_text("Forward Time One Unit (.)").clicked() {
+            if ui.small_button("▶").on_hover_text(crate::shortcuts::name_tip(&app.state, "Forward Time One Unit")).clicked() {
                 run(app, Command::ForwardTimeOneUnit);
             }
         });
