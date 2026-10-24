@@ -54,6 +54,12 @@ fn apply_picks(app: &mut LoomApp, picks: Vec<Pick>, mods: Modifiers) {
     let op = if mods.ctrl { SelectOp::Add } else if mods.alt { SelectOp::Subtract } else { SelectOp::Replace };
     if picks.is_empty() {
         if op == SelectOp::Replace {
+            // At a sub-object level the first empty click clears the
+            // sub-objects; one with none selected lets go of the object too,
+            // which ends the level.
+            if app.state.selection_mode != loom_commands::SelectionMode::Object && app.state.sub_selection.is_empty() {
+                let _ = app.dispatch(Command::SelectionMode { mode: loom_commands::SelectionMode::Object });
+            }
             let _ = app.dispatch(Command::SelectNone);
         }
         return;
@@ -485,9 +491,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             ctx.request_repaint();
                         }
                     }
+                    // A poly mode drag (Extrude, Chamfer, paint brushes) owns the press.
                     if pointer.button_pressed(egui::PointerButton::Primary)
                         && response.hovered()
                         && app.manip_drag.is_none()
+                        && !app.poly_dragging
                         && app.state.active_tool != Tool::Select
                         && app.has_selection()
                         && !(app.poly_dragging && matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)))
