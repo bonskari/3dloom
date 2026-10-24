@@ -250,7 +250,7 @@ impl BevyRenderer {
             // (material ID drawn or all faces, its surface)
             let parts: Vec<(Option<u16>, Option<Surface>)> = match &o.surfaces {
                 Some(Surfaces::PerId(_)) => mesh_data_by_id(o.mesh).into_iter().map(|(id, _)| (Some(id), o.surfaces.as_ref().map(|s| s.for_face(id).into_owned()))).collect(),
-                Some(Surfaces::Single(s)) => vec![(None, Some(s.clone()))],
+                Some(Surfaces::Single(s)) => vec![(None, Some((**s).clone()))],
                 None => vec![(None, None)],
             };
             for (e, _) in set.remove(&o.id).map(|obj| obj.parts).unwrap_or_default() {

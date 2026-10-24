@@ -147,7 +147,9 @@ pub fn compose_base(diffuse: glam::Vec3, map: Option<(&MapImage, &Map)>, opacity
 pub fn luminance(img: &MapImage, amount: f32) -> MapImage {
     let rgba = img
         .rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| {
             let l = ((p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0 * amount).round().clamp(0.0, 255.0) as u8;
             [l, l, l, l]

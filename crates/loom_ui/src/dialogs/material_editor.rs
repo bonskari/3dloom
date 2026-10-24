@@ -200,7 +200,7 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                             let n = rot * n_local;
                             let uv = [uv[0] * setup.uv_tiling, uv[1] * setup.uv_tiling];
                             let s = match surfaces {
-                                Surfaces::Single(s) => std::borrow::Cow::Borrowed(s),
+                                Surfaces::Single(s) => std::borrow::Cow::Borrowed(s.as_ref()),
                                 Surfaces::PerId(list) => {
                                     // Patchwork: the sub-materials in turn over a 4 × 2 grid of the sample's UVs.
                                     let ids: Vec<&u16> = list.keys().collect();
@@ -245,7 +245,7 @@ fn sample_images(app: &mut LoomApp, sample: &Sample) -> loom_scene::maps::Images
 
 /// The sample a material shows (resolved through the library when it has an id).
 fn material_sample(app: &LoomApp, id: Option<MaterialId>, fallback: &StandardMaterial) -> Sample {
-    let surfaces = id.and_then(|i| loom_scene::material::surfaces(&app.state.scene.materials, i)).unwrap_or_else(|| Surfaces::Single(Surface::from_standard(fallback)));
+    let surfaces = id.and_then(|i| loom_scene::material::surfaces(&app.state.scene.materials, i)).unwrap_or_else(|| Surfaces::Single(Box::new(Surface::from_standard(fallback))));
     Sample::Surfaces(surfaces)
 }
 
@@ -285,7 +285,7 @@ fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
                         }
                         let mut s = Surface::from_standard(&StandardMaterial::new(""));
                         s.diffuse_map = Some(Map { amount: 100.0, ..map.clone() });
-                        return Sample::Surfaces(Surfaces::Single(s));
+                        return Sample::Surfaces(Surfaces::Single(Box::new(s)));
                     }
                 }
                 Level::Material(id) => {
@@ -1558,7 +1558,7 @@ mod tests {
         m.diffuse.set(glam::Vec3::new(1.0, 0.0, 0.0));
         m.ambient.set(glam::Vec3::new(1.0, 0.0, 0.0));
         let images = loom_scene::maps::Images::new();
-        let sample = |m: &StandardMaterial| Sample::Surfaces(Surfaces::Single(Surface::from_standard(m)));
+        let sample = |m: &StandardMaterial| Sample::Surfaces(Surfaces::Single(Box::new(Surface::from_standard(m))));
         let dull = preview_pixels(&sample(&m), size, &setup(SampleType::Sphere), &images);
         let mid = dull[size * (size / 2) + size / 2];
         assert!(mid.r() > 100 && mid.g() < 40, "the sphere is red: {mid:?}");
@@ -1574,7 +1574,7 @@ mod tests {
         let size = 40;
         let m = StandardMaterial::slot_default(0);
         let images = loom_scene::maps::Images::new();
-        let s = Sample::Surfaces(Surfaces::Single(Surface::from_standard(&m)));
+        let s = Sample::Surfaces(Surfaces::Single(Box::new(Surface::from_standard(&m))));
         let bg = preview_pixels(&s, size, &setup(SampleType::Sphere), &images)[0];
         let covered = |kind| preview_pixels(&s, size, &setup(kind), &images).iter().filter(|c| **c != bg).count();
         let (sphere, cube, cyl) = (covered(SampleType::Sphere), covered(SampleType::Cube), covered(SampleType::Cylinder));

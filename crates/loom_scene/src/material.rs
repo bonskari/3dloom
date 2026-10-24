@@ -853,7 +853,7 @@ impl Surface {
 /// material ID (0-based, as faces store it) for a Multi/Sub-Object material.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Surfaces {
-    Single(Surface),
+    Single(Box<Surface>),
     /// Face IDs without an entry (or with the sub-material off) draw black.
     PerId(BTreeMap<u16, Surface>),
 }
@@ -861,7 +861,7 @@ pub enum Surfaces {
 impl Surfaces {
     pub fn for_face(&self, material_id: u16) -> std::borrow::Cow<'_, Surface> {
         match self {
-            Surfaces::Single(s) => std::borrow::Cow::Borrowed(s),
+            Surfaces::Single(s) => std::borrow::Cow::Borrowed(s.as_ref()),
             Surfaces::PerId(m) => m.get(&material_id).map_or_else(|| std::borrow::Cow::Owned(Surface::black()), std::borrow::Cow::Borrowed),
         }
     }
@@ -889,7 +889,7 @@ pub fn surfaces(lib: &MaterialLibrary, id: MaterialId) -> Option<Surfaces> {
     let m = lib.get(&id)?;
     Some(match &m.kind {
         MaterialKind::MultiSub(list) => Surfaces::PerId(list.iter().map(|s| (s.id.saturating_sub(1), single(lib, Some(id), Some(s.id.saturating_sub(1)), 0))).collect()),
-        _ => Surfaces::Single(single(lib, Some(id), None, 0)),
+        _ => Surfaces::Single(Box::new(single(lib, Some(id), None, 0))),
     })
 }
 
