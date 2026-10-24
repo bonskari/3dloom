@@ -175,6 +175,27 @@ pub fn delete_faces(mesh: &mut Mesh, faces: &[FaceId]) -> Result<(), String> {
     mesh.check_invariants()
 }
 
+/// Deletes polygons but keeps all their vertices, also the ones left with no
+/// polygon (the No answer to "Delete isolated vertices?").
+pub fn delete_faces_keep_vertices(mesh: &mut Mesh, faces: &[FaceId]) -> Result<(), String> {
+    let remove: BTreeSet<usize> = faces.iter().map(|f| f.0 as usize).collect();
+    let mut im = crate::indexed::IndexedMesh::from_mesh(mesh);
+    for f in &remove {
+        if let Some(face) = im.faces.get(*f) {
+            let ids = face.ids.clone();
+            im.keep.extend(ids);
+        }
+    }
+    let mut i = 0;
+    im.faces.retain(|_| {
+        let k = !remove.contains(&i);
+        i += 1;
+        k
+    });
+    *mesh = im.build()?;
+    mesh.check_invariants()
+}
+
 pub fn delete_vertices(mesh: &mut Mesh, vertices: &[VertexId]) -> Result<(), String> {
     let remove_vertices: BTreeSet<VertexId> = vertices.iter().copied().collect();
     let mut remove_faces = Vec::new();

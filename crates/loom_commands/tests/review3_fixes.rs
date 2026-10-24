@@ -44,7 +44,7 @@ fn extrude_along_a_one_knot_line_reports_and_a_short_line_is_an_error_not_a_pani
     execute(&mut s, Command::SelectNodes { ids: vec![b.0], op: SelectOp::Replace }).unwrap();
     execute(&mut s, Command::SelectionMode { mode: SelectionMode::Face }).unwrap();
     execute(&mut s, Command::SelectSub { node: None, ids: vec![0], op: SelectOp::Replace }).unwrap();
-    let err = execute(&mut s, Command::ExtrudeAlongSpline { spline: line.0, segments: 4, taper: 0.0, twist: 0.0, align: true }).unwrap_err();
+    let err = execute(&mut s, Command::ExtrudeAlongSpline { spline: line.0, segments: 4, taper: 0.0, taper_curve: 0.0, twist: 0.0, rotation: 0.0, align: true }).unwrap_err();
     assert!(err.contains("knots"), "{err}");
     // Ending a one-knot line removes it.
     execute(&mut s, Command::SelectNodes { ids: vec![line.0], op: SelectOp::Replace }).unwrap();
