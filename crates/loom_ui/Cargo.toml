@@ -22,3 +22,6 @@ wgpu        = { workspace = true }
 glam        = { workspace = true }
 # Native (xdg-desktop-portal) Open / Save dialogs when a person runs the app.
 rfd         = "0.17"
+
+[dev-dependencies]
+loom_fbx = { workspace = true }

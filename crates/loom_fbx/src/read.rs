@@ -390,7 +390,9 @@ pub fn read_with(bytes: &[u8], ro: &ReadOpts) -> Result<FbxDocument, String> {
             // The horizontal angle: 3dLoom's FOV is horizontal (ufbx resolves the aperture mode).
             FbxKind::Camera { fov_deg: c.field_of_view_deg.x as f32 }
         } else if let Some(b) = n.bone.as_ref() {
-            FbxKind::Bone { length: 0.0, size: (b.radius as f32).max(0.01) }
+            // A file without a bone size gives 0 (the Importer's Bone Creation sizes it).
+            let sized = b.element.props.find_prop("Size").is_some();
+            FbxKind::Bone { length: 0.0, size: if sized { (b.radius as f32).max(0.01) } else { 0.0 } }
         } else {
             FbxKind::Empty
         };

@@ -2151,3 +2151,86 @@ fn a_scene_named_on_the_command_line_opens() {
     assert_eq!(next.app.state.file.as_deref(), Some(path.as_path()));
     assert_eq!(next.app.state.recent_files.first(), Some(&path));
 }
+
+/// A scratch folder for the file-dialog tests.
+fn exchange_dir(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join("loom-ui-exchange").join(name);
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// Types `path` into the in-app file dialog's File name field and clicks `button`.
+fn choose_file(h: &mut Harness, path: &std::path::Path, button: &str) {
+    click_text(h, "File name:", SCREEN, 40.0);
+    h.run(vec![egui::Event::Text(path.to_string_lossy().into_owned())]);
+    click_text(h, button, SCREEN, 0.0);
+}
+
+/// File > Export to .fbx shows the FBX Export options; a click on Triangulate
+/// and OK write a triangulated file.
+#[test]
+fn fbx_export_goes_through_its_options_dialog() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let path = exchange_dir("fbx_export").join("box.fbx");
+    h.cmd(Command::ExportFile { path: None });
+    choose_file(&mut h, &path, "Save");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxExportOptions), "the options come before the file is written");
+    assert!(!path.exists());
+    assert!(!h.app.state.exchange.fbx_export.triangulate);
+    click_text(&mut h, "Triangulate", SCREEN, 0.0);
+    assert!(h.app.state.exchange.fbx_export.triangulate, "the check box sets the option");
+    assert!(h.text_rect("User defined", SCREEN).is_some(), "the preset shows it was changed");
+    click_text(&mut h, "OK", SCREEN, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    let doc = loom_fbx::read(&std::fs::read(&path).unwrap(), 0.01).unwrap();
+    let loom_fbx::FbxKind::Mesh { mesh, .. } = &doc.nodes[0].kind else { panic!("{:?}", doc.nodes[0].kind) };
+    assert_eq!(mesh.face_count(), 12, "triangulated");
+}
+
+/// File > Import of an .fbx: Cancel in the FBX Import options imports nothing;
+/// with Cameras off, OK imports the meshes without the camera.
+#[test]
+fn fbx_import_options_cancel_and_cameras_off() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::CreateCamera { target: false });
+    let path = exchange_dir("fbx_import").join("scene.fbx");
+    h.cmd(Command::ExportFile { path: Some(path.to_string_lossy().into_owned()) });
+    h.cmd(Command::NewScene);
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxImportOptions));
+    click_text(&mut h, "Cancel", SCREEN, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(h.app.state.scene.len(), 0, "Cancel imports nothing");
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    click_text(&mut h, "Cameras", SCREEN, 0.0);
+    assert!(!h.app.state.exchange.fbx_import.cameras);
+    click_text(&mut h, "OK", SCREEN, 0.0);
+    let kinds: Vec<bool> = h.app.state.scene.nodes().map(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).collect();
+    assert_eq!(kinds, vec![false], "the box only");
+}
+
+/// File > Import of an .obj: the OBJ Import options list the file's objects;
+/// unchecking one leaves it out.
+#[test]
+fn obj_import_options_pick_the_objects() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let path = exchange_dir("obj_import").join("two.obj");
+    std::fs::write(&path, "o Left\nv 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\no Right\nv 5 0 0\nv 6 0 0\nv 6 1 0\nf 4 5 6\n").unwrap();
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ObjImportOptions));
+    assert!(h.text_rect("Left (1)", SCREEN).is_some() && h.text_rect("Right (1)", SCREEN).is_some(), "the file's objects are listed");
+    click_text(&mut h, "Right (1)", SCREEN, 0.0);
+    click_text(&mut h, "Import", SCREEN, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    let names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    assert_eq!(names, vec!["Left".to_string()]);
+}
