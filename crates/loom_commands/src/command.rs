@@ -1503,6 +1503,14 @@ commands! {
     AlignObjectToPivot => "Align to Pivot", Loom, "Hierarchy > Pivot > Align to Pivot (Affect Object Only): turn the object to the pivot's axes.";
     DontAffectChildren => "Don't Affect Children", Loom, "Toggle Hierarchy > Adjust Transform > Don't Affect Children: transforms leave the children where they are.";
     ResetTransform => "Reset Transform", Loom, "Hierarchy > Adjust Transform > Reset: Transform: the local axes turn to the world; the mesh and the children stay.";
+    EditWorkingPivot => "Edit Working Pivot", Loom, "Toggle Hierarchy > Working Pivot > Edit Working Pivot: the transform tools move and turn the working pivot (Local system at first).";
+    UseWorkingPivot => "Use Working Pivot", Loom, "Toggle Hierarchy > Working Pivot > Use Working Pivot: every transform uses the Working system about the working pivot.";
+    WorkingPivotAlignToView => "Working Pivot Align To View", Loom, "Hierarchy > Working Pivot > Align To View: the working pivot's XY plane faces the active view.";
+    WorkingPivotReset => "Working Pivot Reset", Loom, "Hierarchy > Working Pivot > Reset: the working pivot goes to the selected object's pivot (sub-objects: their centre).";
+    PlacePivotToView => "Place Pivot To View", Loom, "Hierarchy > Working Pivot > Place Pivot To: View: the next click places the working pivot in the screen plane through it.";
+    PlacePivotToSurface => "Place Pivot To Surface", Loom, "Hierarchy > Working Pivot > Place Pivot To: Surface: the next click places the working pivot on the surface, Z along its normal.";
+    PlacePivotAlignToViewToggle => "Place Pivot Align To View", Loom, "Toggle Hierarchy > Working Pivot > Place Pivot To > Align To View: placing also aligns the working pivot to the view.";
+    SetWorkingPivot => "Set Working Pivot", Loom, "Place the working pivot: world position and/or Euler XYZ rotation in degrees." { position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]> };
     ResetScale => "Reset Scale", Loom, "Hierarchy > Adjust Transform > Reset: Scale: the node scale becomes 100 % with no visual change (the object takes the scale).";
     ResetPivot => "Reset Pivot", Loom, "Reset the selected objects' pivots to the object origin (Hierarchy > Pivot > Reset Pivot).";
     SetPivot => "Set Pivot", Loom, "Set a node's pivot (node transform) without moving the mesh." { id: u64, position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]> };

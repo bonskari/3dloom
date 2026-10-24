@@ -289,3 +289,56 @@ fn reset_xform_puts_rotation_and_scale_in_an_xform_modifier() {
     assert!(s.scene.world_matrix(id).abs_diff_eq(Mat4::from_translation(Vec3::new(4.0, 0.0, 0.0)), 1e-4));
     assert!(same_points(&world_verts(&s, id), &mesh), "no visual change");
 }
+
+/// Hierarchy > Working Pivot: Edit Working Pivot moves the working pivot with
+/// the transform tools; Use Working Pivot rotates the selection about it in
+/// its axes (the Working system, Use Transform Coordinate Center).
+#[test]
+fn working_pivot_edit_then_use() {
+    let mut s = AppState::new();
+    let id = box_at(&mut s, 10.0);
+    execute(&mut s, Command::EditWorkingPivot).unwrap();
+    assert!(s.edit_working_pivot);
+    assert_eq!(s.coord_system, CoordSystem::Local, "editing starts in Local");
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 5.0, 0.0], system: Some(CoordSystem::World) }).unwrap();
+    assert!(pos(&s, id).abs_diff_eq(Vec3::new(10.0, 0.0, 0.0), 1e-4), "the object stays while editing");
+    assert!(s.working_pivot.origin.abs_diff_eq(Vec3::new(0.0, 5.0, 0.0), 1e-4));
+    execute(&mut s, Command::RotateSelection { axis: Axis::Z, degrees: 90.0, system: Some(CoordSystem::World) }).unwrap();
+    assert!(s.working_pivot.origin.abs_diff_eq(Vec3::new(0.0, 5.0, 0.0), 1e-4), "rotates about itself");
+    execute(&mut s, Command::EditWorkingPivot).unwrap();
+    assert!(!s.edit_working_pivot);
+    execute(&mut s, Command::SelectAndRotate).unwrap();
+    execute(&mut s, Command::UseWorkingPivot).unwrap();
+    assert!(s.use_working_pivot);
+    assert_eq!((s.coord_system, s.center_mode), (CoordSystem::Working, CenterMode::TransformCoordinate));
+    // 90° about the working pivot's Z (world Z here): (10,0,0) swings round (0,5,0).
+    execute(&mut s, Command::RotateSelection { axis: Axis::Z, degrees: 90.0, system: None }).unwrap();
+    assert!(pos(&s, id).abs_diff_eq(Vec3::new(5.0, 15.0, 0.0), 1e-3), "{}", pos(&s, id));
+    // Moving in the Working system follows its X (world Y after the 90° turn).
+    execute(&mut s, Command::SelectAndMove).unwrap();
+    assert_eq!(s.coord_system, CoordSystem::Working, "Use Working Pivot holds for every transform");
+    execute(&mut s, Command::MoveSelection { delta: [1.0, 0.0, 0.0], system: None }).unwrap();
+    assert!(pos(&s, id).abs_diff_eq(Vec3::new(5.0, 16.0, 0.0), 1e-3), "{}", pos(&s, id));
+    execute(&mut s, Command::UseWorkingPivot).unwrap();
+    assert_eq!(s.coord_system, CoordSystem::View, "leaving restores the tool's own system");
+}
+
+#[test]
+fn working_pivot_reset_and_place() {
+    let mut s = AppState::new();
+    let id = box_at(&mut s, 7.0);
+    execute(&mut s, Command::WorkingPivotReset).unwrap();
+    assert!(s.working_pivot.origin.abs_diff_eq(pos(&s, id), 1e-4), "Reset goes to the selected pivot");
+    // Place Pivot To Surface: the clicked point, Z along the normal.
+    execute(&mut s, Command::PlacePivotToSurface).unwrap();
+    assert_eq!(s.pick_mode, Some(PickMode::WorkingPivotSurface));
+    execute(&mut s, Command::PickSurface { id: id.0, point: [7.0, -1.0, 1.0], normal: [0.0, -1.0, 0.0] }).unwrap();
+    assert_eq!(s.pick_mode, None);
+    assert!(s.working_pivot.origin.abs_diff_eq(Vec3::new(7.0, -1.0, 1.0), 1e-4));
+    assert!((s.working_pivot.rotation * Vec3::Z).abs_diff_eq(-Vec3::Y, 1e-4));
+    // Align To View in the Top view: the XY plane faces the view.
+    execute(&mut s, Command::ActiveViewport { index: 0 }).unwrap();
+    assert_eq!(s.viewports[0].kind, loom_commands::ViewKind::Top);
+    execute(&mut s, Command::WorkingPivotAlignToView).unwrap();
+    assert!((s.working_pivot.rotation * Vec3::Z).abs_diff_eq(Vec3::Z, 1e-4));
+}

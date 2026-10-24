@@ -203,6 +203,9 @@ pub enum PickMode {
     Constraint(crate::motion::ConstraintPick),
     /// Reference Coordinate System > Pick: the clicked object's axes become the system.
     CoordSystem,
+    /// Working Pivot > Place Pivot To: View (a point in the screen plane) / Surface.
+    WorkingPivotView,
+    WorkingPivotSurface,
 }
 
 /// Paint Deformation brushes.
@@ -229,6 +232,22 @@ pub enum PolyConstraint {
     Edges,
     Faces,
     Normals,
+}
+
+/// Hierarchy > Working Pivot: the scene's one working pivot (world space).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub struct WorkingPivot {
+    pub origin: Vec3,
+    pub rotation: glam::Quat,
+}
+
+/// Transform manager settings put aside while a Working Pivot mode is on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SavedManagers {
+    pub coord_by_tool: [CoordSystem; 4],
+    pub center_by_tool: [(CenterMode, CenterMode); 4],
+    pub center: (CenterMode, CenterMode),
+    pub tool: Tool,
 }
 
 /// The Slice Plane gizmo (world space).
@@ -536,11 +555,13 @@ pub enum CoordSystem {
     Local,
     Gimbal,
     Grid,
+    /// The working pivot's axes (Hierarchy > Working Pivot).
+    Working,
     Pick,
 }
 
 impl CoordSystem {
-    pub const ALL: [CoordSystem; 8] = [CoordSystem::View, CoordSystem::Screen, CoordSystem::World, CoordSystem::Parent, CoordSystem::Local, CoordSystem::Gimbal, CoordSystem::Grid, CoordSystem::Pick];
+    pub const ALL: [CoordSystem; 9] = [CoordSystem::View, CoordSystem::Screen, CoordSystem::World, CoordSystem::Parent, CoordSystem::Local, CoordSystem::Gimbal, CoordSystem::Grid, CoordSystem::Working, CoordSystem::Pick];
     pub fn label(self) -> &'static str {
         match self {
             CoordSystem::View => "View",
@@ -550,6 +571,7 @@ impl CoordSystem {
             CoordSystem::Local => "Local",
             CoordSystem::Gimbal => "Gimbal",
             CoordSystem::Grid => "Grid",
+            CoordSystem::Working => "Working",
             CoordSystem::Pick => "Pick",
         }
     }
@@ -1288,6 +1310,15 @@ pub struct AppState {
     pub affect_hierarchy_only: bool,
     /// Hierarchy > Adjust Transform > Don't Affect Children.
     pub dont_affect_children: bool,
+    pub working_pivot: WorkingPivot,
+    /// Working Pivot > Edit Working Pivot: the transform tools move the working pivot.
+    pub edit_working_pivot: bool,
+    /// Working Pivot > Use Working Pivot: every transform uses the Working system.
+    pub use_working_pivot: bool,
+    /// Working Pivot > Place Pivot To > Align To View.
+    pub working_pivot_align_to_view: bool,
+    /// What Edit / Use Working Pivot restore when they end.
+    pub working_pivot_saved: (Option<SavedManagers>, Option<SavedManagers>),
     pub selection_locked: bool,
     pub snaps_on: bool,
     pub angle_snap_on: bool,
@@ -1512,6 +1543,11 @@ impl AppState {
             affect_object_only: false,
             affect_hierarchy_only: false,
             dont_affect_children: false,
+            working_pivot: WorkingPivot::default(),
+            edit_working_pivot: false,
+            use_working_pivot: false,
+            working_pivot_align_to_view: false,
+            working_pivot_saved: (None, None),
             selection_locked: false,
             snaps_on: false,
             angle_snap_on: false,
@@ -1975,6 +2011,9 @@ impl AppState {
     pub fn selection_pivot(&self) -> Vec3 {
         if self.slice_plane_mode {
             return self.slice_plane.origin;
+        }
+        if self.edit_working_pivot {
+            return self.working_pivot.origin;
         }
         self.selection_bounds()
             .map(|(a, b)| (a + b) * 0.5)

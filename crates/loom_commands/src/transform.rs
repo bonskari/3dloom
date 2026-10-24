@@ -26,6 +26,11 @@ fn screen_axes(state: &AppState, viewport: usize) -> Mat3 {
     Mat3::from_cols(right, up, toward_viewer)
 }
 
+/// The active view's axes (X right, Y up, Z toward the viewer).
+pub fn view_axes(state: &AppState, viewport: usize) -> Mat3 {
+    screen_axes(state, viewport)
+}
+
 fn rotation_only(m: Mat4) -> Mat3 {
     let (_, q, _) = m.to_scale_rotation_translation();
     Mat3::from_quat(q)
@@ -121,6 +126,8 @@ pub fn frame_for_system(state: &AppState, viewport: usize, id: Option<NodeId>, s
             Some(_) => rotation_only(state.scene.parent_frame(id.unwrap())),
             None => Mat3::IDENTITY,
         },
+        CoordSystem::Working => Mat3::from_quat(state.working_pivot.rotation),
+        CoordSystem::Local if state.edit_working_pivot => Mat3::from_quat(state.working_pivot.rotation),
         CoordSystem::Local if state.selection_mode != SelectionMode::Object && !state.slice_plane_mode && !state.sub_selection.is_empty() => {
             sub_object_axes(state).unwrap_or(Mat3::IDENTITY)
         }
@@ -142,6 +149,9 @@ pub fn frame_for_system(state: &AppState, viewport: usize, id: Option<NodeId>, s
         },
     };
     let origin = match state.center_mode {
+        // Edit Working Pivot: the tools turn the working pivot about itself.
+        _ if state.edit_working_pivot => state.working_pivot.origin,
+        CenterMode::TransformCoordinate if system == CoordSystem::Working => state.working_pivot.origin,
         _ if state.selection_mode != SelectionMode::Object => state.selection_pivot(),
         CenterMode::PivotPoint => match id {
             Some(i) => state.scene.world_matrix(i).w_axis.truncate(),
@@ -153,6 +163,7 @@ pub fn frame_for_system(state: &AppState, viewport: usize, id: Option<NodeId>, s
                 Some(i) => state.scene.world_matrix(i).w_axis.truncate(),
                 None => state.selection_pivot(),
             },
+            CoordSystem::Working => state.working_pivot.origin,
             CoordSystem::Pick => state
                 .pick_coord_node
                 .map(|p| state.scene.world_matrix(p).w_axis.truncate())

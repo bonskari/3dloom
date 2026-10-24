@@ -5,7 +5,7 @@ use crate::command::{Axis, Command, PrimitiveKind, SelectOp, ShapeKind};
 use crate::state::{AlignPoint, AppState, DialogPurpose, NormalAlignPicks, SpacingContext, PickMode, SelectionMode, SubObjectId, Tool, ViewKind};
 use glam::Mat3;
 use crate::viewport::Dialog as Dlg;
-use crate::state::{AxisConstraint, CloneKind, CoordSystem};
+use crate::state::{AxisConstraint, CenterMode, CloneKind, CoordSystem, SavedManagers};
 use crate::transform::frame_for;
 use loom_scene::NodeProps;
 use crate::viewport::{default_kinds, Dialog, NavMode, Shading, Viewport};
@@ -1042,6 +1042,17 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.pick_mode = None;
                     execute(state, Command::AlignCameraTo { point, normal })
                 }
+                Some(PickMode::WorkingPivotSurface) => {
+                    // On the surface, Z along its normal (or the view with Align To View).
+                    state.pick_mode = None;
+                    state.working_pivot.origin = Vec3::from(point);
+                    state.working_pivot.rotation = if state.working_pivot_align_to_view {
+                        Quat::from_mat3(&crate::transform::view_axes(state, state.active_viewport)).normalize()
+                    } else {
+                        Quat::from_rotation_arc(Vec3::Z, Vec3::from(normal).normalize_or(Vec3::Z))
+                    };
+                    Ok(json!({ "origin": point }))
+                }
                 Some(PickMode::UvwMapNormal) => {
                     state.pick_mode = None;
                     execute(state, Command::UvwMapAlignTo { point, normal })
@@ -1206,6 +1217,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Some(PickMode::SplineBind) => crate::spline::bind_at(state, Vec3::from(point)),
             Some(PickMode::TrimExtendModifier) => crate::spline::trim_extend_click(state, point),
+            Some(PickMode::WorkingPivotView) => {
+                state.pick_mode = None;
+                state.working_pivot.origin = Vec3::from(point);
+                if state.working_pivot_align_to_view {
+                    state.working_pivot.rotation = Quat::from_mat3(&crate::transform::view_axes(state, state.active_viewport)).normalize();
+                }
+                Ok(json!({ "origin": point }))
+            }
             _ => Err("no point pick mode active".into()),
         },
         C::SpaceObjects { start, end, count, spacing, start_offset, end_offset, context, follow, kind } => {
@@ -1889,6 +1908,83 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({ "affect_hierarchy_only": state.affect_hierarchy_only }))
         }
         C::DontAffectChildren => toggle(&mut state.dont_affect_children, "dont_affect_children"),
+        C::EditWorkingPivot => {
+            if state.edit_working_pivot {
+                // Ending the edit restores the tool and the managers it started with.
+                state.edit_working_pivot = false;
+                if let Some(saved) = state.working_pivot_saved.0.take() {
+                    restore_managers(state, saved);
+                }
+            } else {
+                state.working_pivot_saved.0 = Some(save_managers(state));
+                state.edit_working_pivot = true;
+                state.coord_by_tool = [CoordSystem::Local; 4];
+                state.coord_system = CoordSystem::Local;
+            }
+            Ok(json!({ "edit_working_pivot": state.edit_working_pivot }))
+        }
+        C::UseWorkingPivot => {
+            if state.use_working_pivot {
+                state.use_working_pivot = false;
+                if let Some(saved) = state.working_pivot_saved.1.take() {
+                    let tool = state.active_tool;
+                    restore_managers(state, SavedManagers { tool, ..saved });
+                }
+            } else {
+                // Every transform uses the Working system about the working pivot.
+                state.working_pivot_saved.1 = Some(save_managers(state));
+                state.use_working_pivot = true;
+                let tc = CenterMode::TransformCoordinate;
+                state.coord_by_tool = [CoordSystem::Working; 4];
+                state.coord_system = CoordSystem::Working;
+                state.center_by_tool = [(tc, tc); 4];
+                (state.center_single, state.center_multi) = (tc, tc);
+                state.refresh_center_mode();
+            }
+            Ok(json!({ "use_working_pivot": state.use_working_pivot }))
+        }
+        C::WorkingPivotAlignToView => {
+            let axes = crate::transform::view_axes(state, state.active_viewport);
+            state.working_pivot.rotation = Quat::from_mat3(&axes).normalize();
+            Ok(json!({}))
+        }
+        C::WorkingPivotReset => {
+            let origin = if state.selection_mode != SelectionMode::Object && !state.sub_selection.is_empty() {
+                // Sub-objects: the average of the selected vertices.
+                let pts: Vec<Vec3> = selected_vertices(state)
+                    .into_iter()
+                    .flat_map(|(n, vs)| {
+                        let m = state.scene.object_matrix(n);
+                        let mesh = state.scene.node(n).map(|nd| nd.cage_mesh().into_owned());
+                        vs.into_iter().filter_map(move |v| mesh.as_ref()?.vertex_position(v).map(|p| m.transform_point3(p)))
+                    })
+                    .collect();
+                if pts.is_empty() {
+                    return Ok(json!({}));
+                }
+                pts.iter().sum::<Vec3>() / pts.len() as f32
+            } else {
+                // The pivot of the last-selected object (the highest id here).
+                match state.selection.iter().next_back() {
+                    Some(id) => state.scene.world_matrix(*id).w_axis.truncate(),
+                    None => return Ok(json!({})),
+                }
+            };
+            state.working_pivot.origin = origin;
+            Ok(json!({ "origin": origin.to_array() }))
+        }
+        C::PlacePivotToView => toggle_pick_mode(state, PickMode::WorkingPivotView),
+        C::PlacePivotToSurface => toggle_pick_mode(state, PickMode::WorkingPivotSurface),
+        C::PlacePivotAlignToViewToggle => toggle(&mut state.working_pivot_align_to_view, "align_to_view"),
+        C::SetWorkingPivot { position, rotation_deg } => {
+            if let Some(p) = position {
+                state.working_pivot.origin = Vec3::from(p);
+            }
+            if let Some(r) = rotation_deg {
+                state.working_pivot.rotation = Quat::from_euler(glam::EulerRot::XYZ, r[0].to_radians(), r[1].to_radians(), r[2].to_radians());
+            }
+            Ok(json!({ "origin": state.working_pivot.origin.to_array() }))
+        }
         C::AlignPivotToWorld if state.affect_object_only => {
             // Affect Object Only: the object turns to the world; the pivot stays.
             object_offset_change(state, "Align to World", |state, id, off| {
@@ -2425,7 +2521,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
 
         C::SelectNodes { ids, op } => {
-            if state.selection_locked {
+            // Edit Working Pivot locks the selection to the working pivot.
+            if state.selection_locked || state.edit_working_pivot {
                 return Ok(json!({ "locked": true }));
             }
             let ids: BTreeSet<NodeId> = ids
@@ -3517,6 +3614,19 @@ fn euler_hint(state: &AppState, id: Option<NodeId>, world_rot_deg: Vec3) -> Vec3
     }
 }
 
+fn save_managers(state: &AppState) -> SavedManagers {
+    SavedManagers { coord_by_tool: state.coord_by_tool, center_by_tool: state.center_by_tool, center: (state.center_single, state.center_multi), tool: state.active_tool }
+}
+
+fn restore_managers(state: &mut AppState, s: SavedManagers) {
+    state.coord_by_tool = s.coord_by_tool;
+    state.center_by_tool = s.center_by_tool;
+    (state.center_single, state.center_multi) = s.center;
+    state.active_tool = s.tool;
+    state.coord_system = state.coord_by_tool[tool_index(s.tool)];
+    state.refresh_center_mode();
+}
+
 /// Gimbal moves and scales in the Parent system.
 fn gimbal_as_parent(state: &mut AppState) {
     if state.coord_system == CoordSystem::Gimbal {
@@ -3604,6 +3714,15 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
         }
         commit(state, label, Change::Group(changes))?;
         return Ok(json!({}));
+    }
+    if state.edit_working_pivot {
+        // Edit Working Pivot: the transform tools move the working pivot.
+        let (m, _) = matrix_for(state, None);
+        let (_, rot, _) = m.to_scale_rotation_translation();
+        let wp = &mut state.working_pivot;
+        wp.origin = m.transform_point3(wp.origin);
+        wp.rotation = (rot * wp.rotation).normalize();
+        return Ok(json!({ "working_pivot": wp.origin.to_array() }));
     }
     if state.slice_plane_mode {
         // Slice Plane mode: the transform tools move the plane, not the mesh.

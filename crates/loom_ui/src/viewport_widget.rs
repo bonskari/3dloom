@@ -754,6 +754,19 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                             let node = app.world_meshes()[mesh].0;
                                             let _ = app.dispatch(Command::ToggleSeamEdge { node: node.0, edge: e.0 });
                                         }
+                                    } else if app.state.pick_mode == Some(loom_commands::PickMode::WorkingPivotView) {
+                                        if let Some(pt) = working_pivot_view_point(app, index, p, rect, view, proj) {
+                                            let _ = app.dispatch(Command::PickPoint { point: pt.to_array() });
+                                        }
+                                    } else if app.state.pick_mode == Some(loom_commands::PickMode::WorkingPivotSurface) {
+                                        // A surface under the pointer, else the construction plane (like AutoGrid).
+                                        if let Some((id, point, normal)) = surface_hit_node(app, p, rect, view, proj) {
+                                            let _ = app.dispatch(Command::PickSurface { id: id.0, point: point.to_array(), normal: normal.to_array() });
+                                        } else if let Some((point, (_, _, n))) = creation_anchor(app, index, p, rect, view, proj) {
+                                            let (x, y, z) = glam::Quat::from_rotation_arc(Vec3::Z, n).to_euler(glam::EulerRot::XYZ);
+                                            let _ = app.dispatch(Command::SetWorkingPivot { position: Some(point.to_array()), rotation_deg: Some([x.to_degrees(), y.to_degrees(), z.to_degrees()]) });
+                                            let _ = app.dispatch(Command::ExitPickMode);
+                                        }
                                     } else if matches!(app.state.pick_mode, Some(loom_commands::PickMode::NormalAlignSource | loom_commands::PickMode::NormalAlignTarget | loom_commands::PickMode::AlignCamera | loom_commands::PickMode::UvwMapNormal | loom_commands::PickMode::UvwMapRegionA | loom_commands::PickMode::UvwMapRegionB)) {
                                         if let Some((id, point, normal)) = surface_hit_node(app, p, rect, view, proj) {
                                             let _ = app.dispatch(Command::PickSurface { id: id.0, point: point.to_array(), normal: normal.to_array() });
@@ -1177,9 +1190,32 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         x += size.x + 10.0;
     }
     if disabled {
-        painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font, egui::Color32::from_gray(225));
+        painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font.clone(), egui::Color32::from_gray(225));
+    }
+    // Working Pivot modes show under the viewport name.
+    let wp = match (app.state.edit_working_pivot, app.state.use_working_pivot) {
+        (true, _) => Some("EDIT WP"),
+        (false, true) => Some("USE WP"),
+        _ => None,
+    };
+    if let Some(t) = wp {
+        painter.text(egui::pos2(rect.min.x + 6.0, y + 18.0), egui::Align2::LEFT_TOP, t, font, egui::Color32::from_gray(225));
     }
     over
+}
+
+/// Place Pivot To View: the pointer on the screen-parallel plane through the
+/// working pivot.
+fn working_pivot_view_point(app: &LoomApp, index: usize, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Option<Vec3> {
+    let local = Vec2::new(p.x - rect.left(), p.y - rect.top());
+    let (origin, dir) = loom_render::pick::screen_to_world_ray(local, Vec2::new(rect.width(), rect.height()), view, proj);
+    let n = loom_commands::transform::view_axes(&app.state, index).z_axis;
+    let denom = dir.dot(n);
+    if denom.abs() <= 1e-6 {
+        return None;
+    }
+    let t = (app.state.working_pivot.origin - origin).dot(n) / denom;
+    (t >= 0.0).then_some(origin + dir * t)
 }
 
 /// World units per screen pixel at the view's focus distance.
