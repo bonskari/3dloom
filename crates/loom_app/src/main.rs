@@ -190,8 +190,10 @@ fn update_worker(h: loom_ui::update_menu::UpdateHandle) {
 }
 
 impl eframe::App for ControlledApp {
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // Injected events first, then the app's own hook (it ends interactions on focus loss).
         self.live.input.apply(raw_input);
+        self.inner.raw_input_hook(ctx, raw_input);
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
@@ -208,10 +210,6 @@ impl eframe::App for ControlledApp {
         } else {
             ctx.request_repaint();
         }
-    }
-
-    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        self.inner.raw_input_hook(ctx, raw_input);
     }
 }
 
