@@ -943,7 +943,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             if let Some(path) = app.state.viewports[index].background.clone().filter(|_| app.state.viewports[index].background_display) {
                 let version = app.state.viewports[index].background_version;
                 if let Some(tex) = app.background_texture(&ctx, &path, version) {
-                    let target = background_rect(&app.state.viewports[index], rect, tex.size(), app.state.render_size, view_proj);
+                    let target = background_rect(&app.state.viewports[index], rect, tex.size(), (app.state.scene.render.width, app.state.scene.render.height), view_proj);
                     painter.image(tex.id(), target, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 }
             }
