@@ -63,7 +63,6 @@ schema_for! {
     bool => json!({"type":"boolean"}),
     String => json!({"type":"string"}),
     [f32; 3] => json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}),
-    [f32; 4] => json!({"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4}),
 }
 impl ArgSchema for loom_scene::render::RenderArea {
     fn schema() -> Value {
