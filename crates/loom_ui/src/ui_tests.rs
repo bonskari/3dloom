@@ -1008,3 +1008,17 @@ fn status_bar_flyouts_close() {
     assert!(menus(&h).is_empty(), "an item closes the flyout");
     assert_context_menu_closes(&mut h, p, "status bar flyout");
 }
+
+/// Expert Mode leaves a Cancel Expert Mode button in the bottom-right corner;
+/// clicking it brings the interface back.
+#[test]
+fn cancel_expert_mode_button_brings_the_interface_back() {
+    let mut h = Harness::new();
+    h.frames(2);
+    h.cmd(Command::ExpertModeToggle);
+    h.frames(2);
+    assert!(h.app.state.expert_mode);
+    let screen = h.ctx.screen_rect();
+    click_text(&mut h, "Cancel Expert Mode", screen, 0.0);
+    assert!(!h.app.state.expert_mode, "the button ends Expert Mode");
+}
