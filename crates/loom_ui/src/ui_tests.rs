@@ -2347,7 +2347,7 @@ fn a_second_empty_click_at_polygon_level_releases_the_object_and_the_level() {
     h.frames(10);
     assert_eq!(h.sub_count(), 0, "the first click clears the polygons");
     assert_eq!(h.app.state.selection.len(), 1, "and keeps the object");
-    assert_eq!(h.app.state.selection_mode, SelectionMode::Polygon);
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Face);
     h.click(p);
     h.frames(10);
     assert!(h.app.state.selection.is_empty(), "the second click lets go of the object");

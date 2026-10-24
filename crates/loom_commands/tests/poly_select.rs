@@ -221,16 +221,16 @@ fn edit_poly_entry_level_follows_every_level_change() {
 fn sub_object_level_ends_when_no_object_is_left_selected() {
     let mut s = state();
     plane(&mut s);
-    execute(&mut s, Command::SelectionMode { mode: SelectionMode::Polygon }).unwrap();
+    execute(&mut s, Command::SelectionMode { mode: SelectionMode::Face }).unwrap();
     execute(&mut s, Command::CloneOptions { kind: loom_commands::CloneKind::Copy, copies: 1, name: None, offset: None, rotate_deg: None, scale: None }).unwrap();
-    assert_eq!(s.selection_mode, SelectionMode::Polygon);
+    assert_eq!(s.selection_mode, SelectionMode::Face);
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert!(s.selection.is_empty(), "the clone is gone");
     assert_eq!(s.selection_mode, SelectionMode::Object);
     // Select None at sub-object level with nothing selected also lands at object level.
     let id = *s.scene.nodes().map(|n| &n.id).next().unwrap();
     execute(&mut s, Command::SelectNodes { ids: vec![id.0], op: SelectOp::Replace }).unwrap();
-    execute(&mut s, Command::SelectionMode { mode: SelectionMode::Polygon }).unwrap();
+    execute(&mut s, Command::SelectionMode { mode: SelectionMode::Face }).unwrap();
     execute(&mut s, Command::SelectNone).unwrap();
     if s.selection.is_empty() {
         assert_eq!(s.selection_mode, SelectionMode::Object);
