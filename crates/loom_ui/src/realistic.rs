@@ -93,13 +93,6 @@ impl LoomApp {
             self.sync_bevy();
             let Gpu::Running(b) = &mut self.gpu else { return };
             b.renderer.update();
-            if let Ok(p) = std::env::var("LOOM_BEVY_DEBUG") {
-                for slot in 0..4u32 {
-                    if let Ok(img) = b.renderer.debug_read(slot) {
-                        let _ = img.save(format!("{p}-{slot}.png"));
-                    }
-                }
-            }
             let slots: Vec<u32> = (0..self.state.viewports.len() as u32).collect();
             for slot in slots {
                 let Some((generation, view)) = b.renderer.view_texture(slot) else { continue };

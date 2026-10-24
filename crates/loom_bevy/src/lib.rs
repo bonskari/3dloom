@@ -231,7 +231,9 @@ impl BevyRenderer {
             Extent3d { width: size[0].max(1), height: size[1].max(1), depth_or_array_layers: 1 },
             TextureDimension::D2,
             TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::RENDER_WORLD,
+            // Kept in the main world too: Bevy reads the target's size from it
+            // whenever the projection changes (it holds no pixel data).
+            RenderAssetUsages::default(),
         );
         image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
         image
@@ -272,12 +274,16 @@ impl BevyRenderer {
         let (entity, image) = (v.camera, v.image.clone());
         let aspect = size[0] as f32 / size[1] as f32;
         let mut e = self.app.world_mut().entity_mut(entity);
-        e.insert((
-            Camera { order: slot.min(1 << 20) as isize, target: RenderTarget::Image(image.into()), clear_color: ClearColorConfig::Custom(clear), is_active: true, ..Default::default() },
-            camera.bevy_projection(aspect),
-            Transform::from_matrix(camera.view.inverse()),
-            if msaa { Msaa::Sample4 } else { Msaa::Off },
-        ));
+        // Camera is changed in place: inserting it anew would drop the
+        // render target size Bevy computed, and the view would stop rendering.
+        if let Some(mut cam) = e.get_mut::<Camera>() {
+            if !matches!(&cam.target, RenderTarget::Image(t) if t.handle == image) {
+                cam.target = RenderTarget::Image(image.into());
+            }
+            cam.clear_color = ClearColorConfig::Custom(clear);
+            cam.is_active = true;
+        }
+        e.insert((camera.bevy_projection(aspect), Transform::from_matrix(camera.view.inverse()), if msaa { Msaa::Sample4 } else { Msaa::Off }));
     }
 
     /// Fits the key light's shadow range around the scene as seen from the active views.
@@ -357,8 +363,8 @@ impl BevyRenderer {
         result
     }
 
-    #[doc(hidden)]
-    pub fn debug_read(&self, slot: u32) -> Result<image::RgbaImage, String> {
+    /// Reads back what view `slot` rendered last (sRGB RGBA).
+    pub fn read_view(&self, slot: u32) -> Result<image::RgbaImage, String> {
         self.read_back(slot)
     }
 
