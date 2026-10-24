@@ -518,3 +518,25 @@ fn camera_view_honours_clip_manually_and_orthographic_projection() {
     let centre = crate::viewport_widget::project_world_to_screen(Vec3::new(0.0, 0.0, 20.0), c.view_projection(rect.width() / rect.height()), rect).unwrap();
     assert!(centre.distance(rect.center()) < 1.0, "{centre:?} vs {:?}", rect.center());
 }
+
+#[test]
+fn realistic_shading_from_the_label_menu_runs_without_a_gpu() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Teapot, position: [0.0; 3], size: [25.0; 3] });
+    let index = 3;
+    let entry = crate::label_menus::shading_entries(&h.app, index).into_iter().find(|e| e.label == "Realistic (Bevy)").expect("Realistic entry");
+    let crate::label_menus::Action::Command(cmd) = entry.action else { panic!("Realistic is a command") };
+    h.cmd(Command::ActiveViewport { index: index as u32 });
+    h.cmd(cmd);
+    assert_eq!(h.app.state.viewports[index].shading, loom_commands::Shading::Realistic);
+    assert!(crate::label_menus::shading_entries(&h.app, index).iter().any(|e| e.label == "Realistic (Bevy)" && e.checked));
+    // Headless: no wgpu device, so the view falls back to the shaded drawing.
+    assert!(!h.app.realistic_available());
+    h.frames(5);
+    let c = h.app.viewport_rects[index].center();
+    h.drag(c, c + egui::vec2(30.0, 10.0));
+    // A Render without a GPU reports it instead of panicking.
+    h.cmd(Command::Render { path: Some(std::env::temp_dir().join("loom-headless-render.png").to_string_lossy().into()), width: Some(32), height: Some(32) });
+    assert!(h.app.state.pending_render.is_none());
+    assert!(h.app.last_error.as_deref().is_some_and(|e| e.contains("Render")), "{:?}", h.app.last_error);
+}

@@ -104,7 +104,7 @@ fn on(app: &LoomApp, action: &str) -> bool {
 /// One ribbon panel: a fixed-width group of wrapped buttons with its title
 /// underneath (explicit widths keep nested wrapping from growing unbounded).
 fn panel(ui: &mut egui::Ui, title: &str, width: f32, body: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::group(ui.style()).inner_margin(egui::Margin::symmetric(6.0, 4.0)).show(ui, |ui| {
+    egui::Frame::group(ui.style()).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
         ui.set_max_width(width);
         ui.set_min_height(44.0);
         ui.vertical(|ui| {

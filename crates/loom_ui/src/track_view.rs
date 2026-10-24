@@ -491,7 +491,7 @@ fn curve_editor(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Response,
                     let pos = kv.pos(key.time, key.value);
                     let is_sel = sel.iter().any(|s| s.track == t.key() && s.comp == c as u32 && (s.time - key.time).abs() < 1e-3);
                     painter.rect_filled(egui::Rect::from_center_size(pos, egui::vec2(6.0, 6.0)), 0.0, if is_sel { egui::Color32::WHITE } else { egui::Color32::from_gray(20) });
-                    painter.rect_stroke(egui::Rect::from_center_size(pos, egui::vec2(6.0, 6.0)), 0.0, egui::Stroke::new(1.0_f32, col));
+                    painter.rect_stroke(egui::Rect::from_center_size(pos, egui::vec2(6.0, 6.0)), 0.0, egui::Stroke::new(1.0_f32, col), egui::StrokeKind::Middle);
                     if !frozen {
                         hits.push((pos, t.clone(), c as u32, key.time, ki, ti));
                     }
@@ -605,7 +605,7 @@ fn key_window_input(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Respo
                 app.tv_drag = Some(TvDrag::Move { start, applied: (dt, dv) });
             }
             TvDrag::Region { start } => {
-                painter.rect_stroke(egui::Rect::from_two_pos(start, p), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::WHITE));
+                painter.rect_stroke(egui::Rect::from_two_pos(start, p), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::WHITE), egui::StrokeKind::Middle);
             }
             TvDrag::Tool { start } => match tool {
                 TvTool::DrawCurves => {
@@ -616,7 +616,7 @@ fn key_window_input(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Respo
                     painter.add(egui::Shape::line(line, egui::Stroke::new(1.5_f32, egui::Color32::WHITE)));
                 }
                 TvTool::ZoomRegion => {
-                    painter.rect_stroke(egui::Rect::from_two_pos(start, p), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::YELLOW));
+                    painter.rect_stroke(egui::Rect::from_two_pos(start, p), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::YELLOW), egui::StrokeKind::Middle);
                 }
                 _ => {
                     painter.line_segment([start, p], egui::Stroke::new(1.0_f32, egui::Color32::YELLOW));
@@ -869,7 +869,7 @@ fn dope_input(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Response, k
                 app.tv_drag = Some(TvDrag::Range { start, applied: dt });
             }
             TvDrag::Region { start } | TvDrag::Tool { start } => {
-                painter.rect_stroke(egui::Rect::from_two_pos(start, p), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::WHITE));
+                painter.rect_stroke(egui::Rect::from_two_pos(start, p), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::WHITE), egui::StrokeKind::Middle);
             }
             TvDrag::Handle { .. } => {}
         }

@@ -12,6 +12,8 @@ pub enum Shading {
     Wireframe,
     HiddenLine,
     Flat,
+    /// Physically based shading with lights and shadows (the Bevy renderer).
+    Realistic,
 }
 
 impl Shading {
@@ -21,6 +23,7 @@ impl Shading {
             Shading::Wireframe => "Wireframe",
             Shading::HiddenLine => "Hidden Line",
             Shading::Flat => "Flat",
+            Shading::Realistic => "Realistic",
         }
     }
 }
@@ -263,6 +266,10 @@ pub enum Dialog {
     SelectFromScene,
     /// Rendering > Material Editor (M).
     MaterialEditor,
+    /// Rendering > Render: choose the PNG the active view renders to.
+    RenderFile,
+    /// Rendering > Render SetUp: the output size.
+    RenderSetup,
     /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).
     MaterialMap { channel: u8 },
     ViewportConfiguration,

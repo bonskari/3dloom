@@ -424,7 +424,7 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Response, paint
     }
     // The unit square.
     let sq = egui::Rect::from_min_max(view.to_screen(egui::vec2(0.0, 1.0)), view.to_screen(egui::vec2(1.0, 0.0)));
-    painter.rect_stroke(sq, 0.0, egui::Stroke::new(1.5_f32, egui::Color32::from_gray(160)));
+    painter.rect_stroke(sq, 0.0, egui::Stroke::new(1.5_f32, egui::Color32::from_gray(160)), egui::StrokeKind::Middle);
     let Some(m) = mesh.map(ch) else { return };
     // Faces (Face level fills) and edges.
     let tvf = uw::tv_faces(mesh, ch);
@@ -770,7 +770,7 @@ fn interact(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Response, vie
         }
         if let Some(UvDrag::Region { start, .. }) = app.uv_drag {
             let r = egui::Rect::from_two_pos(start, p);
-            ui.painter().rect_stroke(r, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_gray(230)));
+            ui.painter().rect_stroke(r, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_gray(230)), egui::StrokeKind::Middle);
         }
     }
     if pointer.primary_released() {
@@ -993,7 +993,7 @@ fn sketch(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Response, view:
             painter.line_segment([*a, *b], stroke);
         }
         (2, [a, .., b]) => {
-            painter.rect_stroke(egui::Rect::from_two_pos(*a, *b), 0.0, stroke);
+            painter.rect_stroke(egui::Rect::from_two_pos(*a, *b), 0.0, stroke, egui::StrokeKind::Middle);
         }
         (3, [a, .., b]) => {
             painter.circle_stroke(*a, a.distance(*b), stroke);
@@ -1025,7 +1025,7 @@ fn freeform(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Response, vie
     let s = |q: glam::Vec2| view.to_screen(egui::vec2(q.x, q.y));
     let painter = ui.painter();
     let col = egui::Color32::from_rgb(255, 160, 40);
-    painter.rect_stroke(egui::Rect::from_two_pos(s(lo), s(hi)), 0.0, egui::Stroke::new(1.0_f32, col));
+    painter.rect_stroke(egui::Rect::from_two_pos(s(lo), s(hi)), 0.0, egui::Stroke::new(1.0_f32, col), egui::StrokeKind::Middle);
     let corners = [lo, glam::Vec2::new(hi.x, lo.y), hi, glam::Vec2::new(lo.x, hi.y)];
     for c in corners {
         painter.rect_filled(egui::Rect::from_center_size(s(c), egui::vec2(6.0, 6.0)), 0.0, col);

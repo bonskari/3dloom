@@ -67,7 +67,7 @@ fn layout_icon(ui: &mut egui::Ui, layout: ViewportLayout, selected: bool) -> egu
             egui::pos2(rect.min.x + c[2] * rect.width(), rect.min.y + c[3] * rect.height()),
         )
         .shrink(1.5);
-        p.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(220)));
+        p.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(220)), egui::StrokeKind::Middle);
     }
     resp.on_hover_text(layout.label())
 }
@@ -94,7 +94,7 @@ fn layout_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         )
         .shrink(2.0);
         let active = i == app.state.active_viewport;
-        painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, if active { crate::viewports::ACTIVE_FRAME } else { egui::Color32::from_gray(200) }));
+        painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, if active { crate::viewports::ACTIVE_FRAME } else { egui::Color32::from_gray(200) }), egui::StrokeKind::Middle);
         let label = app.state.viewports.get(i).map(|v| v.kind.label()).unwrap_or("");
         painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(14.0), egui::Color32::WHITE);
         let resp = ui.interact(r, ui.id().with(("layout_cell", i)), egui::Sense::click());

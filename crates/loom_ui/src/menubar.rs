@@ -214,6 +214,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.separator();
                 item(ui, app, "Test Room", "Test Room");
             });
+            ui.menu_button("Rendering", |ui| {
+                cmd(ui, app, "Render", Command::Render { path: None, width: None, height: None });
+                cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None });
+                ui.separator();
+                cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
+            });
             ui.menu_button("Customize", |ui| {
                 cmd(ui, app, "Customize User Interface...", Command::CustomizeUserInterface);
                 ui.separator();
