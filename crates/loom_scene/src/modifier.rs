@@ -253,6 +253,41 @@ fn param_off() -> Param<bool> {
     Param::new(false)
 }
 
+fn param_one() -> Param<f32> {
+    Param::new(1.0)
+}
+
+fn param_zero() -> Param<u32> {
+    Param::new(0)
+}
+
+/// VertexPaint layer blend modes (the Layer group's Mode list), by index.
+pub const VERTEX_PAINT_MODES: [&str; 15] = [
+    "Normal", "Add", "Subtract", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Color Burn", "Color Dodge", "Difference", "Exclusion", "Soft Light", "Hard Light", "Pin Light",
+];
+
+/// One channel of a VertexPaint layer colour `t` blended onto the colour below `b`.
+pub fn blend_channel(mode: u32, b: f32, t: f32) -> f32 {
+    let r = match mode {
+        1 => b + t,
+        2 => b - t,
+        3 => b * t,
+        4 => 1.0 - (1.0 - b) * (1.0 - t),
+        5 => if b < 0.5 { 2.0 * b * t } else { 1.0 - 2.0 * (1.0 - b) * (1.0 - t) },
+        6 => b.min(t),
+        7 => b.max(t),
+        8 => if t <= 0.0 { 0.0 } else { 1.0 - ((1.0 - b) / t).min(1.0) },
+        9 => if t >= 1.0 { 1.0 } else { (b / (1.0 - t)).min(1.0) },
+        10 => (b - t).abs(),
+        11 => b + t - 2.0 * b * t,
+        12 => (1.0 - 2.0 * t) * b * b + 2.0 * t * b,
+        13 => if t < 0.5 { 2.0 * b * t } else { 1.0 - 2.0 * (1.0 - b) * (1.0 - t) },
+        14 => if t < 0.5 { b.min(2.0 * t) } else { b.max(2.0 * t - 1.0) },
+        _ => t,
+    };
+    r.clamp(0.0, 1.0)
+}
+
 fn face_centroid(m: &Mesh, f: loom_mesh::FaceId) -> Vec3 {
     let pts = m.face_positions(f).unwrap_or_default();
     if pts.is_empty() { Vec3::ZERO } else { pts.iter().sum::<Vec3>() / pts.len() as f32 }
@@ -462,7 +497,26 @@ pub enum Modifier {
     Material { id: Param<u32> },
     MaterialByElement { random: Param<bool>, id_count: Param<u32>, seed: Param<u32> },
     /// VertexPaint: a colour (illumination / alpha) layer painted per vertex of the input.
-    VertexPaint { channel: Param<u32>, brush_size: Param<f32>, opacity: Param<f32>, color: [Param<f32>; 3], paint: BTreeMap<u32, [f32; 3]> },
+    /// `paint` is the layer's colour per painted input vertex and `coverage`
+    /// how much of it covers the colour below (a vertex painted before
+    /// coverage existed covers fully); the layer blends by `mode`
+    /// (`VERTEX_PAINT_MODES`) at `layer_opacity`. `faces`: the face
+    /// selection that restricts the brush and Paint All (empty: every face).
+    VertexPaint {
+        channel: Param<u32>,
+        brush_size: Param<f32>,
+        opacity: Param<f32>,
+        color: [Param<f32>; 3],
+        paint: BTreeMap<u32, [f32; 3]>,
+        #[serde(default)]
+        coverage: BTreeMap<u32, f32>,
+        #[serde(default = "param_one")]
+        layer_opacity: Param<f32>,
+        #[serde(default = "param_zero")]
+        mode: Param<u32>,
+        #[serde(default)]
+        faces: std::collections::BTreeSet<u32>,
+    },
     /// Edit Poly: an Editable Poly's editing applied to the stack input. The
     /// edits are kept as the edited mesh plus the input they were made on;
     /// position changes below carry through, topology changes drop them.
@@ -654,7 +708,7 @@ impl Modifier {
             "Turn To Mesh" => Modifier::TurnToMesh,
             "Material" => Modifier::Material { id: Param::new(1) },
             "Material By Element" => Modifier::MaterialByElement { random: Param::new(true), id_count: Param::new(2), seed: Param::new(0) },
-            "VertexPaint" => Modifier::VertexPaint { channel: Param::new(0), brush_size: f(20.0), opacity: f(1.0), color: [f(1.0), f(1.0), f(1.0)], paint: BTreeMap::new() },
+            "VertexPaint" => Modifier::VertexPaint { channel: Param::new(0), brush_size: f(20.0), opacity: f(1.0), color: [f(1.0), f(1.0), f(1.0)], paint: BTreeMap::new(), coverage: BTreeMap::new(), layer_opacity: f(1.0), mode: Param::new(0), faces: Default::default() },
             // Edit Mesh is edited as an Edit Poly (spec §6.3).
             "Edit Poly" | "Edit Mesh" => Modifier::EditPoly { poly: PolyObject::from_mesh(Mesh::default()), input_vertices: 0, input_faces: 0, snapshot: Vec::new() },
             "Extrude" => Modifier::Extrude { amount: f(0.0), segments: Param::new(1), cap_start: Param::new(true), cap_end: Param::new(true) },
@@ -963,6 +1017,7 @@ impl Modifier {
             (Modifier::Tessellate { .. }, "Operation") => Some(&["Edge", "Face"]),
             (Modifier::STLCheck { .. }, "Test") => Some(&["Open Edge", "Double Face", "Spike", "Multiple Edge", "Everything"]),
             (Modifier::VertexPaint { .. }, "Channel") => Some(&["Vertex Color", "Vertex Illum", "Vertex Alpha"]),
+            (Modifier::VertexPaint { .. }, "Mode") => Some(&VERTEX_PAINT_MODES),
             (Modifier::Lathe { .. }, "Direction") => Some(&["X", "Y", "Z"]),
             (Modifier::Lathe { .. }, "Align") => Some(&["Min", "Center", "Max"]),
             (Modifier::Sweep { .. }, "Section") => Some(&["Angle", "Bar", "Channel", "Cylinder", "Half Round", "Pipe", "Quarter Round", "Tee", "Tube", "Wide Flange", "Custom"]),
@@ -1188,8 +1243,9 @@ impl Modifier {
             ],
             Modifier::Material { id } => vec![("Material ID", Int(id.get()))],
             Modifier::MaterialByElement { random, id_count, seed } => vec![("Random Distribution", Bool(random.get())), ("ID Count", Int(id_count.get())), ("Seed", Int(seed.get()))],
-            Modifier::VertexPaint { channel, brush_size, opacity, color, .. } => vec![
+            Modifier::VertexPaint { channel, brush_size, opacity, color, layer_opacity, mode, .. } => vec![
                 ("Channel", Int(channel.get())), ("Brush Size", Float(brush_size.get())), ("Opacity", Float(opacity.get())), ("Color R", Float(color[0].get())), ("Color G", Float(color[1].get())), ("Color B", Float(color[2].get())),
+                ("Layer Opacity", Float(layer_opacity.get())), ("Mode", Int(mode.get())),
             ],
             Modifier::EditPoly { .. } | Modifier::EditSpline { .. } => Vec::new(),
             Modifier::Extrude { amount, segments, cap_start, cap_end } => vec![
@@ -1471,6 +1527,8 @@ impl Modifier {
             (Modifier::VertexPaint { color, .. }, "Color R") => color[0].set(v.clamp(0.0, 1.0)),
             (Modifier::VertexPaint { color, .. }, "Color G") => color[1].set(v.clamp(0.0, 1.0)),
             (Modifier::VertexPaint { color, .. }, "Color B") => color[2].set(v.clamp(0.0, 1.0)),
+            (Modifier::VertexPaint { layer_opacity, .. }, "Layer Opacity") => layer_opacity.set(v.clamp(0.0, 1.0)),
+            (Modifier::VertexPaint { mode, .. }, "Mode") => mode.set(u.min(VERTEX_PAINT_MODES.len() as u32 - 1)),
             (Modifier::Extrude { amount, .. }, "Amount") => amount.set(v),
             (Modifier::Extrude { segments, .. }, "Segments") => segments.set(u.clamp(1, 1000)),
             (Modifier::Extrude { cap_start, .. } | Modifier::Lathe { cap_start, .. } | Modifier::Bevel { cap_start, .. }, "Cap Start") => cap_start.set(b),
@@ -2054,13 +2112,16 @@ impl Modifier {
                 loom_mesh::mesh_mods::material_by_element(&mut v.mesh, &ids, random.get(), seed.get());
                 Ok(v)
             }
-            Modifier::VertexPaint { channel, paint, .. } => {
+            Modifier::VertexPaint { channel, paint, coverage, layer_opacity, mode, .. } => {
+                let (o, m) = (layer_opacity.get(), mode.get());
                 for (i, c) in paint {
+                    let k = coverage.get(i).copied().unwrap_or(1.0) * o;
+                    let mix = |b: f32, t: f32| b + (blend_channel(m, b, t) - b) * k;
                     if let Some(vx) = v.mesh.vertices_mut().get_mut(*i as usize) {
                         match channel.get() {
-                            0 => vx.color = *c,
-                            1 => vx.illum = *c,
-                            _ => vx.alpha = c[0],
+                            0 => vx.color = [mix(vx.color[0], c[0]), mix(vx.color[1], c[1]), mix(vx.color[2], c[2])],
+                            1 => vx.illum = [mix(vx.illum[0], c[0]), mix(vx.illum[1], c[1]), mix(vx.illum[2], c[2])],
+                            _ => vx.alpha = mix(vx.alpha, c[0]),
                         }
                     }
                 }

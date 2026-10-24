@@ -2457,3 +2457,29 @@ fn edit_normals_draws_explicit_normals_green_and_the_rotate_tool_turns_them() {
     h.click(egui::pos2(rect.right() - 60.0, rect.bottom() - 60.0));
     assert_eq!(segments_coloured(&h, crate::poly_modes::NORMAL_EXPLICIT), 1, "the rotated normal is explicit");
 }
+
+#[test]
+fn hsds_element_button_shows_the_yellow_cage_and_the_level_list_displays_a_level() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = selected(&h)[0];
+    h.cmd(Command::AddModifier { name: "HSDS".into() });
+    framed(&mut h);
+    assert_eq!(segments_coloured(&h, crate::poly_modes::HSDS_CAGE), 0, "no cage at the top level");
+    h.click(panel_text(&h, "Element"));
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers[0].sub_level, 4, "the rollout's Element button");
+    assert_eq!(segments_coloured(&h, crate::poly_modes::HSDS_CAGE), 12, "the box's 12 cage edges, yellow");
+    h.cmd(Command::SelectSub { node: None, ids: vec![0], op: loom_commands::SelectOp::Replace });
+    h.click(panel_text(&h, "Subdivide"));
+    let level1 = h.app.state.scene.eval_mesh(id).value.mesh.face_count();
+    assert!(level1 > 6, "subdivided");
+    panel_text(&h, "Level 1");
+    // Display next to Base Level: Level 1 is turned off.
+    let base = panel_text(&h, "Base Level");
+    let display = h.texts("Display").into_iter().find(|p| (p.y - base.y).abs() < 4.0).expect("Display next to Base Level");
+    h.click(display);
+    assert_eq!(h.app.state.scene.eval_mesh(id).value.mesh.face_count(), 6, "only the base level shows");
+    // Picking Base Level in the list: the cage is the original polygons.
+    h.click(base);
+    assert_eq!(h.app.state.scene.node(id).unwrap().cage_mesh().face_count(), 6);
+}

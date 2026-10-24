@@ -46,6 +46,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
+        c if crate::vertex_paint::handles(&c) => crate::vertex_paint::execute(state, c),
         c if c.group() == crate::Group::TrackView || crate::track_view::handles(&c) => crate::track_view::execute(state, c),
         C::UnwrapUvwModifier => crate::unwrap::execute(state, cmd),
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
@@ -483,6 +484,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SplineIkControlCreateHelpers => crate::stack::spline_ik_create_helpers(state),
         C::HsdsSubdivide { faces } => crate::stack::hsds_subdivide(state, faces),
         C::HsdsAdaptiveSubdivide { max_level, max_angle } => crate::stack::hsds_adaptive(state, max_level, max_angle),
+        C::HsdsSelectLevel { level } => crate::stack::hsds_select_level(state, level),
+        C::HsdsDisplay { level } => crate::stack::hsds_display(state, level),
         C::PointCacheRecord { index, path, start, end } => crate::stack::point_cache_record(state, index as usize, &path, start, end),
         C::PointCacheLoad { index, path } => crate::stack::point_cache_load(state, index as usize, Some(&path)),
         C::PointCacheUnload { index } => crate::stack::point_cache_load(state, index as usize, None),
@@ -4188,6 +4191,8 @@ fn snapshot(state: &AppState) -> Value {
         "frame": state.current_frame,
         "animation": crate::anim_cmds::state_json(state),
         "edit_normals": crate::normals::state_json(state),
+        "hsds": crate::stack::hsds_json(state),
+        "vertex_paint": crate::vertex_paint::state_json(state),
         "undo_labels": state.undo.labels(),
     })
 }

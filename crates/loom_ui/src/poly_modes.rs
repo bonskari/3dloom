@@ -239,6 +239,7 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hov
     let stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255));
     draw_skin(painter, app, projection);
     draw_normals(painter, app, projection);
+    draw_hsds_cage(painter, app, projection);
     // Modifier gizmo: the input's bounding box in the gizmo frame, orange.
     for id in app.state.selection.iter() {
         let Some(n) = app.state.scene.node(*id) else { continue };
@@ -589,6 +590,28 @@ fn mesh_ids_at(app: &LoomApp, projection: &Projection, id: NodeId, index: usize,
                     r.contains(c.to_pos2())
                 }).map(|(f, _, _)| f).collect(),
                 None => faces.filter(|(_, poly, _)| crate::region::Region::Polygon(poly.clone()).contains(p)).min_by(|a, b| a.2.total_cmp(&b.2)).map(|(f, _, _)| vec![f]).unwrap_or_default(),
+            }
+        }
+    }
+}
+
+/// HSDS at a sub-object level: the cage of the level being edited, yellow.
+pub const HSDS_CAGE: egui::Color32 = egui::Color32::from_rgb(255, 230, 0);
+
+fn draw_hsds_cage(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
+    for (id, mesh) in app.world_meshes() {
+        let Some(n) = app.state.scene.node(*id) else { continue };
+        if !app.state.selection.contains(id) || !n.active_entry.and_then(|a| n.modifiers.get(a)).is_some_and(|s| s.sub_level > 0 && matches!(s.modifier, loom_scene::Modifier::Hsds(_))) {
+            continue;
+        }
+        let pts: Vec<Option<egui::Pos2>> = mesh.vertices().iter().map(|v| projection.screen(v.position)).collect();
+        for (i, he) in mesh.half_edges().iter().enumerate() {
+            if (i as u32) > he.twin.0 {
+                continue;
+            }
+            let b = mesh.half_edges()[he.next.0 as usize].origin;
+            if let (Some(a), Some(b)) = (pts[he.origin.0 as usize], pts[b.0 as usize]) {
+                painter.line_segment([a, b], egui::Stroke::new(1.0_f32, HSDS_CAGE));
             }
         }
     }

@@ -370,6 +370,13 @@ fn poly_rollouts(ui: &mut egui::Ui, app: &mut LoomApp) {
 }
 
 /// A modifier's rollouts: its sub-object levels and its parameters.
+/// Runs a rollout button's command; a refusal shows in the status bar prompt.
+fn run_or_report(app: &mut LoomApp, cmd: Command) {
+    if let Err(e) = app.dispatch(cmd) {
+        app.state.status_prompt = e;
+    }
+}
+
 fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, index: usize) {
     let Some(node) = app.state.scene.node(id) else { return };
     let Some(slot) = node.modifiers.get(index) else { return };
@@ -438,10 +445,34 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
     }
     if let Modifier::Hsds(d) = &modifier {
         let levels = d.levels.len();
+        let (edited, shown) = (d.edited_level(), d.displayed_levels());
+        let sub = app.state.scene.node(id).and_then(|n| n.modifiers.get(index)).map(|s| s.sub_level).unwrap_or(0);
         rollout(ui, "HSDS Parameters", true, |ui| {
-            ui.label(format!("Subdivision Stack: base + {levels} level(s)"));
+            // The sub-object level buttons (the same levels as the stack's).
+            ui.horizontal(|ui| {
+                for (i, l) in ["Vertex", "Edge", "Polygon", "Element"].iter().enumerate() {
+                    let lvl = i as u32 + 1;
+                    if ui.selectable_label(sub == lvl, *l).clicked() {
+                        let _ = app.dispatch(Command::ModifierSubobjectLevel { index: index as u32, level: if sub == lvl { 0 } else { lvl } });
+                    }
+                }
+            });
+            // Level of detail list: pick the level to edit; Display shows the result up to that level.
+            ui.group(|ui| {
+                for k in 0..=levels {
+                    ui.horizontal(|ui| {
+                        let name = if k == 0 { "Base Level".to_owned() } else { format!("Level {k}") };
+                        if ui.selectable_label(edited == k, name).clicked() {
+                            run_or_report(app, Command::HsdsSelectLevel { level: k as u32 });
+                        }
+                        if ui.selectable_label(shown == k, "Display").on_hover_text("Show the result only up to this level").clicked() {
+                            run_or_report(app, Command::HsdsDisplay { level: k as u32 });
+                        }
+                    });
+                }
+            });
             if ui.button("Subdivide").on_hover_text("Split the selected polygons of the finest level into a new level").clicked() {
-                let _ = app.dispatch(Command::HsdsSubdivide { faces: None });
+                run_or_report(app, Command::HsdsSubdivide { faces: None });
             }
             let id = egui::Id::new("hsds_adaptive");
             let (mut lvl, mut ang): (u32, f32) = ui.ctx().data(|m| m.get_temp(id)).unwrap_or((2, 30.0));
