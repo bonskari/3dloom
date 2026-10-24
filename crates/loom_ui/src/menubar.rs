@@ -229,8 +229,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 cmd(ui, app, "Preferences...", Command::Preferences);
             });
             ui.menu_button("Help", |ui| {
+                if ui.button("3dLoom on GitHub").on_hover_text(REPO_URL).clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(REPO_URL));
+                    ui.close_menu();
+                }
+                if ui.button("Releases").clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(format!("{REPO_URL}/releases")));
+                    ui.close_menu();
+                }
+                ui.separator();
                 ui.label("3dLoom — a 3D modelling application");
             });
+            if let Some(handle) = app.update.clone() {
+                crate::update_menu::show(ui, &handle);
+            }
         });
     });
 }
@@ -247,3 +259,6 @@ fn controller_item(ui: &mut egui::Ui, app: &mut LoomApp, track: &str, controller
         ui.close_menu();
     }
 }
+
+/// The project's public repository (Help menu).
+const REPO_URL: &str = "https://github.com/bonskari/3dloom";

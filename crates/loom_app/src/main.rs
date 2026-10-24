@@ -40,29 +40,25 @@ fn main() -> eframe::Result<()> {
         },
         None => None,
     };
-    // Signed self-update before any window opens (CI release builds only, see
-    // `update::enabled`). A newer release replaces this executable and the
-    // start continues in it; LOOM_UPDATED stops the new process checking again.
-    if update::enabled(option_env!("LOOM_UPDATE_CHANNEL"), std::env::var("LOOM_CONTROL_PORT").ok().as_deref(), std::env::var("LOOM_NO_UPDATE").ok().as_deref())
-        && std::env::var_os("LOOM_UPDATED").is_none()
-    {
-        let exe = update::own_path();
-        match update::run(env!("LOOM_COMMIT")) {
-            update::Status::Updated(commit) => {
-                if let Some(exe) = exe {
-                    update::relaunch(&exe, &commit);
-                }
-            }
-            update::Status::Failed(e) => eprintln!("3dLoom update check failed: {e}"),
-            _ => {}
-        }
-    }
+    // Signed self-update (CI release builds only, see `update::enabled`): a
+    // background check after the window opens feeds the Update menu; nothing
+    // installs until the user picks it.
+    let exe = update::own_path();
+    let update = update::enabled(option_env!("LOOM_UPDATE_CHANNEL"), std::env::var("LOOM_CONTROL_PORT").ok().as_deref(), std::env::var("LOOM_NO_UPDATE").ok().as_deref()).then(|| {
+        let handle = loom_ui::update_menu::new_handle();
+        let worker = handle.clone();
+        std::thread::spawn(move || update_worker(worker));
+        handle
+    });
     eframe::run_native(
         "3dLoom",
         options,
         Box::new(|cc| {
+            let mut inner = loom_ui::LoomApp::new(cc);
+            inner.update = update.clone();
             Ok(Box::new(ControlledApp {
-                inner: loom_ui::LoomApp::new(cc),
+                inner,
+                restart_exe: exe,
                 control,
                 pending_shot: None,
 
@@ -77,6 +73,70 @@ struct ControlledApp {
     control: Option<Receiver<control::Request>>,
     /// Screenshot requested last frame, waiting for the image event.
     pending_shot: Option<(String, Sender<serde_json::Value>)>,
+    /// This program's path from before an update replaced it (for Restart now).
+    restart_exe: Option<std::path::PathBuf>,
+}
+
+impl Drop for ControlledApp {
+    /// Update > Restart now: once the window has really closed (unsaved
+    /// changes were asked about), the installed version starts.
+    fn drop(&mut self) {
+        let restart = self.inner.update.as_ref().is_some_and(|h| {
+            let s = h.lock().unwrap();
+            s.restart_requested && matches!(s.status, loom_ui::update_menu::UpdateStatus::Ready { .. })
+        });
+        if let (true, Some(exe)) = (restart, self.restart_exe.as_ref()) {
+            update::relaunch(exe);
+        }
+    }
+}
+
+/// The Update menu's background work: check (with the list of changes), then
+/// install when asked; Check again / Try again re-run the check.
+fn update_worker(h: loom_ui::update_menu::UpdateHandle) {
+    use loom_ui::update_menu::UpdateStatus as S;
+    let own = env!("LOOM_COMMIT");
+    loop {
+        let found = update::check(own);
+        let pending = match found {
+            Ok(Some((manifest, asset))) => {
+                let changes = update::changes(own, &manifest.commit);
+                h.lock().unwrap().status = S::Available { commit: manifest.commit.clone(), changes };
+                Some((manifest, asset))
+            }
+            Ok(None) => {
+                h.lock().unwrap().status = S::UpToDate;
+                None
+            }
+            Err(e) => {
+                h.lock().unwrap().status = S::Failed(e);
+                None
+            }
+        };
+        // Wait for the user.
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let mut s = h.lock().unwrap();
+            if s.check_requested {
+                s.check_requested = false;
+                s.status = S::Checking;
+                break;
+            }
+            if s.install_requested {
+                s.install_requested = false;
+                if let Some((manifest, asset)) = pending.as_ref() {
+                    s.status = S::Installing { commit: manifest.commit.clone() };
+                    drop(s);
+                    let r = update::install(manifest, asset);
+                    let mut s = h.lock().unwrap();
+                    s.status = match r {
+                        Ok(()) => S::Ready { commit: manifest.commit.clone() },
+                        Err(e) => S::Failed(e),
+                    };
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for ControlledApp {

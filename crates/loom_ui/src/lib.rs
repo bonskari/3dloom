@@ -23,6 +23,7 @@ pub mod ribbon;
 pub mod viewports;
 pub mod uv_editor;
 pub mod track_view;
+pub mod update_menu;
 #[cfg(test)]
 mod ui_tests;
 
@@ -212,6 +213,8 @@ pub struct LoomApp {
     /// The Modifier List use counts as last written to disk (None in tests: never written).
     pub saved_modifier_usage: loom_commands::modifier_list::Usage,
     pub persist_modifier_usage: bool,
+    /// The Update menu's state when this build updates itself (set by the app).
+    pub update: Option<update_menu::UpdateHandle>,
     /// A transform or region drag in the Edit UVWs window.
     pub uv_drag: Option<uv_editor::UvDrag>,
     /// Sketch: the stroke being drawn (UV) and whether vertices were picked yet.
@@ -312,6 +315,7 @@ impl LoomApp {
             viewport_rects: Vec::new(),
             saved_modifier_usage: Default::default(),
             persist_modifier_usage: false,
+            update: None,
             uv_drag: None,
             uv_sketch: Vec::new(),
             uv_sketch_picked: false,

@@ -1,10 +1,11 @@
 //! Self-update from the nightly release.
 //!
-//! Release builds made by CI carry an update channel. Before any window opens
-//! they fetch the release's `latest.json` and its ed25519 signature, check the
-//! signature against the key built into the program, and when the release is
-//! another commit they download the binary for this platform, check its
-//! SHA-256, replace their own executable and continue the start in it.
+//! Release builds made by CI carry an update channel. After the window opens,
+//! a background check fetches the release's `latest.json` and its ed25519
+//! signature, checks the signature against the key built into the program and
+//! lists the changes since this version. Only when the user picks Update does
+//! it download the binary for this platform, check its SHA-256 and replace
+//! the executable; the new version runs after a restart.
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
@@ -27,14 +28,6 @@ pub struct Manifest {
 pub struct Asset {
     pub name: String,
     pub sha256: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Status {
-    UpToDate,
-    /// The executable was replaced; the commit it now holds.
-    Updated(String),
-    Failed(String),
 }
 
 /// Whether this run updates itself: only CI release builds (they carry a
@@ -72,22 +65,37 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Checks the release and, when it is newer, installs it over this executable.
-pub fn run(own_commit: &str) -> Status {
-    match check_and_install(own_commit) {
-        Ok(Some(commit)) => Status::Updated(commit),
-        Ok(None) => Status::UpToDate,
-        Err(e) => Status::Failed(e),
-    }
+/// The signed manifest and this platform's asset, when the release is another commit.
+pub fn check(own_commit: &str) -> Result<Option<(Manifest, Asset)>, String> {
+    let platform = platform().ok_or("no release build for this platform")?;
+    let manifest = fetch(&format!("{RELEASE_URL}/latest.json"), 15)?;
+    let signature = fetch(&format!("{RELEASE_URL}/latest.json.sig"), 15)?;
+    let manifest = verify(&manifest, &signature, &PUBLIC_KEY)?;
+    let asset = pending(&manifest, own_commit, platform).cloned();
+    Ok(asset.map(|a| (manifest, a)))
 }
 
-fn check_and_install(own_commit: &str) -> Result<Option<String>, String> {
-    let platform = platform().ok_or("no release build for this platform")?;
-    // A quick check: an unreachable release must not hold up the start.
-    let manifest = fetch(&format!("{RELEASE_URL}/latest.json"), 8)?;
-    let signature = fetch(&format!("{RELEASE_URL}/latest.json.sig"), 8)?;
-    let manifest = verify(&manifest, &signature, &PUBLIC_KEY)?;
-    let Some(asset) = pending(&manifest, own_commit, platform) else { return Ok(None) };
+/// The first lines of the commit messages from `own` to `latest`, newest
+/// first, from the public repository (empty when they cannot be fetched).
+pub fn changes(own: &str, latest: &str) -> Vec<String> {
+    let url = format!("https://api.github.com/repos/bonskari/3dloom/compare/{own}...{latest}");
+    let Ok(body) = fetch(&url, 15) else { return Vec::new() };
+    commit_titles(&body)
+}
+
+/// Commit titles from a GitHub compare response, newest first.
+pub fn commit_titles(body: &[u8]) -> Vec<String> {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else { return Vec::new() };
+    let mut out: Vec<String> = v["commits"]
+        .as_array()
+        .map(|cs| cs.iter().filter_map(|c| c["commit"]["message"].as_str()).map(|m| m.lines().next().unwrap_or("").to_owned()).filter(|t| !t.is_empty()).collect())
+        .unwrap_or_default();
+    out.reverse();
+    out
+}
+
+/// Downloads the asset, checks its SHA-256 and replaces this executable.
+pub fn install(manifest: &Manifest, asset: &Asset) -> Result<(), String> {
     let binary = fetch(&format!("{RELEASE_URL}/{}", asset.name), 300)?;
     if sha256_hex(&binary) != asset.sha256 {
         return Err(format!("{} does not match its checksum", asset.name));
@@ -101,8 +109,7 @@ fn check_and_install(own_commit: &str) -> Result<Option<String>, String> {
     }
     let replaced = self_replace::self_replace(&staged).map_err(|e| format!("replacing the program: {e}"));
     let _ = std::fs::remove_file(&staged);
-    replaced?;
-    Ok(Some(manifest.commit))
+    replaced
 }
 
 /// The program's own path, taken before the update replaces the file: on
@@ -120,24 +127,10 @@ pub fn live_path(p: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
-/// Continues this start in the replaced executable at `exe` (its path from
-/// before the update): the same process on Unix (exec), a new one on Windows.
-/// Returns only if that fails.
-pub fn relaunch(exe: &std::path::Path, commit: &str) {
-    let mut cmd = std::process::Command::new(exe);
-    cmd.args(std::env::args_os().skip(1)).env("LOOM_UPDATED", commit);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let e = cmd.exec();
-        eprintln!("3dLoom: starting the updated program failed: {e}");
-    }
-    #[cfg(not(unix))]
-    {
-        if cmd.spawn().is_ok() {
-            std::process::exit(0);
-        }
-    }
+/// Starts the replaced executable at `exe` (its path from before the
+/// update) with this run's arguments; the caller then exits.
+pub fn relaunch(exe: &std::path::Path) {
+    let _ = std::process::Command::new(exe).args(std::env::args_os().skip(1)).spawn();
 }
 
 fn fetch(url: &str, timeout_secs: u64) -> Result<Vec<u8>, String> {
@@ -219,6 +212,13 @@ mod tests {
     fn a_replaced_executable_path_drops_the_deleted_mark() {
         assert_eq!(live_path(std::path::Path::new("/tmp/upd/loom (deleted)")), std::path::PathBuf::from("/tmp/upd/loom"));
         assert_eq!(live_path(std::path::Path::new("/opt/loom")), std::path::PathBuf::from("/opt/loom"));
+    }
+
+    #[test]
+    fn compare_response_gives_commit_titles_newest_first() {
+        let body = br#"{"commits":[{"commit":{"message":"First change\n\nbody"}},{"commit":{"message":"Second change"}}]}"#;
+        assert_eq!(commit_titles(body), vec!["Second change", "First change"]);
+        assert!(commit_titles(b"not json").is_empty());
     }
 
     #[test]
