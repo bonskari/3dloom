@@ -165,6 +165,12 @@ pub struct LoomApp {
     world_display: std::sync::Arc<Vec<Mesh>>,
     /// Bumped by every `world_meshes` rebuild.
     world_version: u64,
+    /// What Show End Result off applied to at the last rebuild (`end_result_key`).
+    shown_end_result_key: Option<Vec<NodeId>>,
+    /// A base parameter change held back by the topology-dependence warning.
+    pub(crate) pending_topology: Option<Command>,
+    /// The node whose topology warning was answered Yes while its base object stays active.
+    pub(crate) topology_ack: Option<NodeId>,
     /// The wgpu device and, once a Realistic view or a Render needs it, Bevy.
     gpu: realistic::Gpu,
     /// Meshes and colours waiting to be uploaded to the GPU. Every viewport
@@ -229,6 +235,10 @@ pub struct LoomApp {
     /// The Modifier List use counts as last written to disk (None in tests: never written).
     pub saved_modifier_usage: loom_commands::modifier_list::Usage,
     pub persist_modifier_usage: bool,
+    /// The user's settings file (None in tests: nothing read or written).
+    pub settings_path: Option<std::path::PathBuf>,
+    /// The settings as last read or written, to write only on change.
+    pub saved_settings: Option<loom_commands::settings::Settings>,
     /// The Update menu's state when this build updates itself (set by the app).
     pub update: Option<update_menu::UpdateHandle>,
     /// A transform or region drag in the Edit UVWs window.
@@ -295,7 +305,64 @@ impl LoomApp {
         }
         app.saved_modifier_usage = app.state.modifier_usage.clone();
         app.persist_modifier_usage = true;
+        if let Some(path) = loom_commands::settings::settings_path() {
+            app.use_settings_file(path);
+        }
         app
+    }
+
+    /// Loads the settings file at `path` (when it exists) and writes changes
+    /// back to it from now on.
+    pub fn use_settings_file(&mut self, path: std::path::PathBuf) {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match loom_commands::settings::Settings::from_json(&text) {
+                Ok(settings) => {
+                    settings.apply(&mut self.state);
+                    if let Some(dir) = settings.last_folder.filter(|d| d.is_dir()) {
+                        self.file_dir = dir;
+                    }
+                }
+                Err(e) => self.last_error = Some(format!("{}: {e}", path.display())),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => self.last_error = Some(format!("{}: {e}", path.display())),
+        }
+        self.saved_settings = Some(self.settings());
+        self.settings_path = Some(path);
+    }
+
+    /// `loom scene.loom` / `loom model.fbx`: opens (.loom) or imports the
+    /// first argument that is not a `-` flag.
+    pub fn open_command_line(&mut self, args: impl IntoIterator<Item = String>) {
+        let Some(path) = args.into_iter().find(|a| !a.starts_with('-')) else { return };
+        let is_scene = std::path::Path::new(&path).extension().is_some_and(|e| e.eq_ignore_ascii_case("loom"));
+        let cmd = if is_scene { Command::OpenFile { path: Some(path.clone()) } } else { Command::ImportFile { path: Some(path.clone()) } };
+        if let Err(e) = self.dispatch(cmd) {
+            self.last_error = Some(format!("{path}: {e}"));
+        }
+    }
+
+    /// What the settings file holds now.
+    pub fn settings(&self) -> loom_commands::settings::Settings {
+        let mut s = loom_commands::settings::Settings::capture(&self.state);
+        s.last_folder = Some(self.file_dir.clone());
+        s
+    }
+
+    /// Writes the settings file when something in it changed.
+    fn persist_settings(&mut self) {
+        let Some(path) = self.settings_path.clone() else { return };
+        let now = self.settings();
+        if self.saved_settings.as_ref() == Some(&now) {
+            return;
+        }
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = std::fs::write(&path, now.to_json()) {
+            self.last_error = Some(format!("{}: {e}", path.display()));
+        }
+        self.saved_settings = Some(now);
     }
 
     /// App state without GPU resources, for tests of UI models.
@@ -307,6 +374,9 @@ impl LoomApp {
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
             world_version: 0,
+            shown_end_result_key: None,
+            pending_topology: None,
+            topology_ack: None,
             gpu: realistic::Gpu::None,
             pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(Vec::new()), Vec::new(), Vec::new())))),
             bitmap_cache: std::collections::HashMap::new(),
@@ -342,6 +412,8 @@ impl LoomApp {
             viewport_rects: Vec::new(),
             saved_modifier_usage: Default::default(),
             persist_modifier_usage: false,
+            settings_path: None,
+            saved_settings: None,
             update: None,
             uv_drag: None,
             uv_sketch: Vec::new(),
@@ -400,6 +472,21 @@ impl LoomApp {
             self.state.undo.end();
         }
         self.end_create_mode_for(cmd.name());
+        if let Command::SetParameter { id, .. } = &cmd {
+            // A base parameter under a topology-dependent modifier: ask first.
+            let id = NodeId(*id);
+            if let Some(a) = self.topology_ack {
+                if !self.state.selection.contains(&a) || self.state.scene.node(a).is_none_or(|n| n.active_entry.is_some()) {
+                    self.topology_ack = None;
+                }
+            }
+            let dependent = self.state.scene.node(id).is_some_and(|n| n.modifiers.iter().any(|s| s.modifier.topology_dependent()));
+            if dependent && self.topology_ack != Some(id) {
+                self.pending_topology = Some(cmd);
+                self.state.dialog = Some(loom_commands::Dialog::TopologyWarning);
+                return Ok(serde_json::json!({ "asked": "topology warning" }));
+            }
+        }
         let opens_editor = matches!(&cmd, Command::AddModifier { name } if name == "Unwrap UVW") && self.state.uv_editor.always_bring_up;
         let logged = log::log_enabled!(target: "loom::cmd", log::Level::Info).then(|| serde_json::to_value(&cmd).unwrap_or_default());
         let r = loom_commands::execute(&mut self.state, cmd);
@@ -438,6 +525,11 @@ impl LoomApp {
     }
 
     pub(crate) fn sync_after_command(&mut self) {
+        let key = self.end_result_key();
+        if key != self.shown_end_result_key {
+            self.shown_end_result_key = key;
+            self.state.mesh_dirty = true;
+        }
         if self.state.mesh_dirty {
             self.rebuild_world_meshes();
             self.state.mesh_dirty = false;
@@ -465,6 +557,18 @@ impl LoomApp {
         self.sync_after_command();
     }
 
+    /// Show End Result off: the selected object, while the Modify panel edits
+    /// it, shows its stack only up to the active entry.
+    pub(crate) fn below_end_result(&self, id: NodeId) -> bool {
+        !self.state.show_end_result && self.panel_tab == command_panel::Tab::Modify && self.state.selection.contains(&id)
+    }
+
+    /// The objects `below_end_result` applies to (None: none); the drawn
+    /// meshes are rebuilt when it changes.
+    fn end_result_key(&self) -> Option<Vec<NodeId>> {
+        (!self.state.show_end_result && self.panel_tab == command_panel::Tab::Modify).then(|| self.state.selection.iter().copied().collect())
+    }
+
     fn rebuild_world_meshes(&mut self) {
         let srgb_f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
         let srgb = |c: u8| srgb_f(c as f32 / 255.0);
@@ -479,12 +583,13 @@ impl LoomApp {
             let n = self.state.scene.node(id).expect("collected above");
             let mut mesh = n.cage_mesh().into_owned();
             // What the GPU draws: the stack result (NURMS included), or with
-            // Show End Result off only up to the active entry; the cage stays
-            // the base mesh for sub-object picking.
+            // Show End Result off only up to the active entry of the object
+            // the Modify panel edits; the cage stays the base mesh for
+            // sub-object picking.
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
             let mut shown = if n.modifiers.is_empty() && !nurms {
                 None
-            } else if !self.state.show_end_result {
+            } else if self.below_end_result(id) {
                 match n.active_entry {
                     None => Some(n.object.display_output()),
                     Some(a) => Some(self.state.scene.evaluated(id, Some(a)).value.mesh.clone()),
@@ -882,6 +987,7 @@ impl LoomApp {
             }
             self.saved_modifier_usage = self.state.modifier_usage.clone();
         }
+        self.persist_settings();
         hotkeys::handle(ctx, self);
         // "Close spline?" answered Yes: the line is closed, so the Line tool ends it.
         if let Some(line) = self.line.take() {
@@ -907,6 +1013,10 @@ impl LoomApp {
         statusbar::show(ctx, self);
         time_slider::show(ctx, self);
         command_panel::show(ctx, self);
+        if self.end_result_key() != self.shown_end_result_key {
+            // A tab switch changes what Show End Result off shows.
+            self.sync_after_command();
+        }
         viewports::show(ctx, self);
         if let Some(open) = self.quad_menu {
             if quad_menu::show(ctx, self, open) {
@@ -961,14 +1071,10 @@ fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::A
         .clone()
 }
 
-/// The user's 3dLoom config file for Modifier List use counts:
-/// `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%APPDATA%` on Windows.
+/// The user's 3dLoom config file for Modifier List use counts (in
+/// `loom_commands::settings::config_dir`).
 fn modifier_usage_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("APPDATA")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from))
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
-    Some(base.join("3dloom").join("modifier-usage.json"))
+    Some(loom_commands::settings::config_dir()?.join("modifier-usage.json"))
 }
 
 /// A length spinner in display units (Units Setup); typed values may carry a

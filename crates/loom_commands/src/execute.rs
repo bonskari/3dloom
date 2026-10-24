@@ -105,6 +105,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             };
             let path = std::path::PathBuf::from(path);
             let doc = crate::file::read(&path)?;
+            crate::settings::note_recent(state, &path);
             load_document(state, doc, Some(path));
             Ok(json!({ "nodes": state.scene.len() }))
         }
@@ -118,6 +119,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 }
             };
             save_to(state, &target)?;
+            crate::settings::note_recent(state, &target);
             state.file = Some(target.clone());
             state.undo.mark_saved();
             run_pending(state)?;
@@ -130,6 +132,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             };
             let target = std::path::PathBuf::from(path);
             save_to(state, &target)?;
+            crate::settings::note_recent(state, &target);
             state.file = Some(target.clone());
             state.undo.mark_saved();
             run_pending(state)?;
@@ -151,6 +154,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             };
             let target = incremental_path(&current);
             save_to(state, &target)?;
+            crate::settings::note_recent(state, &target);
             state.file = Some(target.clone());
             state.undo.mark_saved();
             run_pending(state)?;
@@ -163,7 +167,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.viewports = fresh.viewports;
             state.layout = fresh.layout;
             state.active_viewport = 0;
-            state.units = fresh.units;
+            state.units = state.default_units.clone();
             state.frame_range = fresh.frame_range;
             state.fps = fresh.fps;
             state.current_frame = fresh.current_frame;
@@ -462,7 +466,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SpinnerSnapToggle => toggle(&mut state.prefs.spinner_snap, "spinner_snap"),
         C::ShowRibbonToggle => toggle(&mut state.show_ribbon, "show_ribbon"),
-        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
+        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
         | C::RenameModifier { .. } | C::SelectStackEntry { .. } | C::SetModifierParameter { .. } | C::ModifierSubobjectLevel { .. } | C::ShowEndResultToggle | C::PinStackToggle
         | C::MakeUnique | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
         | C::PickModifierNode { .. } | C::SwitchToControlPointLevel | C::SwitchToLatticeLevel | C::SwitchToSetVolumeLevel | C::SwitchToTopLevel | C::SelectControlPoints { .. }
@@ -1331,12 +1335,69 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 if let Some(v) = custom_value { *value = v.max(1e-6); }
                 if let Some(u) = custom_unit { *unit = SystemUnit::parse(&u).ok_or_else(|| format!("unknown custom unit {u:?}"))?; }
             }
+            state.default_units = state.units.clone();
             Ok(json!({ "display": state.units.display.label(), "example": state.format_units(1.0) }))
         }
         C::CustomizeUserInterface => {
             state.dialog = Some(Dlg::CustomizeUI);
             Ok(json!({}))
         }
+        C::AssignShortcut { group, action, chord } => {
+            let c = crate::keymap::parse_chord(&chord)?;
+            let previous = state.custom_keys.assign(&group, &action, c)?;
+            Ok(json!({ "group": group, "action": action, "chord": c.chart_text(), "previous": previous }))
+        }
+        C::RemoveShortcut { group, action } => {
+            let removed = state.custom_keys.remove(&group, &action)?;
+            Ok(json!({ "removed": removed }))
+        }
+        C::ResetShortcuts => {
+            state.custom_keys.reset();
+            Ok(json!({}))
+        }
+        C::SaveShortcuts { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::SaveShortcuts);
+                return Ok(json!({ "dialog": "SaveShortcuts" }));
+            };
+            write_text(&path, &crate::keymap::shortcuts_to_file_text(&state.custom_keys))?;
+            back_to_keyboard_panel(state);
+            Ok(json!({ "path": path }))
+        }
+        C::LoadShortcuts { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::LoadShortcuts);
+                return Ok(json!({ "dialog": "LoadShortcuts" }));
+            };
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+            let rows = crate::keymap::shortcuts_from_file_text(&text)?;
+            state.custom_keys.set_rows(&rows)?;
+            back_to_keyboard_panel(state);
+            Ok(json!({ "path": path, "groups": rows.len() }))
+        }
+        C::SaveCustomUiScheme { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::SaveCustomUiScheme);
+                return Ok(json!({ "dialog": "SaveCustomUiScheme" }));
+            };
+            write_text(&path, &crate::settings::scheme_to_text(state))?;
+            Ok(json!({ "path": path }))
+        }
+        C::LoadCustomUiScheme { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::LoadCustomUiScheme);
+                return Ok(json!({ "dialog": "LoadCustomUiScheme" }));
+            };
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+            crate::settings::apply_scheme_text(state, &text)?;
+            Ok(json!({ "path": path }))
+        }
+        C::RevertToStartupUi => {
+            let ui = state.startup_ui;
+            ui.apply(state);
+            Ok(json!({}))
+        }
+        C::ShowCommandPanelToggle => toggle(&mut state.show_command_panel, "show_command_panel"),
         C::SelectAndManipulate => toggle(&mut state.manipulate, "manipulate"),
         C::Manipulate { id, name, delta } => {
             let nid = NodeId(id);
@@ -2137,20 +2198,27 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let mut changes = Vec::new();
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-                if matches!(node.object, ObjectKind::Camera { .. }) {
+                if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
                     continue;
                 }
+                // As the reference: rotation and scale (and the pivot offset) go into
+                // a new XForm modifier on top of the stack; collapsing bakes them.
                 let t = &node.transform;
-                let bake = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
-                let mut mesh = node.cage_mesh().into_owned();
-                edit_ops::transform_mesh(&mut mesh, bake)?;
+                let held = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
+                let mut xform = Modifier::by_name("XForm").ok_or("no XForm modifier")?;
+                if let Some(g) = xform.gizmo_mut() {
+                    *g = Transform::from_matrix(held);
+                }
+                let mut stack = node.modifiers.clone();
+                let at = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
+                stack.insert(at, loom_scene::ModifierSlot::new(xform));
                 let mut after_t = t.clone();
                 after_t.rotation.set(Vec3::ZERO);
                 after_t.scale.set(Vec3::ONE);
                 let mut props = node.props();
                 props.object_offset = Transform::default();
                 let new_world = state.scene.parent_frame(id) * after_t.matrix();
-                changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(node.object.with_mesh(mesh)) });
+                changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.extend(keep_children(state, id, new_world));
                 changes.push(Change::SetTransform { id, before: t.clone(), after: after_t });
@@ -2735,9 +2803,48 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 }
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
+    let change = share_with_instances(&state.scene, change);
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
     Ok(())
+}
+
+/// Instances share one object: a replaced object (a sub-object edit, a
+/// parameter, an attach) is replaced on every member of the node's instance
+/// group that the change does not already cover.
+fn share_with_instances(scene: &loom_scene::Scene, change: Change) -> Change {
+    fn replaced<'a>(c: &'a Change, out: &mut Vec<(NodeId, &'a ObjectKind)>, removed: &mut BTreeSet<NodeId>) {
+        match c {
+            Change::ReplaceObject { id, after, .. } => out.push((*id, &**after)),
+            Change::RemoveNode(id) => {
+                removed.insert(*id);
+            }
+            Change::Group(cs) => cs.iter().for_each(|c| replaced(c, out, removed)),
+            _ => {}
+        }
+    }
+    let mut objects = Vec::new();
+    let mut done = BTreeSet::new();
+    replaced(&change, &mut objects, &mut done);
+    if objects.is_empty() {
+        return change;
+    }
+    done.extend(objects.iter().map(|(id, _)| *id));
+    let mut extra = Vec::new();
+    for (id, after) in objects {
+        let Some(node) = scene.node(id) else { continue };
+        let root = node.instance_of.unwrap_or(id);
+        for member in scene.nodes().filter(|n| n.id == root || n.instance_of == Some(root)) {
+            if done.insert(member.id) {
+                extra.push(Change::ReplaceObject { id: member.id, before: Box::new(member.object.clone()), after: Box::new(after.clone()) });
+            }
+        }
+    }
+    if extra.is_empty() {
+        return change;
+    }
+    extra.insert(0, change);
+    Change::Group(extra)
 }
 
 /// Commits a structural edit (link, unlink, group) that only re-expresses a
@@ -2914,6 +3021,10 @@ pub fn file_action(state: &mut AppState, action: crate::viewport::PendingFileAct
         A::New => execute(state, C::NewScene),
         A::Reset => execute(state, C::ResetFile),
         A::Open => execute(state, C::OpenFile { path: None }),
+        A::OpenRecent(i) => {
+            let path = state.recent_files.get(i).ok_or_else(|| format!("no recent file {}", i + 1))?.to_string_lossy().into_owned();
+            execute(state, C::OpenFile { path: Some(path) })
+        }
         A::Exit => {
             state.exit_requested = true;
             Ok(json!({ "exit": true }))
@@ -2976,6 +3087,22 @@ fn set_tool(state: &mut AppState, tool: Tool) -> Result<Value, String> {
         state.coord_system = state.coord_by_tool[tool_index(tool)];
     }
     Ok(json!({ "tool": tool.label() }))
+}
+
+/// The Keyboard panel's Save / Load file dialog returns to the panel.
+fn back_to_keyboard_panel(state: &mut AppState) {
+    if matches!(state.dialog, Some(Dlg::SaveShortcuts | Dlg::LoadShortcuts)) {
+        state.dialog = Some(Dlg::CustomizeUI);
+    }
+}
+
+/// Writes a settings-style text file, making its folder first.
+fn write_text(path: &str, text: &str) -> Result<(), String> {
+    let path = std::path::Path::new(path);
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn toggle(flag: &mut bool, name: &str) -> Result<Value, String> {
@@ -3461,6 +3588,16 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 *gizmo = Transform::from_matrix_near(local_m * gizmo.matrix(), gizmo, Vec3::ZERO);
                 changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 continue;
+            }
+            if level == 2 {
+                if let Some(d) = stack[a].modifier.deformer_mut() {
+                    // Center: only the center point moves; the gizmo stays.
+                    let g = d.gizmo.matrix();
+                    let c = g.inverse().transform_point3(local_m.transform_point3(g.transform_point3(d.center.get())));
+                    d.center.set(c);
+                    changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+                    continue;
+                }
             }
             if let Some(gizmo) = stack[a].modifier.gizmo_mut() {
                 let cur = gizmo.matrix();

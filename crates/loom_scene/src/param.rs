@@ -368,6 +368,14 @@ impl<T: Animatable> Param<T> {
 
     /// Sets the value at the ambient time under the ambient Auto Key state.
     pub fn set(&mut self, value: T) {
+        // A constant that is not about to be keyed keeps the exact value (the
+        // f32 components cannot hold every u32, e.g. smoothing group bit 32).
+        if let Controller::Constant(old) = &mut self.controller {
+            if !(anim::animate() && anim::time().abs() > 1e-4 && old.comps() != value.comps()) {
+                *old = value;
+                return;
+            }
+        }
         let nc = value.comps();
         self.controller.set_comps(&nc, anim::time(), anim::animate());
     }

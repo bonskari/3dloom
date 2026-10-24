@@ -685,6 +685,7 @@ commands! {
     AddModifier => "Add Modifier", Loom, "Add a modifier from the Modifier List above the active entry of the selected objects." { name: String };
     DeleteModifier => "Delete Modifier", Loom, "Remove stack entry `index` (0 = bottom) from the selected objects." { index: u32 };
     MoveModifier => "Move Modifier", Loom, "Reorder the stack: entry `from` goes to position `to`." { from: u32, to: u32 };
+    CopyModifier => "Copy Modifier", Loom, "Shift-drag (copy) / Ctrl-drag (`instance`) in the stack: a copy of entry `from` is inserted so it ends up at position `to` (0 = bottom, up to the stack length)." { from: u32, to: u32, instance: bool };
     ToggleModifier => "Toggle Modifier", Loom, "Modifier on / off (the stack lightbulb)." { index: u32, on: bool };
     ToggleModifierInViewport => "Toggle Modifier In Viewport", Loom, "Modifier on / off in viewports only." { index: u32, on: bool };
     RenameModifier => "Rename Modifier", Loom, "Rename a stack entry." { index: u32, name: String };
@@ -857,10 +858,19 @@ commands! {
     // --- Properties, preferences, units, customize ---
     ObjectProperties => "Object Properties", MainUI, "Open the Object Properties dialog for the selection (Edit menu, quad menu).";
     Preferences => "Preferences", Loom, "Open Customize > Preferences.";
-    SetPreference => "Set Preference", Loom, "Set a Preferences value by name (booleans as 0/1): Auto Backup Enable, Auto Backup Count, Auto Backup Interval (minutes), Scene Undo Levels, Reference Coordinate System Constant, Auto Window/Crossing by Direction, Paint Selection Brush Size, Spinner Precision, Spinner Snap, Spinner Use Snap, Spinner Wrap Cursor, Viewport Tooltips, Show Cross Hair Cursor, Transform Gizmos, Show Axis Labels, Allow Multiple Gizmos, Gizmo Size, Move Plane Handle Size, Move Plane Handle Offset, Center Box Handle, Rotate Free Rotation, Rotate Show Tripod, Rotate Screen Handle, Rotate Show Pie Slice, Rotate Angle Data, Scale Size, Rotation Increment, Viewport Orbit Snap Angle." { name: String, value: f64 };
+    SetPreference => "Set Preference", Loom, "Set a Preferences value by name (booleans as 0/1): Auto Backup Enable, Auto Backup Count, Auto Backup Interval (minutes), Scene Undo Levels, Reference Coordinate System Constant, Auto Window/Crossing by Direction, Paint Selection Brush Size, Spinner Precision, Spinner Snap, Spinner Use Snap, Spinner Wrap Cursor, Viewport Tooltips, Show Cross Hair Cursor, Transform Gizmos, Show Axis Labels, Allow Multiple Gizmos, Gizmo Size, Move Plane Handle Size, Move Plane Handle Offset, Center Box Handle, Rotate Free Rotation, Rotate Show Tripod, Rotate Screen Handle, Rotate Show Pie Slice, Rotate Angle Data, Scale Size, Rotation Increment, Viewport Orbit Snap Angle, Space Locks Selection, Recent Files in File Menu." { name: String, value: f64 };
     UnitsSetup => "Units Setup", Loom, "Open Customize > Units Setup.";
     SetUnits => "Set Units", Loom, "Units Setup: `system_unit` Inches/Feet/Millimeters/Centimeters/Meters/Kilometers, `system_scale` units per system unit, `display` Generic / Millimeters / Centimeters / Meters / Kilometers / Decimal Inches / Decimal Feet / Feet w/ Decimal Inches / Custom (with custom_name, custom_value, custom_unit)." { system_unit: Option<String>, system_scale: Option<f32>, display: Option<String>, custom_name: Option<String>, custom_value: Option<f32>, custom_unit: Option<String> };
-    CustomizeUserInterface => "Customize User Interface", Loom, "Open Customize > Customize User Interface (Keyboard panel, read-only).";
+    CustomizeUserInterface => "Customize User Interface", Loom, "Open Customize > Customize User Interface (Keyboard panel).";
+    AssignShortcut => "Assign Shortcut", Loom, "Customize User Interface > Keyboard > Assign: bind `chord` (chart spelling, e.g. Alt+Ctrl+Z, NumPad +) to `action` in `group` (Main UI, Editable Poly, Edit Poly, Editable Spline, FFD, Unwrap UVW, Skin, Track View, Edit Normals); the action that had the chord there loses it. Saved in the settings file." { group: String, action: String, chord: String };
+    RemoveShortcut => "Remove Shortcut", Loom, "Customize User Interface > Keyboard > Remove: unbind every shortcut of `action` in `group`." { group: String, action: String };
+    ResetShortcuts => "Reset Shortcuts", Loom, "Customize User Interface > Keyboard > Reset: every group back to the default shortcuts.";
+    SaveShortcuts => "Save Shortcuts", Loom, "Customize User Interface > Keyboard > Save: write every group's shortcuts to a .kbd file (3dLoom's own JSON format); without `path` the Save dialog shows." { path: Option<String> };
+    LoadShortcuts => "Load Shortcuts", Loom, "Customize User Interface > Keyboard > Load: read shortcuts written by Save Shortcuts; the groups in the file replace the current ones. Without `path` the Open dialog shows." { path: Option<String> };
+    LoadCustomUiScheme => "Load Custom UI Scheme", MainUI, "Customize > Load Custom UI Scheme: apply a .ui file written by Save Custom UI Scheme (Show UI toggles and shortcuts); without `path` the Open dialog shows." { path: Option<String> };
+    SaveCustomUiScheme => "Save Custom UI Scheme", MainUI, "Customize > Save Custom UI Scheme: write the Show UI toggles and shortcuts to a .ui file; without `path` the Save dialog shows." { path: Option<String> };
+    RevertToStartupUi => "Revert to Startup UI", MainUI, "Customize > Revert to Startup Layout: the Show UI toggles as they were when 3dLoom started.";
+    ShowCommandPanelToggle => "Show Command Panel Toggle", MainUI, "Customize > Show UI > Show Command Panel: show or hide the command panel.";
     SelectAndManipulate => "Select and Manipulate", MainUI, "Toggle manipulators: drag the radius / height handles of primitives in viewports.";
     Manipulate => "Manipulate", Loom, "Add `delta` to a float parameter of a node (what a manipulator drag does)." { id: u64, name: String, delta: f64 };
 
@@ -1511,7 +1521,7 @@ commands! {
     UnhideByName => "Unhide By Name", Loom, "Open the Select From Scene dialog to unhide objects by name.";
     FreezeByName => "Freeze By Name", Loom, "Open the Select From Scene dialog to freeze objects by name.";
     UnfreezeByName => "Unfreeze By Name", Loom, "Open the Select From Scene dialog to unfreeze objects by name.";
-    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm: bake rotation and scale into the mesh and reset the node transform (position kept).";
+    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm > Reset Selected: the node's rotation and scale (and pivot offset) move into a new XForm modifier on top of the stack, the node keeps only its position; collapse the stack to bake them.";
     RescaleWorldUnits => "Rescale World Units", Loom, "Utilities > Rescale World Units: scale the whole scene by a factor." { factor: f32 };
     Measure => "Measure", Loom, "Utilities > Measure: dimensions, surface area, volume and centre of mass of the selection.";
     SetWireColor => "Set Wire Color", Loom, "Set a node's object colour (Name and Color rollout)." { id: u64, rgb: [u8; 3] };

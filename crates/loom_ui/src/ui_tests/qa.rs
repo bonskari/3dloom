@@ -917,8 +917,12 @@ fn menu_toggles_show_a_check_mark() {
     let mut h = Harness::new();
     click_text(&mut h, "Customize");
     let t = texts_now(&mut h);
+    assert!(t.iter().any(|s| s.starts_with("    Lock UI Layout")), "the layout is not locked: {t:?}");
+    click_text(&mut h, "Show UI");
+    let t = texts_now(&mut h);
     assert!(t.iter().any(|s| s.starts_with("✔ Show Main Toolbar")), "the main toolbar is shown: {t:?}");
-    assert!(t.iter().any(|s| s.starts_with("    Lock UI Layout")), "the layout is not locked");
+    assert!(t.iter().any(|s| s.starts_with("✔ Show Command Panel")), "{t:?}");
+    h.key(egui::Key::Escape);
     h.key(egui::Key::Escape);
     click_text(&mut h, "Views");
     let t = texts_now(&mut h);

@@ -287,6 +287,12 @@ pub enum Dialog {
     Preferences,
     UnitsSetup,
     CustomizeUI,
+    /// Customize User Interface > Keyboard > Save / Load (.kbd).
+    SaveShortcuts,
+    LoadShortcuts,
+    /// Customize > Save / Load Custom UI Scheme (.ui).
+    SaveCustomUiScheme,
+    LoadCustomUiScheme,
     /// Editable Poly settings windows (caddy-less dialogs).
     PolySettings(PolySettingsKind),
     /// Editable Poly > Detach.
@@ -306,6 +312,8 @@ pub enum Dialog {
     CloseSpline,
     /// Editable Spline > Refine with Connect on an existing vertex: Refine / Connect Only.
     RefineVertex,
+    /// A base parameter change under a topology-dependent modifier: Yes / Hold/Yes / No.
+    TopologyWarning,
     /// File > Import (OBJ).
     ImportFile,
     SaveAnimation,
@@ -363,6 +371,8 @@ pub enum Dialog {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PendingFileAction {
     Open,
+    /// File > Recent: the n-th file of `AppState::recent_files`.
+    OpenRecent(usize),
     New,
     Reset,
     Exit,
