@@ -373,7 +373,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(selection_json(state))
         }
-        C::DeleteObjects => delete(state),
+        C::DeleteObjects => delete(state, None),
+        C::DeletePolygons { delete_isolated } => {
+            if state.dialog == Some(Dialog::DeleteIsolatedVertices) {
+                state.dialog = None;
+            }
+            if !state.selection_mode.is_face_level() {
+                return Err("Delete Polygons works at Polygon and Element level".into());
+            }
+            delete(state, Some(delete_isolated))
+        }
         C::Clone => {
             if state.selection.is_empty() {
                 return Ok(json!({}));
@@ -1369,7 +1378,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         | C::MSmooth { .. } | C::TessellateFaces { .. } | C::Relax { .. } | C::RelaxSettings | C::FullInteractivity { .. } | C::PreserveUVs { .. } | C::DeleteIsolatedVertices
         | C::AutoSmooth | C::PaintDeformPushPull | C::PaintDeformRelax | C::SetMaterialId { .. } | C::SelectByMaterialId { .. } | C::SetSmoothingGroups { .. } | C::ClearSmoothingGroups
         | C::SelectBySmoothingGroup { .. } | C::AutoSmoothThreshold { .. } | C::SetVertexColor { .. } | C::SetVertexIllumination { .. } | C::SetVertexAlpha { .. } | C::SelectByVertexColor { .. }
-        | C::SubdivisionSurface { .. } | C::PaintDeformRevert | C::PaintDeformCommit | C::PaintDeformCancel | C::PaintDeformSettings { .. } | C::PaintDeformStroke { .. } => {
+        | C::SubdivisionSurface { .. } | C::PaintDeformRevert | C::PaintDeformCommit | C::PaintDeformCancel | C::PaintDeformSettings { .. } | C::PaintDeformStroke { .. }
+        | C::CleanRemove | C::SwiftLoopMode | C::SwiftLoop { .. } | C::LoopMode | C::SelectByHalf { .. } | C::BridgeSpecificEdges { .. } | C::PickBridgeEdge { .. } => {
             crate::poly::execute(state, cmd)
         }
         C::SnapsToggle => toggle(&mut state.snaps_on, "snaps"),
@@ -1986,6 +1996,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::ExitPickMode => {
+            // Cut: the first right-click ends the current cut, the second leaves Cut.
+            if state.pick_mode == Some(PickMode::CutB) {
+                state.pick_mode = Some(PickMode::CutA);
+                state.pick_point_a = None;
+                return Ok(json!({ "pick": "CutA" }));
+            }
             state.pick_mode = None;
             state.refine_chain = None;
             state.pick_source = None;
@@ -2104,7 +2120,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex) => {
                     return Err("this pick mode needs a point pick (Pick Point)".into());
                 }
-                Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB) => {
+                Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB | PickMode::SwiftLoop | PickMode::BridgeEdge1 | PickMode::BridgeEdge2) => {
                     return Err("this pick mode needs a sub-object pick (Pick Sub)".into());
                 }
                 None => return Err("no pick mode active".into()),
@@ -2358,9 +2374,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 state.sub_selection.clear();
             }
             let mesh = state.scene.node(node).ok_or_else(|| missing(node))?.cage_mesh().into_owned();
+            let loop_mode = state.loop_mode;
+            let clicked = ids.clone();
             for raw in ids {
                 let expanded: Vec<SubObjectId> = match mode {
                     SelectionMode::Element => element_of(&mesh, FaceId(raw)).into_iter().map(SubObjectId::Face).collect(),
+                    // Loop Mode: an edge brings its whole loop (Alt takes the loop away).
+                    SelectionMode::Edge if loop_mode => loom_mesh::select_ops::edge_loop(&mesh, &[HalfEdgeId(raw)]).into_iter().map(SubObjectId::Edge).collect(),
                     SelectionMode::Border => match mesh.canonical_edge_id(HalfEdgeId(raw)) {
                         Some(e) if is_border_edge(&mesh, e) => vec![SubObjectId::Edge(e)],
                         _ => vec![],
@@ -2374,6 +2394,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         state.sub_selection.insert(node, id);
                     }
                 }
+            }
+            if loop_mode && op != SelectOp::Subtract {
+                loop_mode_select(state, node, &mesh, mode, &clicked);
             }
             Ok(selection_json(state))
         }
@@ -3077,7 +3100,56 @@ fn base_of(name: &str) -> &str {
     name.trim_end_matches(|c: char| c.is_ascii_digit())
 }
 
-fn delete(state: &mut AppState) -> Result<Value, String> {
+/// Loop Mode at Vertex / Polygon level: a clicked vertex or polygon next to
+/// an already selected one brings the loop the two of them run along.
+fn loop_mode_select(state: &mut AppState, node: NodeId, mesh: &Mesh, mode: SelectionMode, clicked: &[u32]) {
+    use loom_mesh::select_ops::{edge_loop, edge_ring, vertex_edges};
+    let mut add: Vec<SubObjectId> = Vec::new();
+    for &raw in clicked {
+        match mode {
+            SelectionMode::Vertex => {
+                let v = VertexId(raw);
+                for e in vertex_edges(mesh, v) {
+                    let Some((a, b)) = mesh.edge_vertices(e) else { continue };
+                    let other = if a == v { b } else { a };
+                    if !state.sub_selection.contains(node, SubObjectId::Vertex(other)) {
+                        continue;
+                    }
+                    for l in edge_loop(mesh, &[e]) {
+                        if let Some((x, y)) = mesh.edge_vertices(l) {
+                            add.extend([SubObjectId::Vertex(x), SubObjectId::Vertex(y)]);
+                        }
+                    }
+                }
+            }
+            SelectionMode::Face => {
+                let hes = mesh.half_edges();
+                for c in mesh.face_corners(FaceId(raw)).unwrap_or_default() {
+                    let Some(g) = hes[hes[c.0 as usize].twin.0 as usize].face else { continue };
+                    if !state.sub_selection.contains(node, SubObjectId::Face(g)) {
+                        continue;
+                    }
+                    // The polygons between the ring edges of the shared edge.
+                    for r in edge_ring(mesh, &[c]) {
+                        let h = &hes[r.0 as usize];
+                        add.extend(h.face.into_iter().chain(hes[h.twin.0 as usize].face).map(SubObjectId::Face));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for id in add {
+        if !is_hidden(mesh, id) {
+            state.sub_selection.insert(node, id);
+        }
+    }
+}
+
+/// Delete. Deleting polygons that would leave vertices with no polygon asks
+/// first (`delete_isolated` None opens the prompt); the answer comes back as
+/// Delete Polygons.
+fn delete(state: &mut AppState, delete_isolated: Option<bool>) -> Result<Value, String> {
     if state.selection_mode != SelectionMode::Object && state.sub_selection.is_empty() {
         return Ok(json!({}));
     }
@@ -3112,13 +3184,29 @@ fn delete(state: &mut AppState) -> Result<Value, String> {
         }
     }
     let nodes: BTreeSet<NodeId> = faces.keys().chain(edges.keys()).chain(verts.keys()).copied().collect();
+    if delete_isolated.is_none() && edges.is_empty() && verts.is_empty() {
+        let leaves_isolated = faces.iter().any(|(n, fs)| {
+            let Some(node) = state.scene.node(*n) else { return false };
+            let mesh = node.cage_mesh();
+            let set: BTreeSet<FaceId> = fs.iter().copied().collect();
+            fs.iter().flat_map(|f| mesh.face_vertex_ids(*f).unwrap_or_default()).any(|v| mesh.faces_around_vertex(v).iter().all(|g| set.contains(g)))
+        });
+        if leaves_isolated {
+            state.dialog = Some(Dialog::DeleteIsolatedVertices);
+            return Ok(json!({ "ask": "Delete isolated vertices?" }));
+        }
+    }
     let mut changes = Vec::new();
     for n in nodes {
         let node = state.scene.node(n).ok_or_else(|| missing(n))?;
         let before = node.object.clone();
         let mut mesh = node.cage_mesh().into_owned();
         if let Some(f) = faces.get(&n) {
-            edit_ops::delete_faces(&mut mesh, f)?;
+            if delete_isolated == Some(false) {
+                edit_ops::delete_faces_keep_vertices(&mut mesh, f)?;
+            } else {
+                edit_ops::delete_faces(&mut mesh, f)?;
+            }
         }
         if let Some(e) = edges.get(&n) {
             edit_ops::delete_edges(&mut mesh, e)?;

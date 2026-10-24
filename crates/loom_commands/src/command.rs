@@ -892,7 +892,7 @@ commands! {
     PreviewSelectMode => "Preview Select Mode", EditablePoly, "Cycle Preview Selection: Off, SubObj, Multi.";
     Hide => "Hide", EditablePoly, "Hide the selected vertices or polygons (Alt+H).";
     Connect => "Connect", EditablePoly, "Vertex level: connect the selected vertex pairs across their polygons. Edge / Border level: Connect Edges with the current settings (Shift+Ctrl+E).";
-    Remove => "Remove", EditablePoly, "Vertex level: remove the selected vertices and merge their polygons. Edge level: remove the edges (Backspace).";
+    Remove => "Remove", EditablePoly, "Vertex level: remove the selected vertices and merge their polygons (Backspace). Edge level: remove the edges (Backspace).";
     Break => "Break", EditablePoly, "Break the selected vertices so every polygon gets its own corner.";
     SplitEdges => "Split Edges", EditablePoly, "Split the mesh along the selected edges (open them into borders).";
     TargetWeldMode => "Target Weld Mode", EditablePoly, "Toggle Target Weld: pick a vertex, then the vertex to weld it onto (Shift+Ctrl+W). Picks arrive as Pick Sub.";
@@ -932,7 +932,7 @@ commands! {
     Slice => "Slice", EditablePoly, "Slice the mesh (or the selected polygons) with the Slice Plane.";
     ResetSlicePlane => "Reset Slice Plane", EditablePoly, "Put the Slice Plane back at the selection's centre, level.";
     QuickSliceMode => "Quickslice Mode", EditablePoly, "Toggle QuickSlice: click two points; the plane through them and the view direction slices the mesh (Shift+Ctrl+Q).";
-    Cut => "Cut", EditablePoly, "Toggle Cut: click a start point and an end point on the surface (Alt+C).";
+    Cut => "Cut", EditablePoly, "Toggle Cut: click a start point, then each click cuts on from the last point; right-click ends the cut, a second right-click leaves Cut (Alt+C).";
     MeshSmooth => "MeshSmooth", EditablePoly, "MSmooth the selection with the current settings.";
     MeshSmoothSettings => "MeshSmooth Settings", EditablePoly, "Open the MeshSmooth settings window.";
     Tessellate => "Tessellate", EditablePoly, "Tessellate the selected polygons with the current settings.";
@@ -963,7 +963,7 @@ commands! {
     Chamfer => "Chamfer", Loom, "Chamfer the selected vertices (amount, open) or edges (amount, segments, open); sets the Chamfer settings." { amount: f32, segments: u32, open: bool };
     ConnectEdges => "Connect Edges", Loom, "Connect the selected edges with `segments` new edges; pinch and slide; sets the Connect settings." { segments: u32, pinch: f32, slide: f32 };
     ConnectVertices => "Connect Vertices", Loom, "Connect the selected vertex pairs that share a polygon.";
-    Bridge => "Bridge", Loom, "Bridge two selected borders or two selected polygons; sets the Bridge settings." { segments: u32, smooth: f32, bridge_adjacent: f32, twist1: i32, twist2: i32 };
+    Bridge => "Bridge", Loom, "Bridge two selected borders or two selected polygons; at Edge level the selected border edges pair up in increasing order of id (or the two picked edges with Bridge Specific Edges); sets the Bridge settings." { segments: u32, smooth: f32, bridge_adjacent: f32, twist1: i32, twist2: i32 };
     Extrude => "Extrude", Loom, "Extrude the selection: vertices / edges by height and base width, polygons by height with `kind`; sets the Extrude settings." { height: f32, width: f32, kind: crate::state::ExtrudeKind };
     Inset => "Inset", Loom, "Inset the selected polygons by `amount`, as a group or by polygon; sets the Inset settings." { amount: f32, by_polygon: bool };
     Bevel => "Bevel", Loom, "Bevel the selected polygons: extrude by `height`, then outline by `outline`; sets the Bevel settings." { height: f32, outline: f32, kind: crate::state::ExtrudeKind };
@@ -1537,6 +1537,14 @@ commands! {
     EdgeLoop => "Edge Loop", Loom, "Grow the selected edges into their loops.";
     ExtrudeFaces => "Extrude Faces", Loom, "Extrude the selected faces along their normals." { distance: f32 };
     DissolveEdges => "Dissolve Edges", Loom, "Remove the selected edges, merging their faces.";
+    CleanRemove => "Clean Remove", Loom, "Ctrl+Remove at Edge level (also Ctrl+Backspace): remove the selected edges and the vertices they leave with only two edges.";
+    SwiftLoopMode => "Swift Loop Mode", Loom, "Toggle Swift Loop: each click on the surface inserts an edge loop across the ring of the nearest edge; right-click exits.";
+    SwiftLoop => "Swift Loop", Loom, "Insert the edge loop through raw edge `edge` of `node`, `t` along it from its canonical origin (what a Swift Loop click does)." { node: u64, edge: u32, t: f32 };
+    LoopMode => "Loop Mode", Loom, "Toggle Modify Selection > Loop Mode: a clicked edge selects its loop (Alt deselects it); two adjacent vertices or polygons select their loop.";
+    SelectByHalf => "Select By Half", Loom, "Selection > By Half: select the sub-objects whose centre is on the positive side of the pivot along `axis`; `invert` selects the negative side (Invert Axis)." { axis: Axis, invert: bool };
+    BridgeSpecificEdges => "Bridge Specific Edges", Loom, "Bridge Edges dialog: on bridges the two picked edges (Pick Edge 1 / 2), off bridges the edge selection (Use Edge Selection)." { on: bool };
+    PickBridgeEdge => "Pick Bridge Edge", Loom, "Bridge Edges dialog > Pick Edge 1 (`which` 1) / Pick Edge 2 (2): the next edge pick (Pick Sub) becomes that edge." { which: u32 };
+    DeletePolygons => "Delete Polygons", Loom, "Delete the selected polygons; `delete_isolated` also deletes the vertices left with no polygon (the answer to the Delete prompt)." { delete_isolated: bool };
     Collapse => "Collapse", Loom, "Collapse the selected sub-objects to their centre.";
     ConnectEdgeRing => "Connect Edge Ring", Loom, "Connect the selected edge ring with a new loop.";
     Rename => "Rename", Loom, "Rename a node." { id: u64, name: String };

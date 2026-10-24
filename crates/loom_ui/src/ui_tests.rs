@@ -1397,6 +1397,163 @@ fn navigation_recovers_after_a_release_lost_to_focus_loss() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
+/// A 60-unit plane of 4 x 4 cells (15 units) as an Editable Poly, framed.
+fn poly_plane(h: &mut Harness) -> loom_scene::NodeId {
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [60.0, 60.0, 0.0] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    for n in ["Length Segs", "Width Segs"] {
+        h.cmd(Command::SetParameter { id: id.0, name: n.into(), value: 4.0 });
+    }
+    h.cmd(Command::ConvertToEditablePoly);
+    framed(h);
+    id
+}
+
+fn cage(h: &Harness, id: loom_scene::NodeId) -> loom_mesh::Mesh {
+    h.app.state.scene.node(id).unwrap().cage_mesh().into_owned()
+}
+
+/// The canonical edge between the vertices at two positions.
+fn edge_between(m: &loom_mesh::Mesh, a: Vec3, b: Vec3) -> u32 {
+    let at = |p: Vec3| (0..m.vertex_count() as u32).map(loom_mesh::VertexId).find(|v| m.vertex_position(*v).unwrap().distance(p) < 1e-3).expect("vertex there");
+    let (va, vb) = (at(a), at(b));
+    (0..m.half_edges().len() as u32)
+        .map(loom_mesh::HalfEdgeId)
+        .find(|e| m.canonical_edge_id(*e) == Some(*e) && m.edge_vertices(*e).is_some_and(|(x, y)| (x == va && y == vb) || (x == vb && y == va)))
+        .expect("edge there")
+        .0
+}
+
+#[test]
+fn backspace_removes_vertices_and_ctrl_backspace_cleans_edges() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.key(egui::Key::Num1);
+    h.cmd(Command::SelectSub { node: Some(id.0), ids: vec![0], op: loom_commands::SelectOp::Replace });
+    h.key(egui::Key::Backspace);
+    assert_eq!(cage(&h, id).vertex_count(), 7, "Backspace at Vertex level removes the vertex");
+    h.cmd(Command::UndoSceneOperation);
+    // A connected loop, then Ctrl+Backspace: the edges and their vertices go.
+    h.key(egui::Key::Num2);
+    h.cmd(Command::SelectSub { node: Some(id.0), ids: vec![0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::SelectEdgeRing);
+    h.cmd(Command::ConnectEdges { segments: 1, pinch: 0.0, slide: 0.0 });
+    assert_eq!(cage(&h, id).vertex_count(), 12);
+    h.mods = egui::Modifiers::CTRL;
+    h.key(egui::Key::Backspace);
+    h.mods = egui::Modifiers::NONE;
+    let m = cage(&h, id);
+    assert_eq!((m.face_count(), m.vertex_count()), (6, 8));
+}
+
+#[test]
+fn swift_loop_click_inserts_a_loop() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.key(egui::Key::Num2);
+    h.cmd(Command::SwiftLoopMode);
+    // On the top face, close to its +X edge: the loop runs across that edge's ring.
+    let p = h.screen_of(Vec3::new(13.0, 5.0, 30.0));
+    h.click(p);
+    let m = cage(&h, id);
+    m.check_invariants().unwrap();
+    assert_eq!(m.face_count(), 10, "a closed loop of four new edges");
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::SwiftLoop));
+    right_click(&mut h, p);
+    assert_eq!(h.app.state.pick_mode, None, "right-click leaves Swift Loop");
+}
+
+#[test]
+fn cut_clicks_chain_until_right_click() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.key(egui::Key::Num4);
+    h.cmd(Command::Cut);
+    for (x, y) in [(-14.5, -7.0), (14.5, -7.0), (-14.5, 7.0)] {
+        let p = h.screen_of(Vec3::new(x, y, 30.0));
+        h.click(p);
+    }
+    let m = cage(&h, id);
+    m.check_invariants().unwrap();
+    assert_eq!(m.face_count(), 8, "the third click cut on from the second");
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 30.0));
+    right_click(&mut h, p);
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::CutA), "one right-click ends the cut");
+    right_click(&mut h, p);
+    assert_eq!(h.app.state.pick_mode, None, "a second leaves Cut");
+}
+
+#[test]
+fn loop_mode_click_selects_the_edge_loop() {
+    let mut h = Harness::new();
+    let id = poly_plane(&mut h);
+    h.key(egui::Key::Num2);
+    h.cmd(Command::LoopMode);
+    let p = h.screen_of(Vec3::new(0.0, 7.5, 0.0));
+    h.click(p);
+    assert_eq!(h.sub_count(), 4, "the click selects the whole line of edges");
+    let m = cage(&h, id);
+    assert!(h.app.state.sub_selection.iter().all(|(_, s)| match s {
+        loom_commands::SubObjectId::Edge(e) => m.edge_vertices(e).is_some_and(|(a, b)| m.vertex_position(a).unwrap().x.abs() < 1e-3 && m.vertex_position(b).unwrap().x.abs() < 1e-3),
+        _ => false,
+    }));
+}
+
+#[test]
+fn pick_hinge_and_pick_bridge_edge_take_a_clicked_edge() {
+    let mut h = Harness::new();
+    let id = poly_plane(&mut h);
+    h.key(egui::Key::Num4);
+    h.cmd(Command::PickHinge);
+    let p = h.screen_of(Vec3::new(0.0, 7.5, 0.0));
+    h.click(p);
+    let m = cage(&h, id);
+    let want = edge_between(&m, Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 15.0, 0.0));
+    assert_eq!(h.app.state.poly_settings.hinge_edge, Some((id, want)), "the clicked edge is the hinge");
+    assert_eq!(h.app.state.pick_mode, None);
+    // Bridge Pick Edge 1 takes a border edge.
+    h.key(egui::Key::Num2);
+    h.cmd(Command::PickBridgeEdge { which: 1 });
+    let p = h.screen_of(Vec3::new(-30.0, 7.5, 0.0));
+    h.click(p);
+    let border = edge_between(&m, Vec3::new(-30.0, 0.0, 0.0), Vec3::new(-30.0, 15.0, 0.0));
+    assert_eq!(h.app.state.poly_settings.bridge_edges[0], Some((id, border)));
+}
+
+#[test]
+fn bridge_edges_dialog_takes_edges_selected_while_it_is_open() {
+    let mut h = Harness::new();
+    let id = poly_plane(&mut h);
+    // A one-cell hole at x 0..15, y 0..15.
+    h.key(egui::Key::Num4);
+    let m = cage(&h, id);
+    let f = (0..m.face_count() as u32)
+        .find(|f| {
+            let p = m.face_positions(loom_mesh::FaceId(*f)).unwrap();
+            (p.iter().sum::<Vec3>() / p.len() as f32).distance(Vec3::new(7.5, 7.5, 0.0)) < 0.1
+        })
+        .unwrap();
+    h.cmd(Command::SelectSub { node: Some(id.0), ids: vec![f], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::DeleteObjects);
+    assert_eq!(cage(&h, id).face_count(), 15);
+    h.key(egui::Key::Num2);
+    let m = cage(&h, id);
+    let top = edge_between(&m, Vec3::new(0.0, 15.0, 0.0), Vec3::new(15.0, 15.0, 0.0));
+    h.cmd(Command::SelectSub { node: Some(id.0), ids: vec![top], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::BridgeSettings);
+    assert_eq!(cage(&h, id).face_count(), 15, "one edge: nothing to bridge yet");
+    // Ctrl+click the hole's bottom edge in the viewport while the dialog is open.
+    h.mods = egui::Modifiers::CTRL;
+    let p = h.screen_of(Vec3::new(7.5, 0.0, 0.0));
+    h.click(p);
+    h.mods = egui::Modifiers::NONE;
+    h.frames(2);
+    assert_eq!(cage(&h, id).face_count(), 16, "the preview bridges the newly selected pair");
+}
+
 /// The Material Editor window's rect.
 fn material_editor_rect(h: &Harness) -> egui::Rect {
     h.ctx.memory(|m| m.area_rect(egui::Id::new("Material Editor"))).expect("the Material Editor is shown")

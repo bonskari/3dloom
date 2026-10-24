@@ -23,7 +23,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             ui.add_enabled_ui(has, |ui| {
-                action(ui, app, "Remove", "Remove the selected edges (Backspace)", Command::Remove);
+                // Ctrl+click: Clean Remove, the leftover vertices go too.
+                if ui.button("Remove").on_hover_text("Remove the selected edges (Backspace); Ctrl+click also removes their leftover vertices").clicked() {
+                    let ctrl = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+                    let _ = app.dispatch(if ctrl { Command::CleanRemove } else { Command::Remove });
+                }
                 action(ui, app, "Split", "Split the mesh along the selected edges", Command::SplitEdges);
             });
         });
