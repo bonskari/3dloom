@@ -71,7 +71,7 @@ fn options_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.label("Size:");
         let mut v = s.marker_size;
-        if ui.add(egui::DragValue::new(&mut v).speed(speed).range(1.0..=100.0)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=100.0).speed(speed)).changed() {
             set(app, Command::SnapSettings { mode: None, marker_display: None, marker_size: Some(v), preview_radius_px: None, radius_px: None, angle_deg: None, percent: None, use_axis_constraints: None, show_rubber_band: None });
         }
     });
@@ -79,25 +79,25 @@ fn options_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     egui::Grid::new("snap_general").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         let mut v = s.preview_radius_px;
         ui.label("Snap Preview Radius:");
-        if ui.add(egui::DragValue::new(&mut v).speed(speed).range(1.0..=200.0)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=200.0).speed(speed)).changed() {
             set(app, Command::SnapSettings { mode: None, marker_display: None, marker_size: None, preview_radius_px: Some(v), radius_px: None, angle_deg: None, percent: None, use_axis_constraints: None, show_rubber_band: None });
         }
         ui.end_row();
         let mut v = s.radius_px;
         ui.label("Snap Radius:");
-        if ui.add(egui::DragValue::new(&mut v).speed(speed).range(1.0..=200.0)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=200.0).speed(speed)).changed() {
             set(app, Command::SnapSettings { mode: None, marker_display: None, marker_size: None, preview_radius_px: None, radius_px: Some(v), angle_deg: None, percent: None, use_axis_constraints: None, show_rubber_band: None });
         }
         ui.end_row();
         let mut v = s.angle_deg;
         ui.label("Angle (deg):");
-        if ui.add(egui::DragValue::new(&mut v).speed(speed).range(0.0..=180.0)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=180.0).speed(speed)).changed() {
             set(app, Command::SnapSettings { mode: None, marker_display: None, marker_size: None, preview_radius_px: None, radius_px: None, angle_deg: Some(v), percent: None, use_axis_constraints: None, show_rubber_band: None });
         }
         ui.end_row();
         let mut v = s.percent;
         ui.label("Percent (%):");
-        if ui.add(egui::DragValue::new(&mut v).speed(speed).range(0.0..=100.0)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=100.0).speed(speed)).changed() {
             set(app, Command::SnapSettings { mode: None, marker_display: None, marker_size: None, preview_radius_px: None, radius_px: None, angle_deg: None, percent: Some(v), use_axis_constraints: None, show_rubber_band: None });
         }
         ui.end_row();
@@ -124,19 +124,19 @@ fn home_grid_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     egui::Grid::new("home_grid").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         let mut v = g.spacing;
         ui.label("Grid Spacing:");
-        if ui.add(egui::DragValue::new(&mut v).speed(speed).range(0.001..=1e6)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, 0.001..=1e6).speed(speed)).changed() {
             let _ = app.dispatch(Command::HomeGrid { spacing: Some(v), major_every: None, perspective_extent: None, inhibit_subdivision: None, inhibit_resize: None, dynamic_update_all: None });
         }
         ui.end_row();
         let mut v = g.major_every;
         ui.label("Major Lines every Nth Grid Line:");
-        if ui.add(egui::DragValue::new(&mut v).speed(0.1).range(1..=100)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, 1..=100).speed(0.1)).changed() {
             let _ = app.dispatch(Command::HomeGrid { spacing: None, major_every: Some(v), perspective_extent: None, inhibit_subdivision: None, inhibit_resize: None, dynamic_update_all: None });
         }
         ui.end_row();
         let mut v = g.perspective_extent;
         ui.label("Perspective View Grid Extent:");
-        if ui.add(egui::DragValue::new(&mut v).speed(0.1).range(1..=100)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, 1..=100).speed(0.1)).changed() {
             let _ = app.dispatch(Command::HomeGrid { spacing: None, major_every: None, perspective_extent: Some(v), inhibit_subdivision: None, inhibit_resize: None, dynamic_update_all: None });
         }
         ui.end_row();

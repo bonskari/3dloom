@@ -40,7 +40,7 @@ fn number(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, label: &
             let r = if length {
                 ui.add(app.length_drag(&mut v, app.spinner_speed(0.5)))
             } else {
-                ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision.max(1)))
+                ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision.max(1)))
             };
             let r = if supported { r } else { r.on_disabled_hover_text(UNSUPPORTED) };
             spin(app, id, name, &r, v as f64, value as f64);
@@ -52,7 +52,7 @@ fn int(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, label: &str
     ui.horizontal(|ui| {
         ui.label(label);
         let mut v = value;
-        let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(1.0)));
+        let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(1.0)));
         spin(app, id, name, &r, v as f64, value as f64);
     });
 }

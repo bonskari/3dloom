@@ -269,14 +269,16 @@ pub struct HideCategories {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dialog {
     SelectFromScene,
-    /// Rendering > Render: choose the PNG the active view renders to.
+    /// Render Setup > Render Output > Files...: the file a Production render saves to.
     RenderFile,
-    /// Rendering > Render SetUp: the output size.
+    /// Rendering > Render Setup (F10).
     RenderSetup,
     /// Tools > Light Lister.
     LightLister,
     /// General Parameters > Exclude...: the Exclude/Include dialog of a light.
     LightExclude { light: u64 },
+    /// Rendered Frame Window > Save Image.
+    SaveRenderedImage,
     /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).
     MaterialMap { channel: u8 },
     ViewportConfiguration,
@@ -296,6 +298,12 @@ pub enum Dialog {
     Preferences,
     UnitsSetup,
     CustomizeUI,
+    /// Customize User Interface > Keyboard > Save / Load (.kbd).
+    SaveShortcuts,
+    LoadShortcuts,
+    /// Customize > Save / Load Custom UI Scheme (.ui).
+    SaveCustomUiScheme,
+    LoadCustomUiScheme,
     /// Editable Poly settings windows (caddy-less dialogs).
     PolySettings(PolySettingsKind),
     /// Editable Poly > Detach.
@@ -315,6 +323,8 @@ pub enum Dialog {
     CloseSpline,
     /// Editable Spline > Refine with Connect on an existing vertex: Refine / Connect Only.
     RefineVertex,
+    /// A base parameter change under a topology-dependent modifier: Yes / Hold/Yes / No.
+    TopologyWarning,
     /// File > Import (OBJ).
     ImportFile,
     SaveAnimation,
@@ -372,6 +382,8 @@ pub enum Dialog {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PendingFileAction {
     Open,
+    /// File > Recent: the n-th file of `AppState::recent_files`.
+    OpenRecent(usize),
     New,
     Reset,
     Exit,

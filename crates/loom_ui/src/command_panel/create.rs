@@ -154,13 +154,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     ui.horizontal(|ui| {
                         for (v, l) in ke.position.iter_mut().zip(["X:", "Y:", "Z:"]) {
                             ui.label(l);
-                            ui.add(egui::DragValue::new(v).speed(speed));
+                            ui.add(crate::spinner::spin(ui, v, ..).speed(speed));
                         }
                     });
                     ui.horizontal(|ui| {
                         ui.label("Size:");
                         for v in ke.size.iter_mut() {
-                            ui.add(egui::DragValue::new(v).speed(speed).range(0.0..=1e6));
+                            ui.add(crate::spinner::spin(ui, v, 0.0..=1e6).speed(speed));
                         }
                     });
                     let (position, size) = (ke.position, ke.size);
@@ -295,15 +295,26 @@ fn keyboard_entry(ui: &mut egui::Ui, app: &mut LoomApp, kind: PrimitiveKind) {
         ui.horizontal(|ui| {
             for (v, l) in ke.position.iter_mut().zip(["X:", "Y:", "Z:"]) {
                 ui.label(l);
-                ui.add(egui::DragValue::new(v).speed(speed));
+                ui.add(crate::spinner::spin(ui, v, ..).speed(speed));
             }
         });
-        ui.horizontal(|ui| {
-            ui.label("Size:");
-            for v in ke.size.iter_mut() {
-                ui.add(egui::DragValue::new(v).speed(speed).range(0.0..=1e6));
-            }
-        });
+        if kind == PrimitiveKind::Box {
+            // size is width X, length Y, height Z; the rollout lists Length, Width, Height.
+            egui::Grid::new("box_keyboard_entry").num_columns(2).show(ui, |ui| {
+                for (i, l) in [(1, "Length:"), (0, "Width:"), (2, "Height:")] {
+                    ui.label(l);
+                    ui.add(crate::spinner::spin(ui, &mut ke.size[i], 0.0..=1e6).speed(speed));
+                    ui.end_row();
+                }
+            });
+        } else {
+            ui.horizontal(|ui| {
+                ui.label("Size:");
+                for v in ke.size.iter_mut() {
+                    ui.add(crate::spinner::spin(ui, v, 0.0..=1e6).speed(speed));
+                }
+            });
+        }
         let (position, size) = (ke.position, ke.size);
         if ui.button("Create").clicked() {
             let _ = app.dispatch(Command::CreatePrimitive { kind, position, size });
@@ -361,9 +372,9 @@ fn param_grid(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, salt
                         let mut v = f;
                         let length = ["Length", "Width", "Height", "Depth", "Radius", "Radius 1", "Radius 2"].contains(&name);
                         let r = if length {
-                            ui.add(app.length_drag(&mut v, app.spinner_speed(0.05)))
+                            ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.05)))
                         } else {
-                            ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision))
+                            ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision))
                         };
                         spin(app, id, name, &r, v as f64, f as f64);
                     }
@@ -379,7 +390,7 @@ fn param_grid(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, salt
                     }
                     loom_scene::ParamValue::Int(i) => {
                         let mut v = i;
-                        let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.1)));
+                        let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.1)));
                         spin(app, id, name, &r, v as f64, i as f64);
                     }
                     loom_scene::ParamValue::Bool(b) => {
@@ -430,7 +441,7 @@ fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
     };
     let length = |ui: &mut egui::Ui, app: &mut LoomApp, name: &str, value: f32| {
         let mut v = value;
-        let r = ui.add(app.length_drag(&mut v, app.spinner_speed(0.5)));
+        let r = ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.5)));
         spin(app, id, name, &r, v as f64, value as f64);
     };
     rollout(ui, "Parameters", true, |ui| {
@@ -439,14 +450,14 @@ fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             ui.label("Lens:");
             let lens = loom_scene::camera::fov_to_lens(fov);
             let mut v = lens;
-            let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.1)).range(1.0..=100_000.0).fixed_decimals(decimals).suffix("mm"));
+            let r = ui.add(crate::spinner::spin(ui, &mut v, 1.0..=100_000.0).speed(app.spinner_speed(0.1)).fixed_decimals(decimals).suffix("mm"));
             spin(app, id, "Lens", &r, v as f64, lens as f64);
             ui.end_row();
             // The FOV spinner shows the FOV measured in the chosen direction.
             ui.label("FOV:");
             let shown = fov_in_direction(fov, dir, RENDER_ASPECT);
             let mut v = shown;
-            let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.1)).range(1.0..=175.0).fixed_decimals(decimals).suffix(" deg"));
+            let r = ui.add(crate::spinner::spin(ui, &mut v, 1.0..=175.0).speed(app.spinner_speed(0.1)).fixed_decimals(decimals).suffix(" deg"));
             spin(app, id, "FOV", &r, fov_from_direction(v, dir, RENDER_ASPECT) as f64, fov as f64);
             egui::ComboBox::from_id_salt(("camera_fov_dir", id.0)).width(60.0).selected_text(&FOV_DIRECTIONS[dir.min(2) as usize][..1]).show_ui(ui, |ui| {
                 for (i, d) in FOV_DIRECTIONS.iter().enumerate() {
