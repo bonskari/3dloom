@@ -997,6 +997,110 @@ fn modifier_stack_drag_reorders_and_trash_removes() {
     assert_eq!(names(&h), vec!["Taper".to_string()], "the trash removes the active entry");
 }
 
+/// The value text painted on the same row as `label`.
+fn field_beside(h: &mut Harness, label: &str) -> egui::Pos2 {
+    let shapes = run_shapes(h, Vec::new());
+    let mut all = Vec::new();
+    for s in &shapes {
+        texts(&s.shape, &mut all);
+    }
+    let l = all.iter().rev().find(|(t, _)| t == label).map(|(_, r)| *r).unwrap_or_else(|| panic!("no {label}"));
+    all.iter().filter(|(t, r)| t != label && (r.center().y - l.center().y).abs() < 4.0 && r.min.x > l.max.x).map(|(_, r)| r.center()).next().unwrap_or_else(|| panic!("no field beside {label}"))
+}
+
+/// A spinner drag in Modify changes the parameter live and is one undo step.
+#[test]
+fn modify_spinner_drag_is_one_undo_step() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let f = field_beside(&mut h, "Length");
+    h.drag(f, f + egui::vec2(40.0, 0.0));
+    let after = param(&h, "Length");
+    assert!((after - 30.0).abs() > 0.5, "the drag changed Length: {after}");
+    h.cmd(Command::UndoSceneOperation);
+    assert!((param(&h, "Length") - 30.0).abs() < 1e-4, "one undo puts it back: {}", param(&h, "Length"));
+    assert_eq!(h.app.state.scene.len(), 1);
+    let _ = id;
+}
+
+#[test]
+fn bevel_mode_drag_and_ctrl_alt_sub_clicks() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    let before = face_count(&h, id);
+    h.mods = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+    h.key(egui::Key::B);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.poly_drag, Some(loom_commands::PolyDrag::Bevel), "Shift+Ctrl+B");
+    h.drag(p, p + egui::vec2(-10.0, -40.0));
+    assert_eq!(face_count(&h, id), before + 4, "one bevel");
+    h.cmd(Command::UndoSceneOperation);
+    h.app.state.poly_drag = None;
+    // Ctrl+click adds a polygon, Alt+click removes it (still at polygon level;
+    // the undo cleared the sub-object selection).
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Face);
+    h.click(p);
+    let side = h.screen_of(Vec3::new(5.0, -15.0, 10.0));
+    h.mods = egui::Modifiers::CTRL;
+    h.click(side);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.sub_count(), 2, "Ctrl+click adds");
+    h.mods = egui::Modifiers::ALT;
+    h.click(side);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.sub_count(), 1, "Alt+click removes");
+}
+
+#[test]
+fn every_menu_opens_and_escape_closes_it() {
+    let mut h = Harness::new();
+    for m in ["File", "Edit", "Tools", "Group", "Animation", "Graph Editors", "Views", "Create", "Rendering", "Customize", "Help"] {
+        let closed = texts_now(&mut h).len();
+        // The menu bar title (Create is also a command panel tab).
+        let shapes = run_shapes(&mut h, Vec::new());
+        let mut all = Vec::new();
+        for s in &shapes {
+            texts(&s.shape, &mut all);
+        }
+        let r = all.iter().find(|(t, r)| t == m && r.max.y < 22.0).map(|(_, r)| *r).unwrap_or_else(|| panic!("no menu {m}"));
+        h.click(r.center());
+        let before = texts_now(&mut h).len();
+        assert!(before > closed, "{m} opens ({closed} -> {before} texts)");
+        h.key(egui::Key::Escape);
+        let after = texts_now(&mut h).len();
+        assert!(after < before, "Escape closes {m} ({before} -> {after} texts)");
+    }
+}
+
+#[test]
+fn preferences_and_other_dialogs_open_and_close() {
+    let mut h = Harness::new();
+    box_scene(&mut h);
+    for (c, d) in [
+        (Command::Preferences, loom_commands::Dialog::Preferences),
+        (Command::UnitsSetup, loom_commands::Dialog::UnitsSetup),
+        (Command::GridAndSnapSettings, loom_commands::Dialog::GridAndSnapSettings),
+        (Command::TimeConfiguration, loom_commands::Dialog::TimeConfiguration),
+        (Command::ObjectProperties, loom_commands::Dialog::ObjectProperties),
+        (Command::ConfigureViewports, loom_commands::Dialog::ViewportConfiguration),
+    ] {
+        h.cmd(c.clone());
+        assert_eq!(h.app.state.dialog, Some(d), "{c:?} opens");
+        h.frames(2);
+        h.cmd(Command::CloseDialog);
+        assert!(h.app.state.dialog.is_none(), "{c:?} closes");
+    }
+    h.cmd(Command::Preferences);
+    h.frames(2);
+    click_text(&mut h, "OK");
+    assert!(h.app.state.dialog.is_none(), "Preferences OK closes it");
+}
+
 #[test]
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();
