@@ -42,6 +42,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
+        c if crate::display::handles(&c) => crate::display::execute(state, c),
         c if crate::render::handles(&c) => crate::render::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
@@ -1574,7 +1575,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 PrimitiveKind::Plane => (ObjectKind::plane_object(size.y, size.x), 0.0),
             };
             let mut node = Node::new(&state.scene.next_name(object.base_name()), object);
-            node.wire_color = loom_scene::OBJECT_COLORS[(state.scene.next_id() as usize) % loom_scene::OBJECT_COLORS.len()];
+            node.wire_color = state.display.new_object_color(state.scene.next_id());
             node.transform.position.set(Vec3::from(position) + Vec3::Z * z_offset);
             let name = node.name.clone();
             let id = NodeId(state.scene.next_id());
@@ -2765,7 +2766,7 @@ pub(crate) fn cage_change(node: &Node, mesh: Mesh) -> Change {
 /// commands do; returns its id.
 pub(crate) fn add_object(state: &mut AppState, object: ObjectKind, position: Vec3) -> Result<NodeId, String> {
     let mut node = Node::new(&state.scene.next_name(object.base_name()), object);
-    node.wire_color = loom_scene::OBJECT_COLORS[(state.scene.next_id() as usize) % loom_scene::OBJECT_COLORS.len()];
+    node.wire_color = state.display.new_object_color(state.scene.next_id());
     node.transform.position.set(position);
     let name = node.name.clone();
     let id = NodeId(state.scene.next_id());
@@ -3820,7 +3821,7 @@ fn apply_locks(before: &Transform, mut after: Transform, locks: loom_scene::Axes
 }
 
 /// Hidden or frozen objects drop out of the selection.
-fn prune_selection_hidden(state: &mut AppState) {
+pub(crate) fn prune_selection_hidden(state: &mut AppState) {
     let keep: BTreeSet<NodeId> = state
         .selection
         .iter()

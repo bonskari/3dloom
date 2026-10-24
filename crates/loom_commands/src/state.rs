@@ -1221,6 +1221,8 @@ pub struct AppState {
     /// Rendering > Material Editor (M): its own modeless window, open beside
     /// `dialog` so the bitmap chooser its Maps buttons open does not close it.
     pub material_editor_open: bool,
+    /// Display panel and viewport display settings (Display Color, statistics, Object Color dialog...).
+    pub display: crate::display::DisplaySettings,
     /// What a Select From Scene style dialog is for (Hide/Freeze by Name...).
     pub dialog_purpose: DialogPurpose,
     pub pick_mode: Option<PickMode>,
@@ -1489,6 +1491,7 @@ impl AppState {
             hide_category: HideCategories::default(),
             dialog: None,
             material_editor_open: false,
+            display: Default::default(),
             dialog_purpose: DialogPurpose::Select,
             pick_mode: None,
             align_target: None,
@@ -1672,6 +1675,10 @@ impl AppState {
     /// Whether a node shows in viewports (own flag and Hide by Category).
     pub fn is_visible(&self, node: &Node) -> bool {
         if node.hidden || self.scene.layer(node.layer).is_some_and(|l| l.hidden) {
+            return false;
+        }
+        // Display > Hide Frozen Objects, Hide by Category > Bone Objects.
+        if (self.display.hide_frozen && (node.frozen || self.scene.layer(node.layer).is_some_and(|l| l.frozen))) || (self.display.hide_bones && node.object.is_bone()) {
             return false;
         }
         // A hidden group head hides its members.

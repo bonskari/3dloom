@@ -1048,11 +1048,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
             }
             if app.state.viewports[index].safe_frames {
-                draw_safe_frames(&painter, rect);
+                draw_safe_frames(&painter, app, rect);
             }
-            if app.state.show_trajectories || app.motion_trajectories || app.state.trajectory_keys {
-                draw_trajectories(&painter, app, view_proj, rect);
-            }
+            draw_trajectories(&painter, app, view_proj, rect);
+            draw_links(&painter, app, view_proj, rect);
             if is_active && app.has_selection() {
                 let layout = gizmo::layout_for(app, index, rect.height());
                 let hovered = hover_pos.and_then(|p| gizmo::hit(app, &layout, &projection, p));
@@ -2047,9 +2046,22 @@ fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Ma
 /// safe (90 %) and title-safe (80 %) regions.
 /// The selection's motion paths: a line through every frame, white frame
 /// ticks, red key boxes (white when selected), the current frame in yellow.
+/// The objects whose trajectories show: the selection while Show
+/// Trajectories (or the Motion panel's Trajectories mode) is on, plus every
+/// visible object with the Trajectory display property.
+fn trajectory_nodes(app: &LoomApp) -> Vec<loom_scene::NodeId> {
+    let mut ids: Vec<loom_scene::NodeId> = if app.state.show_trajectories || app.motion_trajectories || app.state.trajectory_keys { app.state.selection.iter().copied().collect() } else { Vec::new() };
+    for n in app.state.scene.nodes() {
+        if n.display.trajectory && app.state.is_visible(n) && !ids.contains(&n.id) {
+            ids.push(n.id);
+        }
+    }
+    ids
+}
+
 fn draw_trajectories(painter: &egui::Painter, app: &LoomApp, view_proj: glam::Mat4, rect: egui::Rect) {
     let frame = app.state.current_frame;
-    for id in &app.state.selection {
+    for id in &trajectory_nodes(app) {
         let Some((pts, keys)) = loom_commands::motion::trajectory(&app.state, *id) else { continue };
         let screen: Vec<Option<egui::Pos2>> = pts.iter().map(|(_, p)| project_world_to_screen(*p, view_proj, rect)).collect();
         for w in screen.windows(2) {
@@ -2086,13 +2098,63 @@ fn trajectory_hit(app: &LoomApp, view_proj: glam::Mat4, rect: egui::Rect, p: egu
     None
 }
 
-fn draw_safe_frames(painter: &egui::Painter, rect: egui::Rect) {
-    let aspect = 4.0 / 3.0;
+/// Link Display > Display Links: a link from each such visible object's
+/// pivot to its parent's pivot, in the object colour, with a diamond at the
+/// child end.
+fn draw_links(painter: &egui::Painter, app: &LoomApp, view_proj: glam::Mat4, rect: egui::Rect) {
+    let scene = &app.state.scene;
+    for n in scene.nodes().filter(|n| n.display.display_links && app.state.is_visible(n)) {
+        let Some(parent) = n.parent else { continue };
+        let child = scene.world_matrix(n.id).w_axis.truncate();
+        let to = scene.world_matrix(parent).w_axis.truncate();
+        let (Some(a), Some(b)) = (project_world_to_screen(child, view_proj, rect), project_world_to_screen(to, view_proj, rect)) else { continue };
+        let c = n.wire_color;
+        let color = if app.state.selection.contains(&n.id) { egui::Color32::WHITE } else { egui::Color32::from_rgb(c[0], c[1], c[2]) };
+        painter.line_segment([a, b], egui::Stroke::new(1.5_f32, color));
+        let d = 4.0;
+        painter.add(egui::Shape::convex_polygon(vec![a + egui::vec2(0.0, -d), a + egui::vec2(d, 0.0), a + egui::vec2(0.0, d), a + egui::vec2(-d, 0.0)], egui::Color32::TRANSPARENT, egui::Stroke::new(1.0_f32, color)));
+    }
+}
+
+/// The live area: the render output's image aspect fitted into the viewport.
+pub(crate) fn safe_frame_live_area(app: &LoomApp, rect: egui::Rect) -> egui::Rect {
+    let aspect = app.state.scene.render.image_aspect().max(0.01);
     let (w, h) = if rect.width() / rect.height() > aspect { (rect.height() * aspect, rect.height()) } else { (rect.width(), rect.width() / aspect) };
-    let live = egui::Rect::from_center_size(rect.center(), egui::vec2(w, h));
-    painter.rect_stroke(live, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)), egui::StrokeKind::Middle);
-    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.05, h * 0.05)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(90, 200, 255)), egui::StrokeKind::Middle);
-    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.10, h * 0.10)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 150, 60)), egui::StrokeKind::Middle);
+    egui::Rect::from_center_size(rect.center(), egui::vec2(w, h))
+}
+
+/// Safe Frames: Live Area (render aspect), Action / Title / User Safe
+/// frames (percent smaller than the live area) and the 12-Field Grid.
+fn draw_safe_frames(painter: &egui::Painter, app: &LoomApp, rect: egui::Rect) {
+    let s = app.state.display.safe_frames;
+    let live = safe_frame_live_area(app, rect);
+    let (w, h) = (live.width(), live.height());
+    let frame = |pct: [f32; 2]| live.shrink2(egui::vec2(w * pct[0] / 200.0, h * pct[1] / 200.0));
+    let stroke = |c: [u8; 3]| egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(c[0], c[1], c[2]));
+    if s.live_area {
+        painter.rect_stroke(live, 0.0, stroke([255, 230, 0]), egui::StrokeKind::Middle);
+    }
+    if s.action_safe {
+        painter.rect_stroke(frame(s.action), 0.0, stroke([90, 200, 255]), egui::StrokeKind::Middle);
+    }
+    if s.title_safe {
+        painter.rect_stroke(frame(s.title), 0.0, stroke([255, 150, 60]), egui::StrokeKind::Middle);
+    }
+    if s.user_safe {
+        painter.rect_stroke(frame(s.user), 0.0, stroke([230, 90, 230]), egui::StrokeKind::Middle);
+    }
+    if s.grid {
+        let (cols, rows) = if s.grid_4x3 { (4, 3) } else { (12, 9) };
+        let st = egui::Stroke::new(1.0_f32, egui::Color32::from_gray(150));
+        for i in 1..cols {
+            let x = live.left() + w * i as f32 / cols as f32;
+            painter.line_segment([egui::pos2(x, live.top()), egui::pos2(x, live.bottom())], st);
+        }
+        for i in 1..rows {
+            let y = live.top() + h * i as f32 / rows as f32;
+            painter.line_segment([egui::pos2(live.left(), y), egui::pos2(live.right(), y)], st);
+        }
+    }
 }
 
 /// The soft selection gradient: red (1) → orange → yellow → blue (0).
