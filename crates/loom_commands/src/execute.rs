@@ -507,7 +507,19 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SelectObject => set_tool(state, Tool::Select),
         C::SelectAndMove => set_tool(state, Tool::Move),
         C::SelectAndRotate => set_tool(state, Tool::Rotate),
-        C::SelectAndScale | C::ScaleCycle => set_tool(state, Tool::Scale),
+        C::SelectAndScale => set_tool(state, Tool::Scale),
+        C::ScaleCycle => {
+            if state.active_tool == Tool::Scale {
+                state.scale_kind = state.scale_kind.next();
+            }
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": state.scale_kind.label() }))
+        }
+        C::ScaleType { kind } => {
+            state.scale_kind = kind;
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": kind.label() }))
+        }
         C::SubObjectLevelCycle if state.spline_selected() => {
             state.selection_mode = match state.selection_mode {
                 SelectionMode::Object => SelectionMode::Vertex,

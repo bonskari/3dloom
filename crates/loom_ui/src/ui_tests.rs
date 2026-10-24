@@ -7,6 +7,8 @@ use eframe::egui;
 use glam::Vec3;
 use loom_commands::{Command, PrimitiveKind, SelectionMode};
 
+mod menus;
+
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
 struct Harness {
@@ -14,11 +16,14 @@ struct Harness {
     app: LoomApp,
     time: f64,
     mods: egui::Modifiers,
+    /// The last frame's widgets (role, text, rect), as a screen reader sees them.
+    widgets: Vec<(egui::accesskit::Role, String, egui::Rect)>,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new() };
+        h.ctx.enable_accesskit();
         h.frames(3);
         h
     }
@@ -27,7 +32,45 @@ impl Harness {
         self.time += 1.0 / 30.0;
         let input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
         let app = &mut self.app;
-        let _ = self.ctx.run(input, |ctx| app.frame(ctx));
+        let out = self.ctx.run(input, |ctx| app.frame(ctx));
+        if let Some(tree) = out.platform_output.accesskit_update {
+            self.widgets = tree
+                .nodes
+                .iter()
+                .filter_map(|(_, n)| {
+                    let b = n.bounds()?;
+                    let text = n.label().or(n.value()).unwrap_or_default().to_owned();
+                    Some((n.role(), text, egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32))))
+                })
+                .collect();
+        }
+    }
+
+    /// The rects of the widgets with this role whose text is `text`, top to bottom.
+    fn find_all(&self, role: egui::accesskit::Role, text: &str) -> Vec<egui::Rect> {
+        let mut v: Vec<egui::Rect> = self.widgets.iter().filter(|(r, t, _)| *r == role && t.trim() == text).map(|w| w.2).collect();
+        v.sort_by(|a, b| a.min.y.total_cmp(&b.min.y).then(a.min.x.total_cmp(&b.min.x)));
+        v
+    }
+
+    /// The topmost widget with this role whose text is `text`.
+    fn find(&self, role: egui::accesskit::Role, text: &str) -> egui::Rect {
+        *self.find_all(role, text).first().unwrap_or_else(|| panic!("no {role:?} \"{text}\" on screen"))
+    }
+
+    fn has(&self, role: egui::accesskit::Role, text: &str) -> bool {
+        self.widgets.iter().any(|(r, t, _)| *r == role && t.trim() == text)
+    }
+
+    /// The spinner right of the label `label` on the same row.
+    fn spinner_after(&self, label: &str) -> egui::Rect {
+        let l = self.find(egui::accesskit::Role::Label, label);
+        self.widgets
+            .iter()
+            .filter(|(r, _, w)| *r == egui::accesskit::Role::SpinButton && w.min.x >= l.max.x - 1.0 && (w.center().y - l.center().y).abs() < l.height())
+            .min_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x))
+            .map(|w| w.2)
+            .unwrap_or_else(|| panic!("no spinner after \"{label}\""))
     }
 
     fn frames(&mut self, n: usize) {

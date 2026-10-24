@@ -301,6 +301,11 @@ impl ArgSchema for crate::state::SelectionRegion {
         json!({"type":"string","enum":["Rectangular","Circular","Fence","Lasso","Paint"]})
     }
 }
+impl ArgSchema for crate::state::ScaleKind {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Uniform","NonUniform","Squash"]})
+    }
+}
 impl ArgSchema for crate::state::CoordSystem {
     fn schema() -> Value {
         json!({"type":"string","enum":["View","Screen","World","Parent","Local","Gimbal","Grid","Pick"]})
@@ -646,7 +651,8 @@ commands! {
     SelectAndMove => "Select and Move", MainUI, "Activate the Select and Move tool (W).";
     SelectAndRotate => "Select and Rotate", MainUI, "Activate the Select and Rotate tool (E).";
     SelectAndScale => "Select and Scale", MainUI, "Activate the Select and Scale tool (R).";
-    ScaleCycle => "Scale Cycle", MainUI, "Cycle the scale tool modes (Ctrl+E).";
+    ScaleCycle => "Scale Cycle", MainUI, "Cycle the Scale flyout: Uniform, Non-Uniform, Squash (Ctrl+E); from another tool it first turns on Scale.";
+    ScaleType => "Scale Type", Loom, "Main Toolbar > Scale flyout: Uniform (all axes alike), NonUniform (the handle's axes) or Squash (the handle's axes, the others the opposite way); turns on Scale." { kind: crate::state::ScaleKind };
     SubObjectLevelCycle => "Sub-object Level Cycle", MainUI, "Cycle vertex, edge, face sub-object levels (Insert).";
     SubObjectSelectionToggle => "Sub-object Selection Toggle", MainUI, "Toggle between object and sub-object level (Ctrl+B).";
     SelectionLockToggle => "Selection Lock Toggle", MainUI, "Lock or unlock the selection (Space).";
