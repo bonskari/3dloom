@@ -1,10 +1,10 @@
 //! Self-update from the nightly release.
 //!
-//! Release builds made by CI carry an update channel. On start they fetch the
-//! release's `latest.json` and its ed25519 signature, check the signature
-//! against the key built into the program, and when the release is a newer
-//! commit they download the binary for this platform, check its SHA-256 and
-//! replace their own executable. The new version runs from the next start.
+//! Release builds made by CI carry an update channel. Before any window opens
+//! they fetch the release's `latest.json` and its ed25519 signature, check the
+//! signature against the key built into the program, and when the release is
+//! another commit they download the binary for this platform, check its
+//! SHA-256, replace their own executable and continue the start in it.
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
@@ -31,7 +31,6 @@ pub struct Asset {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
-    Checking,
     UpToDate,
     /// The executable was replaced; the commit it now holds.
     Updated(String),
@@ -84,11 +83,12 @@ pub fn run(own_commit: &str) -> Status {
 
 fn check_and_install(own_commit: &str) -> Result<Option<String>, String> {
     let platform = platform().ok_or("no release build for this platform")?;
-    let manifest = fetch(&format!("{RELEASE_URL}/latest.json"))?;
-    let signature = fetch(&format!("{RELEASE_URL}/latest.json.sig"))?;
+    // A quick check: an unreachable release must not hold up the start.
+    let manifest = fetch(&format!("{RELEASE_URL}/latest.json"), 8)?;
+    let signature = fetch(&format!("{RELEASE_URL}/latest.json.sig"), 8)?;
     let manifest = verify(&manifest, &signature, &PUBLIC_KEY)?;
     let Some(asset) = pending(&manifest, own_commit, platform) else { return Ok(None) };
-    let binary = fetch(&format!("{RELEASE_URL}/{}", asset.name))?;
+    let binary = fetch(&format!("{RELEASE_URL}/{}", asset.name), 300)?;
     if sha256_hex(&binary) != asset.sha256 {
         return Err(format!("{} does not match its checksum", asset.name));
     }
@@ -105,8 +105,28 @@ fn check_and_install(own_commit: &str) -> Result<Option<String>, String> {
     Ok(Some(manifest.commit))
 }
 
-fn fetch(url: &str) -> Result<Vec<u8>, String> {
-    let resp = ureq::get(url).timeout(std::time::Duration::from_secs(120)).call().map_err(|e| format!("{url}: {e}"))?;
+/// Continues this start in the replaced executable: the same process on Unix
+/// (exec), a new one on Windows. Returns only if that fails.
+pub fn relaunch(commit: &str) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(std::env::args_os().skip(1)).env("LOOM_UPDATED", commit);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let e = cmd.exec();
+        eprintln!("3dLoom: starting the updated program failed: {e}");
+    }
+    #[cfg(not(unix))]
+    {
+        if cmd.spawn().is_ok() {
+            std::process::exit(0);
+        }
+    }
+}
+
+fn fetch(url: &str, timeout_secs: u64) -> Result<Vec<u8>, String> {
+    let resp = ureq::get(url).timeout(std::time::Duration::from_secs(timeout_secs)).call().map_err(|e| format!("{url}: {e}"))?;
     let mut out = Vec::new();
     resp.into_reader().take(512 * 1024 * 1024).read_to_end(&mut out).map_err(|e| format!("{url}: {e}"))?;
     Ok(out)
