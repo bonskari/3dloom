@@ -13,6 +13,12 @@ fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str) {
     }
 }
 
+/// A toggle item: a check mark shows its state (as in the viewport label menus).
+fn check_item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str, on: bool) {
+    let label = if on { format!("✔ {label}") } else { format!("    {label}") };
+    item(ui, app, &label, action);
+}
+
 fn cmd(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, c: Command) {
     if menu_button(ui, &app.state, label, c.name()).clicked() {
         let _ = app.dispatch(c);
@@ -95,10 +101,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.separator();
                 ui.menu_button("Grids and Snaps", |ui| {
                     cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
-                    item(ui, app, "Snaps Toggle", "Snaps Toggle");
-                    item(ui, app, "Angle Snap Toggle", "Angle Snap Toggle");
-                    item(ui, app, "Percent Snap Toggle", "Percent Snap Toggle");
-                    item(ui, app, "Spinner Snap Toggle", "Spinner Snap Toggle");
+                    check_item(ui, app, "Snaps Toggle", "Snaps Toggle", app.state.snaps_on);
+                    check_item(ui, app, "Angle Snap Toggle", "Angle Snap Toggle", app.state.angle_snap_on);
+                    check_item(ui, app, "Percent Snap Toggle", "Percent Snap Toggle", app.state.percent_snap_on);
+                    check_item(ui, app, "Spinner Snap Toggle", "Spinner Snap Toggle", app.state.prefs.spinner_snap);
                 });
                 ui.separator();
                 cmd(ui, app, "Measure", Command::Measure);
@@ -179,13 +185,15 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Zoom Extents All", "Zoom Extents All");
                 item(ui, app, "Zoom Extents Selected", "Zoom Extents Selected");
                 ui.separator();
-                item(ui, app, "Show Grid", "Hide Grids Toggle");
-                item(ui, app, "Show Statistics", "Show Statistics Toggle");
-                item(ui, app, "Edged Faces", "View Edged Faces Toggle");
+                let vp = app.state.active();
+                let (grid, edged, safe) = (vp.show_grid, vp.edged_faces, vp.safe_frames);
+                check_item(ui, app, "Show Grid", "Hide Grids Toggle", grid);
+                check_item(ui, app, "Show Statistics", "Show Statistics Toggle", app.state.show_statistics);
+                check_item(ui, app, "Edged Faces", "View Edged Faces Toggle", edged);
                 item(ui, app, "Wireframe / Smooth+Highlights", "Wireframe / Smooth+Highlights Toggle");
-                item(ui, app, "Show Safe Frames", "Viewport Safeframes Toggle");
+                check_item(ui, app, "Show Safe Frames", "Viewport Safeframes Toggle", safe);
                 ui.separator();
-                item(ui, app, "Expert Mode", "Expert Mode Toggle");
+                check_item(ui, app, "Expert Mode", "Expert Mode Toggle", app.state.expert_mode);
             });
             ui.menu_button("Create", |ui| {
                 ui.menu_button("Standard Primitives", |ui| {
@@ -223,9 +231,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             ui.menu_button("Customize", |ui| {
                 cmd(ui, app, "Customize User Interface...", Command::CustomizeUserInterface);
                 ui.separator();
-                item(ui, app, "Show Main Toolbar", "Show Main Toolbar Toggle");
-                item(ui, app, "Show Ribbon", "Show Ribbon Toggle");
-                item(ui, app, "Lock UI Layout", "Lock User Interface Toggle");
+                check_item(ui, app, "Show Main Toolbar", "Show Main Toolbar Toggle", app.state.show_main_toolbar);
+                check_item(ui, app, "Show Ribbon", "Show Ribbon Toggle", app.state.show_ribbon);
+                check_item(ui, app, "Lock UI Layout", "Lock User Interface Toggle", app.state.ui_locked);
                 ui.separator();
                 cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
                 cmd(ui, app, "Units Setup...", Command::UnitsSetup);

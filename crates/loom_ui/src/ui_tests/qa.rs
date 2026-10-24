@@ -901,6 +901,31 @@ fn move_tool_drag_on_a_polygon_moves_it() {
     assert!(top_vertices(&h, id).iter().all(|v| (v.x.abs() - 15.0).abs() < 1e-3), "one undo step");
 }
 
+fn texts_now(h: &mut Harness) -> Vec<String> {
+    let shapes = run_shapes(h, Vec::new());
+    let mut all = Vec::new();
+    for s in &shapes {
+        texts(&s.shape, &mut all);
+    }
+    all.into_iter().map(|(t, _)| t).collect()
+}
+
+/// Menu toggles show their state with a check mark, as in Max (and as the
+/// viewport label menus already do).
+#[test]
+fn menu_toggles_show_a_check_mark() {
+    let mut h = Harness::new();
+    click_text(&mut h, "Customize");
+    let t = texts_now(&mut h);
+    assert!(t.iter().any(|s| s.starts_with("✔ Show Main Toolbar")), "the main toolbar is shown: {t:?}");
+    assert!(t.iter().any(|s| s.starts_with("    Lock UI Layout")), "the layout is not locked");
+    h.key(egui::Key::Escape);
+    click_text(&mut h, "Views");
+    let t = texts_now(&mut h);
+    assert!(t.iter().any(|s| s.starts_with("✔ Show Grid")), "{t:?}");
+    assert!(t.iter().any(|s| s.starts_with("    Edged Faces")), "{t:?}");
+}
+
 #[test]
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();
