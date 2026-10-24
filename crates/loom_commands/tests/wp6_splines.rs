@@ -181,10 +181,15 @@ fn box_and_path(s: &mut AppState, path: &[[f32; 3]]) -> (NodeId, NodeId) {
     execute(s, Command::LineEnd { node: line.0 }).unwrap();
     execute(s, Command::SelectNodes { ids: vec![b.0], op: SelectOp::Replace }).unwrap();
     execute(s, Command::SelectionMode { mode: SelectionMode::Face }).unwrap();
+    select_top(s, b);
+    (b, line)
+}
+
+/// The box's top face is the polygon selection (an undone extrusion leaves its caps' ids selected).
+fn select_top(s: &mut AppState, b: NodeId) {
     let mesh = s.scene.node(b).unwrap().object.mesh().into_owned();
     let top = (0..mesh.face_count() as u32).find(|f| mesh.face_normal(loom_mesh::FaceId(*f)).z > 0.9).unwrap();
     execute(s, Command::SelectSub { node: None, ids: vec![top], op: SelectOp::Replace }).unwrap();
-    (b, line)
 }
 
 /// Largest |x| / |y| of the box's vertices at height `z`.
@@ -209,6 +214,7 @@ fn extrude_along_spline_taper_amount_and_taper_curve() {
     let (x, _) = ring_extent(&s, b, 70.0);
     assert!((x - 7.5).abs() < 1e-2, "end ring half width {x}");
     execute(&mut s, Command::UndoSceneOperation).unwrap();
+    select_top(&mut s, b);
     // Taper Curve bulges the middle and leaves the ends alone.
     execute(&mut s, Command::ExtrudeAlongSpline { spline: line.0, segments: 4, taper: 0.0, taper_curve: 1.0, twist: 0.0, rotation: 0.0, align: true }).unwrap();
     let (mid, _) = ring_extent(&s, b, 50.0);
@@ -225,6 +231,7 @@ fn extrude_along_spline_rotation_turns_the_path_about_the_face_normal() {
     let (_, hi) = s.scene.node(b).unwrap().object.mesh().aabb();
     assert!(hi.x > 25.0 && hi.y < 15.5, "bends towards +X: {hi:?}");
     execute(&mut s, Command::UndoSceneOperation).unwrap();
+    select_top(&mut s, b);
     execute(&mut s, Command::ExtrudeAlongSpline { spline: line.0, segments: 4, taper: 0.0, taper_curve: 0.0, twist: 0.0, rotation: 90.0, align: true }).unwrap();
     let (_, hi) = s.scene.node(b).unwrap().object.mesh().aabb();
     assert!(hi.y > 25.0 && hi.x < 15.5, "Rotation 90 turns the bend towards +Y: {hi:?}");
