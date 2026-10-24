@@ -229,3 +229,23 @@ fn drag_creating_a_box_keeps_it_selected() {
     let height = h.app.state.scene.node(id).unwrap().object.parameters().iter().find(|(n, _)| *n == "Height").map(|(_, v)| format!("{v:?}"));
     assert!(height.as_ref().is_some_and(|h| !h.contains("0.0)")), "the height step gave it a height: {height:?}");
 }
+
+#[test]
+fn debug_box_creation_steps() {
+    let mut h = Harness::new();
+    framed(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
+    let a = ground_point(&h, Vec3::new(-10.0, -10.0, 0.0));
+    let b = ground_point(&h, Vec3::new(10.0, 10.0, 0.0));
+    eprintln!("a {a:?} b {b:?} rect {:?}", h.app.viewport_rects[h.app.state.active_viewport]);
+    let m = h.mods;
+    h.run(vec![egui::Event::PointerMoved(a)]);
+    h.run(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: m }]);
+    eprintln!("after press: scene {} create {}", h.app.state.scene.len(), h.app.create.is_some());
+    for i in 1..=8 {
+        h.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 8.0))]);
+    }
+    eprintln!("after drag: scene {} create {}", h.app.state.scene.len(), h.app.create.is_some());
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
+    eprintln!("after release: scene {} create {} err {:?}", h.app.state.scene.len(), h.app.create.is_some(), h.app.last_error);
+}
