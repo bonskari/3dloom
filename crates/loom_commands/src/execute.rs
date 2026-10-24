@@ -3910,6 +3910,7 @@ fn snapshot(state: &AppState) -> Value {
         "title": state.title(),
         "selection": selection_json(state),
         "dialog": state.dialog.map(|d| format!("{d:?}")),
+        "material_editor": state.material_editor_open,
         "pick_mode": state.pick_mode.map(|p| format!("{p:?}")),
         "poly_drag": state.poly_drag.map(|p| format!("{p:?}")),
         "poly_settings": serde_json::to_value(state.poly_settings).unwrap_or(Value::Null),

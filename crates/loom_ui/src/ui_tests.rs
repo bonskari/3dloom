@@ -14,11 +14,13 @@ struct Harness {
     app: LoomApp,
     time: f64,
     mods: egui::Modifiers,
+    /// The last frame's painted shapes, for finding widgets by their text.
+    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, shapes: Vec::new() };
         h.frames(3);
         h
     }
@@ -27,7 +29,7 @@ impl Harness {
         self.time += 1.0 / 30.0;
         let input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
         let app = &mut self.app;
-        let _ = self.ctx.run(input, |ctx| app.frame(ctx));
+        self.shapes = self.ctx.run(input, |ctx| app.frame(ctx)).shapes;
     }
 
     fn frames(&mut self, n: usize) {
@@ -73,6 +75,18 @@ impl Harness {
         let rect = self.app.viewport_rects[i];
         let vp = self.app.camera_for(i).view_projection(rect.width() / rect.height());
         crate::viewport_widget::project_world_to_screen(world, vp, rect).expect("point in front of the camera")
+    }
+
+    /// Screen rect of the text `text` painted last frame inside `within`.
+    fn text_rect(&self, text: &str, within: egui::Rect) -> Option<egui::Rect> {
+        fn find(shape: &egui::Shape, text: &str, within: egui::Rect) -> Option<egui::Rect> {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().find_map(|s| find(s, text, within)),
+                egui::Shape::Text(t) if t.galley.text() == text => Some(t.galley.rect.translate(t.pos.to_vec2())).filter(|r| within.contains_rect(*r)),
+                _ => None,
+            }
+        }
+        self.shapes.iter().find_map(|c| find(&c.shape, text, within))
     }
 
     fn sub_count(&self) -> usize {
@@ -409,7 +423,7 @@ fn m_opens_the_material_editor_and_an_assigned_material_colours_the_viewport() {
     let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
     h.run(vec![egui::Event::PointerMoved(p)]);
     h.key(egui::Key::M);
-    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialEditor));
+    assert!(h.app.state.material_editor_open);
     h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
     h.cmd(Command::SetMaterialParameter { slot: None, name: "Specular Level".into(), value: 80.0 });
     h.cmd(Command::AssignMaterialToSelection);
@@ -418,7 +432,7 @@ fn m_opens_the_material_editor_and_an_assigned_material_colours_the_viewport() {
     assert!(style.specular[3] > 0.0, "and the highlight");
     assert!(style.wire_color.is_some(), "edges keep the object colour");
     h.key(egui::Key::M);
-    assert_eq!(h.app.state.dialog, None, "M again closes it");
+    assert!(!h.app.state.material_editor_open, "M again closes it");
 }
 
 /// The Create panel's Object Type buttons go through `start_create`: the
@@ -560,4 +574,98 @@ fn realistic_shading_from_the_label_menu_runs_without_a_gpu() {
     h.cmd(Command::Render { path: Some(std::env::temp_dir().join("loom-headless-render.png").to_string_lossy().into()), width: Some(32), height: Some(32) });
     assert!(h.app.state.pending_render.is_none());
     assert!(h.app.last_error.as_deref().is_some_and(|e| e.contains("Render")), "{:?}", h.app.last_error);
+}
+
+/// The Material Editor window's rect.
+fn material_editor_rect(h: &Harness) -> egui::Rect {
+    h.ctx.memory(|m| m.area_rect(egui::Id::new("Material Editor"))).expect("the Material Editor is shown")
+}
+
+fn editor_material(h: &Harness) -> loom_scene::material::StandardMaterial {
+    h.app.state.scene.slot_material(h.app.state.scene.material_editor.active)
+}
+
+/// The Material Editor open (M) on a selected box, with the in-app file chooser.
+fn material_editor(h: &mut Harness) {
+    poly_box(h);
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::MaterialEditorToggle);
+    assert!(h.app.state.material_editor_open);
+}
+
+/// Clicks the text `label` inside `within` (or `dx` past its right end, for the field beside a label).
+fn click_text(h: &mut Harness, label: &str, within: egui::Rect, dx: f32) {
+    let r = h.text_rect(label, within).unwrap_or_else(|| panic!("{label:?} is not shown in {within:?}"));
+    h.click(r.center() + egui::vec2(if dx > 0.0 { r.width() / 2.0 + dx } else { 0.0 }, 0.0));
+    h.frames(2);
+}
+
+#[test]
+fn material_editor_stays_open_across_a_map_pick_and_cancel() {
+    let mut h = Harness::new();
+    material_editor(&mut h);
+    h.cmd(Command::MaterialEditorSlot { slot: 2 });
+    let win = material_editor_rect(&h);
+    // Diffuse Color's map button opens the bitmap chooser over the editor.
+    click_text(&mut h, "None", win, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialMap { channel: 0 }));
+    assert!(h.app.state.material_editor_open, "the chooser leaves the editor open");
+    assert!(h.text_rect("Get Material", win).is_some(), "and the editor is still drawn");
+    click_text(&mut h, "Cancel", SCREEN, 0.0);
+    assert_eq!(h.app.state.dialog, None, "Cancel closes the chooser");
+    assert!(h.app.state.material_editor_open, "but not the editor");
+    assert_eq!(h.app.state.scene.material_editor.active, 2, "on the same slot");
+    assert!(editor_material(&h).map("Diffuse Color").is_none());
+    // Choose a file: the map goes into the slot and the editor stays.
+    click_text(&mut h, "None", win, 0.0);
+    click_text(&mut h, "File name:", SCREEN, 40.0);
+    h.run(vec![egui::Event::Text("wood.png".into())]);
+    click_text(&mut h, "Open", SCREEN, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    assert!(h.app.state.material_editor_open);
+    assert_eq!(h.app.state.scene.material_editor.active, 2);
+    let map = editor_material(&h).map("Diffuse Color").cloned().expect("the chosen bitmap is the Diffuse Color map");
+    assert!(map.path.ends_with("wood.png"), "{}", map.path);
+    assert!(h.text_rect("wood.png", material_editor_rect(&h)).is_some(), "the button shows the bitmap");
+}
+
+#[test]
+fn only_the_map_buttons_open_a_chooser_from_the_material_editor() {
+    let mut h = Harness::new();
+    material_editor(&mut h);
+    let stays = |h: &Harness, what: &str| {
+        assert_eq!(h.app.state.dialog, None, "{what} opened a dialog");
+        assert!(h.app.state.material_editor_open, "{what} closed the editor");
+    };
+    // Sample slot 8 (second row, second column).
+    let win = material_editor_rect(&h);
+    let get = h.text_rect("Get Material", win).unwrap();
+    let slot_h = (get.top() - win.top() - 30.0) / 4.0;
+    h.click(egui::pos2(win.left() + 6.0 + 68.0 + 32.0, win.top() + 30.0 + slot_h * 1.5));
+    h.frames(2);
+    assert_eq!(h.app.state.scene.material_editor.active, 7, "the slot click lands");
+    stays(&h, "a sample slot");
+    for (label, dx) in [("Get Material", 0.0), ("Assign to Selection", 0.0), ("Reset", 0.0), ("Show Map in Viewport", 0.0), ("Wire", 0.0), ("2-Sided", 0.0), ("Faceted", 0.0), ("Lock Ambient and Diffuse", 0.0), ("Self-Illumination", 20.0), ("Opacity", 20.0), ("Glossiness", 20.0), ("Standard", 0.0), ("Shader Basic Parameters", 0.0)] {
+        let win = material_editor_rect(&h);
+        click_text(&mut h, label, win, dx);
+        stays(&h, label);
+    }
+    let m = editor_material(&h);
+    assert!(m.wire && m.two_sided && m.faceted && m.show_map_in_viewport, "the clicks landed: {m:?}");
+    assert_eq!(h.app.state.scene.material_editor.active, 7);
+    // The name field.
+    let name = m.name.clone();
+    let win = material_editor_rect(&h);
+    click_text(&mut h, &name, win, 0.0);
+    h.run(vec![egui::Event::Text("x".into())]);
+    h.key(egui::Key::Enter);
+    stays(&h, "the name field");
+    assert_ne!(editor_material(&h).name, name, "the name edit landed");
+    // A colour swatch opens its picker, not a file chooser.
+    let win = material_editor_rect(&h);
+    click_text(&mut h, "Diffuse:", win, 20.0);
+    assert!(h.ctx.memory(|m| m.any_popup_open()), "the colour picker opened");
+    stays(&h, "the Diffuse swatch");
+    h.key(egui::Key::Escape);
+    stays(&h, "Escape");
 }

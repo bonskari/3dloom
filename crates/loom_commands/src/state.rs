@@ -1125,6 +1125,9 @@ pub struct AppState {
     pub hide_floating_dialogs: bool,
     pub hide_category: HideCategories,
     pub dialog: Option<Dialog>,
+    /// Rendering > Material Editor (M): its own modeless window, open beside
+    /// `dialog` so the bitmap chooser its Maps buttons open does not close it.
+    pub material_editor_open: bool,
     /// What a Select From Scene style dialog is for (Hide/Freeze by Name...).
     pub dialog_purpose: DialogPurpose,
     pub pick_mode: Option<PickMode>,
@@ -1359,6 +1362,7 @@ impl AppState {
             hide_floating_dialogs: false,
             hide_category: HideCategories::default(),
             dialog: None,
+            material_editor_open: false,
             dialog_purpose: DialogPurpose::Select,
             pick_mode: None,
             align_target: None,
