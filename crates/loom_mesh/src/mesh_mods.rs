@@ -64,7 +64,7 @@ pub fn corner_normals(mesh: &Mesh) -> Vec<Vec3> {
 
 /// Smoothing groups from a set of hard edges `(min vertex, max vertex)`:
 /// faces joined across a soft edge form a region, every region gets one
-/// bit, and regions touching across a hard edge never share it (greedy
+/// bit, and regions touching across a hard edge or at a vertex never share it (greedy
 /// 32-colouring). A mesh with no hard edges is all group 1.
 pub fn smoothing_groups_from_hard_edges(mesh: &mut Mesh, hard: &std::collections::HashSet<(u32, u32)>) {
     let n = mesh.face_count();
@@ -116,6 +116,18 @@ pub fn smoothing_groups_from_hard_edges(mesh: &mut Mesh, hard: &std::collections
         if ra != rb {
             adjacent[ra].insert(rb);
             adjacent[rb].insert(ra);
+        }
+    }
+    // Regions meeting only at a vertex (a pyramid's opposite sides at the
+    // apex) must not share a bit either, or that vertex's normal blends them.
+    for v in 0..mesh.vertex_count() {
+        let around: BTreeSet<usize> = mesh.faces_around_vertex(VertexId(v as u32)).iter().map(|f| region_of[&roots[f.0 as usize]]).collect();
+        for a in &around {
+            for b in &around {
+                if a != b {
+                    adjacent[*a].insert(*b);
+                }
+            }
         }
     }
     let mut bit: Vec<u32> = vec![0; regions];
