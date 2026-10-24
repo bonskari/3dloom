@@ -150,12 +150,21 @@ fn image_area(ui: &mut egui::Ui, view: &mut FrameView, img: Option<&image::RgbaI
 }
 
 /// Swatch and RGBA of the pixel under the pointer.
+/// The same space is taken with or without a pixel, so the window's layout
+/// does not move as the pointer enters and leaves the image.
 fn pixel_readout(ui: &mut egui::Ui, view: &FrameView) {
-    if let Some(([x, y], p)) = view.hover {
-        let (r, _) = ui.allocate_exact_size(egui::vec2(16.0, 14.0), egui::Sense::hover());
-        ui.painter().rect_filled(r, 0.0, egui::Color32::from_rgb(p[0], p[1], p[2]));
-        ui.label(format!("({x}, {y})  R {} G {} B {} A {}", p[0], p[1], p[2], p[3]));
-    }
+    let (r, _) = ui.allocate_exact_size(egui::vec2(16.0, 14.0), egui::Sense::hover());
+    let text = match view.hover {
+        Some(([x, y], p)) => {
+            ui.painter().rect_filled(r, 0.0, egui::Color32::from_rgb(p[0], p[1], p[2]));
+            format!("({x}, {y})  R {} G {} B {} A {}", p[0], p[1], p[2], p[3])
+        }
+        None => String::new(),
+    };
+    ui.allocate_ui_with_layout(egui::vec2(280.0, 16.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_min_size(egui::vec2(280.0, 16.0));
+        ui.add(egui::Label::new(text).truncate());
+    });
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
@@ -189,7 +198,7 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     // First shown at the image's size (1:1), within the screen.
     let screen = ctx.screen_rect().size();
     let (iw, ih) = app.state.rendered.image.as_ref().map_or((app.state.scene.render.width as f32, app.state.scene.render.height as f32), |i| (i.width() as f32, i.height() as f32));
-    let size = egui::vec2((iw + 24.0).clamp(480.0, (screen.x - 40.0).max(480.0)), (ih + 170.0).clamp(320.0, (screen.y - 40.0).max(320.0)));
+    let size = egui::vec2((iw + 24.0).clamp(760.0, (screen.x - 40.0).max(760.0)), (ih + 170.0).clamp(320.0, (screen.y - 40.0).max(320.0)));
     egui::Window::new(title).id(egui::Id::new("Rendered Frame Window")).open(open).resizable(true).default_size(size).show(ctx, |ui| {
         // Rendering controls.
         ui.horizontal(|ui| {
