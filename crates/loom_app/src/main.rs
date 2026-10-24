@@ -46,8 +46,13 @@ fn main() -> eframe::Result<()> {
     if update::enabled(option_env!("LOOM_UPDATE_CHANNEL"), std::env::var("LOOM_CONTROL_PORT").ok().as_deref(), std::env::var("LOOM_NO_UPDATE").ok().as_deref())
         && std::env::var_os("LOOM_UPDATED").is_none()
     {
+        let exe = update::own_path();
         match update::run(env!("LOOM_COMMIT")) {
-            update::Status::Updated(commit) => update::relaunch(&commit),
+            update::Status::Updated(commit) => {
+                if let Some(exe) = exe {
+                    update::relaunch(&exe, &commit);
+                }
+            }
             update::Status::Failed(e) => eprintln!("3dLoom update check failed: {e}"),
             _ => {}
         }

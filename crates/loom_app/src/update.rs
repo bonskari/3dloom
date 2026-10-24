@@ -105,10 +105,25 @@ fn check_and_install(own_commit: &str) -> Result<Option<String>, String> {
     Ok(Some(manifest.commit))
 }
 
-/// Continues this start in the replaced executable: the same process on Unix
-/// (exec), a new one on Windows. Returns only if that fails.
-pub fn relaunch(commit: &str) {
-    let Ok(exe) = std::env::current_exe() else { return };
+/// The program's own path, taken before the update replaces the file: on
+/// Linux the running image's path afterwards reads "<path> (deleted)".
+pub fn own_path() -> Option<std::path::PathBuf> {
+    std::env::current_exe().ok().map(|p| live_path(&p))
+}
+
+/// Drops the " (deleted)" Linux appends to the path of a replaced executable.
+pub fn live_path(p: &std::path::Path) -> std::path::PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_suffix(" (deleted)") {
+        Some(live) => std::path::PathBuf::from(live),
+        None => p.to_path_buf(),
+    }
+}
+
+/// Continues this start in the replaced executable at `exe` (its path from
+/// before the update): the same process on Unix (exec), a new one on Windows.
+/// Returns only if that fails.
+pub fn relaunch(exe: &std::path::Path, commit: &str) {
     let mut cmd = std::process::Command::new(exe);
     cmd.args(std::env::args_os().skip(1)).env("LOOM_UPDATED", commit);
     #[cfg(unix)]
@@ -198,6 +213,12 @@ mod tests {
         assert!(!enabled(Some("nightly"), Some("7841"), None), "remote-controlled");
         assert!(!enabled(Some("nightly"), None, Some("1")), "the launcher handles it");
         assert!(enabled(Some("nightly"), Some("0"), Some("0")));
+    }
+
+    #[test]
+    fn a_replaced_executable_path_drops_the_deleted_mark() {
+        assert_eq!(live_path(std::path::Path::new("/tmp/upd/loom (deleted)")), std::path::PathBuf::from("/tmp/upd/loom"));
+        assert_eq!(live_path(std::path::Path::new("/opt/loom")), std::path::PathBuf::from("/opt/loom"));
     }
 
     #[test]
