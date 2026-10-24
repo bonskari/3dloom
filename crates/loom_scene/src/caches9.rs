@@ -156,3 +156,34 @@ pub fn point_cache(d: &PointCacheData, mut v: StackValue, ctx: &EvalCtx<'_>) -> 
     }
     Ok(v)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(path: &std::path::Path, points: usize) {
+        let pc = Pc2 { start: 0.0, rate: 1.0, samples: vec![vec![Vec3::ZERO; points]; 2] };
+        pc.write(std::io::BufWriter::new(std::fs::File::create(path).unwrap())).unwrap();
+    }
+
+    #[test]
+    fn a_failed_read_is_not_kept() {
+        let dir = std::env::temp_dir().join(format!("loom-pc-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("later.pc2");
+        let _ = std::fs::remove_file(&path);
+        let d = PointCacheData { path: path.to_string_lossy().into(), ..Default::default() };
+        assert!(d.cache().is_none(), "no file yet");
+        write(&path, 3);
+        assert_eq!(d.cache().map(|p| p.points()), Some(3), "read once the file appears");
+        // A rewritten file is read again; an unchanged one comes from the cache.
+        write(&path, 5);
+        assert_eq!(d.cache().map(|p| p.points()), Some(5));
+        let a = d.cache().unwrap();
+        assert!(Arc::ptr_eq(&a, &d.cache().unwrap()), "cached while the file is unchanged");
+        // A copy of the modifier keeps the loaded file.
+        assert!(Arc::ptr_eq(&a, &d.clone().cache().unwrap()));
+        std::fs::remove_file(&path).unwrap();
+        assert!(d.cache().is_none(), "the file is gone");
+    }
+}

@@ -160,3 +160,30 @@ fn same_counts_different_topology_drops_the_edits() {
     assert!(d.fits(&a));
     assert!(!d.fits(&b), "a reordered face is a different topology");
 }
+
+#[test]
+fn copy_normal_is_not_an_undo_step() {
+    let mut s = AppState::new();
+    let b = boxed(&mut s);
+    execute(&mut s, Command::EditNormalsSelectBy { level: 0 }).unwrap();
+    execute(&mut s, Command::EditNormalsSelect { ids: vec![0], op: SelectOp::Replace }).unwrap();
+    let steps = s.undo.len();
+    let labels = s.undo.labels();
+    execute(&mut s, Command::CopyNormal).unwrap();
+    assert_eq!(s.undo.len(), steps, "Copy adds no undo step");
+    assert_eq!(s.undo.labels(), labels);
+    // Paste is an undo step, and Undo takes it back.
+    execute(&mut s, Command::EditNormalsSelectBy { level: 1 }).unwrap();
+    execute(&mut s, Command::EditNormalsSelect { ids: vec![6], op: SelectOp::Replace }).unwrap();
+    let before = corner_normals_at(&s, b, 6);
+    let steps = s.undo.len();
+    execute(&mut s, Command::PasteNormal).unwrap();
+    assert_eq!(s.undo.len(), steps + 1);
+    assert_ne!(corner_normals_at(&s, b, 6), before);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    let back = corner_normals_at(&s, b, 6);
+    assert!(back.iter().zip(&before).all(|(a, c)| a.distance(*c) < 1e-5), "{back:?} vs {before:?}");
+    // The copied normal is still there after the undo: Paste works again.
+    execute(&mut s, Command::PasteNormal).unwrap();
+    assert_ne!(corner_normals_at(&s, b, 6), before);
+}

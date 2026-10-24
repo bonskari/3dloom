@@ -254,3 +254,25 @@ fn a_missed_trim_or_extend_changes_nothing() {
     assert_eq!(t.scene.node(a).unwrap().edit_spline().unwrap().clone(), before, "a missed trim keeps the hidden spline hidden");
     assert!(!t.undo.can_redo());
 }
+
+#[test]
+fn bevel_profile_reads_the_profiles_modifier_stack() {
+    let mut s = AppState::new();
+    let profile = line(&mut s, &[[0.0, 0.0, 0.0], [2.0, 5.0, 0.0], [0.0, 10.0, 0.0]]);
+    // The profile's own stack raises its top knot by 10: a Spline IK Control helper moved.
+    add(&mut s, "Spline IK Control");
+    set(&mut s, 0, "Link Types", 2.0);
+    execute(&mut s, Command::SplineIkControlCreateHelpers).unwrap();
+    let top = match &s.scene.node(profile).unwrap().modifiers[0].modifier {
+        loom_scene::Modifier::SplineIkControl(d) => d.helpers[2].unwrap(),
+        other => panic!("{other:?}"),
+    };
+    execute(&mut s, Command::SelectNodes { ids: vec![top.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 10.0, 0.0], system: None }).unwrap();
+    execute(&mut s, Command::CreateShape { kind: ShapeKind::Rectangle, position: [30.0, 0.0, 0.0], size: [20.0, 20.0, 0.0] }).unwrap();
+    let r = *s.selection.iter().next().unwrap();
+    add(&mut s, "Bevel Profile");
+    execute(&mut s, Command::PickModifierNode { index: 0, node: profile.0 }).unwrap();
+    let (lo, hi) = s.scene.eval_mesh(r).value.mesh.aabb();
+    assert!((hi.z - lo.z - 20.0).abs() < 1e-2, "the evaluated profile is 20 high: {lo} {hi}");
+}
