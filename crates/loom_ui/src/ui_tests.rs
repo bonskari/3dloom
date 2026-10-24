@@ -3012,3 +3012,24 @@ fn a_scene_named_on_the_command_line_opens() {
     assert_eq!(next.app.state.file.as_deref(), Some(path.as_path()));
     assert_eq!(next.app.state.recent_files.first(), Some(&path));
 }
+
+/// At a sub-object level the first empty click clears the sub-objects and
+/// keeps the object; a second one lets go of the object and ends the level.
+#[test]
+fn a_second_empty_click_at_polygon_level_releases_the_object_and_the_level() {
+    let mut h = Harness::new();
+    poly_plane(&mut h);
+    h.key(egui::Key::Num4);
+    h.cmd(Command::SelectAll);
+    assert!(h.sub_count() > 0);
+    let p = empty_point(&h);
+    h.click(p);
+    h.frames(10);
+    assert_eq!(h.sub_count(), 0, "the first click clears the polygons");
+    assert_eq!(h.app.state.selection.len(), 1, "and keeps the object");
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Face);
+    h.click(p);
+    h.frames(10);
+    assert!(h.app.state.selection.is_empty(), "the second click lets go of the object");
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Object, "and ends Polygon level");
+}
