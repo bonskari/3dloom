@@ -50,6 +50,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     store(ui, "motion_page", page);
     app.motion_trajectories = page == 1;
     if page == 0 {
+        super::biped::motion_rollouts(ui, app, id);
         parameters(ui, app, id);
     } else {
         trajectories(ui, app);

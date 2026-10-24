@@ -2,7 +2,7 @@
 //! 24 sample slots, assignment to objects, maps, undo and the .loom file.
 
 use loom_commands::file::{read, write, Document, SceneSettings, FORMAT};
-use loom_commands::{execute, AppState, Command, Dialog, PrimitiveKind};
+use loom_commands::{execute, AppState, Command, PrimitiveKind};
 use loom_scene::NodeId;
 
 fn boxed(s: &mut AppState) -> NodeId {
@@ -18,9 +18,9 @@ fn param(slot: u32, name: &str, value: f64) -> Command {
 fn material_editor_toggle_opens_and_closes_the_editor() {
     let mut s = AppState::new();
     execute(&mut s, Command::MaterialEditorToggle).unwrap();
-    assert_eq!(s.dialog, Some(Dialog::MaterialEditor));
+    assert!(s.material_editor_open);
     execute(&mut s, Command::MaterialEditorToggle).unwrap();
-    assert_eq!(s.dialog, None);
+    assert!(!s.material_editor_open);
 }
 
 #[test]

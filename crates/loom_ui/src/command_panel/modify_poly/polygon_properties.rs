@@ -4,6 +4,7 @@
 //! Edit Vertex Colors.
 
 use crate::command_panel::rollout;
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{Command, SelectionMode};
@@ -62,7 +63,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let add = ui.input(|i| i.modifiers.ctrl);
                 let _ = app.dispatch(Command::SelectByMaterialId { id: st.mat_id, clear: !add });
             }
-            if ui.add_enabled(has, egui::Button::new("Clear Selection")).clicked() {
+            if ui.add_enabled(has, egui::Button::new("Clear Selection")).with_shortcut(&app.state, Command::SelectNone.name()).clicked() {
                 let _ = app.dispatch(Command::SelectNone);
             }
         });

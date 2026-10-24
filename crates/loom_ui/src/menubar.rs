@@ -3,19 +3,18 @@
 
 use crate::LoomApp;
 use eframe::egui;
+use crate::shortcuts::menu_button;
 use loom_commands::{Command, PrimitiveKind};
 
 fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str) {
-    let chord = app.keymap.chord_for(action).map(|c| c.label()).unwrap_or_default();
-    let text = if chord.is_empty() { label.to_owned() } else { format!("{label}    {chord}") };
-    if ui.button(text).clicked() {
+    if menu_button(ui, &app.state, label, action).clicked() {
         app.dispatch_named(action);
         ui.close_menu();
     }
 }
 
 fn cmd(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, c: Command) {
-    if ui.button(label).clicked() {
+    if menu_button(ui, &app.state, label, c.name()).clicked() {
         let _ = app.dispatch(c);
         ui.close_menu();
     }
@@ -31,8 +30,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             ui.separator();
             ui.menu_button("File", |ui| {
                 use loom_commands::PendingFileAction as A;
-                let chord = |app: &LoomApp, action: &str| app.keymap.chord_for(action).map(|c| format!("    {}", c.label())).unwrap_or_default();
-                if ui.button(format!("New{}", chord(app, "New Scene"))).clicked() {
+                if menu_button(ui, &app.state, "New", "New Scene").clicked() {
                     app.request_file_action(A::New);
                     ui.close_menu();
                 }
@@ -41,7 +39,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button(format!("Open...{}", chord(app, "Open File"))).clicked() {
+                if menu_button(ui, &app.state, "Open...", "Open File").clicked() {
                     app.request_file_action(A::Open);
                     ui.close_menu();
                 }

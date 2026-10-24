@@ -195,7 +195,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         .copied()
         .filter(|id| {
             state.scene.node(*id).is_some_and(|n| match &n.object {
-                ObjectKind::Camera { .. } | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } => true,
+                ObjectKind::Camera { .. } | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_) => true,
                 _ => state.scene.eval_mesh(*id).value.mesh.face_count() > 0 || n.object.display_output().face_count() > 0,
             })
         })
@@ -212,6 +212,8 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
             ObjectKind::Group { .. } => FbxKind::Empty,
             ObjectKind::Bone { length, width, height, .. } => FbxKind::Bone { length: length.get(), size: width.get().max(height.get()) },
             ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } => FbxKind::Empty,
+            // A biped's centre of mass is the skeleton's root joint.
+            ObjectKind::Biped(b) => FbxKind::Bone { length: 0.0, size: loom_scene::biped::root_size(b.height.get()) },
             _ => {
                 // A skinned node writes the mesh below its Skin (and Morpher) with the deformers as FBX deformers.
                 let skin_index = node.modifiers.iter().position(|s| matches!(s.modifier, Modifier::Skin(_)));

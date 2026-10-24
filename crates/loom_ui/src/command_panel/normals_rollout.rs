@@ -3,6 +3,7 @@
 //! Copy / Paste Value, Display Length. Every control dispatches a command.
 
 use super::rollout;
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::Command;
@@ -37,22 +38,22 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.separator();
         let w = (ui.available_width() - 8.0) / 2.0;
         ui.horizontal(|ui| {
-            if ui.add_sized([w, 20.0], egui::Button::new("Unify")).on_hover_text("Unify Normals (U)").clicked() {
+            if ui.add_sized([w, 20.0], egui::Button::new("Unify")).on_hover_name(&app.state, "Unify Normals").clicked() {
                 run(app, Command::UnifyNormals);
             }
-            if ui.add_sized([w, 20.0], egui::Button::new("Break")).on_hover_text("Break Normals (B)").clicked() {
+            if ui.add_sized([w, 20.0], egui::Button::new("Break")).on_hover_name(&app.state, "Break Normals").clicked() {
                 run(app, Command::BreakNormals);
             }
         });
         ui.horizontal(|ui| {
-            if ui.add_sized([w, 20.0], egui::Button::new("Specify")).on_hover_text("Specify Normals (S)").clicked() {
+            if ui.add_sized([w, 20.0], egui::Button::new("Specify")).on_hover_name(&app.state, "Specify Normals").clicked() {
                 run(app, Command::SpecifyNormals);
             }
-            if ui.add_sized([w, 20.0], egui::Button::new("Make Explicit")).on_hover_text("Make Explicit (E)").clicked() {
+            if ui.add_sized([w, 20.0], egui::Button::new("Make Explicit")).on_hover_name(&app.state, "Make Explicit").clicked() {
                 run(app, Command::MakeExplicit);
             }
         });
-        if ui.add_sized([ui.available_width(), 20.0], egui::Button::new("Reset")).on_hover_text("Reset Normals (R)").clicked() {
+        if ui.add_sized([ui.available_width(), 20.0], egui::Button::new("Reset")).on_hover_name(&app.state, "Reset Normals").clicked() {
             run(app, Command::ResetNormals);
         }
         ui.label("Average:");
@@ -74,10 +75,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         });
         ui.horizontal(|ui| {
-            if ui.add_sized([w, 20.0], egui::Button::new("Copy Value")).on_hover_text("Copy Normal (Ctrl+C)").clicked() {
+            if ui.add_sized([w, 20.0], egui::Button::new("Copy Value")).on_hover_name(&app.state, "Copy Normal").clicked() {
                 run(app, Command::CopyNormal);
             }
-            if ui.add_sized([w, 20.0], egui::Button::new("Paste Value")).on_hover_text("Paste Normal (Ctrl+V)").clicked() {
+            if ui.add_sized([w, 20.0], egui::Button::new("Paste Value")).on_hover_name(&app.state, "Paste Normal").clicked() {
                 run(app, Command::PasteNormal);
             }
         });
