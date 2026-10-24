@@ -43,7 +43,7 @@ fn painted(h: &Harness, prefix: &str) -> Vec<String> {
 /// Hovers the icon (checking its tooltip), then clicks it.
 fn click_icon(h: &mut Harness, panel_id: &str, glyph: &str, tip: &str) {
     let p = icon_in(h, glyph, panel(h, panel_id));
-    assert!(tooltip_shows(h, p, tip), "hovering {glyph:?} in {panel_id} shows {tip:?}; painted: {:?}", painted(h, tip.split(' ').next().unwrap_or("")));
+    assert!(tooltip_shows(h, p, tip), "hovering {glyph:?} in {panel_id} shows {tip:?}; painted: {:?}; hit: {}", painted(h, tip.split(' ').next().unwrap_or("")), h.app.ui_hit(&h.ctx, p));
     h.click(p);
 }
 
@@ -74,7 +74,7 @@ fn main_toolbar_icons_run_their_commands() {
     assert_eq!(h.app.state.active_tool, Tool::Move);
     click_icon(&mut h, "main_toolbar", icons::SCALE, "Select and Scale (R); right-click: Transform Type-In");
     assert_eq!(h.app.state.active_tool, Tool::Scale);
-    click_icon(&mut h, "main_toolbar", icons::SELECT_OBJECT, "Select Object");
+    click_icon(&mut h, "main_toolbar", icons::SELECT_OBJECT, "Select Object (Q)");
     assert_eq!(h.app.state.active_tool, Tool::Select);
 
     let snaps = h.app.state.snaps_on;
@@ -99,7 +99,7 @@ fn main_toolbar_icons_run_their_commands() {
 
     click_icon(&mut h, "main_toolbar", icons::LINK, "Select and Link");
     assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::Link));
-    click_icon(&mut h, "main_toolbar", icons::SELECT_OBJECT, "Select Object");
+    click_icon(&mut h, "main_toolbar", icons::SELECT_OBJECT, "Select Object (Q)");
 
     click_icon(&mut h, "main_toolbar", icons::LAYERS, "Manage Layers (Layer Manager)");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::LayerManager));
@@ -142,7 +142,7 @@ fn status_bar_icons_run_their_commands() {
     assert_eq!(h.app.state.current_frame, h.app.state.frame_range.1);
     click_icon(&mut h, "statusbar", icons::GO_TO_START, "Go to Start Frame (Home)");
     assert_eq!(h.app.state.current_frame, h.app.state.frame_range.0);
-    click_icon(&mut h, "statusbar", icons::NEXT_FRAME, "Next Frame (.)");
+    click_icon(&mut h, "statusbar", icons::NEXT_FRAME, "Next Frame (Period)");
     assert_eq!(h.app.state.current_frame, h.app.state.frame_range.0 + 1);
     click_icon(&mut h, "statusbar", icons::KEY_MODE, "Key Mode Toggle");
     assert!(h.app.state.key_step_mode);
@@ -156,9 +156,9 @@ fn status_bar_icons_run_their_commands() {
 fn time_slider_arrows_step_a_frame() {
     let mut h = Harness::new();
     let f = h.app.state.current_frame;
-    click_icon(&mut h, "time_slider", icons::NEXT_FRAME, "Forward Time One Unit (.)");
+    click_icon(&mut h, "time_slider", icons::NEXT_FRAME, "Forward Time One Unit (Period)");
     assert_eq!(h.app.state.current_frame, f + 1);
-    click_icon(&mut h, "time_slider", icons::PREVIOUS_FRAME, "Backup Time One Unit (,)");
+    click_icon(&mut h, "time_slider", icons::PREVIOUS_FRAME, "Backup Time One Unit (Comma)");
     assert_eq!(h.app.state.current_frame, f);
 }
 
