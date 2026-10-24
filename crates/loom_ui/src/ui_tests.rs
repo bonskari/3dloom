@@ -272,3 +272,30 @@ fn alt_r_rings_on_an_edit_poly_modifier_and_a_sphere() {
         assert!(h.sub_count() > 1, "{kind:?}: Alt+R rings the edge ({} selected)", h.sub_count());
     }
 }
+
+fn right_click(h: &mut Harness, p: egui::Pos2) {
+    let m = h.mods;
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: m }]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: false, modifiers: m }]);
+    h.frames(1);
+}
+
+#[test]
+fn right_click_or_the_select_tool_ends_the_create_mode() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    // Make a sphere, then right-click: the create mode ends (no quad menu, no new object).
+    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Sphere));
+    let a = r.center() + egui::vec2(0.0, 80.0);
+    h.drag(a, a + egui::vec2(60.0, 0.0));
+    assert!(h.app.create_kind.is_some(), "still creating spheres after one");
+    right_click(&mut h, r.center());
+    assert!(h.app.create_kind.is_none(), "right-click ends the create mode");
+    assert!(h.app.quad_menu.is_none(), "and does not open the quad menu");
+    // Q (Select Object) ends it too.
+    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
+    h.key(egui::Key::Q);
+    assert!(h.app.create_kind.is_none(), "the Select tool ends the create mode");
+}
