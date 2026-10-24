@@ -25,7 +25,8 @@ field name, enums as tagged objects or strings as serde derives them.
   full half-edge mesh, smoothing groups, material ids, vertex colours,
   soft-selection and paint settings, `EditableSpline` with its knots and
   tangents, the parametric shapes, `Boolean` / `ProBoolean` / `Loft` with
-  their operand copies and parameters, `Camera`, `Group`, `Bone` with its
+  their operand copies and parameters, `Camera`, `Light` (a standard light:
+  type, target node, every rollout parameter, exclusion list), `Group`, `Bone` with its
   length / width / height / taper / fins / Bone Tools properties, `Dummy`,
   `Point`, `IkGoal`), `hidden`,
   `frozen`, `wire_color`, `locks`, `inherit`, `display` properties,
@@ -87,7 +88,8 @@ field name, enums as tagged objects or strings as serde derives them.
 
 `layout` (one of the 14 viewport layouts), `viewports` (view kind, orbit
 camera target / distance / yaw / pitch, shading, edged faces, grid,
-disabled, safe frames, FOV, scene lights, background image path and lock),
+disabled, safe frames, FOV, scene or default lights and the default light
+count, background image path and lock),
 `active_viewport`, `units` (Units Setup), `named_sets` and
 `named_sub_selections` (named selection sets), `selection`, `frame_range`,
 `fps`, `current_frame`, `real_time`, `loop_playback`, `play_speed`,
