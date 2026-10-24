@@ -34,20 +34,59 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         let sp = ui.spacing();
         let chrome = sp.button_padding.x * 2.0 + sp.icon_width + sp.icon_spacing + sp.item_spacing.x;
         let w = (ui.available_width() - 28.0 - chrome).max(40.0);
-        egui::ComboBox::from_id_salt("modifier_list").selected_text("Modifier List").width(w).show_ui(ui, |ui| {
-            ui.add_enabled(false, egui::Button::new(egui::RichText::new("WORLD-SPACE MODIFIERS").small()));
-            for name in Modifier::WSM_LIST {
-                if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
-                    let _ = app.dispatch(Command::AddModifier { name: (*name).to_owned() });
+        let combo = egui::ComboBox::from_id_salt("modifier_list").selected_text("Modifier List").width(w).height(480.0).show_ui(ui, |ui| {
+            // Search: typed text filters the list; Enter adds the first match.
+            let query_id = egui::Id::new("modifier_list_query");
+            let mut query: String = ui.ctx().data(|d| d.get_temp(query_id)).unwrap_or_default();
+            let r = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search modifiers").desired_width(f32::INFINITY));
+            if !r.has_focus() && !r.lost_focus() {
+                r.request_focus();
+            }
+            ui.ctx().data_mut(|d| d.insert_temp(query_id, query.clone()));
+            let mut add: Option<String> = None;
+            if !query.trim().is_empty() {
+                let hits = loom_commands::modifier_list::search(&query);
+                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    add = hits.first().cloned();
+                }
+                for name in &hits {
+                    if ui.add_enabled(!is_group, egui::Button::new(name.as_str())).clicked() {
+                        add = Some(name.clone());
+                    }
+                }
+                if hits.is_empty() {
+                    ui.weak("No modifier matches");
+                }
+            } else {
+                ui.add_enabled(false, egui::Button::new(egui::RichText::new("MOST USED").small()));
+                for name in loom_commands::modifier_list::most_used(&app.state.modifier_usage, 8) {
+                    if ui.add_enabled(!is_group, egui::Button::new(name.as_str())).clicked() {
+                        add = Some(name);
+                    }
+                }
+                ui.add_enabled(false, egui::Button::new(egui::RichText::new("WORLD-SPACE MODIFIERS").small()));
+                for name in Modifier::WSM_LIST {
+                    if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
+                        add = Some((*name).to_owned());
+                    }
+                }
+                ui.add_enabled(false, egui::Button::new(egui::RichText::new("OBJECT-SPACE MODIFIERS").small()));
+                for name in Modifier::LIST {
+                    if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
+                        add = Some((*name).to_owned());
+                    }
                 }
             }
-            ui.add_enabled(false, egui::Button::new(egui::RichText::new("OBJECT-SPACE MODIFIERS").small()));
-            for name in Modifier::LIST {
-                if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
-                    let _ = app.dispatch(Command::AddModifier { name: (*name).to_owned() });
-                }
+            if let Some(name) = add {
+                let _ = app.dispatch(Command::AddModifier { name });
+                ui.ctx().data_mut(|d| d.remove::<String>(query_id));
+                ui.close_menu();
             }
         });
+        if combo.inner.is_none() {
+            // Closed: the next opening starts with an empty search.
+            ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::new("modifier_list_query")));
+        }
         if ui.small_button(if app.state.show_modifier_set { "▲" } else { "▼" }).on_hover_text("Show / hide the modifier button set").clicked() {
             let _ = app.dispatch(Command::ModifierSetButtonsToggle);
         }

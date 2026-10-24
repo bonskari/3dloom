@@ -2,6 +2,7 @@
 //! MCP tool. See the 2026-10-21 spec, section 6.8.
 
 pub mod command;
+pub mod modifier_list;
 pub mod execute;
 pub mod poly;
 mod poly_edit;

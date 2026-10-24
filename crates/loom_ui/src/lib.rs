@@ -201,6 +201,9 @@ pub struct LoomApp {
     pub last_title: String,
     /// Each viewport's screen rectangle last frame (tests aim clicks with it).
     pub viewport_rects: Vec<egui::Rect>,
+    /// The Modifier List use counts as last written to disk (None in tests: never written).
+    pub saved_modifier_usage: loom_commands::modifier_list::Usage,
+    pub persist_modifier_usage: bool,
     /// A transform or region drag in the Edit UVWs window.
     pub uv_drag: Option<uv_editor::UvDrag>,
     /// Sketch: the stroke being drawn (UV) and whether vertices were picked yet.
@@ -252,7 +255,14 @@ impl LoomApp {
             .as_ref()
             .expect("wgpu backend required");
         viewport_widget::init_render_resources(wgpu);
-        Self::headless()
+        let mut app = Self::headless();
+        // The Modifier List's use counts live with the user, not the scene.
+        if let Some(text) = modifier_usage_path().and_then(|p| std::fs::read_to_string(p).ok()) {
+            app.state.modifier_usage = loom_commands::modifier_list::usage_from_json(&text);
+        }
+        app.saved_modifier_usage = app.state.modifier_usage.clone();
+        app.persist_modifier_usage = true;
+        app
     }
 
     /// App state without GPU resources, for tests of UI models.
@@ -290,6 +300,8 @@ impl LoomApp {
             native_file_dialogs: dialogs::file_dialog::use_native(std::env::var("LOOM_CONTROL_PORT").ok().as_deref()),
             last_title: String::new(),
             viewport_rects: Vec::new(),
+            saved_modifier_usage: Default::default(),
+            persist_modifier_usage: false,
             uv_drag: None,
             uv_sketch: Vec::new(),
             uv_sketch_picked: false,
@@ -682,6 +694,13 @@ impl LoomApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.last_title = title;
         }
+        if self.persist_modifier_usage && self.state.modifier_usage != self.saved_modifier_usage {
+            if let Some(path) = modifier_usage_path() {
+                let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));
+                let _ = std::fs::write(&path, loom_commands::modifier_list::usage_to_json(&self.state.modifier_usage));
+            }
+            self.saved_modifier_usage = self.state.modifier_usage.clone();
+        }
         hotkeys::handle(ctx, self);
         // Playback: advance by the wall clock (Real Time) or a frame per redraw.
         if self.state.playing {
@@ -725,4 +744,14 @@ fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::A
             })
         })
         .clone()
+}
+
+/// The user's 3dLoom config file for Modifier List use counts:
+/// `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%APPDATA%` on Windows.
+fn modifier_usage_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("APPDATA")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from))
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
+    Some(base.join("3dloom").join("modifier-usage.json"))
 }

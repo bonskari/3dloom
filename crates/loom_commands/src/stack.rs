@@ -15,66 +15,11 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::AddModifier { name } => {
-            let modifier = Modifier::by_name(&name).ok_or_else(|| format!("no modifier {name:?} (Modifier List: {}, {})", Modifier::WSM_LIST.join(", "), Modifier::LIST.join(", ")))?;
-            let ids = selected_ids(state)?;
-            // The sub-object selection the poly being edited passes up stays
-            // with it (the Editable Poly's level stays under the new entry).
-            freeze_passes_up(state, &ids);
-            let mut changes = Vec::new();
-            let mut inserted = Vec::new();
-            for id in &ids {
-                let node = state.scene.node(*id).ok_or("missing node")?;
-                let mut stack = node.modifiers.clone();
-                // Inserts above the active entry (just above the base object when it is active).
-                let at = node.active_entry.map(|a| a + 1).unwrap_or(0).min(stack.len());
-                // World-space modifiers stay above every object-space one (stack order).
-                let first_wsm = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
-                let at = if modifier.is_wsm() { stack.len() } else { at.min(first_wsm) };
-                let mut modifier = modifier.clone();
-                if modifier.needs_shape() {
-                    // Refuses Extrude / Lathe / Bevel / Sweep / Edit Spline on a mesh.
-                    let input_shape = match at.checked_sub(1) {
-                        Some(prev) => state.scene.evaluated(*id, Some(prev)).value.shape.clone(),
-                        None => node.object.shape(),
-                    };
-                    let Some(input_shape) = input_shape else {
-                        return Err(format!("{name} requires a shape (spline) object below it"));
-                    };
-                    modifier.init_edit_spline(&input_shape);
-                }
-                if matches!(modifier, Modifier::UVWMap { .. }) {
-                    let input = match at.checked_sub(1) {
-                        Some(prev) => state.scene.evaluated(*id, Some(prev)).value.mesh.clone(),
-                        None => node.object.display_output(),
-                    };
-                    modifier.fit_uvw_map(&input);
-                }
-                if matches!(modifier, Modifier::FFD { .. } | Modifier::EditPoly { .. }) {
-                    // An FFD lattice is fitted to what flows into it; an Edit Poly starts from it.
-                    let input = match at.checked_sub(1) {
-                        Some(prev) => state.scene.evaluated(*id, Some(prev)).value.mesh.clone(),
-                        None => node.object.display_output(),
-                    };
-                    let (lo, hi) = input.aabb();
-                    modifier.fit_ffd(lo, hi);
-                    modifier.init_edit_poly(&input);
-                }
-                let mut slot = ModifierSlot::new(modifier);
-                if name == "Edit Mesh" {
-                    slot.name = "Edit Mesh".to_owned();
-                }
-                stack.insert(at, slot);
-                inserted.push((*id, at));
-                changes.push(Change::SetStack { id: *id, before: node.modifiers.clone(), after: stack });
-                changes.extend(repoint_instances(state, *id, &|i| Some(if i >= at { i + 1 } else { i })));
+            let r = add_modifier(state, &name);
+            if r.is_ok() {
+                *state.modifier_usage.entry(name).or_insert(0) += 1;
             }
-            commit_change(state, &format!("Add {name}"), Change::Group(changes))?;
-            for (id, at) in inserted {
-                set_active(state, id, Some(at));
-            }
-            state.selection_mode = SelectionMode::Object;
-            state.sub_selection.clear();
-            Ok(stack_json(state))
+            r
         }
         C::DeleteModifier { index } => {
             let idx = index as usize;
@@ -1002,4 +947,69 @@ pub fn point_cache_load(state: &mut AppState, index: usize, path: Option<&str>) 
     }
     commit_change(state, if path.is_some() { "Load Point Cache" } else { "Unload Point Cache" }, Change::SetStack { id, before, after })?;
     Ok(json!({ "path": path }))
+}
+
+fn add_modifier(state: &mut AppState, name: &str) -> Result<Value, String> {
+    {
+            let modifier = Modifier::by_name(name).ok_or_else(|| format!("no modifier {name:?} (Modifier List: {}, {})", Modifier::WSM_LIST.join(", "), Modifier::LIST.join(", ")))?;
+            let ids = selected_ids(state)?;
+            // The sub-object selection the poly being edited passes up stays
+            // with it (the Editable Poly's level stays under the new entry).
+            freeze_passes_up(state, &ids);
+            let mut changes = Vec::new();
+            let mut inserted = Vec::new();
+            for id in &ids {
+                let node = state.scene.node(*id).ok_or("missing node")?;
+                let mut stack = node.modifiers.clone();
+                // Inserts above the active entry (just above the base object when it is active).
+                let at = node.active_entry.map(|a| a + 1).unwrap_or(0).min(stack.len());
+                // World-space modifiers stay above every object-space one (stack order).
+                let first_wsm = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
+                let at = if modifier.is_wsm() { stack.len() } else { at.min(first_wsm) };
+                let mut modifier = modifier.clone();
+                if modifier.needs_shape() {
+                    // Refuses Extrude / Lathe / Bevel / Sweep / Edit Spline on a mesh.
+                    let input_shape = match at.checked_sub(1) {
+                        Some(prev) => state.scene.evaluated(*id, Some(prev)).value.shape.clone(),
+                        None => node.object.shape(),
+                    };
+                    let Some(input_shape) = input_shape else {
+                        return Err(format!("{name} requires a shape (spline) object below it"));
+                    };
+                    modifier.init_edit_spline(&input_shape);
+                }
+                if matches!(modifier, Modifier::UVWMap { .. }) {
+                    let input = match at.checked_sub(1) {
+                        Some(prev) => state.scene.evaluated(*id, Some(prev)).value.mesh.clone(),
+                        None => node.object.display_output(),
+                    };
+                    modifier.fit_uvw_map(&input);
+                }
+                if matches!(modifier, Modifier::FFD { .. } | Modifier::EditPoly { .. }) {
+                    // An FFD lattice is fitted to what flows into it; an Edit Poly starts from it.
+                    let input = match at.checked_sub(1) {
+                        Some(prev) => state.scene.evaluated(*id, Some(prev)).value.mesh.clone(),
+                        None => node.object.display_output(),
+                    };
+                    let (lo, hi) = input.aabb();
+                    modifier.fit_ffd(lo, hi);
+                    modifier.init_edit_poly(&input);
+                }
+                let mut slot = ModifierSlot::new(modifier);
+                if name == "Edit Mesh" {
+                    slot.name = "Edit Mesh".to_owned();
+                }
+                stack.insert(at, slot);
+                inserted.push((*id, at));
+                changes.push(Change::SetStack { id: *id, before: node.modifiers.clone(), after: stack });
+                changes.extend(repoint_instances(state, *id, &|i| Some(if i >= at { i + 1 } else { i })));
+            }
+            commit_change(state, &format!("Add {name}"), Change::Group(changes))?;
+            for (id, at) in inserted {
+                set_active(state, id, Some(at));
+            }
+            state.selection_mode = SelectionMode::Object;
+            state.sub_selection.clear();
+            Ok(stack_json(state))
+        }
 }

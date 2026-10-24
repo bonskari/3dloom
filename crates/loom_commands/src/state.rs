@@ -1219,6 +1219,8 @@ pub struct AppState {
     pub auto_key: bool,
     /// Set Key mode, and the history position / node versions its pose started from.
     pub set_key_mode: bool,
+    /// Modifier List use counts (the most-used section); the UI loads and saves them.
+    pub modifier_usage: crate::modifier_list::Usage,
     /// Selection List: the named selection set Set Keys keys; None = "Selected".
     pub key_selection_list: Option<String>,
     pub set_key_buffer: Option<crate::anim_cmds::SetKeyBuffer>,
@@ -1403,6 +1405,7 @@ impl AppState {
             auto_key: false,
             set_key_mode: false,
             key_selection_list: None,
+            modifier_usage: Default::default(),
             set_key_buffer: None,
             key_filters: Default::default(),
             default_tangent: (loom_scene::anim::TangentType::Auto, loom_scene::anim::TangentType::Auto),
