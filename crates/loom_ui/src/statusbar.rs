@@ -184,30 +184,30 @@ fn camera_controls(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId)
             if has_target {
                 let current = match app.state.nav_mode { NavMode::DollyTarget => 1, NavMode::DollyBoth => 2, _ => 0 };
                 flyout(ui, app, "dolly", current, [
-                    ("Dolly", "Dolly Camera Mode", Command::DollyCameraMode),
-                    ("Dolly Target", "Dolly Target Mode", Command::DollyTargetMode),
-                    ("Dolly Both", "Dolly Camera + Target Mode", Command::DollyCameraTargetMode),
+                    (icons::DOLLY, None, "Dolly Camera Mode", Command::DollyCameraMode),
+                    (icons::DOLLY, Some(icons::SELECTED_VARIANT), "Dolly Target Mode", Command::DollyTargetMode),
+                    (icons::DOLLY, Some(icons::SUB_OBJECT_VARIANT), "Dolly Camera + Target Mode", Command::DollyCameraTargetMode),
                 ]);
             } else {
-                nav(ui, app, "Dolly", "Dolly Camera Mode", NavMode::DollyCamera, Command::DollyCameraMode);
+                nav(ui, app, icons::DOLLY, "Dolly Camera Mode", NavMode::DollyCamera, Command::DollyCameraMode);
             }
-            nav(ui, app, "Persp", "Perspective Mode", NavMode::Perspective, Command::PerspectiveMode);
-            nav(ui, app, "Roll", "Roll Camera Mode", NavMode::RollCamera, Command::RollCameraMode);
+            nav(ui, app, icons::PERSPECTIVE_MODE, "Perspective Mode", NavMode::Perspective, Command::PerspectiveMode);
+            nav(ui, app, icons::ROLL, "Roll Camera Mode", NavMode::RollCamera, Command::RollCameraMode);
             flyout(ui, app, "zoom_extents_all", 0, [
-                ("Extents All", "Zoom Extents All", Command::ZoomExtentsAll),
-                ("Extents All Selected", "Zoom Extents All Selected", Command::ZoomExtentsAllSelected),
+                (icons::ZOOM_EXTENTS_ALL, None, "Zoom Extents All", Command::ZoomExtentsAll),
+                (icons::ZOOM_EXTENTS_ALL, Some(icons::SELECTED_VARIANT), "Zoom Extents All Selected", Command::ZoomExtentsAllSelected),
             ]);
         });
         ui.horizontal(|ui| {
-            nav(ui, app, "FOV", "Field-of-View", NavMode::Fov, Command::FieldOfViewMode);
-            nav(ui, app, "Truck", "Truck Camera Mode", NavMode::TruckCamera, Command::TruckCameraMode);
+            nav(ui, app, icons::FIELD_OF_VIEW, "Field-of-View", NavMode::Fov, Command::FieldOfViewMode);
+            nav(ui, app, icons::TRUCK, "Truck Camera Mode", NavMode::TruckCamera, Command::TruckCameraMode);
             let current = usize::from(app.state.nav_mode == NavMode::PanCamera);
             flyout(ui, app, "orbit_camera", current, [
-                ("Orbit Cam", "Orbit Camera Mode", Command::OrbitCameraMode),
-                ("Pan Cam", "Pan Camera Mode", Command::PanCameraMode),
+                (icons::ORBIT, None, "Orbit Camera Mode", Command::OrbitCameraMode),
+                (icons::PAN_CAMERA, None, "Pan Camera Mode", Command::PanCameraMode),
             ]);
             let max = app.state.maximized;
-            if ui.selectable_label(max, "⛶").on_hover_name(&app.state, "Maximize Viewport Toggle").clicked() {
+            if Icon::new(icons::MAXIMIZE, "Maximize Viewport Toggle").on(max).show(ui, &app.state).clicked() {
                 let _ = app.dispatch(Command::MaximizeViewportToggle);
             }
         });

@@ -2820,10 +2820,10 @@ fn camera_view_swaps_the_navigation_buttons_and_truck_moves_the_camera_with_one_
     h.cmd(Command::CameraView);
     maximized(&mut h);
     h.cmd(Command::SelectNone);
-    let screen = h.ctx.screen_rect();
-    assert!(h.text_rect("Truck", screen).is_some() && h.text_rect("Roll", screen).is_some(), "camera viewport controls");
-    assert!(h.text_rect("Pan", screen).is_none());
-    click_text(&mut h, "Truck", screen, 0.0);
+    use egui::accesskit::Role;
+    assert!(h.has(Role::Button, "Truck Camera Mode") && h.has(Role::Button, "Roll Camera Mode"), "camera viewport controls");
+    assert!(!h.has(Role::Button, "Pan View"));
+    h.click(h.find(Role::Button, "Truck Camera Mode").center());
     assert_eq!(h.app.state.nav_mode, loom_input::NavMode::TruckCamera);
     let eye = |h: &Harness| h.app.state.scene.world_matrix(cam).w_axis.truncate();
     let before = eye(&h);

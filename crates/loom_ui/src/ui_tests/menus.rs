@@ -159,7 +159,7 @@ fn typing_a_name_in_the_named_selection_sets_field_makes_a_set() {
     let mut h = Harness::new();
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     let a = selected(&h);
-    let field = right_of(&h, Role::TextInput, h.find(Role::Button, "{}"));
+    let field = right_of(&h, Role::TextInput, h.find(Role::Button, "Edit Named Selection Sets"));
     h.click(field.center());
     type_text(&mut h, "lit lamp");
     assert_eq!(h.app.state.named_sets.get("lit lamp"), Some(&vec![a]));
@@ -180,7 +180,7 @@ fn at_sub_object_level_the_named_sets_field_names_and_lists_the_objects_sets() {
     let p = h.screen_of(Vec3::new(15.0, -15.0, 30.0));
     h.click(p);
     assert_eq!(h.sub_count(), 1);
-    let field = right_of(&h, Role::TextInput, h.find(Role::Button, "{}"));
+    let field = right_of(&h, Role::TextInput, h.find(Role::Button, "Edit Named Selection Sets"));
     h.click(field.center());
     type_text(&mut h, "Vertex Lighting");
     assert!(h.app.state.named_sub_selections.contains_key("Vertex Lighting"), "a sub-object set, not an object set");
