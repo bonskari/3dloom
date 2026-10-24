@@ -70,7 +70,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     for a in &actions[range] {
                         ui.horizontal(|ui| {
                             let selected = action.as_deref() == Some(*a);
-                            if ui.add_sized([290.0, row_h], egui::SelectableLabel::new(selected, *a)).clicked() {
+                            let clicked = ui
+                                .allocate_ui_with_layout(egui::vec2(290.0, row_h), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    ui.set_min_width(290.0);
+                                    ui.add(egui::SelectableLabel::new(selected, *a)).clicked()
+                                })
+                                .inner;
+                            if clicked {
                                 action = Some((*a).to_owned());
                             }
                             ui.label(shortcuts.get(a).map(|v| v.join(", ")).unwrap_or_default());
