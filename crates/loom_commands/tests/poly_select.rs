@@ -192,3 +192,25 @@ fn base_object_stack_levels() {
     let boxed = *s.selection.iter().next().unwrap();
     assert!(loom_commands::base_sub_levels(&s.scene.node(boxed).unwrap().object).is_empty());
 }
+
+/// One level, wherever it is changed: the level keys and the Selection
+/// rollout set the active Edit Poly entry's own level, and the stack's level
+/// rows set the selection mode (the stack showed Edge while the rollout showed Polygon).
+#[test]
+fn edit_poly_entry_level_follows_every_level_change() {
+    let mut s = state();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
+    let id = *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::AddModifier { name: "Edit Poly".into() }).unwrap();
+    let lvl = |s: &AppState| s.scene.node(id).unwrap().modifiers[0].sub_level;
+    execute(&mut s, Command::FaceLevel).unwrap();
+    assert_eq!((s.selection_mode, lvl(&s)), (SelectionMode::Face, 4));
+    execute(&mut s, Command::EdgeLevel).unwrap();
+    assert_eq!((s.selection_mode, lvl(&s)), (SelectionMode::Edge, 2));
+    execute(&mut s, Command::EdgeLevel).unwrap();
+    assert_eq!((s.selection_mode, lvl(&s)), (SelectionMode::Object, 0), "the same key again leaves the level");
+    execute(&mut s, Command::SelectionMode { mode: SelectionMode::Element }).unwrap();
+    assert_eq!(lvl(&s), 5);
+    execute(&mut s, Command::ModifierSubobjectLevel { index: 0, level: 1 }).unwrap();
+    assert_eq!((s.selection_mode, lvl(&s)), (SelectionMode::Vertex, 1));
+}

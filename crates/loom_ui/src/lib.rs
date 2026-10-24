@@ -22,6 +22,8 @@ pub mod ribbon;
 pub mod viewports;
 pub mod uv_editor;
 pub mod track_view;
+#[cfg(test)]
+mod ui_tests;
 
 use eframe::egui;
 use glam::Vec3;
@@ -197,6 +199,8 @@ pub struct LoomApp {
     pub native_file_dialogs: bool,
     /// Title last sent to the window, so it is only resent on change.
     pub last_title: String,
+    /// Each viewport's screen rectangle last frame (tests aim clicks with it).
+    pub viewport_rects: Vec<egui::Rect>,
     /// A transform or region drag in the Edit UVWs window.
     pub uv_drag: Option<uv_editor::UvDrag>,
     /// Sketch: the stroke being drawn (UV) and whether vertices were picked yet.
@@ -285,6 +289,7 @@ impl LoomApp {
             file_dir: std::env::current_dir().unwrap_or_default(),
             native_file_dialogs: dialogs::file_dialog::use_native(std::env::var("LOOM_CONTROL_PORT").ok().as_deref()),
             last_title: String::new(),
+            viewport_rects: Vec::new(),
             uv_drag: None,
             uv_sketch: Vec::new(),
             uv_sketch_picked: false,
@@ -650,6 +655,14 @@ impl LoomApp {
 
 impl eframe::App for LoomApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.frame(ctx);
+    }
+}
+
+impl LoomApp {
+    /// One frame of the whole UI (what eframe calls each repaint; the UI
+    /// regression tests call it directly with synthetic input).
+    pub fn frame(&mut self, ctx: &egui::Context) {
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_file_action(loom_commands::PendingFileAction::Exit);

@@ -542,6 +542,34 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SelectionMode { mode } => {
             state.selection_mode = mode;
             state.sub_selection.clear();
+            // The level lives in one place for the user: an active Edit Poly /
+            // Poly Select / Mesh Select entry shows the same level in the stack.
+            let ids: Vec<NodeId> = state.selection.iter().copied().collect();
+            for id in ids {
+                let Some(n) = state.scene.node_mut(id) else { continue };
+                let Some(i) = n.active_entry else { continue };
+                let Some(slot) = n.modifiers.get_mut(i) else { continue };
+                let level = match (&slot.modifier, mode) {
+                    (_, SelectionMode::Object) => 0,
+                    (loom_scene::Modifier::EditPoly { .. } | loom_scene::Modifier::PolySelect { .. }, m) => match m {
+                        SelectionMode::Vertex => 1,
+                        SelectionMode::Edge => 2,
+                        SelectionMode::Border => 3,
+                        SelectionMode::Face => 4,
+                        _ => 5,
+                    },
+                    // Mesh Select: Vertex, Edge, Face, Polygon, Element; polygons keep Face or Polygon.
+                    (loom_scene::Modifier::MeshSelect { .. }, m) => match m {
+                        SelectionMode::Vertex => 1,
+                        SelectionMode::Edge | SelectionMode::Border => 2,
+                        SelectionMode::Face if slot.sub_level == 3 => 3,
+                        SelectionMode::Face => 4,
+                        _ => 5,
+                    },
+                    _ => continue,
+                };
+                slot.sub_level = level;
+            }
             Ok(json!({ "mode": mode.label() }))
         }
 

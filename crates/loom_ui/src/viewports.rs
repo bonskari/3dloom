@@ -40,6 +40,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         .show(ctx, |ui| {
             let panel = ui.available_rect_before_wrap();
             let rects = cell_rects(app, panel);
+            app.viewport_rects = rects.clone();
             for (i, rect) in rects.iter().enumerate() {
                 if rect.width() < 1.0 || rect.height() < 1.0 {
                     continue;
