@@ -292,12 +292,12 @@ fn drag_creating_a_cylinder_downwards_gives_a_negative_height() {
     let mut h = Harness::new();
     creating(&mut h, PrimitiveKind::Cylinder);
     let a = ground_point(&h, Vec3::ZERO);
-    let b = ground_point(&h, Vec3::new(20.0, 0.0, 0.0));
+    let b = ground_point(&h, Vec3::new(3.0, 0.0, 0.0));
     h.drag(a, b);
     let c = b + egui::vec2(0.0, 60.0);
     hover_to(&mut h, b, c);
     h.click(c);
-    assert!(param(&h, "Height") < -1.0, "moving down builds below the plane: {}", param(&h, "Height"));
+    assert!(param(&h, "Height") < -0.3, "moving down builds below the plane: {}", param(&h, "Height"));
     assert!(pivot(&h).length() < 1e-2, "pivot at the base centre, on the click: {}", pivot(&h));
 }
 
@@ -306,11 +306,11 @@ fn edge_creation_method_draws_a_sphere_edge_to_edge() {
     let mut h = Harness::new();
     creating(&mut h, PrimitiveKind::Sphere);
     h.app.set_creation_method(PrimitiveKind::Sphere, "Edge");
-    let a = ground_point(&h, Vec3::new(-20.0, 0.0, 0.0));
-    let b = ground_point(&h, Vec3::new(20.0, 0.0, 0.0));
+    let a = ground_point(&h, Vec3::new(-3.0, 0.0, 0.0));
+    let b = ground_point(&h, Vec3::new(3.0, 0.0, 0.0));
     h.drag(a, b);
-    assert!((param(&h, "Radius") - 20.0).abs() < 0.5, "radius is half the drag: {}", param(&h, "Radius"));
-    assert!(pivot(&h).length() < 0.5, "the centre is midway: {}", pivot(&h));
+    assert!((param(&h, "Radius") - 3.0).abs() < 0.1, "radius is half the drag: {}", param(&h, "Radius"));
+    assert!(pivot(&h).length() < 0.1, "the centre is midway: {}", pivot(&h));
 }
 
 #[test]
@@ -318,7 +318,7 @@ fn cone_second_radius_starts_at_the_first_and_decreases_towards_a_point() {
     let mut h = Harness::new();
     creating(&mut h, PrimitiveKind::Cone);
     let a = ground_point(&h, Vec3::ZERO);
-    let b = ground_point(&h, Vec3::new(20.0, 0.0, 0.0));
+    let b = ground_point(&h, Vec3::new(3.0, 0.0, 0.0));
     h.drag(a, b);
     assert!((param(&h, "Radius 2") - param(&h, "Radius 1")).abs() < 1e-3, "a straight side while the height is set");
     let c = b + egui::vec2(0.0, -60.0);
@@ -339,11 +339,11 @@ fn cube_creation_method_is_one_drag_with_equal_sides() {
     creating(&mut h, PrimitiveKind::Box);
     h.app.set_creation_method(PrimitiveKind::Box, "Cube");
     let a = ground_point(&h, Vec3::ZERO);
-    let b = ground_point(&h, Vec3::new(20.0, 10.0, 0.0));
+    let b = ground_point(&h, Vec3::new(3.0, 1.5, 0.0));
     h.drag(a, b);
     assert!(h.app.create.is_none(), "a cube is a one-step operation");
     let (l, w, ht) = (param(&h, "Length"), param(&h, "Width"), param(&h, "Height"));
-    assert!(l > 1.0 && (l - w).abs() < 1e-4 && (l - ht).abs() < 1e-4, "{l} {w} {ht}");
+    assert!(l > 0.5 && (l - w).abs() < 1e-4 && (l - ht).abs() < 1e-4, "{l} {w} {ht}");
 }
 
 #[test]
@@ -352,16 +352,16 @@ fn square_plane_and_centre_pyramid_creation_methods() {
     creating(&mut h, PrimitiveKind::Plane);
     h.app.set_creation_method(PrimitiveKind::Plane, "Square");
     let a = ground_point(&h, Vec3::ZERO);
-    let b = ground_point(&h, Vec3::new(20.0, 10.0, 0.0));
+    let b = ground_point(&h, Vec3::new(3.0, 1.5, 0.0));
     h.drag(a, b);
-    assert!((param(&h, "Length") - param(&h, "Width")).abs() < 1e-4 && param(&h, "Width") > 1.0);
+    assert!((param(&h, "Length") - param(&h, "Width")).abs() < 1e-4 && param(&h, "Width") > 0.5);
 
     let mut h = Harness::new();
     creating(&mut h, PrimitiveKind::Pyramid);
     h.app.set_creation_method(PrimitiveKind::Pyramid, "Center");
     let a = ground_point(&h, Vec3::ZERO);
-    let b = ground_point(&h, Vec3::new(20.0, 10.0, 0.0));
+    let b = ground_point(&h, Vec3::new(3.0, 1.5, 0.0));
     h.drag(a, b);
-    assert!((param(&h, "Width") - 40.0).abs() < 1.0 && (param(&h, "Depth") - 20.0).abs() < 1.0, "base drawn from the centre out");
+    assert!((param(&h, "Width") - 6.0).abs() < 0.1 && (param(&h, "Depth") - 3.0).abs() < 0.1, "base drawn from the centre out");
     assert!(pivot(&h).length() < 1e-2, "pivot stays at the click: {}", pivot(&h));
 }
