@@ -533,6 +533,277 @@ fn camera_view_honours_clip_manually_and_orthographic_projection() {
     assert!(centre.distance(rect.center()) < 1.0, "{centre:?} vs {:?}", rect.center());
 }
 
+// ---- object picking: mesh surfaces, See-Through, repeat clicks, wireframe edges ----
+
+/// Long enough between two clicks that they are not a double-click.
+fn pause(h: &mut Harness) {
+    h.frames(12);
+}
+
+fn selected(h: &Harness) -> Vec<loom_scene::NodeId> {
+    h.app.state.selection.iter().copied().collect()
+}
+
+fn created(h: &mut Harness, kind: PrimitiveKind, position: [f32; 3], size: f32) -> loom_scene::NodeId {
+    h.cmd(Command::CreatePrimitive { kind, position, size: [size; 3] });
+    *h.app.state.selection.iter().next().unwrap()
+}
+
+#[test]
+fn a_click_through_the_hole_of_a_torus_selects_nothing() {
+    let mut h = Harness::new();
+    // Radius 1 = 15, radius 2 = 5, lying on the ground: the hole is 10 units wide at z = 5.
+    let torus = created(&mut h, PrimitiveKind::Torus, [0.0; 3], 40.0);
+    framed(&mut h);
+    let p = h.screen_of(Vec3::new(2.0, 2.0, 5.0));
+    h.click(p);
+    assert!(h.app.state.selection.is_empty(), "the hole is inside the bounding box but not on the surface");
+    let p = h.screen_of(Vec3::new(15.0, 0.0, 10.0));
+    h.click(p);
+    assert_eq!(selected(&h), vec![torus], "a click on the tube selects the torus");
+}
+
+#[test]
+fn a_box_inside_a_see_through_box_is_picked_and_a_repeat_click_goes_deeper() {
+    let mut h = Harness::new();
+    let outer = created(&mut h, PrimitiveKind::Box, [0.0; 3], 60.0);
+    let inner = created(&mut h, PrimitiveKind::Box, [0.0; 3], 10.0);
+    h.cmd(Command::SelectNodes { ids: vec![outer.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::DisplayAsSeeThroughToggle);
+    h.cmd(Command::SelectNone);
+    framed(&mut h);
+    let p = h.screen_of(Vec3::new(2.0, 2.0, 10.0));
+    h.click(p);
+    assert_eq!(selected(&h), vec![inner], "the opaque box inside wins over the See-Through one in front");
+    pause(&mut h);
+    h.click(p + egui::vec2(1.0, 1.0));
+    assert_eq!(selected(&h), vec![outer], "a repeat click at the same spot picks the next object along the ray");
+    pause(&mut h);
+    h.click(p);
+    assert_eq!(selected(&h), vec![inner], "and comes round again");
+    pause(&mut h);
+    let q = p + egui::vec2(6.0, 0.0);
+    h.click(q);
+    assert_eq!(selected(&h), vec![inner], "a click elsewhere starts again from the front");
+}
+
+#[test]
+fn a_wireframe_view_picks_objects_by_their_edges() {
+    let mut h = Harness::new();
+    let b = created(&mut h, PrimitiveKind::Box, [0.0; 3], 30.0);
+    h.cmd(Command::SelectNone);
+    maximized(&mut h);
+    h.cmd(Command::TopView);
+    if h.app.state.active().shading != loom_commands::Shading::Wireframe {
+        h.cmd(Command::WireframeSmoothHighlightsToggle);
+    }
+    h.cmd(Command::ZoomExtentsAll);
+    let p = h.screen_of(Vec3::new(5.0, 5.0, 30.0));
+    h.click(p);
+    assert!(h.app.state.selection.is_empty(), "inside the wires there is nothing to click");
+    let p = h.screen_of(Vec3::new(15.0, 5.0, 30.0)) + egui::vec2(3.0, 0.0);
+    h.click(p);
+    assert_eq!(selected(&h), vec![b], "a click 3 px from an edge selects the box");
+}
+
+#[test]
+fn double_clicking_an_object_selects_its_hierarchy() {
+    let mut h = Harness::new();
+    let a = created(&mut h, PrimitiveKind::Box, [0.0; 3], 30.0);
+    let b = created(&mut h, PrimitiveKind::Box, [60.0, 0.0, 0.0], 20.0);
+    let c = created(&mut h, PrimitiveKind::Box, [100.0, 0.0, 0.0], 10.0);
+    let other = created(&mut h, PrimitiveKind::Box, [-60.0, 0.0, 0.0], 20.0);
+    h.cmd(Command::SetParent { id: b.0, parent: Some(a.0) });
+    h.cmd(Command::SetParent { id: c.0, parent: Some(b.0) });
+    h.cmd(Command::SelectNone);
+    framed(&mut h);
+    let p = h.screen_of(Vec3::new(7.0, 7.0, 30.0));
+    h.click(p);
+    assert_eq!(selected(&h), vec![a], "a single click selects the parent alone");
+    h.click(p);
+    let mut want = vec![a, b, c];
+    want.sort();
+    assert_eq!(selected(&h), want, "a double-click selects it and all its descendants");
+    assert!(!h.app.state.selection.contains(&other));
+}
+
+#[test]
+fn double_clicking_an_edge_selects_its_loop() {
+    let mut h = Harness::new();
+    // A 40-unit plane of 4 x 4 polygons: the edges on x = 10 form one loop of four.
+    poly_plane(&mut h);
+    h.key(egui::Key::Num2);
+    let p = h.screen_of(Vec3::new(10.0, 5.0, 0.0));
+    h.click(p);
+    assert_eq!(h.sub_count(), 1, "a single click selects the edge");
+    h.click(p);
+    assert_eq!(h.sub_count(), 4, "a double-click selects its loop");
+    pause(&mut h);
+    h.click(p);
+    assert_eq!(h.sub_count(), 1, "a later single click is a plain pick again");
+}
+
+// ---- a click on empty space clears the selection at the current level ----
+
+/// A spot of the active viewport away from objects framed by Zoom Extents.
+fn empty_point(h: &Harness) -> egui::Pos2 {
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    egui::pos2(r.left() + r.width() * 0.06, r.top() + r.height() * 0.6)
+}
+
+/// The keys 1-5 are Editable Poly / Edit Poly shortcuts; other objects
+/// change level through the command.
+fn level(h: &mut Harness, mode: SelectionMode) {
+    h.cmd(Command::SelectionMode { mode });
+}
+
+/// The first two knots / segments / the spline of the selected Editable Spline.
+fn spline_pick(h: &mut Harness) {
+    let node = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectSub { node: Some(node.0), ids: vec![0, 1], op: loom_commands::SelectOp::Replace });
+}
+
+fn poly_plane(h: &mut Harness) {
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [40.0, 40.0, 0.0] });
+    h.cmd(Command::ConvertToEditablePoly);
+    framed(h);
+}
+
+fn plane_with(h: &mut Harness, modifier: &str) {
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [40.0, 40.0, 0.0] });
+    h.cmd(Command::AddModifier { name: modifier.into() });
+    framed(h);
+}
+
+fn editable_rectangle(h: &mut Harness) {
+    h.cmd(Command::CreateShape { kind: loom_commands::ShapeKind::Rectangle, position: [0.0; 3], size: [40.0, 40.0, 0.0] });
+    h.cmd(Command::ConvertToEditableSpline);
+    framed(h);
+}
+
+/// A cylinder skinned to two bones, selected with Skin current in the stack.
+fn skinned(h: &mut Harness) {
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Cylinder, position: [0.0; 3], size: [10.0, 10.0, 40.0] });
+    let arm = *h.app.state.selection.iter().next().unwrap();
+    let r = h.app.dispatch(Command::CreateBoneChain { points: vec![[0.0, 0.0, 0.0], [0.0, 0.0, 20.0], [0.0, 0.0, 40.0], [0.0, 0.0, 42.0]], name: None }).unwrap();
+    let bones: Vec<u64> = serde_json::from_value(r["nodes"].clone()).unwrap();
+    h.cmd(Command::SelectNodes { ids: vec![arm.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::SkinModifier);
+    h.cmd(Command::SkinAddBones { ids: bones[..2].to_vec() });
+    framed(h);
+}
+
+#[test]
+fn a_skinned_object_deselects_on_an_empty_click_at_object_level_and_in_edit_envelopes() {
+    let mut h = Harness::new();
+    skinned(&mut h);
+    assert!(h.app.state.skin_entry().is_some());
+    let p = empty_point(&h);
+    h.click(p);
+    assert!(h.app.state.selection.is_empty(), "object level: the skinned object deselects");
+
+    let mut h = Harness::new();
+    skinned(&mut h);
+    h.cmd(Command::ModifierSubobjectLevel { index: 0, level: 1 });
+    assert!(h.app.state.skin_active(), "Edit Envelopes is on");
+    h.cmd(Command::SkinSelectVertices { ids: vec![0, 1, 2], op: loom_commands::SelectOp::Replace });
+    assert_eq!(h.app.state.skin_selection.len(), 3);
+    let p = empty_point(&h);
+    h.click(p);
+    assert!(h.app.state.skin_selection.is_empty(), "Edit Envelopes: the vertices deselect");
+}
+
+#[test]
+fn a_click_on_empty_space_clears_the_selection_at_every_level_and_tool() {
+    type Setup = fn(&mut Harness);
+    type Count = fn(&Harness) -> usize;
+    let objects: Count = |h| h.app.state.selection.len();
+    let subs: Count = |h| h.sub_count();
+    let cases: Vec<(&str, Setup, Count)> = vec![
+        ("object", |h| poly_box(h), objects),
+        ("Editable Poly vertex", |h| { poly_plane(h); h.key(egui::Key::Num1); h.cmd(Command::SelectAll); }, subs),
+        ("Editable Poly edge", |h| { poly_plane(h); h.key(egui::Key::Num2); h.cmd(Command::SelectAll); }, subs),
+        ("Editable Poly border", |h| { poly_plane(h); h.key(egui::Key::Num3); h.cmd(Command::SelectAll); }, subs),
+        ("Editable Poly polygon", |h| { poly_plane(h); h.key(egui::Key::Num4); h.cmd(Command::SelectAll); }, subs),
+        ("Editable Poly element", |h| { poly_plane(h); h.key(egui::Key::Num5); h.cmd(Command::SelectAll); }, subs),
+        ("Edit Poly vertex", |h| { plane_with(h, "Edit Poly"); h.key(egui::Key::Num1); h.cmd(Command::SelectAll); }, subs),
+        ("Edit Poly polygon", |h| { plane_with(h, "Edit Poly"); h.key(egui::Key::Num4); h.cmd(Command::SelectAll); }, subs),
+        ("Poly Select edge", |h| { plane_with(h, "Poly Select"); level(h, SelectionMode::Edge); h.cmd(Command::SelectAll); }, subs),
+        ("Mesh Select face", |h| { plane_with(h, "Mesh Select"); level(h, SelectionMode::Face); h.cmd(Command::SelectAll); }, subs),
+        ("Editable Spline vertex", |h| { editable_rectangle(h); level(h, SelectionMode::Vertex); spline_pick(h); }, subs),
+        ("Editable Spline segment", |h| { editable_rectangle(h); level(h, SelectionMode::Edge); spline_pick(h); }, subs),
+        ("Editable Spline spline", |h| { editable_rectangle(h); level(h, SelectionMode::Face); spline_pick(h); }, subs),
+        ("Skin object", |h| skinned(h), objects),
+        (
+            "Skin envelope vertices",
+            |h| {
+                skinned(h);
+                h.cmd(Command::ModifierSubobjectLevel { index: 0, level: 1 });
+                h.cmd(Command::SkinSelectVertices { ids: vec![0, 1, 2], op: loom_commands::SelectOp::Replace });
+            },
+            |h| h.app.state.skin_selection.len(),
+        ),
+        (
+            "FFD control points",
+            |h| {
+                plane_with(h, "FFD 2x2x2");
+                h.cmd(Command::ModifierSubobjectLevel { index: 0, level: 1 });
+                h.cmd(Command::SelectControlPoints { op: loom_commands::SelectOp::Replace, indices: vec![0, 1] });
+            },
+            |h| h.app.state.ffd_selection.len(),
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (name, setup, count) in &cases {
+        for (tool, key) in [("Select", egui::Key::Q), ("Move", egui::Key::W), ("Rotate", egui::Key::E), ("Scale", egui::Key::R)] {
+            let mods: &[(&str, egui::Modifiers)] = if tool == "Select" { &[("", egui::Modifiers::NONE), ("Ctrl+", egui::Modifiers::CTRL), ("Alt+", egui::Modifiers::ALT)] } else { &[("", egui::Modifiers::NONE)] };
+            for (mod_name, m) in mods {
+                let mut h = Harness::new();
+                setup(&mut h);
+                h.key(key);
+                let before = count(&h);
+                if before == 0 {
+                    failures.push(format!("{name}, {tool} tool: the setup selected nothing"));
+                    continue;
+                }
+                let p = empty_point(&h);
+                h.mods = *m;
+                h.click(p);
+                h.mods = egui::Modifiers::NONE;
+                let after = count(&h);
+                let want = if m.is_none() { 0 } else { before };
+                if after != want {
+                    failures.push(format!("{name}, {tool} tool, {mod_name}click on empty space: {before} -> {after}, want {want}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+#[test]
+fn region_selection_uses_the_drawn_geometry_not_the_bounding_box() {
+    let mut h = Harness::new();
+    let torus = created(&mut h, PrimitiveKind::Torus, [0.0; 3], 40.0);
+    h.cmd(Command::SelectNone);
+    framed(&mut h);
+    h.app.state.prefs.auto_window_crossing = false;
+    h.app.state.window_selection = false;
+    let c = h.screen_of(Vec3::new(0.0, 0.0, 5.0));
+    h.drag(c - egui::vec2(6.0, 6.0), c + egui::vec2(6.0, 6.0));
+    assert!(h.app.state.selection.is_empty(), "Crossing inside the hole touches nothing");
+    // Window around the drawn torus (a little margin): its box corners stick out, its vertices do not.
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let vp = h.app.camera_for(i).view_projection(rect.width() / rect.height());
+    let mesh = &h.app.world_meshes()[0].1;
+    let pts: Vec<egui::Pos2> = mesh.vertices().iter().filter_map(|v| crate::viewport_widget::project_world_to_screen(v.position, vp, rect)).collect();
+    let bounds = egui::Rect::from_points(&pts).expand(3.0);
+    h.app.state.window_selection = true;
+    h.drag(bounds.min, bounds.max);
+    assert_eq!(selected(&h), vec![torus], "Window around the drawn torus selects it");
+}
+
 /// An imported skinned character: one bracket per selected object, and the
 /// mesh's bracket goes round the posed (Skin) result, not the bind-pose cage.
 #[test]

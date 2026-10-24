@@ -264,6 +264,9 @@ pub struct LoomApp {
     pub drag_select_start: Option<egui::Pos2>,
     /// Alt+LMB press not yet moved 4 px: a click subtracts from the selection, a drag orbits.
     pub alt_click: Option<egui::Pos2>,
+    /// The last object click: where, the objects under it front to back, and
+    /// which of them it picked; a repeat click there picks the next one.
+    pub pick_cycle: Option<(egui::Pos2, Vec<NodeId>, usize)>,
     /// Lasso/Paint path or Fence corners being collected.
     pub region_points: Vec<egui::Pos2>,
     pub quad_menu: Option<quad_menu::Open>,
@@ -356,6 +359,7 @@ impl LoomApp {
             view_animation: None,
             drag_select_start: None,
             alt_click: None,
+            pick_cycle: None,
             region_points: Vec::new(),
             quad_menu: None,
             background_textures: std::collections::HashMap::new(),
@@ -497,9 +501,7 @@ impl LoomApp {
             } else {
                 [srgb(n.wire_color[0]), srgb(n.wire_color[1]), srgb(n.wire_color[2])]
             };
-            // Helpers (Dummy, Point, IK goals) draw see-through like wireframe helpers;
-            // a camera icon is drawn solid.
-            let see_through = n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }));
+            let see_through = draws_see_through(n);
             // An assigned material colours the faces (its diffuse, opacity and
             // highlight); edges and wireframe keep the object colour.
             let material = self.state.scene.node_material(n.id).cloned();
@@ -561,6 +563,12 @@ impl LoomApp {
     /// Visible nodes with their world-space meshes, in render order.
     pub fn world_meshes(&self) -> &[(NodeId, Mesh)] {
         &self.world_meshes
+    }
+
+    /// The world-space mesh the viewports draw for `world_meshes()[i]`:
+    /// what object picking hits.
+    pub fn drawn_mesh(&self, i: usize) -> &Mesh {
+        self.world_display.get(i).unwrap_or(&self.world_meshes[i].1)
     }
 
     /// What the viewports draw for each of `world_meshes` (a Skin's posed
@@ -853,6 +861,12 @@ pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
 }
 
 /// Decodes a Show Map bitmap once per path (a failed load is remembered too).
+/// Drawn see-through: See-Through on (Alt+X), and helpers (Dummy, Point, IK
+/// goals); a camera icon is drawn solid.
+pub(crate) fn draws_see_through(n: &loom_scene::Node) -> bool {
+    n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }))
+}
+
 fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>, path: &str) -> Option<std::sync::Arc<loom_render::Bitmap>> {
     cache
         .entry(path.to_owned())
