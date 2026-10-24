@@ -121,8 +121,9 @@ fn show_end_result_off_and_set_parameter_routing() {
     assert!((gizmo.position.get().x - 5.0).abs() < 1e-4, "the gizmo moved");
     let (lo, _) = s.scene.eval_mesh(a).value.mesh.aabb();
     assert!((lo.x + 5.0 - 5.0).abs() < 1e-4, "the result moved by the gizmo: {lo:?}");
+    assert!(!s.show_end_result, "Show End Result starts off, as in the reference");
     execute(&mut s, Command::ShowEndResultToggle).unwrap();
-    assert!(!s.show_end_result);
+    assert!(s.show_end_result);
     // SetParameter on the base object still edits the primitive.
     execute(&mut s, Command::SetParameter { id: a.0, name: "Height".into(), value: 20.0 }).unwrap();
     let (_, hi) = s.scene.node(a).unwrap().object.mesh().aabb();
@@ -143,4 +144,118 @@ fn state_lists_the_stack_with_modifier_names_and_levels() {
     let stack = &st["nodes"][0]["stack"];
     assert_eq!(stack[0]["modifier"], "Bend");
     assert_eq!(stack[0]["sub_level"], 1);
+}
+
+fn set(s: &mut AppState, index: u32, name: &str, value: f64) {
+    execute(s, Command::SetModifierParameter { index, name: name.into(), value }).unwrap();
+}
+
+/// Smooth > Prevent Indirect Smoothing: faces that only share a vertex get
+/// different groups too, so no smoothing leaks across that vertex.
+#[test]
+fn smooth_prevent_indirect_smoothing_separates_faces_meeting_at_a_vertex() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Pyramid, position: [0.0; 3], size: [10.0, 10.0, 10.0] }).unwrap();
+    let a = *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::AddModifier { name: "Smooth".into() }).unwrap();
+    set(&mut s, 0, "Auto Smooth", 1.0);
+    set(&mut s, 0, "Threshold", 5.0);
+    // Two faces that share a vertex but no edge, sharing a group bit.
+    let leaks = |s: &AppState| {
+        let m = s.scene.eval_mesh(a).value.mesh.clone();
+        let mut n = 0;
+        for v in 0..m.vertex_count() as u32 {
+            let faces = m.faces_around_vertex(loom_mesh::VertexId(v));
+            for (i, f) in faces.iter().enumerate() {
+                for g in &faces[i + 1..] {
+                    if m.faces()[f.0 as usize].smoothing_groups & m.faces()[g.0 as usize].smoothing_groups != 0 {
+                        n += 1;
+                    }
+                }
+            }
+        }
+        n
+    };
+    assert!(leaks(&s) > 0, "edge-only colouring reuses a group across the apex");
+    set(&mut s, 0, "Prevent Indirect Smoothing", 1.0);
+    assert_eq!(leaks(&s), 0, "no two faces around a vertex share a group");
+    let Modifier::Smooth { .. } = &s.scene.node(a).unwrap().modifiers[0].modifier else { panic!() };
+    assert!(s.scene.node(a).unwrap().modifiers[0].modifier.parameters().iter().any(|(n, _)| *n == "Prevent Indirect Smoothing"));
+}
+
+/// Taper > Center: moving the center shifts where the taper is measured
+/// from; the gizmo itself stays where it is.
+#[test]
+fn taper_center_level_moves_only_the_center() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s);
+    execute(&mut s, Command::AddModifier { name: "Taper".into() }).unwrap();
+    set(&mut s, 0, "Amount", 1.0);
+    let top_y = |s: &AppState| {
+        let m = s.scene.eval_mesh(a).value.mesh.clone();
+        let ys: Vec<f32> = m.vertices().iter().filter(|v| v.position.z > 9.9).map(|v| v.position.y).collect();
+        (ys.iter().cloned().fold(f32::INFINITY, f32::min), ys.iter().cloned().fold(f32::NEG_INFINITY, f32::max))
+    };
+    let (lo, hi) = top_y(&s);
+    assert!((lo + 10.0).abs() < 1e-4 && (hi - 10.0).abs() < 1e-4, "the top doubles: {lo} {hi}");
+    execute(&mut s, Command::ModifierSubobjectLevel { index: 0, level: 2 }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 5.0, 0.0], system: None }).unwrap();
+    let gizmo = s.scene.node(a).unwrap().modifiers[0].modifier.gizmo().unwrap().clone();
+    assert!(gizmo.position.get().length() < 1e-6, "the gizmo did not move: {}", gizmo.position.get());
+    let (lo, hi) = top_y(&s);
+    assert!((lo + 15.0).abs() < 1e-4 && (hi - 5.0).abs() < 1e-4, "the taper scales about the moved center: {lo} {hi}");
+    // Gizmo level: the gizmo moves and takes the center with it.
+    execute(&mut s, Command::ModifierSubobjectLevel { index: 0, level: 1 }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 5.0, 0.0], system: None }).unwrap();
+    let gizmo = s.scene.node(a).unwrap().modifiers[0].modifier.gizmo().unwrap().clone();
+    assert!((gizmo.position.get().y - 5.0).abs() < 1e-4);
+    let (lo, hi) = top_y(&s);
+    assert!((lo + 20.0).abs() < 1e-4 && (hi - 0.0).abs() < 1e-4, "center now at y = 10: {lo} {hi}");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    let (lo, hi) = top_y(&s);
+    assert!((lo + 10.0).abs() < 1e-4 && (hi - 10.0).abs() < 1e-4, "both moves undone: {lo} {hi}");
+}
+
+/// Shift-drag in the stack copies an entry, Ctrl-drag instances it
+/// (the instanced pair shares parameters).
+#[test]
+fn copy_and_instance_a_modifier_within_the_stack() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s);
+    execute(&mut s, Command::AddModifier { name: "Bend".into() }).unwrap();
+    execute(&mut s, Command::AddModifier { name: "Taper".into() }).unwrap();
+    set(&mut s, 1, "Amount", 0.5);
+    let undo_before = s.undo.len();
+    // Copy Taper (1) to the top.
+    execute(&mut s, Command::CopyModifier { from: 1, to: 2, instance: false }).unwrap();
+    assert_eq!(names(&s, a), vec!["Bend", "Taper", "Taper"]);
+    assert_eq!(s.undo.len(), undo_before + 1);
+    assert_eq!(s.scene.node(a).unwrap().modifiers[2].instance_of, None);
+    set(&mut s, 2, "Amount", 0.25);
+    let amount = |s: &AppState, i: usize| match s.scene.resolved_modifier(a, i).unwrap() {
+        Modifier::Taper { amount, .. } => amount.get(),
+        _ => panic!(),
+    };
+    assert_eq!((amount(&s, 1), amount(&s, 2)), (0.5, 0.25), "a copy is independent");
+    // Instance Bend (0) below everything else: index 0, above it the source moves up.
+    execute(&mut s, Command::CopyModifier { from: 0, to: 0, instance: true }).unwrap();
+    assert_eq!(names(&s, a), vec!["Bend", "Bend", "Taper", "Taper"]);
+    let inst = s.scene.node(a).unwrap().modifiers[0].instance_of;
+    assert_eq!(inst, Some((a, 1)), "the new entry instances the original, now at 1");
+    set(&mut s, 0, "Angle", 30.0);
+    let angle = |s: &AppState, i: usize| match s.scene.resolved_modifier(a, i).unwrap() {
+        Modifier::Bend { angle, .. } => angle.get(),
+        _ => panic!(),
+    };
+    assert_eq!((angle(&s, 0), angle(&s, 1)), (30.0, 30.0), "instances share their parameters");
+    // Moving entries keeps the instance pointing at its source.
+    execute(&mut s, Command::MoveModifier { from: 1, to: 3 }).unwrap();
+    assert_eq!(names(&s, a), vec!["Bend", "Taper", "Taper", "Bend"]);
+    assert_eq!(s.scene.node(a).unwrap().modifiers[0].instance_of, Some((a, 3)));
+    // Deleting the source leaves the instance its own copy.
+    execute(&mut s, Command::DeleteModifier { index: 3 }).unwrap();
+    assert_eq!(s.scene.node(a).unwrap().modifiers[0].instance_of, None);
+    assert_eq!(angle(&s, 0), 30.0);
+    assert!(execute(&mut s, Command::CopyModifier { from: 7, to: 0, instance: false }).is_err());
 }

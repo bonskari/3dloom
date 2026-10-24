@@ -164,10 +164,10 @@ fn hotkey_runs_the_bound_command() {
     assert_eq!(s.active_tool, loom_commands::Tool::Move);
     execute(&mut s, Command::Hotkey { chord: "T".into() }).unwrap();
     assert_eq!(s.active().kind, loom_commands::ViewKind::Top);
-    assert!(execute(&mut s, Command::Hotkey { chord: "F9".into() }).is_err(), "unbound chord is an error");
-    // Shift+Q is Render: without a path it opens the output file dialog.
+    assert!(execute(&mut s, Command::Hotkey { chord: "F11".into() }).is_err(), "unbound chord is an error");
+    // Shift+Q is Render: it opens the Rendered Frame Window and starts a render.
     execute(&mut s, Command::Hotkey { chord: "Shift+Q".into() }).unwrap();
-    assert_eq!(s.dialog, Some(loom_commands::Dialog::RenderFile));
+    assert!(s.rendered.open && s.pending_render.is_some());
 }
 
 fn box_at(s: &mut AppState, x: f32) -> loom_scene::NodeId {
@@ -391,20 +391,67 @@ fn inherit_off_ignores_parent_position() {
     assert!((s.scene.world_matrix(c).w_axis.x - (-5.0)).abs() < 1e-5, "child keeps its local x without inheriting the parent's x: {}", s.scene.world_matrix(c).w_axis.x);
 }
 
+/// World bounds of the stack result.
+fn result_bounds(s: &AppState, id: loom_scene::NodeId) -> (glam::Vec3, glam::Vec3) {
+    let world = s.scene.object_matrix(id);
+    let mut mesh = s.scene.eval_mesh(id).value.mesh.clone();
+    loom_mesh::edit_ops::transform_mesh(&mut mesh, world).unwrap();
+    mesh.aabb()
+}
+
+/// Reset XForm, as the reference: the node's rotation and scale move into a
+/// new XForm modifier on top of the stack (the object looks the same), and
+/// collapsing the stack bakes them into the mesh.
 #[test]
-fn reset_xform_bakes_transform() {
+fn reset_xform_adds_an_xform_modifier_holding_rotation_and_scale() {
     let mut s = state();
     let id = box_at(&mut s, 0.0);
+    execute(&mut s, Command::AddModifier { name: "Bend".into() }).unwrap();
     execute(&mut s, Command::SetTransform { id: id.0, position: Some([1.0, 2.0, 0.0]), rotation_deg: Some([0.0, 0.0, 90.0]), scale: Some([2.0, 1.0, 1.0]) }).unwrap();
-    let before = s.object_bounds(id).unwrap();
+    let before = result_bounds(&s, id);
+    let undo_before = s.undo.len();
     execute(&mut s, Command::ResetXForm).unwrap();
+    assert_eq!(s.undo.len(), undo_before + 1, "one undo step");
     let node = s.scene.node(id).unwrap();
-    assert!(matches!(node.object, loom_scene::ObjectKind::EditablePoly(_)));
+    assert!(matches!(node.object, loom_scene::ObjectKind::Box { .. }), "the base object keeps its parameters");
+    assert_eq!(node.modifiers.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), ["Bend", "XForm"], "XForm on top of the stack");
+    let loom_scene::Modifier::XForm { gizmo } = &node.modifiers[1].modifier else { panic!("an XForm") };
+    assert!(gizmo.scale.get().abs_diff_eq(glam::Vec3::new(2.0, 1.0, 1.0), 1e-4), "{}", gizmo.scale.get());
+    assert!((gizmo.rotation.get().z - 90.0).abs() < 1e-3, "{}", gizmo.rotation.get());
     assert_eq!(node.transform.rotation.get(), glam::Vec3::ZERO);
     assert_eq!(node.transform.scale.get(), glam::Vec3::ONE);
     assert_eq!(node.transform.position.get(), glam::Vec3::new(1.0, 2.0, 0.0), "position is kept");
-    let after = s.object_bounds(id).unwrap();
+    let after = result_bounds(&s, id);
     assert!(before.0.abs_diff_eq(after.0, 1e-4) && before.1.abs_diff_eq(after.1, 1e-4), "{before:?} {after:?}");
+    // Collapse (Convert To Editable Poly) bakes it.
+    execute(&mut s, Command::ConvertToEditablePoly).unwrap();
+    let node = s.scene.node(id).unwrap();
+    assert!(matches!(node.object, loom_scene::ObjectKind::EditablePoly(_)));
+    assert!(node.modifiers.is_empty());
+    let baked = result_bounds(&s, id);
+    assert!(before.0.abs_diff_eq(baked.0, 1e-4) && before.1.abs_diff_eq(baked.1, 1e-4), "{before:?} {baked:?}");
+}
+
+#[test]
+fn reset_xform_keeps_a_spline_a_spline() {
+    let mut s = state();
+    execute(&mut s, Command::CreateShape { kind: loom_commands::ShapeKind::Circle, position: [0.0; 3], size: [5.0, 5.0, 0.0] }).unwrap();
+    let id = *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::SetTransform { id: id.0, position: None, rotation_deg: Some([90.0, 0.0, 0.0]), scale: Some([2.0, 2.0, 2.0]) }).unwrap();
+    let knots = |s: &AppState| -> Vec<glam::Vec3> {
+        let world = s.scene.object_matrix(id);
+        let shape = s.scene.eval_mesh(id).value.shape.clone().expect("the shape flows through the stack");
+        shape.splines.iter().flat_map(|sp| sp.knots.iter().map(|k| world.transform_point3(k.pos))).collect()
+    };
+    let before = knots(&s);
+    execute(&mut s, Command::ResetXForm).unwrap();
+    assert_eq!(s.scene.node(id).unwrap().modifiers.len(), 1);
+    assert!(s.scene.node(id).unwrap().object.spline().is_none(), "the Circle keeps its parameters");
+    let after = knots(&s);
+    assert_eq!(before.len(), after.len());
+    for (b, a) in before.iter().zip(&after) {
+        assert!(b.abs_diff_eq(*a, 1e-3), "{b} {a}");
+    }
 }
 
 #[test]

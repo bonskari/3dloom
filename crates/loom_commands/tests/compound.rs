@@ -95,3 +95,18 @@ fn loft_skins_shapes_along_a_path() {
     execute(&mut s, Command::SetParameter { id: circle.0, name: "Cap End".into(), value: 0.0 }).unwrap();
     assert!(!loom_mesh::select_ops::border_edges(&s.scene.node(circle).unwrap().object.mesh()).is_empty(), "no end cap");
 }
+
+/// The reference starts the Boolean rollout on Subtraction (A-B): picking B cuts it out of A.
+#[test]
+fn boolean_pick_defaults_to_subtraction_a_minus_b() {
+    let mut s = AppState::new();
+    assert_eq!(s.compound_settings.boolean_op, 2, "Subtraction (A-B)");
+    let a = boxed(&mut s, [0.0; 3], [10.0, 10.0, 10.0]);
+    let b = boxed(&mut s, [0.0, 0.0, -2.0], [4.0, 4.0, 14.0]);
+    execute(&mut s, Command::SelectNodes { ids: vec![a.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::PickOperandB).unwrap();
+    execute(&mut s, Command::PickHit { id: b.0 }).unwrap();
+    let ObjectKind::Boolean { op, .. } = &s.scene.node(a).unwrap().object else { panic!("a Boolean") };
+    assert_eq!(op.get(), 2);
+    assert_eq!(s.scene.node(a).unwrap().object.mesh().aabb().1.z, 10.0, "B's column is cut out, not added");
+}

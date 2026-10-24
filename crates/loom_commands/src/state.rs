@@ -288,7 +288,7 @@ pub struct CompoundSettings {
 
 impl Default for CompoundSettings {
     fn default() -> Self {
-        Self { boolean_op: 0, move_operand: true, proboolean_op: 0, loft_path_percent: 0.0 }
+        Self { boolean_op: 2, move_operand: true, proboolean_op: 0, loft_path_percent: 0.0 }
     }
 }
 
@@ -523,6 +523,34 @@ impl SelectionRegion {
             SelectionRegion::Fence => "Fence Selection Region",
             SelectionRegion::Lasso => "Lasso Selection Region",
             SelectionRegion::Paint => "Paint Selection Region",
+        }
+    }
+}
+
+/// Main Toolbar > Scale flyout: Uniform, Non-Uniform or Squash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ScaleKind {
+    #[default]
+    Uniform,
+    NonUniform,
+    Squash,
+}
+
+impl ScaleKind {
+    pub const ALL: [ScaleKind; 3] = [ScaleKind::Uniform, ScaleKind::NonUniform, ScaleKind::Squash];
+    pub fn label(self) -> &'static str {
+        match self {
+            ScaleKind::Uniform => "Select and Uniform Scale",
+            ScaleKind::NonUniform => "Select and Non-uniform Scale",
+            ScaleKind::Squash => "Select and Squash",
+        }
+    }
+    /// The next flyout button (Scale Cycle).
+    pub fn next(self) -> ScaleKind {
+        match self {
+            ScaleKind::Uniform => ScaleKind::NonUniform,
+            ScaleKind::NonUniform => ScaleKind::Squash,
+            ScaleKind::Squash => ScaleKind::Uniform,
         }
     }
 }
@@ -1054,6 +1082,54 @@ impl Tool {
     }
 }
 
+/// Viewport Configuration > ViewCube.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViewCubeSettings {
+    /// Show the ViewCube (Alt+Ctrl+V).
+    pub show: bool,
+    /// Show in All Views (else only in the active one).
+    pub all_views: bool,
+    /// ViewCube Size: 0 Large, 1 Normal, 2 Small, 3 Tiny.
+    pub size: u8,
+    /// Inactive Opacity, 0..=1.
+    pub inactive_opacity: f32,
+    /// Show Compass Below the ViewCube.
+    pub compass: bool,
+}
+
+impl Default for ViewCubeSettings {
+    fn default() -> Self {
+        Self { show: true, all_views: false, size: 1, inactive_opacity: 0.5, compass: true }
+    }
+}
+
+/// A stored view: the ViewCube Home view and Views > Save Active View.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SavedView {
+    pub target: [f32; 3],
+    pub distance: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+    #[serde(default)]
+    pub roll: f32,
+    pub fov_y_radians: f32,
+    /// Save Active View keeps the shading; the Home view does not.
+    #[serde(default)]
+    pub shading: Option<crate::viewport::Shading>,
+}
+
+impl SavedView {
+    pub fn of(vp: &crate::viewport::Viewport) -> Self {
+        let c = &vp.camera;
+        Self { target: c.target.to_array(), distance: c.distance, yaw: c.yaw, pitch: c.pitch, roll: c.roll, fov_y_radians: vp.fov_y_radians, shading: None }
+    }
+
+    pub fn camera(&self) -> OrbitCamera {
+        OrbitCamera { target: Vec3::from_array(self.target), distance: self.distance, yaw: self.yaw, pitch: self.pitch, roll: self.roll }
+    }
+}
+
 /// Which viewport view the (single, for now) viewport shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewKind {
@@ -1190,6 +1266,16 @@ pub struct AppState {
     pub focus_modify: bool,
     pub ui_locked: bool,
     pub shade_selected_faces: bool,
+    /// Views > Shade Selected: selected objects shaded in wireframe views.
+    pub shade_selected: bool,
+    /// Viewport Configuration > ViewCube.
+    pub viewcube: ViewCubeSettings,
+    /// The Viewport Configuration panel to show when the dialog opens next.
+    pub config_panel: Option<String>,
+    /// ViewCube Home view (Set Current View as Home); None = the default Perspective.
+    pub home_view: Option<SavedView>,
+    /// Views > Save Active View, one per view label ("Top", "Perspective"...).
+    pub saved_views: BTreeMap<String, SavedView>,
     pub selection_brackets: bool,
     pub hide_floating_dialogs: bool,
     pub hide_category: HideCategories,
@@ -1211,6 +1297,8 @@ pub struct AppState {
     /// Main Toolbar > Window/Crossing: true = Window (fully enclosed only).
     pub window_selection: bool,
     pub selection_region: SelectionRegion,
+    /// The Scale flyout's button: how Select and Scale scales.
+    pub scale_kind: ScaleKind,
     pub coord_system: CoordSystem,
     /// Node whose coordinate system `CoordSystem::Pick` uses.
     pub pick_coord_node: Option<NodeId>,
@@ -1410,19 +1498,24 @@ pub struct AppState {
     pub file: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
     pub mesh_dirty: bool,
-    /// Render SetUp output size in pixels.
-    pub render_size: (u32, u32),
     /// A Render waiting for the UI's renderer (the command layer has no GPU).
     pub pending_render: Option<RenderRequest>,
+    /// The Rendered Frame Window, its image and the render in progress.
+    pub rendered: crate::render::RenderedFrame,
 }
 
-/// Render the active view of `viewport` to the PNG `path` at `width` x `height`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A render for the UI's renderer: viewport `viewport` with `settings`
+/// (Render Setup at the time of the request), into the Rendered Frame Window.
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderRequest {
-    pub path: String,
-    pub width: u32,
-    pub height: u32,
     pub viewport: usize,
+    pub settings: loom_scene::render::RenderSettings,
+    /// The selection, for Area to Render > Selected.
+    pub selection: Vec<NodeId>,
+    /// Also write the image here when done.
+    pub save_path: Option<String>,
+    /// Iterative: Region and Selected keep the rest of the window's image.
+    pub iterative: bool,
 }
 
 impl Default for AppState {
@@ -1454,13 +1547,18 @@ impl AppState {
             show_ribbon: false,
             show_command_panel: true,
             startup_ui: crate::settings::UiLayout::DEFAULT,
-            show_end_result: true,
+            show_end_result: false,
             pin_stack: false,
             show_modifier_set: false,
             modifier_set: vec!["XForm".into(), "Normal".into(), "Smooth".into(), "Poly Select".into()],
             focus_modify: false,
             ui_locked: false,
             shade_selected_faces: false,
+            shade_selected: false,
+            viewcube: ViewCubeSettings::default(),
+            config_panel: None,
+            home_view: None,
+            saved_views: BTreeMap::new(),
             selection_brackets: true,
             hide_floating_dialogs: false,
             hide_category: HideCategories::default(),
@@ -1475,6 +1573,7 @@ impl AppState {
             selection_filter: SelectionFilter::All,
             window_selection: false,
             selection_region: SelectionRegion::Rectangular,
+            scale_kind: ScaleKind::Uniform,
             coord_system: CoordSystem::View,
             pick_coord_node: None,
             center_mode: CenterMode::PivotPoint,
@@ -1580,8 +1679,8 @@ impl AppState {
             pending_file_action: None,
             exit_requested: false,
             uv_editor: UvEditor::default(),
-            render_size: (640, 480),
             pending_render: None,
+            rendered: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,
@@ -1999,7 +2098,7 @@ mod tests {
 
     /// Screen-right vector of an orbit camera looking at the origin.
     fn screen_right(yaw: f32, pitch: f32) -> Vec3 {
-        let cam = OrbitCamera { yaw, pitch, distance: 10.0, target: Vec3::ZERO };
+        let cam = OrbitCamera { yaw, pitch, distance: 10.0, target: Vec3::ZERO, roll: 0.0 };
         let forward = (cam.target - cam.eye_position()).normalize();
         forward.cross(Vec3::Z).normalize()
     }

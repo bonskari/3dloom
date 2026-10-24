@@ -53,6 +53,9 @@ pub struct Scene {
     /// The Material Editor's sample slots (saved with the scene, as Max does).
     #[serde(default)]
     pub material_editor: crate::material::MaterialEditorSlots,
+    /// Render Setup (saved with the scene, as the reference does).
+    #[serde(default)]
+    pub render: crate::render::RenderSettings,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -122,6 +125,7 @@ impl Scene {
             track_data: Default::default(),
             materials: Default::default(),
             material_editor: Default::default(),
+            render: Default::default(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             eval_in_progress: Default::default(),
@@ -272,6 +276,9 @@ impl Scene {
                 if let (Some(g), Some(dst)) = (slot.modifier.gizmo(), m.gizmo_mut()) {
                     *dst = g.clone();
                 }
+                if let (Some(d), Some(dst)) = (slot.modifier.deformer(), m.deformer_mut()) {
+                    dst.center = d.center.clone();
+                }
                 if let (crate::modifier::Modifier::FFD { points, rest, lo, hi, .. }, crate::modifier::Modifier::FFD { points: dp, rest: dr, lo: dlo, hi: dhi, .. }) = (&slot.modifier, &mut m) {
                     if points.len() == dp.len() {
                         *dp = points.clone();
@@ -379,7 +386,7 @@ impl Scene {
                         continue;
                     }
                 }
-                let keeps_shape = modifier.passes_shape();
+                let keeps_shape = modifier.passes_shape() || matches!(modifier, crate::modifier::Modifier::XForm { .. });
                 let counts_before = (value.mesh.vertex_count(), value.mesh.face_count());
                 match modifier.apply(value.clone(), &ctx) {
                     Ok(v) => value = v,

@@ -98,10 +98,12 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::ArchiveFile => ("Archive", "zip,txt", "Save"),
         Dialog::MergeFile => ("Merge File", "loom", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", "png", "Open"),
+        Dialog::BackgroundFile => ("Select Background Image", "png", "Open"),
         Dialog::MaterialMap { .. } => ("Select Bitmap Image File", "png", "Open"),
         Dialog::PickUvTexture => ("Pick Texture", "png", "Open"),
         Dialog::SaveUvw => ("Save UVW", "uvw", "Save"),
-        Dialog::RenderFile => ("Render Output File", "png", "Save"),
+        Dialog::RenderFile => ("Render Output File", "png,jpg,bmp,tga,exr", "Save"),
+        Dialog::SaveRenderedImage => ("Save Image", "png,jpg,bmp,tga,exr", "Save"),
         Dialog::LoadUvw => ("Load UVW", "uvw", "Open"),
         Dialog::BitmapFit => ("Bitmap Fit", "png", "Open"),
         Dialog::SaveShortcuts => ("Save Shortcut File As", "kbd", "Save"),
@@ -136,7 +138,8 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
             amount: None,
         },
         Dialog::SaveUvw => Command::SaveUvw { path: Some(p) },
-        Dialog::RenderFile => Command::Render { path: Some(p), width: None, height: None },
+        Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: Some(p) },
+        Dialog::SaveRenderedImage => Command::SaveRenderedImage { path: Some(p) },
         Dialog::LoadUvw => Command::LoadUvw { path: Some(p) },
         Dialog::SaveShortcuts => Command::SaveShortcuts { path: Some(p) },
         Dialog::LoadShortcuts => Command::LoadShortcuts { path: Some(p) },
@@ -266,6 +269,12 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
     }
     if let Some(parent) = path.parent() {
         app.file_dir = parent.to_path_buf();
+    }
+    if dialog == Dialog::BackgroundFile {
+        // Back to the Viewport Background dialog with the file in its field.
+        app.background_pick = Some(path.to_string_lossy().into_owned());
+        app.state.dialog = Some(Dialog::ViewportBackground);
+        return true;
     }
     if dialog == Dialog::PickTexture {
         // Show Map in Viewport > Bitmap on the selected object.

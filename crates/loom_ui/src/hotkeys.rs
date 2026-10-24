@@ -97,6 +97,13 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
                 "New Scene" => app.new_scene(),
                 "Open File" => app.request_file_action(A::Open),
                 "Reset File" => app.request_file_action(A::Reset),
+                // I: the point under the cursor becomes the view's centre.
+                "Pan Viewport" => {
+                    let point = ctx.input(|i| i.pointer.hover_pos()).and_then(|p| crate::viewport_widget::view_point_under(app, p));
+                    if let Err(e) = app.dispatch(Command::PanViewport { point: point.map(|p| p.to_array()) }) {
+                        app.last_error = Some(e);
+                    }
+                }
                 _ => app.dispatch_named(name),
             }
         }

@@ -49,7 +49,7 @@ fn row(ui: &mut egui::Ui, label: &str, v: &mut [f32; 3], speed: f64, decimals: u
     let mut changed = false;
     ui.label(label);
     for c in v.iter_mut() {
-        changed |= ui.add(egui::DragValue::new(c).speed(speed).fixed_decimals(decimals)).changed();
+        changed |= ui.add(crate::spinner::spin(ui, c, ..).speed(speed).fixed_decimals(decimals)).changed();
     }
     changed
 }
@@ -118,7 +118,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     for (d, label) in [(1u8, "1D"), (2, "2D"), (3, "3D")] {
                         changed |= ui.radio_value(&mut st.dims, d, label).changed();
                         ui.add_enabled_ui(st.dims >= d, |ui| {
-                            changed |= ui.add(egui::DragValue::new(&mut st.count[d as usize - 1]).speed(0.1).range(1..=1000)).changed();
+                            changed |= ui.add(crate::spinner::spin(ui, &mut st.count[d as usize - 1], 1..=1000).speed(0.1)).changed();
                         });
                         if d >= 2 {
                             ui.add_enabled_ui(st.dims >= d, |ui| {

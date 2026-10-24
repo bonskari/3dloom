@@ -3,7 +3,7 @@
 
 use crate::LoomApp;
 use eframe::egui;
-use crate::shortcuts::menu_button;
+use crate::shortcuts::{menu_button, HoverShortcut};
 use loom_commands::{Command, PrimitiveKind};
 
 fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str) {
@@ -26,6 +26,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     }
     egui::TopBottomPanel::top("menubar").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
+            quick_access(ui, app);
+            ui.separator();
             ui.menu_button("File", |ui| {
                 use loom_commands::PendingFileAction as A;
                 if menu_button(ui, &app.state, "New", "New Scene").clicked() {
@@ -188,10 +190,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Undo View Change", "Undo Viewport Operation");
                 item(ui, app, "Redo View Change", "Redo Viewport Operation");
                 ui.separator();
+                // The active view's name is part of the item, as in the reference.
+                let view = app.state.active().kind.label();
+                item(ui, app, &format!("Save Active {view} View"), "Save Active View");
+                item(ui, app, &format!("Restore Active {view} View"), "Restore Active View");
+                ui.separator();
                 item(ui, app, "Viewport Configuration...", "Configure Viewports");
                 item(ui, app, "Viewport Background...", "Viewport Background");
                 item(ui, app, "Update Background Image", "Update Background Image");
+                item(ui, app, "Reset Background Transform", "Reset Background Transform");
                 item(ui, app, "Show Floating Dialogs", "Show Floating Dialogs");
+                ui.separator();
+                item(ui, app, "Shade Selected", "Shade Selected");
+                item(ui, app, "Create Camera From View", "Create Camera From View");
                 ui.separator();
                 for (label, action) in [
                     ("Top", "Top View"), ("Bottom", "Bottom View"), ("Front", "Front View"), ("Back", "Back View"),
@@ -234,14 +245,57 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         }
                     }
                     ui.separator();
-                    cmd(ui, app, "Create Camera From View", Command::CreateCamera { target: false });
+                    cmd(ui, app, "Create Camera From View", Command::CreateCameraFromView);
+                });
+                ui.menu_button("Shapes", |ui| {
+                    let kinds = std::iter::once((crate::CreateKind::Line, "Line")).chain(loom_commands::ShapeKind::ALL.iter().map(|k| (crate::CreateKind::Shape(*k), k.label())));
+                    for (kind, label) in kinds {
+                        if ui.button(label).clicked() {
+                            if let Some(line) = app.line.take() {
+                                line.finish(app);
+                            }
+                            app.create_category = crate::Category::Shapes;
+                            app.panel_tab = crate::Tab::Create;
+                            app.start_create(Some(kind));
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.menu_button("Compound", |ui| {
+                    for kind in crate::command_panel::compound::CompoundKind::ALL {
+                        if ui.button(kind.label()).clicked() {
+                            app.create_category = crate::Category::Geometry;
+                            app.create_compound = true;
+                            app.compound_kind = Some(kind);
+                            app.create_kind = None;
+                            app.panel_tab = crate::Tab::Create;
+                            let _ = app.dispatch(Command::SelectObject);
+                            ui.close_menu();
+                        }
+                    }
                 });
                 ui.separator();
                 item(ui, app, "Test Room", "Test Room");
             });
+            ui.menu_button("Modifiers", |ui| {
+                let has = app.has_selection();
+                for (category, entries) in MODIFIERS_MENU {
+                    ui.menu_button(*category, |ui| {
+                        for (label, name) in *entries {
+                            if ui.add_enabled(has, egui::Button::new(*label)).clicked() {
+                                if let Err(e) = app.dispatch(Command::AddModifier { name: (*name).into() }) {
+                                    app.state.status_prompt = e;
+                                }
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                }
+            });
             ui.menu_button("Rendering", |ui| {
                 cmd(ui, app, "Render", Command::Render { path: None, width: None, height: None });
-                cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None });
+                cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
+                cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
                 ui.separator();
                 cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
             });
@@ -285,6 +339,26 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     });
 }
 
+/// The Quick Access toolbar: New Scene, Open File, Save File, Undo, Redo.
+fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
+    use loom_commands::PendingFileAction as A;
+    if ui.button("🗋").on_hover_name(&app.state, "New Scene").clicked() {
+        app.request_file_action(A::New);
+    }
+    if ui.button("🗁").on_hover_name(&app.state, "Open File").clicked() {
+        app.request_file_action(A::Open);
+    }
+    if ui.button("💾").on_hover_name(&app.state, "Save File").clicked() {
+        app.dispatch_named("Save File");
+    }
+    if ui.add_enabled(app.state.undo.can_undo(), egui::Button::new("Undo")).on_hover_name(&app.state, "Undo Scene Operation").clicked() {
+        app.dispatch_named("Undo Scene Operation");
+    }
+    if ui.add_enabled(app.state.undo.can_redo(), egui::Button::new("Redo")).on_hover_name(&app.state, "Redo Scene Operation").clicked() {
+        app.dispatch_named("Redo Scene Operation");
+    }
+}
+
 /// Animation > Position / Rotation / Scale Controllers: assign to every selected object.
 fn controller_item(ui: &mut egui::Ui, app: &mut LoomApp, track: &str, controller: &str) {
     if ui.button(controller).clicked() {
@@ -300,3 +374,57 @@ fn controller_item(ui: &mut egui::Ui, app: &mut LoomApp, track: &str, controller
 
 /// The project's public repository (Help menu).
 const REPO_URL: &str = "https://github.com/bonskari/3dloom";
+
+/// Modifiers menu: the reference's categories, each with the modifiers of
+/// the Modifier List that belong to it (label, Modifier List name).
+/// Categories with no modifier in Loom (NURBS Editing, Cameras) are left out.
+pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
+    ("Selection Modifiers", &[("Mesh Select", "Mesh Select"), ("Poly Select", "Poly Select"), ("Spline Select", "Spline Select"), ("Vol. Select", "Vol. Select")]),
+    ("Patch/Spline Editing", &[
+        ("CrossSection", "CrossSection"), ("Delete Spline", "Delete Spline"), ("Edit Spline", "Edit Spline"), ("Fillet/Chamfer", "Fillet/Chamfer"), ("Lathe", "Lathe"),
+        ("Normalize Spline", "Normalize Spline"), ("Renderable Spline", "Renderable Spline"), ("Surface", "Surface"), ("Sweep", "Sweep"), ("Trim/Extend", "Trim/Extend"),
+    ]),
+    ("Mesh Editing", &[
+        ("Bevel", "Bevel"), ("Bevel Profile", "Bevel Profile"), ("Cap Holes", "Cap Holes"), ("DeleteMesh", "DeleteMesh"), ("Edit Mesh", "Edit Mesh"), ("Edit Normals", "Edit Normals"),
+        ("Edit Poly", "Edit Poly"), ("Extrude", "Extrude"), ("Face Extrude", "Face Extrude"), ("MultiRes", "MultiRes"), ("Normal", "Normal"), ("Optimize", "Optimize"),
+        ("ProOptimizer", "ProOptimizer"), ("Smooth", "Smooth"), ("STL Check", "STL Check"), ("Symmetry", "Symmetry"), ("Tessellate", "Tessellate"), ("VertexPaint", "VertexPaint"),
+        ("Vertex Weld", "Vertex Weld"),
+    ]),
+    ("Conversion", &[("Turn To Mesh", "Turn To Mesh"), ("Turn To Poly", "Turn To Poly")]),
+    ("Animation", &[
+        ("Flex", "Flex"), ("Linked XForm", "Linked XForm"), ("Melt", "Melt"), ("Morpher", "Morpher"), ("PathDeform", "PathDeform"), ("PathDeform (WSM)", "PathDeform (WSM)"),
+        ("Skin", "Skin"), ("Skin Morph", "Skin Morph"), ("Skin Wrap", "Skin Wrap"), ("Spline IK Control", "Spline IK Control"),
+    ]),
+    ("UV Coordinates", &[
+        ("Camera Map", "Camera Map"), ("Camera Map (WSM)", "Camera Map (WSM)"), ("MapScaler", "MapScaler"), ("MapScaler (WSM)", "MapScaler (WSM)"), ("Unwrap UVW", "Unwrap UVW"),
+        ("UVW Map", "UVW Map"), ("UVW Mapping Add", "UVW Mapping Add"), ("UVW Mapping Clear", "UVW Mapping Clear"), ("UVW XForm", "UVW XForm"),
+    ]),
+    ("Cache Tools", &[("Point Cache", "Point Cache"), ("Point Cache (WSM)", "Point Cache (WSM)")]),
+    ("Subdivision Surfaces", &[("HSDS Modifier", "HSDS"), ("MeshSmooth", "MeshSmooth"), ("TurboSmooth", "TurboSmooth")]),
+    ("Free Form Deformers", &[("FFD 2x2x2", "FFD 2x2x2"), ("FFD 3x3x3", "FFD 3x3x3"), ("FFD 4x4x4", "FFD 4x4x4"), ("FFD(box)", "FFD(box)"), ("FFD(cyl)", "FFD(cyl)")]),
+    ("Parametric Deformers", &[
+        ("Affect Region", "Affect Region"), ("Bend", "Bend"), ("Displace", "Displace"), ("Lattice", "Lattice"), ("Mirror", "Mirror"), ("Noise", "Noise"), ("Preserve", "Preserve"),
+        ("Push", "Push"), ("Relax", "Relax"), ("Ripple", "Ripple"), ("Shell", "Shell"), ("Skew", "Skew"), ("Slice", "Slice"), ("Spherify", "Spherify"), ("Squeeze", "Squeeze"),
+        ("Stretch", "Stretch"), ("Substitute", "Substitute"), ("Taper", "Taper"), ("Twist", "Twist"), ("Wave", "Wave"), ("XForm", "XForm"),
+    ]),
+    ("Surface", &[("Material", "Material"), ("Material By Element", "Material By Element")]),
+    ("Radiosity", &[("Subdivide", "Subdivide"), ("Subdivide (WSM)", "Subdivide (WSM)")]),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::MODIFIERS_MENU;
+    use loom_scene::Modifier;
+
+    #[test]
+    fn modifiers_menu_holds_every_modifier_list_entry_once() {
+        let mut names: Vec<&str> = MODIFIERS_MENU.iter().flat_map(|(_, e)| e.iter().map(|(_, n)| *n)).collect();
+        for n in &names {
+            assert!(Modifier::by_name(n).is_some(), "{n} is not a modifier");
+        }
+        names.sort();
+        let mut list: Vec<&str> = Modifier::LIST.iter().chain(Modifier::WSM_LIST.iter()).copied().collect();
+        list.sort();
+        assert_eq!(names, list);
+    }
+}

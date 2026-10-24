@@ -27,6 +27,17 @@ fn search_matches_anywhere_in_the_name_ignoring_case() {
     assert!(modifier_list::search("").len() > 50, "an empty search lists everything");
 }
 
+/// Typing a first letter finds the modifier that starts with it: T then Enter adds Taper.
+#[test]
+fn search_lists_names_starting_with_the_typed_text_first() {
+    assert_eq!(modifier_list::search("t")[0], "Taper");
+    assert_eq!(modifier_list::search("T")[0], "Taper");
+    assert_eq!(modifier_list::search("e")[0], "Edit Mesh");
+    let hits = modifier_list::search("t");
+    let first_other = hits.iter().position(|n| !n.to_lowercase().starts_with('t')).unwrap();
+    assert!(hits[first_other..].iter().all(|n| !n.to_lowercase().starts_with('t')), "the other matches follow");
+}
+
 #[test]
 fn usage_round_trips_through_its_file() {
     let mut s = AppState::new();

@@ -42,7 +42,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
-        c @ (C::Render { .. } | C::RenderSetup { .. }) => crate::render::execute(state, c),
+        c if crate::render::handles(&c) => crate::render::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
@@ -466,7 +466,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SpinnerSnapToggle => toggle(&mut state.prefs.spinner_snap, "spinner_snap"),
         C::ShowRibbonToggle => toggle(&mut state.show_ribbon, "show_ribbon"),
-        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
+        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
         | C::RenameModifier { .. } | C::SelectStackEntry { .. } | C::SetModifierParameter { .. } | C::ModifierSubobjectLevel { .. } | C::ShowEndResultToggle | C::PinStackToggle
         | C::MakeUnique | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
         | C::PickModifierNode { .. } | C::SwitchToControlPointLevel | C::SwitchToLatticeLevel | C::SwitchToSetVolumeLevel | C::SwitchToTopLevel | C::SelectControlPoints { .. }
@@ -523,7 +523,19 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SelectObject => set_tool(state, Tool::Select),
         C::SelectAndMove => set_tool(state, Tool::Move),
         C::SelectAndRotate => set_tool(state, Tool::Rotate),
-        C::SelectAndScale | C::ScaleCycle => set_tool(state, Tool::Scale),
+        C::SelectAndScale => set_tool(state, Tool::Scale),
+        C::ScaleCycle => {
+            if state.active_tool == Tool::Scale {
+                state.scale_kind = state.scale_kind.next();
+            }
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": state.scale_kind.label() }))
+        }
+        C::ScaleType { kind } => {
+            state.scale_kind = kind;
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": kind.label() }))
+        }
         C::SubObjectLevelCycle if state.spline_selected() => {
             state.selection_mode = match state.selection_mode {
                 SelectionMode::Object => SelectionMode::Vertex,
@@ -630,13 +642,74 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::HomeView => {
+            // The ViewCube Home view: a Perspective view, the default one or Set Current View as Home.
             state.record_view();
-            let kind = state.active().kind;
-            let fresh = Viewport::new(kind);
+            let home = state.home_view;
             let vp = state.active_mut();
-            vp.camera = fresh.camera;
+            vp.kind = ViewKind::Perspective;
+            match home {
+                Some(h) => {
+                    vp.camera = h.camera();
+                    vp.fov_y_radians = h.fov_y_radians;
+                }
+                None => vp.camera = Viewport::new(ViewKind::Perspective).camera,
+            }
             Ok(camera_json(state))
         }
+        C::SetCurrentViewAsHome => {
+            if matches!(state.active().kind, ViewKind::Camera(_)) {
+                return Err("the Home view is set from a non-camera view".into());
+            }
+            state.home_view = Some(crate::state::SavedView::of(state.active()));
+            Ok(json!({}))
+        }
+        C::ViewCubeToggle => toggle(&mut state.viewcube.show, "viewcube"),
+        C::SetViewCubeOptions { show, all_views, size, inactive_opacity, compass } => {
+            let v = &mut state.viewcube;
+            if let Some(b) = show { v.show = b; }
+            if let Some(b) = all_views { v.all_views = b; }
+            if let Some(n) = size { v.size = n.min(3) as u8; }
+            if let Some(o) = inactive_opacity { v.inactive_opacity = (o / 100.0).clamp(0.0, 1.0); }
+            if let Some(b) = compass { v.compass = b; }
+            Ok(json!({ "show": v.show, "all_views": v.all_views, "size": v.size, "inactive_opacity": v.inactive_opacity * 100.0, "compass": v.compass }))
+        }
+        C::SaveActiveView => {
+            let vp = state.active();
+            if matches!(vp.kind, ViewKind::Camera(_)) {
+                return Err("camera views are not saved".into());
+            }
+            let mut saved = crate::state::SavedView::of(vp);
+            saved.shading = Some(vp.shading);
+            let label = vp.kind.label().to_owned();
+            state.saved_views.insert(label.clone(), saved);
+            Ok(json!({ "saved": label }))
+        }
+        C::RestoreActiveView => {
+            let label = state.active().kind.label();
+            let Some(saved) = state.saved_views.get(label).copied() else {
+                return Err(format!("no saved {label} view"));
+            };
+            state.record_view();
+            let vp = state.active_mut();
+            vp.camera = saved.camera();
+            vp.fov_y_radians = saved.fov_y_radians;
+            if let Some(sh) = saved.shading {
+                vp.shading = sh;
+            }
+            Ok(camera_json(state))
+        }
+        C::ShadeSelectedToggle => {
+            state.mesh_dirty = true;
+            toggle(&mut state.shade_selected, "shade_selected")
+        }
+        C::DollyCameraMode => nav_toggle(state, NavMode::DollyCamera),
+        C::DollyTargetMode => nav_toggle(state, NavMode::DollyTarget),
+        C::DollyCameraTargetMode => nav_toggle(state, NavMode::DollyBoth),
+        C::PerspectiveMode => nav_toggle(state, NavMode::Perspective),
+        C::RollCameraMode => nav_toggle(state, NavMode::RollCamera),
+        C::TruckCameraMode => nav_toggle(state, NavMode::TruckCamera),
+        C::OrbitCameraMode => nav_toggle(state, NavMode::OrbitCamera),
+        C::PanCameraMode => nav_toggle(state, NavMode::PanCamera),
         C::TimeConfiguration => {
             state.dialog = Some(Dlg::TimeConfiguration);
             Ok(json!({}))
@@ -673,7 +746,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             frame_all(state, bounds)
         }
         C::ZoomMode => nav_toggle(state, NavMode::Zoom),
-        C::PanView | C::PanViewport => nav_toggle(state, NavMode::Pan),
+        C::PanViewport { point: Some(p) } => {
+            // The view slides (no turn, no zoom) until `p` is at its centre.
+            state.record_view();
+            let cam = &mut state.active_mut().camera;
+            let to_eye = cam.basis().2;
+            let p = Vec3::from(p);
+            cam.target = p - to_eye * to_eye.dot(p - cam.target);
+            Ok(camera_json(state))
+        }
+        C::PanView | C::PanViewport { point: None } => nav_toggle(state, NavMode::Pan),
         C::OrbitViewMode => nav_toggle(state, NavMode::Orbit),
         C::ZoomRegionMode => nav_toggle(state, NavMode::ZoomRegion),
         C::FieldOfViewMode => nav_toggle(state, NavMode::Fov),
@@ -738,7 +820,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ViewportLightingToggle => toggle(&mut state.active_mut().scene_lights, "scene_lights"),
         C::ShadeSelectedFacesToggle => toggle(&mut state.shade_selected_faces, "shade_selected_faces"),
         C::SelectionBracketToggle => toggle(&mut state.selection_brackets, "selection_brackets"),
-        C::BackgroundLockToggle => toggle(&mut state.active_mut().background_locked, "background_locked"),
+        C::BackgroundLockToggle => {
+            let on = !state.active().background_locked;
+            set_background_lock(state.active_mut(), on);
+            Ok(json!({ "background_locked": on }))
+        }
+        C::ResetBackgroundTransform => {
+            let vp = state.active_mut();
+            if vp.background_locked {
+                set_background_lock(vp, true);
+            }
+            Ok(json!({}))
+        }
         C::UpdateBackgroundImage => {
             state.active_mut().background_version += 1;
             Ok(json!({}))
@@ -747,10 +840,33 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(Dialog::ViewportBackground);
             Ok(json!({}))
         }
-        C::SetViewportBackground { path } => {
-            let vp = state.active_mut();
-            vp.background = path;
-            vp.background_version += 1;
+        C::SetViewportBackground { path, aspect, lock, display, all_views } => {
+            let aspect = match aspect {
+                Some(a) => Some(crate::viewport::BackgroundAspect::from_label(&a).ok_or_else(|| format!("unknown aspect ratio `{a}` (Match Viewport, Match Bitmap, Match Rendering Output)"))?),
+                None => None,
+            };
+            let active = state.active_viewport;
+            for (i, vp) in state.viewports.iter_mut().enumerate() {
+                if i != active && all_views != Some(true) {
+                    continue;
+                }
+                if let Some(p) = &path {
+                    vp.background = (!p.is_empty()).then(|| p.clone());
+                    vp.background_version += 1;
+                    vp.background_display = true;
+                }
+                if let Some(a) = aspect {
+                    vp.background_aspect = a;
+                }
+                if let Some(d) = display {
+                    vp.background_display = d;
+                }
+                if let Some(l) = lock {
+                    if l != vp.background_locked {
+                        set_background_lock(vp, l);
+                    }
+                }
+            }
             Ok(json!({}))
         }
         C::SelectByName => {
@@ -762,8 +878,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             };
             open_by_name(state, purpose)
         }
-        C::ConfigureViewports => {
+        C::ConfigureViewports { panel } => {
             state.dialog = Some(Dialog::ViewportConfiguration);
+            state.config_panel = panel;
             Ok(json!({}))
         }
         C::CloseDialog => {
@@ -806,6 +923,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 });
             match cam {
                 Some(id) => set_view(state, ViewKind::Camera(id)),
+                None if state.scene.nodes().filter(|n| matches!(n.object, ObjectKind::Camera { .. })).count() > 1 => {
+                    // Several cameras and none selected: the Select Camera list.
+                    state.dialog = Some(Dialog::SelectCamera);
+                    Ok(json!({ "camera": Value::Null, "dialog": "Select Camera" }))
+                }
                 None => Ok(json!({ "camera": Value::Null })),
             }
         }
@@ -1779,7 +1901,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. }) => crate::camera::execute(state, c),
+        c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. }) => crate::camera::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
@@ -2223,20 +2345,27 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let mut changes = Vec::new();
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-                if matches!(node.object, ObjectKind::Camera { .. }) {
+                if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
                     continue;
                 }
+                // As the reference: rotation and scale (and the pivot offset) go into
+                // a new XForm modifier on top of the stack; collapsing bakes them.
                 let t = &node.transform;
-                let bake = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
-                let mut mesh = node.cage_mesh().into_owned();
-                edit_ops::transform_mesh(&mut mesh, bake)?;
+                let held = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
+                let mut xform = Modifier::by_name("XForm").ok_or("no XForm modifier")?;
+                if let Some(g) = xform.gizmo_mut() {
+                    *g = Transform::from_matrix(held);
+                }
+                let mut stack = node.modifiers.clone();
+                let at = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
+                stack.insert(at, loom_scene::ModifierSlot::new(xform));
                 let mut after_t = t.clone();
                 after_t.rotation.set(Vec3::ZERO);
                 after_t.scale.set(Vec3::ONE);
                 let mut props = node.props();
                 props.object_offset = Transform::default();
                 let new_world = state.scene.parent_frame(id) * after_t.matrix();
-                changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(node.object.with_mesh(mesh)) });
+                changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.extend(keep_children(state, id, new_world));
                 changes.push(Change::SetTransform { id, before: t.clone(), after: after_t });
@@ -2613,9 +2742,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             )?;
             Ok(json!({}))
         }
-        C::Orbit { yaw, pitch, distance, target } => {
+        C::Orbit { yaw, pitch, distance, target, roll } => {
             state.record_view();
             let cam = &mut state.active_mut().camera;
+            if let Some(r) = roll {
+                cam.roll = loom_input::camera_control::wrap_angle(r.to_radians());
+            }
             if let Some(y) = yaw {
                 cam.yaw = y.to_radians();
             }
@@ -2821,9 +2953,48 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 }
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
+    let change = share_with_instances(&state.scene, change);
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
     Ok(())
+}
+
+/// Instances share one object: a replaced object (a sub-object edit, a
+/// parameter, an attach) is replaced on every member of the node's instance
+/// group that the change does not already cover.
+fn share_with_instances(scene: &loom_scene::Scene, change: Change) -> Change {
+    fn replaced<'a>(c: &'a Change, out: &mut Vec<(NodeId, &'a ObjectKind)>, removed: &mut BTreeSet<NodeId>) {
+        match c {
+            Change::ReplaceObject { id, after, .. } => out.push((*id, &**after)),
+            Change::RemoveNode(id) => {
+                removed.insert(*id);
+            }
+            Change::Group(cs) => cs.iter().for_each(|c| replaced(c, out, removed)),
+            _ => {}
+        }
+    }
+    let mut objects = Vec::new();
+    let mut done = BTreeSet::new();
+    replaced(&change, &mut objects, &mut done);
+    if objects.is_empty() {
+        return change;
+    }
+    done.extend(objects.iter().map(|(id, _)| *id));
+    let mut extra = Vec::new();
+    for (id, after) in objects {
+        let Some(node) = scene.node(id) else { continue };
+        let root = node.instance_of.unwrap_or(id);
+        for member in scene.nodes().filter(|n| n.id == root || n.instance_of == Some(root)) {
+            if done.insert(member.id) {
+                extra.push(Change::ReplaceObject { id: member.id, before: Box::new(member.object.clone()), after: Box::new(after.clone()) });
+            }
+        }
+    }
+    if extra.is_empty() {
+        return change;
+    }
+    extra.insert(0, change);
+    Change::Group(extra)
 }
 
 /// Commits a structural edit (link, unlink, group) that only re-expresses a
@@ -3119,6 +3290,7 @@ fn set_view(state: &mut AppState, kind: ViewKind) -> Result<Value, String> {
     if let Some((yaw, pitch)) = kind.angles() {
         vp.camera.yaw = yaw;
         vp.camera.pitch = pitch;
+        vp.camera.roll = 0.0;
     }
     Ok(camera_json(state))
 }
@@ -3152,6 +3324,12 @@ fn zoom(state: &mut AppState, factor: f32) -> Result<Value, String> {
     let cam = &mut state.active_mut().camera;
     cam.distance = (cam.distance * factor).max(0.05);
     Ok(camera_json(state))
+}
+
+/// Lock Zoom/Pan on (anchored to the viewport's current view) or off.
+fn set_background_lock(vp: &mut Viewport, on: bool) {
+    vp.background_locked = on;
+    vp.background_anchor = on.then_some((vp.camera.target, vp.camera.distance));
 }
 
 fn nav_toggle(state: &mut AppState, mode: NavMode) -> Result<Value, String> {
@@ -3572,6 +3750,16 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 *gizmo = Transform::from_matrix_near(local_m * gizmo.matrix(), gizmo, Vec3::ZERO);
                 changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 continue;
+            }
+            if level == 2 {
+                if let Some(d) = stack[a].modifier.deformer_mut() {
+                    // Center: only the center point moves; the gizmo stays.
+                    let g = d.gizmo.matrix();
+                    let c = g.inverse().transform_point3(local_m.transform_point3(g.transform_point3(d.center.get())));
+                    d.center.set(c);
+                    changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+                    continue;
+                }
             }
             if let Some(gizmo) = stack[a].modifier.gizmo_mut() {
                 let cur = gizmo.matrix();
@@ -4091,6 +4279,7 @@ fn camera_json(state: &AppState) -> Value {
         "shading": vp.shading.label(),
         "yaw_deg": c.yaw.to_degrees(),
         "pitch_deg": c.pitch.to_degrees(),
+        "roll_deg": c.roll.to_degrees(),
         "distance": c.distance,
         "target": [c.target.x, c.target.y, c.target.z],
     })
@@ -4143,6 +4332,7 @@ fn snapshot(state: &AppState) -> Value {
         "selection": selection_json(state),
         "dialog": state.dialog.map(|d| format!("{d:?}")),
         "material_editor": state.material_editor_open,
+        "rendered_frame": crate::render::state_json(state),
         "pick_mode": state.pick_mode.map(|p| format!("{p:?}")),
         "poly_drag": state.poly_drag.map(|p| format!("{p:?}")),
         "poly_settings": serde_json::to_value(state.poly_settings).unwrap_or(Value::Null),
