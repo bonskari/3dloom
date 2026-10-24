@@ -1,5 +1,6 @@
 //! Command Panel (right side): Scene (the object hierarchy) and the six tabs.
 
+pub mod biped;
 pub mod compound;
 pub mod create;
 pub mod display;
