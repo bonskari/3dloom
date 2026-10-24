@@ -25,7 +25,9 @@ impl Harness {
 
     fn run(&mut self, events: Vec<egui::Event>) {
         self.time += 1.0 / 30.0;
-        let input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
+        let mut input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
+        // As eframe does before each frame.
+        self.app.raw_input_hook(&self.ctx, &mut input);
         let app = &mut self.app;
         let _ = self.ctx.run(input, |ctx| app.frame(ctx));
     }

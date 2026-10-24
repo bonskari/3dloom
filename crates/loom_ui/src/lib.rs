@@ -621,6 +621,46 @@ impl LoomApp {
         self.state.undo.end();
     }
 
+    /// Runs before egui reads a frame's input (eframe's `raw_input_hook`).
+    /// When the window loses the focus (screen lock, another window) with a
+    /// mouse button held, the release goes elsewhere and never arrives: egui
+    /// would keep the button down and the viewport keep its drag, so moving
+    /// the pointer afterwards went on orbiting or panning. Every press-held
+    /// interaction ends here and egui gets the releases it missed.
+    pub fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if !raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))) {
+            return;
+        }
+        let (down, pos) = ctx.input(|i| {
+            let down: Vec<egui::PointerButton> = [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle, egui::PointerButton::Extra1, egui::PointerButton::Extra2]
+                .into_iter()
+                .filter(|b| i.pointer.button_down(*b))
+                .collect();
+            (down, i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(egui::Pos2::ZERO))
+        });
+        let up = loom_input::InputEvent::MouseUp { button: loom_input::MouseButton::Left, pos: glam::Vec2::new(pos.x, pos.y), mods: loom_input::Modifiers::default() };
+        self.camera_controller.handle(up, &mut self.state.active_mut().camera);
+        self.alt_click = None;
+        self.drag_select_start = None;
+        self.region_points.clear();
+        if self.transform_drag.is_some() {
+            self.end_transform_drag();
+            self.shift_sources.clear();
+        }
+        if self.manip_drag.take().is_some() {
+            self.state.undo.end();
+        }
+        self.soft_painting = false;
+        if self.deform_painting {
+            self.deform_painting = false;
+            self.poly_dragging = false;
+            self.state.undo.end();
+        }
+        for button in down {
+            raw.events.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: raw.modifiers });
+        }
+    }
+
     /// Display-unit factor and suffix (Units Setup) for length spinners.
     pub fn unit_display(&self) -> (f64, String) {
         self.state.units.display_factor()
@@ -754,6 +794,10 @@ impl LoomApp {
 impl eframe::App for LoomApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame(ctx);
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        LoomApp::raw_input_hook(self, ctx, raw_input);
     }
 }
 
