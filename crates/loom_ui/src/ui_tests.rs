@@ -227,5 +227,5 @@ fn drag_creating_a_box_keeps_it_selected() {
     assert_eq!(h.app.state.selection.len(), 1, "the new box stays selected");
     let id = *h.app.state.selection.iter().next().unwrap();
     let height = h.app.state.scene.node(id).unwrap().object.parameters().iter().find(|(n, _)| *n == "Height").map(|(_, v)| format!("{v:?}"));
-    assert!(height.is_some_and(|h| !h.contains("0.0)")), "the height step gave it a height: {height:?}");
+    assert!(height.as_ref().is_some_and(|h| !h.contains("0.0)")), "the height step gave it a height: {height:?}");
 }
