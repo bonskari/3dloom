@@ -136,6 +136,34 @@ fn move_tool_drag_on_an_unselected_object_selects_and_moves_it() {
     assert!(h.app.state.selection.contains(&id));
 }
 
+/// A drag whose last pointer move arrives in the same frame as the release
+/// (a quick flick, or a slow frame) must still end where the pointer let go.
+#[test]
+fn a_move_drag_released_in_the_same_frame_as_its_last_motion_keeps_that_motion() {
+    let end = |same_frame: bool| {
+        let mut h = Harness::new();
+        let id = box_scene(&mut h);
+        h.key(egui::Key::W);
+        let a = body_point(&h);
+        let b = a + egui::vec2(80.0, 0.0);
+        h.run(vec![egui::Event::PointerMoved(a)]);
+        h.run(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+        h.run(vec![egui::Event::PointerMoved(a + egui::vec2(10.0, 0.0))]);
+        let release = egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE };
+        if same_frame {
+            h.run(vec![egui::Event::PointerMoved(b), release]);
+        } else {
+            h.run(vec![egui::Event::PointerMoved(b)]);
+            h.run(vec![release]);
+        }
+        h.frames(1);
+        pos_of(&h, id)
+    };
+    let (split, joined) = (end(false), end(true));
+    assert!(split.length() > 1.0, "the drag moved the box: {split}");
+    assert!(joined.distance(split) < 1e-3, "release frame keeps the last motion: {joined} vs {split}");
+}
+
 #[test]
 fn delete_key_removes_and_undo_restores() {
     let mut h = Harness::new();

@@ -525,6 +525,18 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
+                    // The motion first, so a release in the same frame keeps the last step.
+                    if let Some(mut drag) = app.transform_drag {
+                        if pointer.is_moving() || pointer.button_released(egui::PointerButton::Primary) {
+                            let layout = gizmo::layout_for(app, index, rect.height());
+                            if drag.snap_start.is_none() {
+                                drag.snap_start = Some(layout.origin);
+                            }
+                            gizmo::drag(app, &mut drag, &layout, &projection, p, index);
+                            app.transform_drag = Some(drag);
+                            ctx.request_repaint();
+                        }
+                    }
                     if pointer.button_released(egui::PointerButton::Primary) {
                         if let Some(drag) = app.transform_drag {
                             app.end_transform_drag();
@@ -533,17 +545,6 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 app.shift_clone = Some(crate::ShiftClone { tool: app.state.active_tool, sources: std::mem::take(&mut app.shift_sources), offset: drag.offset, rotate_deg: drag.rotate_deg, quat: drag.quat, scale: drag.factors, undo_len: app.state.undo.len() });
                                 let _ = app.dispatch(Command::Clone);
                             }
-                        }
-                    }
-                    if let Some(mut drag) = app.transform_drag {
-                        if pointer.is_moving() {
-                            let layout = gizmo::layout_for(app, index, rect.height());
-                            if drag.snap_start.is_none() {
-                                drag.snap_start = Some(layout.origin);
-                            }
-                            gizmo::drag(app, &mut drag, &layout, &projection, p, index);
-                            app.transform_drag = Some(drag);
-                            ctx.request_repaint();
                         }
                     }
 
