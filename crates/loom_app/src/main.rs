@@ -20,6 +20,8 @@ fn main() -> eframe::Result<()> {
         // Needed by the custom 3D viewport callback; without this, meshes are
         // drawn purely in submission order and room walls/floor overlap wrong.
         depth_buffer: 24,
+        // The Realistic (Bevy) renderer shares the window's device.
+        wgpu_options: loom_ui::wgpu_configuration(),
         ..Default::default()
     };
     // Opt-in remote control: `LOOM_CONTROL_PORT=7833 loom`.

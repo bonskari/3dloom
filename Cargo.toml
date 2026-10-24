@@ -12,6 +12,7 @@ members = [
     "crates/loom_ui",
     "crates/loom_app",
     "crates/loom_mcp",
+    "crates/loom_bevy",
 ]
 
 [workspace.package]
@@ -32,6 +33,7 @@ loom_render = { path = "crates/loom_render" }
 loom_ui     = { path = "crates/loom_ui" }
 loom_scene  = { path = "crates/loom_scene" }
 loom_commands = { path = "crates/loom_commands" }
+loom_bevy   = { path = "crates/loom_bevy" }
 
 # External
 glam      = { version = "0.29", features = ["bytemuck", "serde"] }

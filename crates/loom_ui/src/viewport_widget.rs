@@ -917,7 +917,20 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     painter.image(tex.id(), target, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 }
             }
-            let cb = egui_wgpu::Callback::new_paint_callback(
+            // Realistic: Bevy's image is the 3D view (no grid); without a GPU
+            // (the headless app) the viewport falls back to the shaded view.
+            let realistic = app.state.viewports[index].shading == loom_commands::Shading::Realistic && app.realistic_available();
+            if realistic {
+                let ppp = ctx.pixels_per_point();
+                let size = [(rect.width() * ppp).round().max(1.0) as u32, (rect.height() * ppp).round().max(1.0) as u32];
+                match app.realistic_texture(index, size, view, proj) {
+                    Some(tex) => {
+                        painter.image(tex, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    }
+                    None => ctx.request_repaint(),
+                }
+            }
+            let cb = (!realistic).then(|| egui_wgpu::Callback::new_paint_callback(
                 rect,
                 ViewportCallback {
                     slot: index,
@@ -936,8 +949,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10 }
                     },
                 },
-            );
-            painter.add(cb);
+            ));
+            if let Some(cb) = cb {
+                painter.add(cb);
+            }
 
             let hover_pos = ctx.input(|i| i.pointer.hover_pos());
             draw_shapes(&painter, app, view_proj, rect);
