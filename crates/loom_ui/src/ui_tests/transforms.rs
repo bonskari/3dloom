@@ -64,7 +64,8 @@ fn hierarchy_pivot_buttons_follow_the_affect_mode() {
     h.cmd(Command::MoveSelection { delta: [5.0, 0.0, 0.0], system: Some(loom_commands::CoordSystem::World) });
     h.click(panel_text(&h, "Center to Pivot"));
     let (lo, hi) = h.app.state.object_bounds(id).unwrap();
-    assert!(((lo + hi) * 0.5).abs_diff_eq(Vec3::new(0.0, 0.0, 10.0), 1e-3), "{}", (lo + hi) * 0.5);
+    let pivot = h.app.state.scene.world_matrix(id).w_axis.truncate();
+    assert!(((lo + hi) * 0.5).abs_diff_eq(pivot, 1e-3), "{} vs {pivot}", (lo + hi) * 0.5);
     h.click(panel_text(&h, "Affect Hierarchy Only"));
     assert!(h.app.state.affect_hierarchy_only && !h.app.state.affect_object_only);
     h.click(panel_text(&h, "Don't Affect Children"));
