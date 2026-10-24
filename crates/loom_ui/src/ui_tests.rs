@@ -1778,7 +1778,9 @@ fn show_end_result_starts_off_and_only_the_edited_object_shows_up_to_its_active_
     assert!((drawn_width(&h, a) - 10.0).abs() < 1e-3, "{}", drawn_width(&h, a));
     assert!((drawn_width(&h, b) - 20.0).abs() < 1e-3, "{}", drawn_width(&h, b));
     // Leaving the Modify panel shows the end result again.
-    h.click_widget("Create");
+    let cp = panel(&h, "command_panel");
+    let tab = *h.find_all(egui::accesskit::Role::Button, "Create").iter().find(|r| cp.contains(r.center())).expect("the Create tab");
+    h.click(tab.center());
     assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3);
     h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     assert!((drawn_width(&h, a) - 10.0).abs() < 1e-3);
@@ -2200,10 +2202,10 @@ fn modifier_stack_right_click_menus_close() {
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(2);
     let cp = panel(&h, "command_panel");
-    let bend = find_context_menu(&mut h, cp.min.x as i32..cp.max.x as i32, cp.min.y as i32..cp.max.y as i32, 6, |_| true);
+    // Start below the panel edge: the toolbar's Render flyout sits right above it.
+    let bend = find_context_menu(&mut h, cp.min.x as i32..cp.max.x as i32, cp.min.y as i32 + 8..cp.max.y as i32, 6, |_| true);
     // Rename, Delete, Off.
     let m = menus(&h)[0];
-    eprintln!("DBG bend={bend:?} m={m:?} texts={:?}", h.shapes.iter().filter(|c| m.contains(c.clip_rect.center())).map(|c| format!("{:?}", c.shape).chars().take(80).collect::<String>()).collect::<Vec<_>>().len());
     h.click(menu_row(&h, m, 2));
     assert!(!h.app.state.scene.node(id).unwrap().modifiers[0].enabled, "Off runs");
     assert!(menus(&h).is_empty(), "and closes the menu");
