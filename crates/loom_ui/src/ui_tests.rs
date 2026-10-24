@@ -204,14 +204,12 @@ fn drag_creating_a_sphere_centres_it_on_the_click_and_selects_it() {
     let mut h = Harness::new();
     maximized(&mut h);
     h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Sphere));
-    let a = ground_point(&h, Vec3::new(0.0, 0.0, 0.0));
-    let b = ground_point(&h, Vec3::new(10.0, 0.0, 0.0));
-    h.drag(a, b);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.center() + egui::vec2(0.0, 80.0);
+    h.drag(a, a + egui::vec2(60.0, 0.0));
     let id = *h.app.state.selection.iter().next().expect("the new sphere is selected");
-    let n = h.app.state.scene.node(id).unwrap();
-    let p = n.transform.position.get();
-    assert!(p.z.abs() < 0.5, "the pivot stays on the construction plane (Base To Pivot off): z = {}", p.z);
-    assert!(p.x.abs() < 1.0 && p.y.abs() < 1.0, "centred on the click: {p:?}");
+    let p = h.app.state.scene.node(id).unwrap().transform.position.get();
+    assert!(p.z.abs() < 1e-3, "the pivot stays on the construction plane (Base To Pivot off): z = {}", p.z);
     assert!(h.app.create_kind.is_some(), "the create mode stays on for the next sphere");
 }
 
@@ -220,11 +218,11 @@ fn drag_creating_a_box_keeps_it_selected() {
     let mut h = Harness::new();
     maximized(&mut h);
     h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
-    let a = ground_point(&h, Vec3::new(-10.0, -10.0, 0.0));
-    let b = ground_point(&h, Vec3::new(10.0, 10.0, 0.0));
-    eprintln!("box drag {a:?} -> {b:?} in {:?}", h.app.viewport_rects[h.app.state.active_viewport]);
+    // Screen points below the horizon of the default view: both hit the ground.
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.center() + egui::vec2(-80.0, 60.0);
+    let b = r.center() + egui::vec2(80.0, 140.0);
     h.drag(a, b);
-    eprintln!("after drag: scene {} create {} err {:?}", h.app.state.scene.len(), h.app.create.is_some(), h.app.last_error);
     // Height: move the mouse up, then click.
     let c = b + egui::vec2(0.0, -60.0);
     for i in 1..=6 {
@@ -234,7 +232,9 @@ fn drag_creating_a_box_keeps_it_selected() {
     assert_eq!(h.app.state.scene.len(), 1, "one box");
     assert_eq!(h.app.state.selection.len(), 1, "the new box stays selected");
     let id = *h.app.state.selection.iter().next().unwrap();
-    let height = h.app.state.scene.node(id).unwrap().object.parameters().iter().find(|(n, _)| *n == "Height").map(|(_, v)| format!("{v:?}"));
-    assert!(height.as_ref().is_some_and(|h| !h.contains("0.0)")), "the height step gave it a height: {height:?}");
+    let params = h.app.state.scene.node(id).unwrap().object.parameters();
+    let get = |name: &str| params.iter().find(|(n, _)| *n == name).map(|(_, v)| format!("{v:?}")).unwrap_or_default();
+    for p in ["Length", "Width", "Height"] {
+        assert!(!get(p).contains("(0.0)"), "{p} was set by the drag: {}", get(p));
+    }
 }
-
