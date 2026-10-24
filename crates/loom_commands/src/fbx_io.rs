@@ -2,7 +2,7 @@
 //! given nodes with their hierarchy, both by the FBX Importer / Exporter
 //! options in `AppState::exchange`.
 
-use crate::execute::{commit, unique_name};
+use crate::execute::unique_name;
 use crate::exchange::{FileContent, UpAxis};
 use crate::state::{AppState, SelectionMode};
 use glam::Mat4;

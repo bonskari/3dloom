@@ -375,7 +375,9 @@ fn dialog_key(dialog: &str) -> Result<&'static str, String> {
 
 /// The built-in presets of a dialog: (name, options as JSON).
 pub fn builtin_presets(dialog: &str) -> Vec<(String, Value)> {
-    let to = |v: &impl Serialize| serde_json::to_value(v).expect("plain data");
+    fn to(v: &impl Serialize) -> Value {
+        serde_json::to_value(v).expect("plain data")
+    }
     match dialog {
         "fbx_export" => vec![("Media & Entertainment".into(), to(&FbxExportOptions::default()))],
         "fbx_import" => {

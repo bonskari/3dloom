@@ -219,7 +219,7 @@ fn imported_blend_shapes_sit_below_the_skin() {
     m.skin = Some(FbxSkin { bones: vec![(0, Mat4::IDENTITY)], mesh_bind: Mat4::IDENTITY, weights: vec![vec![(0, 1.0)]; n] });
     m.blend_shapes.push(FbxBlendShape { name: "up".into(), offsets: vec![(0, Vec3::Z)], weight: 50.0 });
     let path = d.join("order.fbx");
-    std::fs::write(&path, loom_fbx::write(&FbxDocument { nodes: vec![bone, m], unit_metres: 0.0254, anim: None }, &WriteOpts::default())).unwrap();
+    std::fs::write(&path, loom_fbx::write(&FbxDocument { nodes: vec![bone, m], unit_metres: 0.0254, anim: None, ..Default::default() }, &WriteOpts::default())).unwrap();
     let mut s = AppState::new();
     execute(&mut s, Command::ImportFile { path: Some(path.to_string_lossy().into_owned()) }).unwrap();
     let head = s.scene.nodes().find(|n| n.name == "Head").unwrap();
