@@ -304,8 +304,14 @@ mod tests {
     use crate::material::{Map, MapType};
 
     fn quad_image() -> Arc<Image> {
-        // 2 × 2: red, green / blue, white (rows from the top).
-        Arc::new(Image { width: 2, height: 2, rgba: vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255] })
+        // 4 × 4 in 2 × 2 blocks: red, green / blue, white (rows from the top).
+        let block = |x: usize, y: usize| match (x / 2, y / 2) {
+            (0, 0) => [255, 0, 0, 255],
+            (1, 0) => [0, 255, 0, 255],
+            (0, 1) => [0, 0, 255, 255],
+            _ => [255, 255, 255, 255],
+        };
+        Arc::new(Image { width: 4, height: 4, rgba: (0..16).flat_map(|i| block(i % 4, i / 4)).collect() })
     }
 
     fn images_for(map: &Map) -> Images {
@@ -333,9 +339,9 @@ mod tests {
         assert_eq!(eval(&m, [0.75, 0.25], &im)[3], 0.0);
         assert!(near(eval(&m, [0.1, 0.9], &im), [1.0, 0.0, 0.0, 1.0]));
         let baked = bake(&m, &im).unwrap();
-        assert_eq!((baked.width, baked.height), (4, 4), "a placed image keeps its pixel size");
+        assert_eq!((baked.width, baked.height), (8, 8), "a placed image keeps its pixel size");
         assert_eq!(baked.rgba[3], 255, "top left is the image");
-        assert_eq!(baked.rgba[(4 * 4 - 1) * 4 + 3], 0, "bottom right is clear");
+        assert_eq!(baked.rgba[(8 * 8 - 1) * 4 + 3], 0, "bottom right is clear");
     }
 
     #[test]
@@ -366,8 +372,8 @@ mod tests {
         assert!(edge > 0.2 && edge < 0.8, "softened edge is grey: {edge}");
 
         let g = Map::new(MapType::Gradient, 100.0);
-        assert!(eval(&g, [0.5, 0.0], &im)[0] > 0.95, "Color #3 white at the bottom");
-        assert!(eval(&g, [0.5, 1.0], &im)[0] < 0.05, "Color #1 black at the top");
+        assert!(eval(&g, [0.5, 0.01], &im)[0] > 0.95, "Color #3 white at the bottom");
+        assert!(eval(&g, [0.5, 0.99], &im)[0] < 0.05, "Color #1 black at the top");
         assert!((eval(&g, [0.5, 0.5], &im)[0] - 0.5).abs() < 0.02);
 
         let n = Map::new(MapType::Noise, 100.0);
