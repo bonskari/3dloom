@@ -223,3 +223,28 @@ fn rendering_control_flags_reach_the_render() {
     let invisible = shot(loom_bevy::ObjectFlags { visibility: 0.0, ..on }, true, on);
     assert_eq!(red(&invisible), 0, "Visibility 0 leaves the cube out");
 }
+
+#[test]
+fn zz_debug_unseen_shadow() {
+    let Some((adapter, device, queue)) = gpu() else { return };
+    let mut r = BevyRenderer::new(adapter, device, queue);
+    let floor = loom_mesh::box_primitive(Vec3::new(40.0, 40.0, 0.5));
+    let cube = {
+        let mut m = loom_mesh::box_primitive(Vec3::splat(3.0));
+        let _ = loom_mesh::edit_ops::translate_mesh(&mut m, Vec3::new(0.0, 0.0, 8.0));
+        m
+    };
+    let camera = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -1.0, 90.0), Vec3::ZERO, Vec3::Y), projection: Mat4::perspective_rh(45f32.to_radians(), 1.0, 0.1, 1000.0) };
+    let on = loom_bevy::ObjectFlags::default();
+    let dark = |img: &image::RgbaImage| img.pixels().filter(|p| p.0[3] > 0 && p.0[0] < 100).count();
+    for (name, fl) in [("unseen", loom_bevy::ObjectFlags { visible_to_camera: false, ..on }), ("plain", on), ("unseen2", loom_bevy::ObjectFlags { visible_to_camera: false, ..on })] {
+        r.sync(&[
+            SceneObject { id: 1, mesh: &cube, wire_color: [230, 20, 20], material: None, renderable: true, flags: fl },
+            SceneObject { id: 2, mesh: &floor, wire_color: [200, 200, 200], material: None, renderable: true, flags: on },
+        ]);
+        let img = r.render_image(128, 128, &camera).unwrap();
+        let mut hist = [0usize; 8];
+        for p in img.pixels() { hist[(p.0[0] / 32) as usize] += 1; }
+        eprintln!("DEBUG {name}: dark={} hist={hist:?}", dark(&img));
+    }
+}
