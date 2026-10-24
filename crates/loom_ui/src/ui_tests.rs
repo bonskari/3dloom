@@ -540,3 +540,310 @@ fn realistic_shading_from_the_label_menu_runs_without_a_gpu() {
     assert!(h.app.state.pending_render.is_none());
     assert!(h.app.last_error.as_deref().is_some_and(|e| e.contains("Render")), "{:?}", h.app.last_error);
 }
+
+/// The rect of a viewport label of the active viewport: 0 = [+], 1 = POV, 2 = shading.
+fn label_rect(h: &Harness, which: usize) -> egui::Rect {
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let texts = ["[ + ]".to_owned(), format!("[ {} ]", h.app.state.view_label(i)), format!("[ {} ]", h.app.state.viewports[i].shading.label())];
+    let mut x = rect.min.x + 6.0;
+    for (n, t) in texts.into_iter().enumerate() {
+        let size = h.ctx.fonts(|f| f.layout_no_wrap(t, egui::FontId::proportional(13.0), egui::Color32::WHITE).size());
+        let r = egui::Rect::from_min_size(egui::pos2(x, rect.min.y + 4.0), size);
+        if n == which {
+            return r;
+        }
+        x += size.x + 10.0;
+    }
+    unreachable!()
+}
+
+/// Open menus (and submenus), left to right.
+fn menus(h: &Harness) -> Vec<egui::Rect> {
+    let mut v: Vec<egui::Rect> = h.ctx.memory(|m| {
+        m.areas().visible_layer_ids().into_iter().filter(|l| l.order == egui::Order::Foreground).filter_map(|l| m.area_rect(l.id)).collect()
+    });
+    v.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+    v
+}
+
+/// The middle of entry `row` (counted before any separator) of a menu.
+fn menu_row(h: &Harness, menu: egui::Rect, row: usize) -> egui::Pos2 {
+    let s = h.ctx.style();
+    let pitch = s.spacing.interact_size.y + s.spacing.item_spacing.y;
+    egui::pos2(menu.min.x + 40.0, menu.min.y + s.spacing.menu_margin.top as f32 + row as f32 * pitch + s.spacing.interact_size.y * 0.5)
+}
+
+fn hover(h: &mut Harness, p: egui::Pos2) {
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.frames(2);
+}
+
+#[test]
+fn pov_label_menu_runs_an_item_and_closes() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    assert!(menus(&h).is_empty());
+    h.click(label_rect(&h, 1).center());
+    let open = menus(&h);
+    assert_eq!(open.len(), 1, "clicking the POV label opens its menu");
+    // Perspective, Orthographic, Front, Back, Top.
+    h.click(menu_row(&h, open[0], 4));
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Top, "the item runs");
+    assert!(menus(&h).is_empty(), "and closes the menu");
+}
+
+#[test]
+fn label_menus_close_on_a_click_elsewhere_and_on_escape() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    let centre = h.app.viewport_rects[h.app.state.active_viewport].center();
+    for which in 0..3 {
+        let l = label_rect(&h, which).center();
+        h.click(l);
+        assert_eq!(menus(&h).len(), 1, "label {which} opens");
+        h.click(centre);
+        assert!(menus(&h).is_empty(), "label {which}: a click elsewhere closes it");
+        h.click(label_rect(&h, which).center());
+        assert_eq!(menus(&h).len(), 1);
+        h.key(egui::Key::Escape);
+        assert!(menus(&h).is_empty(), "label {which}: Escape closes it");
+        h.click(label_rect(&h, which).center());
+        assert_eq!(menus(&h).len(), 1);
+        h.click(label_rect(&h, which).center());
+        assert!(menus(&h).is_empty(), "label {which}: clicking the label again closes it");
+    }
+}
+
+#[test]
+fn label_right_click_menus_run_items_and_close() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    let p = label_rect(&h, 2).center();
+    right_click(&mut h, p);
+    let open = menus(&h);
+    assert_eq!(open.len(), 1, "right-clicking the shading label opens its menu");
+    assert!(h.app.quad_menu.is_none(), "not the quad menu");
+    // Smooth + Highlights, Wireframe.
+    h.click(menu_row(&h, open[0], 1));
+    assert_eq!(h.app.state.active().shading, loom_commands::Shading::Wireframe, "the item runs");
+    assert!(menus(&h).is_empty(), "and closes the menu");
+    let centre = h.app.viewport_rects[h.app.state.active_viewport].center();
+    let p = label_rect(&h, 1).center();
+    right_click(&mut h, p);
+    assert_eq!(menus(&h).len(), 1);
+    h.click(centre);
+    assert!(menus(&h).is_empty(), "a click elsewhere closes it");
+    let p = label_rect(&h, 1).center();
+    right_click(&mut h, p);
+    assert_eq!(menus(&h).len(), 1);
+    h.key(egui::Key::Escape);
+    assert!(menus(&h).is_empty(), "Escape closes it");
+}
+
+#[test]
+fn label_submenus_open_to_the_right() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateCameraAt { target: false, position: [0.0, -100.0, 20.0], look_at: [0.0, 0.0, 20.0] }).unwrap();
+    let cam = loom_scene::NodeId(r["id"].as_u64().unwrap());
+    maximized(&mut h);
+    // (label, submenu row): POV > Cameras, [+] > Active Viewport, shading > Other.
+    for (which, row) in [(1, 0), (0, 1), (2, 3)] {
+        h.click(label_rect(&h, which).center());
+        let parent = menus(&h)[0];
+        let p = menu_row(&h, parent, row);
+        hover(&mut h, p);
+        let open = menus(&h);
+        assert_eq!(open.len(), 2, "label {which}: hovering the submenu entry opens it");
+        assert!(open[1].min.x >= parent.max.x - 1.0, "label {which}: the submenu {:?} is right of its menu {parent:?}", open[1]);
+        h.key(egui::Key::Escape);
+        assert!(menus(&h).is_empty(), "label {which}: Escape closes menu and submenu");
+    }
+    // Picking a camera in the submenu sets the view and closes both menus.
+    h.click(label_rect(&h, 1).center());
+    let parent = menus(&h)[0];
+    let p = menu_row(&h, parent, 0);
+    hover(&mut h, p);
+    let sub = menus(&h)[1];
+    let p = menu_row(&h, sub, 0);
+    hover(&mut h, egui::pos2(sub.min.x + 5.0, p.y));
+    h.click(p);
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Camera(cam));
+    assert!(menus(&h).is_empty(), "picking a camera closes the menus");
+}
+
+#[test]
+fn quad_menu_closes_on_an_item_a_click_anywhere_and_escape_and_reopens_on_a_new_right_click() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let at = r.center() + egui::vec2(-150.0, 50.0);
+    right_click(&mut h, at);
+    assert!(h.app.quad_menu.is_some(), "right-click opens the quad menu");
+    // The display quadrant sits up and right of the click, Hide Selection at its bottom.
+    let display = menus(&h).into_iter().find(|m| m.min.x > at.x && m.max.y < at.y).expect("the display quadrant");
+    h.click(egui::pos2(display.center().x, display.max.y - h.ctx.style().spacing.menu_margin.bottom as f32 - 10.0));
+    assert!(h.app.state.scene.node(id).unwrap().hidden, "the item runs");
+    assert!(h.app.quad_menu.is_none() && menus(&h).is_empty(), "and closes the menu");
+    // In the viewport, on the Command Panel, on the empty end of the menu bar.
+    let elsewhere = [r.center() + egui::vec2(250.0, -200.0), egui::pos2(SCREEN.max.x - 60.0, 300.0), egui::pos2(SCREEN.max.x - 30.0, 10.0)];
+    for p in elsewhere {
+        h.app.create_kind = None; // the Command Panel click may have picked a Create button
+        right_click(&mut h, at);
+        assert!(h.app.quad_menu.is_some());
+        h.click(p);
+        assert!(h.app.quad_menu.is_none() && menus(&h).is_empty(), "a click at {p:?} closes it ({:?} {:?})", h.app.quad_menu, menus(&h));
+    }
+    right_click(&mut h, at);
+    h.key(egui::Key::Escape);
+    assert!(h.app.quad_menu.is_none() && menus(&h).is_empty(), "Escape closes it");
+    right_click(&mut h, at);
+    let other = r.center() + egui::vec2(200.0, 150.0);
+    right_click(&mut h, other);
+    let open = h.app.quad_menu.expect("a right-click elsewhere reopens it");
+    assert_eq!(open.at, other, "at the new spot");
+    h.frames(2);
+    assert!(h.app.quad_menu.is_some(), "and it stays open");
+}
+
+/// The rect of a side or top/bottom panel, by its id.
+fn panel(h: &Harness, id: &str) -> egui::Rect {
+    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(id)).expect("panel shown").rect
+}
+
+/// Right-clicks over the points until one opens a menu or popup (not the quad
+/// menu); Escape between tries. Returns that point. `accept` filters the menu by its rect.
+fn find_context_menu(h: &mut Harness, xs: std::ops::Range<i32>, ys: std::ops::Range<i32>, step: usize, accept: impl Fn(egui::Rect) -> bool) -> egui::Pos2 {
+    for y in ys.clone().step_by(step) {
+        for x in xs.clone().step_by(step) {
+            let p = egui::pos2(x as f32, y as f32);
+            right_click(h, p);
+            if h.app.quad_menu.is_none() && menus(h).len() == 1 && accept(menus(h)[0]) {
+                return p;
+            }
+            h.key(egui::Key::Escape);
+            h.app.quad_menu = None;
+        }
+    }
+    panic!("no context menu in x {xs:?}, y {ys:?}");
+}
+
+/// The menu opened by a right-click at `p` closes on Escape, a click on an empty
+/// spot, a right-click on an empty spot and (last, it may deselect) a click in the viewport.
+fn assert_context_menu_closes(h: &mut Harness, p: egui::Pos2, what: &str) {
+    let empty = egui::pos2(SCREEN.max.x - 30.0, 10.0);
+    let open = |h: &mut Harness| {
+        right_click(h, p);
+        assert_eq!(menus(h).len(), 1, "{what}: right-click opens it");
+    };
+    open(h);
+    h.frames(3);
+    assert_eq!(menus(h).len(), 1, "{what}: it stays open");
+    h.key(egui::Key::Escape);
+    assert!(menus(h).is_empty(), "{what}: Escape closes it");
+    open(h);
+    h.click(empty);
+    assert!(menus(h).is_empty(), "{what}: a click elsewhere closes it");
+    open(h);
+    right_click(h, empty);
+    assert!(menus(h).is_empty(), "{what}: a right-click elsewhere closes it");
+    open(h);
+    let v = h.app.viewport_rects[h.app.state.active_viewport];
+    h.click(v.center() + egui::vec2(v.width() * 0.3, v.height() * 0.3));
+    assert!(menus(h).is_empty() && h.app.quad_menu.is_none(), "{what}: a click in the viewport closes it");
+}
+
+#[test]
+fn modifier_stack_right_click_menus_close() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    let bend = find_context_menu(&mut h, cp.min.x as i32..cp.max.x as i32, cp.min.y as i32..cp.max.y as i32, 6, |_| true);
+    // Rename, Delete, Off.
+    let m = menus(&h)[0];
+    h.click(menu_row(&h, m, 2));
+    assert!(!h.app.state.scene.node(id).unwrap().modifiers[0].enabled, "Off runs");
+    assert!(menus(&h).is_empty(), "and closes the menu");
+    let base = find_context_menu(&mut h, bend.x as i32..bend.x as i32 + 1, bend.y as i32..cp.max.y as i32, 3, |r| (r.height() - m.height()).abs() > 1.0);
+    let m = menus(&h)[0];
+    let row = menu_row(&h, m, 0);
+    hover(&mut h, row);
+    let open = menus(&h);
+    assert_eq!(open.len(), 2, "Convert To opens");
+    assert!(open[1].min.x >= m.max.x - 1.0, "to the right: {:?} vs {m:?}", open[1]);
+    h.key(egui::Key::Escape);
+    assert!(menus(&h).is_empty());
+    // The base object's menu last: the viewport click deselects the box.
+    assert_context_menu_closes(&mut h, bend, "modifier entry");
+    h.cmd(Command::SelectNodes { ids: vec![id.0], op: loom_commands::SelectOp::Replace });
+    assert_context_menu_closes(&mut h, base, "base object");
+}
+
+#[test]
+fn time_slider_right_click_menu_closes() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    let cx = SCREEN.center().x as i32;
+    let p = find_context_menu(&mut h, cx..cx + 1, SCREEN.max.y as i32 - 140..SCREEN.max.y as i32, 3, |_| true);
+    // Key Properties (a submenu), then Delete Key below a separator.
+    let m = menus(&h)[0];
+    let s = h.ctx.style();
+    let delete = menu_row(&h, m, 1) + egui::vec2(0.0, 6.0 + s.spacing.item_spacing.y);
+    h.click(delete);
+    assert!(menus(&h).is_empty(), "Delete Key closes the menu");
+    assert_context_menu_closes(&mut h, p, "track bar");
+}
+
+#[test]
+fn track_view_right_click_menu_closes() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    h.app.state.track_view.open = true;
+    h.frames(3);
+    let win = h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().filter(|l| l.order == egui::Order::Middle).filter_map(|l| m.area_rect(l.id)).next()).expect("the Track View window");
+    let (x, y) = (win.min.x as i32, win.min.y as i32);
+    let p = find_context_menu(&mut h, x + 10..x + 200, y + 30..win.max.y as i32, 6, |_| true);
+    // Assign Controller..., Copy.
+    let m = menus(&h)[0];
+    h.click(menu_row(&h, m, 1));
+    assert!(menus(&h).is_empty(), "Copy closes the menu");
+    assert_context_menu_closes(&mut h, p, "Track View controller list");
+}
+
+#[test]
+fn uv_editor_right_click_menu_stays_open_and_closes() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    h.cmd(Command::AddModifier { name: "Unwrap UVW".into() });
+    h.cmd(Command::EditUvws);
+    h.frames(3);
+    let win = h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().filter(|l| l.order == egui::Order::Middle).filter_map(|l| m.area_rect(l.id)).next()).expect("the Edit UVWs window");
+    let p = win.center();
+    right_click(&mut h, p);
+    h.frames(3);
+    let open = menus(&h);
+    assert_eq!(open.len(), 1, "right-click on the UV canvas opens its menu and it stays open");
+    // Break.
+    h.click(menu_row(&h, open[0], 0));
+    assert!(menus(&h).is_empty(), "Break closes the menu");
+    assert_context_menu_closes(&mut h, p, "UV canvas");
+}
+
+#[test]
+fn status_bar_flyouts_close() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    let bar = panel(&h, "statusbar");
+    // The navigation block at the right end holds the flyouts (below the time slider edge).
+    let p = find_context_menu(&mut h, bar.max.x as i32 - 300..bar.max.x as i32, bar.min.y as i32 + 6..bar.max.y as i32, 4, |_| true);
+    let m = menus(&h)[0];
+    h.click(menu_row(&h, m, 0));
+    assert!(menus(&h).is_empty(), "an item closes the flyout");
+    assert_context_menu_closes(&mut h, p, "status bar flyout");
+}

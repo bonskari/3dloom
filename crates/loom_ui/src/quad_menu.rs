@@ -378,8 +378,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: Open) -> bool {
     if let Some(t2) = &q.tools2 {
         place(ctx, app, "tools2", t2, egui::Align2::RIGHT_TOP);
     }
-    // Submenus are their own areas, so test "over any area" rather than our panels.
-    let clicked_outside = open.armed && ctx.input(|i| i.pointer.any_pressed()) && !ctx.is_pointer_over_area();
+    // Submenus are their own areas, so test "over any menu area" rather than our panels
+    // (not "over any area": the panels and the viewports' central panel count as areas too).
+    let over_menu = ctx.input(|i| i.pointer.interact_pos()).and_then(|p| ctx.layer_id_at(p)).is_some_and(|l| l.order == egui::Order::Foreground);
+    let clicked_outside = open.armed && ctx.input(|i| i.pointer.any_pressed()) && !over_menu;
     let _ = any_hover;
     let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     if !open.armed {

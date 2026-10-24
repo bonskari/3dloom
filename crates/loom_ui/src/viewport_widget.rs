@@ -225,7 +225,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             if app.state.viewports[index].background.is_none() && !app.state.viewports[index].is_orthographic() {
                 draw_background_gradient(&painter, rect);
             }
-            draw_labels(ui, app, index, rect);
+            let over_label = draw_labels(ui, app, index, rect);
 
             if app.state.region_points_reset {
                 app.state.region_points_reset = false;
@@ -776,7 +776,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                     // Right click cancels a creation in progress or a by-Hit mode;
                     // otherwise it opens the quad menu (on the click).
-                    if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() {
+                    if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() && !over_label {
                         if let Some(session) = app.create.take() {
                             session.cancel(app);
                         } else if app.create_kind.is_some() && app.bone_points.is_empty() && app.line.is_none() {
@@ -795,7 +795,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.state.nav_mode = loom_input::NavMode::None;
                         } else if !app.region_points.is_empty() && app.drag_select_start.is_none() {
                             app.region_points.clear();
-                        } else if app.quad_menu.is_none() {
+                        } else {
+                            // A right-click elsewhere while one is open reopens it there.
                             let mut open = crate::quad_menu::Open::new(p, index);
                             open.kind = if mods.shift { crate::quad_menu::QuadKind::Snaps } else if mods.ctrl { crate::quad_menu::QuadKind::Create } else if mods.alt { crate::quad_menu::QuadKind::Animation } else { crate::quad_menu::QuadKind::Default };
                             app.quad_menu = Some(open);
@@ -1069,7 +1070,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
 }
 
 /// The three viewport label menus (General, POV, Shading).
-fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::Rect) {
+/// Returns true when the pointer is over a label (its right-click is the label's menu, not the quad menu).
+fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::Rect) -> bool {
+    let mut over = false;
     // The labels sit over the 3D image (drawn later in the viewport's own
     // layer): their own background layer, painted after the panel.
     let painter = &ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("viewport_labels"))).with_clip_rect(rect);
@@ -1107,6 +1110,7 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
                 crate::label_menus::render(ui, app, index, &entries);
             });
         let hovered = resp.is_some_and(|r| r.response.hovered()) || ui.rect_contains_pointer(r);
+        over |= hovered;
         let color = if hovered { egui::Color32::WHITE } else { egui::Color32::from_gray(225) };
         painter.galley(r.min, galley, color);
         x += size.x + 10.0;
@@ -1114,6 +1118,7 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
     if disabled {
         painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font, egui::Color32::from_gray(225));
     }
+    over
 }
 
 /// World units per screen pixel at the view's focus distance.
