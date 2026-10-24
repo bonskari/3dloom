@@ -293,6 +293,8 @@ pub enum Dialog {
     PolySettings(PolySettingsKind),
     /// Editable Poly > Detach.
     Detach,
+    /// Deleting polygons would leave vertices with no polygon: "Delete isolated vertices?"
+    DeleteIsolatedVertices,
     LayerManager,
     /// File > Open.
     OpenFile,

@@ -11,6 +11,7 @@ pub mod preferences;
 pub mod units_setup;
 pub mod mirror;
 pub mod poly_settings;
+pub mod delete_isolated;
 pub mod detach;
 pub mod manage_layers;
 pub mod normal_align;
@@ -113,6 +114,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CustomizeUI => customize_ui::show(ctx, app, &mut open),
         Dialog::PolySettings(kind) => poly_settings::show(ctx, app, kind, &mut open),
         Dialog::Detach => detach::show(ctx, app, &mut open),
+        Dialog::DeleteIsolatedVertices => delete_isolated::show(ctx, app, &mut open),
         Dialog::LayerManager => manage_layers::show(ctx, app, &mut open),
         Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::SaveChanges(action) => save_changes::show(ctx, app, action, &mut open),

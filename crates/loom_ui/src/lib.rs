@@ -628,15 +628,7 @@ impl LoomApp {
 
     /// A length spinner in display units: the value stays in scene units.
     pub fn length_drag<'a>(&self, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
-        let (factor, suffix) = self.unit_display();
-        let decimals = self.state.prefs.spinner_precision;
-        egui::DragValue::new(value)
-            .speed(speed)
-            .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
-            .custom_parser(move |text| {
-                let t = text.trim().trim_end_matches(|c: char| c.is_alphabetic() || c == '"' || c == '\'');
-                t.parse::<f64>().ok().map(|v| v / factor)
-            })
+        length_drag_value(&self.state.units, self.state.prefs.spinner_precision, value, speed)
     }
 
     /// Spinner drag speed: the Preferences snap value when Spinner Snap is on.
@@ -860,4 +852,15 @@ fn modifier_usage_path() -> Option<std::path::PathBuf> {
         .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from))
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
     Some(base.join("3dloom").join("modifier-usage.json"))
+}
+
+/// A length spinner in display units (Units Setup); typed values may carry a
+/// unit (7", -3.5", 2.5cm). The value stays in scene units.
+pub fn length_drag_value<'a>(units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
+    let (factor, suffix) = units.display_factor();
+    let units = units.clone();
+    egui::DragValue::new(value)
+        .speed(speed)
+        .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
+        .custom_parser(move |text| units.parse(text))
 }

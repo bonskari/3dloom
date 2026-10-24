@@ -178,6 +178,11 @@ pub enum PickMode {
     /// Cut: start and end surface points.
     CutA,
     CutB,
+    /// Swift Loop: each click on an edge inserts a loop across its ring.
+    SwiftLoop,
+    /// Bridge Edges > Pick Edge 1 / Pick Edge 2: the next edge pick.
+    BridgeEdge1,
+    BridgeEdge2,
     /// Attach to Group: the next clicked group takes the selection.
     GroupAttach,
     /// Linked XForm / Preserve: the next clicked object is the control / original.
@@ -307,6 +312,10 @@ pub struct PolySettings {
     pub hinge_segments: u32,
     /// The picked hinge edge (node, raw edge id).
     pub hinge_edge: Option<(NodeId, u32)>,
+    /// Bridge Edges: Bridge Specific Edges (the picked edges) instead of the selection.
+    pub bridge_specific: bool,
+    /// Bridge Edges > Pick Edge 1 / 2 (node, raw edge id).
+    pub bridge_edges: [Option<(NodeId, u32)>; 2],
     pub msmooth_smoothness: f32,
     pub msmooth_separate_by_smoothing: bool,
     pub msmooth_separate_by_materials: bool,
@@ -346,6 +355,8 @@ impl Default for PolySettings {
             hinge_angle: 30.0,
             hinge_segments: 1,
             hinge_edge: None,
+            bridge_specific: false,
+            bridge_edges: [None, None],
             msmooth_smoothness: 1.0,
             msmooth_separate_by_smoothing: false,
             msmooth_separate_by_materials: false,
@@ -850,6 +861,46 @@ impl UnitsSetup {
         }
     }
 
+    /// A typed length in scene units. A plain number is in display units; a
+    /// number with a unit (7", -3.5in, 2', 1ft, 5'7", 10mm, 2.5cm, 1m, 0.1km
+    /// or the custom unit's name) is converted. Typographic quotes and the
+    /// en dash count as " ' and -.
+    pub fn parse(&self, text: &str) -> Option<f64> {
+        let t: String = text
+            .trim()
+            .chars()
+            .map(|c| match c {
+                '\u{201c}' | '\u{201d}' | '\u{2033}' => '"',
+                '\u{2018}' | '\u{2019}' | '\u{2032}' => '\'',
+                '\u{2013}' | '\u{2212}' => '-',
+                c => c,
+            })
+            .collect();
+        let scene_metres = self.system_scale as f64 * self.system_unit.metres();
+        if let Some((ft, rest)) = t.split_once('\'') {
+            let feet: f64 = ft.trim().parse().ok()?;
+            let rest = rest.trim().trim_end_matches('"').trim();
+            let inches: f64 = if rest.is_empty() { 0.0 } else { rest.parse().ok()? };
+            let sign = if ft.trim().starts_with('-') { -1.0 } else { 1.0 };
+            return Some((feet + sign * inches / 12.0) * 0.3048 / scene_metres);
+        }
+        let i = t.find(|c: char| c.is_alphabetic() || c == '"').unwrap_or(t.len());
+        let v: f64 = t[..i].trim().parse().ok()?;
+        let unit = t[i..].trim().to_ascii_lowercase();
+        let metres = match unit.as_str() {
+            "" => return Some(v / self.display_factor().0),
+            "\"" | "in" => 0.0254,
+            "ft" => 0.3048,
+            "mm" => 0.001,
+            "cm" => 0.01,
+            "m" => 1.0,
+            "km" => 1000.0,
+            u if !u.is_empty() && u.eq_ignore_ascii_case(&self.display_factor().1) => return Some(v / self.display_factor().0),
+            _ => return None,
+        };
+        Some(v * metres / scene_metres)
+    }
+
     pub fn format(&self, v: f32, decimals: usize) -> String {
         let (f, suffix) = self.display_factor();
         let d = v as f64 * f;
@@ -1165,6 +1216,8 @@ pub struct AppState {
     /// Editable Poly > Selection rollout toggles.
     pub select_by_vertex: bool,
     pub ignore_backfacing: bool,
+    /// Modify Selection > Loop Mode: a click selects the whole loop.
+    pub loop_mode: bool,
     pub preview_selection: PreviewSelect,
     /// Edit Geometry > Named Selections (sub-object).
     pub named_sub_selections: BTreeMap<String, Vec<(NodeId, SubObjectId)>>,
@@ -1385,6 +1438,7 @@ impl AppState {
             named_sets: BTreeMap::new(),
             select_by_vertex: false,
             ignore_backfacing: false,
+            loop_mode: false,
             preview_selection: PreviewSelect::Off,
             named_sub_selections: BTreeMap::new(),
             soft_paint: None,

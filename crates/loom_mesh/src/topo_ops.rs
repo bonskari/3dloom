@@ -785,6 +785,18 @@ pub fn connect_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], segments: u32, pinch
         let ids: Vec<u32> = params.iter().map(|t| im.add_vertex(pa.lerp(pb, *t), Some(lo.0))).collect();
         points.insert((lo.0, hi.0), ids);
     }
+    let new_segments = split_at_points(&mut im, &points);
+    *mesh = im.build().map_err(|e| format!("Connect: {e}"))?;
+    if new_segments.is_empty() {
+        return Err("Connect needs two or more selected edges in a polygon".into());
+    }
+    Ok(new_segments)
+}
+
+/// Puts the new edge points (keyed by the edge's (lower, higher) vertex ids,
+/// listed in that direction) into every polygon's loop and splits the
+/// polygons with two or more of them. Returns the new edges' end positions.
+fn split_at_points(im: &mut IndexedMesh, points: &BTreeMap<(u32, u32), Vec<u32>>) -> Vec<(Vec3, Vec3)> {
     let mut new_segments = Vec::new();
     let mut out = Vec::new();
     for face in &im.faces {
@@ -887,11 +899,7 @@ pub fn connect_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], segments: u32, pinch
         }
     }
     im.faces = out;
-    *mesh = im.build().map_err(|e| format!("Connect: {e}"))?;
-    if new_segments.is_empty() {
-        return Err("Connect needs two or more selected edges in a polygon".into());
-    }
-    Ok(new_segments)
+    new_segments
 }
 
 /// Insert Vertex on an edge at parameter `t` from its canonical origin.
@@ -1110,6 +1118,235 @@ pub fn create_polygon(mesh: &mut Mesh, verts: &[VertexId]) -> Result<FaceId, Str
 /// Vertices that touch no polygon.
 pub fn isolated_vertices(mesh: &Mesh) -> Vec<VertexId> {
     (0..mesh.vertex_count() as u32).map(VertexId).filter(|v| vertex_edges(mesh, *v).is_empty()).collect()
+}
+
+/// The selected border edges as runs: each run is the faceless half-edges of
+/// one connected stretch of a border, in border order, and whether it is the
+/// whole border loop. Edges with polygons on both sides are left out. Runs
+/// come in increasing order of their lowest edge id.
+pub fn border_runs(mesh: &Mesh, edges: &[HalfEdgeId]) -> Vec<(Vec<HalfEdgeId>, bool)> {
+    let hes = mesh.half_edges();
+    let mut set: BTreeSet<HalfEdgeId> = BTreeSet::new();
+    for e in edges {
+        let Some(c) = canonical(mesh, *e) else { continue };
+        let h = if hes[c.0 as usize].face.is_none() { c } else { hes[c.0 as usize].twin };
+        if hes[h.0 as usize].face.is_none() && hes[hes[h.0 as usize].twin.0 as usize].face.is_some() {
+            set.insert(h);
+        }
+    }
+    let prev: BTreeMap<HalfEdgeId, HalfEdgeId> = set.iter().map(|h| (hes[h.0 as usize].next, *h)).collect();
+    let mut seen: BTreeSet<HalfEdgeId> = BTreeSet::new();
+    let mut runs: Vec<(HalfEdgeId, Vec<HalfEdgeId>, bool)> = Vec::new();
+    for &h in &set {
+        if seen.contains(&h) {
+            continue;
+        }
+        let mut start = h;
+        let mut closed = false;
+        for _ in 0..set.len() {
+            match prev.get(&start) {
+                Some(p) if *p == h => {
+                    closed = true;
+                    break;
+                }
+                Some(p) => start = *p,
+                None => break,
+            }
+        }
+        let mut run = vec![start];
+        let mut cur = hes[start.0 as usize].next;
+        while set.contains(&cur) && cur != start {
+            run.push(cur);
+            cur = hes[cur.0 as usize].next;
+        }
+        seen.extend(run.iter().copied());
+        let low = run.iter().filter_map(|x| canonical(mesh, *x)).min().unwrap_or(start);
+        runs.push((low, run, closed));
+    }
+    runs.sort_by_key(|r| r.0);
+    runs.into_iter().map(|(_, r, c)| (r, c)).collect()
+}
+
+/// Bridge (edges): joins each pair of open border runs (from
+/// [`border_runs`]) with new polygons. Runs with the same number of edges get
+/// `segments` rows of quads; runs of different lengths one row of triangles.
+/// Runs that share an end vertex close with a triangle there.
+pub fn bridge_edge_runs(mesh: &mut Mesh, pairs: &[(Vec<HalfEdgeId>, Vec<HalfEdgeId>)], segments: u32) -> Result<Vec<FaceId>, String> {
+    let hes = mesh.half_edges();
+    let polyline = |run: &[HalfEdgeId]| -> Vec<u32> {
+        let mut v: Vec<u32> = run.iter().map(|h| hes[h.0 as usize].origin.0).collect();
+        if let Some(l) = run.last() {
+            v.push(hes[hes[l.0 as usize].twin.0 as usize].origin.0);
+        }
+        v
+    };
+    let mut im = IndexedMesh::from_mesh(mesh);
+    let mut new_faces = Vec::new();
+    let mut push = |im: &mut IndexedMesh, src: &IndexedFace, mut ids: Vec<u32>| {
+        ids.dedup();
+        while ids.len() > 1 && ids.first() == ids.last() {
+            ids.pop();
+        }
+        if ids.len() >= 3 {
+            new_faces.push(FaceId(im.faces.len() as u32));
+            im.faces.push(IndexedFace::like(src, ids));
+        }
+    };
+    for (ra, rb) in pairs {
+        let (Some(a0), false) = (ra.first(), rb.is_empty()) else { return Err("Bridge needs two edge selections".into()) };
+        // Both runs go in border order, so the second is walked backwards to face the first.
+        let a = polyline(ra);
+        let c: Vec<u32> = polyline(rb).into_iter().rev().collect();
+        let f = hes[hes[a0.0 as usize].twin.0 as usize].face.ok_or("not a border edge")?;
+        let src = IndexedFace::like(&im.faces[f.0 as usize], vec![]);
+        let (m, n) = (a.len() - 1, c.len() - 1);
+        if m == n {
+            let segs = segments.max(1) as usize;
+            let mut rings: Vec<Vec<u32>> = vec![a.clone()];
+            for s in 1..segs {
+                let t = s as f32 / segs as f32;
+                let ring = (0..=m)
+                    .map(|k| if a[k] == c[k] { a[k] } else { im.add_vertex(im.positions[a[k] as usize].lerp(im.positions[c[k] as usize], t), Some(a[k])) })
+                    .collect();
+                rings.push(ring);
+            }
+            rings.push(c.clone());
+            for s in 0..segs {
+                for i in 0..m {
+                    push(&mut im, &src, vec![rings[s][i], rings[s][i + 1], rings[s + 1][i + 1], rings[s + 1][i]]);
+                }
+            }
+        } else {
+            if segments > 1 {
+                return Err("Bridge: with more than one segment both edge selections need the same number of edges".into());
+            }
+            // Zip the two runs by length along them.
+            let along = |ids: &[u32]| -> Vec<f32> {
+                let mut acc = vec![0.0];
+                for w in ids.windows(2) {
+                    let d = im.positions[w[0] as usize].distance(im.positions[w[1] as usize]);
+                    acc.push(acc.last().unwrap() + d);
+                }
+                let total = acc.last().copied().unwrap_or(1.0).max(1e-9);
+                acc.into_iter().map(|x| x / total).collect()
+            };
+            let (ta, tc) = (along(&a), along(&c));
+            let (mut i, mut j) = (0, 0);
+            while i < m || j < n {
+                if j == n || (i < m && ta[i + 1] <= tc[j + 1]) {
+                    push(&mut im, &src, vec![a[i], a[i + 1], c[j]]);
+                    i += 1;
+                } else {
+                    push(&mut im, &src, vec![a[i], c[j + 1], c[j]]);
+                    j += 1;
+                }
+            }
+        }
+    }
+    *mesh = im.build().map_err(|e| format!("Bridge: {e}"))?;
+    Ok(new_faces)
+}
+
+/// The edges Swift Loop splits for a click on `edge` at `t` (from its
+/// canonical origin): the edge's ring across quads both ways, each as a
+/// half-edge and the split parameter from that half-edge's origin, in order
+/// along the loop; and whether the loop closes.
+pub fn swift_loop_ring(mesh: &Mesh, edge: HalfEdgeId, t: f32) -> (Vec<(HalfEdgeId, f32)>, bool) {
+    let hes = mesh.half_edges();
+    let Some(h0) = canonical(mesh, edge) else { return (Vec::new(), false) };
+    let mut seen: BTreeSet<HalfEdgeId> = [h0].into_iter().collect();
+    // Across a quad a→b→c→d the point t from a on a→b continues t from d on d→c.
+    let mut walk = |start: HalfEdgeId, t: f32| -> (Vec<(HalfEdgeId, f32)>, bool) {
+        let mut out = Vec::new();
+        let mut h = start;
+        loop {
+            if hes[h.0 as usize].face.is_none() {
+                return (out, false);
+            }
+            let n1 = hes[h.0 as usize].next;
+            let n2 = hes[n1.0 as usize].next;
+            let n3 = hes[n2.0 as usize].next;
+            if hes[n3.0 as usize].next != h {
+                return (out, false);
+            }
+            let nh = hes[n2.0 as usize].twin;
+            let Some(c) = canonical(mesh, nh) else { return (out, false) };
+            if !seen.insert(c) {
+                return (out, c == h0);
+            }
+            out.push((nh, t));
+            h = nh;
+        }
+    };
+    let (fwd, closed) = walk(h0, t);
+    let mut ring: Vec<(HalfEdgeId, f32)> = Vec::new();
+    if !closed {
+        let (bwd, _) = walk(hes[h0.0 as usize].twin, 1.0 - t);
+        ring.extend(bwd.into_iter().rev());
+    }
+    ring.push((h0, t));
+    ring.extend(fwd);
+    (ring, closed)
+}
+
+/// Where Swift Loop's new loop runs (the preview): the split points in
+/// order, and whether the loop closes.
+pub fn swift_loop_points(mesh: &Mesh, edge: HalfEdgeId, t: f32) -> (Vec<Vec3>, bool) {
+    let (ring, closed) = swift_loop_ring(mesh, edge, t);
+    let pts = ring
+        .iter()
+        .filter_map(|(h, t)| {
+            let (a, b) = mesh.edge_vertices(*h)?;
+            Some(mesh.vertex_position(a)?.lerp(mesh.vertex_position(b)?, *t))
+        })
+        .collect();
+    (pts, closed)
+}
+
+/// Swift Loop: inserts the edge loop through the click on `edge` at `t`
+/// (from its canonical origin), across the edge's whole ring. Returns the
+/// new edges' end positions.
+pub fn swift_loop(mesh: &mut Mesh, edge: HalfEdgeId, t: f32) -> Result<Vec<(Vec3, Vec3)>, String> {
+    let (ring, _) = swift_loop_ring(mesh, edge, t.clamp(0.02, 0.98));
+    if ring.is_empty() {
+        return Err("Swift Loop: no edge there".into());
+    }
+    let mut im = IndexedMesh::from_mesh(mesh);
+    let mut points: BTreeMap<(u32, u32), Vec<u32>> = BTreeMap::new();
+    for (h, t) in ring {
+        let (a, b) = mesh.edge_vertices(h).ok_or("invalid edge")?;
+        let p = mesh.vertex_position(a).unwrap().lerp(mesh.vertex_position(b).unwrap(), t);
+        let lo = a.0.min(b.0);
+        let id = im.add_vertex(p, Some(lo));
+        points.insert((lo, a.0.max(b.0)), vec![id]);
+    }
+    let segs = split_at_points(&mut im, &points);
+    *mesh = im.build().map_err(|e| format!("Swift Loop: {e}"))?;
+    if segs.is_empty() {
+        return Err("Swift Loop needs a quad next to the edge".into());
+    }
+    Ok(segs)
+}
+
+/// Clean Remove (Ctrl+Remove on edges): removes the edges, then the vertices
+/// they leave behind with only two edges.
+pub fn clean_remove_edges(mesh: &mut Mesh, edges: &[HalfEdgeId]) -> Result<usize, String> {
+    let ends: Vec<Vec3> = edges
+        .iter()
+        .filter_map(|e| mesh.edge_vertices(*e))
+        .flat_map(|(a, b)| [a, b])
+        .filter_map(|v| mesh.vertex_position(v))
+        .collect();
+    crate::edit_ops::dissolve_edges(mesh, edges)?;
+    let mut leftovers: Vec<VertexId> = Vec::new();
+    for p in ends {
+        if let Some(v) = (0..mesh.vertex_count() as u32).map(VertexId).find(|v| mesh.vertex_position(*v) == Some(p)) {
+            if vertex_edges(mesh, v).len() == 2 && !leftovers.contains(&v) {
+                leftovers.push(v);
+            }
+        }
+    }
+    remove_vertices(mesh, &leftovers)
 }
 
 #[cfg(test)]
