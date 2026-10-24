@@ -404,6 +404,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
+                    // Skin > Paint Weights brush.
+                    crate::poly_modes::skin_paint(app, &ctx, &painter, &pointer, response.hovered(), p, rect, view, proj, &projection);
                     // Paint Deformation brush: LMB paints on the selected poly (Ctrl inverts, Shift relaxes).
                     if let Some(mode) = app.state.paint_deform {
                         if let Some(target) = app.state.selection.iter().next().copied() {
@@ -680,8 +682,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             session.finish(app, hit, p);
                         }
                         if app.alt_click.take().is_some() {
-                            let picked = picks_at(app, p, rect, view, proj, view_proj);
-                            apply_picks(app, picked, mods);
+                            // Alt+click removes: Skin vertices at Edit Envelopes, else the picked items.
+                            if !(app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods)) {
+                                let picked = picks_at(app, p, rect, view, proj, view_proj);
+                                apply_picks(app, picked, mods);
+                            }
                         } else if app.transform_drag.is_none() {
                             if let Some(mut session) = app.create.take() {
                                 if !session.on_release(app, p) {
@@ -809,6 +814,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             if points.len() >= 2 {
                                 let _ = app.dispatch(Command::CreateBoneChain { points, name: None });
                             }
+                        } else if loom_commands::skin::painting(&app.state) {
+                            // Right-click ends Paint Weights.
+                            let _ = app.dispatch(Command::SkinPaintWeightsToggle);
                         } else if app.state.pick_mode.is_some() {
                             let _ = app.dispatch(Command::ExitPickMode);
                         } else if app.state.nav_mode != loom_input::NavMode::None {

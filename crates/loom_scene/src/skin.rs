@@ -66,6 +66,9 @@ pub struct SkinBone {
     pub cross_sections: Vec<(f32, f32, f32)>,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// Envelope Visibility: the envelope stays drawn while another bone is current.
+    #[serde(default)]
+    pub envelope_visible: bool,
 }
 
 fn yes() -> bool {
@@ -199,7 +202,7 @@ impl SkinData {
         let mut data = Self { mesh_bind, bone_affect_limit: 20, always_deform: true, weight_all_vertices: true, ..Default::default() };
         let to_mesh = mesh_bind.inverse();
         for (node, geometry_to_bone, envelope) in bones {
-            data.bones.push(SkinBone { node: *node, bind_inverse: *geometry_to_bone * to_mesh, envelope: envelope.clone(), cross_sections: Vec::new(), enabled: true });
+            data.bones.push(SkinBone { node: *node, bind_inverse: *geometry_to_bone * to_mesh, envelope: envelope.clone(), cross_sections: Vec::new(), enabled: true, envelope_visible: false });
             data.excluded.push(BTreeSet::new());
         }
         let n = weights.len();
@@ -224,7 +227,7 @@ impl SkinData {
         if self.bones.iter().any(|b| b.node == bone) {
             return;
         }
-        self.bones.push(SkinBone { node: bone, bind_inverse: scene.world_matrix(bone).inverse(), envelope: default_envelope(scene, bone), cross_sections: Vec::new(), enabled: true });
+        self.bones.push(SkinBone { node: bone, bind_inverse: scene.world_matrix(bone).inverse(), envelope: default_envelope(scene, bone), cross_sections: Vec::new(), enabled: true, envelope_visible: false });
         self.excluded.push(BTreeSet::new());
     }
 

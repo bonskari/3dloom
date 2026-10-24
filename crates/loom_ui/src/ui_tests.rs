@@ -14,20 +14,22 @@ struct Harness {
     app: LoomApp,
     time: f64,
     mods: egui::Modifiers,
-    /// The last frame's painted shapes, for finding widgets by their text.
+    /// The last frame's shapes, to find a widget by its text.
     shapes: Vec<egui::epaint::ClippedShape>,
+    /// The window size (taller for panels with long rollouts).
+    screen: egui::Rect,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, shapes: Vec::new() };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, shapes: Vec::new(), screen: SCREEN };
         h.frames(3);
         h
     }
 
     fn run(&mut self, events: Vec<egui::Event>) {
         self.time += 1.0 / 30.0;
-        let input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
+        let input = egui::RawInput { screen_rect: Some(self.screen), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
         let app = &mut self.app;
         self.shapes = self.ctx.run(input, |ctx| app.frame(ctx)).shapes;
     }
@@ -91,6 +93,27 @@ impl Harness {
 
     fn sub_count(&self) -> usize {
         self.app.state.sub_selection.len()
+    }
+
+    /// Centres of the visible texts that read `text` (buttons, labels), in paint order.
+    fn texts(&self, text: &str) -> Vec<egui::Pos2> {
+        fn walk(shape: &egui::Shape, clip: egui::Rect, text: &str, out: &mut Vec<egui::Pos2>) {
+            match shape {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, text, out)),
+                egui::Shape::Text(t) if t.galley.text() == text => {
+                    let c = t.galley.rect.translate(t.pos.to_vec2()).center();
+                    if clip.contains(c) {
+                        out.push(c);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for s in &self.shapes {
+            walk(&s.shape, s.clip_rect, text, &mut out);
+        }
+        out
     }
 }
 
@@ -606,6 +629,217 @@ fn realistic_shading_from_the_label_menu_runs_without_a_gpu() {
     h.cmd(Command::Render { path: Some(std::env::temp_dir().join("loom-headless-render.png").to_string_lossy().into()), width: Some(32), height: Some(32) });
     assert!(h.app.state.pending_render.is_none());
     assert!(h.app.last_error.as_deref().is_some_and(|e| e.contains("Render")), "{:?}", h.app.last_error);
+}
+
+/// A 40-unit cylinder along Z skinned to two 20-unit bones, at Edit
+/// Envelopes in the Modify panel, framed in a maximized Perspective view.
+fn skinned_cylinder(h: &mut Harness) -> (loom_scene::NodeId, Vec<u64>) {
+    // Tall enough that the whole Skin Parameters rollout shows without scrolling.
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.frames(2);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Cylinder, position: [0.0; 3], size: [8.0, 8.0, 40.0] });
+    let arm = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetParameter { id: arm.0, name: "Height Segments".into(), value: 8.0 });
+    let r = h.app.dispatch(Command::CreateBoneChain { points: vec![[0.0, 0.0, 0.0], [0.0, 0.0, 20.0], [0.0, 0.0, 40.0], [0.0, 0.0, 42.0]], name: None }).unwrap();
+    let bones: Vec<u64> = serde_json::from_value(r["nodes"].clone()).unwrap();
+    h.cmd(Command::SelectNodes { ids: vec![arm.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::SkinModifier);
+    h.cmd(Command::SkinAddBones { ids: bones[..2].to_vec() });
+    h.cmd(Command::ModifierSubobjectLevel { index: 0, level: 1 });
+    h.app.panel_tab = crate::Tab::Modify;
+    framed(h);
+    assert!(h.app.state.skin_active());
+    (arm, bones)
+}
+
+/// The weight the Skin gives vertex `v` from bone `b` (list index).
+fn skin_weight(h: &Harness, v: usize, b: u32) -> f32 {
+    let e = loom_commands::skin::entry(&h.app.state).unwrap();
+    let p = e.data.mesh_bind.transform_point3(e.input.vertices()[v].position);
+    e.data.vertex_weights(v, p).into_iter().find(|(x, _)| *x == b).map(|x| x.1).unwrap_or(0.0)
+}
+
+/// Skinned vertices facing the camera, on screen inside the view and at
+/// least 12 px from every other vertex: (vertex, screen point).
+fn clear_front_vertices(h: &Harness) -> Vec<(u32, egui::Pos2)> {
+    let (_, world) = loom_commands::skin::vertex_world_positions(&h.app.state).unwrap();
+    let normals = loom_commands::skin::vertex_world_normals(&h.app.state).unwrap();
+    let rect = h.app.viewport_rects[h.app.state.active_viewport].shrink(40.0);
+    let cam = h.app.state.active().camera.eye_position();
+    let screen: Vec<egui::Pos2> = world.iter().map(|q| h.screen_of(*q)).collect();
+    (0..world.len())
+        .filter(|i| normals[*i].dot(cam - world[*i]) > 0.0 && rect.contains(screen[*i]))
+        .filter(|i| (0..world.len()).all(|j| j == *i || screen[j].distance(screen[*i]) > 12.0))
+        .map(|i| (i as u32, screen[i]))
+        .collect()
+}
+
+/// A viewport point at least 40 px from every skinned vertex.
+fn empty_spot(h: &Harness) -> egui::Pos2 {
+    let (_, world) = loom_commands::skin::vertex_world_positions(&h.app.state).unwrap();
+    let screen: Vec<egui::Pos2> = world.iter().map(|q| h.screen_of(*q)).collect();
+    let rect = h.app.viewport_rects[h.app.state.active_viewport];
+    let p = egui::pos2(rect.right() - 120.0, rect.bottom() - 60.0);
+    assert!(screen.iter().all(|s| s.distance(p) > 40.0), "the corner is clear of the mesh");
+    p
+}
+
+/// A text inside the window titled `window`.
+fn window_text(h: &Harness, window: &str, text: &str) -> egui::Pos2 {
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new(window))).unwrap_or_else(|| panic!("no {window} window"));
+    let all: Vec<egui::Pos2> = h.texts(text).into_iter().filter(|p| area.contains(*p)).collect();
+    assert_eq!(all.len(), 1, "{text:?} in {window} {} times", all.len());
+    all[0]
+}
+
+/// A text in the command panel (right of the maximized viewport).
+fn panel_text(h: &Harness, text: &str) -> egui::Pos2 {
+    let right = h.app.viewport_rects[h.app.state.active_viewport].right();
+    let all: Vec<egui::Pos2> = h.texts(text).into_iter().filter(|p| p.x > right).collect();
+    assert_eq!(all.len(), 1, "{text:?} in the command panel {} times", all.len());
+    all[0]
+}
+
+#[test]
+fn skin_select_vertices_click_ctrl_click_and_an_empty_click_clears() {
+    let mut h = Harness::new();
+    let (arm, _) = skinned_cylinder(&mut h);
+    let front = clear_front_vertices(&h);
+    assert!(front.len() >= 2, "visible vertices to click");
+    h.click(front[0].1);
+    assert_eq!(loom_commands::skin::selection(&h.app.state), vec![front[0].0], "a click selects the vertex");
+    h.mods = egui::Modifiers::CTRL;
+    h.click(front[1].1);
+    h.mods = egui::Modifiers::NONE;
+    let mut both = vec![front[0].0, front[1].0];
+    both.sort();
+    assert_eq!(loom_commands::skin::selection(&h.app.state), both, "Ctrl adds");
+    h.mods = egui::Modifiers::ALT;
+    h.click(front[0].1);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(loom_commands::skin::selection(&h.app.state), vec![front[1].0], "Alt removes");
+    // A plain click on nothing clears the vertices and stays in Edit Envelopes on the object.
+    h.click(empty_spot(&h));
+    assert!(loom_commands::skin::selection(&h.app.state).is_empty(), "an empty click clears the vertex selection");
+    assert!(h.app.state.selection.contains(&arm) && h.app.state.skin_active());
+    // Select > Vertices off (the panel checkbox): clicks no longer pick vertices, an empty click still keeps the level.
+    h.click(panel_text(&h, "Vertices"));
+    assert!(!h.app.state.skin_filter_vertices);
+    h.click(front[0].1);
+    assert!(loom_commands::skin::selection(&h.app.state).is_empty(), "no vertex picking with Vertices off");
+    h.click(empty_spot(&h));
+    assert!(h.app.state.selection.contains(&arm) && h.app.state.skin_active(), "the object and its level stay");
+}
+
+#[test]
+fn skin_backface_cull_vertices_skips_vertices_facing_away() {
+    let mut h = Harness::new();
+    skinned_cylinder(&mut h);
+    let (_, world) = loom_commands::skin::vertex_world_positions(&h.app.state).unwrap();
+    let normals = loom_commands::skin::vertex_world_normals(&h.app.state).unwrap();
+    let cam = h.app.state.active().camera.eye_position();
+    let back: Vec<u32> = (0..world.len() as u32).filter(|i| normals[*i as usize].dot(cam - world[*i as usize]) < -0.5).collect();
+    assert!(!back.is_empty());
+    let rect = h.app.viewport_rects[h.app.state.active_viewport];
+    let region = (egui::pos2(rect.left() + 2.0, rect.top() + 40.0), egui::pos2(rect.right() - 2.0, rect.bottom() - 2.0));
+    h.drag(region.0, region.1);
+    let all = loom_commands::skin::selection(&h.app.state);
+    assert!(back.iter().all(|v| all.contains(v)), "without the cull a window selects the back vertices too");
+    h.click(panel_text(&h, "Backface Cull Vertices"));
+    assert!(h.app.state.skin_backface_cull);
+    h.drag(region.0, region.1);
+    let culled = loom_commands::skin::selection(&h.app.state);
+    assert!(!culled.is_empty() && back.iter().all(|v| !culled.contains(v)), "Backface Cull Vertices leaves the far side out");
+}
+
+#[test]
+fn weight_tool_preset_buttons_set_the_current_bone_on_the_selection() {
+    let mut h = Harness::new();
+    let (_, bones) = skinned_cylinder(&mut h);
+    // A vertex both envelopes reach (z 12..28), so its weight can move between the bones.
+    let (_, world) = loom_commands::skin::vertex_world_positions(&h.app.state).unwrap();
+    let front: Vec<(u32, egui::Pos2)> = clear_front_vertices(&h).into_iter().filter(|(v, _)| (12.0..28.0).contains(&world[*v as usize].z)).collect();
+    let v = front[0].0;
+    h.click(front[0].1);
+    h.cmd(Command::SkinSelectBone { id: bones[1] });
+    h.click(panel_text(&h, "Weight Tool"));
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::WeightTool));
+    for (label, w) in [(".25", 0.25), (".5", 0.5), (".75", 0.75), (".1", 0.1), (".9", 0.9), ("0", 0.0), ("1", 1.0)] {
+        let undo = h.app.state.undo.len();
+        h.click(window_text(&h, "Weight Tool", label));
+        assert!((skin_weight(&h, v as usize, 1) - w).abs() < 1e-4, "{label}: {}", skin_weight(&h, v as usize, 1));
+        assert_eq!(h.app.state.undo.len(), undo + 1, "{label} is one undo entry");
+    }
+    h.click(window_text(&h, "Weight Tool", ".5"));
+    // Scale Weight scales by its own field (0.95), Set Weight sets the Set Weight field (0.5).
+    h.click(window_text(&h, "Weight Tool", "Scale Weight"));
+    assert!((skin_weight(&h, v as usize, 1) - 0.475).abs() < 1e-4);
+    h.click(window_text(&h, "Weight Tool", "Set Weight"));
+    assert!((skin_weight(&h, v as usize, 1) - 0.5).abs() < 1e-4);
+    window_text(&h, "Weight Tool", "0 Copied   1 Selected");
+}
+
+#[test]
+fn paint_weights_stroke_brushes_the_current_bone_alt_erases_and_right_click_ends() {
+    let mut h = Harness::new();
+    let (_, bones) = skinned_cylinder(&mut h);
+    h.cmd(Command::SkinSelectBone { id: bones[1] });
+    h.cmd(Command::SkinSetPainterOption { name: "Max Size".into(), value: 8.0 });
+    h.click(panel_text(&h, "Paint Weights"));
+    assert!(loom_commands::skin::painting(&h.app.state), "the Paint Weights button turns the brush on");
+    // Stroke across the lower front of the cylinder, where the upper bone has no weight yet.
+    let (_, world) = loom_commands::skin::vertex_world_positions(&h.app.state).unwrap();
+    let low: Vec<(u32, egui::Pos2)> = clear_front_vertices(&h).into_iter().filter(|(v, _)| (world[*v as usize].z - 5.0).abs() < 0.1).collect();
+    assert!(low.len() >= 2, "two front vertices on the z = 5 ring");
+    let before: Vec<f32> = low.iter().map(|(v, _)| skin_weight(&h, *v as usize, 1)).collect();
+    let undo = h.app.state.undo.len();
+    h.drag(low[0].1, low[1].1);
+    let after: Vec<f32> = low.iter().map(|(v, _)| skin_weight(&h, *v as usize, 1)).collect();
+    assert!(after.iter().zip(&before).all(|(a, b)| a > b), "the stroke weights the upper bone: {before:?} -> {after:?}");
+    assert_eq!(h.app.state.undo.len(), undo + 1, "one stroke, one undo entry");
+    assert!(loom_commands::skin::selection(&h.app.state).is_empty(), "painting does not select");
+    // Alt+drag erases.
+    h.mods = egui::Modifiers::ALT;
+    h.drag(low[0].1, low[1].1);
+    h.mods = egui::Modifiers::NONE;
+    let erased: Vec<f32> = low.iter().map(|(v, _)| skin_weight(&h, *v as usize, 1)).collect();
+    assert!(erased.iter().zip(&after).all(|(e, a)| e < a), "Alt takes weight away: {after:?} -> {erased:?}");
+    // Ctrl+Shift drag sizes the brush.
+    h.mods = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+    h.drag(low[0].1, low[0].1 + egui::vec2(60.0, 0.0));
+    h.mods = egui::Modifiers::NONE;
+    assert!(h.app.state.skin_painter.size > 8.0, "{}", h.app.state.skin_painter.size);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    right_click(&mut h, r.center());
+    assert!(!loom_commands::skin::painting(&h.app.state), "right-click ends Paint Weights");
+    assert!(h.app.quad_menu.is_none(), "without opening the quad menu");
+}
+
+#[test]
+fn weight_table_cells_edit_by_right_click_and_drag_and_ids_select() {
+    let mut h = Harness::new();
+    let (_, bones) = skinned_cylinder(&mut h);
+    h.click(panel_text(&h, "Weight Table"));
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::WeightTable));
+    h.frames(2);
+    let names: Vec<String> = bones[..2].iter().map(|b| h.app.state.scene.node(loom_scene::NodeId(*b)).unwrap().name.clone()).collect();
+    let (row, col) = (window_text(&h, "Weight Table", "#1"), window_text(&h, "Weight Table", &names[1]));
+    let cell = egui::pos2(col.x, row.y);
+    right_click(&mut h, cell);
+    assert_eq!(skin_weight(&h, 1, 1), 0.0, "right-click enters 0");
+    h.mods = egui::Modifiers::CTRL;
+    right_click(&mut h, cell);
+    h.mods = egui::Modifiers::NONE;
+    assert!((skin_weight(&h, 1, 1) - 1.0).abs() < 1e-4, "Ctrl+right-click enters 1");
+    // Dragging the cell to the left lowers it, as one undo entry.
+    let undo = h.app.state.undo.len();
+    h.drag(cell, cell - egui::vec2(40.0, 0.0));
+    let w = skin_weight(&h, 1, 1);
+    assert!(w < 0.99 && w > 0.0, "{w}");
+    assert_eq!(h.app.state.undo.len(), undo + 1);
+    // A click on a vertex ID selects it.
+    h.click(window_text(&h, "Weight Table", "#2"));
+    assert_eq!(loom_commands::skin::selection(&h.app.state), vec![2]);
 }
 
 /// The Material Editor window's rect.

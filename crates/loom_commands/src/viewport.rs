@@ -325,6 +325,8 @@ pub enum Dialog {
     WeightTable,
     /// Skin > Weight Tool.
     WeightTool,
+    /// Skin > Weight Properties > Painter Options.
+    PainterOptions,
     /// Display > Show Map in Viewport > Bitmap: pick the image file.
     PickTexture,
     /// UVW Map > Bitmap Fit: pick the image whose aspect the gizmo takes.

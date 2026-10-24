@@ -1369,9 +1369,9 @@ commands! {
     RemoveCrossSectionSkin => "Remove Cross Section (Skin)", Skin, "Envelope > Remove: the last added cross section of the current bone.";
     AddWeightSkin => "Add Weight (Skin)", Skin, "Weight Tool +: the current bone gains 0.05 on the selected vertices.";
     SubtractWeightSkin => "Subtract Weight (Skin)", Skin, "Weight Tool -: the current bone loses 0.05 on the selected vertices.";
-    ScaleWeightUpSkin => "Scale Weight Up (Skin)", Skin, "Weight Tool: the current bone's weight ×1.1 on the selected vertices.";
-    ScaleWeightDownSkin => "Scale Weight Down (Skin)", Skin, "Weight Tool: the current bone's weight ×0.9 on the selected vertices.";
-    ScaleWeightCustomSkin => "Scale Weight Custom (Skin)", Skin, "Weight Tool: the current bone's weight × the custom value on the selected vertices.";
+    ScaleWeightUpSkin => "Scale Weight Up (Skin)", Skin, "Weight Tool > Scale Weight +: the current bone's weight ×1.05 on the selected vertices.";
+    ScaleWeightDownSkin => "Scale Weight Down (Skin)", Skin, "Weight Tool > Scale Weight -: the current bone's weight ×0.95 on the selected vertices.";
+    ScaleWeightCustomSkin => "Scale Weight Custom (Skin)", Skin, "Weight Tool > Scale Weight: the current bone's weight × the Scale Weight field on the selected vertices.";
     SetWeightCustomSkin => "Set Weight Custom (Skin)", Skin, "Weight Tool: the current bone's weight = the custom value on the selected vertices.";
     SetWeightTo00Skin => "Set Weight To 0.0 (Skin)", Skin, "Weight Tool 0.";
     SetWeightTo010Skin => "Set Weight To 0.10 (Skin)", Skin, "Weight Tool .1.";
@@ -1416,7 +1416,7 @@ commands! {
     PasteToAllEnvelopesSkin => "Paste To All Envelopes (Skin)", Skin, "Paste the copied envelope onto every bone.";
     CopyWeightsSkin => "Copy Weights (Skin)", Skin, "Copy the selected vertices' weights (with their positions).";
     PasteWeightsSkin => "Paste Weights (Skin)", Skin, "Paste the copied weights onto the selected vertices by order.";
-    PasteWeightsByPosSkin => "Paste Weights By Pos(Skin)", Skin, "Paste the copied weights onto the selected vertices by nearest position.";
+    PasteWeightsByPosSkin => "Paste Weights By Pos(Skin)", Skin, "Weight Tool > Paste-Pos: each selected vertex takes the weights of the nearest copied vertex within the Paste-Pos Tolerance.";
     RemoveZeroWeightsSkin => "Remove Zero Weights (Skin)", Skin, "Drop weights at or below the Remove Zero Limit (0.0005).";
     ZoomToSelectedBoneSkin => "Zoom To Selected Bone (Skin)", Skin, "Frame the current bone in the active viewport.";
     ZoomToSelectedGizmoSkin => "Zoom To Selected Gizmo (Skin)", Skin, "Frame the current gizmo's bone in the active viewport.";
@@ -1434,6 +1434,15 @@ commands! {
     SkinSetGizmoKey => "Skin Set Gizmo Key", Loom, "Skin > Gizmos: a key's bulge amount / angle." { key: u32, bulge: Option<f32>, angle: Option<f32> };
     SkinSetGizmoDelta => "Skin Set Gizmo Delta", Loom, "Joint Angle Deformer > Edit Lattice: the delta (child-bone frame) of a vertex at the current key." { key: u32, vertex: u32, delta: [f32; 3] };
     SkinSetGizmoOption => "Skin Set Gizmo Option", Loom, "Skin > Gizmos: Influence or Enabled of the current gizmo." { name: String, value: f64 };
+    SkinSetVertexWeights => "Skin Set Vertex Weights", Loom, "Weight Table: one bone's weight on the given vertices (the other bones share the rest)." { vertices: Vec<u32>, bone: u64, weight: f32 };
+    SkinSetScaleWeight => "Skin Set Scale Weight", Loom, "Weight Tool > Scale Weight field: the factor Scale Weight Custom uses (default 0.95)." { value: f32 };
+    SkinSetPasteTolerance => "Skin Set Paste Tolerance", Loom, "Weight Tool > Paste-Pos Tolerance: Paste-Pos fills only vertices this close to a copied one (default 0.1)." { value: f32 };
+    SkinSelectBoneByName => "Skin Select Bone By Name", Loom, "Parameters > bone name field: the first bone whose name starts with the text (* is a wildcard) becomes current." { name: String };
+    SkinEnvelopeVisibility => "Skin Envelope Visibility", Loom, "Envelope Properties > Envelope Visibility: the current bone's envelope stays drawn while another bone is current (toggle).";
+    SkinPaintWeightsToggle => "Skin Paint Weights", Loom, "Weight Properties > Paint Weights: LMB drags brush weight onto the current bone (Alt erases, Ctrl+Shift drag sizes the brush, Alt+Shift drag sets its strength, right-click ends).";
+    SkinPaintStroke => "Skin Paint Stroke", Loom, "Paint Weights: one brush dab per world point on the current bone, with the Painter Options (erase takes weight away)." { points: Vec<[f32; 3]>, erase: bool };
+    SkinSetPainterOption => "Skin Set Painter Option", Loom, "Painter Options: Max Strength, Max Size, Additive, Falloff (0 Linear 1 Smooth 2 Slow 3 Fast 4 Flat), Draw Ring, Mirror, Mirror Axis (0 X 1 Y 2 Z), Mirror Offset; Paint Blend Weights." { name: String, value: f64 };
+    SkinPainterOptionsDialog => "Skin Painter Options", Loom, "Weight Properties > Painter Options... dialog.";
     MorpherModifier => "Morpher Modifier", MainUI, "Add a Morpher modifier to the selection.";
     DisplayBones => "Display Bones", MainUI, "Viewports show bones only (other geometry hidden from display).";
     DisplayBonesAndObjects => "Display Bones and Objects", MainUI, "Viewports show bones and objects (the default).";

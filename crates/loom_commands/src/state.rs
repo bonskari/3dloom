@@ -1267,6 +1267,14 @@ pub struct AppState {
     pub skin_pose_live: Option<Vec<(NodeId, loom_scene::Transform)>>,
     /// Weight Tool custom value.
     pub skin_custom_weight: f32,
+    /// Weight Tool > Scale Weight field.
+    pub skin_scale_weight: f32,
+    /// Weight Tool > Paste-Pos Tolerance.
+    pub skin_paste_tolerance: f32,
+    /// Weight Properties > Paint Weights: LMB drags brush weights onto the current bone.
+    pub skin_paint: bool,
+    /// Painter Options and Paint Blend Weights.
+    pub skin_painter: crate::skin::Painter,
     /// Edit Envelopes > Select filters (Vertices, Envelopes, Cross Sections) and Backface Cull.
     pub skin_filter_vertices: bool,
     pub skin_filter_envelopes: bool,
@@ -1446,6 +1454,10 @@ impl AppState {
             skin_bone: None,
             skin_pose_live: None,
             skin_custom_weight: 0.5,
+            skin_scale_weight: 0.95,
+            skin_paste_tolerance: 0.1,
+            skin_paint: false,
+            skin_painter: crate::skin::Painter::default(),
             skin_filter_vertices: true,
             skin_filter_envelopes: true,
             skin_filter_cross_sections: true,

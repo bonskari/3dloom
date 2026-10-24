@@ -428,60 +428,26 @@ fn draw_skin(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
     if !app.state.skin_active() {
         return;
     }
-    let Some((id, weights)) = loom_commands::skin::current_bone_weights(&app.state) else { return };
-    let show_env = app.state.skin_filter_envelopes && !loom_commands::skin::entry(&app.state).map(|e| e.data.display.no_envelopes).unwrap_or(true);
-    if show_env {
-        if let Some((start, end, inner, outer, sections)) = loom_commands::skin::current_envelope_world(&app.state) {
-            let axis = (end - start).normalize_or_zero();
-            let (u, v) = {
-                let a = if axis.x.abs() < 0.9 { glam::Vec3::X } else { glam::Vec3::Y };
-                let u = axis.cross(a).normalize_or_zero();
-                (u, axis.cross(u))
-            };
-            let ring = |centre: glam::Vec3, r: f32, colour: egui::Color32| {
-                let pts: Vec<Option<egui::Pos2>> = (0..24).map(|i| { let t = i as f32 / 24.0 * std::f32::consts::TAU; projection.screen(centre + (u * t.cos() + v * t.sin()) * r) }).collect();
-                for i in 0..24 {
-                    if let (Some(a), Some(b)) = (pts[i], pts[(i + 1) % 24]) {
-                        painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour));
-                    }
-                }
-            };
-            let red = egui::Color32::from_rgb(230, 60, 60);
-            let purple = egui::Color32::from_rgb(170, 80, 220);
-            ring(start, inner[0], red);
-            ring(end, inner[1], red);
-            ring(start, outer[0], purple);
-            ring(end, outer[1], purple);
-            if app.state.skin_filter_cross_sections {
-                for (t, i, o) in sections {
-                    let c = start.lerp(end, t);
-                    ring(c, i, red);
-                    ring(c, o, purple);
-                }
-            }
-            // Four lines along the capsule for each radius.
-            for (r0, r1, colour) in [(inner[0], inner[1], red), (outer[0], outer[1], purple)] {
-                for dir in [u, v, -u, -v] {
-                    if let (Some(a), Some(b)) = (projection.screen(start + dir * r0), projection.screen(end + dir * r1)) {
-                        painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour));
-                    }
-                }
-            }
-            if let (Some(a), Some(b)) = (projection.screen(start), projection.screen(end)) {
-                let handle = app.state.skin_handle;
-                painter.rect_filled(egui::Rect::from_center_size(a, egui::vec2(7.0, 7.0)), 0.0, if handle == Some(0) { egui::Color32::WHITE } else { red });
-                painter.rect_filled(egui::Rect::from_center_size(b, egui::vec2(7.0, 7.0)), 0.0, if handle == Some(1) { egui::Color32::WHITE } else { red });
-            }
+    let Some((_, weights)) = loom_commands::skin::current_bone_weights(&app.state) else { return };
+    let display = loom_commands::skin::entry(&app.state).map(|e| e.data.display).unwrap_or_default();
+    if app.state.skin_filter_envelopes && !display.no_envelopes {
+        for env in loom_commands::skin::shown_envelopes_world(&app.state) {
+            draw_envelope(painter, app, projection, &env);
         }
     }
     let selection: std::collections::BTreeSet<u32> = loom_commands::skin::selection(&app.state).into_iter().collect();
     if app.state.skin_filter_vertices {
-        let Some((_, mesh)) = app.world_meshes().iter().find(|(n, _)| *n == id) else { return };
-        for (i, w) in weights.iter().enumerate() {
-            let Some(p) = mesh.vertex_position(loom_mesh::VertexId(i as u32)).and_then(|p| projection.screen(p)) else { continue };
+        let Some((_, positions)) = loom_commands::skin::vertex_world_positions(&app.state) else { return };
+        for (i, (w, q)) in weights.iter().zip(&positions).enumerate() {
+            let Some(p) = projection.screen(*q) else { continue };
             let selected = selection.contains(&(i as u32));
-            let c = loom_commands::skin::weight_color(*w);
-            let colour = egui::Color32::from_rgb(c[0], c[1], c[2]);
+            // Show Colored Vertices: the current bone's weight from blue (0) to red (1).
+            let colour = if display.colored_vertices {
+                let c = loom_commands::skin::weight_color(*w);
+                egui::Color32::from_rgb(c[0], c[1], c[2])
+            } else {
+                egui::Color32::from_rgb(40, 40, 40)
+            };
             if selected {
                 painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(7.0, 7.0)), 0.0, egui::Color32::WHITE);
             }
@@ -490,14 +456,79 @@ fn draw_skin(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
     }
 }
 
-/// Click / region selection of Skin vertices at the Envelope level.
+/// One envelope capsule (inner red, outer purple); the current bone's with
+/// its cross-section rings and end handles, the others dimmed.
+fn draw_envelope(painter: &egui::Painter, app: &LoomApp, projection: &Projection, env: &loom_commands::skin::EnvelopeWorld) {
+    let (start, end, inner, outer) = (env.start, env.end, env.inner, env.outer);
+    let axis = (end - start).normalize_or_zero();
+    let (u, v) = {
+        let a = if axis.x.abs() < 0.9 { glam::Vec3::X } else { glam::Vec3::Y };
+        let u = axis.cross(a).normalize_or_zero();
+        (u, axis.cross(u))
+    };
+    let ring = |centre: glam::Vec3, r: f32, colour: egui::Color32| {
+        let pts: Vec<Option<egui::Pos2>> = (0..24)
+            .map(|i| {
+                let t = i as f32 / 24.0 * std::f32::consts::TAU;
+                projection.screen(centre + (u * t.cos() + v * t.sin()) * r)
+            })
+            .collect();
+        for i in 0..24 {
+            if let (Some(a), Some(b)) = (pts[i], pts[(i + 1) % 24]) {
+                painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour));
+            }
+        }
+    };
+    let (red, purple) = if env.current { (egui::Color32::from_rgb(230, 60, 60), egui::Color32::from_rgb(170, 80, 220)) } else { (egui::Color32::from_rgb(140, 70, 70), egui::Color32::from_rgb(110, 70, 140)) };
+    ring(start, inner[0], red);
+    ring(end, inner[1], red);
+    ring(start, outer[0], purple);
+    ring(end, outer[1], purple);
+    if env.current && app.state.skin_filter_cross_sections {
+        for (t, i, o) in &env.cross_sections {
+            let c = start.lerp(end, *t);
+            ring(c, *i, red);
+            ring(c, *o, purple);
+        }
+    }
+    // Four lines along the capsule for each radius.
+    for (r0, r1, colour) in [(inner[0], inner[1], red), (outer[0], outer[1], purple)] {
+        for dir in [u, v, -u, -v] {
+            if let (Some(a), Some(b)) = (projection.screen(start + dir * r0), projection.screen(end + dir * r1)) {
+                painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour));
+            }
+        }
+    }
+    if env.current {
+        if let (Some(a), Some(b)) = (projection.screen(start), projection.screen(end)) {
+            let handle = app.state.skin_handle;
+            painter.rect_filled(egui::Rect::from_center_size(a, egui::vec2(7.0, 7.0)), 0.0, if handle == Some(0) { egui::Color32::WHITE } else { red });
+            painter.rect_filled(egui::Rect::from_center_size(b, egui::vec2(7.0, 7.0)), 0.0, if handle == Some(1) { egui::Color32::WHITE } else { red });
+        }
+    }
+}
+
+/// Click / region selection at the Envelope level: vertices (Select
+/// Vertices on, Backface Cull Vertices honoured), else a click on a bone
+/// makes it current; a click on nothing clears the vertex selection.
 pub fn skin_pick(app: &mut LoomApp, projection: &Projection, region: Option<&crate::region::Region>, p: egui::Pos2, mods: loom_input::Modifiers) -> bool {
     if !loom_commands::skin::picks_vertices(&app.state) {
         return false;
     }
-    let Some((id, _)) = app.state.skin_entry() else { return false };
-    let Some((_, mesh)) = app.world_meshes().iter().find(|(n, _)| *n == id) else { return false };
-    let pts: Vec<Option<egui::Pos2>> = (0..mesh.vertex_count()).map(|i| mesh.vertex_position(loom_mesh::VertexId(i as u32)).and_then(|q| projection.screen(q))).collect();
+    let pts: Vec<Option<egui::Pos2>> = if app.state.skin_filter_vertices {
+        let Some((_, positions)) = loom_commands::skin::vertex_world_positions(&app.state) else { return false };
+        let normals = if app.state.skin_backface_cull { loom_commands::skin::vertex_world_normals(&app.state) } else { None };
+        positions
+            .iter()
+            .enumerate()
+            .map(|(i, q)| {
+                let back = normals.as_ref().is_some_and(|n| n[i].dot(projection.toward_viewer_at(*q)) < 0.0);
+                if back { None } else { projection.screen(*q) }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let hits: Vec<u32> = match region {
         Some(r) => pts.iter().enumerate().filter_map(|(i, sp)| sp.filter(|sp| r.contains(*sp)).map(|_| i as u32)).collect(),
         None => pts
@@ -517,7 +548,78 @@ pub fn skin_pick(app: &mut LoomApp, projection: &Projection, region: Option<&cra
         }
     }
     let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
+    if hits.is_empty() && op != loom_commands::SelectOp::Replace {
+        return true;
+    }
     let _ = app.dispatch(Command::SkinSelectVertices { ids: hits, op });
+    true
+}
+
+/// Paint Weights: LMB drags dab weight onto the current bone (one undo entry
+/// per stroke), Alt erases, Ctrl+Shift drag sizes the brush, Alt+Shift drag
+/// sets its strength; the brush ring follows the pointer on the surface.
+/// Returns true while the button belongs to the brush.
+#[allow(clippy::too_many_arguments)]
+pub fn skin_paint(app: &mut LoomApp, ctx: &egui::Context, painter: &egui::Painter, pointer: &egui::PointerState, hovered: bool, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4, projection: &Projection) -> bool {
+    if !loom_commands::skin::painting(&app.state) {
+        return false;
+    }
+    let Some((id, _)) = app.state.skin_entry() else { return false };
+    let mods = ctx.input(|i| i.modifiers);
+    let down = pointer.button_down(egui::PointerButton::Primary) && (hovered || app.deform_painting);
+    let resizing = mods.shift && (mods.ctrl || mods.alt);
+    if pointer.button_pressed(egui::PointerButton::Primary) && hovered {
+        app.deform_painting = true;
+        app.poly_dragging = true;
+        // One stroke = one undo entry (a resize drag commits nothing, so leaves none).
+        app.state.undo.begin("Paint Weights");
+    }
+    let hit = |app: &LoomApp, at: egui::Pos2| surface_hit_node(app, at, rect, view, proj).filter(|(n, _, _)| *n == id);
+    if down && app.deform_painting {
+        if resizing {
+            let dx = pointer.delta().x;
+            if dx != 0.0 {
+                let painter_opts = app.state.skin_painter.clone();
+                let (name, value) = if mods.ctrl {
+                    let upp = hit(app, p).map(|(_, at, _)| projection.units_per_pixel(at)).unwrap_or(0.1);
+                    ("Max Size", (painter_opts.size + dx * upp).max(0.01) as f64)
+                } else {
+                    ("Max Strength", (painter_opts.strength + dx * 0.005).clamp(0.0, 1.0) as f64)
+                };
+                let _ = app.dispatch(Command::SkinSetPainterOption { name: name.into(), value });
+            }
+        } else if pointer.is_moving() || pointer.button_pressed(egui::PointerButton::Primary) {
+            if let Some((_, at, _)) = hit(app, p) {
+                let _ = app.dispatch(Command::SkinPaintStroke { points: vec![at.to_array()], erase: mods.alt });
+            }
+        }
+        ctx.request_repaint();
+    }
+    if down || app.deform_painting {
+        app.drag_select_start = None;
+        app.alt_click = None;
+    }
+    if pointer.button_released(egui::PointerButton::Primary) && app.deform_painting {
+        app.deform_painting = false;
+        app.poly_dragging = false;
+        app.state.undo.end();
+    }
+    if app.state.skin_painter.draw_ring {
+        if let Some(hp) = pointer.hover_pos().filter(|hp| rect.contains(*hp)) {
+            if let Some((_, at, normal)) = hit(app, hp) {
+                // The brush ring lies on the surface around the hit point.
+                let r = app.state.skin_painter.size;
+                let a = if normal.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+                let u = normal.cross(a).normalize_or_zero();
+                let v = normal.cross(u);
+                let pts: Vec<egui::Pos2> = (0..=32).filter_map(|i| projection.screen(at + (u * (i as f32 / 32.0 * std::f32::consts::TAU).cos() + v * (i as f32 / 32.0 * std::f32::consts::TAU).sin()) * r)).collect();
+                painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255))));
+                if let (Some(a), Some(b)) = (projection.screen(at), projection.screen(at + normal * r * 0.5)) {
+                    painter.line_segment([a, b], egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255)));
+                }
+            }
+        }
+    }
     true
 }
 

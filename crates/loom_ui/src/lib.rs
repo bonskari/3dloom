@@ -541,7 +541,20 @@ impl LoomApp {
             };
             // A visibility track below 1 shows the object partly transparent (never fully hidden in shaded views).
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
-            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors: n.display.vertex_colors, texture, specular, wire_color });
+            // Skin > Display > Show Colored Faces (in Edit Envelopes): the faces shade by the current bone's weight.
+            let mut vertex_colors = n.display.vertex_colors;
+            let mut color = color;
+            if let (Some(d), Some((skinned, weights))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
+                if skinned == id && d.vertex_count() == weights.len() {
+                    for (v, w) in d.vertices_mut().iter_mut().zip(weights) {
+                        let c = loom_commands::skin::weight_color(w);
+                        v.color = [srgb(c[0]), srgb(c[1]), srgb(c[2])];
+                    }
+                    vertex_colors = true;
+                    color = [1.0; 3];
+                }
+            }
+            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors, texture, specular, wire_color });
             display.push(shown.unwrap_or_else(|| mesh.clone()));
             meshes.push((n.id, mesh));
         }
