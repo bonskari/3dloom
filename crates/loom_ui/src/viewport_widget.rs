@@ -960,6 +960,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
             }
             let shade_only = if app.state.shade_selected { selected.clone() } else { Vec::new() };
+            // Shaded views without Edged Faces outline the selection only
+            // with Display Selected with Edged Faces (the brackets show it otherwise).
+            let selected = if wire || edged_faces || app.state.display.display_selected_edged || app.state.selection_mode != SelectionMode::Object { selected } else { Vec::new() };
             let cb = (!realistic).then(|| egui_wgpu::Callback::new_paint_callback(
                 rect,
                 ViewportCallback {
@@ -1035,6 +1038,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         painter.circle_filled(*p, 3.0, egui::Color32::from_rgb(230, 200, 90));
                     }
                 }
+            }
+            if app.state.show_statistics && is_active {
+                draw_statistics(&painter, app, rect, ctx.input(|i| i.stable_dt));
             }
             if app.state.viewports[index].safe_frames {
                 draw_safe_frames(&painter, app, rect);
@@ -2357,6 +2363,71 @@ fn draw_links(painter: &egui::Painter, app: &LoomApp, view_proj: glam::Mat4, rec
         painter.line_segment([a, b], egui::Stroke::new(1.5_f32, color));
         let d = 4.0;
         painter.add(egui::Shape::convex_polygon(vec![a + egui::vec2(0.0, -d), a + egui::vec2(d, 0.0), a + egui::vec2(0.0, d), a + egui::vec2(-d, 0.0)], egui::Color32::TRANSPARENT, egui::Stroke::new(1.0_f32, color)));
+    }
+}
+
+/// Polygon, triangle, edge and vertex counts of what the viewports draw:
+/// every visible object, or only the selected ones.
+pub(crate) fn statistics_counts(app: &LoomApp, selection_only: bool) -> [usize; 4] {
+    let mut c = [0usize; 4];
+    for (i, (id, _)) in app.world_meshes().iter().enumerate() {
+        if selection_only && !app.state.selection.contains(id) {
+            continue;
+        }
+        let m = app.drawn_mesh(i);
+        for f in 0..m.face_count() {
+            if let Some(v) = m.face_vertex_ids(FaceId(f as u32)) {
+                c[0] += 1;
+                c[1] += v.len().saturating_sub(2);
+            }
+        }
+        c[2] += m.unique_edges().len();
+        c[3] += m.vertex_count();
+    }
+    c
+}
+
+/// Show Statistics (7): the counts the Statistics panel picks, for Total,
+/// Selection or both, and the frame rate, under the viewport labels.
+fn draw_statistics(painter: &egui::Painter, app: &LoomApp, rect: egui::Rect, dt: f32) {
+    use loom_commands::display::StatisticsScope;
+    let s = app.state.display.statistics;
+    let mut columns: Vec<(&str, [usize; 4])> = Vec::new();
+    if s.scope != StatisticsScope::Selection {
+        columns.push(("Total", statistics_counts(app, false)));
+    }
+    if s.scope != StatisticsScope::Total {
+        columns.push(("Selected", statistics_counts(app, true)));
+    }
+    let group = |n: usize| {
+        let d = n.to_string();
+        let mut out = String::new();
+        for (i, ch) in d.chars().enumerate() {
+            if i > 0 && (d.len() - i) % 3 == 0 {
+                out.push(',');
+            }
+            out.push(ch);
+        }
+        out
+    };
+    let mut rows: Vec<(String, Vec<String>)> = vec![(String::new(), columns.iter().map(|c| c.0.to_owned()).collect())];
+    for (on, label, k) in [(s.polygons, "Polys:", 0), (s.triangles, "Tris:", 1), (s.edges, "Edges:", 2), (s.vertices, "Verts:", 3)] {
+        if on {
+            rows.push((label.to_owned(), columns.iter().map(|c| group(c.1[k])).collect()));
+        }
+    }
+    if s.fps {
+        rows.push(("FPS:".to_owned(), vec![if dt > 0.0 { format!("{:.3}", 1.0 / dt) } else { "-".to_owned() }]));
+    }
+    let font = egui::FontId::monospace(12.0);
+    let color = egui::Color32::from_gray(230);
+    let top = rect.top() + 24.0;
+    for (r, (label, values)) in rows.iter().enumerate() {
+        let y = top + r as f32 * 15.0;
+        painter.text(egui::pos2(rect.left() + 10.0, y), egui::Align2::LEFT_TOP, label, font.clone(), color);
+        for (c, v) in values.iter().enumerate() {
+            painter.text(egui::pos2(rect.left() + 130.0 + c as f32 * 90.0, y), egui::Align2::RIGHT_TOP, v, font.clone(), color);
+        }
     }
 }
 
