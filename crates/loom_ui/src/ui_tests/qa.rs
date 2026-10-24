@@ -699,6 +699,48 @@ fn circular_region_selects_and_ctrl_region_adds() {
     assert_eq!(h.app.state.selection.len(), 2);
 }
 
+fn panel_width(h: &Harness) -> f32 {
+    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).expect("panel state").rect.width()
+}
+
+#[test]
+fn the_command_panel_keeps_its_width_across_tabs_and_poly_levels() {
+    let mut h = Harness::new();
+    let start = panel_width(&h);
+    let id = poly_scene(&mut h);
+    let _ = id;
+    for level in [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5] {
+        h.key(level);
+        h.frames(2);
+        let w = panel_width(&h);
+        if (w - start).abs() > 1.0 {
+            h.time += 0.03;
+            let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 4000.0))), time: Some(h.time), ..Default::default() };
+            let app = &mut h.app;
+            let shapes = h.ctx.run(input, |ctx| app.frame(ctx)).shapes;
+            let mut all = Vec::new();
+            for s in &shapes {
+                texts(&s.shape, &mut all);
+            }
+            all.sort_by(|a, b| b.1.max.x.total_cmp(&a.1.max.x));
+            eprintln!("level {level:?}: panel {w} vs {start}; rightmost texts on a tall screen: {:?}", &all[..14.min(all.len())]);
+        }
+        assert!((w - start).abs() <= 1.0, "level {level:?}: the panel grew from {start} to {w}");
+    }
+    h.key(egui::Key::Num6);
+    for tab in crate::Tab::ALL {
+        h.app.panel_tab = tab;
+        h.frames(3);
+        assert!((panel_width(&h) - start).abs() <= 1.0, "{tab:?}: the panel grew from {start} to {}", panel_width(&h));
+    }
+    h.app.panel_tab = crate::Tab::Create;
+    for cat in ["Shapes", "Lights", "Cameras", "Helpers", "Space Warps", "Systems", "Geometry"] {
+        click_text(&mut h, cat);
+        h.frames(2);
+        assert!((panel_width(&h) - start).abs() <= 1.0, "Create > {cat}: the panel grew from {start} to {}", panel_width(&h));
+    }
+}
+
 #[test]
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();

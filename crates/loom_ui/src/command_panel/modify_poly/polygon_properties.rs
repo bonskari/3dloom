@@ -70,7 +70,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     rollout(ui, "Polygon: Smoothing Groups", true, |ui| {
         let (any, all) = selected_groups(app);
-        egui::Grid::new(id.with("sg")).num_columns(8).spacing(egui::vec2(2.0, 2.0)).show(ui, |ui| {
+        // Narrow columns (the default minimum is the 40 px interact width): eight fit the panel.
+        egui::Grid::new(id.with("sg")).num_columns(8).min_col_width(22.0).spacing(egui::vec2(2.0, 2.0)).show(ui, |ui| {
             for g in 0..32u32 {
                 let bit = 1u32 << g;
                 let on = all & bit != 0;
