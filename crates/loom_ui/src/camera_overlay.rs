@@ -19,7 +19,7 @@ const CLIP: egui::Color32 = egui::Color32::from_rgb(230, 40, 40);
 const HORIZON: egui::Color32 = egui::Color32::from_gray(20);
 
 /// A world segment clipped to the part in front of the eye, in screen space.
-fn segment(view_proj: Mat4, rect: egui::Rect, a: Vec3, b: Vec3) -> Option<[egui::Pos2; 2]> {
+pub(crate) fn segment(view_proj: Mat4, rect: egui::Rect, a: Vec3, b: Vec3) -> Option<[egui::Pos2; 2]> {
     let mut ca = view_proj * a.extend(1.0);
     let mut cb = view_proj * b.extend(1.0);
     const W: f32 = 1e-4;

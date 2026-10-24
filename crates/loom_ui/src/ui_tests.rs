@@ -7,6 +7,7 @@ use eframe::egui;
 use glam::Vec3;
 use loom_commands::{Command, PrimitiveKind, SelectionMode};
 
+mod transforms;
 mod menus;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
@@ -77,11 +78,11 @@ impl Harness {
     /// Every text `label` painted last frame in the Command Panel, top to bottom.
     fn widgets_labelled(&self, label: &str) -> Vec<egui::Rect> {
         let panel = egui::containers::panel::PanelState::load(&self.ctx, egui::Id::new("command_panel")).expect("the Command Panel").rect;
-        self.texts(label).into_iter().filter(|r| panel.contains_rect(*r)).collect()
+        self.text_rects(label).into_iter().filter(|r| panel.contains_rect(*r)).collect()
     }
 
     /// Every text `label` painted last frame, top to bottom (its rect).
-    fn texts(&self, label: &str) -> Vec<egui::Rect> {
+    fn text_rects(&self, label: &str) -> Vec<egui::Rect> {
         fn find(shape: &egui::Shape, text: &str, out: &mut Vec<egui::Rect>) {
             match shape {
                 egui::Shape::Vec(v) => v.iter().for_each(|s| find(s, text, out)),
@@ -114,7 +115,7 @@ impl Harness {
 
     /// Clicks the one text `label` shown anywhere (a dialog's button).
     fn click_text_anywhere(&mut self, label: &str) {
-        let v = self.texts(label);
+        let v = self.text_rects(label);
         assert_eq!(v.len(), 1, "one {label:?} shown: {v:?}");
         self.click(v[0].center());
     }
@@ -1880,7 +1881,7 @@ fn base_parameter_change_under_edit_poly_asks_yes_hold_yes_no() {
     h.frames(2);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::TopologyWarning));
     assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "nothing changes before the answer");
-    assert_eq!(h.texts("Hold/Yes").len(), 1);
+    assert_eq!(h.text_centers("Hold/Yes").len(), 1);
     h.click_text_anywhere("No");
     assert_eq!(h.app.state.dialog, None);
     assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "No keeps the old value");
@@ -2299,6 +2300,86 @@ fn status_bar_flyouts_close() {
     h.click(menu_row(&h, m, 0));
     assert!(menus(&h).is_empty(), "an item closes the flyout");
     assert_context_menu_closes(&mut h, p, "status bar flyout");
+}
+
+fn light_of(h: &Harness, id: loom_scene::NodeId) -> loom_scene::light::LightObject {
+    h.app.state.scene.node(id).unwrap().object.light().expect("a light").clone()
+}
+
+#[test]
+fn the_lights_category_buttons_start_light_creation() {
+    let mut h = Harness::new();
+    h.app.panel_tab = crate::Tab::Create;
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Lights", cp, 0.0);
+    click_text(&mut h, "Target Spot", cp, 0.0);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Light(loom_commands::light::LightKind::TargetSpot)));
+    click_text(&mut h, "Omni", cp, 0.0);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Light(loom_commands::light::LightKind::Omni)));
+}
+
+#[test]
+fn clicking_an_omni_places_it_and_its_icon_selects_it() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Light(loom_commands::light::LightKind::Omni));
+    let at = Vec3::new(20.0, -10.0, 0.0);
+    let p = h.screen_of(at);
+    h.click(p);
+    let id = *h.app.state.selection.iter().next().expect("the new omni is selected");
+    assert_eq!(light_of(&h, id).light_type, loom_scene::light::LightType::Omni);
+    assert!(h.app.state.scene.world_matrix(id).w_axis.truncate().distance(at) < 0.5);
+    h.app.create_kind = None;
+    h.cmd(Command::SelectNone);
+    h.click(p);
+    assert!(h.app.state.selection.contains(&id), "a click on the icon selects the light");
+}
+
+#[test]
+fn dragging_a_target_spot_puts_the_light_at_the_press_and_the_target_at_the_release() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Light(loom_commands::light::LightKind::TargetSpot));
+    let (from, to) = (Vec3::new(-40.0, -40.0, 0.0), Vec3::new(30.0, 20.0, 0.0));
+    let (a, b) = (h.screen_of(from), h.screen_of(to));
+    h.drag(a, b);
+    let spot = *h.app.state.selection.iter().next().expect("the new spot is selected");
+    let t = light_of(&h, spot).target.expect("a target spot");
+    let eye = h.app.state.scene.world_matrix(spot).w_axis.truncate();
+    let at = h.app.state.scene.world_matrix(t).w_axis.truncate();
+    assert!(eye.distance(from) < 0.5, "light at the press: {eye}");
+    assert!(at.distance(to) < 0.5, "target at the release: {at}");
+    let forward = -h.app.state.scene.world_matrix(spot).z_axis.truncate().normalize();
+    assert!(forward.distance((to - from).normalize()) < 1e-2, "the spot aims at its target");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.len(), 0, "one undo step removes light and target");
+}
+
+#[test]
+fn modify_rollouts_edit_a_light() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::FreeSpot, position: [0.0, 0.0, 80.0], target: [0.0; 3] }).unwrap();
+    let spot = loom_scene::NodeId(r["id"].as_u64().unwrap());
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    let cp = panel(&h, "command_panel");
+    assert!(h.text_rect("Free Spot", cp).is_some(), "the stack names the light type");
+    assert!(h.text_rect("Intensity/Color/Attenuation", cp).is_some());
+    click_text(&mut h, "Targeted", cp, 0.0);
+    let t = light_of(&h, spot).target.expect("Targeted adds a target");
+    assert!(h.app.state.scene.node(t).is_some());
+    click_text(&mut h, "Exclude...", cp, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::LightExclude { light: spot.0 }));
+    click_text(&mut h, "Cancel", SCREEN, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    // Shift+4: the view from the selected spot.
+    h.mods = egui::Modifiers::SHIFT;
+    h.key(egui::Key::Num4);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Camera(spot));
+    let c = h.app.camera_for(h.app.state.active_viewport);
+    assert!((c.fov_x_radians.unwrap().to_degrees() - 45.0).abs() < 1e-3, "the light view spans the falloff");
 }
 
 // --- Rendering: the Rendered Frame Window, Render Setup, the render region ---
