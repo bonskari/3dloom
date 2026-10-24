@@ -19,7 +19,8 @@ fn euler_deg(q: ufbx::Quat) -> Vec3 {
 
 /// `LayerElementSmoothing/Smoothing` as written ByPolygon, when the file
 /// has one: the group bits from the binary file (`smoothing`, keyed by
-/// geometry id), else ufbx's per-face bool.
+/// geometry id), else ufbx's per-face bool. (ufbx parses an ASCII file's
+/// `Smoothing` as bools, so its bits are gone there.)
 fn dom_smoothing_groups(mesh: &ufbx::Mesh, smoothing: &std::collections::HashMap<i64, Vec<u32>>) -> Option<Vec<u32>> {
     let dom = mesh.element.dom_node.as_ref()?;
     let id = dom.values.first()?.value_int;
@@ -121,7 +122,10 @@ fn convert_mesh(m: &ufbx::Mesh, smoothing: &std::collections::HashMap<i64, Vec<u
             }
         }
     }
-    let groups = dom_smoothing_groups(m, smoothing);
+    // Real group bits (3ds Max, Blender "Smoothing Groups"). ByPolygon 0/1
+    // (Blender "Face", or ufbx's per-face bool) only says which faces are
+    // flat: the hard edges between smooth faces come from the normals.
+    let groups = dom_smoothing_groups(m, smoothing).filter(|g| g.iter().any(|x| *x > 1));
     let from_faces = m.face_smoothing.len() == m.num_faces;
     for (fi, f) in m.faces.iter().enumerate() {
         let mut face = IndexedFace { ids: (f.index_begin..f.index_begin + f.num_indices).map(|c| m.vertex_indices[c as usize]).collect(), ..Default::default() };
@@ -129,7 +133,7 @@ fn convert_mesh(m: &ufbx::Mesh, smoothing: &std::collections::HashMap<i64, Vec<u
         face.smoothing_groups = match &groups {
             Some(g) => g[fi],
             None if from_faces => m.face_smoothing[fi] as u32,
-            None => 0,
+            None => 1,
         };
         for (k, set) in m.uv_sets.iter().enumerate() {
             let uv = &set.vertex_uv;
@@ -143,9 +147,15 @@ fn convert_mesh(m: &ufbx::Mesh, smoothing: &std::collections::HashMap<i64, Vec<u
         im.faces.push(face);
     }
     let (mut mesh, map) = loom_mesh::obj::build_repaired_mapped(im)?;
-    if groups.is_none() && !from_faces {
+    if groups.is_none() {
+        let flat: Vec<bool> = mesh.faces().iter().map(|f| f.smoothing_groups == 0).collect();
         let hard = hard_edges(m);
         loom_mesh::mesh_mods::smoothing_groups_from_hard_edges(&mut mesh, &hard);
+        for (f, flat) in mesh.faces_mut().iter_mut().zip(flat) {
+            if flat {
+                f.smoothing_groups = 0;
+            }
+        }
     }
     Ok((mesh, map))
 }

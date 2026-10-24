@@ -164,7 +164,10 @@ fn hotkey_runs_the_bound_command() {
     assert_eq!(s.active_tool, loom_commands::Tool::Move);
     execute(&mut s, Command::Hotkey { chord: "T".into() }).unwrap();
     assert_eq!(s.active().kind, loom_commands::ViewKind::Top);
-    assert!(execute(&mut s, Command::Hotkey { chord: "Shift+Q".into() }).is_err(), "unbound chord is an error");
+    assert!(execute(&mut s, Command::Hotkey { chord: "F9".into() }).is_err(), "unbound chord is an error");
+    // Shift+Q is Render: without a path it opens the output file dialog.
+    execute(&mut s, Command::Hotkey { chord: "Shift+Q".into() }).unwrap();
+    assert_eq!(s.dialog, Some(loom_commands::Dialog::RenderFile));
 }
 
 fn box_at(s: &mut AppState, x: f32) -> loom_scene::NodeId {

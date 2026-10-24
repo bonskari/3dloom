@@ -277,7 +277,7 @@ impl ArgSchema for crate::viewport::ViewportLayout {
 }
 impl ArgSchema for crate::viewport::Shading {
     fn schema() -> Value {
-        json!({"type":"string","enum":["SmoothHighlights","Wireframe","HiddenLine","Flat"]})
+        json!({"type":"string","enum":["SmoothHighlights","Wireframe","HiddenLine","Flat","Realistic"]})
     }
 }
 impl ArgSchema for crate::state::ViewKind {
@@ -1024,6 +1024,8 @@ commands! {
     SetKeyMode => "Set Key Mode", MainUI, "Toggle Set Key mode ('): pose freely, then Set Keys commits the pose as keys; changing frame discards it.";
     SetKeys => "Set Keys", MainUI, "Key the filtered tracks of the selection at the current frame (K); in Set Key mode, commit the pose.";
     MaterialEditorToggle => "Material Editor Toggle", MainUI, "Open or close the Material Editor (M).";
+    Render => "Render", MainUI, "Render the active view to a PNG (`path`; without it the file dialog shows) at `width` x `height` (default: the Render SetUp size), with lights and shadows." { path: Option<String>, width: Option<u32>, height: Option<u32> };
+    RenderSetup => "Render SetUp...", MainUI, "Render SetUp: set the output size (`width`, `height`); with neither the dialog shows." { width: Option<u32>, height: Option<u32> };
     MaterialEditorSlot => "Material Editor Slot", Loom, "Make sample slot `slot` (0-23) the active one." { slot: u32 };
     SetMaterialColor => "Set Material Color", Loom, "Blinn Basic Parameters colour of a slot's material (slot omitted = active): Ambient, Diffuse or Specular, 0-255 RGB; Ambient follows Diffuse while locked." { slot: Option<u32>, which: String, rgb: [u8; 3] };
     SetMaterialParameter => "Set Material Parameter", Loom, "A slot's material value by label: Specular Level, Glossiness, Soften, Self-Illumination, Opacity, 2-Sided, Wire, Faceted, Ambient/Diffuse Lock, Show Map in Viewport (booleans as 0/1)." { slot: Option<u32>, name: String, value: f64 };
@@ -1608,9 +1610,7 @@ pub const DEFERRED_SPLINE: &[(&str, &str)] = &[];
 /// spec section that excludes them.
 pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
     ("Environment Dialog Toggle", "3"),
-    ("Render", "3"),
     ("Render Last", "3"),
-    ("Render SetUp...", "3"),
     ("Create Animated Sequence File...", "3"),
     ("Hide Particle Systems Toggle", "3"),
     ("Hide Space Warps Toggle", "3"),

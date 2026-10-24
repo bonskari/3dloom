@@ -214,7 +214,7 @@ impl ViewportRenderer {
     /// Caller is responsible for the pass lifecycle (clear, store, etc.).
     ///
     /// `selected` lists indices into `meshes` of currently-selected meshes —
-    /// each selected mesh additionally gets an orange wireframe overlay.
+    /// each selected mesh additionally gets a white wireframe overlay.
     #[allow(clippy::too_many_arguments)]
     pub fn record_into_pass(
         &self,

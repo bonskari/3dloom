@@ -133,7 +133,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
         let r = egui::Rect::from_center_size(o, egui::vec2(CENTER_PX * 2.0, CENTER_PX * 2.0));
         if l.center_box {
             painter.rect_filled(r, 0.0, if active { HOVER } else { egui::Color32::from_gray(200) });
-            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::BLACK));
+            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::BLACK), egui::StrokeKind::Middle);
         }
         if let Some(d) = drag {
             let off = d.offset;
