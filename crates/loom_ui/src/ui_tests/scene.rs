@@ -52,6 +52,7 @@ fn select_from_scene_highlights_the_selection_click_replaces_ctrl_adds_and_selec
     // Gamma (the selection) starts highlighted: Select right away keeps it.
     let p = window_text(&h, "Select From Scene", "Alpha");
     h.click(p);
+    pause(&mut h);
     let p = window_text(&h, "Select From Scene", "Beta");
     h.mods = egui::Modifiers::CTRL;
     h.click(p);
@@ -107,9 +108,11 @@ fn display_children_shows_the_hierarchy_and_expand_all_opens_it() {
     let w = window_text(&h, "Select From Scene", "Wing");
     let ai = window_text(&h, "Select From Scene", "Aileron");
     assert!(g.y < w.y && w.y < ai.y, "parent above child above grandchild");
-    assert!(g.x < w.x && w.x < ai.x, "each level indented");
+    let left = |t: &str| h.text_rect(t, SCREEN).unwrap().min.x;
+    assert!(left("Gondola") < left("Wing") && left("Wing") < left("Aileron"), "each level indented");
     // Shift+click selects the range Gondola..Aileron.
     h.click(g);
+    pause(&mut h);
     h.mods = egui::Modifiers::SHIFT;
     h.click(ai);
     h.mods = egui::Modifiers::NONE;
@@ -249,6 +252,7 @@ fn merge_starts_with_nothing_highlighted_and_asks_about_duplicate_names() {
     assert_eq!(h.app.state.scene.len(), 1, "OK does nothing with nothing highlighted");
     let p = window_text(&h, title, "Blade");
     h.click(p);
+    pause(&mut h);
     let p = window_text(&h, title, "Hub");
     h.mods = egui::Modifiers::CTRL;
     h.click(p);
@@ -256,6 +260,9 @@ fn merge_starts_with_nothing_highlighted_and_asks_about_duplicate_names() {
     let ok = window_text(&h, title, "OK");
     h.click(ok);
     // Blade is taken: the Duplicate Name question.
+    h.frames(2);
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("Duplicate Name")));
+    eprintln!("DEBUG dialog={:?} area={area:?} texts={:?} merge={:?}", h.app.state.dialog, h.texts("Delete Old"), h.app.state.merge_pending.is_some());
     let p = window_text(&h, "Duplicate Name", "Delete Old");
     h.click(p);
     let mut names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
