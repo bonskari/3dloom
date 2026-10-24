@@ -457,20 +457,35 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hov
 /// Control Points or Set Volume level is on.
 /// Skin > Edit Envelopes: the current bone's envelope capsule (inner red,
 /// outer purple), cross-section rings and the vertices coloured by weight.
-/// Edit Normals at the Normal level: every normal as a line from its corner's
-/// vertex (blue, selected red), Display Length long.
-fn draw_normals(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
-    let Some((id, index)) = loom_commands::normals::entry(&app.state) else { return };
-    let Some(n) = app.state.scene.node(id) else { return };
-    if n.active_entry != Some(index) || n.modifiers[index].sub_level != 1 {
-        return;
-    }
-    let loom_scene::Modifier::EditNormals(d) = &n.modifiers[index].modifier else { return };
+/// Edit Normals colours: unspecified (follow the smoothing groups) dark
+/// blue, explicit (turned or set by hand) green, selected red.
+pub const NORMAL_UNSPECIFIED: egui::Color32 = egui::Color32::from_rgb(40, 70, 220);
+pub const NORMAL_EXPLICIT: egui::Color32 = egui::Color32::from_rgb(40, 220, 60);
+pub const NORMAL_SELECTED: egui::Color32 = egui::Color32::from_rgb(255, 40, 40);
+
+/// One normal of the Edit Normals entry at its Normal level, on screen.
+struct ScreenNormal {
+    id: u32,
+    from: egui::Pos2,
+    to: egui::Pos2,
+    explicit: bool,
+    selected: bool,
+    /// It points away from the viewer (Ignore Backfacing skips it).
+    back: bool,
+}
+
+/// Every normal of the Edit Normals entry at its Normal level as a screen
+/// line from its corner's vertex, Display Length long.
+fn normals_on_screen(app: &LoomApp, projection: &Projection) -> Option<Vec<ScreenNormal>> {
+    let (id, index) = loom_commands::normals::normal_level(&app.state)?;
+    let n = app.state.scene.node(id)?;
+    let loom_scene::Modifier::EditNormals(d) = &n.modifiers[index].modifier else { return None };
     let input = loom_commands::normals::input_mesh(&app.state, id, index);
     let groups = d.groups_for(&input);
     let world = app.state.scene.object_matrix(id);
     let all = d.normals(&input, &groups);
     let mut drawn = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
     for (i, g) in groups.iter().enumerate() {
         if *g == loom_scene::edit_normals::NO_GROUP || !drawn.insert(*g) {
             continue;
@@ -481,8 +496,100 @@ fn draw_normals(painter: &egui::Painter, app: &LoomApp, projection: &Projection)
         let a = world.transform_point3(p);
         let b = world.transform_point3(p + dir * d.display_length);
         if let (Some(sa), Some(sb)) = (projection.screen(a), projection.screen(b)) {
-            let c = if d.selection.contains(g) { egui::Color32::from_rgb(255, 60, 60) } else { egui::Color32::from_rgb(80, 120, 255) };
-            painter.line_segment([sa, sb], egui::Stroke::new(1.5_f32, c));
+            let back = (b - a).dot(projection.toward_viewer_at(a)) < 0.0;
+            out.push(ScreenNormal { id: *g, from: sa, to: sb, explicit: d.explicit.contains_key(g), selected: d.selection.contains(g), back });
+        }
+    }
+    Some(out)
+}
+
+fn draw_normals(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
+    for n in normals_on_screen(app, projection).unwrap_or_default() {
+        let c = if n.selected { NORMAL_SELECTED } else if n.explicit { NORMAL_EXPLICIT } else { NORMAL_UNSPECIFIED };
+        painter.line_segment([n.from, n.to], egui::Stroke::new(1.5_f32, c));
+    }
+}
+
+fn segment_distance(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
+    let ab = b - a;
+    let t = if ab.length_sq() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+    p.distance(a + ab * t)
+}
+
+/// Edit Normals at the Normal level: a click (nearest within 8 px) or a
+/// region selects normals, or the normals of the vertices / edges / faces
+/// under Select By; Ctrl adds, Alt removes, a click on nothing clears.
+/// False when the Normal level is not on.
+pub fn normals_pick(app: &mut LoomApp, projection: &Projection, region: Option<&crate::region::Region>, p: egui::Pos2, mods: loom_input::Modifiers) -> bool {
+    let Some(normals) = normals_on_screen(app, projection) else { return false };
+    let Some((id, index)) = loom_commands::normals::normal_level(&app.state) else { return false };
+    let Some(loom_scene::Modifier::EditNormals(d)) = app.state.scene.node(id).map(|n| &n.modifiers[index].modifier) else { return false };
+    let (by, ignore_back) = (d.select_by, d.ignore_backfacing);
+    let ids: Vec<u32> = if by == 0 {
+        let shown = normals.iter().filter(|n| !(ignore_back && n.back));
+        match region {
+            Some(r) => shown.filter(|n| r.contains(n.from) || r.contains(n.to)).map(|n| n.id).collect(),
+            None => shown.map(|n| (n.id, segment_distance(p, n.from, n.to))).filter(|(_, d)| *d <= 8.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(g, _)| vec![g]).unwrap_or_default(),
+        }
+    } else {
+        mesh_ids_at(app, projection, id, index, by, ignore_back, region, p)
+    };
+    let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
+    let _ = app.dispatch(Command::EditNormalsSelect { ids, op });
+    true
+}
+
+/// Select By Vertex / Edge / Face: the input mesh's ids under a click or in a region.
+#[allow(clippy::too_many_arguments)]
+fn mesh_ids_at(app: &LoomApp, projection: &Projection, id: NodeId, index: usize, by: u32, ignore_back: bool, region: Option<&crate::region::Region>, p: egui::Pos2) -> Vec<u32> {
+    let input = loom_commands::normals::input_mesh(&app.state, id, index);
+    let world = app.state.scene.object_matrix(id);
+    let wp: Vec<Vec3> = input.vertices().iter().map(|v| world.transform_point3(v.position)).collect();
+    let sp: Vec<Option<egui::Pos2>> = wp.iter().map(|q| projection.screen(*q)).collect();
+    let face_front: Vec<bool> = (0..input.face_count() as u32)
+        .map(|f| {
+            let f = loom_mesh::FaceId(f);
+            let vs = input.face_vertex_ids(f).unwrap_or_default();
+            let c = vs.iter().map(|v| wp[v.0 as usize]).sum::<Vec3>() / vs.len().max(1) as f32;
+            world.transform_vector3(input.face_normal(f)).dot(projection.toward_viewer_at(c)) >= 0.0
+        })
+        .collect();
+    let he = input.half_edges();
+    let front_he = |i: usize| -> bool { !ignore_back || [Some(i), Some(he[i].twin.0 as usize)].iter().flatten().any(|h| he.get(*h).and_then(|h| h.face).is_some_and(|f| face_front[f.0 as usize])) };
+    match by {
+        1 => {
+            let visible: Vec<bool> = (0..wp.len()).map(|v| !ignore_back || he.iter().any(|h| h.origin.0 as usize == v && h.face.is_some_and(|f| face_front[f.0 as usize]))).collect();
+            let cands = sp.iter().enumerate().filter_map(|(v, s)| s.filter(|_| visible[v]).map(|s| (v as u32, s)));
+            match region {
+                Some(r) => cands.filter(|(_, s)| r.contains(*s)).map(|(v, _)| v).collect(),
+                None => cands.map(|(v, s)| (v, s.distance(p))).filter(|(_, d)| *d <= 8.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(v, _)| vec![v]).unwrap_or_default(),
+            }
+        }
+        2 => {
+            let edges = (0..he.len()).filter(|i| input.canonical_edge_id(loom_mesh::HalfEdgeId(*i as u32)).is_some_and(|c| c.0 as usize == *i) && front_he(*i)).filter_map(|i| {
+                let (a, b) = (sp[he[i].origin.0 as usize]?, sp[he[he[i].next.0 as usize].origin.0 as usize]?);
+                Some((i as u32, a, b))
+            });
+            match region {
+                Some(r) => edges.filter(|(_, a, b)| r.contains(*a) && r.contains(*b)).map(|(e, _, _)| e).collect(),
+                None => edges.map(|(e, a, b)| (e, segment_distance(p, a, b))).filter(|(_, d)| *d <= 6.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(e, _)| vec![e]).unwrap_or_default(),
+            }
+        }
+        _ => {
+            let eye = projection.view.inverse().w_axis.truncate();
+            let faces = (0..input.face_count()).filter(|f| !ignore_back || face_front[*f]).filter_map(|f| {
+                let vs = input.face_vertex_ids(loom_mesh::FaceId(f as u32)).unwrap_or_default();
+                let poly: Option<Vec<egui::Pos2>> = vs.iter().map(|v| sp[v.0 as usize]).collect();
+                let c = vs.iter().map(|v| wp[v.0 as usize]).sum::<Vec3>() / vs.len().max(1) as f32;
+                Some((f as u32, poly?, c.distance(eye)))
+            });
+            match region {
+                Some(r) => faces.filter(|(_, poly, _)| {
+                    let c = poly.iter().fold(egui::Vec2::ZERO, |a, q| a + q.to_vec2()) / poly.len().max(1) as f32;
+                    r.contains(c.to_pos2())
+                }).map(|(f, _, _)| f).collect(),
+                None => faces.filter(|(_, poly, _)| crate::region::Region::Polygon(poly.clone()).contains(p)).min_by(|a, b| a.2.total_cmp(&b.2)).map(|(f, _, _)| vec![f]).unwrap_or_default(),
+            }
         }
     }
 }

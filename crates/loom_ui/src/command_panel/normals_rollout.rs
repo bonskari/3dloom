@@ -34,7 +34,12 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             let index = st["index"].as_u64().unwrap_or(0) as u32;
             run(app, Command::SetModifierParameter { index, name: "Ignore Backfacing".into(), value: if ib { 1.0 } else { 0.0 } });
         }
-        ui.label(format!("{} normals, {} selected", st["normals"], st["selected"].as_array().map(|a| a.len()).unwrap_or(0)));
+        // The readout names a single picked normal (1-based, like the reference's numbers).
+        let sel = st["selected"].as_array().cloned().unwrap_or_default();
+        ui.label(match sel.as_slice() {
+            [one] => format!("Normal {} Selected", one.as_u64().unwrap_or(0) + 1),
+            _ => format!("{} Normals Selected", sel.len()),
+        });
         ui.separator();
         let w = (ui.available_width() - 8.0) / 2.0;
         ui.horizontal(|ui| {

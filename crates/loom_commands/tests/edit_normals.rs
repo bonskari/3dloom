@@ -187,3 +187,45 @@ fn copy_normal_is_not_an_undo_step() {
     execute(&mut s, Command::PasteNormal).unwrap();
     assert_ne!(corner_normals_at(&s, b, 6), before);
 }
+
+/// Normal `g`'s direction and the world position of its vertex, from the entry.
+fn normal_of(s: &AppState, id: NodeId, g: u32) -> (Vec3, Vec3) {
+    let (_, index) = loom_commands::normals::entry(s).unwrap();
+    let input = loom_commands::normals::input_mesh(s, id, index);
+    let loom_scene::Modifier::EditNormals(d) = &s.scene.node(id).unwrap().modifiers[index].modifier else { panic!("not Edit Normals") };
+    let groups = d.groups_for(&input);
+    let corner = groups.iter().position(|x| *x == g).unwrap();
+    let p = input.vertex_position(input.half_edges()[corner].origin).unwrap();
+    (d.normal(&input, &groups, g), s.scene.object_matrix(id).transform_point3(p))
+}
+
+#[test]
+fn applying_edit_normals_enters_the_normal_level() {
+    let mut s = AppState::new();
+    let b = boxed(&mut s);
+    let n = s.scene.node(b).unwrap();
+    assert_eq!(n.modifiers[n.active_entry.unwrap()].sub_level, 1, "the normals show at once, as in the reference");
+}
+
+#[test]
+fn the_rotate_tool_turns_the_selected_normals_not_the_object() {
+    let mut s = AppState::new();
+    let b = boxed(&mut s);
+    execute(&mut s, Command::SetTransform { id: b.0, position: Some([20.0, 0.0, 0.0]), rotation_deg: Some([0.0, 0.0, 90.0]), scale: None }).unwrap();
+    execute(&mut s, Command::EditNormalsSelect { ids: vec![0], op: SelectOp::Replace }).unwrap();
+    let (n0, at) = normal_of(&s, b, 0);
+    // The transform gizmo sits on the selected normal.
+    let f = loom_commands::frame_for(&s, 0, Some(b));
+    assert!(f.origin.distance(at) < 1e-4, "gizmo at {} not on the normal at {at}", f.origin);
+    let world = s.scene.world_matrix(b);
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::X, degrees: 30.0, system: Some(loom_commands::CoordSystem::World) }).unwrap();
+    assert_eq!(s.scene.world_matrix(b), world, "the object stays put");
+    let (n1, _) = normal_of(&s, b, 0);
+    // A world X rotation of a normal on an object turned 90 degrees about Z.
+    let r = glam::Quat::from_rotation_z(90f32.to_radians());
+    let want = r.inverse() * glam::Quat::from_rotation_x(30f32.to_radians()) * r * n0;
+    assert!(n1.distance(want) < 1e-4, "{n1} vs {want}");
+    assert_eq!(execute(&mut s, Command::State).unwrap()["edit_normals"]["explicit"], 1, "a rotated normal is explicit");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert!(normal_of(&s, b, 0).0.distance(n0) < 1e-5, "undo turns it back");
+}

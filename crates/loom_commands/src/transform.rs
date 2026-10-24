@@ -69,7 +69,10 @@ pub fn frame_for_system(state: &AppState, viewport: usize, id: Option<NodeId>, s
             None => Mat3::IDENTITY,
         },
     };
+    let normals = crate::normals::selected_center(state);
     let origin = match state.center_mode {
+        // Edit Normals at the Normal level: the gizmo sits on the selected normals.
+        _ if normals.is_some() => normals.unwrap_or_default(),
         _ if state.selection_mode != SelectionMode::Object => state.selection_pivot(),
         CenterMode::PivotPoint => match id {
             Some(i) => state.scene.world_matrix(i).w_axis.truncate(),

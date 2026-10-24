@@ -1063,6 +1063,10 @@ fn add_modifier(state: &mut AppState, name: &str) -> Result<Value, String> {
                 if name == "Edit Mesh" {
                     slot.name = "Edit Mesh".to_owned();
                 }
+                if matches!(slot.modifier, Modifier::EditNormals(_)) {
+                    // Edit Normals starts at its Normal level: the normals show at once.
+                    slot.sub_level = 1;
+                }
                 stack.insert(at, slot);
                 inserted.push((*id, at));
                 changes.push(Change::SetStack { id: *id, before: node.modifiers.clone(), after: stack });

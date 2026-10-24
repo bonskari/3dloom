@@ -2332,3 +2332,128 @@ fn a_scene_named_on_the_command_line_opens() {
     assert_eq!(next.app.state.file.as_deref(), Some(path.as_path()));
     assert_eq!(next.app.state.recent_files.first(), Some(&path));
 }
+
+/// A 30-unit box with an Edit Normals modifier (at its Normal level), framed.
+fn normals_box(h: &mut Harness) -> loom_scene::NodeId {
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = selected(h)[0];
+    h.cmd(Command::AddModifier { name: "Edit Normals".into() });
+    framed(h);
+    id
+}
+
+/// Each normal's (world start, direction), by id.
+fn normal_lines(h: &Harness) -> Vec<(u32, Vec3, Vec3)> {
+    let (id, index) = loom_commands::normals::entry(&h.app.state).unwrap();
+    let input = loom_commands::normals::input_mesh(&h.app.state, id, index);
+    let loom_scene::Modifier::EditNormals(d) = &h.app.state.scene.node(id).unwrap().modifiers[index].modifier else { panic!() };
+    let groups = d.groups_for(&input);
+    let all = d.normals(&input, &groups);
+    let world = h.app.state.scene.object_matrix(id);
+    let mut out: Vec<(u32, Vec3, Vec3)> = Vec::new();
+    for (i, g) in groups.iter().enumerate() {
+        if *g != loom_scene::edit_normals::NO_GROUP && !out.iter().any(|o| o.0 == *g) {
+            let p = world.transform_point3(input.vertex_position(input.half_edges()[i].origin).unwrap());
+            out.push((*g, p, world.transform_vector3(all[g]).normalize()));
+        }
+    }
+    out
+}
+
+/// Screen points 60% along the normals that face the viewer, well apart from every other normal.
+fn clear_normal_points(h: &Harness) -> Vec<(u32, egui::Pos2)> {
+    let eye = h.app.camera_for(h.app.state.active_viewport).view_matrix().inverse().w_axis.truncate();
+    let lines = normal_lines(h);
+    let pts: Vec<(u32, egui::Pos2, bool)> = lines.iter().map(|(g, p, d)| (*g, h.screen_of(*p + *d * 6.0), d.dot(eye - *p) > 0.0)).collect();
+    pts.iter().filter(|(g, s, front)| *front && pts.iter().all(|(o, t, _)| o == g || t.distance(*s) > 14.0)).map(|(g, s, _)| (*g, *s)).collect()
+}
+
+fn normal_selection(h: &Harness) -> Vec<u32> {
+    let st = loom_commands::normals::state_json(&h.app.state);
+    st["selected"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect()
+}
+
+/// Line segments painted last frame in `color`.
+fn segments_coloured(h: &Harness, color: egui::Color32) -> usize {
+    fn walk(s: &egui::Shape, c: egui::Color32, n: &mut usize) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, c, n)),
+            egui::Shape::LineSegment { stroke, .. } if stroke.color == c => *n += 1,
+            _ => {}
+        }
+    }
+    let mut n = 0;
+    h.shapes.iter().for_each(|c| walk(&c.shape, color, &mut n));
+    n
+}
+
+#[test]
+fn edit_normals_click_ctrl_alt_and_empty_click_select_normals() {
+    let mut h = Harness::new();
+    let id = normals_box(&mut h);
+    let pts = clear_normal_points(&h);
+    assert!(pts.len() >= 2, "visible normals to click: {pts:?}");
+    let (a, b) = (pts[0], pts[1]);
+    h.click(a.1);
+    assert_eq!(normal_selection(&h), vec![a.0], "a click selects the normal");
+    assert!(h.app.state.selection.contains(&id), "the object stays selected");
+    panel_text(&h, &format!("Normal {} Selected", a.0 + 1));
+    h.mods = egui::Modifiers::CTRL;
+    h.click(b.1);
+    h.mods = egui::Modifiers::NONE;
+    let mut both = vec![a.0, b.0];
+    both.sort();
+    assert_eq!(normal_selection(&h), both, "Ctrl adds");
+    panel_text(&h, "2 Normals Selected");
+    h.mods = egui::Modifiers::ALT;
+    h.click(a.1);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(normal_selection(&h), vec![b.0], "Alt removes");
+    let rect = h.app.viewport_rects[h.app.state.active_viewport];
+    h.click(egui::pos2(rect.right() - 60.0, rect.bottom() - 60.0));
+    assert!(normal_selection(&h).is_empty(), "an empty click clears the normals");
+    assert!(h.app.state.selection.contains(&id), "and keeps the object");
+    // A region selects the normals whose lines it holds.
+    h.drag(a.1 - egui::vec2(6.0, 6.0), a.1 + egui::vec2(6.0, 6.0));
+    assert!(normal_selection(&h).contains(&a.0), "region picks {:?}", normal_selection(&h));
+}
+
+#[test]
+fn edit_normals_draws_explicit_normals_green_and_the_rotate_tool_turns_them() {
+    let mut h = Harness::new();
+    let id = normals_box(&mut h);
+    h.frames(1);
+    assert_eq!(segments_coloured(&h, crate::poly_modes::NORMAL_EXPLICIT), 0, "no explicit normals yet");
+    assert!(segments_coloured(&h, crate::poly_modes::NORMAL_UNSPECIFIED) >= 20, "unspecified normals blue");
+    let (g, at) = clear_normal_points(&h)[0];
+    h.click(at);
+    assert_eq!(normal_selection(&h), vec![g]);
+    assert_eq!(segments_coloured(&h, crate::poly_modes::NORMAL_SELECTED), 1, "the selected normal red");
+    let before = normal_lines(&h).into_iter().find(|l| l.0 == g).unwrap().2;
+    let world = h.app.state.scene.world_matrix(id);
+    // Select And Rotate (E is Make Explicit at the Normal level, so the toolbar
+    // command): drag on an axis ring of the gizmo, which sits on the normal.
+    h.cmd(Command::SelectAndRotate);
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let cam = h.app.camera_for(i);
+    let projection = crate::gizmo::Projection::new(cam.view_matrix(), cam.projection_matrix(rect.width() / rect.height()), rect);
+    let layout = crate::gizmo::layout_for(&h.app, i, rect.height());
+    let o = projection.screen(layout.origin).unwrap();
+    assert!(o.distance(h.screen_of(normal_lines(&h).into_iter().find(|l| l.0 == g).unwrap().1)) < 1.0, "the gizmo is on the normal");
+    let start = (0..360)
+        .flat_map(|deg| (10..200).step_by(2).map(move |r| (deg as f32, r as f32)))
+        .map(|(deg, r)| o + egui::vec2(deg.to_radians().cos(), deg.to_radians().sin()) * r)
+        .find(|p| matches!(crate::gizmo::hit(&h.app, &layout, &projection, *p), Some(crate::gizmo::Handle::Axis(_))))
+        .expect("an axis ring on screen");
+    let tangent = (start - o).normalized().rot90() * 40.0;
+    h.drag(start, start + tangent);
+    let after = normal_lines(&h).into_iter().find(|l| l.0 == g).unwrap().2;
+    assert!(after.distance(before) > 0.05, "the normal turned: {before} -> {after}");
+    assert_eq!(h.app.state.scene.world_matrix(id), world, "the object did not rotate");
+    assert_eq!(normal_selection(&h), vec![g]);
+    // Deselect: the turned normal is now drawn green (explicit).
+    h.cmd(Command::SelectObject);
+    h.click(egui::pos2(rect.right() - 60.0, rect.bottom() - 60.0));
+    assert_eq!(segments_coloured(&h, crate::poly_modes::NORMAL_EXPLICIT), 1, "the rotated normal is explicit");
+}

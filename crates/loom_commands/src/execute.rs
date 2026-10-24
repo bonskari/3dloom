@@ -3549,6 +3549,12 @@ fn with_system(state: &mut AppState, system: Option<CoordSystem>) -> CoordSystem
 type MatrixFor<'a> = &'a dyn Fn(&AppState, Option<NodeId>) -> (Mat4, Vec3);
 
 fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: MatrixFor) -> Result<Value, String> {
+    if let Some((id, _)) = crate::normals::normal_level(state) {
+        let (m, _) = matrix_for(state, Some(id));
+        if let Some(r) = crate::normals::transform(state, label, m) {
+            return r;
+        }
+    }
     let mut changes = Vec::new();
     // A modifier gizmo level (XForm Gizmo / Center): the tools move the gizmo.
     let gizmo_targets: Vec<(NodeId, usize, u32)> = state
