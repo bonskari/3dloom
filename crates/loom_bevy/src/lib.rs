@@ -15,7 +15,7 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::entity::Entity;
 use bevy::image::{Image, ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Vec3;
-use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, DirectionalLightShadowMap, MeshMaterial3d, PointLight, PointLightShadowMap, SpotLight, StandardMaterial};
+use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, DirectionalLightShadowMap, MeshMaterial3d, PointLightShadowMap, StandardMaterial};
 use bevy::render::camera::{Camera, ClearColorConfig, RenderTarget};
 use bevy::render::mesh::{Mesh, Mesh3d};
 use bevy::render::render_asset::RenderAssets;

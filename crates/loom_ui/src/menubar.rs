@@ -179,10 +179,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Undo View Change", "Undo Viewport Operation");
                 item(ui, app, "Redo View Change", "Redo Viewport Operation");
                 ui.separator();
+                // The active view's name is part of the item, as in the reference.
+                let view = app.state.active().kind.label();
+                item(ui, app, &format!("Save Active {view} View"), "Save Active View");
+                item(ui, app, &format!("Restore Active {view} View"), "Restore Active View");
+                ui.separator();
                 item(ui, app, "Viewport Configuration...", "Configure Viewports");
                 item(ui, app, "Viewport Background...", "Viewport Background");
                 item(ui, app, "Update Background Image", "Update Background Image");
+                item(ui, app, "Reset Background Transform", "Reset Background Transform");
                 item(ui, app, "Show Floating Dialogs", "Show Floating Dialogs");
+                ui.separator();
+                item(ui, app, "Shade Selected", "Shade Selected");
+                item(ui, app, "Create Camera From View", "Create Camera From View");
                 ui.separator();
                 for (label, action) in [
                     ("Top", "Top View"), ("Bottom", "Bottom View"), ("Front", "Front View"), ("Back", "Back View"),
@@ -242,7 +251,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         }
                     }
                     ui.separator();
-                    cmd(ui, app, "Create Camera From View", Command::CreateCamera { target: false });
+                    cmd(ui, app, "Create Camera From View", Command::CreateCameraFromView);
                 });
                 ui.menu_button("Shapes", |ui| {
                     let kinds = std::iter::once((crate::CreateKind::Line, "Line")).chain(loom_commands::ShapeKind::ALL.iter().map(|k| (crate::CreateKind::Shape(*k), k.label())));

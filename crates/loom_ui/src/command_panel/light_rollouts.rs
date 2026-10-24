@@ -38,7 +38,7 @@ fn number(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, label: &
             ui.label(label);
             let mut v = value;
             let r = if length {
-                ui.add(app.length_drag(&mut v, app.spinner_speed(0.5)))
+                ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.5)))
             } else {
                 ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision.max(1)))
             };
@@ -174,7 +174,7 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
                     ui.label(format!("{:.*}{}", app.state.prefs.spinner_precision, distance as f64 * factor, suffix));
                 } else {
                     let mut v = distance;
-                    let r = ui.add(app.length_drag(&mut v, app.spinner_speed(0.5)));
+                    let r = ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.5)));
                     spin(app, id, "Target Distance", &r, v as f64, distance as f64);
                 }
             });

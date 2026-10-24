@@ -300,6 +300,8 @@ impl ViewportRenderer {
     ///
     /// `selected` lists indices into `meshes` of currently-selected meshes —
     /// each selected mesh additionally gets a white wireframe overlay.
+    /// `shade_only`: in a wireframe view (`shaded` false), these meshes are
+    /// shaded anyway (Views > Shade Selected).
     #[allow(clippy::too_many_arguments)]
     pub fn record_into_pass(
         &self,
@@ -309,6 +311,7 @@ impl ViewportRenderer {
         selected: &[usize],
         show_edges: bool,
         shaded: bool,
+        shade_only: &[usize],
         grid: Option<GridPlane>,
         orthographic: bool,
         textures: &TextureSet,
@@ -317,10 +320,11 @@ impl ViewportRenderer {
         if let Some(plane) = grid {
             self.grid.record(pass, bind_group, plane, orthographic);
         }
-        if shaded {
+        let shade = shaded_meshes(meshes.len(), shaded, shade_only);
+        if !shade.is_empty() {
             // Opaque meshes first (per-object cull setting), then see-through.
             for transparent in [false, true] {
-                for mb in meshes.iter().filter(|mb| mb.index_count > 0 && (mb.style.alpha < 1.0) == transparent) {
+                for mb in shade.iter().map(|i| meshes[*i]).filter(|mb| mb.index_count > 0 && (mb.style.alpha < 1.0) == transparent) {
                     let pipeline = if transparent {
                         &self.mesh_pipeline_blend
                     } else if mb.style.backface_cull {
@@ -353,6 +357,16 @@ impl ViewportRenderer {
                 }
             }
         }
+    }
+}
+
+/// The meshes a viewport draws shaded: all of them in a shaded view, else
+/// only `shade_only` (Shade Selected in a wireframe view).
+pub fn shaded_meshes(count: usize, shaded: bool, shade_only: &[usize]) -> Vec<usize> {
+    if shaded {
+        (0..count).collect()
+    } else {
+        shade_only.iter().copied().filter(|i| *i < count).collect()
     }
 }
 
@@ -402,5 +416,18 @@ impl ViewportRenderer {
     pub fn make_texture_set(&self, device: &Device, queue: &Queue, bitmaps: &[crate::mesh_buffer::Bitmap]) -> TextureSet {
         let (none, checker) = self.base_textures(device, queue);
         TextureSet { none, checker, bitmaps: bitmaps.iter().enumerate().map(|(i, b)| self.bitmap_texture(device, queue, b, &format!("texture_bitmap_{i}"))).collect() }
+    }
+}
+
+#[cfg(test)]
+mod shade_tests {
+    use super::shaded_meshes;
+
+    /// Shade Selected: a wireframe view shades the selected meshes only.
+    #[test]
+    fn wireframe_views_shade_only_the_shade_selected_meshes() {
+        assert_eq!(shaded_meshes(3, true, &[]), vec![0, 1, 2]);
+        assert_eq!(shaded_meshes(3, false, &[]), Vec::<usize>::new());
+        assert_eq!(shaded_meshes(3, false, &[2, 7]), vec![2]);
     }
 }
