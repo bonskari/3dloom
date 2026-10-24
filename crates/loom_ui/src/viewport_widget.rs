@@ -471,9 +471,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             ctx.request_repaint();
                         }
                     }
+                    // A poly mode drag (Extrude, Chamfer, paint brushes) owns the press.
                     if pointer.button_pressed(egui::PointerButton::Primary)
                         && response.hovered()
                         && app.manip_drag.is_none()
+                        && !app.poly_dragging
                         && app.state.active_tool != Tool::Select
                         && app.has_selection()
                         && !(app.poly_dragging && matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)))

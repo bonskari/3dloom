@@ -410,6 +410,34 @@ fn extrude_button_then_drag_on_the_face_extrudes_it() {
     assert_eq!(face_count(&h, id), before, "one undo step");
 }
 
+/// In Extrude mode the drag belongs to the mode, even when it starts on the
+/// Move gizmo (which sits on the selected face).
+#[test]
+fn extrude_drag_starting_on_the_move_gizmo_makes_one_extrusion() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::W);
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    let before = face_count(&h, id);
+    let centre = h.app.selection_pivot();
+    click_text(&mut h, "Extrude");
+    let g = h.screen_of(centre);
+    h.drag(g, g + egui::vec2(0.0, -40.0));
+    assert_eq!(face_count(&h, id), before + 4, "one extrusion, not one per frame");
+    assert!(h.app.transform_drag.is_none());
+    let top: Vec<Vec3> = {
+        let n = h.app.state.scene.node(id).unwrap();
+        let m = n.cage_mesh();
+        m.vertices().iter().enumerate().filter_map(|(i, _)| m.vertex_position(loom_mesh::VertexId(i as u32))).filter(|v| v.z > 30.5).collect()
+    };
+    assert_eq!(top.len(), 4, "the extruded cap is four vertices above the box");
+    assert!(top.iter().all(|v| v.x.abs() <= 15.0 + 1e-3 && v.y.abs() <= 15.0 + 1e-3), "and the gizmo did not move them sideways: {top:?}");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(face_count(&h, id), before, "one undo step");
+}
+
 #[test]
 fn ring_loop_and_connect_buttons_on_edges() {
     let mut h = Harness::new();
