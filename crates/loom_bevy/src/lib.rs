@@ -395,7 +395,7 @@ impl BevyRenderer {
     pub fn begin_render(&mut self, options: RenderOptions) {
         self.end_render();
         let world = self.app.world_mut();
-        world.insert_resource(DirectionalLightShadowMap { size: options.shadow_map_size.clamp(512, 8192) });
+        world.insert_resource(DirectionalLightShadowMap { size: options.shadow_map_size.clamp(512, 8192) as usize });
         world.insert_resource(AmbientLight { color: Color::srgb(options.ambient[0], options.ambient[1], options.ambient[2]), brightness: 250.0, affects_lightmapped_meshes: true });
         if let Some(mut l) = world.get_mut::<DirectionalLight>(self.light) {
             l.shadows_enabled = options.shadows;
