@@ -2703,9 +2703,9 @@ pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Resul
 /// parameter, an attach) is replaced on every member of the node's instance
 /// group that the change does not already cover.
 fn share_with_instances(scene: &loom_scene::Scene, change: Change) -> Change {
-    fn replaced(c: &Change, out: &mut Vec<(NodeId, ObjectKind)>, removed: &mut BTreeSet<NodeId>) {
+    fn replaced<'a>(c: &'a Change, out: &mut Vec<(NodeId, &'a ObjectKind)>, removed: &mut BTreeSet<NodeId>) {
         match c {
-            Change::ReplaceObject { id, after, .. } => out.push((*id, (**after).clone())),
+            Change::ReplaceObject { id, after, .. } => out.push((*id, &**after)),
             Change::RemoveNode(id) => {
                 removed.insert(*id);
             }
