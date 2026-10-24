@@ -1121,48 +1121,49 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
     let wants_map = matches!(for_, BrowserFor::Map(_) | BrowserFor::MapType);
     let mut picked: Option<String> = None;
     let mut cancel = false;
-    egui::Window::new("Material/Map Browser").open(open).collapsible(false).resizable(true).default_width(420.0).show(ctx, |ui| {
-        ui.horizontal_top(|ui| {
-            ui.vertical(|ui| {
-                ui.label(egui::RichText::new("Browse From:").strong());
-                for (i, label) in ["Mtl Editor", "Active Slot", "Selected", "Scene", "New"].iter().enumerate() {
-                    // Maps and material types come only from New; Get Material only from existing materials.
-                    let enabled = if for_ == BrowserFor::GetMaterial { i != 4 } else { i == 4 };
-                    if ui.add_enabled(enabled, egui::RadioButton::new(from == i as u8, *label)).clicked() {
-                        from = i as u8;
-                        selected = None;
-                    }
+    egui::Window::new("Material/Map Browser").open(open).collapsible(false).resizable(false).default_width(360.0).show(ctx, |ui| {
+        ui.label(egui::RichText::new("Browse From:").strong());
+        ui.horizontal_wrapped(|ui| {
+            for (i, label) in ["Mtl Editor", "Active Slot", "Selected", "Scene", "New"].iter().enumerate() {
+                // Maps and material types come only from New; Get Material only from existing materials.
+                let enabled = if for_ == BrowserFor::GetMaterial { i != 4 } else { i == 4 };
+                if ui.add_enabled(enabled, egui::RadioButton::new(from == i as u8, *label)).clicked() {
+                    from = i as u8;
+                    selected = None;
                 }
-                ui.separator();
-                ui.label(egui::RichText::new("Show").strong());
-                let (mut materials, mut maps) = (!wants_map, wants_map);
-                ui.add_enabled(false, egui::Checkbox::new(&mut materials, "Materials"));
-                ui.add_enabled(false, egui::Checkbox::new(&mut maps, "Maps"));
-            });
-            ui.separator();
-            ui.vertical(|ui| {
-                let entries: Vec<(String, String)> = if from == 4 {
-                    if wants_map {
-                        MapType::ALL.iter().map(|t| (t.label().to_owned(), t.label().to_owned())).collect()
-                    } else {
-                        MaterialKind::TYPES.iter().map(|t| (t.to_string(), t.to_string())).collect()
-                    }
-                } else {
-                    browse_materials(app, from)
-                };
-                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                    for (key, label) in &entries {
-                        let r = ui.selectable_label(selected.as_deref() == Some(key.as_str()), label);
-                        if r.clicked() {
-                            selected = Some(key.clone());
-                        }
-                        if r.double_clicked() {
-                            picked = Some(key.clone());
-                        }
-                    }
-                });
-            });
+            }
         });
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Show:").strong());
+            let (mut materials, mut maps) = (!wants_map, wants_map);
+            ui.add_enabled(false, egui::Checkbox::new(&mut materials, "Materials"));
+            ui.add_enabled(false, egui::Checkbox::new(&mut maps, "Maps"));
+        });
+        ui.separator();
+        let entries: Vec<(String, String)> = if from == 4 {
+            if wants_map {
+                MapType::ALL.iter().map(|t| (t.label().to_owned(), t.label().to_owned())).collect()
+            } else {
+                MaterialKind::TYPES.iter().map(|t| (t.to_string(), t.to_string())).collect()
+            }
+        } else {
+            browse_materials(app, from)
+        };
+        egui::ScrollArea::vertical().id_salt("material_browser_list").max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
+            if entries.is_empty() {
+                ui.weak("(none)");
+            }
+            for (key, label) in &entries {
+                let r = ui.selectable_label(selected.as_deref() == Some(key.as_str()), label);
+                if r.clicked() {
+                    selected = Some(key.clone());
+                }
+                if r.double_clicked() {
+                    picked = Some(key.clone());
+                }
+            }
+        });
+        ui.separator();
         ui.horizontal(|ui| {
             if ui.add_enabled(selected.is_some(), egui::Button::new("OK")).clicked() {
                 picked = selected.clone();
