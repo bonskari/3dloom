@@ -256,6 +256,12 @@ impl Mesh {
     /// Auto Smooth on a subset: only edges between two faces of the subset
     /// join regions; faces outside keep their groups.
     pub fn auto_smooth_faces(&mut self, faces: &[FaceId], threshold_deg: f32) {
+        self.auto_smooth_faces_with(faces, threshold_deg, false);
+    }
+
+    /// Auto Smooth with Prevent Indirect Smoothing: regions that meet only
+    /// at a vertex get different bits too, so no vertex normal mixes them.
+    pub fn auto_smooth_faces_with(&mut self, faces: &[FaceId], threshold_deg: f32, prevent_indirect: bool) {
         let n = self.faces.len();
         if n == 0 || faces.is_empty() {
             return;
@@ -298,6 +304,17 @@ impl Mesh {
         // Colour the regions: neighbouring regions take different bits.
         let mut region_bits: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
         let mut neighbours: std::collections::HashMap<usize, std::collections::HashSet<usize>> = std::collections::HashMap::new();
+        if prevent_indirect {
+            // Every two subset faces around a vertex count as neighbours.
+            for v in 0..self.vertices.len() as u32 {
+                let around: Vec<usize> = self.faces_around_vertex(VertexId(v)).into_iter().map(|f| f.0 as usize).filter(|f| subset.contains(f)).collect();
+                for (i, a) in around.iter().enumerate() {
+                    for b in &around[i + 1..] {
+                        adjacent.push((*a, *b));
+                    }
+                }
+            }
+        }
         for (a, b) in &adjacent {
             let (ra, rb) = (roots[*a], roots[*b]);
             if ra != rb {

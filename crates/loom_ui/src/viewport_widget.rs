@@ -1738,7 +1738,7 @@ fn draw_shapes(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport
         let shape = if n.modifiers.is_empty() || editing {
             base
         } else {
-            let v = match n.active_entry.filter(|_| !app.state.show_end_result) {
+            let v = match n.active_entry.filter(|_| app.below_end_result(n.id)) {
                 Some(a) => app.state.scene.evaluated(n.id, Some(a)),
                 None => app.state.scene.eval_mesh(n.id),
             };

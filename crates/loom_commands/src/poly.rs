@@ -287,8 +287,13 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::NamedSubSelectionCopy { name } => {
-            let items: Vec<(NodeId, SubObjectId)> = state.sub_selection.iter().collect();
-            state.named_sub_selections.insert(name, items);
+            // A set belongs to its object and level: copying replaces only the
+            // selected objects' items at this level; other objects and levels keep theirs.
+            let mode = state.selection_mode;
+            let selected = state.selection.clone();
+            let entry = state.named_sub_selections.entry(name).or_default();
+            entry.retain(|(n, id)| !(selected.contains(n) && same_level(mode, *id)));
+            entry.extend(state.sub_selection.iter());
             Ok(json!({}))
         }
         C::NamedSubSelectionPaste { name } => {
@@ -296,7 +301,10 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             state.sub_selection.clear();
             let mode = state.selection_mode;
             for (n, id) in items {
-                // Only ids that still exist at the current level (the topology may have changed).
+                // Only the selected objects' ids that still exist at the current level (the topology may have changed).
+                if !state.selection.contains(&n) {
+                    continue;
+                }
                 let Some(node) = state.scene.node(n) else { continue };
                 let mesh = node.cage_mesh();
                 let valid = match (mode, id) {
@@ -313,6 +321,26 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         }
         other => crate::poly_edit::execute(state, other),
     }
+}
+
+/// Whether a sub-object id is of the kind the level selects.
+fn same_level(mode: SelectionMode, id: SubObjectId) -> bool {
+    matches!(
+        (mode, id),
+        (SelectionMode::Vertex, SubObjectId::Vertex(_)) | (SelectionMode::Edge | SelectionMode::Border, SubObjectId::Edge(_)) | (SelectionMode::Face | SelectionMode::Element, SubObjectId::Face(_))
+    )
+}
+
+/// The named sub-object sets of the selected objects at the current level
+/// (the Main Toolbar's Named Selection Sets list at a sub-object level).
+pub fn named_sub_sets(state: &AppState) -> Vec<String> {
+    let mode = state.selection_mode;
+    state
+        .named_sub_selections
+        .iter()
+        .filter(|(_, items)| items.iter().any(|(n, id)| state.selection.contains(n) && same_level(mode, *id)))
+        .map(|(name, _)| name.clone())
+        .collect()
 }
 
 /// Selected nodes that are Editable Polys.

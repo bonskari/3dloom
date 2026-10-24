@@ -4,7 +4,7 @@
 pub mod command;
 pub mod modifier_list;
 mod material;
-mod render;
+pub mod render;
 pub mod execute;
 pub mod poly;
 mod poly_edit;
@@ -39,7 +39,8 @@ pub use spline::SplineSettings;
 pub use unwrap::{freeform_hit, FreeformHit};
 pub use state::{base_sub_levels, CompoundSettings};
 pub use execute::{execute, execute_json, is_hidden, selected_vertices, type_in_values};
-pub use state::{RenderRequest, TvLevel, TvMode, UvEditor, UvTexture, ExtrudeKind, PolyDrag, PolySettings, TessKind, PaintMode, PolyConstraint, SlicePlane, AlignPoint, AppState, PreviewSelect, SoftPaint, AxisConstraint, CenterMode, CloneKind, CoordSystem, GizmoPrefs, DisplayUnits, MirrorAxis, NormalAlignPicks, Prefs, SpacingContext, SystemUnit, UnitsSetup, DialogPurpose, PickMode, SelectionFilter, SelectionMode, SelectionRegion, SubObjectId, SubSelection, Tool, ViewKind, ViewState};
+pub use state::{RenderRequest, TvLevel, TvMode, UvEditor, UvTexture, ExtrudeKind, PolyDrag, PolySettings, TessKind, PaintMode, PolyConstraint, SlicePlane, AlignPoint, AppState, PreviewSelect, SoftPaint, AxisConstraint, CenterMode, CloneKind, CoordSystem, GizmoPrefs, DisplayUnits, MirrorAxis, NormalAlignPicks, Prefs, SpacingContext, SystemUnit, UnitsSetup, DialogPurpose, PickMode, SelectionFilter, SelectionMode, SelectionRegion, ScaleKind, SubObjectId, SubSelection, Tool, ViewKind, ViewState};
+pub use poly::named_sub_sets;
 pub mod keymap;
 pub mod settings;
 pub use keymap::{parse_chord, Chord, Key, Keymap};

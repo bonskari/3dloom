@@ -22,7 +22,7 @@ fn structure_grid(ui: &mut egui::Ui, salt: &str, s: &BipedStructure, height: boo
         if height {
             ui.label("Height:");
             let mut h = s.height.get();
-            if ui.add(egui::DragValue::new(&mut h).speed(0.1).range(loom_scene::biped::MIN_HEIGHT..=f32::MAX)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut h, loom_scene::biped::MIN_HEIGHT..=f32::MAX).speed(0.1)).changed() {
                 out = Some(("Height", h as f64));
             }
             ui.end_row();
@@ -36,7 +36,7 @@ fn structure_grid(ui: &mut egui::Ui, salt: &str, s: &BipedStructure, height: boo
         for (name, lo, hi) in BipedStructure::LINKS {
             ui.label(format!("{name}:"));
             let mut v = s.count(name).unwrap_or(lo);
-            if ui.add(egui::DragValue::new(&mut v).speed(0.05).range(lo..=hi)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut v, lo..=hi).speed(0.05)).changed() {
                 out = Some((name, v as f64));
             }
             ui.end_row();

@@ -309,6 +309,8 @@ pub fn hit(app: &LoomApp, l: &GizmoLayout, p: &Projection, pointer: egui::Pos2) 
     match app.state.active_tool {
         Tool::Move => move_gizmo::hit(l, p, pointer),
         Tool::Rotate => rotate_gizmo::hit(l, p, pointer),
+        // Uniform Scale: any part of the gizmo scales all three axes alike.
+        Tool::Scale if app.state.scale_kind == loom_commands::ScaleKind::Uniform => scale_gizmo::hit(l, p, pointer).map(|_| Handle::Uniform),
         Tool::Scale => scale_gizmo::hit(l, p, pointer),
         Tool::Select => None,
     }
@@ -399,7 +401,7 @@ pub fn drag(app: &mut LoomApp, drag: &mut DragState, l: &GizmoLayout, p: &Projec
             let f = target / drag.factor;
             if f.is_finite() && (f - 1.0).abs() > f32::EPSILON {
                 drag.factor = target;
-                let factors = scale_gizmo::factors(drag.handle, f);
+                let factors = if app.state.scale_kind == loom_commands::ScaleKind::Squash { scale_gizmo::squash_factors(drag.handle, f) } else { scale_gizmo::factors(drag.handle, f) };
                 drag.factors *= factors;
                 let _ = app.dispatch(Command::ScaleSelection { factors: factors.to_array(), system });
             }

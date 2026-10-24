@@ -75,6 +75,23 @@ pub fn factors(h: Handle, f: f32) -> Vec3 {
     }
 }
 
+/// Squash: the handle's axes scale by `f`, the others the opposite way so
+/// the volume stays (axis: 1/√f each; plane: 1/f² on the normal). The
+/// centre handle has no other axis and scales uniformly.
+pub fn squash_factors(h: Handle, f: f32) -> Vec3 {
+    match h {
+        Handle::Axis(a) => {
+            let u = move_gizmo::unit(a);
+            u * f + (Vec3::ONE - u) / f.sqrt()
+        }
+        Handle::Plane(pl) => {
+            let n = move_gizmo::unit(pl.normal());
+            (Vec3::ONE - n) * f + n / (f * f)
+        }
+        _ => factors(h, f),
+    }
+}
+
 /// Whether axis `a` is part of handle `h`.
 fn involves(h: Option<Handle>, a: Axis) -> bool {
     match h {

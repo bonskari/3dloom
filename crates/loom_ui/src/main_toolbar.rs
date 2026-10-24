@@ -5,7 +5,7 @@
 use crate::shortcuts::{menu_widget, tip, HoverShortcut};
 use crate::LoomApp;
 use eframe::egui;
-use loom_commands::{CenterMode, Command, CoordSystem, SelectionFilter, SelectionRegion, Tool};
+use loom_commands::{CenterMode, Command, CoordSystem, ScaleKind, SelectionFilter, SelectionRegion, Tool};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Plan {
@@ -24,7 +24,7 @@ const fn item(name: &'static str, since: Plan) -> Item {
     Item { name, since }
 }
 
-/// Main Toolbar contents, in order (render buttons are out of scope).
+/// Main Toolbar contents, in order.
 pub const ITEMS: &[Item] = &[
     item("Undo", Plan::Now),
     item("Redo", Plan::Now),
@@ -56,6 +56,9 @@ pub const ITEMS: &[Item] = &[
     item("Curve Editor", Plan::Phase8),
     item("Schematic View", Plan::Phase3),
     item("Material Editor", Plan::Phase5),
+    item("Render Setup", Plan::Now),
+    item("Rendered Frame Window", Plan::Now),
+    item("Render Production", Plan::Now),
 ];
 
 fn tool_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, action: &str) {
@@ -87,6 +90,41 @@ fn transform_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, tool: Too
             let _ = app.dispatch(Command::TransformTypeInDialogToggle);
         }
     }
+}
+
+/// Named Selection Sets: type a name and press Enter to name the selection
+/// (the sub-object selection at a sub-object level); the list next to it
+/// holds the object sets, or at a sub-object level the selected objects'
+/// sets of that level.
+fn named_selection_sets(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let sub_level = app.state.selection_mode != loom_commands::SelectionMode::Object;
+    let text_id = egui::Id::new("named_sets_field");
+    let mut text: String = ui.ctx().data(|d| d.get_temp(text_id)).unwrap_or_default();
+    let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text("Named Sel. Sets").desired_width(100.0)).on_hover_text("Named Selection Sets: type a name and press Enter");
+    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !text.trim().is_empty() {
+        let name = text.trim().to_owned();
+        let c = if sub_level { Command::NamedSubSelectionCopy { name } } else { Command::NamedSelectionSet { name } };
+        if let Err(e) = app.dispatch(c) {
+            app.state.status_prompt = e;
+        }
+    }
+    let names: Vec<String> = if sub_level { loom_commands::named_sub_sets(&app.state) } else { app.state.named_sets.keys().cloned().collect() };
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt("named_sets").selected_text("").width(14.0).show_ui(ui, |ui| {
+        for n in names {
+            if ui.button(&n).clicked() {
+                chosen = Some(n);
+            }
+        }
+    });
+    if let Some(name) = chosen {
+        text = name.clone();
+        let c = if sub_level { Command::NamedSubSelectionPaste { name } } else { Command::SelectNamedSet { name } };
+        if let Err(e) = app.dispatch(c) {
+            app.state.status_prompt = e;
+        }
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(text_id, text));
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
@@ -152,7 +190,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                     "Select and Move" => transform_button(ui, app, "Move", Tool::Move, "Select and Move"),
                     "Select and Rotate" => transform_button(ui, app, "Rotate", Tool::Rotate, "Select and Rotate"),
-                    "Select and Scale" => transform_button(ui, app, "Scale", Tool::Scale, "Select and Scale"),
+                    "Select and Scale" => {
+                        // Scale flyout: Uniform / Non-Uniform / Squash (Ctrl+E cycles).
+                        let kind = app.state.scale_kind;
+                        let label = match kind { ScaleKind::Uniform => "Scale", ScaleKind::NonUniform => "Scale NU", ScaleKind::Squash => "Squash" };
+                        transform_button(ui, app, label, Tool::Scale, "Select and Scale");
+                        egui::ComboBox::from_id_salt("scale_kind").selected_text("").width(14.0).show_ui(ui, |ui| {
+                            for k in ScaleKind::ALL {
+                                if ui.selectable_label(kind == k, k.label()).clicked() {
+                                    let _ = app.dispatch(Command::ScaleType { kind: k });
+                                }
+                            }
+                        });
+                    }
                     "Reference Coordinate System" => {
                         let cur = app.state.coord_system;
                         let name = |app: &LoomApp, id: loom_scene::NodeId| app.state.scene.node(id).map(|n| n.name.clone());
@@ -263,12 +313,36 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             let _ = app.dispatch(Command::EditNamedSelectionSets);
                         }
                     }
-                    "Named Selection Sets" => {
-                        let names: Vec<String> = app.state.named_sets.keys().cloned().collect();
-                        egui::ComboBox::from_id_salt("named_sets").selected_text("Named Sel. Sets").width(100.0).show_ui(ui, |ui| {
-                            for n in names {
-                                if ui.button(&n).clicked() {
-                                    let _ = app.dispatch(Command::SelectNamedSet { name: n.clone() });
+                    "Named Selection Sets" => named_selection_sets(ui, app),
+                    "Render Setup" => {
+                        ui.separator();
+                        if ui.button("Render Setup").on_hover_name(&app.state, "Render SetUp...").clicked() {
+                            app.dispatch_named("Render SetUp...");
+                        }
+                    }
+                    "Rendered Frame Window" => {
+                        if ui.selectable_label(app.state.rendered.open, "Frame Window").on_hover_name(&app.state, "Rendered Frame Window").clicked() {
+                            app.dispatch_named("Rendered Frame Window");
+                        }
+                    }
+                    "Render Production" => {
+                        // Render flyout: Production / Iterative (right-click).
+                        let iterative = app.state.rendered.iterative;
+                        let action = if iterative { "Render Iterative" } else { "Render" };
+                        let r = ui.button(if iterative { "Render (Iterative)" } else { "Render" }).on_hover_text(format!("{}; right-click: Render flyout", tip(&app.state, action, action)));
+                        if r.clicked() {
+                            app.dispatch_named(action);
+                        }
+                        let popup = ui.id().with("render_flyout");
+                        if r.secondary_clicked() {
+                            ui.memory_mut(|m| m.toggle_popup(popup));
+                        }
+                        egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+                            ui.set_min_width(140.0);
+                            for (l, it) in [("Render Production", false), ("Render Iterative", true)] {
+                                if ui.add(menu_widget(&app.state, l, if it { "Render Iterative" } else { "Render" })).clicked() {
+                                    let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
+                                    app.dispatch_named(if it { "Render Iterative" } else { "Render" });
                                 }
                             }
                         });
@@ -293,7 +367,7 @@ mod tests {
             "Select and Scale", "Reference Coordinate System", "Use Center", "Select and Manipulate", "Keyboard Shortcut Override Toggle",
             "Snaps Toggle", "Angle Snap Toggle", "Percent Snap Toggle", "Spinner Snap Toggle", "Edit Named Selection Sets",
             "Named Selection Sets", "Mirror", "Align", "Manage Layers", "Graphite Modeling Tools", "Curve Editor", "Schematic View",
-            "Material Editor",
+            "Material Editor", "Render Setup", "Rendered Frame Window", "Render Production",
         ];
         assert_eq!(names, expected);
         // Items of later plans are flagged, never drawn as dead buttons.
