@@ -1996,6 +1996,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     return crate::poly_edit::execute(state, C::AttachNode { id: id.0 });
                 }
                 Some(PickMode::SplineRefine | PickMode::SplineInsert) => return Err("Refine / Insert pick a segment, not an object".into()),
+                Some(PickMode::SplineFillet | PickMode::SplineChamfer) => return Err("Fillet / Chamfer drag on a selected vertex, not an object".into()),
                 Some(PickMode::UnwrapSplineMap) => {
                     let mapping = state.uv_editor.spline_map_mapping;
                     let normalize = state.unwrap_entry().and_then(|(n, i)| match &state.scene.node(n)?.modifiers[i].modifier {
