@@ -332,8 +332,12 @@ pub fn click(app: &mut LoomApp, p: egui::Pos2, rect: egui::Rect, view_proj: Mat4
                 let pts = segment_screen(&shape, si, seg, world, &screen);
                 let d = dist_to_polyline(p, &pts);
                 if d <= 8.0 && best.as_ref().is_none_or(|(_, _, _, bd, _)| d < *bd) {
-                    // Nearest parameter along the segment, by its sampled points.
-                    let n = (pts.len() - 1).max(1);
+                    // Nearest parameter along the segment, by points sampled evenly in
+                    // its parameter (a straight segment's two screen ends would put
+                    // the new knot off the cursor under perspective).
+                    let b = shape.splines[si].segment(seg).unwrap();
+                    let n = 64;
+                    let pts: Vec<egui::Pos2> = (0..=n).filter_map(|i| screen(world.transform_point3(loom_shape::interp::point_at(&b, i as f32 / n as f32)))).collect();
                     let (mut bt, mut bdist) = (0.0, f32::INFINITY);
                     for (i, w) in pts.windows(2).enumerate() {
                         let (a, b) = (w[0], w[1]);

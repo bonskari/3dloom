@@ -564,7 +564,7 @@ fn shift_lines_a_new_line_knot_up_with_the_last() {
     h.mods = egui::Modifiers::NONE;
     let k = line_world_knots(&h, id);
     assert_eq!(k.len(), 3);
-    assert!(k[1].x.abs() < 1e-3 && k[1].y > 25.0, "Shift keeps the second knot straight above the first: {:?}", k[1]);
+    assert!((k[1].x - k[0].x).abs() < 1e-4 && k[1].y > 25.0, "Shift keeps the second knot straight above the first: {:?}", k[1]);
     assert!((k[2].y - k[1].y).abs() < 1e-3 && k[2].x > 25.0, "and the third level with the second: {:?}", k[2]);
 }
 
@@ -640,7 +640,7 @@ fn refine_with_connect_by_clicks_and_right_click_ends_it() {
 fn fillet_mode_drags_on_a_selected_vertex() {
     let mut h = Harness::new();
     let id = spline_square(&mut h);
-    h.key(egui::Key::Num1);
+    h.cmd(Command::SelectionMode { mode: SelectionMode::Vertex });
     h.cmd(Command::SelectSub { node: None, ids: vec![0, 1], op: loom_commands::SelectOp::Replace });
     h.cmd(Command::SplineFilletMode { chamfer: false });
     let undo = h.app.state.undo.len();
