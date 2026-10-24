@@ -1,0 +1,572 @@
+//! Viewport side of the Editable Poly modes: Extrude / Chamfer drags,
+//! Target Weld, Insert Vertex, Edit Triangulation and Create picks, and
+//! their rubber bands.
+
+use crate::gizmo::Projection;
+use crate::viewport_widget::{creation_anchor, pick_edge, pick_face, pick_vertex, surface_hit_node, Pick};
+use crate::LoomApp;
+use eframe::egui;
+use glam::{Mat4, Vec3};
+use loom_commands::{Command, Dialog, PickMode, PolyDrag, PolySettingsKind, SelectionMode, SubObjectId};
+use loom_scene::NodeId;
+
+pub fn is_poly_pick(mode: Option<PickMode>) -> bool {
+    matches!(
+        mode,
+        Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::CreateVertex
+            | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB)
+    )
+}
+
+/// A click while a poly pick mode is on.
+pub fn click(app: &mut LoomApp, index: usize, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) {
+    let view_proj = proj * view;
+    match app.state.pick_mode {
+        Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon) => {
+            if let Some(Pick::SubObject { mesh, id: SubObjectId::Vertex(v) }) = pick_vertex(app, p, rect, view_proj) {
+                let node = app.world_meshes()[mesh].0;
+                let _ = app.dispatch(Command::PickSub { node: node.0, id: v.0 });
+            }
+        }
+        Some(PickMode::InsertVertex) => {
+            if let Some(Pick::SubObject { mesh, id: SubObjectId::Edge(e) }) = pick_edge(app, p, rect, view_proj) {
+                let (node, m) = &app.world_meshes()[mesh];
+                let Some((a, b)) = m.edge_vertices(e) else { return };
+                let (Some(pa), Some(pb)) = (m.vertex_position(a), m.vertex_position(b)) else { return };
+                let pr = Projection::new(view, proj, rect);
+                let t = match (pr.screen(pa), pr.screen(pb)) {
+                    (Some(sa), Some(sb)) => {
+                        let ab = sb - sa;
+                        if ab.length_sq() < 1e-6 { 0.5 } else { ((p - sa).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) }
+                    }
+                    _ => 0.5,
+                };
+                let _ = app.dispatch(Command::InsertVertexOnEdge { node: node.0, edge: e.0, t });
+            } else if let Some(Pick::SubObject { mesh, id: SubObjectId::Face(f) }) = pick_face(app, p, rect, view, proj) {
+                let node = app.world_meshes()[mesh].0;
+                if let Some((_, point, _)) = surface_hit_node(app, p, rect, view, proj) {
+                    let _ = app.dispatch(Command::InsertVertexInFace { node: node.0, face: f.0, point: point.to_array() });
+                }
+            }
+        }
+        Some(PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB) => {
+            if let Some(Pick::SubObject { mesh, id: SubObjectId::Face(f) }) = pick_face(app, p, rect, view, proj) {
+                let node = app.world_meshes()[mesh].0;
+                if let Some((_, point, _)) = surface_hit_node(app, p, rect, view, proj) {
+                    let _ = app.dispatch(Command::PickFacePoint { node: node.0, face: f.0, point: point.to_array() });
+                }
+            } else if matches!(app.state.pick_mode, Some(PickMode::QuickSliceA | PickMode::QuickSliceB)) {
+                // QuickSlice also takes points off the mesh (the construction plane).
+                if let Some((pt, _)) = creation_anchor(app, index, p, rect, view, proj) {
+                    let _ = app.dispatch(Command::PickFacePoint { node: app.state.selection.iter().next().map(|n| n.0).unwrap_or(0), face: u32::MAX, point: pt.to_array() });
+                }
+            }
+        }
+        Some(PickMode::CreateVertex) => {
+            let Some(node) = app.state.selection.iter().next().copied() else { return };
+            let point = surface_hit_node(app, p, rect, view, proj).map(|h| h.1).or_else(|| creation_anchor(app, index, p, rect, view, proj).map(|(a, _)| a));
+            if let Some(pt) = point {
+                let _ = app.dispatch(Command::CreateVertex { node: node.0, point: pt.to_array() });
+            }
+        }
+        _ => {}
+    }
+}
+
+#[derive(Clone, Copy)]
+struct DragState {
+    start: egui::Pos2,
+    upp: f32,
+    sel: usize,
+}
+
+/// Extrude / Chamfer mode drags: press on the viewport with a sub-object
+/// selection, drag to set the value, release to keep it. Returns true while
+/// the mode owns the pointer.
+pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState, hovered: bool, p: egui::Pos2, projection: &Projection) -> bool {
+    let Some(mode) = app.state.poly_drag else { return false };
+    if app.state.selection_mode == SelectionMode::Object {
+        return false;
+    }
+    let id = egui::Id::new("poly_drag_state");
+    let sel_id = id.with("selection");
+    let kind = match mode {
+        PolyDrag::Extrude => PolySettingsKind::Extrude,
+        PolyDrag::Chamfer => PolySettingsKind::Chamfer,
+        PolyDrag::Inset => PolySettingsKind::Inset,
+        PolyDrag::Bevel => PolySettingsKind::Bevel,
+        PolyDrag::Outline => PolySettingsKind::Outline,
+        PolyDrag::Hinge => PolySettingsKind::Hinge,
+    };
+    // Hinge From Edge: without a hinge the first click picks the edge.
+    if pointer.button_released(egui::PointerButton::Primary) {
+        app.poly_dragging = false;
+    }
+    if mode == PolyDrag::Hinge && app.state.poly_settings.hinge_edge.is_none() {
+        if pointer.button_pressed(egui::PointerButton::Primary) && hovered {
+            app.poly_dragging = true;
+            if let Some(Pick::SubObject { mesh, id: SubObjectId::Edge(e) }) = pick_edge(app, p, projection.rect, projection.proj * projection.view) {
+                let node = app.world_meshes()[mesh].0;
+                app.state.poly_settings.hinge_edge = Some((node, e.0));
+            }
+        }
+        return true;
+    }
+    let dialog = Dialog::PolySettings(kind);
+    let mut st: Option<DragState> = ctx.data(|d| d.get_temp(id));
+    if st.is_none() && pointer.button_pressed(egui::PointerButton::Primary) && hovered && !app.state.sub_selection.is_empty() {
+        app.poly_dragging = true;
+        let centre = selection_centre(app);
+        let sel: Vec<(u64, SubObjectId)> = app.state.sub_selection.iter().map(|(n, s)| (n.0, s)).collect();
+        st = Some(DragState { start: p, upp: projection.units_per_pixel(centre).max(1e-6), sel: sel.len() });
+        ctx.data_mut(|d| {
+            d.insert_temp(id, st.unwrap());
+            d.insert_temp(sel_id, sel);
+        });
+    }
+    let Some(s) = st else { return false };
+    let sel: Vec<(u64, SubObjectId)> = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_default();
+    let delta = s.start - p;
+    let ps = app.state.poly_settings;
+    let cmd = match mode {
+        // Up = positive height.
+        PolyDrag::Extrude => Command::Extrude { height: delta.y * s.upp, width: ps.extrude_width, kind: ps.extrude_kind },
+        PolyDrag::Chamfer => Command::Chamfer { amount: delta.length() * s.upp, segments: ps.chamfer_segments, open: ps.chamfer_open },
+        PolyDrag::Inset => Command::Inset { amount: delta.length() * s.upp, by_polygon: ps.inset_by_polygon },
+        // Bevel: up/down = height, sideways = outline (a two-stage drag folded into one).
+        PolyDrag::Bevel => Command::Bevel { height: delta.y * s.upp, outline: -delta.x * s.upp, kind: ps.bevel_kind },
+        PolyDrag::Outline => Command::Outline { amount: delta.y * s.upp },
+        // Half a degree per pixel.
+        PolyDrag::Hinge => Command::HingeFromEdge { angle: delta.y * 0.5, segments: ps.hinge_segments, edge: None },
+    };
+    if pointer.is_moving() && s.sel > 0 {
+        app.preview_undo();
+        app.preview_apply(dialog, |app| {
+            app.state.sub_selection.clear();
+            for (n, so) in &sel {
+                app.state.sub_selection.insert(NodeId(*n), *so);
+            }
+            let _ = app.dispatch(cmd.clone());
+        });
+        ctx.request_repaint();
+    }
+    if pointer.button_released(egui::PointerButton::Primary) || !pointer.button_down(egui::PointerButton::Primary) {
+        app.preview_keep();
+        ctx.data_mut(|d| {
+            d.remove::<DragState>(id);
+            d.remove::<Vec<(u64, SubObjectId)>>(sel_id);
+        });
+    }
+    true
+}
+
+fn selection_centre(app: &LoomApp) -> Vec3 {
+    let mut sum = Vec3::ZERO;
+    let mut n = 0.0;
+    for (node, ids) in app.state.sub_selection.by_node() {
+        let Some((_, mesh)) = app.world_meshes().iter().find(|(id, _)| *id == node) else { continue };
+        for so in ids {
+            let vs: Vec<loom_mesh::VertexId> = match so {
+                SubObjectId::Vertex(v) => vec![*v],
+                SubObjectId::Edge(e) => mesh.edge_vertices(*e).map(|(a, b)| vec![a, b]).unwrap_or_default(),
+                SubObjectId::Face(f) => mesh.face_vertex_ids(*f).unwrap_or_default(),
+            };
+            for v in vs {
+                if let Some(p) = mesh.vertex_position(v) {
+                    sum += p;
+                    n += 1.0;
+                }
+            }
+        }
+    }
+    if n > 0.0 { sum / n } else { Vec3::ZERO }
+}
+
+fn vertex_screen(app: &LoomApp, projection: &Projection, node: NodeId, v: u32) -> Option<egui::Pos2> {
+    let (_, mesh) = app.world_meshes().iter().find(|(id, _)| *id == node)?;
+    projection.screen(mesh.vertex_position(loom_mesh::VertexId(v))?)
+}
+
+/// Rubber bands: Target Weld / Edit Tri from the first pick to the pointer,
+/// Create's polyline through the picked vertices.
+pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hover: Option<egui::Pos2>) {
+    let stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255));
+    draw_skin(painter, app, projection);
+    draw_normals(painter, app, projection);
+    // Modifier gizmo: the input's bounding box in the gizmo frame, orange.
+    for id in app.state.selection.iter() {
+        let Some(n) = app.state.scene.node(*id) else { continue };
+        let Some(a) = n.active_entry else { continue };
+        let Some(slot) = n.modifiers.get(a) else { continue };
+        if let loom_scene::Modifier::FFD { kind, dims, points, gizmo, .. } = &slot.modifier {
+            // FFD: the lattice in orange, control points green, selected ones red.
+            let world = app.state.scene.object_matrix(*id) * gizmo.matrix();
+            let pts: Vec<Option<egui::Pos2>> = points.iter().map(|p| projection.screen(world.transform_point3(*p))).collect();
+            let col = egui::Color32::from_rgb(255, 160, 40);
+            for (a, b) in loom_mesh::ffd::lattice_edges(*dims, *kind == 4) {
+                if let (Some(p), Some(q)) = (pts[a], pts[b]) {
+                    painter.line_segment([p, q], egui::Stroke::new(1.0_f32, col));
+                }
+            }
+            if slot.sub_level == 1 || slot.sub_level == 3 {
+                for (i, p) in pts.iter().enumerate() {
+                    if let Some(p) = p {
+                        let sel = app.state.ffd_selection.contains(&(i as u32));
+                        let c = if sel { egui::Color32::from_rgb(255, 40, 40) } else { egui::Color32::from_rgb(60, 220, 60) };
+                        painter.rect_filled(egui::Rect::from_center_size(*p, egui::vec2(6.0, 6.0)), 0.0, c);
+                    }
+                }
+            }
+            continue;
+        }
+        if let loom_scene::Modifier::UnwrapUVW(u) = &slot.modifier {
+            // Unwrap UVW: seams in blue on the object, the map gizmo in yellow.
+            let world = app.state.scene.object_matrix(*id);
+            let input = match a.checked_sub(1) {
+                Some(prev) => app.state.scene.evaluated(*id, Some(prev)).value.mesh.clone(),
+                None => n.object.display_output(),
+            };
+            if u.show_seams.get() && !u.seams.is_empty() {
+                let w: f32 = if u.thin_seams.get() { 1.5 } else { 3.0 };
+                let blue = egui::Stroke::new(w, egui::Color32::from_rgb(60, 120, 255));
+                for (va, vb) in &u.seams {
+                    let (Some(pa), Some(pb)) = (input.vertex_position(loom_mesh::VertexId(*va)), input.vertex_position(loom_mesh::VertexId(*vb))) else { continue };
+                    if let (Some(p), Some(q)) = (projection.screen(world.transform_point3(pa)), projection.screen(world.transform_point3(pb))) {
+                        painter.line_segment([p, q], blue);
+                    }
+                }
+            }
+            if app.state.uv_editor.display_quick_map_gizmo || u.map_kind.get() > 0 {
+                let g = world * u.map_gizmo.matrix();
+                let (w, l) = (u.map_size.x * 0.5, u.map_size.y * 0.5);
+                let col = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 220, 60));
+                let corners = [Vec3::new(-w, -l, 0.0), Vec3::new(w, -l, 0.0), Vec3::new(w, l, 0.0), Vec3::new(-w, l, 0.0)];
+                for i in 0..4 {
+                    if let (Some(p), Some(q)) = (projection.screen(g.transform_point3(corners[i])), projection.screen(g.transform_point3(corners[(i + 1) % 4]))) {
+                        painter.line_segment([p, q], col);
+                    }
+                }
+            }
+            continue;
+        }
+        if let loom_scene::Modifier::UVWMap { projection: mapping, length, width, height, gizmo, .. } = &slot.modifier {
+            // The mapping gizmo: a plane, cylinder, sphere or box of the map's size.
+            let world = app.state.scene.object_matrix(*id) * gizmo.matrix();
+            let (w, l, h) = (width.get() * 0.5, length.get() * 0.5, height.get() * 0.5);
+            let col = egui::Color32::from_rgb(255, 200, 40);
+            let stroke = egui::Stroke::new(1.0_f32, col);
+            let seg = |a: Vec3, b: Vec3| {
+                if let (Some(p), Some(q)) = (projection.screen(world.transform_point3(a)), projection.screen(world.transform_point3(b))) {
+                    painter.line_segment([p, q], stroke);
+                }
+            };
+            let circle = |z: f32, r: f32, axis: u8| {
+                let n = 32;
+                for k in 0..n {
+                    let (a0, a1) = (k as f32 / n as f32 * std::f32::consts::TAU, (k + 1) as f32 / n as f32 * std::f32::consts::TAU);
+                    let pt = |a: f32| match axis {
+                        0 => Vec3::new(z, r * a.cos(), r * a.sin()),
+                        1 => Vec3::new(r * a.cos(), z, r * a.sin()),
+                        _ => Vec3::new(r * a.cos(), r * a.sin(), z),
+                    };
+                    seg(pt(a0), pt(a1));
+                }
+            };
+            match mapping.get() {
+                1 => {
+                    let r = w.max(l);
+                    circle(-h, r, 2);
+                    circle(h, r, 2);
+                    for k in 0..4 {
+                        let a = k as f32 * std::f32::consts::FRAC_PI_2;
+                        seg(Vec3::new(r * a.cos(), r * a.sin(), -h), Vec3::new(r * a.cos(), r * a.sin(), h));
+                    }
+                }
+                2 | 3 => {
+                    let r = w.max(l).max(h);
+                    circle(0.0, r, 0);
+                    circle(0.0, r, 1);
+                    circle(0.0, r, 2);
+                }
+                4 | 6 => {
+                    for (a, b) in [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)] {
+                        let c = |i: u8| Vec3::new(if i & 1 == 0 { -w } else { w }, if i & 2 == 0 { -l } else { l }, if i & 4 == 0 { -h } else { h });
+                        seg(c(a), c(b));
+                    }
+                }
+                _ => {
+                    seg(Vec3::new(-w, -l, 0.0), Vec3::new(w, -l, 0.0));
+                    seg(Vec3::new(w, -l, 0.0), Vec3::new(w, l, 0.0));
+                    seg(Vec3::new(w, l, 0.0), Vec3::new(-w, l, 0.0));
+                    seg(Vec3::new(-w, l, 0.0), Vec3::new(-w, -l, 0.0));
+                    // The "up" tick on the top edge.
+                    seg(Vec3::new(0.0, l, 0.0), Vec3::new(0.0, l + l * 0.2, 0.0));
+                }
+            }
+            continue;
+        }
+        if let loom_scene::Modifier::AffectRegion(d) = &slot.modifier {
+            // Affect Region: the pull vector from the start point to the end point.
+            let world = app.state.scene.object_matrix(*id);
+            let col = egui::Color32::from_rgb(255, 160, 40);
+            if let (Some(s), Some(e)) = (projection.screen(world.transform_point3(Vec3::ZERO)), projection.screen(world.transform_point3(d.gizmo.position.get()))) {
+                painter.line_segment([s, e], egui::Stroke::new(1.5_f32, col));
+                painter.circle_stroke(s, 4.0, egui::Stroke::new(1.5_f32, col));
+                painter.circle_filled(e, 4.0, col);
+            }
+            continue;
+        }
+        let Some(g) = slot.modifier.gizmo() else { continue };
+        let input = match a.checked_sub(1) {
+            Some(prev) => app.state.scene.evaluated(*id, Some(prev)).value.mesh.clone(),
+            None => n.object.display_output(),
+        };
+        let (lo, hi) = input.aabb();
+        let world = app.state.scene.object_matrix(*id) * g.matrix();
+        let ginv = g.matrix().inverse();
+        // Box corners in gizmo space from the object-space bounds.
+        let corners: Vec<Vec3> = (0..8).map(|i| {
+            let c = Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z });
+            ginv.transform_point3(c)
+        }).collect();
+        let (mut glo, mut ghi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+        for c in &corners {
+            glo = glo.min(*c);
+            ghi = ghi.max(*c);
+        }
+        let col = egui::Color32::from_rgb(255, 160, 40);
+        let pts: Vec<Option<egui::Pos2>> = (0..8).map(|i| {
+            let c = Vec3::new(if i & 1 == 0 { glo.x } else { ghi.x }, if i & 2 == 0 { glo.y } else { ghi.y }, if i & 4 == 0 { glo.z } else { ghi.z });
+            projection.screen(world.transform_point3(c))
+        }).collect();
+        for (a, b) in [(0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7)] {
+            if let (Some(p), Some(q)) = (pts[a], pts[b]) {
+                painter.line_segment([p, q], egui::Stroke::new(1.0_f32, col));
+            }
+        }
+        if let Some(c) = projection.screen(world.transform_point3(Vec3::ZERO)) {
+            painter.circle_stroke(c, 4.0, egui::Stroke::new(1.5_f32, col));
+        }
+    }
+    if app.state.slice_plane_mode {
+        let sp = app.state.slice_plane;
+        let (x, y) = (sp.rotation * Vec3::X * sp.size, sp.rotation * Vec3::Y * sp.size);
+        let corners = [sp.origin - x - y, sp.origin + x - y, sp.origin + x + y, sp.origin - x + y];
+        let pts: Vec<egui::Pos2> = corners.iter().filter_map(|c| projection.screen(*c)).collect();
+        if pts.len() == 4 {
+            painter.add(egui::Shape::convex_polygon(pts.clone(), egui::Color32::from_rgba_unmultiplied(255, 220, 60, 40), egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 220, 60))));
+        }
+    }
+    match app.state.pick_mode {
+        Some(PickMode::QuickSliceB | PickMode::CutB) => {
+            if let (Some((_, _, a)), Some(h)) = (app.state.pick_point_a, hover) {
+                if let Some(sa) = projection.screen(a) {
+                    painter.line_segment([sa, h], stroke);
+                    painter.circle_stroke(sa, 4.0, stroke);
+                }
+            }
+        }
+        Some(PickMode::TargetWeldTarget | PickMode::EditTriangulationB) => {
+            if let (Some((node, v)), Some(h)) = (app.state.pick_source, hover) {
+                if let Some(sp) = vertex_screen(app, projection, node, v) {
+                    painter.line_segment([sp, h], stroke);
+                    painter.circle_stroke(sp, 4.0, stroke);
+                }
+            }
+        }
+        Some(PickMode::CreatePolygon) => {
+            let pts: Vec<egui::Pos2> = app.state.create_verts.iter().filter_map(|(n, v)| vertex_screen(app, projection, *n, *v)).collect();
+            for w in pts.windows(2) {
+                painter.line_segment([w[0], w[1]], stroke);
+            }
+            if let (Some(last), Some(h)) = (pts.last(), hover) {
+                painter.line_segment([*last, h], stroke);
+            }
+            for p in &pts {
+                painter.circle_filled(*p, 3.0, egui::Color32::from_rgb(255, 255, 255));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Screen positions of the active FFD entry's control points, when its
+/// Control Points or Set Volume level is on.
+/// Skin > Edit Envelopes: the current bone's envelope capsule (inner red,
+/// outer purple), cross-section rings and the vertices coloured by weight.
+/// Edit Normals at the Normal level: every normal as a line from its corner's
+/// vertex (blue, selected red), Display Length long.
+fn draw_normals(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
+    let Some((id, index)) = loom_commands::normals::entry(&app.state) else { return };
+    let Some(n) = app.state.scene.node(id) else { return };
+    if n.active_entry != Some(index) || n.modifiers[index].sub_level != 1 {
+        return;
+    }
+    let loom_scene::Modifier::EditNormals(d) = &n.modifiers[index].modifier else { return };
+    let input = loom_commands::normals::input_mesh(&app.state, id, index);
+    let groups = d.groups_for(&input);
+    let world = app.state.scene.object_matrix(id);
+    let all = d.normals(&input, &groups);
+    let mut drawn = std::collections::BTreeSet::new();
+    for (i, g) in groups.iter().enumerate() {
+        if *g == loom_scene::edit_normals::NO_GROUP || !drawn.insert(*g) {
+            continue;
+        }
+        let v = input.half_edges()[i].origin;
+        let Some(p) = input.vertex_position(v) else { continue };
+        let dir = all.get(g).copied().unwrap_or_default();
+        let a = world.transform_point3(p);
+        let b = world.transform_point3(p + dir * d.display_length);
+        if let (Some(sa), Some(sb)) = (projection.screen(a), projection.screen(b)) {
+            let c = if d.selection.contains(g) { egui::Color32::from_rgb(255, 60, 60) } else { egui::Color32::from_rgb(80, 120, 255) };
+            painter.line_segment([sa, sb], egui::Stroke::new(1.5_f32, c));
+        }
+    }
+}
+
+fn draw_skin(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
+    if !app.state.skin_active() {
+        return;
+    }
+    let Some((id, weights)) = loom_commands::skin::current_bone_weights(&app.state) else { return };
+    let show_env = app.state.skin_filter_envelopes && !loom_commands::skin::entry(&app.state).map(|e| e.data.display.no_envelopes).unwrap_or(true);
+    if show_env {
+        if let Some((start, end, inner, outer, sections)) = loom_commands::skin::current_envelope_world(&app.state) {
+            let axis = (end - start).normalize_or_zero();
+            let (u, v) = {
+                let a = if axis.x.abs() < 0.9 { glam::Vec3::X } else { glam::Vec3::Y };
+                let u = axis.cross(a).normalize_or_zero();
+                (u, axis.cross(u))
+            };
+            let ring = |centre: glam::Vec3, r: f32, colour: egui::Color32| {
+                let pts: Vec<Option<egui::Pos2>> = (0..24).map(|i| { let t = i as f32 / 24.0 * std::f32::consts::TAU; projection.screen(centre + (u * t.cos() + v * t.sin()) * r) }).collect();
+                for i in 0..24 {
+                    if let (Some(a), Some(b)) = (pts[i], pts[(i + 1) % 24]) {
+                        painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour));
+                    }
+                }
+            };
+            let red = egui::Color32::from_rgb(230, 60, 60);
+            let purple = egui::Color32::from_rgb(170, 80, 220);
+            ring(start, inner[0], red);
+            ring(end, inner[1], red);
+            ring(start, outer[0], purple);
+            ring(end, outer[1], purple);
+            if app.state.skin_filter_cross_sections {
+                for (t, i, o) in sections {
+                    let c = start.lerp(end, t);
+                    ring(c, i, red);
+                    ring(c, o, purple);
+                }
+            }
+            // Four lines along the capsule for each radius.
+            for (r0, r1, colour) in [(inner[0], inner[1], red), (outer[0], outer[1], purple)] {
+                for dir in [u, v, -u, -v] {
+                    if let (Some(a), Some(b)) = (projection.screen(start + dir * r0), projection.screen(end + dir * r1)) {
+                        painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour));
+                    }
+                }
+            }
+            if let (Some(a), Some(b)) = (projection.screen(start), projection.screen(end)) {
+                let handle = app.state.skin_handle;
+                painter.rect_filled(egui::Rect::from_center_size(a, egui::vec2(7.0, 7.0)), 0.0, if handle == Some(0) { egui::Color32::WHITE } else { red });
+                painter.rect_filled(egui::Rect::from_center_size(b, egui::vec2(7.0, 7.0)), 0.0, if handle == Some(1) { egui::Color32::WHITE } else { red });
+            }
+        }
+    }
+    let selection: std::collections::BTreeSet<u32> = loom_commands::skin::selection(&app.state).into_iter().collect();
+    if app.state.skin_filter_vertices {
+        let Some((_, mesh)) = app.world_meshes().iter().find(|(n, _)| *n == id) else { return };
+        for (i, w) in weights.iter().enumerate() {
+            let Some(p) = mesh.vertex_position(loom_mesh::VertexId(i as u32)).and_then(|p| projection.screen(p)) else { continue };
+            let selected = selection.contains(&(i as u32));
+            let c = loom_commands::skin::weight_color(*w);
+            let colour = egui::Color32::from_rgb(c[0], c[1], c[2]);
+            if selected {
+                painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(7.0, 7.0)), 0.0, egui::Color32::WHITE);
+            }
+            painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(if selected { 5.0 } else { 4.0 }, if selected { 5.0 } else { 4.0 })), 0.0, colour);
+        }
+    }
+}
+
+/// Click / region selection of Skin vertices at the Envelope level.
+pub fn skin_pick(app: &mut LoomApp, projection: &Projection, region: Option<&crate::region::Region>, p: egui::Pos2, mods: loom_input::Modifiers) -> bool {
+    if !loom_commands::skin::picks_vertices(&app.state) {
+        return false;
+    }
+    let Some((id, _)) = app.state.skin_entry() else { return false };
+    let Some((_, mesh)) = app.world_meshes().iter().find(|(n, _)| *n == id) else { return false };
+    let pts: Vec<Option<egui::Pos2>> = (0..mesh.vertex_count()).map(|i| mesh.vertex_position(loom_mesh::VertexId(i as u32)).and_then(|q| projection.screen(q))).collect();
+    let hits: Vec<u32> = match region {
+        Some(r) => pts.iter().enumerate().filter_map(|(i, sp)| sp.filter(|sp| r.contains(*sp)).map(|_| i as u32)).collect(),
+        None => pts
+            .iter()
+            .enumerate()
+            .filter_map(|(i, sp)| sp.map(|sp| (i as u32, sp.distance(p))))
+            .filter(|(_, d)| *d <= 8.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| vec![i])
+            .unwrap_or_default(),
+    };
+    if hits.is_empty() && region.is_none() {
+        // A click on a bone makes it the current bone.
+        if let Some(bone) = pick_bone(app, p, projection) {
+            let _ = app.dispatch(Command::SkinSelectBone { id: bone.0 });
+            return true;
+        }
+    }
+    let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
+    let _ = app.dispatch(Command::SkinSelectVertices { ids: hits, op });
+    true
+}
+
+/// The Skin bone whose projected segment is nearest the pointer (within 10 px).
+fn pick_bone(app: &LoomApp, p: egui::Pos2, projection: &Projection) -> Option<NodeId> {
+    let e = loom_commands::skin::entry(&app.state).ok()?;
+    let mut best: Option<(f32, NodeId)> = None;
+    for b in &e.data.bones {
+        let w = app.state.scene.world_matrix(b.node);
+        let len = app.state.scene.node(b.node).and_then(|n| n.object.bone_length()).unwrap_or(1.0);
+        let (Some(a), Some(c)) = (projection.screen(w.transform_point3(glam::Vec3::ZERO)), projection.screen(w.transform_point3(glam::Vec3::X * len))) else { continue };
+        let ab = c - a;
+        let t = if ab.length_sq() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+        let d = (a + ab * t).distance(p);
+        if d <= 10.0 && best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, b.node));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+pub fn ffd_points_on_screen(app: &LoomApp, projection: &Projection) -> Option<Vec<Option<egui::Pos2>>> {
+    let (id, a) = app.state.ffd_active()?;
+    let n = app.state.scene.node(id)?;
+    let slot = n.modifiers.get(a)?;
+    if slot.sub_level != 1 && slot.sub_level != 3 {
+        return None;
+    }
+    let loom_scene::Modifier::FFD { points, gizmo, .. } = &slot.modifier else { return None };
+    let world = app.state.scene.object_matrix(id) * gizmo.matrix();
+    Some(points.iter().map(|p| projection.screen(world.transform_point3(*p))).collect())
+}
+
+/// Click / region selection of FFD control points. Returns true when the
+/// active entry's control point level consumed the pick.
+pub fn ffd_pick(app: &mut LoomApp, projection: &Projection, region: Option<&crate::region::Region>, p: egui::Pos2, mods: loom_input::Modifiers) -> bool {
+    let Some(pts) = ffd_points_on_screen(app, projection) else { return false };
+    let hits: Vec<u32> = match region {
+        Some(r) => pts.iter().enumerate().filter_map(|(i, sp)| sp.filter(|sp| r.contains(*sp)).map(|_| i as u32)).collect(),
+        None => pts
+            .iter()
+            .enumerate()
+            .filter_map(|(i, sp)| sp.map(|sp| (i as u32, sp.distance(p))))
+            .filter(|(_, d)| *d <= 8.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| vec![i])
+            .unwrap_or_default(),
+    };
+    let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
+    let _ = app.dispatch(Command::SelectControlPoints { op, indices: hits });
+    true
+}

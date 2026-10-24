@@ -1,0 +1,92 @@
+Affect Backfacing	
+Align To Grid	
+Align To View	
+Attach	
+Attach List	
+Auto Smooth	
+Bevel Mode	Shift+Ctrl+B
+Bevel Settings	
+Border Level	3
+Break	Shift+B
+Bridge	
+Bridge Settings	
+Cap	
+Chamfer Mode	Shift+Ctrl+C
+Chamfer Settings	
+Collapse	
+Connect	Shift+Ctrl+E
+Connect Edge Settings	
+Constrain to Edges	Shift+X
+Constrain to Faces	
+Constrain to None	
+Constrain to Normals	
+Create	
+Create Shape From Edges	
+Cut	Alt+C
+Detach	
+Edge Level	2
+Edit Soft Selection Mode	
+Edit Triangulation Mode	
+Element Level	5
+Extrude along Spline Mode	
+Extrude along Spline Settings	
+Extrude Mode	Shift+E
+Extrude Settings	
+Flip Normals	
+Grow Selection	Ctrl+PageUp
+Hide	Alt+H
+Hide Unselected	Alt+I
+Hinge from Edge Mode	
+Hinge from Edge Settings	
+Ignore Backfacing in Selections	
+Insert Vertex Mode	
+Inset Mode	
+Inset Settings	
+Lock Soft Selection	
+Make Planar	
+MeshSmooth	
+MeshSmooth Settings	
+Object Level	6
+Outline Mode	
+Outline Settings	
+Paint Deform Push/Pull	
+Paint Deform Relax	
+Paint Soft Selection	
+Polygon Level	4
+Preview Select Mode	
+Quickslice Mode	Shift+Ctrl+Q
+Remove	
+Remove Isolated Vertices	
+Remove Unused Map Vertices	
+Repeat Last Operation	;
+Reset Slice Plane	
+Retriangulate	
+Select By Vertex	
+Select Edge Loop	
+Select Edge Loop Down	
+Select Edge Loop Down Add	
+Select Edge Loop Down Subtract	
+Select Edge Loop Up	
+Select Edge Loop Up Add	
+Select Edge Loop Up Subtract	
+Select Edge Ring	
+Select Edge Ring Down	
+Select Edge Ring Down Add	
+Select Edge Ring Down Subtract	
+Select Edge Ring Up	
+Select Edge Ring Up Add	
+Select Edge Ring Up Subtract	
+Shaded Face Toggle	
+Shrink Selection	Ctrl+PageDown
+Slice	
+Slice Plane Mode	
+Split Edges	
+Target Weld Mode	Shift+Ctrl+W
+Tessellate	
+Tessellate Settings	
+Turn	
+Unhide All	Alt+U
+Use Soft Selection	
+Vertex Level	1
+Weld Settings	
+	

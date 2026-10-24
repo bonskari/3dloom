@@ -1,0 +1,158 @@
+//! Phase 9 subdivision and caches: HSDS (hierarchical subdivision of
+//! chosen polygons) and Point Cache / Point Cache (WSM) playing back .pc2
+//! files.
+
+use crate::modifier::{EvalCtx, StackValue};
+use crate::param::Param;
+use glam::Vec3;
+use loom_mesh::pc2::Pc2;
+use loom_mesh::{FaceId, Mesh};
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, OnceLock};
+
+/// One HSDS level: the polygons of the mesh at that level that split, and
+/// that mesh's counts (a topology change below drops the levels).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HsdsLevel {
+    pub faces: Vec<u32>,
+    pub vertex_count: usize,
+    pub face_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct HsdsData {
+    pub levels: Vec<HsdsLevel>,
+    pub smooth_result: bool,
+    /// The finest level's mesh, the cage picked at the sub-object levels
+    /// (rebuilt by the commands; not saved).
+    #[serde(skip)]
+    pub cage: Mesh,
+}
+
+/// The mesh after every level, or the input and a warning when the input no
+/// longer has the topology the levels were made on.
+pub fn hsds_mesh(d: &HsdsData, input: &Mesh) -> Result<(Mesh, Option<String>), String> {
+    let s = if d.smooth_result { 1.0 } else { 0.0 };
+    let mut m = input.clone();
+    for (i, level) in d.levels.iter().enumerate() {
+        if m.vertex_count() != level.vertex_count || m.face_count() != level.face_count {
+            return Ok((input.clone(), Some(format!("HSDS: the topology below changed at level {}; its {} subdivision level(s) were dropped", i + 1, d.levels.len()))));
+        }
+        let faces: Vec<FaceId> = level.faces.iter().copied().filter(|f| (*f as usize) < m.face_count()).map(FaceId).collect();
+        m = loom_mesh::geom_ops::msmooth_faces(&m, Some(&faces), s, false, false)?;
+    }
+    Ok((m, None))
+}
+
+pub fn hsds(d: &HsdsData, mut v: StackValue) -> Result<StackValue, String> {
+    let (m, warning) = hsds_mesh(d, &v.mesh)?;
+    if let Some(w) = warning {
+        v.warnings.push(w);
+        return Ok(v);
+    }
+    v.mesh = m;
+    v.selection = None;
+    Ok(v)
+}
+
+/// Adaptive Subdivision: up to `max_level` new levels, each splitting the
+/// polygons that have an edge whose faces meet at more than `max_angle`
+/// degrees.
+pub fn hsds_adaptive(d: &mut HsdsData, input: &Mesh, max_level: u32, max_angle: f32) -> Result<(), String> {
+    let (mut m, warning) = hsds_mesh(d, input)?;
+    if let Some(w) = warning {
+        return Err(w);
+    }
+    let cos_limit = max_angle.to_radians().cos();
+    for _ in 0..max_level {
+        let mut sharp = std::collections::BTreeSet::new();
+        for (i, he) in m.half_edges().iter().enumerate() {
+            let (Some(f), Some(g)) = (he.face, m.half_edges()[he.twin.0 as usize].face) else { continue };
+            if (i as u32) < he.twin.0 && m.face_normal(f).dot(m.face_normal(g)) < cos_limit {
+                sharp.insert(f.0);
+                sharp.insert(g.0);
+            }
+        }
+        if sharp.is_empty() {
+            break;
+        }
+        d.levels.push(HsdsLevel { faces: sharp.into_iter().collect(), vertex_count: m.vertex_count(), face_count: m.face_count() });
+        let level = d.levels.last().unwrap();
+        let faces: Vec<FaceId> = level.faces.iter().map(|f| FaceId(*f)).collect();
+        m = loom_mesh::geom_ops::msmooth_faces(&m, Some(&faces), if d.smooth_result { 1.0 } else { 0.0 }, false, false)?;
+    }
+    d.cage = m;
+    Ok(())
+}
+
+/// Point Cache / Point Cache (WSM): plays a .pc2 file back onto the mesh.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PointCacheData {
+    pub path: String,
+    pub strength: Param<f32>,
+    /// Relative Offset: the recorded motion (from the first sample) is added
+    /// to the input, scaled by Strength; off: the input moves toward the cache.
+    pub relative: bool,
+    /// Playback Type: 0 Original Range, 1 Custom Start (`start_frame`).
+    pub playback: u32,
+    pub start_frame: f32,
+    /// The WSM: the file holds world positions.
+    pub world: bool,
+    #[serde(skip)]
+    pub data: OnceLock<Option<Arc<Pc2>>>,
+}
+
+impl Default for PointCacheData {
+    fn default() -> Self {
+        Self { path: String::new(), strength: Param::new(1.0), relative: false, playback: 0, start_frame: 0.0, world: false, data: OnceLock::new() }
+    }
+}
+
+impl PointCacheData {
+    /// The loaded file (read once per copy of the modifier; None when it cannot be read).
+    pub fn cache(&self) -> Option<Arc<Pc2>> {
+        if self.path.is_empty() {
+            return None;
+        }
+        self.data.get_or_init(|| std::fs::File::open(&self.path).ok().and_then(|f| Pc2::read(std::io::BufReader::new(f)).ok()).map(Arc::new)).clone()
+    }
+
+    /// Loads `path` now, so a bad file is refused at once.
+    pub fn load(&mut self, path: &str) -> Result<(), String> {
+        let f = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+        let pc = Pc2::read(std::io::BufReader::new(f)).map_err(|e| format!("{path}: {e}"))?;
+        self.path = path.to_string();
+        self.data = OnceLock::new();
+        let _ = self.data.set(Some(Arc::new(pc)));
+        Ok(())
+    }
+}
+
+pub fn point_cache(d: &PointCacheData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<StackValue, String> {
+    if d.path.is_empty() {
+        return Ok(v);
+    }
+    let Some(pc) = d.cache() else {
+        v.warnings.push(format!("Point Cache: cannot read {}", d.path));
+        return Ok(v);
+    };
+    let n = v.mesh.vertex_count();
+    if pc.points() != n {
+        v.warnings.push(format!("Point Cache: the file has {} vertices, the mesh {n}; the mesh passes through", pc.points()));
+        return Ok(v);
+    }
+    crate::anim::note_animated_read();
+    let now = crate::anim::time();
+    let t = if d.playback == 1 { now - d.start_frame + pc.start } else { now };
+    let Some(at) = pc.at(t) else { return Ok(v) };
+    let to_local = |p: Vec3| if d.world { ctx.object_inverse.transform_point3(p) } else { p };
+    let first = &pc.samples[0];
+    let k = d.strength.get();
+    for (i, vert) in v.mesh.vertices_mut().iter_mut().enumerate() {
+        let cur = vert.position;
+        vert.position = if d.relative { cur + (to_local(at[i]) - to_local(first[i])) * k } else { cur.lerp(to_local(at[i]), k) };
+    }
+    Ok(v)
+}

@@ -1,0 +1,23 @@
+[package]
+name    = "loom_ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+loom_shape  = { workspace = true }
+loom_mesh   = { workspace = true }
+loom_commands = { workspace = true }
+loom_scene  = { workspace = true }
+serde_json  = { workspace = true }
+log = "0.4"
+image = { workspace = true }
+loom_render = { workspace = true }
+loom_input  = { workspace = true }
+eframe      = { workspace = true }
+egui        = { workspace = true }
+egui-wgpu   = { workspace = true }
+wgpu        = { workspace = true }
+glam        = { workspace = true }
+# Native (xdg-desktop-portal) Open / Save dialogs when a person runs the app.
+rfd         = "0.17"

@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+.DS_Store
+__pycache__/
+.superpowers/
+
+# Local-only: internal notes, agent instructions, reference material and infra tools.
+/private/
+/AGENTS.md
+/CLAUDE.md

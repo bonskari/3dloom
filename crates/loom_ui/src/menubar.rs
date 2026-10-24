@@ -1,0 +1,240 @@
+//! The menu bar with the items that exist. Items of later
+//! plans are added by those plans (no disabled placeholders).
+
+use crate::LoomApp;
+use eframe::egui;
+use loom_commands::{Command, PrimitiveKind};
+
+fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str) {
+    let chord = app.keymap.chord_for(action).map(|c| c.label()).unwrap_or_default();
+    let text = if chord.is_empty() { label.to_owned() } else { format!("{label}    {chord}") };
+    if ui.button(text).clicked() {
+        app.dispatch_named(action);
+        ui.close_menu();
+    }
+}
+
+fn cmd(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, c: Command) {
+    if ui.button(label).clicked() {
+        let _ = app.dispatch(c);
+        ui.close_menu();
+    }
+}
+
+pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
+    if app.state.expert_mode {
+        return;
+    }
+    egui::TopBottomPanel::top("menubar").show(ctx, |ui| {
+        egui::menu::bar(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                use loom_commands::PendingFileAction as A;
+                let chord = |app: &LoomApp, action: &str| app.keymap.chord_for(action).map(|c| format!("    {}", c.label())).unwrap_or_default();
+                if ui.button(format!("New{}", chord(app, "New Scene"))).clicked() {
+                    app.request_file_action(A::New);
+                    ui.close_menu();
+                }
+                if ui.button("Reset").clicked() {
+                    app.request_file_action(A::Reset);
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button(format!("Open...{}", chord(app, "Open File"))).clicked() {
+                    app.request_file_action(A::Open);
+                    ui.close_menu();
+                }
+                item(ui, app, "Save", "Save File");
+                item(ui, app, "Save As...", "Save File As");
+                item(ui, app, "Save Copy As...", "Save File As Copy");
+                item(ui, app, "Save Incremental", "Save Incremental (+)");
+                ui.separator();
+                item(ui, app, "Merge...", "Merge File");
+                item(ui, app, "Import...", "Import File");
+                item(ui, app, "Export...", "Export File");
+                item(ui, app, "Export Selected...", "Export Selected");
+                ui.separator();
+                if ui.button("Exit").clicked() {
+                    app.request_file_action(A::Exit);
+                    ui.close_menu();
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                let undo = app.state.undo.labels().last().cloned().unwrap_or_default();
+                item(ui, app, &format!("Undo {undo}"), "Undo Scene Operation");
+                item(ui, app, "Redo", "Redo Scene Operation");
+                ui.separator();
+                item(ui, app, "Hold", "Hold");
+                item(ui, app, "Fetch", "Fetch");
+                ui.separator();
+                item(ui, app, "Delete", "Delete Objects");
+                item(ui, app, "Clone", "Clone");
+                ui.separator();
+                item(ui, app, "Transform Type-In...", "Transform Type-In Dialog Toggle");
+                ui.separator();
+                item(ui, app, "Object Properties...", "Object Properties");
+                ui.separator();
+                item(ui, app, "Select All", "Select All");
+                item(ui, app, "Select None", "Select None");
+                item(ui, app, "Select Invert", "Select Invert");
+                item(ui, app, "Select By Name...", "Select By Name");
+                ui.separator();
+                cmd(ui, app, "Edit Named Selection Sets...", Command::EditNamedSelectionSets);
+            });
+            ui.menu_button("Tools", |ui| {
+                item(ui, app, "Isolate Selection", "Isolate Selection");
+                cmd(ui, app, "Layer Manager...", Command::LayerManager);
+                ui.separator();
+                item(ui, app, "Mirror...", "Mirror");
+                cmd(ui, app, "Array...", Command::Array);
+                item(ui, app, "Spacing Tool...", "Spacing Tool");
+                ui.menu_button("Align", |ui| {
+                    item(ui, app, "Align...", "Align");
+                    item(ui, app, "Quick Align", "Quick Align");
+                    item(ui, app, "Normal Align...", "Normal Align ");
+                    item(ui, app, "Align Camera", "Align Camera");
+                    item(ui, app, "Align to View...", "Align to View Dialog");
+                });
+                ui.separator();
+                ui.menu_button("Grids and Snaps", |ui| {
+                    cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
+                    item(ui, app, "Snaps Toggle", "Snaps Toggle");
+                    item(ui, app, "Angle Snap Toggle", "Angle Snap Toggle");
+                    item(ui, app, "Percent Snap Toggle", "Percent Snap Toggle");
+                    item(ui, app, "Spinner Snap Toggle", "Spinner Snap Toggle");
+                });
+                ui.separator();
+                cmd(ui, app, "Measure", Command::Measure);
+            });
+            ui.menu_button("Group", |ui| {
+                cmd(ui, app, "Group", Command::Group { name: None });
+                cmd(ui, app, "Ungroup", Command::Ungroup);
+                ui.separator();
+                cmd(ui, app, "Open", Command::GroupOpen);
+                cmd(ui, app, "Close", Command::GroupClose);
+                ui.separator();
+                cmd(ui, app, "Attach", Command::GroupAttach);
+                cmd(ui, app, "Detach", Command::GroupDetach);
+                ui.separator();
+                cmd(ui, app, "Explode", Command::GroupExplode);
+                ui.separator();
+                ui.add_enabled(false, egui::Button::new("Assembly")).on_disabled_hover_text("Assemblies (luminaires) are out of scope");
+            });
+            ui.menu_button("Animation", |ui| {
+                cmd(ui, app, "Load Animation...", Command::LoadAnimation { path: None, offset: None });
+                cmd(ui, app, "Save Animation...", Command::SaveAnimation { path: None });
+                ui.separator();
+                ui.menu_button("Constraints", |ui| {
+                    for (label, kind) in [("Attachment Constraint", "Attachment Constraint"), ("Path Constraint", "Path Constraint"), ("Position Constraint", "Position Constraint"), ("Link Constraint", "Link Constraint"), ("LookAt Constraint", "LookAt Constraint"), ("Orientation Constraint", "Orientation Constraint")] {
+                        cmd(ui, app, label, Command::StartConstraintPick { kind: kind.into() });
+                    }
+                });
+                ui.menu_button("Position Controllers", |ui| {
+                    for c in ["Position XYZ", "Bezier Position", "TCB Position", "Linear Position", "Noise Position", "Position List"] {
+                        controller_item(ui, app, "Position", c);
+                    }
+                });
+                ui.menu_button("Rotation Controllers", |ui| {
+                    for c in ["Euler XYZ", "Bezier Rotation", "TCB Rotation", "Linear Rotation", "Noise Rotation", "Rotation List"] {
+                        controller_item(ui, app, "Rotation", c);
+                    }
+                });
+                ui.menu_button("Scale Controllers", |ui| {
+                    for c in ["ScaleXYZ", "Bezier Scale", "TCB Scale", "Linear Scale", "Noise Scale", "Scale List"] {
+                        controller_item(ui, app, "Scale", c);
+                    }
+                });
+                ui.separator();
+                cmd(ui, app, "Delete Selected Animation", Command::DeleteSelectedAnimation);
+                ui.separator();
+                ui.menu_button("IK Solvers", |ui| {
+                    item(ui, app, "HI Solver", "History-Independent IK Solver");
+                    item(ui, app, "IK Limb Solver", "IK Limb Solver");
+                    item(ui, app, "Spline IK Solver", "Spline IK Solver");
+                });
+                ui.separator();
+                item(ui, app, "Bone Tools...", "Bone Tools...");
+                ui.separator();
+                item(ui, app, "Display Bones", "Display Bones");
+                item(ui, app, "Display Bones and Objects", "Display Bones and Objects");
+            });
+            ui.menu_button("Graph Editors", |ui| {
+                cmd(ui, app, "Track View - Curve Editor...", Command::OpenCurveEditor);
+                cmd(ui, app, "Track View - Dope Sheet...", Command::OpenDopeSheet);
+            });
+            ui.menu_button("Views", |ui| {
+                item(ui, app, "Undo View Change", "Undo Viewport Operation");
+                item(ui, app, "Redo View Change", "Redo Viewport Operation");
+                ui.separator();
+                item(ui, app, "Viewport Configuration...", "Configure Viewports");
+                item(ui, app, "Viewport Background...", "Viewport Background");
+                item(ui, app, "Update Background Image", "Update Background Image");
+                item(ui, app, "Show Floating Dialogs", "Show Floating Dialogs");
+                ui.separator();
+                for (label, action) in [
+                    ("Top", "Top View"), ("Bottom", "Bottom View"), ("Front", "Front View"), ("Back", "Back View"),
+                    ("Left", "Left View"), ("Right", "Right View"), ("Perspective", "Perspective User View"), ("Orthographic", "Orthographic User View"),
+                ] {
+                    item(ui, app, label, action);
+                }
+                ui.separator();
+                item(ui, app, "Zoom Extents", "Zoom Extents");
+                item(ui, app, "Zoom Extents All", "Zoom Extents All");
+                item(ui, app, "Zoom Extents Selected", "Zoom Extents Selected");
+                ui.separator();
+                item(ui, app, "Show Grid", "Hide Grids Toggle");
+                item(ui, app, "Show Statistics", "Show Statistics Toggle");
+                item(ui, app, "Edged Faces", "View Edged Faces Toggle");
+                item(ui, app, "Wireframe / Smooth+Highlights", "Wireframe / Smooth+Highlights Toggle");
+                item(ui, app, "Show Safe Frames", "Viewport Safeframes Toggle");
+                ui.separator();
+                item(ui, app, "Expert Mode", "Expert Mode Toggle");
+            });
+            ui.menu_button("Create", |ui| {
+                ui.menu_button("Standard Primitives", |ui| {
+                    for kind in PrimitiveKind::ALL {
+                        if ui.button(kind.label()).clicked() {
+                            app.create_kind = Some(crate::CreateKind::Primitive(kind));
+                            app.create_category = crate::Category::Geometry;
+                            app.panel_tab = crate::Tab::Create;
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.menu_button("Cameras", |ui| {
+                    cmd(ui, app, "Target Camera", Command::CreateCamera { target: true });
+                    cmd(ui, app, "Free Camera", Command::CreateCamera { target: false });
+                });
+                ui.separator();
+                item(ui, app, "Test Room", "Test Room");
+            });
+            ui.menu_button("Customize", |ui| {
+                cmd(ui, app, "Customize User Interface...", Command::CustomizeUserInterface);
+                ui.separator();
+                item(ui, app, "Show Main Toolbar", "Show Main Toolbar Toggle");
+                item(ui, app, "Show Ribbon", "Show Ribbon Toggle");
+                item(ui, app, "Lock UI Layout", "Lock User Interface Toggle");
+                ui.separator();
+                cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
+                cmd(ui, app, "Units Setup...", Command::UnitsSetup);
+                ui.separator();
+                cmd(ui, app, "Preferences...", Command::Preferences);
+            });
+            ui.menu_button("Help", |ui| {
+                ui.label("3dLoom — a 3D modelling application");
+            });
+        });
+    });
+}
+
+/// Animation > Position / Rotation / Scale Controllers: assign to every selected object.
+fn controller_item(ui: &mut egui::Ui, app: &mut LoomApp, track: &str, controller: &str) {
+    if ui.button(controller).clicked() {
+        let ids: Vec<u64> = app.state.selection.iter().map(|n| n.0).collect();
+        for id in ids {
+            if let Err(e) = app.dispatch(Command::AssignController { id, track: track.into(), controller: controller.into() }) {
+                app.state.status_prompt = e;
+            }
+        }
+        ui.close_menu();
+    }
+}

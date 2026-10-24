@@ -1,0 +1,118 @@
+# Modifier List: name, group, in / out, reason (out rows).
+Camera Map (WSM)	WSM	in	
+MapScaler (WSM)	WSM	in	
+PathDeform (WSM)	WSM	in	
+Point Cache (WSM)	WSM	in	
+Subdivide (WSM)	WSM	in	
+Displace Mesh (WSM)	WSM	out	previews material displacement maps, which are render-only (spec: never render)
+Displace NURBS (WSM)	WSM	out	NURBS (no NURBS objects in Loom)
+Hair and Fur (WSM)	WSM	out	hair (spec: never)
+LS Colors (WSM)	WSM	out	lighting analysis (render; spec: never)
+PatchDeform (WSM)	WSM	out	patch objects (none in Loom)
+Surface Mapper (WSM)	WSM	out	NURBS surfaces (no NURBS objects)
+SurfDeform (WSM)	WSM	out	NURBS surfaces (no NURBS objects)
+Affect Region	OSM	in	
+Bend	OSM	in	
+Bevel	OSM	in	
+Bevel Profile	OSM	in	
+Camera Map	OSM	in	
+Cap Holes	OSM	in	
+CrossSection	OSM	in	
+Delete Spline	OSM	in	
+DeleteMesh	OSM	in	
+Displace	OSM	in	
+Edit Mesh	OSM	in	
+Edit Normals	OSM	in	
+Edit Poly	OSM	in	
+Edit Spline	OSM	in	
+Extrude	OSM	in	
+Face Extrude	OSM	in	
+FFD 2x2x2	OSM	in	
+FFD 3x3x3	OSM	in	
+FFD 4x4x4	OSM	in	
+FFD(box)	OSM	in	
+FFD(cyl)	OSM	in	
+Fillet/Chamfer	OSM	in	
+Flex	OSM	in	
+HSDS	OSM	in	
+Lathe	OSM	in	
+Lattice	OSM	in	
+Linked XForm	OSM	in	
+MapScaler	OSM	in	
+Material	OSM	in	
+Material By Element	OSM	in	
+Melt	OSM	in	
+Mesh Select	OSM	in	
+MeshSmooth	OSM	in	
+Mirror	OSM	in	
+Morpher	OSM	in	
+MultiRes	OSM	in	
+Noise	OSM	in	
+Normal	OSM	in	
+Normalize Spline	OSM	in	
+Optimize	OSM	in	
+PathDeform	OSM	in	
+Point Cache	OSM	in	
+Poly Select	OSM	in	
+Preserve	OSM	in	
+ProOptimizer	OSM	in	
+Push	OSM	in	
+Relax	OSM	in	
+Renderable Spline	OSM	in	
+Ripple	OSM	in	
+Shell	OSM	in	
+Skew	OSM	in	
+Skin	OSM	in	
+Skin Morph	OSM	in	
+Skin Wrap	OSM	in	
+Slice	OSM	in	
+Smooth	OSM	in	
+Spherify	OSM	in	
+Spline IK Control	OSM	in	
+Spline Select	OSM	in	
+Squeeze	OSM	in	
+STL Check	OSM	in	
+Stretch	OSM	in	
+Subdivide	OSM	in	
+Substitute	OSM	in	
+Surface	OSM	in	
+Sweep	OSM	in	
+Symmetry	OSM	in	
+Taper	OSM	in	
+Tessellate	OSM	in	
+Trim/Extend	OSM	in	
+TurboSmooth	OSM	in	
+Turn To Mesh	OSM	in	
+Turn To Poly	OSM	in	
+Twist	OSM	in	
+Unwrap UVW	OSM	in	
+UVW Map	OSM	in	
+UVW Mapping Add	OSM	in	
+UVW Mapping Clear	OSM	in	
+UVW XForm	OSM	in	
+Vertex Weld	OSM	in	
+VertexPaint	OSM	in	
+Vol. Select	OSM	in	
+Wave	OSM	in	
+XForm	OSM	in	
+Attribute Holder	OSM	out	custom attributes (not in the spec)
+Cloth	OSM	out	cloth (spec: never)
+Garment Maker	OSM	out	cloth patterns (spec: never)
+Delete Patch	OSM	out	patch objects (none in Loom)
+Edit Patch	OSM	out	patch objects (none in Loom)
+Patch Select	OSM	out	patch objects (none in Loom)
+PatchDeform	OSM	out	patch objects (none in Loom)
+Turn To Patch	OSM	out	patch objects (none in Loom)
+Skin Wrap Patch	OSM	out	patch objects (none in Loom)
+Disp Approx	OSM	out	render-time displacement approximation (spec: never render)
+FFD Select	OSM	out	selects control points of FFD space warps (Loom has no space warps; its FFD modifiers select points at their own Control Points level)
+LS Mesh	OSM	out	lighting analysis (render; spec: never)
+NSurf Sel	OSM	out	NURBS surfaces (no NURBS objects)
+SurfDeform	OSM	out	NURBS surfaces (no NURBS objects)
+Particle Face Creator	OSM	out	particles (spec: never)
+Particle Skinner	OSM	out	particles (spec: never)
+Projection	OSM	out	normal-map baking cages (render; spec: out)
+Projection Holder	OSM	out	holds Projection results (render; spec: out)
+Quadify Mesh	OSM	out	quad remeshing to a target size: not in the spec's modelling list
+Select By Channel	OSM	out	reads selections stored by the Channel Info utility, which is not in the spec
+Welder	OSM	out	welds cached cloth meshes (cloth; spec: never)

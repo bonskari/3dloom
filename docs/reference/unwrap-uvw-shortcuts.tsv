@@ -1,0 +1,206 @@
+Align Horizontally to Pivot	
+Align Selection Horizontal	
+Align Selection Vertical	
+Align to Edge	
+Align Vertically to Pivot	
+Allow Selections Inside Tranform Gizmo	
+Always Bring Up The Edit Window	
+Auto-Pin Moved Vertices	
+Blend Tiles To background	
+Box Map	
+Break By Subobject	
+Break Selected Vertices	Ctrl+B
+Brightness Affects Center Tile	
+Contract Geom. Polygons	
+Copy	
+Cylindrical Map	
+Detach Edge Verts	D, Ctrl+D
+Display Quick Map Gizmo	
+Display Seams	
+Edge Sel to Pelt Seam(Add)	
+Edge Sel to Pelt Seam(Replace)	
+Edge Snap	
+Edge to Polygon Select	
+Edge to Vertex Select	
+Edit UVW's	Ctrl+E
+Expand Geom. Polygons	
+Filter Selected Polygons	Alt+F
+Flatten By Material ID	
+Flatten By Material IDs	
+Flatten By Smoothing Group	
+Flatten Map	
+Flatten Map Dialog	
+Flip Horizontal	
+Flip Vertical	
+Freeform Mode	
+Freeform Snap	
+Freeze Selected	Ctrl+F
+Geom Element	
+Geom. Edge Loop Selection	
+Geom. Edge Ring Selection	
+Geom. Element Select Mode	
+Get Polygon Selection From Stack	Alt+Shift+Ctrl+F
+Get Selection From Polygons	Alt+Shift+Ctrl+P
+Grid Snap	
+Grid Visible	
+Group Selected	
+Hide Selected	Ctrl+H
+Ignore Back Polygons	
+Linear Align	
+Load Defaults	
+Load UVW	Alt+Shift+Ctrl+L
+Lock selected vertices	Space
+LSCM Interactive	
+LSCM Reset	
+LSCM Solve	
+Mapping Align Normal	
+Mapping Align To View	
+Mapping Align X	
+Mapping Align Y	
+Mapping Align Z	
+Mapping Center	
+Mapping Fit	
+Mapping Reset	
+Mirror Horizontal	Alt+Shift+Ctrl+N
+Mirror Vertical	Alt+Shift+Ctrl+M
+Move Horizontal	Alt+Shift+Ctrl+J
+Move Vertical	Alt+Shift+Ctrl+K
+Normal Map	
+Normal Map Dialog	
+Open Edge Mode	
+Open Edge Select	
+Pack	
+Pack Buttons	
+Pack Dialog	
+Pack Normalize	
+Pack Region	
+Pack Together	
+Paint Select Decrement Cursor Size	
+Paint Select Increment Cursor Size	
+Paint Select Mode	
+Pan	Ctrl+P
+Paste	
+Paste Instance	
+Paste Symmetrical	
+Pelt Always Show Seams	
+Pelt Dialog	
+Pelt Dialog Mirror Stretcher	
+Pelt Dialog Relax Simulation Heavy	
+Pelt Dialog Relax Simulation Light	
+Pelt Dialog Reset Stretcher	
+Pelt Dialog Run Simulation	
+Pelt Dialog Select Pelt UV's	
+Pelt Dialog Select Stretcher	
+Pelt Dialog Snap Seams	
+Pelt Dialog Straighten Stretcher	
+Pelt Edit Seams	
+Pelt Expand Selection To Seams	
+Pelt Map	
+Pelt Seam to Edge Sel(Add)	
+Pelt Seam to Edge Sel(Replace)	
+Pin Selected	
+Pivot Snap Left Center	
+Pivot Snap Lower Center	
+Pivot Snap Lower Left	
+Pivot Snap Lower Right	
+Pivot Snap Right Center	
+Pivot Snap To Center	
+Pivot Snap Upper Center	
+Pivot Snap Upper Right	
+Pivot Snap Upperr Left	
+Planar map faces/patches	Enter
+Planar Threshold	
+Point To Point Edge Selection	
+Polygon Mode	
+Polygon Select	
+Polygon to Edge  Select	
+Polygon to Vertex Select	
+Prevent Reflattening	
+Quick Planar map	
+Relax	
+Relax Dialog	
+Relax One Click	
+Render UVW Template	
+Rescale	
+Rescale Clusters	
+Reset Pivot On Selection	
+Reset UVWs	
+Rotate	
+Rotate +90	
+Rotate -90	
+Save Current Settings As Default	
+Save UVW	
+Scale Horizontal	
+Scale Vertical	
+Select By Material ID	
+Select By Smoothing Group	
+Select Group	
+Select Inverted Polygons	
+Select Overlapped Polygons	
+Select Pinned Verts	
+Show Edge Distortion	
+Show Hidden Edges	
+Show Local Distortion	
+Show Map	
+Show Seams In Viewport	Alt+E
+Show Shared Sub-objects	
+Show Subobject Counter	
+Show Vertex Connections	
+Sketch	
+Sketch Dialog	
+Sketch Reverse Vertex Order	
+Snap	Ctrl+S
+Snap To Grid/Vertex/Edge	
+Soft Selection	
+Soft Selection Edge Distance	
+Soft Selection Edge Distance Range 1	
+Soft Selection Edge Distance Range 2	
+Soft Selection Edge Distance Range 3	
+Soft Selection Edge Distance Range 4	
+Soft Selection Edge Distance Range 5	
+Soft Selection Edge Distance Range 6	
+Soft Selection Edge Distance Range 7	
+Soft Selection Edge Distance Range 8	
+Space Horizontally	
+Space Vertically	
+Spherical Map	
+Spline Map	
+Stitch	
+Stitch Average	
+Stitch Dialog	
+Stitch To Source	
+Stitch To Target	
+Straighten Edges	
+Sync Selection Mode	
+Sync Texture Selection To Viewport	
+Sync Viewport Selection To Texture	
+Texture Vertex Contract Selection	NumPad -, -
+Texture Vertex Expand Selection	NumPad +, =
+Texture Vertex Move Mode	W
+Texture Vertex Rotate Mode	E
+Texture Vertex Scale Mode	R
+Texture Vertex Weld Selected	Ctrl+W
+Texture VertexTarget Weld 	Ctrl+T
+TV Edge Sub-object Mode	
+TV Element Mode	
+TV Loop Grow Select	
+TV Loop Select	
+TV Loop Shrink Select	
+TV Polygon Sub-object Mode	
+TV Ring Grow Select	
+TV Ring Select	
+TV Ring Shrink Select	
+TV Vertex Sub-object Mode	
+Tweak UVW	
+Unfold Edge	
+Unfold Map	
+Unfold Map	
+Unfold Map Dialog	
+Unfreeze All	
+Ungroup Selected	
+Unhide All	
+Unpin Selected	
+Unwrap Options	Ctrl+O
+Update Map	Ctrl+U
+UV Edge Mode	
+UV Edge Select	

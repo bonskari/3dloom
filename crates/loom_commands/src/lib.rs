@@ -1,0 +1,42 @@
+//! Command registry: the single path for every user action, hotkey and
+//! MCP tool. See the 2026-10-21 spec, section 6.8.
+
+pub mod command;
+pub mod execute;
+pub mod poly;
+mod poly_edit;
+mod poly_props;
+mod groups;
+mod stack;
+pub mod spline;
+pub mod snap;
+pub mod state;
+pub mod transform;
+
+pub use command::{registry, Axis, Command, CommandInfo, Group, PrimitiveKind, SaveChangesReply, SelectOp, DEFERRED, DEFERRED_UNWRAP, OUT_OF_SCOPE, ShapeKind, UNWRAP_ALIASES};
+pub mod unwrap;
+pub use keymap::unwrap_chart_rows;
+pub use execute::file_action;
+pub mod file;
+pub mod fbx_io;
+pub mod max_io;
+pub mod rig;
+pub mod skin;
+pub mod morph;
+pub mod autosave;
+pub mod anim_cmds;
+pub mod controllers;
+pub mod track_view;
+pub mod motion;
+pub mod normals;
+pub use spline::SplineSettings;
+pub use unwrap::{freeform_hit, FreeformHit};
+pub use state::{base_sub_levels, CompoundSettings};
+pub use execute::{execute, execute_json, is_hidden, selected_vertices, type_in_values};
+pub use state::{TvLevel, TvMode, UvEditor, UvTexture, ExtrudeKind, PolyDrag, PolySettings, TessKind, PaintMode, PolyConstraint, SlicePlane, AlignPoint, AppState, PreviewSelect, SoftPaint, AxisConstraint, CenterMode, CloneKind, CoordSystem, GizmoPrefs, DisplayUnits, MirrorAxis, NormalAlignPicks, Prefs, SpacingContext, SystemUnit, UnitsSetup, DialogPurpose, PickMode, SelectionFilter, SelectionMode, SelectionRegion, SubObjectId, SubSelection, Tool, ViewKind, ViewState};
+pub mod keymap;
+pub use keymap::{parse_chord, Chord, Key, Keymap};
+pub mod viewport;
+pub use viewport::{default_kinds, HideCategories, LayoutSplits, NavMode, Shading, Viewport, ViewportLayout, Dialog, PendingFileAction, PolySettingsKind};
+pub use transform::{frame_for, frame_for_system, TransformFrame};
+pub use keymap::{keyboard_chart, write_keyboard_chart, ChartRow};

@@ -1,0 +1,9 @@
+[package]
+name    = "loom_max"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+loom_mesh = { workspace = true }
+glam      = { workspace = true }

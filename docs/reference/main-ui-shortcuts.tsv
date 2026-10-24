@@ -1,0 +1,116 @@
+Adaptive Degradation Toggle	O
+Align	Alt+A
+Angle Snap Toggle	A
+Auto Key Mode Toggle	N
+Background Lock Toggle	Alt+Ctrl+B
+Backup Time One Unit	,
+Bottom View	B
+Camera View	C
+Clone	Ctrl+V
+Create Animated Sequence File...	Shift+V
+Cycle Active Snap Type	Alt+S
+Cycle Selection Method	Ctrl+F
+Cycle Snap Hit	Alt+Shift+S
+Delete Objects	.
+Disable Viewport	D
+Display as See-Through Toggle	Alt+X
+Enable Axis Constraints in Snaps Toggle	Alt+D, Alt+F3
+Environment Dialog Toggle	8
+Expert Mode Toggle	Ctrl+X
+Fetch	Alt+Ctrl+F
+Forward Time One Unit	.
+Front View	F
+Go to End Frame	End
+Go to Start Frame	Home
+Hide Cameras Toggle	Shift+C
+Hide Geometry Toggle	Shift+G
+Hide Grids Toggle	G
+Hide Helpers Toggle	Shift+H
+Hide Lights Toggle	Shift+L
+Hide Particle Systems Toggle	Shift+P
+Hide Shapes Toggle	Shift+S
+Hide Space Warps Toggle	Shift+Ctrl+W
+Hold	Ctrl+H
+Home View	Alt+Home
+Isolate Selection	Alt+Q
+Left View	L
+Lock User Interface Toggle	Alt+0
+Material Editor Toggle	M
+Maximize Viewport Toggle	Alt+W
+New Scene	Ctrl+N
+Normal Align 	Alt+N
+Open File	Ctrl+O
+Orbit View Mode	Ctrl+R
+Orthographic User View	U
+Pan View	Ctrl+P
+Pan Viewport	I
+Percent Snap Toggle	Shift+Ctrl+P
+Perspective User View	P
+Play Animation	/
+Quick Align	Shift+A
+Redo Scene Operation	Ctrl+Y
+Redo Viewport Operation	Shift+Y
+Redraw All Views	`
+Render	Shift+Q
+Render Last	F9
+Render SetUp...	F10
+Save File	Ctrl+S
+Scale Cycle	Ctrl+E
+Select All	Ctrl+A
+Select Ancestor	PageUp
+Select and Move	W
+Select and Rotate	E
+Select By Name	H
+Select Child	PageDown
+Select Children	Ctrl+PageDown
+Select Invert	Ctrl+I
+Select None	Ctrl+D
+Select Similar	Ctrl+Q
+Selection Lock Toggle	Space
+Set Key Mode	'
+Set Keys	K
+Show Floating Dialogs	Ctrl+`
+Show Main Toolbar Toggle	Alt+6
+Show Statistics Toggle	7
+Snap To Frozen Objects Toggle	Alt+F2
+Snaps Toggle	S
+Sound Toggle	\
+Spacing Tool	Shift+I
+Spot/Directional Light View	Shift+4
+Sub-object Level Cycle	Insert
+Sub-object Selection Toggle	Ctrl+B
+Top View	T
+Transform Gizmo Plane Constraint Cycle	F8
+Transform Gizmo Size Down	-
+Transform Gizmo Size Up	=
+Transform Gizmo Toggle	Shift+Ctrl+X
+Transform Gizmo X Constraint	F5
+Transform Gizmo Y Constraint	F6
+Transform Gizmo Z Constraint	F7
+Transform Type-In Dialog Toggle	F12
+Undo Scene Operation	Ctrl+Z
+Undo Viewport Operation	Shift+Z
+Update Background Image	Alt+Shift+Ctrl+B
+View Edged Faces Toggle	F4
+Viewport Background	Alt+B
+Viewport Lighting Illuminate with Default / Scene Lights Toggle	Ctrl+L
+Viewport Safeframes Toggle	Shift+F
+Viewport Selection Shade Selected Faces Toggle	F2
+Viewport Selection Show Selection Bracket Toggle	J
+Virtual Viewport Pan Down	NumPad 2
+Virtual Viewport Pan Left	NumPad 4
+Virtual Viewport Pan Right	NumPad 6
+Virtual Viewport Pan Up	NumPad 8
+Virtual Viewport Toggle	NumPad /
+Virtual Viewport Zoom In	NumPad +
+Virtual Viewport Zoom Out	NumPad -
+Wireframe / Smooth+Highlights Toggle	F3
+Zoom Extents	Alt+Ctrl+Z
+Zoom Extents All	Shift+Ctrl+Z
+Zoom Extents Selected	Z
+Zoom In 2X	Alt+Shift+Ctrl+Z
+Zoom Mode	Alt+Z
+Zoom Out 2X	Alt+Shift+Z
+Zoom Region Mode	Ctrl+W
+Zoom Viewport In	[, Ctrl+=
+Zoom Viewport Out	], Ctrl+-

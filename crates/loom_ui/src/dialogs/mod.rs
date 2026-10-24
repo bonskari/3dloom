@@ -1,0 +1,152 @@
+//! Modeless dialogs opened by commands (`AppState::dialog`).
+
+pub mod align;
+pub mod array;
+pub mod spacing_tool;
+pub mod align_to_view;
+pub mod clone_options;
+pub mod customize_ui;
+pub mod object_properties;
+pub mod preferences;
+pub mod units_setup;
+pub mod mirror;
+pub mod poly_settings;
+pub mod detach;
+pub mod manage_layers;
+pub mod normal_align;
+pub mod grid_and_snap_settings;
+pub mod named_selection_sets;
+pub mod transform_type_in;
+pub mod select_from_scene;
+pub mod time_configuration;
+pub mod viewport_background;
+pub mod viewport_configuration;
+pub mod file_dialog;
+pub mod save_changes;
+pub mod merge;
+pub mod unwrap_dialogs;
+pub mod rig_dialogs;
+pub mod track_view_dialogs;
+
+use crate::LoomApp;
+use eframe::egui;
+use loom_commands::{Command, Dialog};
+
+pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
+    import_summary(ctx, app);
+    // A previewing dialog that went away without OK (Close Dialog, Escape,
+    // another dialog) leaves the scene as it was.
+    if let Some(p) = app.preview {
+        if app.state.dialog != Some(p.dialog) {
+            app.preview_undo();
+            app.state.align_target = None;
+            app.state.normal_align = None;
+            // A poly settings window previews on a selection the op replaces: give it back.
+            if let Dialog::PolySettings(kind) = p.dialog {
+                let sel_id = egui::Id::new("poly_settings").with(format!("{kind:?}")).with("selection");
+                if let Some(sel) = ctx.data(|d| d.get_temp::<Vec<(u64, loom_commands::SubObjectId)>>(sel_id)) {
+                    app.state.sub_selection.clear();
+                    for (n, so) in sel {
+                        app.state.sub_selection.insert(loom_scene::NodeId(n), so);
+                    }
+                }
+            }
+        }
+    }
+    // A Shift+drag clone whose Clone Options dialog went away is cancelled.
+    if app.shift_clone.is_some() && app.state.dialog != Some(Dialog::CloneOptions) {
+        if let Some(sc) = app.shift_clone.take() {
+            if app.state.undo.len() == sc.undo_len {
+                let _ = app.dispatch(Command::UndoSceneOperation);
+            }
+        }
+    }
+    if app.last_dialog != app.state.dialog {
+        // Per-dialog session state must not leak into the next time it opens.
+        ctx.data_mut(|d| {
+            d.remove::<Vec<u64>>(egui::Id::new("mirror_dialog_sources"));
+            d.remove::<Vec<u64>>(egui::Id::new("array_dialog").with("sources"));
+            d.remove::<bool>(egui::Id::new("array_dialog").with("preview"));
+            d.remove::<bool>(egui::Id::new("align_dialog_kept"));
+            d.remove::<String>(egui::Id::new("clone_options_name"));
+            d.remove::<u32>(egui::Id::new("clone_options_copies"));
+            file_dialog::clear_state(d);
+            merge::clear_state(d);
+            d.remove::<String>(egui::Id::new("auto_backup_name_edit"));
+            for k in ["Weld", "Chamfer", "ConnectEdges", "Bridge", "Extrude", "Inset", "Bevel", "Outline", "Hinge", "MSmooth", "Tessellate", "Relax"] {
+                let id = egui::Id::new("poly_settings").with(k);
+                d.remove::<loom_commands::PolySettings>(id);
+                d.remove::<Vec<(u64, loom_commands::SubObjectId)>>(id.with("selection"));
+            }
+        });
+        app.last_dialog = app.state.dialog;
+    }
+    let Some(dialog) = app.state.dialog else { return };
+    if app.state.hide_floating_dialogs {
+        return;
+    }
+    let mut open = true;
+    match dialog {
+        Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),
+        Dialog::SelectFromScene => select_from_scene::show(ctx, app, &mut open),
+        Dialog::NamedSelectionSets => named_selection_sets::show(ctx, app, &mut open),
+        Dialog::TimeConfiguration => time_configuration::show(ctx, app, &mut open),
+        Dialog::ViewportBackground => viewport_background::show(ctx, app, &mut open),
+        Dialog::TransformTypeIn => transform_type_in::show(ctx, app, &mut open),
+        Dialog::CloneOptions => clone_options::show(ctx, app, &mut open),
+        Dialog::GridAndSnapSettings => grid_and_snap_settings::show(ctx, app, &mut open),
+        Dialog::Align => align::show(ctx, app, &mut open),
+        Dialog::AlignToView => align_to_view::show(ctx, app, &mut open),
+        Dialog::NormalAlign => normal_align::show(ctx, app, &mut open),
+        Dialog::Mirror => mirror::show(ctx, app, &mut open),
+        Dialog::Array => array::show(ctx, app, &mut open),
+        Dialog::SpacingTool => spacing_tool::show(ctx, app, &mut open),
+        Dialog::ObjectProperties => object_properties::show(ctx, app, &mut open),
+        Dialog::Preferences => preferences::show(ctx, app, &mut open),
+        Dialog::UnitsSetup => units_setup::show(ctx, app, &mut open),
+        Dialog::CustomizeUI => customize_ui::show(ctx, app, &mut open),
+        Dialog::PolySettings(kind) => poly_settings::show(ctx, app, kind, &mut open),
+        Dialog::Detach => detach::show(ctx, app, &mut open),
+        Dialog::LayerManager => manage_layers::show(ctx, app, &mut open),
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::SaveChanges(action) => save_changes::show(ctx, app, action, &mut open),
+        Dialog::PickTexture | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
+        Dialog::MergeObjects => merge::show(ctx, app, &mut open),
+        Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
+        Dialog::WeightTable => rig_dialogs::weight_table(ctx, app, &mut open),
+        Dialog::WeightTool => rig_dialogs::weight_tool(ctx, app, &mut open),
+        Dialog::OutOfRangeTypes => track_view_dialogs::out_of_range_types(ctx, app, &mut open),
+        Dialog::ReduceKeys => track_view_dialogs::reduce_keys(ctx, app, &mut open),
+        Dialog::TrackSets => track_view_dialogs::track_sets(ctx, app, &mut open),
+        Dialog::AssignController => track_view_dialogs::assign_controller(ctx, app, &mut open),
+        Dialog::KeyInfo => track_view_dialogs::key_info(ctx, app, &mut open),
+        Dialog::TrackViewFilters => track_view_dialogs::filters(ctx, app, &mut open),
+        Dialog::TrackViewUtilities => track_view_dialogs::utilities(ctx, app, &mut open),
+    }
+    // A dialog that handed over to another (Save Changes → Open) must not close the new one.
+    if !open && app.state.dialog == Some(dialog) {
+        let _ = app.dispatch(Command::CloseDialog);
+    }
+}
+
+/// File > Import's summary: what the file held that Loom did not import.
+fn import_summary(ctx: &egui::Context, app: &mut LoomApp) {
+    if app.state.import_report.is_empty() {
+        return;
+    }
+    let mut open = true;
+    let mut ok = false;
+    egui::Window::new("Import Summary").open(&mut open).collapsible(false).resizable(true).default_width(460.0).show(ctx, |ui| {
+        ui.label(format!("{} item(s) were not imported as they are in the file:", app.state.import_report.len()));
+        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+            for w in &app.state.import_report {
+                ui.label(egui::RichText::new(w).small());
+            }
+        });
+        ok = ui.button("OK").clicked();
+    });
+    if !open || ok {
+        app.state.import_report.clear();
+    }
+}
