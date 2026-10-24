@@ -80,8 +80,8 @@ fn snap_button(ui: &mut egui::Ui, app: &mut LoomApp, glyph: &str, on: bool, acti
 }
 
 /// Transform buttons: click selects the tool, right-click opens Transform Type-In.
-fn transform_button(ui: &mut egui::Ui, app: &mut LoomApp, glyph: &str, tool: Tool, action: &str) {
-    let r = Icon::new(glyph, action).on(app.state.active_tool == tool).hint("right-click: Transform Type-In").show(ui, &app.state);
+fn transform_button(ui: &mut egui::Ui, app: &mut LoomApp, glyph: &str, tip: &str, tool: Tool, action: &str) {
+    let r = Icon::new(glyph, action).tip(tip).on(app.state.active_tool == tool).hint("right-click: Transform Type-In").show(ui, &app.state);
     if r.clicked() {
         app.dispatch_named(action);
     }
@@ -196,16 +196,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         }
                         ui.separator();
                     }
-                    "Select and Move" => transform_button(ui, app, icons::MOVE, Tool::Move, "Select and Move"),
-                    "Select and Rotate" => transform_button(ui, app, icons::ROTATE, Tool::Rotate, "Select and Rotate"),
+                    "Select and Move" => transform_button(ui, app, icons::MOVE, "Select and Move", Tool::Move, "Select and Move"),
+                    "Select and Rotate" => transform_button(ui, app, icons::ROTATE, "Select and Rotate", Tool::Rotate, "Select and Rotate"),
                     "Select and Scale" => {
                         // Scale flyout: Uniform / Non-Uniform / Squash (Ctrl+E cycles).
                         let kind = app.state.scale_kind;
                         let glyph = |k: ScaleKind| match k { ScaleKind::Uniform => icons::SCALE, ScaleKind::NonUniform => icons::SCALE_NON_UNIFORM, ScaleKind::Squash => icons::SQUASH };
-                        transform_button(ui, app, glyph(kind), Tool::Scale, "Select and Scale");
+                        transform_button(ui, app, glyph(kind), kind.label(), Tool::Scale, "Select and Scale");
                         egui::ComboBox::from_id_salt("scale_kind").selected_text("").width(14.0).show_ui(ui, |ui| {
                             for k in ScaleKind::ALL {
-                                if ui.selectable_label(kind == k, icons::labeled(glyph(k), k.label())).clicked() {
+                                if ui.selectable_label(kind == k, k.label()).clicked() {
                                     let _ = app.dispatch(Command::ScaleType { kind: k });
                                 }
                             }

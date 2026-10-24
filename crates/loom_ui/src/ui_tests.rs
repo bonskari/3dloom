@@ -1769,7 +1769,7 @@ fn show_end_result_starts_off_and_only_the_edited_object_shows_up_to_its_active_
     let mut h = Harness::new();
     let b = tapered_box(&mut h, 40.0);
     let a = tapered_box(&mut h, 0.0);
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     assert!(!h.app.state.show_end_result, "off by default");
     assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3, "the top entry is active: the whole stack shows");
     // The base object in the stack: A shows its box, B (not being edited) its end result.
@@ -1780,7 +1780,7 @@ fn show_end_result_starts_off_and_only_the_edited_object_shows_up_to_its_active_
     // Leaving the Modify panel shows the end result again.
     h.click_widget("Create");
     assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3);
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     assert!((drawn_width(&h, a) - 10.0).abs() < 1e-3);
     // Show End Result on: the whole stack.
     h.click(h.find(egui::accesskit::Role::Button, "Show End Result On/Off Toggle").center());
@@ -1794,7 +1794,7 @@ fn smooth_modifier_has_32_smoothing_group_buttons() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     let id = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::AddModifier { name: "Smooth".into() });
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     let groups = |h: &Harness| match &h.app.state.scene.node(id).unwrap().modifiers[0].modifier {
         loom_scene::Modifier::Smooth { groups, .. } => groups.get(),
         _ => panic!("Smooth"),
@@ -1821,7 +1821,7 @@ fn shift_and_ctrl_drag_in_the_stack_copy_and_instance_a_modifier() {
     let id = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::AddModifier { name: "Bend".into() });
     h.cmd(Command::AddModifier { name: "Taper".into() });
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     let names = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
     let instances = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.instance_of.map(|(_, i)| i)).collect::<Vec<_>>();
     // Shift-drag Taper down onto Bend: a copy below Bend.
@@ -1855,7 +1855,7 @@ fn base_parameter_change_under_edit_poly_asks_yes_hold_yes_no() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     let id = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::AddModifier { name: "Edit Poly".into() });
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     h.click_widget("Box");
     let height = |h: &Harness| h.app.state.scene.node(id).unwrap().object.parameters().into_iter().find(|(n, _)| *n == "Height").unwrap().1;
     // The spinner's edit goes through dispatch, as a drag does.
@@ -2203,6 +2203,7 @@ fn modifier_stack_right_click_menus_close() {
     let bend = find_context_menu(&mut h, cp.min.x as i32..cp.max.x as i32, cp.min.y as i32..cp.max.y as i32, 6, |_| true);
     // Rename, Delete, Off.
     let m = menus(&h)[0];
+    eprintln!("DBG bend={bend:?} m={m:?} texts={:?}", h.shapes.iter().filter(|c| m.contains(c.clip_rect.center())).map(|c| format!("{:?}", c.shape).chars().take(80).collect::<String>()).collect::<Vec<_>>().len());
     h.click(menu_row(&h, m, 2));
     assert!(!h.app.state.scene.node(id).unwrap().modifiers[0].enabled, "Off runs");
     assert!(menus(&h).is_empty(), "and closes the menu");

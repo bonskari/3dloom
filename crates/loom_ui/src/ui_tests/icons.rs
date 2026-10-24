@@ -74,7 +74,7 @@ fn main_toolbar_icons_run_their_commands() {
     assert_eq!(h.app.state.active_tool, Tool::Rotate);
     click_icon(&mut h, "main_toolbar", icons::MOVE, "Select and Move (W); right-click: Transform Type-In");
     assert_eq!(h.app.state.active_tool, Tool::Move);
-    click_icon(&mut h, "main_toolbar", icons::SCALE, "Select and Scale (R); right-click: Transform Type-In");
+    click_icon(&mut h, "main_toolbar", icons::SCALE, "Select and Uniform Scale (R); right-click: Transform Type-In");
     assert_eq!(h.app.state.active_tool, Tool::Scale);
     click_icon(&mut h, "main_toolbar", icons::SELECT_OBJECT, "Select Object (Q)");
     assert_eq!(h.app.state.active_tool, Tool::Select);

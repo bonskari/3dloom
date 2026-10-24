@@ -104,11 +104,11 @@ fn create_menu_shapes_and_compound_start_their_tools() {
 #[test]
 fn scale_flyout_chooses_uniform_non_uniform_or_squash() {
     let mut h = Harness::new();
-    // The Scale button names the current type; the flyout list is right of it.
+    // The Scale button is named after the current type; the flyout list is right of it.
     for (button, item, kind) in [
-        ("Scale", "Select and Non-uniform Scale", loom_commands::ScaleKind::NonUniform),
-        ("Scale NU", "Select and Squash", loom_commands::ScaleKind::Squash),
-        ("Squash", "Select and Uniform Scale", loom_commands::ScaleKind::Uniform),
+        ("Select and Uniform Scale", "Select and Non-uniform Scale", loom_commands::ScaleKind::NonUniform),
+        ("Select and Non-uniform Scale", "Select and Squash", loom_commands::ScaleKind::Squash),
+        ("Select and Squash", "Select and Uniform Scale", loom_commands::ScaleKind::Uniform),
     ] {
         let flyout = right_of(&h, Role::ComboBox, h.find(Role::Button, button));
         h.click(flyout.center());
