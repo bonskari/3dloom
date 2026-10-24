@@ -3043,12 +3043,22 @@ fn normal_lines(h: &Harness) -> Vec<(u32, Vec3, Vec3)> {
     out
 }
 
-/// Screen points 60% along the normals that face the viewer, well apart from every other normal.
+/// Screen points 60% along the normals that face the viewer, well apart from every other normal's line.
 fn clear_normal_points(h: &Harness) -> Vec<(u32, egui::Pos2)> {
     let eye = h.app.camera_for(h.app.state.active_viewport).view_matrix().inverse().w_axis.truncate();
     let lines = normal_lines(h);
-    let pts: Vec<(u32, egui::Pos2, bool)> = lines.iter().map(|(g, p, d)| (*g, h.screen_of(*p + *d * 6.0), d.dot(eye - *p) > 0.0)).collect();
-    pts.iter().filter(|(g, s, front)| *front && pts.iter().all(|(o, t, _)| o == g || t.distance(*s) > 14.0)).map(|(g, s, _)| (*g, *s)).collect()
+    let seg: Vec<(u32, egui::Pos2, egui::Pos2)> = lines.iter().map(|(g, p, d)| (*g, h.screen_of(*p), h.screen_of(*p + *d * 10.0))).collect();
+    let dist = |q: egui::Pos2, a: egui::Pos2, b: egui::Pos2| {
+        let ab = b - a;
+        let t = if ab.length_sq() < 1e-6 { 0.0 } else { ((q - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+        q.distance(a + ab * t)
+    };
+    lines
+        .iter()
+        .filter(|(_, p, d)| d.dot(eye - *p) > 0.0)
+        .map(|(g, p, d)| (*g, h.screen_of(*p + *d * 6.0)))
+        .filter(|(g, s)| seg.iter().all(|(o, a, b)| o == g || dist(*s, *a, *b) > 12.0))
+        .collect()
 }
 
 fn normal_selection(h: &Harness) -> Vec<u32> {
@@ -3151,7 +3161,10 @@ fn hsds_element_button_shows_the_yellow_cage_and_the_level_list_displays_a_level
     h.app.panel_tab = crate::Tab::Modify;
     framed(&mut h);
     assert_eq!(segments_coloured(&h, crate::poly_modes::HSDS_CAGE), 0, "no cage at the top level");
-    h.click(panel_text(&h, "Element"));
+    // The rollout's Element button (the stack lists the levels too, above it).
+    let right = h.app.viewport_rects[h.app.state.active_viewport].right();
+    let element = h.text_centers("Element").into_iter().filter(|p| p.x > right).max_by(|a, b| a.y.total_cmp(&b.y)).expect("Element");
+    h.click(element);
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers[0].sub_level, 4, "the rollout's Element button");
     assert_eq!(segments_coloured(&h, crate::poly_modes::HSDS_CAGE), 12, "the box's 12 cage edges, yellow");
     h.cmd(Command::SelectSub { node: None, ids: vec![0], op: loom_commands::SelectOp::Replace });

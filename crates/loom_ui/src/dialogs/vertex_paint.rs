@@ -109,7 +109,7 @@ fn new_layer(ctx: &egui::Context, app: &mut LoomApp) {
     let key = egui::Id::new("vertex_paint_new_layer");
     let Some((mut name, mut mode)) = ctx.data(|d| d.get_temp::<(String, u32)>(key)) else { return };
     let mut done = None;
-    egui::Window::new("New Layer").id(key).resizable(false).collapsible(false).show(ctx, |ui| {
+    egui::Window::new("New Layer").id(egui::Id::new("New Layer")).resizable(false).collapsible(false).show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label("Name:");
             ui.text_edit_singleline(&mut name);
