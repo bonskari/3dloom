@@ -24,7 +24,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     // The Hotkey field takes the next key press, modifiers and all.
     if ctx.memory(|m| m.has_focus(hotkey_id)) {
         let pressed = ctx.input(|i| crate::hotkeys::pressed_keys(&i.events));
-        if let Some(c) = pressed.into_iter().filter_map(|(k, m)| crate::hotkeys::chord_of(k, m)).last() {
+        if let Some(c) = pressed.into_iter().filter_map(|(k, m)| crate::hotkeys::chord_of(k, m)).next_back() {
             chord = Some(c);
         }
     }
