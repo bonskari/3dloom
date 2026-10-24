@@ -79,6 +79,34 @@ fn current_weights(data: &SkinData, mesh: &Mesh, v: usize) -> Vec<(u32, f32)> {
     data.vertex_weights(v, p)
 }
 
+/// Sets one bone's weight on a vertex. Lowering the only bone a vertex has
+/// gives the rest to the other bones whose envelopes reach it, so the weight
+/// can come down (it would normalise straight back to 1 otherwise).
+fn set_bone_weight(data: &mut SkinData, mesh: &Mesh, v: usize, bone: u32, w: f32, current: &[(u32, f32)]) {
+    let alone = current.iter().all(|(b, x)| *b == bone || *x <= 0.0);
+    if alone && w < 1.0 {
+        let p = data.mesh_bind.transform_point3(mesh.vertices()[v].position);
+        let mut with: Vec<(u32, f32)> = current.to_vec();
+        with.extend(envelope_reach(data, p, v as u32).into_iter().filter(|(b, _)| *b != bone));
+        data.set_weight(v, bone, w, &with);
+    } else {
+        data.set_weight(v, bone, w, current);
+    }
+}
+
+/// The raw envelope weight of every enabled bone not excluded from the vertex.
+fn envelope_reach(data: &SkinData, p_world: Vec3, v: u32) -> Vec<(u32, f32)> {
+    data.bones
+        .iter()
+        .enumerate()
+        .filter(|(i, b)| b.enabled && !data.excluded.get(*i).is_some_and(|x| x.contains(&v)))
+        .filter_map(|(i, b)| {
+            let e = loom_scene::skin::envelope_weight(&b.envelope, b.bind_inverse.transform_point3(p_world));
+            (e > 1e-6).then_some((i as u32, e))
+        })
+        .collect()
+}
+
 fn weight_of(w: &[(u32, f32)], bone: u32) -> f32 {
     w.iter().find(|(b, _)| *b == bone).map(|x| x.1).unwrap_or(0.0)
 }
@@ -95,7 +123,7 @@ fn weight_edit(state: &mut AppState, label: &str, f: impl Fn(f32, f32) -> f32) -
         for v in verts {
             let cur = current_weights(data, mesh, v);
             let w = f(weight_of(&cur, bone), custom);
-            data.set_weight(v, bone, w, &cur);
+            set_bone_weight(data, mesh, v, bone, w, &cur);
         }
         Ok(())
     })
@@ -159,6 +187,16 @@ fn bone_relative(state: &mut AppState, pick: impl Fn(&AppState, &SkinData, usize
 }
 
 pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
+    let bone = state.skin_bone;
+    let r = run(state, cmd);
+    if state.skin_bone != bone {
+        // Show Colored Faces follows the current bone.
+        state.mesh_dirty = true;
+    }
+    r
+}
+
+fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     use Command as C;
     match cmd {
         C::SkinModifier => crate::execute(state, C::AddModifier { name: "Skin".into() }),
@@ -234,6 +272,71 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.skin_custom_weight = value.clamp(0.0, 1.0);
             Ok(status(state))
         }
+        C::SkinSetScaleWeight { value } => {
+            state.skin_scale_weight = value.max(0.0);
+            Ok(status(state))
+        }
+        C::SkinSetPasteTolerance { value } => {
+            state.skin_paste_tolerance = value.max(0.0);
+            Ok(status(state))
+        }
+        C::SkinSetVertexWeights { vertices, bone, weight } => edit(state, "Weight Table", |data, mesh, _| {
+            let b = data.bones.iter().position(|x| x.node == NodeId(bone)).ok_or("the bone is not in the Skin's list")? as u32;
+            let n = mesh.vertex_count();
+            if let Some(bad) = vertices.iter().find(|v| **v as usize >= n) {
+                return Err(format!("no vertex {bad} (the mesh has {n})"));
+            }
+            for v in vertices {
+                let cur = current_weights(data, mesh, v as usize);
+                set_bone_weight(data, mesh, v as usize, b, weight, &cur);
+            }
+            Ok(())
+        }),
+        C::SkinSelectBoneByName { name } => {
+            let e = entry(state)?;
+            let names = bone_names(state, &e.data);
+            let i = names.iter().position(|n| name_matches(&name, n)).ok_or_else(|| format!("no bone matches {name:?}"))?;
+            state.skin_bone = Some(e.data.bones[i].node);
+            state.skin_gizmo = None;
+            Ok(status(state))
+        }
+        C::SkinEnvelopeVisibility => edit(state, "Envelope Visibility", |data, _, st| {
+            let i = current_bone_index(st, data)?;
+            data.bones[i].envelope_visible = !data.bones[i].envelope_visible;
+            Ok(())
+        }),
+        C::SkinPaintWeightsToggle => {
+            let e = entry(state)?;
+            if !state.skin_paint && !state.skin_active() {
+                // Paint Weights works at the Envelope level, as Edit Envelopes does.
+                crate::execute(state, C::ModifierSubobjectLevel { index: e.index as u32, level: 1 })?;
+            }
+            state.skin_paint = !state.skin_paint;
+            Ok(status(state))
+        }
+        C::SkinPaintStroke { points, erase } => paint(state, &points, erase),
+        C::SkinSetPainterOption { name, value } => {
+            let p = &mut state.skin_painter;
+            let on = value != 0.0;
+            match name.as_str() {
+                "Max Strength" => p.strength = (value as f32).clamp(0.0, 1.0),
+                "Max Size" => p.size = (value as f32).max(1e-3),
+                "Additive" => p.additive = on,
+                "Falloff" => p.falloff = (value.max(0.0) as u32).min(4),
+                "Draw Ring" => p.draw_ring = on,
+                "Mirror" => p.mirror = on,
+                "Mirror Axis" => p.mirror_axis = (value.max(0.0) as u32).min(2),
+                "Mirror Offset" => p.mirror_offset = value as f32,
+                "Paint Blend Weights" => p.blend = on,
+                other => return Err(format!("Painter Options has no {other:?}")),
+            }
+            Ok(status(state))
+        }
+        C::SkinPainterOptionsDialog => {
+            entry(state)?;
+            state.dialog = Some(Dialog::PainterOptions);
+            Ok(json!({ "dialog": "PainterOptions" }))
+        }
         C::SetWeightTo00Skin => weight_edit(state, "Set Weight", |_, _| 0.0),
         C::SetWeightTo010Skin => weight_edit(state, "Set Weight", |_, _| 0.1),
         C::SetWeightTo025Skin => weight_edit(state, "Set Weight", |_, _| 0.25),
@@ -244,9 +347,12 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SetWeightCustomSkin => weight_edit(state, "Set Weight", |_, c| c),
         C::AddWeightSkin => weight_edit(state, "Add Weight", |w, _| w + 0.05),
         C::SubtractWeightSkin => weight_edit(state, "Subtract Weight", |w, _| w - 0.05),
-        C::ScaleWeightUpSkin => weight_edit(state, "Scale Weight", |w, _| w * 1.1),
-        C::ScaleWeightDownSkin => weight_edit(state, "Scale Weight", |w, _| w * 0.9),
-        C::ScaleWeightCustomSkin => weight_edit(state, "Scale Weight", |w, c| w * c),
+        C::ScaleWeightUpSkin => weight_edit(state, "Scale Weight", |w, _| w * 1.05),
+        C::ScaleWeightDownSkin => weight_edit(state, "Scale Weight", |w, _| w * 0.95),
+        C::ScaleWeightCustomSkin => {
+            let k = state.skin_scale_weight;
+            weight_edit(state, "Scale Weight", move |w, _| w * k)
+        }
         C::BlendWeightsSkin => edit(state, "Blend Weights", |data, mesh, st| {
             let verts = selected_verts(st, mesh.vertex_count());
             if verts.is_empty() {
@@ -483,6 +589,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::PasteWeightsSkin | C::PasteWeightsByPosSkin => {
             let by_pos = matches!(cmd, C::PasteWeightsByPosSkin);
             let clip = state.skin_clipboard_weights.clone();
+            let tolerance = state.skin_paste_tolerance;
             if clip.is_empty() {
                 return Err("no weights copied".into());
             }
@@ -490,8 +597,12 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 let verts = selected_verts(st, mesh.vertex_count());
                 for (k, v) in verts.iter().enumerate() {
                     let src = if by_pos {
+                        // Paste-Pos: the nearest copied vertex within the tolerance; farther vertices keep theirs.
                         let p = mesh.vertices()[*v].position;
-                        clip.iter().min_by(|a, b| a.0.distance(p).total_cmp(&b.0.distance(p))).unwrap()
+                        match clip.iter().filter(|c| c.0.distance(p) <= tolerance).min_by(|a, b| a.0.distance(p).total_cmp(&b.0.distance(p))) {
+                            Some(c) => c,
+                            None => continue,
+                        }
                     } else {
                         &clip[k % clip.len()]
                     };
@@ -713,6 +824,10 @@ pub fn status(state: &AppState) -> Value {
             "skin_pose_mode": state.skin_pose_live.is_some(),
             "gizmos": e.data.gizmos.iter().map(|g| json!({ "kind": format!("{:?}", g.kind), "bone": g.bone, "parent": g.parent_bone, "keys": g.keys.len() })).collect::<Vec<_>>(),
             "custom_weight": state.skin_custom_weight,
+            "scale_weight": state.skin_scale_weight,
+            "paste_tolerance": state.skin_paste_tolerance,
+            "paint_weights": state.skin_paint,
+            "painter": { "max_strength": state.skin_painter.strength, "max_size": state.skin_painter.size, "additive": state.skin_painter.additive, "falloff": state.skin_painter.falloff, "draw_ring": state.skin_painter.draw_ring, "mirror": state.skin_painter.mirror, "mirror_axis": state.skin_painter.mirror_axis, "mirror_offset": state.skin_painter.mirror_offset, "paint_blend_weights": state.skin_painter.blend },
         }),
         Err(_) => Value::Null,
     }
@@ -733,9 +848,169 @@ pub fn weight_color(w: f32) -> [u8; 3] {
     }
 }
 
-/// Skin > Edit Envelopes is where the viewport clicks go.
+/// Skin > Edit Envelopes owns the viewport clicks: vertices (with Select
+/// Vertices on) and bones; a click on nothing clears the vertex selection.
 pub fn picks_vertices(state: &AppState) -> bool {
-    state.skin_active() && state.skin_filter_vertices && state.selection_mode == SelectionMode::Object
+    state.skin_active() && state.selection_mode == SelectionMode::Object
+}
+
+/// Paint Weights is on and Edit Envelopes active.
+pub fn painting(state: &AppState) -> bool {
+    state.skin_paint && state.skin_active()
+}
+
+/// Painter Options (Max Strength / Max Size, falloff, mirror) and Paint Blend Weights.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Painter {
+    pub strength: f32,
+    /// Brush radius in world units.
+    pub size: f32,
+    pub additive: bool,
+    /// 0 Linear, 1 Smooth, 2 Slow, 3 Fast, 4 Flat.
+    pub falloff: u32,
+    pub draw_ring: bool,
+    pub mirror: bool,
+    pub mirror_axis: u32,
+    pub mirror_offset: f32,
+    pub blend: bool,
+}
+
+impl Default for Painter {
+    fn default() -> Self {
+        Self { strength: 1.0, size: 10.0, additive: true, falloff: 1, draw_ring: true, mirror: false, mirror_axis: 0, mirror_offset: 0.0, blend: true }
+    }
+}
+
+impl Painter {
+    /// Brush weight at `t` = distance / radius (0 centre, 1 rim).
+    pub fn falloff_at(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        match self.falloff {
+            0 => 1.0 - t,
+            2 => 1.0 - t * t * t,
+            3 => (1.0 - t) * (1.0 - t),
+            4 => 1.0,
+            _ => 1.0 - t * t * (3.0 - 2.0 * t),
+        }
+    }
+}
+
+/// World positions of the Skin's output vertices (what the viewport shows).
+pub fn vertex_world_positions(state: &AppState) -> Option<(NodeId, Vec<Vec3>)> {
+    let (id, index) = state.skin_entry()?;
+    let world = state.scene.object_matrix(id);
+    Some((id, state.scene.evaluated(id, Some(index)).value.mesh.vertices().iter().map(|v| world.transform_point3(v.position)).collect()))
+}
+
+/// Area-weighted vertex normals of the Skin's output in world space (Backface Cull Vertices).
+pub fn vertex_world_normals(state: &AppState) -> Option<Vec<Vec3>> {
+    let (id, index) = state.skin_entry()?;
+    let world = state.scene.object_matrix(id);
+    let ev = state.scene.evaluated(id, Some(index));
+    let mesh = &ev.value.mesh;
+    let pos: Vec<Vec3> = mesh.vertices().iter().map(|v| world.transform_point3(v.position)).collect();
+    let mut n = vec![Vec3::ZERO; pos.len()];
+    for f in 0..mesh.face_count() {
+        let ids = mesh.face_vertex_ids(loom_mesh::FaceId(f as u32)).unwrap_or_default();
+        for k in 1..ids.len().saturating_sub(1) {
+            let (a, b, c) = (ids[0].0 as usize, ids[k].0 as usize, ids[k + 1].0 as usize);
+            let face = (pos[b] - pos[a]).cross(pos[c] - pos[a]);
+            for v in [a, b, c] {
+                n[v] += face;
+            }
+        }
+    }
+    Some(n.into_iter().map(|x| x.normalize_or_zero()).collect())
+}
+
+/// Paint Weights: a dab at each world point (and its mirror with Painter Options > Mirror).
+fn paint(state: &mut AppState, points: &[[f32; 3]], erase: bool) -> Result<Value, String> {
+    let (_, world) = vertex_world_positions(state).ok_or("no Skin on the selection (add the modifier first)")?;
+    let p = state.skin_painter.clone();
+    let mut centres: Vec<Vec3> = points.iter().map(|x| Vec3::from(*x)).collect();
+    if p.mirror {
+        let a = p.mirror_axis.min(2) as usize;
+        let mirrored: Vec<Vec3> = centres
+            .iter()
+            .map(|c| {
+                let mut m = *c;
+                m[a] = 2.0 * p.mirror_offset - m[a];
+                m
+            })
+            .collect();
+        centres.extend(mirrored);
+    }
+    // Per vertex the strongest brush weight of the dabs.
+    let mut hit: std::collections::BTreeMap<usize, f32> = std::collections::BTreeMap::new();
+    for c in &centres {
+        for (v, q) in world.iter().enumerate() {
+            let d = q.distance(*c);
+            if d <= p.size {
+                let f = p.falloff_at(d / p.size);
+                let e = hit.entry(v).or_insert(0.0);
+                *e = e.max(f);
+            }
+        }
+    }
+    if hit.is_empty() {
+        return Ok(json!({ "painted": 0 }));
+    }
+    let painted = hit.len();
+    edit(state, "Paint Weights", |data, mesh, st| {
+        let bone = current_bone_index(st, data)?;
+        let b = bone as u32;
+        let n = mesh.vertex_count();
+        let before: Vec<f32> = (0..n).map(|v| weight_of(&current_weights(data, mesh, v), b)).collect();
+        let mut after = before.clone();
+        let paintable = |v: usize| v < n && !data.excluded[bone].contains(&(v as u32));
+        for (v, f) in hit.iter().filter(|(v, _)| paintable(**v)) {
+            let amount = p.strength * f;
+            let cur = before[*v];
+            let w = if p.additive {
+                if erase { cur - amount } else { cur + amount }
+            } else {
+                // Not additive: the stroke moves the weight towards Max Strength (or 0).
+                let target = if erase { 0.0 } else { p.strength };
+                cur + (target - cur) * f
+            };
+            after[*v] = w.clamp(0.0, 1.0);
+        }
+        if p.blend {
+            // Paint Blend Weights: each painted vertex moves towards its neighbourhood's average, by the brush weight.
+            let painted = after.clone();
+            for (v, f) in hit.iter().filter(|(v, _)| paintable(**v)) {
+                let ring: Vec<usize> = select_ops::vertex_neighbours(mesh, VertexId(*v as u32)).into_iter().map(|x| x.0 as usize).chain(std::iter::once(*v)).collect();
+                let avg = ring.iter().map(|i| painted[*i]).sum::<f32>() / ring.len() as f32;
+                after[*v] = painted[*v] + (avg - painted[*v]) * f * 0.5;
+            }
+        }
+        let changed: Vec<usize> = hit.keys().copied().filter(|v| paintable(*v) && (after[*v] - before[*v]).abs() > 1e-6).collect();
+        for v in changed {
+            let cur = current_weights(data, mesh, v);
+            set_bone_weight(data, mesh, v, b, after[v], &cur);
+        }
+        Ok(())
+    })?;
+    Ok(json!({ "painted": painted }))
+}
+
+/// Bone name field: case-insensitive prefix, `*` matches any run of characters.
+fn name_matches(pattern: &str, name: &str) -> bool {
+    let (p, n) = (pattern.to_lowercase(), name.to_lowercase());
+    let mut rest = n.as_str();
+    for (k, part) in p.split('*').enumerate() {
+        if k == 0 {
+            match rest.strip_prefix(part) {
+                Some(r) => rest = r,
+                None => return false,
+            }
+        } else if let Some(i) = rest.find(part) {
+            rest = &rest[i + part.len()..];
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 /// Per-vertex weight of the current bone, for the viewport colours.
@@ -745,11 +1020,38 @@ pub fn current_bone_weights(state: &AppState) -> Option<(NodeId, Vec<f32>)> {
     Some((e.id, (0..e.input.vertex_count()).map(|v| weight_of(&current_weights(&e.data, &e.input, v), i)).collect()))
 }
 
-/// The current bone's envelope capsule in world space: (start, end, inner radii, outer radii, cross sections).
-pub fn current_envelope_world(state: &AppState) -> Option<(Vec3, Vec3, [f32; 2], [f32; 2], Vec<(f32, f32, f32)>)> {
-    let e = entry(state).ok()?;
-    let i = current_bone_index(state, &e.data).ok()?;
-    let b = &e.data.bones[i];
-    let world = b.bind_inverse.inverse();
-    Some((world.transform_point3(b.envelope.start), world.transform_point3(b.envelope.end), b.envelope.inner, b.envelope.outer, b.cross_sections.clone()))
+/// An envelope capsule in world space.
+pub struct EnvelopeWorld {
+    /// The current bone's (drawn with its handles and cross sections).
+    pub current: bool,
+    pub start: Vec3,
+    pub end: Vec3,
+    pub inner: [f32; 2],
+    pub outer: [f32; 2],
+    pub cross_sections: Vec<(f32, f32, f32)>,
+}
+
+/// Display > Show Colored Faces at the Envelope level: the skinned node and its per-vertex weights of the current bone.
+pub fn colored_faces(state: &AppState) -> Option<(NodeId, Vec<f32>)> {
+    if !state.skin_active() || !entry(state).ok()?.data.display.colored_faces {
+        return None;
+    }
+    current_bone_weights(state)
+}
+
+/// The envelopes the viewport shows: the current bone's, the ones with
+/// Envelope Visibility on, or all with Display > Show All Envelopes.
+pub fn shown_envelopes_world(state: &AppState) -> Vec<EnvelopeWorld> {
+    let Ok(e) = entry(state) else { return Vec::new() };
+    let cur = current_bone_index(state, &e.data).ok();
+    e.data
+        .bones
+        .iter()
+        .enumerate()
+        .filter(|(i, b)| Some(*i) == cur || b.envelope_visible || e.data.display.all_envelopes)
+        .map(|(i, b)| {
+            let world = b.bind_inverse.inverse();
+            EnvelopeWorld { current: Some(i) == cur, start: world.transform_point3(b.envelope.start), end: world.transform_point3(b.envelope.end), inner: b.envelope.inner, outer: b.envelope.outer, cross_sections: b.cross_sections.clone() }
+        })
+        .collect()
 }

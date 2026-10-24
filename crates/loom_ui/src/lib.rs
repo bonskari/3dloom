@@ -22,6 +22,7 @@ mod viewport_widget;
 pub mod poly_modes;
 pub mod spline_modes;
 pub mod ribbon;
+pub mod shortcuts;
 pub mod viewports;
 pub mod uv_editor;
 pub mod track_view;
@@ -31,7 +32,7 @@ mod ui_tests;
 
 use eframe::egui;
 use glam::Vec3;
-use loom_commands::{AppState, Command, Keymap, PrimitiveKind, ShapeKind, Tool};
+use loom_commands::{AppState, Command, PrimitiveKind, ShapeKind, Tool};
 pub use command_panel::create::Category;
 pub use command_panel::Tab;
 pub use command_panel::hierarchy::Sub as HierarchySub;
@@ -116,6 +117,8 @@ pub enum CreateKind {
     Line,
     /// Systems > Bones: clicks lay joints, a right-click ends the chain.
     Bones,
+    /// Systems > Biped: drag from the feet to set the height.
+    Biped,
     /// Helpers > Dummy / Point: a click places one.
     Helper(HelperKind),
     /// Cameras > Target (drag camera to target) / Free (a click places one).
@@ -153,7 +156,6 @@ pub enum LineDrag {
 
 pub struct LoomApp {
     pub state: AppState,
-    pub keymap: Keymap,
     pub camera_controller: ViewportNavigator,
     /// World-space meshes of visible nodes, rebuilt when `state.mesh_dirty`.
     world_meshes: Vec<(NodeId, Mesh)>,
@@ -196,6 +198,12 @@ pub struct LoomApp {
     pub create: Option<CreateSession>,
     /// A Target camera being dragged out.
     pub camera_create: Option<create_tool::CameraSession>,
+    /// A biped being dragged out.
+    pub biped_create: Option<create_tool::BipedSession>,
+    /// Create Biped rollout: the structure the next biped gets.
+    pub biped_defaults: loom_scene::biped::BipedStructure,
+    /// The biped made last; the Create Biped rollout still edits it.
+    pub last_biped: Option<NodeId>,
     pub panel_tab: Tab,
     pub hierarchy_sub: HierarchySub,
     pub utility: Utility,
@@ -257,6 +265,9 @@ pub struct LoomApp {
     pub drag_select_start: Option<egui::Pos2>,
     /// Alt+LMB press not yet moved 4 px: a click subtracts from the selection, a drag orbits.
     pub alt_click: Option<egui::Pos2>,
+    /// The last object click: where, the objects under it front to back, and
+    /// which of them it picked; a repeat click there picks the next one.
+    pub pick_cycle: Option<(egui::Pos2, Vec<NodeId>, usize)>,
     /// Lasso/Paint path or Fence corners being collected.
     pub region_points: Vec<egui::Pos2>,
     pub quad_menu: Option<quad_menu::Open>,
@@ -291,7 +302,6 @@ impl LoomApp {
     pub fn headless() -> Self {
         Self {
             state: AppState::new(),
-            keymap: Keymap::main_ui(),
             camera_controller: ViewportNavigator::new(),
             world_meshes: Vec::new(),
             world_styles: Vec::new(),
@@ -315,6 +325,9 @@ impl LoomApp {
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
             camera_create: None,
+            biped_create: None,
+            biped_defaults: loom_scene::biped::BipedStructure::new(1.0),
+            last_biped: None,
             panel_tab: Tab::Create,
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
@@ -349,6 +362,7 @@ impl LoomApp {
             view_animation: None,
             drag_select_start: None,
             alt_click: None,
+            pick_cycle: None,
             region_points: Vec::new(),
             quad_menu: None,
             background_textures: std::collections::HashMap::new(),
@@ -496,9 +510,7 @@ impl LoomApp {
             } else {
                 [srgb(n.wire_color[0]), srgb(n.wire_color[1]), srgb(n.wire_color[2])]
             };
-            // Helpers (Dummy, Point, IK goals) draw see-through like wireframe helpers;
-            // a camera icon is drawn solid.
-            let see_through = n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }));
+            let see_through = draws_see_through(n);
             // An assigned material colours the faces (its diffuse, opacity and
             // highlight); edges and wireframe keep the object colour.
             let material = self.state.scene.node_material(n.id).cloned();
@@ -540,7 +552,20 @@ impl LoomApp {
             };
             // A visibility track below 1 shows the object partly transparent (never fully hidden in shaded views).
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
-            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors: n.display.vertex_colors, texture, specular, wire_color });
+            // Skin > Display > Show Colored Faces (in Edit Envelopes): the faces shade by the current bone's weight.
+            let mut vertex_colors = n.display.vertex_colors;
+            let mut color = color;
+            if let (Some(d), Some((skinned, weights))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
+                if skinned == id && d.vertex_count() == weights.len() {
+                    for (v, w) in d.vertices_mut().iter_mut().zip(weights) {
+                        let c = loom_commands::skin::weight_color(w);
+                        v.color = [srgb(c[0]), srgb(c[1]), srgb(c[2])];
+                    }
+                    vertex_colors = true;
+                    color = [1.0; 3];
+                }
+            }
+            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors, texture, specular, wire_color });
             display.push(shown.unwrap_or_else(|| mesh.clone()));
             meshes.push((n.id, mesh));
         }
@@ -560,6 +585,18 @@ impl LoomApp {
     /// Visible nodes with their world-space meshes, in render order.
     pub fn world_meshes(&self) -> &[(NodeId, Mesh)] {
         &self.world_meshes
+    }
+
+    /// The world-space mesh the viewports draw for `world_meshes()[i]`:
+    /// what object picking hits.
+    pub fn drawn_mesh(&self, i: usize) -> &Mesh {
+        self.world_display.get(i).unwrap_or(&self.world_meshes[i].1)
+    }
+
+    /// What the viewports draw for each of `world_meshes` (a Skin's posed
+    /// result, not the cage), in the same order.
+    pub fn world_display(&self) -> &[Mesh] {
+        &self.world_display
     }
 
     pub fn render_camera(&self) -> Camera {
@@ -847,6 +884,12 @@ pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
 }
 
 /// Decodes a Show Map bitmap once per path (a failed load is remembered too).
+/// Drawn see-through: See-Through on (Alt+X), and helpers (Dummy, Point, IK
+/// goals); a camera icon is drawn solid.
+pub(crate) fn draws_see_through(n: &loom_scene::Node) -> bool {
+    n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }))
+}
+
 fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>, path: &str) -> Option<std::sync::Arc<loom_render::Bitmap>> {
     cache
         .entry(path.to_owned())

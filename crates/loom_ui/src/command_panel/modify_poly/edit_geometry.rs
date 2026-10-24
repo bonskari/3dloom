@@ -16,7 +16,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         let sub = level != SelectionMode::Object;
         let has = sub && !app.state.sub_selection.is_empty();
         let ps = app.state.poly_settings;
-        action(ui, app, "Repeat Last", "Repeat Last Operation (;)", Command::RepeatLastOperation);
+        action(ui, app, "Repeat Last", "Repeat Last Operation", Command::RepeatLastOperation);
         ui.label("Constraints:");
         ui.horizontal(|ui| {
             for (c, l, cmd) in [
@@ -68,11 +68,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             let on = pick_on(app, &[PickMode::QuickSliceA, PickMode::QuickSliceB]);
-            if ui.selectable_label(on, "QuickSlice").on_hover_text("QuickSlice (Shift+Ctrl+Q): click two points").clicked() {
+            if ui.selectable_label(on, "QuickSlice").on_hover_text(crate::shortcuts::tip(&app.state, "QuickSlice: click two points", "Quickslice Mode")).clicked() {
                 let _ = app.dispatch(Command::QuickSliceMode);
             }
             let on = pick_on(app, &[PickMode::CutA, PickMode::CutB]);
-            if ui.selectable_label(on, "Cut").on_hover_text("Cut (Alt+C): click the start and end points on the surface").clicked() {
+            if ui.selectable_label(on, "Cut").on_hover_text(crate::shortcuts::tip(&app.state, "Cut: click the start and end points on the surface", "Cut")).clicked() {
                 let _ = app.dispatch(Command::Cut);
             }
         });

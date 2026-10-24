@@ -264,8 +264,6 @@ pub struct HideCategories {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dialog {
     SelectFromScene,
-    /// Rendering > Material Editor (M).
-    MaterialEditor,
     /// Rendering > Render: choose the PNG the active view renders to.
     RenderFile,
     /// Rendering > Render SetUp: the output size.
@@ -327,6 +325,8 @@ pub enum Dialog {
     WeightTable,
     /// Skin > Weight Tool.
     WeightTool,
+    /// Skin > Weight Properties > Painter Options.
+    PainterOptions,
     /// Display > Show Map in Viewport > Bitmap: pick the image file.
     PickTexture,
     /// UVW Map > Bitmap Fit: pick the image whose aspect the gizmo takes.

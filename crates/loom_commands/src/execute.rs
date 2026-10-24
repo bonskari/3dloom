@@ -50,7 +50,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::UnwrapUvwModifier => crate::unwrap::execute(state, cmd),
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
         c if c.group() == crate::Group::Skin => crate::skin::execute(state, c),
-        c @ (C::SkinAddBones { .. } | C::SkinRemoveBone { .. } | C::SkinSelectBone { .. } | C::SkinSelectVertices { .. } | C::SkinSetVertexWeight { .. } | C::SkinSetEnvelope { .. } | C::SkinSetCustomWeight { .. } | C::SkinNormalize | C::SkinRigidToggle | C::SkinBakeSelectedVerts | C::MirrorModeSkin | C::PasteGreenToBlue | C::PasteBlueToGreen | C::MirrorPaste | C::SkinAddGizmo { .. } | C::SkinRemoveGizmo | C::SkinSelectGizmo { .. } | C::SkinAddGizmoKey | C::SkinSetGizmoKey { .. } | C::SkinSetGizmoDelta { .. } | C::SkinSetGizmoOption { .. }) => crate::skin::execute(state, c),
+        c @ (C::SkinAddBones { .. } | C::SkinRemoveBone { .. } | C::SkinSelectBone { .. } | C::SkinSelectVertices { .. } | C::SkinSetVertexWeight { .. } | C::SkinSetEnvelope { .. } | C::SkinSetCustomWeight { .. } | C::SkinNormalize | C::SkinRigidToggle | C::SkinBakeSelectedVerts | C::MirrorModeSkin | C::PasteGreenToBlue | C::PasteBlueToGreen | C::MirrorPaste | C::SkinAddGizmo { .. } | C::SkinRemoveGizmo | C::SkinSelectGizmo { .. } | C::SkinAddGizmoKey | C::SkinSetGizmoKey { .. } | C::SkinSetGizmoDelta { .. } | C::SkinSetGizmoOption { .. } | C::SkinSetVertexWeights { .. } | C::SkinSetScaleWeight { .. } | C::SkinSetPasteTolerance { .. } | C::SkinSelectBoneByName { .. } | C::SkinEnvelopeVisibility | C::SkinPaintWeightsToggle | C::SkinPaintStroke { .. } | C::SkinSetPainterOption { .. } | C::SkinPainterOptionsDialog) => crate::skin::execute(state, c),
         c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin) => crate::morph::execute(state, c),
         C::NewScene => {
             let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
@@ -1684,6 +1684,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+            if let ObjectKind::Biped(b) = &node.object {
+                // Structure parameters rebuild the parts.
+                let mut after = (**b).clone();
+                after.set(&name, value)?;
+                return crate::biped::rebuild(state, id, after, &name);
+            }
             let root = node.instance_of.unwrap_or(id);
             let group: Vec<NodeId> = state
                 .scene
@@ -2507,6 +2513,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({ "edges": state.active().edged_faces, "vertices": state.show_vertices }))
         }
+        c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. }) => crate::biped::execute(state, c),
         c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         // Every remaining variant is an Unwrap UVW group command.
         other => crate::unwrap::execute(state, other),
@@ -3910,6 +3917,7 @@ fn snapshot(state: &AppState) -> Value {
         "title": state.title(),
         "selection": selection_json(state),
         "dialog": state.dialog.map(|d| format!("{d:?}")),
+        "material_editor": state.material_editor_open,
         "pick_mode": state.pick_mode.map(|p| format!("{p:?}")),
         "poly_drag": state.poly_drag.map(|p| format!("{p:?}")),
         "poly_settings": serde_json::to_value(state.poly_settings).unwrap_or(Value::Null),

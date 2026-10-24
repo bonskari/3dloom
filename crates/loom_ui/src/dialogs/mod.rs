@@ -83,13 +83,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         });
         app.last_dialog = app.state.dialog;
     }
-    let Some(dialog) = app.state.dialog else { return };
     if app.state.hide_floating_dialogs {
         return;
     }
+    // The Material Editor is a window of its own: its bitmap chooser (a
+    // dialog) opens over it and leaves it open.
+    if app.state.material_editor_open {
+        let mut open = true;
+        material_editor::show(ctx, app, &mut open);
+        if !open {
+            app.state.material_editor_open = false;
+        }
+    }
+    let Some(dialog) = app.state.dialog else { return };
     let mut open = true;
     match dialog {
-        Dialog::MaterialEditor => material_editor::show(ctx, app, &mut open),
         Dialog::MaterialMap { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
@@ -122,6 +130,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
         Dialog::WeightTable => rig_dialogs::weight_table(ctx, app, &mut open),
         Dialog::WeightTool => rig_dialogs::weight_tool(ctx, app, &mut open),
+        Dialog::PainterOptions => rig_dialogs::painter_options(ctx, app, &mut open),
         Dialog::OutOfRangeTypes => track_view_dialogs::out_of_range_types(ctx, app, &mut open),
         Dialog::ReduceKeys => track_view_dialogs::reduce_keys(ctx, app, &mut open),
         Dialog::TrackSets => track_view_dialogs::track_sets(ctx, app, &mut open),

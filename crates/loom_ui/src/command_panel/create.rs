@@ -210,13 +210,23 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         Category::Systems => {
             rollout(ui, "Object Type", true, |ui| {
                 ui.checkbox(&mut app.autogrid, "AutoGrid");
-                let on = app.create_kind == Some(CreateKind::Bones);
-                if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, "Bones")).clicked() {
-                    app.bone_points.clear();
-                    app.start_create((!on).then_some(CreateKind::Bones));
-                }
+                ui.horizontal(|ui| {
+                    let on = app.create_kind == Some(CreateKind::Bones);
+                    if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, "Bones")).clicked() {
+                        app.bone_points.clear();
+                        app.start_create((!on).then_some(CreateKind::Bones));
+                    }
+                    let on = app.create_kind == Some(CreateKind::Biped);
+                    if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, "Biped")).clicked() {
+                        app.start_create((!on).then_some(CreateKind::Biped));
+                    }
+                });
             });
             name_and_color(ui, app);
+            if app.create_kind == Some(CreateKind::Biped) {
+                super::biped::create_rollout(ui, app);
+                return;
+            }
             if app.create_kind == Some(CreateKind::Bones) {
                 rollout(ui, "IK Chain Assignment", true, |ui| {
                     ui.label("Click joints in a viewport; right-click ends the chain.");

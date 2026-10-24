@@ -225,7 +225,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             if app.state.viewports[index].background.is_none() && !app.state.viewports[index].is_orthographic() {
                 draw_background_gradient(&painter, rect);
             }
-            draw_labels(ui, app, index, rect);
+            let over_label = draw_labels(ui, app, index, rect);
 
             if app.state.region_points_reset {
                 app.state.region_points_reset = false;
@@ -404,6 +404,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
+                    // Skin > Paint Weights brush.
+                    crate::poly_modes::skin_paint(app, &ctx, &painter, &pointer, response.hovered(), p, rect, view, proj, &projection);
                     // Paint Deformation brush: LMB paints on the selected poly (Ctrl inverts, Shift relaxes).
                     if let Some(mode) = app.state.paint_deform {
                         if let Some(target) = app.state.selection.iter().next().copied() {
@@ -594,6 +596,16 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     }
                                     let _ = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() });
                                 }
+                            } else if app.create_kind == Some(crate::CreateKind::Biped) {
+                                // Biped: the press puts the feet down, the drag sets the height.
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                    if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
+                                        anchor = hit.point;
+                                        app.consume_snap_override();
+                                    }
+                                    let upp = units_per_pixel(app, index, rect);
+                                    app.biped_create = crate::create_tool::BipedSession::begin(app, anchor, basis.2, p, upp);
+                                }
                             } else if let Some(crate::CreateKind::Camera { target }) = app.create_kind {
                                 if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
                                     if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
@@ -665,9 +677,16 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         if let Some(session) = app.camera_create.take() {
                             session.finish(app);
                         }
+                        if let Some(session) = app.biped_create.take() {
+                            let hit = plane_hit(p, rect, view, proj, session.normal);
+                            session.finish(app, hit, p);
+                        }
                         if app.alt_click.take().is_some() {
-                            let picked = picks_at(app, p, rect, view, proj, view_proj);
-                            apply_picks(app, picked, mods);
+                            // Alt+click removes: Skin vertices at Edit Envelopes, else the picked items.
+                            if !(app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods)) {
+                                let picked = picks_at(app, p, rect, view, proj, view_proj);
+                                apply_picks(app, picked, mods);
+                            }
                         } else if app.transform_drag.is_none() {
                             if let Some(mut session) = app.create.take() {
                                 if !session.on_release(app, p) {
@@ -722,8 +741,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                             let _ = app.dispatch(Command::PickHit { id: id.0 });
                                         }
                                     } else {
-                                        let picked = picks_at(app, p, rect, view, proj, view_proj);
-                                        apply_picks(app, picked, mods);
+                                        let double = pointer.button_double_clicked(egui::PointerButton::Primary);
+                                        if !(double && double_click(app, p, rect, view, proj, view_proj, mods)) {
+                                            let mut picked = picks_at(app, p, rect, view, proj, view_proj);
+                                            cycle_object_pick(app, p, rect, view, proj, &mut picked, double);
+                                            apply_picks(app, picked, mods);
+                                        }
                                     }
                                 } else {
                                     let region = drag_region(app, start, p);
@@ -754,6 +777,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                     }
                     if pointer.is_moving() {
+                        if let Some(mut session) = app.biped_create.take() {
+                            let hit = plane_hit(p, rect, view, proj, session.normal);
+                            session.on_drag(app, hit, p);
+                            app.biped_create = Some(session);
+                            ctx.request_repaint();
+                        }
                         if let Some(session) = app.camera_create.clone() {
                             let mut hit = plane_hit(p, rect, view, proj, session.normal);
                             if let Some(snap) = snap_at(app, index, &projection, p, None, false) {
@@ -776,7 +805,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                     // Right click cancels a creation in progress or a by-Hit mode;
                     // otherwise it opens the quad menu (on the click).
-                    if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() {
+                    if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() && !over_label {
                         if let Some(session) = app.create.take() {
                             session.cancel(app);
                         } else if app.create_kind.is_some() && app.bone_points.is_empty() && app.line.is_none() {
@@ -789,13 +818,17 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             if points.len() >= 2 {
                                 let _ = app.dispatch(Command::CreateBoneChain { points, name: None });
                             }
+                        } else if loom_commands::skin::painting(&app.state) {
+                            // Right-click ends Paint Weights.
+                            let _ = app.dispatch(Command::SkinPaintWeightsToggle);
                         } else if app.state.pick_mode.is_some() {
                             let _ = app.dispatch(Command::ExitPickMode);
                         } else if app.state.nav_mode != loom_input::NavMode::None {
                             app.state.nav_mode = loom_input::NavMode::None;
                         } else if !app.region_points.is_empty() && app.drag_select_start.is_none() {
                             app.region_points.clear();
-                        } else if app.quad_menu.is_none() {
+                        } else {
+                            // A right-click elsewhere while one is open reopens it there.
                             let mut open = crate::quad_menu::Open::new(p, index);
                             open.kind = if mods.shift { crate::quad_menu::QuadKind::Snaps } else if mods.ctrl { crate::quad_menu::QuadKind::Create } else if mods.alt { crate::quad_menu::QuadKind::Animation } else { crate::quad_menu::QuadKind::Default };
                             app.quad_menu = Some(open);
@@ -1069,7 +1102,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
 }
 
 /// The three viewport label menus (General, POV, Shading).
-fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::Rect) {
+/// Returns true when the pointer is over a label (its right-click is the label's menu, not the quad menu).
+fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::Rect) -> bool {
+    let mut over = false;
     // The labels sit over the 3D image (drawn later in the viewport's own
     // layer): their own background layer, painted after the panel.
     let painter = &ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("viewport_labels"))).with_clip_rect(rect);
@@ -1107,6 +1142,7 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
                 crate::label_menus::render(ui, app, index, &entries);
             });
         let hovered = resp.is_some_and(|r| r.response.hovered()) || ui.rect_contains_pointer(r);
+        over |= hovered;
         let color = if hovered { egui::Color32::WHITE } else { egui::Color32::from_gray(225) };
         painter.galley(r.min, galley, color);
         x += size.x + 10.0;
@@ -1114,6 +1150,7 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
     if disabled {
         painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font, egui::Color32::from_gray(225));
     }
+    over
 }
 
 /// World units per screen pixel at the view's focus distance.
@@ -1233,30 +1270,99 @@ fn pick_object(
     view: Mat4,
     proj: Mat4,
 ) -> Option<Pick> {
-    let local = p - rect.min;
-    let viewport_size = Vec2::new(rect.width(), rect.height());
-    let (origin, dir) = loom_render::pick::screen_to_world_ray(
-        Vec2::new(local.x, local.y),
-        viewport_size,
-        view,
-        proj,
-    );
-    if let Some(i) = pick_shape(app, p, rect, proj * view) {
-        return Some(Pick::Object(i));
+    object_hits(app, p, rect, view, proj).first().map(|&i| Pick::Object(i))
+}
+
+/// Objects under `p` in pick order, as indices into `world_meshes`: a shape
+/// whose outline is within reach, else every object whose drawn surface the
+/// pointer ray hits (in a Wireframe view: whose drawn edges pass within 4 px),
+/// solid ones front to back and then See-Through ones, so what a See-Through
+/// object encloses is picked through it.
+fn object_hits(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Vec<usize> {
+    let view_proj = proj * view;
+    if let Some(i) = pick_shape(app, p, rect, view_proj) {
+        return vec![i];
     }
-    let mut best: Option<(usize, f32)> = None;
-    for (i, (_, mesh)) in app.world_meshes().iter().enumerate() {
+    let local = p - rect.min;
+    let (origin, dir) = loom_render::pick::screen_to_world_ray(Vec2::new(local.x, local.y), Vec2::new(rect.width(), rect.height()), view, proj);
+    let wire = app.state.active().shading == loom_commands::Shading::Wireframe;
+    let mut hits: Vec<(bool, f32, usize)> = Vec::new();
+    for (i, (id, _)) in app.world_meshes().iter().enumerate() {
+        let mesh = app.drawn_mesh(i);
         if mesh.face_count() == 0 {
             continue;
         }
-        let (mn, mx) = mesh.aabb();
-        if let Some(t) = loom_render::pick::ray_aabb(origin, dir, mn, mx) {
-            if best.is_none_or(|(_, bt)| t < bt) {
-                best = Some((i, t));
+        let t = if wire { edge_hit(mesh, p, rect, view_proj, origin, dir) } else { loom_render::pick::ray_mesh(origin, dir, mesh) };
+        if let Some(t) = t {
+            hits.push((app.state.scene.node(*id).is_some_and(crate::draws_see_through), t, i));
+        }
+    }
+    hits.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    hits.into_iter().map(|(_, _, i)| i).collect()
+}
+
+/// The nearest point (as a distance along the ray) of a mesh edge drawn
+/// within 4 px of `p`.
+fn edge_hit(mesh: &Mesh, p: egui::Pos2, rect: egui::Rect, view_proj: Mat4, origin: Vec3, dir: Vec3) -> Option<f32> {
+    let mut best: Option<f32> = None;
+    for he_i in 0..mesh.half_edges().len() {
+        let e = HalfEdgeId(he_i as u32);
+        if mesh.canonical_edge_id(e) != Some(e) {
+            continue;
+        }
+        let Some((va, vb)) = mesh.edge_vertices(e) else { continue };
+        let (Some(wa), Some(wb)) = (mesh.vertex_position(va), mesh.vertex_position(vb)) else { continue };
+        let (Some(a), Some(b)) = (project_world_to_screen(wa, view_proj, rect), project_world_to_screen(wb, view_proj, rect)) else { continue };
+        let ab = b - a;
+        let s = if ab.length_sq() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+        if (a + ab * s).distance(p) <= 4.0 {
+            let t = (wa + (wb - wa) * s - origin).dot(dir);
+            if best.is_none_or(|bt| t < bt) {
+                best = Some(t);
             }
         }
     }
-    best.map(|(i, _)| Pick::Object(i))
+    best
+}
+
+/// A repeat click within 2 px of the last object click picks the next object
+/// under it (and comes round again); a double-click never steps.
+fn cycle_object_pick(app: &mut LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4, picked: &mut Vec<Pick>, double: bool) {
+    if !matches!(picked.as_slice(), [Pick::Object(_)]) {
+        app.pick_cycle = None;
+        return;
+    }
+    let hits = object_hits(app, p, rect, view, proj);
+    let ids: Vec<NodeId> = hits.iter().map(|&i| app.world_meshes()[i].0).collect();
+    let k = match &app.pick_cycle {
+        Some((q, prev, k)) if !double && q.distance(p) <= 2.0 && *prev == ids => (k + 1) % ids.len(),
+        _ => 0,
+    };
+    *picked = vec![Pick::Object(hits[k])];
+    app.pick_cycle = Some((p, ids, k));
+}
+
+/// Viewport double-clicks: on an object, it and all its descendants are
+/// selected; on an Editable Poly / Edit Poly edge, its loop.
+fn double_click(app: &mut LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4, view_proj: Mat4, mods: Modifiers) -> bool {
+    app.pick_cycle = None;
+    match app.state.selection_mode {
+        SelectionMode::Object => {
+            let Some(Pick::Object(i)) = pick_object(app, p, rect, view, proj) else { return false };
+            let id = app.world_meshes()[i].0;
+            let ids: Vec<u64> = std::iter::once(id).chain(app.state.scene.descendants(id)).map(|n| n.0).collect();
+            let op = if mods.ctrl { SelectOp::Add } else { SelectOp::Replace };
+            let _ = app.dispatch(Command::SelectNodes { ids, op });
+            true
+        }
+        SelectionMode::Edge if !app.state.spline_selected() => {
+            let Some(Pick::SubObject { mesh, id: SubObjectId::Edge(e) }) = pick_edge(app, p, rect, view_proj) else { return false };
+            let edges = loom_mesh::select_ops::edge_loop(&app.world_meshes()[mesh].1, &[e]);
+            apply_picks(app, edges.into_iter().map(|e| Pick::SubObject { mesh, id: SubObjectId::Edge(e) }).collect(), mods);
+            true
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn pick_vertex(
@@ -1380,34 +1486,46 @@ pub(crate) fn pick_face(
     })
 }
 
-/// Screen points that represent a candidate for region selection.
-fn candidate_points(mesh: &Mesh, id: Option<SubObjectId>, view_proj: Mat4, rect: egui::Rect) -> Vec<egui::Pos2> {
+/// Screen points that represent a sub-object for region selection.
+fn candidate_points(mesh: &Mesh, id: SubObjectId, view_proj: Mat4, rect: egui::Rect) -> Vec<egui::Pos2> {
     let project = |p: Vec3| project_world_to_screen(p, view_proj, rect);
     match id {
-        None => {
-            let (mn, mx) = mesh.aabb();
-            let mut pts: Vec<egui::Pos2> = (0..8)
-                .filter_map(|i| {
-                    let c = Vec3::new(
-                        if i & 1 == 0 { mn.x } else { mx.x },
-                        if i & 2 == 0 { mn.y } else { mx.y },
-                        if i & 4 == 0 { mn.z } else { mx.z },
-                    );
-                    project(c)
-                })
-                .collect();
-            if let Some(c) = project((mn + mx) * 0.5) {
-                pts.push(c);
-            }
-            pts
-        }
-        Some(SubObjectId::Vertex(v)) => mesh.vertex_position(v).and_then(project).into_iter().collect(),
-        Some(SubObjectId::Edge(e)) => mesh
+        SubObjectId::Vertex(v) => mesh.vertex_position(v).and_then(project).into_iter().collect(),
+        SubObjectId::Edge(e) => mesh
             .edge_vertices(e)
             .map(|(a, b)| [a, b].into_iter().filter_map(|v| mesh.vertex_position(v)).filter_map(project).collect())
             .unwrap_or_default(),
-        Some(SubObjectId::Face(f)) => mesh.face_positions(f).map(|pts| pts.into_iter().filter_map(project).collect()).unwrap_or_default(),
+        SubObjectId::Face(f) => mesh.face_positions(f).map(|pts| pts.into_iter().filter_map(project).collect()).unwrap_or_default(),
     }
+}
+
+/// Object region selection by the drawn geometry: Window needs every vertex
+/// inside the region; Crossing any part of the object: a vertex, a point
+/// along an edge, or a face under the region's centre.
+fn object_in_region(mesh: &Mesh, region: &crate::region::Region, view_proj: Mat4, rect: egui::Rect, window: bool) -> bool {
+    let project = |p: Vec3| project_world_to_screen(p, view_proj, rect);
+    let points: Vec<egui::Pos2> = mesh.vertices().iter().filter_map(|v| project(v.position)).collect();
+    if window || points.is_empty() {
+        return region.selects(&points, window);
+    }
+    if points.iter().any(|p| region.contains(*p)) {
+        return true;
+    }
+    for he_i in 0..mesh.half_edges().len() {
+        let e = HalfEdgeId(he_i as u32);
+        if mesh.canonical_edge_id(e) != Some(e) {
+            continue;
+        }
+        let Some((a, b)) = mesh.edge_vertices(e) else { continue };
+        let (Some(a), Some(b)) = (mesh.vertex_position(a).and_then(project), mesh.vertex_position(b).and_then(project)) else { continue };
+        let steps = ((b - a).length() / 4.0).ceil().clamp(1.0, 256.0) as usize;
+        if (1..steps).any(|k| region.contains(a + (b - a) * (k as f32 / steps as f32))) {
+            return true;
+        }
+    }
+    let centre = region.bounding_rect().center() - rect.min;
+    let (origin, dir) = loom_render::pick::screen_to_world_ray(Vec2::new(centre.x, centre.y), Vec2::new(rect.width(), rect.height()), Mat4::IDENTITY, view_proj);
+    region.contains(region.bounding_rect().center()) && loom_render::pick::ray_mesh(origin, dir, mesh).is_some()
 }
 
 /// Region selection with Window (fully enclosed) or Crossing (touched) semantics.
@@ -1456,7 +1574,7 @@ fn region_select_mode(app: &LoomApp, region: &crate::region::Region, viewport_re
         match app.state.selection_mode {
             SelectionMode::Object => {
                 let selectable = app.state.scene.node(*node_id).is_some_and(|n| !n.frozen && app.state.selection_filter.accepts(n));
-                if selectable && region.selects(&candidate_points(mesh, None, view_proj, viewport_rect), window) {
+                if selectable && object_in_region(app.drawn_mesh(mesh_i), region, view_proj, viewport_rect, window) {
                     items.push(Pick::Object(mesh_i));
                 }
             }
@@ -1465,7 +1583,7 @@ fn region_select_mode(app: &LoomApp, region: &crate::region::Region, viewport_re
             SelectionMode::Vertex => {
                 for vertex_i in 0..mesh.vertex_count() {
                     let id = SubObjectId::Vertex(VertexId(vertex_i as u32));
-                    if sub_pickable(app, mesh, id, view_dir) && region.selects(&candidate_points(mesh, Some(id), view_proj, viewport_rect), window) {
+                    if sub_pickable(app, mesh, id, view_dir) && region.selects(&candidate_points(mesh, id, view_proj, viewport_rect), window) {
                         items.push(Pick::SubObject { mesh: mesh_i, id });
                     }
                 }
@@ -1477,7 +1595,7 @@ fn region_select_mode(app: &LoomApp, region: &crate::region::Region, viewport_re
                         continue;
                     }
                     let id = SubObjectId::Edge(he_id);
-                    if sub_pickable(app, mesh, id, view_dir) && region.selects(&candidate_points(mesh, Some(id), view_proj, viewport_rect), window) {
+                    if sub_pickable(app, mesh, id, view_dir) && region.selects(&candidate_points(mesh, id, view_proj, viewport_rect), window) {
                         items.push(Pick::SubObject { mesh: mesh_i, id });
                     }
                 }
@@ -1485,7 +1603,7 @@ fn region_select_mode(app: &LoomApp, region: &crate::region::Region, viewport_re
             SelectionMode::Face | SelectionMode::Element => {
                 for face_i in 0..mesh.face_count() {
                     let id = SubObjectId::Face(FaceId(face_i as u32));
-                    if sub_pickable(app, mesh, id, view_dir) && region.selects(&candidate_points(mesh, Some(id), view_proj, viewport_rect), window) {
+                    if sub_pickable(app, mesh, id, view_dir) && region.selects(&candidate_points(mesh, id, view_proj, viewport_rect), window) {
                         items.push(Pick::SubObject { mesh: mesh_i, id });
                     }
                 }
@@ -1869,25 +1987,36 @@ fn set_constraint_from_handle(app: &mut LoomApp, handle: gizmo::Handle) {
     app.state.axis_constraint = c;
 }
 
-fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
-    let stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
-    // Group heads have no mesh: bracket the members' bounds instead.
+/// World boxes the selection brackets go around: each selected object's drawn
+/// result (a skinned mesh as posed, not its bind-pose cage); a group head, which
+/// has no mesh, gets its members' bounds.
+pub(crate) fn selection_bracket_boxes(app: &LoomApp) -> Vec<(Vec3, Vec3)> {
+    let bounds = |i: usize| app.world_display().get(i).filter(|m| m.vertex_count() > 0).map(|m| m.aabb());
+    let drawn = |id: NodeId| app.world_meshes().iter().position(|(n, _)| *n == id).and_then(bounds);
     let mut boxes: Vec<(Vec3, Vec3)> = Vec::new();
     for id in app.state.selection.iter() {
         let Some(n) = app.state.scene.node(*id) else { continue };
         if matches!(n.object, loom_scene::ObjectKind::Group { .. }) {
-            if let Some(b) = app.state.bounds_of(app.state.scene.descendants(*id).into_iter()) {
+            let members = app.state.scene.descendants(*id).into_iter().filter_map(drawn);
+            if let Some(b) = members.reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))) {
                 boxes.push(b);
             }
         }
     }
-    for (id, mesh) in app.world_meshes() {
-        if !app.state.selection.contains(id) || mesh.vertex_count() == 0 {
+    for (i, (id, _)) in app.world_meshes().iter().enumerate() {
+        if !app.state.selection.contains(id) {
             continue;
         }
-        boxes.push(mesh.aabb());
+        if let Some(b) = bounds(i) {
+            boxes.push(b);
+        }
     }
-    for (mn, mx) in boxes {
+    boxes
+}
+
+fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
+    let stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
+    for (mn, mx) in selection_bracket_boxes(app) {
         let mut bounds: Option<egui::Rect> = None;
         for i in 0..8 {
             let c = Vec3::new(if i & 1 == 0 { mn.x } else { mx.x }, if i & 2 == 0 { mn.y } else { mx.y }, if i & 4 == 0 { mn.z } else { mx.z });

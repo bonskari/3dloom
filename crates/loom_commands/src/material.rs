@@ -3,7 +3,7 @@
 
 use crate::command::Command as C;
 use crate::execute::commit;
-use crate::{AppState, Dialog};
+use crate::AppState;
 use loom_scene::material::{next_material_id, BitmapMap, MaterialEditorSlots, MaterialLibrary, StandardMaterial, MAP_CHANNELS, SLOT_COUNT};
 use loom_scene::{Change, NodeId};
 use serde_json::{json, Value};
@@ -66,8 +66,8 @@ fn edit(state: &mut AppState, slot: Option<u32>, label: &str, f: impl FnOnce(&mu
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
     match cmd {
         C::MaterialEditorToggle => {
-            state.dialog = if state.dialog == Some(Dialog::MaterialEditor) { None } else { Some(Dialog::MaterialEditor) };
-            Ok(json!({ "open": state.dialog == Some(Dialog::MaterialEditor) }))
+            state.material_editor_open = !state.material_editor_open;
+            Ok(json!({ "open": state.material_editor_open }))
         }
         C::MaterialEditorSlot { slot } => {
             let i = slot_index(state, Some(slot))?;
