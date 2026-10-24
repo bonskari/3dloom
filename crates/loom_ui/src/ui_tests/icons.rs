@@ -194,7 +194,9 @@ fn modifier_stack_icons_run_their_commands() {
 #[test]
 fn probe_statusbar_tooltips() {
     let mut h = Harness::new();
-    for (g, t) in [(icons::UNLOCKED, "Selection"), (icons::ABSOLUTE, "Absolute"), (icons::PAN, "Pan"), (icons::GO_TO_END, "Go to")] {
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    for (g, t) in [(icons::UNLOCKED, "Selection"), (icons::ABSOLUTE, "Absolute"), (icons::PAN, "Pan"), (icons::UNLOCKED, "Selection")] {
+        eprintln!("PROBE0 focus {:?} {}", h.ctx.memory(|m| m.focused()), h.app.ui_hit(&h.ctx, icon_in(&h, g, panel(&h, "statusbar"))));
         let p = icon_in(&h, g, panel(&h, "statusbar"));
         tooltip_shows(&mut h, p, "zzz");
         eprintln!("PROBE {t}: {:?}", painted(&h, t));
