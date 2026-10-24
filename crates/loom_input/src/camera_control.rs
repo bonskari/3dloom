@@ -198,6 +198,23 @@ impl ViewportNavigator {
         self.orbit_snap = step.filter(|s| *s > 0.0);
     }
 
+    /// The drag in progress ("orbit", "pan", "zoom", "roll"), for diagnostics.
+    pub fn drag_mode(&self) -> Option<&'static str> {
+        self.dragging.map(|d| match d {
+            DragMode::Orbit => "orbit",
+            DragMode::Pan => "pan",
+            DragMode::Zoom => "zoom",
+            DragMode::Roll => "roll",
+        })
+    }
+
+    /// Drops a drag whose button release was never seen.
+    pub fn cancel_drag(&mut self) {
+        self.dragging = None;
+        self.axis_lock = None;
+        self.roll_outside = false;
+    }
+
     fn drag_for(&self, button: MouseButton, mods: Modifiers) -> Option<DragMode> {
         let zoom_mode = matches!(self.mode, NavMode::Zoom | NavMode::Fov | NavMode::ZoomAll);
         match button {

@@ -84,28 +84,44 @@ pub fn parse_chord(s: &str) -> Result<Chord, String> {
     Ok(chord)
 }
 
-fn parse_key(k: &str) -> Option<Key> {
+/// Every key with its chart spelling (what `parse_chord` reads and
+/// `Chord::chart_text` writes).
+const KEY_NAMES: [(Key, &str); 86] = {
     use Key::*;
-    Some(match k {
-        "A" => A, "B" => B, "C" => C, "D" => D, "E" => E, "F" => F, "G" => G, "H" => H, "I" => I,
-        "J" => J, "K" => K, "L" => L, "M" => M, "N" => N, "O" => O, "P" => P, "Q" => Q, "R" => R,
-        "S" => S, "T" => T, "U" => U, "V" => V, "W" => W, "X" => X, "Y" => Y, "Z" => Z,
-        "0" => Num0, "1" => Num1, "2" => Num2, "3" => Num3, "4" => Num4,
-        "5" => Num5, "6" => Num6, "7" => Num7, "8" => Num8, "9" => Num9,
-        "F1" => F1, "F2" => F2, "F3" => F3, "F4" => F4, "F5" => F5, "F6" => F6,
-        "F7" => F7, "F8" => F8, "F9" => F9, "F10" => F10, "F11" => F11, "F12" => F12,
-        "Space" => Space, "Enter" => Enter, "Insert" => Insert, "Delete" => Delete, "Home" => Home, "End" => End,
-        "PageUp" => PageUp, "PageDown" => PageDown, "Backspace" => Backspace, ";" => Semicolon,
-        "," => Comma, "." => Period, "/" => Slash, "\\" => Backslash, "[" => OpenBracket,
-        "]" => CloseBracket, "`" => Backtick, "'" => Quote, "=" => Equals, "-" => Minus,
-        "NumPad +" => NumPadAdd, "NumPad -" => NumPadSubtract, "NumPad /" => NumPadDivide,
-        "NumPad *" => NumPadMultiply,
-        "NumPad 0" => NumPad0, "NumPad 1" => NumPad1, "NumPad 2" => NumPad2, "NumPad 3" => NumPad3,
-        "NumPad 4" => NumPad4, "NumPad 5" => NumPad5, "NumPad 6" => NumPad6, "NumPad 7" => NumPad7,
-        "NumPad 8" => NumPad8, "NumPad 9" => NumPad9,
-        "Up Arrow" => UpArrow, "Down Arrow" => DownArrow, "Left Arrow" => LeftArrow, "Right Arrow" => RightArrow,
-        _ => return None,
-    })
+    [
+        (A, "A"), (B, "B"), (C, "C"), (D, "D"), (E, "E"), (F, "F"), (G, "G"), (H, "H"), (I, "I"),
+        (J, "J"), (K, "K"), (L, "L"), (M, "M"), (N, "N"), (O, "O"), (P, "P"), (Q, "Q"), (R, "R"),
+        (S, "S"), (T, "T"), (U, "U"), (V, "V"), (W, "W"), (X, "X"), (Y, "Y"), (Z, "Z"),
+        (Num0, "0"), (Num1, "1"), (Num2, "2"), (Num3, "3"), (Num4, "4"),
+        (Num5, "5"), (Num6, "6"), (Num7, "7"), (Num8, "8"), (Num9, "9"),
+        (F1, "F1"), (F2, "F2"), (F3, "F3"), (F4, "F4"), (F5, "F5"), (F6, "F6"),
+        (F7, "F7"), (F8, "F8"), (F9, "F9"), (F10, "F10"), (F11, "F11"), (F12, "F12"),
+        (Space, "Space"), (Enter, "Enter"), (Insert, "Insert"), (Delete, "Delete"), (Home, "Home"), (End, "End"),
+        (PageUp, "PageUp"), (PageDown, "PageDown"), (Backspace, "Backspace"), (Semicolon, ";"),
+        (Comma, ","), (Period, "."), (Slash, "/"), (Backslash, "\\"), (OpenBracket, "["),
+        (CloseBracket, "]"), (Backtick, "`"), (Quote, "'"), (Equals, "="), (Minus, "-"),
+        (NumPadAdd, "NumPad +"), (NumPadSubtract, "NumPad -"), (NumPadDivide, "NumPad /"),
+        (NumPadMultiply, "NumPad *"),
+        (NumPad0, "NumPad 0"), (NumPad1, "NumPad 1"), (NumPad2, "NumPad 2"), (NumPad3, "NumPad 3"),
+        (NumPad4, "NumPad 4"), (NumPad5, "NumPad 5"), (NumPad6, "NumPad 6"), (NumPad7, "NumPad 7"),
+        (NumPad8, "NumPad 8"), (NumPad9, "NumPad 9"),
+        (UpArrow, "Up Arrow"), (DownArrow, "Down Arrow"), (LeftArrow, "Left Arrow"), (RightArrow, "Right Arrow"),
+    ]
+};
+
+/// Every key the chart knows.
+pub const ALL_KEYS: [Key; 86] = {
+    let mut out = [Key::A; 86];
+    let mut i = 0;
+    while i < 86 {
+        out[i] = KEY_NAMES[i].0;
+        i += 1;
+    }
+    out
+};
+
+fn parse_key(k: &str) -> Option<Key> {
+    KEY_NAMES.iter().find(|(_, n)| *n == k).map(|(key, _)| *key)
 }
 
 /// `(action, chords)` rows of the Main UI chart.
@@ -197,13 +213,18 @@ pub fn skin_chart_rows() -> Vec<(&'static str, &'static str)> {
 
 /// Every registered command with its shortcut, in registry order.
 pub fn keyboard_chart() -> Vec<ChartRow> {
-    let main = Keymap::main_ui();
-    let poly = Keymap::editable_poly();
-    let ffd = Keymap::ffd();
-    let unwrap = Keymap::unwrap_uvw();
-    let skin = Keymap::skin();
-    let track_view = Keymap::track_view();
-    let edit_normals = Keymap::edit_normals();
+    keyboard_chart_with(&CustomKeys::default())
+}
+
+/// The chart with the user's shortcut edits.
+pub fn keyboard_chart_with(keys: &CustomKeys) -> Vec<ChartRow> {
+    let main = keys.get("Main UI");
+    let poly = keys.get("Editable Poly");
+    let ffd = keys.get("FFD");
+    let unwrap = keys.get("Unwrap UVW");
+    let skin = keys.get("Skin");
+    let track_view = keys.get("Track View");
+    let edit_normals = keys.get("Edit Normals");
     crate::registry()
         .iter()
         .map(|info| ChartRow {
@@ -220,13 +241,13 @@ pub fn keyboard_chart() -> Vec<ChartRow> {
             action: info.name,
             shortcut: {
                 let km = match info.group {
-                    crate::Group::EditablePoly => &poly,
-                    crate::Group::FFD => &ffd,
-                    crate::Group::UnwrapUVW => &unwrap,
-                    crate::Group::Skin => &skin,
-                    crate::Group::TrackView => &track_view,
-                    crate::Group::EditNormals => &edit_normals,
-                    _ => &main,
+                    crate::Group::EditablePoly => poly,
+                    crate::Group::FFD => ffd,
+                    crate::Group::UnwrapUVW => unwrap,
+                    crate::Group::Skin => skin,
+                    crate::Group::TrackView => track_view,
+                    crate::Group::EditNormals => edit_normals,
+                    _ => main,
                 };
                 let mut chords: Vec<String> = km.bindings().filter(|(_, n)| *n == info.name).map(|(c, _)| c.label()).collect();
                 chords.sort();
@@ -238,8 +259,13 @@ pub fn keyboard_chart() -> Vec<ChartRow> {
 
 /// Customize User Interface > Write Keyboard Chart: tab-separated rows.
 pub fn write_keyboard_chart(path: &std::path::Path) -> std::io::Result<()> {
+    write_keyboard_chart_with(&CustomKeys::default(), path)
+}
+
+/// Write Keyboard Chart with the user's shortcut edits.
+pub fn write_keyboard_chart_with(keys: &CustomKeys, path: &std::path::Path) -> std::io::Result<()> {
     let mut text = String::from("Group\tAction\tShortcut\n");
-    for r in keyboard_chart() {
+    for r in keyboard_chart_with(keys) {
         text.push_str(&format!("{}\t{}\t{}\n", r.group, r.action, r.shortcut));
     }
     if let Some(dir) = path.parent() {
@@ -248,7 +274,7 @@ pub fn write_keyboard_chart(path: &std::path::Path) -> std::io::Result<()> {
     std::fs::write(path, text)
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Keymap {
     map: HashMap<Chord, &'static str>,
 }
@@ -422,7 +448,191 @@ pub mod cached {
     cached!(main_ui, editable_poly, edit_poly, editable_spline, unwrap_uvw, track_view, edit_normals, skin, ffd);
 }
 
+/// The shortcut groups of Customize User Interface > Keyboard, in list order.
+pub const GROUPS: [&str; 9] = ["Main UI", "Editable Poly", "Edit Poly", "Editable Spline", "FFD", "Unwrap UVW", "Skin", "Track View", "Edit Normals"];
+
+/// A group's default shortcuts.
+pub fn default_keymap(group: &str) -> Option<&'static Keymap> {
+    Some(match group {
+        "Main UI" => cached::main_ui(),
+        "Editable Poly" => cached::editable_poly(),
+        "Edit Poly" => cached::edit_poly(),
+        "Editable Spline" => cached::editable_spline(),
+        "FFD" => cached::ffd(),
+        "Unwrap UVW" => cached::unwrap_uvw(),
+        "Skin" => cached::skin(),
+        "Track View" => cached::track_view(),
+        "Edit Normals" => cached::edit_normals(),
+        _ => return None,
+    })
+}
+
+/// The actions a group's Action list shows (and the ones it can bind).
+/// Main UI lists the API-only Loom commands too, as their keys go there.
+pub fn group_actions(group: &str) -> Vec<&'static str> {
+    use crate::Group as G;
+    let by_group = |g: &[G]| crate::registry().iter().filter(|i| g.contains(&i.group)).map(|i| i.name).collect();
+    match group {
+        "Main UI" => by_group(&[G::MainUI, G::Loom]),
+        "Editable Poly" | "Edit Poly" => by_group(&[G::EditablePoly]),
+        "Editable Spline" => {
+            let mut v: Vec<&'static str> = Vec::new();
+            for (a, _) in spline_chart_rows() {
+                if let Some(name) = static_action(a) {
+                    if !v.contains(&name) {
+                        v.push(name);
+                    }
+                }
+            }
+            v
+        }
+        "FFD" => by_group(&[G::FFD]),
+        "Unwrap UVW" => by_group(&[G::UnwrapUVW]),
+        "Skin" => by_group(&[G::Skin]),
+        "Track View" => by_group(&[G::TrackView]),
+        "Edit Normals" => by_group(&[G::EditNormals]),
+        _ => Vec::new(),
+    }
+}
+
+/// The registry's own copy of an action name.
+pub fn static_action(name: &str) -> Option<&'static str> {
+    crate::registry().iter().find(|i| i.name == name).map(|i| i.name)
+}
+
+/// Customize User Interface > Keyboard edits: the groups whose shortcuts
+/// differ from the defaults, each as its whole key map.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CustomKeys {
+    edited: std::collections::BTreeMap<String, Keymap>,
+}
+
+/// One group's shortcuts as text: (chord in chart spelling, action), sorted.
+pub type GroupRows = Vec<(String, String)>;
+
+impl CustomKeys {
+    /// The live shortcuts of `group` (defaults unless edited).
+    pub fn get(&self, group: &str) -> &Keymap {
+        self.edited.get(group).or_else(|| default_keymap(group)).unwrap_or_else(|| cached::main_ui())
+    }
+
+    /// `action` as a static name, if `group` lists it or binds it by default.
+    fn check(group: &str, action: &str) -> Result<&'static str, String> {
+        let default = default_keymap(group).ok_or_else(|| format!("unknown shortcut group {group:?}"))?;
+        group_actions(group)
+            .into_iter()
+            .chain(default.bindings().map(|(_, a)| a))
+            .find(|a| *a == action)
+            .ok_or_else(|| format!("{action:?} is not an action of the {group} group"))
+    }
+
+    fn edit(&mut self, group: &str, f: impl FnOnce(&mut Keymap)) {
+        let default = default_keymap(group).expect("checked group");
+        let map = self.edited.entry(group.to_owned()).or_insert_with(|| default.clone());
+        f(map);
+        if map == default {
+            self.edited.remove(group);
+        }
+    }
+
+    /// Binds `chord` to `action` in `group`; returns the action that had it.
+    pub fn assign(&mut self, group: &str, action: &str, chord: Chord) -> Result<Option<&'static str>, String> {
+        let action = Self::check(group, action)?;
+        let previous = self.get(group).lookup(chord).filter(|a| *a != action);
+        self.edit(group, |m| {
+            m.map.insert(chord, action);
+        });
+        Ok(previous)
+    }
+
+    /// Unbinds every chord of `action` in `group`; returns how many.
+    pub fn remove(&mut self, group: &str, action: &str) -> Result<usize, String> {
+        let action = Self::check(group, action)?;
+        let mut n = 0;
+        self.edit(group, |m| {
+            let before = m.map.len();
+            m.map.retain(|_, a| *a != action);
+            n = before - m.map.len();
+        });
+        Ok(n)
+    }
+
+    pub fn reset(&mut self) {
+        self.edited.clear();
+    }
+
+    /// The edited groups as text (what the settings file stores).
+    pub fn edited_rows(&self) -> std::collections::BTreeMap<String, GroupRows> {
+        self.edited.iter().map(|(g, m)| (g.clone(), rows_of(m))).collect()
+    }
+
+    /// Every group as text (what a shortcut file stores).
+    pub fn all_rows(&self) -> std::collections::BTreeMap<String, GroupRows> {
+        GROUPS.iter().map(|g| (g.to_string(), rows_of(self.get(g)))).collect()
+    }
+
+    /// Replaces the groups in `rows` with their listed shortcuts. An unknown
+    /// group, action or chord is an error and changes nothing.
+    pub fn set_rows(&mut self, rows: &std::collections::BTreeMap<String, GroupRows>) -> Result<(), String> {
+        let mut parsed = Vec::new();
+        for (group, list) in rows {
+            let mut map = HashMap::new();
+            default_keymap(group).ok_or_else(|| format!("unknown shortcut group {group:?}"))?;
+            for (chord, action) in list {
+                let action = static_action(action).ok_or_else(|| format!("unknown action {action:?}"))?;
+                map.insert(parse_chord(chord)?, action);
+            }
+            parsed.push((group.clone(), Keymap { map }));
+        }
+        for (group, map) in parsed {
+            self.edited.remove(&group);
+            if default_keymap(&group) != Some(&map) {
+                self.edited.insert(group, map);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn rows_of(m: &Keymap) -> GroupRows {
+    let mut rows: GroupRows = m.bindings().map(|(c, a)| (c.chart_text(), a.to_owned())).collect();
+    rows.sort();
+    rows
+}
+
+/// Shortcut files (Customize User Interface > Keyboard > Save / Load):
+/// 3dLoom's own JSON, every group with its shortcuts.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ShortcutFile {
+    format: String,
+    groups: std::collections::BTreeMap<String, GroupRows>,
+}
+
+const SHORTCUT_FORMAT: &str = "3dloom-shortcuts-1";
+
+pub fn shortcuts_to_file_text(keys: &CustomKeys) -> String {
+    serde_json::to_string_pretty(&ShortcutFile { format: SHORTCUT_FORMAT.into(), groups: keys.all_rows() }).expect("plain data")
+}
+
+pub fn shortcuts_from_file_text(text: &str) -> Result<std::collections::BTreeMap<String, GroupRows>, String> {
+    let f: ShortcutFile = serde_json::from_str(text).map_err(|e| format!("not a 3dLoom shortcut file: {e}"))?;
+    if f.format != SHORTCUT_FORMAT {
+        return Err(format!("unknown shortcut file format {:?}", f.format));
+    }
+    Ok(f.groups)
+}
+
 impl Chord {
+    /// The chord as the chart spells it (`Alt+Ctrl+Z`, `NumPad +`, `Shift+,`): what `parse_chord` reads.
+    pub fn chart_text(&self) -> String {
+        let mut s = String::new();
+        if self.alt { s.push_str("Alt+"); }
+        if self.ctrl { s.push_str("Ctrl+"); }
+        if self.shift { s.push_str("Shift+"); }
+        s.push_str(KEY_NAMES.iter().find(|(k, _)| *k == self.key).map(|(_, n)| *n).unwrap_or("?"));
+        s
+    }
+
     /// Chord label, e.g. `Alt+Ctrl+Z`.
     pub fn label(&self) -> String {
         let mut s = String::new();

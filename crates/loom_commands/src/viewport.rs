@@ -329,10 +329,18 @@ pub enum Dialog {
     Preferences,
     UnitsSetup,
     CustomizeUI,
+    /// Customize User Interface > Keyboard > Save / Load (.kbd).
+    SaveShortcuts,
+    LoadShortcuts,
+    /// Customize > Save / Load Custom UI Scheme (.ui).
+    SaveCustomUiScheme,
+    LoadCustomUiScheme,
     /// Editable Poly settings windows (caddy-less dialogs).
     PolySettings(PolySettingsKind),
     /// Editable Poly > Detach.
     Detach,
+    /// Deleting polygons would leave vertices with no polygon: "Delete isolated vertices?"
+    DeleteIsolatedVertices,
     LayerManager,
     /// File > Open.
     OpenFile,
@@ -342,6 +350,10 @@ pub enum Dialog {
     SaveFileAsCopy,
     /// "Save changes?" before the pending action discards the scene.
     SaveChanges(PendingFileAction),
+    /// Line tool: "Close spline?" when the first vertex is clicked.
+    CloseSpline,
+    /// Editable Spline > Refine with Connect on an existing vertex: Refine / Connect Only.
+    RefineVertex,
     /// File > Import (OBJ).
     ImportFile,
     SaveAnimation,
@@ -399,6 +411,8 @@ pub enum Dialog {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PendingFileAction {
     Open,
+    /// File > Recent: the n-th file of `AppState::recent_files`.
+    OpenRecent(usize),
     New,
     Reset,
     Exit,
