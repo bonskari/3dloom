@@ -1526,7 +1526,7 @@ fn navigation_recovers_after_a_release_lost_to_focus_loss() {
 }
 
 /// A 60-unit plane of 4 x 4 cells (15 units) as an Editable Poly, framed.
-fn poly_plane(h: &mut Harness) -> loom_scene::NodeId {
+fn poly_plane_4x4(h: &mut Harness) -> loom_scene::NodeId {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [60.0, 60.0, 0.0] });
     let id = *h.app.state.selection.iter().next().unwrap();
     for n in ["Length Segs", "Width Segs"] {
@@ -1617,7 +1617,7 @@ fn cut_clicks_chain_until_right_click() {
 #[test]
 fn loop_mode_click_selects_the_edge_loop() {
     let mut h = Harness::new();
-    let id = poly_plane(&mut h);
+    let id = poly_plane_4x4(&mut h);
     h.key(egui::Key::Num2);
     h.cmd(Command::LoopMode);
     let p = h.screen_of(Vec3::new(0.0, 7.5, 0.0));
@@ -1633,7 +1633,7 @@ fn loop_mode_click_selects_the_edge_loop() {
 #[test]
 fn pick_hinge_and_pick_bridge_edge_take_a_clicked_edge() {
     let mut h = Harness::new();
-    let id = poly_plane(&mut h);
+    let id = poly_plane_4x4(&mut h);
     h.key(egui::Key::Num4);
     h.cmd(Command::PickHinge);
     let p = h.screen_of(Vec3::new(0.0, 7.5, 0.0));
@@ -1654,7 +1654,7 @@ fn pick_hinge_and_pick_bridge_edge_take_a_clicked_edge() {
 #[test]
 fn bridge_edges_dialog_takes_edges_selected_while_it_is_open() {
     let mut h = Harness::new();
-    let id = poly_plane(&mut h);
+    let id = poly_plane_4x4(&mut h);
     // A one-cell hole at x 0..15, y 0..15.
     h.key(egui::Key::Num4);
     let m = cage(&h, id);
