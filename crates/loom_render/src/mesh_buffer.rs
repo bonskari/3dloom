@@ -509,6 +509,9 @@ mod tests {
     #[test]
     fn wire_faces_draw_as_edges_in_the_material_colour() {
         let mut m = box_primitive(Vec3::splat(0.5));
+        for f in m.faces_mut() {
+            f.material_id = 0;
+        }
         m.faces_mut()[0].material_id = 1;
         let wire = SurfaceStyle { color: [0.0, 1.0, 0.0], wire: true, ..MeshStyle::default().surface() };
         let style = MeshStyle { sub: Some(std::sync::Arc::new(SubStyles { by_id: [(1, wire)].into_iter().collect(), missing: MeshStyle::default().surface() })), ..Default::default() };

@@ -1153,6 +1153,7 @@ fn material_editor_stays_open_across_a_map_pick_and_cancel() {
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialBrowser(loom_commands::BrowserFor::Map(diffuse))));
     assert!(h.app.state.material_editor_open, "the Browser leaves the editor open");
     // Bitmap, double-clicked: the bitmap chooser follows.
+    h.frames(12);
     let bitmap = window_text(&h, "Material/Map Browser", "Bitmap");
     h.click(bitmap);
     h.click(bitmap);
@@ -1260,11 +1261,15 @@ fn multi_sub_from_the_type_button_colours_faces_by_material_id() {
     let node = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
     click_in_editor(&mut h, "Standard", 0.0);
+    // Single clicks, apart (not a double-click): select, then OK.
+    h.frames(12);
     h.click(window_text(&h, "Material/Map Browser", "Multi/Sub-Object"));
+    h.frames(12);
     h.click(window_text(&h, "Material/Map Browser", "OK"));
     h.frames(2);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ReplaceMaterial { kind: 1, map: false }));
     h.click(window_text(&h, "Replace Material", "Keep old material as sub-material?"));
+    h.frames(12);
     h.click(window_text(&h, "Replace Material", "OK"));
     h.frames(2);
     assert_eq!(h.app.state.dialog, None);
