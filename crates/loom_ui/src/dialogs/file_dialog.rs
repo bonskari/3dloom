@@ -39,7 +39,7 @@ pub fn clear_state(d: &mut egui::util::IdTypeMap) {
 fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     let name = match dialog {
         Dialog::SaveFileAs | Dialog::SaveFileAsCopy => app.state.file.as_ref().and_then(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Untitled.loom".into()),
-        Dialog::ExportFile | Dialog::ExportSelected => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
+        Dialog::ExportFile | Dialog::ExportSelected | Dialog::ArchiveFile => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
         _ => String::new(),
     };
     let dir = app.state.file.as_ref().and_then(|f| f.parent()).filter(|d| d.is_dir()).map(|d| d.to_path_buf()).unwrap_or_else(|| app.file_dir.clone());
@@ -94,6 +94,8 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::ImportFile => ("Import File", "fbx,obj,max", "Open"),
         Dialog::ExportFile => ("Export File", "fbx,obj", "Save"),
         Dialog::ExportSelected => ("Export Selected", "fbx,obj", "Save"),
+        Dialog::SaveSelected => ("Save Selected", "loom", "Save"),
+        Dialog::ArchiveFile => ("Archive", "zip,txt", "Save"),
         Dialog::MergeFile => ("Merge File", "loom", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", "png", "Open"),
         Dialog::MaterialMap { .. } => ("Select Bitmap Image File", "png", "Open"),
@@ -123,6 +125,8 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::ImportFile => Command::ImportFile { path: Some(p) },
         Dialog::ExportFile => Command::ExportFile { path: Some(p) },
         Dialog::ExportSelected => Command::ExportSelected { path: Some(p) },
+        Dialog::SaveSelected => Command::SaveSelected { path: Some(p) },
+        Dialog::ArchiveFile => Command::ArchiveFile { path: Some(p) },
         Dialog::BitmapFit => Command::UvwMapBitmapFit { path: p },
         Dialog::PickUvTexture => Command::PickTexture { path: p },
         Dialog::MaterialMap { channel } => Command::SetMaterialMap {

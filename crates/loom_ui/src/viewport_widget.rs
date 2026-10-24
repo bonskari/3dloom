@@ -475,6 +475,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && response.hovered()
                         && app.manip_drag.is_none()
                         && app.state.active_tool != Tool::Select
+                        && app.state.pick_mode != Some(loom_commands::PickMode::Link)
                         && app.has_selection()
                         && !(app.poly_dragging && matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)))
                     {
@@ -755,6 +756,19 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                             let mut picked = picks_at(app, p, rect, view, proj, view_proj);
                                             cycle_object_pick(app, p, rect, view, proj, &mut picked, double);
                                             apply_picks(app, picked, mods);
+                                        }
+                                    }
+                                } else if app.state.pick_mode == Some(loom_commands::PickMode::Link) {
+                                    // Select and Link: drag from the child to the parent.
+                                    let child = pick_object(app, start, rect, view, proj).and_then(|k| if let Pick::Object(i) = k { Some(app.world_meshes()[i].0) } else { None });
+                                    let parent = pick_object(app, p, rect, view, proj).and_then(|k| if let Pick::Object(i) = k { Some(app.world_meshes()[i].0) } else { None });
+                                    if let (Some(child), Some(parent)) = (child, parent) {
+                                        let child = app.state.selection_target(child);
+                                        if child != parent {
+                                            if !app.state.selection.contains(&child) {
+                                                let _ = app.dispatch(Command::SelectNodes { ids: vec![child.0], op: SelectOp::Replace });
+                                            }
+                                            let _ = app.dispatch(Command::PickHit { id: parent.0 });
                                         }
                                     }
                                 } else {
@@ -1096,7 +1110,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             // --- Marquee overlay (drawn after the 3D scene) ---
             if let Some(start) = app.drag_select_start.filter(|_| is_active) {
                 if let Some(end) = pointer.interact_pos() {
-                    draw_region(&painter, &drag_region(app, start, end));
+                    if app.state.pick_mode == Some(loom_commands::PickMode::Link) {
+                        // Select and Link's rubber-band line from the child to the pointer.
+                        painter.add(egui::Shape::dashed_line(&[start, end], egui::Stroke::new(1.0, egui::Color32::WHITE), 4.0, 3.0));
+                    } else {
+                        draw_region(&painter, &drag_region(app, start, end));
+                    }
                 }
                 ctx.request_repaint(); // keep redrawing while dragging
             } else if is_active && app.state.selection_region == loom_commands::SelectionRegion::Fence && !app.region_points.is_empty() {

@@ -8,6 +8,7 @@ pub mod dialogs;
 pub mod gizmo;
 mod hotkeys;
 pub mod label_menus;
+mod layers_toolbar;
 pub mod live;
 pub mod main_toolbar;
 pub mod quad_menu;
@@ -512,6 +513,15 @@ impl LoomApp {
     }
 
     /// File > New / Reset / Open / Exit: asks to save first when the scene is dirty.
+    /// File > New / Ctrl+N: the New Scene dialog when the scene has objects, else a new scene.
+    pub fn new_scene(&mut self) {
+        if self.state.scene.len() > 0 {
+            self.state.dialog = Some(loom_commands::Dialog::NewScene);
+        } else {
+            self.request_file_action(loom_commands::PendingFileAction::New);
+        }
+    }
+
     pub fn request_file_action(&mut self, action: loom_commands::PendingFileAction) {
         if self.state.dirty() {
             self.state.dialog = Some(loom_commands::Dialog::SaveChanges(action));
@@ -571,7 +581,8 @@ impl LoomApp {
             let color = if gray {
                 [0.35, 0.35, 0.35]
             } else {
-                [srgb(n.wire_color[0]), srgb(n.wire_color[1]), srgb(n.wire_color[2])]
+                let c = self.state.scene.display_color(n);
+                [srgb(c[0]), srgb(c[1]), srgb(c[2])]
             };
             let see_through = draws_see_through(n);
             // An assigned material colours the faces (its diffuse, opacity and
@@ -954,6 +965,7 @@ impl LoomApp {
         }
         menubar::show(ctx, self);
         main_toolbar::show(ctx, self);
+        layers_toolbar::show(ctx, self);
         ribbon::show(ctx, self);
         // Bottom panels first so they span the full width under the Command Panel.
         statusbar::show(ctx, self);

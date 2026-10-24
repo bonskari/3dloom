@@ -74,6 +74,11 @@ impl ArgSchema for crate::track_view::KeyArg {
         json!({"type":"object","properties":{"id":{"type":"integer","minimum":0},"track":{"type":"string"},"comp":{"type":"integer","minimum":0},"time":{"type":"number"}},"required":["id","track","time"]})
     }
 }
+impl ArgSchema for crate::file::MergeDuplicate {
+    fn schema() -> Value {
+        json!({"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["merge","skip","delete_old","rename","auto_rename"]},"new_name":{"type":"string"}},"required":["name","action"]})
+    }
+}
 impl<T: ArgSchema> ArgSchema for Option<T> {
     fn schema() -> Value {
         T::schema()
@@ -628,7 +633,7 @@ commands! {
     ImportFile => "Import File", MainUI, "Import an FBX, a Wavefront OBJ (each `o` / `g` block an Editable Poly) or a .max scene file (nodes, hierarchy, transforms, pivots, Editable Poly / Mesh with UVs and material ids, Box / Cylinder / Plane; modifier stacks and render objects are reported, not imported), one undo entry; without `path` the Import dialog shows." { path: Option<String> };
     ExportFile => "Export File", MainUI, "Export every visible geometry object to a Wavefront OBJ (world space, n-gons, smoothing groups, material ids); without `path` the Export dialog shows." { path: Option<String> };
     ExportSelected => "Export Selected", MainUI, "Export the selected geometry objects to a Wavefront OBJ; without `path` the dialog shows." { path: Option<String> };
-    MergeFile => "Merge File", MainUI, "Merge objects from another .loom file: all of them, or those in `names`; fresh ids, colliding names renamed, one undo entry. Without `path` the Merge dialog shows." { path: Option<String>, names: Option<Vec<String>> };
+    MergeFile => "Merge File", MainUI, "Merge objects from another .loom file: all of them, or those in `names`; fresh ids, objects keep their layers (by name, created when missing), one undo entry. A name the scene already has follows its Duplicate Name answer in `duplicates` (merge keeps both, skip, delete_old, rename to `new_name`, auto_rename = the default). Without `path` the Merge dialog shows." { path: Option<String>, names: Option<Vec<String>>, duplicates: Option<Vec<crate::file::MergeDuplicate>> };
     SaveChangesReply => "Save Changes Reply", Loom, "Answer the open Save Changes prompt: Yes saves (Save As when untitled) and then runs the pending New / Reset / Open / Exit, No runs it without saving, Cancel keeps the scene." { reply: crate::command::SaveChangesReply };
     AutoBackupNow => "Auto Backup Now", Loom, "Write the next Auto Backup file (autoback/<name>NN.loom) now, regardless of the interval.";
     SetAutoBackupName => "Set Auto Backup Name", Loom, "Preferences > Files > Auto Backup File Name." { name: String };
@@ -792,6 +797,20 @@ commands! {
     MoveToLayer => "Move To Layer", Loom, "Move the selected objects onto a layer." { layer: u32 };
     AddSelectionToCurrentLayer => "Add Selection To Current Layer", Loom, "Layer Manager > Add Selection to Current Layer.";
     SelectLayerObjects => "Select Layer Objects", Loom, "Select every selectable object on a layer." { layer: u32 };
+    SetCurrentLayerToSelection => "Set Current Layer to Selection's Layer", Loom, "Layers toolbar: the layer of the selected objects becomes current (refused when they are on different layers).";
+    SetLayerColor => "Set Layer Color", Loom, "Layer Manager > Color: the layer colour (0-255 RGB); objects whose colour is By Layer show it." { layer: u32, rgb: [u8; 3] };
+    SetLayerRenderable => "Set Layer Renderable", Loom, "Layer Manager > Render: on or off, renders leave out the layer's objects when off." { layer: u32, on: bool };
+    SetAllLayersHidden => "Set All Layers Hidden", Loom, "Layer Manager > Hide/Unhide All Layers." { on: bool };
+    SetAllLayersFrozen => "Set All Layers Frozen", Loom, "Layer Manager > Freeze/Unfreeze All Layers." { on: bool };
+    SetColorByLayer => "Set Color By Layer", Loom, "Object Color > By Layer / By Object for the selected objects: By Layer shows the layer's colour." { on: bool };
+    ShowLayersToolbarToggle => "Show Layers Toolbar Toggle", Loom, "Customize > Show UI > Show Layers Toolbar (layer list, New Layer, Add Selection to Current Layer, Select Objects in Current Layer, Set Current Layer to Selection's Layer).";
+    NewSceneKeep => "New Scene Keep", Loom, "File > New > New Scene dialog: `objects_and_hierarchy` keeps the objects and their links but removes animation keys; `objects` also unlinks them; `all` is New Scene. The scene becomes untitled." { keep: String };
+    SaveSelected => "Save Selected", Loom, "File > Save As > Save Selected: the selected objects with their ancestors (and group members) to a new .loom; the current file stays. Without `path` the dialog shows." { path: Option<String> };
+    ArchiveFile => "Archive", Loom, "File > Save As > Archive: a .zip of the scene file and every bitmap it uses, or with a .txt path a list of those files. Without `path` the dialog shows." { path: Option<String> };
+    SummaryInfo => "Summary Info", Loom, "File > Summary Info: open the dialog with scene totals, the description and the materials list.";
+    FileProperties => "File Properties", Loom, "File > File Properties: open the Summary / Contents / Custom dialog.";
+    SetFileProperty => "Set File Property", Loom, "File Properties > Summary field (Title, Subject, Author, Manager, Company, Category, Keywords, Comments) or Summary Info > Description; saved with the scene." { name: String, value: String };
+    SetCustomFileProperty => "Set Custom File Property", Loom, "File Properties > Custom: add or change a named property; no `value` deletes it." { name: String, value: Option<String> };
     ShowRibbonToggle => "Show Ribbon Toggle", Loom, "Show or hide the Graphite Modeling Tools ribbon (Main Toolbar button, Customize > Show UI > Show Ribbon).";
     LockUserInterfaceToggle => "Lock User Interface Toggle", MainUI, "Lock or unlock the UI layout (Alt+0).";
     ExpertModeToggle => "Expert Mode Toggle", MainUI, "Toggle Expert Mode: only the viewports are shown (Ctrl+X).";
@@ -1510,6 +1529,7 @@ commands! {
     SetPivot => "Set Pivot", Loom, "Set a node's pivot (node transform) without moving the mesh." { id: u64, position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]> };
     SetNodeLocks => "Set Node Locks", Loom, "Hierarchy > Link Info > Locks: per-axis move/rotate/scale locks (true = locked)." { id: u64, move_axes: Option<[bool; 3]>, rotate_axes: Option<[bool; 3]>, scale_axes: Option<[bool; 3]> };
     SetNodeInherit => "Set Node Inherit", Loom, "Hierarchy > Link Info > Inherit: which parent transform components the node inherits (true = inherit)." { id: u64, move_axes: Option<[bool; 3]>, rotate_axes: Option<[bool; 3]>, scale_axes: Option<[bool; 3]> };
+    SetSelectionDisplayProperty => "Set Selection Display Property", Loom, "Display > Display Properties checkbox by name on every selected object, one undo step." { name: String, value: bool };
     SetDisplayProperty => "Set Display Property", Loom, "Display > Display Properties checkbox by name: See-Through, Display as Box, Backface Cull, Vertex Ticks, Ignore Extents, Show Frozen in Gray." { id: u64, name: String, value: bool };
     HideByHit => "Hide By Hit", Loom, "Display > Hide > Hide by Hit: the next clicked object is hidden (right-click ends the mode).";
     FreezeByHit => "Freeze By Hit", Loom, "Display > Freeze > Freeze by Hit: the next clicked object is frozen.";

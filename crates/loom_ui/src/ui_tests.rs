@@ -2151,3 +2151,5 @@ fn a_scene_named_on_the_command_line_opens() {
     assert_eq!(next.app.state.file.as_deref(), Some(path.as_path()));
     assert_eq!(next.app.state.recent_files.first(), Some(&path));
 }
+
+mod scene;

@@ -47,7 +47,7 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, index: usize, view_proj: Mat
             continue;
         }
         let selected = app.state.selection.contains(&n.id);
-        let wire = if selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(n.wire_color[0], n.wire_color[1], n.wire_color[2]) };
+        let wire = if selected { egui::Color32::WHITE } else { let c = app.state.scene.display_color(n); egui::Color32::from_rgb(c[0], c[1], c[2]) };
         for (a, b, k) in overlay_lines(&app.state.scene, n.id, selected) {
             let color = match k {
                 LineKind::Cone => CONE,

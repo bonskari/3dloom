@@ -51,6 +51,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         let _ = app.dispatch(Command::SetWireColor { id: id.0, rgb });
                     }
                 }
+                // Object colour By Layer / By Object.
+                let by_layer = node.display.color_by_layer;
+                if ui.selectable_label(by_layer, if by_layer { "By Layer" } else { "By Object" }).on_hover_text("Object colour from the layer or from the object").clicked() {
+                    let _ = app.dispatch(Command::SetColorByLayer { on: !by_layer });
+                }
             });
             egui::Grid::new("object_info").num_columns(4).spacing([12.0, 2.0]).show(ui, |ui| {
                 ui.label("Dimensions:");

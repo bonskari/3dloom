@@ -54,7 +54,7 @@ impl LoomApp {
             .world_meshes()
             .iter()
             .enumerate()
-            .filter_map(|(i, (id, _))| self.state.scene.node(*id).map(|n| (id.0, i, n.wire_color)))
+            .filter_map(|(i, (id, _))| self.state.scene.node(*id).map(|n| (id.0, i, self.state.scene.display_color(n))))
             .collect();
         let display = self.world_display.clone();
         let scene = &self.state.scene;

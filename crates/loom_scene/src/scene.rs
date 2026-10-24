@@ -10,6 +10,27 @@ pub struct Layer {
     pub name: String,
     pub hidden: bool,
     pub frozen: bool,
+    /// The layer colour (objects whose colour is By Layer show it).
+    #[serde(default = "default_layer_color")]
+    pub color: [u8; 3],
+    /// Render: off keeps the layer's objects out of renders.
+    #[serde(default = "default_true")]
+    pub renderable: bool,
+}
+
+fn default_layer_color() -> [u8; 3] {
+    crate::OBJECT_COLORS[0]
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Layer {
+    /// A new visible, unfrozen, renderable layer with a palette colour picked by its id.
+    pub fn new(id: u32, name: impl Into<String>) -> Self {
+        Self { id, name: name.into(), hidden: false, frozen: false, color: crate::OBJECT_COLORS[id as usize % crate::OBJECT_COLORS.len()], renderable: true }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +82,7 @@ pub struct Scene {
 }
 
 fn default_layers() -> Vec<Layer> {
-    vec![Layer { id: 0, name: "0 (default)".to_owned(), hidden: false, frozen: false }]
+    vec![Layer::new(0, "0 (default)")]
 }
 
 impl Default for Scene {
@@ -397,6 +418,19 @@ impl Scene {
     }
 
     /// A fresh layer id (ids are never reused).
+    /// The colour a node shows in the viewports: its layer's when its colour is By Layer.
+    pub fn display_color(&self, node: &Node) -> [u8; 3] {
+        match self.layer(node.layer) {
+            Some(l) if node.display.color_by_layer => l.color,
+            _ => node.wire_color,
+        }
+    }
+
+    /// Whether renders include the node (its layer's Render flag).
+    pub fn is_renderable(&self, node: &Node) -> bool {
+        self.layer(node.layer).is_none_or(|l| l.renderable)
+    }
+
     pub fn next_layer_id(&self) -> u32 {
         self.layers.iter().map(|l| l.id + 1).max().unwrap_or(1)
     }

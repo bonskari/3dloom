@@ -1475,11 +1475,14 @@ pub struct DisplayProps {
     /// Show Map in Viewport: none, the checker, or a bitmap.
     #[serde(default)]
     pub texture: TextureDisplay,
+    /// Object Color By Layer: the viewport shows the layer's colour instead of the object's.
+    #[serde(default)]
+    pub color_by_layer: bool,
 }
 
 impl Default for DisplayProps {
     fn default() -> Self {
-        Self { see_through: false, display_as_box: false, backface_cull: false, vertex_ticks: false, ignore_extents: false, show_frozen_in_gray: true, vertex_colors: false, texture: TextureDisplay::None }
+        Self { see_through: false, display_as_box: false, backface_cull: false, vertex_ticks: false, ignore_extents: false, show_frozen_in_gray: true, vertex_colors: false, texture: TextureDisplay::None, color_by_layer: false }
     }
 }
 
