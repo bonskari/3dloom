@@ -13,6 +13,7 @@ pub enum Utility {
     RescaleWorldUnits,
     Collapse,
     ResetXForm,
+    AssignVertexColors,
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -23,6 +24,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ("Rescale World Units", Utility::RescaleWorldUnits),
             ("Collapse", Utility::Collapse),
             ("Reset XForm", Utility::ResetXForm),
+            ("Assign Vertex Colors", Utility::AssignVertexColors),
         ] {
             if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.utility == u, label)).clicked() {
                 app.utility = if app.utility == u { Utility::None } else { u };
@@ -63,6 +65,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             });
         }),
+        Utility::AssignVertexColors => rollout(ui, "Assign Vertex Colors", true, |ui| assign_vertex_colors(ui, app, false)),
         Utility::ResetXForm => rollout(ui, "Reset Transform", true, |ui| {
             ui.add_enabled_ui(has, |ui| {
                 if ui.button("Reset Selected").clicked() {
@@ -70,5 +73,28 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             });
         }),
+    }
+}
+
+/// Assign Vertex Colors: Light Model, Color Assignment and Shadows, then
+/// Assign To Selected (the utility) or Assign (a VertexPaint entry's rollout).
+pub fn assign_vertex_colors(ui: &mut egui::Ui, app: &mut LoomApp, update: bool) {
+    let id = egui::Id::new("assign_vertex_colors");
+    let (mut model, mut by_vertex, mut shadows): (u32, bool, bool) = ui.ctx().data(|d| d.get_temp(id)).unwrap_or((0, false, false));
+    ui.label("Light Model:");
+    for (i, l) in loom_commands::assign_vertex_colors::LIGHT_MODELS.iter().enumerate() {
+        ui.radio_value(&mut model, i as u32, *l);
+    }
+    ui.label("Color Assignment:");
+    ui.radio_value(&mut by_vertex, false, "Color by Face");
+    ui.radio_value(&mut by_vertex, true, "Color by Vertex");
+    // Lighting Only turns Shadows off, as in the reference.
+    ui.add_enabled(model != 1, egui::Checkbox::new(&mut shadows, "Shadows"));
+    ui.ctx().data_mut(|d| d.insert_temp(id, (model, by_vertex, shadows)));
+    let label = if update { "Assign" } else { "Assign To Selected" };
+    if ui.add_enabled(!app.state.selection.is_empty(), egui::Button::new(label)).clicked() {
+        if let Err(e) = app.dispatch(Command::AssignVertexColors { light_model: model, by_vertex, shadows, update }) {
+            app.state.status_prompt = e;
+        }
     }
 }

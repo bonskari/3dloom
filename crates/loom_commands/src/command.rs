@@ -726,6 +726,7 @@ commands! {
     VertexPaintSelectFaces => "Vertex Paint Select Faces", Loom, "VertexPaint: select faces of the entry's input (none = paint everywhere)." { ids: Vec<u32>, op: SelectOp };
     VertexPaintPaintAll => "Vertex Paint Paint All", Loom, "VertexPaint > Paint All: fill the selected faces (every face when none is selected) with the entry's colour at its opacity.";
     VertexPaintNewLayer => "Vertex Paint New Layer", Loom, "VertexPaint > Layer > New Layer: another VertexPaint above the active one, named `name`, blending by `mode` (index in the Mode list)." { name: String, mode: u32 };
+    AssignVertexColors => "Assign Vertex Colors", Loom, "Utilities > Assign Vertex Colors: bake the scene lights and the diffuse colour into vertex colours (Light Model 0 Lighting + Diffuse, 1 Lighting Only, 2 Diffuse; Color by Vertex or by Face; Shadows). `update` false = Assign To Selected (a new VertexPaint on each selected object), true = the active VertexPaint's Assign." { light_model: u32, by_vertex: bool, shadows: bool, update: bool };
     VertexPaintStroke => "Vertex Paint Stroke", Loom, "VertexPaint: paint the active VertexPaint entry at object-space points (0-255 colour, brush size, opacity)." { node: u64, points: Vec<[f32; 3]>, rgb: [u8; 3], size: f32, opacity: f32 };
     AttachSpline => "Attach (Spline)", MainUI, "Editable Spline > Attach: click a shape to attach it.";
     AttachMultipleSpline => "Attach Multiple (Spline)", MainUI, "Editable Spline > Attach Mult.: the other selected shapes join the first.";

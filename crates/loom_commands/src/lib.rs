@@ -37,6 +37,7 @@ pub mod track_view;
 pub mod motion;
 pub mod normals;
 pub mod vertex_paint;
+pub mod assign_vertex_colors;
 pub use spline::SplineSettings;
 pub use unwrap::{freeform_hit, FreeformHit};
 pub use state::{base_sub_levels, CompoundSettings};

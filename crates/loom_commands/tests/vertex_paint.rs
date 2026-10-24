@@ -120,3 +120,45 @@ fn soft_strokes_build_up_and_the_eyedropper_picks_the_painted_colour() {
     let Modifier::VertexPaint { color, .. } = &s.scene.node(b).unwrap().modifiers[0].modifier else { panic!() };
     assert!(color[1].get() > 0.3 && color[1].get() < 0.99, "a blend of the corners: {}", color[1].get());
 }
+
+/// Vertex colours of `id`'s plane vertex nearest `at`.
+fn colour_near(s: &AppState, id: NodeId, at: glam::Vec3) -> [f32; 3] {
+    let m = s.scene.eval_mesh(id).value.mesh.clone();
+    let world = s.scene.object_matrix(id);
+    let v = (0..m.vertex_count()).min_by(|a, b| world.transform_point3(m.vertices()[*a].position).distance(at).total_cmp(&world.transform_point3(m.vertices()[*b].position).distance(at))).unwrap();
+    m.vertices()[v].color
+}
+
+#[test]
+fn assign_vertex_colors_bakes_the_lights_and_their_shadows() {
+    let mut s = AppState::new();
+    // An omni over a box over a plane: the box shades the middle of the plane.
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0, 0.0, 20.0], size: [40.0; 3] }).unwrap();
+    let r = execute(&mut s, Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 120.0], target: [0.0; 3] }).unwrap();
+    let omni = r["id"].as_u64().unwrap();
+    execute(&mut s, Command::SetParameter { id: omni, name: "Shadows On".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [200.0, 200.0, 0.0] }).unwrap();
+    let plane = *s.selection.iter().next().unwrap();
+    for n in ["Length Segs", "Width Segs"] {
+        execute(&mut s, Command::SetParameter { id: plane.0, name: n.into(), value: 4.0 }).unwrap();
+    }
+    let (mid, edge) = (glam::Vec3::ZERO, glam::Vec3::new(100.0, 0.0, 0.0));
+    // Lighting Only, no shadows: the middle (under the light) is the brightest.
+    execute(&mut s, Command::AssignVertexColors { light_model: 1, by_vertex: true, shadows: false, update: false }).unwrap();
+    let n = s.scene.node(plane).unwrap();
+    assert!(matches!(n.modifiers.last().map(|m| &m.modifier), Some(Modifier::VertexPaint { .. })), "Assign To Selected adds a VertexPaint");
+    let (a, b) = (colour_near(&s, plane, mid), colour_near(&s, plane, edge));
+    assert!(a[0] > b[0] && b[0] > 0.0, "lit: middle {a:?} edge {b:?}");
+    // Lighting + Diffuse with Shadows, Assign on the entry: the box's shadow darkens the middle.
+    execute(&mut s, Command::AssignVertexColors { light_model: 0, by_vertex: true, shadows: true, update: true }).unwrap();
+    assert_eq!(s.scene.node(plane).unwrap().modifiers.len(), 1, "Assign refills the entry");
+    let (a, b) = (colour_near(&s, plane, mid), colour_near(&s, plane, edge));
+    assert!(a[0] < 1e-3 && b[0] > 0.01, "shadowed middle {a:?}, lit edge {b:?}");
+    // Diffuse: the object's colour everywhere, no lighting.
+    execute(&mut s, Command::AssignVertexColors { light_model: 2, by_vertex: false, shadows: false, update: true }).unwrap();
+    let w = s.scene.node(plane).unwrap().wire_color;
+    let want = [w[0] as f32 / 255.0, w[1] as f32 / 255.0, w[2] as f32 / 255.0];
+    assert!(s.scene.eval_mesh(plane).value.mesh.vertices().iter().all(|v| near(v.color, want)), "diffuse {want:?}");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert!(colour_near(&s, plane, mid)[0] < 1e-3, "undo brings the lit colours back");
+}

@@ -47,6 +47,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
         c if crate::vertex_paint::handles(&c) => crate::vertex_paint::execute(state, c),
+        C::AssignVertexColors { light_model, by_vertex, shadows, update } => crate::assign_vertex_colors::assign(state, light_model, by_vertex, shadows, update),
         c if c.group() == crate::Group::TrackView || crate::track_view::handles(&c) => crate::track_view::execute(state, c),
         C::UnwrapUvwModifier => crate::unwrap::execute(state, cmd),
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),

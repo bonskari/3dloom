@@ -611,6 +611,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 }
             });
         });
+        rollout(ui, "Assign Vertex Colors", false, |ui| super::utilities::assign_vertex_colors(ui, app, true));
     }
     if matches!(modifier, Modifier::Skin(_)) {
         super::skin_rollouts::show(ui, app, id, index);
