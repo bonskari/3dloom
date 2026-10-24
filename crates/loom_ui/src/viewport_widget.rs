@@ -754,6 +754,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() {
                         if let Some(session) = app.create.take() {
                             session.cancel(app);
+                        } else if app.create_kind.is_some() && app.bone_points.is_empty() && app.line.is_none() {
+                            // A right-click with nothing being dragged out ends the create mode.
+                            app.create_kind = None;
                         } else if let Some(line) = app.line.take() {
                             line.finish(app);
                         } else if !app.bone_points.is_empty() {

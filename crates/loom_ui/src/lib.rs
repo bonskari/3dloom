@@ -330,12 +330,24 @@ impl LoomApp {
 
     /// Runs a command, records errors for the status bar and marks render
     /// state dirty when the scene changed.
+    /// Picking a transform tool (Select, Move, Rotate, Scale) ends the create
+    /// mode, cancelling an object still being dragged out.
+    fn end_create_mode_for(&mut self, command: &str) {
+        if matches!(command, "Select Object" | "Select and Move" | "Select and Rotate" | "Select and Scale") && (self.create_kind.is_some() || self.create.is_some()) {
+            if let Some(session) = self.create.take() {
+                session.cancel(self);
+            }
+            self.create_kind = None;
+        }
+    }
+
     pub fn dispatch(&mut self, cmd: Command) -> Result<serde_json::Value, String> {
         if matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation) && self.create.is_some() {
             // Undo during creation ends the creation; its transaction closes first.
             self.create = None;
             self.state.undo.end();
         }
+        self.end_create_mode_for(cmd.name());
         let opens_editor = matches!(&cmd, Command::AddModifier { name } if name == "Unwrap UVW") && self.state.uv_editor.always_bring_up;
         let r = loom_commands::execute(&mut self.state, cmd);
         match &r {
@@ -351,6 +363,9 @@ impl LoomApp {
     }
 
     pub fn dispatch_json(&mut self, body: &serde_json::Value) -> serde_json::Value {
+        if let Some(name) = body["cmd"].as_str() {
+            self.end_create_mode_for(name);
+        }
         let r = loom_commands::execute_json(&mut self.state, body);
         self.sync_after_command();
         r
