@@ -575,6 +575,75 @@ mod tests {
     }
 
     #[test]
+    fn negative_height_builds_below_the_construction_plane() {
+        for (name, m) in [
+            ("cone", cone_primitive(1.0, 0.5, -2.0, 2, 1, 8, None)),
+            ("cylinder", cylinder_segmented(1.0, -2.0, 2, 1, 8, None)),
+            ("tube", tube_primitive(1.0, 0.5, -2.0, 2, 1, 8, None)),
+        ] {
+            let (min, max) = m.aabb();
+            assert!((min.z + 2.0).abs() < 1e-5 && max.z.abs() < 1e-5, "{name}: {min} {max}");
+            m.check_invariants().unwrap();
+            assert!(m.half_edges().iter().all(|he| he.face.is_some()), "{name} stays closed");
+        }
+    }
+
+    #[test]
+    fn sphere_squash_keeps_the_vertex_count_and_chop_removes_vertices() {
+        let full = sphere_full(1.0, 16, 0.0, false, None);
+        let squash = sphere_full(1.0, 16, 0.5, true, None);
+        let chop = sphere_full(1.0, 16, 0.5, false, None);
+        assert_eq!(squash.vertex_count(), full.vertex_count(), "squash keeps the vertex count");
+        assert_eq!(squash.face_count(), full.face_count(), "and the face count");
+        assert!(chop.vertex_count() < squash.vertex_count());
+        let (min, max) = squash.aabb();
+        assert!(min.z.abs() < 1e-4 && (max.z - 1.0).abs() < 1e-4, "{min} {max}");
+        squash.check_invariants().unwrap();
+    }
+
+    #[test]
+    fn sliced_sphere_is_closed_and_smaller() {
+        let full = sphere_full(1.0, 16, 0.0, false, None);
+        let half = sphere_full(1.0, 16, 0.0, false, Some((0.0, 180.0)));
+        assert!(half.face_count() < full.face_count());
+        half.check_invariants().unwrap();
+        assert!(half.half_edges().iter().all(|he| he.face.is_some()), "sliced sphere is capped");
+        let (min, _) = half.aabb();
+        assert!(min.y > -1e-4, "the 0..180 slice keeps +Y: {min}");
+    }
+
+    #[test]
+    fn torus_smooth_options_assign_groups_by_side_or_segment() {
+        let (segs, sides) = (8u32, 6u32);
+        let at = |m: &Mesh, c: u32, k: u32| m.faces()[(c * sides + k) as usize].smoothing_groups;
+        let all = torus_smoothed(2.0, 0.5, 0.0, 0.0, segs, sides, None, TorusSmooth::All);
+        assert!(all.faces().iter().all(|f| f.smoothing_groups == all.faces()[0].smoothing_groups && f.smoothing_groups != 0));
+        let none = torus_smoothed(2.0, 0.5, 0.0, 0.0, segs, sides, None, TorusSmooth::None);
+        assert!(none.faces().iter().all(|f| f.smoothing_groups == 0));
+        // Sides: smooth between adjacent segments (bands around the ring),
+        // hard between adjacent sides.
+        let s = torus_smoothed(2.0, 0.5, 0.0, 0.0, segs, sides, None, TorusSmooth::Sides);
+        for c in 0..segs {
+            for k in 0..sides {
+                assert_ne!(at(&s, c, k) & at(&s, (c + 1) % segs, k), 0, "sides: segment {c} side {k}");
+                assert_eq!(at(&s, c, k) & at(&s, c, (k + 1) % sides), 0, "sides: segment {c} side {k}");
+            }
+        }
+        // Segments: each segment smoothed on its own.
+        let g = torus_smoothed(2.0, 0.5, 0.0, 0.0, segs, sides, None, TorusSmooth::Segments);
+        for c in 0..segs {
+            for k in 0..sides {
+                assert_ne!(at(&g, c, k) & at(&g, c, (k + 1) % sides), 0, "segments: segment {c} side {k}");
+                assert_eq!(at(&g, c, k) & at(&g, (c + 1) % segs, k), 0, "segments: segment {c} side {k}");
+            }
+        }
+        // Odd counts wrap without the last and first band merging.
+        let odd = torus_smoothed(2.0, 0.5, 0.0, 0.0, 7, 5, None, TorusSmooth::Sides);
+        let at7 = |c: u32, k: u32| odd.faces()[(c * 5 + k) as usize].smoothing_groups;
+        assert_eq!(at7(0, 4) & at7(0, 0), 0);
+    }
+
+    #[test]
     fn hemisphere_half_keeps_upper_half() {
         let m = sphere_segmented(1.0, 16, 0.5);
         let (min, max) = m.aabb();
