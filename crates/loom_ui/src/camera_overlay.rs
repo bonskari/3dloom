@@ -16,7 +16,7 @@ const RANGE: egui::Color32 = egui::Color32::from_rgb(230, 220, 60);
 /// Clipping plane rectangles.
 const CLIP: egui::Color32 = egui::Color32::from_rgb(230, 40, 40);
 /// The horizon line.
-const HORIZON: egui::Color32 = egui::Color32::from_gray(45);
+const HORIZON: egui::Color32 = egui::Color32::from_gray(20);
 
 /// A world segment clipped to the part in front of the eye, in screen space.
 fn segment(view_proj: Mat4, rect: egui::Rect, a: Vec3, b: Vec3) -> Option<[egui::Pos2; 2]> {
@@ -87,5 +87,5 @@ fn horizon(painter: &egui::Painter, app: &LoomApp, n: &loom_scene::Node, view_pr
     }
     let y_at = |x: f32| p.y + d.y * (x - p.x) / d.x;
     let (a, b) = (egui::pos2(rect.left(), y_at(rect.left())), egui::pos2(rect.right(), y_at(rect.right())));
-    painter.with_clip_rect(rect).line_segment([a, b], egui::Stroke::new(1.0_f32, HORIZON));
+    painter.with_clip_rect(rect).line_segment([a, b], egui::Stroke::new(1.5_f32, HORIZON));
 }
