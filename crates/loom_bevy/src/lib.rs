@@ -357,6 +357,11 @@ impl BevyRenderer {
         result
     }
 
+    #[doc(hidden)]
+    pub fn debug_read(&self, slot: u32) -> Result<image::RgbaImage, String> {
+        self.read_back(slot)
+    }
+
     fn read_back(&self, slot: u32) -> Result<image::RgbaImage, String> {
         let v = self.views.get(&slot).ok_or("no render view")?;
         let images = self.app.sub_app(RenderApp).world().get_resource::<RenderAssets<GpuImage>>().ok_or("no GPU images")?;

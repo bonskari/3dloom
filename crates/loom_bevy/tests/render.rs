@@ -46,3 +46,22 @@ fn renders_a_lit_red_box() {
     let img = r.render_image(64, 64, &camera).expect("render");
     assert_eq!(&img.get_pixel(32, 32).0[..3], &[0, 0, 0], "the box moved out of view");
 }
+
+#[test]
+fn debug_viewport_path() {
+    let Some((adapter, device, queue)) = gpu() else { return };
+    let mut r = BevyRenderer::new(adapter, device, queue);
+    let mesh = loom_mesh::box_primitive(Vec3::splat(5.0));
+    let mut plane = loom_mesh::box_primitive(Vec3::new(60.0, 60.0, 0.5));
+    let _ = loom_mesh::edit_ops::translate_mesh(&mut plane, Vec3::new(0.0, 0.0, -5.5));
+    r.sync(&[SceneObject { id: 1, mesh: &mesh, wire_color: [220, 30, 30], material: None }, SceneObject { id: 2, mesh: &plane, wire_color: [30, 200, 30], material: None }]);
+    let eye = Vec3::new(-180.0, -240.0, 160.0);
+    let camera = ViewCamera { view: Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Z), projection: Mat4::perspective_rh(45f32.to_radians(), 1.6, 0.33, 330000.0) };
+    for _ in 0..5 {
+        r.set_view(3, [504, 316], &camera, [0.0; 4], true);
+        r.update();
+    }
+    r.debug_read(3).unwrap().save("/tmp/claude-1000/-home-b1s-dev-github-3dloom/133d9ffa-5cf9-4f2c-8165-69b12a73953d/scratchpad/dbg_view.png").unwrap();
+    let img = r.render_image(504, 316, &camera).unwrap();
+    img.save("/tmp/claude-1000/-home-b1s-dev-github-3dloom/133d9ffa-5cf9-4f2c-8165-69b12a73953d/scratchpad/dbg_render.png").unwrap();
+}
