@@ -100,9 +100,11 @@ fn pick_in_the_coordinate_list_takes_the_clicked_object() {
     // Back to World; the name is still in the list and picks it again.
     h.cmd(Command::ReferenceCoordinateSystem { system: loom_commands::CoordSystem::World });
     click_text(&mut h, "World", bar, 0.0);
-    h.frames(4);
+    // The list scrolls: the picked names follow Pick at its end.
     let m = menus(&h)[0];
-    eprintln!("DEBUG menus {:?} texts {:?}", menus(&h), h.texts(&name));
+    h.run(vec![egui::Event::PointerMoved(m.center())]);
+    h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -200.0), modifiers: egui::Modifiers::NONE }]);
+    h.frames(10);
     click_text(&mut h, &name, m, 0.0);
     assert_eq!(h.app.state.coord_system, loom_commands::CoordSystem::Pick);
 }
