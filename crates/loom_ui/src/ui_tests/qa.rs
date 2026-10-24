@@ -165,6 +165,54 @@ fn a_move_drag_released_in_the_same_frame_as_its_last_motion_keeps_that_motion()
 }
 
 #[test]
+fn select_by_name_opens_with_the_selection_and_select_all_skips_unlisted_objects() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.key(egui::Key::H);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::SelectFromScene));
+    click_text(&mut h, "Select");
+    assert!(h.app.state.dialog.is_none(), "Select closes the dialog");
+    assert!(h.app.state.selection.contains(&a), "the selection the dialog opened with stays selected");
+    // A hidden object is not listed (Display: Hidden off), so Select All leaves it out.
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [50.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::HideSelection);
+    h.key(egui::Key::H);
+    click_text(&mut h, "Select All");
+    click_text(&mut h, "Select");
+    assert!(h.app.state.selection.contains(&a));
+    assert!(!h.app.state.selection.contains(&b), "a hidden, unlisted object is not selected");
+}
+
+#[test]
+fn select_by_name_click_picks_one_and_double_click_selects_and_closes() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Sphere, position: [50.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = selected(&h);
+    let name_a = h.app.state.scene.node(a).unwrap().name.clone();
+    let name_b = h.app.state.scene.node(b).unwrap().name.clone();
+    h.key(egui::Key::H);
+    // A plain click on a name makes it the only chosen one, as in Max's list.
+    click_text(&mut h, &name_a);
+    click_text(&mut h, "Select");
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![a]);
+    h.key(egui::Key::H);
+    // Earlier clicks more than egui's triple-click window ago.
+    h.frames(30);
+    let r = find_text(&mut h, &name_b).expect("listed");
+    let m = h.mods;
+    h.run(vec![egui::Event::PointerMoved(r.center())]);
+    for _ in 0..2 {
+        h.run(vec![egui::Event::PointerButton { pos: r.center(), button: egui::PointerButton::Primary, pressed: true, modifiers: m }]);
+        h.run(vec![egui::Event::PointerButton { pos: r.center(), button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
+    }
+    h.frames(2);
+    assert!(h.app.state.dialog.is_none(), "a double-click closes the dialog");
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![b], "and selects the name");
+}
+
+#[test]
 fn delete_key_removes_and_undo_restores() {
     let mut h = Harness::new();
     box_scene(&mut h);
