@@ -133,6 +133,6 @@ impl LoomApp {
         self.sync_bevy();
         let Gpu::Running(b) = &mut self.gpu else { return Err("no GPU renderer".into()) };
         let img = b.renderer.render_image(req.width, req.height, &loom_bevy::ViewCamera { view, projection })?;
-        img.save(&req.path).map_err(|e| format!("{}: {e}", req.path))
+        loom_commands::images::save_rgba(&img, std::path::Path::new(&req.path))
     }
 }

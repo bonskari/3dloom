@@ -246,40 +246,33 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 let ids = crate::fbx_io::import(state, &path)?;
                 return Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }));
             }
-            let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Object".into());
-            let objects = loom_mesh::obj::parse(&text, &stem).map_err(|e| format!("{}: {e}", path.display()))?;
-            if objects.is_empty() {
-                return Err(format!("{}: no faces", path.display()));
-            }
-            let mut changes = Vec::with_capacity(objects.len());
-            let mut ids = Vec::with_capacity(objects.len());
-            let first = state.scene.next_id();
-            let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().map(|n| n.name.clone()).collect();
-            for (i, o) in objects.into_iter().enumerate() {
-                let name = if taken.contains(&o.name) { unique_name(&o.name, &taken) } else { o.name.clone() };
-                taken.insert(name.clone());
-                let mut node = Node::new(&name, ObjectKind::EditablePoly(loom_scene::PolyObject::from_mesh(o.mesh)));
-                node.wire_color = loom_scene::OBJECT_COLORS[((first as usize) + i) % loom_scene::OBJECT_COLORS.len()];
-                node.layer = state.scene.current_layer;
-                ids.push(first + i as u64);
-                changes.push(Change::AddNode(node));
-            }
-            let label = format!("Import {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-            commit(state, &label, Change::Group(changes))?;
-            state.selection = ids.iter().map(|i| NodeId(*i)).collect();
-            state.sub_selection.clear();
-            state.selection_mode = SelectionMode::Object;
-            Ok(json!({ "nodes": ids }))
+            crate::obj_io::import(state, &path)
         }
         C::ExportFile { path } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::ExportFile);
                 return Ok(json!({ "dialog": "ExportFile" }));
             };
-            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| state.is_visible(n)).map(|n| n.id).collect();
+            // OBJ Hidden Objects: hidden objects go too.
+            let hidden = !crate::fbx_io::is_fbx(std::path::Path::new(&path)) && state.exchange.obj_export.hidden_objects;
+            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| hidden || state.is_visible(n)).map(|n| n.id).collect();
             export_any(state, &ids, std::path::Path::new(&path))
         }
+        C::SetExchangeOption { dialog, name, value } => {
+            state.exchange.set(&dialog, &name, value)?;
+            state.exchange.describe(&dialog)
+        }
+        C::ExchangeOptions { dialog } => state.exchange.describe(&dialog),
+        C::SaveExchangePreset { dialog, name } => {
+            state.exchange.save_preset(&dialog, &name)?;
+            state.exchange.describe(&dialog)
+        }
+        C::DeleteExchangePreset { dialog, name } => {
+            state.exchange.delete_preset(&dialog, &name)?;
+            state.exchange.describe(&dialog)
+        }
+        C::FbxFileInfo { path } => crate::fbx_io::file_info(state, std::path::Path::new(&path)),
+        C::ObjFileInfo { path } => crate::obj_io::file_info(std::path::Path::new(&path)),
         C::ExportSelected { path } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::ExportSelected);
@@ -2918,36 +2911,13 @@ fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<
     state.mesh_dirty = true;
 }
 
-/// Writes the evaluated meshes of `ids` (geometry only: shapes count when
-/// their viewport render makes faces) as one OBJ file.
 /// Export by extension: `.fbx` → FBX, anything else → OBJ.
 fn export_any(state: &AppState, ids: &[NodeId], path: &std::path::Path) -> Result<Value, String> {
     if crate::fbx_io::is_fbx(path) {
         crate::fbx_io::export(state, ids, path)
     } else {
-        export_obj(state, ids, path)
+        crate::obj_io::export(state, ids, path)
     }
-}
-
-fn export_obj(state: &AppState, ids: &[NodeId], path: &std::path::Path) -> Result<Value, String> {
-    let mut objects = Vec::new();
-    for id in ids {
-        let Some(node) = state.scene.node(*id) else { continue };
-        if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
-            continue;
-        }
-        let mesh = state.scene.eval_mesh(*id).value.mesh.clone();
-        if mesh.face_count() == 0 {
-            continue;
-        }
-        objects.push((node.name.clone(), mesh, state.scene.object_matrix(*id)));
-    }
-    if objects.is_empty() {
-        return Err("nothing to export: no geometry objects".into());
-    }
-    let text = loom_mesh::obj::write(&objects);
-    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(json!({ "path": path, "objects": objects.len() }))
 }
 
 /// `Box` → `Box001`, `Box002`… (trailing digits replaced), the first not in `taken`.

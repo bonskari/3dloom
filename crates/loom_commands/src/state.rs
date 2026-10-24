@@ -1394,6 +1394,10 @@ pub struct AppState {
     pub seam_point: Option<u32>,
     /// Merge dialog: the chosen file and its object names.
     pub merge_pending: Option<(std::path::PathBuf, Vec<String>)>,
+    /// FBX / OBJ import and export options (the format dialogs; saved in the settings).
+    pub exchange: crate::exchange::ExchangeOptions,
+    /// The file an FBX / OBJ options dialog is open for, and whether it exports the selection only.
+    pub exchange_pending: Option<(std::path::PathBuf, bool)>,
     /// The scene's file (File > Save writes here); None = Untitled.
     pub file: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
@@ -1573,6 +1577,8 @@ impl AppState {
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,
+            exchange: Default::default(),
+            exchange_pending: None,
             file: None,
             mesh_dirty: false,
         }

@@ -28,6 +28,7 @@ pub mod render_setup;
 pub mod save_changes;
 pub mod spline_prompts;
 pub mod merge;
+pub mod exchange_options;
 pub mod unwrap_dialogs;
 pub mod rig_dialogs;
 pub mod track_view_dialogs;
@@ -76,6 +77,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             d.remove::<u32>(egui::Id::new("clone_options_copies"));
             file_dialog::clear_state(d);
             merge::clear_state(d);
+            exchange_options::clear_state(d);
             d.remove::<String>(egui::Id::new("auto_backup_name_edit"));
             for k in ["Weld", "Chamfer", "ConnectEdges", "Bridge", "Extrude", "Inset", "Bevel", "Outline", "Hinge", "MSmooth", "Tessellate", "Relax"] {
                 let id = egui::Id::new("poly_settings").with(k);
@@ -132,6 +134,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::PickTexture | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
+        Dialog::FbxImportOptions => exchange_options::fbx_import(ctx, app, &mut open),
+        Dialog::FbxExportOptions => exchange_options::fbx_export(ctx, app, &mut open),
+        Dialog::ObjImportOptions => exchange_options::obj_import(ctx, app, &mut open),
+        Dialog::ObjExportOptions => exchange_options::obj_export(ctx, app, &mut open),
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
         Dialog::WeightTable => rig_dialogs::weight_table(ctx, app, &mut open),
         Dialog::WeightTool => rig_dialogs::weight_tool(ctx, app, &mut open),

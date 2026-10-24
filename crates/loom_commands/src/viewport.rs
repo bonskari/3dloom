@@ -312,7 +312,7 @@ pub enum Dialog {
     CloseSpline,
     /// Editable Spline > Refine with Connect on an existing vertex: Refine / Connect Only.
     RefineVertex,
-    /// File > Import (OBJ).
+    /// File > Import (FBX, OBJ, .max).
     ImportFile,
     SaveAnimation,
     LoadAnimation,
@@ -323,14 +323,20 @@ pub enum Dialog {
     KeyInfo,
     TrackViewFilters,
     TrackViewUtilities,
-    /// File > Export (OBJ).
+    /// File > Export (FBX, OBJ).
     ExportFile,
-    /// File > Export Selected (OBJ).
+    /// File > Export Selected (FBX, OBJ).
     ExportSelected,
     /// File > Merge: pick the file; then the object list.
     MergeFile,
     /// File > Merge: the file's object list (`AppState::merge_pending`).
     MergeObjects,
+    /// FBX Importer / Exporter and OBJ Importer / Exporter options for the
+    /// file in `AppState::exchange_pending` (after Import / Export picks it).
+    FbxImportOptions,
+    FbxExportOptions,
+    ObjImportOptions,
+    ObjExportOptions,
     /// Animation > Bone Tools...
     BoneTools,
     /// Skin > Weight Table.
