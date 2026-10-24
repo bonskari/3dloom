@@ -540,3 +540,87 @@ fn realistic_shading_from_the_label_menu_runs_without_a_gpu() {
     assert!(h.app.state.pending_render.is_none());
     assert!(h.app.last_error.as_deref().is_some_and(|e| e.contains("Render")), "{:?}", h.app.last_error);
 }
+
+/// Runs injected input the way the app's control socket feeds it: one step per frame.
+fn inject(h: &mut Harness, events: serde_json::Value) {
+    let mut q = crate::live::InputQueue::default();
+    q.push(crate::live::parse_input(&events).unwrap());
+    while !q.is_empty() {
+        h.time += 1.0 / 30.0;
+        let mut input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(h.time), ..Default::default() };
+        q.apply(&mut input);
+        let app = &mut h.app;
+        let _ = h.ctx.run(input, |ctx| app.frame(ctx));
+    }
+    h.frames(1);
+}
+
+#[test]
+fn diagnostics_show_a_held_alt_press_until_reset_interaction() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    h.mods = egui::Modifiers::ALT;
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: h.mods }]);
+    h.frames(1);
+    let d = h.app.diagnostics(&h.ctx);
+    assert_eq!(d["egui"]["input"]["modifiers"]["alt"], true, "{}", d["egui"]);
+    assert_eq!(d["egui"]["input"]["pointer"]["buttons_down"], serde_json::json!(["primary"]));
+    assert_eq!(d["interaction"]["alt_click"], serde_json::json!([p.x, p.y]));
+    assert_eq!(d["interaction"]["nav_mode"], "None");
+    assert_eq!(d["viewports"]["active"], h.app.state.active_viewport);
+    assert_eq!(d["modes"]["sub_object_level"], "Object");
+    let events = d["input_events"].as_array().unwrap();
+    assert!(events.iter().any(|e| e["event"].as_str().unwrap().starts_with("PointerButton")), "{events:?}");
+    assert!(events.iter().any(|e| e["event"] == "Modifiers(alt)"), "{events:?}");
+    // The release never arrives (focus lost): reset clears what it left behind.
+    let cleared = h.app.reset_interaction(&h.ctx);
+    assert!(cleared.contains(&"alt_click"), "{cleared:?}");
+    assert!(h.app.alt_click.is_none());
+    assert_eq!(h.app.diagnostics(&h.ctx)["interaction"]["alt_click"], serde_json::Value::Null);
+}
+
+#[test]
+fn injected_alt_drag_orbits_like_a_mouse() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    let yaw = h.app.state.active().camera.yaw;
+    inject(&mut h, serde_json::json!([{ "type": "drag", "from": [p.x, p.y], "to": [p.x + 120.0, p.y], "mods": ["alt"] }]));
+    assert_ne!(h.app.state.active().camera.yaw, yaw, "the injected Alt+drag orbits");
+    assert_eq!(h.app.state.selection.len(), 1, "and keeps the selection");
+    // Held modifiers and keys: Ctrl+A selects all, after a new box.
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [50.0, 0.0, 0.0], size: [10.0; 3] });
+    inject(&mut h, serde_json::json!([{ "type": "modifiers", "mods": ["ctrl"] }, { "type": "key", "key": "A", "mods": ["ctrl"] }, { "type": "modifiers", "mods": [] }]));
+    assert_eq!(h.app.state.selection.len(), 2, "Ctrl+A selects all");
+}
+
+#[test]
+fn injected_input_rejects_bad_events() {
+    use crate::live::parse_input;
+    assert!(parse_input(&serde_json::json!([{ "type": "key", "key": "NoSuchKey" }])).is_err());
+    assert!(parse_input(&serde_json::json!([{ "type": "click", "pos": [1] }])).is_err());
+    assert!(parse_input(&serde_json::json!([{ "type": "click", "pos": [1, 2], "mods": ["hyper"] }])).is_err());
+    assert!(parse_input(&serde_json::json!({ "type": "move" })).is_err());
+    assert_eq!(parse_input(&serde_json::json!([{ "type": "click", "pos": [1, 2] }])).unwrap().len(), 3);
+    assert_eq!(parse_input(&serde_json::json!([{ "type": "wait", "frames": 4 }])).unwrap().len(), 4);
+}
+
+#[test]
+fn ui_hit_names_the_viewport_and_panel_under_a_point() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.frames(1);
+    let hit = h.app.ui_hit(&h.ctx, p);
+    assert_eq!(hit["viewport"], h.app.state.active_viewport);
+    assert_eq!(hit["pointer_here"], true);
+    let menu = h.app.ui_hit(&h.ctx, egui::pos2(5.0, 5.0));
+    assert_eq!(menu["panel"], "menubar", "{menu}");
+    assert_eq!(menu["viewport"], serde_json::Value::Null);
+    let tree = h.app.ui_tree(&h.ctx);
+    assert!(tree["panels"].as_array().unwrap().iter().any(|p| p["name"] == "command_panel"), "{tree}");
+    assert_eq!(tree["viewports"].as_array().unwrap().len(), h.app.viewport_rects.len());
+}

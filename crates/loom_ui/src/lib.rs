@@ -8,6 +8,7 @@ pub mod dialogs;
 pub mod gizmo;
 mod hotkeys;
 pub mod label_menus;
+pub mod live;
 pub mod main_toolbar;
 pub mod quad_menu;
 mod realistic;
@@ -264,6 +265,8 @@ pub struct LoomApp {
     /// Show Map in Viewport bitmaps decoded once per path.
     pub bitmap_cache: std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>,
     pub last_error: Option<String>,
+    /// The last raw input events (live diagnostics).
+    pub input_log: live::InputLog,
 }
 
 impl LoomApp {
@@ -350,6 +353,7 @@ impl LoomApp {
             quad_menu: None,
             background_textures: std::collections::HashMap::new(),
             last_error: None,
+            input_log: Default::default(),
         }
     }
 
@@ -383,7 +387,11 @@ impl LoomApp {
         }
         self.end_create_mode_for(cmd.name());
         let opens_editor = matches!(&cmd, Command::AddModifier { name } if name == "Unwrap UVW") && self.state.uv_editor.always_bring_up;
+        let logged = log::log_enabled!(target: "loom::cmd", log::Level::Info).then(|| serde_json::to_value(&cmd).unwrap_or_default());
         let r = loom_commands::execute(&mut self.state, cmd);
+        if let Some(body) = logged {
+            live::log_command(&body, r.as_ref().map_err(String::as_str));
+        }
         match &r {
             Err(e) => self.last_error = Some(e.clone()),
             Ok(_) => self.last_error = None,
@@ -401,6 +409,7 @@ impl LoomApp {
             self.end_create_mode_for(name);
         }
         let r = loom_commands::execute_json(&mut self.state, body);
+        live::log_command(body, if r["ok"] == true { Ok(&r) } else { Err(r["error"].as_str().unwrap_or("failed")) });
         self.sync_after_command();
         r
     }
@@ -761,6 +770,7 @@ impl LoomApp {
     /// One frame of the whole UI (what eframe calls each repaint; the UI
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
+        ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_file_action(loom_commands::PendingFileAction::Exit);

@@ -49,3 +49,34 @@ fn tool_names_are_unique_and_snake_case() {
     assert_eq!(tool_name("Rotate +90"), "loom_rotate_plus_90");
     assert_eq!(tool_name("Rotate -90"), "loom_rotate_minus_90");
 }
+
+#[test]
+fn every_control_socket_request_has_a_tool() {
+    let tools: HashSet<String> = tool_list().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+    for (cmd, _, schema) in loom_commands::live::app_commands() {
+        assert!(tools.contains(&format!("loom_{cmd}")), "no tool for `{cmd}`");
+        assert_eq!(schema["type"], "object");
+        if cmd != "screenshot" {
+            assert_eq!(loom_mcp::app_command(&format!("loom_{cmd}")), Some(cmd));
+        }
+    }
+    assert_eq!(loom_mcp::app_command("loom_state"), None, "registry commands are not app commands");
+    for t in ["loom_instances", "loom_attach", "loom_logs", "loom_diagnostics", "loom_input", "loom_log_tail", "loom_reset_interaction", "loom_ui_hit"] {
+        assert!(tools.contains(t), "{t}");
+    }
+}
+
+#[test]
+fn logs_are_read_by_pid_or_newest() {
+    let dir = std::env::temp_dir().join(format!("loom-mcp-logs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("loom-2026-01-01-12.log"), "a\nb\nc\n").unwrap();
+    std::fs::write(dir.join("loom-2026-01-01-112.log"), "x\n").unwrap();
+    let v = loom_mcp::read_logs(&dir, Some(12), 2).unwrap();
+    assert_eq!(v["text"], "b\nc");
+    assert!(v["path"].as_str().unwrap().ends_with("-12.log"));
+    assert_eq!(v["files"].as_array().unwrap().len(), 2);
+    assert!(loom_mcp::read_logs(&dir, Some(7), 2).is_err());
+    assert!(loom_mcp::read_logs(&dir, None, 5).is_ok());
+}

@@ -52,6 +52,34 @@ pub fn tool_list() -> Vec<Value> {
             "path": { "type": "string", "description": "Path of the .loom file" }
         }, "required": ["path"] },
     }));
+    // The control socket's own requests (diagnostics, input, logs, ...).
+    for (cmd, description, schema) in loom_commands::live::app_commands() {
+        if cmd == "screenshot" {
+            continue; // loom_screenshot below returns the image itself.
+        }
+        tools.push(json!({ "name": format!("loom_{cmd}"), "description": description, "inputSchema": schema }));
+    }
+    tools.push(json!({
+        "name": "loom_instances",
+        "description": "List the running 3dLoom instances (every run has a private control socket), newest first, with pid, socket, version and log file, and which one the tools talk to.",
+        "inputSchema": { "type": "object", "properties": {}, "required": [] },
+    }));
+    tools.push(json!({
+        "name": "loom_attach",
+        "description": "Talk to this instance from now on: by pid (its Unix socket) or by TCP port (LOOM_CONTROL_PORT). Without arguments, the newest instance.",
+        "inputSchema": { "type": "object", "properties": {
+            "pid": { "type": "integer" },
+            "port": { "type": "integer" }
+        }, "required": [] },
+    }));
+    tools.push(json!({
+        "name": "loom_logs",
+        "description": "Read log files directly, also of a run that crashed or is not answering: the last lines of the log of `pid` (default: the attached instance, else the newest log) and the list of kept log files.",
+        "inputSchema": { "type": "object", "properties": {
+            "pid": { "type": "integer" },
+            "lines": { "type": "integer", "description": "How many lines (default 200)" }
+        }, "required": [] },
+    }));
     tools.push(json!({
         "name": "loom_screenshot",
         "description": "Capture the 3dLoom window as it is rendered right now and return the image.",
@@ -66,4 +94,22 @@ pub fn tool_list() -> Vec<Value> {
 pub fn read_file(path: &str) -> Result<Value, String> {
     let doc = loom_commands::file::read(std::path::Path::new(path))?;
     Ok(loom_commands::file::summary(&doc))
+}
+
+/// The control-socket request an app-command tool sends (`loom_diagnostics`
+/// → `diagnostics`), if `tool` is one.
+pub fn app_command(tool: &str) -> Option<&'static str> {
+    loom_commands::live::app_commands().into_iter().map(|(c, _, _)| c).find(|c| tool.strip_prefix("loom_") == Some(*c))
+}
+
+/// `loom_logs`: the log of `pid` (or the newest) in `dir`, and the kept files.
+pub fn read_logs(dir: &std::path::Path, pid: Option<u32>, lines: usize) -> Result<Value, String> {
+    let files = loom_commands::live::log_files(dir);
+    let file = match pid {
+        Some(pid) => files.iter().find(|f| f.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(&format!("-{pid}.log")))),
+        None => files.first(),
+    }
+    .ok_or_else(|| format!("no log file{} in {}", pid.map(|p| format!(" of pid {p}")).unwrap_or_default(), dir.display()))?;
+    let text = loom_commands::live::tail(file, lines).map_err(|e| format!("{}: {e}", file.display()))?;
+    Ok(json!({ "path": file, "text": text, "files": files }))
 }

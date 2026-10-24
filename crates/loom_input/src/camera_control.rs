@@ -99,6 +99,20 @@ impl ViewportNavigator {
         self.dragging.is_some()
     }
 
+    /// The drag in progress ("orbit", "pan", "zoom"), for diagnostics.
+    pub fn drag_mode(&self) -> Option<&'static str> {
+        self.dragging.map(|d| match d {
+            DragMode::Orbit => "orbit",
+            DragMode::Pan => "pan",
+            DragMode::Zoom => "zoom",
+        })
+    }
+
+    /// Drops a drag whose button release was never seen.
+    pub fn cancel_drag(&mut self) {
+        self.dragging = None;
+    }
+
     fn drag_for(&self, button: MouseButton, mods: Modifiers) -> Option<DragMode> {
         match button {
             MouseButton::Middle | MouseButton::Left if mods.alt && mods.ctrl => Some(DragMode::Zoom),
