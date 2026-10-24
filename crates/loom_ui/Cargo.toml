@@ -13,6 +13,7 @@ serde_json  = { workspace = true }
 log = "0.4"
 image = { workspace = true }
 loom_render = { workspace = true }
+loom_bevy   = { workspace = true }
 loom_input  = { workspace = true }
 eframe      = { workspace = true }
 egui        = { workspace = true }
