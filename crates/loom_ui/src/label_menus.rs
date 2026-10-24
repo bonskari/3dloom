@@ -50,7 +50,27 @@ pub fn general_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
         sep(),
         check("Viewport Clipping", vp.clipping, Command::ViewportClipping),
         sep(),
-        item("Configure Viewports...", Command::ConfigureViewports),
+        MenuEntry { label: "ViewCube".into(), checked: false, action: Action::Submenu({
+            let mut v = vec![check("Show the ViewCube", s.viewcube.show, Command::ViewCubeToggle), sep()];
+            v.extend(viewcube_entries(app, index));
+            v
+        }) },
+        sep(),
+        item("Configure Viewports...", Command::ConfigureViewports { panel: None }),
+    ]
+}
+
+/// The ViewCube menu (right-click the cube; also [+] > ViewCube).
+pub fn viewcube_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
+    let vp = &app.state.viewports[index];
+    vec![
+        item("Home", Command::HomeView),
+        check("Orthographic", vp.is_orthographic(), Command::OrthographicUserView),
+        check("Perspective", !vp.is_orthographic(), Command::PerspectiveUserView),
+        sep(),
+        item("Set Current View as Home", Command::SetCurrentViewAsHome),
+        sep(),
+        item("Configure...", Command::ConfigureViewports { panel: Some("ViewCube".into()) }),
     ]
 }
 
