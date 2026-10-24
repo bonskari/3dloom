@@ -1494,7 +1494,7 @@ fn draw_region(painter: &egui::Painter, region: &crate::region::Region) {
     match region {
         Region::Rect(r) => {
             painter.rect_filled(*r, 0.0, fill);
-            painter.rect_stroke(*r, 0.0, stroke);
+            painter.rect_stroke(*r, 0.0, stroke, egui::StrokeKind::Middle);
         }
         Region::Circle { center, radius } => {
             painter.circle_filled(*center, *radius, fill);
@@ -1735,7 +1735,7 @@ fn draw_snap_marker(painter: &egui::Painter, app: &LoomApp, hit: &loom_commands:
             painter.line_segment([egui::pos2(c.x - r, c.y + r), egui::pos2(c.x + r, c.y - r)], stroke);
         }
         K::Vertex | K::Endpoint | K::BoundingBox => {
-            painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0)), 0.0, stroke);
+            painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0)), 0.0, stroke, egui::StrokeKind::Middle);
         }
         K::Pivot => {
             painter.circle_stroke(c, r, stroke);
@@ -1750,7 +1750,7 @@ fn draw_snap_marker(painter: &egui::Painter, app: &LoomApp, hit: &loom_commands:
             painter.add(egui::Shape::closed_line(pts, stroke));
         }
         K::Face => {
-            painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0)), 0.0, stroke);
+            painter.rect_stroke(egui::Rect::from_center_size(c, egui::vec2(r * 2.0, r * 2.0)), 0.0, stroke, egui::StrokeKind::Middle);
             painter.line_segment([egui::pos2(c.x - r, c.y - r), egui::pos2(c.x + r, c.y + r)], stroke);
             painter.line_segment([egui::pos2(c.x - r, c.y + r), egui::pos2(c.x + r, c.y - r)], stroke);
         }
@@ -1932,9 +1932,9 @@ fn draw_safe_frames(painter: &egui::Painter, rect: egui::Rect) {
     let aspect = 4.0 / 3.0;
     let (w, h) = if rect.width() / rect.height() > aspect { (rect.height() * aspect, rect.height()) } else { (rect.width(), rect.width() / aspect) };
     let live = egui::Rect::from_center_size(rect.center(), egui::vec2(w, h));
-    painter.rect_stroke(live, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)));
-    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.05, h * 0.05)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(90, 200, 255)));
-    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.10, h * 0.10)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 150, 60)));
+    painter.rect_stroke(live, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)), egui::StrokeKind::Middle);
+    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.05, h * 0.05)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(90, 200, 255)), egui::StrokeKind::Middle);
+    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.10, h * 0.10)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 150, 60)), egui::StrokeKind::Middle);
 }
 
 /// The soft selection gradient: red (1) → orange → yellow → blue (0).

@@ -51,7 +51,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 if active.width() >= 1.0 {
                     // Auto Key draws the active viewport's frame red.
                     let c = if app.state.auto_key { egui::Color32::from_rgb(220, 30, 30) } else { ACTIVE_FRAME };
-                    ui.painter().rect_stroke(*active, 0.0, egui::Stroke::new(if app.state.auto_key { 3.0 } else { 1.5 }, c));
+                    ui.painter().rect_stroke(*active, 0.0, egui::Stroke::new(if app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
                 }
             }
             if !app.state.maximized && !app.state.ui_locked {
