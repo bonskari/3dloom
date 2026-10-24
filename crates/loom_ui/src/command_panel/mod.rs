@@ -1,4 +1,4 @@
-//! Command Panel (right side) with the six tabs.
+//! Command Panel (right side): Scene (the object hierarchy) and the six tabs.
 
 pub mod compound;
 pub mod create;
@@ -8,6 +8,7 @@ pub mod modify;
 pub mod modify_poly;
 pub mod modify_spline;
 pub mod motion;
+pub mod scene;
 pub mod skin_rollouts;
 pub mod morph_rollouts;
 mod normals_rollout;
@@ -18,6 +19,7 @@ use eframe::egui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
+    Scene,
     #[default]
     Create,
     Modify,
@@ -28,9 +30,10 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [Tab::Create, Tab::Modify, Tab::Hierarchy, Tab::Motion, Tab::Display, Tab::Utilities];
+    pub const ALL: [Tab; 7] = [Tab::Scene, Tab::Create, Tab::Modify, Tab::Hierarchy, Tab::Motion, Tab::Display, Tab::Utilities];
     pub fn label(self) -> &'static str {
         match self {
+            Tab::Scene => "Scene",
             Tab::Create => "Create",
             Tab::Modify => "Modify",
             Tab::Hierarchy => "Hierarchy",
@@ -63,7 +66,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         .default_width(270.0)
         .resizable(!app.state.ui_locked)
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 for tab in Tab::ALL {
                     if ui.selectable_label(app.panel_tab == tab, tab.label()).clicked() {
                         app.panel_tab = tab;
@@ -72,6 +75,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             });
             ui.separator();
             egui::ScrollArea::vertical().show(ui, |ui| match app.panel_tab {
+                Tab::Scene => scene::show(ui, app),
                 Tab::Create => create::show(ui, app),
                 Tab::Modify => modify::show(ui, app),
                 Tab::Hierarchy => hierarchy::show(ui, app),
