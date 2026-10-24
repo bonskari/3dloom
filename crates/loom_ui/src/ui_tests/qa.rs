@@ -1102,6 +1102,20 @@ fn preferences_and_other_dialogs_open_and_close() {
 }
 
 #[test]
+fn slash_plays_and_stops_the_animation() {
+    let mut h = Harness::new();
+    let f0 = h.app.state.current_frame;
+    h.key(egui::Key::Slash);
+    h.frames(30);
+    let f1 = h.app.state.current_frame;
+    assert!(f1 != f0, "playing advances the frame ({f0} -> {f1})");
+    h.key(egui::Key::Slash);
+    let f2 = h.app.state.current_frame;
+    h.frames(30);
+    assert_eq!(h.app.state.current_frame, f2, "/ again stops");
+}
+
+#[test]
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();
     for (label, tab) in [("Modify", crate::Tab::Modify), ("Hierarchy", crate::Tab::Hierarchy), ("Motion", crate::Tab::Motion), ("Display", crate::Tab::Display), ("Utilities", crate::Tab::Utilities), ("Create", crate::Tab::Create)] {
