@@ -35,6 +35,15 @@ fn free_port() -> u16 {
     std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
 }
 
+/// A fresh directory for a launched instance's control socket, log and
+/// settings, so tests never touch the user's (`current`, log files, settings.json).
+fn private_dir(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("loom-e2e-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
 impl App {
     /// Launches on the persistent Xvnc display `:90` (where xdotool can drive
     /// the window), or returns None when that display or xdotool is missing.
@@ -47,9 +56,13 @@ impl App {
         }
         let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let port = free_port();
+        let dir = private_dir(&port.to_string());
         let bin = env!("CARGO_BIN_EXE_loom");
         let child = Command::new(bin)
             .env("LOOM_CONTROL_PORT", port.to_string())
+            .env("XDG_RUNTIME_DIR", &dir)
+            .env("XDG_STATE_HOME", &dir)
+            .env("LOOM_CONFIG_DIR", &dir)
             .env("DISPLAY", ":90")
             .env_remove("WAYLAND_DISPLAY")
             .env("XDG_SESSION_TYPE", "x11")
@@ -80,10 +93,14 @@ impl App {
         }
         let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let port = free_port();
+        let dir = private_dir(&port.to_string());
         let bin = env!("CARGO_BIN_EXE_loom");
         let child = Command::new("xvfb-run")
             .args(["-a", "-s", "-screen 0 1600x1000x24", bin])
             .env("LOOM_CONTROL_PORT", port.to_string())
+            .env("XDG_RUNTIME_DIR", &dir)
+            .env("XDG_STATE_HOME", &dir)
+            .env("LOOM_CONFIG_DIR", &dir)
             // winit prefers Wayland when WAYLAND_DISPLAY is set and would
             // open the window on the user's real screen instead of Xvfb.
             .env_remove("WAYLAND_DISPLAY")
@@ -422,4 +439,141 @@ fn phase9_modifiers_through_the_socket_and_screenshot() {
     std::fs::create_dir_all(&dir).unwrap();
     let shot = dir.join("9-modifiers.png");
     ok(app.send(json!({ "cmd": "screenshot", "path": shot.to_str().unwrap() })));
+}
+
+/// A Unix socket client (the control socket every run has).
+#[cfg(unix)]
+fn ask(stream: &mut std::os::unix::net::UnixStream, body: Value) -> Value {
+    writeln!(stream, "{body}").unwrap();
+    let mut line = String::new();
+    BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
+    serde_json::from_str(&line).unwrap_or_else(|e| panic!("bad reply {line:?}: {e}"))
+}
+
+#[cfg(unix)]
+#[test]
+fn every_run_answers_on_its_private_unix_socket_with_diagnostics_input_and_logs() {
+    use std::os::unix::fs::PermissionsExt;
+    if Command::new("xvfb-run").arg("--help").output().is_err() {
+        eprintln!("xvfb-run not found; skipping e2e");
+        return;
+    }
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = private_dir("unix");
+    let bin = env!("CARGO_BIN_EXE_loom");
+    // No LOOM_CONTROL_PORT: started the way a person starts it.
+    let child = Command::new("xvfb-run")
+        .args(["-a", "-s", "-screen 0 1600x1000x24", bin])
+        .env_remove("LOOM_CONTROL_PORT")
+        .env("XDG_RUNTIME_DIR", &dir)
+        .env("XDG_STATE_HOME", &dir)
+        .env_remove("WAYLAND_DISPLAY")
+        .env("XDG_SESSION_TYPE", "x11")
+        .env("WINIT_UNIX_BACKEND", "x11")
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .process_group(0)
+        .spawn()
+        .expect("spawn loom under xvfb-run");
+    let _guard = KillGuard(Some(child));
+    let rt = dir.join("3dloom");
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut s = loop {
+        if let Ok(s) = std::os::unix::net::UnixStream::connect(rt.join("current")) {
+            break s;
+        }
+        assert!(Instant::now() < deadline, "loom did not open its unix socket");
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+    assert_eq!(std::fs::metadata(&rt).unwrap().permissions().mode() & 0o777, 0o700);
+    let ping = ask(&mut s, json!({ "cmd": "ping" }));
+    assert_eq!(ping["ok"], true, "{ping}");
+    let pid = ping["pid"].as_u64().unwrap();
+    let sock = rt.join(format!("{pid}.sock"));
+    assert_eq!(ping["socket"], sock.to_string_lossy().as_ref());
+    assert_eq!(std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777, 0o600);
+
+    // A registry command, as over TCP.
+    let r = ask(&mut s, json!({ "cmd": "Create Primitive", "args": { "kind": "box", "position": [0, 0, 0], "size": [20, 20, 20] } }));
+    assert_eq!(r["ok"], true, "{r}");
+    let r = ask(&mut s, json!({ "cmd": "State" }));
+    assert_eq!(r["nodes"][0]["name"], "Box001");
+
+    // Diagnostics: the interaction state, the viewport rectangles.
+    let d = ask(&mut s, json!({ "cmd": "diagnostics" }));
+    assert_eq!(d["ok"], true, "{d}");
+    assert_eq!(d["interaction"]["nav_mode"], "None");
+    assert_eq!(d["interaction"]["camera_drag"], Value::Null);
+    let active = d["viewports"]["active"].as_u64().unwrap() as usize;
+    let rect: Vec<f64> = d["viewports"]["rects"][active].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    let (cx, cy) = ((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0);
+    let before = d["viewports"]["active_view"]["camera"].clone();
+
+    // Injected input: a middle-button drag in the active viewport pans it.
+    let r = ask(&mut s, json!({ "cmd": "input", "args": { "events": [{ "type": "drag", "button": "middle", "from": [cx, cy], "to": [cx + 80.0, cy + 40.0] }] } }));
+    assert_eq!(r["ok"], true, "{r}");
+    let d = ask(&mut s, json!({ "cmd": "diagnostics" }));
+    assert_ne!(d["viewports"]["active_view"]["camera"]["target"], before["target"], "the injected drag panned: {}", d["viewports"]);
+    assert!(d["input_events"].as_array().unwrap().iter().any(|e| e["event"].as_str().unwrap().contains("Middle")), "{}", d["input_events"]);
+    let hit = ask(&mut s, json!({ "cmd": "ui_hit", "x": cx, "y": cy }));
+    assert_eq!(hit["viewport"], active, "{hit}");
+    let r = ask(&mut s, json!({ "cmd": "reset_interaction" }));
+    assert_eq!(r["ok"], true, "{r}");
+
+    // The log: this run's file, with the commands and their results.
+    let p = ask(&mut s, json!({ "cmd": "log_path" }));
+    let log = std::path::PathBuf::from(p["path"].as_str().unwrap());
+    assert!(log.starts_with(dir.join("3dloom/logs")), "{}", log.display());
+    assert!(log.file_name().unwrap().to_string_lossy().ends_with(&format!("-{pid}.log")));
+    let t = ask(&mut s, json!({ "cmd": "log_tail", "lines": 50 }));
+    let text = t["text"].as_str().unwrap();
+    assert!(text.contains("Create Primitive") && text.contains("\"box\""), "{text}");
+    assert!(text.contains("pid ") && text.contains("started"), "{text}");
+
+    let shot = dir.join("shot.png");
+    let r = ask(&mut s, json!({ "cmd": "screenshot", "path": shot.to_string_lossy() }));
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(shot.exists());
+
+    // The MCP server finds the same instance through the runtime directory
+    // (built next to `loom` when the workspace is tested).
+    let mcp = std::path::Path::new(bin).with_file_name("loom-mcp");
+    if mcp.exists() {
+        let mut child = Command::new(&mcp)
+            .env_remove("LOOM_CONTROL_PORT")
+            .env("XDG_RUNTIME_DIR", &dir)
+            .env("XDG_STATE_HOME", &dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn loom-mcp");
+        let mut stdin = child.stdin.take().unwrap();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut call = |id: u64, name: &str, args: Value| -> Value {
+            writeln!(stdin, "{}", json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": name, "arguments": args } })).unwrap();
+            let mut line = String::new();
+            stdout.read_line(&mut line).unwrap();
+            let v: Value = serde_json::from_str(&line).unwrap();
+            assert!(v["result"]["isError"] != true, "{name}: {v}");
+            serde_json::from_str(v["result"]["content"][0]["text"].as_str().unwrap()).unwrap_or(Value::Null)
+        };
+        let list = call(1, "loom_instances", json!({}));
+        let me = list["instances"].as_array().unwrap().iter().find(|i| i["pid"] == pid).cloned().unwrap_or_else(|| panic!("{list}"));
+        assert_eq!(me["answers"], true, "{me}");
+        assert_eq!(me["attached"], true, "{me}");
+        let attached = call(2, "loom_attach_instance", json!({ "pid": pid }));
+        assert_eq!(attached["pid"], pid);
+        let d = call(3, "loom_diagnostics", json!({}));
+        assert_eq!(d["interaction"]["nav_mode"], "None", "{d}");
+        let st = call(4, "loom_state", json!({}));
+        assert_eq!(st["nodes"][0]["name"], "Box001");
+        let logs = call(5, "loom_logs", json!({ "lines": 20 }));
+        assert!(logs["text"].as_str().unwrap().contains("loom::cmd"), "{logs}");
+        drop(stdin);
+        let _ = child.wait();
+    } else {
+        eprintln!("{} not built; skipping the MCP part", mcp.display());
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -910,6 +910,90 @@ fn realistic_shading_from_the_label_menu_runs_without_a_gpu() {
     assert!(h.app.last_error.as_deref().is_some_and(|e| e.contains("Render")), "{:?}", h.app.last_error);
 }
 
+/// Runs injected input the way the app's control socket feeds it: one step per frame.
+fn inject(h: &mut Harness, events: serde_json::Value) {
+    let mut q = crate::live::InputQueue::default();
+    q.push(crate::live::parse_input(&events).unwrap());
+    while !q.is_empty() {
+        h.time += 1.0 / 30.0;
+        let mut input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(h.time), ..Default::default() };
+        q.apply(&mut input);
+        let app = &mut h.app;
+        let _ = h.ctx.run(input, |ctx| app.frame(ctx));
+    }
+    h.frames(1);
+}
+
+#[test]
+fn diagnostics_show_a_held_alt_press_until_reset_interaction() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    h.mods = egui::Modifiers::ALT;
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: h.mods }]);
+    h.frames(1);
+    let d = h.app.diagnostics(&h.ctx);
+    assert_eq!(d["egui"]["input"]["modifiers"]["alt"], true, "{}", d["egui"]);
+    assert_eq!(d["egui"]["input"]["pointer"]["buttons_down"], serde_json::json!(["primary"]));
+    assert_eq!(d["interaction"]["alt_click"], serde_json::json!([p.x, p.y]));
+    assert_eq!(d["interaction"]["nav_mode"], "None");
+    assert_eq!(d["viewports"]["active"], h.app.state.active_viewport);
+    assert_eq!(d["modes"]["sub_object_level"], "Object");
+    let events = d["input_events"].as_array().unwrap();
+    assert!(events.iter().any(|e| e["event"].as_str().unwrap().starts_with("PointerButton")), "{events:?}");
+    assert!(events.iter().any(|e| e["event"] == "Modifiers(alt)"), "{events:?}");
+    // The release never arrives (focus lost): reset clears what it left behind.
+    let cleared = h.app.reset_interaction(&h.ctx);
+    assert!(cleared.contains(&"alt_click"), "{cleared:?}");
+    assert!(h.app.alt_click.is_none());
+    assert_eq!(h.app.diagnostics(&h.ctx)["interaction"]["alt_click"], serde_json::Value::Null);
+}
+
+#[test]
+fn injected_alt_drag_orbits_like_a_mouse() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    let yaw = h.app.state.active().camera.yaw;
+    inject(&mut h, serde_json::json!([{ "type": "drag", "from": [p.x, p.y], "to": [p.x + 120.0, p.y], "mods": ["alt"] }]));
+    assert_ne!(h.app.state.active().camera.yaw, yaw, "the injected Alt+drag orbits");
+    assert_eq!(h.app.state.selection.len(), 1, "and keeps the selection");
+    // Held modifiers and keys: Ctrl+A selects all, after a new box.
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [50.0, 0.0, 0.0], size: [10.0; 3] });
+    inject(&mut h, serde_json::json!([{ "type": "modifiers", "mods": ["ctrl"] }, { "type": "key", "key": "A", "mods": ["ctrl"] }, { "type": "modifiers", "mods": [] }]));
+    assert_eq!(h.app.state.selection.len(), 2, "Ctrl+A selects all");
+}
+
+#[test]
+fn injected_input_rejects_bad_events() {
+    use crate::live::parse_input;
+    assert!(parse_input(&serde_json::json!([{ "type": "key", "key": "NoSuchKey" }])).is_err());
+    assert!(parse_input(&serde_json::json!([{ "type": "click", "pos": [1] }])).is_err());
+    assert!(parse_input(&serde_json::json!([{ "type": "click", "pos": [1, 2], "mods": ["hyper"] }])).is_err());
+    assert!(parse_input(&serde_json::json!({ "type": "move" })).is_err());
+    assert_eq!(parse_input(&serde_json::json!([{ "type": "click", "pos": [1, 2] }])).unwrap().len(), 3);
+    assert_eq!(parse_input(&serde_json::json!([{ "type": "wait", "frames": 4 }])).unwrap().len(), 4);
+}
+
+#[test]
+fn ui_hit_names_the_viewport_and_panel_under_a_point() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.frames(1);
+    let hit = h.app.ui_hit(&h.ctx, p);
+    assert_eq!(hit["viewport"], h.app.state.active_viewport);
+    assert_eq!(hit["pointer_here"], true);
+    let menu = h.app.ui_hit(&h.ctx, egui::pos2(5.0, 5.0));
+    assert_eq!(menu["panel"], "menubar", "{menu}");
+    assert_eq!(menu["viewport"], serde_json::Value::Null);
+    let tree = h.app.ui_tree(&h.ctx);
+    assert!(tree["panels"].as_array().unwrap().iter().any(|p| p["name"] == "command_panel"), "{tree}");
+    assert_eq!(tree["viewports"].as_array().unwrap().len(), h.app.viewport_rects.len());
+}
+
 /// A 40-unit cylinder along Z skinned to two 20-unit bones, at Edit
 /// Envelopes in the Modify panel, framed in a maximized Perspective view.
 fn skinned_cylinder(h: &mut Harness) -> (loom_scene::NodeId, Vec<u64>) {
@@ -1400,7 +1484,7 @@ fn navigation_recovers_after_a_release_lost_to_focus_loss() {
 }
 
 /// A 60-unit plane of 4 x 4 cells (15 units) as an Editable Poly, framed.
-fn poly_plane(h: &mut Harness) -> loom_scene::NodeId {
+fn poly_plane_4x4(h: &mut Harness) -> loom_scene::NodeId {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [60.0, 60.0, 0.0] });
     let id = *h.app.state.selection.iter().next().unwrap();
     for n in ["Length Segs", "Width Segs"] {
@@ -1491,7 +1575,7 @@ fn cut_clicks_chain_until_right_click() {
 #[test]
 fn loop_mode_click_selects_the_edge_loop() {
     let mut h = Harness::new();
-    let id = poly_plane(&mut h);
+    let id = poly_plane_4x4(&mut h);
     h.key(egui::Key::Num2);
     h.cmd(Command::LoopMode);
     let p = h.screen_of(Vec3::new(0.0, 7.5, 0.0));
@@ -1507,7 +1591,7 @@ fn loop_mode_click_selects_the_edge_loop() {
 #[test]
 fn pick_hinge_and_pick_bridge_edge_take_a_clicked_edge() {
     let mut h = Harness::new();
-    let id = poly_plane(&mut h);
+    let id = poly_plane_4x4(&mut h);
     h.key(egui::Key::Num4);
     h.cmd(Command::PickHinge);
     let p = h.screen_of(Vec3::new(0.0, 7.5, 0.0));
@@ -1528,7 +1612,7 @@ fn pick_hinge_and_pick_bridge_edge_take_a_clicked_edge() {
 #[test]
 fn bridge_edges_dialog_takes_edges_selected_while_it_is_open() {
     let mut h = Harness::new();
-    let id = poly_plane(&mut h);
+    let id = poly_plane_4x4(&mut h);
     // A one-cell hole at x 0..15, y 0..15.
     h.key(egui::Key::Num4);
     let m = cage(&h, id);
@@ -1969,4 +2053,103 @@ fn cancel_expert_mode_button_brings_the_interface_back() {
     let screen = h.ctx.screen_rect();
     click_text(&mut h, "Cancel Expert Mode", screen, 0.0);
     assert!(!h.app.state.expert_mode, "the button ends Expert Mode");
+}
+
+fn customize_ui_rect(h: &Harness) -> egui::Rect {
+    h.ctx.memory(|m| m.area_rect(egui::Id::new("Customize User Interface"))).expect("the Customize User Interface dialog is shown")
+}
+
+/// Customize User Interface > Keyboard: pick an action, press a key in the
+/// Hotkey field (it names the action that has it), Assign, Remove.
+#[test]
+fn keyboard_panel_assigns_a_pressed_hotkey_and_names_its_current_owner() {
+    let mut h = Harness::new();
+    h.cmd(Command::CustomizeUserInterface);
+    let win = customize_ui_rect(&h);
+    click_text(&mut h, "Search:", win, 40.0);
+    h.run(vec![egui::Event::Text("and Move".into())]);
+    h.frames(2);
+    let win = customize_ui_rect(&h);
+    click_text(&mut h, "Select and Move", win, 0.0);
+    let hotkey = h.text_rect("Hotkey:", win).expect("the Hotkey field's label");
+    h.click(egui::pos2(hotkey.left() + 40.0, hotkey.bottom() + 14.0));
+    h.frames(1);
+    assert!(h.ctx.memory(|m| m.has_focus(egui::Id::new(crate::dialogs::customize_ui::HOTKEY_FIELD))), "the click focuses the Hotkey field");
+    h.key(egui::Key::E);
+    assert_eq!(h.app.state.active_tool, loom_commands::Tool::Select, "the key went to the field, not to Select and Rotate");
+    assert!(h.text_rect("Select and Rotate", win).is_some(), "Assigned to: names the action E runs now");
+    h.mods = egui::Modifiers::ALT | egui::Modifiers::SHIFT;
+    h.key(egui::Key::M);
+    h.mods = egui::Modifiers::NONE;
+    assert!(h.text_rect("Alt+Shift+M", win).is_some(), "the field shows the pressed chord");
+    let alt_shift_m = loom_commands::parse_chord("Alt+Shift+M").unwrap();
+    assert_eq!(h.app.state.hotkey(alt_shift_m), None);
+    click_text(&mut h, "Assign", win, 0.0);
+    assert_eq!(h.app.state.hotkey(alt_shift_m), Some("Select and Move"));
+    assert!(h.text_rect("Alt+Shift+M, W", customize_ui_rect(&h)).is_some(), "the action list shows both keys");
+    // The new key works in the viewports once the dialog is closed.
+    h.cmd(Command::CloseDialog);
+    h.mods = egui::Modifiers::ALT | egui::Modifiers::SHIFT;
+    h.key(egui::Key::M);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.active_tool, loom_commands::Tool::Move);
+    h.cmd(Command::CustomizeUserInterface);
+    h.frames(2);
+    let win = customize_ui_rect(&h);
+    click_text(&mut h, "Remove", win, 0.0);
+    assert_eq!(h.app.state.hotkey(loom_commands::parse_chord("W").unwrap()), None, "Remove clears every key of the action");
+    assert_eq!(h.app.state.hotkey(alt_shift_m), None);
+}
+
+/// The settings file is written when a setting changes and read back by the next start.
+#[test]
+fn settings_are_written_on_change_and_read_at_the_next_start() {
+    let dir = std::env::temp_dir().join("loom-ui-settings-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("settings.json");
+    let mut h = Harness::new();
+    h.app.use_settings_file(path.clone());
+    h.frames(1);
+    assert!(!path.exists(), "nothing changed, nothing written");
+    h.cmd(Command::SetPreference { name: "Gizmo Size".into(), value: 33.0 });
+    h.cmd(Command::ShowMainToolbarToggle);
+    h.cmd(Command::AssignShortcut { group: "Main UI".into(), action: "Select and Move".into(), chord: "Alt+Shift+M".into() });
+    assert!(path.exists(), "a change writes the file");
+    let mut next = Harness::new();
+    next.app.use_settings_file(path);
+    next.frames(2);
+    assert_eq!(next.app.state.prefs.gizmos.size, 33.0);
+    assert!(!next.app.state.show_main_toolbar);
+    next.mods = egui::Modifiers::ALT | egui::Modifiers::SHIFT;
+    next.key(egui::Key::M);
+    assert_eq!(next.app.state.active_tool, loom_commands::Tool::Move, "the saved shortcut works after a restart");
+}
+
+/// Customize > Show UI > Show Command Panel hides the panel and the viewports take its room.
+#[test]
+fn hiding_the_command_panel_widens_the_viewports() {
+    let mut h = Harness::new();
+    let right = |h: &Harness| h.app.viewport_rects.iter().map(|r| r.max.x).fold(0.0, f32::max);
+    let before = right(&h);
+    h.cmd(Command::ShowCommandPanelToggle);
+    assert!(right(&h) > before + 100.0, "{} -> {}", before, right(&h));
+    h.cmd(Command::ShowCommandPanelToggle);
+    assert!((right(&h) - before).abs() < 1.0);
+}
+
+/// `loom scene.loom` opens the scene (flags are skipped) and lists it under File > Recent.
+#[test]
+fn a_scene_named_on_the_command_line_opens() {
+    let dir = std::env::temp_dir().join("loom-ui-command-line-test");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("start.loom");
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::SaveFile { path: Some(path.to_string_lossy().into_owned()) });
+    let mut next = Harness::new();
+    next.app.open_command_line(["-q".to_owned(), path.to_string_lossy().into_owned()]);
+    next.frames(2);
+    assert_eq!(next.app.state.scene.len(), 1);
+    assert_eq!(next.app.state.file.as_deref(), Some(path.as_path()));
+    assert_eq!(next.app.state.recent_files.first(), Some(&path));
 }
