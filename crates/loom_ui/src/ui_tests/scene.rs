@@ -260,7 +260,8 @@ fn merge_starts_with_nothing_highlighted_and_asks_about_duplicate_names() {
     h.mods = egui::Modifiers::NONE;
     let ok = window_text(&h, title, "OK");
     h.click(ok);
-    // Blade is taken: the Duplicate Name question.
+    // Blade is taken: the Duplicate Name question (a new window shows after its sizing frame).
+    h.frames(2);
     let p = window_text(&h, "Duplicate Name", "Delete Old");
     h.click(p);
     let mut names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
