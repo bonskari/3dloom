@@ -337,6 +337,7 @@ impl BevyRenderer {
     /// Cast Shadows / Receive Shadows off: Bevy's shadow opt-out markers.
     fn shadow_flags(mut e: bevy::ecs::world::EntityWorldMut<'_>, flags: ObjectFlags) -> bevy::ecs::world::EntityWorldMut<'_> {
         use bevy::pbr::{NotShadowCaster, NotShadowReceiver};
+        let removed = (flags.cast_shadows && e.contains::<NotShadowCaster>()) || (flags.receive_shadows && e.contains::<NotShadowReceiver>());
         if flags.cast_shadows {
             e.remove::<NotShadowCaster>();
         } else {
@@ -346,6 +347,13 @@ impl BevyRenderer {
             e.remove::<NotShadowReceiver>();
         } else {
             e.insert(NotShadowReceiver);
+        }
+        if removed {
+            // Bevy re-extracts a mesh's shadow flags when a marker is added,
+            // not when one is removed: mark the mesh changed so it is.
+            if let Some(mut m) = e.get_mut::<Mesh3d>() {
+                bevy::ecs::change_detection::DetectChangesMut::set_changed(&mut m);
+            }
         }
         e
     }
