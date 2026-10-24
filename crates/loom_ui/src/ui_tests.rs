@@ -1528,6 +1528,70 @@ fn cancel_expert_mode_button_brings_the_interface_back() {
     assert!(!h.app.state.expert_mode, "the button ends Expert Mode");
 }
 
+/// AutoGrid: with a create tool waiting, a tripod sits on the surface under
+/// the cursor with Z along the face normal; off the surface there is none.
+#[test]
+fn autogrid_tripod_follows_the_cursor_over_surfaces() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    h.cmd(Command::SelectNone);
+    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Sphere));
+    h.app.autogrid = true;
+    let i = h.app.state.active_viewport;
+    let p = h.screen_of(top_face_point());
+    let (at, (_, _, z)) = crate::viewport_widget::autogrid_tripod(&h.app, i, p).expect("a tripod on the box");
+    assert!((at.z - 30.0).abs() < 0.1, "on the top face: {at}");
+    assert!(z.distance(Vec3::Z) < 1e-3, "Z along the face normal: {z}");
+    assert!(crate::viewport_widget::autogrid_tripod(&h.app, i, empty_point(&h)).is_none(), "none off the surface");
+    h.app.autogrid = false;
+    assert!(crate::viewport_widget::autogrid_tripod(&h.app, i, p).is_none(), "only with AutoGrid on");
+}
+
+// ---- Viewport Background ----
+
+#[test]
+fn viewport_background_dialog_sets_aspect_and_picks_the_viewport() {
+    let mut h = Harness::new();
+    h.cmd(Command::ActiveViewport { index: 1 }); // Front
+    h.cmd(Command::SetViewportBackground { path: Some("/tmp/ref.png".into()), aspect: None, lock: None, display: None, all_views: None });
+    h.cmd(Command::ViewportBackground);
+    let screen = h.ctx.screen_rect();
+    click_text(&mut h, "Match Bitmap", screen, 0.0);
+    click_text(&mut h, "Lock Zoom/Pan", screen, 0.0);
+    click_text(&mut h, "OK", screen, 0.0);
+    let vp = &h.app.state.viewports[1];
+    assert_eq!(vp.background_aspect, loom_commands::viewport::BackgroundAspect::Bitmap);
+    assert!(vp.background_locked && vp.background_anchor.is_some());
+    assert_eq!(h.app.state.dialog, None, "OK closes it");
+    // The Viewport list makes another viewport active and shows its settings.
+    h.cmd(Command::ViewportBackground);
+    click_text(&mut h, "Front", screen, 0.0);
+    click_text(&mut h, "Left", screen, 0.0);
+    assert_eq!(h.app.state.active_viewport, 2, "Left is now active");
+    // Files... opens the file browser, which comes back to the dialog.
+    click_text(&mut h, "Files...", screen, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::BackgroundFile));
+}
+
+#[test]
+fn background_rect_keeps_the_bitmap_aspect_and_follows_the_zoom_when_locked() {
+    let mut vp = loom_commands::Viewport::new(loom_commands::ViewKind::Front);
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 600.0));
+    let vp_mat = glam::Mat4::IDENTITY;
+    assert_eq!(crate::viewport_widget::background_rect(&vp, rect, [200, 100], (640, 480), vp_mat), rect, "Match Viewport stretches");
+    vp.background_aspect = loom_commands::viewport::BackgroundAspect::Bitmap;
+    let r = crate::viewport_widget::background_rect(&vp, rect, [200, 100], (640, 480), vp_mat);
+    assert_eq!((r.width(), r.height()), (1000.0, 500.0));
+    assert_eq!(r.center(), rect.center());
+    vp.background_aspect = loom_commands::viewport::BackgroundAspect::Rendering;
+    let r = crate::viewport_widget::background_rect(&vp, rect, [200, 100], (640, 480), vp_mat);
+    assert_eq!((r.width(), r.height()), (800.0, 600.0), "640 x 480 is 4:3");
+    vp.background_locked = true;
+    vp.background_anchor = Some((Vec3::ZERO, vp.camera.distance * 2.0));
+    let r = crate::viewport_widget::background_rect(&vp, rect, [200, 100], (640, 480), vp_mat);
+    assert_eq!((r.width(), r.height()), (1600.0, 1200.0), "zoomed in twice as far since the lock");
+}
+
 // ---- viewport navigation: ViewCube, Orbit trackball, I, camera viewport controls ----
 
 /// The ViewCube of the active viewport.
@@ -1676,7 +1740,9 @@ fn i_pans_the_point_under_the_cursor_to_the_centre() {
     maximized(&mut h);
     let p = h.screen_of(Vec3::new(20.0, 10.0, 0.0));
     h.run(vec![egui::Event::PointerMoved(p)]);
+    eprintln!("DBG p={p:?} under={:?} hover={:?}", crate::viewport_widget::view_point_under(&h.app, p), h.ctx.input(|i| i.pointer.hover_pos()));
     h.key(egui::Key::I);
+    eprintln!("DBG2 nav={:?} err={:?}", h.app.state.nav_mode, h.app.last_error);
     let t = h.app.state.active().camera.target;
     assert!((t.x - 20.0).abs() < 0.2 && (t.y - 10.0).abs() < 0.2, "{t}");
     assert_eq!(h.app.state.nav_mode, loom_input::NavMode::None, "I recentres; it does not start the Pan tool");

@@ -668,7 +668,7 @@ commands! {
     MaximizeViewportToggle => "Maximize Viewport Toggle", MainUI, "Maximize or restore the active viewport (Alt+W).";
     DisableViewport => "Disable Viewport", MainUI, "Toggle updates of the active viewport (D).";
     RedrawAllViews => "Redraw All Views", MainUI, "Redraw every viewport (`).";
-    HomeView => "Home View", MainUI, "Reset the active viewport to its default view (Alt+Home).";
+    HomeView => "Home View", MainUI, "ViewCube Home (Alt+Home): the active viewport goes to the Home view, a Perspective view (the default one, or the one Set Current View as Home stored).";
     ZoomIn2X => "Zoom In 2X", MainUI, "Zoom the active viewport in by a factor of two (Alt+Shift+Ctrl+Z).";
     ZoomOut2X => "Zoom Out 2X", MainUI, "Zoom the active viewport out by a factor of two (Alt+Shift+Z).";
     ZoomMode => "Zoom Mode", MainUI, "Toggle the modal Zoom tool (Alt+Z).";
@@ -841,7 +841,8 @@ commands! {
     ViewportView => "Viewport View", Loom, "Set the point of view of a viewport by index." { index: u32, kind: crate::state::ViewKind };
     ViewportShading => "Viewport Shading", Loom, "Set the active viewport's shading mode and edged faces." { shading: crate::viewport::Shading, edged_faces: Option<bool> };
     SetSplits => "Set Splits", Loom, "Move the viewport layout splitters (fractions 0.05–0.95)." { x: Option<f32>, y: Option<f32> };
-    SetViewportBackground => "Set Viewport Background", Loom, "Set or clear the active viewport's background image path." { path: Option<String> };
+    SetViewportBackground => "Set Viewport Background", Loom, "Viewport Background dialog OK: the image file (omitted = keep, empty = remove), Aspect Ratio (Match Viewport, Match Bitmap, Match Rendering Output), Lock Zoom/Pan, Display Background, for the active viewport or all of them." { path: Option<String>, aspect: Option<String>, lock: Option<bool>, display: Option<bool>, all_views: Option<bool> };
+    ResetBackgroundTransform => "Reset Background Transform", MainUI, "Views > Viewport Background > Reset Background Transform: a locked background image is fitted to the active view again.";
     ShowStatisticsToggle => "Show Statistics Toggle", MainUI, "Show or hide polygon statistics (7).";
     ViewEdgedFacesToggle => "View Edged Faces Toggle", MainUI, "Toggle edged faces (F4).";
     WireframeSmoothHighlightsToggle => "Wireframe / Smooth+Highlights Toggle", MainUI, "Toggle wireframe and shaded display (F3).";

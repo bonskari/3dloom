@@ -265,6 +265,8 @@ pub struct LoomApp {
     pub view_animation: Option<ViewAnimation>,
     /// A press on the ViewCube: where it started and whether it has dragged (orbiting).
     pub cube_press: Option<(egui::Pos2, bool)>,
+    /// Viewport Background > Files...: the file picked, for the dialog's field.
+    pub background_pick: Option<String>,
     /// The ViewCube's right-click menu: where it opened, for which viewport.
     pub cube_menu: Option<(egui::Pos2, usize)>,
     /// A camera viewport control drag is open as one scene undo step.
@@ -366,6 +368,7 @@ impl LoomApp {
             shift_sources: Vec::new(),
             view_animation: None,
             cube_press: None,
+            background_pick: None,
             cube_menu: None,
             camera_nav_open: false,
             drag_select_start: None,

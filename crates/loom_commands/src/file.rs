@@ -37,6 +37,16 @@ pub struct ViewportSave {
     pub scene_lights: bool,
     pub background: Option<String>,
     pub background_locked: bool,
+    #[serde(default)]
+    pub background_anchor: Option<([f32; 3], f32)>,
+    #[serde(default)]
+    pub background_aspect: crate::viewport::BackgroundAspect,
+    #[serde(default = "yes")]
+    pub background_display: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn default_clip() -> (f32, f32) {
@@ -63,6 +73,9 @@ impl ViewportSave {
             scene_lights: v.scene_lights,
             background: v.background.clone(),
             background_locked: v.background_locked,
+            background_anchor: v.background_anchor.map(|(t, d)| (t.to_array(), d)),
+            background_aspect: v.background_aspect,
+            background_display: v.background_display,
         }
     }
 
@@ -84,6 +97,10 @@ impl ViewportSave {
         v.scene_lights = self.scene_lights;
         v.background = self.background.clone();
         v.background_locked = self.background_locked;
+        // A file from before the anchor: locked where its view is.
+        v.background_anchor = self.background_locked.then(|| self.background_anchor.map(|(t, d)| (Vec3::from_array(t), d)).unwrap_or((v.camera.target, v.camera.distance)));
+        v.background_aspect = self.background_aspect;
+        v.background_display = self.background_display;
         v
     }
 }

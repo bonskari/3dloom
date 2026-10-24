@@ -123,6 +123,8 @@ struct ViewportCallback {
     selected: Vec<usize>,
     show_edges: bool,
     shaded: bool,
+    /// Views > Shade Selected in a wireframe view: these meshes are shaded.
+    shade_only: Vec<usize>,
     grid: Option<loom_render::GridPlane>,
     orthographic: bool,
     grid_params: loom_render::GridParams,
@@ -183,6 +185,7 @@ impl CallbackTrait for ViewportCallback {
                 &self.selected,
                 self.show_edges,
                 self.shaded,
+                &self.shade_only,
                 self.grid,
                 self.orthographic,
                 textures,
@@ -218,7 +221,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             // Labels: [+] [Top] [Wireframe], each opening its menu.
             // Perspective views get a vertical gradient; axis views stay flat.
             // Painted first: everything else, the labels included, goes over it.
-            if app.state.viewports[index].background.is_none() && !app.state.viewports[index].is_orthographic() {
+            if !(app.state.viewports[index].background.is_some() && app.state.viewports[index].background_display) && !app.state.viewports[index].is_orthographic() {
                 draw_background_gradient(&painter, rect);
             }
             let over_label = draw_labels(ui, app, index, rect);
@@ -263,7 +266,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             if over_cube && pointer.button_pressed(egui::PointerButton::Primary) {
                 app.cube_press = pointer.interact_pos().map(|p| (p, false));
             }
-            if over_cube && pointer.button_pressed(egui::PointerButton::Secondary) {
+            let cube_menu_opened = over_cube && pointer.button_pressed(egui::PointerButton::Secondary);
+            if cube_menu_opened {
                 app.cube_menu = pointer.interact_pos().map(|p| (p, index));
             }
             let cube_busy = over_cube || (is_active && app.cube_press.is_some());
@@ -924,21 +928,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 let edges = vp.edged_faces || vp.shading == loom_commands::Shading::HiddenLine;
                 (vp.shading == loom_commands::Shading::Wireframe, grid_plane, edges, vp.show_grid, view_shading)
             };
-            // Viewport background image: stretched to the viewport, or, with
-            // Lock Zoom/Pan, pinned to a 10-unit square on the construction plane.
-            if let Some(path) = app.state.viewports[index].background.clone() {
+            // Viewport background image: fitted by its Aspect Ratio and, with
+            // Lock Zoom/Pan, zoomed and panned with the scene since the lock.
+            if let Some(path) = app.state.viewports[index].background.clone().filter(|_| app.state.viewports[index].background_display) {
                 let version = app.state.viewports[index].background_version;
-                let locked = app.state.viewports[index].background_locked;
                 if let Some(tex) = app.background_texture(&ctx, &path, version) {
-                    let target = if locked {
-                        let corners = [Vec3::new(-5.0, -5.0, 0.0), Vec3::new(5.0, 5.0, 0.0)];
-                        match (project_world_to_screen(corners[0], view_proj, rect), project_world_to_screen(corners[1], view_proj, rect)) {
-                            (Some(a), Some(b)) => egui::Rect::from_two_pos(a, b),
-                            _ => rect,
-                        }
-                    } else {
-                        rect
-                    };
+                    let target = background_rect(&app.state.viewports[index], rect, tex.size(), app.state.render_size, view_proj);
                     painter.image(tex.id(), target, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 }
             }
@@ -955,6 +950,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     None => ctx.request_repaint(),
                 }
             }
+            let shade_only = if app.state.shade_selected { selected.clone() } else { Vec::new() };
             let cb = (!realistic).then(|| egui_wgpu::Callback::new_paint_callback(
                 rect,
                 ViewportCallback {
@@ -966,6 +962,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     selected,
                     show_edges: edged_faces || wire || app.state.selection_mode.is_edge_level(),
                     shaded: !wire,
+                    shade_only,
                     grid: show_grid.then_some(grid_plane),
                     orthographic: app.state.viewports[index].is_orthographic(),
                     grid_params: {
@@ -1056,6 +1053,20 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     painter.line_segment([egui::pos2(hp.x, rect.top()), egui::pos2(hp.x, rect.bottom())], egui::Stroke::new(1.0_f32, c));
                 }
             }
+            // AutoGrid: an axis tripod follows the cursor over surfaces.
+            if is_active {
+                if let Some((at, (x, y, z))) = hover_pos.and_then(|hp| autogrid_tripod(app, index, hp)) {
+                    let len = units_per_pixel(app, index, rect) * 40.0;
+                    if let Some(o) = projection.screen(at) {
+                        for (axis, label, color) in [(x, "X", egui::Color32::from_rgb(230, 60, 60)), (y, "Y", egui::Color32::from_rgb(60, 200, 60)), (z, "Z", egui::Color32::from_rgb(80, 120, 255))] {
+                            if let Some(e) = projection.screen(at + axis * len) {
+                                painter.line_segment([o, e], egui::Stroke::new(1.5_f32, color));
+                                painter.text(e, egui::Align2::LEFT_BOTTOM, label, egui::FontId::proportional(11.0), color);
+                            }
+                        }
+                    }
+                }
+            }
             // Snap marker: while creating, or with Move active (dragging or hovering).
             if is_active && app.state.snaps_on && rect.contains(hover_pos.unwrap_or(egui::pos2(-1.0, -1.0))) {
                 let hp = hover_pos.unwrap();
@@ -1113,7 +1124,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 });
                 // Picking an item or clicking elsewhere closes it.
                 let outside = pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p));
-                if pointer.button_released(egui::PointerButton::Primary) || (outside && pointer.any_pressed()) {
+                // (Not on the press that opened it: the area has no size yet.)
+                if !cube_menu_opened && (pointer.button_released(egui::PointerButton::Primary) || (outside && pointer.any_pressed())) {
                     app.cube_menu = None;
                 }
             }
@@ -1192,6 +1204,49 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
         app.camera_nav_open = false;
     }
     changed
+}
+
+/// Where viewport `vp`'s background image (`image` pixels) is drawn in
+/// `rect`: Match Viewport fills it, Match Bitmap / Match Rendering Output fit
+/// that aspect in it, centred. Locked, the image keeps the place it had in
+/// the view it was locked in: centred on the anchor's target and scaled by
+/// the zoom since.
+pub(crate) fn background_rect(vp: &loom_commands::Viewport, rect: egui::Rect, image: [usize; 2], render: (u32, u32), view_proj: Mat4) -> egui::Rect {
+    use loom_commands::viewport::BackgroundAspect as A;
+    let aspect = match vp.background_aspect {
+        A::Viewport => None,
+        A::Bitmap => Some(image[0] as f32 / image[1].max(1) as f32),
+        A::Rendering => Some(render.0 as f32 / render.1.max(1) as f32),
+    };
+    let size = match aspect {
+        None => rect.size(),
+        Some(a) if rect.width() / rect.height().max(1.0) > a => egui::vec2(rect.height() * a, rect.height()),
+        Some(a) => egui::vec2(rect.width(), rect.width() / a.max(1e-6)),
+    };
+    match vp.background_anchor.filter(|_| vp.background_locked) {
+        Some((target, distance)) => {
+            let centre = project_world_to_screen(target, view_proj, rect).unwrap_or(rect.center());
+            egui::Rect::from_center_size(centre, size * (distance / vp.camera.distance.max(1e-6)))
+        }
+        None => egui::Rect::from_center_size(rect.center(), size),
+    }
+}
+
+/// AutoGrid: the axis tripod that follows the cursor over a surface while a
+/// create tool is waiting for its first click: (point, (x, y, z axes)), or
+/// None off every surface.
+pub(crate) fn autogrid_tripod(app: &LoomApp, index: usize, p: egui::Pos2) -> Option<(Vec3, (Vec3, Vec3, Vec3))> {
+    if !app.autogrid || app.create_kind.is_none() || app.create.is_some() {
+        return None;
+    }
+    let rect = *app.viewport_rects.get(index)?;
+    if !rect.contains(p) {
+        return None;
+    }
+    let camera = app.camera_for(index);
+    let (view, proj) = (camera.view_matrix(), camera.projection_matrix(rect.width() / rect.height().max(1.0)));
+    surface_hit(app, p, rect, view, proj)?;
+    creation_anchor(app, index, p, rect, view, proj)
 }
 
 /// The world point under screen point `p` on the active view's focus plane

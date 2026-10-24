@@ -171,6 +171,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Viewport Configuration...", "Configure Viewports");
                 item(ui, app, "Viewport Background...", "Viewport Background");
                 item(ui, app, "Update Background Image", "Update Background Image");
+                item(ui, app, "Reset Background Transform", "Reset Background Transform");
                 item(ui, app, "Show Floating Dialogs", "Show Floating Dialogs");
                 ui.separator();
                 item(ui, app, "Shade Selected", "Shade Selected");

@@ -792,7 +792,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ViewportLightingToggle => toggle(&mut state.active_mut().scene_lights, "scene_lights"),
         C::ShadeSelectedFacesToggle => toggle(&mut state.shade_selected_faces, "shade_selected_faces"),
         C::SelectionBracketToggle => toggle(&mut state.selection_brackets, "selection_brackets"),
-        C::BackgroundLockToggle => toggle(&mut state.active_mut().background_locked, "background_locked"),
+        C::BackgroundLockToggle => {
+            let on = !state.active().background_locked;
+            set_background_lock(state.active_mut(), on);
+            Ok(json!({ "background_locked": on }))
+        }
+        C::ResetBackgroundTransform => {
+            let vp = state.active_mut();
+            if vp.background_locked {
+                set_background_lock(vp, true);
+            }
+            Ok(json!({}))
+        }
         C::UpdateBackgroundImage => {
             state.active_mut().background_version += 1;
             Ok(json!({}))
@@ -801,10 +812,33 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(Dialog::ViewportBackground);
             Ok(json!({}))
         }
-        C::SetViewportBackground { path } => {
-            let vp = state.active_mut();
-            vp.background = path;
-            vp.background_version += 1;
+        C::SetViewportBackground { path, aspect, lock, display, all_views } => {
+            let aspect = match aspect {
+                Some(a) => Some(crate::viewport::BackgroundAspect::from_label(&a).ok_or_else(|| format!("unknown aspect ratio `{a}` (Match Viewport, Match Bitmap, Match Rendering Output)"))?),
+                None => None,
+            };
+            let active = state.active_viewport;
+            for (i, vp) in state.viewports.iter_mut().enumerate() {
+                if i != active && all_views != Some(true) {
+                    continue;
+                }
+                if let Some(p) = &path {
+                    vp.background = (!p.is_empty()).then(|| p.clone());
+                    vp.background_version += 1;
+                    vp.background_display = true;
+                }
+                if let Some(a) = aspect {
+                    vp.background_aspect = a;
+                }
+                if let Some(d) = display {
+                    vp.background_display = d;
+                }
+                if let Some(l) = lock {
+                    if l != vp.background_locked {
+                        set_background_lock(vp, l);
+                    }
+                }
+            }
             Ok(json!({}))
         }
         C::SelectByName => open_by_name(state, DialogPurpose::Select),
@@ -3072,6 +3106,12 @@ fn zoom(state: &mut AppState, factor: f32) -> Result<Value, String> {
     let cam = &mut state.active_mut().camera;
     cam.distance = (cam.distance * factor).max(0.05);
     Ok(camera_json(state))
+}
+
+/// Lock Zoom/Pan on (anchored to the viewport's current view) or off.
+fn set_background_lock(vp: &mut Viewport, on: bool) {
+    vp.background_locked = on;
+    vp.background_anchor = on.then_some((vp.camera.target, vp.camera.distance));
 }
 
 fn nav_toggle(state: &mut AppState, mode: NavMode) -> Result<Value, String> {
