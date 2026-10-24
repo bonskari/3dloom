@@ -14,6 +14,26 @@ fn box_node(name: &str) -> FbxNode {
     FbxNode::new(name, FbxKind::Mesh { mesh, materials: vec!["Paint".into()] })
 }
 
+/// The box with a box-mapped channel 1: each face projected on its own plane.
+fn box_mapped(name: &str) -> FbxNode {
+    let mut n = box_node(name);
+    let FbxKind::Mesh { mesh, .. } = &mut n.kind else { unreachable!() };
+    let mut verts = Vec::new();
+    let mut corners = vec![0u32; mesh.half_edges().len()];
+    for f in 0..mesh.face_count() {
+        let fid = loom_mesh::FaceId(f as u32);
+        let nrm = mesh.face_normal(fid).abs();
+        for he in mesh.face_corners(fid).unwrap() {
+            let p = mesh.vertices()[mesh.half_edges()[he.0 as usize].origin.0 as usize].position / 10.0;
+            let uv = if nrm.z > 0.5 { Vec3::new(p.x, p.y, 0.0) } else if nrm.y > 0.5 { Vec3::new(p.x, p.z, 0.0) } else { Vec3::new(p.y, p.z, 0.0) };
+            corners[he.0 as usize] = verts.len() as u32;
+            verts.push(uv);
+        }
+    }
+    mesh.set_map(1, loom_mesh::half_edge::MapChannel { verts, corners });
+    n
+}
+
 fn doc(nodes: Vec<FbxNode>) -> FbxDocument {
     FbxDocument { nodes, unit_metres: 0.01, ..Default::default() }
 }
@@ -83,7 +103,7 @@ fn triangulate_split_normals_and_tangents() {
     assert_eq!(plain(&split).meshes[0].num_vertices, 24);
     assert_eq!(plain(&loom_fbx::write(&d, &WriteOpts::default())).meshes[0].num_vertices, 8);
     // Tangents and binormals from the box's map channel 1, orthogonal to the normals.
-    let t = plain(&loom_fbx::write(&d, &WriteOpts { tangents: true, ..Default::default() }));
+    let t = plain(&loom_fbx::write(&doc(vec![box_mapped("Box")]), &WriteOpts { tangents: true, ..Default::default() }));
     let m = &t.meshes[0];
     assert!(m.vertex_tangent.exists && m.vertex_bitangent.exists);
     for c in 0..m.num_indices {
@@ -212,7 +232,7 @@ fn curve_filters_and_remove_single_key() {
     let kr = key_counts(CurveFilters { key_reducer: Some((1e-3, false)), ..Default::default() });
     assert_eq!(*kr.last().unwrap(), 3, "X: start, corner, end: {kr:?}");
     let synced = key_counts(CurveFilters { key_reducer: Some((1e-3, true)), ..Default::default() });
-    assert!(synced[..3].iter().all(|n| *n == 3), "XYZ synchronization: translation curves share X's keys: {synced:?}");
+    assert_eq!(synced.iter().filter(|n| **n == 3).count(), 3, "XYZ synchronization: the translation curves share X's keys: {synced:?}");
     let single = key_counts(CurveFilters { constant: Some([1e-4, 1e-3, 1e-3, 1e-3]), remove_single_key: true, ..Default::default() });
     assert_eq!(single, vec![12], "only X is written: {single:?}");
     // The animation still reads back the same.

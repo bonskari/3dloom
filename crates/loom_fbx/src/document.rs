@@ -138,7 +138,8 @@ pub struct FbxBlendShape {
 }
 
 /// Which way the written file says is up. The document is always Z-up;
-/// `YUp` converts on the way out (x, z, -y), the frame Unity-style
+/// `YUp` turns the root nodes by the change of basis (x, y, z) → (x, z, -y)
+/// (Axis Conversion, applied to root elements only), the frame Unity-style
 /// readers expect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WriteAxes {

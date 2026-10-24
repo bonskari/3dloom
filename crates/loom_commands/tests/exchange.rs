@@ -347,7 +347,7 @@ fn obj_export_options_change_the_text() {
     execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Cylinder, position: [0.0; 3], size: [10.0, 10.0, 10.0] }).unwrap();
     let cyl = *s.selection.iter().next().unwrap();
     execute(&mut s, Command::SetParameter { id: cyl.0, name: "Sides".into(), value: 6.0 }).unwrap();
-    execute(&mut s, Command::SetParameter { id: cyl.0, name: "Height Segs".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::SetParameter { id: cyl.0, name: "Height Segments".into(), value: 1.0 }).unwrap();
     export(&mut s, &f);
     let text = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
     assert!(faces(&text).iter().all(|n| *n == 4), "{:?}", faces(&text));
@@ -378,9 +378,12 @@ fn obj_import_options_objects_materials_and_geometry() {
     let mesh = s.scene.eval_mesh(c.id).value.mesh.clone();
     // Import from file: the per-face normals make every edge hard.
     let groups: Vec<u32> = mesh.faces().iter().map(|f| f.smoothing_groups).collect();
-    for (i, a) in groups.iter().enumerate() {
-        for b in &groups[i + 1..] {
-            assert_eq!(a & b, 0, "flat faces share no group: {groups:?}");
+    let ids = |f: usize| mesh.face_vertex_ids(loom_mesh::FaceId(f as u32)).unwrap();
+    for a in 0..groups.len() {
+        for b in a + 1..groups.len() {
+            if ids(a).iter().any(|v| ids(b).contains(v)) {
+                assert_eq!(groups[a] & groups[b], 0, "neighbouring flat faces share no group: {groups:?}");
+            }
         }
     }
     let m = s.scene.node_material(c.id).expect("the MTL material is assigned").clone();

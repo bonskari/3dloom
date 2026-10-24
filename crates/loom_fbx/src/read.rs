@@ -287,7 +287,13 @@ fn convert_material(m: &ufbx::Material) -> FbxMaterial {
         specular_factor: if lambert { 0.0 } else { num(&f.specular_factor, 1.0) },
         shininess: num(&f.specular_exponent, 20.0),
         opacity: opacity.clamp(0.0, 1.0),
-        emissive_factor: num(&f.emission_factor, 0.0) * rgb(&f.emission_color).iter().fold(0.0f32, |a, b| a.max(*b)),
+        // Self-illumination: the emitted colour's strength relative to the diffuse colour.
+        emissive_factor: {
+            let peak = |c: [f32; 3]| c.iter().fold(0.0f32, |a, b| a.max(*b));
+            let d = peak(rgb(&f.diffuse_color));
+            let e = num(&f.emission_factor, 0.0) * peak(rgb(&f.emission_color));
+            if d > 1e-6 { (e / d).min(1.0) } else { e.min(1.0) }
+        },
         textures: Vec::new(),
     };
     for t in m.textures.iter() {

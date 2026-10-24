@@ -7,6 +7,9 @@ use crate::document::{FbxDocument, FbxKind, FbxMaterial, FbxNode, WriteAxes, Wri
 use glam::{Mat4, Vec3};
 use loom_mesh::{FaceId, HalfEdgeId, Mesh};
 
+/// Axis conversion, as the reference applies it: only root nodes turn
+/// (the Z-up → Y-up change of basis, (x, y, z) → (x, z, -y), on the left of
+/// their transform); children, geometry and bone-local data stay as they are.
 fn axis(v: Vec3, axes: WriteAxes) -> Vec3 {
     match axes {
         WriteAxes::ZUp => v,
@@ -16,16 +19,15 @@ fn axis(v: Vec3, axes: WriteAxes) -> Vec3 {
 
 /// Loom's Euler XYZ (glam intrinsic) → FBX `Lcl Rotation` with
 /// `RotationOrder` XYZ, which is extrinsic (Rz·Ry·Rx). A camera also turns
-/// so its FBX forward (+X) is loom's forward (-Z).
-fn fbx_rotation(r: Vec3, axes: WriteAxes, camera: bool) -> Vec3 {
+/// so its FBX forward (+X) is loom's forward (-Z); a root node in a Y-up
+/// file turns by the change of basis.
+fn fbx_rotation(r: Vec3, axes: WriteAxes, camera: bool, root: bool) -> Vec3 {
     let mut q = glam::Quat::from_euler(glam::EulerRot::XYZ, r.x.to_radians(), r.y.to_radians(), r.z.to_radians());
     if camera {
         q *= glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
     }
-    if axes == WriteAxes::YUp {
-        // Conjugate by the Z-up → Y-up change of basis.
-        let basis = glam::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
-        q = basis * q * basis.inverse();
+    if axes == WriteAxes::YUp && root {
+        q = glam::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2) * q;
     }
     let (x, y, z) = q.to_euler(glam::EulerRot::XYZEx);
     Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
@@ -38,15 +40,11 @@ fn cm_factor(doc: &FbxDocument, opts: &WriteOpts) -> f32 {
     (doc.unit_metres * 100.0 / opts.file_unit_cm.max(1e-12)) as f32
 }
 
-/// A document-frame matrix in the written frame: Y-up conjugates it by the
-/// Z-up → Y-up change of basis (x, z, -y), as every node transform is.
-fn conj(m: Mat4, axes: WriteAxes) -> Mat4 {
+/// A world matrix in the written frame (Y-up: the change of basis on the left).
+fn world(m: Mat4, axes: WriteAxes) -> Mat4 {
     match axes {
         WriteAxes::ZUp => m,
-        WriteAxes::YUp => {
-            let b = Mat4::from_cols(glam::Vec4::X, -glam::Vec4::Z, glam::Vec4::Y, glam::Vec4::W);
-            b * m * b.inverse()
-        }
+        WriteAxes::YUp => Mat4::from_cols(glam::Vec4::X, -glam::Vec4::Z, glam::Vec4::Y, glam::Vec4::W) * m,
     }
 }
 
@@ -146,12 +144,10 @@ fn global_settings(doc: &FbxDocument, axes: WriteAxes, file_unit_cm: f64) -> Rec
 }
 
 fn model(id: i64, n: &FbxNode, class: &str, axes: WriteAxes, factor: f32) -> Record {
-    let t = axis(n.translation * factor, axes);
-    let r = fbx_rotation(n.rotation_deg, axes, class == "Camera");
-    let s = match axes {
-        WriteAxes::ZUp => n.scale,
-        WriteAxes::YUp => Vec3::new(n.scale.x, n.scale.z, n.scale.y),
-    };
+    let root = n.parent.is_none();
+    let t = if root { axis(n.translation * factor, axes) } else { n.translation * factor };
+    let r = fbx_rotation(n.rotation_deg, axes, class == "Camera", root);
+    let s = n.scale;
     let v3 = |name: &str, v: Vec3| p(name, name, "", "A", vec![Prop::F64(v.x as f64), Prop::F64(v.y as f64), Prop::F64(v.z as f64)]);
     Record::with("Model", vec![Prop::I64(id), object_name(&n.name, "Model"), Prop::Str(class.into())])
         .child(Record::leaf("Version", vec![Prop::I32(232)]))
@@ -233,7 +229,6 @@ fn corner_tangents(mesh: &Mesh, normals: &[Vec3]) -> Option<Vec<(Vec3, Vec3)>> {
 /// The Geometry record and, when `split_normals` splits control points,
 /// per mesh vertex the control points it became.
 fn geometry(id: i64, name: &str, mesh: &Mesh, opts: &WriteOpts, factor: f32, subdivision: Option<(u32, u32)>) -> (Record, Option<Vec<Vec<u32>>>) {
-    let axes = opts.axes;
     let tri;
     let mesh = if opts.triangulate {
         tri = loom_mesh::mesh_mods::triangulate(mesh).unwrap_or_else(|_| mesh.clone());
@@ -274,7 +269,7 @@ fn geometry(id: i64, name: &str, mesh: &Mesh, opts: &WriteOpts, factor: f32, sub
     }
     let mut vertices: Vec<f64> = Vec::with_capacity(control.len() * 3);
     for v in &control {
-        let q = axis(*v * factor, axes);
+        let q = *v * factor;
         vertices.extend([q.x as f64, q.y as f64, q.z as f64]);
     }
     let mut indices: Vec<i32> = Vec::new();
@@ -289,7 +284,7 @@ fn geometry(id: i64, name: &str, mesh: &Mesh, opts: &WriteOpts, factor: f32, sub
         for (i, he) in corners.iter().enumerate() {
             let v = point_of_corner[he.0 as usize] as i32;
             indices.push(if i + 1 == k { -(v + 1) } else { v });
-            let n = axis(normals_by_corner[he.0 as usize], axes);
+            let n = normals_by_corner[he.0 as usize];
             normals.extend([n.x as f64, n.y as f64, n.z as f64]);
             corner_hes.push(he.0);
         }
@@ -314,7 +309,7 @@ fn geometry(id: i64, name: &str, mesh: &Mesh, opts: &WriteOpts, factor: f32, sub
         let flat = |pick: fn(&(Vec3, Vec3)) -> Vec3| -> Vec<f64> {
             tb.iter()
                 .flat_map(|x| {
-                    let v = axis(pick(x), axes);
+                    let v = pick(x);
                     [v.x as f64, v.y as f64, v.z as f64]
                 })
                 .collect()
@@ -609,8 +604,8 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
                         .child(Record::leaf("UserData", vec![Prop::Str("".into()), Prop::Str("".into())]))
                         .child(Record::leaf("Indexes", vec![Prop::ArrI32(indexes)]))
                         .child(Record::leaf("Weights", vec![Prop::ArrF64(weights)]))
-                        .child(Record::leaf("Transform", vec![Prop::ArrF64(matrix16(conj(*g2b, opts.axes), factor))]))
-                        .child(Record::leaf("TransformLink", vec![Prop::ArrF64(matrix16(conj(bone_bind, opts.axes), factor))])),
+                        .child(Record::leaf("Transform", vec![Prop::ArrF64(matrix16(*g2b, factor))]))
+                        .child(Record::leaf("TransformLink", vec![Prop::ArrF64(matrix16(world(bone_bind, opts.axes), factor))])),
                 );
                 connections.children.push(Record::leaf("C", vec![Prop::Str("OO".into()), Prop::I64(cid), Prop::I64(sid)]));
                 connections.children.push(Record::leaf("C", vec![Prop::Str("OO".into()), Prop::I64(bone_mid), Prop::I64(cid)]));
@@ -631,7 +626,7 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
                 n_geom += 1;
                 let offsets: Vec<(u32, Vec3)> = bs.offsets.iter().flat_map(|(v, o)| points(*v).into_iter().map(move |cp| (cp, *o))).collect();
                 let indexes: Vec<i32> = offsets.iter().map(|(v, _)| *v as i32).collect();
-                let verts: Vec<f64> = offsets.iter().flat_map(|(_, o)| { let q = axis(*o * factor, opts.axes); [q.x as f64, q.y as f64, q.z as f64] }).collect();
+                let verts: Vec<f64> = offsets.iter().flat_map(|(_, o)| { let q = *o * factor; [q.x as f64, q.y as f64, q.z as f64] }).collect();
                 let normals: Vec<f64> = vec![0.0; offsets.len() * 3];
                 objects.children.push(
                     Record::with("Geometry", vec![Prop::I64(shid), object_name(&bs.name, "Geometry"), Prop::Str("Shape".into())])
@@ -660,7 +655,7 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
             .child(Record::leaf("Version", vec![Prop::I32(100)]))
             .child(Record::leaf("NbPoseNodes", vec![Prop::I32(pose_nodes.len() as i32)]));
         for (nid, m) in &pose_nodes {
-            pose = pose.child(Record::new("PoseNode").child(Record::leaf("Node", vec![Prop::I64(*nid)])).child(Record::leaf("Matrix", vec![Prop::ArrF64(matrix16(conj(*m, opts.axes), factor))])));
+            pose = pose.child(Record::new("PoseNode").child(Record::leaf("Node", vec![Prop::I64(*nid)])).child(Record::leaf("Matrix", vec![Prop::ArrF64(matrix16(world(*m, opts.axes), factor))])));
         }
         objects.children.push(pose);
     }
@@ -738,10 +733,11 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
             let Some(&mid) = model_ids.get(*index) else { continue };
             let camera = matches!(doc.nodes[*index].kind, FbxKind::Camera { .. });
             let times: Vec<i64> = a.frames.iter().map(|f| ktime(*f, fps)).collect();
-            let t: Vec<Vec3> = a.translation.iter().map(|v| axis(*v * factor, opts.axes)).collect();
+            let root = doc.nodes[*index].parent.is_none();
+            let t: Vec<Vec3> = a.translation.iter().map(|v| if root { axis(*v * factor, opts.axes) } else { *v * factor }).collect();
             let mut r: Vec<Vec3> = Vec::with_capacity(a.rotation_deg.len());
             for v in &a.rotation_deg {
-                let mut e = fbx_rotation(*v, opts.axes, camera);
+                let mut e = fbx_rotation(*v, opts.axes, camera, root);
                 // Keep each axis continuous so linear interpolation does not spin the long way round.
                 if let Some(prev) = r.last() {
                     for i in 0..3 {
@@ -750,10 +746,7 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
                 }
                 r.push(e);
             }
-            let sc: Vec<Vec3> = a.scale.iter().map(|v| match opts.axes {
-                WriteAxes::ZUp => *v,
-                WriteAxes::YUp => Vec3::new(v.x, v.z, v.y),
-            }).collect();
+            let sc: Vec<Vec3> = a.scale.clone();
             let filters = &opts.curve_filters;
             for (kind, (label, prop, values)) in [("T", "Lcl Translation", &t), ("R", "Lcl Rotation", &r), ("S", "Lcl Scaling", &sc)].into_iter().enumerate() {
                 // Curve filters: per component the keys that stay (XYZ synchronization: the union).

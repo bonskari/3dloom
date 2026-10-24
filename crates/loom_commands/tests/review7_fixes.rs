@@ -153,6 +153,8 @@ fn exported_skin_with_a_pivot_offset_skins_in_place() {
         m.vertices().iter().map(|v| w.transform_point3(v.position)).collect()
     };
     let path = d.join("off.fbx");
+    // The raw file is compared in the scene's frame: Z-up.
+    execute(&mut s, Command::SetExchangeOption { dialog: "fbx_export".into(), name: "up_axis".into(), value: serde_json::json!("Z-up") }).unwrap();
     execute(&mut s, Command::ExportSelected { path: Some(path.to_string_lossy().into_owned()) }).unwrap();
     let scene = ufbx::load_memory(&std::fs::read(&path).unwrap(), ufbx::LoadOpts::default()).unwrap();
     let mesh = &scene.meshes[0];
