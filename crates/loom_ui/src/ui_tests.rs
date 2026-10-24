@@ -2935,6 +2935,8 @@ fn a_scene_named_on_the_command_line_opens() {
 
 /// A 30-unit box with an Edit Normals modifier (at its Normal level), framed.
 fn normals_box(h: &mut Harness) -> loom_scene::NodeId {
+    // Tall enough for the whole Modify panel.
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
     let id = selected(h)[0];
     h.cmd(Command::AddModifier { name: "Edit Normals".into() });
@@ -3061,6 +3063,7 @@ fn edit_normals_draws_explicit_normals_green_and_the_rotate_tool_turns_them() {
 #[test]
 fn hsds_element_button_shows_the_yellow_cage_and_the_level_list_displays_a_level() {
     let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
     let id = selected(&h)[0];
     h.cmd(Command::AddModifier { name: "HSDS".into() });
