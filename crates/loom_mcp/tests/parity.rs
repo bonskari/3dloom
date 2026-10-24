@@ -61,7 +61,7 @@ fn every_control_socket_request_has_a_tool() {
         }
     }
     assert_eq!(loom_mcp::app_command("loom_state"), None, "registry commands are not app commands");
-    for t in ["loom_instances", "loom_attach", "loom_logs", "loom_diagnostics", "loom_input", "loom_log_tail", "loom_reset_interaction", "loom_ui_hit"] {
+    for t in ["loom_instances", "loom_attach_instance", "loom_logs", "loom_diagnostics", "loom_input", "loom_log_tail", "loom_reset_interaction", "loom_ui_hit"] {
         assert!(tools.contains(t), "{t}");
     }
 }

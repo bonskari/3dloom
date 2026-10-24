@@ -1,6 +1,6 @@
 //! MCP (stdio, JSON-RPC 2.0) server that drives a running 3dLoom instance
 //! through its control socket: by default the newest instance's private Unix
-//! socket (`loom_instances` / `loom_attach` pick another), or the TCP port
+//! socket (`loom_instances` / `loom_attach_instance` pick another), or the TCP port
 //! when `LOOM_CONTROL_PORT` is set.
 //!
 //! Env: `LOOM_CONTROL_PORT` (TCP; also the port `loom_launch` uses, default
@@ -71,7 +71,7 @@ fn call_tool(params: &Value) -> Result<Value, (i64, String)> {
         "loom_launch" => launch(&args),
         "loom_screenshot" => screenshot(&args),
         "loom_instances" => Ok(text(&instances().to_string())),
-        "loom_attach" => attach(&args),
+        "loom_attach_instance" => attach(&args),
         "loom_logs" => {
             let dir = loom_commands::live::log_dir().ok_or((-32000, "no log directory (HOME is not set)".to_owned()))?;
             let pid = args.get("pid").and_then(Value::as_u64).map(|p| p as u32).or_else(|| match target() {
@@ -181,7 +181,7 @@ enum Target {
 
 static TARGET: std::sync::Mutex<Option<Target>> = std::sync::Mutex::new(None);
 
-/// The attached instance: what `loom_attach` / `loom_launch` chose, else the
+/// The attached instance: what `loom_attach_instance` / `loom_launch` chose, else the
 /// TCP port when `LOOM_CONTROL_PORT` is set (as before), else the newest.
 fn target() -> Target {
     let chosen = TARGET.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -260,7 +260,7 @@ fn instances() -> Value {
     json!({ "runtime_dir": dir, "attached": format!("{attached:?}"), "instances": list })
 }
 
-/// `loom_attach {pid | port}`: checks the instance answers, then uses it.
+/// `loom_attach_instance {pid | port}`: checks the instance answers, then uses it.
 fn attach(args: &Value) -> Result<Value, (i64, String)> {
     let t = if let Some(port) = args.get("port").and_then(Value::as_u64) {
         Target::Tcp(port as u16)

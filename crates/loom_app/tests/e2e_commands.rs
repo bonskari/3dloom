@@ -560,7 +560,7 @@ fn every_run_answers_on_its_private_unix_socket_with_diagnostics_input_and_logs(
         let me = list["instances"].as_array().unwrap().iter().find(|i| i["pid"] == pid).cloned().unwrap_or_else(|| panic!("{list}"));
         assert_eq!(me["answers"], true, "{me}");
         assert_eq!(me["attached"], true, "{me}");
-        let attached = call(2, "loom_attach", json!({ "pid": pid }));
+        let attached = call(2, "loom_attach_instance", json!({ "pid": pid }));
         assert_eq!(attached["pid"], pid);
         let d = call(3, "loom_diagnostics", json!({}));
         assert_eq!(d["interaction"]["nav_mode"], "None", "{d}");

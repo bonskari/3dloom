@@ -65,7 +65,7 @@ pub fn tool_list() -> Vec<Value> {
         "inputSchema": { "type": "object", "properties": {}, "required": [] },
     }));
     tools.push(json!({
-        "name": "loom_attach",
+        "name": "loom_attach_instance",
         "description": "Talk to this instance from now on: by pid (its Unix socket) or by TCP port (LOOM_CONTROL_PORT). Without arguments, the newest instance.",
         "inputSchema": { "type": "object", "properties": {
             "pid": { "type": "integer" },
