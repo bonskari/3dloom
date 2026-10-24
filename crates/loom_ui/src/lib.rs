@@ -8,13 +8,16 @@ pub mod dialogs;
 pub mod gizmo;
 mod hotkeys;
 pub mod label_menus;
+pub mod live;
 pub mod main_toolbar;
 pub mod quad_menu;
 mod realistic;
+pub mod rendered_frame;
 pub mod region;
 pub mod time_slider;
 mod menubar;
 mod statusbar;
+pub mod spinner;
 pub mod tools;
 pub mod viewport_gizmo;
 mod viewport_widget;
@@ -164,8 +167,18 @@ pub struct LoomApp {
     world_display: std::sync::Arc<Vec<Mesh>>,
     /// Bumped by every `world_meshes` rebuild.
     world_version: u64,
+    /// What Show End Result off applied to at the last rebuild (`end_result_key`).
+    shown_end_result_key: Option<Vec<NodeId>>,
+    /// A base parameter change held back by the topology-dependence warning.
+    pub(crate) pending_topology: Option<Command>,
+    /// The node whose topology warning was answered Yes while its base object stays active.
+    pub(crate) topology_ack: Option<NodeId>,
     /// The wgpu device and, once a Realistic view or a Render needs it, Bevy.
     gpu: realistic::Gpu,
+    /// The render in progress (one bucket per frame).
+    pub(crate) render_job: Option<realistic::RenderJob>,
+    /// The Rendered Frame Window's and its clones' zoom, pan and textures.
+    pub rfw: rendered_frame::FrameViews,
     /// Meshes and colours waiting to be uploaded to the GPU. Every viewport
     /// callback holds this; whichever runs first takes and uploads them, so
     /// the upload never depends on one particular viewport being painted.
@@ -228,6 +241,10 @@ pub struct LoomApp {
     /// The Modifier List use counts as last written to disk (None in tests: never written).
     pub saved_modifier_usage: loom_commands::modifier_list::Usage,
     pub persist_modifier_usage: bool,
+    /// The user's settings file (None in tests: nothing read or written).
+    pub settings_path: Option<std::path::PathBuf>,
+    /// The settings as last read or written, to write only on change.
+    pub saved_settings: Option<loom_commands::settings::Settings>,
     /// The Update menu's state when this build updates itself (set by the app).
     pub update: Option<update_menu::UpdateHandle>,
     /// A transform or region drag in the Edit UVWs window.
@@ -279,6 +296,8 @@ pub struct LoomApp {
     /// `state.bitmap_generation` the caches were filled at (Reload clears them).
     pub bitmap_generation: u64,
     pub last_error: Option<String>,
+    /// The last raw input events (live diagnostics).
+    pub input_log: live::InputLog,
 }
 
 impl LoomApp {
@@ -296,7 +315,64 @@ impl LoomApp {
         }
         app.saved_modifier_usage = app.state.modifier_usage.clone();
         app.persist_modifier_usage = true;
+        if let Some(path) = loom_commands::settings::settings_path() {
+            app.use_settings_file(path);
+        }
         app
+    }
+
+    /// Loads the settings file at `path` (when it exists) and writes changes
+    /// back to it from now on.
+    pub fn use_settings_file(&mut self, path: std::path::PathBuf) {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match loom_commands::settings::Settings::from_json(&text) {
+                Ok(settings) => {
+                    settings.apply(&mut self.state);
+                    if let Some(dir) = settings.last_folder.filter(|d| d.is_dir()) {
+                        self.file_dir = dir;
+                    }
+                }
+                Err(e) => self.last_error = Some(format!("{}: {e}", path.display())),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => self.last_error = Some(format!("{}: {e}", path.display())),
+        }
+        self.saved_settings = Some(self.settings());
+        self.settings_path = Some(path);
+    }
+
+    /// `loom scene.loom` / `loom model.fbx`: opens (.loom) or imports the
+    /// first argument that is not a `-` flag.
+    pub fn open_command_line(&mut self, args: impl IntoIterator<Item = String>) {
+        let Some(path) = args.into_iter().find(|a| !a.starts_with('-')) else { return };
+        let is_scene = std::path::Path::new(&path).extension().is_some_and(|e| e.eq_ignore_ascii_case("loom"));
+        let cmd = if is_scene { Command::OpenFile { path: Some(path.clone()) } } else { Command::ImportFile { path: Some(path.clone()) } };
+        if let Err(e) = self.dispatch(cmd) {
+            self.last_error = Some(format!("{path}: {e}"));
+        }
+    }
+
+    /// What the settings file holds now.
+    pub fn settings(&self) -> loom_commands::settings::Settings {
+        let mut s = loom_commands::settings::Settings::capture(&self.state);
+        s.last_folder = Some(self.file_dir.clone());
+        s
+    }
+
+    /// Writes the settings file when something in it changed.
+    fn persist_settings(&mut self) {
+        let Some(path) = self.settings_path.clone() else { return };
+        let now = self.settings();
+        if self.saved_settings.as_ref() == Some(&now) {
+            return;
+        }
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = std::fs::write(&path, now.to_json()) {
+            self.last_error = Some(format!("{}: {e}", path.display()));
+        }
+        self.saved_settings = Some(now);
     }
 
     /// App state without GPU resources, for tests of UI models.
@@ -308,7 +384,12 @@ impl LoomApp {
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
             world_version: 0,
+            shown_end_result_key: None,
+            pending_topology: None,
+            topology_ack: None,
             gpu: realistic::Gpu::None,
+            render_job: None,
+            rfw: Default::default(),
             pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(Vec::new()), Vec::new(), Vec::new())))),
             bitmap_cache: std::collections::HashMap::new(),
             baked_cache: std::collections::HashMap::new(),
@@ -345,6 +426,8 @@ impl LoomApp {
             viewport_rects: Vec::new(),
             saved_modifier_usage: Default::default(),
             persist_modifier_usage: false,
+            settings_path: None,
+            saved_settings: None,
             update: None,
             uv_drag: None,
             uv_sketch: Vec::new(),
@@ -370,6 +453,7 @@ impl LoomApp {
             quad_menu: None,
             background_textures: std::collections::HashMap::new(),
             last_error: None,
+            input_log: Default::default(),
         }
     }
 
@@ -402,8 +486,27 @@ impl LoomApp {
             self.state.undo.end();
         }
         self.end_create_mode_for(cmd.name());
+        if let Command::SetParameter { id, .. } = &cmd {
+            // A base parameter under a topology-dependent modifier: ask first.
+            let id = NodeId(*id);
+            if let Some(a) = self.topology_ack {
+                if !self.state.selection.contains(&a) || self.state.scene.node(a).is_none_or(|n| n.active_entry.is_some()) {
+                    self.topology_ack = None;
+                }
+            }
+            let dependent = self.state.scene.node(id).is_some_and(|n| n.modifiers.iter().any(|s| s.modifier.topology_dependent()));
+            if dependent && self.topology_ack != Some(id) {
+                self.pending_topology = Some(cmd);
+                self.state.dialog = Some(loom_commands::Dialog::TopologyWarning);
+                return Ok(serde_json::json!({ "asked": "topology warning" }));
+            }
+        }
         let opens_editor = matches!(&cmd, Command::AddModifier { name } if name == "Unwrap UVW") && self.state.uv_editor.always_bring_up;
+        let logged = log::log_enabled!(target: "loom::cmd", log::Level::Info).then(|| serde_json::to_value(&cmd).unwrap_or_default());
         let r = loom_commands::execute(&mut self.state, cmd);
+        if let Some(body) = logged {
+            live::log_command(&body, r.as_ref().map_err(String::as_str));
+        }
         match &r {
             Err(e) => self.last_error = Some(e.clone()),
             Ok(_) => self.last_error = None,
@@ -421,6 +524,7 @@ impl LoomApp {
             self.end_create_mode_for(name);
         }
         let r = loom_commands::execute_json(&mut self.state, body);
+        live::log_command(body, if r["ok"] == true { Ok(&r) } else { Err(r["error"].as_str().unwrap_or("failed")) });
         self.sync_after_command();
         r
     }
@@ -435,6 +539,11 @@ impl LoomApp {
     }
 
     pub(crate) fn sync_after_command(&mut self) {
+        let key = self.end_result_key();
+        if key != self.shown_end_result_key {
+            self.shown_end_result_key = key;
+            self.state.mesh_dirty = true;
+        }
         if self.state.mesh_dirty {
             self.rebuild_world_meshes();
             self.state.mesh_dirty = false;
@@ -460,6 +569,18 @@ impl LoomApp {
             Ok(_) => self.last_error = None,
         }
         self.sync_after_command();
+    }
+
+    /// Show End Result off: the selected object, while the Modify panel edits
+    /// it, shows its stack only up to the active entry.
+    pub(crate) fn below_end_result(&self, id: NodeId) -> bool {
+        !self.state.show_end_result && self.panel_tab == command_panel::Tab::Modify && self.state.selection.contains(&id)
+    }
+
+    /// The objects `below_end_result` applies to (None: none); the drawn
+    /// meshes are rebuilt when it changes.
+    fn end_result_key(&self) -> Option<Vec<NodeId>> {
+        (!self.state.show_end_result && self.panel_tab == command_panel::Tab::Modify).then(|| self.state.selection.iter().copied().collect())
     }
 
     fn rebuild_world_meshes(&mut self) {
@@ -496,12 +617,13 @@ impl LoomApp {
             let n = self.state.scene.node(id).expect("collected above");
             let mut mesh = n.cage_mesh().into_owned();
             // What the GPU draws: the stack result (NURMS included), or with
-            // Show End Result off only up to the active entry; the cage stays
-            // the base mesh for sub-object picking.
+            // Show End Result off only up to the active entry of the object
+            // the Modify panel edits; the cage stays the base mesh for
+            // sub-object picking.
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
             let mut shown = if n.modifiers.is_empty() && !nurms {
                 None
-            } else if !self.state.show_end_result {
+            } else if self.below_end_result(id) {
                 match n.active_entry {
                     None => Some(n.object.display_output()),
                     Some(a) => Some(self.state.scene.evaluated(id, Some(a)).value.mesh.clone()),
@@ -799,22 +921,55 @@ impl LoomApp {
         self.state.undo.end();
     }
 
+    /// Runs before egui reads a frame's input (eframe's `raw_input_hook`).
+    /// When the window loses the focus (screen lock, another window) with a
+    /// mouse button held, the release goes elsewhere and never arrives: egui
+    /// would keep the button down and the viewport keep its drag, so moving
+    /// the pointer afterwards went on orbiting or panning. Every press-held
+    /// interaction ends here and egui gets the releases it missed.
+    pub fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if !raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))) {
+            return;
+        }
+        let (down, pos) = ctx.input(|i| {
+            let down: Vec<egui::PointerButton> = [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle, egui::PointerButton::Extra1, egui::PointerButton::Extra2]
+                .into_iter()
+                .filter(|b| i.pointer.button_down(*b))
+                .collect();
+            (down, i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(egui::Pos2::ZERO))
+        });
+        let up = loom_input::InputEvent::MouseUp { button: loom_input::MouseButton::Left, pos: glam::Vec2::new(pos.x, pos.y), mods: loom_input::Modifiers::default() };
+        self.camera_controller.handle(up, &mut self.state.active_mut().camera);
+        self.alt_click = None;
+        self.drag_select_start = None;
+        self.region_points.clear();
+        if self.transform_drag.is_some() {
+            self.end_transform_drag();
+            self.shift_sources.clear();
+        }
+        if self.manip_drag.take().is_some() {
+            self.state.undo.end();
+        }
+        self.soft_painting = false;
+        if self.deform_painting {
+            self.deform_painting = false;
+            self.poly_dragging = false;
+            self.state.undo.end();
+        }
+        for button in down {
+            raw.events.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: raw.modifiers });
+        }
+    }
+
     /// Display-unit factor and suffix (Units Setup) for length spinners.
     pub fn unit_display(&self) -> (f64, String) {
         self.state.units.display_factor()
     }
 
     /// A length spinner in display units: the value stays in scene units.
-    pub fn length_drag<'a>(&self, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
-        let (factor, suffix) = self.unit_display();
-        let decimals = self.state.prefs.spinner_precision;
-        egui::DragValue::new(value)
-            .speed(speed)
-            .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
-            .custom_parser(move |text| {
-                let t = text.trim().trim_end_matches(|c: char| c.is_alphabetic() || c == '"' || c == '\'');
-                t.parse::<f64>().ok().map(|v| v / factor)
-            })
+    /// Add it right away: it is a [`spinner::spin`] (right-click sets 0).
+    pub fn length_drag<'a>(&self, ui: &egui::Ui, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
+        length_drag_value(ui, &self.state.units, self.state.prefs.spinner_precision, value, .., speed)
     }
 
     /// Spinner drag speed: the Preferences snap value when Spinner Snap is on.
@@ -933,12 +1088,17 @@ impl eframe::App for LoomApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame(ctx);
     }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        LoomApp::raw_input_hook(self, ctx, raw_input);
+    }
 }
 
 impl LoomApp {
     /// One frame of the whole UI (what eframe calls each repaint; the UI
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
+        ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_file_action(loom_commands::PendingFileAction::Exit);
@@ -965,6 +1125,11 @@ impl LoomApp {
             }
             self.saved_modifier_usage = self.state.modifier_usage.clone();
         }
+        self.persist_settings();
+        // Esc stops a render in progress (before the hotkeys see it).
+        if self.state.rendered.progress.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            let _ = self.dispatch(Command::CancelRender);
+        }
         hotkeys::handle(ctx, self);
         // An image file dropped on an object: a material with it as the Diffuse map.
         let dropped: Vec<std::path::PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
@@ -975,6 +1140,14 @@ impl LoomApp {
                 if let (true, Some(node)) = (image, at.and_then(|p| viewport_widget::node_at(self, p))) {
                     let _ = self.dispatch(Command::DropBitmap { path: path.to_string_lossy().into_owned(), node: Some(node.0) });
                 }
+            }
+        }
+        // "Close spline?" answered Yes: the line is closed, so the Line tool ends it.
+        if let Some(line) = self.line.take() {
+            if line.is_closed(self) {
+                line.finish(self);
+            } else {
+                self.line = Some(line);
             }
         }
         // Playback: advance by the wall clock (Real Time) or a frame per redraw.
@@ -993,6 +1166,10 @@ impl LoomApp {
         statusbar::show(ctx, self);
         time_slider::show(ctx, self);
         command_panel::show(ctx, self);
+        if self.end_result_key() != self.shown_end_result_key {
+            // A tab switch changes what Show End Result off shows.
+            self.sync_after_command();
+        }
         viewports::show(ctx, self);
         if let Some(open) = self.quad_menu {
             if quad_menu::show(ctx, self, open) {
@@ -1002,6 +1179,7 @@ impl LoomApp {
         dialogs::show(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
+        rendered_frame::show(ctx, self);
         self.finish_realistic_frame(ctx);
     }
 }
@@ -1047,12 +1225,20 @@ fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::A
         .clone()
 }
 
-/// The user's 3dLoom config file for Modifier List use counts:
-/// `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%APPDATA%` on Windows.
+/// The user's 3dLoom config file for Modifier List use counts (in
+/// `loom_commands::settings::config_dir`).
 fn modifier_usage_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("APPDATA")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from))
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
-    Some(base.join("3dloom").join("modifier-usage.json"))
+    Some(loom_commands::settings::config_dir()?.join("modifier-usage.json"))
+}
+
+/// A length spinner in display units (Units Setup); typed values may carry a
+/// unit (7", -3.5", 2.5cm). The value stays in scene units. It is a
+/// [`spinner::spin`]: add it right away; right-click sets 0 or the minimum.
+pub fn length_drag_value<'a>(ui: &egui::Ui, units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, range: impl std::ops::RangeBounds<f32>, speed: f64) -> egui::DragValue<'a> {
+    let (factor, suffix) = units.display_factor();
+    let units = units.clone();
+    spinner::spin(ui, value, range)
+        .speed(speed)
+        .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
+        .custom_parser(move |text| units.parse(text))
 }

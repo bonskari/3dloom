@@ -124,6 +124,9 @@ pub enum PickMode {
     SplineRefine,
     /// Editable Spline > Insert: click a segment, the new knot follows the mouse.
     SplineInsert,
+    /// Editable Spline > Fillet / Chamfer: drag on a selected vertex.
+    SplineFillet,
+    SplineChamfer,
     /// Editable Poly > Extrude Along Spline: click a shape.
     ExtrudeAlongSpline,
     HideByHit,
@@ -180,6 +183,11 @@ pub enum PickMode {
     /// Cut: start and end surface points.
     CutA,
     CutB,
+    /// Swift Loop: each click on an edge inserts a loop across its ring.
+    SwiftLoop,
+    /// Bridge Edges > Pick Edge 1 / Pick Edge 2: the next edge pick.
+    BridgeEdge1,
+    BridgeEdge2,
     /// Attach to Group: the next clicked group takes the selection.
     GroupAttach,
     /// Linked XForm / Preserve: the next clicked object is the control / original.
@@ -278,7 +286,7 @@ pub struct CompoundSettings {
 
 impl Default for CompoundSettings {
     fn default() -> Self {
-        Self { boolean_op: 0, move_operand: true, proboolean_op: 0, loft_path_percent: 0.0 }
+        Self { boolean_op: 2, move_operand: true, proboolean_op: 0, loft_path_percent: 0.0 }
     }
 }
 
@@ -309,6 +317,10 @@ pub struct PolySettings {
     pub hinge_segments: u32,
     /// The picked hinge edge (node, raw edge id).
     pub hinge_edge: Option<(NodeId, u32)>,
+    /// Bridge Edges: Bridge Specific Edges (the picked edges) instead of the selection.
+    pub bridge_specific: bool,
+    /// Bridge Edges > Pick Edge 1 / 2 (node, raw edge id).
+    pub bridge_edges: [Option<(NodeId, u32)>; 2],
     pub msmooth_smoothness: f32,
     pub msmooth_separate_by_smoothing: bool,
     pub msmooth_separate_by_materials: bool,
@@ -348,6 +360,8 @@ impl Default for PolySettings {
             hinge_angle: 30.0,
             hinge_segments: 1,
             hinge_edge: None,
+            bridge_specific: false,
+            bridge_edges: [None, None],
             msmooth_smoothness: 1.0,
             msmooth_separate_by_smoothing: false,
             msmooth_separate_by_materials: false,
@@ -511,6 +525,34 @@ impl SelectionRegion {
     }
 }
 
+/// Main Toolbar > Scale flyout: Uniform, Non-Uniform or Squash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ScaleKind {
+    #[default]
+    Uniform,
+    NonUniform,
+    Squash,
+}
+
+impl ScaleKind {
+    pub const ALL: [ScaleKind; 3] = [ScaleKind::Uniform, ScaleKind::NonUniform, ScaleKind::Squash];
+    pub fn label(self) -> &'static str {
+        match self {
+            ScaleKind::Uniform => "Select and Uniform Scale",
+            ScaleKind::NonUniform => "Select and Non-uniform Scale",
+            ScaleKind::Squash => "Select and Squash",
+        }
+    }
+    /// The next flyout button (Scale Cycle).
+    pub fn next(self) -> ScaleKind {
+        match self {
+            ScaleKind::Uniform => ScaleKind::NonUniform,
+            ScaleKind::NonUniform => ScaleKind::Squash,
+            ScaleKind::Squash => ScaleKind::Uniform,
+        }
+    }
+}
+
 /// Main Toolbar > Reference Coordinate System.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CoordSystem {
@@ -543,6 +585,7 @@ impl CoordSystem {
 
 /// Preferences > Gizmos (the settings the gizmos read).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GizmoPrefs {
     /// "Transform Gizmos: On" (Shift+Ctrl+X toggles).
     pub enabled: bool,
@@ -598,6 +641,7 @@ impl Default for GizmoPrefs {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Prefs {
     pub gizmos: GizmoPrefs,
     /// Preferences > General > Spinners > Use Snap (Spinner Snap Toggle).
@@ -629,6 +673,8 @@ pub struct Prefs {
     pub auto_backup_interval_min: f32,
     /// Auto Backup File Name (default "AutoBackup").
     pub auto_backup_name: String,
+    /// Preferences > Files > Recent Files in File Menu (0-50, default 10).
+    pub recent_files_count: usize,
 }
 
 impl Default for Prefs {
@@ -650,19 +696,20 @@ impl Default for Prefs {
             auto_backup_count: 3,
             auto_backup_interval_min: 5.0,
             auto_backup_name: "AutoBackup".into(),
+            recent_files_count: 10,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 28] = [
+    pub const NAMES: [&'static str; 29] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
-        "Scale Size", "Rotation Increment", "Space Locks Selection",
+        "Scale Size", "Rotation Increment", "Space Locks Selection", "Recent Files in File Menu",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -682,6 +729,7 @@ impl Prefs {
             "Auto Backup Enable" => b(self.auto_backup_enable),
             "Auto Backup Count" => self.auto_backup_count as f64,
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
+            "Recent Files in File Menu" => self.recent_files_count as f64,
             "Transform Gizmos" => b(self.gizmos.enabled),
             "Show Axis Labels" => b(self.gizmos.show_axis_labels),
             "Allow Multiple Gizmos" => b(self.gizmos.allow_multiple),
@@ -718,6 +766,7 @@ impl Prefs {
             "Auto Backup Enable" => self.auto_backup_enable = on,
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
+            "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
             "Transform Gizmos" => self.gizmos.enabled = on,
             "Show Axis Labels" => self.gizmos.show_axis_labels = on,
@@ -850,6 +899,46 @@ impl UnitsSetup {
             None => (1.0, String::new()),
             Some((metres_per_display, suffix)) => ((self.system_scale as f64) * self.system_unit.metres() / metres_per_display, suffix),
         }
+    }
+
+    /// A typed length in scene units. A plain number is in display units; a
+    /// number with a unit (7", -3.5in, 2', 1ft, 5'7", 10mm, 2.5cm, 1m, 0.1km
+    /// or the custom unit's name) is converted. Typographic quotes and the
+    /// en dash count as " ' and -.
+    pub fn parse(&self, text: &str) -> Option<f64> {
+        let t: String = text
+            .trim()
+            .chars()
+            .map(|c| match c {
+                '\u{201c}' | '\u{201d}' | '\u{2033}' => '"',
+                '\u{2018}' | '\u{2019}' | '\u{2032}' => '\'',
+                '\u{2013}' | '\u{2212}' => '-',
+                c => c,
+            })
+            .collect();
+        let scene_metres = self.system_scale as f64 * self.system_unit.metres();
+        if let Some((ft, rest)) = t.split_once('\'') {
+            let feet: f64 = ft.trim().parse().ok()?;
+            let rest = rest.trim().trim_end_matches('"').trim();
+            let inches: f64 = if rest.is_empty() { 0.0 } else { rest.parse().ok()? };
+            let sign = if ft.trim().starts_with('-') { -1.0 } else { 1.0 };
+            return Some((feet + sign * inches / 12.0) * (0.3048 / scene_metres));
+        }
+        let i = t.find(|c: char| c.is_alphabetic() || c == '"').unwrap_or(t.len());
+        let v: f64 = t[..i].trim().parse().ok()?;
+        let unit = t[i..].trim().to_ascii_lowercase();
+        let metres = match unit.as_str() {
+            "" => return Some(v / self.display_factor().0),
+            "\"" | "in" => 0.0254,
+            "ft" => 0.3048,
+            "mm" => 0.001,
+            "cm" => 0.01,
+            "m" => 1.0,
+            "km" => 1000.0,
+            u if !u.is_empty() && u.eq_ignore_ascii_case(&self.display_factor().1) => return Some(v / self.display_factor().0),
+            _ => return None,
+        };
+        Some(v * (metres / scene_metres))
     }
 
     pub fn format(&self, v: f32, decimals: usize) -> String {
@@ -1114,6 +1203,10 @@ pub struct AppState {
     pub expert_mode: bool,
     pub show_main_toolbar: bool,
     pub show_ribbon: bool,
+    /// Customize > Show UI > Show Command Panel.
+    pub show_command_panel: bool,
+    /// The Show UI toggles as loaded at startup (Revert to Startup Layout).
+    pub startup_ui: crate::settings::UiLayout,
     /// Modify panel: Show End Result, Pin Stack, modifier button set.
     pub show_end_result: bool,
     pub pin_stack: bool,
@@ -1148,6 +1241,8 @@ pub struct AppState {
     /// Main Toolbar > Window/Crossing: true = Window (fully enclosed only).
     pub window_selection: bool,
     pub selection_region: SelectionRegion,
+    /// The Scale flyout's button: how Select and Scale scales.
+    pub scale_kind: ScaleKind,
     pub coord_system: CoordSystem,
     /// Node whose coordinate system `CoordSystem::Pick` uses.
     pub pick_coord_node: Option<NodeId>,
@@ -1160,6 +1255,13 @@ pub struct AppState {
     pub prefs: Prefs,
     /// Customize > Units Setup.
     pub units: UnitsSetup,
+    /// The units Units Setup last set: new and reset scenes start with them
+    /// and the settings file keeps them (an opened file's units do not).
+    pub default_units: UnitsSetup,
+    /// Customize User Interface > Keyboard: the user's shortcut edits.
+    pub custom_keys: crate::keymap::CustomKeys,
+    /// File > Recent: opened and saved scenes, newest first.
+    pub recent_files: Vec<std::path::PathBuf>,
     /// Set when the selection region shape changes so the UI drops a
     /// half-drawn fence/lasso.
     pub region_points_reset: bool,
@@ -1174,6 +1276,8 @@ pub struct AppState {
     /// Editable Poly > Selection rollout toggles.
     pub select_by_vertex: bool,
     pub ignore_backfacing: bool,
+    /// Modify Selection > Loop Mode: a click selects the whole loop.
+    pub loop_mode: bool,
     pub preview_selection: PreviewSelect,
     /// Edit Geometry > Named Selections (sub-object).
     pub named_sub_selections: BTreeMap<String, Vec<(NodeId, SubObjectId)>>,
@@ -1251,6 +1355,13 @@ pub struct AppState {
     pub trajectory_selected: BTreeSet<i32>,
     /// Editable Spline > Tangent Copy: the copied handle.
     pub tangent_clipboard: Option<Vec3>,
+    /// Refine with Connect: the node, its connecting spline once it exists, and
+    /// the last connected point (object space).
+    pub refine_chain: Option<(NodeId, Option<usize>, Vec3)>,
+    /// The Refine prompt's click: node, flat knot, flat segment and parameter.
+    pub refine_pending: Option<(NodeId, u32, u32, f32)>,
+    /// The "Close spline?" prompt's click: line node, point, Initial Type smooth.
+    pub line_close_pending: Option<(NodeId, [f32; 3], bool)>,
     /// What the last File > Import left out (the Import Summary window lists it; empty = nothing to show).
     pub import_report: Vec<String>,
     /// Soft Selection > Edit Soft Selection: viewport drags set Falloff / Pinch / Bubble.
@@ -1323,19 +1434,24 @@ pub struct AppState {
     pub file: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
     pub mesh_dirty: bool,
-    /// Render SetUp output size in pixels.
-    pub render_size: (u32, u32),
     /// A Render waiting for the UI's renderer (the command layer has no GPU).
     pub pending_render: Option<RenderRequest>,
+    /// The Rendered Frame Window, its image and the render in progress.
+    pub rendered: crate::render::RenderedFrame,
 }
 
-/// Render the active view of `viewport` to the PNG `path` at `width` x `height`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A render for the UI's renderer: viewport `viewport` with `settings`
+/// (Render Setup at the time of the request), into the Rendered Frame Window.
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderRequest {
-    pub path: String,
-    pub width: u32,
-    pub height: u32,
     pub viewport: usize,
+    pub settings: loom_scene::render::RenderSettings,
+    /// The selection, for Area to Render > Selected.
+    pub selection: Vec<NodeId>,
+    /// Also write the image here when done.
+    pub save_path: Option<String>,
+    /// Iterative: Region and Selected keep the rest of the window's image.
+    pub iterative: bool,
 }
 
 impl Default for AppState {
@@ -1365,7 +1481,9 @@ impl AppState {
             expert_mode: false,
             show_main_toolbar: true,
             show_ribbon: false,
-            show_end_result: true,
+            show_command_panel: true,
+            startup_ui: crate::settings::UiLayout::DEFAULT,
+            show_end_result: false,
             pin_stack: false,
             show_modifier_set: false,
             modifier_set: vec!["XForm".into(), "Normal".into(), "Smooth".into(), "Poly Select".into()],
@@ -1388,6 +1506,7 @@ impl AppState {
             selection_filter: SelectionFilter::All,
             window_selection: false,
             selection_region: SelectionRegion::Rectangular,
+            scale_kind: ScaleKind::Uniform,
             coord_system: CoordSystem::View,
             pick_coord_node: None,
             center_mode: CenterMode::PivotPoint,
@@ -1396,6 +1515,9 @@ impl AppState {
             axis_constraint: AxisConstraint::XY,
             prefs: Prefs::default(),
             units: UnitsSetup::default(),
+            default_units: UnitsSetup::default(),
+            custom_keys: Default::default(),
+            recent_files: Vec::new(),
             region_points_reset: false,
             manipulate: false,
             coord_by_tool: [CoordSystem::View; 4],
@@ -1405,6 +1527,7 @@ impl AppState {
             named_sets: BTreeMap::new(),
             select_by_vertex: false,
             ignore_backfacing: false,
+            loop_mode: false,
             preview_selection: PreviewSelect::Off,
             named_sub_selections: BTreeMap::new(),
             soft_paint: None,
@@ -1451,6 +1574,9 @@ impl AppState {
             trajectory_keys: false,
             trajectory_selected: BTreeSet::new(),
             tangent_clipboard: None,
+            refine_chain: None,
+            refine_pending: None,
+            line_close_pending: None,
             import_report: Vec::new(),
             soft_edit: false,
             track_view: Default::default(),
@@ -1486,8 +1612,8 @@ impl AppState {
             pending_file_action: None,
             exit_requested: false,
             uv_editor: UvEditor::default(),
-            render_size: (640, 480),
             pending_render: None,
+            rendered: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,
@@ -1836,38 +1962,37 @@ impl AppState {
 
     /// The shortcut groups live in this state, highest priority first; Main UI is last.
     /// With Keyboard Shortcut Override off only Main UI is live.
-    pub fn active_keymaps(&self) -> Vec<&'static crate::keymap::Keymap> {
-        use crate::keymap::cached;
-        let mut maps = Vec::new();
+    pub fn active_keymaps(&self) -> Vec<&crate::keymap::Keymap> {
+        let mut groups = Vec::new();
         if self.keyboard_override {
             if crate::normals::entry(self).is_some_and(|(id, i)| self.scene.node(id).is_some_and(|n| n.active_entry == Some(i) && n.modifiers[i].sub_level == 1)) {
-                maps.push(cached::edit_normals());
+                groups.push("Edit Normals");
             }
             // A focused Track View window takes its own group first.
             if self.track_view.open && self.track_view.focused {
-                maps.push(cached::track_view());
+                groups.push("Track View");
             }
             if self.unwrap_active() {
-                maps.push(cached::unwrap_uvw());
+                groups.push("Unwrap UVW");
             }
             if self.skin_active() {
-                maps.push(cached::skin());
+                groups.push("Skin");
             }
             if self.spline_selected() {
-                maps.push(cached::editable_spline());
+                groups.push("Editable Spline");
             }
             if self.ffd_active().is_some() {
-                maps.push(cached::ffd());
+                groups.push("FFD");
             }
             if self.edit_poly_active() {
-                maps.push(cached::edit_poly());
+                groups.push("Edit Poly");
             }
             if self.poly_selected() {
-                maps.push(cached::editable_poly());
+                groups.push("Editable Poly");
             }
         }
-        maps.push(cached::main_ui());
-        maps
+        groups.push("Main UI");
+        groups.into_iter().map(|g| self.custom_keys.get(g)).collect()
     }
 
     pub fn hotkey(&self, chord: crate::keymap::Chord) -> Option<&'static str> {

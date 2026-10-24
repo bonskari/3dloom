@@ -239,6 +239,55 @@ impl ViewCamera {
     }
 }
 
+/// Clip-space matrix taking the part `sub` = [u0, v0, u1, v1] of the frame
+/// (fractions, v down) to the whole of normalised device coordinates.
+pub fn crop_ndc(sub: [f32; 4]) -> Mat4 {
+    let [u0, v0, u1, v1] = sub;
+    let (sx, sy) = (1.0 / (u1 - u0), 1.0 / (v1 - v0));
+    let (cx, cy) = (u0 + u1 - 1.0, 1.0 - v0 - v1);
+    Mat4::from_cols(
+        bevy::math::Vec4::new(sx, 0.0, 0.0, 0.0),
+        bevy::math::Vec4::new(0.0, sy, 0.0, 0.0),
+        bevy::math::Vec4::new(0.0, 0.0, 1.0, 0.0),
+        bevy::math::Vec4::new(-sx * cx, -sy * cy, 0.0, 1.0),
+    )
+}
+
+/// The projection of one render bucket: a part of the full frame's
+/// projection. Bevy never resizes it to the bucket's image, and the shadow
+/// cascades are fitted to the full frame, so the buckets join seamlessly.
+#[derive(Debug, Clone)]
+pub struct BucketProjection {
+    pub full: Projection,
+    pub crop: Mat4,
+}
+
+impl BucketProjection {
+    /// `camera` at image aspect `aspect`, the part `sub` of the frame.
+    pub fn new(camera: &ViewCamera, aspect: f32, sub: [f32; 4]) -> Self {
+        use bevy::render::camera::CameraProjection;
+        let mut full = camera.bevy_projection(aspect);
+        full.update(aspect, 1.0);
+        Self { full, crop: crop_ndc(sub) }
+    }
+}
+
+impl bevy::render::camera::CameraProjection for BucketProjection {
+    fn get_clip_from_view(&self) -> Mat4 {
+        self.crop * self.full.get_clip_from_view()
+    }
+    fn get_clip_from_view_for_sub(&self, _sub_view: &bevy::render::camera::SubCameraView) -> Mat4 {
+        self.get_clip_from_view()
+    }
+    fn update(&mut self, _width: f32, _height: f32) {}
+    fn far(&self) -> f32 {
+        self.full.far()
+    }
+    fn get_frustum_corners(&self, z_near: f32, z_far: f32) -> [bevy::math::Vec3A; 8] {
+        self.full.get_frustum_corners(z_near, z_far)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,5 +453,32 @@ mod tests {
             let b = t.transform_point2(bevy::math::Vec2::new(u, 1.0 - v));
             assert!((b.x - m[0]).abs() < 1e-5 && (b.y - (1.0 - m[1])).abs() < 1e-5, "{b} vs {m:?}");
         }
+    }
+
+    #[test]
+    fn a_bucket_projection_maps_its_part_of_the_frame_to_the_whole_image() {
+        use bevy::render::camera::CameraProjection;
+        let cam = ViewCamera { view: Mat4::IDENTITY, projection: Mat4::perspective_rh(50f32.to_radians(), 2.0, 0.1, 100.0) };
+        let full = BucketProjection::new(&cam, 2.0, [0.0, 0.0, 1.0, 1.0]);
+        let whole = cam.bevy_projection(2.0);
+        assert!(full.get_clip_from_view().abs_diff_eq(whole.get_clip_from_view(), 1e-5), "the whole frame is the plain projection");
+        // A view-space point and where it lands in the full frame.
+        let p = bevy::math::Vec4::new(1.0, 0.6, -5.0, 1.0);
+        let ndc = |m: Mat4| {
+            let c = m * p;
+            (c.x / c.w, c.y / c.w)
+        };
+        let (x, y) = ndc(full.get_clip_from_view());
+        let (u, v) = ((x + 1.0) * 0.5, (1.0 - y) * 0.5);
+        // The top-right quarter: the point's frame fraction maps into it.
+        let q = BucketProjection::new(&cam, 2.0, [0.5, 0.0, 1.0, 0.5]);
+        let (qx, qy) = ndc(q.get_clip_from_view());
+        let (qu, qv) = ((qx + 1.0) * 0.5, (1.0 - qy) * 0.5);
+        assert!((qu - (u - 0.5) * 2.0).abs() < 1e-4 && (qv - v * 2.0).abs() < 1e-4, "({u},{v}) -> ({qu},{qv})");
+        // Resizing to the bucket's image does not change it; shadows see the full frame.
+        let mut r = q.clone();
+        r.update(64.0, 64.0);
+        assert_eq!(r.get_clip_from_view(), q.get_clip_from_view());
+        assert_eq!(q.get_frustum_corners(-1.0, -10.0), whole.get_frustum_corners(-1.0, -10.0));
     }
 }

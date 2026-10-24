@@ -30,8 +30,41 @@ use bevy::DefaultPlugins;
 use bevy::app::PluginGroup;
 use bevy::color::Color;
 
-pub use convert::{diffuse_map_path, material_from_loom, material_from_surface, mesh_data, mesh_data_by_id, MeshData, ViewCamera};
+pub use convert::{diffuse_map_path, material_from_loom, material_from_surface, mesh_data, mesh_data_by_id, BucketProjection, MeshData, ViewCamera};
 use loom_scene::material::{Map, Surface, Surfaces};
+
+use bevy::render::camera::Projection;
+use bevy::render::view::RenderLayers;
+
+/// Render layers: the viewports see layer 0, a render sees the renderable
+/// objects (1), only the selected ones (2) or hidden ones too (3).
+const VIEWPORT_LAYER: usize = 0;
+const RENDER_LAYER: usize = 1;
+const SELECTED_LAYER: usize = 2;
+const HIDDEN_LAYER: usize = 3;
+
+/// Render Setup values a render uses (the Bevy renderer panel and the
+/// Common options that reach the renderer).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderOptions {
+    pub msaa: bool,
+    pub shadows: bool,
+    pub shadow_map_size: u32,
+    /// sRGB 0–1; the background's alpha is 0.
+    pub background: [f32; 3],
+    pub ambient: [f32; 3],
+    pub force_two_sided: bool,
+    /// Area to Render > Selected: only these nodes.
+    pub selected_only: Option<Vec<u64>>,
+    /// Render Hidden Geometry: the objects given to `sync_hidden` render too.
+    pub hidden: bool,
+}
+
+impl Default for RenderOptions {
+    fn default() -> Self {
+        Self { msaa: true, shadows: true, shadow_map_size: 4096, background: [0.0; 3], ambient: [1.0; 3], force_two_sided: false, selected_only: None, hidden: false }
+    }
+}
 
 /// One visible object: its world-space mesh and how it is coloured (its
 /// material resolved per face material ID, `Scene::node_surfaces`).
@@ -40,14 +73,17 @@ pub struct SceneObject<'a> {
     pub mesh: &'a loom_mesh::Mesh,
     pub wire_color: [u8; 3],
     pub surfaces: Option<Surfaces>,
+    /// Shows in renders (geometry, not helpers or camera icons).
+    pub renderable: bool,
 }
 
 struct Object {
-    /// One entity per material ID drawn (one for a single material).
-    entities: Vec<Entity>,
+    /// One entity (and material) per face material ID drawn; one for a single material.
+    parts: Vec<(Entity, Handle<StandardMaterial>)>,
     mesh_hash: u64,
     surfaces: Option<Surfaces>,
     wire_color: [u8; 3],
+    renderable: bool,
 }
 
 struct View {
@@ -99,6 +135,16 @@ pub struct BevyRenderer {
     bounds: Option<(Vec3, f32)>,
     /// Updates still wanted after a change (pipelines compiling, first frames).
     settle: u32,
+    /// Hidden objects a Render Hidden Geometry render adds (render layer only).
+    hidden: HashMap<u64, Object>,
+    /// The render in progress: its options and what it changed, to restore.
+    render: Option<ActiveRender>,
+}
+
+struct ActiveRender {
+    options: RenderOptions,
+    /// Materials made 2-sided by Force 2-Sided, with their own setting.
+    two_sided: Vec<(Handle<StandardMaterial>, bool, Option<bevy::render::render_resource::Face>)>,
 }
 
 impl BevyRenderer {
@@ -134,9 +180,27 @@ impl BevyRenderer {
             .spawn((
                 DirectionalLight { illuminance: 3000.0, shadows_enabled: true, ..Default::default() },
                 Transform::from_translation(KEY_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
+                // The key light lights (and shadows) every layer.
+                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER]),
             ))
             .id();
-        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, bounds: None, settle: 3 }
+        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, bounds: None, settle: 3, hidden: HashMap::new(), render: None }
+    }
+
+    /// The layers an object is on: viewports, renders, and the selection's
+    /// layer while a Selected render runs.
+    fn object_layers(&self, id: u64, renderable: bool, hidden: bool) -> RenderLayers {
+        if hidden {
+            return RenderLayers::layer(HIDDEN_LAYER);
+        }
+        let mut l = vec![VIEWPORT_LAYER];
+        if renderable {
+            l.push(RENDER_LAYER);
+            if self.render.as_ref().and_then(|r| r.options.selected_only.as_ref()).is_some_and(|s| s.contains(&id)) {
+                l.push(SELECTED_LAYER);
+            }
+        }
+        RenderLayers::from_layers(&l)
     }
 
     /// Brings the Bevy scene in line with `objects`: new nodes are spawned,
@@ -144,6 +208,21 @@ impl BevyRenderer {
     /// Multi/Sub-Object material splits the mesh into one entity per face
     /// material ID, each with its sub-material.
     pub fn sync(&mut self, objects: &[SceneObject]) {
+        let mut set = std::mem::take(&mut self.objects);
+        self.bounds = self.sync_set(&mut set, objects, false);
+        self.objects = set;
+    }
+
+    /// The hidden objects a Render Hidden Geometry render draws (seen by
+    /// renders only); an empty list removes them.
+    pub fn sync_hidden(&mut self, objects: &[SceneObject]) {
+        let mut set = std::mem::take(&mut self.hidden);
+        self.sync_set(&mut set, objects, true);
+        self.hidden = set;
+    }
+
+    /// Brings `set` in line with `objects`; returns their bounds.
+    fn sync_set(&mut self, set: &mut HashMap<u64, Object>, objects: &[SceneObject], hidden: bool) -> Option<(Vec3, f32)> {
         let mut seen = HashSet::new();
         let mut lo = Vec3::splat(f32::MAX);
         let mut hi = Vec3::splat(f32::MIN);
@@ -155,8 +234,16 @@ impl BevyRenderer {
                 hi = hi.max(Vec3::from(b.max()));
             }
             let hash = data.content_hash() ^ convert::material_ids_hash(o.mesh).rotate_left(1);
-            if let Some(obj) = self.objects.get(&o.id) {
+            let layers = self.object_layers(o.id, o.renderable, hidden);
+            if let Some(obj) = set.get_mut(&o.id) {
                 if obj.mesh_hash == hash && obj.surfaces == o.surfaces && obj.wire_color == o.wire_color {
+                    if obj.renderable != o.renderable {
+                        obj.renderable = o.renderable;
+                        for (e, _) in obj.parts.clone() {
+                            self.app.world_mut().entity_mut(e).insert(layers.clone());
+                        }
+                        self.settle = self.settle.max(3);
+                    }
                     continue;
                 }
             }
@@ -166,8 +253,7 @@ impl BevyRenderer {
                 Some(Surfaces::Single(s)) => vec![(None, Some(s.clone()))],
                 None => vec![(None, None)],
             };
-            let old = self.objects.remove(&o.id).map(|obj| obj.entities).unwrap_or_default();
-            for e in old {
+            for (e, _) in set.remove(&o.id).map(|obj| obj.parts).unwrap_or_default() {
                 self.app.world_mut().despawn(e);
             }
             let mut entities = Vec::new();
@@ -195,26 +281,36 @@ impl BevyRenderer {
                 let world = self.app.world_mut();
                 let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
                 let material_handle = world.resource_mut::<Assets<StandardMaterial>>().add(mat);
-                let mut e = world.spawn((Transform::IDENTITY, Mesh3d(mesh), MeshMaterial3d(material_handle)));
+                let mut e = world.spawn((Transform::IDENTITY, Mesh3d(mesh), MeshMaterial3d(material_handle.clone()), layers.clone()));
                 // Bevy computes bounds only once per entity: keep them current.
                 if let Some(b) = d.aabb() {
                     e.insert(b);
                 }
-                entities.push(e.id());
+                let entity = e.id();
+                if let Some(r) = self.render.as_mut().filter(|r| r.options.force_two_sided) {
+                    // A render in progress with Force 2-Sided: new materials too.
+                    let mut mats = self.app.world_mut().resource_mut::<Assets<StandardMaterial>>();
+                    if let Some(m) = mats.get_mut(&material_handle) {
+                        r.two_sided.push((material_handle.clone(), m.double_sided, m.cull_mode));
+                        m.double_sided = true;
+                        m.cull_mode = None;
+                    }
+                }
+                entities.push((entity, material_handle));
             }
-            self.objects.insert(o.id, Object { entities, mesh_hash: hash, surfaces: o.surfaces.clone(), wire_color: o.wire_color });
+            set.insert(o.id, Object { parts: entities, mesh_hash: hash, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable });
             self.settle = self.settle.max(3);
         }
-        let gone: Vec<u64> = self.objects.keys().filter(|id| !seen.contains(id)).copied().collect();
+        let gone: Vec<u64> = set.keys().filter(|id| !seen.contains(id)).copied().collect();
         for id in gone {
-            if let Some(obj) = self.objects.remove(&id) {
-                for e in obj.entities {
+            if let Some(obj) = set.remove(&id) {
+                for (e, _) in obj.parts {
                     self.app.world_mut().despawn(e);
                 }
             }
             self.settle = self.settle.max(3);
         }
-        self.bounds = (lo.x <= hi.x).then(|| ((lo + hi) * 0.5, ((hi - lo) * 0.5).length().max(1e-3)));
+        (lo.x <= hi.x).then(|| ((lo + hi) * 0.5, ((hi - lo) * 0.5).length().max(1e-3)))
     }
 
     /// Reads the image files again (Bitmap > Reload): textures are rebuilt on the next sync.
@@ -323,6 +419,12 @@ impl BevyRenderer {
     /// pixels on the next `update`, cleared to `clear` (sRGB, alpha 0 lets
     /// the background behind the image show). Views not set before an update stop rendering.
     pub fn set_view(&mut self, slot: u32, size: [u32; 2], camera: &ViewCamera, clear: [f32; 4], msaa: bool) {
+        let aspect = size[0].max(1) as f32 / size[1].max(1) as f32;
+        self.place_view(slot, size, camera.bevy_projection(aspect), camera.view, clear, msaa, RenderLayers::layer(VIEWPORT_LAYER));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn place_view(&mut self, slot: u32, size: [u32; 2], projection: Projection, view: bevy::math::Mat4, clear: [f32; 4], msaa: bool, layers: RenderLayers) {
         let clear = Color::srgba(clear[0], clear[1], clear[2], clear[3]);
         let size = [size[0].max(1), size[1].max(1)];
         let changed = match self.views.get(&slot) {
@@ -352,7 +454,6 @@ impl BevyRenderer {
         let v = self.views.get_mut(&slot).expect("inserted above");
         v.used = true;
         let (entity, image) = (v.camera, v.image.clone());
-        let aspect = size[0] as f32 / size[1] as f32;
         let mut e = self.app.world_mut().entity_mut(entity);
         // Camera is changed in place: inserting it anew would drop the
         // render target size Bevy computed, and the view would stop rendering.
@@ -363,7 +464,90 @@ impl BevyRenderer {
             cam.clear_color = ClearColorConfig::Custom(clear);
             cam.is_active = true;
         }
-        e.insert((camera.bevy_projection(aspect), Transform::from_matrix(camera.view.inverse()), if msaa { Msaa::Sample4 } else { Msaa::Off }));
+        e.insert((projection, Transform::from_matrix(view.inverse()), if msaa { Msaa::Sample4 } else { Msaa::Off }, layers));
+    }
+
+    /// Starts a render with `options`: shadows, shadow map size, ambient
+    /// light, Force 2-Sided and the Selected layer apply until `end_render`
+    /// (the Realistic viewports see them meanwhile too).
+    pub fn begin_render(&mut self, options: RenderOptions) {
+        self.end_render();
+        let world = self.app.world_mut();
+        world.insert_resource(DirectionalLightShadowMap { size: options.shadow_map_size.clamp(512, 8192) as usize });
+        world.insert_resource(AmbientLight { color: Color::srgb(options.ambient[0], options.ambient[1], options.ambient[2]), brightness: 250.0, affects_lightmapped_meshes: true });
+        if let Some(mut l) = world.get_mut::<DirectionalLight>(self.light) {
+            l.shadows_enabled = options.shadows;
+        }
+        let mut two_sided = Vec::new();
+        if options.force_two_sided {
+            let handles: Vec<Handle<StandardMaterial>> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
+            let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
+            for h in handles {
+                if let Some(m) = mats.get_mut(&h) {
+                    two_sided.push((h, m.double_sided, m.cull_mode));
+                    m.double_sided = true;
+                    m.cull_mode = None;
+                }
+            }
+        }
+        self.render = Some(ActiveRender { options, two_sided });
+        self.relayer();
+        self.settle = self.settle.max(3);
+    }
+
+    /// Puts every object on its layers again (the Selected layer changed).
+    fn relayer(&mut self) {
+        let list: Vec<(Entity, RenderLayers)> = self.objects.iter().flat_map(|(id, o)| o.parts.iter().map(|(e, _)| (*e, self.object_layers(*id, o.renderable, false)))).collect();
+        for (e, l) in list {
+            self.app.world_mut().entity_mut(e).insert(l);
+        }
+    }
+
+    /// Renders bucket `sub` = [u0, v0, u1, v1] (fractions of the frame, v
+    /// down) of `camera` at image aspect `aspect` into a `size` image on the
+    /// next `update`; read it back with `read_render`. Needs `begin_render`.
+    pub fn set_render_bucket(&mut self, camera: &ViewCamera, aspect: f32, sub: [f32; 4], size: [u32; 2]) -> Result<(), String> {
+        let Some(r) = self.render.as_ref() else { return Err("no render started".into()) };
+        let o = &r.options;
+        let layers = match &o.selected_only {
+            Some(_) => RenderLayers::layer(SELECTED_LAYER),
+            None if o.hidden => RenderLayers::from_layers(&[RENDER_LAYER, HIDDEN_LAYER]),
+            None => RenderLayers::layer(RENDER_LAYER),
+        };
+        let clear = [o.background[0], o.background[1], o.background[2], 0.0];
+        let msaa = o.msaa;
+        self.place_view(RENDER_SLOT, size, Projection::custom(BucketProjection::new(camera, aspect, sub)), camera.view, clear, msaa, layers);
+        Ok(())
+    }
+
+    /// The last bucket rendered (sRGB RGBA, background alpha 0).
+    pub fn read_render(&self) -> Result<image::RgbaImage, String> {
+        self.read_back(RENDER_SLOT)
+    }
+
+    /// Ends the render: its camera goes, the scene's own settings return.
+    pub fn end_render(&mut self) {
+        if let Some(v) = self.views.remove(&RENDER_SLOT) {
+            self.app.world_mut().despawn(v.camera);
+        }
+        let Some(r) = self.render.take() else { return };
+        let world = self.app.world_mut();
+        world.insert_resource(DirectionalLightShadowMap { size: 2048 });
+        world.insert_resource(AmbientLight { color: Color::WHITE, brightness: 250.0, affects_lightmapped_meshes: true });
+        if let Some(mut l) = world.get_mut::<DirectionalLight>(self.light) {
+            l.shadows_enabled = true;
+        }
+        let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
+        for (h, double_sided, cull) in r.two_sided {
+            if let Some(m) = mats.get_mut(&h) {
+                m.double_sided = double_sided;
+                m.cull_mode = cull;
+            }
+        }
+        if r.options.selected_only.is_some() {
+            self.relayer();
+        }
+        self.settle = self.settle.max(3);
     }
 
     /// Fits the key light's shadow range around the scene as seen from the active views.
@@ -417,24 +601,22 @@ impl BevyRenderer {
         (gpu.size.width == v.size[0] && gpu.size.height == v.size[1]).then(|| (v.generation, (*gpu.texture_view).clone()))
     }
 
-    /// Renders `camera` at `width` x `height` with 4x MSAA and 4096 px
-    /// shadows, and reads the pixels back (sRGB RGBA, opaque black background).
+    /// Renders `camera` at `width` x `height` in one go with the default
+    /// render options (4x MSAA, 4096 px shadows) and reads the pixels back
+    /// (sRGB RGBA, black background with alpha 0).
     pub fn render_image(&mut self, width: u32, height: u32, camera: &ViewCamera) -> Result<image::RgbaImage, String> {
         if width == 0 || height == 0 {
             return Err(format!("render size {width}x{height}"));
         }
-        self.app.insert_resource(DirectionalLightShadowMap { size: 4096 });
+        self.begin_render(RenderOptions::default());
         // A few frames: new pipelines, the target image and the shadow map settle first.
+        let aspect = width as f32 / height as f32;
         for _ in 0..4 {
-            self.set_view(RENDER_SLOT, [width, height], camera, [0.0, 0.0, 0.0, 1.0], true);
+            self.set_render_bucket(camera, aspect, [0.0, 0.0, 1.0, 1.0], [width, height])?;
             self.update();
         }
-        let result = self.read_back(RENDER_SLOT);
-        // The offline camera and its image are not kept.
-        if let Some(v) = self.views.remove(&RENDER_SLOT) {
-            self.app.world_mut().despawn(v.camera);
-        }
-        self.app.insert_resource(DirectionalLightShadowMap { size: 2048 });
+        let result = self.read_render();
+        self.end_render();
         result
     }
 

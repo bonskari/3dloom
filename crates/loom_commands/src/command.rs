@@ -64,6 +64,11 @@ schema_for! {
     String => json!({"type":"string"}),
     [f32; 3] => json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}),
 }
+impl ArgSchema for loom_scene::render::RenderArea {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["View","Selected","Region","Crop","Blowup"]})
+    }
+}
 impl ArgSchema for loom_scene::anim::Ort {
     fn schema() -> Value {
         json!({"type":"string","enum":["Constant","Cycle","Loop","PingPong","Linear","RelativeRepeat"]})
@@ -299,6 +304,11 @@ impl ArgSchema for crate::state::SelectionFilter {
 impl ArgSchema for crate::state::SelectionRegion {
     fn schema() -> Value {
         json!({"type":"string","enum":["Rectangular","Circular","Fence","Lasso","Paint"]})
+    }
+}
+impl ArgSchema for crate::state::ScaleKind {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Uniform","NonUniform","Squash"]})
     }
 }
 impl ArgSchema for crate::state::CoordSystem {
@@ -646,7 +656,8 @@ commands! {
     SelectAndMove => "Select and Move", MainUI, "Activate the Select and Move tool (W).";
     SelectAndRotate => "Select and Rotate", MainUI, "Activate the Select and Rotate tool (E).";
     SelectAndScale => "Select and Scale", MainUI, "Activate the Select and Scale tool (R).";
-    ScaleCycle => "Scale Cycle", MainUI, "Cycle the scale tool modes (Ctrl+E).";
+    ScaleCycle => "Scale Cycle", MainUI, "Cycle the Scale flyout: Uniform, Non-Uniform, Squash (Ctrl+E); from another tool it first turns on Scale.";
+    ScaleType => "Scale Type", Loom, "Main Toolbar > Scale flyout: Uniform (all axes alike), NonUniform (the handle's axes) or Squash (the handle's axes, the others the opposite way); turns on Scale." { kind: crate::state::ScaleKind };
     SubObjectLevelCycle => "Sub-object Level Cycle", MainUI, "Cycle vertex, edge, face sub-object levels (Insert).";
     SubObjectSelectionToggle => "Sub-object Selection Toggle", MainUI, "Toggle between object and sub-object level (Ctrl+B).";
     SelectionLockToggle => "Selection Lock Toggle", MainUI, "Lock or unlock the selection (Space).";
@@ -685,6 +696,7 @@ commands! {
     AddModifier => "Add Modifier", Loom, "Add a modifier from the Modifier List above the active entry of the selected objects." { name: String };
     DeleteModifier => "Delete Modifier", Loom, "Remove stack entry `index` (0 = bottom) from the selected objects." { index: u32 };
     MoveModifier => "Move Modifier", Loom, "Reorder the stack: entry `from` goes to position `to`." { from: u32, to: u32 };
+    CopyModifier => "Copy Modifier", Loom, "Shift-drag (copy) / Ctrl-drag (`instance`) in the stack: a copy of entry `from` is inserted so it ends up at position `to` (0 = bottom, up to the stack length)." { from: u32, to: u32, instance: bool };
     ToggleModifier => "Toggle Modifier", Loom, "Modifier on / off (the stack lightbulb)." { index: u32, on: bool };
     ToggleModifierInViewport => "Toggle Modifier In Viewport", Loom, "Modifier on / off in viewports only." { index: u32, on: bool };
     RenameModifier => "Rename Modifier", Loom, "Rename a stack entry." { index: u32, name: String };
@@ -740,6 +752,9 @@ commands! {
     SubtractSpline => "Subtract (Spline)", MainUI, "Editable Spline > Boolean Subtract the second selected closed spline from the first.";
     WeldVerticesSpline => "Weld Vertices (Spline)", MainUI, "Editable Spline > Weld the selected vertices within the Weld threshold.";
     SplineRefine => "Spline Refine", Loom, "Editable Spline: add a knot at parameter `t` of flat segment `segment` of node `node`." { node: u64, segment: u32, t: f32 };
+    SplineRefineAtVertex => "Spline Refine At Vertex", Loom, "Editable Spline > Refine with Connect: a click on existing flat knot `knot` (`segment`/`t` is the segment point there) asks Refine / Connect Only, or runs the remembered choice." { node: u64, knot: u32, segment: u32, t: f32 };
+    SplineRefineReply => "Spline Refine Reply", Loom, "Answer the open Refine prompt: Connect Only joins the existing vertex to the connection, Refine adds a vertex next to it; `dont_show` remembers the answer." { connect_only: bool, dont_show: bool };
+    SplineFilletMode => "Spline Fillet Mode", Loom, "Editable Spline > Geometry > Fillet (or Chamfer) button: dragging on a selected vertex rounds (cuts) the selected vertices." { chamfer: bool };
     SplineFillet => "Spline Fillet", Loom, "Editable Spline: fillet the selected vertices by `amount`." { amount: f32 };
     SplineChamfer => "Spline Chamfer", Loom, "Editable Spline: chamfer the selected vertices by `amount`." { amount: f32 };
     SetVertexType => "Set Vertex Type", Loom, "Editable Spline: Corner / Smooth / Bezier / Bezier Corner for the selected vertices." { kind: String };
@@ -756,7 +771,7 @@ commands! {
     SplineExplode => "Spline Explode", Loom, "Editable Spline: explode the selected splines into segments, as splines or objects." { to_objects: bool };
     SplineSettings => "Spline Settings", Loom, "Editable Spline rollout settings by name (Weld Threshold, Fillet, Chamfer, Outline, Outline Center, Divisions, Boolean, Mirror Axis, Mirror Copy, Mirror About Pivot, New Vertex Type, Refine Connect, Refine Linear, Lock Handles, Area Selection, …)." { name: String, value: f64 };
     CreateShapeFromEdges => "Create Shape From Edges", EditablePoly, "Editable Poly > Create Shape From Selection: the selected edges become a new Editable Spline (Smooth or Linear)." { name: Option<String>, smooth: bool };
-    ExtrudeAlongSpline => "Extrude Along Spline", Loom, "Editable Poly: sweep the selected polygons along shape `spline`'s first spline." { spline: u64, segments: u32, taper: f32, twist: f32, align: bool };
+    ExtrudeAlongSpline => "Extrude Along Spline", Loom, "Editable Poly: sweep the selected polygons along shape `spline`'s first spline: the end scales by 1 + `taper`, `taper_curve` bulges (+) or pinches (−) the middle, `twist` degrees along it, and with `align` the path starts along the face normal, turned `rotation` degrees about it." { spline: u64, segments: u32, taper: f32, taper_curve: f32, twist: f32, rotation: f32, align: bool };
     CreateBoolean => "Create Boolean", Loom, "Compound Objects > Boolean: the selected object (A) and `operand_b` become a Boolean (operation 0 Union, 1 Intersection, 2 A-B, 3 B-A, 4-7 Cut); `move_operand` removes B." { operand_b: u64, operation: u32, move_operand: bool };
     PickOperandB => "Pick Operand B", Loom, "Compound Objects > Boolean > Pick Operand B: click the second object.";
     CreateProBoolean => "Create ProBoolean", Loom, "Compound Objects > ProBoolean: the selected object becomes a ProBoolean base.";
@@ -854,10 +869,19 @@ commands! {
     // --- Properties, preferences, units, customize ---
     ObjectProperties => "Object Properties", MainUI, "Open the Object Properties dialog for the selection (Edit menu, quad menu).";
     Preferences => "Preferences", Loom, "Open Customize > Preferences.";
-    SetPreference => "Set Preference", Loom, "Set a Preferences value by name (booleans as 0/1): Auto Backup Enable, Auto Backup Count, Auto Backup Interval (minutes), Scene Undo Levels, Reference Coordinate System Constant, Auto Window/Crossing by Direction, Paint Selection Brush Size, Spinner Precision, Spinner Snap, Spinner Use Snap, Spinner Wrap Cursor, Viewport Tooltips, Show Cross Hair Cursor, Transform Gizmos, Show Axis Labels, Allow Multiple Gizmos, Gizmo Size, Move Plane Handle Size, Move Plane Handle Offset, Center Box Handle, Rotate Free Rotation, Rotate Show Tripod, Rotate Screen Handle, Rotate Show Pie Slice, Rotate Angle Data, Scale Size, Rotation Increment, Viewport Orbit Snap Angle." { name: String, value: f64 };
+    SetPreference => "Set Preference", Loom, "Set a Preferences value by name (booleans as 0/1): Auto Backup Enable, Auto Backup Count, Auto Backup Interval (minutes), Scene Undo Levels, Reference Coordinate System Constant, Auto Window/Crossing by Direction, Paint Selection Brush Size, Spinner Precision, Spinner Snap, Spinner Use Snap, Spinner Wrap Cursor, Viewport Tooltips, Show Cross Hair Cursor, Transform Gizmos, Show Axis Labels, Allow Multiple Gizmos, Gizmo Size, Move Plane Handle Size, Move Plane Handle Offset, Center Box Handle, Rotate Free Rotation, Rotate Show Tripod, Rotate Screen Handle, Rotate Show Pie Slice, Rotate Angle Data, Scale Size, Rotation Increment, Viewport Orbit Snap Angle, Space Locks Selection, Recent Files in File Menu." { name: String, value: f64 };
     UnitsSetup => "Units Setup", Loom, "Open Customize > Units Setup.";
     SetUnits => "Set Units", Loom, "Units Setup: `system_unit` Inches/Feet/Millimeters/Centimeters/Meters/Kilometers, `system_scale` units per system unit, `display` Generic / Millimeters / Centimeters / Meters / Kilometers / Decimal Inches / Decimal Feet / Feet w/ Decimal Inches / Custom (with custom_name, custom_value, custom_unit)." { system_unit: Option<String>, system_scale: Option<f32>, display: Option<String>, custom_name: Option<String>, custom_value: Option<f32>, custom_unit: Option<String> };
-    CustomizeUserInterface => "Customize User Interface", Loom, "Open Customize > Customize User Interface (Keyboard panel, read-only).";
+    CustomizeUserInterface => "Customize User Interface", Loom, "Open Customize > Customize User Interface (Keyboard panel).";
+    AssignShortcut => "Assign Shortcut", Loom, "Customize User Interface > Keyboard > Assign: bind `chord` (chart spelling, e.g. Alt+Ctrl+Z, NumPad +) to `action` in `group` (Main UI, Editable Poly, Edit Poly, Editable Spline, FFD, Unwrap UVW, Skin, Track View, Edit Normals); the action that had the chord there loses it. Saved in the settings file." { group: String, action: String, chord: String };
+    RemoveShortcut => "Remove Shortcut", Loom, "Customize User Interface > Keyboard > Remove: unbind every shortcut of `action` in `group`." { group: String, action: String };
+    ResetShortcuts => "Reset Shortcuts", Loom, "Customize User Interface > Keyboard > Reset: every group back to the default shortcuts.";
+    SaveShortcuts => "Save Shortcuts", Loom, "Customize User Interface > Keyboard > Save: write every group's shortcuts to a .kbd file (3dLoom's own JSON format); without `path` the Save dialog shows." { path: Option<String> };
+    LoadShortcuts => "Load Shortcuts", Loom, "Customize User Interface > Keyboard > Load: read shortcuts written by Save Shortcuts; the groups in the file replace the current ones. Without `path` the Open dialog shows." { path: Option<String> };
+    LoadCustomUiScheme => "Load Custom UI Scheme", MainUI, "Customize > Load Custom UI Scheme: apply a .ui file written by Save Custom UI Scheme (Show UI toggles and shortcuts); without `path` the Open dialog shows." { path: Option<String> };
+    SaveCustomUiScheme => "Save Custom UI Scheme", MainUI, "Customize > Save Custom UI Scheme: write the Show UI toggles and shortcuts to a .ui file; without `path` the Save dialog shows." { path: Option<String> };
+    RevertToStartupUi => "Revert to Startup UI", MainUI, "Customize > Revert to Startup Layout: the Show UI toggles as they were when 3dLoom started.";
+    ShowCommandPanelToggle => "Show Command Panel Toggle", MainUI, "Customize > Show UI > Show Command Panel: show or hide the command panel.";
     SelectAndManipulate => "Select and Manipulate", MainUI, "Toggle manipulators: drag the radius / height handles of primitives in viewports.";
     Manipulate => "Manipulate", Loom, "Add `delta` to a float parameter of a node (what a manipulator drag does)." { id: u64, name: String, delta: f64 };
 
@@ -889,7 +913,7 @@ commands! {
     PreviewSelectMode => "Preview Select Mode", EditablePoly, "Cycle Preview Selection: Off, SubObj, Multi.";
     Hide => "Hide", EditablePoly, "Hide the selected vertices or polygons (Alt+H).";
     Connect => "Connect", EditablePoly, "Vertex level: connect the selected vertex pairs across their polygons. Edge / Border level: Connect Edges with the current settings (Shift+Ctrl+E).";
-    Remove => "Remove", EditablePoly, "Vertex level: remove the selected vertices and merge their polygons. Edge level: remove the edges (Backspace).";
+    Remove => "Remove", EditablePoly, "Vertex level: remove the selected vertices and merge their polygons (Backspace). Edge level: remove the edges (Backspace).";
     Break => "Break", EditablePoly, "Break the selected vertices so every polygon gets its own corner.";
     SplitEdges => "Split Edges", EditablePoly, "Split the mesh along the selected edges (open them into borders).";
     TargetWeldMode => "Target Weld Mode", EditablePoly, "Toggle Target Weld: pick a vertex, then the vertex to weld it onto (Shift+Ctrl+W). Picks arrive as Pick Sub.";
@@ -929,7 +953,7 @@ commands! {
     Slice => "Slice", EditablePoly, "Slice the mesh (or the selected polygons) with the Slice Plane.";
     ResetSlicePlane => "Reset Slice Plane", EditablePoly, "Put the Slice Plane back at the selection's centre, level.";
     QuickSliceMode => "Quickslice Mode", EditablePoly, "Toggle QuickSlice: click two points; the plane through them and the view direction slices the mesh (Shift+Ctrl+Q).";
-    Cut => "Cut", EditablePoly, "Toggle Cut: click a start point and an end point on the surface (Alt+C).";
+    Cut => "Cut", EditablePoly, "Toggle Cut: click a start point, then each click cuts on from the last point; right-click ends the cut, a second right-click leaves Cut (Alt+C).";
     MeshSmooth => "MeshSmooth", EditablePoly, "MSmooth the selection with the current settings.";
     MeshSmoothSettings => "MeshSmooth Settings", EditablePoly, "Open the MeshSmooth settings window.";
     Tessellate => "Tessellate", EditablePoly, "Tessellate the selected polygons with the current settings.";
@@ -960,7 +984,7 @@ commands! {
     Chamfer => "Chamfer", Loom, "Chamfer the selected vertices (amount, open) or edges (amount, segments, open); sets the Chamfer settings." { amount: f32, segments: u32, open: bool };
     ConnectEdges => "Connect Edges", Loom, "Connect the selected edges with `segments` new edges; pinch and slide; sets the Connect settings." { segments: u32, pinch: f32, slide: f32 };
     ConnectVertices => "Connect Vertices", Loom, "Connect the selected vertex pairs that share a polygon.";
-    Bridge => "Bridge", Loom, "Bridge two selected borders or two selected polygons; sets the Bridge settings." { segments: u32, smooth: f32, bridge_adjacent: f32, twist1: i32, twist2: i32 };
+    Bridge => "Bridge", Loom, "Bridge two selected borders or two selected polygons; at Edge level the selected border edges pair up in increasing order of id (or the two picked edges with Bridge Specific Edges); sets the Bridge settings." { segments: u32, smooth: f32, bridge_adjacent: f32, twist1: i32, twist2: i32 };
     Extrude => "Extrude", Loom, "Extrude the selection: vertices / edges by height and base width, polygons by height with `kind`; sets the Extrude settings." { height: f32, width: f32, kind: crate::state::ExtrudeKind };
     Inset => "Inset", Loom, "Inset the selected polygons by `amount`, as a group or by polygon; sets the Inset settings." { amount: f32, by_polygon: bool };
     Bevel => "Bevel", Loom, "Bevel the selected polygons: extrude by `height`, then outline by `outline`; sets the Bevel settings." { height: f32, outline: f32, kind: crate::state::ExtrudeKind };
@@ -1024,8 +1048,22 @@ commands! {
     SetKeyMode => "Set Key Mode", MainUI, "Toggle Set Key mode ('): pose freely, then Set Keys commits the pose as keys; changing frame discards it.";
     SetKeys => "Set Keys", MainUI, "Key the filtered tracks of the selection at the current frame (K); in Set Key mode, commit the pose.";
     MaterialEditorToggle => "Material Editor Toggle", MainUI, "Open or close the Material Editor (M).";
-    Render => "Render", MainUI, "Render the active view to a PNG (`path`; without it the file dialog shows) at `width` x `height` (default: the Render SetUp size), with lights and shadows." { path: Option<String>, width: Option<u32>, height: Option<u32> };
-    RenderSetup => "Render SetUp...", MainUI, "Render SetUp: set the output size (`width`, `height`); with neither the dialog shows." { width: Option<u32>, height: Option<u32> };
+    Render => "Render", MainUI, "Render Production (Shift+Q): render the Rendered Frame Window's viewport (the active one unless Lock to Viewport) with the Render Setup settings into the Rendered Frame Window, without blocking; `path` also saves the image there (png, jpg, bmp, tga, exr), as Save File does with the Render Output file; `width` x `height` override the output size for this render." { path: Option<String>, width: Option<u32>, height: Option<u32> };
+    RenderIterative => "Render Iterative", MainUI, "Render Iterative: render into the Rendered Frame Window without saving a file; Region and Selected keep the rest of the window's image.";
+    RenderLast => "Render Last", MainUI, "Render Last (F9): repeat the last render (same viewport and area), without saving a file.";
+    RenderSetup => "Render SetUp...", MainUI, "Render Setup > Common: output size (`width`, `height`, 1-8192; with Image Aspect locked one changes the other), `image_aspect` (sets Height), `pixel_aspect`, the two aspect locks, Options `render_hidden` / `force_two_sided`, Render Output `output` file (empty clears) and `save_file`; with no argument the dialog shows (F10)." { width: Option<u32>, height: Option<u32>, image_aspect: Option<f32>, pixel_aspect: Option<f32>, lock_image_aspect: Option<bool>, lock_pixel_aspect: Option<bool>, render_hidden: Option<bool>, force_two_sided: Option<bool>, save_file: Option<bool>, output: Option<String> };
+    BevyRendererSettings => "Bevy Renderer Settings", Loom, "Render Setup > Renderer (Bevy): 4x MSAA `antialiasing`, `supersampling` 1-4 (samples per pixel side), key light `shadows`, `shadow_map_size` 512-8192, `background` and `ambient` colours (sRGB 0-1); omitted fields keep their value." { antialiasing: Option<bool>, supersampling: Option<u32>, shadows: Option<bool>, shadow_map_size: Option<u32>, background: Option<[f32; 3]>, ambient: Option<[f32; 3]> };
+    AreaToRender => "Area to Render", Loom, "Rendered Frame Window > Area to Render: View, Selected, Region, Crop or Blowup, and the `region` rectangle [x0, y0, x1, y1] as fractions of the frame (y down) for Region / Crop, or the Blowup one (kept at the output's shape)." { area: Option<loom_scene::render::RenderArea>, region: Option<[f32; 4]> };
+    EditRegion => "Edit Region", MainUI, "Rendered Frame Window > Edit Region: toggle editing the render region in the viewport (View and Selected switch to Region).";
+    RenderViewport => "Render Viewport", Loom, "Rendered Frame Window / Render Setup: the `viewport` to render (index), Lock to Viewport (`lock`) and Production or Iterative (`iterative`)." { viewport: Option<u32>, lock: Option<bool>, iterative: Option<bool> };
+    RenderedFrameWindow => "Rendered Frame Window", MainUI, "Open or close the Rendered Frame Window.";
+    SaveRenderedImage => "Save Image", MainUI, "Rendered Frame Window > Save Image: write the rendered image to `path` (png, jpg, bmp, tga, exr by extension); without it the file dialog shows." { path: Option<String> };
+    CopyRenderedImage => "Copy Image", MainUI, "Rendered Frame Window > Copy Image: put the image as displayed (channel toggles applied) on the clipboard.";
+    CloneRenderedFrameWindow => "Clone Rendered Frame Window", MainUI, "Rendered Frame Window > Clone: a new window holding a copy of the image, to compare with the next render.";
+    ClearRenderedFrameWindow => "Clear Rendered Frame Window", MainUI, "Rendered Frame Window > Clear: remove the image from the window.";
+    RenderedFrameWindowChannels => "Rendered Frame Window Channels", Loom, "Rendered Frame Window channel toggles: Enable Red / Green / Blue Channel, Display Alpha Channel (`alpha`), Monochrome (`mono`); omitted ones keep their state." { red: Option<bool>, green: Option<bool>, blue: Option<bool>, alpha: Option<bool>, mono: Option<bool> };
+    CancelRender => "Cancel Render", MainUI, "Rendering progress > Cancel: stop the render in progress; the buckets done so far stay in the window.";
+    PauseRender => "Pause Render", MainUI, "Rendering progress > Pause / Resume.";
     MaterialEditorSlot => "Material Editor Slot", Loom, "Make sample slot `slot` (0-23) the active one." { slot: u32 };
     SetMaterialColor => "Set Material Color", Loom, "Blinn Basic Parameters colour of a slot's material (slot omitted = active): Ambient, Diffuse or Specular, 0-255 RGB; Ambient follows Diffuse while locked." { slot: Option<u32>, which: String, rgb: [u8; 3] };
     SetMaterialParameter => "Set Material Parameter", Loom, "A slot's material value by label: Specular Level, Glossiness, Soften, Self-Illumination, Opacity, 2-Sided, Wire, Faceted, Ambient/Diffuse Lock, Show Map in Viewport (booleans as 0/1)." { slot: Option<u32>, name: String, value: f64 };
@@ -1347,6 +1385,8 @@ commands! {
     LineRemoveLastKnot => "Line Remove Last Knot", Loom, "Line tool: Backspace removes the last knot." { node: u64 };
     LineEnd => "Line End", Loom, "Line tool: the line ends; a line with fewer than two knots is removed." { node: u64 };
     LineClose => "Line Close", Loom, "Line tool: clicking the first knot closes the spline." { node: u64 };
+    LineCloseAsk => "Line Close Ask", Loom, "Line tool: a click on the first knot asks \"Close spline?\"; `point`/`smooth` are the knot a No adds there." { node: u64, point: [f32; 3], smooth: bool };
+    LineCloseReply => "Line Close Reply", Loom, "Answer \"Close spline?\": Yes closes the line (the Line tool then ends it), No adds the clicked knot and drawing goes on." { close: bool };
     CreateCamera => "Create Camera", Loom, "Create a camera at the active viewport's eye looking at its target (Target camera gets a target node)." { target: bool };
     CreateCameraAt => "Create Camera At", Loom, "Create > Cameras: a camera at `position` looking at `look_at`; a Target camera puts its target node there, a Free camera keeps the gap as its Target Distance." { target: bool, position: [f32; 3], look_at: [f32; 3] };
     CameraType => "Camera Type", Loom, "Camera Parameters > Type: make a camera a Target camera (adds a target at Target Distance) or a Free camera (removes its target, keeps its aim)." { id: u64, target: bool };
@@ -1535,7 +1575,7 @@ commands! {
     UnhideByName => "Unhide By Name", Loom, "Open the Select From Scene dialog to unhide objects by name.";
     FreezeByName => "Freeze By Name", Loom, "Open the Select From Scene dialog to freeze objects by name.";
     UnfreezeByName => "Unfreeze By Name", Loom, "Open the Select From Scene dialog to unfreeze objects by name.";
-    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm: bake rotation and scale into the mesh and reset the node transform (position kept).";
+    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm > Reset Selected: the node's rotation and scale (and pivot offset) move into a new XForm modifier on top of the stack, the node keeps only its position; collapse the stack to bake them.";
     RescaleWorldUnits => "Rescale World Units", Loom, "Utilities > Rescale World Units: scale the whole scene by a factor." { factor: f32 };
     Measure => "Measure", Loom, "Utilities > Measure: dimensions, surface area, volume and centre of mass of the selection.";
     SetWireColor => "Set Wire Color", Loom, "Set a node's object colour (Name and Color rollout)." { id: u64, rgb: [u8; 3] };
@@ -1561,6 +1601,14 @@ commands! {
     EdgeLoop => "Edge Loop", Loom, "Grow the selected edges into their loops.";
     ExtrudeFaces => "Extrude Faces", Loom, "Extrude the selected faces along their normals." { distance: f32 };
     DissolveEdges => "Dissolve Edges", Loom, "Remove the selected edges, merging their faces.";
+    CleanRemove => "Clean Remove", Loom, "Ctrl+Remove at Edge level (also Ctrl+Backspace): remove the selected edges and the vertices they leave with only two edges.";
+    SwiftLoopMode => "Swift Loop Mode", Loom, "Toggle Swift Loop: each click on the surface inserts an edge loop across the ring of the nearest edge; right-click exits.";
+    SwiftLoop => "Swift Loop", Loom, "Insert the edge loop through raw edge `edge` of `node`, `t` along it from its canonical origin (what a Swift Loop click does)." { node: u64, edge: u32, t: f32 };
+    LoopMode => "Loop Mode", Loom, "Toggle Modify Selection > Loop Mode: a clicked edge selects its loop (Alt deselects it); two adjacent vertices or polygons select their loop.";
+    SelectByHalf => "Select By Half", Loom, "Selection > By Half: select the sub-objects whose centre is on the positive side of the pivot along `axis`; `invert` selects the negative side (Invert Axis)." { axis: Axis, invert: bool };
+    BridgeSpecificEdges => "Bridge Specific Edges", Loom, "Bridge Edges dialog: on bridges the two picked edges (Pick Edge 1 / 2), off bridges the edge selection (Use Edge Selection)." { on: bool };
+    PickBridgeEdge => "Pick Bridge Edge", Loom, "Bridge Edges dialog > Pick Edge 1 (`which` 1) / Pick Edge 2 (2): the next edge pick (Pick Sub) becomes that edge." { which: u32 };
+    DeletePolygons => "Delete Polygons", Loom, "Delete the selected polygons; `delete_isolated` also deletes the vertices left with no polygon (the answer to the Delete prompt)." { delete_isolated: bool };
     Collapse => "Collapse", Loom, "Collapse the selected sub-objects to their centre.";
     ConnectEdgeRing => "Connect Edge Ring", Loom, "Connect the selected edge ring with a new loop.";
     Rename => "Rename", Loom, "Rename a node." { id: u64, name: String };
@@ -1652,7 +1700,6 @@ pub const DEFERRED_SPLINE: &[(&str, &str)] = &[];
 /// spec section that excludes them.
 pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
     ("Environment Dialog Toggle", "3"),
-    ("Render Last", "3"),
     ("Create Animated Sequence File...", "3"),
     ("Hide Particle Systems Toggle", "3"),
     ("Hide Space Warps Toggle", "3"),

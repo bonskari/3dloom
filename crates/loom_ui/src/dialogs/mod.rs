@@ -11,6 +11,7 @@ pub mod preferences;
 pub mod units_setup;
 pub mod mirror;
 pub mod poly_settings;
+pub mod delete_isolated;
 pub mod detach;
 pub mod manage_layers;
 pub mod normal_align;
@@ -25,6 +26,8 @@ pub mod file_dialog;
 pub mod material_editor;
 pub mod render_setup;
 pub mod save_changes;
+pub mod spline_prompts;
+pub mod topology_warning;
 pub mod merge;
 pub mod unwrap_dialogs;
 pub mod rig_dialogs;
@@ -111,7 +114,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::MaterialEditorOptions => material_editor::options(ctx, app, &mut open),
         Dialog::SpecifyCropping => material_editor::specify_cropping(ctx, app, &mut open),
         Dialog::CopyMap { from, to } => material_editor::copy_map(ctx, app, from, to, &mut open),
-        Dialog::RenderFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::RenderFile | Dialog::SaveRenderedImage => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
         Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),
         Dialog::SelectFromScene => select_from_scene::show(ctx, app, &mut open),
@@ -133,9 +136,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CustomizeUI => customize_ui::show(ctx, app, &mut open),
         Dialog::PolySettings(kind) => poly_settings::show(ctx, app, kind, &mut open),
         Dialog::Detach => detach::show(ctx, app, &mut open),
+        Dialog::DeleteIsolatedVertices => delete_isolated::show(ctx, app, &mut open),
         Dialog::LayerManager => manage_layers::show(ctx, app, &mut open),
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::SaveCustomUiScheme | Dialog::LoadCustomUiScheme | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::SaveChanges(action) => save_changes::show(ctx, app, action, &mut open),
+        Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
+        Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
+        Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
         Dialog::PickTexture | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
@@ -154,6 +161,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
     if !open && app.state.dialog == Some(dialog) {
         let _ = app.dispatch(Command::CloseDialog);
+        // A cancelled Keyboard panel Save / Load goes back to the panel.
+        if matches!(dialog, Dialog::SaveShortcuts | Dialog::LoadShortcuts) {
+            let _ = app.dispatch(Command::CustomizeUserInterface);
+        }
     }
 }
 

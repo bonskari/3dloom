@@ -311,7 +311,7 @@ fn spinner_with(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, value: f32, r
     ui.horizontal(|ui| {
         ui.label(label);
         let mut v = value;
-        let r = ui.add(egui::DragValue::new(&mut v).range(range).fixed_decimals(decimals).speed(if decimals > 1 { 0.01 } else { 0.5 }));
+        let r = ui.add(crate::spinner::spin(ui, &mut v, range).fixed_decimals(decimals).speed(if decimals > 1 { 0.01 } else { 0.5 }));
         if r.drag_started() {
             app.state.undo.begin(label);
         }
@@ -798,7 +798,7 @@ fn standard_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                 }
                 let mut amount = map.as_ref().map(|b| b.amount).unwrap_or(0.0);
                 let range = if *channel == "Bump" { -999.0..=999.0 } else { 0.0..=100.0 };
-                let r = ui.add_enabled(map.is_some(), egui::DragValue::new(&mut amount).range(range).speed(0.5));
+                let r = ui.add_enabled(map.is_some(), crate::spinner::spin(ui, &mut amount, range).speed(0.5));
                 if r.drag_started() {
                     app.state.undo.begin("Map Amount");
                 }
@@ -859,7 +859,7 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                         ctx.data_mut(|d| d.insert_temp(sel_id, i));
                     }
                     let mut id = s.id as u32;
-                    if ui.add(egui::DragValue::new(&mut id).range(1..=65535)).changed() {
+                    if ui.add(crate::spinner::spin(ui, &mut id, 1..=65535)).changed() {
                         let _ = app.dispatch(Command::MultiSubSetEntry { index: i as u32, id: Some(id), name: None, enabled: None, color: None });
                     }
                     let name_id = egui::Id::new(("multi_sub_name", i));
@@ -896,7 +896,7 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
         egui::Window::new("Set Number of Materials").collapsible(false).resizable(false).show(&ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Number of Materials:");
-                ui.add(egui::DragValue::new(&mut n).range(1..=1000));
+                ui.add(crate::spinner::spin(ui, &mut n, 1..=1000));
             });
             ui.horizontal(|ui| {
                 if ui.button("OK").clicked() {
@@ -1301,13 +1301,13 @@ pub fn options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.checkbox(&mut o.maps_as_2d, "Display Maps as 2D");
         egui::Grid::new("mtl_options_lights").num_columns(2).show(ui, |ui| {
             ui.label("Top Light Multiplier:");
-            ui.add(egui::DragValue::new(&mut o.top_multiplier).range(0.0..=10.0).speed(0.05).fixed_decimals(2));
+            ui.add(crate::spinner::spin(ui, &mut o.top_multiplier, 0.0..=10.0).speed(0.05).fixed_decimals(2));
             ui.end_row();
             ui.label("Back Light Multiplier:");
-            ui.add(egui::DragValue::new(&mut o.back_multiplier).range(0.0..=10.0).speed(0.05).fixed_decimals(2));
+            ui.add(crate::spinner::spin(ui, &mut o.back_multiplier, 0.0..=10.0).speed(0.05).fixed_decimals(2));
             ui.end_row();
             ui.label("Background Intensity:");
-            ui.add(egui::DragValue::new(&mut o.background_intensity).range(0.0..=1.0).speed(0.01).fixed_decimals(2));
+            ui.add(crate::spinner::spin(ui, &mut o.background_intensity, 0.0..=1.0).speed(0.01).fixed_decimals(2));
             ui.end_row();
         });
         ui.label(egui::RichText::new("Slots").strong());

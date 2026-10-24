@@ -41,7 +41,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 app.by_angle = if by_angle { Some(45.0) } else { None };
             }
             let mut a = app.by_angle.unwrap_or(45.0);
-            if ui.add_enabled(by_angle, egui::DragValue::new(&mut a).speed(app.spinner_speed(0.5)).range(0.0..=180.0).fixed_decimals(1)).changed() {
+            if ui.add_enabled(by_angle, crate::spinner::spin(ui, &mut a, 0.0..=180.0).speed(app.spinner_speed(0.5)).fixed_decimals(1)).changed() {
                 app.by_angle = Some(a);
             }
         });
@@ -94,13 +94,24 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         });
         let n = app.state.sub_selection.len();
-        let what = match app.state.selection_mode {
+        // One sub-object: its number, 1-based as the reference counts them.
+        let single = if n == 1 { app.state.sub_selection.iter().next() } else { None };
+        let numbered = single.and_then(|(node, id)| {
+            let mesh = app.state.scene.node(node)?.cage_mesh().into_owned();
+            Some(match (app.state.selection_mode, id) {
+                (SelectionMode::Vertex, loom_commands::SubObjectId::Vertex(v)) => format!("Vertex {} Selected", v.0 + 1),
+                (SelectionMode::Edge | SelectionMode::Border, loom_commands::SubObjectId::Edge(e)) => format!("Edge {} Selected", mesh.edge_number(e)?),
+                (SelectionMode::Face, loom_commands::SubObjectId::Face(f)) => format!("Polygon {} Selected", f.0 + 1),
+                _ => return None,
+            })
+        });
+        let what = if let Some(s) = numbered { s } else { match app.state.selection_mode {
             SelectionMode::Object => String::new(),
             SelectionMode::Vertex => format!("{n} Vertices Selected"),
             SelectionMode::Edge | SelectionMode::Border => format!("{n} Edges Selected"),
             SelectionMode::Face => format!("{n} Polygons Selected"),
             SelectionMode::Element => format!("{n} Elements Selected"),
-        };
+        } };
         if !what.is_empty() {
             ui.label(what);
         }

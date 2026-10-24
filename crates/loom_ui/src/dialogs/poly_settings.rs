@@ -3,7 +3,7 @@
 
 use crate::LoomApp;
 use eframe::egui;
-use loom_commands::{Command, Dialog, ExtrudeKind, PolySettings, PolySettingsKind, SubObjectId};
+use loom_commands::{Command, Dialog, ExtrudeKind, PolySettings, PolySettingsKind, SelectionMode, SubObjectId};
 use loom_scene::NodeId;
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open: &mut bool) {
@@ -17,8 +17,38 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
     // Hinge needs its edge before anything can preview.
     let can_preview = kind != PolySettingsKind::Hinge || st.hinge_edge.is_some();
     // The selection the preview applies to (ops replace the sub-selection).
-    let sel: Vec<(u64, SubObjectId)> = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_else(|| app.state.sub_selection.iter().map(|(n, s)| (n.0, s)).collect());
-    let applied = app.preview_dialog() == Some(dialog);
+    let mut sel: Vec<(u64, SubObjectId)> = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_else(|| app.state.sub_selection.iter().map(|(n, s)| (n.0, s)).collect());
+    let mut applied = app.preview_dialog() == Some(dialog);
+    if kind == PolySettingsKind::Bridge && (st.bridge_edges != app.state.poly_settings.bridge_edges || st.bridge_specific != app.state.poly_settings.bridge_specific) {
+        st.bridge_edges = app.state.poly_settings.bridge_edges;
+        st.bridge_specific = app.state.poly_settings.bridge_specific;
+        app.preview_undo();
+        applied = false;
+    }
+    // Use Edge Selection: edges selected or deselected while the window is
+    // open join the bridge (the preview's mesh ids are mapped back by position).
+    let post_id = id.with("post");
+    let mut reselect = false;
+    if kind == PolySettingsKind::Bridge && app.state.selection_mode == SelectionMode::Edge && !st.bridge_specific {
+        let cur: Vec<(u64, SubObjectId)> = app.state.sub_selection.iter().map(|(n, s)| (n.0, s)).collect();
+        if let Some(post) = ctx.data(|d| d.get_temp::<Vec<(u64, SubObjectId)>>(post_id)) {
+            if cur != post {
+                let added = edge_ends(app, &cur.iter().filter(|x| !post.contains(x)).copied().collect::<Vec<_>>());
+                let removed = edge_ends(app, &post.iter().filter(|x| !cur.contains(x)).copied().collect::<Vec<_>>());
+                if applied {
+                    app.preview_undo();
+                    applied = false;
+                    let (added, removed) = (edges_at(app, &added), edges_at(app, &removed));
+                    sel.retain(|x| !removed.contains(x));
+                    let new: Vec<(u64, SubObjectId)> = added.into_iter().filter(|x| !sel.contains(x)).collect();
+                    sel.extend(new);
+                } else {
+                    sel = cur;
+                }
+                reselect = true;
+            }
+        }
+    }
     let speed = app.spinner_speed(0.1);
     let mut changed = false;
     let (mut ok, mut apply, mut cancel) = (false, false, false);
@@ -26,8 +56,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
         PolySettingsKind::Weld => "Weld Vertices",
         PolySettingsKind::Chamfer => "Chamfer",
         PolySettingsKind::ConnectEdges => "Connect Edges",
-        PolySettingsKind::Bridge => "Bridge",
-        PolySettingsKind::Extrude => "Extrude",
+        PolySettingsKind::Bridge => match app.state.selection_mode {
+            SelectionMode::Edge => "Bridge Edges",
+            SelectionMode::Border => "Bridge Borders",
+            _ => "Bridge Polygons",
+        },
+        PolySettingsKind::Extrude => match app.state.selection_mode {
+            SelectionMode::Vertex => "Extrude Vertices",
+            SelectionMode::Edge | SelectionMode::Border => "Extrude Edges",
+            _ => "Extrude Polygons",
+        },
         PolySettingsKind::Inset => "Inset Polygons",
         PolySettingsKind::Bevel => "Bevel Polygons",
         PolySettingsKind::Outline => "Outline Polygons",
@@ -37,17 +75,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
         PolySettingsKind::Relax => "Relax",
         PolySettingsKind::ExtrudeAlongSpline => "Extrude Polygons Along Spline",
     };
+    let units = app.state.units.clone();
+    let decimals = app.state.prefs.spinner_precision;
     egui::Window::new(title).id(id).open(open).resizable(false).show(ctx, |ui| {
         egui::Grid::new(id.with("grid")).num_columns(2).show(ui, |ui| {
+            // Lengths in display units; typed values may carry a unit (7", -3.5").
             let f = |ui: &mut egui::Ui, label: &str, v: &mut f32, min: f32| -> bool {
                 ui.label(label);
-                let r = ui.add(egui::DragValue::new(v).speed(speed).range(min..=f32::MAX).fixed_decimals(3)).changed();
+                let r = ui.add(crate::length_drag_value(ui, &units, decimals, v, min..=f32::MAX, speed)).changed();
                 ui.end_row();
                 r
             };
             let u = |ui: &mut egui::Ui, label: &str, v: &mut u32| -> bool {
                 ui.label(label);
-                let r = ui.add(egui::DragValue::new(v).speed(0.1).range(1..=100)).changed();
+                let r = ui.add(crate::spinner::spin(ui, v, 1..=100).speed(0.1)).changed();
                 ui.end_row();
                 r
             };
@@ -65,26 +106,52 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                 PolySettingsKind::ConnectEdges => {
                     changed |= u(ui, "Segments:", &mut st.connect_segments);
                     ui.label("Pinch:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.connect_pinch).speed(1.0).range(-100.0..=100.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.connect_pinch, -100.0..=100.0).speed(1.0)).changed();
                     ui.end_row();
                     ui.label("Slide:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.connect_slide).speed(1.0).range(-100.0..=100.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.connect_slide, -100.0..=100.0).speed(1.0)).changed();
                     ui.end_row();
                 }
                 PolySettingsKind::Bridge => {
                     changed |= u(ui, "Segments:", &mut st.bridge_segments);
                     ui.label("Smooth:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.bridge_smooth).speed(1.0).range(0.0..=180.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.bridge_smooth, 0.0..=180.0).speed(1.0)).changed();
                     ui.end_row();
                     ui.label("Bridge Adjacent:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.bridge_adjacent).speed(1.0).range(0.0..=180.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.bridge_adjacent, 0.0..=180.0).speed(1.0)).changed();
                     ui.end_row();
                     ui.label("Twist 1:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.bridge_twist1).speed(0.1)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.bridge_twist1, ..).speed(0.1)).changed();
                     ui.end_row();
                     ui.label("Twist 2:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.bridge_twist2).speed(0.1)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.bridge_twist2, ..).speed(0.1)).changed();
                     ui.end_row();
+                    if app.state.selection_mode == SelectionMode::Edge {
+                        ui.label("");
+                        ui.vertical(|ui| {
+                            for (specific, l) in [(false, "Use Edge Selection"), (true, "Use Specific Edges")] {
+                                if ui.radio(st.bridge_specific == specific, l).clicked() && st.bridge_specific != specific {
+                                    st.bridge_specific = specific;
+                                    let _ = app.dispatch(Command::BridgeSpecificEdges { on: specific });
+                                    reselect = true;
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        for (i, which) in [(0usize, 1u32), (1, 2)] {
+                            ui.label(format!("Edge {which}:"));
+                            let mode = if which == 1 { loom_commands::PickMode::BridgeEdge1 } else { loom_commands::PickMode::BridgeEdge2 };
+                            let picking = app.state.pick_mode == Some(mode);
+                            let label = match st.bridge_edges[i] {
+                                Some((n, e)) => edge_label(app, n, e),
+                                None => format!("Pick Edge {which}"),
+                            };
+                            if ui.add_enabled(st.bridge_specific, egui::SelectableLabel::new(picking, label)).on_hover_text("Click a border edge in a viewport").clicked() {
+                                let _ = app.dispatch(Command::PickBridgeEdge { which });
+                            }
+                            ui.end_row();
+                        }
+                    }
                 }
                 PolySettingsKind::Inset => {
                     changed |= f(ui, "Inset Amount:", &mut st.inset_amount, 0.0);
@@ -111,13 +178,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                 }
                 PolySettingsKind::Hinge => {
                     ui.label("Angle:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.hinge_angle).speed(1.0).range(-360.0..=360.0).suffix("°")).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.hinge_angle, -360.0..=360.0).speed(1.0).suffix("°")).changed();
                     ui.end_row();
                     changed |= u(ui, "Segments:", &mut st.hinge_segments);
                     ui.label("Hinge:");
                     let picking = app.state.pick_mode == Some(loom_commands::PickMode::HingeEdge);
                     let label = match st.hinge_edge {
-                        Some((_, e)) => format!("Edge {e}"),
+                        Some((n, e)) => edge_label(app, n, e),
                         None => "Pick Hinge".to_owned(),
                     };
                     if ui.selectable_label(picking, label).on_hover_text("Click an edge in a viewport").clicked() {
@@ -127,7 +194,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                 }
                 PolySettingsKind::MSmooth => {
                     ui.label("Smoothness:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.msmooth_smoothness).speed(0.01).range(0.0..=1.0).fixed_decimals(2)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.msmooth_smoothness, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed();
                     ui.end_row();
                     ui.label("Separate By:");
                     ui.vertical(|ui| {
@@ -144,12 +211,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                     });
                     ui.end_row();
                     ui.label("Tension:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.tess_tension).speed(1.0).range(-100.0..=100.0)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.tess_tension, -100.0..=100.0).speed(1.0)).changed();
                     ui.end_row();
                 }
                 PolySettingsKind::Relax => {
                     ui.label("Amount:");
-                    changed |= ui.add(egui::DragValue::new(&mut st.relax_amount).speed(0.01).range(0.0..=1.0).fixed_decimals(2)).changed();
+                    changed |= ui.add(crate::spinner::spin(ui, &mut st.relax_amount, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed();
                     ui.end_row();
                     changed |= u(ui, "Iterations:", &mut st.relax_iterations);
                     ui.label("");
@@ -163,31 +230,53 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
                     let ss = app.state.spline_settings;
                     let mut segs = ss.extrude_segments;
                     ui.label("Segments:");
-                    if ui.add(egui::DragValue::new(&mut segs).range(1..=100)).changed() {
+                    if ui.add(crate::spinner::spin(ui, &mut segs, 1..=100)).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Segments".into(), value: segs as f64 });
+                        changed = true;
                     }
                     ui.end_row();
                     let mut taper = ss.extrude_taper;
                     ui.label("Taper Amount:");
-                    if ui.add(egui::DragValue::new(&mut taper).speed(0.01).range(-10.0..=1.0).fixed_decimals(2)).changed() {
+                    if ui.add(crate::spinner::spin(ui, &mut taper, -1.0..=10.0).speed(0.01).fixed_decimals(2)).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Taper".into(), value: taper as f64 });
+                        changed = true;
+                    }
+                    ui.end_row();
+                    let mut curve = ss.extrude_taper_curve;
+                    ui.label("Taper Curve:");
+                    if ui.add(crate::spinner::spin(ui, &mut curve, -10.0..=10.0).speed(0.01).fixed_decimals(2)).changed() {
+                        let _ = app.dispatch(Command::SplineSettings { name: "Extrude Taper Curve".into(), value: curve as f64 });
+                        changed = true;
                     }
                     ui.end_row();
                     let mut twist = ss.extrude_twist;
                     ui.label("Twist:");
-                    if ui.add(egui::DragValue::new(&mut twist).speed(1.0).suffix("°")).changed() {
+                    if ui.add(crate::spinner::spin(ui, &mut twist, ..).speed(1.0).suffix("°")).changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Twist".into(), value: twist as f64 });
+                        changed = true;
                     }
                     ui.end_row();
                     let mut align = ss.extrude_align;
                     ui.label("");
                     if ui.checkbox(&mut align, "Align to face normal").changed() {
                         let _ = app.dispatch(Command::SplineSettings { name: "Extrude Align".into(), value: if align { 1.0 } else { 0.0 } });
+                        changed = true;
+                    }
+                    ui.end_row();
+                    let mut rotation = ss.extrude_rotation;
+                    ui.label("Rotation:");
+                    if ui.add_enabled(align, crate::spinner::spin(ui, &mut rotation, ..).speed(1.0).suffix("°")).changed() {
+                        let _ = app.dispatch(Command::SplineSettings { name: "Extrude Rotation".into(), value: rotation as f64 });
+                        changed = true;
                     }
                     ui.end_row();
                     ui.label("Spline:");
                     let picking = app.state.pick_mode == Some(loom_commands::PickMode::ExtrudeAlongSpline);
-                    if ui.selectable_label(picking, "Pick Spline").on_hover_text("Click a shape in a viewport").clicked() {
+                    let label = match ss.extrude_path.and_then(|p| app.state.scene.node(p)) {
+                        Some(n) => n.name.clone(),
+                        None => "Pick Spline".to_owned(),
+                    };
+                    if ui.selectable_label(picking, label).on_hover_text("Click a shape in a viewport").clicked() {
                         let _ = app.dispatch(Command::ExtrudeAlongSplineMode);
                     }
                     ui.end_row();
@@ -232,10 +321,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
         PolySettingsKind::MSmooth => Command::MSmooth { smoothness: st.msmooth_smoothness, separate_by_smoothing: st.msmooth_separate_by_smoothing, separate_by_materials: st.msmooth_separate_by_materials },
         PolySettingsKind::Tessellate => Command::TessellateFaces { kind: st.tess_kind, tension: st.tess_tension },
         PolySettingsKind::Relax => Command::Relax { amount: st.relax_amount, iterations: st.relax_iterations, hold_boundary: st.relax_hold_boundary, hold_outer: st.relax_hold_outer },
-        // Extrude Along Spline runs when its spline is picked; the dialog only holds the settings.
-        PolySettingsKind::ExtrudeAlongSpline => Command::ExtrudeAlongSplineMode,
+        // Extrude Along Spline previews once its spline is picked.
+        PolySettingsKind::ExtrudeAlongSpline => {
+            let ss = app.state.spline_settings;
+            Command::ExtrudeAlongSpline { spline: ss.extrude_path.map(|p| p.0).unwrap_or(0), segments: ss.extrude_segments, taper: ss.extrude_taper, taper_curve: ss.extrude_taper_curve, twist: ss.extrude_twist, rotation: ss.extrude_rotation, align: ss.extrude_align }
+        }
     };
-    let can_preview = can_preview && kind != PolySettingsKind::ExtrudeAlongSpline;
+    let can_preview = can_preview && (kind != PolySettingsKind::ExtrudeAlongSpline || app.state.spline_settings.extrude_path.is_some_and(|p| app.state.scene.node(p).is_some()));
     let restore = |app: &mut LoomApp, sel: &[(u64, SubObjectId)]| {
         app.state.sub_selection.clear();
         for (n, s) in sel {
@@ -246,7 +338,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
         restore(app, sel);
         let _ = app.dispatch(cmd.clone());
     };
-    if changed && can_preview && app.state.full_interactivity {
+    if (changed || reselect) && can_preview && (app.state.full_interactivity || reselect) {
         app.preview_undo();
         app.preview_apply(dialog, |app| run(app, &sel));
     } else if !applied && !ok && !cancel && !apply && *open && can_preview {
@@ -276,4 +368,40 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
         restore(app, &sel);
         *open = false;
     }
+    if kind == PolySettingsKind::Bridge {
+        let post: Vec<(u64, SubObjectId)> = app.state.sub_selection.iter().map(|(n, s)| (n.0, s)).collect();
+        ctx.data_mut(|d| if *open { d.insert_temp(post_id, post) } else { d.remove::<Vec<(u64, SubObjectId)>>(post_id) });
+    }
 }
+
+/// "Edge N" for a picked edge, numbered as the reference numbers edges.
+fn edge_label(app: &LoomApp, node: NodeId, e: u32) -> String {
+    let n = app.state.scene.node(node).and_then(|n| n.cage_mesh().edge_number(loom_mesh::HalfEdgeId(e)));
+    format!("Edge {}", n.unwrap_or(e + 1))
+}
+
+/// End positions of the selected edges (object space).
+fn edge_ends(app: &LoomApp, sel: &[(u64, SubObjectId)]) -> Vec<(u64, glam::Vec3, glam::Vec3)> {
+    sel.iter()
+        .filter_map(|(n, s)| {
+            let SubObjectId::Edge(e) = s else { return None };
+            let mesh = app.state.scene.node(NodeId(*n))?.cage_mesh().into_owned();
+            let (a, b) = mesh.edge_vertices(*e)?;
+            Some((*n, mesh.vertex_position(a)?, mesh.vertex_position(b)?))
+        })
+        .collect()
+}
+
+/// The edges with those end positions in the current meshes.
+fn edges_at(app: &LoomApp, ends: &[(u64, glam::Vec3, glam::Vec3)]) -> Vec<(u64, SubObjectId)> {
+    ends.iter()
+        .filter_map(|(n, pa, pb)| {
+            let mesh = app.state.scene.node(NodeId(*n))?.cage_mesh().into_owned();
+            let near = |v: loom_mesh::VertexId, p: glam::Vec3| mesh.vertex_position(v).is_some_and(|q| q.distance(p) < 1e-4);
+            (0..mesh.half_edges().len() as u32).map(loom_mesh::HalfEdgeId).find(|e| {
+                mesh.canonical_edge_id(*e) == Some(*e) && mesh.edge_vertices(*e).is_some_and(|(a, b)| (near(a, *pa) && near(b, *pb)) || (near(a, *pb) && near(b, *pa)))
+            }).map(|e| (*n, SubObjectId::Edge(e)))
+        })
+        .collect()
+}
+

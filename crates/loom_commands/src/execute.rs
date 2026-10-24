@@ -42,7 +42,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
-        c @ (C::Render { .. } | C::RenderSetup { .. }) => crate::render::execute(state, c),
+        c if crate::render::handles(&c) => crate::render::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
@@ -105,6 +105,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             };
             let path = std::path::PathBuf::from(path);
             let doc = crate::file::read(&path)?;
+            crate::settings::note_recent(state, &path);
             load_document(state, doc, Some(path));
             Ok(json!({ "nodes": state.scene.len() }))
         }
@@ -118,6 +119,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 }
             };
             save_to(state, &target)?;
+            crate::settings::note_recent(state, &target);
             state.file = Some(target.clone());
             state.undo.mark_saved();
             run_pending(state)?;
@@ -130,6 +132,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             };
             let target = std::path::PathBuf::from(path);
             save_to(state, &target)?;
+            crate::settings::note_recent(state, &target);
             state.file = Some(target.clone());
             state.undo.mark_saved();
             run_pending(state)?;
@@ -151,6 +154,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             };
             let target = incremental_path(&current);
             save_to(state, &target)?;
+            crate::settings::note_recent(state, &target);
             state.file = Some(target.clone());
             state.undo.mark_saved();
             run_pending(state)?;
@@ -163,7 +167,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.viewports = fresh.viewports;
             state.layout = fresh.layout;
             state.active_viewport = 0;
-            state.units = fresh.units;
+            state.units = state.default_units.clone();
             state.frame_range = fresh.frame_range;
             state.fps = fresh.fps;
             state.current_frame = fresh.current_frame;
@@ -373,7 +377,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(selection_json(state))
         }
-        C::DeleteObjects => delete(state),
+        C::DeleteObjects => delete(state, None),
+        C::DeletePolygons { delete_isolated } => {
+            if state.dialog == Some(Dialog::DeleteIsolatedVertices) {
+                state.dialog = None;
+            }
+            if !state.selection_mode.is_face_level() {
+                return Err("Delete Polygons works at Polygon and Element level".into());
+            }
+            delete(state, Some(delete_isolated))
+        }
         C::Clone => {
             if state.selection.is_empty() {
                 return Ok(json!({}));
@@ -453,7 +466,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SpinnerSnapToggle => toggle(&mut state.prefs.spinner_snap, "spinner_snap"),
         C::ShowRibbonToggle => toggle(&mut state.show_ribbon, "show_ribbon"),
-        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
+        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
         | C::RenameModifier { .. } | C::SelectStackEntry { .. } | C::SetModifierParameter { .. } | C::ModifierSubobjectLevel { .. } | C::ShowEndResultToggle | C::PinStackToggle
         | C::MakeUnique | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
         | C::PickModifierNode { .. } | C::SwitchToControlPointLevel | C::SwitchToLatticeLevel | C::SwitchToSetVolumeLevel | C::SwitchToTopLevel | C::SelectControlPoints { .. }
@@ -461,7 +474,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::AttachSpline | C::AttachMultipleSpline | C::BreakVerticesSpline | C::ChamferVertexSpline | C::CloseSpline | C::ConnectSpline | C::CreateLineSpline | C::CycleVerticesSpline
         | C::DeleteSegmentSpline | C::DeleteSplineSpline | C::DeleteVertexSpline | C::DetachSegmentSpline | C::DetachSplineSpline | C::DivideSpline | C::ExplodeSpline | C::FilletSpline
         | C::FuseVerticesSpline | C::HideSpline | C::UnhideAllSpline | C::InsertSelectionSpline | C::MakeFirstSpline | C::MirrorBothSpline | C::MirrorHorizontallySpline | C::MirrorVerticallySpline
-        | C::OutlineSpline | C::RefineSpline | C::RefineConnectSpline | C::ReverseSpline | C::SubtractSpline | C::WeldVerticesSpline | C::SplineRefine { .. } | C::SplineFillet { .. }
+        | C::OutlineSpline | C::RefineSpline | C::RefineConnectSpline | C::ReverseSpline | C::SubtractSpline | C::WeldVerticesSpline | C::SplineRefine { .. } | C::SplineRefineAtVertex { .. } | C::SplineRefineReply { .. } | C::SplineFilletMode { .. } | C::SplineFillet { .. }
         | C::SplineChamfer { .. } | C::SetVertexType { .. } | C::SetKnotHandle { .. } | C::SplineOutline { .. } | C::SplineBoolean { .. } | C::SplineMirror { .. } | C::SplineDivide { .. }
         | C::SplineWeld { .. } | C::SplineFuse | C::SplineConnect { .. } | C::SplineAttach { .. } | C::SplineDetach { .. } | C::SplineExplode { .. } | C::SplineSettings { .. }
         | C::CreateShapeFromEdges { .. } | C::ExtrudeAlongSpline { .. } | C::BindSpline | C::UnbindSpline | C::TrimSpline | C::ExtendSpline | C::CrossInsertSpline
@@ -507,7 +520,19 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SelectObject => set_tool(state, Tool::Select),
         C::SelectAndMove => set_tool(state, Tool::Move),
         C::SelectAndRotate => set_tool(state, Tool::Rotate),
-        C::SelectAndScale | C::ScaleCycle => set_tool(state, Tool::Scale),
+        C::SelectAndScale => set_tool(state, Tool::Scale),
+        C::ScaleCycle => {
+            if state.active_tool == Tool::Scale {
+                state.scale_kind = state.scale_kind.next();
+            }
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": state.scale_kind.label() }))
+        }
+        C::ScaleType { kind } => {
+            state.scale_kind = kind;
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": kind.label() }))
+        }
         C::SubObjectLevelCycle if state.spline_selected() => {
             state.selection_mode = match state.selection_mode {
                 SelectionMode::Object => SelectionMode::Vertex,
@@ -1322,12 +1347,69 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 if let Some(v) = custom_value { *value = v.max(1e-6); }
                 if let Some(u) = custom_unit { *unit = SystemUnit::parse(&u).ok_or_else(|| format!("unknown custom unit {u:?}"))?; }
             }
+            state.default_units = state.units.clone();
             Ok(json!({ "display": state.units.display.label(), "example": state.format_units(1.0) }))
         }
         C::CustomizeUserInterface => {
             state.dialog = Some(Dlg::CustomizeUI);
             Ok(json!({}))
         }
+        C::AssignShortcut { group, action, chord } => {
+            let c = crate::keymap::parse_chord(&chord)?;
+            let previous = state.custom_keys.assign(&group, &action, c)?;
+            Ok(json!({ "group": group, "action": action, "chord": c.chart_text(), "previous": previous }))
+        }
+        C::RemoveShortcut { group, action } => {
+            let removed = state.custom_keys.remove(&group, &action)?;
+            Ok(json!({ "removed": removed }))
+        }
+        C::ResetShortcuts => {
+            state.custom_keys.reset();
+            Ok(json!({}))
+        }
+        C::SaveShortcuts { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::SaveShortcuts);
+                return Ok(json!({ "dialog": "SaveShortcuts" }));
+            };
+            write_text(&path, &crate::keymap::shortcuts_to_file_text(&state.custom_keys))?;
+            back_to_keyboard_panel(state);
+            Ok(json!({ "path": path }))
+        }
+        C::LoadShortcuts { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::LoadShortcuts);
+                return Ok(json!({ "dialog": "LoadShortcuts" }));
+            };
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+            let rows = crate::keymap::shortcuts_from_file_text(&text)?;
+            state.custom_keys.set_rows(&rows)?;
+            back_to_keyboard_panel(state);
+            Ok(json!({ "path": path, "groups": rows.len() }))
+        }
+        C::SaveCustomUiScheme { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::SaveCustomUiScheme);
+                return Ok(json!({ "dialog": "SaveCustomUiScheme" }));
+            };
+            write_text(&path, &crate::settings::scheme_to_text(state))?;
+            Ok(json!({ "path": path }))
+        }
+        C::LoadCustomUiScheme { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::LoadCustomUiScheme);
+                return Ok(json!({ "dialog": "LoadCustomUiScheme" }));
+            };
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+            crate::settings::apply_scheme_text(state, &text)?;
+            Ok(json!({ "path": path }))
+        }
+        C::RevertToStartupUi => {
+            let ui = state.startup_ui;
+            ui.apply(state);
+            Ok(json!({}))
+        }
+        C::ShowCommandPanelToggle => toggle(&mut state.show_command_panel, "show_command_panel"),
         C::SelectAndManipulate => toggle(&mut state.manipulate, "manipulate"),
         C::Manipulate { id, name, delta } => {
             let nid = NodeId(id);
@@ -1369,7 +1451,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         | C::MSmooth { .. } | C::TessellateFaces { .. } | C::Relax { .. } | C::RelaxSettings | C::FullInteractivity { .. } | C::PreserveUVs { .. } | C::DeleteIsolatedVertices
         | C::AutoSmooth | C::PaintDeformPushPull | C::PaintDeformRelax | C::SetMaterialId { .. } | C::SelectByMaterialId { .. } | C::SetSmoothingGroups { .. } | C::ClearSmoothingGroups
         | C::SelectBySmoothingGroup { .. } | C::AutoSmoothThreshold { .. } | C::SetVertexColor { .. } | C::SetVertexIllumination { .. } | C::SetVertexAlpha { .. } | C::SelectByVertexColor { .. }
-        | C::SubdivisionSurface { .. } | C::PaintDeformRevert | C::PaintDeformCommit | C::PaintDeformCancel | C::PaintDeformSettings { .. } | C::PaintDeformStroke { .. } => {
+        | C::SubdivisionSurface { .. } | C::PaintDeformRevert | C::PaintDeformCommit | C::PaintDeformCancel | C::PaintDeformSettings { .. } | C::PaintDeformStroke { .. }
+        | C::CleanRemove | C::SwiftLoopMode | C::SwiftLoop { .. } | C::LoopMode | C::SelectByHalf { .. } | C::BridgeSpecificEdges { .. } | C::PickBridgeEdge { .. } => {
             crate::poly::execute(state, cmd)
         }
         C::SnapsToggle => toggle(&mut state.snaps_on, "snaps"),
@@ -1570,6 +1653,23 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(())
         }, None),
         C::LineEnd { node } => crate::spline::line_end(state, NodeId(node)),
+        C::LineCloseAsk { node, point, smooth } => {
+            state.scene.node(NodeId(node)).ok_or_else(|| missing(NodeId(node)))?;
+            state.line_close_pending = Some((NodeId(node), point, smooth));
+            state.dialog = Some(Dlg::CloseSpline);
+            Ok(json!({ "dialog": "CloseSpline" }))
+        }
+        C::LineCloseReply { close } => {
+            let (node, point, smooth) = state.line_close_pending.take().ok_or("no Close spline prompt is open")?;
+            if state.dialog == Some(Dlg::CloseSpline) {
+                state.dialog = None;
+            }
+            if close {
+                execute(state, C::LineClose { node: node.0 })
+            } else {
+                execute(state, C::LineAddKnot { node: node.0, point, smooth })
+            }
+        }
         C::LineClose { node } => edit_line(state, NodeId(node), "Line Close", |spline, _| {
             if spline.knots.len() < 3 {
                 return Err("a spline needs three knots to close".into());
@@ -1969,7 +2069,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::ExitPickMode => {
+            // Cut: the first right-click ends the current cut, the second leaves Cut.
+            if state.pick_mode == Some(PickMode::CutB) {
+                state.pick_mode = Some(PickMode::CutA);
+                state.pick_point_a = None;
+                return Ok(json!({ "pick": "CutA" }));
+            }
             state.pick_mode = None;
+            state.refine_chain = None;
             state.pick_source = None;
             if !state.create_verts.is_empty() {
                 return crate::poly_edit::finish_create(state);
@@ -1984,6 +2091,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     return crate::poly_edit::execute(state, C::AttachNode { id: id.0 });
                 }
                 Some(PickMode::SplineRefine | PickMode::SplineInsert) => return Err("Refine / Insert pick a segment, not an object".into()),
+                Some(PickMode::SplineFillet | PickMode::SplineChamfer) => return Err("Fillet / Chamfer drag on a selected vertex, not an object".into()),
                 Some(PickMode::UnwrapSplineMap) => {
                     let mapping = state.uv_editor.spline_map_mapping;
                     let normalize = state.unwrap_entry().and_then(|(n, i)| match &state.scene.node(n)?.modifiers[i].modifier {
@@ -2011,8 +2119,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     return crate::spline::execute(state, C::SplineAttach { node: id.0, reorient });
                 }
                 Some(PickMode::ExtrudeAlongSpline) => {
+                    if state.dialog == Some(Dlg::PolySettings(crate::PolySettingsKind::ExtrudeAlongSpline)) {
+                        // The open dialog keeps the path; its preview runs the extrusion.
+                        state.scene.node(id).and_then(|n| n.edit_shape()).ok_or("the picked object is not a shape")?;
+                        state.spline_settings.extrude_path = Some(id);
+                        state.pick_mode = None;
+                        return Ok(json!({ "path": id.0 }));
+                    }
                     let ss = state.spline_settings;
-                    return crate::spline::execute(state, C::ExtrudeAlongSpline { spline: id.0, segments: ss.extrude_segments, taper: ss.extrude_taper, twist: ss.extrude_twist, align: ss.extrude_align });
+                    return crate::spline::execute(state, C::ExtrudeAlongSpline { spline: id.0, segments: ss.extrude_segments, taper: ss.extrude_taper, taper_curve: ss.extrude_taper_curve, twist: ss.extrude_twist, rotation: ss.extrude_rotation, align: ss.extrude_align });
                 }
                 Some(PickMode::GroupAttach) => {
                     return crate::groups::attach_to_group(state, id);
@@ -2082,7 +2197,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex) => {
                     return Err("this pick mode needs a point pick (Pick Point)".into());
                 }
-                Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB) => {
+                Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB | PickMode::SwiftLoop | PickMode::BridgeEdge1 | PickMode::BridgeEdge2) => {
                     return Err("this pick mode needs a sub-object pick (Pick Sub)".into());
                 }
                 None => return Err("no pick mode active".into()),
@@ -2099,20 +2214,27 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let mut changes = Vec::new();
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-                if matches!(node.object, ObjectKind::Camera { .. }) {
+                if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
                     continue;
                 }
+                // As the reference: rotation and scale (and the pivot offset) go into
+                // a new XForm modifier on top of the stack; collapsing bakes them.
                 let t = &node.transform;
-                let bake = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
-                let mut mesh = node.cage_mesh().into_owned();
-                edit_ops::transform_mesh(&mut mesh, bake)?;
+                let held = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
+                let mut xform = Modifier::by_name("XForm").ok_or("no XForm modifier")?;
+                if let Some(g) = xform.gizmo_mut() {
+                    *g = Transform::from_matrix(held);
+                }
+                let mut stack = node.modifiers.clone();
+                let at = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
+                stack.insert(at, loom_scene::ModifierSlot::new(xform));
                 let mut after_t = t.clone();
                 after_t.rotation.set(Vec3::ZERO);
                 after_t.scale.set(Vec3::ONE);
                 let mut props = node.props();
                 props.object_offset = Transform::default();
                 let new_world = state.scene.parent_frame(id) * after_t.matrix();
-                changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(node.object.with_mesh(mesh)) });
+                changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.extend(keep_children(state, id, new_world));
                 changes.push(Change::SetTransform { id, before: t.clone(), after: after_t });
@@ -2336,9 +2458,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 state.sub_selection.clear();
             }
             let mesh = state.scene.node(node).ok_or_else(|| missing(node))?.cage_mesh().into_owned();
+            let loop_mode = state.loop_mode;
+            let clicked = ids.clone();
             for raw in ids {
                 let expanded: Vec<SubObjectId> = match mode {
                     SelectionMode::Element => element_of(&mesh, FaceId(raw)).into_iter().map(SubObjectId::Face).collect(),
+                    // Loop Mode: an edge brings its whole loop (Alt takes the loop away).
+                    SelectionMode::Edge if loop_mode => loom_mesh::select_ops::edge_loop(&mesh, &[HalfEdgeId(raw)]).into_iter().map(SubObjectId::Edge).collect(),
                     SelectionMode::Border => match mesh.canonical_edge_id(HalfEdgeId(raw)) {
                         Some(e) if is_border_edge(&mesh, e) => vec![SubObjectId::Edge(e)],
                         _ => vec![],
@@ -2352,6 +2478,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         state.sub_selection.insert(node, id);
                     }
                 }
+            }
+            if loop_mode && op != SelectOp::Subtract {
+                loop_mode_select(state, node, &mesh, mode, &clicked);
             }
             Ok(selection_json(state))
         }
@@ -2690,9 +2819,48 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 }
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
+    let change = share_with_instances(&state.scene, change);
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
     Ok(())
+}
+
+/// Instances share one object: a replaced object (a sub-object edit, a
+/// parameter, an attach) is replaced on every member of the node's instance
+/// group that the change does not already cover.
+fn share_with_instances(scene: &loom_scene::Scene, change: Change) -> Change {
+    fn replaced<'a>(c: &'a Change, out: &mut Vec<(NodeId, &'a ObjectKind)>, removed: &mut BTreeSet<NodeId>) {
+        match c {
+            Change::ReplaceObject { id, after, .. } => out.push((*id, &**after)),
+            Change::RemoveNode(id) => {
+                removed.insert(*id);
+            }
+            Change::Group(cs) => cs.iter().for_each(|c| replaced(c, out, removed)),
+            _ => {}
+        }
+    }
+    let mut objects = Vec::new();
+    let mut done = BTreeSet::new();
+    replaced(&change, &mut objects, &mut done);
+    if objects.is_empty() {
+        return change;
+    }
+    done.extend(objects.iter().map(|(id, _)| *id));
+    let mut extra = Vec::new();
+    for (id, after) in objects {
+        let Some(node) = scene.node(id) else { continue };
+        let root = node.instance_of.unwrap_or(id);
+        for member in scene.nodes().filter(|n| n.id == root || n.instance_of == Some(root)) {
+            if done.insert(member.id) {
+                extra.push(Change::ReplaceObject { id: member.id, before: Box::new(member.object.clone()), after: Box::new(after.clone()) });
+            }
+        }
+    }
+    if extra.is_empty() {
+        return change;
+    }
+    extra.insert(0, change);
+    Change::Group(extra)
 }
 
 /// Commits a structural edit (link, unlink, group) that only re-expresses a
@@ -2869,6 +3037,10 @@ pub fn file_action(state: &mut AppState, action: crate::viewport::PendingFileAct
         A::New => execute(state, C::NewScene),
         A::Reset => execute(state, C::ResetFile),
         A::Open => execute(state, C::OpenFile { path: None }),
+        A::OpenRecent(i) => {
+            let path = state.recent_files.get(i).ok_or_else(|| format!("no recent file {}", i + 1))?.to_string_lossy().into_owned();
+            execute(state, C::OpenFile { path: Some(path) })
+        }
         A::Exit => {
             state.exit_requested = true;
             Ok(json!({ "exit": true }))
@@ -2931,6 +3103,22 @@ fn set_tool(state: &mut AppState, tool: Tool) -> Result<Value, String> {
         state.coord_system = state.coord_by_tool[tool_index(tool)];
     }
     Ok(json!({ "tool": tool.label() }))
+}
+
+/// The Keyboard panel's Save / Load file dialog returns to the panel.
+fn back_to_keyboard_panel(state: &mut AppState) {
+    if matches!(state.dialog, Some(Dlg::SaveShortcuts | Dlg::LoadShortcuts)) {
+        state.dialog = Some(Dlg::CustomizeUI);
+    }
+}
+
+/// Writes a settings-style text file, making its folder first.
+fn write_text(path: &str, text: &str) -> Result<(), String> {
+    let path = std::path::Path::new(path);
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn toggle(flag: &mut bool, name: &str) -> Result<Value, String> {
@@ -3055,7 +3243,56 @@ fn base_of(name: &str) -> &str {
     name.trim_end_matches(|c: char| c.is_ascii_digit())
 }
 
-fn delete(state: &mut AppState) -> Result<Value, String> {
+/// Loop Mode at Vertex / Polygon level: a clicked vertex or polygon next to
+/// an already selected one brings the loop the two of them run along.
+fn loop_mode_select(state: &mut AppState, node: NodeId, mesh: &Mesh, mode: SelectionMode, clicked: &[u32]) {
+    use loom_mesh::select_ops::{edge_loop, edge_ring, vertex_edges};
+    let mut add: Vec<SubObjectId> = Vec::new();
+    for &raw in clicked {
+        match mode {
+            SelectionMode::Vertex => {
+                let v = VertexId(raw);
+                for e in vertex_edges(mesh, v) {
+                    let Some((a, b)) = mesh.edge_vertices(e) else { continue };
+                    let other = if a == v { b } else { a };
+                    if !state.sub_selection.contains(node, SubObjectId::Vertex(other)) {
+                        continue;
+                    }
+                    for l in edge_loop(mesh, &[e]) {
+                        if let Some((x, y)) = mesh.edge_vertices(l) {
+                            add.extend([SubObjectId::Vertex(x), SubObjectId::Vertex(y)]);
+                        }
+                    }
+                }
+            }
+            SelectionMode::Face => {
+                let hes = mesh.half_edges();
+                for c in mesh.face_corners(FaceId(raw)).unwrap_or_default() {
+                    let Some(g) = hes[hes[c.0 as usize].twin.0 as usize].face else { continue };
+                    if !state.sub_selection.contains(node, SubObjectId::Face(g)) {
+                        continue;
+                    }
+                    // The polygons between the ring edges of the shared edge.
+                    for r in edge_ring(mesh, &[c]) {
+                        let h = &hes[r.0 as usize];
+                        add.extend(h.face.into_iter().chain(hes[h.twin.0 as usize].face).map(SubObjectId::Face));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    for id in add {
+        if !is_hidden(mesh, id) {
+            state.sub_selection.insert(node, id);
+        }
+    }
+}
+
+/// Delete. Deleting polygons that would leave vertices with no polygon asks
+/// first (`delete_isolated` None opens the prompt); the answer comes back as
+/// Delete Polygons.
+fn delete(state: &mut AppState, delete_isolated: Option<bool>) -> Result<Value, String> {
     if state.selection_mode != SelectionMode::Object && state.sub_selection.is_empty() {
         return Ok(json!({}));
     }
@@ -3090,13 +3327,29 @@ fn delete(state: &mut AppState) -> Result<Value, String> {
         }
     }
     let nodes: BTreeSet<NodeId> = faces.keys().chain(edges.keys()).chain(verts.keys()).copied().collect();
+    if delete_isolated.is_none() && edges.is_empty() && verts.is_empty() {
+        let leaves_isolated = faces.iter().any(|(n, fs)| {
+            let Some(node) = state.scene.node(*n) else { return false };
+            let mesh = node.cage_mesh();
+            let set: BTreeSet<FaceId> = fs.iter().copied().collect();
+            fs.iter().flat_map(|f| mesh.face_vertex_ids(*f).unwrap_or_default()).any(|v| mesh.faces_around_vertex(v).iter().all(|g| set.contains(g)))
+        });
+        if leaves_isolated {
+            state.dialog = Some(Dialog::DeleteIsolatedVertices);
+            return Ok(json!({ "ask": "Delete isolated vertices?" }));
+        }
+    }
     let mut changes = Vec::new();
     for n in nodes {
         let node = state.scene.node(n).ok_or_else(|| missing(n))?;
         let before = node.object.clone();
         let mut mesh = node.cage_mesh().into_owned();
         if let Some(f) = faces.get(&n) {
-            edit_ops::delete_faces(&mut mesh, f)?;
+            if delete_isolated == Some(false) {
+                edit_ops::delete_faces_keep_vertices(&mut mesh, f)?;
+            } else {
+                edit_ops::delete_faces(&mut mesh, f)?;
+            }
         }
         if let Some(e) = edges.get(&n) {
             edit_ops::delete_edges(&mut mesh, e)?;
@@ -3351,6 +3604,16 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 *gizmo = Transform::from_matrix_near(local_m * gizmo.matrix(), gizmo, Vec3::ZERO);
                 changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 continue;
+            }
+            if level == 2 {
+                if let Some(d) = stack[a].modifier.deformer_mut() {
+                    // Center: only the center point moves; the gizmo stays.
+                    let g = d.gizmo.matrix();
+                    let c = g.inverse().transform_point3(local_m.transform_point3(g.transform_point3(d.center.get())));
+                    d.center.set(c);
+                    changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+                    continue;
+                }
             }
             if let Some(gizmo) = stack[a].modifier.gizmo_mut() {
                 let cur = gizmo.matrix();
@@ -3922,6 +4185,7 @@ fn snapshot(state: &AppState) -> Value {
         "selection": selection_json(state),
         "dialog": state.dialog.map(|d| format!("{d:?}")),
         "material_editor": state.material_editor_open,
+        "rendered_frame": crate::render::state_json(state),
         "pick_mode": state.pick_mode.map(|p| format!("{p:?}")),
         "poly_drag": state.poly_drag.map(|p| format!("{p:?}")),
         "poly_settings": serde_json::to_value(state.poly_settings).unwrap_or(Value::Null),

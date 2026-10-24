@@ -154,7 +154,7 @@ fn ik(ui: &mut egui::Ui, app: &mut LoomApp) {
             for (label, name, value, range) in [("Swivel Angle:", "Swivel Angle", c.swivel_deg as f64, -360.0..=360.0), ("Threshold:", "Threshold", c.threshold as f64, 0.001..=100.0), ("Iterations:", "Iterations", c.iterations as f64, 1.0..=1000.0)] {
                 ui.label(label);
                 let mut v = value;
-                if ui.add(egui::DragValue::new(&mut v).speed(speed).range(range)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut v, range).speed(speed)).changed() {
                     let _ = app.dispatch(Command::SetIkChainParameter { chain: c.id, name: name.into(), value: v });
                 }
                 ui.end_row();

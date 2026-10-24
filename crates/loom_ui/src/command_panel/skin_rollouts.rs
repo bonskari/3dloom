@@ -99,18 +99,18 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
             egui::Grid::new("skin_env").num_columns(4).show(ui, |ui| {
                 ui.label("Radius:");
                 let mut i0 = e.inner[0];
-                if ui.add(egui::DragValue::new(&mut i0).speed(speed).range(0.0..=1e6)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut i0, 0.0..=1e6).speed(speed)).changed() {
                     let _ = app.dispatch(Command::SkinSetEnvelope { inner_start: Some(i0), inner_end: Some(i0), outer_start: None, outer_end: None, falloff: None, abs_effect: None, squash: None });
                 }
                 let mut o0 = e.outer[0];
-                if ui.add(egui::DragValue::new(&mut o0).speed(speed).range(0.0..=1e6)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut o0, 0.0..=1e6).speed(speed)).changed() {
                     let _ = app.dispatch(Command::SkinSetEnvelope { inner_start: None, inner_end: None, outer_start: Some(o0), outer_end: Some(o0), falloff: None, abs_effect: None, squash: None });
                 }
                 ui.label("inner / outer");
                 ui.end_row();
                 ui.label("Squash:");
                 let mut sq = e.squash;
-                if ui.add(egui::DragValue::new(&mut sq).speed(speed).range(0.0..=10.0)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut sq, 0.0..=10.0).speed(speed)).changed() {
                     let _ = app.dispatch(Command::SkinSetEnvelope { inner_start: None, inner_end: None, outer_start: None, outer_end: None, falloff: None, abs_effect: None, squash: Some(sq) });
                 }
                 ui.end_row();
@@ -150,7 +150,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                         en.data.vertex_weights(*first as usize, p).into_iter().find(|(x, _)| *x == bi).map(|x| x.1).unwrap_or(0.0)
                     });
                     let mut ab = w.unwrap_or(0.0);
-                    let r = ui.add(egui::DragValue::new(&mut ab).speed(0.01).range(0.0..=1.0).fixed_decimals(3));
+                    let r = ui.add(crate::spinner::spin(ui, &mut ab, 0.0..=1.0).speed(0.01).fixed_decimals(3));
                     // A drag is one undo entry.
                     if r.drag_started() {
                         app.state.undo.begin("Abs. Effect");
@@ -163,7 +163,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                     }
                 } else {
                     let mut ab = e.abs_effect;
-                    if ui.add(egui::DragValue::new(&mut ab).speed(0.01).range(0.0..=1.0)).changed() {
+                    if ui.add(crate::spinner::spin(ui, &mut ab, 0.0..=1.0).speed(0.01)).changed() {
                         let _ = app.dispatch(Command::SkinSetEnvelope { inner_start: None, inner_end: None, outer_start: None, outer_end: None, falloff: None, abs_effect: Some(ab), squash: None });
                     }
                 }
@@ -230,13 +230,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
         egui::Grid::new("skin_mirror").num_columns(2).show(ui, |ui| {
             ui.label("Mirror Offset:");
             let mut o = d.mirror.offset;
-            if ui.add(egui::DragValue::new(&mut o).speed(speed)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut o, ..).speed(speed)).changed() {
                 set(app, index, "Mirror Offset", o as f64);
             }
             ui.end_row();
             ui.label("Mirror Thresh.:");
             let mut th = d.mirror.threshold;
-            if ui.add(egui::DragValue::new(&mut th).speed(speed).range(0.0..=1e6)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut th, 0.0..=1e6).speed(speed)).changed() {
                 set(app, index, "Mirror Threshold", th as f64);
             }
             ui.end_row();
@@ -257,7 +257,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
         ui.horizontal(|ui| {
             ui.label("Bone Affect Limit:");
             let mut lim = d.bone_affect_limit as f64;
-            if ui.add(egui::DragValue::new(&mut lim).speed(1.0).range(1.0..=100.0)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut lim, 1.0..=100.0).speed(1.0)).changed() {
                 set(app, index, "Bone Affect Limit", lim.round());
             }
         });
@@ -303,7 +303,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
             ui.horizontal(|ui| {
                 ui.label("Influence:");
                 let mut inf = g.influence;
-                if ui.add(egui::DragValue::new(&mut inf).speed(0.01).range(0.0..=10.0)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut inf, 0.0..=10.0).speed(0.01)).changed() {
                     let _ = app.dispatch(Command::SkinSetGizmoOption { name: "Influence".into(), value: inf as f64 });
                 }
             });
@@ -323,12 +323,12 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                 for (k, key) in g.keys.iter().enumerate() {
                     ui.label(format!("{k}"));
                     let mut a = key.angle_deg;
-                    if ui.add(egui::DragValue::new(&mut a).speed(0.5).range(-360.0..=360.0)).changed() {
+                    if ui.add(crate::spinner::spin(ui, &mut a, -360.0..=360.0).speed(0.5)).changed() {
                         let _ = app.dispatch(Command::SkinSetGizmoKey { key: k as u32, bulge: None, angle: Some(a) });
                     }
                     if g.kind == loom_scene::skin::GizmoKind::BulgeAngle {
                         let mut b = key.bulge;
-                        if ui.add(egui::DragValue::new(&mut b).speed(0.01).range(-2.0..=5.0)).changed() {
+                        if ui.add(crate::spinner::spin(ui, &mut b, -2.0..=5.0).speed(0.01)).changed() {
                             let _ = app.dispatch(Command::SkinSetGizmoKey { key: k as u32, bulge: Some(b), angle: None });
                         }
                     } else {
