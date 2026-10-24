@@ -16,10 +16,14 @@ fn axis(v: Vec3, axes: WriteAxes) -> Vec3 {
 /// Loom's Euler XYZ (glam intrinsic) → FBX `Lcl Rotation` with
 /// `RotationOrder` XYZ, which is extrinsic (Rz·Ry·Rx). A camera also turns
 /// so its FBX forward (+X) is loom's forward (-Z).
-fn fbx_rotation(r: Vec3, axes: WriteAxes, camera: bool) -> Vec3 {
+/// `class` "Camera": FBX cameras look down +X; "Light": FBX lights aim down
+/// -Y; the document's cameras and lights look down -Z.
+fn fbx_rotation(r: Vec3, axes: WriteAxes, class: &str) -> Vec3 {
     let mut q = glam::Quat::from_euler(glam::EulerRot::XYZ, r.x.to_radians(), r.y.to_radians(), r.z.to_radians());
-    if camera {
-        q *= glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+    match class {
+        "Camera" => q *= glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        "Light" => q *= glam::Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+        _ => {}
     }
     if axes == WriteAxes::YUp {
         // Conjugate by the Z-up → Y-up change of basis.
@@ -134,7 +138,7 @@ fn global_settings(doc: &FbxDocument, axes: WriteAxes) -> Record {
 
 fn model(id: i64, n: &FbxNode, class: &str, axes: WriteAxes, factor: f32) -> Record {
     let t = axis(n.translation * factor, axes);
-    let r = fbx_rotation(n.rotation_deg, axes, class == "Camera");
+    let r = fbx_rotation(n.rotation_deg, axes, class);
     let s = match axes {
         WriteAxes::ZUp => n.scale,
         WriteAxes::YUp => Vec3::new(n.scale.x, n.scale.z, n.scale.y),
@@ -285,6 +289,33 @@ fn camera_attribute(id: i64, name: &str, fov_deg: f32) -> Record {
         .child(Record::leaf("GeometryVersion", vec![Prop::I32(124)]))
 }
 
+fn light_attribute(id: i64, name: &str, l: &crate::document::FbxLight, factor: f32) -> Record {
+    let num = |n: &str, v: f32| p(n, "Number", "", "A", vec![Prop::F64(v as f64)]);
+    let flag = |n: &str, v: bool| p(n, "bool", "", "", vec![Prop::I32(v as i32)]);
+    let (near, far) = (l.near.unwrap_or((0.0, 0.0)), l.far.unwrap_or((0.0, 0.0)));
+    Record::with("NodeAttribute", vec![Prop::I64(id), object_name(name, "NodeAttribute"), Prop::Str("Light".into())])
+        .child(
+            Record::new("Properties70")
+                .child(p("LightType", "enum", "", "", vec![Prop::I32(l.light_type as i32)]))
+                .child(p("Color", "Color", "", "A", l.color.iter().map(|c| Prop::F64(*c as f64)).collect()))
+                .child(num("Intensity", l.intensity * 100.0))
+                .child(num("InnerAngle", l.inner_angle))
+                .child(num("OuterAngle", l.outer_angle))
+                .child(flag("CastLightOnObject", l.cast_light))
+                .child(flag("CastShadows", l.cast_shadows))
+                .child(p("DecayType", "enum", "", "", vec![Prop::I32(l.decay as i32)]))
+                .child(num("DecayStart", l.decay_start * factor))
+                .child(flag("EnableNearAttenuation", l.near.is_some()))
+                .child(num("NearAttenuationStart", near.0 * factor))
+                .child(num("NearAttenuationEnd", near.1 * factor))
+                .child(flag("EnableFarAttenuation", l.far.is_some()))
+                .child(num("FarAttenuationStart", far.0 * factor))
+                .child(num("FarAttenuationEnd", far.1 * factor)),
+        )
+        .child(Record::leaf("TypeFlags", vec![Prop::Str("Light".into())]))
+        .child(Record::leaf("GeometryVersion", vec![Prop::I32(124)]))
+}
+
 /// A matrix as FBX stores it (column-major 16 doubles), its translation scaled to centimetres.
 fn matrix16(m: Mat4, factor: f32) -> Vec<f64> {
     let mut c = m.to_cols_array();
@@ -349,6 +380,13 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
                 let aid = ids.next();
                 n_attr += 1;
                 objects.children.push(camera_attribute(aid, &n.name, *fov_deg));
+                connections.children.push(Record::leaf("C", vec![Prop::Str("OO".into()), Prop::I64(aid), Prop::I64(mid)]));
+            }
+            FbxKind::Light(light) => {
+                objects.children.push(model(mid, n, "Light", opts.axes, factor));
+                let aid = ids.next();
+                n_attr += 1;
+                objects.children.push(light_attribute(aid, &n.name, light, factor));
                 connections.children.push(Record::leaf("C", vec![Prop::Str("OO".into()), Prop::I64(aid), Prop::I64(mid)]));
             }
             FbxKind::Bone { size, .. } => {
@@ -475,12 +513,16 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
         connections.children.push(Record::leaf("C", vec![Prop::Str("OO".into()), Prop::I64(layer), Prop::I64(stack)]));
         for (index, a) in &take.tracks {
             let Some(&mid) = model_ids.get(*index) else { continue };
-            let camera = matches!(doc.nodes[*index].kind, FbxKind::Camera { .. });
+            let class = match doc.nodes[*index].kind {
+                FbxKind::Camera { .. } => "Camera",
+                FbxKind::Light(_) => "Light",
+                _ => "",
+            };
             let times: Vec<i64> = a.frames.iter().map(|f| ktime(*f, fps)).collect();
             let t: Vec<Vec3> = a.translation.iter().map(|v| axis(*v * factor, opts.axes)).collect();
             let mut r: Vec<Vec3> = Vec::with_capacity(a.rotation_deg.len());
             for v in &a.rotation_deg {
-                let mut e = fbx_rotation(*v, opts.axes, camera);
+                let mut e = fbx_rotation(*v, opts.axes, class);
                 // Keep each axis continuous so linear interpolation does not spin the long way round.
                 if let Some(prev) = r.last() {
                     for i in 0..3 {

@@ -33,8 +33,14 @@ pub struct ViewportSave {
     pub clip: (f32, f32),
     pub fov_y_radians: f32,
     pub scene_lights: bool,
+    #[serde(default = "one")]
+    pub default_lights: u32,
     pub background: Option<String>,
     pub background_locked: bool,
+}
+
+fn one() -> u32 {
+    1
 }
 
 fn default_clip() -> (f32, f32) {
@@ -58,6 +64,7 @@ impl ViewportSave {
             clip: v.clip,
             fov_y_radians: v.fov_y_radians,
             scene_lights: v.scene_lights,
+            default_lights: v.default_lights,
             background: v.background.clone(),
             background_locked: v.background_locked,
         }
@@ -78,6 +85,7 @@ impl ViewportSave {
         v.clip = self.clip;
         v.fov_y_radians = self.fov_y_radians;
         v.scene_lights = self.scene_lights;
+        v.default_lights = self.default_lights;
         v.background = self.background.clone();
         v.background_locked = self.background_locked;
         v

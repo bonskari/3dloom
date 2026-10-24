@@ -87,7 +87,7 @@ impl CreateSession {
         let (kind, shape) = match what {
             CreateKind::Primitive(k) => (k, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
-            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } => return None,
+            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) => return None,
         };
         let label = format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label()));
         app.state.undo.begin(&label);
@@ -473,6 +473,25 @@ impl CameraSession {
 
     pub fn finish(self, app: &mut LoomApp) {
         app.state.undo.end();
+    }
+
+    /// Create > Lights > Target Spot / Target Direct: the press places the
+    /// light, the drag moves its target (the same session as a target camera).
+    pub fn begin_light(app: &mut LoomApp, kind: loom_commands::light::LightKind, anchor: Vec3, normal: Vec3) -> Option<Self> {
+        app.state.undo.begin("Create Light");
+        let r = app.dispatch(Command::CreateLight { kind, position: anchor.to_array(), target: anchor.to_array() });
+        let target = r.ok().and_then(|v| v["target"].as_u64()).map(NodeId);
+        if target.is_none() {
+            app.state.undo.end();
+        }
+        target.map(|target| Self { target, normal })
+    }
+
+    /// Create > Lights > Free Spot / Free Direct / Omni / Skylight: a click
+    /// places the light; free lights shine down the construction plane's -Z.
+    pub fn place_light(app: &mut LoomApp, kind: loom_commands::light::LightKind, anchor: Vec3, normal: Vec3) {
+        let at = anchor - normal * loom_scene::light::DEFAULT_TARGET_DISTANCE;
+        let _ = app.dispatch(Command::CreateLight { kind, position: anchor.to_array(), target: at.to_array() });
     }
 
     /// Create > Cameras > Free: a click places a camera looking down the

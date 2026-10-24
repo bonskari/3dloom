@@ -24,6 +24,7 @@ pub mod viewport_configuration;
 pub mod file_dialog;
 pub mod material_editor;
 pub mod render_setup;
+pub mod lights;
 pub mod save_changes;
 pub mod merge;
 pub mod unwrap_dialogs;
@@ -101,6 +102,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::MaterialMap { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
+        Dialog::LightLister => lights::light_lister(ctx, app, &mut open),
+        Dialog::LightExclude { light } => lights::light_exclude(ctx, app, light, &mut open),
         Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),
         Dialog::SelectFromScene => select_from_scene::show(ctx, app, &mut open),
         Dialog::NamedSelectionSets => named_selection_sets::show(ctx, app, &mut open),

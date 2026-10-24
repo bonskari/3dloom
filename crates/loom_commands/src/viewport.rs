@@ -42,7 +42,11 @@ pub struct Viewport {
     pub clip: (f32, f32),
     /// Perspective field of view (vertical), per viewport.
     pub fov_y_radians: f32,
+    /// Illuminate with Scene Lights (Ctrl+L switches to Default Lights);
+    /// a scene with no light that is on is lit by the default lights.
     pub scene_lights: bool,
+    /// Default Lights: 1 light (from the viewer) or 2 (key and fill).
+    pub default_lights: u32,
     pub background: Option<String>,
     pub background_locked: bool,
     /// Bumped by Update Background Image so the UI reloads the file.
@@ -76,7 +80,8 @@ impl Viewport {
             clipping: false,
             clip: (0.0, 1000.0),
             fov_y_radians: 45f32.to_radians(),
-            scene_lights: false,
+            scene_lights: true,
+            default_lights: 1,
             background: None,
             background_locked: false,
             background_version: 0,
@@ -268,6 +273,10 @@ pub enum Dialog {
     RenderFile,
     /// Rendering > Render SetUp: the output size.
     RenderSetup,
+    /// Tools > Light Lister.
+    LightLister,
+    /// General Parameters > Exclude...: the Exclude/Include dialog of a light.
+    LightExclude { light: u64 },
     /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).
     MaterialMap { channel: u8 },
     ViewportConfiguration,

@@ -4,6 +4,7 @@
 //! viewport background, and renders the active view to a PNG for Render.
 
 pub mod convert;
+pub mod lights;
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,7 +15,8 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::entity::Entity;
 use bevy::image::{Image, ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Vec3;
-use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, DirectionalLightShadowMap, MeshMaterial3d, StandardMaterial};
+use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, DirectionalLightShadowMap, MeshMaterial3d, PointLightShadowMap, StandardMaterial};
+use bevy::render::view::RenderLayers;
 use bevy::render::camera::{Camera, ClearColorConfig, RenderTarget};
 use bevy::render::mesh::{Mesh, Mesh3d};
 use bevy::render::render_asset::RenderAssets;
@@ -90,7 +92,13 @@ pub struct BevyRenderer {
     objects: HashMap<u64, Object>,
     views: HashMap<u32, View>,
     textures: HashMap<String, Option<Handle<Image>>>,
-    light: Entity,
+    /// The default key light, while the scene has no light that is on.
+    light: Option<Entity>,
+    /// Scene lights by node id.
+    scene_lights: HashMap<u64, lights::Synced>,
+    /// Render layers the views see: 0 plus one per scene light when a light
+    /// excludes objects from shadow casting.
+    view_layers: RenderLayers,
     /// Scene bounds (centre, radius) for the shadow range.
     bounds: Option<(Vec3, f32)>,
     /// Updates still wanted after a change (pipelines compiling, first frames).
@@ -123,16 +131,112 @@ impl BevyRenderer {
         }
         app.finish();
         app.cleanup();
-        app.insert_resource(AmbientLight { color: Color::WHITE, brightness: 250.0, affects_lightmapped_meshes: true });
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
-        let light = app
-            .world_mut()
+        let light = Some(Self::spawn_key_light(&mut app));
+        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), light, scene_lights: HashMap::new(), view_layers: RenderLayers::layer(0), bounds: None, settle: 3 }
+    }
+
+    /// Default lighting: a key light with shadows and a white ambient light.
+    fn spawn_key_light(app: &mut App) -> Entity {
+        app.insert_resource(AmbientLight { color: Color::WHITE, brightness: 250.0, affects_lightmapped_meshes: true });
+        app.world_mut()
             .spawn((
                 DirectionalLight { illuminance: 3000.0, shadows_enabled: true, ..Default::default() },
                 Transform::from_translation(KEY_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
             ))
-            .id();
-        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), light, bounds: None, settle: 3 }
+            .id()
+    }
+
+    /// Brings the Bevy lights in line with the scene's lights (call after
+    /// `sync`, which measures the scene): with none the default key light
+    /// and ambient light the scene; otherwise the scene lights replace them.
+    pub fn sync_lights(&mut self, samples: &[loom_scene::light::LightSample]) {
+        let (centre, radius) = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
+        if samples.is_empty() {
+            if self.light.is_none() {
+                self.light = Some(Self::spawn_key_light(&mut self.app));
+            }
+        } else if let Some(e) = self.light.take() {
+            self.app.world_mut().despawn(e);
+        }
+        if !samples.is_empty() {
+            let (color, brightness) = lights::ambient(samples);
+            self.app.insert_resource(AmbientLight { color, brightness, affects_lightmapped_meshes: true });
+        }
+        // Shadow-casting exclusions need a render layer per light.
+        let exclusions = samples.iter().any(|s| s.shadows && s.exclusion.scope != 0 && (s.exclusion.include || !s.exclusion.nodes.is_empty()));
+        let mut seen = HashSet::new();
+        let mut map_size = 0usize;
+        for (i, s) in samples.iter().enumerate() {
+            let Some(kind) = lights::kind(s) else { continue };
+            seen.insert(s.id.0);
+            let centre_distance = (Vec3::from(s.position.to_array()) - centre).length();
+            let world = self.app.world_mut();
+            let entity = match self.scene_lights.get(&s.id.0) {
+                Some(l) if l.kind == kind => l.entity,
+                other => {
+                    if let Some(l) = other {
+                        world.despawn(l.entity);
+                    }
+                    let e = world.spawn(Transform::IDENTITY).id();
+                    self.scene_lights.insert(s.id.0, lights::Synced { entity: e, kind });
+                    e
+                }
+            };
+            let mut e = world.entity_mut(entity);
+            e.insert((lights::transform(s), if exclusions { RenderLayers::layer(i + 1) } else { RenderLayers::layer(0) }));
+            match kind {
+                lights::Kind::Point => {
+                    e.insert(lights::point(s, centre_distance, radius));
+                }
+                lights::Kind::Spot => {
+                    e.insert(lights::spot(s, centre_distance, radius));
+                }
+                lights::Kind::Directional => {
+                    e.insert(lights::directional(s));
+                }
+            }
+            if s.shadows && kind != lights::Kind::Directional {
+                map_size = map_size.max(s.map_size as usize);
+            }
+        }
+        let gone: Vec<u64> = self.scene_lights.keys().filter(|id| !seen.contains(id)).copied().collect();
+        for id in gone {
+            if let Some(l) = self.scene_lights.remove(&id) {
+                self.app.world_mut().despawn(l.entity);
+            }
+        }
+        if map_size > 0 {
+            self.app.insert_resource(PointLightShadowMap { size: map_size.clamp(128, 8192) });
+        }
+        // Each object is on layer 0 and on the layer of every light whose shadows it casts.
+        self.view_layers = if exclusions { RenderLayers::from_layers(&(0..=samples.len()).collect::<Vec<_>>()) } else { RenderLayers::layer(0) };
+        for (id, obj) in &self.objects {
+            let mut layers = RenderLayers::layer(0);
+            if exclusions {
+                for (i, s) in samples.iter().enumerate() {
+                    if !s.exclusion.excludes(loom_scene::NodeId(*id), false) {
+                        layers = layers.with(i + 1);
+                    }
+                }
+            }
+            self.app.world_mut().entity_mut(obj.entity).insert(layers);
+        }
+        let layers = self.view_layers.clone();
+        for v in self.views.values() {
+            self.app.world_mut().entity_mut(v.camera).insert(layers.clone());
+        }
+        self.settle = self.settle.max(3);
+    }
+
+    /// The Bevy light entity of scene light `id` (tests and debugging).
+    pub fn light_entity(&self, id: u64) -> Option<Entity> {
+        self.scene_lights.get(&id).map(|l| l.entity)
+    }
+
+    /// Whether the default key light is lighting the scene.
+    pub fn default_lighting(&self) -> bool {
+        self.light.is_some()
     }
 
     /// Brings the Bevy scene in line with `objects`: new nodes are spawned,
@@ -263,7 +367,7 @@ impl BevyRenderer {
                     let entity = self
                         .app
                         .world_mut()
-                        .spawn((Camera3d::default(), Tonemapping::AcesFitted, Camera { order: slot.min(1 << 20) as isize, ..Default::default() }))
+                        .spawn((Camera3d::default(), Tonemapping::AcesFitted, Camera { order: slot.min(1 << 20) as isize, ..Default::default() }, self.view_layers.clone()))
                         .id();
                     self.views.insert(slot, View { camera: entity, image: image.clone(), size, msaa, used: false, generation: 0 });
                 }
@@ -300,7 +404,11 @@ impl BevyRenderer {
         }
         let Some((min, max)) = range else { return };
         let config = CascadeShadowConfigBuilder { num_cascades: 1, minimum_distance: min, maximum_distance: max.max(min + 1e-3), first_cascade_far_bound: max.max(min + 1e-3), overlap_proportion: 0.2 }.build();
-        self.app.world_mut().entity_mut(self.light).insert(config);
+        let directional = self.scene_lights.values().filter(|l| l.kind == lights::Kind::Directional).map(|l| l.entity);
+        let entities: Vec<Entity> = self.light.into_iter().chain(directional).collect();
+        for e in entities {
+            self.app.world_mut().entity_mut(e).insert(config.clone());
+        }
     }
 
     /// Renders every view set since the last update.

@@ -50,12 +50,15 @@ impl LoomApp {
 
     fn sync_bevy(&mut self) {
         let version = self.world_version;
+        // Light icons and their targets are viewport proxies, not geometry.
         let objects: Vec<(u64, usize, [u8; 3])> = self
             .world_meshes()
             .iter()
             .enumerate()
+            .filter(|(_, (id, _))| !self.is_light_proxy(*id))
             .filter_map(|(i, (id, _))| self.state.scene.node(*id).map(|n| (id.0, i, n.wire_color)))
             .collect();
+        let lights = loom_scene::light::scene_lights(&self.state.scene, |_| true);
         let display = self.world_display.clone();
         let scene = &self.state.scene;
         let Gpu::Running(b) = &mut self.gpu else { return };
@@ -69,7 +72,14 @@ impl LoomApp {
             })
             .collect();
         b.renderer.sync(&list);
+        b.renderer.sync_lights(&lights);
         b.synced = Some(version);
+    }
+
+    /// A light node or a light's target.
+    pub(crate) fn is_light_proxy(&self, id: loom_scene::NodeId) -> bool {
+        let scene = &self.state.scene;
+        matches!(scene.node(id).map(|n| &n.object), Some(loom_scene::ObjectKind::Light(_))) || loom_commands::light::is_light_target(scene, id)
     }
 
     /// Asks Bevy to render viewport `index` this frame at `size` physical
