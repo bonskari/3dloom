@@ -82,6 +82,14 @@ field name, enums as tagged objects or strings as serde derives them.
   `threshold`, `iterations`, `spline`, `ik_for_fk`). Solved bone rotations
   are not stored; they are recomputed on load.
 - `layers`, `current_layer`: the Layer Manager.
+- `render`: Render Setup — `width`, `height`, `pixel_aspect`,
+  `lock_image_aspect`, `lock_pixel_aspect`, `render_hidden`,
+  `force_two_sided`, `save_file`, `output_path`, Area to Render `area`
+  (View / Selected / Region / Crop / Blowup) with the `region` and `blowup`
+  rectangles (x0, y0, x1, y1 as fractions of the frame), and `bevy` (the
+  renderer panel: `antialiasing`, `supersampling`, `shadows`,
+  `shadow_map_size`, `background` and `ambient` sRGB colours). The rendered
+  image itself is not stored.
 
 ## `settings`
 
