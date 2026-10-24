@@ -163,7 +163,7 @@ impl PathTable {
 
 pub fn path_deform(d: &PathDeformData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<StackValue, String> {
     let Some(path) = d.path else { return Ok(v) };
-    let shape = ctx.node_shape(path).ok_or("PathDeform: pick a shape as the path")?;
+    let shape = ctx.node_eval_shape(path).ok_or("PathDeform: pick a shape as the path (one that does not depend on this object)")?;
     let table = PathTable::new(&shape).ok_or("PathDeform: the path has no length")?;
     // Path space → this object's space.
     let to_object = if d.world { ctx.object_inverse * ctx.node_world_matrix(path).unwrap_or(Mat4::IDENTITY) } else { Mat4::IDENTITY };
@@ -264,10 +264,22 @@ pub fn flex(d: &FlexData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<StackV
 }
 
 /// Spline IK Control: a helper per knot; the knots follow their helpers.
+///
+/// Mapping: `helpers` is in flat knot order (spline by spline) and
+/// `knot_counts` holds each spline's knot count when the helpers were made,
+/// so helper `j` of spline `s` sits at `knot_counts[..s].sum() + j`. A spline
+/// is driven only while its knot count below is still the recorded one: a
+/// knot added or removed below shifts the indices, and guessing which helper
+/// belongs to which knot would silently move the wrong knots. Such a spline
+/// (or a spline that is gone) passes through unchanged and a warning names
+/// it and its unused helpers; the other splines keep following theirs.
+/// Files without `knot_counts` treat the whole shape as one flat list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SplineIkControlData {
     pub helpers: Vec<Option<NodeId>>,
+    /// Knots of each spline when Create Helpers ran.
+    pub knot_counts: Vec<usize>,
     /// Link Types: 0 Link All in Hierarchy, 1 Link All to Root, 2 No Linking.
     pub link_type: u32,
     /// Helper Display: 0 Center Marker, 1 Axis Tripod, 2 Cross, 3 Box.
@@ -277,22 +289,41 @@ pub struct SplineIkControlData {
 
 impl Default for SplineIkControlData {
     fn default() -> Self {
-        Self { helpers: Vec::new(), link_type: 0, display: 2, helper_size: 20.0 }
+        Self { helpers: Vec::new(), knot_counts: Vec::new(), link_type: 0, display: 2, helper_size: 20.0 }
     }
 }
 
 pub fn spline_ik_control(d: &SplineIkControlData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<StackValue, String> {
     let mut sh = v.shape.take().ok_or("Spline IK Control needs a shape below it")?;
-    let mut flat = 0usize;
-    for sp in &mut sh.splines {
-        for k in &mut sp.knots {
-            if let Some(Some(h)) = d.helpers.get(flat) {
-                if let Some(m) = ctx.node_world_matrix(*h) {
-                    // The knot moves with its helper; its handles keep their vectors.
-                    k.pos = ctx.object_inverse.transform_point3(m.w_axis.truncate());
-                }
+    // Without recorded counts (an older file): the whole shape as one flat list.
+    let legacy;
+    let counts: &[usize] = if d.knot_counts.is_empty() {
+        legacy = [d.helpers.len()];
+        &legacy
+    } else {
+        &d.knot_counts
+    };
+    let flat_now = d.knot_counts.is_empty();
+    let spline_count = sh.splines.len();
+    let mut start = 0usize;
+    for (s, &count) in counts.iter().enumerate() {
+        let helpers = d.helpers.get(start..(start + count).min(d.helpers.len())).unwrap_or(&[]);
+        start += count;
+        let used = helpers.iter().flatten().count();
+        let knots: Vec<&mut loom_shape::Knot> = if flat_now { sh.splines.iter_mut().flat_map(|sp| sp.knots.iter_mut()).collect() } else { sh.splines.get_mut(s).map(|sp| sp.knots.iter_mut().collect()).unwrap_or_default() };
+        if knots.len() != count {
+            if used > 0 {
+                let which = if flat_now { "the shape".to_string() } else { format!("spline {}", s + 1) };
+                let now = if flat_now || s < spline_count { format!("has {} knots", knots.len()) } else { "is gone".to_string() };
+                v.warnings.push(format!("Spline IK Control: {which} {now} (its helpers were made for {count}); its {used} helper(s) are not used"));
             }
-            flat += 1;
+            continue;
+        }
+        for (k, h) in knots.into_iter().zip(helpers) {
+            if let Some(m) = h.and_then(|h| ctx.node_world_matrix(h)) {
+                // The knot moves with its helper; its handles keep their vectors.
+                k.pos = ctx.object_inverse.transform_point3(m.w_axis.truncate());
+            }
         }
     }
     v.mesh = crate::node::shape_cage_mesh(&sh, false);

@@ -287,6 +287,12 @@ impl Scene {
             let e = self.evaluated(other, None);
             Some((self.object_matrix(other), e.value.mesh.clone()))
         };
+        let eval_shape_lookup = |other: NodeId| -> Option<loom_shape::Shape> {
+            if !self.nodes.contains_key(&other) || self.eval_in_progress.borrow().contains(&other) {
+                return None;
+            }
+            self.evaluated(other, None).value.shape.clone()
+        };
         self.eval_in_progress.borrow_mut().insert(id);
         let camera_fov = |other: NodeId| -> Option<f32> {
             match &self.nodes.get(&other)?.object {
@@ -295,7 +301,7 @@ impl Scene {
             }
         };
         let self_world_at = |t: f32| -> glam::Mat4 { self.at_time(t, || self.object_matrix(id)) };
-        let ctx = EvalCtx { object_world, object_inverse: object_world.inverse(), lookup: Some(&lookup), shape_lookup: Some(&shape_lookup), world_lookup: Some(&world_lookup), eval_lookup: Some(&eval_lookup), self_world_at: Some(&self_world_at), camera_fov: Some(&camera_fov) };
+        let ctx = EvalCtx { object_world, object_inverse: object_world.inverse(), lookup: Some(&lookup), shape_lookup: Some(&shape_lookup), eval_shape_lookup: Some(&eval_shape_lookup), world_lookup: Some(&world_lookup), eval_lookup: Some(&eval_lookup), self_world_at: Some(&self_world_at), camera_fov: Some(&camera_fov) };
         let mut value = StackValue { mesh: node.map(|n| n.object.display_output()).unwrap_or_default(), selection: None, shape: node.and_then(|n| n.object.shape()), shape_selection: None, warnings: Vec::new() };
         let mut warnings = Vec::new();
         if let Some(n) = node {

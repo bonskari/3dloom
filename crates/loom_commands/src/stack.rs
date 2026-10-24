@@ -814,6 +814,7 @@ pub fn spline_ik_create_helpers(state: &mut AppState) -> Result<Value, String> {
     let mut after = before.clone();
     if let Modifier::SplineIkControl(d) = &mut after[index].modifier {
         d.helpers = ids.iter().map(|h| Some(*h)).collect();
+        d.knot_counts = input.splines.iter().map(|sp| sp.knots.len()).collect();
     }
     changes.push(Change::SetStack { id, before, after });
     commit_change(state, "Create Helpers", Change::Group(changes))?;
