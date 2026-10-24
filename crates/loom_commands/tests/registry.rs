@@ -392,18 +392,25 @@ fn inherit_off_ignores_parent_position() {
 }
 
 #[test]
-fn reset_xform_bakes_transform() {
+fn reset_xform_moves_transform_into_an_xform_modifier() {
     let mut s = state();
     let id = box_at(&mut s, 0.0);
     execute(&mut s, Command::SetTransform { id: id.0, position: Some([1.0, 2.0, 0.0]), rotation_deg: Some([0.0, 0.0, 90.0]), scale: Some([2.0, 1.0, 1.0]) }).unwrap();
-    let before = s.object_bounds(id).unwrap();
+    let bounds = |s: &AppState| {
+        let m = s.scene.object_matrix(id);
+        let pts: Vec<glam::Vec3> = s.scene.evaluated(id, None).value.mesh.vertices().iter().map(|v| m.transform_point3(v.position)).collect();
+        (pts.iter().fold(glam::Vec3::INFINITY, |a, p| a.min(*p)), pts.iter().fold(glam::Vec3::NEG_INFINITY, |a, p| a.max(*p)))
+    };
+    let before = bounds(&s);
+    let object = s.scene.node(id).unwrap().object.clone();
     execute(&mut s, Command::ResetXForm).unwrap();
     let node = s.scene.node(id).unwrap();
-    assert!(matches!(node.object, loom_scene::ObjectKind::EditablePoly(_)));
+    assert_eq!(node.object, object, "the base object stays; an XForm modifier holds the transform");
+    assert!(matches!(node.modifiers.last().map(|m| &m.modifier), Some(loom_scene::Modifier::XForm { .. })));
     assert_eq!(node.transform.rotation.get(), glam::Vec3::ZERO);
     assert_eq!(node.transform.scale.get(), glam::Vec3::ONE);
     assert_eq!(node.transform.position.get(), glam::Vec3::new(1.0, 2.0, 0.0), "position is kept");
-    let after = s.object_bounds(id).unwrap();
+    let after = bounds(&s);
     assert!(before.0.abs_diff_eq(after.0, 1e-4) && before.1.abs_diff_eq(after.1, 1e-4), "{before:?} {after:?}");
 }
 
