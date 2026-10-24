@@ -341,16 +341,15 @@ fn obj_export_options_change_the_text() {
     // The box spans z 0..10; flipped Y-up and scaled 2, y spans 0..20.
     let ys: Vec<f32> = text.lines().filter(|l| l.starts_with("v ")).map(|l| l.split_whitespace().nth(2).unwrap().parse().unwrap()).collect();
     assert!(ys.iter().any(|y| (*y - 20.0).abs() < 1e-3) && ys.iter().all(|y| *y >= -1e-3), "{ys:?}");
-    // Quads split an n-gon: a 6-sided cylinder cap becomes 2 quads.
+    // Quads split an n-gon: a hexagon becomes 2 quads.
     opt(&mut s, "obj_export", "faces", json!("Quads"));
     execute(&mut s, Command::NewScene).unwrap();
-    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Cylinder, position: [0.0; 3], size: [10.0, 10.0, 10.0] }).unwrap();
-    let cyl = *s.selection.iter().next().unwrap();
-    execute(&mut s, Command::SetParameter { id: cyl.0, name: "Sides".into(), value: 6.0 }).unwrap();
-    execute(&mut s, Command::SetParameter { id: cyl.0, name: "Height Segments".into(), value: 1.0 }).unwrap();
+    let hex = d.join("hex.obj");
+    std::fs::write(&hex, "v 2 0 0\nv 1 1.7 0\nv -1 1.7 0\nv -2 0 0\nv -1 -1.7 0\nv 1 -1.7 0\nf 1 2 3 4 5 6\n").unwrap();
+    import(&mut s, &hex);
     export(&mut s, &f);
     let text = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
-    assert!(faces(&text).iter().all(|n| *n == 4), "{:?}", faces(&text));
+    assert_eq!(faces(&text), vec![4, 4]);
 }
 
 #[test]
