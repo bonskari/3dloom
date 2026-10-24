@@ -26,6 +26,14 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     let rebases_pose = state.set_key_mode && !crate::anim_cmds::is_pose_edit(&cmd);
     let position = state.undo.position();
     let r = execute_inner(state, cmd);
+    // Axis constraints are kept separately at object and sub-object level.
+    let sub = state.selection_mode != SelectionMode::Object;
+    if sub != state.constraint_level_sub && !state.prefs.ref_coord_constant {
+        let t = tool_index(state.active_tool);
+        state.constraint_by_tool[state.constraint_level_sub as usize][t] = state.axis_constraint;
+        state.axis_constraint = state.constraint_by_tool[sub as usize][t];
+    }
+    state.constraint_level_sub = sub;
     if rebases_pose && state.set_key_mode && state.undo.position() != position {
         crate::anim_cmds::start_pose(state);
     }
@@ -2264,10 +2272,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     let to = state.scene.world_matrix(id).w_axis.truncate();
                     return transform_selection_each(state, "Quick Align", &|_, _| (Mat4::from_translation(to - from), Vec3::ZERO));
                 }
-                Some(PickMode::NormalAlignSource | PickMode::NormalAlignTarget | PickMode::AlignCamera) => {
+                Some(PickMode::NormalAlignSource | PickMode::NormalAlignTarget | PickMode::AlignCamera | PickMode::WorkingPivotSurface) => {
                     return Err("this pick mode needs a surface pick (Pick Surface)".into());
                 }
-                Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex) => {
+                Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex | PickMode::WorkingPivotView) => {
                     return Err("this pick mode needs a point pick (Pick Point)".into());
                 }
                 Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB | PickMode::SwiftLoop | PickMode::BridgeEdge1 | PickMode::BridgeEdge2) => {
@@ -3158,11 +3166,12 @@ fn set_tool(state: &mut AppState, tool: Tool) -> Result<Value, String> {
     // Coordinate System > Constant is on.
     if !state.prefs.ref_coord_constant {
         state.center_by_tool[old] = (state.center_single, state.center_multi);
-        state.constraint_by_tool[old] = state.axis_constraint;
+        let level = state.constraint_level_sub as usize;
+        state.constraint_by_tool[level][old] = state.axis_constraint;
         let i = tool_index(tool);
         state.coord_system = state.coord_by_tool[i];
         (state.center_single, state.center_multi) = state.center_by_tool[i];
-        state.axis_constraint = state.constraint_by_tool[i];
+        state.axis_constraint = state.constraint_by_tool[level][i];
         state.refresh_center_mode();
     }
     Ok(json!({ "tool": tool.label() }))

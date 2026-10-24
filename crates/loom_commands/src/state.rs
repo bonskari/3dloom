@@ -1254,9 +1254,12 @@ pub struct AppState {
     /// (Preferences > Reference Coordinate System > Constant off).
     pub coord_by_tool: [CoordSystem; 4],
     /// Use Center (single, multiple) and axis constraint remembered per
-    /// transform tool, like `coord_by_tool`.
+    /// transform tool, like `coord_by_tool`; the constraint also per level
+    /// ([object, sub-object][tool]).
     pub center_by_tool: [(CenterMode, CenterMode); 4],
-    pub constraint_by_tool: [AxisConstraint; 4],
+    pub constraint_by_tool: [[AxisConstraint; 4]; 2],
+    /// Which level `axis_constraint` belongs to (true = sub-object).
+    pub constraint_level_sub: bool,
     /// Keyboard Shortcut Override Toggle: when off only Main UI shortcuts work.
     pub keyboard_override: bool,
     pub named_sets: BTreeMap<String, Vec<NodeId>>,
@@ -1510,7 +1513,8 @@ impl AppState {
             manipulate: false,
             coord_by_tool: [CoordSystem::View; 4],
             center_by_tool: [(CenterMode::PivotPoint, CenterMode::Selection); 4],
-            constraint_by_tool: [AxisConstraint::XY; 4],
+            constraint_by_tool: [[AxisConstraint::XY; 4]; 2],
+            constraint_level_sub: false,
             keyboard_override: true,
             ffd_selection: BTreeSet::new(),
             vertex_paint_brush: false,

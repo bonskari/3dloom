@@ -61,6 +61,21 @@ fn transform_managers_are_remembered_per_transform_tool() {
 }
 
 #[test]
+fn axis_constraints_are_kept_per_object_and_sub_object_level() {
+    let mut s = AppState::new();
+    box_at(&mut s, 0.0);
+    execute(&mut s, Command::ConvertToEditablePoly).unwrap();
+    execute(&mut s, Command::SelectAndMove).unwrap();
+    assert_eq!(s.axis_constraint, AxisConstraint::XY);
+    execute(&mut s, Command::SelectionMode { mode: SelectionMode::Face }).unwrap();
+    execute(&mut s, Command::TransformGizmoZConstraint).unwrap();
+    execute(&mut s, Command::SelectionMode { mode: SelectionMode::Object }).unwrap();
+    assert_eq!(s.axis_constraint, AxisConstraint::XY, "object level keeps its own");
+    execute(&mut s, Command::SelectionMode { mode: SelectionMode::Vertex }).unwrap();
+    assert_eq!(s.axis_constraint, AxisConstraint::Z, "sub-object level is restored");
+}
+
+#[test]
 fn gimbal_rotation_changes_only_its_own_euler_track() {
     let mut s = AppState::new();
     let id = box_at(&mut s, 0.0);
