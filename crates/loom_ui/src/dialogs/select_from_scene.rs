@@ -312,13 +312,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         ui.add_space(r.depth as f32 * 14.0);
                         if r.has_children && r.id != SCENE_ROOT {
                             let open_branch = st.expanded.contains(&r.id);
-                            if ui.small_button(if open_branch { "−" } else { "+" }).on_hover_text(if open_branch { "Collapse" } else { "Expand" }).clicked() {
+                            if ui.add_sized([16.0, 16.0], egui::Button::new(if open_branch { "−" } else { "+" }).small()).on_hover_text(if open_branch { "Collapse" } else { "Expand" }).clicked() {
                                 if open_branch {
                                     st.expanded.remove(&r.id);
                                 } else {
                                     st.expanded.insert(r.id);
                                 }
                             }
+                        } else if o.display_children && r.id != SCENE_ROOT {
+                            // Leaves line up with their siblings' names.
+                            ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
                         }
                         let on = st.chosen.contains(&r.id);
                         let resp = ui.selectable_label(on, &r.name);

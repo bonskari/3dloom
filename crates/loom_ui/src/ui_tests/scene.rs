@@ -108,7 +108,8 @@ fn display_children_shows_the_hierarchy_and_expand_all_opens_it() {
     let w = window_text(&h, "Select From Scene", "Wing");
     let ai = window_text(&h, "Select From Scene", "Aileron");
     assert!(g.y < w.y && w.y < ai.y, "parent above child above grandchild");
-    let left = |t: &str| h.text_rect(t, SCREEN).unwrap().min.x;
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("Select From Scene"))).unwrap();
+    let left = |t: &str| h.text_rect(t, area).unwrap().min.x;
     assert!(left("Gondola") < left("Wing") && left("Wing") < left("Aileron"), "each level indented");
     // Shift+click selects the range Gondola..Aileron.
     h.click(g);
@@ -260,9 +261,6 @@ fn merge_starts_with_nothing_highlighted_and_asks_about_duplicate_names() {
     let ok = window_text(&h, title, "OK");
     h.click(ok);
     // Blade is taken: the Duplicate Name question.
-    h.frames(2);
-    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("Duplicate Name")));
-    eprintln!("DEBUG dialog={:?} area={area:?} texts={:?} merge={:?}", h.app.state.dialog, h.texts("Delete Old"), h.app.state.merge_pending.is_some());
     let p = window_text(&h, "Duplicate Name", "Delete Old");
     h.click(p);
     let mut names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
