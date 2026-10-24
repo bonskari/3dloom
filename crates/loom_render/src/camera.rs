@@ -8,6 +8,9 @@ pub struct Camera {
     pub fov_y_radians: f32,
     pub near: f32,
     pub far: f32,
+    /// Viewport Clipping in an axis view: (near, far) distances from the view's
+    /// eye point; perspective views use `near` / `far` directly.
+    pub clip: Option<(f32, f32)>,
 }
 
 impl Default for Camera {
@@ -18,6 +21,7 @@ impl Default for Camera {
             fov_y_radians: 45f32.to_radians(),
             near: 0.01,
             far: 1000.0,
+            clip: None,
         }
     }
 }
@@ -58,8 +62,10 @@ impl Camera {
                 width * 0.5,
                 -height * 0.5,
                 height * 0.5,
-                0.01,
-                Self::ORTHO_EYE * 2.0,
+                // The projection's eye sits ORTHO_EYE behind the target; the
+                // view's eye point is `distance` in front of it.
+                self.clip.map_or(0.01, |(n, _)| (Self::ORTHO_EYE - self.orbit.distance + n).max(0.01)),
+                self.clip.map_or(Self::ORTHO_EYE * 2.0, |(n, f)| (Self::ORTHO_EYE - self.orbit.distance + f).max(Self::ORTHO_EYE - self.orbit.distance + n + 1e-3)),
             )
         }
     }
@@ -115,6 +121,25 @@ mod tests {
         let dir = (cam.orbit.target - cam.orbit.eye_position()).normalize();
         let p = cam.view_projection(1.0) * glam::Vec4::from((cam.orbit.eye_position() + dir * 30_000.0, 1.0));
         assert!(p.z / p.w <= 1.0, "a point 30 000 units away is clipped: {}", p.z / p.w);
+    }
+
+    /// Viewport Clipping in an axis view: the planes are distances from the
+    /// view's eye point (orbit distance in front of the target), as in Perspective.
+    #[test]
+    fn orthographic_clipping_cuts_by_distance_from_the_eye() {
+        let mut cam = Camera::default();
+        cam.perspective = false;
+        cam.orbit.distance = 50.0;
+        cam.clip = Some((40.0, 60.0));
+        let eye = cam.orbit.eye_position();
+        let dir = (cam.orbit.target - eye).normalize();
+        let depth = |d: f32| {
+            let p = cam.view_projection(1.0) * glam::Vec4::from((eye + dir * d, 1.0));
+            p.z / p.w
+        };
+        assert!((0.0..=1.0).contains(&depth(50.0)), "the target (50 from the eye) is kept");
+        assert!(depth(30.0) < 0.0, "nearer than near is cut");
+        assert!(depth(70.0) > 1.0, "farther than far is cut");
     }
 
     #[test]

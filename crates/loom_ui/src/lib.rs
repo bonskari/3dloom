@@ -530,6 +530,7 @@ impl LoomApp {
             fov_y_radians: vp.fov_y_radians,
             near,
             far,
+            clip: (vp.clipping && vp.is_orthographic()).then_some(vp.clip),
         }
     }
 

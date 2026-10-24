@@ -1006,7 +1006,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             if cube_shown {
                 crate::viewport_gizmo::draw(&painter, gizmo_rect, vp_yaw, vp_pitch, !app.state.viewports[index].is_orthographic(), cube_hovered);
             }
-            if app.state.viewports[index].clipping && !app.state.viewports[index].is_orthographic() {
+            if app.state.viewports[index].clipping {
                 clip_slider(ui, &painter, app, index, rect);
             }
 
