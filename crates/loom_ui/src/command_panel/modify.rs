@@ -4,6 +4,7 @@
 //! rollouts, or the modifier's parameters and sub-object levels).
 
 use super::{create, rollout};
+use crate::icons::{self, Icon};
 use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
@@ -91,7 +92,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             // Closed: the next opening starts with an empty search.
             ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::new("modifier_list_query")));
         }
-        if ui.small_button(if app.state.show_modifier_set { "▲" } else { "▼" }).on_hover_text("Show / hide the modifier button set").clicked() {
+        if Icon::new(if app.state.show_modifier_set { icons::UP } else { icons::DOWN }, Command::ModifierSetButtonsToggle.name()).tip("Show / hide the modifier button set").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ModifierSetButtonsToggle);
         }
     });
@@ -137,7 +138,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 open = ui.ctx().data(|d| d.get_temp::<bool>(id.with("was_in_level"))) == Some(false);
             }
             let mut leave = false;
-            if ui.add(egui::Button::new(if open { "−" } else { "+" }).frame(false).min_size(egui::vec2(10.0, 0.0))).clicked() {
+            if ui.add(egui::Button::new(if open { icons::COLLAPSE } else { icons::EXPAND }).frame(false).min_size(egui::vec2(10.0, 0.0))).clicked() {
                 open = !open;
                 leave = !open && in_level;
             }
@@ -167,7 +168,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 if leave {
                     let _ = app.dispatch(Command::ModifierSubobjectLevel { index: i as u32, level: 0 });
                 }
-                let bulb = if *enabled { "💡" } else { "○" };
+                // The bulb is lit while the modifier is on.
+                let bulb = egui::RichText::new(icons::MODIFIER_ON).color(if *enabled { egui::Color32::from_rgb(250, 235, 160) } else { egui::Color32::from_gray(90) });
                 if ui.add(egui::Button::new(bulb).frame(false)).on_hover_text("Modifier on / off").clicked() {
                     toggle = Some((i, !*enabled));
                 }
@@ -285,22 +287,22 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     }
     // The five buttons under the stack.
     ui.horizontal(|ui| {
-        if ui.selectable_label(app.state.pin_stack, "📌").on_hover_text("Pin Stack").clicked() {
+        if Icon::new(icons::PIN_STACK, Command::PinStackToggle.name()).tip("Pin Stack").on(app.state.pin_stack).show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::PinStackToggle);
         }
-        if ui.selectable_label(app.state.show_end_result, "⏚").on_hover_text("Show End Result On/Off Toggle").clicked() {
+        if Icon::new(icons::SHOW_END_RESULT, Command::ShowEndResultToggle.name()).tip("Show End Result On/Off Toggle").on(app.state.show_end_result).show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ShowEndResultToggle);
         }
         let instanced = active.and_then(|a| entries.get(a)).is_some_and(|e| e.3.is_some()) || node_instanced;
-        if ui.add_enabled(instanced, egui::Button::new("⧉")).on_hover_text("Make Unique").clicked() {
+        if Icon::new(icons::MAKE_UNIQUE, Command::MakeUnique.name()).tip("Make Unique").enabled(instanced).show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::MakeUnique);
         }
-        if ui.add_enabled(active.is_some(), egui::Button::new("🗑")).on_hover_text("Remove modifier from the stack").clicked() {
+        if Icon::new(icons::REMOVE_MODIFIER, "Remove modifier from the stack").enabled(active.is_some()).show(ui, &app.state).clicked() {
             if let Some(a) = active {
                 delete = Some(a);
             }
         }
-        if ui.button("⚙").on_hover_text("Configure Modifier Sets").clicked() {
+        if Icon::new(icons::CONFIGURE_SETS, Command::ModifierSetButtonsToggle.name()).tip("Configure Modifier Sets").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ModifierSetButtonsToggle);
         }
     });
