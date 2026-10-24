@@ -19,13 +19,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, kind: PolySettingsKind, open
     // The selection the preview applies to (ops replace the sub-selection).
     let mut sel: Vec<(u64, SubObjectId)> = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_else(|| app.state.sub_selection.iter().map(|(n, s)| (n.0, s)).collect());
     let mut applied = app.preview_dialog() == Some(dialog);
-    if kind == PolySettingsKind::Bridge {
-        if st.bridge_edges != app.state.poly_settings.bridge_edges || st.bridge_specific != app.state.poly_settings.bridge_specific {
-            st.bridge_edges = app.state.poly_settings.bridge_edges;
-            st.bridge_specific = app.state.poly_settings.bridge_specific;
-            app.preview_undo();
-            applied = false;
-        }
+    if kind == PolySettingsKind::Bridge && (st.bridge_edges != app.state.poly_settings.bridge_edges || st.bridge_specific != app.state.poly_settings.bridge_specific) {
+        st.bridge_edges = app.state.poly_settings.bridge_edges;
+        st.bridge_specific = app.state.poly_settings.bridge_specific;
+        app.preview_undo();
+        applied = false;
     }
     // Use Edge Selection: edges selected or deselected while the window is
     // open join the bridge (the preview's mesh ids are mapped back by position).
