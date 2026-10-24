@@ -3076,7 +3076,7 @@ fn hsds_element_button_shows_the_yellow_cage_and_the_level_list_displays_a_level
     panel_text(&h, "Level 1");
     // Display next to Base Level: Level 1 is turned off.
     let base = panel_text(&h, "Base Level");
-    let display = h.texts("Display").into_iter().find(|p| (p.y - base.y).abs() < 4.0).expect("Display next to Base Level");
+    let display = h.text_centers("Display").into_iter().find(|p| (p.y - base.y).abs() < 4.0).expect("Display next to Base Level");
     h.click(display);
     assert_eq!(h.app.state.scene.eval_mesh(id).value.mesh.face_count(), 6, "only the base level shows");
     // Picking Base Level in the list: the cage is the original polygons.
