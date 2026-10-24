@@ -26,11 +26,13 @@ struct Harness {
     commands: Vec<egui::OutputCommand>,
     /// Every texture upload so far.
     textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
+    /// Seconds between frames (a loaded machine draws fewer per second).
+    frame_time: f64,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new() };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0 };
         h.ctx.enable_accesskit();
         h.frames(3);
         h
@@ -50,7 +52,7 @@ impl Harness {
     }
 
     fn run(&mut self, events: Vec<egui::Event>) {
-        self.time += 1.0 / 30.0;
+        self.time += self.frame_time;
         let mut input = egui::RawInput { screen_rect: Some(self.screen), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
         // As eframe does before each frame.
         self.app.raw_input_hook(&self.ctx, &mut input);
@@ -1021,7 +1023,7 @@ fn inject(h: &mut Harness, events: serde_json::Value) {
     let mut q = crate::live::InputQueue::default();
     q.push(crate::live::parse_input(&events).unwrap());
     while !q.is_empty() {
-        h.time += 1.0 / 30.0;
+        h.time += h.frame_time;
         let mut input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(h.time), ..Default::default() };
         q.apply(&mut input);
         let app = &mut h.app;
@@ -1069,6 +1071,22 @@ fn injected_alt_drag_orbits_like_a_mouse() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [50.0, 0.0, 0.0], size: [10.0; 3] });
     inject(&mut h, serde_json::json!([{ "type": "modifiers", "mods": ["ctrl"] }, { "type": "key", "key": "A", "mods": ["ctrl"] }, { "type": "modifiers", "mods": [] }]));
     assert_eq!(h.app.state.selection.len(), 2, "Ctrl+A selects all");
+}
+
+#[test]
+fn middle_drag_pans_even_when_frames_come_slowly() {
+    // At 8 frames a second egui's smoothed pointer velocity stays zero (it
+    // wants three positions within 0.1 s), yet every frame the pointer moved.
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    h.frame_time = 1.0 / 8.0;
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center();
+    let target = h.app.state.active().camera.target;
+    h.drag_with(egui::PointerButton::Middle, c, c + egui::vec2(80.0, 40.0));
+    assert_ne!(h.app.state.active().camera.target, target, "a slow mouse drag pans");
+    let target = h.app.state.active().camera.target;
+    inject(&mut h, serde_json::json!([{ "type": "drag", "button": "middle", "from": [c.x, c.y], "to": [c.x + 80.0, c.y + 40.0] }]));
+    assert_ne!(h.app.state.active().camera.target, target, "so does a slow injected drag");
 }
 
 #[test]
