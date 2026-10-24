@@ -407,27 +407,30 @@ pub fn omni_icon() -> Mesh {
     loom_mesh::build_merged(&wind_outward(polys, Vec3::ZERO))
 }
 
-/// Spot: a cone with its apex at the light, opening down -Z.
+/// Spot: a cone opening down -Z at the pivot; like a camera icon it lies
+/// behind the light (local z >= 0), so a light view does not look into it.
 pub fn spot_icon() -> Mesh {
-    let base = ring(3.5, -7.0, 8);
-    let mut polys: Vec<Vec<Vec3>> = (0..8).map(|i| vec![Vec3::ZERO, base[(i + 1) % 8], base[i]]).collect();
+    let base = ring(3.5, 0.0, 8);
+    let apex = Vec3::new(0.0, 0.0, 7.0);
+    let mut polys: Vec<Vec<Vec3>> = (0..8).map(|i| vec![apex, base[(i + 1) % 8], base[i]]).collect();
     polys.push(base.clone());
-    loom_mesh::build_merged(&wind_outward(polys, Vec3::new(0.0, 0.0, -4.0)))
+    loom_mesh::build_merged(&wind_outward(polys, Vec3::new(0.0, 0.0, 3.0)))
 }
 
-/// Directional: a short cylinder with an arrow head pointing down -Z.
+/// Directional: a short cylinder with an arrow head whose tip is the pivot,
+/// pointing down -Z (all of it behind the light).
 pub fn direct_icon() -> Mesh {
-    let (top, bottom) = (ring(2.5, 3.0, 8), ring(2.5, -3.0, 8));
+    let (top, bottom) = (ring(2.5, 10.0, 8), ring(2.5, 4.0, 8));
     let mut polys = Vec::new();
     band(&mut polys, &top, &bottom);
     polys.push(top.clone());
     polys.push(bottom.clone());
-    let mut polys = wind_outward(polys, Vec3::ZERO);
-    let head = ring(4.0, -3.0, 8);
-    let tip = Vec3::new(0.0, 0.0, -8.0);
+    let mut polys = wind_outward(polys, Vec3::new(0.0, 0.0, 7.0));
+    let head = ring(4.0, 4.0, 8);
+    let tip = Vec3::ZERO;
     let mut arrow: Vec<Vec<Vec3>> = (0..8).map(|i| vec![tip, head[i], head[(i + 1) % 8]]).collect();
     arrow.push(head);
-    polys.extend(wind_outward(arrow, Vec3::new(0.0, 0.0, -4.5)));
+    polys.extend(wind_outward(arrow, Vec3::new(0.0, 0.0, 2.5)));
     loom_mesh::build_merged(&polys)
 }
 
@@ -676,6 +679,9 @@ mod tests {
             assert!(m.face_count() > 0, "{t:?}");
             let (min, max) = m.aabb();
             assert!(min.length() < 12.0 && max.length() < 12.0, "{t:?} icon is small: {min} {max}");
+            if t.aims() {
+                assert!(min.z >= -1e-5, "{t:?}: nothing in front of the light, where its own view looks");
+            }
         }
     }
 }
