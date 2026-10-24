@@ -218,11 +218,13 @@ pub struct DragState {
     pub shift: bool,
     /// Transform centre when the drag began (snap rubber band / perpendicular).
     pub snap_start: Option<Vec3>,
+    /// Undo depth before the drag, so a right-click can cancel exactly it.
+    pub undo_len: usize,
 }
 
 impl DragState {
     pub fn new(handle: Handle, start: egui::Pos2) -> Self {
-        Self { handle, start, last: start, angle_deg: 0.0, raw_angle_deg: 0.0, quat: Quat::IDENTITY, factor: 1.0, raw_factor: 1.0, offset: Vec3::ZERO, rotate_deg: Vec3::ZERO, factors: Vec3::ONE, shift: false, snap_start: None }
+        Self { handle, start, last: start, angle_deg: 0.0, raw_angle_deg: 0.0, quat: Quat::IDENTITY, factor: 1.0, raw_factor: 1.0, offset: Vec3::ZERO, rotate_deg: Vec3::ZERO, factors: Vec3::ONE, shift: false, snap_start: None, undo_len: 0 }
     }
 }
 

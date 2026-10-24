@@ -852,7 +852,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     // Right click cancels a creation in progress or a by-Hit mode;
                     // otherwise it opens the quad menu (on the click).
                     if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() && !over_label {
-                        if let Some(session) = app.create.take() {
+                        if app.transform_drag.is_some() {
+                            app.cancel_transform_drag();
+                        } else if let Some(session) = app.create.take() {
                             session.cancel(app);
                         } else if app.create_kind.is_some() && app.bone_points.is_empty() && app.line.is_none() {
                             // A right-click with nothing being dragged out ends the create mode.

@@ -652,7 +652,8 @@ impl LoomApp {
 
     // ---- gizmo drags: one undo step per drag ------------------------------
 
-    pub fn begin_transform_drag(&mut self, drag: DragState) {
+    pub fn begin_transform_drag(&mut self, mut drag: DragState) {
+        drag.undo_len = self.state.undo.len();
         self.transform_drag = Some(drag);
         let label = match self.state.active_tool {
             Tool::Rotate => "Rotate",
@@ -704,6 +705,17 @@ impl LoomApp {
         }
         for button in down {
             raw.events.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: raw.modifiers });
+        }
+    }
+
+    /// Right-click during a drag: the selection goes back where the drag
+    /// began (a Shift+drag clone goes too).
+    pub fn cancel_transform_drag(&mut self) {
+        let Some(drag) = self.transform_drag else { return };
+        self.end_transform_drag();
+        self.shift_sources.clear();
+        if self.state.undo.len() > drag.undo_len {
+            let _ = self.dispatch(Command::UndoSceneOperation);
         }
     }
 

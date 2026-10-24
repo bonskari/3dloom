@@ -466,7 +466,10 @@ fn chamfer_mode_drag_on_an_edge_chamfers_it() {
     let p = h.screen_of(Vec3::new(15.0, 0.0, 30.0));
     h.click(p);
     let before = face_count(&h, id);
-    click_text(&mut h, "Chamfer");
+    // The Edit Edges rollout is below the fold at 1280×800: Chamfer Mode by its shortcut.
+    h.mods = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+    h.key(egui::Key::C);
+    h.mods = egui::Modifiers::NONE;
     h.drag(p, p + egui::vec2(0.0, -30.0));
     assert_eq!(face_count(&h, id), before + 1, "a one-segment chamfer adds a face");
 }
@@ -739,6 +742,32 @@ fn the_command_panel_keeps_its_width_across_tabs_and_poly_levels() {
         h.frames(2);
         assert!((panel_width(&h) - start).abs() <= 1.0, "Create > {cat}: the panel grew from {start} to {}", panel_width(&h));
     }
+}
+
+/// Max: a right-click while dragging a transform cancels it and puts the
+/// selection back where the drag began.
+#[test]
+fn right_click_during_a_move_drag_cancels_it() {
+    let mut h = Harness::new();
+    let id = box_scene(&mut h);
+    h.key(egui::Key::W);
+    let a = body_point(&h);
+    h.run(vec![egui::Event::PointerMoved(a)]);
+    h.run(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    for i in 1..=6 {
+        h.run(vec![egui::Event::PointerMoved(a + egui::vec2(10.0 * i as f32, 0.0))]);
+    }
+    assert!(pos_of(&h, id).length() > 1.0, "the drag moves the box");
+    let b = a + egui::vec2(60.0, 0.0);
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(2);
+    assert!(pos_of(&h, id).length() < 1e-4, "right-click cancels the move: {}", pos_of(&h, id));
+    assert!(h.app.quad_menu.is_none(), "and opens no quad menu");
+    assert!(h.app.transform_drag.is_none());
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.len(), 0, "the cancelled drag left no undo step: undo removes the box itself");
 }
 
 #[test]
