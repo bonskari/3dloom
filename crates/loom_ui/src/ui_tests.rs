@@ -774,6 +774,8 @@ fn base_parameter_change_under_edit_poly_asks_yes_hold_yes_no() {
     let other = *h.app.state.selection.iter().next().unwrap();
     let _ = h.app.dispatch(Command::SetParameter { id: other.0, name: "Height".into(), value: 5.0 });
     assert_eq!(h.app.state.dialog, None);
+}
+
 /// The Material Editor window's rect.
 fn material_editor_rect(h: &Harness) -> egui::Rect {
     h.ctx.memory(|m| m.area_rect(egui::Id::new("Material Editor"))).expect("the Material Editor is shown")
