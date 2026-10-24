@@ -57,13 +57,17 @@ impl Harness {
     }
 
     fn drag(&mut self, a: egui::Pos2, b: egui::Pos2) {
+        self.drag_with(egui::PointerButton::Primary, a, b);
+    }
+
+    fn drag_with(&mut self, button: egui::PointerButton, a: egui::Pos2, b: egui::Pos2) {
         let m = self.mods;
         self.run(vec![egui::Event::PointerMoved(a)]);
-        self.run(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: m }]);
+        self.run(vec![egui::Event::PointerButton { pos: a, button, pressed: true, modifiers: m }]);
         for i in 1..=8 {
             self.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 8.0))]);
         }
-        self.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
+        self.run(vec![egui::Event::PointerButton { pos: b, button, pressed: false, modifiers: m }]);
         self.frames(1);
     }
 
@@ -539,4 +543,41 @@ fn realistic_shading_from_the_label_menu_runs_without_a_gpu() {
     h.cmd(Command::Render { path: Some(std::env::temp_dir().join("loom-headless-render.png").to_string_lossy().into()), width: Some(32), height: Some(32) });
     assert!(h.app.state.pending_render.is_none());
     assert!(h.app.last_error.as_deref().is_some_and(|e| e.contains("Render")), "{:?}", h.app.last_error);
+}
+
+fn camera(h: &Harness) -> (f32, f32, f32, Vec3) {
+    let c = &h.app.state.active().camera;
+    (c.yaw, c.pitch, c.distance, c.target)
+}
+
+#[test]
+fn viewport_navigation_orbits_pans_and_zooms() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center() + egui::vec2(150.0, 100.0);
+    // Alt+MMB orbits.
+    let before = camera(&h);
+    h.mods = egui::Modifiers::ALT;
+    h.drag_with(egui::PointerButton::Middle, c, c + egui::vec2(120.0, 40.0));
+    h.mods = egui::Modifiers::NONE;
+    let after = camera(&h);
+    assert!(after.0 != before.0 && after.1 != before.1, "Alt+MMB orbits: {before:?} -> {after:?}");
+    // MMB pans.
+    let before = camera(&h);
+    h.drag_with(egui::PointerButton::Middle, c, c + egui::vec2(80.0, 30.0));
+    let after = camera(&h);
+    assert_ne!(after.3, before.3, "MMB pans");
+    assert_eq!(after.0, before.0, "a pan does not orbit");
+    // The wheel zooms.
+    let before = camera(&h);
+    h.run(vec![egui::Event::PointerMoved(c)]);
+    h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: egui::vec2(0.0, 3.0), modifiers: egui::Modifiers::NONE }]);
+    h.frames(1);
+    assert_ne!(camera(&h).2, before.2, "the wheel zooms");
+    // Alt+LMB drag orbits.
+    let before = camera(&h);
+    h.mods = egui::Modifiers::ALT;
+    h.drag(c, c + egui::vec2(-100.0, 50.0));
+    h.mods = egui::Modifiers::NONE;
+    assert_ne!(camera(&h).0, before.0, "Alt+LMB drag orbits");
 }
