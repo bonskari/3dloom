@@ -1863,7 +1863,7 @@ fn base_parameter_change_under_edit_poly_asks_yes_hold_yes_no() {
     h.frames(2);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::TopologyWarning));
     assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "nothing changes before the answer");
-    assert_eq!(h.texts("Hold/Yes").len(), 1);
+    assert_eq!(h.text_centers("Hold/Yes").len(), 1);
     h.click_text_anywhere("No");
     assert_eq!(h.app.state.dialog, None);
     assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "No keeps the old value");

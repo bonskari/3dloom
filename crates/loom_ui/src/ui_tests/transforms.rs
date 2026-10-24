@@ -58,10 +58,10 @@ fn hierarchy_pivot_buttons_follow_the_affect_mode() {
     hierarchy_panel(&mut h);
     h.click(panel_text(&h, "Affect Pivot Only"));
     assert!(h.app.state.affect_pivot_only);
-    assert!(h.texts("Align to Object").len() == 1 && h.texts("Center to Pivot").is_empty());
+    assert!(h.text_centers("Align to Object").len() == 1 && h.text_centers("Center to Pivot").is_empty());
     h.click(panel_text(&h, "Affect Object Only"));
     assert!(h.app.state.affect_object_only && !h.app.state.affect_pivot_only);
-    assert!(h.texts("Center to Object").is_empty(), "Affect Object Only relabels the alignment buttons");
+    assert!(h.text_centers("Center to Object").is_empty(), "Affect Object Only relabels the alignment buttons");
     // Move the mesh off the pivot, then Center to Pivot brings it back.
     h.cmd(Command::MoveSelection { delta: [5.0, 0.0, 0.0], system: Some(loom_commands::CoordSystem::World) });
     h.click(panel_text(&h, "Center to Pivot"));
