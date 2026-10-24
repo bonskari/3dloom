@@ -174,6 +174,9 @@ pub struct LoomApp {
     pub line_initial_smooth: bool,
     /// Line > Creation Method: Drag Type.
     pub line_drag: LineDrag,
+    /// Standard Primitives > Creation Method picked per kind (index into
+    /// `create_tool::creation_methods`), in Object Type order; None = the default.
+    pub creation_method: [Option<usize>; 10],
     pub create_category: Category,
     pub autogrid: bool,
     pub keyboard_entry: KeyboardEntry,
@@ -274,6 +277,7 @@ impl LoomApp {
             bone_mirror_offset: 0.0,
             line_initial_smooth: false,
             line_drag: LineDrag::Bezier,
+            creation_method: [None; 10],
             create_category: Category::Geometry,
             autogrid: false,
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },

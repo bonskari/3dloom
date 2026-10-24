@@ -33,8 +33,8 @@ pub const NORMALS_CHANNEL: u32 = u32::MAX - 1;
 pub use standard_primitives::{
     bone_mesh, dummy_mesh, BoneFinParams,
     box_segmented, build_merged, cone_primitive, cylinder_segmented, geosphere_primitive, plane_segmented,
-    pyramid_primitive, sphere_segmented, teapot_primitive, torus_full, torus_primitive, tube_primitive, GeoBase, Slice,
-    TeapotParts,
+    pyramid_primitive, sphere_full, sphere_segmented, teapot_primitive, torus_full, torus_primitive, torus_smoothed, tube_primitive, GeoBase, Slice,
+    TeapotParts, TorusSmooth,
 };
 pub use primitives::{
     box_primitive, cylinder_primitive, quad_primitive, sphere_primitive, test_room,

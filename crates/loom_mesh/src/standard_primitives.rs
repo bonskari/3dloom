@@ -216,9 +216,11 @@ pub fn cylinder_segmented(radius: f32, height: f32, height_segs: u32, cap_segs: 
     cone_primitive(radius, radius, height, height_segs, cap_segs, sides, slice)
 }
 
-/// Cone: Radius 1 (base), Radius 2 (top), Height, Height Segs, Cap Segs, Sides, Slice.
+/// Cone: Radius 1 (base), Radius 2 (top), Height (negative builds below
+/// the construction plane), Height Segs, Cap Segs, Sides, Slice.
 pub fn cone_primitive(radius1: f32, radius2: f32, height: f32, height_segs: u32, cap_segs: u32, sides: u32, slice: Slice) -> Mesh {
-    let (r1, r2, h) = (radius1.max(0.0), radius2.max(0.0), height.max(0.0));
+    // A negative height builds below the construction plane.
+    let (r1, r2, h) = (radius1.max(0.0), radius2.max(0.0), height);
     let (hs, cs) = (height_segs.max(1), cap_segs.max(1));
     let mut profile = vec![(0.0, 0.0)];
     for k in 1..=cs {
@@ -238,7 +240,7 @@ pub fn cone_primitive(radius1: f32, radius2: f32, height: f32, height_segs: u32,
 pub fn tube_primitive(radius1: f32, radius2: f32, height: f32, height_segs: u32, cap_segs: u32, sides: u32, slice: Slice) -> Mesh {
     let outer = radius1.max(radius2).max(0.0);
     let inner = radius1.min(radius2).max(0.0);
-    let h = height.max(0.0);
+    let h = height;
     let (hs, cs) = (height_segs.max(1), cap_segs.max(1));
     let mut profile = Vec::new();
     for k in 0..=hs {
@@ -259,6 +261,35 @@ pub fn tube_primitive(radius1: f32, radius2: f32, height: f32, height_segs: u32,
 /// Sphere: Radius, Segments, Hemisphere (0 = full, 0.5 = half; the bottom
 /// is chopped and capped, as in Chop mode).
 pub fn sphere_segmented(radius: f32, segments: u32, hemisphere: f32) -> Mesh {
+    sphere_full(radius, segments, hemisphere, false, None)
+}
+
+/// Sphere with every Parameters rollout option: Hemisphere cut off from the
+/// base either by Chop (removes rings, caps the cut) or Squash (keeps every
+/// vertex and face, compressing the rings into what is left), and Slice
+/// around the local Z axis.
+pub fn sphere_full(radius: f32, segments: u32, hemisphere: f32, squash: bool, slice: Slice) -> Mesh {
+    let r = radius.max(0.0);
+    if squash && hemisphere > 0.0 {
+        let seg = segments.max(4);
+        let rings = (seg / 2).max(2);
+        let h = hemisphere.clamp(0.0, 1.0);
+        let z_cut = -r + 2.0 * r * h;
+        let theta_cut = if r > 0.0 { (z_cut / r).clamp(-1.0, 1.0).acos() } else { std::f32::consts::PI };
+        // Same profile as the full sphere: top pole, rings - 1 rings, and
+        // the bottom pole, which becomes the centre of the flat base.
+        let mut profile = vec![(0.0, z_cut)];
+        for k in (1..rings).rev() {
+            let theta = theta_cut * k as f32 / (rings - 1) as f32;
+            profile.push((theta.sin() * r, theta.cos() * r));
+        }
+        profile.push((0.0, r));
+        return build_merged(&oriented(revolve(&profile, seg, slice, false, 0.0)));
+    }
+    sphere_chop(r, segments, hemisphere, slice)
+}
+
+fn sphere_chop(radius: f32, segments: u32, hemisphere: f32, slice: Slice) -> Mesh {
     let r = radius.max(0.0);
     let seg = segments.max(4);
     let rings = (seg / 2).max(2);
@@ -274,7 +305,7 @@ pub fn sphere_segmented(radius: f32, segments: u32, hemisphere: f32) -> Mesh {
         let theta = theta_cut * k as f32 / steps as f32;
         profile.push((theta.sin() * r, theta.cos() * r));
     }
-    build_merged(&oriented(revolve(&profile, seg, None, false, 0.0)))
+    build_merged(&oriented(revolve(&profile, seg, slice, false, 0.0)))
 }
 
 /// Torus: Radius 1 (ring), Radius 2 (cross-section), Segments, Sides, Slice,
@@ -284,10 +315,58 @@ pub fn torus_primitive(radius1: f32, radius2: f32, segments: u32, sides: u32, sl
 }
 
 pub fn torus_full(radius1: f32, radius2: f32, rotation_deg: f32, twist_deg: f32, segments: u32, sides: u32, slice: Slice) -> Mesh {
-    let (r1, r2) = (radius1.max(0.0), radius2.max(0.0));
-    let (segments, sides) = (segments.max(3), sides.max(3));
-    // Ring angle range (Slice) and the number of ring columns over it.
-    let (a0, a1, wrap) = match slice {
+    build_merged(&oriented(torus_polys(radius1, radius2, rotation_deg, twist_deg, segments, sides, slice).0))
+}
+
+/// Torus Smooth options of the Parameters rollout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TorusSmooth {
+    /// Complete smoothing on all surfaces.
+    All,
+    /// Smooth between adjacent segments: smooth bands running around the ring.
+    Sides,
+    /// No smoothing: prism-like facets.
+    None,
+    /// Each segment smoothed on its own: ring-like segments.
+    Segments,
+}
+
+/// Torus with explicit smoothing groups per the Smooth option. Slice caps
+/// get a group of their own.
+pub fn torus_smoothed(radius1: f32, radius2: f32, rotation_deg: f32, twist_deg: f32, segments: u32, sides: u32, slice: Slice, smooth: TorusSmooth) -> Mesh {
+    let (polys, columns, sides) = torus_polys(radius1, radius2, rotation_deg, twist_deg, segments, sides, slice);
+    let wrap = slice_range(slice).2;
+    let ring_faces = (columns * sides) as usize;
+    let expected = polys.len();
+    let mut m = build_merged(&oriented(polys));
+    if m.face_count() != expected {
+        // Degenerate input (zero radius) merged faces away; keep auto smoothing.
+        return m;
+    }
+    // Two alternating bits, and a third for the last band when an odd
+    // count wraps around to the first.
+    let band = |i: u32, n: u32, wraps: bool| -> u32 {
+        if wraps && n % 2 == 1 && i == n - 1 { 1 << 2 } else { 1 << (i % 2) }
+    };
+    for (i, f) in m.faces_mut().iter_mut().enumerate() {
+        if i >= ring_faces {
+            f.smoothing_groups = if smooth == TorusSmooth::None { 0 } else { 1 << 3 };
+            continue;
+        }
+        let (c, k) = (i as u32 / sides, i as u32 % sides);
+        f.smoothing_groups = match smooth {
+            TorusSmooth::All => 1,
+            TorusSmooth::None => 0,
+            TorusSmooth::Sides => band(k, sides, true),
+            TorusSmooth::Segments => band(c, columns, wrap),
+        };
+    }
+    m
+}
+
+/// Ring angle range of a Slice: (from, to, whole turn).
+fn slice_range(slice: Slice) -> (f32, f32, bool) {
+    match slice {
         None => (0.0, TAU, true),
         Some((from, to)) => {
             let (f, mut t) = (from.to_radians(), to.to_radians());
@@ -300,7 +379,16 @@ pub fn torus_full(radius1: f32, radius2: f32, rotation_deg: f32, twist_deg: f32,
                 (f, t, false)
             }
         }
-    };
+    }
+}
+
+/// Torus polygons, segment-major (segment c, side k at index c * sides + k),
+/// then the slice caps; with the segment column count and side count used.
+fn torus_polys(radius1: f32, radius2: f32, rotation_deg: f32, twist_deg: f32, segments: u32, sides: u32, slice: Slice) -> (Vec<Vec<Vec3>>, u32, u32) {
+    let (r1, r2) = (radius1.max(0.0), radius2.max(0.0));
+    let (segments, sides) = (segments.max(3), sides.max(3));
+    // Ring angle range (Slice) and the number of ring columns over it.
+    let (a0, a1, wrap) = slice_range(slice);
     let columns = if wrap { segments } else { ((segments as f32 * (a1 - a0) / TAU).round() as u32).max(1) };
     let cols = if wrap { columns } else { columns + 1 };
     // Rotation turns every cross-section about the ring's centre
@@ -324,7 +412,7 @@ pub fn torus_full(radius1: f32, radius2: f32, rotation_deg: f32, twist_deg: f32,
         polys.push((0..sides).map(|k| point(0, k)).collect());
         polys.push((0..sides).rev().map(|k| point(cols - 1, k)).collect());
     }
-    build_merged(&oriented(polys))
+    (polys, columns, sides)
 }
 
 /// Pyramid: Width (X), Depth (Y), Height; segs = [width, depth, height].
