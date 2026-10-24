@@ -1166,7 +1166,8 @@ fn copy_clone_and_clear() {
     h.frames(2);
     let clone = h.ctx.memory(|m| m.area_rect(egui::Id::new(("Rendered Frame Window clone", 1u32)))).expect("the clone window shows");
     assert!(clone.width() > 50.0);
-    click_text(&mut h, "Clear", rfw_rect(&h), 0.0);
+    let win = rfw_rect(&h);
+    click_text(&mut h, "Clear", win, 0.0);
     assert!(h.app.state.rendered.image.is_none(), "Clear empties the window");
     assert_eq!(h.app.state.rendered.clones[0].image.dimensions(), (64, 32), "the clone keeps its copy");
 }
@@ -1285,7 +1286,8 @@ fn cancel_stops_a_render_and_keeps_the_buckets_done() {
     h.frames(6);
     let p = h.app.state.rendered.progress.expect("still rendering");
     assert!(p.done > 0 && p.done < p.total, "{p:?}");
-    click_text(&mut h, "Cancel", rfw_rect(&h), 0.0);
+    let win = rfw_rect(&h);
+    click_text(&mut h, "Cancel", win, 0.0);
     assert!(h.app.state.rendered.progress.is_none(), "cancelled");
     assert!(h.app.state.status_prompt.contains("cancelled"), "{}", h.app.state.status_prompt);
     assert_eq!(h.app.state.rendered.image.as_ref().map(|i| i.dimensions()), Some((2048, 1536)), "the partial image stays");

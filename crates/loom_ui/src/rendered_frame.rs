@@ -12,7 +12,6 @@ use loom_scene::render::RenderArea;
 use std::collections::HashMap;
 
 /// What one image window shows: zoom, pan and its texture.
-#[derive(Default)]
 pub struct FrameView {
     /// Screen pixels per image pixel (1 = 1:1).
     pub zoom: f32,
@@ -24,6 +23,12 @@ pub struct FrameView {
     pub hover: Option<([u32; 2], [u8; 4])>,
     /// Screen rectangle of the image last frame (tests aim at it).
     pub image_rect: egui::Rect,
+}
+
+impl Default for FrameView {
+    fn default() -> Self {
+        Self { zoom: 1.0, pan: egui::Vec2::ZERO, texture: None, shown: None, hover: None, image_rect: egui::Rect::NOTHING }
+    }
 }
 
 impl FrameView {
