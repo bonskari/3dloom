@@ -326,3 +326,30 @@ fn layers_toolbar_toggles() {
     execute(&mut s, Command::ShowLayersToolbarToggle).unwrap();
     assert!(s.show_layers_toolbar);
 }
+
+#[test]
+fn fbx_export_and_import_keep_the_layers() {
+    let d = dir("fbx_layers");
+    let path = d.join("level.fbx");
+    {
+        let mut s = AppState::new();
+        named_box(&mut s, "Floor", 0.0);
+        named_box(&mut s, "Crate", 20.0);
+        execute(&mut s, Command::CreateLayer { name: Some("Props".into()) }).unwrap();
+        let props = s.scene.current_layer;
+        execute(&mut s, Command::SetLayerColor { layer: props, rgb: [255, 128, 0] }).unwrap();
+        execute(&mut s, Command::ExportFile { path: p(&path) }).unwrap();
+    }
+    let mut s = AppState::new();
+    execute(&mut s, Command::ImportFile { path: p(&path) }).unwrap();
+    let layer_name = |s: &AppState, n: &str| {
+        let l = s.scene.nodes().find(|x| x.name == n).unwrap().layer;
+        s.scene.layer(l).unwrap().clone()
+    };
+    assert_eq!(layer_name(&s, "Floor").id, 0, "layer 0 stays layer 0");
+    let props = layer_name(&s, "Crate");
+    assert_eq!(props.name, "Props");
+    assert_eq!(props.color, [255, 128, 0]);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.layers.len(), 1, "one undo removes the imported layer too");
+}

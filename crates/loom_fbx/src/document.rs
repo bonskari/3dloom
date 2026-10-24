@@ -13,6 +13,19 @@ pub struct FbxDocument {
     pub unit_metres: f64,
     /// The animation take (the file's first anim stack), baked per frame.
     pub anim: Option<FbxTake>,
+    /// Display layers (the Layer Manager's layers).
+    pub layers: Vec<FbxLayer>,
+}
+
+/// A display layer: name, colour (0-1), Show / Freeze and its nodes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FbxLayer {
+    pub name: String,
+    pub color: Vec3,
+    pub visible: bool,
+    pub frozen: bool,
+    /// Indices into `FbxDocument::nodes`.
+    pub nodes: Vec<usize>,
 }
 
 /// One animation take: per-frame local transforms of the nodes that move.

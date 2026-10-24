@@ -48,18 +48,20 @@ impl LoomApp {
         matches!(self.gpu, Gpu::Ready(_) | Gpu::Running(_))
     }
 
-    fn sync_bevy(&mut self) {
+    /// Hands the scene to Bevy: the shown objects for the Realistic views,
+    /// or (`render`) only those whose layer renders, for a Render.
+    fn sync_bevy(&mut self, render: bool) {
         let version = self.world_version;
         let objects: Vec<(u64, usize, [u8; 3])> = self
             .world_meshes()
             .iter()
             .enumerate()
-            .filter_map(|(i, (id, _))| self.state.scene.node(*id).map(|n| (id.0, i, self.state.scene.display_color(n))))
+            .filter_map(|(i, (id, _))| self.state.scene.node(*id).filter(|n| !render || self.state.scene.is_renderable(n)).map(|n| (id.0, i, self.state.scene.display_color(n))))
             .collect();
         let display = self.world_display.clone();
         let scene = &self.state.scene;
         let Gpu::Running(b) = &mut self.gpu else { return };
-        if b.synced == Some(version) {
+        if !render && b.synced == Some(version) {
             return;
         }
         let list: Vec<loom_bevy::SceneObject> = objects
@@ -69,7 +71,8 @@ impl LoomApp {
             })
             .collect();
         b.renderer.sync(&list);
-        b.synced = Some(version);
+        // A render's list leaves objects out: the views sync again afterwards.
+        b.synced = if render { None } else { Some(version) };
     }
 
     /// Asks Bevy to render viewport `index` this frame at `size` physical
@@ -87,7 +90,7 @@ impl LoomApp {
     /// frame (before egui paints them), then any pending Render runs.
     pub(crate) fn finish_realistic_frame(&mut self, ctx: &egui::Context) {
         if matches!(self.gpu, Gpu::Running(_)) {
-            self.sync_bevy();
+            self.sync_bevy(false);
             let Gpu::Running(b) = &mut self.gpu else { return };
             b.renderer.update();
             let slots: Vec<u32> = (0..self.state.viewports.len() as u32).collect();
@@ -130,7 +133,7 @@ impl LoomApp {
         if self.bevy().is_none() {
             return Err("no GPU renderer".into());
         }
-        self.sync_bevy();
+        self.sync_bevy(true);
         let Gpu::Running(b) = &mut self.gpu else { return Err("no GPU renderer".into()) };
         let img = b.renderer.render_image(req.width, req.height, &loom_bevy::ViewCamera { view, projection })?;
         img.save(&req.path).map_err(|e| format!("{}: {e}", req.path))
