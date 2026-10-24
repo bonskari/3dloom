@@ -210,7 +210,7 @@ impl Harness {
     }
 
     /// Centres of the visible texts that read `text` (buttons, labels), in paint order.
-    fn texts(&self, text: &str) -> Vec<egui::Pos2> {
+    fn text_centres(&self, text: &str) -> Vec<egui::Pos2> {
         fn walk(shape: &egui::Shape, clip: egui::Rect, text: &str, out: &mut Vec<egui::Pos2>) {
             match shape {
                 egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, text, out)),
@@ -1156,7 +1156,7 @@ fn empty_spot(h: &Harness) -> egui::Pos2 {
 /// A text inside the window titled `window`.
 fn window_text(h: &Harness, window: &str, text: &str) -> egui::Pos2 {
     let area = h.ctx.memory(|m| m.area_rect(egui::Id::new(window))).unwrap_or_else(|| panic!("no {window} window"));
-    let all: Vec<egui::Pos2> = h.texts(text).into_iter().filter(|p| area.contains(*p)).collect();
+    let all: Vec<egui::Pos2> = h.text_centres(text).into_iter().filter(|p| area.contains(*p)).collect();
     assert_eq!(all.len(), 1, "{text:?} in {window} {} times", all.len());
     all[0]
 }
@@ -1164,7 +1164,7 @@ fn window_text(h: &Harness, window: &str, text: &str) -> egui::Pos2 {
 /// A text in the command panel (right of the maximized viewport).
 fn panel_text(h: &Harness, text: &str) -> egui::Pos2 {
     let right = h.app.viewport_rects[h.app.state.active_viewport].right();
-    let all: Vec<egui::Pos2> = h.texts(text).into_iter().filter(|p| p.x > right).collect();
+    let all: Vec<egui::Pos2> = h.text_centres(text).into_iter().filter(|p| p.x > right).collect();
     assert_eq!(all.len(), 1, "{text:?} in the command panel {} times", all.len());
     all[0]
 }
