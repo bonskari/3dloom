@@ -3094,6 +3094,7 @@ fn edit_normals_click_ctrl_alt_and_empty_click_select_normals() {
     h.mods = egui::Modifiers::CTRL;
     h.click(b.1);
     h.mods = egui::Modifiers::NONE;
+    eprintln!("DBG a={a:?} b={b:?} sel={:?} log={:?}", normal_selection(&h), h.app.state.undo.labels());
     let mut both = vec![a.0, b.0];
     both.sort();
     assert_eq!(normal_selection(&h), both, "Ctrl adds");
