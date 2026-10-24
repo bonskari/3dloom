@@ -103,8 +103,9 @@ pub const CONFIGURE_SETS: &str = ph::GEAR;
 pub const MODIFIER_ON: &str = ph::LIGHTBULB;
 pub const EXPAND: &str = ph::PLUS_SQUARE;
 pub const COLLAPSE: &str = ph::MINUS_SQUARE;
-pub const SHOW_SET: &str = ph::CARET_DOWN;
-pub const HIDE_SET: &str = ph::CARET_UP;
+/// Small up / down arrows (show / hide a set, ring and loop steps, the ribbon).
+pub const DOWN: &str = ph::CARET_DOWN;
+pub const UP: &str = ph::CARET_UP;
 /// The small settings button next to an Edit Poly / Edit Spline operation.
 pub const SETTINGS: &str = ph::APP_WINDOW;
 

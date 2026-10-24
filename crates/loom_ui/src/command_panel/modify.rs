@@ -89,7 +89,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             // Closed: the next opening starts with an empty search.
             ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::new("modifier_list_query")));
         }
-        if Icon::new(if app.state.show_modifier_set { icons::HIDE_SET } else { icons::SHOW_SET }, Command::ModifierSetButtonsToggle.name()).tip("Show / hide the modifier button set").show(ui, &app.state).clicked() {
+        if Icon::new(if app.state.show_modifier_set { icons::UP } else { icons::DOWN }, Command::ModifierSetButtonsToggle.name()).tip("Show / hide the modifier button set").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ModifierSetButtonsToggle);
         }
     });
