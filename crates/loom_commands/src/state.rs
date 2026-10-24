@@ -523,6 +523,34 @@ impl SelectionRegion {
     }
 }
 
+/// Main Toolbar > Scale flyout: Uniform, Non-Uniform or Squash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ScaleKind {
+    #[default]
+    Uniform,
+    NonUniform,
+    Squash,
+}
+
+impl ScaleKind {
+    pub const ALL: [ScaleKind; 3] = [ScaleKind::Uniform, ScaleKind::NonUniform, ScaleKind::Squash];
+    pub fn label(self) -> &'static str {
+        match self {
+            ScaleKind::Uniform => "Select and Uniform Scale",
+            ScaleKind::NonUniform => "Select and Non-uniform Scale",
+            ScaleKind::Squash => "Select and Squash",
+        }
+    }
+    /// The next flyout button (Scale Cycle).
+    pub fn next(self) -> ScaleKind {
+        match self {
+            ScaleKind::Uniform => ScaleKind::NonUniform,
+            ScaleKind::NonUniform => ScaleKind::Squash,
+            ScaleKind::Squash => ScaleKind::Uniform,
+        }
+    }
+}
+
 /// Main Toolbar > Reference Coordinate System.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CoordSystem {
@@ -1207,6 +1235,8 @@ pub struct AppState {
     /// Main Toolbar > Window/Crossing: true = Window (fully enclosed only).
     pub window_selection: bool,
     pub selection_region: SelectionRegion,
+    /// The Scale flyout's button: how Select and Scale scales.
+    pub scale_kind: ScaleKind,
     pub coord_system: CoordSystem,
     /// Node whose coordinate system `CoordSystem::Pick` uses.
     pub pick_coord_node: Option<NodeId>,
@@ -1468,6 +1498,7 @@ impl AppState {
             selection_filter: SelectionFilter::All,
             window_selection: false,
             selection_region: SelectionRegion::Rectangular,
+            scale_kind: ScaleKind::Uniform,
             coord_system: CoordSystem::View,
             pick_coord_node: None,
             center_mode: CenterMode::PivotPoint,

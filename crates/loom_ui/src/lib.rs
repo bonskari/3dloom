@@ -17,6 +17,7 @@ pub mod region;
 pub mod time_slider;
 mod menubar;
 mod statusbar;
+pub mod spinner;
 pub mod tools;
 pub mod viewport_gizmo;
 mod viewport_widget;
@@ -825,8 +826,9 @@ impl LoomApp {
     }
 
     /// A length spinner in display units: the value stays in scene units.
-    pub fn length_drag<'a>(&self, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
-        length_drag_value(&self.state.units, self.state.prefs.spinner_precision, value, speed)
+    /// Add it right away: it is a [`spinner::spin`] (right-click sets 0).
+    pub fn length_drag<'a>(&self, ui: &egui::Ui, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
+        length_drag_value(ui, &self.state.units, self.state.prefs.spinner_precision, value, .., speed)
     }
 
     /// Spinner drag speed: the Preferences snap value when Spinner Snap is on.
@@ -1078,11 +1080,12 @@ fn modifier_usage_path() -> Option<std::path::PathBuf> {
 }
 
 /// A length spinner in display units (Units Setup); typed values may carry a
-/// unit (7", -3.5", 2.5cm). The value stays in scene units.
-pub fn length_drag_value<'a>(units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
+/// unit (7", -3.5", 2.5cm). The value stays in scene units. It is a
+/// [`spinner::spin`]: add it right away; right-click sets 0 or the minimum.
+pub fn length_drag_value<'a>(ui: &egui::Ui, units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, range: impl std::ops::RangeBounds<f32>, speed: f64) -> egui::DragValue<'a> {
     let (factor, suffix) = units.display_factor();
     let units = units.clone();
-    egui::DragValue::new(value)
+    spinner::spin(ui, value, range)
         .speed(speed)
         .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
         .custom_parser(move |text| units.parse(text))

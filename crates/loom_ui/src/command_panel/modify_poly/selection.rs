@@ -41,7 +41,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 app.by_angle = if by_angle { Some(45.0) } else { None };
             }
             let mut a = app.by_angle.unwrap_or(45.0);
-            if ui.add_enabled(by_angle, egui::DragValue::new(&mut a).speed(app.spinner_speed(0.5)).range(0.0..=180.0).fixed_decimals(1)).changed() {
+            if ui.add_enabled(by_angle, crate::spinner::spin(ui, &mut a, 0.0..=180.0).speed(app.spinner_speed(0.5)).fixed_decimals(1)).changed() {
                 app.by_angle = Some(a);
             }
         });
