@@ -32,6 +32,9 @@ pub struct Scene {
     /// The Material Editor's sample slots (saved with the scene, as Max does).
     #[serde(default)]
     pub material_editor: crate::material::MaterialEditorSlots,
+    /// Render Setup (saved with the scene, as the reference does).
+    #[serde(default)]
+    pub render: crate::render::RenderSettings,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -101,6 +104,7 @@ impl Scene {
             track_data: Default::default(),
             materials: Default::default(),
             material_editor: Default::default(),
+            render: Default::default(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             eval_in_progress: Default::default(),

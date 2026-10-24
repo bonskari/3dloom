@@ -57,6 +57,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             if !app.state.maximized && !app.state.ui_locked {
                 splitters(ui, app, panel);
             }
+            crate::rendered_frame::region_overlay(ui, app, &rects);
         });
 }
 

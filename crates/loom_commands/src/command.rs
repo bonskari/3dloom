@@ -64,6 +64,11 @@ schema_for! {
     String => json!({"type":"string"}),
     [f32; 3] => json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}),
 }
+impl ArgSchema for loom_scene::render::RenderArea {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["View","Selected","Region","Crop","Blowup"]})
+    }
+}
 impl ArgSchema for loom_scene::anim::Ort {
     fn schema() -> Value {
         json!({"type":"string","enum":["Constant","Cycle","Loop","PingPong","Linear","RelativeRepeat"]})
@@ -1037,8 +1042,22 @@ commands! {
     SetKeyMode => "Set Key Mode", MainUI, "Toggle Set Key mode ('): pose freely, then Set Keys commits the pose as keys; changing frame discards it.";
     SetKeys => "Set Keys", MainUI, "Key the filtered tracks of the selection at the current frame (K); in Set Key mode, commit the pose.";
     MaterialEditorToggle => "Material Editor Toggle", MainUI, "Open or close the Material Editor (M).";
-    Render => "Render", MainUI, "Render the active view to a PNG (`path`; without it the file dialog shows) at `width` x `height` (default: the Render SetUp size), with lights and shadows." { path: Option<String>, width: Option<u32>, height: Option<u32> };
-    RenderSetup => "Render SetUp...", MainUI, "Render SetUp: set the output size (`width`, `height`); with neither the dialog shows." { width: Option<u32>, height: Option<u32> };
+    Render => "Render", MainUI, "Render Production (Shift+Q): render the Rendered Frame Window's viewport (the active one unless Lock to Viewport) with the Render Setup settings into the Rendered Frame Window, without blocking; `path` also saves the image there (png, jpg, bmp, tga, exr), as Save File does with the Render Output file; `width` x `height` override the output size for this render." { path: Option<String>, width: Option<u32>, height: Option<u32> };
+    RenderIterative => "Render Iterative", MainUI, "Render Iterative: render into the Rendered Frame Window without saving a file; Region and Selected keep the rest of the window's image.";
+    RenderLast => "Render Last", MainUI, "Render Last (F9): repeat the last render (same viewport and area), without saving a file.";
+    RenderSetup => "Render SetUp...", MainUI, "Render Setup > Common: output size (`width`, `height`, 1-8192; with Image Aspect locked one changes the other), `image_aspect` (sets Height), `pixel_aspect`, the two aspect locks, Options `render_hidden` / `force_two_sided`, Render Output `output` file (empty clears) and `save_file`; with no argument the dialog shows (F10)." { width: Option<u32>, height: Option<u32>, image_aspect: Option<f32>, pixel_aspect: Option<f32>, lock_image_aspect: Option<bool>, lock_pixel_aspect: Option<bool>, render_hidden: Option<bool>, force_two_sided: Option<bool>, save_file: Option<bool>, output: Option<String> };
+    BevyRendererSettings => "Bevy Renderer Settings", Loom, "Render Setup > Renderer (Bevy): 4x MSAA `antialiasing`, `supersampling` 1-4 (samples per pixel side), key light `shadows`, `shadow_map_size` 512-8192, `background` and `ambient` colours (sRGB 0-1); omitted fields keep their value." { antialiasing: Option<bool>, supersampling: Option<u32>, shadows: Option<bool>, shadow_map_size: Option<u32>, background: Option<[f32; 3]>, ambient: Option<[f32; 3]> };
+    AreaToRender => "Area to Render", Loom, "Rendered Frame Window > Area to Render: View, Selected, Region, Crop or Blowup, and the `region` rectangle [x0, y0, x1, y1] as fractions of the frame (y down) for Region / Crop, or the Blowup one (kept at the output's shape)." { area: Option<loom_scene::render::RenderArea>, region: Option<[f32; 4]> };
+    EditRegion => "Edit Region", MainUI, "Rendered Frame Window > Edit Region: toggle editing the render region in the viewport (View and Selected switch to Region).";
+    RenderViewport => "Render Viewport", Loom, "Rendered Frame Window / Render Setup: the `viewport` to render (index), Lock to Viewport (`lock`) and Production or Iterative (`iterative`)." { viewport: Option<u32>, lock: Option<bool>, iterative: Option<bool> };
+    RenderedFrameWindow => "Rendered Frame Window", MainUI, "Open or close the Rendered Frame Window.";
+    SaveRenderedImage => "Save Image", MainUI, "Rendered Frame Window > Save Image: write the rendered image to `path` (png, jpg, bmp, tga, exr by extension); without it the file dialog shows." { path: Option<String> };
+    CopyRenderedImage => "Copy Image", MainUI, "Rendered Frame Window > Copy Image: put the image as displayed (channel toggles applied) on the clipboard.";
+    CloneRenderedFrameWindow => "Clone Rendered Frame Window", MainUI, "Rendered Frame Window > Clone: a new window holding a copy of the image, to compare with the next render.";
+    ClearRenderedFrameWindow => "Clear Rendered Frame Window", MainUI, "Rendered Frame Window > Clear: remove the image from the window.";
+    RenderedFrameWindowChannels => "Rendered Frame Window Channels", Loom, "Rendered Frame Window channel toggles: Enable Red / Green / Blue Channel, Display Alpha Channel (`alpha`), Monochrome (`mono`); omitted ones keep their state." { red: Option<bool>, green: Option<bool>, blue: Option<bool>, alpha: Option<bool>, mono: Option<bool> };
+    CancelRender => "Cancel Render", MainUI, "Rendering progress > Cancel: stop the render in progress; the buckets done so far stay in the window.";
+    PauseRender => "Pause Render", MainUI, "Rendering progress > Pause / Resume.";
     MaterialEditorSlot => "Material Editor Slot", Loom, "Make sample slot `slot` (0-23) the active one." { slot: u32 };
     SetMaterialColor => "Set Material Color", Loom, "Blinn Basic Parameters colour of a slot's material (slot omitted = active): Ambient, Diffuse or Specular, 0-255 RGB; Ambient follows Diffuse while locked." { slot: Option<u32>, which: String, rgb: [u8; 3] };
     SetMaterialParameter => "Set Material Parameter", Loom, "A slot's material value by label: Specular Level, Glossiness, Soften, Self-Illumination, Opacity, 2-Sided, Wire, Faceted, Ambient/Diffuse Lock, Show Map in Viewport (booleans as 0/1)." { slot: Option<u32>, name: String, value: f64 };
@@ -1646,7 +1665,6 @@ pub const DEFERRED_SPLINE: &[(&str, &str)] = &[];
 /// spec section that excludes them.
 pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
     ("Environment Dialog Toggle", "3"),
-    ("Render Last", "3"),
     ("Create Animated Sequence File...", "3"),
     ("Hide Particle Systems Toggle", "3"),
     ("Hide Space Warps Toggle", "3"),

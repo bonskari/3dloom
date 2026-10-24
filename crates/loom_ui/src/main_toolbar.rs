@@ -24,7 +24,7 @@ const fn item(name: &'static str, since: Plan) -> Item {
     Item { name, since }
 }
 
-/// Main Toolbar contents, in order (render buttons are out of scope).
+/// Main Toolbar contents, in order.
 pub const ITEMS: &[Item] = &[
     item("Undo", Plan::Now),
     item("Redo", Plan::Now),
@@ -56,6 +56,9 @@ pub const ITEMS: &[Item] = &[
     item("Curve Editor", Plan::Phase8),
     item("Schematic View", Plan::Phase3),
     item("Material Editor", Plan::Phase5),
+    item("Render Setup", Plan::Now),
+    item("Rendered Frame Window", Plan::Now),
+    item("Render Production", Plan::Now),
 ];
 
 fn tool_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, action: &str) {
@@ -254,6 +257,39 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             }
                         });
                     }
+                    "Render Setup" => {
+                        ui.separator();
+                        if ui.button("Render Setup").on_hover_name(&app.state, "Render SetUp...").clicked() {
+                            app.dispatch_named("Render SetUp...");
+                        }
+                    }
+                    "Rendered Frame Window" => {
+                        if ui.selectable_label(app.state.rendered.open, "Frame Window").on_hover_name(&app.state, "Rendered Frame Window").clicked() {
+                            app.dispatch_named("Rendered Frame Window");
+                        }
+                    }
+                    "Render Production" => {
+                        // Render flyout: Production / Iterative (right-click).
+                        let iterative = app.state.rendered.iterative;
+                        let action = if iterative { "Render Iterative" } else { "Render" };
+                        let r = ui.button(if iterative { "Render (Iterative)" } else { "Render" }).on_hover_text(format!("{}; right-click: Render flyout", tip(&app.state, action, action)));
+                        if r.clicked() {
+                            app.dispatch_named(action);
+                        }
+                        let popup = ui.id().with("render_flyout");
+                        if r.secondary_clicked() {
+                            ui.memory_mut(|m| m.toggle_popup(popup));
+                        }
+                        egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+                            ui.set_min_width(140.0);
+                            for (l, it) in [("Render Production", false), ("Render Iterative", true)] {
+                                if ui.add(menu_widget(&app.state, l, if it { "Render Iterative" } else { "Render" })).clicked() {
+                                    let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
+                                    app.dispatch_named(if it { "Render Iterative" } else { "Render" });
+                                }
+                            }
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -274,7 +310,7 @@ mod tests {
             "Select and Scale", "Reference Coordinate System", "Use Center", "Select and Manipulate", "Keyboard Shortcut Override Toggle",
             "Snaps Toggle", "Angle Snap Toggle", "Percent Snap Toggle", "Spinner Snap Toggle", "Edit Named Selection Sets",
             "Named Selection Sets", "Mirror", "Align", "Manage Layers", "Graphite Modeling Tools", "Curve Editor", "Schematic View",
-            "Material Editor",
+            "Material Editor", "Render Setup", "Rendered Frame Window", "Render Production",
         ];
         assert_eq!(names, expected);
         // Items of later plans are flagged, never drawn as dead buttons.
