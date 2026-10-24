@@ -300,6 +300,13 @@ fn right_click_or_the_select_tool_ends_the_create_mode() {
     assert!(h.app.create_kind.is_none(), "the Select tool ends the create mode");
 }
 
+/// The maximized Perspective view pulled back so a 200-unit area shows.
+fn wide_view(h: &mut Harness) {
+    maximized(h);
+    h.app.state.active_mut().camera = loom_input::OrbitCamera { target: Vec3::ZERO, distance: 300.0, yaw: 0.75, pitch: 0.6 };
+    h.frames(2);
+}
+
 fn camera_target(h: &Harness, cam: loom_scene::NodeId) -> Option<loom_scene::NodeId> {
     match h.app.state.scene.node(cam).unwrap().object {
         loom_scene::ObjectKind::Camera { target, .. } => target,
@@ -310,7 +317,7 @@ fn camera_target(h: &Harness, cam: loom_scene::NodeId) -> Option<loom_scene::Nod
 #[test]
 fn dragging_a_target_camera_puts_the_camera_at_the_press_and_the_target_at_the_release() {
     let mut h = Harness::new();
-    maximized(&mut h);
+    wide_view(&mut h);
     h.app.create_kind = Some(crate::CreateKind::Camera { target: true });
     let (from, to) = (Vec3::new(-40.0, -40.0, 0.0), Vec3::new(30.0, 20.0, 0.0));
     let (a, b) = (h.screen_of(from), h.screen_of(to));
@@ -330,7 +337,7 @@ fn dragging_a_target_camera_puts_the_camera_at_the_press_and_the_target_at_the_r
 #[test]
 fn clicking_a_free_camera_places_it_looking_down_and_its_icon_selects_it() {
     let mut h = Harness::new();
-    maximized(&mut h);
+    wide_view(&mut h);
     h.app.create_kind = Some(crate::CreateKind::Camera { target: false });
     let at = Vec3::new(10.0, 10.0, 0.0);
     let p = h.screen_of(at);
