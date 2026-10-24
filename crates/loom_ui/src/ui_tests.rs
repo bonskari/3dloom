@@ -637,6 +637,12 @@ fn empty_point(h: &Harness) -> egui::Pos2 {
     egui::pos2(r.left() + r.width() * 0.06, r.top() + r.height() * 0.6)
 }
 
+/// A crossing drag over nearly the whole active viewport.
+fn drag_all(h: &mut Harness) {
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    h.drag(egui::pos2(r.left() + r.width() * 0.04, r.top() + r.height() * 0.15), egui::pos2(r.right() - 10.0, r.bottom() - 10.0));
+}
+
 fn poly_plane(h: &mut Harness) {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [40.0, 40.0, 0.0] });
     h.cmd(Command::ConvertToEditablePoly);
@@ -702,11 +708,11 @@ fn a_click_on_empty_space_clears_the_selection_at_every_level_and_tool() {
         ("Editable Poly element", |h| { poly_plane(h); h.key(egui::Key::Num5); h.cmd(Command::SelectAll); }, subs),
         ("Edit Poly vertex", |h| { plane_with(h, "Edit Poly"); h.key(egui::Key::Num1); h.cmd(Command::SelectAll); }, subs),
         ("Edit Poly polygon", |h| { plane_with(h, "Edit Poly"); h.key(egui::Key::Num4); h.cmd(Command::SelectAll); }, subs),
-        ("Poly Select edge", |h| { plane_with(h, "Poly Select"); h.key(egui::Key::Num2); h.cmd(Command::SelectAll); }, subs),
-        ("Mesh Select face", |h| { plane_with(h, "Mesh Select"); h.key(egui::Key::Num3); h.cmd(Command::SelectAll); }, subs),
-        ("Editable Spline vertex", |h| { editable_rectangle(h); h.key(egui::Key::Num1); h.cmd(Command::SelectAll); }, subs),
-        ("Editable Spline segment", |h| { editable_rectangle(h); h.key(egui::Key::Num2); h.cmd(Command::SelectAll); }, subs),
-        ("Editable Spline spline", |h| { editable_rectangle(h); h.key(egui::Key::Num3); h.cmd(Command::SelectAll); }, subs),
+        ("Poly Select edge", |h| { plane_with(h, "Poly Select"); h.key(egui::Key::Num2); drag_all(h); }, subs),
+        ("Mesh Select face", |h| { plane_with(h, "Mesh Select"); h.key(egui::Key::Num3); drag_all(h); }, subs),
+        ("Editable Spline vertex", |h| { editable_rectangle(h); h.key(egui::Key::Num1); drag_all(h); }, subs),
+        ("Editable Spline segment", |h| { editable_rectangle(h); h.key(egui::Key::Num2); drag_all(h); }, subs),
+        ("Editable Spline spline", |h| { editable_rectangle(h); h.key(egui::Key::Num3); drag_all(h); }, subs),
         ("Skin object", |h| skinned(h), objects),
         (
             "Skin envelope vertices",
@@ -753,4 +759,27 @@ fn a_click_on_empty_space_clears_the_selection_at_every_level_and_tool() {
         }
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+#[test]
+fn region_selection_uses_the_drawn_geometry_not_the_bounding_box() {
+    let mut h = Harness::new();
+    let torus = created(&mut h, PrimitiveKind::Torus, [0.0; 3], 40.0);
+    h.cmd(Command::SelectNone);
+    framed(&mut h);
+    h.app.state.prefs.auto_window_crossing = false;
+    h.app.state.window_selection = false;
+    let c = h.screen_of(Vec3::new(0.0, 0.0, 5.0));
+    h.drag(c - egui::vec2(6.0, 6.0), c + egui::vec2(6.0, 6.0));
+    assert!(h.app.state.selection.is_empty(), "Crossing inside the hole touches nothing");
+    // Window around the drawn torus (a little margin): its box corners stick out, its vertices do not.
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let vp = h.app.camera_for(i).view_projection(rect.width() / rect.height());
+    let mesh = &h.app.world_meshes()[0].1;
+    let pts: Vec<egui::Pos2> = mesh.vertices().iter().filter_map(|v| crate::viewport_widget::project_world_to_screen(v.position, vp, rect)).collect();
+    let bounds = egui::Rect::from_points(&pts).expand(3.0);
+    h.app.state.window_selection = true;
+    h.drag(bounds.min, bounds.max);
+    assert_eq!(selected(&h), vec![torus], "Window around the drawn torus selects it");
 }
