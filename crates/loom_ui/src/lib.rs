@@ -966,6 +966,17 @@ impl LoomApp {
             self.saved_modifier_usage = self.state.modifier_usage.clone();
         }
         hotkeys::handle(ctx, self);
+        // An image file dropped on an object: a material with it as the Diffuse map.
+        let dropped: Vec<std::path::PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        if !dropped.is_empty() {
+            let at = ctx.input(|i| i.pointer.latest_pos());
+            for path in dropped {
+                let image = path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["png", "jpg", "jpeg", "bmp", "tga", "tif", "tiff"].contains(&e.to_ascii_lowercase().as_str()));
+                if let (true, Some(node)) = (image, at.and_then(|p| viewport_widget::node_at(self, p))) {
+                    let _ = self.dispatch(Command::DropBitmap { path: path.to_string_lossy().into_owned(), node: Some(node.0) });
+                }
+            }
+        }
         // Playback: advance by the wall clock (Real Time) or a frame per redraw.
         if self.state.playing {
             let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.25);

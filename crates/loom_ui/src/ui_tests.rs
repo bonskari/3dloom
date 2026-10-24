@@ -1697,3 +1697,27 @@ fn cancel_expert_mode_button_brings_the_interface_back() {
 }
 
 
+
+/// An image file dropped from the file manager onto selected polygons gets
+/// a material of its own there (a Multi/Sub-Object material is built).
+#[test]
+fn an_image_file_dropped_on_selected_polygons_assigns_it_there() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let node = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Face });
+    h.cmd(Command::SelectSub { node: Some(node.0), ids: vec![0], op: loom_commands::SelectOp::Replace });
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.time += 1.0 / 30.0;
+    let input = egui::RawInput { screen_rect: Some(h.screen), time: Some(h.time), dropped_files: vec![egui::DroppedFile { path: Some("/x/bfrontgarage.jpg".into()), ..Default::default() }], ..Default::default() };
+    let app = &mut h.app;
+    h.shapes = h.ctx.run(input, |ctx| app.frame(ctx)).shapes;
+    h.frames(2);
+    let multi = h.app.state.scene.node(node).unwrap().material.expect("the drop assigned a material");
+    let loom_scene::material::MaterialKind::MultiSub(list) = &h.app.state.scene.materials[&multi].kind else { panic!("a Multi/Sub-Object material") };
+    let mesh = h.app.state.scene.node(node).unwrap().cage_mesh().into_owned();
+    let row = list.iter().find(|e| e.id == mesh.faces()[0].material_id + 1).expect("the face's ID has a sub-material");
+    assert_eq!(h.app.state.scene.materials[&row.material.unwrap()].diffuse_map.as_ref().unwrap().path, "/x/bfrontgarage.jpg");
+    assert!(h.app.world_styles[0].sub.is_some(), "the viewport draws it per ID");
+}

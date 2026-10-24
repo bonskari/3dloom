@@ -49,6 +49,7 @@ pub fn handles(c: &C) -> bool {
             | C::AssignMaterialToNode { .. }
             | C::AssignMaterialToFaces { .. }
             | C::GetMaterial { .. }
+            | C::DropBitmap { .. }
             | C::SetMaterialEditorOption { .. }
             | C::SetSampleType { .. }
             | C::PickMaterialFromObject
@@ -671,6 +672,37 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             state.undo.end();
             r?;
             Ok(json!({ "material": multi.0, "id": face_id }))
+        }
+        C::DropBitmap { path, node } => {
+            let node = match node {
+                Some(n) => NodeId(n),
+                None => *state.selection.iter().next().ok_or("drop the bitmap on an object")?,
+            };
+            state.scene.node(node).ok_or_else(|| format!("no node {}", node.0))?;
+            let ed = &state.scene.material_editor;
+            let slot = (0..SLOT_COUNT).find(|i| ed.slots[*i].is_none()).unwrap_or(ed.active);
+            let name = std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
+            let on_faces = selected_faces(state).iter().any(|(n, f)| *n == node && !f.is_empty());
+            state.undo.begin("Drop Bitmap");
+            let r = (|| {
+                let before = snapshot(state);
+                let mut after = before.clone();
+                let mut m = StandardMaterial::new(name);
+                m.diffuse_map = Some(Map::bitmap(path, default_amount("Diffuse Color")));
+                m.show_map_in_viewport = true;
+                let id = next_material_id(&after.0);
+                after.0.insert(id, m);
+                after.1.slots[slot] = Some(id);
+                commit(state, "Drop Bitmap", Change::SetMaterials { before, after })?;
+                if on_faces {
+                    execute(state, C::AssignMaterialToFaces { slot: Some(slot as u32) })
+                } else {
+                    execute(state, C::AssignMaterialToNode { node: node.0, slot: Some(slot as u32) })
+                }
+            })();
+            state.undo.end();
+            let v = r?;
+            Ok(json!({ "slot": slot, "assigned": v }))
         }
         C::GetMaterial { material } => {
             let id = MaterialId(material);

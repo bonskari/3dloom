@@ -309,3 +309,30 @@ fn compound_materials_round_trip_through_the_loom_file() {
     assert_eq!(back.material_editor, s.scene.material_editor);
     assert!(matches!(back.node_surfaces(a), Some(Surfaces::PerId(_))));
 }
+
+#[test]
+fn a_bitmap_dropped_on_selected_polygons_gets_its_own_sub_material() {
+    let mut s = AppState::new();
+    let n = poly_box(&mut s);
+    select_faces(&mut s, n, vec![0]);
+    let undo = s.undo.len();
+    execute(&mut s, Command::DropBitmap { path: "/x/bfrontgarage.jpg".into(), node: Some(n.0) }).unwrap();
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let multi = s.scene.node(n).unwrap().material.expect("a Multi/Sub-Object material");
+    let list = sub_list(&s, multi);
+    let front = list.iter().find(|e| e.material.is_some_and(|m| s.scene.materials[&m].name == "bfrontgarage")).expect("the bitmap's material");
+    let m = &s.scene.materials[&front.material.unwrap()];
+    assert_eq!(m.diffuse_map.as_ref().unwrap().path, "/x/bfrontgarage.jpg");
+    assert!(m.show_map_in_viewport);
+    assert_eq!(s.scene.material_editor.slots[0], front.material, "in the first unused sample slot");
+    let mesh = s.scene.node(n).unwrap().cage_mesh().into_owned();
+    assert_eq!(mesh.faces()[0].material_id + 1, front.id);
+    // A second bitmap on another polygon: another ID in the same material.
+    select_faces(&mut s, n, vec![1]);
+    execute(&mut s, Command::DropBitmap { path: "/x/bsidegarage.jpg".into(), node: Some(n.0) }).unwrap();
+    assert_eq!(s.scene.node(n).unwrap().material, Some(multi));
+    assert_eq!(sub_list(&s, multi).len(), list.len() + 1);
+    assert_eq!(s.scene.material_editor.slots[1].map(|m| s.scene.materials[&m].name.clone()), Some("bsidegarage".to_string()));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(sub_list(&s, multi).len(), list.len());
+}
