@@ -3,6 +3,7 @@
 
 mod commands;
 mod control;
+mod logging;
 mod update;
 
 use eframe::egui;
@@ -10,8 +11,9 @@ use eframe::NativeOptions;
 use std::sync::mpsc::{Receiver, Sender};
 
 fn main() -> eframe::Result<()> {
-    // RUST_LOG=warn shows wgpu validation errors, which are otherwise silent.
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    // The log file and standard error (RUST_LOG, default warn: wgpu
+    // validation errors are otherwise silent).
+    logging::init();
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("3dLoom")
@@ -24,23 +26,45 @@ fn main() -> eframe::Result<()> {
         wgpu_options: loom_ui::wgpu_configuration(),
         ..Default::default()
     };
-    // Opt-in remote control: `LOOM_CONTROL_PORT=7833 loom`.
-    let control = match std::env::var("LOOM_CONTROL_PORT")
+    // Control sockets: always the user's own Unix socket; the localhost TCP
+    // port only when asked for (`LOOM_CONTROL_PORT=7833 loom`).
+    let (control_tx, control) = std::sync::mpsc::channel::<control::Request>();
+    let waker = control::Waker::default();
+    #[cfg(unix)]
+    let unix_socket = match control::spawn_unix(&loom_commands::live::runtime_dir(), control_tx.clone(), waker.clone()) {
+        Ok(s) => {
+            log::info!(target: "loom::control", "control socket {}", s.path.display());
+            Some(s)
+        }
+        Err(e) => {
+            log::warn!(target: "loom::control", "control socket failed in {}: {e}", loom_commands::live::runtime_dir().display());
+            None
+        }
+    };
+    let tcp = match std::env::var("LOOM_CONTROL_PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
         .filter(|p| *p != 0)
     {
-        Some(port) => match control::spawn(port) {
-            Ok(rx) => {
+        Some(port) => match control::spawn_tcp(port, control_tx, waker.clone()) {
+            Ok(()) => {
                 eprintln!("3dLoom control socket listening on 127.0.0.1:{port}");
-                Some(rx)
+                log::info!(target: "loom::control", "control port 127.0.0.1:{port}");
+                true
             }
             Err(e) => {
                 eprintln!("3dLoom control socket failed on port {port}: {e}");
-                None
+                log::warn!(target: "loom::control", "control port {port} failed: {e}");
+                false
             }
         },
-        None => None,
+        None => false,
+    };
+    let live = commands::Live {
+        log_path: logging::path(),
+        #[cfg(unix)]
+        socket: unix_socket.as_ref().map(|s| s.path.clone()),
+        ..Default::default()
     };
     // Signed self-update (CI release builds only, see `update::enabled`): a
     // background check after the window opens feeds the Update menu; nothing
@@ -55,15 +79,20 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "3dLoom",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             let mut inner = loom_ui::LoomApp::new(cc);
             inner.update = update.clone();
+            let _ = waker.set(cc.egui_ctx.clone());
             Ok(Box::new(ControlledApp {
                 inner,
                 restart_exe: exe,
                 control,
+                continuous_repaint: tcp,
+                live,
+                pending_input: Vec::new(),
+                #[cfg(unix)]
+                _unix_socket: unix_socket,
                 pending_shot: None,
-
             }))
         }),
     )
@@ -72,7 +101,16 @@ fn main() -> eframe::Result<()> {
 /// Wraps `LoomApp` so control-socket requests are applied on the UI thread.
 struct ControlledApp {
     inner: loom_ui::LoomApp,
-    control: Option<Receiver<control::Request>>,
+    control: Receiver<control::Request>,
+    /// TCP clients (LOOM_CONTROL_PORT) expect the view to keep advancing
+    /// (view animations, buffer rebuilds) without user input.
+    continuous_repaint: bool,
+    /// Injected input, the log file and the socket path.
+    live: commands::Live,
+    /// `input` requests waiting for their events to be delivered.
+    pending_input: Vec<(Sender<serde_json::Value>, usize)>,
+    #[cfg(unix)]
+    _unix_socket: Option<control::UnixSocket>,
     /// Screenshot requested last frame, waiting for the image event.
     pending_shot: Option<(String, Sender<serde_json::Value>)>,
     /// This program's path from before an update replaced it (for Restart now).
@@ -100,6 +138,11 @@ fn update_worker(h: loom_ui::update_menu::UpdateHandle) {
     let own = env!("LOOM_COMMIT");
     loop {
         let found = update::check(own);
+        match &found {
+            Ok(Some((m, _))) => log::info!(target: "loom::update", "update available: {} (running {own})", m.commit),
+            Ok(None) => log::info!(target: "loom::update", "up to date ({own})"),
+            Err(e) => log::warn!(target: "loom::update", "update check failed: {e}"),
+        }
         let pending = match found {
             Ok(Some((manifest, asset))) => {
                 let changes = update::changes(own, &manifest.commit);
@@ -130,6 +173,10 @@ fn update_worker(h: loom_ui::update_menu::UpdateHandle) {
                     s.status = S::Installing { commit: manifest.commit.clone() };
                     drop(s);
                     let r = update::install(manifest, asset);
+                    match &r {
+                        Ok(()) => log::info!(target: "loom::update", "installed {}", manifest.commit),
+                        Err(e) => log::warn!(target: "loom::update", "install of {} failed: {e}", manifest.commit),
+                    }
                     let mut s = h.lock().unwrap();
                     s.status = match r {
                         Ok(()) => S::Ready { commit: manifest.commit.clone() },
@@ -142,28 +189,46 @@ fn update_worker(h: loom_ui::update_menu::UpdateHandle) {
 }
 
 impl eframe::App for ControlledApp {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.live.input.apply(raw_input);
+    }
+
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.deliver_screenshot(ctx);
-        if self.control.is_some() {
-            self.drain_requests(ctx);
-            // Control clients expect the view to keep advancing (view
-            // animations, buffer rebuilds) without user input.
+        self.drain_requests(ctx);
+        if self.continuous_repaint {
             ctx.request_repaint();
         }
         self.inner.update(ctx, frame);
+        if self.live.input.is_empty() {
+            for (reply, steps) in self.pending_input.drain(..) {
+                let _ = reply.send(serde_json::json!({ "ok": true, "steps": steps }));
+            }
+        } else {
+            ctx.request_repaint();
+        }
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.inner.raw_input_hook(ctx, raw_input);
     }
 }
 
 impl ControlledApp {
     fn drain_requests(&mut self, ctx: &egui::Context) {
-        let Some(rx) = self.control.as_ref() else {
-            return;
-        };
-        let requests: Vec<control::Request> = rx.try_iter().collect();
+        let requests: Vec<control::Request> = self.control.try_iter().collect();
+        if !requests.is_empty() {
+            // Let the view catch up with what the requests changed.
+            ctx.request_repaint();
+        }
         for req in requests {
-            match commands::apply(&mut self.inner, &req.body) {
+            match commands::apply(&mut self.inner, ctx, &mut self.live, &req.body) {
                 commands::Outcome::Done(v) => {
                     let _ = req.reply.send(v);
+                }
+                commands::Outcome::Input { steps } => {
+                    ctx.request_repaint();
+                    self.pending_input.push((req.reply, steps));
                 }
                 commands::Outcome::Screenshot(shot) => {
                     if self.pending_shot.is_some() {
@@ -177,6 +242,7 @@ impl ControlledApp {
                         egui::UserData::default(),
                     ));
                     self.pending_shot = Some((shot.path, req.reply));
+                    ctx.request_repaint();
                 }
             }
         }

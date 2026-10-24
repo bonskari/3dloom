@@ -73,6 +73,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                 }
             }
         });
+        // Bone name field: typing highlights the first matching bone (* wildcards).
+        let name_id = egui::Id::new(("skin_bone_name", id, index));
+        let mut typed = ui.data(|d| d.get_temp::<String>(name_id)).unwrap_or_default();
+        if ui.add(egui::TextEdit::singleline(&mut typed).desired_width(ui.available_width())).changed() {
+            if !typed.is_empty() {
+                let _ = app.dispatch(Command::SkinSelectBoneByName { name: typed.clone() });
+            }
+            ui.data_mut(|d| d.insert_temp(name_id, typed));
+        }
         ui.separator();
         ui.label("Cross Sections");
         ui.horizontal(|ui| {
@@ -114,25 +123,52 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                     }
                 }
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                if ui.selectable_label(b.envelope_visible, "Envelope Visibility").clicked() {
+                    let _ = app.dispatch(Command::SkinEnvelopeVisibility);
+                }
                 if ui.button("Copy").clicked() {
                     let _ = app.dispatch(Command::CopyEnvelopeSkin);
                 }
                 if ui.button("Paste").clicked() {
                     let _ = app.dispatch(Command::PasteEnvelopeSkin);
                 }
+                if ui.button("Paste to All Bones").clicked() {
+                    let _ = app.dispatch(Command::PasteToAllEnvelopesSkin);
+                }
             });
             ui.separator();
             ui.label("Weight Properties");
+            let sel = loom_commands::skin::selection(&app.state);
             ui.horizontal(|ui| {
                 ui.label("Abs. Effect:");
-                let mut ab = e.abs_effect;
-                if ui.add(crate::spinner::spin(ui, &mut ab, 0.0..=1.0).speed(0.01)).changed() {
-                    let _ = app.dispatch(Command::SkinSetEnvelope { inner_start: None, inner_end: None, outer_start: None, outer_end: None, falloff: None, abs_effect: Some(ab), squash: None });
+                if let Some(first) = sel.first() {
+                    // With vertices selected: the current bone's weight on them (the first one's shows).
+                    let bi = d.bones.iter().position(|x| x.node == b.node).unwrap_or(0) as u32;
+                    let w = loom_commands::skin::entry(&app.state).ok().map(|en| {
+                        let p = en.data.mesh_bind.transform_point3(en.input.vertices()[*first as usize].position);
+                        en.data.vertex_weights(*first as usize, p).into_iter().find(|(x, _)| *x == bi).map(|x| x.1).unwrap_or(0.0)
+                    });
+                    let mut ab = w.unwrap_or(0.0);
+                    let r = ui.add(crate::spinner::spin(ui, &mut ab, 0.0..=1.0).speed(0.01).fixed_decimals(3));
+                    // A drag is one undo entry.
+                    if r.drag_started() {
+                        app.state.undo.begin("Abs. Effect");
+                    }
+                    if r.changed() {
+                        let _ = app.dispatch(Command::SkinSetVertexWeight { weight: ab, absolute: true });
+                    }
+                    if r.drag_stopped() {
+                        app.state.undo.end();
+                    }
+                } else {
+                    let mut ab = e.abs_effect;
+                    if ui.add(crate::spinner::spin(ui, &mut ab, 0.0..=1.0).speed(0.01)).changed() {
+                        let _ = app.dispatch(Command::SkinSetEnvelope { inner_start: None, inner_end: None, outer_start: None, outer_end: None, falloff: None, abs_effect: Some(ab), squash: None });
+                    }
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                let sel = loom_commands::skin::selection(&app.state);
                 let rigid = sel.iter().all(|v| d.rigid.get(*v as usize).copied().unwrap_or(false)) && !sel.is_empty();
                 if ui.selectable_label(rigid, "Rigid").clicked() {
                     let _ = app.dispatch(Command::SkinRigidToggle);
@@ -159,6 +195,18 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
                     let _ = app.dispatch(Command::WeightTableDialogSkin);
                 }
             });
+            ui.horizontal(|ui| {
+                if ui.selectable_label(loom_commands::skin::painting(&app.state), "Paint Weights").clicked() {
+                    let _ = app.dispatch(Command::SkinPaintWeightsToggle);
+                }
+                if ui.button("...").on_hover_text("Painter Options").clicked() {
+                    let _ = app.dispatch(Command::SkinPainterOptionsDialog);
+                }
+            });
+            let mut blend = app.state.skin_painter.blend;
+            if ui.checkbox(&mut blend, "Paint Blend Weights").changed() {
+                let _ = app.dispatch(Command::SkinSetPainterOption { name: "Paint Blend Weights".into(), value: if blend { 1.0 } else { 0.0 } });
+            }
         }
     });
     rollout(ui, "Mirror Parameters", false, |ui| {

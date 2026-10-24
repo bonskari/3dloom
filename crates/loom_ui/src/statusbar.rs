@@ -36,6 +36,12 @@ fn flyout<const N: usize>(ui: &mut egui::Ui, app: &mut LoomApp, id: &str, curren
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     if app.state.expert_mode {
+        // The only control left in Expert Mode, in the bottom-right corner.
+        egui::Area::new(egui::Id::new("cancel_expert_mode")).anchor(egui::Align2::RIGHT_BOTTOM, [-6.0, -6.0]).show(ctx, |ui| {
+            if ui.button("Cancel Expert Mode").on_hover_cmd(&app.state, "Cancel Expert Mode", Command::ExpertModeToggle.name()).clicked() {
+                let _ = app.dispatch(Command::ExpertModeToggle);
+            }
+        });
         return;
     }
     egui::TopBottomPanel::bottom("statusbar").show(ctx, |ui| {

@@ -11,6 +11,7 @@ pub mod preferences;
 pub mod units_setup;
 pub mod mirror;
 pub mod poly_settings;
+pub mod delete_isolated;
 pub mod detach;
 pub mod manage_layers;
 pub mod normal_align;
@@ -25,6 +26,7 @@ pub mod file_dialog;
 pub mod material_editor;
 pub mod render_setup;
 pub mod save_changes;
+pub mod spline_prompts;
 pub mod merge;
 pub mod unwrap_dialogs;
 pub mod rig_dialogs;
@@ -121,15 +123,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CustomizeUI => customize_ui::show(ctx, app, &mut open),
         Dialog::PolySettings(kind) => poly_settings::show(ctx, app, kind, &mut open),
         Dialog::Detach => detach::show(ctx, app, &mut open),
+        Dialog::DeleteIsolatedVertices => delete_isolated::show(ctx, app, &mut open),
         Dialog::LayerManager => manage_layers::show(ctx, app, &mut open),
         Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::SaveChanges(action) => save_changes::show(ctx, app, action, &mut open),
+        Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
+        Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::PickTexture | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
         Dialog::WeightTable => rig_dialogs::weight_table(ctx, app, &mut open),
         Dialog::WeightTool => rig_dialogs::weight_tool(ctx, app, &mut open),
+        Dialog::PainterOptions => rig_dialogs::painter_options(ctx, app, &mut open),
         Dialog::OutOfRangeTypes => track_view_dialogs::out_of_range_types(ctx, app, &mut open),
         Dialog::ReduceKeys => track_view_dialogs::reduce_keys(ctx, app, &mut open),
         Dialog::TrackSets => track_view_dialogs::track_sets(ctx, app, &mut open),

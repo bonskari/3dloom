@@ -76,20 +76,29 @@ fn edit_normals_is_linear() {
 
 #[test]
 fn edited_normals_evaluate_in_linear_time() {
-    let mut s = AppState::new();
-    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [100.0, 100.0, 0.0] }).unwrap();
-    let id = *s.selection.iter().next().unwrap();
-    execute(&mut s, Command::SetParameter { id: id.0, name: "Length Segs".into(), value: 100.0 }).unwrap();
-    execute(&mut s, Command::SetParameter { id: id.0, name: "Width Segs".into(), value: 100.0 }).unwrap();
-    execute(&mut s, Command::AddModifier { name: "Edit Normals".into() }).unwrap();
-    execute(&mut s, Command::ModifierSubobjectLevel { index: 0, level: 1 }).unwrap();
-    execute(&mut s, Command::EditNormalsSelectBy { level: 1 }).unwrap();
-    execute(&mut s, Command::EditNormalsSelect { ids: (0..101 * 101).collect(), op: loom_commands::SelectOp::Replace }).unwrap();
-    let t = Instant::now();
-    execute(&mut s, Command::BreakNormals).unwrap();
-    execute(&mut s, Command::MakeExplicit).unwrap();
-    let e = s.scene.eval_mesh(id);
-    let dt = t.elapsed();
-    assert!(e.value.mesh.map(loom_mesh::NORMALS_CHANNEL).is_some(), "{:?}", e.warnings);
-    assert!(dt < BUDGET, "Break + evaluation took {dt:?}");
+    // Break + evaluation of a plane with `segs`² cells; returns its duration.
+    fn run(segs: u32) -> std::time::Duration {
+        let mut s = AppState::new();
+        execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [100.0, 100.0, 0.0] }).unwrap();
+        let id = *s.selection.iter().next().unwrap();
+        execute(&mut s, Command::SetParameter { id: id.0, name: "Length Segs".into(), value: segs as f64 }).unwrap();
+        execute(&mut s, Command::SetParameter { id: id.0, name: "Width Segs".into(), value: segs as f64 }).unwrap();
+        execute(&mut s, Command::AddModifier { name: "Edit Normals".into() }).unwrap();
+        execute(&mut s, Command::ModifierSubobjectLevel { index: 0, level: 1 }).unwrap();
+        execute(&mut s, Command::EditNormalsSelectBy { level: 1 }).unwrap();
+        execute(&mut s, Command::EditNormalsSelect { ids: (0..(segs + 1) * (segs + 1)).collect(), op: loom_commands::SelectOp::Replace }).unwrap();
+        let t = Instant::now();
+        execute(&mut s, Command::BreakNormals).unwrap();
+        execute(&mut s, Command::MakeExplicit).unwrap();
+        let e = s.scene.eval_mesh(id);
+        let dt = t.elapsed();
+        assert!(e.value.mesh.map(loom_mesh::NORMALS_CHANNEL).is_some(), "{:?}", e.warnings);
+        dt
+    }
+    // Wall-clock budgets fail on a loaded machine, so compare 4x the cells:
+    // linear work takes ~4x as long, quadratic ~16x. Best of three each.
+    let best = |segs| (0..3).map(|_| run(segs)).min().unwrap();
+    let (small, large) = (best(50), best(100));
+    let ratio = large.as_secs_f64() / small.as_secs_f64().max(1e-6);
+    assert!(ratio < 9.0, "4x the cells took {ratio:.1}x as long ({small:?} vs {large:?})");
 }

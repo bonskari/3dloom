@@ -77,6 +77,17 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
             let _ = app.dispatch(Command::DissolveEdges);
             continue;
         }
+        // Ctrl+Backspace: Clean Remove (the edges and their leftover vertices).
+        let ctrl_only = (mods.ctrl || mods.command) && !mods.alt && !mods.shift;
+        if key == egui::Key::Backspace && ctrl_only && app.state.selection_mode.is_edge_level() {
+            let _ = app.dispatch(Command::CleanRemove);
+            continue;
+        }
+        // Backspace at Vertex level is Remove.
+        if key == egui::Key::Backspace && plain && app.state.selection_mode == loom_commands::SelectionMode::Vertex && !app.state.spline_selected() {
+            let _ = app.dispatch(Command::Remove);
+            continue;
+        }
         let Some(chord) = chord_of(key, mods) else { continue };
         // Editable Poly group first while an Editable Poly is selected, then Main UI.
         if let Some(name) = app.state.hotkey(chord) {

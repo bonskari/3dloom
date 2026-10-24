@@ -226,6 +226,77 @@ pub fn handle_drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::Point
     true
 }
 
+#[derive(Clone)]
+struct FilletDrag {
+    start: egui::Pos2,
+    upp: f32,
+    sel: Vec<(u64, SubObjectId)>,
+    /// Undo version right after the last applied step (to take it back on the next move).
+    applied: Option<u64>,
+}
+
+/// Fillet / Chamfer mode: pressing on a selected vertex and dragging up
+/// rounds (cuts) every selected vertex by the drag, live. Returns true while the mode owns the pointer.
+pub fn fillet_drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState, hovered: bool, p: egui::Pos2, projection: &Projection) -> bool {
+    let chamfer = match app.state.pick_mode {
+        Some(PickMode::SplineFillet) => false,
+        Some(PickMode::SplineChamfer) => true,
+        _ => return false,
+    };
+    if app.state.selection_mode != SelectionMode::Vertex {
+        return false;
+    }
+    let id = egui::Id::new("spline_fillet_drag");
+    let mut st: Option<FilletDrag> = ctx.data(|d| d.get_temp(id));
+    if st.is_none() && pointer.button_pressed(egui::PointerButton::Primary) && hovered {
+        // The press must land on a selected vertex.
+        let mut at: Option<Vec3> = None;
+        for (_, nid, shape, world, _) in shape_nodes(app) {
+            for (n, so) in app.state.sub_selection.iter() {
+                let SubObjectId::Vertex(v) = so else { continue };
+                let Some((si, k)) = shape.knot_at(v.0 as usize).filter(|_| n == nid) else { continue };
+                let w = world.transform_point3(shape.splines[si].knots[k].pos);
+                if projection.screen(w).is_some_and(|sp| sp.distance(p) <= 8.0) {
+                    at = Some(w);
+                }
+            }
+        }
+        if let Some(w) = at {
+            let sel = app.state.sub_selection.iter().map(|(n, s)| (n.0, s)).collect();
+            st = Some(FilletDrag { start: p, upp: projection.units_per_pixel(w).max(1e-6), sel, applied: None });
+            app.poly_dragging = true;
+        }
+    }
+    // Elsewhere a click selects vertices as usual.
+    let Some(mut s) = st else { return false };
+    if pointer.is_moving() && pointer.button_down(egui::PointerButton::Primary) {
+        // Each move redoes the operation from the original vertices, so the
+        // drag leaves one undo entry.
+        if s.applied.is_some_and(|v| v == app.state.undo.version()) {
+            let _ = app.dispatch(Command::UndoSceneOperation);
+        }
+        app.state.sub_selection.clear();
+        for (n, so) in &s.sel {
+            app.state.sub_selection.insert(NodeId(*n), *so);
+        }
+        s.applied = None;
+        let amount = (s.start.y - p.y) * s.upp;
+        if amount > 1e-4 {
+            let before = app.state.undo.version();
+            let _ = app.dispatch(if chamfer { Command::SplineChamfer { amount } } else { Command::SplineFillet { amount } });
+            s.applied = (app.state.undo.version() != before).then(|| app.state.undo.version());
+        }
+        ctx.request_repaint();
+    }
+    if pointer.button_released(egui::PointerButton::Primary) || !pointer.button_down(egui::PointerButton::Primary) {
+        app.poly_dragging = false;
+        ctx.data_mut(|d| d.remove::<FilletDrag>(id));
+    } else {
+        ctx.data_mut(|d| d.insert_temp(id, s));
+    }
+    true
+}
+
 pub fn is_spline_pick(mode: Option<PickMode>) -> bool {
     matches!(mode, Some(PickMode::SplineRefine | PickMode::SplineInsert | PickMode::SplineTrim | PickMode::SplineExtend | PickMode::SplineCrossInsert | PickMode::SplineBind | PickMode::TrimExtendModifier))
 }
@@ -261,8 +332,12 @@ pub fn click(app: &mut LoomApp, p: egui::Pos2, rect: egui::Rect, view_proj: Mat4
                 let pts = segment_screen(&shape, si, seg, world, &screen);
                 let d = dist_to_polyline(p, &pts);
                 if d <= 8.0 && best.as_ref().is_none_or(|(_, _, _, bd, _)| d < *bd) {
-                    // Nearest parameter along the segment, by its sampled points.
-                    let n = (pts.len() - 1).max(1);
+                    // Nearest parameter along the segment, by points sampled evenly in
+                    // its parameter (a straight segment's two screen ends would put
+                    // the new knot off the cursor under perspective).
+                    let b = shape.splines[si].segment(seg).unwrap();
+                    let n = 64;
+                    let pts: Vec<egui::Pos2> = (0..=n).filter_map(|i| screen(world.transform_point3(loom_shape::interp::point_at(&b, i as f32 / n as f32)))).collect();
                     let (mut bt, mut bdist) = (0.0, f32::INFINITY);
                     for (i, w) in pts.windows(2).enumerate() {
                         let (a, b) = (w[0], w[1]);
@@ -285,6 +360,19 @@ pub fn click(app: &mut LoomApp, p: egui::Pos2, rect: egui::Rect, view_proj: Mat4
         // These tools take the clicked point on the spline; they stay on for more clicks.
         let _ = app.dispatch(Command::PickPoint { point: on.to_array() });
         return;
+    }
+    if app.state.pick_mode == Some(PickMode::SplineRefine) && app.state.spline_settings.refine_connect {
+        // Refine with Connect on an existing vertex asks Refine / Connect Only.
+        let knot = shape_nodes(app).into_iter().filter(|(_, n, ..)| *n == id).find_map(|(_, _, shape, world, hidden)| {
+            (0..shape.splines.len()).filter(|si| !hidden.contains(si)).flat_map(|si| (0..shape.splines[si].knots.len()).map(move |k| (si, k))).find_map(|(si, k)| {
+                let sp = screen(world.transform_point3(shape.splines[si].knots[k].pos))?;
+                (sp.distance(p) <= 6.0).then(|| shape.knot_index(si, k))
+            })
+        });
+        if let Some(knot) = knot {
+            let _ = app.dispatch(Command::SplineRefineAtVertex { node: id.0, knot: knot as u32, segment: seg as u32, t });
+            return;
+        }
     }
     let insert = app.state.pick_mode == Some(PickMode::SplineInsert);
     if insert && app.state.selection_mode != SelectionMode::Vertex {

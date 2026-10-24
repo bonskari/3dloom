@@ -8,6 +8,7 @@ pub mod dialogs;
 pub mod gizmo;
 mod hotkeys;
 pub mod label_menus;
+pub mod live;
 pub mod main_toolbar;
 pub mod quad_menu;
 mod realistic;
@@ -265,6 +266,9 @@ pub struct LoomApp {
     pub drag_select_start: Option<egui::Pos2>,
     /// Alt+LMB press not yet moved 4 px: a click subtracts from the selection, a drag orbits.
     pub alt_click: Option<egui::Pos2>,
+    /// The last object click: where, the objects under it front to back, and
+    /// which of them it picked; a repeat click there picks the next one.
+    pub pick_cycle: Option<(egui::Pos2, Vec<NodeId>, usize)>,
     /// Lasso/Paint path or Fence corners being collected.
     pub region_points: Vec<egui::Pos2>,
     pub quad_menu: Option<quad_menu::Open>,
@@ -273,6 +277,8 @@ pub struct LoomApp {
     /// Show Map in Viewport bitmaps decoded once per path.
     pub bitmap_cache: std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>,
     pub last_error: Option<String>,
+    /// The last raw input events (live diagnostics).
+    pub input_log: live::InputLog,
 }
 
 impl LoomApp {
@@ -357,10 +363,12 @@ impl LoomApp {
             view_animation: None,
             drag_select_start: None,
             alt_click: None,
+            pick_cycle: None,
             region_points: Vec::new(),
             quad_menu: None,
             background_textures: std::collections::HashMap::new(),
             last_error: None,
+            input_log: Default::default(),
         }
     }
 
@@ -394,7 +402,11 @@ impl LoomApp {
         }
         self.end_create_mode_for(cmd.name());
         let opens_editor = matches!(&cmd, Command::AddModifier { name } if name == "Unwrap UVW") && self.state.uv_editor.always_bring_up;
+        let logged = log::log_enabled!(target: "loom::cmd", log::Level::Info).then(|| serde_json::to_value(&cmd).unwrap_or_default());
         let r = loom_commands::execute(&mut self.state, cmd);
+        if let Some(body) = logged {
+            live::log_command(&body, r.as_ref().map_err(String::as_str));
+        }
         match &r {
             Err(e) => self.last_error = Some(e.clone()),
             Ok(_) => self.last_error = None,
@@ -412,6 +424,7 @@ impl LoomApp {
             self.end_create_mode_for(name);
         }
         let r = loom_commands::execute_json(&mut self.state, body);
+        live::log_command(body, if r["ok"] == true { Ok(&r) } else { Err(r["error"].as_str().unwrap_or("failed")) });
         self.sync_after_command();
         r
     }
@@ -498,9 +511,7 @@ impl LoomApp {
             } else {
                 [srgb(n.wire_color[0]), srgb(n.wire_color[1]), srgb(n.wire_color[2])]
             };
-            // Helpers (Dummy, Point, IK goals) draw see-through like wireframe helpers;
-            // a camera icon is drawn solid.
-            let see_through = n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }));
+            let see_through = draws_see_through(n);
             // An assigned material colours the faces (its diffuse, opacity and
             // highlight); edges and wireframe keep the object colour.
             let material = self.state.scene.node_material(n.id).cloned();
@@ -542,7 +553,20 @@ impl LoomApp {
             };
             // A visibility track below 1 shows the object partly transparent (never fully hidden in shaded views).
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
-            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors: n.display.vertex_colors, texture, specular, wire_color });
+            // Skin > Display > Show Colored Faces (in Edit Envelopes): the faces shade by the current bone's weight.
+            let mut vertex_colors = n.display.vertex_colors;
+            let mut color = color;
+            if let (Some(d), Some((skinned, weights))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
+                if skinned == id && d.vertex_count() == weights.len() {
+                    for (v, w) in d.vertices_mut().iter_mut().zip(weights) {
+                        let c = loom_commands::skin::weight_color(w);
+                        v.color = [srgb(c[0]), srgb(c[1]), srgb(c[2])];
+                    }
+                    vertex_colors = true;
+                    color = [1.0; 3];
+                }
+            }
+            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors, texture, specular, wire_color });
             display.push(shown.unwrap_or_else(|| mesh.clone()));
             meshes.push((n.id, mesh));
         }
@@ -562,6 +586,12 @@ impl LoomApp {
     /// Visible nodes with their world-space meshes, in render order.
     pub fn world_meshes(&self) -> &[(NodeId, Mesh)] {
         &self.world_meshes
+    }
+
+    /// The world-space mesh the viewports draw for `world_meshes()[i]`:
+    /// what object picking hits.
+    pub fn drawn_mesh(&self, i: usize) -> &Mesh {
+        self.world_display.get(i).unwrap_or(&self.world_meshes[i].1)
     }
 
     /// What the viewports draw for each of `world_meshes` (a Skin's posed
@@ -638,6 +668,46 @@ impl LoomApp {
         self.state.undo.end();
     }
 
+    /// Runs before egui reads a frame's input (eframe's `raw_input_hook`).
+    /// When the window loses the focus (screen lock, another window) with a
+    /// mouse button held, the release goes elsewhere and never arrives: egui
+    /// would keep the button down and the viewport keep its drag, so moving
+    /// the pointer afterwards went on orbiting or panning. Every press-held
+    /// interaction ends here and egui gets the releases it missed.
+    pub fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if !raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))) {
+            return;
+        }
+        let (down, pos) = ctx.input(|i| {
+            let down: Vec<egui::PointerButton> = [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle, egui::PointerButton::Extra1, egui::PointerButton::Extra2]
+                .into_iter()
+                .filter(|b| i.pointer.button_down(*b))
+                .collect();
+            (down, i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(egui::Pos2::ZERO))
+        });
+        let up = loom_input::InputEvent::MouseUp { button: loom_input::MouseButton::Left, pos: glam::Vec2::new(pos.x, pos.y), mods: loom_input::Modifiers::default() };
+        self.camera_controller.handle(up, &mut self.state.active_mut().camera);
+        self.alt_click = None;
+        self.drag_select_start = None;
+        self.region_points.clear();
+        if self.transform_drag.is_some() {
+            self.end_transform_drag();
+            self.shift_sources.clear();
+        }
+        if self.manip_drag.take().is_some() {
+            self.state.undo.end();
+        }
+        self.soft_painting = false;
+        if self.deform_painting {
+            self.deform_painting = false;
+            self.poly_dragging = false;
+            self.state.undo.end();
+        }
+        for button in down {
+            raw.events.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: raw.modifiers });
+        }
+    }
+
     /// Display-unit factor and suffix (Units Setup) for length spinners.
     pub fn unit_display(&self) -> (f64, String) {
         self.state.units.display_factor()
@@ -646,15 +716,7 @@ impl LoomApp {
     /// A length spinner in display units: the value stays in scene units.
     /// Add it right away: it is a [`spinner::spin`] (right-click sets 0).
     pub fn length_drag<'a>(&self, ui: &egui::Ui, value: &'a mut f32, speed: f64) -> egui::DragValue<'a> {
-        let (factor, suffix) = self.unit_display();
-        let decimals = self.state.prefs.spinner_precision;
-        spinner::spin(ui, value, ..)
-            .speed(speed)
-            .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
-            .custom_parser(move |text| {
-                let t = text.trim().trim_end_matches(|c: char| c.is_alphabetic() || c == '"' || c == '\'');
-                t.parse::<f64>().ok().map(|v| v / factor)
-            })
+        length_drag_value(ui, &self.state.units, self.state.prefs.spinner_precision, value, .., speed)
     }
 
     /// Spinner drag speed: the Preferences snap value when Spinner Snap is on.
@@ -773,12 +835,17 @@ impl eframe::App for LoomApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame(ctx);
     }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        LoomApp::raw_input_hook(self, ctx, raw_input);
+    }
 }
 
 impl LoomApp {
     /// One frame of the whole UI (what eframe calls each repaint; the UI
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
+        ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_file_action(loom_commands::PendingFileAction::Exit);
@@ -806,6 +873,14 @@ impl LoomApp {
             self.saved_modifier_usage = self.state.modifier_usage.clone();
         }
         hotkeys::handle(ctx, self);
+        // "Close spline?" answered Yes: the line is closed, so the Line tool ends it.
+        if let Some(line) = self.line.take() {
+            if line.is_closed(self) {
+                line.finish(self);
+            } else {
+                self.line = Some(line);
+            }
+        }
         // Playback: advance by the wall clock (Real Time) or a frame per redraw.
         if self.state.playing {
             let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.25);
@@ -855,6 +930,12 @@ pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
 }
 
 /// Decodes a Show Map bitmap once per path (a failed load is remembered too).
+/// Drawn see-through: See-Through on (Alt+X), and helpers (Dummy, Point, IK
+/// goals); a camera icon is drawn solid.
+pub(crate) fn draws_see_through(n: &loom_scene::Node) -> bool {
+    n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }))
+}
+
 fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>, path: &str) -> Option<std::sync::Arc<loom_render::Bitmap>> {
     cache
         .entry(path.to_owned())
@@ -878,4 +959,16 @@ fn modifier_usage_path() -> Option<std::path::PathBuf> {
         .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from))
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
     Some(base.join("3dloom").join("modifier-usage.json"))
+}
+
+/// A length spinner in display units (Units Setup); typed values may carry a
+/// unit (7", -3.5", 2.5cm). The value stays in scene units. It is a
+/// [`spinner::spin`]: add it right away; right-click sets 0 or the minimum.
+pub fn length_drag_value<'a>(ui: &egui::Ui, units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, range: impl std::ops::RangeBounds<f32>, speed: f64) -> egui::DragValue<'a> {
+    let (factor, suffix) = units.display_factor();
+    let units = units.clone();
+    spinner::spin(ui, value, range)
+        .speed(speed)
+        .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
+        .custom_parser(move |text| units.parse(text))
 }
