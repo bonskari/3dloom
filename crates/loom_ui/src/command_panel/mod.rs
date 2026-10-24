@@ -69,7 +69,7 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
-    if app.state.expert_mode {
+    if app.state.expert_mode || !app.state.show_command_panel {
         return;
     }
     if app.state.focus_modify {
