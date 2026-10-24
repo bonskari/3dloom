@@ -62,9 +62,6 @@ impl RenderJob {
     pub fn elapsed(&self) -> std::time::Duration {
         self.started.elapsed()
     }
-    pub fn request(&self) -> &loom_commands::RenderRequest {
-        &self.req
-    }
 }
 
 /// Where a request's output lies in the view: (full frame, output origin,
