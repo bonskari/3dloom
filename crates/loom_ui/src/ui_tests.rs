@@ -1305,8 +1305,9 @@ fn an_iterative_region_render_keeps_the_rest_of_the_window() {
         eprintln!("an_iterative_region_render_keeps_the_rest_of_the_window: no GPU adapter, skipped");
         return;
     };
+    // A small box in the middle of the default view: the corners are background.
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
-    framed(&mut h);
+    maximized(&mut h);
     h.app.dispatch_json(&serde_json::json!({ "cmd": "Render SetUp...", "args": { "width": 320, "height": 240 } }));
     h.app.dispatch_json(&serde_json::json!({ "cmd": "Bevy Renderer Settings", "args": { "background": [0.0, 0.0, 1.0] } }));
     h.cmd(Command::Render { path: None, width: None, height: None });
