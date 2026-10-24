@@ -198,12 +198,11 @@ fn at_sub_object_level_the_named_sets_field_names_and_lists_the_objects_sets() {
 fn quick_access_toolbar_runs_new_undo_and_redo() {
     let mut h = Harness::new();
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
-    // The Quick Access toolbar is in the menu bar, above the Main Toolbar's own ↶ ↷.
-    let undo = h.find(Role::Button, "↶");
-    assert!(undo.max.y <= h.find(Role::Button, "File").max.y + 1.0, "the topmost ↶ is in the menu bar");
+    let undo = h.find(Role::Button, "Undo");
+    assert!(undo.max.y <= h.find(Role::Button, "File").max.y + 1.0, "in the menu bar row");
     h.click(undo.center());
     assert_eq!(h.app.state.scene.len(), 0);
-    h.click(h.find(Role::Button, "↷").center());
+    h.click(h.find(Role::Button, "Redo").center());
     assert_eq!(h.app.state.scene.len(), 1);
     assert!(h.has(Role::Button, "🗁") && h.has(Role::Button, "💾"), "Open File and Save File");
     h.click(h.find(Role::Button, "🗋").center());

@@ -307,10 +307,10 @@ fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
     if ui.button("💾").on_hover_name(&app.state, "Save File").clicked() {
         app.dispatch_named("Save File");
     }
-    if ui.add_enabled(app.state.undo.can_undo(), egui::Button::new("↶")).on_hover_name(&app.state, "Undo Scene Operation").clicked() {
+    if ui.add_enabled(app.state.undo.can_undo(), egui::Button::new("Undo")).on_hover_name(&app.state, "Undo Scene Operation").clicked() {
         app.dispatch_named("Undo Scene Operation");
     }
-    if ui.add_enabled(app.state.undo.can_redo(), egui::Button::new("↷")).on_hover_name(&app.state, "Redo Scene Operation").clicked() {
+    if ui.add_enabled(app.state.undo.can_redo(), egui::Button::new("Redo")).on_hover_name(&app.state, "Redo Scene Operation").clicked() {
         app.dispatch_named("Redo Scene Operation");
     }
 }
