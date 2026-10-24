@@ -309,8 +309,8 @@ pub fn hit(app: &LoomApp, l: &GizmoLayout, p: &Projection, pointer: egui::Pos2) 
     match app.state.active_tool {
         Tool::Move => move_gizmo::hit(l, p, pointer),
         Tool::Rotate => rotate_gizmo::hit(l, p, pointer),
-        // Uniform Scale: any part of the gizmo scales all three axes alike.
-        Tool::Scale if app.state.scale_kind == loom_commands::ScaleKind::Uniform => scale_gizmo::hit(l, p, pointer).map(|_| Handle::Uniform),
+        // The gizmo's centre scales uniformly and its axis / plane handles
+        // non-uniformly whichever flyout button is on (Squash changes the math).
         Tool::Scale => scale_gizmo::hit(l, p, pointer),
         Tool::Select => None,
     }
