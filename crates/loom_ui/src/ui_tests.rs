@@ -222,7 +222,9 @@ fn drag_creating_a_box_keeps_it_selected() {
     h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
     let a = ground_point(&h, Vec3::new(-10.0, -10.0, 0.0));
     let b = ground_point(&h, Vec3::new(10.0, 10.0, 0.0));
+    eprintln!("box drag {a:?} -> {b:?} in {:?}", h.app.viewport_rects[h.app.state.active_viewport]);
     h.drag(a, b);
+    eprintln!("after drag: scene {} create {} err {:?}", h.app.state.scene.len(), h.app.create.is_some(), h.app.last_error);
     // Height: move the mouse up, then click.
     let c = b + egui::vec2(0.0, -60.0);
     for i in 1..=6 {
