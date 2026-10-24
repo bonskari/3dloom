@@ -201,6 +201,8 @@ pub enum PickMode {
     UnwrapSplineMap,
     /// Animation > Constraints / Motion panel Add … Target: the clicked object is the target.
     Constraint(crate::motion::ConstraintPick),
+    /// Reference Coordinate System > Pick: the clicked object's axes become the system.
+    CoordSystem,
 }
 
 /// Paint Deformation brushes.
@@ -587,6 +589,10 @@ fn default_gizmo_size() -> f32 {
     20.0
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for GizmoPrefs {
     fn default() -> Self {
         Self {
@@ -641,6 +647,10 @@ pub struct Prefs {
     pub auto_backup_interval_min: f32,
     /// Auto Backup File Name (default "AutoBackup").
     pub auto_backup_name: String,
+    /// Preferences > Animation > Local Center During Animate: with Auto Key
+    /// on, Rotate and Scale use each object's pivot (default on).
+    #[serde(default = "default_true")]
+    pub local_center_during_animate: bool,
 }
 
 impl Default for Prefs {
@@ -662,19 +672,20 @@ impl Default for Prefs {
             auto_backup_count: 3,
             auto_backup_interval_min: 5.0,
             auto_backup_name: "AutoBackup".into(),
+            local_center_during_animate: true,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 28] = [
+    pub const NAMES: [&'static str; 29] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
-        "Scale Size", "Rotation Increment", "Space Locks Selection",
+        "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -690,6 +701,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => b(self.spinner_wrap_cursor),
             "Viewport Tooltips" => b(self.viewport_tooltips),
             "Space Locks Selection" => b(self.space_selection_lock),
+            "Local Center During Animate" => b(self.local_center_during_animate),
             "Show Cross Hair Cursor" => b(self.show_cross_hair),
             "Auto Backup Enable" => b(self.auto_backup_enable),
             "Auto Backup Count" => self.auto_backup_count as f64,
@@ -727,6 +739,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => self.spinner_wrap_cursor = on,
             "Viewport Tooltips" => self.viewport_tooltips = on,
             "Space Locks Selection" => self.space_selection_lock = on,
+            "Local Center During Animate" => self.local_center_during_animate = on,
             "Auto Backup Enable" => self.auto_backup_enable = on,
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
@@ -1199,6 +1212,8 @@ pub struct AppState {
     pub coord_system: CoordSystem,
     /// Node whose coordinate system `CoordSystem::Pick` uses.
     pub pick_coord_node: Option<NodeId>,
+    /// The four most recently picked systems, newest first (names in the list).
+    pub pick_coord_recent: Vec<NodeId>,
     pub center_mode: CenterMode,
     /// The centre is remembered separately for single and multiple selections.
     pub center_single: CenterMode,
@@ -1216,6 +1231,10 @@ pub struct AppState {
     /// Reference coordinate system remembered per transform tool
     /// (Preferences > Reference Coordinate System > Constant off).
     pub coord_by_tool: [CoordSystem; 4],
+    /// Use Center (single, multiple) and axis constraint remembered per
+    /// transform tool, like `coord_by_tool`.
+    pub center_by_tool: [(CenterMode, CenterMode); 4],
+    pub constraint_by_tool: [AxisConstraint; 4],
     /// Keyboard Shortcut Override Toggle: when off only Main UI shortcuts work.
     pub keyboard_override: bool,
     pub named_sets: BTreeMap<String, Vec<NodeId>>,
@@ -1265,6 +1284,10 @@ pub struct AppState {
     pub affect_pivot_only: bool,
     /// Hierarchy > Pivot: Move/Rotate act on the object offset only.
     pub affect_object_only: bool,
+    /// Hierarchy > Pivot: Rotate/Scale act on the links to the children only.
+    pub affect_hierarchy_only: bool,
+    /// Hierarchy > Adjust Transform > Don't Affect Children.
+    pub dont_affect_children: bool,
     pub selection_locked: bool,
     pub snaps_on: bool,
     pub angle_snap_on: bool,
@@ -1445,6 +1468,7 @@ impl AppState {
             selection_region: SelectionRegion::Rectangular,
             coord_system: CoordSystem::View,
             pick_coord_node: None,
+            pick_coord_recent: Vec::new(),
             center_mode: CenterMode::PivotPoint,
             center_single: CenterMode::PivotPoint,
             center_multi: CenterMode::Selection,
@@ -1454,6 +1478,8 @@ impl AppState {
             region_points_reset: false,
             manipulate: false,
             coord_by_tool: [CoordSystem::View; 4],
+            center_by_tool: [(CenterMode::PivotPoint, CenterMode::Selection); 4],
+            constraint_by_tool: [AxisConstraint::XY; 4],
             keyboard_override: true,
             ffd_selection: BTreeSet::new(),
             vertex_paint_brush: false,
@@ -1484,6 +1510,8 @@ impl AppState {
             soft_cache: Default::default(),
             affect_pivot_only: false,
             affect_object_only: false,
+            affect_hierarchy_only: false,
+            dont_affect_children: false,
             selection_locked: false,
             snaps_on: false,
             angle_snap_on: false,

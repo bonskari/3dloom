@@ -155,23 +155,42 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     "Select and Scale" => transform_button(ui, app, "Scale", Tool::Scale, "Select and Scale"),
                     "Reference Coordinate System" => {
                         let cur = app.state.coord_system;
-                        egui::ComboBox::from_id_salt("coord_system").selected_text(cur.label()).width(70.0).show_ui(ui, |ui| {
+                        let name = |app: &LoomApp, id: loom_scene::NodeId| app.state.scene.node(id).map(|n| n.name.clone());
+                        // Pick shows the picked object's name; the four most recent picks stay in the list.
+                        let shown = match (cur, app.state.pick_coord_node) {
+                            (CoordSystem::Pick, Some(id)) => name(app, id).unwrap_or_else(|| cur.label().to_owned()),
+                            _ => cur.label().to_owned(),
+                        };
+                        let recent: Vec<(loom_scene::NodeId, String)> = app.state.pick_coord_recent.iter().filter_map(|id| Some((*id, name(app, *id)?))).collect();
+                        egui::ComboBox::from_id_salt("coord_system").selected_text(shown).width(70.0).show_ui(ui, |ui| {
                             for c in CoordSystem::ALL {
-                                if ui.selectable_label(cur == c, c.label()).clicked() {
+                                if ui.selectable_label(cur == c && (c != CoordSystem::Pick || app.state.pick_coord_node.is_none()), c.label()).clicked() {
                                     let _ = app.dispatch(Command::ReferenceCoordinateSystem { system: c });
+                                }
+                            }
+                            for (id, n) in recent {
+                                if ui.selectable_label(cur == CoordSystem::Pick && app.state.pick_coord_node == Some(id), n).clicked() {
+                                    let _ = app.dispatch(Command::PickCoordinateSystem { id: id.0 });
                                 }
                             }
                         });
                     }
                     "Use Center" => {
                         let cur = app.state.center_mode;
-                        let short = match cur { CenterMode::PivotPoint => "Pivot", CenterMode::Selection => "Selection", CenterMode::TransformCoordinate => "Coord" };
-                        egui::ComboBox::from_id_salt("use_center").selected_text(short).width(80.0).show_ui(ui, |ui| {
-                            for m in CenterMode::ALL {
-                                if ui.selectable_label(cur == m, m.label()).clicked() {
-                                    let _ = app.dispatch(Command::UseCenter { mode: m });
+                        // Auto Key + Rotate/Scale: each pivot, the flyout is unavailable.
+                        let forced = loom_commands::transform::animate_forces_pivot(&app.state) && matches!(app.state.active_tool, Tool::Rotate | Tool::Scale);
+                        let shown = if forced { CenterMode::PivotPoint } else { cur };
+                        let short = match shown { CenterMode::PivotPoint => "Pivot", CenterMode::Selection => "Selection", CenterMode::TransformCoordinate => "Coord" };
+                        ui.add_enabled_ui(!forced, |ui| {
+                            egui::ComboBox::from_id_salt("use_center").selected_text(short).width(80.0).show_ui(ui, |ui| {
+                                for m in CenterMode::ALL {
+                                    // Local uses each object's own centre: Use Transform Center is unavailable.
+                                    let off = m == CenterMode::TransformCoordinate && app.state.coord_system == CoordSystem::Local;
+                                    if ui.add_enabled(!off, egui::SelectableLabel::new(cur == m, m.label())).clicked() {
+                                        let _ = app.dispatch(Command::UseCenter { mode: m });
+                                    }
                                 }
-                            }
+                            });
                         });
                         ui.separator();
                     }

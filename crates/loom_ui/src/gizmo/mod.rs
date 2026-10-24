@@ -280,7 +280,7 @@ pub fn axis_segment(l: &GizmoLayout, p: &Projection, a: Axis, from: f32, to: f32
 /// `viewport_height` is the viewport's height in pixels: the gizmo is sized as a
 /// percent of the viewport, so it grows with a maximized view.
 pub fn layout_for(app: &LoomApp, viewport: usize, viewport_height: f32) -> GizmoLayout {
-    let frame = loom_commands::frame_for(&app.state, viewport, app.state.selection.iter().next().copied().filter(|_| app.state.selection.len() == 1 || app.state.coord_system == CoordSystem::Local));
+    let frame = loom_commands::frame_for(&app.state, viewport, app.state.selection.iter().next().copied().filter(|_| app.state.selection.len() == 1 || matches!(app.state.coord_system, CoordSystem::Local | CoordSystem::Gimbal)));
     let g = app.state.prefs.gizmos;
     let mut layout = GizmoLayout {
         origin: frame.origin,

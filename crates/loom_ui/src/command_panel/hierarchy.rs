@@ -1,4 +1,4 @@
-//! Hierarchy tab: Pivot rollout (Adjust Pivot), IK (solver, properties,
+//! Hierarchy tab: Pivot (Adjust Pivot, Adjust Transform), IK (solver, properties,
 //! Spline IK shape) and Link Info (Locks, Inherit).
 
 use super::rollout;
@@ -38,15 +38,25 @@ fn pivot(ui: &mut egui::Ui, app: &mut LoomApp) {
         if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.state.affect_object_only, "Affect Object Only")).clicked() {
             let _ = app.dispatch(Command::AffectObjectOnly);
         }
+        if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.state.affect_hierarchy_only, "Affect Hierarchy Only")).clicked() {
+            let _ = app.dispatch(Command::AffectHierarchyOnly);
+        }
         ui.separator();
         ui.label("Alignment:");
         let has = !app.state.selection.is_empty();
-        ui.add_enabled_ui(has, |ui| {
-            if ui.add_sized([w, 22.0], egui::Button::new("Center to Object")).clicked() {
-                let _ = app.dispatch(Command::CenterPivotToObject);
-            }
-            if ui.add_sized([w, 22.0], egui::Button::new("Align to World")).clicked() {
-                let _ = app.dispatch(Command::AlignPivotToWorld);
+        // The buttons act on the pivot (Affect Pivot Only) or the object
+        // (Affect Object Only), and are off otherwise.
+        let object = app.state.affect_object_only;
+        let buttons = if object {
+            [("Center to Pivot", Command::CenterObjectToPivot), ("Align to Pivot", Command::AlignObjectToPivot), ("Align to World", Command::AlignPivotToWorld)]
+        } else {
+            [("Center to Object", Command::CenterPivotToObject), ("Align to Object", Command::AlignPivotToObject), ("Align to World", Command::AlignPivotToWorld)]
+        };
+        ui.add_enabled_ui(has && (object || app.state.affect_pivot_only), |ui| {
+            for (label, cmd) in buttons {
+                if ui.add_sized([w, 22.0], egui::Button::new(label)).clicked() {
+                    let _ = app.dispatch(cmd);
+                }
             }
         });
         ui.separator();
@@ -54,6 +64,23 @@ fn pivot(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.add_enabled_ui(has, |ui| {
             if ui.add_sized([w, 22.0], egui::Button::new("Reset Pivot")).clicked() {
                 let _ = app.dispatch(Command::ResetPivot);
+            }
+        });
+    });
+    rollout(ui, "Adjust Transform", true, |ui| {
+        let w = ui.available_width();
+        ui.label("Move/Rotate/Scale:");
+        if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.state.dont_affect_children, "Don't Affect Children")).clicked() {
+            let _ = app.dispatch(Command::DontAffectChildren);
+        }
+        ui.separator();
+        ui.label("Reset:");
+        ui.add_enabled_ui(!app.state.selection.is_empty(), |ui| {
+            if ui.add_sized([w, 22.0], egui::Button::new("Transform")).clicked() {
+                let _ = app.dispatch(Command::ResetTransform);
+            }
+            if ui.add_sized([w, 22.0], egui::Button::new("Scale")).clicked() {
+                let _ = app.dispatch(Command::ResetScale);
             }
         });
     });

@@ -1480,7 +1480,7 @@ commands! {
     WindowCrossingSelectionToggle => "Window/Crossing Selection Toggle", Loom, "Main Toolbar > Window/Crossing: region selection takes fully enclosed objects only (Window) or anything touched (Crossing).";
     CycleSelectionMethod => "Cycle Selection Method", MainUI, "Cycle the Selection Region flyout: Rectangular, Circular, Fence, Lasso, Paint (Ctrl+F).";
     SelectionRegion => "Selection Region", Loom, "Main Toolbar > Selection Region flyout: Rectangular, Circular, Fence, Lasso or Paint." { shape: crate::state::SelectionRegion };
-    ReferenceCoordinateSystem => "Reference Coordinate System", Loom, "Main Toolbar > Reference Coordinate System list (View, Screen, World, Parent, Local, Gimbal, Grid, Pick)." { system: crate::state::CoordSystem };
+    ReferenceCoordinateSystem => "Reference Coordinate System", Loom, "Main Toolbar > Reference Coordinate System list (View, Screen, World, Parent, Local, Gimbal, Grid, Pick); Pick waits for a clicked object (Pick Hit)." { system: crate::state::CoordSystem };
     UseCenter => "Use Center", Loom, "Main Toolbar > Use Center flyout: Pivot Point, Selection or Transform Coordinate centre." { mode: crate::state::CenterMode };
     KeyboardShortcutOverrideToggle => "Keyboard Shortcut Override Toggle", Loom, "Main Toolbar: when off, only Main UI shortcuts are active (sub-object level keys 1–5 are a group shortcut).";
     SelectAndLink => "Select and Link", Loom, "Main Toolbar > Select and Link: the next clicked object becomes the parent of the selection.";
@@ -1493,10 +1493,17 @@ commands! {
     UnhideNodes => "Unhide Nodes", Loom, "Unhide objects by id." { ids: Vec<u64> };
     FreezeNodes => "Freeze Nodes", Loom, "Freeze objects by id." { ids: Vec<u64> };
     UnfreezeNodes => "Unfreeze Nodes", Loom, "Unfreeze objects by id." { ids: Vec<u64> };
-    AffectPivotOnly => "Affect Pivot Only", Loom, "Toggle Hierarchy > Pivot > Affect Pivot Only: Move/Rotate act on the pivot, the mesh stays.";
+    AffectPivotOnly => "Affect Pivot Only", Loom, "Toggle Hierarchy > Pivot > Affect Pivot Only: Move/Rotate act on the pivot, the mesh stays (Scale has no effect).";
     AffectObjectOnly => "Affect Object Only", Loom, "Toggle Hierarchy > Pivot > Affect Object Only: Move/Rotate act on the object, the pivot stays.";
     CenterPivotToObject => "Center to Object", Loom, "Move the selected objects' pivots to their bounds centre (Hierarchy > Pivot > Center to Object).";
-    AlignPivotToWorld => "Align to World", Loom, "Align the selected objects' pivots to the world axes (Hierarchy > Pivot > Align to World).";
+    AffectHierarchyOnly => "Affect Hierarchy Only", Loom, "Toggle Hierarchy > Pivot > Affect Hierarchy Only: Rotate/Scale swing and stretch the links to the children; no object turns or resizes.";
+    AlignPivotToWorld => "Align to World", Loom, "Hierarchy > Pivot > Align to World: turn the pivot (Affect Pivot Only) or, with Affect Object Only, the object to the world axes.";
+    AlignPivotToObject => "Align to Object", Loom, "Hierarchy > Pivot > Align to Object (Affect Pivot Only): turn the pivot to the object's own axes; the mesh stays.";
+    CenterObjectToPivot => "Center to Pivot", Loom, "Hierarchy > Pivot > Center to Pivot (Affect Object Only): move the object so its bounds centre is at the pivot.";
+    AlignObjectToPivot => "Align to Pivot", Loom, "Hierarchy > Pivot > Align to Pivot (Affect Object Only): turn the object to the pivot's axes.";
+    DontAffectChildren => "Don't Affect Children", Loom, "Toggle Hierarchy > Adjust Transform > Don't Affect Children: transforms leave the children where they are.";
+    ResetTransform => "Reset Transform", Loom, "Hierarchy > Adjust Transform > Reset: Transform: the local axes turn to the world; the mesh and the children stay.";
+    ResetScale => "Reset Scale", Loom, "Hierarchy > Adjust Transform > Reset: Scale: the node scale becomes 100 % with no visual change (the object takes the scale).";
     ResetPivot => "Reset Pivot", Loom, "Reset the selected objects' pivots to the object origin (Hierarchy > Pivot > Reset Pivot).";
     SetPivot => "Set Pivot", Loom, "Set a node's pivot (node transform) without moving the mesh." { id: u64, position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]> };
     SetNodeLocks => "Set Node Locks", Loom, "Hierarchy > Link Info > Locks: per-axis move/rotate/scale locks (true = locked)." { id: u64, move_axes: Option<[bool; 3]>, rotate_axes: Option<[bool; 3]>, scale_axes: Option<[bool; 3]> };
@@ -1511,7 +1518,7 @@ commands! {
     UnhideByName => "Unhide By Name", Loom, "Open the Select From Scene dialog to unhide objects by name.";
     FreezeByName => "Freeze By Name", Loom, "Open the Select From Scene dialog to freeze objects by name.";
     UnfreezeByName => "Unfreeze By Name", Loom, "Open the Select From Scene dialog to unfreeze objects by name.";
-    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm: bake rotation and scale into the mesh and reset the node transform (position kept).";
+    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm: the rotation and scale go into an XForm modifier on top of the stack; the node keeps only its position.";
     RescaleWorldUnits => "Rescale World Units", Loom, "Utilities > Rescale World Units: scale the whole scene by a factor." { factor: f32 };
     Measure => "Measure", Loom, "Utilities > Measure: dimensions, surface area, volume and centre of mass of the selection.";
     SetWireColor => "Set Wire Color", Loom, "Set a node's object colour (Name and Color rollout)." { id: u64, rgb: [u8; 3] };

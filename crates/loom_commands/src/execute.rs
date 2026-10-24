@@ -1776,6 +1776,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.selection_region = shape;
             Ok(json!({ "region": shape.label() }))
         }
+        C::ReferenceCoordinateSystem { system: CoordSystem::Pick } => {
+            // Pick: the next clicked object's axes become the system (Pick Hit).
+            state.pick_mode = Some(PickMode::CoordSystem);
+            Ok(json!({ "pick": true }))
+        }
         C::ReferenceCoordinateSystem { system } => {
             state.coord_system = system;
             if state.prefs.ref_coord_constant {
@@ -1863,6 +1868,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.affect_pivot_only = !state.affect_pivot_only;
             if state.affect_pivot_only {
                 state.affect_object_only = false;
+                state.affect_hierarchy_only = false;
             }
             Ok(json!({ "affect_pivot_only": state.affect_pivot_only }))
         }
@@ -1870,9 +1876,53 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.affect_object_only = !state.affect_object_only;
             if state.affect_object_only {
                 state.affect_pivot_only = false;
+                state.affect_hierarchy_only = false;
             }
             Ok(json!({ "affect_object_only": state.affect_object_only }))
         }
+        C::AffectHierarchyOnly => {
+            state.affect_hierarchy_only = !state.affect_hierarchy_only;
+            if state.affect_hierarchy_only {
+                state.affect_pivot_only = false;
+                state.affect_object_only = false;
+            }
+            Ok(json!({ "affect_hierarchy_only": state.affect_hierarchy_only }))
+        }
+        C::DontAffectChildren => toggle(&mut state.dont_affect_children, "dont_affect_children"),
+        C::AlignPivotToWorld if state.affect_object_only => {
+            // Affect Object Only: the object turns to the world; the pivot stays.
+            object_offset_change(state, "Align to World", |state, id, off| {
+                let (_, wq, _) = state.scene.world_matrix(id).to_scale_rotation_translation();
+                let (s, _, t) = off.to_scale_rotation_translation();
+                Mat4::from_scale_rotation_translation(s, wq.inverse(), t)
+            })
+        }
+        C::CenterObjectToPivot => object_offset_change(state, "Center to Pivot", |state, id, off| {
+            // Shift the offset so the bounds centre lands on the pivot.
+            let Some((min, max)) = state.object_bounds(id) else { return off };
+            let centre_local = state.scene.world_matrix(id).inverse().transform_point3((min + max) * 0.5);
+            Mat4::from_translation(-centre_local) * off
+        }),
+        C::AlignObjectToPivot => object_offset_change(state, "Align to Pivot", |_, _, off| {
+            let (s, _, t) = off.to_scale_rotation_translation();
+            Mat4::from_scale_rotation_translation(s, Quat::IDENTITY, t)
+        }),
+        C::AlignPivotToObject => pivot_world_change(state, "Align to Object", |state, id| {
+            // The pivot turns to the object's own axes.
+            let (_, oq, _) = state.scene.object_matrix(id).to_scale_rotation_translation();
+            let (ws, _, wt) = state.scene.world_matrix(id).to_scale_rotation_translation();
+            (Mat4::from_scale_rotation_translation(ws, oq, wt), None)
+        }),
+        C::ResetTransform => pivot_world_change(state, "Reset Transform", |state, id| {
+            // The local axes turn to the world.
+            let (ws, _, wt) = state.scene.world_matrix(id).to_scale_rotation_translation();
+            (Mat4::from_scale_rotation_translation(ws, Quat::IDENTITY, wt), None)
+        }),
+        C::ResetScale => pivot_world_change(state, "Reset Scale", |state, id| {
+            // The node scale becomes 100 %; the object offset takes it.
+            let (_, wq, wt) = state.scene.world_matrix(id).to_scale_rotation_translation();
+            (Mat4::from_rotation_translation(wq, wt), Some(Vec3::ONE))
+        }),
         C::CenterPivotToObject => {
             let ids = selected_ids(state);
             let mut changes = Vec::new();
@@ -2098,6 +2148,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     }
                     return Ok(json!({ "parent": id.0 }));
                 }
+                Some(PickMode::CoordSystem) => {
+                    state.pick_mode = None;
+                    return execute(state, C::PickCoordinateSystem { id: id.0 });
+                }
                 Some(PickMode::AlignTarget) => {
                     state.pick_mode = None;
                     state.align_target = Some(id);
@@ -2142,15 +2196,26 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 }
                 let t = &node.transform;
                 let bake = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
-                let mut mesh = node.cage_mesh().into_owned();
-                edit_ops::transform_mesh(&mut mesh, bake)?;
                 let mut after_t = t.clone();
                 after_t.rotation.set(Vec3::ZERO);
                 after_t.scale.set(Vec3::ONE);
                 let mut props = node.props();
                 props.object_offset = Transform::default();
                 let new_world = state.scene.parent_frame(id) * after_t.matrix();
-                changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(node.object.with_mesh(mesh)) });
+                // The rotation and scale go into an XForm modifier on top of the
+                // stack. A shape (no mesh stack) or a sheared matrix the gizmo
+                // cannot hold is baked into the base object instead.
+                let gizmo = Transform::from_matrix(bake);
+                if node.object.shape().is_none() && gizmo.matrix().abs_diff_eq(bake, 1e-4) {
+                    let mut stack = node.modifiers.clone();
+                    let first_wsm = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
+                    stack.insert(first_wsm, loom_scene::ModifierSlot::new(Modifier::XForm { gizmo }));
+                    changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+                } else {
+                    let mut mesh = node.cage_mesh().into_owned();
+                    edit_ops::transform_mesh(&mut mesh, bake)?;
+                    changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(node.object.with_mesh(mesh)) });
+                }
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.extend(keep_children(state, id, new_world));
                 changes.push(Change::SetTransform { id, before: t.clone(), after: after_t });
@@ -2264,6 +2329,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::MoveSelection { delta, .. } if state.trajectory_keys && !state.trajectory_selected.is_empty() => crate::motion::execute(state, C::TrajectoryMoveKeys { delta }),
         C::MoveSelection { delta, system } => {
             let saved = with_system(state, system);
+            gimbal_as_parent(state);
             let vp = state.active_viewport;
             let r = transform_selection_each(state, "Move", &|st, id| (frame_for(st, vp, id).move_matrix(Vec3::from(delta)), Vec3::ZERO));
             state.coord_system = saved;
@@ -2277,27 +2343,37 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Axis::Y => Vec3::Y,
                 Axis::Z => Vec3::Z,
             };
+            let centre = animate_pivot(state);
             let r = transform_selection_each(state, "Rotate", &|st, id| {
                 let f = frame_for(st, vp, id);
-                (f.rotate_matrix(a, degrees.to_radians()), euler_hint(st, id, f.axes * a * degrees))
+                // Gimbal: the rotation is exactly one Euler track.
+                let hint = if st.coord_system == CoordSystem::Gimbal { a * degrees } else { euler_hint(st, id, f.axes * a * degrees) };
+                (f.rotate_matrix(a, degrees.to_radians()), hint)
             });
+            state.center_mode = centre;
             state.coord_system = saved;
             r
         }
         C::ScaleSelection { factors, system } => {
             let saved = with_system(state, system);
+            gimbal_as_parent(state);
             let vp = state.active_viewport;
+            let centre = animate_pivot(state);
             let r = transform_selection_each(state, "Scale", &|st, id| (frame_for(st, vp, id).scale_matrix(Vec3::from(factors)), Vec3::ZERO));
+            state.center_mode = centre;
             state.coord_system = saved;
             r
         }
         C::RotateSelectionFree { quat } => {
             let q = Quat::from_xyzw(quat[0], quat[1], quat[2], quat[3]).normalize();
             let vp = state.active_viewport;
-            transform_selection_each(state, "Rotate", &|st, id| {
+            let centre = animate_pivot(state);
+            let r = transform_selection_each(state, "Rotate", &|st, id| {
                 let (ax, ang) = q.to_axis_angle();
                 (frame_for(st, vp, id).rotate_quat_matrix(q), euler_hint(st, id, ax * ang.to_degrees()))
-            })
+            });
+            state.center_mode = centre;
+            r
         }
         C::TransformGizmoXConstraint => {
             state.axis_constraint = AxisConstraint::X;
@@ -2335,7 +2411,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let id = NodeId(id);
             state.scene.node(id).ok_or_else(|| missing(id))?;
             state.pick_coord_node = Some(id);
+            // The list keeps the four most recently picked objects.
+            state.pick_coord_recent.retain(|r| *r != id);
+            state.pick_coord_recent.insert(0, id);
+            state.pick_coord_recent.truncate(4);
             state.coord_system = CoordSystem::Pick;
+            if state.prefs.ref_coord_constant {
+                state.coord_by_tool = [CoordSystem::Pick; 4];
+            } else {
+                state.coord_by_tool[tool_index(state.active_tool)] = CoordSystem::Pick;
+            }
             Ok(json!({ "system": "Pick", "node": id.0 }))
         }
 
@@ -2969,11 +3054,19 @@ fn tool_index(tool: Tool) -> usize {
 }
 
 fn set_tool(state: &mut AppState, tool: Tool) -> Result<Value, String> {
+    let old = tool_index(state.active_tool);
     state.active_tool = tool;
-    // A reference coordinate system is remembered per transform unless
-    // Preferences > Reference Coordinate System > Constant is on.
+    // The transform managers (coordinate system, centre, axis constraint)
+    // are remembered per transform unless Preferences > Reference
+    // Coordinate System > Constant is on.
     if !state.prefs.ref_coord_constant {
-        state.coord_system = state.coord_by_tool[tool_index(tool)];
+        state.center_by_tool[old] = (state.center_single, state.center_multi);
+        state.constraint_by_tool[old] = state.axis_constraint;
+        let i = tool_index(tool);
+        state.coord_system = state.coord_by_tool[i];
+        (state.center_single, state.center_multi) = state.center_by_tool[i];
+        state.axis_constraint = state.constraint_by_tool[i];
+        state.refresh_center_mode();
     }
     Ok(json!({ "tool": tool.label() }))
 }
@@ -3238,6 +3331,18 @@ fn type_in_system(state: &AppState, absolute: bool) -> CoordSystem {
 /// Current Transform Type-In absolute values for the active tool.
 pub fn type_in_values(state: &AppState) -> Vec3 {
     let first = state.selection.iter().next().copied();
+    if state.slice_plane_mode {
+        // Slice Plane mode: the fields show the plane (world position / Euler XYZ).
+        let sp = &state.slice_plane;
+        return match state.active_tool {
+            Tool::Rotate => {
+                let (x, y, z) = sp.rotation.to_euler(glam::EulerRot::XYZ);
+                Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
+            }
+            Tool::Scale => Vec3::splat(100.0),
+            _ => sp.origin,
+        };
+    }
     match state.active_tool {
         Tool::Rotate => first.and_then(|id| state.scene.node(id)).map(|n| {
             let (_, q, _) = state.scene.world_matrix(n.id).to_scale_rotation_translation();
@@ -3261,6 +3366,12 @@ fn transform_type_in(state: &mut AppState, absolute: bool, values: Vec3) -> Resu
         return Ok(json!({}));
     }
     let system = Some(type_in_system(state, absolute));
+    if state.slice_plane_mode && absolute && matches!(state.active_tool, Tool::Rotate | Tool::Move | Tool::Select) {
+        // Slice Plane mode: absolute values place the plane (world), never the object.
+        let (position, rotation_deg) = if state.active_tool == Tool::Rotate { (None, Some(values.to_array())) } else { (Some(values.to_array()), None) };
+        execute(state, Command::SetSlicePlane { position, rotation_deg, size: None })?;
+        return Ok(json!({ "values": type_in_values(state).to_array() }));
+    }
     match state.active_tool {
         Tool::Rotate => {
             let delta = if absolute { values - type_in_values(state) } else { values };
@@ -3404,6 +3515,23 @@ fn euler_hint(state: &AppState, id: Option<NodeId>, world_rot_deg: Vec3) -> Vec3
     } else {
         Vec3::ZERO
     }
+}
+
+/// Gimbal moves and scales in the Parent system.
+fn gimbal_as_parent(state: &mut AppState) {
+    if state.coord_system == CoordSystem::Gimbal {
+        state.coord_system = CoordSystem::Parent;
+    }
+}
+
+/// With Auto Key on, Rotate and Scale use each object's pivot (Local Center
+/// During Animate); returns the centre for the caller to restore.
+fn animate_pivot(state: &mut AppState) -> crate::state::CenterMode {
+    let saved = state.center_mode;
+    if crate::transform::animate_forces_pivot(state) {
+        state.center_mode = crate::state::CenterMode::PivotPoint;
+    }
+    saved
 }
 
 /// Temporarily applies an explicit reference coordinate system; returns the
@@ -3561,6 +3689,25 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
             let parent_world = state.scene.parent_frame(id);
             let world = state.scene.world_matrix(id);
+            if state.affect_pivot_only && label == "Scale" {
+                // A Scale transform has no effect on the pivot.
+                continue;
+            }
+            if state.affect_hierarchy_only {
+                // Rotate/Scale swing and stretch the links: each child's
+                // position follows the transform, nothing turns or resizes.
+                if label == "Rotate" || label == "Scale" {
+                    for c in state.scene.children(id) {
+                        let Some(child) = state.scene.node(c) else { continue };
+                        let wc = state.scene.world_matrix(c);
+                        let (cs, cq, ct) = wc.to_scale_rotation_translation();
+                        let target = Mat4::from_scale_rotation_translation(cs, cq, m.transform_point3(ct));
+                        let after = Transform::from_matrix_near(state.scene.parent_frame(c).inverse() * target, &child.transform, Vec3::ZERO);
+                        changes.push(Change::SetTransform { id: c, before: child.transform.clone(), after });
+                    }
+                }
+                continue;
+            }
             if state.affect_object_only {
                 // Move the mesh relative to the pivot; the pivot stays.
                 let local_m = world.inverse() * m * world;
@@ -3580,6 +3727,9 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 props.object_offset = Transform::from_matrix(new_world.inverse() * mesh_world);
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.extend(keep_children(state, id, new_world));
+            } else if state.dont_affect_children {
+                // Adjust Transform > Don't Affect Children.
+                changes.extend(keep_children(state, id, parent_world * after.matrix()));
             }
             changes.push(Change::SetTransform {
                 id,
@@ -3595,6 +3745,50 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
         return Ok(json!({}));
     }
     commit(state, label, Change::Group(changes))?;
+    Ok(json!({}))
+}
+
+/// Hierarchy > Pivot alignment acting on the object (Affect Object Only):
+/// `f` maps each selected node's object offset matrix to the new one.
+fn object_offset_change(state: &mut AppState, label: &str, f: impl Fn(&AppState, NodeId, Mat4) -> Mat4) -> Result<Value, String> {
+    let ids = selected_ids(state);
+    let mut changes = Vec::new();
+    for id in ids {
+        let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+        let mut props = node.props();
+        props.object_offset = Transform::from_matrix(f(state, id, node.object_offset.matrix()));
+        changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
+    }
+    if !changes.is_empty() {
+        commit(state, label, Change::Group(changes))?;
+    }
+    Ok(json!({}))
+}
+
+/// Moves each selected node's pivot to the world matrix `f` gives (and, if
+/// set, the local scale), with the object offset compensating so the mesh
+/// stays, and the children kept in place.
+fn pivot_world_change(state: &mut AppState, label: &str, f: impl Fn(&AppState, NodeId) -> (Mat4, Option<Vec3>)) -> Result<Value, String> {
+    let ids = selected_ids(state);
+    let mut changes = Vec::new();
+    for id in ids {
+        let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+        let parent_world = state.scene.parent_frame(id);
+        let (target, scale) = f(state, id);
+        let mut after = Transform::from_matrix_near(parent_world.inverse() * target, &node.transform, Vec3::ZERO);
+        if let Some(sc) = scale {
+            after.scale.set(sc);
+        }
+        let new_world = parent_world * after.matrix();
+        let mut props = node.props();
+        props.object_offset = Transform::from_matrix(new_world.inverse() * state.scene.object_matrix(id));
+        changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
+        changes.extend(keep_children(state, id, new_world));
+        changes.push(Change::SetTransform { id, before: node.transform.clone(), after });
+    }
+    if !changes.is_empty() {
+        commit(state, label, Change::Group(changes))?;
+    }
     Ok(json!({}))
 }
 

@@ -12,6 +12,7 @@ enum Tab {
     Viewports,
     Gizmos,
     Files,
+    Animation,
 }
 
 fn set(app: &mut LoomApp, name: &str, value: f64) {
@@ -42,6 +43,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.selectable_value(&mut tab, Tab::Viewports, "Viewports");
             ui.selectable_value(&mut tab, Tab::Gizmos, "Gizmos");
             ui.selectable_value(&mut tab, Tab::Files, "Files");
+            ui.selectable_value(&mut tab, Tab::Animation, "Animation");
         });
         ui.separator();
         match tab {
@@ -85,6 +87,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         }
                     });
                     ui.label(format!("Folder: {}", loom_commands::autosave::autoback_dir().display()));
+                });
+            }
+            Tab::Animation => {
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Animate").strong());
+                    check(ui, app, "Local Center During Animate", "Local Center During Animate");
                 });
             }
             Tab::Viewports => {

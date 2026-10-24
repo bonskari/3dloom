@@ -2,7 +2,7 @@
 //! the transform centre (Use Center flyout) and axis constraints, as
 //! applied to Move, Rotate and Scale.
 
-use crate::state::{AppState, CenterMode, CoordSystem, SelectionMode};
+use crate::state::{AppState, CenterMode, CoordSystem, SelectionMode, SubObjectId, Tool};
 use glam::{Mat3, Mat4, Vec3};
 use loom_scene::NodeId;
 
@@ -31,10 +31,75 @@ fn rotation_only(m: Mat4) -> Mat3 {
     Mat3::from_quat(q)
 }
 
+/// Whether Auto Key forces each object's pivot as the Rotate / Scale centre
+/// (Preferences > Animation > Local Center During Animate).
+pub fn animate_forces_pivot(state: &AppState) -> bool {
+    state.auto_key && state.prefs.local_center_during_animate && state.selection_mode == SelectionMode::Object
+}
+
 /// The frame for the active transform of `id` (None = the selection as a
 /// whole) in `viewport`, from the current coordinate system and centre.
+/// Gimbal is Parent for the Move and Scale tools.
 pub fn frame_for(state: &AppState, viewport: usize, id: Option<NodeId>) -> TransformFrame {
-    frame_for_system(state, viewport, id, state.coord_system)
+    let system = match state.coord_system {
+        CoordSystem::Gimbal if matches!(state.active_tool, Tool::Move | Tool::Scale) => CoordSystem::Parent,
+        s => s,
+    };
+    let mut f = frame_for_system(state, viewport, id, system);
+    if animate_forces_pivot(state) && matches!(state.active_tool, Tool::Rotate | Tool::Scale) {
+        f.origin = match id {
+            Some(i) => state.scene.world_matrix(i).w_axis.truncate(),
+            None => state.selection_pivot(),
+        };
+    }
+    f
+}
+
+/// Gimbal axes of `id`: the Euler XYZ rotation axes in the world (X is the
+/// parent's X, Y turned by X, Z turned by X and Y), so a rotation about one
+/// of them changes only that Euler track.
+fn gimbal_axes(state: &AppState, id: NodeId) -> Mat3 {
+    let parent = rotation_only(state.scene.parent_frame(id));
+    let r = state.scene.node(id).map(|n| n.euler_deg()).unwrap_or_default();
+    let qx = glam::Quat::from_rotation_x(r.x.to_radians());
+    let qy = glam::Quat::from_rotation_y(r.y.to_radians());
+    parent * Mat3::from_cols(Vec3::X, qx * Vec3::Y, qx * qy * Vec3::Z)
+}
+
+/// Local axes of a sub-object selection: Z along its averaged world normal
+/// (faces, or the faces around the selected vertices / edges), X the
+/// object's X flattened onto that plane.
+fn sub_object_axes(state: &AppState) -> Option<Mat3> {
+    let mut n = Vec3::ZERO;
+    let mut x_hint = Vec3::ZERO;
+    for (node, ids) in state.sub_selection.by_node() {
+        let Some(nd) = state.scene.node(node) else { continue };
+        let mesh = nd.cage_mesh();
+        let m = state.scene.object_matrix(node);
+        let normal_m = Mat3::from_mat4(m).inverse().transpose();
+        let mut local = Vec3::ZERO;
+        for id in ids {
+            let faces = match *id {
+                SubObjectId::Face(f) => vec![f],
+                SubObjectId::Vertex(v) => mesh.faces_around_vertex(v),
+                SubObjectId::Edge(e) => mesh.edge_vertices(e).map(|(a, b)| [mesh.faces_around_vertex(a), mesh.faces_around_vertex(b)].concat()).unwrap_or_default(),
+            };
+            for f in faces.into_iter().filter(|f| (f.0 as usize) < mesh.face_count()) {
+                local += mesh.face_normal(f);
+            }
+        }
+        n += (normal_m * local).normalize_or_zero();
+        x_hint += m.transform_vector3(Vec3::X);
+    }
+    let z = n.normalize_or_zero();
+    if z == Vec3::ZERO {
+        return None;
+    }
+    let mut x = (x_hint - z * x_hint.dot(z)).normalize_or_zero();
+    if x == Vec3::ZERO {
+        x = z.any_orthonormal_vector();
+    }
+    Some(Mat3::from_cols(x, z.cross(x), z))
 }
 
 /// `frame_for` with an explicit reference coordinate system.
@@ -56,8 +121,15 @@ pub fn frame_for_system(state: &AppState, viewport: usize, id: Option<NodeId>, s
             Some(_) => rotation_only(state.scene.parent_frame(id.unwrap())),
             None => Mat3::IDENTITY,
         },
-        CoordSystem::Local | CoordSystem::Gimbal => match id {
+        CoordSystem::Local if state.selection_mode != SelectionMode::Object && !state.slice_plane_mode && !state.sub_selection.is_empty() => {
+            sub_object_axes(state).unwrap_or(Mat3::IDENTITY)
+        }
+        CoordSystem::Local => match id {
             Some(i) => rotation_only(state.scene.world_matrix(i)),
+            None => Mat3::IDENTITY,
+        },
+        CoordSystem::Gimbal => match id {
+            Some(i) => gimbal_axes(state, i),
             None => Mat3::IDENTITY,
         },
         CoordSystem::Grid => {

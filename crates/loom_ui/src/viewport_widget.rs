@@ -109,6 +109,26 @@ fn apply_picks(app: &mut LoomApp, picks: Vec<Pick>, mods: Modifiers) {
     }
 }
 
+/// A click's picks: Ctrl toggles what it hits (the reference before its
+/// 2011 change) — selected items leave the selection, the others join it.
+/// Without Ctrl (or with Alt) it is `apply_picks`.
+fn apply_click_picks(app: &mut LoomApp, picks: Vec<Pick>, mods: Modifiers) {
+    if !mods.ctrl || mods.alt || picks.is_empty() {
+        return apply_picks(app, picks, mods);
+    }
+    let world: Vec<NodeId> = app.world_meshes().iter().map(|(id, _)| *id).collect();
+    let (on, off): (Vec<Pick>, Vec<Pick>) = picks.into_iter().partition(|p| match *p {
+        Pick::Object(i) => app.state.selection.contains(&world[i]),
+        Pick::SubObject { mesh, id } => app.state.sub_selection.contains(world[mesh], id),
+    });
+    if !on.is_empty() {
+        apply_picks(app, on, Modifiers { ctrl: false, alt: true, ..mods });
+    }
+    if !off.is_empty() {
+        apply_picks(app, off, mods);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Per-frame paint callback
 // ---------------------------------------------------------------------------
@@ -754,7 +774,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         if !(double && double_click(app, p, rect, view, proj, view_proj, mods)) {
                                             let mut picked = picks_at(app, p, rect, view, proj, view_proj);
                                             cycle_object_pick(app, p, rect, view, proj, &mut picked, double);
-                                            apply_picks(app, picked, mods);
+                                            apply_click_picks(app, picked, mods);
                                         }
                                     }
                                 } else {
