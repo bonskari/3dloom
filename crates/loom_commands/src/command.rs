@@ -740,6 +740,9 @@ commands! {
     SubtractSpline => "Subtract (Spline)", MainUI, "Editable Spline > Boolean Subtract the second selected closed spline from the first.";
     WeldVerticesSpline => "Weld Vertices (Spline)", MainUI, "Editable Spline > Weld the selected vertices within the Weld threshold.";
     SplineRefine => "Spline Refine", Loom, "Editable Spline: add a knot at parameter `t` of flat segment `segment` of node `node`." { node: u64, segment: u32, t: f32 };
+    SplineRefineAtVertex => "Spline Refine At Vertex", Loom, "Editable Spline > Refine with Connect: a click on existing flat knot `knot` (`segment`/`t` is the segment point there) asks Refine / Connect Only, or runs the remembered choice." { node: u64, knot: u32, segment: u32, t: f32 };
+    SplineRefineReply => "Spline Refine Reply", Loom, "Answer the open Refine prompt: Connect Only joins the existing vertex to the connection, Refine adds a vertex next to it; `dont_show` remembers the answer." { connect_only: bool, dont_show: bool };
+    SplineFilletMode => "Spline Fillet Mode", Loom, "Editable Spline > Geometry > Fillet (or Chamfer) button: dragging on a selected vertex rounds (cuts) the selected vertices." { chamfer: bool };
     SplineFillet => "Spline Fillet", Loom, "Editable Spline: fillet the selected vertices by `amount`." { amount: f32 };
     SplineChamfer => "Spline Chamfer", Loom, "Editable Spline: chamfer the selected vertices by `amount`." { amount: f32 };
     SetVertexType => "Set Vertex Type", Loom, "Editable Spline: Corner / Smooth / Bezier / Bezier Corner for the selected vertices." { kind: String };
@@ -756,7 +759,7 @@ commands! {
     SplineExplode => "Spline Explode", Loom, "Editable Spline: explode the selected splines into segments, as splines or objects." { to_objects: bool };
     SplineSettings => "Spline Settings", Loom, "Editable Spline rollout settings by name (Weld Threshold, Fillet, Chamfer, Outline, Outline Center, Divisions, Boolean, Mirror Axis, Mirror Copy, Mirror About Pivot, New Vertex Type, Refine Connect, Refine Linear, Lock Handles, Area Selection, …)." { name: String, value: f64 };
     CreateShapeFromEdges => "Create Shape From Edges", EditablePoly, "Editable Poly > Create Shape From Selection: the selected edges become a new Editable Spline (Smooth or Linear)." { name: Option<String>, smooth: bool };
-    ExtrudeAlongSpline => "Extrude Along Spline", Loom, "Editable Poly: sweep the selected polygons along shape `spline`'s first spline." { spline: u64, segments: u32, taper: f32, twist: f32, align: bool };
+    ExtrudeAlongSpline => "Extrude Along Spline", Loom, "Editable Poly: sweep the selected polygons along shape `spline`'s first spline: the end scales by 1 + `taper`, `taper_curve` bulges (+) or pinches (−) the middle, `twist` degrees along it, and with `align` the path starts along the face normal, turned `rotation` degrees about it." { spline: u64, segments: u32, taper: f32, taper_curve: f32, twist: f32, rotation: f32, align: bool };
     CreateBoolean => "Create Boolean", Loom, "Compound Objects > Boolean: the selected object (A) and `operand_b` become a Boolean (operation 0 Union, 1 Intersection, 2 A-B, 3 B-A, 4-7 Cut); `move_operand` removes B." { operand_b: u64, operation: u32, move_operand: bool };
     PickOperandB => "Pick Operand B", Loom, "Compound Objects > Boolean > Pick Operand B: click the second object.";
     CreateProBoolean => "Create ProBoolean", Loom, "Compound Objects > ProBoolean: the selected object becomes a ProBoolean base.";
@@ -1318,6 +1321,8 @@ commands! {
     LineRemoveLastKnot => "Line Remove Last Knot", Loom, "Line tool: Backspace removes the last knot." { node: u64 };
     LineEnd => "Line End", Loom, "Line tool: the line ends; a line with fewer than two knots is removed." { node: u64 };
     LineClose => "Line Close", Loom, "Line tool: clicking the first knot closes the spline." { node: u64 };
+    LineCloseAsk => "Line Close Ask", Loom, "Line tool: a click on the first knot asks \"Close spline?\"; `point`/`smooth` are the knot a No adds there." { node: u64, point: [f32; 3], smooth: bool };
+    LineCloseReply => "Line Close Reply", Loom, "Answer \"Close spline?\": Yes closes the line (the Line tool then ends it), No adds the clicked knot and drawing goes on." { close: bool };
     CreateCamera => "Create Camera", Loom, "Create a camera at the active viewport's eye looking at its target (Target camera gets a target node)." { target: bool };
     CreateCameraAt => "Create Camera At", Loom, "Create > Cameras: a camera at `position` looking at `look_at`; a Target camera puts its target node there, a Free camera keeps the gap as its Target Distance." { target: bool, position: [f32; 3], look_at: [f32; 3] };
     CameraType => "Camera Type", Loom, "Camera Parameters > Type: make a camera a Target camera (adds a target at Target Distance) or a Free camera (removes its target, keeps its aim)." { id: u64, target: bool };

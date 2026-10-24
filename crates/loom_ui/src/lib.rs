@@ -825,6 +825,14 @@ impl LoomApp {
             self.saved_modifier_usage = self.state.modifier_usage.clone();
         }
         hotkeys::handle(ctx, self);
+        // "Close spline?" answered Yes: the line is closed, so the Line tool ends it.
+        if let Some(line) = self.line.take() {
+            if line.is_closed(self) {
+                line.finish(self);
+            } else {
+                self.line = Some(line);
+            }
+        }
         // Playback: advance by the wall clock (Real Time) or a frame per redraw.
         if self.state.playing {
             let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.25);

@@ -25,6 +25,7 @@ pub mod file_dialog;
 pub mod material_editor;
 pub mod render_setup;
 pub mod save_changes;
+pub mod spline_prompts;
 pub mod merge;
 pub mod unwrap_dialogs;
 pub mod rig_dialogs;
@@ -124,6 +125,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::LayerManager => manage_layers::show(ctx, app, &mut open),
         Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::SaveChanges(action) => save_changes::show(ctx, app, action, &mut open),
+        Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
+        Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::PickTexture | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),

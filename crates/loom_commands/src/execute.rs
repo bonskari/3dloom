@@ -461,7 +461,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::AttachSpline | C::AttachMultipleSpline | C::BreakVerticesSpline | C::ChamferVertexSpline | C::CloseSpline | C::ConnectSpline | C::CreateLineSpline | C::CycleVerticesSpline
         | C::DeleteSegmentSpline | C::DeleteSplineSpline | C::DeleteVertexSpline | C::DetachSegmentSpline | C::DetachSplineSpline | C::DivideSpline | C::ExplodeSpline | C::FilletSpline
         | C::FuseVerticesSpline | C::HideSpline | C::UnhideAllSpline | C::InsertSelectionSpline | C::MakeFirstSpline | C::MirrorBothSpline | C::MirrorHorizontallySpline | C::MirrorVerticallySpline
-        | C::OutlineSpline | C::RefineSpline | C::RefineConnectSpline | C::ReverseSpline | C::SubtractSpline | C::WeldVerticesSpline | C::SplineRefine { .. } | C::SplineFillet { .. }
+        | C::OutlineSpline | C::RefineSpline | C::RefineConnectSpline | C::ReverseSpline | C::SubtractSpline | C::WeldVerticesSpline | C::SplineRefine { .. } | C::SplineRefineAtVertex { .. } | C::SplineRefineReply { .. } | C::SplineFilletMode { .. } | C::SplineFillet { .. }
         | C::SplineChamfer { .. } | C::SetVertexType { .. } | C::SetKnotHandle { .. } | C::SplineOutline { .. } | C::SplineBoolean { .. } | C::SplineMirror { .. } | C::SplineDivide { .. }
         | C::SplineWeld { .. } | C::SplineFuse | C::SplineConnect { .. } | C::SplineAttach { .. } | C::SplineDetach { .. } | C::SplineExplode { .. } | C::SplineSettings { .. }
         | C::CreateShapeFromEdges { .. } | C::ExtrudeAlongSpline { .. } | C::BindSpline | C::UnbindSpline | C::TrimSpline | C::ExtendSpline | C::CrossInsertSpline
@@ -1570,6 +1570,23 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(())
         }, None),
         C::LineEnd { node } => crate::spline::line_end(state, NodeId(node)),
+        C::LineCloseAsk { node, point, smooth } => {
+            state.scene.node(NodeId(node)).ok_or_else(|| missing(NodeId(node)))?;
+            state.line_close_pending = Some((NodeId(node), point, smooth));
+            state.dialog = Some(Dlg::CloseSpline);
+            Ok(json!({ "dialog": "CloseSpline" }))
+        }
+        C::LineCloseReply { close } => {
+            let (node, point, smooth) = state.line_close_pending.take().ok_or("no Close spline prompt is open")?;
+            if state.dialog == Some(Dlg::CloseSpline) {
+                state.dialog = None;
+            }
+            if close {
+                execute(state, C::LineClose { node: node.0 })
+            } else {
+                execute(state, C::LineAddKnot { node: node.0, point, smooth })
+            }
+        }
         C::LineClose { node } => edit_line(state, NodeId(node), "Line Close", |spline, _| {
             if spline.knots.len() < 3 {
                 return Err("a spline needs three knots to close".into());
@@ -1970,6 +1987,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::ExitPickMode => {
             state.pick_mode = None;
+            state.refine_chain = None;
             state.pick_source = None;
             if !state.create_verts.is_empty() {
                 return crate::poly_edit::finish_create(state);
@@ -1984,6 +2002,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     return crate::poly_edit::execute(state, C::AttachNode { id: id.0 });
                 }
                 Some(PickMode::SplineRefine | PickMode::SplineInsert) => return Err("Refine / Insert pick a segment, not an object".into()),
+                Some(PickMode::SplineFillet | PickMode::SplineChamfer) => return Err("Fillet / Chamfer drag on a selected vertex, not an object".into()),
                 Some(PickMode::UnwrapSplineMap) => {
                     let mapping = state.uv_editor.spline_map_mapping;
                     let normalize = state.unwrap_entry().and_then(|(n, i)| match &state.scene.node(n)?.modifiers[i].modifier {
@@ -2011,8 +2030,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     return crate::spline::execute(state, C::SplineAttach { node: id.0, reorient });
                 }
                 Some(PickMode::ExtrudeAlongSpline) => {
+                    if state.dialog == Some(Dlg::PolySettings(crate::PolySettingsKind::ExtrudeAlongSpline)) {
+                        // The open dialog keeps the path; its preview runs the extrusion.
+                        state.scene.node(id).and_then(|n| n.edit_shape()).ok_or("the picked object is not a shape")?;
+                        state.spline_settings.extrude_path = Some(id);
+                        state.pick_mode = None;
+                        return Ok(json!({ "path": id.0 }));
+                    }
                     let ss = state.spline_settings;
-                    return crate::spline::execute(state, C::ExtrudeAlongSpline { spline: id.0, segments: ss.extrude_segments, taper: ss.extrude_taper, twist: ss.extrude_twist, align: ss.extrude_align });
+                    return crate::spline::execute(state, C::ExtrudeAlongSpline { spline: id.0, segments: ss.extrude_segments, taper: ss.extrude_taper, taper_curve: ss.extrude_taper_curve, twist: ss.extrude_twist, rotation: ss.extrude_rotation, align: ss.extrude_align });
                 }
                 Some(PickMode::GroupAttach) => {
                     return crate::groups::attach_to_group(state, id);

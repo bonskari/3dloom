@@ -1113,6 +1113,144 @@ fn weight_table_cells_edit_by_right_click_and_drag_and_ids_select() {
     assert_eq!(loom_commands::skin::selection(&h.app.state), vec![2]);
 }
 
+fn line_world_knots(h: &Harness, id: loom_scene::NodeId) -> Vec<Vec3> {
+    let m = h.app.state.scene.object_matrix(id);
+    let n = h.app.state.scene.node(id).unwrap();
+    n.edit_spline().unwrap().shape.splines[0].knots.iter().map(|k| m.transform_point3(k.pos)).collect()
+}
+
+#[test]
+fn shift_lines_a_new_line_knot_up_with_the_last() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.start_create(Some(crate::CreateKind::Line));
+    h.frames(1);
+    let a = ground_point(&h, Vec3::ZERO);
+    h.click(a);
+    let id = h.app.line.as_ref().expect("the line started").node;
+    h.mods = egui::Modifiers::SHIFT;
+    let b = ground_point(&h, Vec3::new(4.0, 30.0, 0.0));
+    h.click(b);
+    let c = ground_point(&h, Vec3::new(30.0, 34.0, 0.0));
+    h.click(c);
+    h.mods = egui::Modifiers::NONE;
+    let k = line_world_knots(&h, id);
+    assert_eq!(k.len(), 3);
+    assert!((k[1].x - k[0].x).abs() < 1e-4 && k[1].y > 25.0, "Shift keeps the second knot straight above the first: {:?}", k[1]);
+    assert!((k[2].y - k[1].y).abs() < 1e-3 && k[2].x > 25.0, "and the third level with the second: {:?}", k[2]);
+}
+
+#[test]
+fn clicking_the_first_line_knot_asks_close_spline() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.start_create(Some(crate::CreateKind::Line));
+    h.frames(1);
+    for p in [Vec3::ZERO, Vec3::new(40.0, 0.0, 0.0), Vec3::new(40.0, 40.0, 0.0)] {
+        let s = ground_point(&h, p);
+        h.click(s);
+    }
+    let id = h.app.line.as_ref().unwrap().node;
+    let first = ground_point(&h, Vec3::ZERO);
+    h.click(first);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::CloseSpline), "Close spline? is asked");
+    assert!(h.app.line.is_some(), "the line waits for the answer");
+    assert!(!h.app.state.scene.node(id).unwrap().edit_spline().unwrap().shape.splines[0].closed);
+    // Clicks in the viewport wait too.
+    let other = ground_point(&h, Vec3::new(-30.0, 20.0, 0.0));
+    h.click(other);
+    assert_eq!(line_world_knots(&h, id).len(), 3);
+    h.cmd(Command::LineCloseReply { close: true });
+    assert!(h.app.line.is_none(), "Yes ends the line");
+    let sh = h.app.state.scene.node(id).unwrap().edit_spline().unwrap().shape.clone();
+    assert!(sh.splines[0].closed && sh.splines[0].knots.len() == 3);
+    assert_eq!(h.app.state.undo.labels().last().map(String::as_str), Some("Create Line"), "one undo entry for the whole line");
+}
+
+/// A 40-unit square Editable Spline at the origin, selected and framed.
+fn spline_square(h: &mut Harness) -> loom_scene::NodeId {
+    h.cmd(Command::CreateShape { kind: loom_commands::ShapeKind::Rectangle, position: [0.0; 3], size: [40.0, 40.0, 0.0] });
+    h.cmd(Command::ConvertToEditableSpline);
+    framed(h);
+    *h.app.state.selection.iter().next().unwrap()
+}
+
+fn spline_shape(h: &Harness, id: loom_scene::NodeId) -> loom_shape::Shape {
+    h.app.state.scene.node(id).unwrap().edit_spline().unwrap().shape.clone()
+}
+
+#[test]
+fn refine_with_connect_by_clicks_and_right_click_ends_it() {
+    let mut h = Harness::new();
+    let id = spline_square(&mut h);
+    h.cmd(Command::SplineSettings { name: "Refine Connect".into(), value: 1.0 });
+    h.cmd(Command::RefineSpline);
+    for p in [Vec3::new(0.0, -20.0, 0.0), Vec3::new(0.0, 20.0, 0.0)] {
+        let s = h.screen_of(p);
+        h.click(s);
+    }
+    let sh = spline_shape(&h, id);
+    assert_eq!(sh.splines.len(), 2, "the two refined vertices are connected");
+    assert!(sh.splines[1].knots[0].pos.distance(Vec3::new(0.0, -20.0, 0.0)) < 0.5 && sh.splines[1].knots[1].pos.distance(Vec3::new(0.0, 20.0, 0.0)) < 0.5, "{:?}", sh.splines[1].knots);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    right_click(&mut h, r.right_bottom() - egui::vec2(60.0, 60.0));
+    assert_eq!(h.app.state.pick_mode, None, "right-click ends Refine");
+    // A click on an existing vertex asks Refine / Connect Only.
+    h.cmd(Command::RefineSpline);
+    let corner = h.screen_of(Vec3::new(-20.0, -20.0, 0.0));
+    h.click(corner);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RefineVertex));
+    h.cmd(Command::SplineRefineReply { connect_only: true, dont_show: false });
+    let s = h.screen_of(Vec3::new(20.0, 0.0, 0.0));
+    h.click(s);
+    let sh = spline_shape(&h, id);
+    assert_eq!(sh.splines.len(), 3, "Connect Only started a new connection at the corner");
+    assert!(sh.splines[2].knots[0].pos.distance(Vec3::new(-20.0, -20.0, 0.0)) < 1e-3, "{:?}", sh.splines[2].knots);
+}
+
+#[test]
+fn fillet_mode_drags_on_a_selected_vertex() {
+    let mut h = Harness::new();
+    let id = spline_square(&mut h);
+    h.cmd(Command::SelectionMode { mode: SelectionMode::Vertex });
+    h.cmd(Command::SelectSub { node: None, ids: vec![0, 1], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::SplineFilletMode { chamfer: false });
+    let undo = h.app.state.undo.len();
+    let a = h.screen_of(Vec3::new(-20.0, -20.0, 0.0));
+    h.drag(a, a - egui::vec2(0.0, 40.0));
+    assert_eq!(spline_shape(&h, id).splines[0].knots.len(), 6, "both selected corners are rounded");
+    assert_eq!(h.app.state.undo.len(), undo + 1, "the drag is one undo entry");
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet), "Fillet stays on");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(spline_shape(&h, id).splines[0].knots.len(), 4);
+}
+
+#[test]
+fn extrude_along_spline_dialog_previews_the_picked_spline() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::LineStart { point: [0.0, 0.0, 30.0] });
+    let line = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::LineAddKnot { node: line.0, point: [0.0, 0.0, 60.0], smooth: false });
+    h.cmd(Command::LineEnd { node: line.0 });
+    h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    assert_eq!(h.sub_count(), 1);
+    let faces = |h: &Harness| h.app.state.scene.node(b).unwrap().object.mesh().face_count();
+    let before = faces(&h);
+    h.cmd(Command::ExtrudeAlongSplineSettings);
+    h.cmd(Command::ExtrudeAlongSplineMode);
+    h.cmd(Command::PickHit { id: line.0 });
+    h.frames(2);
+    assert!(faces(&h) > before, "the dialog previews the extrusion once the spline is picked");
+    h.cmd(Command::CloseDialog);
+    h.frames(2);
+    assert_eq!(faces(&h), before, "closing without OK takes the preview back");
+}
+
 /// The Material Editor window's rect.
 fn material_editor_rect(h: &Harness) -> egui::Rect {
     h.ctx.memory(|m| m.area_rect(egui::Id::new("Material Editor"))).expect("the Material Editor is shown")
