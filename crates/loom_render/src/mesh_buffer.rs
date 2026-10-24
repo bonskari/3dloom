@@ -14,6 +14,8 @@ pub struct GpuVertex {
     pub uv: [f32; 2],
     /// Object colour (Name and Color rollout), linear RGB + alpha.
     pub color: [f32; 4],
+    /// Blinn highlight: specular colour × level (rgb) and the exponent (a); 0 = none.
+    pub spec: [f32; 4],
 }
 
 /// What the fragment shader samples with map channel 1.
@@ -37,11 +39,15 @@ pub struct MeshStyle {
     pub vertex_colors: bool,
     /// Show Map in Viewport.
     pub texture: TextureSel,
+    /// Blinn highlight of the object's material (see `GpuVertex::spec`).
+    pub specular: [f32; 4],
+    /// Edges and wireframe: the object (wire) colour even when a material colours the faces.
+    pub wire_color: Option<[f32; 3]>,
 }
 
 impl Default for MeshStyle {
     fn default() -> Self {
-        Self { color: [0.7, 0.7, 0.7], alpha: 1.0, backface_cull: false, vertex_colors: false, texture: TextureSel::None }
+        Self { color: [0.7, 0.7, 0.7], alpha: 1.0, backface_cull: false, vertex_colors: false, texture: TextureSel::None, specular: [0.0; 4], wire_color: None }
     }
 }
 
@@ -86,7 +92,10 @@ pub struct MeshBuffer {
 
 impl MeshBuffer {
     pub fn from_mesh(device: &Device, mesh: &Mesh, style: MeshStyle) -> Self {
-        let (verts, indices) = triangulate_with_face_normals(mesh, [style.color[0], style.color[1], style.color[2], style.alpha], style.vertex_colors);
+        let (mut verts, indices) = triangulate_with_face_normals(mesh, [style.color[0], style.color[1], style.color[2], style.alpha], style.vertex_colors);
+        for v in &mut verts {
+            v.spec = style.specular;
+        }
         let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("loom_mesh_vertex_buffer"),
             contents: bytemuck::cast_slice(&verts),
@@ -100,7 +109,7 @@ impl MeshBuffer {
 
         let edges = mesh.unique_edges();
         let edge_vertex_count = (edges.len() * 2) as u32;
-        let edge_vertex_buffer = edge_buffer(device, &edges, style.color, "loom_mesh_edge_buffer");
+        let edge_vertex_buffer = edge_buffer(device, &edges, style.wire_color.unwrap_or(style.color), "loom_mesh_edge_buffer");
         let selected_edge_vertex_buffer = edge_buffer(
             device,
             &edges,
@@ -199,6 +208,7 @@ pub fn triangulate_with_face_normals(mesh: &Mesh, color: [f32; 4], vertex_colors
                 normal: normal.into(),
                 uv,
                 color,
+                spec: [0.0; 4],
             });
         }
         for i in 1..(loop_verts.len() as u32 - 1) {

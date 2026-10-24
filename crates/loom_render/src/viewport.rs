@@ -144,7 +144,7 @@ impl ViewportRenderer {
                     buffers: &[VertexBufferLayout {
                         array_stride: std::mem::size_of::<GpuVertex>() as u64,
                         step_mode: VertexStepMode::Vertex,
-                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4],
+                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4],
                     }],
                 },
                 fragment: Some(FragmentState {

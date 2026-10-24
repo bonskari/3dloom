@@ -401,3 +401,22 @@ fn square_plane_and_centre_pyramid_creation_methods() {
     assert!((param(&h, "Width") - 6.0).abs() < 0.1 && (param(&h, "Depth") - 3.0).abs() < 0.1, "base drawn from the centre out");
     assert!(pivot(&h).length() < 1e-2, "pivot stays at the click: {}", pivot(&h));
 }
+
+#[test]
+fn m_opens_the_material_editor_and_an_assigned_material_colours_the_viewport() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.key(egui::Key::M);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialEditor));
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Specular Level".into(), value: 80.0 });
+    h.cmd(Command::AssignMaterialToSelection);
+    let style = h.app.world_styles[0];
+    assert!(style.color[0] > 0.9 && style.color[1] < 0.05, "faces take the diffuse colour: {:?}", style.color);
+    assert!(style.specular[3] > 0.0, "and the highlight");
+    assert!(style.wire_color.is_some(), "edges keep the object colour");
+    h.key(egui::Key::M);
+    assert_eq!(h.app.state.dialog, None, "M again closes it");
+}

@@ -413,10 +413,8 @@ impl LoomApp {
     }
 
     fn rebuild_world_meshes(&mut self) {
-        let srgb = |c: u8| {
-            let x = c as f32 / 255.0;
-            if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
-        };
+        let srgb_f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
+        let srgb = |c: u8| srgb_f(c as f32 / 255.0);
         let mut meshes = Vec::new();
         let mut display = Vec::new();
         let mut styles = Vec::new();
@@ -461,7 +459,28 @@ impl LoomApp {
             };
             // Helpers (Dummy, Point, IK goals) draw see-through like wireframe helpers.
             let see_through = n.display.see_through || n.object.is_helper();
-            let texture = match &n.display.texture {
+            // An assigned material colours the faces (its diffuse, opacity and
+            // highlight); edges and wireframe keep the object colour.
+            let material = self.state.scene.node_material(n.id).cloned();
+            let wire_color = material.as_ref().map(|_| color);
+            let (color, opacity, specular) = match &material {
+                Some(m) if !gray => {
+                    let d = m.diffuse.get();
+                    let s = m.specular.get() * (m.specular_level.get() / 100.0);
+                    // Glossiness 0–100 → a Blinn exponent from 2 to 2048.
+                    let exponent = 2.0 * 2f32.powf(m.glossiness.get() / 10.0);
+                    let spec = if m.specular_level.get() > 0.0 { [srgb_f(s.x), srgb_f(s.y), srgb_f(s.z), exponent] } else { [0.0; 4] };
+                    ([srgb_f(d.x), srgb_f(d.y), srgb_f(d.z)], (m.opacity.get() / 100.0).clamp(0.0, 1.0), spec)
+                }
+                _ => (color, 1.0, [0.0; 4]),
+            };
+            // Show Map in Viewport on the material shows its diffuse bitmap.
+            let material_map = material.as_ref().filter(|m| m.show_map_in_viewport).and_then(|m| m.diffuse_map.as_ref()).map(|b| b.path.clone());
+            let display_texture = match (&n.display.texture, material_map) {
+                (loom_scene::TextureDisplay::None, Some(path)) => loom_scene::TextureDisplay::Bitmap(path),
+                (t, _) => t.clone(),
+            };
+            let texture = match &display_texture {
                 loom_scene::TextureDisplay::None => loom_render::TextureSel::None,
                 loom_scene::TextureDisplay::Checker => loom_render::TextureSel::Checker,
                 loom_scene::TextureDisplay::Bitmap(path) => match bitmap_index.get(path) {
@@ -481,7 +500,7 @@ impl LoomApp {
             };
             // A visibility track below 1 shows the object partly transparent (never fully hidden in shaded views).
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
-            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility } else { visibility }, backface_cull: n.display.backface_cull, vertex_colors: n.display.vertex_colors, texture });
+            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors: n.display.vertex_colors, texture, specular, wire_color });
             display.push(shown.unwrap_or_else(|| mesh.clone()));
             meshes.push((n.id, mesh));
         }

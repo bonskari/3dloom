@@ -261,6 +261,10 @@ pub struct HideCategories {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dialog {
     SelectFromScene,
+    /// Rendering > Material Editor (M).
+    MaterialEditor,
+    /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).
+    MaterialMap { channel: u8 },
     ViewportConfiguration,
     TimeConfiguration,
     ViewportBackground,

@@ -1471,6 +1471,9 @@ pub struct Node {
     /// carries them; empty until a file brings some in.
     #[serde(default)]
     pub materials: Vec<String>,
+    /// The assigned material (Material Editor > Assign Material to Selection).
+    #[serde(default)]
+    pub material: Option<crate::material::MaterialId>,
     /// Bumped on every change that can alter the evaluated result (cache key).
     #[serde(skip)]
     pub version: u64,
@@ -1662,6 +1665,7 @@ impl Node {
             modifiers: Vec::new(),
             active_entry: None,
             materials: Vec::new(),
+            material: None,
             constraints: Default::default(),
             visibility: None,
             version: 0,

@@ -1023,6 +1023,15 @@ commands! {
     BackupTimeOneUnit => "Backup Time One Unit", MainUI, "Step one frame back (,).";
     SetKeyMode => "Set Key Mode", MainUI, "Toggle Set Key mode ('): pose freely, then Set Keys commits the pose as keys; changing frame discards it.";
     SetKeys => "Set Keys", MainUI, "Key the filtered tracks of the selection at the current frame (K); in Set Key mode, commit the pose.";
+    MaterialEditorToggle => "Material Editor Toggle", MainUI, "Open or close the Material Editor (M).";
+    MaterialEditorSlot => "Material Editor Slot", Loom, "Make sample slot `slot` (0-23) the active one." { slot: u32 };
+    SetMaterialColor => "Set Material Color", Loom, "Blinn Basic Parameters colour of a slot's material (slot omitted = active): Ambient, Diffuse or Specular, 0-255 RGB; Ambient follows Diffuse while locked." { slot: Option<u32>, which: String, rgb: [u8; 3] };
+    SetMaterialParameter => "Set Material Parameter", Loom, "A slot's material value by label: Specular Level, Glossiness, Soften, Self-Illumination, Opacity, 2-Sided, Wire, Faceted, Ambient/Diffuse Lock, Show Map in Viewport (booleans as 0/1)." { slot: Option<u32>, name: String, value: f64 };
+    SetMaterialMap => "Set Material Map", Loom, "Maps rollout: put a bitmap in a channel (Diffuse Color, Specular Level, Opacity, Bump); no path clears it; amount 0-100 (Bump -999-999)." { slot: Option<u32>, map: String, path: Option<String>, amount: Option<f32> };
+    RenameMaterial => "Rename Material", Loom, "Name a slot's material." { slot: Option<u32>, name: String };
+    AssignMaterialToSelection => "Assign Material to Selection", Loom, "Assign the active slot's material to the selected objects.";
+    GetMaterialFromObject => "Get Material From Object", Loom, "Pick Material From Object: put a node's material (node omitted = the selected one) into the active slot." { node: Option<u64> };
+    ResetMaterial => "Reset Material", Loom, "Reset a slot's material to the default Standard material (objects using it change too)." { slot: Option<u32> };
     SetKeySelectionList => "Set Key Selection List", Loom, "The Selection List beside Auto Key / Set Key: which objects Set Keys keys (a named selection set; none = Selected)." { name: Option<String> };
     SetKeySelected => "Set Key Selected", MainUI, "Key the filtered tracks of the selected objects at the current frame.";
     ClearSetKeyModeBuffer => "Clear Set Key Mode Buffer", MainUI, "Discard the Set Key mode pose.";
@@ -1597,7 +1606,6 @@ pub const DEFERRED_SPLINE: &[(&str, &str)] = &[];
 /// spec section that excludes them.
 pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
     ("Environment Dialog Toggle", "3"),
-    ("Material Editor Toggle", "3"),
     ("Render", "3"),
     ("Render Last", "3"),
     ("Render SetUp...", "3"),

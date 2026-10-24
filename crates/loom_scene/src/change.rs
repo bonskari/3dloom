@@ -83,6 +83,17 @@ pub enum Change {
         before: Option<crate::param::Param<f32>>,
         after: Option<crate::param::Param<f32>>,
     },
+    /// The material library and the Material Editor slots together.
+    SetMaterials {
+        before: Box<(crate::material::MaterialLibrary, crate::material::MaterialEditorSlots)>,
+        after: Box<(crate::material::MaterialLibrary, crate::material::MaterialEditorSlots)>,
+    },
+    /// A node's assigned material.
+    SetMaterial {
+        id: NodeId,
+        before: Option<crate::material::MaterialId>,
+        after: Option<crate::material::MaterialId>,
+    },
     Group(Vec<Change>),
 }
 
@@ -190,6 +201,22 @@ impl Change {
             Change::SetLayers { after, .. } => {
                 scene.layers = after.0.clone();
                 scene.current_layer = after.1;
+                Ok(())
+            }
+            Change::SetMaterials { after, .. } => {
+                scene.materials = after.0.clone();
+                scene.material_editor = after.1.clone();
+                scene.bump_version();
+                Ok(())
+            }
+            Change::SetMaterial { id, after, .. } => {
+                if let Some(m) = after {
+                    if !scene.materials.contains_key(m) {
+                        return Err(format!("no material {}", m.0));
+                    }
+                }
+                let node = scene.node_mut(*id).ok_or_else(|| missing(*id))?;
+                node.material = *after;
                 Ok(())
             }
             Change::SetIkChains { after, .. } => {
@@ -307,6 +334,8 @@ impl Change {
             Change::SetLayers { before: b, after: a } => Change::SetLayers { before: a.clone(), after: b.clone() },
             Change::SetStack { id, before: b, after: a } => Change::SetStack { id: *id, before: a.clone(), after: b.clone() },
             Change::SetIkChains { before: b, after: a } => Change::SetIkChains { before: a.clone(), after: b.clone() },
+            Change::SetMaterials { before: b, after: a } => Change::SetMaterials { before: a.clone(), after: b.clone() },
+            Change::SetMaterial { id, before: b, after: a } => Change::SetMaterial { id: *id, before: *a, after: *b },
             Change::Group(changes) => {
                 // Inverses must be computed against the progressively
                 // changed scene, so simulate on a copy.

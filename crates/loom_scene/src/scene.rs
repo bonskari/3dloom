@@ -26,6 +26,12 @@ pub struct Scene {
     /// Track View note tracks, track sets and per-track flags.
     #[serde(default)]
     pub track_data: crate::tracks::TrackData,
+    /// Every material in the scene file: assigned ones and the Material Editor's slots.
+    #[serde(default)]
+    pub materials: crate::material::MaterialLibrary,
+    /// The Material Editor's sample slots (saved with the scene, as Max does).
+    #[serde(default)]
+    pub material_editor: crate::material::MaterialEditorSlots,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -65,6 +71,23 @@ impl Default for Scene {
 }
 
 impl Scene {
+    /// The material Material Editor slot `slot` shows: its library material,
+    /// or the slot's untouched default.
+    pub fn slot_material(&self, slot: usize) -> crate::material::StandardMaterial {
+        self.material_editor
+            .slots
+            .get(slot)
+            .copied()
+            .flatten()
+            .and_then(|id| self.materials.get(&id).cloned())
+            .unwrap_or_else(|| crate::material::StandardMaterial::slot_default(slot))
+    }
+
+    /// The material a node renders with, if one is assigned.
+    pub fn node_material(&self, id: NodeId) -> Option<&crate::material::StandardMaterial> {
+        self.node(id).and_then(|n| n.material).and_then(|m| self.materials.get(&m))
+    }
+
     pub fn new() -> Self {
         Self {
             nodes: BTreeMap::new(),
@@ -76,6 +99,8 @@ impl Scene {
             version_counter: std::cell::Cell::new(1),
             ik_chains: Vec::new(),
             track_data: Default::default(),
+            materials: Default::default(),
+            material_editor: Default::default(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             eval_in_progress: Default::default(),

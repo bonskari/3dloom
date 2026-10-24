@@ -41,6 +41,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::State => Ok(snapshot(state)),
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
+        c if crate::material::handles(&c) => crate::material::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),

@@ -16,6 +16,7 @@ struct VsIn {
     @location(1) normal:   vec3<f32>,
     @location(2) uv:       vec2<f32>,
     @location(3) color:    vec4<f32>,
+    @location(4) spec:     vec4<f32>,
 };
 
 struct VsOut {
@@ -24,6 +25,7 @@ struct VsOut {
     @location(1) world_pos:    vec3<f32>,
     @location(2) uv:           vec2<f32>,
     @location(3) color:        vec4<f32>,
+    @location(4) spec:         vec4<f32>,
 };
 
 @vertex
@@ -34,6 +36,7 @@ fn vs(in: VsIn) -> VsOut {
     out.world_pos = in.position;
     out.uv = in.uv;
     out.color = in.color;
+    out.spec = in.spec;
     return out;
 }
 
@@ -48,17 +51,23 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
 
     let n = normalize(in.world_normal);
     let mode = view.params.x;
+    let to_cam = normalize(view.camera_pos.xyz - in.world_pos);
     var diff = 1.0;
+    var light = to_cam;
     if (mode < 0.5) {
         // Headlight: light from the camera; abs() keeps two-sided faces lit.
-        let to_cam = normalize(view.camera_pos.xyz - in.world_pos);
         diff = clamp(abs(dot(n, to_cam)), 0.0, 1.0);
     } else if (mode > 1.5) {
         // Scene light stand-in: a fixed key light from above-left-front.
-        let key = normalize(vec3<f32>(-0.4, -0.6, 0.7));
-        diff = clamp(abs(dot(n, key)), 0.0, 1.0);
+        light = normalize(vec3<f32>(-0.4, -0.6, 0.7));
+        diff = clamp(abs(dot(n, light)), 0.0, 1.0);
     }
     let ambient = select(0.42, 1.0, mode > 0.5 && mode < 1.5);
-    let color = base * (ambient + (1.0 - ambient) * diff);
+    var color = base * (ambient + (1.0 - ambient) * diff);
+    // Blinn highlight of the material (none in Flat or without a material).
+    if (in.spec.a > 0.0 && !(mode > 0.5 && mode < 1.5)) {
+        let h = normalize(light + to_cam);
+        color = color + in.spec.rgb * pow(clamp(abs(dot(n, h)), 0.0, 1.0), in.spec.a);
+    }
     return vec4<f32>(color, in.color.a);
 }
