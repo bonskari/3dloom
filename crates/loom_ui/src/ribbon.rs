@@ -123,9 +123,7 @@ fn buttons(ui: &mut egui::Ui, app: &mut LoomApp, tab: RibbonTab, panel_title: &s
     for (t, p, label, action) in BUTTONS.iter().filter(|(t, p, _, _)| *t == tab && *p == panel_title) {
         let _ = t;
         let _ = p;
-        let chord = app.keymap.chord_for(action).map(|c| c.label()).unwrap_or_default();
-        let tip = if chord.is_empty() { (*action).to_owned() } else { format!("{action} ({chord})") };
-        if ui.selectable_label(on(app, action), *label).on_hover_text(tip).clicked() {
+        if ui.selectable_label(on(app, action), *label).on_hover_text(crate::shortcuts::name_tip(&app.state, action)).clicked() {
             app.dispatch_named(action);
         }
     }

@@ -400,11 +400,25 @@ impl Keymap {
     }
 
     /// First chord bound to an action, for menu labels ("Undo  Ctrl+Z").
+    /// Plain keys come before modified ones; ties go by label, so the pick is stable.
     pub fn chord_for(&self, action: &str) -> Option<Chord> {
         let mut found: Vec<Chord> = self.map.iter().filter(|(_, n)| **n == action).map(|(c, _)| *c).collect();
-        found.sort_by_key(|c| (c.ctrl, c.alt, c.shift));
+        found.sort_by_key(|c| (c.ctrl, c.alt, c.shift, c.label()));
         found.first().copied()
     }
+}
+
+/// Each key map built once and shared (keyboard routing and tooltips).
+pub mod cached {
+    use super::Keymap;
+    use std::sync::OnceLock;
+    macro_rules! cached {
+        ($($name:ident),*) => { $(pub fn $name() -> &'static Keymap {
+            static CELL: OnceLock<Keymap> = OnceLock::new();
+            CELL.get_or_init(Keymap::$name)
+        })* };
+    }
+    cached!(main_ui, editable_poly, edit_poly, editable_spline, unwrap_uvw, track_view, edit_normals, skin, ffd);
 }
 
 impl Chord {

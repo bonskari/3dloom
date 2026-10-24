@@ -15,7 +15,7 @@ use loom_commands::{Command, PickMode, SelectionMode};
 
 fn pick(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, hover: &str, mode: PickMode, cmd: Command) {
     let on = app.state.pick_mode == Some(mode);
-    if ui.selectable_label(on, label).on_hover_text(hover).clicked() {
+    if ui.selectable_label(on, label).on_hover_text(crate::shortcuts::tip(&app.state, hover, crate::shortcuts::action_of(&cmd))).clicked() {
         let _ = app.dispatch(cmd);
     }
 }
@@ -26,7 +26,7 @@ fn selected_knots(app: &LoomApp) -> Vec<u32> {
 }
 
 fn act(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, hover: &str, cmd: Command) {
-    if ui.button(label).on_hover_text(hover).clicked() {
+    if ui.button(label).on_hover_text(crate::shortcuts::tip(&app.state, hover, crate::shortcuts::action_of(&cmd))).clicked() {
         let _ = app.dispatch(cmd);
     }
 }
