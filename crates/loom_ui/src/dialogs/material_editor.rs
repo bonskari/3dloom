@@ -521,7 +521,7 @@ fn slots(ui: &mut egui::Ui, app: &mut LoomApp) {
         5 => 64,
         _ => 56,
     };
-    ui.horizontal(|ui| {
+    ui.horizontal_top(|ui| {
         // Fewer windows show bigger samples; a scroll bar reaches the other slots.
         let height = rows as f32 * (size as f32 + 4.0) + 2.0;
         egui::ScrollArea::vertical().id_salt("material_slots_scroll").max_height(height).min_scrolled_height(height).show(ui, |ui| {
@@ -1122,7 +1122,7 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
     let mut picked: Option<String> = None;
     let mut cancel = false;
     egui::Window::new("Material/Map Browser").open(open).collapsible(false).resizable(true).default_width(420.0).show(ctx, |ui| {
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new("Browse From:").strong());
                 for (i, label) in ["Mtl Editor", "Active Slot", "Selected", "Scene", "New"].iter().enumerate() {
