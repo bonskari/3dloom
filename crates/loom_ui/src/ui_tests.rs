@@ -88,6 +88,13 @@ fn poly_box(h: &mut Harness) {
     framed(h);
 }
 
+/// The default Perspective view, maximized (an empty scene has no extents to frame).
+fn maximized(h: &mut Harness) {
+    if !h.app.state.maximized {
+        h.cmd(Command::MaximizeViewportToggle);
+    }
+}
+
 fn framed(h: &mut Harness) {
     if !h.app.state.maximized {
         h.cmd(Command::MaximizeViewportToggle);
@@ -195,8 +202,7 @@ fn ground_point(h: &Harness, world: Vec3) -> egui::Pos2 {
 #[test]
 fn drag_creating_a_sphere_centres_it_on_the_click_and_selects_it() {
     let mut h = Harness::new();
-    framed(&mut h);
-    h.cmd(Command::ZoomExtentsAll);
+    maximized(&mut h);
     h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Sphere));
     let a = ground_point(&h, Vec3::new(0.0, 0.0, 0.0));
     let b = ground_point(&h, Vec3::new(10.0, 0.0, 0.0));
@@ -212,7 +218,7 @@ fn drag_creating_a_sphere_centres_it_on_the_click_and_selects_it() {
 #[test]
 fn drag_creating_a_box_keeps_it_selected() {
     let mut h = Harness::new();
-    framed(&mut h);
+    maximized(&mut h);
     h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
     let a = ground_point(&h, Vec3::new(-10.0, -10.0, 0.0));
     let b = ground_point(&h, Vec3::new(10.0, 10.0, 0.0));
@@ -230,22 +236,3 @@ fn drag_creating_a_box_keeps_it_selected() {
     assert!(height.as_ref().is_some_and(|h| !h.contains("0.0)")), "the height step gave it a height: {height:?}");
 }
 
-#[test]
-fn debug_box_creation_steps() {
-    let mut h = Harness::new();
-    framed(&mut h);
-    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
-    let a = ground_point(&h, Vec3::new(-10.0, -10.0, 0.0));
-    let b = ground_point(&h, Vec3::new(10.0, 10.0, 0.0));
-    eprintln!("a {a:?} b {b:?} rect {:?}", h.app.viewport_rects[h.app.state.active_viewport]);
-    let m = h.mods;
-    h.run(vec![egui::Event::PointerMoved(a)]);
-    h.run(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: m }]);
-    eprintln!("after press: scene {} create {}", h.app.state.scene.len(), h.app.create.is_some());
-    for i in 1..=8 {
-        h.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 8.0))]);
-    }
-    eprintln!("after drag: scene {} create {}", h.app.state.scene.len(), h.app.create.is_some());
-    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
-    eprintln!("after release: scene {} create {} err {:?}", h.app.state.scene.len(), h.app.create.is_some(), h.app.last_error);
-}

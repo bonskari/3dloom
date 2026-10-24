@@ -559,6 +559,19 @@ mod tests {
         }
     }
 
+    /// Space locks the selection only when Preferences > General > "Space
+    /// Locks Selection" is on (off by default): pressed by accident it left
+    /// the viewports unable to pick anything.
+    #[test]
+    fn space_locks_the_selection_only_when_enabled() {
+        let mut s = crate::AppState::new();
+        let space = parse_chord("Space").unwrap();
+        assert!(!s.prefs.space_selection_lock);
+        assert_eq!(s.hotkey(space), None);
+        crate::execute(&mut s, crate::Command::SetPreference { name: "Space Locks Selection".into(), value: 1.0 }).unwrap();
+        assert_eq!(s.hotkey(space), Some("Selection Lock Toggle"));
+    }
+
     #[test]
     fn w_is_select_and_move_and_ctrl_z_is_undo() {
         let km = Keymap::main_ui();

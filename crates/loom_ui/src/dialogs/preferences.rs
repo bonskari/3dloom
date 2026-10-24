@@ -55,6 +55,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         ui.label(egui::RichText::new("Scene Selection").strong());
                         check(ui, app, "Auto Window/Crossing by Direction", "Auto Window/Crossing by Direction");
                         ui.horizontal(|ui| number(ui, app, "Paint Selection Brush Size", "Paint Selection Brush Size:", 1.0..=200.0, 0));
+                        check(ui, app, "Space Locks Selection", "Space locks the selection");
                     });
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("Spinners").strong());

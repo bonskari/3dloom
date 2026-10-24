@@ -616,6 +616,9 @@ pub struct Prefs {
     /// Preferences > Viewports > Viewport tooltips / Show cross hair cursor.
     pub viewport_tooltips: bool,
     pub show_cross_hair: bool,
+    /// Preferences > General: Space toggles Selection Lock (off by default).
+    #[serde(default)]
+    pub space_selection_lock: bool,
     /// Preferences > Files > Auto Backup: Enable (default on).
     pub auto_backup_enable: bool,
     /// Number of Autobak files (default 3).
@@ -640,6 +643,7 @@ impl Default for Prefs {
             paint_brush_size: 20.0,
             viewport_tooltips: true,
             show_cross_hair: false,
+            space_selection_lock: false,
             auto_backup_enable: true,
             auto_backup_count: 3,
             auto_backup_interval_min: 5.0,
@@ -650,13 +654,13 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 27] = [
+    pub const NAMES: [&'static str; 28] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
-        "Scale Size", "Rotation Increment",
+        "Scale Size", "Rotation Increment", "Space Locks Selection",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -671,6 +675,7 @@ impl Prefs {
             "Spinner Use Snap" => b(self.spinner_snap),
             "Spinner Wrap Cursor" => b(self.spinner_wrap_cursor),
             "Viewport Tooltips" => b(self.viewport_tooltips),
+            "Space Locks Selection" => b(self.space_selection_lock),
             "Show Cross Hair Cursor" => b(self.show_cross_hair),
             "Auto Backup Enable" => b(self.auto_backup_enable),
             "Auto Backup Count" => self.auto_backup_count as f64,
@@ -707,6 +712,7 @@ impl Prefs {
             "Spinner Use Snap" => self.spinner_snap = on,
             "Spinner Wrap Cursor" => self.spinner_wrap_cursor = on,
             "Viewport Tooltips" => self.viewport_tooltips = on,
+            "Space Locks Selection" => self.space_selection_lock = on,
             "Auto Backup Enable" => self.auto_backup_enable = on,
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
@@ -1837,7 +1843,11 @@ impl AppState {
                 return Some(a);
             }
         }
-        MAIN.get_or_init(crate::keymap::Keymap::main_ui).lookup(chord)
+        let action = MAIN.get_or_init(crate::keymap::Keymap::main_ui).lookup(chord);
+        if action == Some("Selection Lock Toggle") && !self.prefs.space_selection_lock {
+            return None;
+        }
+        action
     }
 
     /// World-space pivot of the current selection (centre of bounds).

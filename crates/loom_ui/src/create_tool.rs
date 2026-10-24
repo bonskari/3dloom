@@ -123,9 +123,6 @@ impl CreateSession {
                             _ => "Radius",
                         };
                         self.set(app, name, self.radius1);
-                        if matches!(self.kind, K::Sphere | K::GeoSphere) {
-                            self.place(app, self.anchor + self.basis.2 * self.radius1);
-                        }
                         if self.kind == K::Tube {
                             self.set(app, "Radius 2", self.radius1 * 0.75);
                         }
@@ -147,7 +144,6 @@ impl CreateSession {
                 K::Torus => {
                     let r2 = (dx_px.abs() * self.units_per_px).max(0.0);
                     self.set(app, "Radius 2", r2);
-                    self.place(app, self.anchor + self.basis.2 * r2);
                 }
                 _ => {}
             },
