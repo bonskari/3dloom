@@ -76,20 +76,32 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.set_min_height(90.0);
         ui.set_min_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = 1.0;
-        // The `+` / `−` in front of entries with sub-object levels; an entry
-        // opens by itself while one of its levels is active.
-        let expander = |ui: &mut egui::Ui, key: (u64, Option<usize>), has_levels: bool, in_level: bool| -> bool {
+        // `+` / `−` in front of entries with sub-object levels. Entering a level
+        // opens the entry; `−` closes it and, if one of its levels is active,
+        // returns to the top level. Returns (open, closed while in a level).
+        let expander = |ui: &mut egui::Ui, key: (u64, Option<usize>), has_levels: bool, in_level: bool| -> (bool, bool) {
             if !has_levels {
                 ui.add_space(14.0);
-                return false;
+                return (false, false);
             }
             let id = egui::Id::new(("stack_open", key));
-            let mut open = in_level || ui.ctx().data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+            let stored = ui.ctx().data(|d| d.get_temp::<bool>(id));
+            // A level entered elsewhere (hotkey, quad menu) opens the entry.
+            let mut open = stored.unwrap_or(false) || (in_level && stored.is_none());
+            if in_level && !open && stored == Some(false) {
+                // Closed earlier, then a level was entered again: open it.
+                open = ui.ctx().data(|d| d.get_temp::<bool>(id.with("was_in_level"))) == Some(false);
+            }
+            let mut leave = false;
             if ui.add(egui::Button::new(if open { "−" } else { "+" }).frame(false).min_size(egui::vec2(10.0, 0.0))).clicked() {
                 open = !open;
+                leave = !open && in_level;
             }
-            ui.ctx().data_mut(|d| d.insert_temp(id, open));
-            open
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(id, open);
+                d.insert_temp(id.with("was_in_level"), in_level && !leave);
+            });
+            (open, leave)
         };
         let level_row = |ui: &mut egui::Ui, label: &str, current: bool| -> bool {
             ui.horizontal(|ui| {
@@ -101,7 +113,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         for (i, (name, enabled, _in_vp, instance, levels, lvl)) in entries.iter().enumerate().rev() {
             let mut open = false;
             ui.horizontal(|ui| {
-                open = expander(ui, (id.0, Some(i)), !levels.is_empty(), active == Some(i) && *lvl > 0);
+                let (o, leave) = expander(ui, (id.0, Some(i)), !levels.is_empty(), active == Some(i) && *lvl > 0);
+                open = o;
+                if leave {
+                    let _ = app.dispatch(Command::ModifierSubobjectLevel { index: i as u32, level: 0 });
+                }
                 let bulb = if *enabled { "💡" } else { "○" };
                 if ui.add(egui::Button::new(bulb).frame(false)).on_hover_text("Modifier on / off").clicked() {
                     toggle = Some((i, !*enabled));
@@ -168,7 +184,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         let base_in_level = active.is_none() && mode != SelectionMode::Object;
         let mut base_open = false;
         ui.horizontal(|ui| {
-            base_open = expander(ui, (id.0, None), !base_levels.is_empty(), base_in_level);
+            let (o, leave) = expander(ui, (id.0, None), !base_levels.is_empty(), base_in_level);
+            base_open = o;
+            if leave {
+                let _ = app.dispatch(Command::SelectionMode { mode: SelectionMode::Object });
+            }
             let base = if active.is_none() { egui::RichText::new(&stack_name).strong() } else { egui::RichText::new(&stack_name) };
             if ui.add(egui::SelectableLabel::new(active.is_none(), base)).clicked() {
                 select = Some(None);
