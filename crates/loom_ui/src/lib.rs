@@ -334,6 +334,15 @@ impl LoomApp {
 
     /// Runs a command, records errors for the status bar and marks render
     /// state dirty when the scene changed.
+    /// A Create panel Object Type button: the Select tool first (as creating
+    /// starts from it), then the create tool; None turns the tool off.
+    pub fn start_create(&mut self, kind: Option<CreateKind>) {
+        if kind.is_some() {
+            let _ = self.dispatch(Command::SelectObject);
+        }
+        self.create_kind = kind;
+    }
+
     /// Picking a transform tool (Select, Move, Rotate, Scale) ends the create
     /// mode, cancelling an object still being dragged out.
     fn end_create_mode_for(&mut self, command: &str) {

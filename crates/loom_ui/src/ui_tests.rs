@@ -420,3 +420,20 @@ fn m_opens_the_material_editor_and_an_assigned_material_colours_the_viewport() {
     h.key(egui::Key::M);
     assert_eq!(h.app.state.dialog, None, "M again closes it");
 }
+
+/// The Create panel's Object Type buttons go through `start_create`: the
+/// Select tool must not switch the new create tool straight off again.
+#[test]
+fn create_panel_buttons_keep_their_tool_on() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    h.key(egui::Key::W);
+    for kind in [crate::CreateKind::Primitive(PrimitiveKind::Box), crate::CreateKind::Helper(crate::HelperKind::Dummy), crate::CreateKind::Bones, crate::CreateKind::Line] {
+        h.app.start_create(Some(kind));
+        h.frames(2);
+        assert_eq!(h.app.create_kind, Some(kind), "the {kind:?} tool stays on");
+        assert_eq!(h.app.state.active_tool, loom_commands::Tool::Select);
+    }
+    h.app.start_create(None);
+    assert!(h.app.create_kind.is_none());
+}

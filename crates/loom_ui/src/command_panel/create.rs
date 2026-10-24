@@ -87,10 +87,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     for (i, kind) in PrimitiveKind::ALL.iter().enumerate() {
                         let on = app.create_kind == Some(CreateKind::Primitive(*kind));
                         if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, kind.label())).clicked() {
-                            app.create_kind = if on { None } else { Some(CreateKind::Primitive(*kind)) };
-                            if app.create_kind.is_some() {
-                                let _ = app.dispatch(Command::SelectObject);
-                            }
+                            app.start_create((!on).then_some(CreateKind::Primitive(*kind)));
                         }
                         if i % 2 == 1 {
                             ui.end_row();
@@ -123,13 +120,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     for (i, (kind, label)) in kinds.iter().enumerate() {
                         let on = app.create_kind == Some(*kind);
                         if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, *label)).clicked() {
-                            app.create_kind = if on { None } else { Some(*kind) };
                             if let Some(line) = app.line.take() {
                                 line.finish(app);
                             }
-                            if app.create_kind.is_some() {
-                                let _ = app.dispatch(Command::SelectObject);
-                            }
+                            app.start_create((!on).then_some(*kind));
                         }
                         if i % 2 == 1 {
                             ui.end_row();
@@ -195,10 +189,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     for (i, (kind, label)) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point")].iter().enumerate() {
                         let on = app.create_kind == Some(CreateKind::Helper(*kind));
                         if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, *label)).clicked() {
-                            app.create_kind = if on { None } else { Some(CreateKind::Helper(*kind)) };
-                            if app.create_kind.is_some() {
-                                let _ = app.dispatch(Command::SelectObject);
-                            }
+                            app.start_create((!on).then_some(CreateKind::Helper(*kind)));
                         }
                         if i % 2 == 1 {
                             ui.end_row();
@@ -214,11 +205,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 ui.checkbox(&mut app.autogrid, "AutoGrid");
                 let on = app.create_kind == Some(CreateKind::Bones);
                 if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, "Bones")).clicked() {
-                    app.create_kind = if on { None } else { Some(CreateKind::Bones) };
                     app.bone_points.clear();
-                    if app.create_kind.is_some() {
-                        let _ = app.dispatch(Command::SelectObject);
-                    }
+                    app.start_create((!on).then_some(CreateKind::Bones));
                 }
             });
             name_and_color(ui, app);
