@@ -47,7 +47,7 @@ impl CreateSession {
         let (kind, shape) = match what {
             CreateKind::Primitive(k) => (k, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
-            CreateKind::Line | CreateKind::Bones | CreateKind::Helper(_) => return None,
+            CreateKind::Line | CreateKind::Bones | CreateKind::Helper(_) | CreateKind::Camera { .. } => return None,
         };
         let label = format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label()));
         app.state.undo.begin(&label);
@@ -375,5 +375,43 @@ impl LineSession {
 
     pub fn backspace(&self, app: &mut LoomApp) {
         let _ = app.dispatch(Command::LineRemoveLastKnot { node: self.node.0 });
+    }
+}
+
+/// Create > Cameras > Target: the press places the camera, dragging moves
+/// its target over the construction plane, the release finishes. One undo
+/// entry.
+#[derive(Debug, Clone)]
+pub struct CameraSession {
+    pub target: NodeId,
+    /// Normal of the construction plane the target slides on.
+    pub normal: Vec3,
+}
+
+impl CameraSession {
+    pub fn begin(app: &mut LoomApp, anchor: Vec3, normal: Vec3) -> Option<Self> {
+        app.state.undo.begin("Create Camera");
+        let r = app.dispatch(Command::CreateCameraAt { target: true, position: anchor.to_array(), look_at: anchor.to_array() });
+        let target = r.ok().and_then(|v| v["target"].as_u64()).map(NodeId);
+        if target.is_none() {
+            app.state.undo.end();
+        }
+        target.map(|target| Self { target, normal })
+    }
+
+    pub fn on_drag(&self, app: &mut LoomApp, at: Vec3) {
+        let _ = app.dispatch(Command::SetTransform { id: self.target.0, position: Some(at.to_array()), rotation_deg: None, scale: None });
+    }
+
+    pub fn finish(self, app: &mut LoomApp) {
+        app.state.undo.end();
+    }
+
+    /// Create > Cameras > Free: a click places a camera looking down the
+    /// construction plane's -Z (away from the viewer in the axis views,
+    /// straight down in Perspective and Top).
+    pub fn place_free(app: &mut LoomApp, anchor: Vec3, normal: Vec3) {
+        let look = anchor - normal * loom_scene::camera::DEFAULT_TARGET_DISTANCE;
+        let _ = app.dispatch(Command::CreateCameraAt { target: false, position: anchor.to_array(), look_at: look.to_array() });
     }
 }

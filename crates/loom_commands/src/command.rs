@@ -1308,6 +1308,8 @@ commands! {
     LineEnd => "Line End", Loom, "Line tool: the line ends; a line with fewer than two knots is removed." { node: u64 };
     LineClose => "Line Close", Loom, "Line tool: clicking the first knot closes the spline." { node: u64 };
     CreateCamera => "Create Camera", Loom, "Create a camera at the active viewport's eye looking at its target (Target camera gets a target node)." { target: bool };
+    CreateCameraAt => "Create Camera At", Loom, "Create > Cameras: a camera at `position` looking at `look_at`; a Target camera puts its target node there, a Free camera keeps the gap as its Target Distance." { target: bool, position: [f32; 3], look_at: [f32; 3] };
+    CameraType => "Camera Type", Loom, "Camera Parameters > Type: make a camera a Target camera (adds a target at Target Distance) or a Free camera (removes its target, keeps its aim)." { id: u64, target: bool };
     CreateBoneChain => "Create Bone Chain", Loom, "Systems > Bones: a chain of bones through the points (local +X along each bone) plus a nub at the end; the chain becomes the selection." { points: Vec<[f32; 3]>, name: Option<String> };
     BoneTools => "Bone Tools...", MainUI, "Animation > Bone Tools... dialog.";
     BoneOptions => "Bone Options", MainUI, "The Bone Tools dialog (Object Properties rollout).";

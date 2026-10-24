@@ -299,3 +299,77 @@ fn right_click_or_the_select_tool_ends_the_create_mode() {
     h.key(egui::Key::Q);
     assert!(h.app.create_kind.is_none(), "the Select tool ends the create mode");
 }
+
+fn camera_target(h: &Harness, cam: loom_scene::NodeId) -> Option<loom_scene::NodeId> {
+    match h.app.state.scene.node(cam).unwrap().object {
+        loom_scene::ObjectKind::Camera { target, .. } => target,
+        _ => panic!("not a camera"),
+    }
+}
+
+#[test]
+fn dragging_a_target_camera_puts_the_camera_at_the_press_and_the_target_at_the_release() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Camera { target: true });
+    let (from, to) = (Vec3::new(-40.0, -40.0, 0.0), Vec3::new(30.0, 20.0, 0.0));
+    let (a, b) = (h.screen_of(from), h.screen_of(to));
+    h.drag(a, b);
+    let cam = *h.app.state.selection.iter().next().expect("the new camera is selected");
+    let t = camera_target(&h, cam).expect("a target camera");
+    let eye = h.app.state.scene.world_matrix(cam).w_axis.truncate();
+    let at = h.app.state.scene.world_matrix(t).w_axis.truncate();
+    assert!(eye.distance(from) < 0.5, "camera at the press: {eye}");
+    assert!(at.distance(to) < 0.5, "target at the release: {at}");
+    let forward = -h.app.state.scene.world_matrix(cam).z_axis.truncate().normalize();
+    assert!(forward.distance((to - from).normalize()) < 1e-2, "the camera looks at its target");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.len(), 0, "one undo step removes camera and target");
+}
+
+#[test]
+fn clicking_a_free_camera_places_it_looking_down_and_its_icon_selects_it() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Camera { target: false });
+    let at = Vec3::new(10.0, 10.0, 0.0);
+    let p = h.screen_of(at);
+    h.click(p);
+    let cam = *h.app.state.selection.iter().next().expect("a free camera");
+    assert!(camera_target(&h, cam).is_none());
+    let w = h.app.state.scene.world_matrix(cam);
+    assert!(w.w_axis.truncate().distance(at) < 0.5);
+    assert!((-w.z_axis.truncate()).distance(-Vec3::Z) < 1e-4, "a free camera made in Perspective looks down");
+    // Clicking its icon (the body behind the lens) selects it.
+    h.app.create_kind = None;
+    h.cmd(Command::SelectNone);
+    let body = w.transform_point3(Vec3::new(0.0, 0.0, 10.0));
+    let p = h.screen_of(body);
+    h.click(p);
+    assert!(h.app.state.selection.contains(&cam), "a click on the icon selects the camera");
+}
+
+#[test]
+fn camera_view_honours_clip_manually_and_orthographic_projection() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateCameraAt { target: false, position: [0.0, -100.0, 20.0], look_at: [0.0, 0.0, 20.0] }).unwrap();
+    let cam = loom_scene::NodeId(r["id"].as_u64().unwrap());
+    h.cmd(Command::CameraView);
+    let i = h.app.state.active_viewport;
+    assert_eq!(h.app.state.viewports[i].kind, loom_commands::ViewKind::Camera(cam));
+    let c = h.app.camera_for(i);
+    assert!((c.near - loom_scene::camera::AUTO_NEAR_CLIP).abs() < 1e-6, "Clip Manually off: nothing nearer than 3 units");
+    for (name, v) in [("Clip Manually", 1.0), ("Near Clip", 50.0), ("Far Clip", 300.0)] {
+        h.cmd(Command::SetParameter { id: cam.0, name: name.into(), value: v });
+    }
+    let c = h.app.camera_for(i);
+    assert_eq!((c.near, c.far), (50.0, 300.0));
+    assert!(c.perspective);
+    h.cmd(Command::SetParameter { id: cam.0, name: "Orthographic Projection".into(), value: 1.0 });
+    let c = h.app.camera_for(i);
+    assert!(!c.perspective && c.clip == Some((50.0, 300.0)));
+    // The view looks down the camera's -Z: the point it looks at projects to the centre.
+    let rect = h.app.viewport_rects[i];
+    let centre = crate::viewport_widget::project_world_to_screen(Vec3::new(0.0, 0.0, 20.0), c.view_projection(rect.width() / rect.height()), rect).unwrap();
+    assert!(centre.distance(rect.center()) < 1.0, "{centre:?} vs {:?}", rect.center());
+}

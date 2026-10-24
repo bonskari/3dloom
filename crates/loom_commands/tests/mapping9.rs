@@ -55,8 +55,9 @@ fn camera_map_projects_from_the_camera() {
     execute(&mut s, Command::PickModifierNode { index: 0, node: cam.0 }).unwrap();
     let m = s.scene.eval_mesh(p).value.mesh.clone();
     let uv = uv_at_vertices(&m, 1);
-    let half_h = (fov.to_radians() * 0.5).tan() * 100.0;
-    let half_w = half_h * 4.0 / 3.0;
+    // FOV is horizontal: it spans the frame's width.
+    let half_w = (fov.to_radians() * 0.5).tan() * 100.0;
+    let half_h = half_w * 3.0 / 4.0;
     for (v, t) in m.vertices().iter().zip(&uv) {
         let want = Vec2::new(0.5 + 0.5 * v.position.x / half_w, 0.5 + 0.5 * v.position.y / half_h);
         assert!(Vec2::new(t.x, t.y).distance(want) < 1e-3, "{} -> {t} want {want}", v.position);

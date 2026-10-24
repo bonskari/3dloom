@@ -23,7 +23,7 @@ pub struct CameraMapData {
     pub world: bool,
     /// Object-space version: the camera relative to the object when it was picked.
     pub camera_in_object: Option<[[f32; 4]; 4]>,
-    /// The camera's vertical field of view (degrees) at pick time (object space).
+    /// The camera's horizontal field of view (degrees) at pick time (object space).
     pub fov: f32,
 }
 
@@ -44,8 +44,8 @@ fn target_channel(vertex_color: bool, channel: u32) -> u32 {
 /// Every vertex projected through a camera (`view` = object space → camera
 /// space, camera looking down its -Z); u, v in 0..1 across the frame.
 fn project_all(v: &mut StackValue, view: Mat4, fov_deg: f32, ch: u32) {
-    let half_h = (fov_deg.to_radians() * 0.5).tan().max(1e-6);
-    let half_w = half_h * RENDER_ASPECT;
+    let half_w = (fov_deg.to_radians() * 0.5).tan().max(1e-6);
+    let half_h = half_w / RENDER_ASPECT;
     let faces: Vec<FaceId> = (0..v.mesh.face_count() as u32).map(FaceId).collect();
     let pos: Vec<Vec3> = (0..v.mesh.vertex_count() as u32).map(|i| v.mesh.vertex_position(loom_mesh::VertexId(i)).unwrap_or_default()).collect();
     let mesh = &mut v.mesh;

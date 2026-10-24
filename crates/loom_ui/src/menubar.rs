@@ -201,8 +201,17 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                 });
                 ui.menu_button("Cameras", |ui| {
-                    cmd(ui, app, "Target Camera", Command::CreateCamera { target: true });
-                    cmd(ui, app, "Free Camera", Command::CreateCamera { target: false });
+                    // Turns on the creation tool: drag (Target) or click (Free) in a viewport.
+                    for (label, target) in [("Target Camera", true), ("Free Camera", false)] {
+                        if ui.button(label).clicked() {
+                            app.create_kind = Some(crate::CreateKind::Camera { target });
+                            app.create_category = crate::Category::Cameras;
+                            app.panel_tab = crate::Tab::Create;
+                            ui.close_menu();
+                        }
+                    }
+                    ui.separator();
+                    cmd(ui, app, "Create Camera From View", Command::CreateCamera { target: false });
                 });
                 ui.separator();
                 item(ui, app, "Test Room", "Test Room");
