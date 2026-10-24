@@ -110,11 +110,11 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
         for at in [INNER, OUTER] {
             let (Some(a), Some(b)) = (corner(sl, p, ua, at), corner(sl, p, va, at)) else { continue };
             if active || uniform_active {
-                painter.line_segment([a, b], egui::Stroke::new(1.5, HOVER));
+                painter.line_segment([a, b], egui::Stroke::new(1.5_f32, HOVER));
             } else {
                 let m = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-                painter.line_segment([a, m], egui::Stroke::new(1.5, axis_color(ua)));
-                painter.line_segment([m, b], egui::Stroke::new(1.5, axis_color(va)));
+                painter.line_segment([a, m], egui::Stroke::new(1.5_f32, axis_color(ua)));
+                painter.line_segment([m, b], egui::Stroke::new(1.5_f32, axis_color(va)));
             }
         }
     }
@@ -122,7 +122,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
         let Some((s, e)) = axis_segment(sl, p, a, 0.0, 1.0) else { continue };
         let involved = involves(hl, a);
         let color = if involved && !uniform_active { HOVER } else { axis_color(a) };
-        let width = if hl == Some(Handle::Axis(a)) { 3.0 } else { 2.0 };
+        let width = if hl == Some(Handle::Axis(a)) { 3.0_f32 } else { 2.0 };
         painter.line_segment([s, e], egui::Stroke::new(width, color));
         if uniform_active {
             if let Some((s, m)) = axis_segment(sl, p, a, 0.0, INNER) {
