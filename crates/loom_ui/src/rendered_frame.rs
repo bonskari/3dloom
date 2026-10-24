@@ -186,7 +186,11 @@ fn channel_toggle(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, t
 
 fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let title = if app.state.rendered.title.is_empty() { "Rendered Frame Window".to_owned() } else { app.state.rendered.title.clone() };
-    egui::Window::new(title).id(egui::Id::new("Rendered Frame Window")).open(open).resizable(true).default_size(egui::vec2(700.0, 560.0)).show(ctx, |ui| {
+    // First shown at the image's size (1:1), within the screen.
+    let screen = ctx.screen_rect().size();
+    let (iw, ih) = app.state.rendered.image.as_ref().map_or((app.state.scene.render.width as f32, app.state.scene.render.height as f32), |i| (i.width() as f32, i.height() as f32));
+    let size = egui::vec2((iw + 24.0).clamp(480.0, (screen.x - 40.0).max(480.0)), (ih + 170.0).clamp(320.0, (screen.y - 40.0).max(320.0)));
+    egui::Window::new(title).id(egui::Id::new("Rendered Frame Window")).open(open).resizable(true).default_size(size).show(ctx, |ui| {
         // Rendering controls.
         ui.horizontal(|ui| {
             ui.label("Area to Render:");
