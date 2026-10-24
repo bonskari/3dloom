@@ -78,9 +78,6 @@ impl LoomApp {
     pub(crate) fn realistic_texture(&mut self, index: usize, size: [u32; 2], view: Mat4, projection: Mat4) -> Option<egui::TextureId> {
         let b = self.bevy()?;
         let camera = loom_bevy::ViewCamera { view, projection };
-        if std::env::var("LOOM_BEVY_DEBUG").is_ok() {
-            eprintln!("bevy view {index} {size:?} eye {:?} proj {:?}", camera.eye(), camera.bevy_projection(size[0] as f32 / size[1] as f32));
-        }
         // Cleared to transparent: the viewport background shows through.
         b.renderer.set_view(index as u32, size, &camera, [0.0; 4], true);
         b.textures.get(&(index as u32)).map(|(_, id)| *id)

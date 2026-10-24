@@ -60,8 +60,9 @@ struct View {
 
 /// Slot of the offline Render camera.
 const RENDER_SLOT: u32 = u32::MAX;
-/// Key light: from the front left and above (world Z up).
-const KEY_LIGHT_FROM: Vec3 = Vec3::new(-0.45, -0.75, 1.0);
+/// Key light: from the front right and above (world Z up), so the default
+/// Perspective view (from the front left) sees the shadows fall beside objects.
+const KEY_LIGHT_FROM: Vec3 = Vec3::new(0.8, -0.45, 1.0);
 
 /// The device a shared Bevy renderer needs: the adapter's features (less
 /// the ones Bevy itself leaves off) and its limits, as Bevy asks for them
