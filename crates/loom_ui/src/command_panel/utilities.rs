@@ -50,7 +50,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         Utility::RescaleWorldUnits => rollout(ui, "Rescale World Units", true, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Scale Factor:");
-                ui.add(egui::DragValue::new(&mut app.rescale_factor).speed(0.01).range(0.0001..=10_000.0));
+                ui.add(crate::spinner::spin(ui, &mut app.rescale_factor, 0.0001..=10_000.0).speed(0.01));
             });
             if ui.button("Rescale").clicked() {
                 let _ = app.dispatch(Command::RescaleWorldUnits { factor: app.rescale_factor });

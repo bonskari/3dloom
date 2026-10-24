@@ -103,7 +103,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let mut open = true;
     match dialog {
         Dialog::MaterialMap { .. } => file_dialog::show(ctx, app, dialog, &mut open),
-        Dialog::RenderFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::RenderFile | Dialog::SaveRenderedImage => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
         Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),
         Dialog::SelectFromScene => select_from_scene::show(ctx, app, &mut open),

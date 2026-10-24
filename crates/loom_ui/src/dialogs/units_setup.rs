@@ -24,7 +24,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.horizontal(|ui| {
                 ui.label("1 Unit =");
                 let mut scale = units.system_scale;
-                if ui.add(egui::DragValue::new(&mut scale).speed(speed).range(0.000001..=1e9)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut scale, 0.000001..=1e9).speed(speed)).changed() {
                     let _ = app.dispatch(Command::SetUnits { system_unit: None, system_scale: Some(scale), display: None, custom_name: None, custom_value: None, custom_unit: None });
                 }
                 egui::ComboBox::from_id_salt("system_unit").selected_text(units.system_unit.label()).show_ui(ui, |ui| {
@@ -82,7 +82,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     }
                     ui.label("=");
                     let mut v = value;
-                    if ui.add(egui::DragValue::new(&mut v).speed(speed).range(0.000001..=1e9)).changed() {
+                    if ui.add(crate::spinner::spin(ui, &mut v, 0.000001..=1e9).speed(speed)).changed() {
                         set(app, None, (None, Some(v), None));
                     }
                     egui::ComboBox::from_id_salt("custom_unit").selected_text(unit.label()).show_ui(ui, |ui| {

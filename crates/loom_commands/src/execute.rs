@@ -42,7 +42,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
-        c @ (C::Render { .. } | C::RenderSetup { .. }) => crate::render::execute(state, c),
+        c if crate::render::handles(&c) => crate::render::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
@@ -520,7 +520,19 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SelectObject => set_tool(state, Tool::Select),
         C::SelectAndMove => set_tool(state, Tool::Move),
         C::SelectAndRotate => set_tool(state, Tool::Rotate),
-        C::SelectAndScale | C::ScaleCycle => set_tool(state, Tool::Scale),
+        C::SelectAndScale => set_tool(state, Tool::Scale),
+        C::ScaleCycle => {
+            if state.active_tool == Tool::Scale {
+                state.scale_kind = state.scale_kind.next();
+            }
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": state.scale_kind.label() }))
+        }
+        C::ScaleType { kind } => {
+            state.scale_kind = kind;
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": kind.label() }))
+        }
         C::SubObjectLevelCycle if state.spline_selected() => {
             state.selection_mode = match state.selection_mode {
                 SelectionMode::Object => SelectionMode::Vertex,
@@ -4169,6 +4181,7 @@ fn snapshot(state: &AppState) -> Value {
         "selection": selection_json(state),
         "dialog": state.dialog.map(|d| format!("{d:?}")),
         "material_editor": state.material_editor_open,
+        "rendered_frame": crate::render::state_json(state),
         "pick_mode": state.pick_mode.map(|p| format!("{p:?}")),
         "poly_drag": state.poly_drag.map(|p| format!("{p:?}")),
         "poly_settings": serde_json::to_value(state.poly_settings).unwrap_or(Value::Null),

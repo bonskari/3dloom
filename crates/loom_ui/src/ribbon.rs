@@ -165,11 +165,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             if let Some(p) = paint {
                                 let (mut size, mut strength) = (p.brush_size, p.brush_strength);
                                 ui.label("Size");
-                                if ui.add(egui::DragValue::new(&mut size).speed(0.1).range(0.01..=f32::MAX)).changed() {
+                                if ui.add(crate::spinner::spin(ui, &mut size, 0.01..=f32::MAX).speed(0.1)).changed() {
                                     let _ = app.dispatch(Command::PaintDeformSettings { value: None, size: Some(size), strength: None, direction: None });
                                 }
                                 ui.label("Strength");
-                                if ui.add(egui::DragValue::new(&mut strength).speed(0.01).range(0.0..=1.0)).changed() {
+                                if ui.add(crate::spinner::spin(ui, &mut strength, 0.0..=1.0).speed(0.01)).changed() {
                                     let _ = app.dispatch(Command::PaintDeformSettings { value: None, size: None, strength: Some(strength), direction: None });
                                 }
                             }
@@ -180,7 +180,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         panel(ui, "By Material / SG", 360.0, |ui| {
                             let mut id: u16 = ui.ctx().data(|d| d.get_temp(egui::Id::new("ribbon_mat_id"))).unwrap_or(1);
                             ui.label("ID");
-                            if ui.add(egui::DragValue::new(&mut id).speed(0.1).range(1..=65535)).changed() {
+                            if ui.add(crate::spinner::spin(ui, &mut id, 1..=65535).speed(0.1)).changed() {
                                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ribbon_mat_id"), id));
                             }
                             if ui.button("By Material ID").clicked() {
@@ -262,7 +262,7 @@ fn modeling_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             let mut it = s.iterations.get();
             ui.label("Iterations");
-            if ui.add(egui::DragValue::new(&mut it).speed(0.1).range(0..=4)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut it, 0..=4).speed(0.1)).changed() {
                 let _ = app.dispatch(Command::SubdivisionSurface { use_nurms: None, smooth_result: None, isoline_display: None, show_cage: None, iterations: Some(it), smoothness: None, separate_by_smoothing: None, separate_by_materials: None });
             }
         }
@@ -278,7 +278,7 @@ fn modeling_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     panel(ui, "Properties", 220.0, |ui| {
         let mut id: u16 = ui.ctx().data(|d| d.get_temp(egui::Id::new("ribbon_set_id"))).unwrap_or(1);
         ui.label("Mat ID");
-        if ui.add(egui::DragValue::new(&mut id).speed(0.1).range(1..=65535)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut id, 1..=65535).speed(0.1)).changed() {
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("ribbon_set_id"), id));
         }
         if ui.button("Set ID").clicked() {
