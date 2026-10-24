@@ -621,8 +621,9 @@ fn smooth_modifier_has_32_smoothing_group_buttons() {
     }
     h.click_widget("3");
     assert_eq!(groups(&h), 1 << 2);
+    let r32 = h.widget("32");
     h.click_widget("32");
-    assert_eq!(groups(&h), (1 << 2) | (1 << 31));
+    assert_eq!(groups(&h), (1 << 2) | (1 << 31), "button 32 at {r32:?}, button 1 at {:?}", h.widget("1"));
     h.click_widget("3");
     assert_eq!(groups(&h), 1 << 31, "a second click clears the group");
     assert!(h.app.state.scene.eval_mesh(id).value.mesh.faces().iter().all(|f| f.smoothing_groups == 1 << 31));
