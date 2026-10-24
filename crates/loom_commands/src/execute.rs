@@ -2056,6 +2056,36 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             })?;
             Ok(json!({}))
         }
+        C::SetRenderProperty { name, value } => {
+            if loom_scene::RenderProps::default().get(&name).is_none() {
+                return Err(format!("no rendering control `{name}`"));
+            }
+            props_change(state, &name, selected_ids(state), |p, _| {
+                p.render.set(&name, value);
+            })?;
+            Ok(json!({}))
+        }
+        C::SetObjectVisibility { value } => {
+            let mut changes = Vec::new();
+            for id in selected_ids(state) {
+                let n = state.scene.node(id).ok_or_else(|| missing(id))?;
+                let mut after = n.visibility.clone().unwrap_or_else(|| loom_scene::Param::new(1.0));
+                after.set(value.clamp(0.0, 1.0));
+                if Some(&after) != n.visibility.as_ref() {
+                    changes.push(Change::SetVisibility { id, before: n.visibility.clone(), after: Some(after) });
+                }
+            }
+            if !changes.is_empty() {
+                commit(state, "Visibility", Change::Group(changes))?;
+            }
+            Ok(json!({}))
+        }
+        C::SetUserProperties { id, text } => {
+            props_change(state, "User Defined", vec![NodeId(id)], |p, _| {
+                p.user_props = text.clone();
+            })?;
+            Ok(json!({}))
+        }
         C::HideByHit => {
             state.pick_mode = Some(PickMode::HideByHit);
             Ok(json!({}))
