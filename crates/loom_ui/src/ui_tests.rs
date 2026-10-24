@@ -32,8 +32,14 @@ impl Harness {
         self.shapes = self.ctx.run(input, |ctx| app.frame(ctx)).shapes;
     }
 
-    /// Every text `label` painted last frame, top to bottom (its rect).
+    /// Every text `label` painted last frame in the Command Panel, top to bottom.
     fn widgets_labelled(&self, label: &str) -> Vec<egui::Rect> {
+        let panel = egui::containers::panel::PanelState::load(&self.ctx, egui::Id::new("command_panel")).expect("the Command Panel").rect;
+        self.texts(label).into_iter().filter(|r| panel.contains_rect(*r)).collect()
+    }
+
+    /// Every text `label` painted last frame, top to bottom (its rect).
+    fn texts(&self, label: &str) -> Vec<egui::Rect> {
         fn find(shape: &egui::Shape, text: &str, out: &mut Vec<egui::Rect>) {
             match shape {
                 egui::Shape::Vec(v) => v.iter().for_each(|s| find(s, text, out)),
@@ -58,10 +64,17 @@ impl Harness {
         v[0]
     }
 
-    /// Clicks the text `label`.
+    /// Clicks the text `label` in the Command Panel.
     fn click_widget(&mut self, label: &str) {
         let r = self.widget(label);
         self.click(r.center());
+    }
+
+    /// Clicks the one text `label` shown anywhere (a dialog's button).
+    fn click_text_anywhere(&mut self, label: &str) {
+        let v = self.texts(label);
+        assert_eq!(v.len(), 1, "one {label:?} shown: {v:?}");
+        self.click(v[0].center());
     }
 
     fn frames(&mut self, n: usize) {
@@ -735,6 +748,7 @@ fn shift_and_ctrl_drag_in_the_stack_copy_and_instance_a_modifier() {
     // A plain drag moves: the lower Taper (bottom row) onto the lower Bend.
     let rows = h.widgets_labelled("Taper");
     let bends = h.widgets_labelled("Bend");
+    assert!(rows.len() == 2 && bends.len() == 2, "{rows:?} {bends:?}");
     h.drag(rows[1].center(), bends[1].center());
     assert_eq!(names(&h), ["Bend", "Taper", "Taper", "Bend"]);
     assert_eq!(instances(&h), [None, None, None, Some(0)], "the instance follows its source");
@@ -756,13 +770,13 @@ fn base_parameter_change_under_edit_poly_asks_yes_hold_yes_no() {
     h.frames(2);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::TopologyWarning));
     assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "nothing changes before the answer");
-    assert_eq!(h.widgets_labelled("Hold/Yes").len(), 1);
-    h.click_widget("No");
+    assert_eq!(h.texts("Hold/Yes").len(), 1);
+    h.click_text_anywhere("No");
     assert_eq!(h.app.state.dialog, None);
     assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "No keeps the old value");
     let _ = h.app.dispatch(Command::SetParameter { id: id.0, name: "Height".into(), value: 20.0 });
     h.frames(2);
-    h.click_widget("Yes");
+    h.click_text_anywhere("Yes");
     assert_eq!(height(&h), loom_scene::ParamValue::Float(20.0), "Yes applies it");
     // Answered once for this visit to the base object: the next change applies directly.
     let _ = h.app.dispatch(Command::SetParameter { id: id.0, name: "Height".into(), value: 25.0 });
