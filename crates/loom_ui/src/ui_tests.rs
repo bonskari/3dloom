@@ -637,10 +637,16 @@ fn empty_point(h: &Harness) -> egui::Pos2 {
     egui::pos2(r.left() + r.width() * 0.06, r.top() + r.height() * 0.6)
 }
 
-/// A crossing drag over nearly the whole active viewport.
-fn drag_all(h: &mut Harness) {
-    let r = h.app.viewport_rects[h.app.state.active_viewport];
-    h.drag(egui::pos2(r.left() + r.width() * 0.04, r.top() + r.height() * 0.15), egui::pos2(r.right() - 10.0, r.bottom() - 10.0));
+/// The keys 1-5 are Editable Poly / Edit Poly shortcuts; other objects
+/// change level through the command.
+fn level(h: &mut Harness, mode: SelectionMode) {
+    h.cmd(Command::SelectionMode { mode });
+}
+
+/// The first two knots / segments / the spline of the selected Editable Spline.
+fn spline_pick(h: &mut Harness) {
+    let node = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectSub { node: Some(node.0), ids: vec![0, 1], op: loom_commands::SelectOp::Replace });
 }
 
 fn poly_plane(h: &mut Harness) {
@@ -708,11 +714,11 @@ fn a_click_on_empty_space_clears_the_selection_at_every_level_and_tool() {
         ("Editable Poly element", |h| { poly_plane(h); h.key(egui::Key::Num5); h.cmd(Command::SelectAll); }, subs),
         ("Edit Poly vertex", |h| { plane_with(h, "Edit Poly"); h.key(egui::Key::Num1); h.cmd(Command::SelectAll); }, subs),
         ("Edit Poly polygon", |h| { plane_with(h, "Edit Poly"); h.key(egui::Key::Num4); h.cmd(Command::SelectAll); }, subs),
-        ("Poly Select edge", |h| { plane_with(h, "Poly Select"); h.key(egui::Key::Num2); drag_all(h); }, subs),
-        ("Mesh Select face", |h| { plane_with(h, "Mesh Select"); h.key(egui::Key::Num3); drag_all(h); }, subs),
-        ("Editable Spline vertex", |h| { editable_rectangle(h); h.key(egui::Key::Num1); drag_all(h); }, subs),
-        ("Editable Spline segment", |h| { editable_rectangle(h); h.key(egui::Key::Num2); drag_all(h); }, subs),
-        ("Editable Spline spline", |h| { editable_rectangle(h); h.key(egui::Key::Num3); drag_all(h); }, subs),
+        ("Poly Select edge", |h| { plane_with(h, "Poly Select"); level(h, SelectionMode::Edge); h.cmd(Command::SelectAll); }, subs),
+        ("Mesh Select face", |h| { plane_with(h, "Mesh Select"); level(h, SelectionMode::Face); h.cmd(Command::SelectAll); }, subs),
+        ("Editable Spline vertex", |h| { editable_rectangle(h); level(h, SelectionMode::Vertex); spline_pick(h); }, subs),
+        ("Editable Spline segment", |h| { editable_rectangle(h); level(h, SelectionMode::Edge); spline_pick(h); }, subs),
+        ("Editable Spline spline", |h| { editable_rectangle(h); level(h, SelectionMode::Face); spline_pick(h); }, subs),
         ("Skin object", |h| skinned(h), objects),
         (
             "Skin envelope vertices",
