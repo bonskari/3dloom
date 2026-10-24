@@ -1386,6 +1386,13 @@ commands! {
     CreateCamera => "Create Camera", Loom, "Create a camera at the active viewport's eye looking at its target (Target camera gets a target node)." { target: bool };
     CreateCameraAt => "Create Camera At", Loom, "Create > Cameras: a camera at `position` looking at `look_at`; a Target camera puts its target node there, a Free camera keeps the gap as its Target Distance." { target: bool, position: [f32; 3], look_at: [f32; 3] };
     CameraType => "Camera Type", Loom, "Camera Parameters > Type: make a camera a Target camera (adds a target at Target Distance) or a Free camera (removes its target, keeps its aim)." { id: u64, target: bool };
+    CreateLight => "Create Light", Loom, "Create > Lights > Standard: a light at `position`. Target Spot / Target Direct put their target node at `target`; Free Spot / Free Direct aim at `target` and keep the gap as Target Distance; Omni and Skylight ignore it." { kind: crate::light::LightKind, position: [f32; 3], target: [f32; 3] };
+    LightType => "Light Type", Loom, "General Parameters > Light Type and Targeted: make a standard light an Omni, Spot or Directional light, with or without a target (a new target goes at Target Distance; removing one keeps the aim)." { id: u64, light_type: crate::light::LightTypeArg, targeted: bool };
+    SetLightExclusion => "Set Light Exclusion", Loom, "Exclude/Include dialog: the objects light `id` excludes (or, with `include`, the only ones it affects) for `scope` 0 Illumination, 1 Shadow Casting, 2 Both." { id: u64, include: bool, scope: u32, nodes: Vec<u64> };
+    SetLightProjectorMap => "Set Light Projector Map", Loom, "Advanced Effects > Projector Map: the bitmap light `id` projects (none clears it)." { id: u64, path: Option<String> };
+    LightLister => "Light Lister...", Loom, "Tools > Light Lister: a dialog with every light's main settings.";
+    SpotDirectionalLightView => "Spot/Directional Light View", MainUI, "Switch the active viewport to the view from the selected (or only) spot or directional light (Shift+4).";
+    ViewportDefaultLights => "Viewport Default Lights", Loom, "Viewport Configuration > Lighting: the active viewport's default lighting uses `count` 1 or 2 lights." { count: u32 };
     CreateBiped => "Create Biped", Loom, "Systems > Biped: a biped standing with its feet at `position`, `height` tall (default 1.8 m in scene units), root named `name` (default Bip001, Bip002, ...), with optional Structure values. Only the centre of mass is selected; Figure Mode is on." { position: [f32; 3], height: Option<f32>, name: Option<String>, arms: Option<bool>, neck_links: Option<u32>, spine_links: Option<u32>, leg_links: Option<u32>, tail_links: Option<u32>, fingers: Option<u32>, finger_links: Option<u32>, toes: Option<u32>, toe_links: Option<u32> };
     SetBipedStructure => "Set Biped Structure", Loom, "Biped Structure rollout (Figure Mode only) of the biped `id` (its root or any part): Height, Arms, Neck Links 1-25, Spine Links 1-10, Leg Links 3-4, Tail Links 0-25, Fingers 0-5, Finger Links 1-4, Toes 1-5, Toe Links 1-3. Parts are rebuilt with their names kept." { id: u64, height: Option<f32>, arms: Option<bool>, neck_links: Option<u32>, spine_links: Option<u32>, leg_links: Option<u32>, tail_links: Option<u32>, fingers: Option<u32>, finger_links: Option<u32>, toes: Option<u32>, toe_links: Option<u32> };
     BipedFigureMode => "Biped Figure Mode", Loom, "Biped rollout > Figure Mode of the selected biped: toggles it, or sets it with `on`. On shows the figure pose, off brings back the animated pose." { on: Option<bool> };
@@ -1699,7 +1706,6 @@ pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
     ("Create Animated Sequence File...", "3"),
     ("Hide Particle Systems Toggle", "3"),
     ("Hide Space Warps Toggle", "3"),
-    ("Spot/Directional Light View", "3"),
     ("Sound Toggle", "3"),
     ("Adaptive Degradation Toggle", "3"),
     // Legacy OpenGL-driver-only feature, not in the spec's viewport list.

@@ -490,10 +490,11 @@ impl SelectionFilter {
     pub fn accepts(self, node: &Node) -> bool {
         match self {
             SelectionFilter::All => true,
-            SelectionFilter::Geometry => !matches!(node.object, ObjectKind::Camera { .. }) && !node.object.is_shape(),
+            SelectionFilter::Geometry => !matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_)) && !node.object.is_shape(),
             SelectionFilter::Shapes => node.object.is_shape(),
             SelectionFilter::Cameras => matches!(node.object, ObjectKind::Camera { .. }),
-            // No lights, helpers, bones, IK chains or points exist yet.
+            SelectionFilter::Lights => matches!(node.object, ObjectKind::Light(_)),
+            // No helpers, bones, IK chains or points exist yet.
             _ => false,
         }
     }
@@ -1755,6 +1756,7 @@ impl AppState {
         let c = &self.hide_category;
         !match node.object {
             ObjectKind::Camera { .. } => c.cameras,
+            ObjectKind::Light(_) => c.lights,
             ref o if o.is_shape() => c.shapes,
             _ => c.geometry,
         }

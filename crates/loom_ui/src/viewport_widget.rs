@@ -54,6 +54,12 @@ fn apply_picks(app: &mut LoomApp, picks: Vec<Pick>, mods: Modifiers) {
     let op = if mods.ctrl { SelectOp::Add } else if mods.alt { SelectOp::Subtract } else { SelectOp::Replace };
     if picks.is_empty() {
         if op == SelectOp::Replace {
+            // At a sub-object level the first empty click clears the
+            // sub-objects; one with none selected lets go of the object too,
+            // which ends the level.
+            if app.state.selection_mode != loom_commands::SelectionMode::Object && app.state.sub_selection.is_empty() {
+                let _ = app.dispatch(Command::SelectionMode { mode: loom_commands::SelectionMode::Object });
+            }
             let _ = app.dispatch(Command::SelectNone);
         }
         return;
@@ -513,9 +519,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             ctx.request_repaint();
                         }
                     }
+                    // A poly mode drag (Extrude, Chamfer, paint brushes) owns the press.
                     if pointer.button_pressed(egui::PointerButton::Primary)
                         && response.hovered()
                         && app.manip_drag.is_none()
+                        && !app.poly_dragging
                         && app.state.active_tool != Tool::Select
                         && app.has_selection()
                         && !(app.poly_dragging && matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)))
@@ -657,6 +665,18 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         app.camera_create = crate::create_tool::CameraSession::begin(app, anchor, basis.2);
                                     } else {
                                         crate::create_tool::CameraSession::place_free(app, anchor, basis.2);
+                                    }
+                                }
+                            } else if let Some(crate::CreateKind::Light(kind)) = app.create_kind {
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                    if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
+                                        anchor = hit.point;
+                                        app.consume_snap_override();
+                                    }
+                                    if kind.targeted() {
+                                        app.camera_create = crate::create_tool::CameraSession::begin_light(app, kind, anchor, basis.2);
+                                    } else {
+                                        crate::create_tool::CameraSession::place_light(app, kind, anchor, basis.2);
                                     }
                                 }
                             } else if app.create_kind == Some(crate::CreateKind::Line) {
@@ -958,12 +978,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 };
                 let lighting = match vp.shading {
                     loom_commands::Shading::Flat => 1,
-                    _ if vp.scene_lights => 2,
                     _ => 0,
                 };
                 // Hidden Line: faces in the viewport colour hide the lines behind them.
                 let override_color = (vp.shading == loom_commands::Shading::HiddenLine).then_some([0.0806, 0.0806, 0.0806]);
-                let view_shading = loom_render::ViewShading { lighting, override_color };
+                let mut view_shading = loom_render::ViewShading { lighting, override_color, ..Default::default() };
+                if lighting == 0 && override_color.is_none() {
+                    view_shading = crate::light_overlay::view_lighting(app, vp, view, view_shading);
+                }
                 let edges = vp.edged_faces || vp.shading == loom_commands::Shading::HiddenLine;
                 (vp.shading == loom_commands::Shading::Wireframe, grid_plane, edges, vp.show_grid, view_shading)
             };
@@ -1018,6 +1040,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             let hover_pos = ctx.input(|i| i.pointer.hover_pos());
             draw_shapes(&painter, app, view_proj, rect);
             crate::camera_overlay::draw(&painter, app, index, view_proj, rect);
+            crate::light_overlay::draw(&painter, app, index, view_proj, rect, realistic);
             crate::spline_modes::draw(&painter, app, &projection);
             draw_mode_overlays(&painter, app, view_proj, rect);
             draw_soft_selection(&painter, app, view_proj, rect);

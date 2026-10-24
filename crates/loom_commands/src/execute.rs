@@ -923,6 +923,21 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 None => Ok(json!({ "camera": Value::Null })),
             }
         }
+        C::SpotDirectionalLightView => {
+            let aims = |id: &NodeId| matches!(state.scene.node(*id).map(|n| &n.object), Some(ObjectKind::Light(l)) if l.light_type.aims());
+            let light = state.selection.iter().copied().find(|id| aims(id)).or_else(|| {
+                let lights: Vec<NodeId> = state.scene.nodes().map(|n| n.id).filter(|id| aims(id)).collect();
+                (lights.len() == 1).then(|| lights[0])
+            });
+            match light {
+                Some(id) => set_view(state, ViewKind::Camera(id)),
+                None => Ok(json!({ "light": Value::Null })),
+            }
+        }
+        C::ViewportDefaultLights { count } => {
+            state.active_mut().default_lights = count.clamp(1, 2);
+            Ok(json!({ "default_lights": count.clamp(1, 2) }))
+        }
         C::ViewportLayout { layout } => {
             state.layout = layout;
             let kinds = default_kinds(layout);
@@ -1795,7 +1810,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::CreateProBoolean => {
             let id = state.selection.iter().next().copied().ok_or("select the base object first")?;
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-            if node.object.is_shape() || matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
+            if node.object.is_shape() || matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }) {
                 return Err("ProBoolean needs a mesh object".into());
             }
             let base = state.scene.eval_mesh(id).value.mesh.clone();
@@ -1894,6 +1909,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. }) => crate::camera::execute(state, c),
+        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister) => crate::light::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
@@ -2323,7 +2339,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let mut changes = Vec::new();
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-                if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
+                if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }) {
                     continue;
                 }
                 // As the reference: rotation and scale (and the pivot offset) go into
@@ -2891,7 +2907,7 @@ fn compound_boolean(state: &mut AppState, b: NodeId, operation: u32, move_operan
     }
     let node = state.scene.node(id).ok_or_else(|| missing(id))?;
     let bnode = state.scene.node(b).ok_or_else(|| missing(b))?;
-    if node.object.is_shape() || bnode.object.is_shape() || matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
+    if node.object.is_shape() || bnode.object.is_shape() || matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }) {
         return Err("Boolean needs two mesh objects".into());
     }
     let a_mesh = state.scene.eval_mesh(id).value.mesh.clone();
@@ -3107,7 +3123,7 @@ fn export_obj(state: &AppState, ids: &[NodeId], path: &std::path::Path) -> Resul
     let mut objects = Vec::new();
     for id in ids {
         let Some(node) = state.scene.node(*id) else { continue };
-        if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
+        if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }) {
             continue;
         }
         let mesh = state.scene.eval_mesh(*id).value.mesh.clone();
