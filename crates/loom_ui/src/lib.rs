@@ -18,10 +18,10 @@ mod statusbar;
 pub mod tools;
 pub mod viewport_gizmo;
 mod viewport_widget;
-mod probe;
 pub mod poly_modes;
 pub mod spline_modes;
 pub mod ribbon;
+pub mod shortcuts;
 pub mod viewports;
 pub mod uv_editor;
 pub mod track_view;
@@ -31,7 +31,7 @@ mod ui_tests;
 
 use eframe::egui;
 use glam::Vec3;
-use loom_commands::{AppState, Command, Keymap, PrimitiveKind, ShapeKind, Tool};
+use loom_commands::{AppState, Command, PrimitiveKind, ShapeKind, Tool};
 pub use command_panel::create::Category;
 pub use command_panel::Tab;
 pub use command_panel::hierarchy::Sub as HierarchySub;
@@ -116,6 +116,8 @@ pub enum CreateKind {
     Line,
     /// Systems > Bones: clicks lay joints, a right-click ends the chain.
     Bones,
+    /// Systems > Biped: drag from the feet to set the height.
+    Biped,
     /// Helpers > Dummy / Point: a click places one.
     Helper(HelperKind),
     /// Cameras > Target (drag camera to target) / Free (a click places one).
@@ -153,7 +155,6 @@ pub enum LineDrag {
 
 pub struct LoomApp {
     pub state: AppState,
-    pub keymap: Keymap,
     pub camera_controller: ViewportNavigator,
     /// World-space meshes of visible nodes, rebuilt when `state.mesh_dirty`.
     world_meshes: Vec<(NodeId, Mesh)>,
@@ -202,6 +203,12 @@ pub struct LoomApp {
     pub create: Option<CreateSession>,
     /// A Target camera being dragged out.
     pub camera_create: Option<create_tool::CameraSession>,
+    /// A biped being dragged out.
+    pub biped_create: Option<create_tool::BipedSession>,
+    /// Create Biped rollout: the structure the next biped gets.
+    pub biped_defaults: loom_scene::biped::BipedStructure,
+    /// The biped made last; the Create Biped rollout still edits it.
+    pub last_biped: Option<NodeId>,
     pub panel_tab: Tab,
     pub hierarchy_sub: HierarchySub,
     pub utility: Utility,
@@ -295,7 +302,6 @@ impl LoomApp {
     pub fn headless() -> Self {
         Self {
             state: AppState::new(),
-            keymap: Keymap::main_ui(),
             camera_controller: ViewportNavigator::new(),
             world_meshes: Vec::new(),
             world_styles: Vec::new(),
@@ -322,6 +328,9 @@ impl LoomApp {
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
             camera_create: None,
+            biped_create: None,
+            biped_defaults: loom_scene::biped::BipedStructure::new(1.0),
+            last_biped: None,
             panel_tab: Tab::Create,
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
@@ -594,6 +603,12 @@ impl LoomApp {
     /// Visible nodes with their world-space meshes, in render order.
     pub fn world_meshes(&self) -> &[(NodeId, Mesh)] {
         &self.world_meshes
+    }
+
+    /// What the viewports draw for each of `world_meshes` (a Skin's posed
+    /// result, not the cage), in the same order.
+    pub fn world_display(&self) -> &[Mesh] {
+        &self.world_display
     }
 
     pub fn render_camera(&self) -> Camera {

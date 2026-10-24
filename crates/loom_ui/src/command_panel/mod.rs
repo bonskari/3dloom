@@ -1,5 +1,6 @@
 //! Command Panel (right side): Scene (the object hierarchy) and the six tabs.
 
+pub mod biped;
 pub mod compound;
 pub mod create;
 pub mod display;
@@ -68,9 +69,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         .show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for tab in Tab::ALL {
-                    let r = ui.selectable_label(app.panel_tab == tab, tab.label());
-                    crate::probe::note(ui, tab.label(), &r);
-                    if r.clicked() {
+                    if ui.selectable_label(app.panel_tab == tab, tab.label()).clicked() {
                         app.panel_tab = tab;
                     }
                 }

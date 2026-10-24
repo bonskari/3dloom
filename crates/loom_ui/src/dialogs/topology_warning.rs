@@ -10,19 +10,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     egui::Window::new("Warning").open(open).resizable(false).collapsible(false).show(ctx, |ui| {
         ui.label("A modifier exists in the stack that depends on topology which may change.\nChanging parameters may have undesirable effects.\nAre you sure?");
         ui.horizontal(|ui| {
-            let r = ui.button("Yes");
-            crate::probe::note(ui, "Yes", &r);
-            if r.clicked() {
+            if ui.button("Yes").clicked() {
                 answer = Some((true, false));
             }
-            let r = ui.button("Hold/Yes");
-            crate::probe::note(ui, "Hold/Yes", &r);
-            if r.clicked() {
+            if ui.button("Hold/Yes").clicked() {
                 answer = Some((true, true));
             }
-            let r = ui.button("No");
-            crate::probe::note(ui, "No", &r);
-            if r.clicked() {
+            if ui.button("No").clicked() {
                 answer = Some((false, false));
             }
         });

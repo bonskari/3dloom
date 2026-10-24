@@ -297,6 +297,17 @@ fn row(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
     ui.add_enabled(enabled, egui::Button::new(label).min_size(egui::vec2(w, 20.0)).frame(false))
 }
 
+/// A command row: its chord right-aligned and in the hover text.
+fn cmd_row(ui: &mut egui::Ui, state: &loom_commands::AppState, label: &str, cmd: &Command) -> egui::Response {
+    let w = ui.available_width();
+    let action = crate::shortcuts::action_of(cmd);
+    let r = ui.add(crate::shortcuts::menu_widget(state, label, action).min_size(egui::vec2(w, 20.0)).frame(false));
+    match crate::shortcuts::chord(state, action) {
+        Some(c) => r.on_hover_text(format!("{label} ({c})")),
+        None => r,
+    }
+}
+
 fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, q: &Quadrant, close: &mut bool) {
     ui.spacing_mut().item_spacing.y = 1.0;
     ui.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
@@ -306,7 +317,7 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, q: &Quadrant, close: &mut b
     for item in &q.items {
         match &item.action {
             Action::Command(cmd) => {
-                if row(ui, &item.label, true).clicked() {
+                if cmd_row(ui, &app.state, &item.label, cmd).clicked() {
                     let _ = app.dispatch(cmd.clone());
                     *close = true;
                 }
@@ -316,7 +327,7 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, q: &Quadrant, close: &mut b
                     ui.set_min_width(170.0);
                     for c in children {
                         if let Action::Command(cmd) = &c.action {
-                            if row(ui, &c.label, true).clicked() {
+                            if cmd_row(ui, &app.state, &c.label, cmd).clicked() {
                                 let _ = app.dispatch(cmd.clone());
                                 ui.close_menu();
                             }
@@ -378,8 +389,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: Open) -> bool {
     if let Some(t2) = &q.tools2 {
         place(ctx, app, "tools2", t2, egui::Align2::RIGHT_TOP);
     }
-    // Submenus are their own areas, so test "over any area" rather than our panels.
-    let clicked_outside = open.armed && ctx.input(|i| i.pointer.any_pressed()) && !ctx.is_pointer_over_area();
+    // Submenus are their own areas, so test "over any menu area" rather than our panels
+    // (not "over any area": the panels and the viewports' central panel count as areas too).
+    let over_menu = ctx.input(|i| i.pointer.interact_pos()).and_then(|p| ctx.layer_id_at(p)).is_some_and(|l| l.order == egui::Order::Foreground);
+    let clicked_outside = open.armed && ctx.input(|i| i.pointer.any_pressed()) && !over_menu;
     let _ = any_hover;
     let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     if !open.armed {

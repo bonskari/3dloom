@@ -2,6 +2,7 @@
 //! toolbar, the texture-coordinate canvas and the bottom bar. Every action
 //! is a command; the window only draws and turns mouse input into them.
 
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{Command, FreeformHit, SelectOp, TvLevel, TvMode, UvTexture};
@@ -107,14 +108,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
 }
 
 fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, cmd: Command) {
-    if ui.button(label).clicked() {
+    if crate::shortcuts::menu_button(ui, &app.state, label, cmd.name()).clicked() {
         let _ = app.dispatch(cmd);
         ui.close_menu();
     }
 }
 
 fn toggle_item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, cmd: Command) {
-    if ui.checkbox(&mut on.clone(), label).clicked() {
+    if ui.checkbox(&mut on.clone(), label).with_shortcut(&app.state, cmd.name()).clicked() {
         let _ = app.dispatch(cmd);
         ui.close_menu();
     }
@@ -240,7 +241,7 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
     let e = app.state.uv_editor.clone();
     ui.horizontal_wrapped(|ui| {
         let mode = |ui: &mut egui::Ui, app: &mut LoomApp, label: &str, m: TvMode, cmd: Command| {
-            if ui.selectable_label(e.mode == m, label).clicked() {
+            if ui.selectable_label(e.mode == m, label).with_shortcut(&app.state, cmd.name()).clicked() {
                 let _ = app.dispatch(cmd);
             }
         };
@@ -288,7 +289,7 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = app.dispatch(Command::RemoveTexture);
             }
         });
-        if ui.button("Update Map").clicked() {
+        if ui.button("Update Map").with_shortcut(&app.state, Command::UpdateMap.name()).clicked() {
             let _ = app.dispatch(Command::UpdateMap);
         }
     });
@@ -628,25 +629,24 @@ fn interact(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Response, vie
     if matches!(app.uv_drag, Some(UvDrag::Pan { .. })) && !pan_drag {
         app.uv_drag = None;
     }
-    if pointer.secondary_clicked() && response.hovered() {
-        // Right-click quad: the common tools.
-        response.clone().context_menu(|ui| {
-            item(ui, app, "Break", Command::BreakSelectedVertices);
-            item(ui, app, "Weld Selected", Command::TextureVertexWeldSelected);
-            item(ui, app, "Target Weld", Command::TextureVertexTargetWeld);
-            item(ui, app, "Detach Edge Verts", Command::DetachEdgeVerts);
-            item(ui, app, "Stitch Selected", Command::Stitch);
-            ui.separator();
-            item(ui, app, "Flip Horizontal", Command::FlipHorizontal);
-            item(ui, app, "Flip Vertical", Command::FlipVertical);
-            item(ui, app, "Mirror Horizontal", Command::MirrorHorizontal);
-            item(ui, app, "Mirror Vertical", Command::MirrorVertical);
-            ui.separator();
-            item(ui, app, "Relax", Command::RelaxUnwrap);
-            item(ui, app, "Pack UVs", Command::Pack);
-            item(ui, app, "Flatten Mapping", Command::FlattenMap);
-        });
-    }
+    // Right-click quad: the common tools. Shown every frame (not only on the
+    // right-click), or the menu would vanish the frame after it opened.
+    response.clone().context_menu(|ui| {
+        item(ui, app, "Break", Command::BreakSelectedVertices);
+        item(ui, app, "Weld Selected", Command::TextureVertexWeldSelected);
+        item(ui, app, "Target Weld", Command::TextureVertexTargetWeld);
+        item(ui, app, "Detach Edge Verts", Command::DetachEdgeVerts);
+        item(ui, app, "Stitch Selected", Command::Stitch);
+        ui.separator();
+        item(ui, app, "Flip Horizontal", Command::FlipHorizontal);
+        item(ui, app, "Flip Vertical", Command::FlipVertical);
+        item(ui, app, "Mirror Horizontal", Command::MirrorHorizontal);
+        item(ui, app, "Mirror Vertical", Command::MirrorVertical);
+        ui.separator();
+        item(ui, app, "Relax", Command::RelaxUnwrap);
+        item(ui, app, "Pack UVs", Command::Pack);
+        item(ui, app, "Flatten Mapping", Command::FlattenMap);
+    });
     if e.paint_select && e.plane == 0 {
         paint_select(ui, app, response, view, &pointer, mods, p);
         return;
@@ -810,19 +810,19 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp, mesh: &Mesh, ch: u32, data: 
             }
         }
         ui.separator();
-        if ui.selectable_label(e.lock_selected, "Lock").on_hover_text("Lock Selected Vertices (Space)").clicked() {
+        if ui.selectable_label(e.lock_selected, "Lock").on_hover_cmd(&app.state, "Lock Selected Vertices", Command::LockSelectedVertices.name()).clicked() {
             let _ = app.dispatch(Command::LockSelectedVertices);
         }
-        if ui.selectable_label(e.filter_selected_polygons, "Filter Sel.").clicked() {
+        if ui.selectable_label(e.filter_selected_polygons, "Filter Sel.").with_shortcut(&app.state, Command::FilterSelectedPolygons.name()).clicked() {
             let _ = app.dispatch(Command::FilterSelectedPolygons);
         }
-        if ui.button("Hide").clicked() {
+        if ui.button("Hide").with_shortcut(&app.state, Command::HideSelectedUnwrap.name()).clicked() {
             let _ = app.dispatch(Command::HideSelectedUnwrap);
         }
         if ui.button("Unhide All").clicked() {
             let _ = app.dispatch(Command::UnhideAllUnwrap);
         }
-        if ui.button("Freeze").clicked() {
+        if ui.button("Freeze").with_shortcut(&app.state, Command::FreezeSelected.name()).clicked() {
             let _ = app.dispatch(Command::FreezeSelected);
         }
         if ui.button("Unfreeze All").clicked() {
@@ -835,7 +835,7 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp, mesh: &Mesh, ch: u32, data: 
         if ui.button("Zoom Sel.").clicked() {
             let _ = app.dispatch(Command::ZoomExtentsSelectedUv);
         }
-        if ui.selectable_label(e.snap, "Snap").clicked() {
+        if ui.selectable_label(e.snap, "Snap").with_shortcut(&app.state, Command::Snap.name()).clicked() {
             let _ = app.dispatch(Command::Snap);
         }
     });
@@ -846,10 +846,10 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp, mesh: &Mesh, ch: u32, data: 
             }
         }
         ui.separator();
-        if ui.button("+").on_hover_text("Expand Selection").clicked() {
+        if ui.button("+").on_hover_cmd(&app.state, "Expand Selection", Command::TextureVertexExpandSelection.name()).clicked() {
             let _ = app.dispatch(Command::TextureVertexExpandSelection);
         }
-        if ui.button("-").on_hover_text("Contract Selection").clicked() {
+        if ui.button("-").on_hover_cmd(&app.state, "Contract Selection", Command::TextureVertexContractSelection.name()).clicked() {
             let _ = app.dispatch(Command::TextureVertexContractSelection);
         }
         if ui.selectable_label(e.select_element, "Select Element").clicked() {
@@ -865,10 +865,10 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp, mesh: &Mesh, ch: u32, data: 
         if ui.button("Rotate -90").clicked() {
             let _ = app.dispatch(Command::RotateMinus90);
         }
-        if ui.button("Mirror H").clicked() {
+        if ui.button("Mirror H").with_shortcut(&app.state, Command::MirrorHorizontal.name()).clicked() {
             let _ = app.dispatch(Command::MirrorHorizontal);
         }
-        if ui.button("Mirror V").clicked() {
+        if ui.button("Mirror V").with_shortcut(&app.state, Command::MirrorVertical.name()).clicked() {
             let _ = app.dispatch(Command::MirrorVertical);
         }
         if ui.button("Align H").clicked() {

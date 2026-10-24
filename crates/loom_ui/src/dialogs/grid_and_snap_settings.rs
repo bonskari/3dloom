@@ -1,5 +1,6 @@
 //! Grid and Snap Settings dialog: Snaps, Options and Home Grid tabs.
 
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::snap::SnapTargets;
@@ -102,12 +103,12 @@ fn options_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.end_row();
     });
     let mut f = s.snap_to_frozen;
-    if ui.checkbox(&mut f, "Snap to frozen objects").changed() {
+    if ui.checkbox(&mut f, "Snap to frozen objects").with_shortcut(&app.state, Command::SnapToFrozenObjectsToggle.name()).changed() {
         set(app, Command::SnapToFrozenObjectsToggle);
     }
     ui.label(egui::RichText::new("Translation").strong());
     let mut a = s.use_axis_constraints;
-    if ui.checkbox(&mut a, "Use Axis Constraints").changed() {
+    if ui.checkbox(&mut a, "Use Axis Constraints").with_shortcut(&app.state, Command::EnableAxisConstraintsInSnapsToggle.name()).changed() {
         set(app, Command::EnableAxisConstraintsInSnapsToggle);
     }
     let mut r = s.show_rubber_band;

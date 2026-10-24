@@ -4,6 +4,7 @@
 //! rollouts, or the modifier's parameters and sub-object levels).
 
 use super::{create, rollout};
+use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{Command, SelectionMode};
@@ -146,10 +147,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             });
             (open, leave)
         };
-        let level_row = |ui: &mut egui::Ui, label: &str, current: bool| -> bool {
+        let level_row = |ui: &mut egui::Ui, label: &str, current: bool, chord: Option<String>| -> bool {
             ui.horizontal(|ui| {
                 ui.add_space(40.0);
-                ui.add(egui::SelectableLabel::new(current, label)).clicked()
+                let r = ui.add(egui::SelectableLabel::new(current, label));
+                match chord {
+                    Some(c) => r.on_hover_text(format!("{label} ({c})")),
+                    None => r,
+                }
+                .clicked()
             })
             .inner
         };
@@ -168,7 +174,6 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let label = if instance.is_some() { format!("{name}  (instanced)") } else { name.clone() };
                 let text = if active == Some(i) { egui::RichText::new(label).strong() } else { egui::RichText::new(label) };
                 let r = ui.add(egui::SelectableLabel::new(active == Some(i), text)).interact(egui::Sense::click_and_drag());
-                crate::probe::note(ui, name, &r);
                 if r.clicked() {
                     select = Some(Some(i));
                 }
@@ -214,7 +219,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 for (j, l) in levels.iter().enumerate() {
                     let level = j as u32 + 1;
                     let current = active == Some(i) && *lvl == level;
-                    if level_row(ui, l, current) {
+                    if level_row(ui, l, current, None) {
                         let _ = app.dispatch(Command::ModifierSubobjectLevel { index: i as u32, level: if current { 0 } else { level } });
                     }
                 }
@@ -231,7 +236,6 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             let base = if active.is_none() { egui::RichText::new(&stack_name).strong() } else { egui::RichText::new(&stack_name) };
             let r = ui.add(egui::SelectableLabel::new(active.is_none(), base));
-            crate::probe::note(ui, &stack_name, &r);
             if r.clicked() {
                 select = Some(None);
             }
@@ -254,7 +258,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         if base_open {
             for (l, m) in &base_levels {
                 let current = base_in_level && mode == *m;
-                if level_row(ui, l, current) {
+                if level_row(ui, l, current, crate::shortcuts::chord(&app.state, crate::shortcuts::level_action(*m))) {
                     if active.is_some() {
                         let _ = app.dispatch(Command::SelectStackEntry { index: None });
                     }
@@ -284,9 +288,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         if ui.selectable_label(app.state.pin_stack, "📌").on_hover_text("Pin Stack").clicked() {
             let _ = app.dispatch(Command::PinStackToggle);
         }
-        let r = ui.selectable_label(app.state.show_end_result, "⏚").on_hover_text("Show End Result On/Off Toggle");
-        crate::probe::note(ui, "⏚", &r);
-        if r.clicked() {
+        if ui.selectable_label(app.state.show_end_result, "⏚").on_hover_text("Show End Result On/Off Toggle").clicked() {
             let _ = app.dispatch(Command::ShowEndResultToggle);
         }
         let instanced = active.and_then(|a| entries.get(a)).is_some_and(|e| e.3.is_some()) || node_instanced;
@@ -649,7 +651,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         });
         rollout(ui, "Parameters", true, |ui| {
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Edit...").clicked() {
+                if ui.button("Edit...").on_hover_cmd(&app.state, "Open the Edit UVWs window", Command::EditUvws.name()).clicked() {
                     let _ = app.dispatch(Command::EditUvws);
                 }
                 if ui.button("Reset UVWs").clicked() {
@@ -658,7 +660,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Save...").clicked() {
                     let _ = app.dispatch(Command::SaveUvw { path: None });
                 }
-                if ui.button("Load...").clicked() {
+                if ui.button("Load...").with_shortcut(&app.state, Command::LoadUvw { path: None }.name()).clicked() {
                     let _ = app.dispatch(Command::LoadUvw { path: None });
                 }
             });
@@ -678,7 +680,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             });
             ui.label(egui::RichText::new("Display:").strong());
             let mut ss = u.show_seams.get();
-            if ui.checkbox(&mut ss, "Show Seams").changed() {
+            if ui.checkbox(&mut ss, "Show Seams").with_shortcut(&app.state, Command::ShowSeamsInViewport.name()).changed() {
                 let _ = app.dispatch(Command::ShowSeamsInViewport);
             }
             ui.horizontal(|ui| {
@@ -702,7 +704,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         rollout(ui, "Map Parameters", true, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (label, cmd) in [("Planar", Command::PlanarMapFaces), ("Pelt", Command::PeltDialog), ("Cylindrical", Command::CylindricalMap), ("Spherical", Command::SphericalMap), ("Box", Command::BoxMap)] {
-                    if ui.button(label).clicked() {
+                    if ui.button(label).with_shortcut(&app.state, cmd.name()).clicked() {
                         let _ = app.dispatch(cmd);
                     }
                 }
@@ -843,8 +845,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if smooth_groups.is_some() && pname == "Smoothing Groups" {
                     continue;
                 }
-                let r = ui.label(pname);
-                crate::probe::note(ui, pname, &r);
+                ui.label(pname);
                 match value {
                     loom_scene::ParamValue::Float(f) => {
                         let mut v = f;
@@ -897,9 +898,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             // 8 to a row; a click toggles that group.
             egui::Grid::new(("smooth_groups", id.0, index)).spacing([2.0, 2.0]).show(ui, |ui| {
                 for g in 0..32u32 {
-                    let r = ui.add(egui::SelectableLabel::new(bits & (1 << g) != 0, (g + 1).to_string()));
-                    crate::probe::note(ui, &(g + 1).to_string(), &r);
-                    if r.clicked() {
+                    if ui.add(egui::SelectableLabel::new(bits & (1 << g) != 0, (g + 1).to_string())).clicked() {
                         let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: "Smoothing Groups".into(), value: (bits ^ (1 << g)) as f64 });
                     }
                     if g % 8 == 7 {
