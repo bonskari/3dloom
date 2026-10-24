@@ -629,25 +629,24 @@ fn interact(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Response, vie
     if matches!(app.uv_drag, Some(UvDrag::Pan { .. })) && !pan_drag {
         app.uv_drag = None;
     }
-    if pointer.secondary_clicked() && response.hovered() {
-        // Right-click quad: the common tools.
-        response.clone().context_menu(|ui| {
-            item(ui, app, "Break", Command::BreakSelectedVertices);
-            item(ui, app, "Weld Selected", Command::TextureVertexWeldSelected);
-            item(ui, app, "Target Weld", Command::TextureVertexTargetWeld);
-            item(ui, app, "Detach Edge Verts", Command::DetachEdgeVerts);
-            item(ui, app, "Stitch Selected", Command::Stitch);
-            ui.separator();
-            item(ui, app, "Flip Horizontal", Command::FlipHorizontal);
-            item(ui, app, "Flip Vertical", Command::FlipVertical);
-            item(ui, app, "Mirror Horizontal", Command::MirrorHorizontal);
-            item(ui, app, "Mirror Vertical", Command::MirrorVertical);
-            ui.separator();
-            item(ui, app, "Relax", Command::RelaxUnwrap);
-            item(ui, app, "Pack UVs", Command::Pack);
-            item(ui, app, "Flatten Mapping", Command::FlattenMap);
-        });
-    }
+    // Right-click quad: the common tools. Shown every frame (not only on the
+    // right-click), or the menu would vanish the frame after it opened.
+    response.clone().context_menu(|ui| {
+        item(ui, app, "Break", Command::BreakSelectedVertices);
+        item(ui, app, "Weld Selected", Command::TextureVertexWeldSelected);
+        item(ui, app, "Target Weld", Command::TextureVertexTargetWeld);
+        item(ui, app, "Detach Edge Verts", Command::DetachEdgeVerts);
+        item(ui, app, "Stitch Selected", Command::Stitch);
+        ui.separator();
+        item(ui, app, "Flip Horizontal", Command::FlipHorizontal);
+        item(ui, app, "Flip Vertical", Command::FlipVertical);
+        item(ui, app, "Mirror Horizontal", Command::MirrorHorizontal);
+        item(ui, app, "Mirror Vertical", Command::MirrorVertical);
+        ui.separator();
+        item(ui, app, "Relax", Command::RelaxUnwrap);
+        item(ui, app, "Pack UVs", Command::Pack);
+        item(ui, app, "Flatten Mapping", Command::FlattenMap);
+    });
     if e.paint_select && e.plane == 0 {
         paint_select(ui, app, response, view, &pointer, mods, p);
         return;
