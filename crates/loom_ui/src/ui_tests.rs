@@ -2160,6 +2160,11 @@ fn exchange_dir(name: &str) -> std::path::PathBuf {
     d
 }
 
+/// The rect of an FBX / OBJ options window (by its id).
+fn options_rect(h: &Harness, id: &str) -> egui::Rect {
+    h.ctx.memory(|m| m.area_rect(egui::Id::new(id))).unwrap_or_else(|| panic!("the {id} window is shown"))
+}
+
 /// Types `path` into the in-app file dialog's File name field and clicks `button`.
 fn choose_file(h: &mut Harness, path: &std::path::Path, button: &str) {
     click_text(h, "File name:", SCREEN, 40.0);
@@ -2180,10 +2185,11 @@ fn fbx_export_goes_through_its_options_dialog() {
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxExportOptions), "the options come before the file is written");
     assert!(!path.exists());
     assert!(!h.app.state.exchange.fbx_export.triangulate);
-    click_text(&mut h, "Triangulate", SCREEN, 0.0);
+    let win = options_rect(&h, "fbx_export_options");
+    click_text(&mut h, "Triangulate", win, 0.0);
     assert!(h.app.state.exchange.fbx_export.triangulate, "the check box sets the option");
-    assert!(h.text_rect("User defined", SCREEN).is_some(), "the preset shows it was changed");
-    click_text(&mut h, "OK", SCREEN, 0.0);
+    assert!(h.text_rect("User defined", win).is_some(), "the preset shows it was changed");
+    click_text(&mut h, "OK", win, 0.0);
     assert_eq!(h.app.state.dialog, None);
     let doc = loom_fbx::read(&std::fs::read(&path).unwrap(), 0.01).unwrap();
     let loom_fbx::FbxKind::Mesh { mesh, .. } = &doc.nodes[0].kind else { panic!("{:?}", doc.nodes[0].kind) };
@@ -2204,14 +2210,15 @@ fn fbx_import_options_cancel_and_cameras_off() {
     h.cmd(Command::ImportFile { path: None });
     choose_file(&mut h, &path, "Open");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxImportOptions));
-    click_text(&mut h, "Cancel", SCREEN, 0.0);
+    click_text(&mut h, "Cancel", options_rect(&h, "fbx_import_options"), 0.0);
     assert_eq!(h.app.state.dialog, None);
     assert_eq!(h.app.state.scene.len(), 0, "Cancel imports nothing");
     h.cmd(Command::ImportFile { path: None });
     choose_file(&mut h, &path, "Open");
-    click_text(&mut h, "Cameras", SCREEN, 0.0);
+    let win = options_rect(&h, "fbx_import_options");
+    click_text(&mut h, "Cameras", win, 0.0);
     assert!(!h.app.state.exchange.fbx_import.cameras);
-    click_text(&mut h, "OK", SCREEN, 0.0);
+    click_text(&mut h, "OK", win, 0.0);
     let kinds: Vec<bool> = h.app.state.scene.nodes().map(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).collect();
     assert_eq!(kinds, vec![false], "the box only");
 }
@@ -2227,9 +2234,10 @@ fn obj_import_options_pick_the_objects() {
     h.cmd(Command::ImportFile { path: None });
     choose_file(&mut h, &path, "Open");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ObjImportOptions));
-    assert!(h.text_rect("Left (1)", SCREEN).is_some() && h.text_rect("Right (1)", SCREEN).is_some(), "the file's objects are listed");
-    click_text(&mut h, "Right (1)", SCREEN, 0.0);
-    click_text(&mut h, "Import", SCREEN, 0.0);
+    let win = options_rect(&h, "obj_import_options");
+    assert!(h.text_rect("Left (1)", win).is_some() && h.text_rect("Right (1)", win).is_some(), "the file's objects are listed");
+    click_text(&mut h, "Right (1)", win, 0.0);
+    click_text(&mut h, "Import", win, 0.0);
     assert_eq!(h.app.state.dialog, None);
     let names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
     assert_eq!(names, vec!["Left".to_string()]);
