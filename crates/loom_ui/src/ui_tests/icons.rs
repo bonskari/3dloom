@@ -21,6 +21,8 @@ fn icon_in(h: &Harness, glyph: &str, area: egui::Rect) -> egui::Pos2 {
 
 /// Rests the pointer on `p` until the tooltip shows, and returns whether `tip` is shown.
 fn tooltip_shows(h: &mut Harness, p: egui::Pos2, tip: &str) -> bool {
+    // Leave first: egui keeps a just-clicked button's tooltip hidden until the pointer comes back.
+    h.run(vec![egui::Event::PointerGone]);
     h.run(vec![egui::Event::PointerMoved(p)]);
     h.frames(25);
     !h.texts(tip).is_empty()
