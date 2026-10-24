@@ -76,11 +76,11 @@ impl Harness {
     /// Every text `label` painted last frame in the Command Panel, top to bottom.
     fn widgets_labelled(&self, label: &str) -> Vec<egui::Rect> {
         let panel = egui::containers::panel::PanelState::load(&self.ctx, egui::Id::new("command_panel")).expect("the Command Panel").rect;
-        self.texts(label).into_iter().filter(|r| panel.contains_rect(*r)).collect()
+        self.text_rects(label).into_iter().filter(|r| panel.contains_rect(*r)).collect()
     }
 
     /// Every text `label` painted last frame, top to bottom (its rect).
-    fn texts(&self, label: &str) -> Vec<egui::Rect> {
+    fn text_rects(&self, label: &str) -> Vec<egui::Rect> {
         fn find(shape: &egui::Shape, text: &str, out: &mut Vec<egui::Rect>) {
             match shape {
                 egui::Shape::Vec(v) => v.iter().for_each(|s| find(s, text, out)),
@@ -113,7 +113,7 @@ impl Harness {
 
     /// Clicks the one text `label` shown anywhere (a dialog's button).
     fn click_text_anywhere(&mut self, label: &str) {
-        let v = self.texts(label);
+        let v = self.text_rects(label);
         assert_eq!(v.len(), 1, "one {label:?} shown: {v:?}");
         self.click(v[0].center());
     }
