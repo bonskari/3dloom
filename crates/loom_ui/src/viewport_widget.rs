@@ -500,7 +500,6 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && app.transform_drag.is_none()
                         && app.manip_drag.is_none()
                         && app.state.active_tool != Tool::Select
-                        && app.state.selection_mode == SelectionMode::Object
                         && !mods.alt
                         && !mods.ctrl
                         && app.state.nav_mode == loom_input::NavMode::None
@@ -511,12 +510,24 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && app.state.paint_deform.is_none()
                         && !app.state.vertex_paint_brush
                     {
-                        if let Some(Pick::Object(i)) = pick_object(app, p, rect, view, proj) {
-                            let node = app.world_meshes()[i].0;
-                            if !app.state.selection.contains(&node) {
-                                apply_picks(app, vec![Pick::Object(i)], mods);
+                        let object_level = app.state.selection_mode == SelectionMode::Object;
+                        // Sub-objects (not splines, whose knots have their own drags; no Shift clone).
+                        let pick = if object_level {
+                            pick_object(app, p, rect, view, proj)
+                        } else if !mods.shift && !app.state.spline_selected() {
+                            pick_at(app, p, rect, view, proj, view_proj).filter(|k| matches!(k, Pick::SubObject { .. }))
+                        } else {
+                            None
+                        };
+                        if let Some(pick) = pick {
+                            let selected = match pick {
+                                Pick::Object(i) => app.state.selection.contains(&app.world_meshes()[i].0),
+                                Pick::SubObject { mesh, id } => app.state.sub_selection.contains(app.world_meshes()[mesh].0, id),
+                            };
+                            if !selected {
+                                apply_picks(app, vec![pick], mods);
                             }
-                            if app.has_selection() {
+                            if app.has_selection() && (object_level || !app.state.sub_selection.is_empty()) {
                                 let mut drag = DragState::new(body_drag_handle(app.state.active_tool, app.state.axis_constraint), p);
                                 drag.shift = mods.shift;
                                 app.begin_transform_drag(drag);

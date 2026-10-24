@@ -851,6 +851,57 @@ fn mirror_and_array_dialog_commands() {
 }
 
 #[test]
+fn navigation_buttons_zoom_pan_orbit_and_right_click_leaves_them() {
+    let mut h = Harness::new();
+    box_scene(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let c = r.center();
+    let cam = h.app.state.active().camera.clone();
+    click_text(&mut h, "Zoom");
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::Zoom);
+    h.drag(c, c + egui::vec2(0.0, -60.0));
+    assert!((h.app.state.active().camera.distance - cam.distance).abs() > 0.1, "Zoom drag changes the distance");
+    assert!(h.app.state.selection.len() == 1, "and does not touch the selection");
+    click_text(&mut h, "Pan");
+    let t = h.app.state.active().camera.target;
+    h.drag(c, c + egui::vec2(60.0, 0.0));
+    assert!(h.app.state.active().camera.target.distance(t) > 0.1, "Pan drag moves the target");
+    click_text(&mut h, "Orbit");
+    let yaw = h.app.state.active().camera.yaw;
+    h.drag(c, c + egui::vec2(60.0, 0.0));
+    assert_ne!(h.app.state.active().camera.yaw, yaw, "Orbit drag orbits");
+    right_click(&mut h, c);
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::None, "right-click leaves the navigation mode");
+    assert!(h.app.quad_menu.is_none());
+}
+
+fn top_vertices(h: &Harness, id: loom_scene::NodeId) -> Vec<Vec3> {
+    let n = h.app.state.scene.node(id).unwrap();
+    let m = n.cage_mesh();
+    (0..m.vertices().len() as u32).filter_map(|i| m.vertex_position(loom_mesh::VertexId(i))).filter(|v| v.z > 29.0).collect()
+}
+
+/// Sub-object level, Move tool: dragging on a polygon (not the gizmo) moves
+/// it, selecting it first when it was not selected, as in Max.
+#[test]
+fn move_tool_drag_on_a_polygon_moves_it() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::W);
+    h.key(egui::Key::Num4);
+    h.key(egui::Key::F5);
+    let p = h.screen_of(top_face_point());
+    h.drag(p, p + egui::vec2(60.0, -30.0));
+    assert_eq!(h.sub_count(), 1, "the press selected the polygon");
+    let top = top_vertices(&h, id);
+    assert_eq!(top.len(), 4);
+    assert!(top.iter().all(|v| (v.x.abs() - 15.0).abs() > 1.0 || v.x.abs() > 16.0), "the top face moved along X: {top:?}");
+    assert!(top.iter().all(|v| (v.y.abs() - 15.0).abs() < 1e-3 && (v.z - 30.0).abs() < 1e-3), "only along X: {top:?}");
+    h.cmd(Command::UndoSceneOperation);
+    assert!(top_vertices(&h, id).iter().all(|v| (v.x.abs() - 15.0).abs() < 1e-3), "one undo step");
+}
+
+#[test]
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();
     for (label, tab) in [("Modify", crate::Tab::Modify), ("Hierarchy", crate::Tab::Hierarchy), ("Motion", crate::Tab::Motion), ("Display", crate::Tab::Display), ("Utilities", crate::Tab::Utilities), ("Create", crate::Tab::Create)] {
