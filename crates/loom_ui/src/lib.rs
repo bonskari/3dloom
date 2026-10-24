@@ -18,6 +18,7 @@ mod statusbar;
 pub mod tools;
 pub mod viewport_gizmo;
 mod viewport_widget;
+mod probe;
 pub mod poly_modes;
 pub mod spline_modes;
 pub mod ribbon;

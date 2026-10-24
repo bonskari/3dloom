@@ -14,15 +14,13 @@ struct Harness {
     app: LoomApp,
     time: f64,
     mods: egui::Modifiers,
-    /// The last frame's labelled widgets (from the accessibility tree).
+    /// The last frame's labelled widgets (`crate::probe::note`).
     widgets: Vec<(String, egui::Rect)>,
 }
 
 impl Harness {
     fn new() -> Self {
-        let ctx = egui::Context::default();
-        ctx.enable_accesskit();
-        let mut h = Harness { ctx, app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new() };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new() };
         h.frames(3);
         h
     }
@@ -31,17 +29,8 @@ impl Harness {
         self.time += 1.0 / 30.0;
         let input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
         let app = &mut self.app;
-        let out = self.ctx.run(input, |ctx| app.frame(ctx));
-        if let Some(update) = out.platform_output.accesskit_update {
-            self.widgets = update
-                .nodes
-                .iter()
-                .filter_map(|(_, n)| {
-                    let b = n.bounds()?;
-                    Some((n.label()?.to_owned(), egui::Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32))))
-                })
-                .collect();
-        }
+        let _ = self.ctx.run(input, |ctx| app.frame(ctx));
+        self.widgets = crate::probe::take(&self.ctx);
     }
 
     /// Every widget labelled exactly `label` in the last frame, top to bottom.

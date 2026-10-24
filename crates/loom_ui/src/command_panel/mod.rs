@@ -68,7 +68,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         .show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for tab in Tab::ALL {
-                    if ui.selectable_label(app.panel_tab == tab, tab.label()).clicked() {
+                    let r = ui.selectable_label(app.panel_tab == tab, tab.label());
+                    crate::probe::note(ui, tab.label(), &r);
+                    if r.clicked() {
                         app.panel_tab = tab;
                     }
                 }
