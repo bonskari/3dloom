@@ -514,7 +514,7 @@ fn every_run_answers_on_its_private_unix_socket_with_diagnostics_input_and_logs(
     let r = ask(&mut s, json!({ "cmd": "input", "args": { "events": [{ "type": "drag", "button": "middle", "from": [cx, cy], "to": [cx + 80.0, cy + 40.0] }] } }));
     assert_eq!(r["ok"], true, "{r}");
     let d = ask(&mut s, json!({ "cmd": "diagnostics" }));
-    assert_ne!(d["viewports"]["active_view"]["camera"]["target"], before["target"], "the injected drag panned: {}", d["viewports"]);
+    assert_ne!(d["viewports"]["active_view"]["camera"]["target"], before["target"], "the injected drag panned: {} {}", d["viewports"], d["input_events"]);
     assert!(d["input_events"].as_array().unwrap().iter().any(|e| e["event"].as_str().unwrap().contains("Middle")), "{}", d["input_events"]);
     let hit = ask(&mut s, json!({ "cmd": "ui_hit", "x": cx, "y": cy }));
     assert_eq!(hit["viewport"], active, "{hit}");
