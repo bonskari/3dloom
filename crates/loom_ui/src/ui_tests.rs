@@ -588,7 +588,8 @@ fn viewport_navigation_orbits_pans_and_zooms() {
 /// pointer and the focus (screen lock, Alt+Tab) and the release never arrives;
 /// the windowing layer has cleared the modifiers. Focus comes back with no
 /// button down.
-fn press_then_lose_focus(h: &mut Harness, button: egui::PointerButton, mods: egui::Modifiers, a: egui::Pos2, b: egui::Pos2) {
+/// `apart`: the pointer leaves some frames before the focus goes.
+fn press_then_lose_focus(h: &mut Harness, button: egui::PointerButton, mods: egui::Modifiers, a: egui::Pos2, b: egui::Pos2, apart: bool) {
     h.mods = mods;
     h.run(vec![egui::Event::PointerMoved(a)]);
     h.run(vec![egui::Event::PointerButton { pos: a, button, pressed: true, modifiers: mods }]);
@@ -596,7 +597,13 @@ fn press_then_lose_focus(h: &mut Harness, button: egui::PointerButton, mods: egu
         h.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 4.0))]);
     }
     h.mods = egui::Modifiers::NONE;
-    h.run(vec![egui::Event::PointerGone, egui::Event::WindowFocused(false)]);
+    if apart {
+        h.run(vec![egui::Event::PointerGone]);
+        h.frames(3);
+        h.run(vec![egui::Event::WindowFocused(false)]);
+    } else {
+        h.run(vec![egui::Event::PointerGone, egui::Event::WindowFocused(false)]);
+    }
     h.frames(3);
     h.run(vec![egui::Event::WindowFocused(true)]);
     h.frames(1);
@@ -640,6 +647,20 @@ fn navigation_works_again(h: &mut Harness, c: egui::Pos2, label: &str) {
 }
 
 #[test]
+fn a_move_drag_ends_when_the_focus_is_lost() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    h.key(egui::Key::W);
+    let a = h.screen_of(pivot(&h));
+    press_then_lose_focus(&mut h, egui::PointerButton::Primary, egui::Modifiers::NONE, a, a + egui::vec2(40.0, 0.0), true);
+    assert!(h.app.transform_drag.is_none(), "the move drag ended with the focus");
+    let moved = pivot(&h);
+    assert_ne!(moved, Vec3::ZERO, "the drag before the focus loss moved the box");
+    hover_to(&mut h, a + egui::vec2(40.0, 0.0), a + egui::vec2(120.0, 30.0));
+    assert_eq!(pivot(&h), moved, "moving the pointer afterwards does not move the box");
+}
+
+#[test]
 fn navigation_recovers_after_a_release_lost_to_focus_loss() {
     use egui::PointerButton::{Middle, Primary};
     let cases = [
@@ -650,14 +671,14 @@ fn navigation_recovers_after_a_release_lost_to_focus_loss() {
         ("LMB region", Primary, egui::Modifiers::NONE),
     ];
     let mut failures = Vec::new();
-    for (label, button, mods) in cases {
+    for ((label, button, mods), apart) in cases.into_iter().flat_map(|c| [(c, false), (c, true)]) {
         let result = std::panic::catch_unwind(|| {
             let mut h = Harness::new();
             poly_box(&mut h);
             let c = h.app.viewport_rects[h.app.state.active_viewport].center() + egui::vec2(150.0, 100.0);
             let b = if label == "Alt+LMB press" { c + egui::vec2(1.0, 0.0) } else { c + egui::vec2(80.0, 30.0) };
-            press_then_lose_focus(&mut h, button, mods, c, b);
-            navigation_works_again(&mut h, c, label);
+            press_then_lose_focus(&mut h, button, mods, c, b, apart);
+            navigation_works_again(&mut h, c, &format!("{label} (pointer left first: {apart})"));
         });
         if let Err(e) = result {
             failures.push(e.downcast_ref::<String>().cloned().unwrap_or_else(|| label.to_string()));
