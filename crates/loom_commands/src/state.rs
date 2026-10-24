@@ -882,7 +882,7 @@ impl UnitsSetup {
             let rest = rest.trim().trim_end_matches('"').trim();
             let inches: f64 = if rest.is_empty() { 0.0 } else { rest.parse().ok()? };
             let sign = if ft.trim().starts_with('-') { -1.0 } else { 1.0 };
-            return Some((feet + sign * inches / 12.0) * 0.3048 / scene_metres);
+            return Some((feet + sign * inches / 12.0) * (0.3048 / scene_metres));
         }
         let i = t.find(|c: char| c.is_alphabetic() || c == '"').unwrap_or(t.len());
         let v: f64 = t[..i].trim().parse().ok()?;
@@ -898,7 +898,7 @@ impl UnitsSetup {
             u if !u.is_empty() && u.eq_ignore_ascii_case(&self.display_factor().1) => return Some(v / self.display_factor().0),
             _ => return None,
         };
-        Some(v * metres / scene_metres)
+        Some(v * (metres / scene_metres))
     }
 
     pub fn format(&self, v: f32, decimals: usize) -> String {

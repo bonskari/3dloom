@@ -312,13 +312,17 @@ fn deleting_polygons_asks_about_isolated_vertices() {
 fn settings_spinners_take_unit_strings() {
     // Default units: system inches, generic display.
     let u = UnitsSetup::default();
-    assert_eq!(u.parse("7\""), Some(7.0));
-    assert_eq!(u.parse("\u{2013}3.5\u{201d}"), Some(-3.5), "the manual's typographic minus and inch mark");
-    assert_eq!(u.parse("1.5in"), Some(1.5));
-    assert_eq!(u.parse("2'"), Some(24.0));
-    assert_eq!(u.parse("5'6\""), Some(66.0));
-    assert!((u.parse("2.54cm").unwrap() - 1.0).abs() < 1e-9);
-    assert_eq!(u.parse("3"), Some(3.0));
+    let near = |t: &str, want: f64| {
+        let got = u.parse(t).unwrap_or(f64::NAN);
+        assert!((got - want).abs() < 1e-9, "{t}: {got} != {want}");
+    };
+    near("7\"", 7.0);
+    near("\u{2013}3.5\u{201d}", -3.5);
+    near("1.5in", 1.5);
+    near("2'", 24.0);
+    near("5'6\"", 66.0);
+    near("2.54cm", 1.0);
+    near("3", 3.0);
     assert_eq!(u.parse("abc"), None);
 }
 
