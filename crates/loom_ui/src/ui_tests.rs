@@ -1375,3 +1375,20 @@ fn hiding_the_command_panel_widens_the_viewports() {
     h.cmd(Command::ShowCommandPanelToggle);
     assert!((right(&h) - before).abs() < 1.0);
 }
+
+/// `loom scene.loom` opens the scene (flags are skipped) and lists it under File > Recent.
+#[test]
+fn a_scene_named_on_the_command_line_opens() {
+    let dir = std::env::temp_dir().join("loom-ui-command-line-test");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("start.loom");
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::SaveFile { path: Some(path.to_string_lossy().into_owned()) });
+    let mut next = Harness::new();
+    next.app.open_command_line(["-q".to_owned(), path.to_string_lossy().into_owned()]);
+    next.frames(2);
+    assert_eq!(next.app.state.scene.len(), 1);
+    assert_eq!(next.app.state.file.as_deref(), Some(path.as_path()));
+    assert_eq!(next.app.state.recent_files.first(), Some(&path));
+}

@@ -322,6 +322,17 @@ impl LoomApp {
         self.settings_path = Some(path);
     }
 
+    /// `loom scene.loom` / `loom model.fbx`: opens (.loom) or imports the
+    /// first argument that is not a `-` flag.
+    pub fn open_command_line(&mut self, args: impl IntoIterator<Item = String>) {
+        let Some(path) = args.into_iter().find(|a| !a.starts_with('-')) else { return };
+        let is_scene = std::path::Path::new(&path).extension().is_some_and(|e| e.eq_ignore_ascii_case("loom"));
+        let cmd = if is_scene { Command::OpenFile { path: Some(path.clone()) } } else { Command::ImportFile { path: Some(path.clone()) } };
+        if let Err(e) = self.dispatch(cmd) {
+            self.last_error = Some(format!("{path}: {e}"));
+        }
+    }
+
     /// What the settings file holds now.
     pub fn settings(&self) -> loom_commands::settings::Settings {
         let mut s = loom_commands::settings::Settings::capture(&self.state);

@@ -58,6 +58,7 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| {
             let mut inner = loom_ui::LoomApp::new(cc);
             inner.update = update.clone();
+            inner.open_command_line(std::env::args().skip(1));
             Ok(Box::new(ControlledApp {
                 inner,
                 restart_exe: exe,
