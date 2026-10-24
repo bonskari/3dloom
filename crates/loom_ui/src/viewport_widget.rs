@@ -1112,7 +1112,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 if let Some(end) = pointer.interact_pos() {
                     if app.state.pick_mode == Some(loom_commands::PickMode::Link) {
                         // Select and Link's rubber-band line from the child to the pointer.
-                        painter.add(egui::Shape::dashed_line(&[start, end], egui::Stroke::new(1.0, egui::Color32::WHITE), 4.0, 3.0));
+                        painter.add(egui::Shape::dashed_line(&[start, end], egui::Stroke::new(1.0_f32, egui::Color32::WHITE), 4.0, 3.0));
                     } else {
                         draw_region(&painter, &drag_region(app, start, end));
                     }
