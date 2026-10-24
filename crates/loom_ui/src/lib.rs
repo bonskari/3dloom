@@ -228,6 +228,10 @@ pub struct LoomApp {
     /// The Modifier List use counts as last written to disk (None in tests: never written).
     pub saved_modifier_usage: loom_commands::modifier_list::Usage,
     pub persist_modifier_usage: bool,
+    /// The user's settings file (None in tests: nothing read or written).
+    pub settings_path: Option<std::path::PathBuf>,
+    /// The settings as last read or written, to write only on change.
+    pub saved_settings: Option<loom_commands::settings::Settings>,
     /// The Update menu's state when this build updates itself (set by the app).
     pub update: Option<update_menu::UpdateHandle>,
     /// A transform or region drag in the Edit UVWs window.
@@ -292,7 +296,53 @@ impl LoomApp {
         }
         app.saved_modifier_usage = app.state.modifier_usage.clone();
         app.persist_modifier_usage = true;
+        if let Some(path) = loom_commands::settings::settings_path() {
+            app.use_settings_file(path);
+        }
         app
+    }
+
+    /// Loads the settings file at `path` (when it exists) and writes changes
+    /// back to it from now on.
+    pub fn use_settings_file(&mut self, path: std::path::PathBuf) {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match loom_commands::settings::Settings::from_json(&text) {
+                Ok(settings) => {
+                    settings.apply(&mut self.state);
+                    if let Some(dir) = settings.last_folder.filter(|d| d.is_dir()) {
+                        self.file_dir = dir;
+                    }
+                }
+                Err(e) => self.last_error = Some(format!("{}: {e}", path.display())),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => self.last_error = Some(format!("{}: {e}", path.display())),
+        }
+        self.saved_settings = Some(self.settings());
+        self.settings_path = Some(path);
+    }
+
+    /// What the settings file holds now.
+    pub fn settings(&self) -> loom_commands::settings::Settings {
+        let mut s = loom_commands::settings::Settings::capture(&self.state);
+        s.last_folder = Some(self.file_dir.clone());
+        s
+    }
+
+    /// Writes the settings file when something in it changed.
+    fn persist_settings(&mut self) {
+        let Some(path) = self.settings_path.clone() else { return };
+        let now = self.settings();
+        if self.saved_settings.as_ref() == Some(&now) {
+            return;
+        }
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = std::fs::write(&path, now.to_json()) {
+            self.last_error = Some(format!("{}: {e}", path.display()));
+        }
+        self.saved_settings = Some(now);
     }
 
     /// App state without GPU resources, for tests of UI models.
@@ -339,6 +389,8 @@ impl LoomApp {
             viewport_rects: Vec::new(),
             saved_modifier_usage: Default::default(),
             persist_modifier_usage: false,
+            settings_path: None,
+            saved_settings: None,
             update: None,
             uv_drag: None,
             uv_sketch: Vec::new(),
@@ -811,6 +863,7 @@ impl LoomApp {
             }
             self.saved_modifier_usage = self.state.modifier_usage.clone();
         }
+        self.persist_settings();
         hotkeys::handle(ctx, self);
         // Playback: advance by the wall clock (Real Time) or a frame per redraw.
         if self.state.playing {
@@ -882,12 +935,8 @@ fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::A
         .clone()
 }
 
-/// The user's 3dLoom config file for Modifier List use counts:
-/// `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%APPDATA%` on Windows.
+/// The user's 3dLoom config file for Modifier List use counts (in
+/// `loom_commands::settings::config_dir`).
 fn modifier_usage_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("APPDATA")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from))
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
-    Some(base.join("3dloom").join("modifier-usage.json"))
+    Some(loom_commands::settings::config_dir()?.join("modifier-usage.json"))
 }

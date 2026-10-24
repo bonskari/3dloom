@@ -35,6 +35,14 @@ fn free_port() -> u16 {
     std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
 }
 
+/// An empty config folder for one launched app.
+fn fresh_config_dir(port: u16) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("loom-e2e-config-{port}"));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
 impl App {
     /// Launches on the persistent Xvnc display `:90` (where xdotool can drive
     /// the window), or returns None when that display or xdotool is missing.
@@ -50,6 +58,8 @@ impl App {
         let bin = env!("CARGO_BIN_EXE_loom");
         let child = Command::new(bin)
             .env("LOOM_CONTROL_PORT", port.to_string())
+            // A fresh settings folder: tests never read or write the user's settings.
+            .env("LOOM_CONFIG_DIR", fresh_config_dir(port))
             .env("DISPLAY", ":90")
             .env_remove("WAYLAND_DISPLAY")
             .env("XDG_SESSION_TYPE", "x11")
@@ -84,6 +94,8 @@ impl App {
         let child = Command::new("xvfb-run")
             .args(["-a", "-s", "-screen 0 1600x1000x24", bin])
             .env("LOOM_CONTROL_PORT", port.to_string())
+            // A fresh settings folder: tests never read or write the user's settings.
+            .env("LOOM_CONFIG_DIR", fresh_config_dir(port))
             // winit prefers Wayland when WAYLAND_DISPLAY is set and would
             // open the window on the user's real screen instead of Xvfb.
             .env_remove("WAYLAND_DISPLAY")
