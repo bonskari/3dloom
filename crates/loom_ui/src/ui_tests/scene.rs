@@ -23,7 +23,7 @@ fn open_dialog(h: &Harness) -> Option<loom_commands::Dialog> {
 /// The texts reading `text` inside the window titled `window`.
 fn in_window(h: &Harness, window: &str, text: &str) -> Vec<egui::Pos2> {
     let area = h.ctx.memory(|m| m.area_rect(egui::Id::new(window))).unwrap_or_else(|| panic!("no {window} window"));
-    h.texts(text).into_iter().filter(|p| area.contains(*p)).collect()
+    h.text_centers(text).into_iter().filter(|p| area.contains(*p)).collect()
 }
 
 /// The lowest text `text` in the window (its OK-row button, below a menu of the same name).
@@ -36,7 +36,7 @@ fn button(h: &Harness, window: &str, text: &str) -> egui::Pos2 {
 fn window_menu(h: &mut Harness, window: &str, menu: &str, item: &str) {
     let p = *in_window(h, window, menu).iter().min_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
     h.click(p);
-    let q = h.texts(item);
+    let q = h.text_centers(item);
     assert!(!q.is_empty(), "no {item:?} in the {menu} menu");
     h.click(q[q.len() - 1]);
 }
@@ -186,7 +186,7 @@ fn h_in_select_and_link_is_select_parent_and_links_the_selection() {
 /// The texts reading `text` inside the area `id`.
 fn in_area(h: &Harness, id: egui::Id, text: &str) -> Vec<egui::Pos2> {
     let area = h.ctx.memory(|m| m.area_rect(id)).expect("the window is open");
-    h.texts(text).into_iter().filter(|p| area.contains(*p)).collect()
+    h.text_centers(text).into_iter().filter(|p| area.contains(*p)).collect()
 }
 
 fn one(v: Vec<egui::Pos2>, what: &str) -> egui::Pos2 {
@@ -281,7 +281,7 @@ fn layer_manager_render_colour_hide_all_and_the_object_list() {
     h.cmd(Command::LayerManager);
     let win = egui::Id::new("layer_manager").with("window");
     assert!(h.ctx.memory(|m| m.area_rect(win)).is_some());
-    assert!(!h.texts("Layer: Props").is_empty(), "the title names the current layer");
+    assert!(!h.text_centers("Layer: Props").is_empty(), "the title names the current layer");
     // Expand Props: its object is listed; a click selects it.
     let plus: Vec<egui::Pos2> = in_area(&h, win, "+");
     assert_eq!(plus.len(), 2, "one expand button per layer");
@@ -307,22 +307,22 @@ fn layers_toolbar_sets_the_current_layer_and_adds_the_selection() {
     h.cmd(Command::CreateLayer { name: Some("Props".into()) });
     let props = h.app.state.scene.current_layer;
     h.cmd(Command::SetCurrentLayer { layer: 0 });
-    assert!(h.texts("Set Current Layer to Selection's Layer").is_empty(), "the toolbar starts hidden");
+    assert!(h.text_centers("Set Current Layer to Selection's Layer").is_empty(), "the toolbar starts hidden");
     h.cmd(Command::ShowLayersToolbarToggle);
-    let p = one(h.texts("Set Current Layer to Selection's Layer"), "toolbar button");
+    let p = one(h.text_centers("Set Current Layer to Selection's Layer"), "toolbar button");
     h.click(p);
     assert_eq!(h.app.state.scene.current_layer, props);
     // The layer list: pick 0 (default) as current, then add the selection to it.
-    let p = one(h.texts("Props"), "the list shows the current layer");
+    let p = one(h.text_centers("Props"), "the list shows the current layer");
     h.click(p);
-    let rows = h.texts("0 (default)");
+    let rows = h.text_centers("0 (default)");
     h.click(rows[rows.len() - 1]);
     assert_eq!(h.app.state.scene.current_layer, 0);
-    let p = one(h.texts("Add Selection to Current Layer"), "toolbar button");
+    let p = one(h.text_centers("Add Selection to Current Layer"), "toolbar button");
     h.click(p);
     assert_eq!(h.app.state.scene.node(a).unwrap().layer, 0);
     h.cmd(Command::SelectNodes { ids: vec![], op: loom_commands::SelectOp::Replace });
-    let p = one(h.texts("Select Objects in Current Layer"), "toolbar button");
+    let p = one(h.text_centers("Select Objects in Current Layer"), "toolbar button");
     h.click(p);
     assert_eq!(sel(&h), vec![a]);
 }
