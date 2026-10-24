@@ -157,6 +157,9 @@ pub struct LoomApp {
     world_meshes: Vec<(NodeId, Mesh)>,
     /// Draw styles parallel to `world_meshes`.
     world_styles: Vec<loom_render::MeshStyle>,
+    /// World bounds of what each of `world_meshes` draws (a Skin's deformed
+    /// result, not the cage), `None` for an empty mesh.
+    world_display_bounds: Vec<Option<(Vec3, Vec3)>>,
     /// Meshes and colours waiting to be uploaded to the GPU. Every viewport
     /// callback holds this; whichever runs first takes and uploads them, so
     /// the upload never depends on one particular viewport being painted.
@@ -284,6 +287,7 @@ impl LoomApp {
             camera_controller: ViewportNavigator::new(),
             world_meshes: Vec::new(),
             world_styles: Vec::new(),
+            world_display_bounds: Vec::new(),
             pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((Vec::new(), Vec::new(), Vec::new())))),
             bitmap_cache: std::collections::HashMap::new(),
             create_kind: None,
@@ -437,6 +441,7 @@ impl LoomApp {
         let mut meshes = Vec::new();
         let mut display = Vec::new();
         let mut styles = Vec::new();
+        let mut display_bounds = Vec::new();
         let mut bitmaps: Vec<(String, std::sync::Arc<loom_render::Bitmap>)> = Vec::new();
         let mut bitmap_index: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         let bones_only = self.state.display_bones_only;
@@ -521,11 +526,14 @@ impl LoomApp {
             // A visibility track below 1 shows the object partly transparent (never fully hidden in shaded views).
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
             styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors: n.display.vertex_colors, texture, specular, wire_color });
-            display.push(shown.unwrap_or_else(|| mesh.clone()));
+            let shown = shown.unwrap_or_else(|| mesh.clone());
+            display_bounds.push((shown.vertex_count() > 0).then(|| shown.aabb()));
+            display.push(shown);
             meshes.push((n.id, mesh));
         }
         self.world_meshes = meshes;
         self.world_styles = styles;
+        self.world_display_bounds = display_bounds;
         if let Ok(mut slot) = self.pending_upload.lock() {
             *slot = Some((display, self.world_styles.clone(), bitmaps));
         }
@@ -538,6 +546,11 @@ impl LoomApp {
     /// Visible nodes with their world-space meshes, in render order.
     pub fn world_meshes(&self) -> &[(NodeId, Mesh)] {
         &self.world_meshes
+    }
+
+    /// World bounds of what each of `world_meshes` draws, in the same order.
+    pub fn world_display_bounds(&self) -> &[Option<(Vec3, Vec3)>] {
+        &self.world_display_bounds
     }
 
     pub fn render_camera(&self) -> Camera {

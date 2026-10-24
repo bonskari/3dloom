@@ -518,3 +518,24 @@ fn camera_view_honours_clip_manually_and_orthographic_projection() {
     let centre = crate::viewport_widget::project_world_to_screen(Vec3::new(0.0, 0.0, 20.0), c.view_projection(rect.width() / rect.height()), rect).unwrap();
     assert!(centre.distance(rect.center()) < 1.0, "{centre:?} vs {:?}", rect.center());
 }
+
+/// An imported skinned character: one bracket per selected object, and the
+/// mesh's bracket goes round the posed (Skin) result, not the bind-pose cage.
+#[test]
+fn an_imported_skinned_character_brackets_the_posed_mesh() {
+    let mut h = Harness::new();
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loom_fbx/tests/fixtures/sitting_idle.fbx");
+    h.cmd(Command::ImportFile { path: Some(path.into()) });
+    let boxes = crate::viewport_widget::selection_bracket_boxes(&h.app);
+    assert_eq!(boxes.len(), h.app.state.selection.len(), "one bracket per selected object");
+    let skinned = h.app.state.scene.nodes().find(|n| !n.modifiers.is_empty()).expect("the skinned mesh").id;
+    h.cmd(Command::SelectNodes { ids: vec![skinned.0], op: loom_commands::SelectOp::Replace });
+    let boxes = crate::viewport_widget::selection_bracket_boxes(&h.app);
+    assert_eq!(boxes.len(), 1);
+    let mut posed = h.app.state.scene.eval_mesh(skinned).value.mesh.clone();
+    let _ = loom_mesh::edit_ops::transform_mesh(&mut posed, h.app.state.scene.object_matrix(skinned));
+    let (pmin, pmax) = posed.aabb();
+    assert!(boxes[0].0.distance(pmin) < 1e-3 && boxes[0].1.distance(pmax) < 1e-3, "bracket {:?} vs posed {:?}", boxes[0], (pmin, pmax));
+    let (cmin, cmax) = h.app.state.bounds_of(std::iter::once(skinned)).unwrap();
+    assert!((cmax - cmin).z > (pmax - pmin).z * 1.3, "the sitting pose is lower than the standing bind pose: cage {:?}, posed {:?}", (cmin, cmax), (pmin, pmax));
+}

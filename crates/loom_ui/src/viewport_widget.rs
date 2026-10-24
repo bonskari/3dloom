@@ -1854,25 +1854,35 @@ fn set_constraint_from_handle(app: &mut LoomApp, handle: gizmo::Handle) {
     app.state.axis_constraint = c;
 }
 
-fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
-    let stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
-    // Group heads have no mesh: bracket the members' bounds instead.
+/// World boxes the selection brackets go around: each selected object's drawn
+/// result (a skinned mesh as posed, not its bind-pose cage); a group head, which
+/// has no mesh, gets its members' bounds.
+pub(crate) fn selection_bracket_boxes(app: &LoomApp) -> Vec<(Vec3, Vec3)> {
+    let drawn = |id: NodeId| app.world_meshes().iter().position(|(n, _)| *n == id).and_then(|i| app.world_display_bounds()[i]);
     let mut boxes: Vec<(Vec3, Vec3)> = Vec::new();
     for id in app.state.selection.iter() {
         let Some(n) = app.state.scene.node(*id) else { continue };
         if matches!(n.object, loom_scene::ObjectKind::Group { .. }) {
-            if let Some(b) = app.state.bounds_of(app.state.scene.descendants(*id).into_iter()) {
+            let members = app.state.scene.descendants(*id).into_iter().filter_map(drawn);
+            if let Some(b) = members.reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))) {
                 boxes.push(b);
             }
         }
     }
-    for (id, mesh) in app.world_meshes() {
-        if !app.state.selection.contains(id) || mesh.vertex_count() == 0 {
+    for (i, (id, _)) in app.world_meshes().iter().enumerate() {
+        if !app.state.selection.contains(id) {
             continue;
         }
-        boxes.push(mesh.aabb());
+        if let Some(b) = app.world_display_bounds()[i] {
+            boxes.push(b);
+        }
     }
-    for (mn, mx) in boxes {
+    boxes
+}
+
+fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
+    let stroke = egui::Stroke::new(1.0_f32, egui::Color32::WHITE);
+    for (mn, mx) in selection_bracket_boxes(app) {
         let mut bounds: Option<egui::Rect> = None;
         for i in 0..8 {
             let c = Vec3::new(if i & 1 == 0 { mn.x } else { mx.x }, if i & 2 == 0 { mn.y } else { mx.y }, if i & 4 == 0 { mn.z } else { mx.z });
