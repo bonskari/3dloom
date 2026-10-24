@@ -877,8 +877,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             });
                     }
                     // MouseMove fires every frame the pointer moves; the controller's internal
-                    // `dragging` state decides whether to act on it.
-                    if pointer.is_moving() {
+                    // `dragging` state decides whether to act on it. `delta`, not the smoothed
+                    // `is_moving`: that stays false below ~20 frames a second.
+                    if pointer.delta() != egui::Vec2::ZERO {
                         let before = app.state.active().camera.distance;
                         nav_event(app, index, rect, InputEvent::MouseMove { pos, mods });
                         let after = app.state.active().camera.distance;
