@@ -226,9 +226,10 @@ fn point_cache_retries_a_missing_file() {
     execute(&mut t, Command::SetFrame { frame: 10 }).unwrap();
     let e = t.scene.eval_mesh(b);
     assert!(e.warnings.iter().any(|w| w.contains("cannot read")), "{:?}", e.warnings);
-    // The file comes back: the next evaluation reads it, no Load needed.
+    // The file comes back: the next frame's evaluation reads it, no Load needed.
     std::fs::write(&file, &kept).unwrap();
     execute(&mut t, Command::SetFrame { frame: 9 }).unwrap();
+    assert!(!t.scene.eval_mesh(b).warnings.iter().any(|w| w.contains("Point Cache")));
     execute(&mut t, Command::SetFrame { frame: 10 }).unwrap();
     let e = t.scene.eval_mesh(b);
     assert!(!e.warnings.iter().any(|w| w.contains("Point Cache")), "{:?}", e.warnings);
