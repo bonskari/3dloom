@@ -647,6 +647,27 @@ fn loop_mode_click_selects_the_edge_loop() {
 }
 
 #[test]
+fn pick_hinge_and_pick_bridge_edge_take_a_clicked_edge() {
+    let mut h = Harness::new();
+    let id = poly_plane(&mut h);
+    h.key(egui::Key::Num4);
+    h.cmd(Command::PickHinge);
+    let p = h.screen_of(Vec3::new(0.0, 7.5, 0.0));
+    h.click(p);
+    let m = cage(&h, id);
+    let want = edge_between(&m, Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 15.0, 0.0));
+    assert_eq!(h.app.state.poly_settings.hinge_edge, Some((id, want)), "the clicked edge is the hinge");
+    assert_eq!(h.app.state.pick_mode, None);
+    // Bridge Pick Edge 1 takes a border edge.
+    h.key(egui::Key::Num2);
+    h.cmd(Command::PickBridgeEdge { which: 1 });
+    let p = h.screen_of(Vec3::new(-30.0, 7.5, 0.0));
+    h.click(p);
+    let border = edge_between(&m, Vec3::new(-30.0, 0.0, 0.0), Vec3::new(-30.0, 15.0, 0.0));
+    assert_eq!(h.app.state.poly_settings.bridge_edges[0], Some((id, border)));
+}
+
+#[test]
 fn bridge_edges_dialog_takes_edges_selected_while_it_is_open() {
     let mut h = Harness::new();
     let id = poly_plane(&mut h);
