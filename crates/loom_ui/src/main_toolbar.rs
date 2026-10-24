@@ -162,7 +162,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             _ => cur.label().to_owned(),
                         };
                         let recent: Vec<(loom_scene::NodeId, String)> = app.state.pick_coord_recent.iter().filter_map(|id| Some((*id, name(app, *id)?))).collect();
-                        egui::ComboBox::from_id_salt("coord_system").selected_text(shown).width(70.0).show_ui(ui, |ui| {
+                        egui::ComboBox::from_id_salt("coord_system").selected_text(shown).width(70.0).height(400.0).show_ui(ui, |ui| {
                             for c in CoordSystem::ALL {
                                 if ui.selectable_label(cur == c && (c != CoordSystem::Pick || app.state.pick_coord_node.is_none()), c.label()).clicked() {
                                     let _ = app.dispatch(Command::ReferenceCoordinateSystem { system: c });

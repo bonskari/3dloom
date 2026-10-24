@@ -40,6 +40,8 @@ fn ctrl_click_toggles_a_polygon() {
 }
 
 fn hierarchy_panel(h: &mut Harness) {
+    // Tall enough for every Pivot rollout.
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1400.0));
     h.app.panel_tab = crate::Tab::Hierarchy;
     h.frames(3);
 }
