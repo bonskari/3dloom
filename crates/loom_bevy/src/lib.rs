@@ -18,7 +18,7 @@ use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, Dire
 use bevy::render::camera::{Camera, ClearColorConfig, RenderTarget};
 use bevy::render::mesh::{Mesh, Mesh3d};
 use bevy::render::render_asset::RenderAssets;
-use bevy::render::render_resource::{Extent3d, PipelineCache, TextureDimension, TextureFormat, TextureUsages};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::renderer::{RenderAdapter, RenderAdapterInfo, RenderDevice, RenderInstance, RenderQueue, WgpuWrapper};
 use bevy::render::settings::{RenderCreation, RenderResources};
 use bevy::render::texture::GpuImage;
@@ -182,14 +182,14 @@ impl BevyRenderer {
                     self.objects.insert(o.id, Object { entity, mesh_hash: hash, material: o.material.cloned(), wire_color: o.wire_color, material_handle });
                 }
             }
-            self.settle = self.settle.max(2);
+            self.settle = self.settle.max(3);
         }
         let gone: Vec<u64> = self.objects.keys().filter(|id| !seen.contains(id)).copied().collect();
         for id in gone {
             if let Some(obj) = self.objects.remove(&id) {
                 self.app.world_mut().despawn(obj.entity);
             }
-            self.settle = self.settle.max(2);
+            self.settle = self.settle.max(3);
         }
         self.bounds = (lo.x <= hi.x).then(|| ((lo + hi) * 0.5, ((hi - lo) * 0.5).length().max(1e-3)));
     }
@@ -267,7 +267,7 @@ impl BevyRenderer {
                     self.views.insert(slot, View { camera: entity, image: image.clone(), size, msaa, used: false, generation: 0 });
                 }
             }
-            self.settle = self.settle.max(2);
+            self.settle = self.settle.max(3);
         }
         let v = self.views.get_mut(&slot).expect("inserted above");
         v.used = true;
@@ -317,8 +317,10 @@ impl BevyRenderer {
         for v in self.views.values_mut() {
             v.used = false;
         }
-        let waiting = self.app.sub_app(RenderApp).world().get_resource::<PipelineCache>().is_some_and(|c| c.waiting_pipelines().next().is_some());
-        self.settle = if waiting { self.settle.max(1) } else { self.settle.saturating_sub(1) };
+        // Pipelines compile synchronously (no `multi_threaded`), so a change
+        // shows within a frame or two; a pipeline cache "waiting" list is no
+        // signal (pipelines whose shaders never load stay in it).
+        self.settle = self.settle.saturating_sub(1);
     }
 
     /// True while pipelines or new assets still need frames to appear.
@@ -342,19 +344,12 @@ impl BevyRenderer {
             return Err(format!("render size {width}x{height}"));
         }
         self.app.insert_resource(DirectionalLightShadowMap { size: 4096 });
-        let mut result = Err("render did not finish".to_owned());
-        // A few frames: pipelines for new materials and the shadow map settle first.
-        for i in 0..12 {
+        // A few frames: new pipelines, the target image and the shadow map settle first.
+        for _ in 0..4 {
             self.set_view(RENDER_SLOT, [width, height], camera, [0.0, 0.0, 0.0, 1.0], true);
             self.update();
-            if i >= 2 && !self.needs_more_frames() {
-                result = self.read_back(RENDER_SLOT);
-                break;
-            }
         }
-        if result.is_err() {
-            result = self.read_back(RENDER_SLOT);
-        }
+        let result = self.read_back(RENDER_SLOT);
         // The offline camera and its image are not kept.
         if let Some(v) = self.views.remove(&RENDER_SLOT) {
             self.app.world_mut().despawn(v.camera);
