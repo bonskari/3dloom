@@ -43,6 +43,19 @@ impl Tab {
             Tab::Utilities => "Utilities",
         }
     }
+    /// The tab's icon; its label is the tooltip.
+    pub fn icon(self) -> &'static str {
+        use crate::icons as i;
+        match self {
+            Tab::Scene => i::TAB_SCENE,
+            Tab::Create => i::TAB_CREATE,
+            Tab::Modify => i::TAB_MODIFY,
+            Tab::Hierarchy => i::TAB_HIERARCHY,
+            Tab::Motion => i::TAB_MOTION,
+            Tab::Display => i::TAB_DISPLAY,
+            Tab::Utilities => i::TAB_UTILITIES,
+        }
+    }
 }
 
 /// A rollout: a collapsible section with a title bar.
@@ -69,7 +82,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         .show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for tab in Tab::ALL {
-                    if ui.selectable_label(app.panel_tab == tab, tab.label()).clicked() {
+                    if crate::icons::Icon::new(tab.icon(), tab.label()).on(app.panel_tab == tab).show(ui, &app.state).clicked() {
                         app.panel_tab = tab;
                     }
                 }

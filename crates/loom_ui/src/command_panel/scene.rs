@@ -1,6 +1,6 @@
 //! Scene tab: the object hierarchy as a tree. Click selects (Ctrl adds,
 //! Alt removes); children sit under their parent behind an expander.
-//! A small type glyph precedes each name.
+//! A type icon precedes each name.
 
 use crate::LoomApp;
 use eframe::egui;
@@ -48,52 +48,25 @@ impl IconKind {
             IconKind::Compound => egui::Color32::from_rgb(190, 140, 230),
         }
     }
-}
 
-/// Draws the glyph in a 14 px square at the cursor.
-fn icon(ui: &mut egui::Ui, kind: IconKind) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
-    let p = ui.painter_at(rect);
-    let c = kind.color();
-    let stroke = egui::Stroke::new(1.4_f32, c);
-    let r = rect.shrink(2.0);
-    let at = |x: f32, y: f32| egui::pos2(r.left() + x * r.width(), r.top() + y * r.height());
-    match kind {
-        IconKind::Geometry => {
-            // An isometric cube: lit top, two shaded sides.
-            let (top, left, right) = (at(0.5, 0.0), at(0.0, 0.25), at(1.0, 0.25));
-            let (mid, bl, br, bottom) = (at(0.5, 0.5), at(0.0, 0.75), at(1.0, 0.75), at(0.5, 1.0));
-            p.add(egui::Shape::convex_polygon(vec![top, right, mid, left], c, egui::Stroke::NONE));
-            p.add(egui::Shape::convex_polygon(vec![left, mid, bottom, bl], c.gamma_multiply(0.7), egui::Stroke::NONE));
-            p.add(egui::Shape::convex_polygon(vec![mid, right, br, bottom], c.gamma_multiply(0.5), egui::Stroke::NONE));
-        }
-        IconKind::Shape => {
-            let pts: Vec<egui::Pos2> = (0..=12).map(|i| i as f32 / 12.0).map(|t| at(t, 0.5 - 0.4 * (t * std::f32::consts::TAU).sin())).collect();
-            p.line(pts, stroke);
-        }
-        IconKind::Camera => {
-            p.rect_filled(egui::Rect::from_min_max(at(0.0, 0.25), at(0.62, 0.8)), 1.0, c);
-            p.add(egui::Shape::convex_polygon(vec![at(0.62, 0.52), at(1.0, 0.25), at(1.0, 0.8)], c, egui::Stroke::NONE));
-        }
-        IconKind::Helper => {
-            p.rect_stroke(egui::Rect::from_min_max(at(0.15, 0.15), at(0.85, 0.85)), 0.0, stroke, egui::StrokeKind::Middle);
-            p.line_segment([at(0.5, 0.0), at(0.5, 1.0)], stroke);
-            p.line_segment([at(0.0, 0.5), at(1.0, 0.5)], stroke);
-        }
-        IconKind::Bone => {
-            p.add(egui::Shape::convex_polygon(vec![at(0.0, 0.5), at(0.3, 0.2), at(1.0, 0.5), at(0.3, 0.8)], c, egui::Stroke::NONE));
-        }
-        IconKind::Group => {
-            // Brackets: [ ]
-            for (x0, x1) in [(0.3, 0.0), (0.7, 1.0)] {
-                p.line(vec![at(x0, 0.0), at(x1, 0.0), at(x1, 1.0), at(x0, 1.0)], stroke);
-            }
-        }
-        IconKind::Compound => {
-            p.circle_stroke(at(0.36, 0.5), r.width() * 0.34, stroke);
-            p.circle_stroke(at(0.64, 0.5), r.width() * 0.34, stroke);
+    /// The icon-font glyph of the kind.
+    pub fn glyph(self) -> &'static str {
+        use crate::icons as i;
+        match self {
+            IconKind::Geometry => i::KIND_GEOMETRY,
+            IconKind::Shape => i::KIND_SHAPE,
+            IconKind::Camera => i::KIND_CAMERA,
+            IconKind::Helper => i::KIND_HELPER,
+            IconKind::Bone => i::KIND_BONE,
+            IconKind::Group => i::KIND_GROUP,
+            IconKind::Compound => i::KIND_COMPOUND,
         }
     }
+}
+
+/// Draws the kind's glyph, in its colour, at the cursor.
+fn icon(ui: &mut egui::Ui, kind: IconKind) {
+    ui.label(egui::RichText::new(kind.glyph()).size(14.0).color(kind.color()));
 }
 
 /// The scene's parent → children table, children in scene order.

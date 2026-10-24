@@ -2,32 +2,45 @@
 //! (Absolute/Offset, X Y Z), Grid size, Auto Key / Set Key, time controls
 //! and the viewport navigation buttons.
 
+use crate::icons::{self, Icon};
 use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{Command, SelectionMode, Tool};
 use loom_input::NavMode;
 
-fn nav(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, hover: &str, mode: NavMode, cmd: Command) {
+fn nav(ui: &mut egui::Ui, app: &mut LoomApp, glyph: &str, hover: &str, mode: NavMode, cmd: Command) {
     let on = app.state.nav_mode == mode;
-    if ui.selectable_label(on, label).on_hover_cmd(&app.state, hover, cmd.name()).clicked() {
+    if Icon::new(glyph, cmd.name()).tip(hover).on(on).show(ui, &app.state).clicked() {
         let _ = app.dispatch(cmd);
     }
 }
 
-fn flyout<const N: usize>(ui: &mut egui::Ui, app: &mut LoomApp, id: &str, current: usize, items: [(&str, &str, Command); N]) {
-    let (label, hover, cmd) = &items[current];
-    let resp = ui.button(*label).on_hover_cmd(&app.state, hover, cmd.name());
+/// A flyout entry: its glyph, the colour that tells the variants apart (none
+/// for the plain tool), its tooltip and command.
+type FlyoutItem = (&'static str, Option<egui::Color32>, &'static str, Command);
+
+fn flyout_icon<'a>(glyph: &'a str, color: Option<egui::Color32>, hover: &'a str, cmd: &'a Command) -> Icon<'a> {
+    let i = Icon::new(glyph, cmd.name()).tip(hover);
+    match color {
+        Some(c) => i.color(c),
+        None => i,
+    }
+}
+
+fn flyout<const N: usize>(ui: &mut egui::Ui, app: &mut LoomApp, id: &str, current: usize, items: [FlyoutItem; N]) {
+    let (glyph, color, hover, cmd) = &items[current];
+    let resp = flyout_icon(glyph, *color, hover, cmd).hint("right-click: flyout").show(ui, &app.state);
     if resp.clicked() {
-        let _ = app.dispatch(items[current].2.clone());
+        let _ = app.dispatch(cmd.clone());
     }
     let popup = ui.id().with(id);
     if resp.secondary_clicked() || resp.long_touched() {
         ui.memory_mut(|m| m.toggle_popup(popup));
     }
     egui::popup::popup_above_or_below_widget(ui, popup, &resp, egui::AboveOrBelow::Above, egui::PopupCloseBehavior::CloseOnClick, |ui| {
-        for (l, t, c) in &items {
-            if ui.button(*l).on_hover_cmd(&app.state, t, c.name()).clicked() {
+        for (g, color, t, c) in &items {
+            if flyout_icon(g, *color, t, c).show(ui, &app.state).clicked() {
                 let _ = app.dispatch(c.clone());
             }
         }
@@ -66,12 +79,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     ui.separator();
                     // Selection Lock Toggle (Space).
                     let locked = app.state.selection_locked;
-                    if ui.selectable_label(locked, "🔒").on_hover_name(&app.state, "Selection Lock Toggle").clicked() {
+                    if Icon::new(if locked { icons::LOCKED } else { icons::UNLOCKED }, "Selection Lock Toggle").on(locked).show(ui, &app.state).clicked() {
                         let _ = app.dispatch(Command::SelectionLockToggle);
                     }
                     // Absolute / Offset coordinate display.
                     let offset = app.state.offset_mode;
-                    if ui.selectable_label(offset, if offset { "Offset" } else { "Abs" }).on_hover_text("Absolute/Offset Mode Transform Type-In").clicked() {
+                    if Icon::new(if offset { icons::OFFSET } else { icons::ABSOLUTE }, "Absolute/Offset Mode Transform Type-In").tip(if offset { "Offset Mode Transform Type-In" } else { "Absolute Mode Transform Type-In" }).on(offset).show(ui, &app.state).clicked() {
                         let _ = app.dispatch(Command::AbsoluteOffsetToggle);
                     }
                     coordinate_fields(ui, app);
@@ -119,32 +132,33 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
 fn navigation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
-            nav(ui, app, "Zoom", "Zoom Mode", NavMode::Zoom, Command::ZoomMode);
-            nav(ui, app, "Zoom All", "Zoom All", NavMode::ZoomAll, Command::ZoomAll);
+            nav(ui, app, icons::ZOOM, "Zoom Mode", NavMode::Zoom, Command::ZoomMode);
+            nav(ui, app, icons::ZOOM_ALL, "Zoom All", NavMode::ZoomAll, Command::ZoomAll);
+            let sel = Some(icons::SELECTED_VARIANT);
             flyout(ui, app, "zoom_extents", 0, [
-                ("Extents", "Zoom Extents", Command::ZoomExtents),
-                ("Extents Selected", "Zoom Extents Selected", Command::ZoomExtentsSelected),
+                (icons::ZOOM_EXTENTS, None, "Zoom Extents", Command::ZoomExtents),
+                (icons::ZOOM_EXTENTS, sel, "Zoom Extents Selected", Command::ZoomExtentsSelected),
             ]);
             flyout(ui, app, "zoom_extents_all", 0, [
-                ("Extents All", "Zoom Extents All", Command::ZoomExtentsAll),
-                ("Extents All Selected", "Zoom Extents All Selected", Command::ZoomExtentsAllSelected),
+                (icons::ZOOM_EXTENTS_ALL, None, "Zoom Extents All", Command::ZoomExtentsAll),
+                (icons::ZOOM_EXTENTS_ALL, sel, "Zoom Extents All Selected", Command::ZoomExtentsAllSelected),
             ]);
         });
         ui.horizontal(|ui| {
             if app.state.active().is_orthographic() {
-                nav(ui, app, "Region", "Zoom Region Mode", NavMode::ZoomRegion, Command::ZoomRegionMode);
+                nav(ui, app, icons::ZOOM_REGION, "Zoom Region Mode", NavMode::ZoomRegion, Command::ZoomRegionMode);
             } else {
-                nav(ui, app, "FOV", "Field-of-View", NavMode::Fov, Command::FieldOfViewMode);
+                nav(ui, app, icons::FIELD_OF_VIEW, "Field-of-View", NavMode::Fov, Command::FieldOfViewMode);
             }
-            nav(ui, app, "Pan", "Pan View", NavMode::Pan, Command::PanView);
+            nav(ui, app, icons::PAN, "Pan View", NavMode::Pan, Command::PanView);
             let orbit_current = match app.state.nav_mode { NavMode::OrbitSelected => 1, NavMode::OrbitSubObject => 2, _ => 0 };
             flyout(ui, app, "orbit", orbit_current, [
-                ("Orbit", "Orbit View Mode", Command::OrbitViewMode),
-                ("Orbit Selected", "Orbit Selected", Command::OrbitSelectedMode),
-                ("Orbit SubObject", "Orbit SubObject", Command::OrbitSubObjectMode),
+                (icons::ORBIT, None, "Orbit View Mode", Command::OrbitViewMode),
+                (icons::ORBIT, Some(icons::SELECTED_VARIANT), "Orbit Selected", Command::OrbitSelectedMode),
+                (icons::ORBIT, Some(icons::SUB_OBJECT_VARIANT), "Orbit SubObject", Command::OrbitSubObjectMode),
             ]);
             let max = app.state.maximized;
-            if ui.selectable_label(max, "⛶").on_hover_name(&app.state, "Maximize Viewport Toggle").clicked() {
+            if Icon::new(icons::MAXIMIZE, "Maximize Viewport Toggle").on(max).show(ui, &app.state).clicked() {
                 let _ = app.dispatch(Command::MaximizeViewportToggle);
             }
         });
@@ -191,7 +205,7 @@ fn red(on: bool) -> egui::Color32 {
 /// playback over Key Mode / current frame / Time Configuration.
 fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
     // The big key: Set Keys (K), red while Set Key mode waits for a pose.
-    let big = egui::Button::new(egui::RichText::new("🔑").size(22.0)).min_size(egui::vec2(44.0, 44.0)).fill(if app.state.set_key_mode { red(true) } else { egui::Color32::from_gray(70) });
+    let big = egui::Button::new(egui::RichText::new(icons::SET_KEYS).size(26.0)).min_size(egui::vec2(44.0, 44.0)).fill(if app.state.set_key_mode { red(true) } else { egui::Color32::from_gray(70) });
     if ui.add(big).on_hover_name(&app.state, "Set Keys").clicked() {
         let _ = app.dispatch(Command::SetKeys);
     }
@@ -217,14 +231,14 @@ fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| playback_buttons(ui, app));
         ui.horizontal(|ui| {
             let key_mode = app.state.key_step_mode;
-            if ui.add(egui::Button::new("⇥").selected(key_mode)).on_hover_text("Key Mode Toggle").clicked() {
+            if Icon::new(icons::KEY_MODE, Command::NextPreviousKeyModeToggle.name()).tip("Key Mode Toggle").on(key_mode).show(ui, &app.state).clicked() {
                 let _ = app.dispatch(Command::NextPreviousKeyModeToggle);
             }
             let mut frame = app.state.current_frame;
             if ui.add(egui::DragValue::new(&mut frame).range(app.state.frame_range.0..=app.state.frame_range.1)).on_hover_text("Current Frame (Go To Frame)").changed() {
                 let _ = app.dispatch(Command::SetFrame { frame });
             }
-            if ui.small_button("⚙").on_hover_text("Time Configuration").clicked() {
+            if Icon::new(icons::TIME_CONFIGURATION, Command::TimeConfiguration.name()).tip("Time Configuration").show(ui, &app.state).clicked() {
                 let _ = app.dispatch(Command::TimeConfiguration);
             }
         });
@@ -300,21 +314,21 @@ fn default_tangents(ui: &mut egui::Ui, app: &mut LoomApp) {
 
 /// Go To Start, Previous, Play / Stop, Next, Go To End.
 fn playback_buttons(ui: &mut egui::Ui, app: &mut LoomApp) {
-    if ui.small_button("⏮").on_hover_name(&app.state, "Go to Start Frame").clicked() {
+    if Icon::new(icons::GO_TO_START, "Go to Start Frame").show(ui, &app.state).clicked() {
         let _ = app.dispatch(Command::GoToStartFrame);
     }
     let key_mode = app.state.key_step_mode;
-    if ui.small_button(if key_mode { "⏪" } else { "◀" }).on_hover_cmd(&app.state, if key_mode { "Previous Key" } else { "Previous Frame" }, Command::BackupTimeOneUnit.name()).clicked() {
+    if Icon::new(if key_mode { icons::PREVIOUS_KEY } else { icons::PREVIOUS_FRAME }, Command::BackupTimeOneUnit.name()).tip(if key_mode { "Previous Key" } else { "Previous Frame" }).show(ui, &app.state).clicked() {
         let _ = app.dispatch(Command::BackupTimeOneUnit);
     }
     let playing = app.state.playing;
-    if ui.add(egui::Button::new(if playing { "⏸" } else { "⏵" }).selected(playing)).on_hover_cmd(&app.state, "Play / Stop Animation", Command::PlayAnimation.name()).clicked() {
+    if Icon::new(if playing { icons::STOP } else { icons::PLAY }, Command::PlayAnimation.name()).tip("Play / Stop Animation").on(playing).show(ui, &app.state).clicked() {
         let _ = app.dispatch(Command::PlayAnimation);
     }
-    if ui.small_button(if key_mode { "⏩" } else { "▶" }).on_hover_cmd(&app.state, if key_mode { "Next Key" } else { "Next Frame" }, Command::ForwardTimeOneUnit.name()).clicked() {
+    if Icon::new(if key_mode { icons::NEXT_KEY } else { icons::NEXT_FRAME }, Command::ForwardTimeOneUnit.name()).tip(if key_mode { "Next Key" } else { "Next Frame" }).show(ui, &app.state).clicked() {
         let _ = app.dispatch(Command::ForwardTimeOneUnit);
     }
-    if ui.small_button("⏭").on_hover_name(&app.state, "Go to End Frame").clicked() {
+    if Icon::new(icons::GO_TO_END, "Go to End Frame").show(ui, &app.state).clicked() {
         let _ = app.dispatch(Command::GoToEndFrame);
     }
 }

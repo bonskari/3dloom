@@ -24,7 +24,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             mode_with_settings(ui, app, "Extrude", "Extrude Mode: drag a selected vertex", on, Command::ExtrudeMode, Command::ExtrudeSettings);
             let th = app.state.poly_settings.weld_threshold;
             ui.add_enabled_ui(has, |ui| action(ui, app, "Weld", "Weld the selected vertices within the threshold", Command::Weld { threshold: th }));
-            if ui.small_button("□").on_hover_text("Weld Settings").clicked() {
+            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Weld Settings").clicked() {
                 let _ = app.dispatch(Command::WeldSettings);
             }
         });

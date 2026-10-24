@@ -41,6 +41,8 @@ bytemuck  = { version = "1.18", features = ["derive"] }
 eframe    = { version = "0.31", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
 egui      = "0.31"
 egui-wgpu = "0.31"
+# Phosphor icons (MIT), the Regular weight only.
+egui-phosphor = { version = "0.9", default-features = false, features = ["regular"] }
 wgpu      = "24.0"
 pollster  = "0.4"
 serde     = { version = "1", features = ["derive"] }

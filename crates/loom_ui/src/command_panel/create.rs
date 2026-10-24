@@ -33,12 +33,25 @@ impl Category {
             Category::Systems => "Systems",
         }
     }
+    /// The category's icon; its label is the tooltip.
+    pub fn icon(self) -> &'static str {
+        use crate::icons as i;
+        match self {
+            Category::Geometry => i::GEOMETRY,
+            Category::Shapes => i::SHAPES,
+            Category::Lights => i::LIGHTS,
+            Category::Cameras => i::CAMERAS,
+            Category::Helpers => i::HELPERS,
+            Category::SpaceWarps => i::SPACE_WARPS,
+            Category::Systems => i::SYSTEMS,
+        }
+    }
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.horizontal_wrapped(|ui| {
         for c in Category::ALL {
-            if ui.selectable_label(app.create_category == c, c.label()).clicked() {
+            if crate::icons::Icon::new(c.icon(), c.label()).on(app.create_category == c).show(ui, &app.state).clicked() {
                 app.create_category = c;
                 app.create_kind = None;
             }

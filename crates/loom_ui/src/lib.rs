@@ -7,6 +7,7 @@ pub mod create_tool;
 pub mod dialogs;
 pub mod gizmo;
 mod hotkeys;
+pub mod icons;
 pub mod label_menus;
 pub mod main_toolbar;
 pub mod quad_menu;
@@ -798,6 +799,7 @@ impl LoomApp {
     /// One frame of the whole UI (what eframe calls each repaint; the UI
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
+        icons::install(ctx);
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_file_action(loom_commands::PendingFileAction::Exit);

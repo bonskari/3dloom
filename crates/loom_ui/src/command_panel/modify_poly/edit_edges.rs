@@ -31,7 +31,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             let on = app.state.poly_drag == Some(PolyDrag::Extrude);
             mode_with_settings(ui, app, "Extrude", "Extrude Mode: drag a selected edge", on, Command::ExtrudeMode, Command::ExtrudeSettings);
             ui.add_enabled_ui(has, |ui| action(ui, app, "Weld", "Weld the selected edges' vertices within the threshold", Command::Weld { threshold: ps.weld_threshold }));
-            if ui.small_button("□").on_hover_text("Weld Settings").clicked() {
+            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Weld Settings").clicked() {
                 let _ = app.dispatch(Command::WeldSettings);
             }
         });
@@ -45,11 +45,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             ui.add_enabled_ui(has, |ui| action(ui, app, "Bridge", "Bridge two selected border loops", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }));
-            if ui.small_button("□").on_hover_text("Bridge Settings").clicked() {
+            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Bridge Settings").clicked() {
                 let _ = app.dispatch(Command::BridgeSettings);
             }
             ui.add_enabled_ui(has, |ui| action_keyed(ui, app, "Connect", "Connect: new edges across the selected edges", "Connect", Command::ConnectEdges { segments: ps.connect_segments, pinch: ps.connect_pinch, slide: ps.connect_slide }));
-            if ui.small_button("□").on_hover_text("Connect Edge Settings").clicked() {
+            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Connect Edge Settings").clicked() {
                 let _ = app.dispatch(Command::ConnectEdgeSettings);
             }
         });
