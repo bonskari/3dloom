@@ -8,7 +8,7 @@ use glam::Vec3;
 use loom_mesh::pc2::Pc2;
 use loom_mesh::{FaceId, Mesh};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex};
 
 /// One HSDS level: the polygons of the mesh at that level that split, and
 /// that mesh's counts (a topology change below drops the levels).
@@ -101,31 +101,75 @@ pub struct PointCacheData {
     /// The WSM: the file holds world positions.
     pub world: bool,
     #[serde(skip)]
-    pub data: OnceLock<Option<Arc<Pc2>>>,
+    pub data: Pc2Cache,
+}
+
+/// Which version of a file a read came from: its path, size and modification time.
+type FileStamp = (String, u64, Option<std::time::SystemTime>);
+
+fn stamp(path: &str) -> Option<FileStamp> {
+    let m = std::fs::metadata(path).ok()?;
+    Some((path.to_string(), m.len(), m.modified().ok()))
+}
+
+/// The last successful read of a Point Cache file, keyed by the file's
+/// stamp. A failed read is never kept: the next evaluation tries again, and
+/// a file rewritten on disk is read again. Not part of the modifier's value
+/// (equality ignores it; a copy starts with the same loaded data).
+#[derive(Default)]
+pub struct Pc2Cache(Mutex<Option<(FileStamp, Arc<Pc2>)>>);
+
+impl Clone for Pc2Cache {
+    fn clone(&self) -> Self {
+        Self(Mutex::new(self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()))
+    }
+}
+
+impl PartialEq for Pc2Cache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for Pc2Cache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Pc2Cache")
+    }
 }
 
 impl Default for PointCacheData {
     fn default() -> Self {
-        Self { path: String::new(), strength: Param::new(1.0), relative: false, playback: 0, start_frame: 0.0, world: false, data: OnceLock::new() }
+        Self { path: String::new(), strength: Param::new(1.0), relative: false, playback: 0, start_frame: 0.0, world: false, data: Pc2Cache::default() }
     }
 }
 
 impl PointCacheData {
-    /// The loaded file (read once per copy of the modifier; None when it cannot be read).
+    /// The file's data: from the cache while the file's size and time are
+    /// unchanged, else read again (None when it cannot be read; nothing is
+    /// remembered of the failure).
     pub fn cache(&self) -> Option<Arc<Pc2>> {
         if self.path.is_empty() {
             return None;
         }
-        self.data.get_or_init(|| std::fs::File::open(&self.path).ok().and_then(|f| Pc2::read(std::io::BufReader::new(f)).ok()).map(Arc::new)).clone()
+        let key = stamp(&self.path)?;
+        let mut slot = self.data.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((k, pc)) = slot.as_ref() {
+            if *k == key {
+                return Some(pc.clone());
+            }
+        }
+        let pc = Arc::new(std::fs::File::open(&self.path).ok().and_then(|f| Pc2::read(std::io::BufReader::new(f)).ok())?);
+        *slot = Some((key, pc.clone()));
+        Some(pc)
     }
 
     /// Loads `path` now, so a bad file is refused at once.
     pub fn load(&mut self, path: &str) -> Result<(), String> {
+        let key = stamp(path);
         let f = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
         let pc = Pc2::read(std::io::BufReader::new(f)).map_err(|e| format!("{path}: {e}"))?;
         self.path = path.to_string();
-        self.data = OnceLock::new();
-        let _ = self.data.set(Some(Arc::new(pc)));
+        self.data = Pc2Cache(Mutex::new(key.map(|k| (k, Arc::new(pc)))));
         Ok(())
     }
 }
@@ -134,6 +178,9 @@ pub fn point_cache(d: &PointCacheData, mut v: StackValue, ctx: &EvalCtx<'_>) -> 
     if d.path.is_empty() {
         return Ok(v);
     }
+    // The file is looked at again on every frame: one that appears or
+    // changes on disk plays without a Load.
+    crate::anim::note_animated_read();
     let Some(pc) = d.cache() else {
         v.warnings.push(format!("Point Cache: cannot read {}", d.path));
         return Ok(v);
@@ -143,7 +190,6 @@ pub fn point_cache(d: &PointCacheData, mut v: StackValue, ctx: &EvalCtx<'_>) -> 
         v.warnings.push(format!("Point Cache: the file has {} vertices, the mesh {n}; the mesh passes through", pc.points()));
         return Ok(v);
     }
-    crate::anim::note_animated_read();
     let now = crate::anim::time();
     let t = if d.playback == 1 { now - d.start_frame + pc.start } else { now };
     let Some(at) = pc.at(t) else { return Ok(v) };
@@ -155,4 +201,35 @@ pub fn point_cache(d: &PointCacheData, mut v: StackValue, ctx: &EvalCtx<'_>) -> 
         vert.position = if d.relative { cur + (to_local(at[i]) - to_local(first[i])) * k } else { cur.lerp(to_local(at[i]), k) };
     }
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(path: &std::path::Path, points: usize) {
+        let pc = Pc2 { start: 0.0, rate: 1.0, samples: vec![vec![Vec3::ZERO; points]; 2] };
+        pc.write(std::io::BufWriter::new(std::fs::File::create(path).unwrap())).unwrap();
+    }
+
+    #[test]
+    fn a_failed_read_is_not_kept() {
+        let dir = std::env::temp_dir().join(format!("loom-pc-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("later.pc2");
+        let _ = std::fs::remove_file(&path);
+        let d = PointCacheData { path: path.to_string_lossy().into(), ..Default::default() };
+        assert!(d.cache().is_none(), "no file yet");
+        write(&path, 3);
+        assert_eq!(d.cache().map(|p| p.points()), Some(3), "read once the file appears");
+        // A rewritten file is read again; an unchanged one comes from the cache.
+        write(&path, 5);
+        assert_eq!(d.cache().map(|p| p.points()), Some(5));
+        let a = d.cache().unwrap();
+        assert!(Arc::ptr_eq(&a, &d.cache().unwrap()), "cached while the file is unchanged");
+        // A copy of the modifier keeps the loaded file.
+        assert!(Arc::ptr_eq(&a, &d.clone().cache().unwrap()));
+        std::fs::remove_file(&path).unwrap();
+        assert!(d.cache().is_none(), "the file is gone");
+    }
 }

@@ -266,3 +266,135 @@ fn paste_instanced_keeps_wsm_on_top() {
     let names: Vec<String> = s.scene.node(b).unwrap().modifiers.iter().map(|m| m.modifier.name().to_string()).collect();
     assert_eq!(names, ["Bend", "PathDeform (WSM)"]);
 }
+
+fn line(s: &mut AppState, pts: &[[f32; 3]]) -> NodeId {
+    let r = execute(s, Command::LineStart { point: pts[0] }).unwrap();
+    let id = r["id"].as_u64().unwrap();
+    for p in &pts[1..] {
+        execute(s, Command::LineAddKnot { node: id, point: *p, smooth: false }).unwrap();
+    }
+    execute(s, Command::LineEnd { node: id }).unwrap();
+    select(s, NodeId(id));
+    NodeId(id)
+}
+
+/// The helpers of the shape's Spline IK Control at stack entry 0.
+fn ik_helpers(s: &AppState, id: NodeId) -> Vec<Option<NodeId>> {
+    match &s.scene.node(id).unwrap().modifiers[0].modifier {
+        loom_scene::Modifier::SplineIkControl(d) => d.helpers.clone(),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn pathdeform_follows_the_paths_modifier_stack() {
+    let mut s = AppState::new();
+    let path = line(&mut s, &[[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]]);
+    // The path's stack bends its end up: a Spline IK Control helper moved 100 along Y.
+    add(&mut s, "Spline IK Control");
+    set(&mut s, 0, "Link Types", 2.0);
+    execute(&mut s, Command::SplineIkControlCreateHelpers).unwrap();
+    let end = ik_helpers(&s, path)[1].unwrap();
+    select(&mut s, end);
+    execute(&mut s, Command::MoveSelection { delta: [0.0, 100.0, 0.0], system: None }).unwrap();
+    let b = prim(&mut s, PrimitiveKind::Box, [0.0; 3], [2.0, 2.0, 2.0]);
+    add(&mut s, "PathDeform");
+    execute(&mut s, Command::PickModifierNode { index: 0, node: path.0 }).unwrap();
+    set(&mut s, 0, "Path Deform Axis", 2.0);
+    set(&mut s, 0, "Percent", 50.0);
+    // Halfway along the evaluated path (0,0)→(100,100), not the base line's
+    // (50,0), in the path's own space (the box sits at the world origin).
+    let local = |s: &AppState, p: Vec3| s.scene.object_matrix(path).inverse().transform_point3(p);
+    let c = centroid(&verts(&s, b));
+    assert!((c - local(&s, Vec3::new(50.0, 50.0, 0.0))).length() < 3.0, "on the evaluated path: {c}");
+    // Moving the helper again re-evaluates the deformed box.
+    select(&mut s, end);
+    execute(&mut s, Command::MoveSelection { delta: [0.0, -100.0, 0.0], system: None }).unwrap();
+    let c = centroid(&verts(&s, b));
+    assert!((c - local(&s, Vec3::new(50.0, 0.0, 0.0))).length() < 3.0, "follows the path's change: {c}");
+}
+
+#[test]
+fn pathdeform_cycle_does_not_hang() {
+    let mut s = AppState::new();
+    let a = line(&mut s, &[[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]]);
+    let c = line(&mut s, &[[0.0, 50.0, 0.0], [100.0, 50.0, 0.0]]);
+    select(&mut s, a);
+    add(&mut s, "PathDeform");
+    execute(&mut s, Command::PickModifierNode { index: 0, node: c.0 }).unwrap();
+    select(&mut s, c);
+    add(&mut s, "PathDeform");
+    execute(&mut s, Command::PickModifierNode { index: 0, node: a.0 }).unwrap();
+    // Each path is being evaluated when the other asks for it: a warning, no recursion.
+    let _ = s.scene.eval_mesh(a);
+    let _ = s.scene.eval_mesh(c);
+}
+
+#[test]
+fn pathdeform_rotation_turns_the_section() {
+    let mut s = AppState::new();
+    let path = line(&mut s, &[[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]]);
+    // A flat box: 2 across X, 10 across Y, 20 along Z (the deform axis).
+    let b = prim(&mut s, PrimitiveKind::Box, [0.0; 3], [2.0, 10.0, 20.0]);
+    add(&mut s, "PathDeform");
+    execute(&mut s, Command::PickModifierNode { index: 0, node: path.0 }).unwrap();
+    set(&mut s, 0, "Path Deform Axis", 2.0);
+    let ext = |s: &AppState| {
+        let (lo, hi) = s.scene.eval_mesh(b).value.mesh.aabb();
+        hi - lo
+    };
+    let e0 = ext(&s);
+    assert!((e0.x - 20.0).abs() < 1e-2, "laid along the path: {e0}");
+    let mut section = [e0.y, e0.z];
+    section.sort_by(f32::total_cmp);
+    assert!((section[0] - 2.0).abs() < 1e-2 && (section[1] - 10.0).abs() < 1e-2, "the 2 x 10 section: {e0}");
+    // Rotation 90: the section turns a quarter round the path.
+    set(&mut s, 0, "Rotation", 90.0);
+    let e90 = ext(&s);
+    assert!((e90.x - 20.0).abs() < 1e-2, "{e90}");
+    assert!((e90.y - e0.z).abs() < 1e-2 && (e90.z - e0.y).abs() < 1e-2, "section turned: {e0} -> {e90}");
+    // Rotation 45: the diagonal of the section.
+    set(&mut s, 0, "Rotation", 45.0);
+    let e45 = ext(&s);
+    let want = (2.0f32 + 10.0) / 2f32.sqrt();
+    assert!((e45.y - want).abs() < 1e-2 && (e45.z - want).abs() < 1e-2, "{e45}");
+}
+
+#[test]
+fn spline_ik_control_keeps_helpers_per_spline() {
+    let mut s = AppState::new();
+    let a = line(&mut s, &[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]]);
+    let other = line(&mut s, &[[0.0, 50.0, 0.0], [20.0, 50.0, 0.0]]);
+    select(&mut s, a);
+    execute(&mut s, Command::SplineAttach { node: other.0, reorient: false }).unwrap();
+    add(&mut s, "Spline IK Control");
+    set(&mut s, 0, "Link Types", 2.0);
+    execute(&mut s, Command::SplineIkControlCreateHelpers).unwrap();
+    let helpers: Vec<NodeId> = ik_helpers(&s, a).into_iter().map(|h| h.unwrap()).collect();
+    assert_eq!(helpers.len(), 5);
+    // Lift the second spline's helpers.
+    for h in &helpers[3..] {
+        select(&mut s, *h);
+        execute(&mut s, Command::MoveSelection { delta: [0.0, 0.0, 7.0], system: None }).unwrap();
+    }
+    let world_spline = |s: &AppState, i: usize| -> Vec<Vec3> {
+        let w = s.scene.object_matrix(a);
+        s.scene.eval_mesh(a).value.shape.clone().unwrap().splines[i].knots.iter().map(|k| w.transform_point3(k.pos)).collect()
+    };
+    assert!(world_spline(&s, 1).iter().all(|p| (p.z - 7.0).abs() < 1e-3));
+    // A knot added to the first spline below the modifier: the second
+    // spline's knots still follow their own helpers, nothing shifts across.
+    execute(&mut s, Command::SplineRefine { node: a.0, segment: 0, t: 0.5 }).unwrap();
+    let e = s.scene.eval_mesh(a);
+    let sh = e.value.shape.clone().unwrap();
+    assert_eq!(sh.splines[0].knots.len(), 4);
+    let k1 = world_spline(&s, 1);
+    assert!((k1[0] - Vec3::new(0.0, 50.0, 7.0)).length() < 1e-3, "{k1:?}");
+    assert!((k1[1] - Vec3::new(20.0, 50.0, 7.0)).length() < 1e-3, "{k1:?}");
+    assert!(world_spline(&s, 0).iter().all(|p| p.z.abs() < 1e-3), "no helper of spline 2 lands on spline 1");
+    assert!(e.warnings.iter().any(|w| w.contains("Spline IK Control")), "the count change is reported: {:?}", e.warnings);
+    // Undoing the refine: the mapping is whole again, no warning.
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    let e = s.scene.eval_mesh(a);
+    assert!(!e.warnings.iter().any(|w| w.contains("Spline IK Control")), "{:?}", e.warnings);
+}

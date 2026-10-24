@@ -57,6 +57,19 @@ fn edit(state: &mut AppState, label: &str, f: impl FnOnce(&mut EditNormalsData, 
     Ok(state_json(state))
 }
 
+/// Copy Normal: fills the entry's clipboard without an undo step (copying
+/// changes no geometry; the Paste that uses it is the undo step).
+fn copy(state: &mut AppState) -> Result<Value, String> {
+    let (id, index) = entry(state).ok_or("select an object with an Edit Normals modifier")?;
+    let input = input_mesh(state, id, index);
+    let mut d = data(state, id, index).ok_or("no Edit Normals entry")?;
+    let n = d.copy(&input).ok_or("select a normal to copy")?;
+    if let Some(Modifier::EditNormals(e)) = state.scene.node_mut(id).and_then(|n| n.modifiers.get_mut(index)).map(|s| &mut s.modifier) {
+        e.clipboard = Some(n);
+    }
+    Ok(state_json(state))
+}
+
 /// Sets the entry's sub-object level (no undo, like the level buttons).
 fn level(state: &mut AppState, level: u32, select_by: Option<u32>) -> Result<Value, String> {
     let (id, index) = entry(state).ok_or("select an object with an Edit Normals modifier")?;
@@ -140,7 +153,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             d.reset(i);
             Ok(())
         }),
-        C::CopyNormal => edit(state, "Copy Normal", |d, i| d.copy(i).map(|_| ()).ok_or_else(|| "select a normal to copy".to_string())),
+        C::CopyNormal => copy(state),
         C::PasteNormal => edit(state, "Paste Normal", |d, i| if d.paste(i) { Ok(()) } else { Err("copy a normal first".into()) }),
         C::EditNormalsSetNormal { direction } => edit(state, "Set Normal", |d, i| {
             d.set_direction(i, glam::Vec3::from(direction));

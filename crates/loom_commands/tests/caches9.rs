@@ -205,3 +205,35 @@ fn point_cache_record_refuses_a_changing_vertex_count() {
     assert!(e.contains("vertex count"), "{e}");
     assert!(!file.exists(), "no corrupt file left behind");
 }
+
+#[test]
+fn point_cache_retries_a_missing_file() {
+    let mut s = AppState::new();
+    let b = animated_bend(&mut s);
+    add(&mut s, "Point Cache");
+    let file = scratch("retry.pc2");
+    execute(&mut s, Command::PointCacheRecord { index: 1, path: file.to_string_lossy().into(), start: 0, end: 10 }).unwrap();
+    execute(&mut s, Command::ToggleModifier { index: 0, on: false }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    let played = verts(&s, b);
+    let loom = scratch("retry.loom");
+    execute(&mut s, Command::SaveFileAs { path: Some(loom.to_string_lossy().into()) }).unwrap();
+    // The scene opens while the cache file is away: a warning, the mesh passes through.
+    let kept = std::fs::read(&file).unwrap();
+    std::fs::remove_file(&file).unwrap();
+    let mut t = AppState::new();
+    execute(&mut t, Command::OpenFile { path: Some(loom.to_string_lossy().into()) }).unwrap();
+    execute(&mut t, Command::SetFrame { frame: 10 }).unwrap();
+    let e = t.scene.eval_mesh(b);
+    assert!(e.warnings.iter().any(|w| w.contains("cannot read")), "{:?}", e.warnings);
+    // The file comes back: the next frame's evaluation reads it, no Load needed.
+    std::fs::write(&file, &kept).unwrap();
+    execute(&mut t, Command::SetFrame { frame: 9 }).unwrap();
+    assert!(!t.scene.eval_mesh(b).warnings.iter().any(|w| w.contains("Point Cache")));
+    execute(&mut t, Command::SetFrame { frame: 10 }).unwrap();
+    let e = t.scene.eval_mesh(b);
+    assert!(!e.warnings.iter().any(|w| w.contains("Point Cache")), "{:?}", e.warnings);
+    for (a, c) in e.value.mesh.vertices().iter().map(|v| v.position).zip(&played) {
+        assert!(a.distance(*c) < 1e-3, "{a} vs {c}");
+    }
+}

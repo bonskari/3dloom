@@ -467,6 +467,9 @@ pub struct EvalCtx<'a> {
     pub lookup: Option<&'a dyn Fn(NodeId) -> Option<(Mat4, Mesh)>>,
     /// Shape of another node (Sweep > Custom Section).
     pub shape_lookup: Option<&'a dyn Fn(NodeId) -> Option<loom_shape::Shape>>,
+    /// Another node's evaluated shape, its stack's output (PathDeform path,
+    /// Bevel Profile profile); `None` for a node already being evaluated (a cycle).
+    pub eval_shape_lookup: Option<&'a dyn Fn(NodeId) -> Option<loom_shape::Shape>>,
     /// Another node's world matrix alone (bones of a Skin).
     pub world_lookup: Option<&'a dyn Fn(NodeId) -> Option<Mat4>>,
     /// Another node's evaluated stack output in world space (Skin Wrap base);
@@ -492,6 +495,13 @@ impl EvalCtx<'_> {
     }
     pub(crate) fn node_shape(&self, id: NodeId) -> Option<loom_shape::Shape> {
         self.shape_lookup.and_then(|l| l(id))
+    }
+    /// Another node's evaluated shape (its base shape without a scene to evaluate in).
+    pub(crate) fn node_eval_shape(&self, id: NodeId) -> Option<loom_shape::Shape> {
+        match self.eval_shape_lookup {
+            Some(l) => l(id),
+            None => self.node_shape(id),
+        }
     }
     fn node_world(&self, id: NodeId) -> Option<Mat4> {
         self.lookup.and_then(|l| l(id)).map(|(m, _)| m)
@@ -1789,7 +1799,7 @@ impl Modifier {
             Modifier::BevelProfile { profile, cap_start, cap_end } => {
                 let sh = v.shape.take().ok_or("Bevel Profile needs a shape below it")?;
                 let pid = profile.ok_or("Bevel Profile: pick a profile shape")?;
-                let prof = ctx.shape_lookup.and_then(|l| l(pid)).ok_or("Bevel Profile: the profile is not a shape")?;
+                let prof = ctx.node_eval_shape(pid).ok_or("Bevel Profile: the profile is not a shape (or depends on this object)")?;
                 let pts: Vec<Vec3> = prof.polylines().into_iter().next().unwrap_or_default();
                 if pts.len() < 2 {
                     return Err("Bevel Profile: the profile needs two points".into());
