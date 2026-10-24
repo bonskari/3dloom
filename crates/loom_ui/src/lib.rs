@@ -1,6 +1,7 @@
 //! egui/eframe UI shell: menubar, command panel, statusbar, viewport widget.
 //! All scene mutations go through `loom_commands::execute` via `dispatch`.
 
+mod camera_overlay;
 mod command_panel;
 pub mod create_tool;
 pub mod dialogs;
@@ -114,6 +115,8 @@ pub enum CreateKind {
     Bones,
     /// Helpers > Dummy / Point: a click places one.
     Helper(HelperKind),
+    /// Cameras > Target (drag camera to target) / Free (a click places one).
+    Camera { target: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +185,8 @@ pub struct LoomApp {
     pub keyboard_entry: KeyboardEntry,
     /// Creation in progress in the viewport.
     pub create: Option<CreateSession>,
+    /// A Target camera being dragged out.
+    pub camera_create: Option<create_tool::CameraSession>,
     pub panel_tab: Tab,
     pub hierarchy_sub: HierarchySub,
     pub utility: Utility,
@@ -292,6 +297,7 @@ impl LoomApp {
             autogrid: false,
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
+            camera_create: None,
             panel_tab: Tab::Create,
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
@@ -466,8 +472,9 @@ impl LoomApp {
             } else {
                 [srgb(n.wire_color[0]), srgb(n.wire_color[1]), srgb(n.wire_color[2])]
             };
-            // Helpers (Dummy, Point, IK goals) draw see-through like wireframe helpers.
-            let see_through = n.display.see_through || n.object.is_helper();
+            // Helpers (Dummy, Point, IK goals) draw see-through like wireframe helpers;
+            // a camera icon is drawn solid.
+            let see_through = n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }));
             // An assigned material colours the faces (its diffuse, opacity and
             // highlight); edges and wireframe keep the object colour.
             let material = self.state.scene.node_material(n.id).cloned();
@@ -537,21 +544,33 @@ impl LoomApp {
         let vp = &self.state.viewports[index.min(self.state.viewports.len() - 1)];
         if let loom_commands::ViewKind::Camera(id) = vp.kind {
             if let Some(node) = self.state.scene.node(id) {
-                // Look through the camera node: it looks down its local -Z.
-                let world = self.state.scene.world_matrix(id);
-                let eye = world.w_axis.truncate();
-                let forward = -world.z_axis.truncate().normalize_or_zero();
-                let distance = 10.0;
-                let dir = -forward;
-                let mut orbit = loom_input::OrbitCamera { target: eye + forward * distance, distance, yaw: dir.y.atan2(dir.x), pitch: dir.z.clamp(-1.0, 1.0).asin() };
-                if forward.length_squared() < 1e-6 {
-                    orbit = vp.camera.clone();
+                if let loom_scene::ObjectKind::Camera { fov, ortho, clip_manually, near_clip, far_clip, .. } = &node.object {
+                    // Look through the camera node: it looks down its local -Z,
+                    // its FOV spanning the viewport's width.
+                    let world = self.state.scene.world_matrix(id);
+                    let eye = world.w_axis.truncate();
+                    let forward = -world.z_axis.truncate().normalize_or_zero();
+                    let distance = loom_commands::camera::target_distance(&self.state.scene, id).unwrap_or(loom_scene::camera::DEFAULT_TARGET_DISTANCE).max(1e-3);
+                    let dir = -forward;
+                    let orbit = loom_input::OrbitCamera { target: eye + forward * distance, distance, yaw: dir.y.atan2(dir.x), pitch: dir.z.clamp(-1.0, 1.0).asin() };
+                    // Clip Manually off: nothing nearer than 3 units shows.
+                    let (near, far) = if clip_manually.get() {
+                        (near_clip.get().max(loom_scene::camera::MIN_NEAR_CLIP), far_clip.get().max(near_clip.get() + 1e-3))
+                    } else {
+                        (loom_scene::camera::AUTO_NEAR_CLIP, Camera::auto_clip(distance).1)
+                    };
+                    let perspective = !ortho.get();
+                    return Camera {
+                        orbit,
+                        perspective,
+                        fov_y_radians: vp.fov_y_radians,
+                        near,
+                        far,
+                        clip: (!perspective).then_some((near, far)),
+                        frame: Some(world),
+                        fov_x_radians: Some(fov.get().to_radians()),
+                    };
                 }
-                let fov = match &node.object {
-                    loom_scene::ObjectKind::Camera { fov, .. } => fov.get().to_radians(),
-                    _ => vp.fov_y_radians,
-                };
-                return Camera { orbit, perspective: true, fov_y_radians: fov, ..Camera::default() };
             }
         }
         let (auto_near, auto_far) = Camera::auto_clip(vp.camera.distance);
@@ -563,6 +582,8 @@ impl LoomApp {
             near,
             far,
             clip: (vp.clipping && vp.is_orthographic()).then_some(vp.clip),
+            frame: None,
+            fov_x_radians: None,
         }
     }
 

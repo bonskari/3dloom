@@ -1679,31 +1679,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        C::CreateCamera { target } => {
-            let cam = state.active().camera.clone();
-            let eye = cam.eye_position();
-            let fov = state.active().fov_y_radians.to_degrees();
-            let mut node = Node::new(&state.scene.next_name("Camera"), ObjectKind::camera_object(fov));
-            node.transform = Transform::from_matrix(Mat4::look_at_rh(eye, cam.target, Vec3::Z).inverse());
-            node.wire_color = [0, 160, 255];
-            let cam_id = NodeId(state.scene.next_id());
-            let mut changes = Vec::new();
-            if target {
-                let target_id = NodeId(cam_id.0 + 1);
-                node.object = ObjectKind::Camera { fov: loom_scene::Param::new(fov), target: Some(target_id) };
-                let mut t = Node::new(&format!("{}.Target", node.name), ObjectKind::box_object(0.2, 0.2, 0.2));
-                t.transform.position.set(cam.target);
-                t.wire_color = [0, 160, 255];
-                changes.push(Change::AddNode(node));
-                changes.push(Change::AddNode(t));
-            } else {
-                changes.push(Change::AddNode(node));
-            }
-            commit(state, "Create Camera", Change::Group(changes))?;
-            state.selection = BTreeSet::from([cam_id]);
-            state.sub_selection.clear();
-            Ok(json!({ "id": cam_id.0 }))
-        }
+        c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. }) => crate::camera::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;

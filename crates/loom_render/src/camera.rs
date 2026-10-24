@@ -11,6 +11,12 @@ pub struct Camera {
     /// Viewport Clipping in an axis view: (near, far) distances from the view's
     /// eye point; perspective views use `near` / `far` directly.
     pub clip: Option<(f32, f32)>,
+    /// Looking through a camera object: its world frame (looks down local
+    /// -Z, local +Y up), which keeps its roll and works straight down.
+    pub frame: Option<Mat4>,
+    /// Looking through a camera object: its horizontal field of view, which
+    /// spans the viewport's width (orthographic: the width at `orbit.distance`).
+    pub fov_x_radians: Option<f32>,
 }
 
 impl Default for Camera {
@@ -22,6 +28,8 @@ impl Default for Camera {
             near: 0.01,
             far: 1000.0,
             clip: None,
+            frame: None,
+            fov_x_radians: None,
         }
     }
 }
@@ -41,6 +49,15 @@ impl Camera {
     }
 
     pub fn view_matrix(&self) -> Mat4 {
+        if let Some(f) = self.frame {
+            let (x, y, z) = (f.x_axis.truncate().normalize_or_zero(), f.y_axis.truncate().normalize_or_zero(), f.z_axis.truncate().normalize_or_zero());
+            let mut eye = f.w_axis.truncate();
+            if !self.perspective {
+                // Orthographic: the projection's eye sits ORTHO_EYE behind the view's eye point.
+                eye += z * (Self::ORTHO_EYE - self.orbit.distance);
+            }
+            return Mat4::from_cols(x.extend(0.0), y.extend(0.0), z.extend(0.0), eye.extend(1.0)).inverse();
+        }
         let eye = if self.perspective {
             self.orbit.eye_position()
         } else {
@@ -51,12 +68,23 @@ impl Camera {
     }
 
     pub fn projection_matrix(&self, aspect: f32) -> Mat4 {
+        let half_x = self.fov_x_radians.map(|f| (f * 0.5).tan());
         if self.perspective {
-            Mat4::perspective_rh(self.fov_y_radians, aspect, self.near, self.far)
+            let fov_y = half_x.map_or(self.fov_y_radians, |t| 2.0 * (t / aspect.max(1e-6)).atan());
+            Mat4::perspective_rh(fov_y, aspect, self.near, self.far)
         } else {
-            // Zoom level comes from `distance` alone (not the perspective FOV).
-            let height = (self.orbit.distance * 0.8284).max(0.01);
-            let width = height * aspect;
+            // Zoom level comes from `distance` alone (not the perspective FOV),
+            // except through a camera, whose FOV spans the width at `distance`.
+            let (width, height) = match half_x {
+                Some(t) => {
+                    let w = (2.0 * self.orbit.distance * t).max(0.01);
+                    (w, w / aspect.max(1e-6))
+                }
+                None => {
+                    let h = (self.orbit.distance * 0.8284).max(0.01);
+                    (h * aspect, h)
+                }
+            };
             Mat4::orthographic_rh(
                 -width * 0.5,
                 width * 0.5,
@@ -152,5 +180,20 @@ mod tests {
                 "view-projection matrix must be finite, got {v}"
             );
         }
+    }
+
+    #[test]
+    fn camera_frame_looks_straight_down_and_its_fov_spans_the_width() {
+        // A camera 100 above the origin looking down -Z (local +Y = world +Y).
+        let frame = Mat4::from_translation(Vec3::new(0.0, 0.0, 100.0));
+        let cam = Camera { frame: Some(frame), fov_x_radians: Some(90f32.to_radians()), near: 1.0, far: 1000.0, ..Camera::default() };
+        let vp = cam.view_projection(2.0);
+        let ndc = |p: Vec3| vp.project_point3(p);
+        // 90 degrees horizontal: x = ±100 at the ground is the frame's edge; y = ±50.
+        assert!((ndc(Vec3::new(100.0, 0.0, 0.0)).x - 1.0).abs() < 1e-4);
+        assert!((ndc(Vec3::new(0.0, 50.0, 0.0)).y - 1.0).abs() < 1e-4);
+        let ortho = Camera { perspective: false, orbit: OrbitCamera { distance: 100.0, ..OrbitCamera::default() }, ..cam };
+        let vp = ortho.view_projection(2.0);
+        assert!((vp.project_point3(Vec3::new(100.0, 0.0, -30.0)).x - 1.0).abs() < 1e-4, "orthographic width is the FOV's width at the distance");
     }
 }

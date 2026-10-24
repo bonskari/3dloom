@@ -474,10 +474,37 @@ pub enum ObjectKind {
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
     },
-    /// A camera object (Create > Cameras). Drawn as a gizmo, not a mesh.
+    /// A camera object (Create > Cameras), looking down its local -Z.
     Camera {
+        /// Horizontal field of view in degrees (Lens follows it, 36 mm film).
         fov: Param<f32>,
+        /// Target camera: the target node it looks at (Free camera: None).
         target: Option<NodeId>,
+        /// FOV Direction the FOV spinner shows: 0 horizontal, 1 vertical, 2 diagonal.
+        #[serde(default = "zero")]
+        fov_type: Param<u32>,
+        #[serde(default = "no")]
+        ortho: Param<bool>,
+        #[serde(default = "no")]
+        show_cone: Param<bool>,
+        #[serde(default = "no")]
+        show_horizon: Param<bool>,
+        /// Environment Ranges > Show.
+        #[serde(default = "no")]
+        show_ranges: Param<bool>,
+        #[serde(default = "zero_f")]
+        near_range: Param<f32>,
+        #[serde(default = "thousand")]
+        far_range: Param<f32>,
+        #[serde(default = "no")]
+        clip_manually: Param<bool>,
+        #[serde(default = "one_f")]
+        near_clip: Param<f32>,
+        #[serde(default = "thousand")]
+        far_clip: Param<f32>,
+        /// Free camera: distance to its invisible target.
+        #[serde(default = "cam_target_distance")]
+        target_distance: Param<f32>,
     },
     /// A group head (Group menu): a dummy whose children are the members.
     Group {
@@ -582,6 +609,18 @@ fn no() -> Param<bool> {
 fn zero() -> Param<u32> {
     p(0)
 }
+fn zero_f() -> Param<f32> {
+    p(0.0)
+}
+fn one_f() -> Param<f32> {
+    p(1.0)
+}
+fn thousand() -> Param<f32> {
+    p(1000.0)
+}
+fn cam_target_distance() -> Param<f32> {
+    p(crate::camera::DEFAULT_TARGET_DISTANCE)
+}
 
 fn p<T: crate::param::Animatable>(v: T) -> Param<T> {
     Param::new(v)
@@ -681,9 +720,6 @@ fn yes() -> Param<bool> {
     p(true)
 }
 
-fn zero_f() -> Param<f32> {
-    p(0.0)
-}
 
 /// Moves every vertex up local Z (Base To Pivot).
 fn lift(m: &mut Mesh, dz: f32) {
@@ -738,7 +774,29 @@ impl ObjectKind {
         Self::Plane { length: p(length), width: p(width), length_segs: p(4), width_segs: p(4), gen_mapping: p(true) }
     }
     pub fn camera_object(fov_deg: f32) -> Self {
-        Self::Camera { fov: p(fov_deg), target: None }
+        Self::Camera {
+            fov: p(fov_deg),
+            target: None,
+            fov_type: zero(),
+            ortho: no(),
+            show_cone: no(),
+            show_horizon: no(),
+            show_ranges: no(),
+            near_range: zero_f(),
+            far_range: thousand(),
+            clip_manually: no(),
+            near_clip: one_f(),
+            far_clip: thousand(),
+            target_distance: cam_target_distance(),
+        }
+    }
+    /// A target camera aiming at `target`.
+    pub fn target_camera_object(fov_deg: f32, target: NodeId) -> Self {
+        let mut o = Self::camera_object(fov_deg);
+        if let Self::Camera { target: t, .. } = &mut o {
+            *t = Some(target);
+        }
+        o
     }
     /// A bone of `length` with the default size (width 4, height 4, taper 90 %).
     pub fn bone(length: f32) -> Self {
@@ -987,6 +1045,7 @@ impl ObjectKind {
             (Self::GeoSphere { .. }, "Geodesic Base Type") => Some(&["Tetra", "Octa", "Icosa"]),
             (Self::Torus { .. }, "Smooth") => Some(&["All", "Sides", "None", "Segments"]),
             (Self::Sphere { .. }, "Chop/Squash") => Some(&["Chop", "Squash"]),
+            (Self::Camera { .. }, "FOV Direction") => Some(&crate::camera::FOV_DIRECTIONS),
             _ => None,
         }
     }
@@ -1064,7 +1123,13 @@ impl ObjectKind {
                 ("Length", f(length)), ("Width", f(width)), ("Length Segs", i(length_segs)), ("Width Segs", i(width_segs)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
-            Self::Camera { fov, .. } => vec![("FOV", f(fov))],
+            Self::Camera { fov, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance, .. } => vec![
+                ("Lens", Float(crate::camera::fov_to_lens(fov.get()))), ("FOV", f(fov)), ("FOV Direction", i(fov_type)), ("Orthographic Projection", b(ortho)),
+                ("Show Cone", b(show_cone)), ("Show Horizon", b(show_horizon)),
+                ("Show Ranges", b(show_ranges)), ("Near Range", f(near_range)), ("Far Range", f(far_range)),
+                ("Clip Manually", b(clip_manually)), ("Near Clip", f(near_clip)), ("Far Clip", f(far_clip)),
+                ("Target Distance", f(target_distance)),
+            ],
             Self::Group { .. } => Vec::new(),
             Self::Bone { length, width, height, taper, fins, bone_on, freeze_length, stretch, stretch_axis, axis } => vec![
                 ("Bone Axis", i(axis)),
@@ -1165,6 +1230,18 @@ impl ObjectKind {
             (Self::Teapot { spout, .. }, "Spout") => { bl(spout); ok }
             (Self::Teapot { lid, .. }, "Lid") => { bl(lid); ok }
             (Self::Camera { fov, .. }, "FOV") => { fov.set(v.clamp(1.0, 175.0)); ok }
+            (Self::Camera { fov, .. }, "Lens") => { fov.set(crate::camera::lens_to_fov(v.max(1e-3)).clamp(1.0, 175.0)); ok }
+            (Self::Camera { fov_type, .. }, "FOV Direction") => { fov_type.set((value.round().max(0.0) as u32).min(2)); ok }
+            (Self::Camera { ortho, .. }, "Orthographic Projection") => { bl(ortho); ok }
+            (Self::Camera { show_cone, .. }, "Show Cone") => { bl(show_cone); ok }
+            (Self::Camera { show_horizon, .. }, "Show Horizon") => { bl(show_horizon); ok }
+            (Self::Camera { show_ranges, .. }, "Show Ranges") => { bl(show_ranges); ok }
+            (Self::Camera { near_range, .. }, "Near Range") => { fl(near_range, 0.0); ok }
+            (Self::Camera { far_range, .. }, "Far Range") => { fl(far_range, 0.0); ok }
+            (Self::Camera { clip_manually, .. }, "Clip Manually") => { bl(clip_manually); ok }
+            (Self::Camera { near_clip, .. }, "Near Clip") => { fl(near_clip, crate::camera::MIN_NEAR_CLIP); ok }
+            (Self::Camera { far_clip, .. }, "Far Clip") => { far_clip.set(v.clamp(crate::camera::MIN_NEAR_CLIP, 1e32)); ok }
+            (Self::Camera { target_distance, .. }, "Target Distance") => { fl(target_distance, 0.0); ok }
             (Self::Rectangle { length, .. }, "Length") | (Self::Ellipse { length, .. }, "Length") => { fl(length, 0.0); ok }
             (Self::Rectangle { width, .. }, "Width") | (Self::Ellipse { width, .. }, "Width") => { fl(width, 0.0); ok }
             (Self::Rectangle { corner_radius, .. }, "Corner Radius") | (Self::NGon { corner_radius, .. }, "Corner Radius") => { fl(corner_radius, 0.0); ok }
@@ -1293,8 +1370,7 @@ impl ObjectKind {
             Self::Plane { length, width, length_segs, width_segs, gen_mapping } => {
                 Cow::Owned(mapped(plane_segmented(length.get(), width.get(), length_segs.get(), width_segs.get()), gen_mapping.get(), AutoMap::Planar))
             }
-            // Camera icon: a small box body.
-            Self::Camera { .. } => Cow::Owned(box_primitive(Vec3::new(0.15, 0.3, 0.15))),
+            Self::Camera { .. } => Cow::Owned(crate::camera::icon_mesh()),
             Self::Group { .. } => Cow::Owned(Mesh::default()),
             Self::Bone { length, width, height, taper, fins, axis, .. } => {
                 let mut m = loom_mesh::bone_mesh(

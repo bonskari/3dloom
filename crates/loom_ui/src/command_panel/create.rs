@@ -173,11 +173,18 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         Category::Cameras => {
             rollout(ui, "Object Type", true, |ui| {
-                for (label, target) in [("Target", true), ("Free", false)] {
-                    if ui.add_sized([110.0, 22.0], egui::Button::new(label)).clicked() {
-                        let _ = app.dispatch(Command::CreateCamera { target });
+                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                ui.horizontal(|ui| {
+                    for (label, target) in [("Target", true), ("Free", false)] {
+                        let kind = CreateKind::Camera { target };
+                        let on = app.create_kind == Some(kind);
+                        if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, label)).clicked() {
+                            // Select Object first: it ends any create mode, then this one starts.
+                            let _ = app.dispatch(Command::SelectObject);
+                            app.create_kind = if on { None } else { Some(kind) };
+                        }
                     }
-                }
+                });
             });
             name_and_color(ui, app);
             parameters(ui, app);
@@ -277,6 +284,10 @@ pub fn parameters(ui: &mut egui::Ui, app: &mut LoomApp) {
     let Some(id) = app.state.selection.iter().next().copied() else { return };
     let Some(node) = app.state.scene.node(id) else { return };
     let params = node.object.parameters();
+    if matches!(node.object, loom_scene::ObjectKind::Camera { .. }) {
+        camera_parameters(ui, app, id);
+        return;
+    }
     let (is_compound, is_shape) = (node.object.is_compound(), node.object.is_shape());
     if is_compound && !matches!(app.panel_tab, crate::Tab::Create) {
         super::compound::rollouts(ui, app, None);
@@ -357,4 +368,115 @@ fn spin(app: &mut LoomApp, id: loom_scene::NodeId, name: &str, r: &egui::Respons
     if r.drag_stopped() {
         app.state.undo.end();
     }
+}
+
+/// The camera Parameters rollout: Lens / FOV, Orthographic Projection,
+/// Stock Lenses, Type, Show Cone / Horizon, Environment Ranges, Clipping
+/// Planes and Target Distance.
+fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
+    use loom_scene::camera::{fov_from_direction, fov_in_direction, FOV_DIRECTIONS, RENDER_ASPECT, STOCK_LENSES};
+    let Some(node) = app.state.scene.node(id) else { return };
+    let loom_scene::ObjectKind::Camera { fov, target, fov_type, ortho, show_cone, show_horizon, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, target_distance } = &node.object else { return };
+    let (fov, has_target, dir) = (fov.get(), target.is_some_and(|t| app.state.scene.node(t).is_some()), fov_type.get());
+    let flags = [("Orthographic Projection", ortho.get()), ("Show Cone", show_cone.get()), ("Show Horizon", show_horizon.get())];
+    let (ranges_on, ranges) = (show_ranges.get(), [("Near Range", near_range.get()), ("Far Range", far_range.get())]);
+    let (clip_on, clips) = (clip_manually.get(), [("Near Clip", near_clip.get()), ("Far Clip", far_clip.get())]);
+    let distance = loom_commands::camera::target_distance(&app.state.scene, id).unwrap_or(target_distance.get());
+    let set = |app: &mut LoomApp, name: &str, value: f64| {
+        let _ = app.dispatch(Command::SetParameter { id: id.0, name: name.into(), value });
+    };
+    let check = |ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str, on: bool| {
+        let mut v = on;
+        if ui.checkbox(&mut v, label).changed() {
+            set(app, name, if v { 1.0 } else { 0.0 });
+        }
+    };
+    let length = |ui: &mut egui::Ui, app: &mut LoomApp, name: &str, value: f32| {
+        let mut v = value;
+        let r = ui.add(app.length_drag(&mut v, app.spinner_speed(0.5)));
+        spin(app, id, name, &r, v as f64, value as f64);
+    };
+    rollout(ui, "Parameters", true, |ui| {
+        let decimals = app.state.prefs.spinner_precision.max(3);
+        egui::Grid::new(("camera_lens", id.0)).num_columns(3).spacing([6.0, 4.0]).show(ui, |ui| {
+            ui.label("Lens:");
+            let lens = loom_scene::camera::fov_to_lens(fov);
+            let mut v = lens;
+            let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.1)).range(1.0..=100_000.0).fixed_decimals(decimals).suffix("mm"));
+            spin(app, id, "Lens", &r, v as f64, lens as f64);
+            ui.end_row();
+            // The FOV spinner shows the FOV measured in the chosen direction.
+            ui.label("FOV:");
+            let shown = fov_in_direction(fov, dir, RENDER_ASPECT);
+            let mut v = shown;
+            let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.1)).range(1.0..=175.0).fixed_decimals(decimals).suffix(" deg"));
+            spin(app, id, "FOV", &r, fov_from_direction(v, dir, RENDER_ASPECT) as f64, fov as f64);
+            egui::ComboBox::from_id_salt(("camera_fov_dir", id.0)).width(60.0).selected_text(&FOV_DIRECTIONS[dir.min(2) as usize][..1]).show_ui(ui, |ui| {
+                for (i, d) in FOV_DIRECTIONS.iter().enumerate() {
+                    if ui.selectable_label(dir == i as u32, *d).clicked() && dir != i as u32 {
+                        set(app, "FOV Direction", i as f64);
+                    }
+                }
+            });
+            ui.end_row();
+        });
+        check(ui, app, "Orthographic Projection", "Orthographic Projection", flags[0].1);
+        ui.separator();
+        ui.label("Stock Lenses");
+        egui::Grid::new(("camera_stock", id.0)).num_columns(3).spacing([4.0, 4.0]).show(ui, |ui| {
+            for (i, mm) in STOCK_LENSES.iter().enumerate() {
+                if ui.add_sized([52.0, 20.0], egui::Button::new(format!("{mm}mm"))).clicked() {
+                    set(app, "Lens", *mm as f64);
+                }
+                if i % 3 == 2 {
+                    ui.end_row();
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Type:");
+            egui::ComboBox::from_id_salt(("camera_type", id.0)).selected_text(if has_target { "Target Camera" } else { "Free Camera" }).show_ui(ui, |ui| {
+                for (label, t) in [("Target Camera", true), ("Free Camera", false)] {
+                    if ui.selectable_label(has_target == t, label).clicked() && has_target != t {
+                        let _ = app.dispatch(Command::CameraType { id: id.0, target: t });
+                    }
+                }
+            });
+        });
+        check(ui, app, "Show Cone", "Show Cone", flags[1].1);
+        check(ui, app, "Show Horizon", "Show Horizon", flags[2].1);
+        ui.separator();
+        ui.label("Environment Ranges");
+        check(ui, app, "Show Ranges", "Show", ranges_on);
+        egui::Grid::new(("camera_ranges", id.0)).num_columns(2).show(ui, |ui| {
+            for (name, value) in ranges {
+                ui.label(format!("{name}:"));
+                length(ui, app, name, value);
+                ui.end_row();
+            }
+        });
+        ui.separator();
+        ui.label("Clipping Planes");
+        check(ui, app, "Clip Manually", "Clip Manually", clip_on);
+        ui.add_enabled_ui(clip_on, |ui| {
+            egui::Grid::new(("camera_clips", id.0)).num_columns(2).show(ui, |ui| {
+                for (name, value) in clips {
+                    ui.label(format!("{name}:"));
+                    length(ui, app, name, value);
+                    ui.end_row();
+                }
+            });
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("Target Distance:");
+            if has_target {
+                // A Target camera shows the distance to its target.
+                let (factor, suffix) = app.unit_display();
+                ui.label(format!("{:.*}{}", app.state.prefs.spinner_precision, distance as f64 * factor, suffix));
+            } else {
+                length(ui, app, "Target Distance", distance);
+            }
+        });
+    });
 }

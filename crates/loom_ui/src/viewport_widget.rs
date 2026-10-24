@@ -594,6 +594,18 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     }
                                     let _ = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() });
                                 }
+                            } else if let Some(crate::CreateKind::Camera { target }) = app.create_kind {
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                    if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
+                                        anchor = hit.point;
+                                        app.consume_snap_override();
+                                    }
+                                    if target {
+                                        app.camera_create = crate::create_tool::CameraSession::begin(app, anchor, basis.2);
+                                    } else {
+                                        crate::create_tool::CameraSession::place_free(app, anchor, basis.2);
+                                    }
+                                }
                             } else if app.create_kind == Some(crate::CreateKind::Line) {
                                 // Line tool: every click is a knot on the construction plane.
                                 if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
@@ -649,6 +661,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         );
                         if let Some(line) = app.line.as_mut() {
                             line.on_release();
+                        }
+                        if let Some(session) = app.camera_create.take() {
+                            session.finish(app);
                         }
                         if app.alt_click.take().is_some() {
                             let picked = picks_at(app, p, rect, view, proj, view_proj);
@@ -739,6 +754,16 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                     }
                     if pointer.is_moving() {
+                        if let Some(session) = app.camera_create.clone() {
+                            let mut hit = plane_hit(p, rect, view, proj, session.normal);
+                            if let Some(snap) = snap_at(app, index, &projection, p, None, false) {
+                                hit = Some(snap.point);
+                            }
+                            if let Some(at) = hit {
+                                session.on_drag(app, at);
+                            }
+                            ctx.request_repaint();
+                        }
                         if let Some(mut session) = app.create.take() {
                             let mut hit = plane_hit(p, rect, view, proj, session.normal());
                             if let Some(snap) = snap_at(app, index, &projection, p, Some(session.anchor), false) {
@@ -916,6 +941,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
 
             let hover_pos = ctx.input(|i| i.pointer.hover_pos());
             draw_shapes(&painter, app, view_proj, rect);
+            crate::camera_overlay::draw(&painter, app, index, view_proj, rect);
             crate::spline_modes::draw(&painter, app, &projection);
             draw_mode_overlays(&painter, app, view_proj, rect);
             draw_soft_selection(&painter, app, view_proj, rect);
