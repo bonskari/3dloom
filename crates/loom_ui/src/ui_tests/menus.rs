@@ -104,13 +104,54 @@ fn create_menu_shapes_and_compound_start_their_tools() {
 #[test]
 fn scale_flyout_chooses_uniform_non_uniform_or_squash() {
     let mut h = Harness::new();
-    let scale = h.find(Role::Button, "Scale");
-    let flyout = right_of(&h, Role::ComboBox, scale);
-    for (item, kind) in [("Select and Non-uniform Scale", loom_commands::ScaleKind::NonUniform), ("Select and Squash", loom_commands::ScaleKind::Squash), ("Select and Uniform Scale", loom_commands::ScaleKind::Uniform)] {
+    // The Scale button names the current type; the flyout list is right of it.
+    for (button, item, kind) in [
+        ("Scale", "Select and Non-uniform Scale", loom_commands::ScaleKind::NonUniform),
+        ("Scale NU", "Select and Squash", loom_commands::ScaleKind::Squash),
+        ("Squash", "Select and Uniform Scale", loom_commands::ScaleKind::Uniform),
+    ] {
+        let flyout = right_of(&h, Role::ComboBox, h.find(Role::Button, button));
         h.click(flyout.center());
         h.click(h.find(Role::Button, item).center());
         assert_eq!((h.app.state.active_tool, h.app.state.scale_kind), (loom_commands::Tool::Scale, kind), "{item}");
     }
+}
+
+/// Drags the Scale gizmo's X axis handle outwards; returns the box's scale.
+fn drag_scale_x_handle(h: &mut Harness) -> Vec3 {
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let cam = h.app.camera_for(i);
+    let aspect = rect.width() / rect.height();
+    let projection = crate::gizmo::Projection::new(cam.view_matrix(), cam.projection_matrix(aspect), rect);
+    let layout = crate::gizmo::layout_for(&h.app, i, rect.height());
+    let (o, x) = (h.screen_of(Vec3::ZERO), h.screen_of(Vec3::new(1.0, 0.0, 0.0)));
+    let dir = (x - o).normalized();
+    // Find the X handle along the projected X axis, as a person aims at it.
+    let kind = h.app.state.scale_kind;
+    h.app.state.scale_kind = loom_commands::ScaleKind::NonUniform;
+    let p = (10..200).map(|d| o + dir * d as f32).find(|p| crate::gizmo::hit(&h.app, &layout, &projection, *p) == Some(crate::gizmo::Handle::Axis(loom_commands::Axis::X))).expect("the X handle");
+    h.app.state.scale_kind = kind;
+    h.drag(p, p + egui::vec2(60.0, -60.0));
+    let s = h.app.state.scene.node(selected(h)).unwrap().transform.scale.get();
+    h.cmd(Command::UndoSceneOperation);
+    s
+}
+
+#[test]
+fn the_scale_type_decides_what_an_axis_handle_drag_scales() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    framed(&mut h);
+    h.key(egui::Key::R);
+    let s = drag_scale_x_handle(&mut h);
+    assert!(s.x > 1.01 && (s.x - s.y).abs() < 1e-4 && (s.x - s.z).abs() < 1e-4, "Uniform: all axes alike {s}");
+    h.cmd(Command::ScaleType { kind: loom_commands::ScaleKind::NonUniform });
+    let s = drag_scale_x_handle(&mut h);
+    assert!(s.x > 1.01 && s.y == 1.0 && s.z == 1.0, "Non-Uniform: X only {s}");
+    h.cmd(Command::ScaleType { kind: loom_commands::ScaleKind::Squash });
+    let s = drag_scale_x_handle(&mut h);
+    assert!(s.x > 1.01 && s.y < 1.0 && (s.y - s.z).abs() < 1e-4 && (s.x * s.y * s.z - 1.0).abs() < 1e-3, "Squash: the others shrink {s}");
 }
 
 #[test]
