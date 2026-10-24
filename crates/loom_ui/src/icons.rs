@@ -286,9 +286,9 @@ mod tests {
         }
         assert!(has.iter().all(|h| *h), "every icon resolves to a glyph: {has:?}");
         ctx.fonts(|f| {
-            assert!(f.definitions().font_data.contains_key(FONT), "the icon font is loaded");
+            assert!(f.lock().fonts.definitions().font_data.contains_key(FONT), "the icon font is loaded");
             // The icon font only follows the text font: letters stay Ubuntu's.
-            assert_eq!(f.definitions().families[&egui::FontFamily::Proportional][0], "Ubuntu-Light");
+            assert_eq!(f.lock().fonts.definitions().families[&egui::FontFamily::Proportional][0], "Ubuntu-Light");
         });
     }
 

@@ -38,7 +38,7 @@ fn the_icon_font_is_loaded_with_the_ui() {
     let h = Harness::new();
     let font = egui::FontId::proportional(icons::SIZE);
     h.ctx.fonts(|f| {
-        assert!(f.definitions().font_data.contains_key(icons::FONT), "the icon font is installed by the first frame");
+        assert!(f.lock().fonts.definitions().font_data.contains_key(icons::FONT), "the icon font is installed by the first frame");
         for g in [icons::UNDO, icons::MOVE, icons::TAB_MODIFY, icons::GEOMETRY, icons::LOCKED, icons::ORBIT, icons::PLAY, icons::SETTINGS, icons::FILTERS, icons::HIDE] {
             assert!(f.has_glyphs(&font, g), "{g:?} has a glyph");
         }
