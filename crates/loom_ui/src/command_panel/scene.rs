@@ -76,7 +76,7 @@ fn icon(ui: &mut egui::Ui, kind: IconKind) {
             p.add(egui::Shape::convex_polygon(vec![at(0.62, 0.52), at(1.0, 0.25), at(1.0, 0.8)], c, egui::Stroke::NONE));
         }
         IconKind::Helper => {
-            p.rect_stroke(egui::Rect::from_min_max(at(0.15, 0.15), at(0.85, 0.85)), 0.0, stroke);
+            p.rect_stroke(egui::Rect::from_min_max(at(0.15, 0.15), at(0.85, 0.85)), 0.0, stroke, egui::StrokeKind::Middle);
             p.line_segment([at(0.5, 0.0), at(0.5, 1.0)], stroke);
             p.line_segment([at(0.0, 0.5), at(1.0, 0.5)], stroke);
         }
