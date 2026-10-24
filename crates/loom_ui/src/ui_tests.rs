@@ -210,7 +210,7 @@ impl Harness {
     }
 
     /// Centres of the visible texts that read `text` (buttons, labels), in paint order.
-    fn texts(&self, text: &str) -> Vec<egui::Pos2> {
+    fn text_centers(&self, text: &str) -> Vec<egui::Pos2> {
         fn walk(shape: &egui::Shape, clip: egui::Rect, text: &str, out: &mut Vec<egui::Pos2>) {
             match shape {
                 egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, text, out)),
@@ -1156,7 +1156,7 @@ fn empty_spot(h: &Harness) -> egui::Pos2 {
 /// A text inside the window titled `window`.
 fn window_text(h: &Harness, window: &str, text: &str) -> egui::Pos2 {
     let area = h.ctx.memory(|m| m.area_rect(egui::Id::new(window))).unwrap_or_else(|| panic!("no {window} window"));
-    let all: Vec<egui::Pos2> = h.texts(text).into_iter().filter(|p| area.contains(*p)).collect();
+    let all: Vec<egui::Pos2> = h.text_centers(text).into_iter().filter(|p| area.contains(*p)).collect();
     assert_eq!(all.len(), 1, "{text:?} in {window} {} times", all.len());
     all[0]
 }
@@ -1164,7 +1164,7 @@ fn window_text(h: &Harness, window: &str, text: &str) -> egui::Pos2 {
 /// A text in the command panel (right of the maximized viewport).
 fn panel_text(h: &Harness, text: &str) -> egui::Pos2 {
     let right = h.app.viewport_rects[h.app.state.active_viewport].right();
-    let all: Vec<egui::Pos2> = h.texts(text).into_iter().filter(|p| p.x > right).collect();
+    let all: Vec<egui::Pos2> = h.text_centers(text).into_iter().filter(|p| p.x > right).collect();
     assert_eq!(all.len(), 1, "{text:?} in the command panel {} times", all.len());
     all[0]
 }
@@ -1966,8 +1966,8 @@ fn click_in_editor(h: &mut Harness, label: &str, dx: f32) {
 
 /// The text `text` on the same row as the label `row` inside `within`.
 fn row_text(h: &Harness, row: &str, text: &str, within: egui::Rect) -> egui::Pos2 {
-    let label = h.texts(row).into_iter().find(|p| within.contains(*p)).unwrap_or_else(|| panic!("{row:?} is not shown"));
-    h.texts(text).into_iter().filter(|p| within.contains(*p) && (p.y - label.y).abs() < 8.0 && p.x > label.x).min_by(|a, b| a.x.total_cmp(&b.x)).unwrap_or_else(|| panic!("no {text:?} on the {row:?} row"))
+    let label = h.text_centers(row).into_iter().find(|p| within.contains(*p)).unwrap_or_else(|| panic!("{row:?} is not shown"));
+    h.text_centers(text).into_iter().filter(|p| within.contains(*p) && (p.y - label.y).abs() < 8.0 && p.x > label.x).min_by(|a, b| a.x.total_cmp(&b.x)).unwrap_or_else(|| panic!("no {text:?} on the {row:?} row"))
 }
 
 #[test]
@@ -2050,7 +2050,7 @@ fn multi_sub_from_the_type_button_colours_faces_by_material_id() {
     click_in_editor(&mut h, "Set Number", 0.0);
     window_text(&h, "Set Number of Materials", "Number of Materials:");
     h.click(window_text(&h, "Set Number of Materials", "Cancel"));
-    assert!(h.texts("Number of Materials:").is_empty(), "Cancel closes it");
+    assert!(h.text_centers("Number of Materials:").is_empty(), "Cancel closes it");
     h.cmd(Command::MultiSubSetNumber { number: 2 });
     h.cmd(Command::MultiSubSetEntry { index: 1, id: None, name: None, enabled: None, color: Some([0, 0, 255]) });
     click_in_editor(&mut h, "Assign to Selection", 0.0);
