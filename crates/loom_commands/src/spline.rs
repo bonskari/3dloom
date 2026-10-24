@@ -847,8 +847,7 @@ fn hidden_change(node: &Node, hidden: BTreeSet<usize>) -> Change {
     }
 }
 
-/// Line End: a line with fewer than two knots is dropped; a finished line's
-/// pivot moves to the centre of its bounds (the knots stay where they were drawn).
+/// Line End: a line with fewer than two knots is dropped.
 pub fn line_end(state: &mut AppState, id: NodeId) -> Result<Value, String> {
     let node = state.scene.node(id).ok_or("missing node")?;
     let knots = node.object.spline().map(|s| s.shape.knot_count()).unwrap_or(0);
@@ -856,24 +855,6 @@ pub fn line_end(state: &mut AppState, id: NodeId) -> Result<Value, String> {
         commit_change(state, "Line", Change::RemoveNode(id))?;
         state.selection.remove(&id);
         return Ok(json!({ "removed": true }));
-    }
-    if let Some(so) = node.object.spline() {
-        let (lo, hi) = so.shape.aabb();
-        let c = (lo + hi) * 0.5;
-        if c.length() > 1e-6 {
-            let mut shape = so.shape.clone();
-            for s in &mut shape.splines {
-                s.translate(-c);
-            }
-            let before = node.transform.clone();
-            let mut after = before.clone();
-            after.position.set(before.position.get() + before.matrix().transform_vector3(node.object_offset.matrix().transform_vector3(c)));
-            let changes = vec![
-                Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(node.object.with_shape(shape)) },
-                Change::SetTransform { id, before, after },
-            ];
-            commit_change(state, "Line", Change::Group(changes))?;
-        }
     }
     Ok(json!({ "removed": false, "knots": knots }))
 }

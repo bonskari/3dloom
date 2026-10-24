@@ -1,6 +1,6 @@
 //! Splines as the reference's chess-set and helmet tutorials use them:
 //! Refine with Connect, the Refine / Connect Only prompt, the "Close
-//! spline?" prompt, Area Selection, the Line pivot, Lathe about the pivot
+//! spline?" prompt, Area Selection, Lathe about the pivot
 //! and Extrude Along Spline's Taper Curve / Rotation / preview pick.
 
 use glam::Vec3;
@@ -132,40 +132,25 @@ fn clicking_the_first_vertex_asks_to_close_the_spline() {
 }
 
 #[test]
-fn a_finished_line_has_its_pivot_at_the_centre_of_its_bounds() {
-    let mut s = AppState::new();
-    execute(&mut s, Command::LineStart { point: [5.0, 0.0, 0.0] }).unwrap();
-    let id = *s.selection.iter().next().unwrap();
-    for p in [[10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [5.0, 10.0, 0.0]] {
-        execute(&mut s, Command::LineAddKnot { node: id.0, point: p, smooth: false }).unwrap();
-    }
-    execute(&mut s, Command::LineEnd { node: id.0 }).unwrap();
-    let pos = s.scene.node(id).unwrap().transform.position.get();
-    assert!(near(pos, Vec3::new(7.5, 5.0, 0.0)), "{pos:?}");
-    let m = s.scene.object_matrix(id);
-    let world: Vec<Vec3> = shape(&s, id).splines[0].knots.iter().map(|k| m.transform_point3(k.pos)).collect();
-    assert!(near(world[0], Vec3::new(5.0, 0.0, 0.0)) && near(world[2], Vec3::new(10.0, 10.0, 0.0)), "the knots stay where they were drawn: {world:?}");
-}
-
-#[test]
 fn lathe_revolves_about_the_pivot_until_an_align_button_is_pressed() {
     let mut s = AppState::new();
+    // The Line's pivot is its first knot: local x runs -3..5 across the profile.
     execute(&mut s, Command::LineStart { point: [5.0, 0.0, 0.0] }).unwrap();
     let id = *s.selection.iter().next().unwrap();
-    for p in [[10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [5.0, 10.0, 0.0]] {
+    for p in [[10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [2.0, 10.0, 0.0]] {
         execute(&mut s, Command::LineAddKnot { node: id.0, point: p, smooth: false }).unwrap();
     }
     execute(&mut s, Command::LineEnd { node: id.0 }).unwrap();
     execute(&mut s, Command::AddModifier { name: "Lathe".into() }).unwrap();
     let Modifier::Lathe { align, .. } = &s.scene.node(id).unwrap().modifiers[0].modifier else { panic!() };
     assert_eq!(align.get(), 3, "no Align button is down");
-    // The pivot is the profile's centre (local origin): the axis runs through it.
+    // The axis runs through the pivot (local origin).
     let (lo, hi) = s.scene.eval_mesh(id).value.mesh.aabb();
-    assert!((lo.x + 2.5).abs() < 1e-3 && (hi.x - 2.5).abs() < 1e-3, "{lo:?} {hi:?}");
+    assert!((lo.x + 5.0).abs() < 1e-3 && (hi.x - 5.0).abs() < 1e-3, "{lo:?} {hi:?}");
     // Min moves the axis to the profile's left side.
     execute(&mut s, Command::SetModifierParameter { index: 0, name: "Align".into(), value: 0.0 }).unwrap();
     let (lo, hi) = s.scene.eval_mesh(id).value.mesh.aabb();
-    assert!((lo.x + 7.5).abs() < 1e-3 && (hi.x - 2.5).abs() < 1e-3, "{lo:?} {hi:?}");
+    assert!((lo.x + 11.0).abs() < 1e-3 && (hi.x - 5.0).abs() < 1e-3, "{lo:?} {hi:?}");
 }
 
 /// A 30-unit poly box with its top face selected and a line path; returns (box, line).
