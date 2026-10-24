@@ -183,7 +183,7 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
             let v = 1.0 - (y as f32 + 0.5) / size as f32 * 2.0;
             let bg = match setup.background {
                 Some(g) => glam::Vec3::splat(g),
-                None => glam::Vec3::splat(if ((x * 8 / size) + (y * 8 / size)) % 2 == 0 { 0.25 } else { 0.45 }),
+                None => glam::Vec3::splat(if ((x * 8 / size) + (y * 8 / size)).is_multiple_of(2) { 0.25 } else { 0.45 }),
             };
             let c = match sample {
                 Sample::Map(m) => {
