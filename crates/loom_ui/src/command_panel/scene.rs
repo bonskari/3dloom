@@ -55,7 +55,7 @@ fn icon(ui: &mut egui::Ui, kind: IconKind) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
     let p = ui.painter_at(rect);
     let c = kind.color();
-    let stroke = egui::Stroke::new(1.4, c);
+    let stroke = egui::Stroke::new(1.4_f32, c);
     let r = rect.shrink(2.0);
     let at = |x: f32, y: f32| egui::pos2(r.left() + x * r.width(), r.top() + y * r.height());
     match kind {
