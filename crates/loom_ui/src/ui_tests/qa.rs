@@ -771,6 +771,86 @@ fn right_click_during_a_move_drag_cancels_it() {
 }
 
 #[test]
+fn instance_clone_follows_parameter_edits() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.cmd(Command::CloneOptions { kind: loom_commands::CloneKind::Instance, copies: 1, name: None, offset: Some([50.0, 0.0, 0.0]), rotate_deg: None, scale: None });
+    let c = selected(&h);
+    assert_ne!(a, c);
+    h.cmd(Command::SetParameter { id: a.0, name: "Height".into(), value: 55.0 });
+    assert!((param(&h, "Height") - 55.0).abs() < 1e-4, "the instance has the new height");
+}
+
+#[test]
+fn delete_at_polygon_level_deletes_the_faces() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    let before = face_count(&h, id);
+    h.key(egui::Key::Delete);
+    assert_eq!(face_count(&h, id), before - 1, "Delete removes the selected polygon, not the object");
+    assert_eq!(h.app.state.scene.len(), 1);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(face_count(&h, id), before);
+}
+
+#[test]
+fn moving_a_parent_carries_its_child_and_group_selects_as_one() {
+    let mut h = Harness::new();
+    let p = box_scene(&mut h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [10.0; 3] });
+    let c = selected(&h);
+    h.cmd(Command::SetParent { id: c.0, parent: Some(p.0) });
+    h.cmd(Command::SelectNodes { ids: vec![p.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::MoveSelection { delta: [0.0, 10.0, 0.0], system: Some(loom_commands::CoordSystem::World) });
+    let cw = h.app.state.scene.world_matrix(c).w_axis.truncate();
+    assert!(cw.distance(Vec3::new(60.0, 10.0, 0.0)) < 1e-3, "the child follows: {cw}");
+    h.cmd(Command::SetParent { id: c.0, parent: None });
+    h.cmd(Command::SelectNodes { ids: vec![p.0, c.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::Group { name: None });
+    assert_eq!(h.app.state.scene.len(), 3, "a group head");
+    h.cmd(Command::SelectNone);
+    let at = h.screen_of(Vec3::new(10.0, -5.0, 20.0));
+    h.click(at);
+    assert_eq!(h.app.state.selection.len(), 1, "a click on a member selects the group head");
+    let head = selected(&h);
+    assert!(head != p && head != c);
+    h.cmd(Command::Ungroup);
+    assert_eq!(h.app.state.scene.len(), 2);
+}
+
+#[test]
+fn hide_and_freeze_unselected() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::FreezeUnselected);
+    assert!(h.app.state.scene.node(b).unwrap().frozen && !h.app.state.scene.node(a).unwrap().frozen);
+    h.cmd(Command::UnfreezeAll);
+    h.cmd(Command::HideUnselected);
+    assert!(h.app.state.scene.node(b).unwrap().hidden && !h.app.state.scene.node(a).unwrap().hidden);
+    h.cmd(Command::UndoSceneOperation);
+    assert!(!h.app.state.scene.node(b).unwrap().hidden, "Hide Unselected undoes");
+}
+
+#[test]
+fn mirror_and_array_dialog_commands() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    h.cmd(Command::SetTransform { id: a.0, position: Some([20.0, 0.0, 0.0]), rotation_deg: None, scale: None });
+    h.cmd(Command::UseCenter { mode: loom_commands::CenterMode::TransformCoordinate });
+    h.cmd(Command::ReferenceCoordinateSystem { system: loom_commands::CoordSystem::World });
+    h.cmd(Command::MirrorObjects { axis: loom_commands::MirrorAxis::X, offset: 0.0, clone: Some(loom_commands::CloneKind::Copy) });
+    assert_eq!(h.app.state.scene.len(), 2);
+    let m = selected(&h);
+    assert!(pos_of(&h, m).distance(Vec3::new(-20.0, 0.0, 0.0)) < 1e-3, "mirrored about the world origin: {}", pos_of(&h, m));
+}
+
+#[test]
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();
     for (label, tab) in [("Modify", crate::Tab::Modify), ("Hierarchy", crate::Tab::Hierarchy), ("Motion", crate::Tab::Motion), ("Display", crate::Tab::Display), ("Utilities", crate::Tab::Utilities), ("Create", crate::Tab::Create)] {
