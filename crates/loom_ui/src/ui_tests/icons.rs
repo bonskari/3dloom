@@ -85,7 +85,7 @@ fn main_toolbar_icons_run_their_commands() {
     click_icon(&mut h, "main_toolbar", icons::ANGLE_SNAP, "Angle Snap Toggle (A); right-click: Grid and Snap Settings");
     assert_ne!(h.app.state.angle_snap_on, angle);
     let percent = h.app.state.percent_snap_on;
-    click_icon(&mut h, "main_toolbar", icons::PERCENT_SNAP, "Percent Snap Toggle (Shift+Ctrl+P); right-click: Grid and Snap Settings");
+    click_icon(&mut h, "main_toolbar", icons::PERCENT_SNAP, "Percent Snap Toggle (Ctrl+Shift+P); right-click: Grid and Snap Settings");
     assert_ne!(h.app.state.percent_snap_on, percent);
     let spinner = h.app.state.prefs.spinner_snap;
     click_icon(&mut h, "main_toolbar", icons::SPINNER_SNAP, "Spinner Snap Toggle");
@@ -189,4 +189,20 @@ fn modifier_stack_icons_run_their_commands() {
     let end = h.app.state.show_end_result;
     click_icon(&mut h, "command_panel", icons::SHOW_END_RESULT, "Show End Result On/Off Toggle");
     assert_ne!(h.app.state.show_end_result, end);
+}
+
+#[test]
+fn probe_statusbar_tooltips() {
+    let mut h = Harness::new();
+    for (g, t) in [(icons::UNLOCKED, "Selection"), (icons::ABSOLUTE, "Absolute"), (icons::PAN, "Pan"), (icons::GO_TO_END, "Go to")] {
+        let p = icon_in(&h, g, panel(&h, "statusbar"));
+        tooltip_shows(&mut h, p, "zzz");
+        eprintln!("PROBE {t}: {:?}", painted(&h, t));
+    }
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    for (g, t) in [(icons::UNLOCKED, "Selection"), (icons::PAN, "Pan")] {
+        let p = icon_in(&h, g, panel(&h, "statusbar"));
+        tooltip_shows(&mut h, p, "zzz");
+        eprintln!("PROBE2 {t}: {:?}", painted(&h, t));
+    }
 }
