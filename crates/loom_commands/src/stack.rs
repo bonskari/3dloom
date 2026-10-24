@@ -738,6 +738,13 @@ fn sub_level_of(mode: SelectionMode) -> Option<SubLevel> {
 /// After every command: the sub-object selection of the base poly flows up
 /// the stack, and a Poly Select entry at a sub-object level stores it.
 pub fn sync_selection(state: &mut AppState) {
+    // A sub-object level needs a selected object (an undo that removes it, a
+    // delete, Select None): without one the level ends, as in the reference,
+    // so a viewport click picks objects again.
+    if state.selection.is_empty() && state.selection_mode != SelectionMode::Object {
+        state.selection_mode = SelectionMode::Object;
+        state.sub_selection.clear();
+    }
     let ids: Vec<NodeId> = state.selection.iter().copied().collect();
     let level = sub_level_of(state.selection_mode);
     for id in ids {
