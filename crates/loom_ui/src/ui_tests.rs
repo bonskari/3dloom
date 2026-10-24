@@ -1692,32 +1692,3 @@ fn cancel_expert_mode_button_brings_the_interface_back() {
 }
 
 
-#[test]
-fn zz_debug_material_browser() {
-    let mut h = Harness::new();
-    material_editor(&mut h);
-    h.cmd(Command::AssignMaterialToSelection);
-    click_in_editor(&mut h, "Get Material", 0.0);
-    h.frames(3);
-    fn walk(shape: &egui::Shape, clip: egui::Rect, out: &mut Vec<(String, egui::Rect, egui::Rect)>) {
-        match shape {
-            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, clip, out)),
-            egui::Shape::Text(t) => out.push((t.galley.text().to_owned(), t.galley.rect.translate(t.pos.to_vec2()), clip)),
-            _ => {}
-        }
-    }
-    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("Material/Map Browser"))).unwrap();
-    eprintln!("AREA {area:?}");
-    let mut out = Vec::new();
-    for c in &h.shapes {
-        walk(&c.shape, c.clip_rect, &mut out);
-    }
-    for (t, r, c) in out.iter().filter(|(_, r, _)| area.expand(40.0).intersects(*r)) {
-        eprintln!("BTXT {t:?} {r:?} clip {c:?}");
-    }
-    let cancel = h.texts("Cancel");
-    eprintln!("CANCEL {cancel:?}");
-    click_text(&mut h, "Cancel", SCREEN, 0.0);
-    eprintln!("DIALOG after cancel {:?}", h.app.state.dialog);
-    panic!("debug");
-}
