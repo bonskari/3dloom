@@ -1738,13 +1738,11 @@ fn i_pans_the_point_under_the_cursor_to_the_centre() {
     let mut h = Harness::new();
     h.cmd(Command::ActiveViewport { index: 0 }); // Top
     maximized(&mut h);
-    let p = h.screen_of(Vec3::new(20.0, 10.0, 0.0));
+    let p = h.screen_of(Vec3::new(2.0, 1.0, 0.0));
     h.run(vec![egui::Event::PointerMoved(p)]);
-    eprintln!("DBG p={p:?} under={:?} hover={:?}", crate::viewport_widget::view_point_under(&h.app, p), h.ctx.input(|i| i.pointer.hover_pos()));
     h.key(egui::Key::I);
-    eprintln!("DBG2 nav={:?} err={:?}", h.app.state.nav_mode, h.app.last_error);
     let t = h.app.state.active().camera.target;
-    assert!((t.x - 20.0).abs() < 0.2 && (t.y - 10.0).abs() < 0.2, "{t}");
+    assert!((t.x - 2.0).abs() < 0.05 && (t.y - 1.0).abs() < 0.05, "{t}");
     assert_eq!(h.app.state.nav_mode, loom_input::NavMode::None, "I recentres; it does not start the Pan tool");
 }
 
