@@ -64,3 +64,18 @@ fn characterization_checks_hierarchy_instead_of_accepting_unrelated_named_bones(
     };
     assert!(m.validate(&s).is_err());
 }
+#[test]
+fn edit_revision_changes_on_edit_but_not_playback() {
+    let mut scene = Scene::new();
+    let initial = scene.revision();
+    scene.set_time(35.);
+    assert_eq!(scene.revision(), initial);
+    let id = scene.add_node(Node::new("bone", ObjectKind::bone(1.)));
+    assert!(scene.revision() > initial);
+    let previous = scene.revision();
+    scene.node_mut(id).unwrap().transform.position.set(Vec3::X);
+    assert!(scene.revision() > previous);
+    let edited = scene.revision();
+    scene.at_time(77., || scene.world_matrix(id));
+    assert_eq!(scene.revision(), edited);
+}

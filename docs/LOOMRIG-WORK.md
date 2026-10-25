@@ -22,3 +22,13 @@ Tests in `loom_scene/tests/loomrig.rs` and `loom_commands/tests/loomrig.rs` exer
 ## Integration still owned by parent
 
 Lifecycle agent implemented reference remapping/pruning and deletion undo; reported persistence 6/6 plus adjacent file/merge 35/35 tests passing. Parent still owns integrated UI, real MetaHuman Body342 import/skin verification and broad suite.
+
+## Independent review follow-up
+
+Verified and fixed deserialized-scene IK cache initialization: both cache and edit revision previously defaulted to zero, allowing first pose evaluation after loading to skip the rig. Deserialized edit revision now starts at one. `Scene::revision()` exposes edit generation for UI caches and stays unchanged during playback.
+
+A 3D HI pole regression reached the correct bend plane but stalled 0.006497 units from its target despite a 0.0001 threshold. The general glam arc constructor snaps sufficiently small angles to identity. HI CCD now retains those small arc corrections, with the existing opposite-vector fallback. Fresh command IK4/4, scene IK7/7, command LoomRig13/13 and scene LoomRig4/4 pass.
+
+Opt-in `loomrig_real` test uses the real Ray MetaHuman FBX and Kimodo seated BVH through `LOOM_RETARGET_FBX` / `LOOM_RETARGET_BVH`. Verified342 original bones, automatic4limb characterization, unchanged neutral native animation, retargeted motion, unchanged native transforms after control edits, unchanged skin bindings/weights/hierarchy, and byte-identical original FBX. Both full-IK world feet remain planted across sampled source-motion frames (measured drift0.000074 and0.000018 scene units); left goal error0.000034. Moving the leg goal deformed1745 of3490 vertices in the actual leg-weighted `SkeletalMesh001`. Test selects positive weights on the controlled leg; choosing the largest mesh alone had originally measured zero changed vertices and was not a valid leg-deformation assertion. Successful real test runtime9.67s in debug.
+
+Source clip moves/trims operate on clip-member node controllers; rig blend and FK input-offset controllers live separately in `Scene.loom_rigs` and do not implicitly shift with source clips.

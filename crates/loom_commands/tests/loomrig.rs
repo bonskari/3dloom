@@ -551,3 +551,79 @@ fn keyed_full_ik_goal_stays_planted_while_native_root_motion_continues() {
     assert!(planted.distance(future) < 0.01, "{planted:?} -> {future:?}");
     assert_eq!(s.scene.node(m.root).unwrap().transform, original);
 }
+#[test]
+fn hi_pole_uses_final_solved_bend_plane() {
+    let (mut s, m) = setup();
+    let middle = m.limbs[0].middle;
+    let start = m.limbs[0].start;
+    let end = m.head;
+    execute(
+        &mut s,
+        Command::CreateLoomRig {
+            root: m.root.0,
+            mapping: Some(m),
+        },
+    )
+    .unwrap();
+    execute(
+        &mut s,
+        Command::SetLoomRigLimb {
+            rig: 1,
+            limb: "Arm".into(),
+            solver: "hi".into(),
+            blend: 1.,
+        },
+    )
+    .unwrap();
+    let l = s.scene.loom_rigs[0].limbs[0].clone();
+    let target = Vec3::new(8., 11., 4.);
+    let pole = Vec3::new(-4., 3., 25.);
+    s.scene
+        .node_mut(l.goal)
+        .unwrap()
+        .transform
+        .position
+        .set(target);
+    s.scene
+        .node_mut(l.pole)
+        .unwrap()
+        .transform
+        .position
+        .set(pole);
+    let root = s.scene.world_matrix(start).transform_point3(Vec3::ZERO);
+    let mid = s.scene.world_matrix(middle).transform_point3(Vec3::ZERO);
+    let axis = (target - root).normalize();
+    let actual = (mid - root - axis * (mid - root).dot(axis)).normalize();
+    let expected = (pole - root - axis * (pole - root).dot(axis)).normalize();
+    assert!(
+        actual.dot(expected) > 0.9999,
+        "actual {actual:?}, expected {expected:?}, dot {}",
+        actual.dot(expected)
+    );
+    let actual_end=s.scene.world_matrix(end).transform_point3(Vec3::ZERO);
+    assert!(actual_end.distance(target)<0.001,"end {actual_end:?}, target {target:?}, distance {}",actual_end.distance(target));
+}
+#[test]
+fn saved_rig_evaluates_same_pose_without_needing_an_edit() {
+    let (mut s, m) = setup();
+    let end = m.head;
+    execute(
+        &mut s,
+        Command::CreateLoomRig {
+            root: m.root.0,
+            mapping: Some(m),
+        },
+    )
+    .unwrap();
+    let master = s.scene.loom_rigs[0].master;
+    s.scene
+        .node_mut(master)
+        .unwrap()
+        .transform
+        .position
+        .set(Vec3::new(2., 3., 4.));
+    let expected = s.scene.world_matrix(end);
+    let json = serde_json::to_string(&s.scene).unwrap();
+    let loaded: loom_scene::Scene = serde_json::from_str(&json).unwrap();
+    assert!(loaded.world_matrix(end).abs_diff_eq(expected, 1e-4));
+}

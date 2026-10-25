@@ -38,6 +38,8 @@ fn fresh_scene_instance() -> u64 {
     NEXT_SCENE_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+fn initial_scene_revision() -> std::cell::Cell<u64> { std::cell::Cell::new(1) }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scene {
     #[serde(skip, default = "fresh_scene_instance")]
@@ -86,7 +88,7 @@ pub struct Scene {
     /// Counts stack evaluations (tests pin the caching).
     #[serde(skip)]
     pub eval_count: std::cell::Cell<usize>,
-    #[serde(skip)]
+    #[serde(skip, default = "initial_scene_revision")]
     version_counter: std::cell::Cell<u64>,
     /// The frame the scene evaluates at (the time slider).
     #[serde(skip)]
@@ -184,6 +186,9 @@ impl Scene {
             link_busy: Default::default(),
         }
     }
+
+    /// Scene edit generation for read-only UI caches; playback does not change it.
+    pub fn revision(&self) -> u64 { self.version_counter.get() }
 
     /// The frame the scene evaluates at.
     pub fn time(&self) -> f32 {

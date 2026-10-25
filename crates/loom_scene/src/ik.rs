@@ -152,7 +152,16 @@ pub fn solve(chain: &IkChain, bones: &[IkBone], goal_world: Vec3, spline: Option
                     if a == Vec3::ZERO || b == Vec3::ZERO {
                         continue;
                     }
-                    let r = Quat::from_rotation_arc(a, b);
+                    // The general arc helper snaps angles below ~0.04 degrees
+                    // to identity. CCD needs those small corrections to honor
+                    // its positional threshold on long bones.
+                    let cross = a.cross(b);
+                    let dot = a.dot(b);
+                    let r = if dot < -1.0 + 2.0 * f32::EPSILON {
+                        Quat::from_rotation_arc(a, b)
+                    } else {
+                        Quat::from_xyzw(cross.x, cross.y, cross.z, 1.0 + dot).normalize()
+                    };
                     let parent_rot = rot_of(if i == 0 { bones[0].parent_frame } else { ws[i - 1] });
                     q[i] = (parent_rot.inverse() * r * rot_of(ws[i])).normalize();
                 }
