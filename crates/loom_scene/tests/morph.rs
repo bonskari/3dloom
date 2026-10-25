@@ -73,10 +73,11 @@ fn skin_morph_fires_at_the_bone_angle() {
     b1n.parent = Some(b0);
     let b1 = s.add_node(b1n);
     let mut data = SkinMorphData::bind(&s, &[b0, b1]);
-    data.morphs.push(SkinMorphTarget { bone: 1, name: "elbow".into(), angle_deg: 90.0, influence_deg: 90.0, falloff: 0, enabled: true, deltas: vec![(0, Vec3::Y * 3.0)] });
+    data.morphs.push(SkinMorphTarget { bone: 1, name: "elbow".into(), angle_deg: 90.0, influence_deg: 90.0, falloff: 0, enabled: true, deltas: vec![(0, Vec3::Y * 3.0)], ..Default::default() });
     s.node_mut(arm).unwrap().modifiers.push(ModifierSlot::new(Modifier::SkinMorph(Box::new(data))));
     let rest = s.eval_mesh(arm).value.mesh.vertices()[0].position;
-    s.node_mut(b1).unwrap().transform.rotation.set(Vec3::new(0.0, 0.0, 45.0));
+    // Half of the morph halfway to half the influence angle away (22.5° of 45°).
+    s.node_mut(b1).unwrap().transform.rotation.set(Vec3::new(0.0, 0.0, 67.5));
     let half = s.eval_mesh(arm).value.mesh.vertices()[0].position;
     s.node_mut(b1).unwrap().transform.rotation.set(Vec3::new(0.0, 0.0, 90.0));
     let full = s.eval_mesh(arm).value.mesh.vertices()[0].position;
