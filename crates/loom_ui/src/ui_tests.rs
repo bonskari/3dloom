@@ -4021,8 +4021,8 @@ fn a_checker_sub_material_shows_checks_in_the_viewport() {
 mod scene;
 
 /// The user's case: an imported skinned FBX character, a Bitmap on the
-/// Diffuse map of the material assigned to it, Show Map in Viewport on: the
-/// posed mesh in the shaded viewport shows the bitmap with varying UVs.
+/// Diffuse map of the material assigned to it, Show Map in Viewport clicked
+/// at the map's level: the posed mesh in the shaded viewport shows the bitmap with varying UVs.
 #[test]
 fn a_bitmap_on_an_imported_skinned_character_shows_in_the_viewport() {
     let mut h = Harness::new();
@@ -4045,8 +4045,9 @@ fn a_bitmap_on_an_imported_skinned_character_shows_in_the_viewport() {
     h.frames(2);
     let i = h.app.world_meshes().iter().position(|(n, _)| *n == skinned).unwrap();
     eprintln!("PROBE before show map: {:?} err {:?}", h.app.world_styles[i].texture, h.app.last_error);
-    h.cmd(Command::MaterialEditorGoToParent);
-    h.cmd(Command::SetMaterialParameter { slot: None, name: "Show Map in Viewport".into(), value: 1.0 });
+    // At the Bitmap's level, as the reference's steps go: Show Standard Map in Viewport.
+    assert!(!h.app.state.scene.material_editor.path.is_empty(), "the editor is at the map level");
+    click_in_editor(&mut h, "Show Map in Viewport", 0.0);
     h.frames(2);
     let style = h.app.world_styles[i].clone();
     eprintln!("PROBE after: {:?} sub {:?} err {:?}", style.texture, style.sub.as_ref().map(|s| s.by_id.len()), h.app.last_error);
