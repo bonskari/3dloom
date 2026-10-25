@@ -78,7 +78,7 @@ fn the_toolbar_right_click_menu_docks_the_main_toolbar_left_and_floats_it() {
     assert!(h.has(Role::Button, "Select and Move"), "its buttons are still there");
     // Right-click the empty space beside a narrow button: Float.
     let mv = h.find(Role::Button, "Select and Move");
-    right_click(&mut h, egui::pos2(r.max.x - 4.0, mv.center().y));
+    right_click(&mut h, egui::pos2((mv.max.x + 10.0).min(r.max.x - 12.0), mv.center().y));
     h.click(menu_entry(&h, "Float"));
     h.frames(2);
     assert_eq!(h.app.state.ui_custom.dock("Main Toolbar"), loom_commands::ui_custom::Dock::Float);
@@ -179,7 +179,11 @@ fn search_for(h: &mut Harness, text: &str) {
 fn drag_action(h: &mut Harness, action: &str, to: egui::Pos2) {
     search_for(h, action);
     let rows = h.find_all(Role::Button, action);
-    let row = rows.iter().copied().find(|r| customize_ui_rect(h).contains_rect(*r)).unwrap_or_else(|| panic!("{action} in the action list: {rows:?} in {:?}", customize_ui_rect(h)));
+    let win = customize_ui_rect(h);
+    let row = rows.iter().copied().find(|r| win.contains_rect(*r)).unwrap_or_else(|| {
+        let shown: Vec<(egui::accesskit::Role, String)> = h.widgets.iter().filter(|w| win.contains_rect(w.2) && matches!(w.0, Role::TextInput | Role::Label | Role::Button)).map(|w| (w.0, w.1.clone())).take(40).collect();
+        panic!("{action} in the action list: {rows:?} in {win:?}; shown: {shown:?}")
+    });
     assert!(drag_carrying(h, row.center(), to), "dragging {action} carries it");
     h.frames(1);
     // Clear the search for the next drag.
@@ -192,7 +196,9 @@ fn actions_dragged_onto_a_new_toolbar_become_its_buttons() {
     let bar = new_toolbar(&mut h, "Mine");
     drag_action(&mut h, "Select All", bar.center());
     assert_eq!(h.app.state.ui_custom.toolbar("Mine").unwrap().items, ["Select All"]);
-    drag_action(&mut h, "Select None", bar.center() + egui::vec2(bar.width() / 2.0 - 4.0, 0.0));
+    // The toolbar fits its button now: drop at its right end.
+    let bar = window_rect(&h, crate::toolbars::window_id("Mine")).unwrap();
+    drag_action(&mut h, "Select None", bar.center() + egui::vec2(bar.width() / 2.0 - 6.0, 0.0));
     let now = window_rect(&h, crate::toolbars::window_id("Mine"));
     assert_eq!(h.app.state.ui_custom.toolbar("Mine").unwrap().items, ["Select All", "Select None"], "dropped after the first button at {:?} (toolbar now {now:?}, dialog {:?}, prompt {:?})", bar.center() + egui::vec2(bar.width() / 2.0 - 4.0, 0.0), customize_ui_rect(&h), h.app.state.status_prompt);
     h.cmd(Command::CloseDialog);

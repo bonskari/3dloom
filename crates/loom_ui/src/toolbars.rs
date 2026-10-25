@@ -87,9 +87,15 @@ pub fn host(ctx: &egui::Context, app: &mut LoomApp, name: &str, edges: &[Dock], 
         Dock::Float => {
             let mut open = true;
             let pos = app.state.ui_custom.float_pos(name);
-            let r = egui::Window::new(name)
-                .id(window_id(name))
-                .default_pos(egui::pos2(pos[0], pos[1]))
+            // A position set by a command (Dock Toolbar with `pos`) moves the open window too.
+            let applied_id = window_id(name).with("applied_pos");
+            let applied: Option<[f32; 2]> = ctx.data(|d| d.get_temp(applied_id));
+            let mut window = egui::Window::new(name).id(window_id(name)).default_pos(egui::pos2(pos[0], pos[1]));
+            if applied.is_some_and(|a| a != pos) {
+                window = window.current_pos(egui::pos2(pos[0], pos[1]));
+            }
+            ctx.data_mut(|d| d.insert_temp(applied_id, pos));
+            let r = window
                 .collapsible(false)
                 .resizable(true)
                 .movable(!locked)
@@ -111,6 +117,8 @@ fn remember_float_pos(ctx: &egui::Context, app: &mut LoomApp, name: &str, min: e
     let moved = (saved[0] - min.x).abs() > 1.0 || (saved[1] - min.y).abs() > 1.0;
     if moved && !ctx.input(|i| i.pointer.any_down()) {
         let _ = app.dispatch(Command::DockToolbar { name: name.to_owned(), dock: "Float".into(), pos: Some([min.x, min.y]) });
+        // The window is already there: no move back next frame.
+        ctx.data_mut(|d| d.insert_temp(window_id(name).with("applied_pos"), app.state.ui_custom.float_pos(name)));
     }
 }
 

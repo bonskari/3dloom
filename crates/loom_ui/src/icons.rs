@@ -47,6 +47,9 @@ pub fn hold_opens(ui: &egui::Ui, r: &egui::Response) -> (bool, bool) {
         }
         ui.ctx().request_repaint();
         (false, false)
+    } else if took && ui.input(|i| i.pointer.any_down()) {
+        // Still held after moving off the button toward the strip.
+        (false, true)
     } else {
         // The release frame still reports the hold, so its click is ignored.
         ui.ctx().data_mut(|d| {
