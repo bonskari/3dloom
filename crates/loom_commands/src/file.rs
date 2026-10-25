@@ -383,7 +383,6 @@ pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, dup
 /// Copies `id` (and the sub-materials it holds) from `src` into `library`,
 /// sharing a library material of the same name and settings; returns its id there.
 pub(crate) fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::MaterialId, library: &mut loom_scene::MaterialLibrary, done: &mut BTreeMap<loom_scene::MaterialId, loom_scene::MaterialId>, depth: u32) -> Option<loom_scene::MaterialId> {
-    use loom_scene::material::MaterialKind;
     if let Some(d) = done.get(&id) {
         return Some(*d);
     }
@@ -391,23 +390,9 @@ pub(crate) fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::
     if depth > 16 {
         return None;
     }
-    match &mut m.kind {
-        MaterialKind::Standard => {}
-        MaterialKind::MultiSub(list) => {
-            for s in list.iter_mut() {
-                s.material = s.material.and_then(|c| carry_material(src, c, library, done, depth + 1));
-            }
-        }
-        MaterialKind::Blend(b) => {
-            for c in b.materials.iter_mut() {
-                *c = c.and_then(|c| carry_material(src, c, library, done, depth + 1));
-            }
-        }
-        MaterialKind::Shell(s) => {
-            for c in s.materials.iter_mut() {
-                *c = c.and_then(|c| carry_material(src, c, library, done, depth + 1));
-            }
-        }
+    // Every sub-material button of every material type.
+    for c in m.children_mut() {
+        *c = c.and_then(|c| carry_material(src, c, library, done, depth + 1));
     }
     let to = match library.iter().find(|(_, x)| **x == m) {
         Some((k, _)) => *k,
