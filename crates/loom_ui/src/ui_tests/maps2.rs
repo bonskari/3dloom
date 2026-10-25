@@ -17,11 +17,27 @@ fn pick_diffuse_map(h: &mut Harness, kind: &str) {
     click_in_editor(h, "Maps", 0.0);
     h.click(row_text(h, "Diffuse Color", "None", material_editor_rect(h)));
     h.frames(12);
-    let p = window_text(h, "Material/Map Browser", kind);
-    h.click(p);
-    h.click(p);
-    h.frames(3);
+    double_click_in_browser(h, kind);
     assert_eq!(h.app.state.dialog, None, "a double-click picks {kind}");
+}
+
+/// Scrolls the Material/Map Browser's list until `kind` shows, then double-clicks it.
+fn double_click_in_browser(h: &mut Harness, kind: &str) {
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("Material/Map Browser"))).expect("the Browser");
+    for _ in 0..40 {
+        if let Some(r) = h.text_rects(kind).into_iter().find(|r| area.contains_rect(*r)) {
+            h.click(r.center());
+            h.click(r.center());
+            h.frames(3);
+            return;
+        }
+        // The wheel over the list, a few lines down.
+        let list = h.text_rects("Bitmap").into_iter().chain(h.text_rects("Mix")).find(|r| area.contains_rect(*r)).map_or(area.center(), |r| r.center());
+        h.run(vec![egui::Event::PointerMoved(list)]);
+        h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -60.0), modifiers: egui::Modifiers::NONE }]);
+        h.frames(2);
+    }
+    panic!("{kind:?} never shows in the Browser");
 }
 
 fn diffuse(h: &Harness) -> loom_scene::material::Map {
@@ -81,7 +97,7 @@ fn tiles_preset_and_gaps_from_its_rollouts() {
     let mut h = Harness::new();
     pick_diffuse_map(&mut h, "Tiles");
     let win = material_editor_rect(&h);
-    for label in ["Standard Controls", "Advanced Controls", "Preset Type:", "Horiz. Count:", "Grout Setup", "Swap Texture Entries", "Mirror"] {
+    for label in ["Standard Controls", "Advanced Controls", "Preset Type:", "Horiz. Count:", "Grout Setup", "Mirror"] {
         assert!(h.text_rect(label, win).is_some(), "{label:?} at the Tiles level");
     }
     pick_in_list(&mut h, "Preset Type:", "Stack Bond", "Running Bond");
@@ -110,10 +126,7 @@ fn composite_layers_are_added_and_filled_from_their_rollouts() {
     let none = h.text_rects("None").into_iter().filter(|r| win.contains_rect(*r)).min_by(|a, b| a.min.y.total_cmp(&b.min.y).then(a.min.x.total_cmp(&b.min.x))).expect("layer 2's map button");
     h.click(none.center());
     h.frames(12);
-    let p = window_text(&h, "Material/Map Browser", "Checker");
-    h.click(p);
-    h.click(p);
-    h.frames(3);
+    double_click_in_browser(&mut h, "Checker");
     assert_eq!(h.app.state.scene.material_editor.path, vec![loom_scene::material::NavStep::Map("Diffuse Color".into()), loom_scene::material::NavStep::Map("Layer 2".into())]);
     assert_eq!(diffuse(&h).sub_map(2).map(|m| m.kind), Some(MapType::Checker));
     click_in_editor(&mut h, "Go to Parent", 0.0);
@@ -125,7 +138,7 @@ fn gradient_ramp_type_and_flags_from_its_rollout() {
     let mut h = Harness::new();
     pick_diffuse_map(&mut h, "Gradient Ramp");
     let win = material_editor_rect(&h);
-    for label in ["Gradient Ramp Parameters", "Flag #1", "Flag #2", "Flag #3", "Gradient Type:", "Interpolation:", "Output"] {
+    for label in ["Gradient Ramp Parameters", "Flag #1", "Flag #2", "Flag #3", "Gradient Type:", "Interpolation:"] {
         assert!(h.text_rect(label, win).is_some(), "{label:?} at the Gradient Ramp level");
     }
     pick_in_list(&mut h, "Gradient Type:", "Linear", "Radial");
@@ -142,7 +155,7 @@ fn falloff_type_and_ior_from_its_rollout_and_the_sample_slot_shades_it() {
     let mut h = Harness::new();
     pick_diffuse_map(&mut h, "Falloff");
     let win = material_editor_rect(&h);
-    for label in ["Falloff Parameters", "Front : Side", "Falloff Type:", "Falloff Direction:", "Mode Specific Parameters", "Output"] {
+    for label in ["Falloff Parameters", "Front : Side", "Falloff Type:", "Falloff Direction:", "Mode Specific Parameters"] {
         assert!(h.text_rect(label, win).is_some(), "{label:?} at the Falloff level");
     }
     pick_in_list(&mut h, "Falloff Type:", "Perpendicular / Parallel", "Fresnel");

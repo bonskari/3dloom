@@ -36,7 +36,7 @@ fn slot_index_of(name: &str) -> u8 {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sample {
     Surfaces(Surfaces),
-    Map(Map),
+    Map(Box<Map>),
 }
 
 /// How a preview is drawn: the sample object, its rotation (Drag/Rotate),
@@ -327,7 +327,7 @@ fn sample_images(app: &mut LoomApp, sample: &Sample) -> loom_scene::maps::Images
         maps.extend(s.opacity_map.iter().cloned());
     };
     match sample {
-        Sample::Map(m) => maps.push(m.clone()),
+        Sample::Map(m) => maps.push((**m).clone()),
         Sample::Surfaces(Surfaces::Single(s)) => add(s),
         Sample::Surfaces(Surfaces::PerId(l)) => l.values().for_each(add),
     }
@@ -376,7 +376,7 @@ fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
                 Level::Map { owner, maps } => {
                     if let Some(map) = app.state.scene.materials.get(&owner).and_then(|o| map_at(o, &maps)) {
                         if ed.options.maps_as_2d {
-                            return Sample::Map(map.clone());
+                            return Sample::Map(Box::new(map.clone()));
                         }
                         let mut s = Surface::from_standard(&StandardMaterial::new(""));
                         s.diffuse_map = Some(Map { amount: 100.0, ..map.clone() });
@@ -1904,7 +1904,7 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
         } else {
             browse_materials(app, from)
         };
-        egui::ScrollArea::vertical().id_salt("material_browser_list").max_height(520.0).auto_shrink([false, true]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("material_browser_list").max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
             if entries.is_empty() {
                 ui.weak("(none)");
             }
@@ -2472,7 +2472,7 @@ mod tests {
     fn a_map_level_shows_the_map_flat() {
         let images = loom_scene::maps::Images::new();
         let checker = Map::new(MapType::Checker, 100.0);
-        let px = preview_pixels(&Sample::Map(checker), 8, &setup(SampleType::Sphere), &images);
+        let px = preview_pixels(&Sample::Map(Box::new(checker)), 8, &setup(SampleType::Sphere), &images);
         // Bottom-left check black, bottom-right white.
         assert_eq!(px[7 * 8], egui::Color32::from_rgb(0, 0, 0));
         assert_eq!(px[7 * 8 + 7], egui::Color32::from_rgb(255, 255, 255));
