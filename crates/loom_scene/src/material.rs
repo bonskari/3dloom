@@ -949,7 +949,7 @@ pub fn map_at_mut<'a>(m: &'a mut StandardMaterial, maps: &[String]) -> Option<&'
 /// (or of the material itself when `maps` is empty).
 pub fn map_slot_at_mut<'a>(m: &'a mut StandardMaterial, maps: &[String], slot: &str) -> Result<&'a mut Option<Box<Map>>, String> {
     let parent = map_at_mut(m, maps).ok_or("no such map level")?;
-    let i = parent.sub_map_index(slot).ok_or_else(|| format!("a {} map has no component \"{slot}\"", parent.kind.label()))?;
+    let i = parent.sub_map_index(slot).filter(|i| parent.slot_has_map(*i)).ok_or_else(|| format!("a {} map has no map component \"{slot}\"", parent.kind.label()))?;
     Ok(parent.sub_map_slot_mut(i))
 }
 

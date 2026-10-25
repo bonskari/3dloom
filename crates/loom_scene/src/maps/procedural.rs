@@ -544,7 +544,8 @@ fn falloff(map: &Map, ctx: &Ctx, sub: &dyn Fn(usize) -> Option<[f32; 4]>) -> [f3
         0 => (1.0 - n.dot(dir)) * 0.5,
         2 => {
             let cos = n.dot(ctx.view).abs().clamp(0.0, 1.0);
-            fresnel(cos, e.ior)
+            // Without Override Material IOR: a Standard material's default index, 1.5.
+            fresnel(cos, if e.override_ior { e.ior } else { 1.5 })
         }
         3 => ctx.light,
         4 => {
@@ -814,6 +815,8 @@ mod tests {
         let grazing = at(&f, Vec3::new(1.0, 0.0, 0.02))[0];
         assert!(front < 0.1 && grazing > 0.8, "Fresnel: {front} {grazing}");
         f.set_parameter("Index of Refraction", 3.0).unwrap();
+        assert_eq!(at(&f, Vec3::Z)[0], front, "the IOR spinner needs Override Material IOR");
+        f.set_parameter("Override Material IOR", 1.0).unwrap();
         assert!(at(&f, Vec3::Z)[0] > front, "a higher IOR reflects more facing");
         // World X: a normal along X is parallel (Front), one along Z perpendicular (Side).
         f.set_parameter("Falloff Type", 1.0).unwrap();

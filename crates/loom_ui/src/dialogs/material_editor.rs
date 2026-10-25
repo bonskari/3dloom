@@ -11,19 +11,21 @@
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{BrowserFor, Command, Dialog};
-use loom_scene::material::{map_at, resolve_level, Level, Map, MapType, MaterialKind, NavStep, SampleType, StandardMaterial, Surface, Surfaces, MAP_CHANNELS, MAP_SLOTS, SLOT_COUNT};
+use loom_scene::material::{map_at, resolve_level, Level, Map, MapType, MaterialKind, NavStep, SampleType, StandardMaterial, Surface, Surfaces, MAP_CHANNELS, SLOT_COUNT};
 use loom_scene::MaterialId;
+
+mod map_rollouts;
 
 /// A sample slot being dragged (onto another slot, an object or selected polygons).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SlotDrag(pub usize);
 
-/// A map button being dragged onto another (its `MAP_SLOTS` index).
+/// A map button being dragged onto another (its `slot_index`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MapDrag(u8);
 
 fn slot_index_of(name: &str) -> u8 {
-    MAP_SLOTS.iter().position(|s| *s == name).unwrap_or(0) as u8
+    loom_scene::map_params::slot_index(name)
 }
 
 // ---------------------------------------------------------------------------
@@ -68,8 +70,8 @@ impl PreviewSetup {
 }
 
 /// Where a view ray through the preview's pixel (u, v in -1–1) hits the
-/// sample object: (normal, map UV), in the object's frame before rotation.
-fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, [f32; 2])> {
+/// sample object: (point, normal, map UV), in the object's frame before rotation.
+fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, glam::Vec3, [f32; 2])> {
     use std::f32::consts::PI;
     match kind {
         SampleType::Sphere => {
@@ -82,7 +84,7 @@ fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, [f
             }
             let p = o + d * (-b - disc.sqrt());
             let n = p.normalize();
-            Some((n, [0.5 + n.x.atan2(n.z) / (2.0 * PI), 0.5 + n.y.asin() / PI]))
+            Some((p, n, [0.5 + n.x.atan2(n.z) / (2.0 * PI), 0.5 + n.y.asin() / PI]))
         }
         SampleType::Cylinder => {
             let (r, h) = (0.62, 0.72);
@@ -112,7 +114,7 @@ fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, [f
                     }
                 }
             }
-            best.map(|(_, n, uv)| (n, uv))
+            best.map(|(t, n, uv)| (o + d * t, n, uv))
         }
         SampleType::Cube => {
             let h = 0.58;
@@ -133,27 +135,34 @@ fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, [f
                     }
                 }
             }
-            best.map(|(_, n, uv)| (n, uv))
+            best.map(|(t, n, uv)| (o + d * t, n, uv))
         }
     }
 }
 
-/// One surface Blinn-shaded under the sample lights at `n` (view along -Z), with its diffuse map at `uv`.
-fn shade(s: &Surface, n: glam::Vec3, uv: [f32; 2], setup: &PreviewSetup, images: &loom_scene::maps::Images) -> (glam::Vec3, f32) {
+/// The sample lights: (direction, colour), the top light first.
+fn sample_lights(setup: &PreviewSetup) -> Vec<(glam::Vec3, glam::Vec3)> {
+    let mut lights = vec![(glam::Vec3::new(-0.5, 0.6, 0.65).normalize(), setup.top)];
+    if let Some(b) = setup.back {
+        lights.push((glam::Vec3::new(0.7, -0.3, -0.65).normalize(), b * 0.6));
+    }
+    lights
+}
+
+/// One surface Blinn-shaded under the sample lights at the shaded point
+/// `ctx` (view along -Z), its maps evaluated there.
+fn shade(s: &Surface, ctx: &loom_scene::maps::Ctx, setup: &PreviewSetup, images: &loom_scene::maps::Images) -> (glam::Vec3, f32) {
+    let n = ctx.normal;
     let mut d = s.diffuse;
     if let Some(m) = &s.diffuse_map {
-        let t = loom_scene::maps::eval(m, uv, images);
+        let t = loom_scene::maps::eval_ctx(m, ctx, images);
         d = d.lerp(glam::Vec3::new(t[0], t[1], t[2]), t[3] * (m.amount / 100.0).clamp(0.0, 1.0));
     }
     let view = glam::Vec3::Z;
     let exponent = 2.0 * 2f32.powf(s.glossiness / 10.0);
     let mut lit = s.ambient * setup.ambient + d * 0.08;
     let mut spec = glam::Vec3::ZERO;
-    let mut lights = vec![(glam::Vec3::new(-0.5, 0.6, 0.65).normalize(), setup.top)];
-    if let Some(b) = setup.back {
-        lights.push((glam::Vec3::new(0.7, -0.3, -0.65).normalize(), b * 0.6));
-    }
-    for (l, c) in lights {
+    for (l, c) in sample_lights(setup) {
         let diff = n.dot(l).max(0.0);
         lit += d * c * diff;
         let h = (l + view).normalize();
@@ -162,7 +171,7 @@ fn shade(s: &Surface, n: glam::Vec3, uv: [f32; 2], setup: &PreviewSetup, images:
     let c = lit * (1.0 - s.self_illum) + d * s.self_illum + spec;
     let mut a = s.opacity;
     if let Some(m) = &s.opacity_map {
-        let t = loom_scene::maps::eval(m, uv, images);
+        let t = loom_scene::maps::eval_ctx(m, ctx, images);
         let lum = (t[0] + t[1] + t[2]) / 3.0;
         a += (lum - a) * (m.amount / 100.0).clamp(0.0, 1.0);
     }
@@ -196,9 +205,24 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                     let d = inv * glam::Vec3::new(0.0, 0.0, -1.0);
                     match hit(setup.kind, o, d) {
                         None => bg,
-                        Some((n_local, uv)) => {
+                        Some((p_local, n_local, uv)) => {
                             let n = rot * n_local;
                             let uv = [uv[0] * setup.uv_tiling, uv[1] * setup.uv_tiling];
+                            // The sample object is 100 units across (`maps::UV_UNITS`), viewed down -Z.
+                            let scale = loom_scene::maps::UV_UNITS / 2.0;
+                            let light = sample_lights(setup).first().map_or(1.0, |(l, _)| n.dot(*l).max(0.0));
+                            let ctx = loom_scene::maps::Ctx {
+                                uv,
+                                p_obj: p_local * scale,
+                                p_world: rot * p_local * scale,
+                                normal: n,
+                                view: glam::Vec3::Z,
+                                cam_x: glam::Vec3::X,
+                                cam_y: glam::Vec3::Y,
+                                obj_axes: rot,
+                                dist: (3.0 - (rot * p_local).z) * scale,
+                                light,
+                            };
                             let s = match surfaces {
                                 Surfaces::Single(s) => std::borrow::Cow::Borrowed(s.as_ref()),
                                 Surfaces::PerId(list) => {
@@ -212,7 +236,7 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                                     }
                                 }
                             };
-                            let (c, a) = shade(&s, n, uv, setup, images);
+                            let (c, a) = shade(&s, &ctx, setup, images);
                             bg.lerp(c, a)
                         }
                     }
@@ -985,26 +1009,30 @@ fn blend_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
 }
 
 fn color_row(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map, i: usize) {
-    let slot = map.kind.color_slots()[i];
-    ui.label(slot);
-    if slot != "Mix Amount" {
-        let mut rgb = rgb_of(map.colors[i]);
+    let slot = map.slot_names()[i].clone();
+    ui.label(&slot);
+    if map.slot_has_color(i) {
+        let mut rgb = rgb_of(map.color(i));
         if ui.color_edit_button_srgb(&mut rgb).changed() {
-            let _ = app.dispatch(Command::SetMapColor { which: slot.into(), rgb });
+            let _ = app.dispatch(Command::SetMapColor { which: slot.clone(), rgb });
         }
     } else {
         ui.label("");
     }
-    map_button(ui, app, slot, map.sub_maps[i].as_deref(), false);
-    let mut on = map.sub_maps[i].as_ref().is_some_and(|s| s.enabled);
-    if ui.add_enabled(map.sub_maps[i].is_some(), egui::Checkbox::new(&mut on, "")).changed() {
-        let _ = app.dispatch(Command::SetMapParameter { name: format!("{slot} Map On"), value: if on { 1.0 } else { 0.0 } });
+    if map.slot_has_map(i) {
+        map_button(ui, app, &slot, map.sub_map(i), false);
+        let mut on = map.sub_map(i).is_some_and(|s| s.enabled);
+        if ui.add_enabled(map.sub_map(i).is_some(), egui::Checkbox::new(&mut on, "")).changed() {
+            let _ = app.dispatch(Command::SetMapParameter { name: format!("{slot} Map On"), value: if on { 1.0 } else { 0.0 } });
+        }
     }
     ui.end_row();
 }
 
 fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
-    if map.kind != MapType::Mix {
+    if map.kind.is_3d() {
+        map_rollouts::coords3(ui, app, map);
+    } else if map.kind.has_2d_coords() {
         crate::command_panel::rollout(ui, "Coordinates", true, |ui| {
             let c = &map.coords;
             ui.label("Texture: Explicit Map Channel");
@@ -1131,6 +1159,7 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             });
             let masked = map.sub_maps[2].as_ref().is_some_and(|m| m.enabled);
             ui.add_enabled_ui(!masked, |ui| map_spinner(ui, app, "Mix Amount:", "Mix Amount", map.params.mix_amount, 0.0..=100.0, 1));
+            map_rollouts::mixing_curve(ui, app, map);
         }),
         MapType::NormalBump => crate::command_panel::rollout(ui, "Parameters", true, |ui| {
             ui.horizontal(|ui| {
@@ -1147,6 +1176,10 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                 map_check(ui, app, "Flip Green (Y)", "Flip Green (Y)", map.params.flip_green);
             });
         }),
+        _ => map_rollouts::parameters(ui, app, map),
+    }
+    if map.kind.has_output() {
+        map_rollouts::output(ui, app, map);
     }
 }
 
@@ -1194,7 +1227,7 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
         } else {
             browse_materials(app, from)
         };
-        egui::ScrollArea::vertical().id_salt("material_browser_list").max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("material_browser_list").max_height(520.0).auto_shrink([false, true]).show(ui, |ui| {
             if entries.is_empty() {
                 ui.weak("(none)");
             }
@@ -1251,8 +1284,8 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
             }
         }
         BrowserFor::Map(i) => {
-            let slot = MAP_SLOTS.get(i as usize).copied().unwrap_or("Diffuse Color");
-            let ok = app.dispatch(Command::NewMap { map: slot.into(), kind: choice.clone() }).is_ok();
+            let slot = loom_scene::map_params::slot_name(i);
+            let ok = app.dispatch(Command::NewMap { map: slot, kind: choice.clone() }).is_ok();
             // A new Bitmap asks for its image file next, as in the reference.
             if ok && choice == "Bitmap" {
                 *open = true;
@@ -1520,7 +1553,7 @@ pub fn copy_map(ctx: &egui::Context, app: &mut LoomApp, from: u8, to: u8, open: 
     ctx.data_mut(|d| d.insert_temp(id, swap));
     match done {
         Some(true) => {
-            let name = |i: u8| MAP_SLOTS.get(i as usize).copied().unwrap_or("").to_owned();
+            let name = loom_scene::map_params::slot_name;
             let _ = app.dispatch(Command::CopyMap { from: name(from), to: name(to), swap });
             *open = false;
         }
@@ -1539,10 +1572,10 @@ pub fn navigator(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         Some(top) => {
             fn walk_map(map: &Map, slot: &str, depth: usize, path: Vec<String>, rows: &mut Vec<(usize, String, Vec<String>)>) {
                 rows.push((depth, format!("{slot}: {} ({})", if map.name.is_empty() { "Map" } else { &map.name }, map.kind.label()), path.clone()));
-                for (i, s) in map.kind.color_slots().iter().enumerate() {
-                    if let Some(sub) = &map.sub_maps[i] {
+                for (i, s) in map.slot_names().iter().enumerate() {
+                    if let Some(sub) = map.sub_map(i) {
                         let mut p = path.clone();
-                        p.push((*s).to_owned());
+                        p.push(s.clone());
                         walk_map(sub, s, depth + 1, p, rows);
                     }
                 }

@@ -624,9 +624,11 @@ impl Map {
                     "Offset" => c3.offset[i] = v,
                     "Tiling" => c3.tiling[i] = v,
                     "Angle" => c3.angle[i] = v,
-                    _ => return self.set_layer_or_flag(name, value),
+                    _ => {}
                 }
-                return Ok(true);
+                if matches!(what, "Offset" | "Tiling" | "Angle") {
+                    return Ok(true);
+                }
             }
         }
         match name {
@@ -788,7 +790,7 @@ impl Map {
                 self.flags.remove(n - 1);
             }
             (MapType::Composite, _) => {
-                let (head, what) = name.rsplit_once(' ').ok_or_else(|| format!("no map parameter \"{name}\""))?;
+                let Some((head, what)) = ["Opacity", "Blend Mode", "Visible", "Color Correct"].into_iter().find_map(|w| name.strip_suffix(w).and_then(|h| h.strip_suffix(' ')).map(|h| (h, w))) else { return Ok(false) };
                 let (is_mask, num) = if let Some(k) = head.strip_prefix("Layer ") { (false, k) } else if let Some(k) = head.strip_prefix("Mask ") { (true, k) } else { return Ok(false) };
                 let i = num.parse::<usize>().ok().and_then(|k| k.checked_sub(1)).filter(|i| *i < self.layers.len()).ok_or_else(|| format!("no layer {num}"))?;
                 match (is_mask, what) {
@@ -796,7 +798,7 @@ impl Map {
                     (false, "Blend Mode") => self.layers[i].blend = (n).min(BLEND_MODES.len() - 1) as u8,
                     (false, "Visible") => self.layers[i].visible = value != 0.0,
                     (true, "Visible") => self.layers[i].mask_visible = value != 0.0,
-                    (_, "Correct") | (_, "Color Correct") => {
+                    (_, "Color Correct") => {
                         // Color Correct This Texture / Mask: the map moves into a Color Correction map.
                         let slot = 2 * i + is_mask as usize;
                         let old = self.sub_map_slot_mut(slot).take();
@@ -853,6 +855,15 @@ mod tests {
         c.set_parameter("Layer 2 Blend Mode", 5.0).unwrap();
         assert_eq!((c.layers[1].opacity, BLEND_MODES[c.layers[1].blend as usize]), (40.0, "Multiply"));
         assert!(c.set_parameter("Layer 9 Opacity", 1.0).is_err());
+        // Color Correct This Texture wraps the layer's map.
+        c.set_parameter("Layer 1 Color Correct", 1.0).unwrap();
+        let cc = c.sub_map(0).unwrap();
+        assert_eq!((cc.kind, cc.sub_map(0).map(|m| m.kind)), (MapType::ColorCorrection, Some(MapType::Checker)));
+        // A 3D axis name and a two-word name ending in an axis letter.
+        c.set_parameter("Center Position X", 0.25).unwrap();
+        assert_eq!(c.extra.center, [0.25, 0.25], "locked X and Y");
+        c.set_parameter("Tiling Z", 3.0).unwrap();
+        assert_eq!(c.coords3.tiling[2], 3.0);
 
         let mut g = Map::new(MapType::GradientRamp, 100.0);
         assert_eq!(g.slot_names(), ["Source Map", "Flag #1", "Flag #2", "Flag #3"]);
