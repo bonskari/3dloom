@@ -567,7 +567,6 @@ impl LoomApp {
         }
     }
 
-    /// File > New / Reset / Open / Exit: asks to save first when the scene is dirty.
     /// File > New / Ctrl+N: the New Scene dialog when the scene has objects, else a new scene.
     pub fn new_scene(&mut self) {
         if self.state.scene.len() > 0 {
@@ -577,6 +576,7 @@ impl LoomApp {
         }
     }
 
+    /// File > New / Reset / Open / Exit: asks to save first when the scene is dirty.
     pub fn request_file_action(&mut self, action: loom_commands::PendingFileAction) {
         if self.state.dirty() {
             self.state.dialog = Some(loom_commands::Dialog::SaveChanges(action));
