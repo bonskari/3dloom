@@ -363,6 +363,8 @@ pub struct LoomApp {
     pub button_look: Option<String>,
     /// Adaptive Degradation is degrading the views this frame.
     pub degrading: bool,
+    /// Grab Viewport: the screenshot asked for, and the viewport rect (points) to cut from it.
+    pub grab_pending: Option<(usize, egui::Rect)>,
     /// The Add / Edit Time Tag dialog.
     pub tag_dialog: Option<statusbar::TagDialog>,
     /// The last raw input events (live diagnostics).
@@ -540,6 +542,7 @@ impl LoomApp {
             last_error: None,
             button_look: None,
             degrading: false,
+            grab_pending: None,
             tag_dialog: None,
             input_log: Default::default(),
         }
@@ -1250,6 +1253,52 @@ impl LoomApp {
         loaded
     }
 
+    /// Grab Viewport: asks the window for a screenshot, then cuts the
+    /// viewport out of it into the Rendered Frame Window (and the Viewport
+    /// Captures folder, when one is set).
+    fn grab_viewport(&mut self, ctx: &egui::Context) {
+        if let Some(index) = self.state.grab_request.take() {
+            if let Some(rect) = self.viewport_rects.get(index).copied() {
+                self.grab_pending = Some((index, rect));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(index)));
+            }
+        }
+        let Some((index, rect)) = self.grab_pending else { return };
+        let shot = ctx.input(|i| i.events.iter().find_map(|e| match e {
+            egui::Event::Screenshot { image, .. } => Some(image.clone()),
+            _ => None,
+        }));
+        let Some(image) = shot else { return };
+        self.grab_pending = None;
+        let ppp = ctx.pixels_per_point();
+        let [w, h] = image.size;
+        let x0 = ((rect.min.x * ppp).round().max(0.0) as usize).min(w);
+        let y0 = ((rect.min.y * ppp).round().max(0.0) as usize).min(h);
+        let x1 = ((rect.max.x * ppp).round().max(0.0) as usize).clamp(x0, w);
+        let y1 = ((rect.max.y * ppp).round().max(0.0) as usize).clamp(y0, h);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let mut out = image::RgbaImage::new((x1 - x0) as u32, (y1 - y0) as u32);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let c = image.pixels[y * w + x].to_srgba_unmultiplied();
+                out.put_pixel((x - x0) as u32, (y - y0) as u32, image::Rgba(c));
+            }
+        }
+        let label = if index < self.state.viewports.len() { self.state.view_label(index) } else { String::new() };
+        if let Some(dir) = self.state.paths.dir("Viewport Captures").map(|d| d.to_path_buf()) {
+            let n = (1..).find(|n| !dir.join(format!("{label}_{n:03}.png")).exists()).unwrap_or(1);
+            let path = dir.join(format!("{label}_{n:03}.png"));
+            if let Err(e) = out.save(&path) {
+                self.last_error = Some(format!("{}: {e}", path.display()));
+            }
+        }
+        self.state.rendered.set_image(Some(std::sync::Arc::new(out)));
+        self.state.rendered.title = format!("Grab Viewport: {label}");
+        self.state.rendered.open = true;
+    }
+
     /// A Customize User Interface > Colors element's colour.
     pub fn color(&self, element: &str) -> egui::Color32 {
         let c = self.state.ui_custom.colors.get(element);
@@ -1395,6 +1444,7 @@ impl LoomApp {
         use loom_commands::ui_custom::Dock;
         toolbars::show_edges(ctx, self, &[Dock::Top, Dock::Float]);
         ribbon::show(ctx, self);
+        menubar::quick_access_below(ctx, self);
         // Bottom panels first so they span the full width under the Command Panel.
         statusbar::show(ctx, self);
         time_slider::show(ctx, self);
@@ -1414,6 +1464,8 @@ impl LoomApp {
             }
         }
         dialogs::show(ctx, self);
+        self.grab_viewport(ctx);
+        menubar::help_windows(ctx, self);
         toolbars::button_appearance(ctx, self);
         command_panel::utilities::measure_floater(ctx, self);
         uv_editor::show(ctx, self);

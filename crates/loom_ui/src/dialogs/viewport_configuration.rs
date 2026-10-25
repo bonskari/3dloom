@@ -400,15 +400,45 @@ fn viewcube_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         });
         ui.separator();
+        ui.label(egui::RichText::new("When Dragging on the ViewCube").strong());
+        let mut snap = v.snap_to_closest;
+        if ui.checkbox(&mut snap, "Snap to Closest View").changed() {
+            set(app, cube_behaviour(Some(snap), None, None, None, None));
+        }
+        ui.label(egui::RichText::new("When Clicking on the ViewCube").strong());
+        let mut fit = v.fit_to_view;
+        if ui.checkbox(&mut fit, "Fit-to-View on View Change").changed() {
+            set(app, cube_behaviour(None, Some(fit), None, None, None));
+        }
+        let mut animated = v.animated;
+        if ui.checkbox(&mut animated, "Use Animated Transitions when Switching Views").changed() {
+            set(app, cube_behaviour(None, None, Some(animated), None, None));
+        }
+        let mut upright = v.keep_upright;
+        if ui.checkbox(&mut upright, "Keep Scene Upright").changed() {
+            set(app, cube_behaviour(None, None, None, Some(upright), None));
+        }
+        ui.separator();
         let mut compass = v.compass;
         if ui.checkbox(&mut compass, "Show Compass Below the ViewCube").changed() {
             set(app, cube_options(None, None, None, Some(compass)));
         }
+        ui.horizontal(|ui| {
+            ui.label("Angle of North:");
+            let mut n = v.north;
+            if ui.add(crate::spinner::spin(ui, &mut n, -360.0..=360.0).speed(1.0).fixed_decimals(1)).changed() {
+                set(app, cube_behaviour(None, None, None, None, Some(n)));
+            }
+        });
     });
 }
 
 fn cube_options(all_views: Option<bool>, size: Option<u32>, inactive_opacity: Option<f32>, compass: Option<bool>) -> Command {
-    Command::SetViewCubeOptions { show: None, all_views, size, inactive_opacity, compass }
+    Command::SetViewCubeOptions { show: None, all_views, size, inactive_opacity, compass, snap_to_closest: None, fit_to_view: None, animated: None, keep_upright: None, north: None }
+}
+
+fn cube_behaviour(snap_to_closest: Option<bool>, fit_to_view: Option<bool>, animated: Option<bool>, keep_upright: Option<bool>, north: Option<f32>) -> Command {
+    Command::SetViewCubeOptions { show: None, all_views: None, size: None, inactive_opacity: None, compass: None, snap_to_closest, fit_to_view, animated, keep_upright, north }
 }
 
 /// Draws a layout as a mini diagram of its cells.

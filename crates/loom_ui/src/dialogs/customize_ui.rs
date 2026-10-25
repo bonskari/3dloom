@@ -447,9 +447,55 @@ fn toolbars(ui: &mut egui::Ui, app: &mut LoomApp, picks: &mut Picks) {
                 });
             }
             ui.add_space(8.0);
+            quick_access_group(ui, app);
             file_buttons(ui, app, Command::LoadToolbars { path: None }, Command::SaveToolbars { path: None }, Command::ResetToolbars);
         });
     });
+}
+
+/// Toolbars panel > Quick Access Toolbar group: its buttons (drop actions
+/// here), Move Up / Move Down / Remove.
+fn quick_access_group(ui: &mut egui::Ui, app: &mut LoomApp) {
+    ui.label(egui::RichText::new("Quick Access Toolbar").strong());
+    let items = app.state.ui_custom.quick_access();
+    let mut set: Option<Vec<String>> = None;
+    let dropped = drop_list(ui, "customize_quick_access", 90.0, |ui| {
+        let mut rows = Vec::new();
+        for (i, it) in items.iter().enumerate() {
+            let r = ui.horizontal(|ui| {
+                ui.label(if it == SEPARATOR { "---- separator ----".to_owned() } else { it.trim().to_owned() });
+                if crate::icons::small(ui, crate::icons::UP, "Move Up").clicked() && i > 0 {
+                    let mut v = items.clone();
+                    v.swap(i, i - 1);
+                    set = Some(v);
+                }
+                if crate::icons::small(ui, crate::icons::DOWN, "Move Down").clicked() && i + 1 < items.len() {
+                    let mut v = items.clone();
+                    v.swap(i, i + 1);
+                    set = Some(v);
+                }
+                if crate::icons::small(ui, crate::icons::CLEAR, "Remove").clicked() {
+                    let mut v = items.clone();
+                    v.remove(i);
+                    set = Some(v);
+                }
+            });
+            rows.push(r.response.rect);
+        }
+        rows
+    });
+    if let Some((item, index)) = dropped {
+        if !item.starts_with(MENU_PREFIX) {
+            let mut v = items.clone();
+            v.insert((index as usize).min(v.len()), item);
+            set = Some(v);
+        }
+    }
+    if let Some(v) = set {
+        if let Err(e) = app.dispatch(Command::SetQuickAccess { items: v }) {
+            app.state.status_prompt = e;
+        }
+    }
 }
 
 /// The program's entries quadrant `q` of quad set `set` shows now (they depend on the selection).

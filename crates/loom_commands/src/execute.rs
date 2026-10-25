@@ -781,8 +781,24 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::ViewCubeToggle => toggle(&mut state.viewcube.show, "viewcube"),
-        C::SetViewCubeOptions { show, all_views, size, inactive_opacity, compass } => {
+        C::SetCurrentViewAsFront => {
+            // Front looks along +Y (yaw -90 degrees); the view's yaw from there is the new north.
+            let yaw = state.active().camera.yaw;
+            let front = ViewKind::Front.angles().map(|a| a.0).unwrap_or(-std::f32::consts::FRAC_PI_2);
+            state.viewcube.north = loom_input::camera_control::wrap_angle(yaw - front).to_degrees();
+            Ok(json!({ "north": state.viewcube.north }))
+        }
+        C::ResetFront => {
+            state.viewcube.north = 0.0;
+            Ok(json!({ "north": 0.0 }))
+        }
+        C::SetViewCubeOptions { show, all_views, size, inactive_opacity, compass, snap_to_closest, fit_to_view, animated, keep_upright, north } => {
             let v = &mut state.viewcube;
+            if let Some(b) = snap_to_closest { v.snap_to_closest = b; }
+            if let Some(b) = fit_to_view { v.fit_to_view = b; }
+            if let Some(b) = animated { v.animated = b; }
+            if let Some(b) = keep_upright { v.keep_upright = b; }
+            if let Some(n) = north { v.north = loom_input::camera_control::wrap_angle(n.to_radians()).to_degrees(); }
             if let Some(b) = show { v.show = b; }
             if let Some(b) = all_views { v.all_views = b; }
             if let Some(n) = size { v.size = n.min(3) as u8; }

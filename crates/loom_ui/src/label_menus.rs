@@ -48,13 +48,13 @@ pub fn general_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
         sep(),
         check("Show Grids", vp.show_grid, Command::HideGridsToggle),
         sep(),
-        check("Viewport Clipping", vp.clipping, Command::ViewportClipping),
-        sep(),
         MenuEntry { label: "ViewCube".into(), checked: false, action: Action::Submenu({
             let mut v = vec![check("Show the ViewCube", s.viewcube.show, Command::ViewCubeToggle), sep()];
             v.extend(viewcube_entries(app, index));
             v
         }) },
+        sep(),
+        MenuEntry { label: "Create Preview".into(), checked: false, action: Action::Submenu(vec![item("Still Image (Grab Viewport)", Command::GrabViewport)]) },
         sep(),
         item("Configure Viewports...", Command::ConfigureViewports { panel: None }),
     ]
@@ -69,6 +69,8 @@ pub fn viewcube_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
         check("Perspective", !vp.is_orthographic(), Command::PerspectiveUserView),
         sep(),
         item("Set Current View as Home", Command::SetCurrentViewAsHome),
+        item("Set Current View as Front", Command::SetCurrentViewAsFront),
+        item("Reset Front", Command::ResetFront),
         sep(),
         item("Configure...", Command::ConfigureViewports { panel: Some("ViewCube".into()) }),
     ]
@@ -123,6 +125,7 @@ pub fn pov_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
     }
     v.push(sep());
     v.push(check("Show Safe Frames", vp.safe_frames, Command::ViewportSafeframesToggle));
+    v.push(check("Viewport Clipping", vp.clipping, Command::ViewportClipping));
     v.push(item("Undo View Change", Command::UndoViewportOperation));
     v.push(item("Redo View Change", Command::RedoViewportOperation));
     v
@@ -216,7 +219,7 @@ mod tests {
             l,
             vec![
                 "Perspective", "Orthographic", "Front", "Back", "Top", "Bottom", "Left", "Right", "",
-                "Show Safe Frames", "Undo View Change", "Redo View Change"
+                "Show Safe Frames", "Viewport Clipping", "Undo View Change", "Redo View Change"
             ]
         );
     }
@@ -227,7 +230,8 @@ mod tests {
         let g = general_entries(&app, 3);
         assert_eq!(g[0].label, "Maximize Viewport");
         assert!(g.iter().any(|e| e.label == "Show Grids" && e.checked));
-        assert!(g.iter().any(|e| e.label == "Viewport Clipping" && !e.checked));
+        assert!(!g.iter().any(|e| e.label == "Viewport Clipping"), "Viewport Clipping is on the POV menu");
+        assert!(pov_entries(&app, 3).iter().any(|e| e.label == "Viewport Clipping" && !e.checked));
         app.state.maximized = true;
         app.state.viewports[3].show_grid = false;
         let g = general_entries(&app, 3);

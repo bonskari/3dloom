@@ -1428,11 +1428,21 @@ pub struct ViewCubeSettings {
     pub inactive_opacity: f32,
     /// Show Compass Below the ViewCube.
     pub compass: bool,
+    /// When Dragging on the ViewCube > Snap to Closest View.
+    pub snap_to_closest: bool,
+    /// When Clicking on the ViewCube > Fit-to-View on View Change.
+    pub fit_to_view: bool,
+    /// Use Animated Transitions when Switching Views.
+    pub animated: bool,
+    /// Keep Scene Upright (no orbiting over the top while dragging the cube).
+    pub keep_upright: bool,
+    /// Angle of North (degrees): the cube's Front face turned about world Z.
+    pub north: f32,
 }
 
 impl Default for ViewCubeSettings {
     fn default() -> Self {
-        Self { show: true, all_views: false, size: 1, inactive_opacity: 0.5, compass: true }
+        Self { show: true, all_views: false, size: 1, inactive_opacity: 0.5, compass: true, snap_to_closest: true, fit_to_view: false, animated: true, keep_upright: false, north: 0.0 }
     }
 }
 
@@ -1864,6 +1874,8 @@ pub struct AppState {
     pub units_mismatch: Option<std::path::PathBuf>,
     /// Customize > Configure User Paths (saved in the settings file).
     pub paths: crate::paths::UserPaths,
+    /// Grab Viewport asked the UI to capture this viewport.
+    pub grab_request: Option<usize>,
     /// New and reset scenes take the saved startup viewport configuration (the app sets it; tests do not).
     pub use_viewport_defaults: bool,
     pub fps: f32,
@@ -2101,6 +2113,7 @@ impl AppState {
             degradation: Default::default(),
             units_mismatch: None,
             paths: Default::default(),
+            grab_request: None,
             use_viewport_defaults: false,
             current_frame: 0,
             frame_range: (0, 100),

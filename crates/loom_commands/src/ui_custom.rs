@@ -380,6 +380,24 @@ pub struct UiCustom {
     pub colors: UiColors,
     /// The command panel's rollout order, by panel.
     pub rollout_order: BTreeMap<String, Vec<String>>,
+    /// The Quick Access toolbar's buttons and separators (None: the program's).
+    pub quick_access: Option<Vec<String>>,
+    /// Quick Access buttons turned off in its drop-down menu.
+    pub quick_access_hidden: Vec<String>,
+    /// Show Below the Ribbon (else in the menu bar).
+    pub quick_access_below: bool,
+    /// Hide Menu Bar (the Quick Access drop-down menu).
+    pub menu_bar_hidden: bool,
+}
+
+/// The Quick Access toolbar's buttons as the program has them.
+pub const QUICK_ACCESS: [&str; 5] = ["New Scene", "Open File", "Save File", "Undo Scene Operation", "Redo Scene Operation"];
+
+impl UiCustom {
+    /// The Quick Access toolbar's items in order (separators included).
+    pub fn quick_access(&self) -> Vec<String> {
+        self.quick_access.clone().unwrap_or_else(|| QUICK_ACCESS.iter().map(|s| (*s).to_owned()).collect())
+    }
 }
 
 impl UiCustom {
@@ -506,6 +524,10 @@ struct ToolbarFile {
     float_pos: BTreeMap<String, [f32; 2]>,
     shown: BTreeMap<String, bool>,
     looks: BTreeMap<String, ButtonLook>,
+    #[serde(default)]
+    quick_access: Option<Vec<String>>,
+    #[serde(default)]
+    quick_access_hidden: Vec<String>,
 }
 
 /// The .mnu part: menus and quad sets (one file for both, as in the reference).
@@ -589,6 +611,10 @@ pub fn handles(c: &C) -> bool {
             | C::SaveUiColors { .. }
             | C::LoadUiColors { .. }
             | C::SetRolloutOrder { .. }
+            | C::SetQuickAccess { .. }
+            | C::ShowQuickAccessItem { .. }
+            | C::SetQuickAccessBelowRibbon { .. }
+            | C::ShowMenuBarToggle
     )
 }
 
@@ -709,7 +735,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         C::SaveToolbars { path } => {
             let Some(path) = path else { return file_dialog(state, UiFileKind::Toolbars, true) };
             let u = &state.ui_custom;
-            let f = ToolbarFile { format: CUI_FORMAT.into(), toolbars: u.toolbars.clone(), docks: u.docks.clone(), float_pos: u.float_pos.clone(), shown: u.shown.clone(), looks: u.looks.clone() };
+            let f = ToolbarFile { format: CUI_FORMAT.into(), toolbars: u.toolbars.clone(), docks: u.docks.clone(), float_pos: u.float_pos.clone(), shown: u.shown.clone(), looks: u.looks.clone(), quick_access: u.quick_access.clone(), quick_access_hidden: u.quick_access_hidden.clone() };
             crate::execute::write_text(&path, &serde_json::to_string_pretty(&f).expect("plain data"))?;
             back_to_customize(state);
             Ok(json!({ "path": path }))
@@ -720,6 +746,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             check_format(&f.format, CUI_FORMAT)?;
             let u = &mut state.ui_custom;
             (u.toolbars, u.docks, u.float_pos, u.shown, u.looks) = (f.toolbars, f.docks, f.float_pos, f.shown, f.looks);
+            (u.quick_access, u.quick_access_hidden) = (f.quick_access, f.quick_access_hidden);
             back_to_customize(state);
             Ok(json!({ "path": path, "toolbars": state.ui_custom.toolbars.len() }))
         }
@@ -730,6 +757,10 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             u.float_pos.clear();
             u.shown.clear();
             u.looks.clear();
+            u.quick_access = None;
+            u.quick_access_hidden.clear();
+            u.quick_access_below = false;
+            u.menu_bar_hidden = false;
             state.show_main_toolbar = true;
             state.show_command_panel = true;
             state.show_layers_toolbar = false;
@@ -1048,6 +1079,34 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 state.ui_custom.rollout_order.insert(panel.clone(), order.clone());
             }
             Ok(json!({ "panel": panel, "order": order }))
+        }
+        C::SetQuickAccess { items } => {
+            for i in &items {
+                if i != SEPARATOR && !known_action(i) {
+                    return Err(format!("unknown action {i:?}"));
+                }
+            }
+            state.ui_custom.quick_access = Some(items.clone());
+            Ok(json!({ "items": items }))
+        }
+        C::ShowQuickAccessItem { action, on } => {
+            let c = &mut state.ui_custom;
+            if !c.quick_access().contains(&action) {
+                return Err(format!("{action} is not on the Quick Access toolbar"));
+            }
+            c.quick_access_hidden.retain(|a| *a != action);
+            if !on {
+                c.quick_access_hidden.push(action.clone());
+            }
+            Ok(json!({ "action": action, "shown": on }))
+        }
+        C::SetQuickAccessBelowRibbon { on } => {
+            state.ui_custom.quick_access_below = on;
+            Ok(json!({ "below": on }))
+        }
+        C::ShowMenuBarToggle => {
+            state.ui_custom.menu_bar_hidden = !state.ui_custom.menu_bar_hidden;
+            Ok(json!({ "menu_bar": !state.ui_custom.menu_bar_hidden }))
         }
         other => Err(format!("{} is not a Customize User Interface command", other.name())),
     }

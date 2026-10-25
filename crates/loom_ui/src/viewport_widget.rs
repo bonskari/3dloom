@@ -322,14 +322,30 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                         if moved {
                             let d = pointer.delta();
-                            app.state.viewports[index].camera.orbit(d.x * 0.006, d.y * 0.006);
+                            let cam = &mut app.state.viewports[index].camera;
+                            cam.orbit(d.x * 0.006, d.y * 0.006);
+                            // Keep Scene Upright: never over the top.
+                            if cube_settings.keep_upright {
+                                let lim = std::f32::consts::FRAC_PI_2 - 1e-3;
+                                cam.pitch = cam.pitch.clamp(-lim, lim);
+                                cam.roll = 0.0;
+                            }
                             ctx.request_repaint();
                         }
                         app.cube_press = Some((start, moved));
                     } else {
                         app.cube_press = None;
+                        if moved && cube_settings.snap_to_closest {
+                            // Snap to Closest View: the nearest of the cube's 26 views.
+                            let north = cube_settings.north.to_radians();
+                            let step = std::f32::consts::FRAC_PI_4;
+                            let cam = &mut app.state.viewports[index].camera;
+                            let yaw = ((cam.yaw - north) / step).round() * step + north;
+                            let pitch = (cam.pitch / step).round() * step;
+                            app.start_view_animation(yaw, pitch, 0.0);
+                        }
                         if !moved {
-                            let cam = app.state.viewports[index].camera.clone();
+                            let cam = cube_frame(&app.state.viewports[index].camera, cube_settings.north);
                             if let Some(hit) = crate::viewport_gizmo::hit_test(start, gizmo_rect, &cam, !app.state.viewports[index].is_orthographic()) {
                                 cube_click(app, index, hit);
                                 ctx.request_repaint();
@@ -1391,7 +1407,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
             }
             if cube_shown {
-                let cam = app.state.viewports[index].camera.clone();
+                let cam = cube_frame(&app.state.viewports[index].camera, cube_settings.north);
                 let perspective = !app.state.viewports[index].is_orthographic();
                 let hovered = (over_cube || (is_active && app.cube_press.is_some())).then(|| hover_pos.and_then(|p| crate::viewport_gizmo::hit_test(p, gizmo_rect, &cam, perspective)));
                 crate::viewport_gizmo::draw(&painter, gizmo_rect, &cam, perspective, hovered, &cube_settings);
@@ -1591,8 +1607,28 @@ fn trackball_radius(rect: egui::Rect) -> f32 {
     rect.width().min(rect.height()) * 0.375
 }
 
-/// Animates the active view from its angles before `change` to those after (ViewCube transitions).
+/// The view as the cube sees it: turned back by the Angle of North (degrees).
+fn cube_frame(cam: &loom_input::OrbitCamera, north: f32) -> loom_input::OrbitCamera {
+    let mut c = cam.clone();
+    c.yaw = loom_input::camera_control::wrap_angle(c.yaw - north.to_radians());
+    c
+}
+
+/// Animates the active view from its angles before `change` to those after
+/// (ViewCube transitions; at once with Animated Transitions off). Fit-to-View
+/// on View Change zooms to the scene's extents after it.
 fn animate_view(app: &mut LoomApp, change: impl FnOnce(&mut LoomApp)) {
+    let settings = app.state.viewcube;
+    if !settings.animated {
+        change(app);
+        if settings.fit_to_view {
+            let _ = app.dispatch(Command::ZoomExtents);
+        }
+        return;
+    }
+    if settings.fit_to_view {
+        let _ = app.dispatch(Command::ZoomExtents);
+    }
     let before = app.state.active().camera.clone();
     change(app);
     let after = app.state.active().camera.clone();
@@ -1610,9 +1646,48 @@ fn cube_click(app: &mut LoomApp, index: usize, hit: crate::viewport_gizmo::Hit) 
     if app.state.active_viewport != index {
         let _ = app.dispatch(Command::ActiveViewport { index: index as u32 });
     }
-    let cam = app.state.viewports[index].camera.clone();
+    let north = app.state.viewcube.north.to_radians();
+    let cam = cube_frame(&app.state.viewports[index].camera, app.state.viewcube.north);
     let idx = index as u32;
-    let orbit = |yaw: Option<f32>, pitch: Option<f32>, roll: f32| Command::Orbit { yaw: yaw.map(f32::to_degrees), pitch: pitch.map(f32::to_degrees), distance: None, target: None, roll: Some(roll.to_degrees()) };
+    let orbit = |yaw: Option<f32>, pitch: Option<f32>, roll: f32| Command::Orbit { yaw: yaw.map(|y| (y + north).to_degrees()), pitch: pitch.map(f32::to_degrees), distance: None, target: None, roll: Some(roll.to_degrees()) };
+    if north.abs() > 1e-4 {
+        // The cube is turned: a face is no longer a world axis view, so every
+        // pick is a user view in the cube's frame.
+        let user = if app.state.viewports[index].is_orthographic() { loom_commands::ViewKind::Orthographic } else { loom_commands::ViewKind::Perspective };
+        let target: Option<(f32, f32, f32)> = match hit {
+            Hit::Home => None,
+            Hit::Spot(dir) => {
+                let (yaw, pitch) = match cube::face_of(dir) {
+                    Some(face) => cube::view_kind(face).angles().expect("faces are axis views"),
+                    None => cube::spot_angles(dir),
+                };
+                Some((yaw, pitch, 0.0))
+            }
+            Hit::RollLeft | Hit::RollRight => {
+                let turn = if hit == Hit::RollLeft { -std::f32::consts::FRAC_PI_2 } else { std::f32::consts::FRAC_PI_2 };
+                Some((cam.yaw, cam.pitch, cam.roll + turn))
+            }
+            Hit::Adjacent(side) => {
+                let (eye, up) = cube::adjacent(&cam, side);
+                cube::face_of(eye.round().as_ivec3()).map(|face| {
+                    let (yaw, pitch) = cube::view_kind(face).angles().expect("faces are axis views");
+                    (yaw, pitch, cube::roll_for(yaw, pitch, up))
+                })
+            }
+        };
+        match target {
+            None => animate_view(app, |app| {
+                let _ = app.dispatch(Command::HomeView);
+            }),
+            Some((yaw, pitch, roll)) => animate_view(app, |app| {
+                if app.state.viewports[index].kind != user {
+                    let _ = app.dispatch(Command::ViewportView { index: idx, kind: user });
+                }
+                let _ = app.dispatch(orbit(Some(yaw), Some(pitch), roll));
+            }),
+        }
+        return;
+    }
     match hit {
         Hit::Home => animate_view(app, |app| {
             let _ = app.dispatch(Command::HomeView);

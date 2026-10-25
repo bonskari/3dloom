@@ -101,3 +101,25 @@ fn the_pov_menu_of_a_camera_view_selects_the_camera_and_its_target() {
     let t = *h.app.state.selection.iter().next().unwrap();
     assert_ne!(t, cam, "the target is selected");
 }
+
+#[test]
+fn grab_viewport_puts_the_active_view_into_the_rendered_frame_window() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    // [+] > Create Preview > Still Image.
+    h.click(label_rect(&h, 0).center());
+    h.run(vec![egui::Event::PointerMoved(menu_entry(&h, "Create Preview"))]);
+    h.frames(2);
+    h.click(menu_entry(&h, "    Still Image (Grab Viewport)"));
+    assert!(h.app.grab_pending.is_some(), "a screenshot is asked for");
+    // The window answers with the screen's picture.
+    let size = [h.screen.width() as usize, h.screen.height() as usize];
+    let image = std::sync::Arc::new(egui::ColorImage::new(size, egui::Color32::from_rgb(10, 20, 30)));
+    h.run(vec![egui::Event::Screenshot { viewport_id: egui::ViewportId::ROOT, user_data: egui::UserData::default(), image }]);
+    h.frames(1);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let img = h.app.state.rendered.image.clone().expect("the picture is in the Rendered Frame Window");
+    assert!((img.width() as f32 - r.width()).abs() <= 1.0 && (img.height() as f32 - r.height()).abs() <= 1.0, "cut to the viewport: {}x{} vs {r:?}", img.width(), img.height());
+    assert_eq!(img.get_pixel(2, 2).0, [10, 20, 30, 255]);
+    assert!(h.app.state.rendered.open);
+}

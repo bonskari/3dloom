@@ -120,6 +120,11 @@ fn toolbars_save_and_load_as_a_cui_file() {
     assert_eq!(items(&t, "Mine"), ["Hold"]);
     assert_eq!(t.ui_custom.dock("Command Panel"), Dock::Float);
     std::fs::write(d.join("bad.cui"), "{\"format\":\"something-else\",\"toolbars\":[],\"docks\":{},\"float_pos\":{},\"shown\":{},\"looks\":{}}").unwrap();
+    // The Quick Access toolbar is in the .cui too.
+    ok(&mut s, Command::SetQuickAccess { items: vec!["Save File".into(), SEPARATOR.into(), "Hold".into()] });
+    ok(&mut s, Command::SaveToolbars { path: p(&file) });
+    ok(&mut t, Command::LoadToolbars { path: p(&file) });
+    assert_eq!(t.ui_custom.quick_access(), ["Save File", "-", "Hold"]);
     assert!(execute(&mut t, Command::LoadToolbars { path: p(&d.join("bad.cui")) }).is_err());
 }
 

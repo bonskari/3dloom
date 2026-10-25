@@ -169,7 +169,7 @@ pub fn scheme_to_text(state: &AppState) -> String {
 pub fn scheme_parts_to_text(state: &AppState, parts: &[&str]) -> String {
     let has = |p: &str| parts.contains(&p);
     let c = &state.ui_custom;
-    let layout = crate::ui_custom::UiCustom { toolbars: c.toolbars.clone(), docks: c.docks.clone(), float_pos: c.float_pos.clone(), shown: c.shown.clone(), looks: c.looks.clone(), rollout_order: c.rollout_order.clone(), ..Default::default() };
+    let layout = crate::ui_custom::UiCustom { toolbars: c.toolbars.clone(), docks: c.docks.clone(), float_pos: c.float_pos.clone(), shown: c.shown.clone(), looks: c.looks.clone(), rollout_order: c.rollout_order.clone(), quick_access: c.quick_access.clone(), quick_access_hidden: c.quick_access_hidden.clone(), quick_access_below: c.quick_access_below, menu_bar_hidden: c.menu_bar_hidden, ..Default::default() };
     let menus = crate::ui_custom::UiCustom { menus: c.menus.clone(), quads: c.quads.clone(), ..Default::default() };
     let s = UiScheme {
         format: SCHEME_FORMAT.into(),
@@ -199,6 +199,7 @@ pub fn apply_scheme_text(state: &mut AppState, text: &str) -> Result<(), String>
     let c = &mut state.ui_custom;
     if let Some(t) = s.toolbars {
         (c.toolbars, c.docks, c.float_pos, c.shown, c.looks, c.rollout_order) = (t.toolbars, t.docks, t.float_pos, t.shown, t.looks, t.rollout_order);
+        (c.quick_access, c.quick_access_hidden, c.quick_access_below, c.menu_bar_hidden) = (t.quick_access, t.quick_access_hidden, t.quick_access_below, t.menu_bar_hidden);
     }
     if let Some(m) = s.menus {
         (c.menus, c.quads) = (m.menus, m.quads);

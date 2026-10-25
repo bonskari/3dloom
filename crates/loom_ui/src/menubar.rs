@@ -262,12 +262,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     if app.state.expert_mode {
         return;
     }
+    let below = app.state.ui_custom.quick_access_below && app.state.show_ribbon;
+    let hidden = app.state.ui_custom.menu_bar_hidden;
+    if hidden && below {
+        // Nothing left on the bar: the Quick Access toolbar keeps a way back.
+        return;
+    }
     egui::TopBottomPanel::top("menubar").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(BAR_ID), ui.id()));
-            quick_access(ui, app);
-            ui.separator();
-            for m in bar_menus(app) {
+            if !below {
+                quick_access(ui, app);
+                ui.separator();
+            }
+            // Hide Menu Bar: only the Quick Access toolbar stays.
+            for m in bar_menus(app).into_iter().filter(|_| !hidden) {
                 menu(ui, app, &m);
             }
             if let Some(handle) = app.update.clone() {
@@ -424,6 +433,7 @@ fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         cmd(ui, app, "Place Highlight", Command::PlaceHighlight);
     });
     cmd(ui, app, "Snapshot...", Command::SnapshotDialog);
+    cmd(ui, app, "Grab Viewport", Command::GrabViewport);
     ui.separator();
     sub(ui, app, "Grids and Snaps", |ui, app| {
         cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
@@ -704,6 +714,13 @@ fn customize_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
 }
 
 fn help_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    if entry(ui, app, "Keyboard Shortcut Map...") {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(SHORTCUT_MAP_ID), true));
+    }
+    if entry(ui, app, "About 3dLoom...") {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(ABOUT_ID), true));
+    }
+    ui.separator();
     if entry(ui, app, "3dLoom on GitHub") {
         ui.ctx().open_url(egui::OpenUrl::new_tab(REPO_URL));
         ui.close_menu();
@@ -716,24 +733,166 @@ fn help_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.label(format!("3dLoom {} — a 3D modelling application", env!("LOOM_VERSION")));
 }
 
+const SHORTCUT_MAP_ID: &str = "help_shortcut_map_open";
+const ABOUT_ID: &str = "help_about_open";
+
+/// Help > Keyboard Shortcut Map (every action of every group with its keys,
+/// searchable) and Help > About (version, licence, home page).
+pub(crate) fn help_windows(ctx: &egui::Context, app: &mut LoomApp) {
+    let map_id = egui::Id::new(SHORTCUT_MAP_ID);
+    let mut map: bool = ctx.data(|d| d.get_temp(map_id)).unwrap_or(false);
+    if map {
+        let search_id = egui::Id::new("help_shortcut_map_search");
+        let mut search: String = ctx.data(|d| d.get_temp(search_id)).unwrap_or_default();
+        let rows = loom_commands::keymap::keyboard_chart_with(&app.state.custom_keys);
+        egui::Window::new("Keyboard Shortcut Map").open(&mut map).default_size(egui::vec2(520.0, 480.0)).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Search:");
+                ui.add(egui::TextEdit::singleline(&mut search).desired_width(220.0));
+            });
+            let needle = search.to_lowercase();
+            let shown: Vec<_> = rows.iter().filter(|r| !r.shortcut.is_empty() && (needle.is_empty() || r.action.to_lowercase().contains(&needle) || r.shortcut.to_lowercase().contains(&needle))).collect();
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                egui::Grid::new("shortcut_map").striped(true).num_columns(3).show(ui, |ui| {
+                    for r in shown {
+                        ui.label(r.shortcut.as_str());
+                        ui.label(r.action);
+                        ui.label(egui::RichText::new(r.group).weak());
+                        ui.end_row();
+                    }
+                });
+            });
+        });
+        ctx.data_mut(|d| d.insert_temp(search_id, search));
+    }
+    ctx.data_mut(|d| d.insert_temp(map_id, map));
+    let about_id = egui::Id::new(ABOUT_ID);
+    let mut about: bool = ctx.data(|d| d.get_temp(about_id)).unwrap_or(false);
+    if about {
+        egui::Window::new("About 3dLoom").open(&mut about).collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.heading("3dLoom");
+            ui.label(format!("Version {}", env!("LOOM_VERSION")));
+            ui.label("A 3D modelling application.");
+            ui.label("Licence: MIT");
+            ui.hyperlink(REPO_URL);
+        });
+    }
+    ctx.data_mut(|d| d.insert_temp(about_id, about));
+}
+
 /// The Quick Access toolbar: New Scene, Open File, Save File, Undo, Redo.
+/// The Quick Access toolbar below the ribbon (Show Below the Ribbon).
+pub fn quick_access_below(ctx: &egui::Context, app: &mut LoomApp) {
+    if app.state.expert_mode || !(app.state.ui_custom.quick_access_below && app.state.show_ribbon) {
+        return;
+    }
+    egui::TopBottomPanel::top("quick_access_below").show(ctx, |ui| {
+        ui.horizontal(|ui| quick_access(ui, app));
+    });
+}
+
+/// The Quick Access toolbar: its buttons (New Scene, Open File, Save File,
+/// Undo and Redo with their history lists, or the user's choice), each with
+/// a right-click Remove from Quick Access Toolbar / Add Separator, and the
+/// Customize Quick Access Toolbar drop-down.
 fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
-    use loom_commands::PendingFileAction as A;
     use crate::icons::{self, Icon};
-    if Icon::new(icons::NEW_SCENE, "New Scene").show(ui, &app.state).clicked() {
-        app.request_file_action(A::New);
+    use loom_commands::PendingFileAction as A;
+    let items = app.state.ui_custom.quick_access();
+    let hidden = app.state.ui_custom.quick_access_hidden.clone();
+    let mut set_items: Option<Vec<String>> = None;
+    for (i, it) in items.iter().enumerate() {
+        if it == loom_commands::ui_custom::SEPARATOR {
+            let r = ui.separator().interact(egui::Sense::click());
+            r.context_menu(|ui| {
+                if ui.button("Remove from Quick Access Toolbar").clicked() {
+                    let mut v = items.clone();
+                    v.remove(i);
+                    set_items = Some(v);
+                    ui.close_menu();
+                }
+            });
+            continue;
+        }
+        if hidden.contains(it) {
+            continue;
+        }
+        let r = match it.as_str() {
+            "New Scene" => Icon::new(icons::NEW_SCENE, "New Scene").show(ui, &app.state),
+            "Open File" => Icon::new(icons::OPEN_FILE, "Open File").show(ui, &app.state),
+            "Save File" => Icon::new(icons::SAVE_FILE, "Save File").show(ui, &app.state),
+            "Undo Scene Operation" => Icon::new(icons::UNDO, "Undo Scene Operation").enabled(app.state.undo.can_undo()).show(ui, &app.state),
+            "Redo Scene Operation" => Icon::new(icons::REDO, "Redo Scene Operation").enabled(app.state.undo.can_redo()).show(ui, &app.state),
+            other => crate::toolbars::action_button(ui, app, other),
+        };
+        if r.clicked() {
+            match it.as_str() {
+                "New Scene" => app.request_file_action(A::New),
+                "Open File" => app.request_file_action(A::Open),
+                other => app.dispatch_named(other),
+            }
+        }
+        r.context_menu(|ui| {
+            if ui.button("Remove from Quick Access Toolbar").clicked() {
+                let _ = app.dispatch(Command::ShowQuickAccessItem { action: it.clone(), on: false });
+                ui.close_menu();
+            }
+            if ui.button("Add Separator").clicked() {
+                let mut v = items.clone();
+                v.insert(i + 1, loom_commands::ui_custom::SEPARATOR.to_owned());
+                set_items = Some(v);
+                ui.close_menu();
+            }
+        });
+        // Undo / Redo: the down arrow lists the operations to go back (or forward) to.
+        let history = match it.as_str() {
+            "Undo Scene Operation" => Some((app.state.undo.labels(), "Undo Scene Operation", "undo_history")),
+            "Redo Scene Operation" => Some((app.state.undo.redo_labels(), "Redo Scene Operation", "redo_history")),
+            _ => None,
+        };
+        if let Some((labels, action, id)) = history {
+            let mut steps = None;
+            let r = egui::ComboBox::from_id_salt(id).selected_text("").width(12.0).show_ui(ui, |ui| {
+                ui.set_min_width(180.0);
+                // The most recent first: picking one goes back through it.
+                for (k, l) in labels.iter().rev().enumerate() {
+                    if ui.selectable_label(false, l).clicked() {
+                        steps = Some(k + 1);
+                    }
+                }
+            });
+            icons::named(&r.response, egui::WidgetType::ComboBox, if action.starts_with("Undo") { "Undo History" } else { "Redo History" });
+            if let Some(n) = steps {
+                for _ in 0..n {
+                    app.dispatch_named(action);
+                }
+            }
+        }
     }
-    if Icon::new(icons::OPEN_FILE, "Open File").show(ui, &app.state).clicked() {
-        app.request_file_action(A::Open);
-    }
-    if Icon::new(icons::SAVE_FILE, "Save File").show(ui, &app.state).clicked() {
-        app.dispatch_named("Save File");
-    }
-    if Icon::new(icons::UNDO, "Undo Scene Operation").enabled(app.state.undo.can_undo()).show(ui, &app.state).clicked() {
-        app.dispatch_named("Undo Scene Operation");
-    }
-    if Icon::new(icons::REDO, "Redo Scene Operation").enabled(app.state.undo.can_redo()).show(ui, &app.state).clicked() {
-        app.dispatch_named("Redo Scene Operation");
+    let r = ui.menu_button(icons::DOWN, |ui| {
+        ui.label(egui::RichText::new("Customize Quick Access Toolbar").strong());
+        for it in items.iter().filter(|i| *i != loom_commands::ui_custom::SEPARATOR) {
+            let on = !hidden.contains(it);
+            let label = if on { format!("\u{2714} {}", it.trim()) } else { format!("    {}", it.trim()) };
+            if ui.button(label).clicked() {
+                let _ = app.dispatch(Command::ShowQuickAccessItem { action: it.clone(), on: !on });
+                ui.close_menu();
+            }
+        }
+        ui.separator();
+        if ui.button(if app.state.ui_custom.menu_bar_hidden { "Show Menu Bar" } else { "Hide Menu Bar" }).clicked() {
+            let _ = app.dispatch(Command::ShowMenuBarToggle);
+            ui.close_menu();
+        }
+        let below = app.state.ui_custom.quick_access_below;
+        if ui.add_enabled(app.state.show_ribbon, egui::Button::new(if below { "Show Above the Ribbon" } else { "Show Below the Ribbon" })).clicked() {
+            let _ = app.dispatch(Command::SetQuickAccessBelowRibbon { on: !below });
+            ui.close_menu();
+        }
+    });
+    icons::named(&r.response, egui::WidgetType::Button, "Customize Quick Access Toolbar");
+    if let Some(v) = set_items {
+        let _ = app.dispatch(Command::SetQuickAccess { items: v });
     }
 }
 

@@ -52,11 +52,16 @@ struct DefaultsSet {
 const DEFAULTS_FORMAT: &str = "3dloom-defaults-1";
 
 pub fn handles(c: &C) -> bool {
-    matches!(c, C::CustomUiDefaultsSwitcher | C::SwitchUiScheme { .. } | C::SwitchDefaults { .. } | C::SaveDefaultsSet { .. })
+    matches!(c, C::GrabViewport | C::CustomUiDefaultsSwitcher | C::SwitchUiScheme { .. } | C::SwitchDefaults { .. } | C::SaveDefaultsSet { .. })
 }
 
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
     match cmd {
+        C::GrabViewport => {
+            // The UI takes the picture (the command layer has no screen).
+            state.grab_request = Some(state.active_viewport);
+            Ok(json!({ "viewport": state.active_viewport }))
+        }
         C::CustomUiDefaultsSwitcher => {
             state.dialog = Some(crate::viewport::Dialog::Switcher);
             Ok(json!({ "schemes": schemes(), "defaults": defaults_sets() }))
