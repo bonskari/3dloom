@@ -428,12 +428,15 @@ impl Scene {
                 if !slot.enabled || !slot.enabled_in_viewport {
                     continue;
                 }
-                let modifier = self.resolved_modifier(id, i).unwrap_or_else(|| slot.modifier.clone());
+                // A local modifier can borrow its weight tables/geometry. Only
+                // instanced slots need an owned copy for their local context.
+                let resolved = slot.instance_of.and_then(|_| self.resolved_modifier(id, i));
+                let modifier = resolved.as_ref().unwrap_or(&slot.modifier);
                 if let Some(stored) = modifier.stored_selection() {
                     if !stored.ids.is_empty() && (stored.vertices != value.mesh.vertex_count() || stored.faces != value.mesh.face_count()) {
                         warnings.push(format!("Topology changed below {}: its sub-object selection was discarded", slot.name));
                         // Evaluate with an empty selection.
-                        let mut m = modifier.clone();
+                        let mut m = (*modifier).clone();
                         if let Some(s) = m.stored_selection_mut() {
                             s.ids.clear();
                         }
