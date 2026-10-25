@@ -163,7 +163,15 @@ fn drag_carrying(h: &mut Harness, a: egui::Pos2, b: egui::Pos2) -> bool {
 fn search_for(h: &mut Harness, text: &str) {
     let win = customize_ui_rect(h);
     let search = h.text_rect("Search:", win).expect("the search field");
-    h.click(search.center() + egui::vec2(search.width() / 2.0 + 40.0, 0.0));
+    // The text field next to the label (beside it, or under it when the column is narrow).
+    let field = h
+        .widgets
+        .iter()
+        .filter(|w| w.0 == Role::TextInput && win.contains_rect(w.2) && w.2.max.x > search.max.x && w.2.min.y > search.min.y - 4.0)
+        .min_by(|a, b| a.2.left_center().distance(search.right_center()).total_cmp(&b.2.left_center().distance(search.right_center())))
+        .map(|w| w.2)
+        .expect("the text field by Search:");
+    h.click(field.center());
     // Select what is there, then type over it.
     h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
     h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: false, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
