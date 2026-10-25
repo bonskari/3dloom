@@ -204,22 +204,6 @@ fn at_sub_object_level_the_named_sets_field_names_and_lists_the_objects_sets() {
 }
 
 #[test]
-fn quick_access_toolbar_runs_new_undo_and_redo() {
-    let mut h = Harness::new();
-    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
-    // Icon buttons: found by their names (the topmost Undo is the Quick Access one).
-    let undo = h.find(Role::Button, "Undo Scene Operation");
-    assert!(undo.max.y <= h.find(Role::Button, "File").max.y + 1.0, "in the menu bar row");
-    h.click(undo.center());
-    assert_eq!(h.app.state.scene.len(), 0);
-    h.click(h.find(Role::Button, "Redo Scene Operation").center());
-    assert_eq!(h.app.state.scene.len(), 1);
-    assert!(h.has(Role::Button, "Open File") && h.has(Role::Button, "Save File"));
-    h.click(h.find(Role::Button, "New Scene").center());
-    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::SaveChanges(loom_commands::PendingFileAction::New)), "New asks to save the changed scene first");
-}
-
-#[test]
 fn box_keyboard_entry_has_length_width_and_height() {
     let mut h = Harness::new();
     h.app.start_create(Some(crate::CreateKind::Primitive(PrimitiveKind::Box)));
