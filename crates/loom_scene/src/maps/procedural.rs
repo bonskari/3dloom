@@ -105,6 +105,8 @@ pub(super) fn eval(map: &Map, uv: [f32; 2], q: Vec3, ctx: &Ctx, component: &dyn 
         // The renderers multiply by the mesh's vertex colours.
         MapType::VertexColor => [1.0; 4],
         MapType::Falloff => falloff(map, ctx, sub),
+        // What these see is the renderer's scene: on the CPU the sample's grey surroundings.
+        MapType::Raytrace | MapType::ReflectRefract | MapType::FlatMirror | MapType::ThinWall => [0.5, 0.5, 0.5, 1.0],
         MapType::Bitmap | MapType::Checker | MapType::Gradient | MapType::Noise | MapType::Mix | MapType::NormalBump => unreachable!("evaluated in maps.rs"),
     }
 }

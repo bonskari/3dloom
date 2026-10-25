@@ -358,6 +358,20 @@ pub(super) fn parameters(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             combo(ui, app, "Sub Channel:", "Sub Channel", e.sub_channel, &SUB_CHANNELS);
         }),
         MapType::Falloff => falloff(ui, app, map),
+        MapType::Raytrace => crate::command_panel::rollout(ui, "Raytracer Parameters", true, |ui| {
+            combo(ui, app, "Trace Mode:", "Trace Mode", e.trace_mode, &["Auto Detect", "Reflection", "Refraction"]);
+        }),
+        MapType::ReflectRefract => crate::command_panel::rollout(ui, "Reflect/Refract Parameters", true, |ui| {
+            map_spinner(ui, app, "Size:", "Env Size", e.env_size, 1.0..=4096.0, 0);
+            map_spinner(ui, app, "Blur:", "Env Blur", e.env_blur, 0.0..=100.0, 2);
+        }),
+        MapType::FlatMirror => crate::command_panel::rollout(ui, "Flat Mirror Parameters", true, |ui| {
+            map_spinner(ui, app, "Blur:", "Env Blur", e.env_blur, 0.0..=100.0, 2);
+            map_spinner(ui, app, "Distortion Amount:", "Distortion Amount", e.distortion, 0.0..=100.0, 2);
+        }),
+        MapType::ThinWall => crate::command_panel::rollout(ui, "Thin Wall Refraction Parameters", true, |ui| {
+            map_spinner(ui, app, "Thickness Offset:", "Thickness Offset", e.thickness_offset, 0.0..=10.0, 2);
+        }),
         _ => {}
     }
 }

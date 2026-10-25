@@ -230,6 +230,13 @@ pub struct MoreParams {
     pub contrast: f32,
     // Vertex Color.
     pub sub_channel: u8,
+    // Raytrace map: Trace Mode 0 Auto Detect, 1 Reflection, 2 Refraction.
+    pub trace_mode: u8,
+    // Flat Mirror: Blur, Distortion Amount; Reflect/Refract: Size, Blur; Thin Wall: Thickness Offset.
+    pub env_blur: f32,
+    pub distortion: f32,
+    pub env_size: f32,
+    pub thickness_offset: f32,
 }
 
 impl Default for MoreParams {
@@ -314,6 +321,11 @@ impl Default for MoreParams {
             brightness: 0.0,
             contrast: 0.0,
             sub_channel: 0,
+            trace_mode: 0,
+            env_blur: 1.0,
+            distortion: 0.0,
+            env_size: 100.0,
+            thickness_offset: 0.5,
         }
     }
 }
@@ -738,6 +750,11 @@ impl Map {
             "Brightness" => e.brightness = v.clamp(-100.0, 100.0),
             "Contrast" => e.contrast = v.clamp(-100.0, 100.0),
             "Sub Channel" => e.sub_channel = idx(SUB_CHANNELS.len()),
+            "Trace Mode" => e.trace_mode = idx(3),
+            "Env Blur" => e.env_blur = v.clamp(0.0, 100.0),
+            "Distortion Amount" => e.distortion = v.clamp(0.0, 100.0),
+            "Env Size" => e.env_size = v.clamp(1.0, 4096.0),
+            "Thickness Offset" => e.thickness_offset = v.clamp(0.0, 10.0),
             _ => return self.set_layer_or_flag(name, value),
         }
         Ok(true)

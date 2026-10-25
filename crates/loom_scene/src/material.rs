@@ -45,10 +45,15 @@ pub enum MapType {
     ColorCorrection,
     VertexColor,
     Falloff,
+    /// Reflection / refraction maps: the renderer's reflections and refraction.
+    Raytrace,
+    ReflectRefract,
+    FlatMirror,
+    ThinWall,
 }
 
 impl MapType {
-    pub const ALL: [MapType; 28] = [
+    pub const ALL: [MapType; 32] = [
         MapType::Bitmap,
         MapType::Cellular,
         MapType::Checker,
@@ -56,6 +61,7 @@ impl MapType {
         MapType::Composite,
         MapType::Dent,
         MapType::Falloff,
+        MapType::FlatMirror,
         MapType::Gradient,
         MapType::GradientRamp,
         MapType::Marble,
@@ -66,6 +72,8 @@ impl MapType {
         MapType::Output,
         MapType::PerlinMarble,
         MapType::Planet,
+        MapType::Raytrace,
+        MapType::ReflectRefract,
         MapType::RgbMultiply,
         MapType::RgbTint,
         MapType::Smoke,
@@ -73,6 +81,7 @@ impl MapType {
         MapType::Splat,
         MapType::Stucco,
         MapType::Swirl,
+        MapType::ThinWall,
         MapType::Tiles,
         MapType::VertexColor,
         MapType::Waves,
@@ -109,6 +118,10 @@ impl MapType {
             MapType::ColorCorrection => "Color Correction",
             MapType::VertexColor => "Vertex Color",
             MapType::Falloff => "Falloff",
+            MapType::Raytrace => "Raytrace",
+            MapType::ReflectRefract => "Reflect/Refract",
+            MapType::FlatMirror => "Flat Mirror",
+            MapType::ThinWall => "Thin Wall Refraction",
         }
     }
 
@@ -120,7 +133,7 @@ impl MapType {
     /// a Composite's and a Gradient Ramp's grow (`Map::slot_names`).
     pub fn color_slots(self) -> &'static [&'static str] {
         match self {
-            MapType::Bitmap | MapType::VertexColor => &[],
+            MapType::Bitmap | MapType::VertexColor | MapType::Raytrace | MapType::ReflectRefract | MapType::FlatMirror | MapType::ThinWall => &[],
             MapType::Checker | MapType::Noise => &["Color #1", "Color #2"],
             MapType::Dent | MapType::Marble | MapType::PerlinMarble | MapType::Smoke | MapType::Speckle | MapType::Splat | MapType::Stucco | MapType::Waves | MapType::Wood | MapType::RgbMultiply => &["Color #1", "Color #2"],
             MapType::Swirl => &["Base", "Swirl"],
@@ -1393,9 +1406,11 @@ impl Surface {
             extended: m.extended.clone(),
             self_illum_color: if m.shading.self_illum_color_on { m.shading.self_illum_color } else { Vec3::ZERO },
             metallic: 0.0,
-            reflect: Vec3::ZERO,
+            // A Raytrace, Reflect/Refract or Flat Mirror map in Reflection: the renderer reflects by its Amount.
+            reflect: on(&m.reflection_map).filter(|r| matches!(r.kind, MapType::Raytrace | MapType::ReflectRefract | MapType::FlatMirror)).map_or(Vec3::ZERO, |r| Vec3::splat((r.amount / 100.0).clamp(0.0, 1.0))),
             fresnel: false,
-            transmission: 0.0,
+            // A Raytrace, Reflect/Refract or Thin Wall Refraction map in Refraction: the renderer refracts by its Amount.
+            transmission: on(&m.refraction_map).filter(|r| matches!(r.kind, MapType::Raytrace | MapType::ReflectRefract | MapType::ThinWall)).map_or(0.0, |r| (r.amount / 100.0).clamp(0.0, 1.0)),
             translucency: 0.0,
             coat: 0.0,
             coat_glossiness: 0.0,
@@ -2024,6 +2039,13 @@ mod tests {
         assert!(Surface::from_standard(&m).falloff.is_none(), "an unchecked map shows nothing");
         m.diffuse_map = Some(Map::new(MapType::VertexColor, 100.0));
         assert!(Surface::from_standard(&m).shows_vertex_colors());
+        // Reflection and refraction maps become the renderer's reflection and refraction.
+        m.reflection_map = Some(Map::new(MapType::FlatMirror, 60.0));
+        m.refraction_map = Some(Map::new(MapType::ThinWall, 40.0));
+        let s = Surface::from_standard(&m);
+        assert_eq!((s.reflect, s.transmission), (Vec3::splat(0.6), 0.4));
+        m.reflection_map = Some(Map::new(MapType::Checker, 60.0));
+        assert_eq!(Surface::from_standard(&m).reflect, Vec3::ZERO, "a plain map is no reflection");
     }
 
     #[test]
