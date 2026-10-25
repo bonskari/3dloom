@@ -78,6 +78,7 @@ fn a_lighting_map_renders_on_the_gpu_from_the_dialog() {
         eprintln!("a_lighting_map_renders_on_the_gpu_from_the_dialog: no GPU adapter, skipped");
         return;
     };
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
     let p = plane(&mut h);
     h.cmd(Command::RenderToTexture);
     let dir = output_dir(&mut h, "lighting");

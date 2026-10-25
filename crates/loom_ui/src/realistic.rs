@@ -449,6 +449,7 @@ impl LoomApp {
             return;
         }
         self.sync_bevy_for(false);
+        eprintln!("DBG run_bake jobs {} gpu_running {}", req.jobs.len(), matches!(self.gpu, Gpu::Running(_)));
         let started = std::time::Instant::now();
         let mut done = 0;
         for job in &req.jobs {
@@ -468,7 +469,9 @@ impl LoomApp {
             let object = BakeObject { mesh: &mesh, channel: job.channel, surfaces, wire_color: wire };
             let options = BakeOptions { look, shadows: e.shadows, direct: e.direct, indirect: e.indirect, size: [e.width, e.height], background: e.background };
             let Gpu::Running(b) = &mut self.gpu else { return };
-            match b.renderer.bake(&object, &options) {
+            let r = b.renderer.bake(&object, &options);
+            eprintln!("DBG bake result ok {} {:?}", r.is_ok(), r.as_ref().err());
+            match r {
                 Ok(mut img) => {
                     let mut covered = loom_bake::alpha_coverage(&img);
                     loom_bake::dilate(&mut img, &mut covered, job.padding);
