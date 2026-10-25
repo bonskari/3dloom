@@ -295,6 +295,8 @@ pub enum PickMode {
     WorkingPivotSurface,
     /// Protractor > Pick Object 1 / 2: the clicked object.
     ProtractorObject(u8),
+    /// Biped Structure > Xtras > Pick Parent: the clicked part becomes the tail's parent.
+    BipedXtraParent,
     /// Tools > Measure Distance: first and second point.
     MeasureDistanceA,
     MeasureDistanceB,
@@ -1544,6 +1546,8 @@ pub struct AppState {
     pub poly_drag: Option<PolyDrag>,
     /// The last geometry operation, for Repeat Last Operation (;).
     pub last_poly_op: Option<crate::command::Command>,
+    /// Biped Xtras > Pick Parent: the biped, the tail and Reorient to Parent.
+    pub biped_xtra_pick: Option<(NodeId, String, bool)>,
     /// Target Weld / Edit Triangulation first pick.
     pub pick_source: Option<(NodeId, u32)>,
     /// Create (polygon level): vertices picked so far.
@@ -1838,6 +1842,7 @@ impl AppState {
             full_interactivity: true,
             preserve_uvs: false,
             pick_point_a: None,
+            biped_xtra_pick: None,
             paint_deform: None,
             branches: false,
             soft_cache: Default::default(),

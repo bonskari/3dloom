@@ -10,29 +10,92 @@ use loom_scene::{Change, Node, NodeId, ObjectKind, Transform};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-/// Structure values a command may set (None keeps the current one).
-#[derive(Debug, Clone, Default)]
-pub struct StructureArgs {
-    pub height: Option<f32>,
-    pub arms: Option<bool>,
-    pub counts: Vec<(&'static str, Option<u32>)>,
+/// The Create Biped / Set Biped Structure arguments and the rollout
+/// parameters they set, in the order they apply (Knuckles before Fingers,
+/// which it sets).
+pub const STRUCTURE_ARGS: [(&str, &str); 28] = [
+    ("body_type", "Body Type"),
+    ("height", "Height"),
+    ("arms", "Arms"),
+    ("knuckles", "Knuckles"),
+    ("forefeet", "ForeFeet"),
+    ("short_thumb", "Short Thumb"),
+    ("neck_links", "Neck Links"),
+    ("spine_links", "Spine Links"),
+    ("leg_links", "Leg Links"),
+    ("tail_links", "Tail Links"),
+    ("ponytail1_links", "Ponytail1 Links"),
+    ("ponytail2_links", "Ponytail2 Links"),
+    ("fingers", "Fingers"),
+    ("finger_links", "Finger Links"),
+    ("toes", "Toes"),
+    ("toe_links", "Toe Links"),
+    ("prop1", "Prop1"),
+    ("prop2", "Prop2"),
+    ("prop3", "Prop3"),
+    ("ankle_attach", "Ankle Attach"),
+    ("triangle_pelvis", "Triangle Pelvis"),
+    ("triangle_neck", "Triangle Neck"),
+    ("twists", "Twists"),
+    ("upper_arm_twists", "Upper Arm"),
+    ("forearm_twists", "Forearm"),
+    ("thigh_twists", "Thigh"),
+    ("calf_twists", "Calf"),
+    ("horse_link_twists", "Horse Link"),
+];
+
+/// Applies a command's structure arguments (absent ones keep their value).
+fn apply_args(cmd: &Command, s: &mut BipedStructure) -> Result<(), String> {
+    let v = serde_json::to_value(cmd).map_err(|e| e.to_string())?;
+    let args = &v["args"];
+    for (field, name) in STRUCTURE_ARGS {
+        let a = &args[field];
+        let value = match a {
+            Value::Null => continue,
+            Value::Bool(b) => *b as u32 as f64,
+            Value::Number(n) => n.as_f64().unwrap_or(0.0),
+            Value::String(t) if field == "body_type" => biped::BodyType::from_name(t).ok_or_else(|| format!("unknown Body Type {t:?} (Skeleton, Male, Female, Classic)"))?.index() as f64,
+            other => return Err(format!("{field}: unexpected {other}")),
+        };
+        s.set(name, value)?;
+    }
+    Ok(())
 }
 
-impl StructureArgs {
-    fn apply(&self, s: &mut BipedStructure) -> Result<(), String> {
-        if let Some(h) = self.height {
-            s.set("Height", h as f64)?;
-        }
-        if let Some(a) = self.arms {
-            s.set("Arms", a as u32 as f64)?;
-        }
-        for (name, v) in &self.counts {
-            if let Some(v) = v {
-                s.set(name, *v as f64)?;
-            }
-        }
-        Ok(())
+/// The value of rollout parameter `name` as a command argument.
+fn arg_value(s: &BipedStructure, name: &str) -> Value {
+    match name {
+        "Body Type" => json!(s.body_type.label()),
+        "Height" => json!(s.height.get()),
+        "Ankle Attach" => json!(s.ankle_attach.get()),
+        _ => s.flag(name).map(|b| json!(b)).or_else(|| s.count(name).map(|c| json!(c))).unwrap_or(Value::Null),
     }
+}
+
+fn command_from(name: &str, args: Value) -> Command {
+    serde_json::from_value(json!({ "cmd": name, "args": args })).expect("a valid biped command")
+}
+
+/// Create Biped with every structure value of `s` (but its height).
+pub fn create_command(position: Vec3, height: Option<f32>, name: Option<String>, s: &BipedStructure) -> Command {
+    let mut args = serde_json::Map::new();
+    for (field, n) in STRUCTURE_ARGS {
+        if n != "Height" {
+            args.insert(field.to_owned(), arg_value(s, n));
+        }
+    }
+    args.insert("position".into(), json!(position.to_array()));
+    args.insert("height".into(), json!(height));
+    args.insert("name".into(), json!(name));
+    command_from("Create Biped", Value::Object(args))
+}
+
+/// Set Biped Structure on `id` with only the arguments in `args` (an object of
+/// `STRUCTURE_ARGS` fields).
+pub fn structure_command(id: NodeId, args: Value) -> Command {
+    let mut a = args;
+    a["id"] = json!(id.0);
+    command_from("Set Biped Structure", a)
 }
 
 /// The biped root (centre of mass) `id` belongs to: itself or an ancestor.
@@ -67,13 +130,14 @@ fn part_object(spec: &PartSpec) -> ObjectKind {
     let mut o = ObjectKind::bone(spec.length);
     let _ = o.set_parameter("Width", spec.width as f64);
     let _ = o.set_parameter("Height", spec.depth as f64);
-    let _ = o.set_parameter("Taper", 0.0);
+    let _ = o.set_parameter("Taper", spec.taper as f64);
     o
 }
 
 fn part_node(spec: &PartSpec, root_name: &str, layer: u32) -> Node {
     let mut n = Node::new(&format!("{root_name} {}", spec.suffix), part_object(spec));
     n.wire_color = spec.color;
+    n.frozen = spec.frozen;
     n.layer = layer;
     n.object_offset.position.set(spec.offset);
     n
@@ -282,45 +346,218 @@ pub fn default_height(state: &AppState) -> f32 {
     (biped::DEFAULT_HEIGHT_METRES as f64 / (state.units.system_unit.metres() * state.units.system_scale as f64)) as f32
 }
 
+/// The structure with `f` applied, rebuilt as one undo entry `label`.
+fn edit_structure(state: &mut AppState, root: NodeId, label: &str, f: impl FnOnce(&mut BipedStructure) -> Result<Value, String>) -> Result<Value, String> {
+    let mut s = structure(state, root).ok_or("no biped")?.clone();
+    let out = f(&mut s)?;
+    rebuild(state, root, s, label)?;
+    Ok(out)
+}
+
+/// Whether part `suffix` is one of `x`'s links or its nub.
+fn part_of(x: &biped::Xtra, suffix: &str) -> bool {
+    suffix.strip_prefix(x.name.as_str()).is_some_and(|r| r.is_empty() || r == "Nub" || r.parse::<u32>().is_ok())
+}
+
+/// A tail name that no tail or other part uses.
+fn check_xtra_name(s: &BipedStructure, taken: &BTreeSet<String>, name: &str) -> Result<(), String> {
+    if name.starts_with("L ") || name.starts_with("R ") {
+        return Err(format!("{name:?}: L and R name the sides"));
+    }
+    let clash = |t: &String| t == name || (t.starts_with(name) && t[name.len()..].parse::<u32>().is_ok()) || t == &format!("{name}Nub");
+    if s.xtras.iter().any(|x| x.name == name) || taken.iter().any(clash) {
+        return Err(format!("the biped has a part named {name:?}"));
+    }
+    Ok(())
+}
+
+fn xtra_index(s: &BipedStructure, name: &str) -> Result<usize, String> {
+    s.xtras.iter().position(|x| x.name == name).ok_or_else(|| format!("no Xtra named {name:?}"))
+}
+
+/// Xtras > Create Xtra: a new tail on the centre of mass, beside the pelvis.
+pub fn create_xtra(state: &mut AppState, root: NodeId, name: Option<String>, links: Option<u32>) -> Result<Value, String> {
+    let taken: BTreeSet<String> = parts(state, root).into_keys().collect();
+    edit_structure(state, root, "Create Xtra", |s| {
+        let name = name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| s.next_xtra_name());
+        check_xtra_name(s, &taken, &name)?;
+        s.xtras.push(biped::Xtra { name: name.clone(), links: links.unwrap_or(1).clamp(1, 25), parent: None, base: Vec3::new(0.05, 0.06, biped::COM_HEIGHT), dir: Vec3::new(0.0, 0.5, 0.85).normalize(), opposite: None });
+        Ok(json!({ "name": name }))
+    })
+}
+
+/// Xtras > Delete Xtra: tails parented to it go to the centre of mass where they are.
+pub fn delete_xtra(state: &mut AppState, root: NodeId, name: &str) -> Result<Value, String> {
+    edit_structure(state, root, "Delete Xtra", |s| {
+        let i = xtra_index(s, name)?;
+        let gone = s.xtras.remove(i);
+        for x in &mut s.xtras {
+            if x.parent.as_deref().is_some_and(|p| part_of(&gone, p)) {
+                x.parent = None;
+            }
+            if x.opposite.as_deref() == Some(gone.name.as_str()) {
+                x.opposite = None;
+            }
+        }
+        Ok(json!({ "deleted": gone.name }))
+    })
+}
+
+/// The part on the other side: "L Hand" <-> "R Hand".
+fn mirror_name(n: &str) -> String {
+    if let Some(r) = n.strip_prefix("L ") {
+        format!("R {r}")
+    } else if let Some(r) = n.strip_prefix("R ") {
+        format!("L {r}")
+    } else {
+        n.to_owned()
+    }
+}
+
+/// Xtras > Create Opposite Xtra: the mirror image of `name` across the biped.
+pub fn create_opposite_xtra(state: &mut AppState, root: NodeId, name: &str) -> Result<Value, String> {
+    let taken: BTreeSet<String> = parts(state, root).into_keys().collect();
+    edit_structure(state, root, "Create Opposite Xtra", |s| {
+        let i = xtra_index(s, name)?;
+        if s.xtras[i].opposite.is_some() {
+            return Err(format!("{name} already has an opposite Xtra"));
+        }
+        let o = s.xtras[i].clone();
+        let new = format!("{}Opp", o.name);
+        check_xtra_name(s, &taken, &new)?;
+        let flip = Vec3::new(-1.0, 1.0, 1.0);
+        let parent = o.parent.as_deref().map(|p| match s.xtras.iter().find(|x| part_of(x, p)).and_then(|x| x.opposite.clone().map(|op| (x.name.clone(), op))) {
+            // A tail on a tail: the opposite tail's link.
+            Some((src, op)) => format!("{op}{}", &p[src.len()..]),
+            None => mirror_name(p),
+        });
+        s.xtras[i].opposite = Some(new.clone());
+        s.xtras.push(biped::Xtra { name: new.clone(), links: o.links, parent, base: o.base * flip, dir: o.dir * flip, opposite: Some(o.name.clone()) });
+        Ok(json!({ "name": new }))
+    })
+}
+
+/// Xtras: rename `name`, set its Links, or give it a new parent (Pick
+/// Parent; `reorient` moves it to the parent's end and along it).
+pub fn set_xtra(state: &mut AppState, root: NodeId, name: &str, new_name: Option<String>, links: Option<u32>, parent: Option<u64>, reorient: bool) -> Result<Value, String> {
+    let all = parts(state, root);
+    let mut s = structure(state, root).ok_or("no biped")?.clone();
+    let i = xtra_index(&s, name)?;
+    // The picked parent as a part name, with its end and direction in biped space (heights from the feet).
+    let mut picked: Option<(Option<String>, Vec3, Vec3)> = None;
+    if let Some(p) = parent.map(NodeId) {
+        let h = s.height.get();
+        let lift = Vec3::Z * biped::COM_HEIGHT;
+        if p == root {
+            picked = Some((None, lift, Vec3::Z));
+        } else {
+            let (suffix, _) = all.iter().find(|(_, id)| **id == p).ok_or("pick a part of the same biped")?;
+            if part_of(&s.xtras[i], suffix) {
+                return Err("a tail cannot be its own parent".into());
+            }
+            let n = state.scene.node(p).expect("a part");
+            let m = state.scene.world_matrix(root).inverse() * state.scene.world_matrix(p);
+            let tip = m.transform_point3(n.object.bone_tip_local().unwrap_or(Vec3::ZERO));
+            let dir = m.transform_vector3(Vec3::X).normalize_or(Vec3::Z);
+            picked = Some((Some(suffix.clone()), tip / h + lift, dir));
+        }
+    }
+    let mut changes = Vec::new();
+    let root_name = state.scene.node(root).expect("a biped").name.clone();
+    if let Some(new) = new_name.map(|n| n.trim().to_owned()).filter(|n| n != name) {
+        if new.is_empty() {
+            return Err("the Xtra name is empty".into());
+        }
+        let others: BTreeSet<String> = all.keys().filter(|t| !part_of(&s.xtras[i], t)).cloned().collect();
+        check_xtra_name(&s, &others, &new)?;
+        // The tail's nodes keep their identity under the new name.
+        for (suffix, id) in all.iter().filter(|(t, _)| part_of(&s.xtras[i], t)) {
+            let after = format!("{new}{}", &suffix[name.len()..]);
+            changes.push(Change::SetName { id: *id, before: format!("{root_name} {suffix}"), after: format!("{root_name} {after}") });
+        }
+        let old = std::mem::replace(&mut s.xtras[i].name, new.clone());
+        let renamed = s.xtras[i].clone();
+        let was = biped::Xtra { name: old.clone(), ..renamed };
+        for x in &mut s.xtras {
+            if let Some(p) = x.parent.as_mut().filter(|p| part_of(&was, p)) {
+                *p = format!("{new}{}", &p[old.len()..]);
+            }
+            if x.opposite.as_deref() == Some(old.as_str()) {
+                x.opposite = Some(new.clone());
+            }
+        }
+    }
+    if let Some(l) = links {
+        s.xtras[i].links = l.clamp(1, 25);
+    }
+    if let Some((p, base, dir)) = picked {
+        s.xtras[i].parent = p;
+        if reorient {
+            s.xtras[i].base = base;
+            s.xtras[i].dir = dir;
+        }
+    }
+    let name = s.xtras[i].name.clone();
+    state.undo.begin("Xtra");
+    let r = if changes.is_empty() { Ok(()) } else { commit_static(state, "Xtra", Change::Group(changes)) }.and_then(|_| rebuild(state, root, s, "Xtra"));
+    state.undo.end();
+    r?;
+    Ok(json!({ "name": name }))
+}
+
+fn root_arg(state: &AppState, id: u64) -> Result<NodeId, String> {
+    root_of(state, NodeId(id)).ok_or_else(|| format!("node {id} is not part of a biped"))
+}
+
 pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     use Command as C;
-    match cmd {
-        C::CreateBiped { position, height, name, arms, neck_links, spine_links, leg_links, tail_links, fingers, finger_links, toes, toe_links } => {
+    match &cmd {
+        C::CreateBiped { position, height, name, .. } => {
             let h = height.unwrap_or_else(|| default_height(state));
             let mut s = BipedStructure::new(h);
-            let args = StructureArgs { height: None, arms, counts: counts(neck_links, spine_links, leg_links, tail_links, fingers, finger_links, toes, toe_links) };
-            args.apply(&mut s)?;
-            create(state, Vec3::from(position), name, s)
+            apply_args(&cmd, &mut s)?;
+            s.set("Height", h as f64)?;
+            create(state, Vec3::from(*position), name.clone(), s)
         }
-        C::SetBipedStructure { id, height, arms, neck_links, spine_links, leg_links, tail_links, fingers, finger_links, toes, toe_links } => {
-            let root = root_of(state, NodeId(id)).ok_or_else(|| format!("node {id} is not part of a biped"))?;
+        C::SetBipedStructure { id, .. } => {
+            let root = root_arg(state, *id)?;
             let mut s = structure(state, root).expect("a root").clone();
-            let args = StructureArgs { height, arms, counts: counts(neck_links, spine_links, leg_links, tail_links, fingers, finger_links, toes, toe_links) };
-            args.apply(&mut s)?;
+            apply_args(&cmd, &mut s)?;
             rebuild(state, root, s, "Biped Structure")
         }
         C::BipedFigureMode { on } => {
             let root = selected_root(state)?;
-            figure_mode(state, root, on)
+            figure_mode(state, root, *on)
         }
         C::BipedRootName { id, name } => {
-            let root = root_of(state, NodeId(id)).ok_or_else(|| format!("node {id} is not part of a biped"))?;
-            rename(state, root, &name)
+            let root = root_arg(state, *id)?;
+            rename(state, root, name)
+        }
+        C::BipedCreateXtra { id, name, links } => {
+            let root = root_arg(state, *id)?;
+            create_xtra(state, root, name.clone(), *links)
+        }
+        C::BipedDeleteXtra { id, name } => {
+            let root = root_arg(state, *id)?;
+            delete_xtra(state, root, name)
+        }
+        C::BipedCreateOppositeXtra { id, name } => {
+            let root = root_arg(state, *id)?;
+            create_opposite_xtra(state, root, name)
+        }
+        C::BipedSetXtra { id, name, new_name, links, parent, reorient } => {
+            let root = root_arg(state, *id)?;
+            set_xtra(state, root, name, new_name.clone(), *links, *parent, reorient.unwrap_or(true))
+        }
+        C::BipedPickXtraParent { name, reorient } => {
+            let root = selected_root(state)?;
+            xtra_index(structure(state, root).expect("a root"), name)?;
+            state.biped_xtra_pick = Some((root, name.clone(), reorient.unwrap_or(true)));
+            state.pick_mode = Some(crate::state::PickMode::BipedXtraParent);
+            state.status_prompt = format!("Pick the new parent of {name}");
+            Ok(json!({}))
         }
         other => Err(format!("{} is not a biped command", other.name())),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn counts(neck: Option<u32>, spine: Option<u32>, leg: Option<u32>, tail: Option<u32>, fingers: Option<u32>, finger_links: Option<u32>, toes: Option<u32>, toe_links: Option<u32>) -> Vec<(&'static str, Option<u32>)> {
-    vec![
-        ("Neck Links", neck),
-        ("Spine Links", spine),
-        ("Leg Links", leg),
-        ("Tail Links", tail),
-        ("Fingers", fingers),
-        ("Finger Links", finger_links),
-        ("Toes", toes),
-        ("Toe Links", toe_links),
-    ]
-}
