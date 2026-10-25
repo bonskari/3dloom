@@ -10,3 +10,6 @@ loom_input = { workspace = true }
 glam       = { workspace = true }
 bytemuck   = { workspace = true }
 wgpu       = { workspace = true }
+
+[dev-dependencies]
+pollster = { workspace = true }

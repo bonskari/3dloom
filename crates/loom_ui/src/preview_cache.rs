@@ -32,7 +32,9 @@ impl Entry {
         }
     }
 }
+type PreviewTask = Box<dyn FnOnce() -> Result<Bitmap, String> + Send>;
 struct Job {
+    task: Option<PreviewTask>,
     path: String,
     max_side: u32,
     epoch: u64,
@@ -63,7 +65,7 @@ impl Default for PreviewCache {
         std::thread::Builder::new()
             .name("loom-preview-decode".into())
             .spawn(move || {
-                while let Ok(job) = pending.recv() {
+                while let Ok(mut job) = pending.recv() {
                     let valid = || {
                         job.active.load(Ordering::Relaxed)
                             && worker_epoch.load(Ordering::Relaxed) == job.epoch
@@ -71,22 +73,32 @@ impl Default for PreviewCache {
                     if !valid() {
                         continue;
                     }
-                    let result = image::open(&job.path)
-                        .map(|image| {
-                            let image =
-                                if image.width() > job.max_side || image.height() > job.max_side {
+                    let result = match job.task.take() {
+                        Some(task) => task().and_then(|bitmap| {
+                            if bitmap.width > job.max_side || bitmap.height > job.max_side {
+                                Err("derived preview exceeds the size limit".into())
+                            } else {
+                                Ok(Arc::new(bitmap))
+                            }
+                        }),
+                        None => image::open(&job.path)
+                            .map(|image| {
+                                let image = if image.width() > job.max_side
+                                    || image.height() > job.max_side
+                                {
                                     image.thumbnail(job.max_side, job.max_side)
                                 } else {
                                     image
                                 };
-                            let rgba = image.into_rgba8();
-                            Arc::new(Bitmap {
-                                width: rgba.width(),
-                                height: rgba.height(),
-                                rgba: rgba.into_raw(),
+                                let rgba = image.into_rgba8();
+                                Arc::new(Bitmap {
+                                    width: rgba.width(),
+                                    height: rgba.height(),
+                                    rgba: rgba.into_raw(),
+                                })
                             })
-                        })
-                        .map_err(|error| format!("{}: {error}", job.path));
+                            .map_err(|error| format!("{}: {error}", job.path)),
+                    };
                     if valid()
                         && completed
                             .send(Decoded {
@@ -115,6 +127,35 @@ impl PreviewCache {
     /// Returns cached pixels, or schedules a decode. Queue saturation simply
     /// leaves the path unrequested so the next viewport rebuild retries it.
     pub fn request(&mut self, path: &str, max_side: u32, generation: u64) -> Option<Arc<Bitmap>> {
+        self.schedule(path, max_side, generation, None)
+    }
+
+    pub fn get(&self, key: &str) -> Option<Arc<Bitmap>> {
+        match self.entries.get(key) {
+            Some(Entry::Ready(bitmap)) => Some(bitmap.clone()),
+            _ => None,
+        }
+    }
+
+    /// Runs a derived CPU image task on the same bounded decoder worker.
+    /// Call get/is_pending/error first to avoid building repeated input snapshots.
+    pub fn request_task(
+        &mut self,
+        key: &str,
+        max_side: u32,
+        generation: u64,
+        task: Box<dyn FnOnce() -> Result<Bitmap, String> + Send>,
+    ) -> Option<Arc<Bitmap>> {
+        self.schedule(key, max_side, generation, Some(task))
+    }
+
+    fn schedule(
+        &mut self,
+        path: &str,
+        max_side: u32,
+        generation: u64,
+        task: Option<PreviewTask>,
+    ) -> Option<Arc<Bitmap>> {
         if self.policy != Some((max_side, generation)) {
             self.clear();
             self.policy = Some((max_side, generation));
@@ -130,6 +171,7 @@ impl PreviewCache {
         }
         let active = Arc::new(AtomicBool::new(true));
         let job = Job {
+            task,
             path: path.into(),
             max_side,
             epoch: self.epoch.load(Ordering::Relaxed),
@@ -329,5 +371,117 @@ mod tests {
         );
         std::fs::remove_file(old).unwrap();
         std::fs::remove_file(visible).unwrap();
+    }
+    #[test]
+    fn derived_tasks_run_only_on_worker_and_cancelled_or_full_queue_jobs_do_not_run() {
+        let mut cache = PreviewCache::default();
+        let main = std::thread::current().id();
+        let (started, worker) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let bitmap = || Bitmap {
+            width: 1,
+            height: 1,
+            rgba: vec![10, 20, 30, 40],
+        };
+        assert!(cache
+            .request_task(
+                "blocked",
+                256,
+                0,
+                Box::new(move || {
+                    started.send(std::thread::current().id()).unwrap();
+                    blocked.recv().unwrap();
+                    Ok(Bitmap {
+                        width: 1,
+                        height: 1,
+                        rgba: vec![0; 4],
+                    })
+                })
+            )
+            .is_none());
+        assert_ne!(worker.recv_timeout(Duration::from_secs(5)).unwrap(), main);
+        let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        for index in 0..8 {
+            let runs = runs.clone();
+            cache.request_task(
+                &format!("queued{index}"),
+                256,
+                0,
+                Box::new(move || {
+                    runs.fetch_add(1, Ordering::Relaxed);
+                    Ok(Bitmap {
+                        width: 1,
+                        height: 1,
+                        rgba: vec![0; 4],
+                    })
+                }),
+            );
+        }
+        let overflow = runs.clone();
+        assert!(cache
+            .request_task(
+                "overflow",
+                256,
+                0,
+                Box::new(move || {
+                    overflow.fetch_add(1, Ordering::Relaxed);
+                    Ok(Bitmap {
+                        width: 1,
+                        height: 1,
+                        rgba: vec![0; 4],
+                    })
+                })
+            )
+            .is_none());
+        assert!(!cache.is_pending("overflow"));
+        cache.clear();
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            cache.poll();
+            if let Some(result) = cache.get("fresh") {
+                assert_eq!(result.rgba, [10, 20, 30, 40]);
+                break;
+            }
+            if !cache.is_pending("fresh") {
+                cache.request_task("fresh", 256, 1, Box::new(move || Ok(bitmap())));
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(runs.load(Ordering::Relaxed), 0);
+        assert!(cache.get("blocked").is_none());
+        assert!(cache
+            .request_task(
+                "fresh",
+                256,
+                1,
+                Box::new(|| panic!("cached task must not execute"))
+            )
+            .is_some());
+    }
+    #[test]
+    fn derived_results_cannot_exceed_the_preview_tier() {
+        let mut cache = PreviewCache::default();
+        cache.request_task(
+            "oversize",
+            128,
+            0,
+            Box::new(|| {
+                Ok(Bitmap {
+                    width: 129,
+                    height: 1,
+                    rgba: vec![255; 129 * 4],
+                })
+            }),
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while cache.error("oversize").is_none() {
+            cache.poll();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(cache.get("oversize").is_none());
+        assert!(cache.error("oversize").unwrap().contains("size limit"));
     }
 }

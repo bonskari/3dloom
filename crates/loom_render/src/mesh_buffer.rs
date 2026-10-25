@@ -16,7 +16,7 @@ pub struct GpuVertex {
     pub color: [f32; 4],
     /// Blinn highlight: specular colour × level (rgb) and the exponent (a); 0 = none.
     pub spec: [f32; 4],
-    /// x = Self-Illumination 0–1, y = the map's Amount 0–1, z / w = decal
+    /// x = Self-Illumination 0–1, y = map Amount 0–1 (-1: composed geometry alpha), z / w = decal
     /// (Tile off) on U / V: outside 0–1 the map leaves the colour.
     pub extra: [f32; 4],
 }
@@ -44,6 +44,8 @@ pub struct SurfaceStyle {
     pub decal: [bool; 2],
     /// The map's Amount, 0–1.
     pub texture_amount: f32,
+    /// The composed bitmap alpha controls geometry opacity, rather than RGB decal coverage.
+    pub texture_alpha: bool,
     /// Faceted: flat normals whatever the smoothing groups.
     pub faceted: bool,
     /// 2-Sided: never culled.
@@ -96,6 +98,8 @@ pub struct MeshStyle {
     pub uv: [f32; 6],
     pub decal: [bool; 2],
     pub texture_amount: f32,
+    /// The composed bitmap alpha controls geometry opacity, rather than RGB decal coverage.
+    pub texture_alpha: bool,
     pub faceted: bool,
     pub two_sided: bool,
     pub wire: bool,
@@ -117,6 +121,7 @@ impl Default for MeshStyle {
             uv: UV_IDENTITY,
             decal: [false; 2],
             texture_amount: 1.0,
+            texture_alpha: false,
             faceted: false,
             two_sided: false,
             wire: false,
@@ -139,6 +144,7 @@ impl MeshStyle {
             uv: self.uv,
             decal: self.decal,
             texture_amount: self.texture_amount,
+            texture_alpha: self.texture_alpha,
             faceted: self.faceted,
             two_sided: self.two_sided,
             wire: self.wire,
@@ -402,7 +408,7 @@ pub fn triangulate_styled(mesh: &Mesh, style: &MeshStyle) -> (Vec<GpuVertex>, Ve
         }
         let color = [look.color[0], look.color[1], look.color[2], look.alpha];
         let m = look.uv;
-        let extra = [look.self_illum, look.texture_amount, if look.decal[0] { 1.0 } else { 0.0 }, if look.decal[1] { 1.0 } else { 0.0 }];
+        let extra = [look.self_illum, if look.texture_alpha { -1.0 } else { look.texture_amount }, if look.decal[0] { 1.0 } else { 0.0 }, if look.decal[1] { 1.0 } else { 0.0 }];
         let flat = face.smoothing_groups == 0 || look.faceted;
         let n = mesh.face_normal(face_id);
 
@@ -429,7 +435,7 @@ pub fn triangulate_styled(mesh: &Mesh, style: &MeshStyle) -> (Vec<GpuVertex>, Ve
                 extra,
             });
         }
-        let key = DrawRange { start: 0, count: 0, texture: look.texture, transparent: look.alpha < 1.0, cull: style.backface_cull && !look.two_sided };
+        let key = DrawRange { start: 0, count: 0, texture: look.texture, transparent: look.alpha < 1.0 || look.texture_alpha, cull: style.backface_cull && !look.two_sided };
         let g = match groups.iter().position(|(r, _)| (r.texture, r.transparent, r.cull) == (key.texture, key.transparent, key.cull)) {
             Some(g) => g,
             None => {
@@ -616,4 +622,14 @@ mod tests {
         assert!(lines.iter().all(|v| v.color == [0.0, 1.0, 0.0]));
         assert!(wire_lines(&m, &MeshStyle::default()).is_empty());
     }
+    #[test]
+    fn opacity_bitmap_routes_full_material_opacity_to_blend_without_changing_vertex_layout() {
+        let mesh = box_primitive(Vec3::ONE);
+        let (vertices, _, ranges) = triangulate_styled(&mesh, &MeshStyle { texture: TextureSel::Bitmap(0), texture_alpha: true, ..Default::default() });
+        assert!(ranges.iter().all(|range| range.transparent));
+        assert!(vertices.iter().all(|vertex| vertex.extra[1] == -1.0 && vertex.color[3] == 1.0));
+        let (_, _, opaque) = triangulate_styled(&mesh, &MeshStyle::default());
+        assert!(opaque.iter().all(|range| !range.transparent));
+    }
+
 }
