@@ -3058,7 +3058,8 @@ fn click_option(h: &mut Harness, label: &str, id: &str) {
         }
         let m = h.mods;
         h.run(vec![egui::Event::PointerMoved(win.center()), egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -120.0), modifiers: m }]);
-        h.frames(2);
+        // Let the scroll settle before looking again.
+        h.frames(20);
     }
     if h.text_rect(label, win).is_none() {
         panic!("{label:?} is not in {id} {win:?}: {:?}", texts_in(h, win));
@@ -3069,6 +3070,8 @@ fn click_option(h: &mut Harness, label: &str, id: &str) {
 /// Types `path` into the in-app file dialog's File name field and clicks `button`.
 fn choose_file(h: &mut Harness, path: &std::path::Path, button: &str) {
     click_text(h, "File name:", SCREEN, 40.0);
+    // Replace the offered name.
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
     h.run(vec![egui::Event::Text(path.to_string_lossy().into_owned())]);
     click_text(h, button, SCREEN, 0.0);
 }
