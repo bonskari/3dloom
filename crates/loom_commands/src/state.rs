@@ -356,6 +356,10 @@ pub struct PolySettings {
     pub relax_hold_boundary: bool,
     pub relax_hold_outer: bool,
     pub auto_smooth_threshold: f32,
+    /// PolyDraw > Branch Taper: the branch end is 1 + this times the start size.
+    pub branch_taper: f32,
+    /// PolyDraw > Minimum Distance: pixels the mouse moves between branch segments.
+    pub branch_min_distance: f32,
 }
 
 impl Default for PolySettings {
@@ -397,6 +401,8 @@ impl Default for PolySettings {
             relax_hold_boundary: true,
             relax_hold_outer: false,
             auto_smooth_threshold: 45.0,
+            branch_taper: -0.5,
+            branch_min_distance: 10.0,
         }
     }
 }
@@ -1436,6 +1442,8 @@ pub struct AppState {
     pub pick_point_a: Option<(NodeId, u32, Vec3)>,
     /// Active Paint Deformation brush.
     pub paint_deform: Option<PaintMode>,
+    /// Freeform > PolyDraw > Branches is on.
+    pub branches: bool,
     /// Soft selection weights per node, keyed by a hash of what they depend on.
     pub soft_cache: std::cell::RefCell<std::collections::HashMap<NodeId, (u64, Vec<f32>)>>,
     /// Hierarchy > Pivot: Move/Rotate act on the pivot only.
@@ -1624,7 +1632,7 @@ impl AppState {
             isolation: None,
             expert_mode: false,
             show_main_toolbar: true,
-            show_ribbon: false,
+            show_ribbon: true,
             show_command_panel: true,
             startup_ui: crate::settings::UiLayout::DEFAULT,
             show_end_result: false,
@@ -1704,6 +1712,7 @@ impl AppState {
             preserve_uvs: false,
             pick_point_a: None,
             paint_deform: None,
+            branches: false,
             soft_cache: Default::default(),
             affect_pivot_only: false,
             affect_object_only: false,

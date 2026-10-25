@@ -401,6 +401,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     if crate::poly_modes::drag(app, &ctx, &pointer, response.hovered(), p, &projection) {
                         app.drag_select_start = None;
                     }
+                    // Freeform > PolyDraw > Branches: the drag draws the branch path.
+                    if crate::poly_modes::branches_drag(app, &ctx, &pointer, response.hovered(), p, &projection) {
+                        app.drag_select_start = None;
+                    }
                     // Editable Spline: dragging a Bezier handle square.
                     if crate::spline_modes::handle_drag(app, &ctx, &pointer, response.hovered(), p, &projection) {
                         app.drag_select_start = None;

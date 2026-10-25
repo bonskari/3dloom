@@ -42,7 +42,7 @@ pub struct UiLayout {
 
 impl UiLayout {
     /// A fresh `AppState`'s toggles.
-    pub const DEFAULT: UiLayout = UiLayout { show_main_toolbar: true, show_ribbon: false, show_command_panel: true, show_track_bar: true, show_layers_toolbar: false };
+    pub const DEFAULT: UiLayout = UiLayout { show_main_toolbar: true, show_ribbon: true, show_command_panel: true, show_track_bar: true, show_layers_toolbar: false };
 
     pub fn of(state: &AppState) -> Self {
         UiLayout { show_main_toolbar: state.show_main_toolbar, show_ribbon: state.show_ribbon, show_command_panel: state.show_command_panel, show_track_bar: state.show_track_bar, show_layers_toolbar: state.show_layers_toolbar }
