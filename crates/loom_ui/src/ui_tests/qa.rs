@@ -573,7 +573,7 @@ fn save_new_open_export_import_merge_round_trip() {
     h.cmd(Command::ImportFile { path: Some(obj.clone()) });
     h.frames(2);
     assert_eq!(h.app.state.scene.len(), 4, "Import adds the two OBJ objects");
-    h.cmd(Command::MergeFile { path: Some(scene.clone()), names: None });
+    h.cmd(Command::MergeFile { path: Some(scene.clone()), names: None, duplicates: None });
     h.frames(2);
     assert_eq!(h.app.state.scene.len(), 6, "Merge adds the file's two objects");
     let names: std::collections::BTreeSet<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
