@@ -427,8 +427,8 @@ impl BevyRenderer {
                     mesh_data(&part)
                 };
                 let mut mesh = d.to_bevy();
-                if mat.normal_map_texture.is_some() {
-                    // A normal map needs tangents (from the UVs).
+                if mat.normal_map_texture.is_some() || mat.anisotropy_strength > 0.0 {
+                    // A normal map and an anisotropic highlight need tangents (from the UVs).
                     let _ = mesh.generate_tangents();
                 }
                 let world = self.app.world_mut();

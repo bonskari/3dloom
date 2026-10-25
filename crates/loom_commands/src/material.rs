@@ -20,6 +20,7 @@ pub fn handles(c: &C) -> bool {
             | C::MaterialEditorSlot { .. }
             | C::SetMaterialColor { .. }
             | C::SetMaterialParameter { .. }
+            | C::SetShader { .. }
             | C::SetMaterialMap { .. }
             | C::RenameMaterial { .. }
             | C::AssignMaterialToSelection
@@ -330,6 +331,16 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         }
         C::SetMaterialColor { slot, which, rgb } => edit(state, slot, "Material Color", |m| m.set_color(&which, rgb)),
         C::SetMaterialParameter { slot, name, value } => edit(state, slot, "Material Parameter", |m| m.set_parameter(&name, value)),
+        C::SetShader { shader } => {
+            let sh = loom_scene::material::Shader::from_label(&shader).ok_or_else(|| format!("no shader \"{shader}\" ({})", loom_scene::material::Shader::ALL.map(|s| s.label()).join(", ")))?;
+            edit(state, None, "Shader", |m| {
+                if !matches!(m.kind, MaterialKind::Standard) {
+                    return Err(format!("a {} material has no shader", m.kind.label()));
+                }
+                m.shading.shader = sh;
+                Ok(())
+            })
+        }
         C::SetMaterialMap { slot, map, path, amount } => edit(state, slot, "Material Map", |m| {
             let range = if map == "Bump" { -999.0..=999.0 } else { 0.0..=100.0 };
             let channel = m.map_slot_mut(&map)?;

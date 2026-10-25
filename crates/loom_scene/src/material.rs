@@ -368,6 +368,132 @@ impl MaterialKind {
     }
 }
 
+/// Shading type: the Shader Basic Parameters drop-down of a Standard material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum Shader {
+    Anisotropic,
+    #[default]
+    Blinn,
+    Metal,
+    MultiLayer,
+    OrenNayarBlinn,
+    Phong,
+    Strauss,
+    Translucent,
+}
+
+impl Shader {
+    pub const ALL: [Shader; 8] = [Shader::Anisotropic, Shader::Blinn, Shader::Metal, Shader::MultiLayer, Shader::OrenNayarBlinn, Shader::Phong, Shader::Strauss, Shader::Translucent];
+
+    /// The drop-down's text (the Basic Parameters rollout is "<name> Basic Parameters").
+    pub fn label(self) -> &'static str {
+        match self {
+            Shader::Anisotropic => "Anisotropic",
+            Shader::Blinn => "Blinn",
+            Shader::Metal => "Metal",
+            Shader::MultiLayer => "Multi-Layer",
+            Shader::OrenNayarBlinn => "Oren-Nayar-Blinn",
+            Shader::Phong => "Phong",
+            Shader::Strauss => "Strauss",
+            Shader::Translucent => "Translucent Shader",
+        }
+    }
+
+    pub fn from_label(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.label() == s || (*t == Shader::Translucent && s == "Translucent"))
+    }
+
+    /// Diffuse Level: Anisotropic, Multi-Layer, Oren-Nayar-Blinn.
+    pub fn has_diffuse_level(self) -> bool {
+        matches!(self, Shader::Anisotropic | Shader::MultiLayer | Shader::OrenNayarBlinn)
+    }
+
+    /// Roughness: Multi-Layer, Oren-Nayar-Blinn.
+    pub fn has_roughness(self) -> bool {
+        matches!(self, Shader::MultiLayer | Shader::OrenNayarBlinn)
+    }
+}
+
+/// The Basic Parameters beyond Blinn's: the other shaders' values, the
+/// Self-Illumination Color mode and the Diffuse/Specular lock.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShaderParams {
+    pub shader: Shader,
+    /// 0–400 (Anisotropic, Multi-Layer, Oren-Nayar-Blinn).
+    pub diffuse_level: f32,
+    /// 0–100 (Multi-Layer, Oren-Nayar-Blinn).
+    pub roughness: f32,
+    /// Anisotropic highlight (Multi-Layer: the first layer's): 0–100 and degrees 0–9999.
+    pub anisotropy: f32,
+    pub orientation: f32,
+    /// Strauss 0–100.
+    pub metalness: f32,
+    /// Multi-Layer Second Specular Layer: Color, Level, Glossiness, Anisotropy, Orientation.
+    pub specular2: Vec3,
+    pub level2: f32,
+    pub glossiness2: f32,
+    pub anisotropy2: f32,
+    pub orientation2: f32,
+    /// Translucent shader: Translucent Clr (its Filter Color is the Extended Parameters' one).
+    pub translucent_color: Vec3,
+    pub backside_specular: bool,
+    /// Self-Illumination Color check box and swatch.
+    pub self_illum_color_on: bool,
+    pub self_illum_color: Vec3,
+    /// The lock between Diffuse and Specular.
+    pub diffuse_specular_locked: bool,
+}
+
+impl Default for ShaderParams {
+    fn default() -> Self {
+        Self {
+            shader: Shader::Blinn,
+            diffuse_level: 100.0,
+            roughness: 0.0,
+            anisotropy: 50.0,
+            orientation: 0.0,
+            metalness: 0.0,
+            specular2: Vec3::splat(229.0 / 255.0),
+            level2: 0.0,
+            glossiness2: 25.0,
+            anisotropy2: 0.0,
+            orientation2: 0.0,
+            translucent_color: Vec3::ZERO,
+            backside_specular: true,
+            self_illum_color_on: false,
+            self_illum_color: Vec3::ZERO,
+            diffuse_specular_locked: false,
+        }
+    }
+}
+
+/// Extended Parameters: Advanced Transparency, Wire, Reflection Dimming.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtendedParams {
+    /// Falloff Out (else In) and its Amt 0–100.
+    pub falloff_out: bool,
+    pub falloff_amount: f32,
+    /// Type: 0 Filter, 1 Subtractive, 2 Additive.
+    pub transparency_type: u8,
+    pub filter_color: Vec3,
+    /// Index of Refraction 0.01–10.
+    pub ior: f32,
+    pub wire_size: f32,
+    /// Wire size In: Units (else Pixels).
+    pub wire_units: bool,
+    pub reflection_dimming: bool,
+    pub dim_level: f32,
+    pub refl_level: f32,
+}
+
+impl Default for ExtendedParams {
+    fn default() -> Self {
+        Self { falloff_out: false, falloff_amount: 0.0, transparency_type: 0, filter_color: Vec3::splat(0.5), ior: 1.5, wire_size: 1.0, wire_units: false, reflection_dimming: false, dim_level: 0.0, refl_level: 3.0 }
+    }
+}
+
 /// Standard material, Blinn Basic Parameters plus the maps; `kind` makes it
 /// a compound material (its own Standard values are then unused).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -416,6 +542,10 @@ pub struct StandardMaterial {
     pub show_map_in_viewport: bool,
     #[serde(default)]
     pub kind: MaterialKind,
+    #[serde(default)]
+    pub shading: ShaderParams,
+    #[serde(default)]
+    pub extended: ExtendedParams,
 }
 
 /// The Maps rollout channels in rollout order, with their default Amount.
@@ -479,6 +609,8 @@ impl StandardMaterial {
             displacement_map: None,
             show_map_in_viewport: false,
             kind: MaterialKind::Standard,
+            shading: ShaderParams::default(),
+            extended: ExtendedParams::default(),
         }
     }
 
@@ -601,6 +733,38 @@ impl StandardMaterial {
             "Faceted" => self.faceted = value != 0.0,
             "Ambient/Diffuse Lock" => self.ambient_locked = value != 0.0,
             "Show Map in Viewport" => self.show_map_in_viewport = value != 0.0,
+            other => return self.set_shader_parameter(other, value),
+        }
+        Ok(())
+    }
+
+    /// The other shaders' Basic Parameters and the Extended Parameters.
+    fn set_shader_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
+        let v = value as f32;
+        let on = value != 0.0;
+        let (sh, ex) = (&mut self.shading, &mut self.extended);
+        match name {
+            "Diffuse Level" => sh.diffuse_level = v.clamp(0.0, 400.0),
+            "Roughness" => sh.roughness = v.clamp(0.0, 100.0),
+            "Anisotropy" => sh.anisotropy = v.clamp(0.0, 100.0),
+            "Orientation" => sh.orientation = v.clamp(0.0, 9999.0),
+            "Metalness" => sh.metalness = v.clamp(0.0, 100.0),
+            "Level 2" => sh.level2 = v.clamp(0.0, 999.0),
+            "Glossiness 2" => sh.glossiness2 = v.clamp(0.0, 100.0),
+            "Anisotropy 2" => sh.anisotropy2 = v.clamp(0.0, 100.0),
+            "Orientation 2" => sh.orientation2 = v.clamp(0.0, 9999.0),
+            "Backside Specular" => sh.backside_specular = on,
+            "Self-Illum Color On" => sh.self_illum_color_on = on,
+            "Diffuse/Specular Lock" => sh.diffuse_specular_locked = on,
+            "Falloff Out" => ex.falloff_out = on,
+            "Falloff Amount" => ex.falloff_amount = v.clamp(0.0, 100.0),
+            "Transparency Type" => ex.transparency_type = (value.round() as u8).min(2),
+            "Index of Refraction" => ex.ior = v.clamp(0.01, 10.0),
+            "Wire Size" => ex.wire_size = v.clamp(0.0, 10000.0),
+            "Wire Units" => ex.wire_units = on,
+            "Reflection Dimming" => ex.reflection_dimming = on,
+            "Dim Level" => ex.dim_level = v.clamp(0.0, 1.0),
+            "Refl. Level" => ex.refl_level = v.clamp(0.1, 10.0),
             other => return Err(format!("no material parameter \"{other}\"")),
         }
         Ok(())
@@ -622,9 +786,24 @@ impl StandardMaterial {
                 if self.ambient_locked {
                     self.ambient.set(c);
                 }
+                if self.shading.diffuse_specular_locked {
+                    self.specular.set(c);
+                }
             }
-            "Specular" => self.specular.set(c),
-            other => return Err(format!("no colour \"{other}\" (Ambient, Diffuse, Specular)")),
+            "Specular" => {
+                self.specular.set(c);
+                if self.shading.diffuse_specular_locked {
+                    self.diffuse.set(c);
+                    if self.ambient_locked {
+                        self.ambient.set(c);
+                    }
+                }
+            }
+            "Specular 2" => self.shading.specular2 = c,
+            "Translucent Color" => self.shading.translucent_color = c,
+            "Self-Illum Color" => self.shading.self_illum_color = c,
+            "Filter Color" => self.extended.filter_color = c,
+            other => return Err(format!("no colour \"{other}\" (Ambient, Diffuse, Specular, Specular 2, Translucent Color, Self-Illum Color, Filter Color)")),
         }
         Ok(())
     }
@@ -851,6 +1030,11 @@ pub struct Surface {
     pub specular_level_map: Option<Map>,
     pub self_illum_map: Option<Map>,
     pub show_map_in_viewport: bool,
+    /// The shader and its values.
+    pub shading: ShaderParams,
+    pub extended: ExtendedParams,
+    /// Self-Illumination Color mode's colour (black in the Diffuse mode).
+    pub self_illum_color: Vec3,
 }
 
 impl Surface {
@@ -872,7 +1056,8 @@ impl Surface {
             specular: m.specular.get() * (m.specular_level.get() / 100.0),
             specular_level: m.specular_level.get(),
             glossiness: m.glossiness.get(),
-            self_illum: (m.self_illum.get() / 100.0).clamp(0.0, 1.0),
+            // The Color mode replaces the amount spinner.
+            self_illum: if m.shading.self_illum_color_on { 0.0 } else { (m.self_illum.get() / 100.0).clamp(0.0, 1.0) },
             opacity: (m.opacity.get() / 100.0).clamp(0.0, 1.0),
             two_sided: m.two_sided,
             wire: m.wire,
@@ -883,6 +1068,9 @@ impl Surface {
             specular_level_map: on(&m.specular_level_map),
             self_illum_map: on(&m.self_illum_map),
             show_map_in_viewport: m.show_map_in_viewport,
+            shading: m.shading.clone(),
+            extended: m.extended.clone(),
+            self_illum_color: if m.shading.self_illum_color_on { m.shading.self_illum_color } else { Vec3::ZERO },
         }
     }
 
@@ -890,6 +1078,73 @@ impl Surface {
     pub fn viewport_map(&self) -> Option<&Map> {
         self.diffuse_map.as_ref().filter(|_| self.show_map_in_viewport)
     }
+
+    /// How the shaded viewports draw this surface with their one Blinn
+    /// lobe per vertex: each shader's diffuse and highlight folded in.
+    pub fn viewport_look(&self) -> ViewportLook {
+        let sh = &self.shading;
+        let blinn = |gloss: f32| 2.0 * 2f32.powf(gloss / 10.0);
+        let level = self.specular_level / 100.0;
+        let mut color = self.diffuse;
+        let mut specular = self.specular;
+        let mut exponent = blinn(self.glossiness);
+        let mut two_sided = self.two_sided;
+        if sh.shader.has_diffuse_level() {
+            color *= sh.diffuse_level / 100.0;
+        }
+        if sh.shader.has_roughness() {
+            color *= oren_nayar_dim(sh.roughness);
+        }
+        match sh.shader {
+            Shader::Blinn | Shader::OrenNayarBlinn => {}
+            // Phong's highlight is about four times wider at the same Glossiness.
+            Shader::Phong => exponent /= 4.0,
+            // An anisotropic highlight is long one way and narrow the other: on average wider.
+            Shader::Anisotropic => exponent *= 1.0 - 0.75 * sh.anisotropy / 100.0,
+            Shader::MultiLayer => {
+                let second = sh.specular2 * (sh.level2 / 100.0);
+                if sh.level2 > self.specular_level {
+                    exponent = blinn(sh.glossiness2);
+                }
+                specular = (specular + second).min(Vec3::ONE);
+            }
+            // Metal makes its own highlight from the diffuse colour, which dims as the level rises.
+            Shader::Metal => {
+                specular = self.diffuse * level;
+                color *= 1.0 - 0.75 * level.min(1.0);
+            }
+            Shader::Strauss => {
+                let (g, m) = (self.glossiness / 100.0, sh.metalness / 100.0);
+                color *= (1.0 - m * g) * (1.0 - g * g * g);
+                specular = Vec3::ONE.lerp(self.diffuse, m) * (0.1 + 0.9 * g);
+            }
+            // Light passes through: both sides show.
+            Shader::Translucent => two_sided = true,
+        }
+        let lit = matches!(sh.shader, Shader::Strauss) || self.specular_level > 0.0 || (sh.shader == Shader::MultiLayer && sh.level2 > 0.0);
+        // The Color mode's glow: toward the colour, unlit by its brightness.
+        let glow = self.self_illum_color.max_element();
+        let (color, self_illum) = if glow > 0.0 { (color.lerp(self.self_illum_color, glow), glow) } else { (color, self.self_illum) };
+        ViewportLook { color, specular: if lit { specular } else { Vec3::ZERO }, exponent: exponent.max(1.0), self_illum, two_sided }
+    }
+}
+
+/// Oren-Nayar's darkening of a facing surface at Roughness 0–100 (σ up to 1 radian).
+pub fn oren_nayar_dim(roughness: f32) -> f32 {
+    let s2 = (roughness / 100.0).powi(2);
+    1.0 - 0.5 * s2 / (s2 + 0.33)
+}
+
+/// A surface as the shaded viewports draw it (sRGB 0–1 colours).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewportLook {
+    pub color: Vec3,
+    /// The highlight colour (zero: no highlight).
+    pub specular: Vec3,
+    /// The Blinn exponent.
+    pub exponent: f32,
+    pub self_illum: f32,
+    pub two_sided: bool,
 }
 
 /// A node's material resolved for drawing: one surface, or one per face
@@ -1008,6 +1263,9 @@ fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
         bump_map: if t < 0.5 { a.bump_map.clone() } else { b.bump_map.clone() },
         specular_level_map: if t < 0.5 { a.specular_level_map.clone() } else { b.specular_level_map.clone() },
         self_illum_map: if t < 0.5 { a.self_illum_map.clone() } else { b.self_illum_map.clone() },
+        shading: if t < 0.5 { a.shading.clone() } else { b.shading.clone() },
+        extended: if t < 0.5 { a.extended.clone() } else { b.extended.clone() },
+        self_illum_color: lerp3(a.self_illum_color, b.self_illum_color),
     }
 }
 
@@ -1083,6 +1341,46 @@ mod tests {
         lib.get_mut(&MaterialId(3)).unwrap().set_parameter("Viewport", 0.0).unwrap();
         assert_eq!(diffuse(&lib, ShellView::Viewport), Vec3::X);
         assert_eq!(lib[&MaterialId(3)].children(), vec![Some(MaterialId(1)), Some(MaterialId(2))]);
+    }
+
+    #[test]
+    fn viewport_looks_follow_the_shader() {
+        let mut m = StandardMaterial::new("m");
+        m.diffuse.set(Vec3::new(0.8, 0.4, 0.2));
+        m.specular_level.set(100.0);
+        m.glossiness.set(40.0);
+        let look = |m: &StandardMaterial| Surface::from_standard(m).viewport_look();
+        let blinn = look(&m);
+        assert_eq!(blinn.color, m.diffuse.get());
+        assert_eq!(blinn.exponent, 2.0 * 2f32.powf(4.0));
+        m.shading.shader = Shader::Phong;
+        assert!(look(&m).exponent < blinn.exponent, "Phong's highlight is wider");
+        m.shading.shader = Shader::Metal;
+        let metal = look(&m);
+        assert!((metal.specular - m.diffuse.get()).length() < 1e-5, "Metal's highlight takes the diffuse colour");
+        assert!(metal.color.x < blinn.color.x, "and the diffuse dims");
+        m.shading.shader = Shader::OrenNayarBlinn;
+        m.shading.diffuse_level = 200.0;
+        m.shading.roughness = 100.0;
+        let onb = look(&m);
+        assert!((onb.color.x - 1.6 * oren_nayar_dim(100.0)).abs() < 1e-5, "{onb:?}");
+        m.shading.shader = Shader::Strauss;
+        m.specular_level.set(0.0);
+        m.shading.metalness = 100.0;
+        let strauss = look(&m);
+        assert!(strauss.specular.length() > 0.0, "Strauss always has a highlight");
+        assert!(strauss.specular.x > strauss.specular.z, "a metal Strauss highlight is tinted by the colour");
+        m.shading.shader = Shader::Translucent;
+        assert!(look(&m).two_sided);
+        m.shading.shader = Shader::MultiLayer;
+        m.shading.level2 = 50.0;
+        m.shading.specular2 = Vec3::Z;
+        assert!(look(&m).specular.z > 0.4, "the second layer adds its colour");
+        m.shading.shader = Shader::Blinn;
+        m.shading.self_illum_color_on = true;
+        m.shading.self_illum_color = Vec3::new(0.0, 1.0, 0.0);
+        let glow = look(&m);
+        assert_eq!((glow.color, glow.self_illum), (Vec3::Y, 1.0), "a full-value glow colour shows unlit");
     }
 
     #[test]

@@ -138,33 +138,104 @@ fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, [f
     }
 }
 
-/// One surface Blinn-shaded under the sample lights at `n` (view along -Z), with its diffuse map at `uv`.
-fn shade(s: &Surface, n: glam::Vec3, uv: [f32; 2], setup: &PreviewSetup, images: &loom_scene::maps::Images) -> (glam::Vec3, f32) {
+/// An anisotropic (Ward) highlight at `n` with tangent `t` turned by
+/// `orientation` degrees: Glossiness sets its size, Anisotropy 0–100 narrows it one way.
+fn ward(n: glam::Vec3, t: glam::Vec3, h: glam::Vec3, glossiness: f32, anisotropy: f32, orientation: f32) -> f32 {
+    let exponent = 2.0 * 2f32.powf(glossiness / 10.0);
+    let a = (2.0 / (exponent + 2.0)).sqrt();
+    let (ax, ay) = (a * (1.0 - 0.95 * anisotropy / 100.0).max(0.02), a);
+    let t = glam::Quat::from_axis_angle(n, orientation.to_radians()) * t;
+    let b = n.cross(t);
+    let nh = n.dot(h).max(1e-4);
+    (-((h.dot(t) / ax).powi(2) + (h.dot(b) / ay).powi(2)) / (nh * nh)).exp()
+}
+
+/// One surface shaded by its shader under the sample lights at `n` (view
+/// along -Z; `up` the sample object's axis, for anisotropic highlights),
+/// with its diffuse and opacity maps at `uv`.
+fn shade(s: &Surface, n: glam::Vec3, up: glam::Vec3, uv: [f32; 2], setup: &PreviewSetup, images: &loom_scene::maps::Images) -> (glam::Vec3, f32) {
+    use loom_scene::material::Shader;
+    let sh = &s.shading;
     let mut d = s.diffuse;
     if let Some(m) = &s.diffuse_map {
         let t = loom_scene::maps::eval(m, uv, images);
         d = d.lerp(glam::Vec3::new(t[0], t[1], t[2]), t[3] * (m.amount / 100.0).clamp(0.0, 1.0));
     }
+    if sh.shader.has_diffuse_level() {
+        d *= sh.diffuse_level / 100.0;
+    }
     let view = glam::Vec3::Z;
-    let exponent = 2.0 * 2f32.powf(s.glossiness / 10.0);
+    let blinn = |g: f32| 2.0 * 2f32.powf(g / 10.0);
+    let exponent = blinn(s.glossiness);
+    let level = s.specular_level / 100.0;
+    // The highlight colour and how much the diffuse keeps.
+    let (spec_color, diffuse_k) = match sh.shader {
+        Shader::Metal => (d * level, 1.0 - 0.75 * level.min(1.0)),
+        Shader::Strauss => {
+            let (g, m) = (s.glossiness / 100.0, sh.metalness / 100.0);
+            (glam::Vec3::ONE.lerp(d, m) * (0.1 + 0.9 * g), (1.0 - m * g) * (1.0 - g * g * g))
+        }
+        _ => (s.specular, 1.0),
+    };
+    let tangent = up.cross(n).try_normalize().unwrap_or(glam::Vec3::X);
+    let sigma2 = (sh.roughness / 100.0).powi(2);
     let mut lit = s.ambient * setup.ambient + d * 0.08;
     let mut spec = glam::Vec3::ZERO;
     let mut lights = vec![(glam::Vec3::new(-0.5, 0.6, 0.65).normalize(), setup.top)];
     if let Some(b) = setup.back {
         lights.push((glam::Vec3::new(0.7, -0.3, -0.65).normalize(), b * 0.6));
     }
-    for (l, c) in lights {
-        let diff = n.dot(l).max(0.0);
-        lit += d * c * diff;
+    let highlight = |n: glam::Vec3, l: glam::Vec3| -> glam::Vec3 {
         let h = (l + view).normalize();
-        spec += s.specular * c * n.dot(h).max(0.0).powf(exponent) * if diff > 0.0 { 1.0 } else { 0.0 };
+        match sh.shader {
+            // Phong: the reflected light against the view, a wider highlight than Blinn's.
+            Shader::Phong => spec_color * (2.0 * n.dot(l) * n - l).dot(view).max(0.0).powf(exponent),
+            Shader::Anisotropic => spec_color * ward(n, tangent, h, s.glossiness, sh.anisotropy, sh.orientation),
+            Shader::MultiLayer => {
+                spec_color * ward(n, tangent, h, s.glossiness, sh.anisotropy, sh.orientation)
+                    + sh.specular2 * (sh.level2 / 100.0) * ward(n, tangent, h, sh.glossiness2, sh.anisotropy2, sh.orientation2)
+            }
+            _ => spec_color * n.dot(h).max(0.0).powf(exponent),
+        }
+    };
+    for (l, c) in lights {
+        let ndl = n.dot(l);
+        let diff = if sh.shader.has_roughness() && sigma2 > 0.0 {
+            // Oren-Nayar: rough surfaces flatten and darken.
+            let (a, b) = (1.0 - 0.5 * sigma2 / (sigma2 + 0.33), 0.45 * sigma2 / (sigma2 + 0.09));
+            let (ti, tr) = (ndl.clamp(-1.0, 1.0).acos(), n.dot(view).clamp(-1.0, 1.0).acos());
+            let pl = (l - n * ndl).normalize_or_zero();
+            let pv = (view - n * n.dot(view)).normalize_or_zero();
+            let cos_phi = pl.dot(pv).max(0.0);
+            ndl.max(0.0) * (a + b * cos_phi * ti.max(tr).sin() * ti.min(tr).tan())
+        } else {
+            ndl.max(0.0)
+        };
+        lit += d * c * diff * diffuse_k;
+        if sh.shader == Shader::Translucent {
+            // Light from behind scatters through in the Translucent colour times the Filter colour.
+            lit += sh.translucent_color * s.extended.filter_color * c * (-ndl).max(0.0);
+            if sh.backside_specular && ndl < 0.0 {
+                spec += highlight(-n, l) * c;
+            }
+        }
+        if ndl > 0.0 {
+            spec += highlight(n, l) * c;
+        }
     }
-    let c = lit * (1.0 - s.self_illum) + d * s.self_illum + spec;
+    let c = lit * (1.0 - s.self_illum) + d * s.self_illum + s.self_illum_color + spec;
     let mut a = s.opacity;
     if let Some(m) = &s.opacity_map {
         let t = loom_scene::maps::eval(m, uv, images);
         let lum = (t[0] + t[1] + t[2]) / 3.0;
         a += (lum - a) * (m.amount / 100.0).clamp(0.0, 1.0);
+    }
+    // Advanced Transparency falloff: In clears the facing middle, Out the edges.
+    let e = &s.extended;
+    if e.falloff_amount > 0.0 && a < 1.0 {
+        let facing = n.dot(view).abs();
+        let extreme = 1.0 - e.falloff_amount / 100.0;
+        a = if e.falloff_out { extreme + (a - extreme) * facing } else { a + (extreme - a) * facing };
     }
     (c, a)
 }
@@ -212,7 +283,7 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                                     }
                                 }
                             };
-                            let (c, a) = shade(&s, n, uv, setup, images);
+                            let (c, a) = shade(&s, n, rot * glam::Vec3::Y, uv, setup, images);
                             bg.lerp(c, a)
                         }
                     }
@@ -744,47 +815,182 @@ fn name_row(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, maps: &[
 // Rollouts per level
 // ---------------------------------------------------------------------------
 
+/// A colour swatch of the material at the current level (`which` as Set Material Color names it).
+fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
+    let mut rgb = rgb_of(c);
+    if ui.color_edit_button_srgb(&mut rgb).on_hover_text(which).changed() {
+        let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: which.into(), rgb });
+    }
+}
+
+/// The highlight curve graph: intensity across the highlight for each lobe
+/// (Specular Level the height, Glossiness the width; an anisotropic lobe's
+/// narrow axis in white).
+fn highlight_graph(ui: &mut egui::Ui, lobes: &[(f32, f32, f32)]) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(120.0, 46.0), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 0.0, egui::Color32::from_gray(30));
+    for (i, (level, gloss, aniso)) in lobes.iter().enumerate() {
+        let exponent = 2.0 * 2f32.powf(gloss / 10.0);
+        for (narrow, color) in [(false, egui::Color32::from_gray(150)), (true, egui::Color32::WHITE)] {
+            if narrow && *aniso <= 0.0 {
+                continue;
+            }
+            let w = if narrow { 1.0 - 0.95 * aniso / 100.0 } else { 1.0 };
+            let pts: Vec<egui::Pos2> = (0..=60)
+                .map(|k| {
+                    let x = k as f32 / 60.0 * 2.0 - 1.0;
+                    let a = (x / w.max(0.05)).clamp(-1.0, 1.0) * std::f32::consts::FRAC_PI_2;
+                    let y = (level / 100.0) * a.cos().max(0.0).powf(exponent / 8.0);
+                    egui::pos2(rect.center().x + x * rect.width() / 2.0, rect.bottom() - 2.0 - y.min(1.2) / 1.2 * (rect.height() - 4.0))
+                })
+                .collect();
+            p.add(egui::Shape::line(pts, egui::Stroke::new(1.0_f32, if i == 0 { color } else { egui::Color32::from_rgb(200, 200, 90) })));
+        }
+    }
+}
+
 fn standard_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    use loom_scene::material::Shader;
+    let sh = m.shading.clone();
     crate::command_panel::rollout(ui, "Shader Basic Parameters", true, |ui| {
         ui.horizontal(|ui| {
-            ui.label("Blinn");
+            egui::ComboBox::from_id_salt("material_shader").width(130.0).selected_text(sh.shader.label()).show_ui(ui, |ui| {
+                for s in Shader::ALL {
+                    if ui.selectable_label(sh.shader == s, s.label()).clicked() {
+                        let _ = app.dispatch(Command::SetShader { shader: s.label().into() });
+                    }
+                }
+            });
             check(ui, app, "Wire", "Wire", m.wire);
             check(ui, app, "2-Sided", "2-Sided", m.two_sided);
             check(ui, app, "Faceted", "Faceted", m.faceted);
         });
     });
-    crate::command_panel::rollout(ui, "Blinn Basic Parameters", true, |ui| {
+    let title = format!("{} Basic Parameters", sh.shader.label().trim_end_matches(" Shader"));
+    crate::command_panel::rollout(ui, &title, true, |ui| {
         egui::Grid::new("blinn_colours").num_columns(3).show(ui, |ui| {
-            for (label, c, channel) in [("Ambient", m.ambient.get(), "Ambient Color"), ("Diffuse", m.diffuse.get(), "Diffuse Color"), ("Specular", m.specular.get(), "Specular Color")] {
+            // Strauss has only Color; Metal makes its own specular colour.
+            let rows: &[(&str, &str, &str)] = match sh.shader {
+                Shader::Strauss => &[("Color", "Diffuse", "Diffuse Color")],
+                Shader::Metal => &[("Ambient", "Ambient", "Ambient Color"), ("Diffuse", "Diffuse", "Diffuse Color")],
+                Shader::MultiLayer => &[("Ambient", "Ambient", "Ambient Color"), ("Diffuse", "Diffuse", "Diffuse Color")],
+                _ => &[("Ambient", "Ambient", "Ambient Color"), ("Diffuse", "Diffuse", "Diffuse Color"), ("Specular", "Specular", "Specular Color")],
+            };
+            for (label, which, channel) in rows {
+                let c = match *which {
+                    "Ambient" => m.ambient.get(),
+                    "Diffuse" => m.diffuse.get(),
+                    _ => m.specular.get(),
+                };
                 ui.label(format!("{label}:"));
-                let mut rgb = rgb_of(c);
-                if ui.color_edit_button_srgb(&mut rgb).changed() {
-                    let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: label.into(), rgb });
-                }
+                swatch(ui, app, which, c);
                 map_button(ui, app, channel, m.map(channel), true);
                 ui.end_row();
             }
         });
-        check(ui, app, "Lock Ambient and Diffuse", "Ambient/Diffuse Lock", m.ambient_locked);
-        ui.horizontal(|ui| {
-            spinner(ui, app, "Self-Illumination", m.self_illum.get(), 0.0..=100.0, 0);
-            map_button(ui, app, "Self-Illumination", m.map("Self-Illumination"), true);
-        });
+        if sh.shader != Shader::Strauss {
+            ui.horizontal(|ui| {
+                check(ui, app, "Lock Ambient and Diffuse", "Ambient/Diffuse Lock", m.ambient_locked);
+                if !matches!(sh.shader, Shader::Metal | Shader::MultiLayer) {
+                    check(ui, app, "Lock Diffuse and Specular", "Diffuse/Specular Lock", sh.diffuse_specular_locked);
+                }
+            });
+        }
+        if sh.shader.has_diffuse_level() || sh.shader.has_roughness() {
+            ui.label(egui::RichText::new("Advanced Diffuse").strong());
+            if sh.shader.has_diffuse_level() {
+                spinner(ui, app, "Diffuse Level", sh.diffuse_level, 0.0..=400.0, 0);
+            }
+            if sh.shader.has_roughness() {
+                spinner(ui, app, "Roughness", sh.roughness, 0.0..=100.0, 0);
+            }
+        }
+        if sh.shader != Shader::Strauss {
+            ui.label(egui::RichText::new("Self-Illumination").strong());
+            ui.horizontal(|ui| {
+                check(ui, app, "Color", "Self-Illum Color On", sh.self_illum_color_on);
+                if sh.self_illum_color_on {
+                    swatch(ui, app, "Self-Illum Color", sh.self_illum_color);
+                } else {
+                    spinner(ui, app, "Self-Illumination", m.self_illum.get(), 0.0..=100.0, 0);
+                }
+                map_button(ui, app, "Self-Illumination", m.map("Self-Illumination"), true);
+            });
+        }
         ui.horizontal(|ui| {
             spinner(ui, app, "Opacity", m.opacity.get(), 0.0..=100.0, 0);
             map_button(ui, app, "Opacity", m.map("Opacity"), true);
         });
-        ui.label(egui::RichText::new("Specular Highlights").strong());
+        if sh.shader == Shader::Translucent {
+            ui.label(egui::RichText::new("Translucency").strong());
+            egui::Grid::new("translucency").num_columns(3).show(ui, |ui| {
+                ui.label("Translucent Clr:");
+                swatch(ui, app, "Translucent Color", sh.translucent_color);
+                ui.label("");
+                ui.end_row();
+                ui.label("Filter Color:");
+                swatch(ui, app, "Filter Color", m.extended.filter_color);
+                map_button(ui, app, "Filter Color", m.map("Filter Color"), true);
+                ui.end_row();
+            });
+        }
+        let first = if sh.shader == Shader::MultiLayer { "First Specular Layer" } else { "Specular Highlights" };
+        ui.label(egui::RichText::new(first).strong());
         ui.horizontal(|ui| {
-            spinner(ui, app, "Specular Level", m.specular_level.get(), 0.0..=999.0, 0);
-            map_button(ui, app, "Specular Level", m.map("Specular Level"), true);
+            ui.vertical(|ui| {
+                if sh.shader == Shader::MultiLayer {
+                    ui.horizontal(|ui| {
+                        ui.label("Color:");
+                        swatch(ui, app, "Specular", m.specular.get());
+                        map_button(ui, app, "Specular Color", m.map("Specular Color"), true);
+                    });
+                }
+                if sh.shader != Shader::Strauss {
+                    ui.horizontal(|ui| {
+                        let label = if sh.shader == Shader::MultiLayer { "Level" } else { "Specular Level" };
+                        spinner_with(ui, app, label, m.specular_level.get(), 0.0..=999.0, 0, |v| Command::SetMaterialParameter { slot: None, name: "Specular Level".into(), value: v });
+                        map_button(ui, app, "Specular Level", m.map("Specular Level"), true);
+                    });
+                }
+                ui.horizontal(|ui| {
+                    spinner(ui, app, "Glossiness", m.glossiness.get(), 0.0..=100.0, 0);
+                    map_button(ui, app, "Glossiness", m.map("Glossiness"), true);
+                });
+                match sh.shader {
+                    Shader::Strauss => spinner(ui, app, "Metalness", sh.metalness, 0.0..=100.0, 0),
+                    Shader::Anisotropic | Shader::MultiLayer => {
+                        spinner(ui, app, "Anisotropy", sh.anisotropy, 0.0..=100.0, 0);
+                        spinner(ui, app, "Orientation", sh.orientation, 0.0..=9999.0, 0);
+                    }
+                    Shader::Metal => {}
+                    _ => spinner(ui, app, "Soften", m.soften.get(), 0.0..=1.0, 2),
+                }
+                if sh.shader == Shader::Translucent {
+                    check(ui, app, "Backside specular", "Backside Specular", sh.backside_specular);
+                }
+            });
+            let level = if sh.shader == Shader::Strauss { 50.0 + sh.metalness / 2.0 } else { m.specular_level.get() };
+            let aniso = if matches!(sh.shader, Shader::Anisotropic | Shader::MultiLayer) { sh.anisotropy } else { 0.0 };
+            let mut lobes = vec![(level, m.glossiness.get(), aniso)];
+            if sh.shader == Shader::MultiLayer {
+                lobes.push((sh.level2, sh.glossiness2, sh.anisotropy2));
+            }
+            highlight_graph(ui, &lobes);
         });
-        ui.horizontal(|ui| {
-            spinner(ui, app, "Glossiness", m.glossiness.get(), 0.0..=100.0, 0);
-            map_button(ui, app, "Glossiness", m.map("Glossiness"), true);
-        });
-        spinner(ui, app, "Soften", m.soften.get(), 0.0..=1.0, 2);
+        if sh.shader == Shader::MultiLayer {
+            ui.label(egui::RichText::new("Second Specular Layer").strong());
+            ui.horizontal(|ui| {
+                ui.label("Color:");
+                swatch(ui, app, "Specular 2", sh.specular2);
+            });
+            spinner(ui, app, "Level 2", sh.level2, 0.0..=999.0, 0);
+            spinner(ui, app, "Glossiness 2", sh.glossiness2, 0.0..=100.0, 0);
+            spinner(ui, app, "Anisotropy 2", sh.anisotropy2, 0.0..=100.0, 0);
+            spinner(ui, app, "Orientation 2", sh.orientation2, 0.0..=9999.0, 0);
+        }
     });
+    extended_rollout(ui, app, m);
     crate::command_panel::rollout(ui, "Maps", false, |ui| {
         egui::Grid::new("material_maps").num_columns(4).show(ui, |ui| {
             ui.label("");
@@ -818,6 +1024,63 @@ fn standard_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                 ui.end_row();
             }
         });
+    });
+}
+
+/// Extended Parameters: Advanced Transparency (blank for the Translucent
+/// shader), Index of Refraction, Wire size, Reflection Dimming.
+fn extended_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    let e = m.extended.clone();
+    let translucent = m.shading.shader == loom_scene::material::Shader::Translucent;
+    crate::command_panel::rollout(ui, "Extended Parameters", false, |ui| {
+        let set = |app: &mut LoomApp, name: &str, v: f64| {
+            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: name.into(), value: v });
+        };
+        ui.label(egui::RichText::new("Advanced Transparency").strong());
+        if !translucent {
+            ui.horizontal(|ui| {
+                ui.label("Falloff:");
+                if ui.radio(!e.falloff_out, "In").clicked() {
+                    set(app, "Falloff Out", 0.0);
+                }
+                if ui.radio(e.falloff_out, "Out").clicked() {
+                    set(app, "Falloff Out", 1.0);
+                }
+                spinner_with(ui, app, "Amt:", e.falloff_amount, 0.0..=100.0, 0, |v| Command::SetMaterialParameter { slot: None, name: "Falloff Amount".into(), value: v });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Type:");
+                for (i, label) in ["Filter", "Subtractive", "Additive"].iter().enumerate() {
+                    if ui.radio(e.transparency_type == i as u8, *label).clicked() {
+                        set(app, "Transparency Type", i as f64);
+                    }
+                    if i == 0 {
+                        swatch(ui, app, "Filter Color", e.filter_color);
+                        map_button(ui, app, "Filter Color", m.map("Filter Color"), true);
+                    }
+                }
+            });
+        }
+        spinner(ui, app, "Index of Refraction", e.ior, 0.01..=10.0, 3);
+        ui.label(egui::RichText::new("Wire").strong());
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Wire Size", e.wire_size, 0.0..=10000.0, 1);
+            ui.label("In:");
+            if ui.radio(!e.wire_units, "Pixels").clicked() {
+                set(app, "Wire Units", 0.0);
+            }
+            if ui.radio(e.wire_units, "Units").clicked() {
+                set(app, "Wire Units", 1.0);
+            }
+        });
+        if m.shading.shader != loom_scene::material::Shader::Strauss {
+            ui.label(egui::RichText::new("Reflection Dimming").strong());
+            ui.horizontal(|ui| {
+                check(ui, app, "Apply", "Reflection Dimming", e.reflection_dimming);
+                spinner(ui, app, "Dim Level", e.dim_level, 0.0..=1.0, 2);
+                spinner(ui, app, "Refl. Level", e.refl_level, 0.1..=10.0, 2);
+            });
+        }
     });
 }
 
@@ -1612,6 +1875,71 @@ mod tests {
         let shiny = preview_pixels(&sample(&m), size, &setup(SampleType::Sphere), &images);
         let brightest = |p: &[egui::Color32]| p.iter().map(|c| c.g() as u32).max().unwrap();
         assert!(brightest(&shiny) > brightest(&dull) + 40, "a highlight appears");
+    }
+
+    #[test]
+    fn each_shader_shades_the_sample_its_own_way() {
+        use loom_scene::material::Shader;
+        let size = 64;
+        let images = loom_scene::maps::Images::new();
+        // The top light only: one highlight.
+        let mut lights = setup(SampleType::Sphere);
+        lights.back = None;
+        let px = |m: &StandardMaterial| preview_pixels(&Sample::Surfaces(Surfaces::Single(Box::new(Surface::from_standard(m)))), size, &lights, &images);
+        let mut m = StandardMaterial::slot_default(0);
+        m.diffuse.set(glam::Vec3::new(0.8, 0.0, 0.0));
+        m.ambient.set(glam::Vec3::new(0.8, 0.0, 0.0));
+        m.specular_level.set(150.0);
+        m.glossiness.set(40.0);
+        let brightest_g = |p: &[egui::Color32]| p.iter().map(|c| c.g()).max().unwrap();
+        assert!(brightest_g(&px(&m)) > 200, "Blinn: a white highlight on red");
+        m.shading.shader = Shader::Metal;
+        assert!(brightest_g(&px(&m)) < 40, "Metal: the highlight is the diffuse colour");
+        // Anisotropic: the highlight is long one way; turning it 90° swaps its extent.
+        let extent = |p: &[egui::Color32]| {
+            let hot: Vec<(usize, usize)> = (0..size * size).filter(|i| p[*i].g() > 120).map(|i| (i % size, i / size)).collect();
+            let w = hot.iter().map(|h| h.0).max().unwrap() - hot.iter().map(|h| h.0).min().unwrap();
+            let h = hot.iter().map(|h| h.1).max().unwrap() - hot.iter().map(|h| h.1).min().unwrap();
+            (w as f32 + 1.0, h as f32 + 1.0)
+        };
+        m.shading.shader = Shader::Anisotropic;
+        m.shading.anisotropy = 90.0;
+        let (w0, h0) = extent(&px(&m));
+        m.shading.orientation = 90.0;
+        let (w1, h1) = extent(&px(&m));
+        assert!((w0 / h0 - w1 / h1).abs() > 0.5, "orientation turns the highlight: {w0}x{h0} vs {w1}x{h1}");
+        // Oren-Nayar-Blinn Roughness darkens.
+        let sum_r = |p: &[egui::Color32]| p.iter().map(|c| c.r() as u32).sum::<u32>();
+        m.specular_level.set(0.0);
+        m.shading.shader = Shader::OrenNayarBlinn;
+        let smooth = sum_r(&px(&m));
+        m.shading.roughness = 100.0;
+        assert!(sum_r(&px(&m)) < smooth, "rough is darker");
+        // Translucent: light from behind comes through in the Translucent colour.
+        m.shading.shader = Shader::Translucent;
+        m.diffuse.set(glam::Vec3::ZERO);
+        m.ambient.set(glam::Vec3::ZERO);
+        let sum_g = |p: &[egui::Color32]| p.iter().map(|c| c.g() as u32).sum::<u32>();
+        let dark = sum_g(&px(&m));
+        m.shading.translucent_color = glam::Vec3::Y;
+        m.extended.filter_color = glam::Vec3::ONE;
+        assert!(sum_g(&px(&m)) > dark + 500, "translucent green");
+    }
+
+    #[test]
+    fn opacity_falloff_in_clears_the_facing_middle() {
+        let size = 32;
+        let images = loom_scene::maps::Images::new();
+        let mut m = StandardMaterial::slot_default(0);
+        m.diffuse.set(glam::Vec3::ONE);
+        m.ambient.set(glam::Vec3::ONE);
+        m.opacity.set(60.0);
+        let px = |m: &StandardMaterial| preview_pixels(&Sample::Surfaces(Surfaces::Single(Box::new(Surface::from_standard(m)))), size, &setup(SampleType::Sphere), &images);
+        let bg = px(&m)[0];
+        let before = px(&m)[size * (size / 2) + size / 2];
+        m.extended.falloff_amount = 100.0;
+        let after = px(&m)[size * (size / 2) + size / 2];
+        assert!((after.r() as i32 - bg.r() as i32).abs() < (before.r() as i32 - bg.r() as i32).abs(), "the middle shows more background: {before:?} {after:?} {bg:?}");
     }
 
     #[test]

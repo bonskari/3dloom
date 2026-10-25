@@ -10,7 +10,7 @@ use bevy::render::camera::{OrthographicProjection, PerspectiveProjection, Projec
 use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::primitives::Aabb;
 use loom_scene::maps::Image as MapImage;
-use loom_scene::material::{Map, StandardMaterial as LoomMaterial, Surface};
+use loom_scene::material::{Map, Shader, StandardMaterial as LoomMaterial, Surface};
 
 /// A loom mesh triangulated for Bevy: one vertex per face corner.
 #[derive(Debug, Clone, PartialEq)]
@@ -201,21 +201,64 @@ pub fn material_from_surface(surface: Option<&Surface>, wire_color: [u8; 3]) -> 
             ..Default::default()
         },
         Some(m) => {
-            let d = m.diffuse;
+            let sh = &m.shading;
+            let mut d = m.diffuse;
+            if sh.shader.has_diffuse_level() {
+                d *= sh.diffuse_level / 100.0;
+            }
+            if sh.shader.has_roughness() {
+                // PBR has no diffuse roughness: Oren-Nayar's darkening of facing surfaces.
+                d *= loom_scene::material::oren_nayar_dim(sh.roughness);
+            }
             let alpha = m.opacity;
             let s = m.self_illum;
             let lit = d * (1.0 - s);
-            let glow = Color::srgb(d.x, d.y, d.z).to_linear() * s;
-            StandardMaterial {
+            let glow = Color::srgb(d.x, d.y, d.z).to_linear() * s + Color::srgb(m.self_illum_color.x, m.self_illum_color.y, m.self_illum_color.z).to_linear();
+            let two_sided = m.two_sided || sh.shader == Shader::Translucent;
+            let mut out = StandardMaterial {
                 base_color: Color::srgba(lit.x, lit.y, lit.z, alpha),
                 emissive: bevy::color::LinearRgba::rgb(glow.red, glow.green, glow.blue),
                 perceptual_roughness: (1.0 - m.glossiness / 100.0).clamp(0.0, 1.0),
                 reflectance: (m.specular_level / 100.0 * 0.5).clamp(0.0, 1.0),
-                alpha_mode: if alpha < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque },
-                double_sided: m.two_sided,
-                cull_mode: if m.two_sided { None } else { Some(bevy::render::render_resource::Face::Back) },
+                // Advanced Transparency Type: Filter and Subtractive blend, Additive adds.
+                alpha_mode: match (alpha < 1.0, m.extended.transparency_type) {
+                    (false, _) => AlphaMode::Opaque,
+                    (true, 2) => AlphaMode::Add,
+                    (true, _) => AlphaMode::Blend,
+                },
+                ior: m.extended.ior.max(1.0),
+                double_sided: two_sided,
+                cull_mode: if two_sided { None } else { Some(bevy::render::render_resource::Face::Back) },
                 ..Default::default()
+            };
+            match sh.shader {
+                Shader::Blinn | Shader::OrenNayarBlinn => {}
+                // Phong's wider highlight at the same Glossiness.
+                Shader::Phong => out.perceptual_roughness = (out.perceptual_roughness * 1.25).min(1.0),
+                Shader::Metal => out.metallic = 1.0,
+                Shader::Strauss => {
+                    out.metallic = (sh.metalness / 100.0).clamp(0.0, 1.0);
+                    out.reflectance = 0.5;
+                }
+                Shader::Anisotropic => {
+                    out.anisotropy_strength = (sh.anisotropy / 100.0).clamp(0.0, 1.0);
+                    out.anisotropy_rotation = sh.orientation.to_radians();
+                }
+                Shader::MultiLayer => {
+                    // The first layer anisotropic, the second a clear coat over it.
+                    out.anisotropy_strength = (sh.anisotropy / 100.0).clamp(0.0, 1.0);
+                    out.anisotropy_rotation = sh.orientation.to_radians();
+                    out.clearcoat = (sh.level2 / 100.0).clamp(0.0, 1.0);
+                    out.clearcoat_perceptual_roughness = (1.0 - sh.glossiness2 / 100.0).clamp(0.0, 1.0);
+                }
+                Shader::Translucent => {
+                    // Light scattered through: the Translucent colour times the Filter colour.
+                    let t = sh.translucent_color * m.extended.filter_color;
+                    out.diffuse_transmission = ((t.x + t.y + t.z) / 3.0).clamp(0.0, 1.0);
+                    out.thickness = 0.0;
+                }
             }
+            out
         }
     }
 }
@@ -391,6 +434,52 @@ mod tests {
         // Specular Level 0: no specular reflection.
         lm.specular_level.set(0.0);
         assert_eq!(material_from_loom(Some(&lm), [0, 0, 0]).reflectance, 0.0);
+    }
+
+    #[test]
+    fn each_shader_maps_to_its_pbr_fields() {
+        let mut lm = LoomMaterial::new("m");
+        lm.glossiness.set(60.0);
+        let pbr = |lm: &LoomMaterial| material_from_loom(Some(lm), [0, 0, 0]);
+        assert_eq!(pbr(&lm).metallic, 0.0);
+        lm.shading.shader = Shader::Metal;
+        assert_eq!(pbr(&lm).metallic, 1.0, "Metal is a metal");
+        lm.shading.shader = Shader::Strauss;
+        lm.shading.metalness = 40.0;
+        assert!((pbr(&lm).metallic - 0.4).abs() < 1e-6, "Strauss Metalness");
+        lm.shading.shader = Shader::Anisotropic;
+        lm.shading.anisotropy = 80.0;
+        lm.shading.orientation = 90.0;
+        let a = pbr(&lm);
+        assert!((a.anisotropy_strength - 0.8).abs() < 1e-6 && (a.anisotropy_rotation - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        lm.shading.shader = Shader::MultiLayer;
+        lm.shading.level2 = 50.0;
+        lm.shading.glossiness2 = 80.0;
+        let ml = pbr(&lm);
+        assert!((ml.clearcoat - 0.5).abs() < 1e-6 && (ml.clearcoat_perceptual_roughness - 0.2).abs() < 1e-5, "the second layer is a clear coat");
+        lm.shading.shader = Shader::OrenNayarBlinn;
+        lm.diffuse.set(Vec3::splat(0.5));
+        lm.shading.diffuse_level = 200.0;
+        let onb = pbr(&lm);
+        assert!((onb.base_color.to_srgba().red - 1.0).abs() < 1e-5, "Diffuse Level 200 doubles the colour");
+        lm.shading.shader = Shader::Translucent;
+        lm.shading.translucent_color = Vec3::ONE;
+        lm.extended.filter_color = Vec3::ONE;
+        let tr = pbr(&lm);
+        assert!(tr.diffuse_transmission > 0.99 && tr.double_sided && tr.cull_mode.is_none(), "light passes through");
+        // Extended Parameters: IOR and the Additive transparency type.
+        lm.extended.ior = 2.4;
+        lm.opacity.set(50.0);
+        lm.extended.transparency_type = 2;
+        let e = pbr(&lm);
+        assert!((e.ior - 2.4).abs() < 1e-6);
+        assert_eq!(e.alpha_mode, AlphaMode::Add);
+        // Self-Illumination Color mode glows in its colour.
+        lm.shading.shader = Shader::Blinn;
+        lm.shading.self_illum_color_on = true;
+        lm.shading.self_illum_color = Vec3::new(0.0, 0.0, 1.0);
+        let g = pbr(&lm);
+        assert!(g.emissive.blue > 0.99 && g.emissive.red == 0.0, "{:?}", g.emissive);
     }
 
     #[test]
