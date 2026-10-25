@@ -119,3 +119,144 @@ fn looping_sector_chains_are_errors_not_memory_blowups() {
     f[68..72].copy_from_slice(&0xFFFF_FFFEu32.to_le_bytes());
     assert!(loom_max::read(&f).is_err());
 }
+
+fn node<'a>(doc: &'a loom_max::MaxDoc, name: &str) -> &'a loom_max::MaxNode {
+    doc.nodes.iter().find(|n| n.name == name).unwrap_or_else(|| panic!("no node {name}"))
+}
+
+fn param(m: &loom_max::MaxModifier, name: &str) -> f64 {
+    m.params.iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("{} has no {name}: {:?}", m.class, m.params)).1
+}
+
+fn classes(n: &loom_max::MaxNode) -> Vec<&str> {
+    n.modifiers.iter().map(|m| m.class).collect()
+}
+
+#[test]
+fn modifier_stacks_come_bottom_first_with_their_parameters() {
+    let Some(b) = sample("Monster/Monster_HEad.max") else { return };
+    let doc = loom_max::read(&b).unwrap();
+    // The Symmetry sits on the half (its stored input bounds end at x = 0.2), the FFD and TurboSmooth above.
+    let g = node(&doc, "Group01");
+    assert_eq!(classes(g), ["Symmetry", "FFD 4x4x4", "TurboSmooth"]);
+    let sym = &g.modifiers[0];
+    assert_eq!((param(sym, "Mirror Axis"), param(sym, "Flip"), param(sym, "Slice Along Mirror"), param(sym, "Weld Seam")), (0.0, 1.0, 1.0, 1.0));
+    assert!((param(sym, "Threshold") - 0.1).abs() < 1e-6);
+    // Its context runs from object space to the pivot offset at the time: the gizmo comes back.
+    let gz = sym.gizmo.unwrap().w_axis.truncate();
+    assert!((gz - glam::Vec3::new(0.0, 0.39, 78.91)).length() < 0.02, "{gz}");
+    assert_eq!(param(&g.modifiers[2], "Iterations"), 1.0);
+    let lat = g.modifiers[1].lattice.as_ref().unwrap();
+    assert_eq!((lat.dims, lat.points.len()), ([4, 4, 4], 64));
+    assert!((lat.lo - glam::Vec3::new(-6.89, -14.38, -10.85)).length() < 0.02, "{}", lat.lo);
+    // Control point (x 0, y 0, z 1) of the file (z runs fastest there) is index 16 here (x fastest).
+    assert!((lat.points[16] - glam::Vec3::new(0.0, 0.11, 0.21)).length() < 0.01, "{}", lat.points[16]);
+    // A Symmetry gizmo moved off the centre.
+    let s = &node(&doc, "Sphere01").modifiers[0];
+    assert!((s.gizmo.unwrap().w_axis.truncate() - glam::Vec3::new(-2.197, -1.8825, 5.1721)).length() < 1e-3);
+    // An object Loom cannot read takes its modifiers' place in the report.
+    let Some(b) = sample("Extra/ChampionsLegends.max") else { return };
+    let doc = loom_max::read(&b).unwrap();
+    assert!(node(&doc, "Text01").modifiers.is_empty());
+    assert!(doc.warnings.iter().any(|w| w.contains("Text01") && w.contains("modifiers are not imported")), "{:?}", doc.warnings);
+}
+
+#[test]
+fn deformers_maps_and_shapes_keep_their_settings() {
+    let Some(b) = sample("Truck/Turck.max") else { return };
+    let doc = loom_max::read(&b).unwrap();
+    // Bend with its Limits: the stored bounds above it (x to 42.38, z to 16.56) are a 90° bend of
+    // the first 20.98 of a 50-tall cylinder, so 5 is the upper limit and 4 the lower.
+    let c = node(&doc, "Cylinder29");
+    assert_eq!(classes(c), ["Bend"]);
+    let bend = &c.modifiers[0];
+    assert_eq!((param(bend, "Angle"), param(bend, "Direction"), param(bend, "Bend Axis"), param(bend, "Limit Effect"), param(bend, "Lower Limit")), (90.0, 0.0, 2.0, 1.0, 0.0));
+    assert!((param(bend, "Upper Limit") - 20.98).abs() < 0.01);
+    assert!(doc.warnings.iter().any(|w| w.starts_with("Cylinder29:") && w.contains("Edit Mesh is not imported")), "{:?}", doc.warnings);
+    // UVW Map: cylindrical on a radius-4, 30-tall cylinder, alignment Z, channel 1.
+    let uvw = &node(&doc, "Cylinder28").modifiers[0];
+    assert_eq!((uvw.class, param(uvw, "Mapping"), param(uvw, "Alignment"), param(uvw, "Channel")), ("UVW Map", 1.0, 2.0, 1.0));
+    assert!((param(uvw, "Length") - 8.008).abs() < 1e-3 && (param(uvw, "Height") - 30.03).abs() < 1e-3);
+    assert!((uvw.gizmo.unwrap().w_axis.truncate() - glam::Vec3::new(0.0, 0.0, 15.0)).length() < 1e-3);
+    // Box mapping on a flat 90 × 18.8 box: length is Y.
+    let uvw = &node(&doc, "Box51").modifiers[0];
+    assert_eq!(param(uvw, "Mapping"), 4.0);
+    assert!((param(uvw, "Length") - 90.09).abs() < 0.01 && (param(uvw, "Width") - 18.78).abs() < 0.01);
+    // Smooth: the threshold is stored in radians.
+    let sm = &node(&doc, "Box53").modifiers[0];
+    assert_eq!((param(sm, "Auto Smooth"), param(sm, "Smoothing Groups")), (0.0, 16.0));
+    assert!((param(sm, "Threshold") - 30.0).abs() < 1e-3);
+    // An editable spline with an Extrude.
+    let circle = node(&doc, "Circle03");
+    let loom_max::MaxKind::Shape(s) = &circle.kind else { panic!("{:?}", circle.kind) };
+    assert_eq!((s.splines.len(), s.splines[0].knots.len(), s.splines[0].closed, s.steps), (1, 10, true, 10));
+    assert_eq!(s.splines[0].knots[0].kind, loom_max::KnotType::BezierCorner);
+    assert_eq!(classes(circle), ["Extrude"]);
+    assert_eq!(param(&circle.modifiers[0], "Amount"), 5.0);
+    // Lines with a Lathe whose axis is the object's Y, 0.59 off the pivot: the knots and the
+    // object offset move so the axis goes through the pivot.
+    let lathed: Vec<&loom_max::MaxNode> = doc.nodes.iter().filter(|n| classes(n) == ["Lathe"]).collect();
+    assert!(lathed.len() >= 5, "{}", lathed.len());
+    let n = lathed[0];
+    let loom_max::MaxKind::Shape(s) = &n.kind else { panic!() };
+    assert_eq!((s.splines[0].knots.len(), s.splines[0].closed), (5, false));
+    let l = &n.modifiers[0];
+    assert_eq!((param(l, "Degrees"), param(l, "Segments"), param(l, "Direction"), param(l, "Align")), (360.0, 20.0, 1.0, 3.0));
+    assert!(l.gizmo.is_none());
+    assert!((s.splines[0].knots[0].pos - glam::Vec3::new(0.72 - 0.59, 3.32, 0.0)).length() < 0.01, "{}", s.splines[0].knots[0].pos);
+}
+
+#[test]
+fn unwrap_keeps_its_texture_vertices_and_xform_its_gizmo() {
+    let Some(b) = sample("Core_Lightning/Unit89.max") else { return };
+    let doc = loom_max::read(&b).unwrap();
+    let n = node(&doc, "unit89_body1");
+    assert_eq!(classes(n), ["Unwrap UVW", "XForm"]);
+    let uv = n.modifiers[0].uvs.as_ref().unwrap();
+    assert_eq!((uv.verts.len(), uv.faces.len()), (226, 192));
+    // The first polygon of the Editable Poly below is the triangle 5, 4, 12.
+    assert_eq!(uv.faces[0], (vec![198, 28, 142], vec![5, 4, 12]));
+    let g = n.modifiers[1].gizmo.unwrap();
+    assert!((g.x_axis.truncate().length() - 0.5).abs() < 1e-4, "{g}");
+}
+
+#[test]
+fn materials_layers_lights_and_cameras() {
+    let Some(b) = sample("Cone/TrafficCone.max") else { return };
+    let doc = loom_max::read(&b).unwrap();
+    let m = node(&doc, "Box001").material.unwrap();
+    let loom_max::MaxMaterial::MultiSub { subs, .. } = &doc.materials[m] else { panic!("{:?}", doc.materials[m]) };
+    assert_eq!(subs.iter().map(|s| s.id).collect::<Vec<_>>(), [1, 2]);
+    let loom_max::MaxMaterial::Standard(red) = &doc.materials[subs[0].material.unwrap()] else { panic!() };
+    assert_eq!(red.name, "_traffic_conecone_red");
+    assert!((glam::Vec3::from(red.diffuse) - glam::Vec3::new(0.992, 0.259, 0.008)).length() < 2e-3);
+    assert_eq!((red.glossiness, red.soften, red.opacity), (Some(10.0), Some(0.1), Some(100.0)));
+    assert_eq!(doc.layers.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["0"]);
+    assert!(doc.nodes.iter().all(|n| n.layer == Some(0)));
+    // A bitmap on the Diffuse channel names its file.
+    if let Some(b) = sample("Extra/Arena_01.max") {
+        let doc = loom_max::read(&b).unwrap();
+        let loom_max::MaxMaterial::Standard(s) = &doc.materials[node(&doc, "Cylinder01").material.unwrap()] else { panic!() };
+        let diffuse = s.maps.iter().find(|(ch, _)| *ch == 1).unwrap();
+        assert!(diffuse.1.ends_with("BaseTexture_01.png"), "{}", diffuse.1);
+    }
+    // Turck's glass is 40 % opaque.
+    if let Some(b) = sample("Truck/Turck.max") {
+        let doc = loom_max::read(&b).unwrap();
+        let glass = doc.materials.iter().find_map(|m| match m { loom_max::MaxMaterial::Standard(s) if s.name == "glass" => Some(s), _ => None }).unwrap();
+        assert!((glass.opacity.unwrap() - 40.0).abs() < 1e-3);
+    }
+    let Some(b) = sample("Monster/Monster_HEad.max") else { return };
+    let doc = loom_max::read(&b).unwrap();
+    let d = node(&doc, "Direct02");
+    let loom_max::MaxKind::Light { kind, params } = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(*kind, "target_direct");
+    let p = |n: &str| params.iter().find(|(k, _)| *k == n).unwrap().1;
+    assert!((p("Hotspot") - 109.22).abs() < 1e-3 && (p("Falloff") - 114.3).abs() < 1e-3 && p("Multiplier") == 1.0);
+    assert_eq!(d.look_at.map(|t| doc.nodes[t].name.as_str()), Some("Direct02.Target"));
+    assert!(matches!(node(&doc, "Direct02.Target").kind, loom_max::MaxKind::Target));
+    assert!((d.local.w_axis.truncate() - glam::Vec3::new(177.233, 118.559, 95.045)).length() < 1e-2);
+    let loom_max::MaxKind::Camera { params } = &node(&doc, "Camera01").kind else { panic!() };
+    let p = |n: &str| params.iter().find(|(k, _)| *k == n).unwrap().1;
+    assert!((p("FOV") - 36.0).abs() < 1e-3 && (p("Near Clip") - 2.54).abs() < 1e-4 && p("Far Clip") == 2540.0);
+}
