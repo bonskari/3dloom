@@ -262,11 +262,43 @@ fn read_take(scene: &ufbx::Scene, index_of: &BTreeMap<u32, usize>) -> Option<cra
     Some(crate::document::FbxTake { name: stack.element.name.to_string(), fps: fps as f32, start, end, tracks })
 }
 
+/// Metres per unit of the file's own distances (UnitScaleFactor is in centimetres).
+fn file_unit_metres(scene: &ufbx::Scene) -> f64 {
+    scene.settings.props.find_prop("UnitScaleFactor").map_or(0.01, |p| p.value_vec4.x * 0.01)
+}
+
+/// An FBX light; `unit` scales the file's distances to document units.
+fn convert_light(l: &ufbx::Light, unit: f32) -> crate::document::FbxLight {
+    let prop = |name: &str| l.element.props.find_prop(name);
+    let real = |name: &str, d: f32| prop(name).map_or(d, |p| p.value_vec4.x as f32);
+    let flag = |name: &str| prop(name).is_some_and(|p| p.value_int != 0);
+    let range = |on: &str, a: &str, b: &str| flag(on).then(|| (real(a, 0.0) * unit, real(b, 0.0) * unit));
+    crate::document::FbxLight {
+        light_type: match l.type_ {
+            ufbx::LightType::Directional => 1,
+            ufbx::LightType::Spot => 2,
+            _ => 0,
+        },
+        color: [l.color.x as f32, l.color.y as f32, l.color.z as f32],
+        intensity: l.intensity as f32,
+        inner_angle: l.inner_angle as f32,
+        outer_angle: l.outer_angle as f32,
+        cast_light: l.cast_light,
+        cast_shadows: l.cast_shadows,
+        decay: l.decay as u32,
+        decay_start: real("DecayStart", 0.0) * unit,
+        near: range("EnableNearAttenuation", "NearAttenuationStart", "NearAttenuationEnd"),
+        far: range("EnableFarAttenuation", "FarAttenuationStart", "FarAttenuationEnd"),
+    }
+}
+
 pub fn read(bytes: &[u8], target_unit_metres: f64) -> Result<FbxDocument, String> {
     let opts = ufbx::LoadOpts {
         target_axes: ufbx::CoordinateAxes::right_handed_z_up(),
         // Loom cameras look down local -Z with +Y up (FBX: +X forward).
         target_camera_axes: ufbx::CoordinateAxes { right: ufbx::CoordinateAxis::PositiveX, up: ufbx::CoordinateAxis::PositiveY, front: ufbx::CoordinateAxis::PositiveZ },
+        // Loom lights aim down local -Z too.
+        target_light_axes: ufbx::CoordinateAxes { right: ufbx::CoordinateAxis::PositiveX, up: ufbx::CoordinateAxis::PositiveY, front: ufbx::CoordinateAxis::PositiveZ },
         target_unit_meters: target_unit_metres,
         space_conversion: ufbx::SpaceConversion::ModifyGeometry,
         geometry_transform_handling: ufbx::GeometryTransformHandling::ModifyGeometry,
@@ -294,6 +326,8 @@ pub fn read(bytes: &[u8], target_unit_metres: f64) -> Result<FbxDocument, String
             FbxKind::Mesh { mesh, materials }
         } else if let Some(c) = n.camera.as_ref() {
             FbxKind::Camera { fov_deg: c.field_of_view_deg.y as f32 }
+        } else if let Some(l) = n.light.as_ref() {
+            FbxKind::Light(convert_light(l, (file_unit_metres(&scene) / target_unit_metres) as f32))
         } else if let Some(b) = n.bone.as_ref() {
             FbxKind::Bone { length: 0.0, size: (b.radius as f32).max(0.01) }
         } else {

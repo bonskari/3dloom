@@ -76,9 +76,39 @@ pub enum FbxKind {
     /// `materials[i]` names material id `i + 1`.
     Mesh { mesh: Mesh, materials: Vec<String> },
     Camera { fov_deg: f32 },
+    /// A light (FBX Light attribute), aiming down local -Z in the document.
+    Light(FbxLight),
     /// A skeleton bone (FBX LimbNode): `length` to its child joint, `size` its drawn width.
     Bone { length: f32, size: f32 },
     Empty,
+}
+
+/// An FBX light's attribute.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FbxLight {
+    /// FBX LightType: 0 point, 1 directional, 2 spot.
+    pub light_type: u32,
+    /// Colour as stored (0..1 per channel).
+    pub color: [f32; 3],
+    /// Intensity / 100 (1 = full strength).
+    pub intensity: f32,
+    /// Full cone angles in degrees (spot).
+    pub inner_angle: f32,
+    pub outer_angle: f32,
+    pub cast_light: bool,
+    pub cast_shadows: bool,
+    /// FBX DecayType: 0 none, 1 linear, 2 quadratic, 3 cubic.
+    pub decay: u32,
+    /// Lengths in document units.
+    pub decay_start: f32,
+    pub near: Option<(f32, f32)>,
+    pub far: Option<(f32, f32)>,
+}
+
+impl Default for FbxLight {
+    fn default() -> Self {
+        Self { light_type: 0, color: [1.0; 3], intensity: 1.0, inner_angle: 43.0, outer_angle: 45.0, cast_light: true, cast_shadows: false, decay: 0, decay_start: 0.0, near: None, far: None }
+    }
 }
 
 /// A skin deformer: per bone its `geometry_to_bone` binding (mesh-local
