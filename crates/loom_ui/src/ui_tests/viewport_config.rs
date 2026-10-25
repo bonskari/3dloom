@@ -33,6 +33,7 @@ fn the_shading_menu_draws_objects_as_bounding_boxes() {
     let id = h.app.state.scene.nodes().next().unwrap().id;
     h.cmd(Command::SetWireColor { id: id.0, rgb: [10, 200, 30] });
     maximized(&mut h);
+    h.cmd(Command::ZoomExtentsAll);
     let wire = egui::Color32::from_rgb(10, 200, 30);
     assert_eq!(lines_in(&h, wire), 0, "shaded on the GPU: no painted box");
     h.click(label_rect(&h, 2).center());

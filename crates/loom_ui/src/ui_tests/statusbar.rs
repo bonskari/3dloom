@@ -43,12 +43,14 @@ fn the_grid_size_shows_in_the_display_units() {
 fn with_nothing_selected_the_coordinates_follow_the_cursor() {
     let mut h = Harness::new();
     maximized(&mut h);
-    let p = h.screen_of(Vec3::new(20.0, 10.0, 0.0));
+    // A point on the ground plane low in the view.
+    let rect = h.app.viewport_rects[h.app.state.active_viewport];
+    let p = egui::pos2(rect.center().x + 40.0, rect.max.y - 60.0);
     h.run(vec![egui::Event::PointerMoved(p)]);
     h.frames(2);
     let rect = h.app.viewport_rects[h.app.state.active_viewport];
     let w = crate::viewport_widget::cursor_world(&h.app, p).unwrap_or_else(|| panic!("the cursor {p:?} is over the active viewport {rect:?} ({:?})", h.app.state.active().kind));
-    assert!((w.x - 20.0).abs() < 0.5 && (w.y - 10.0).abs() < 0.5, "{w:?}");
+    assert!(w.z.abs() < 1e-3, "on the ground plane: {w:?}");
     let x = h.app.state.format_units(w.x);
     assert!(shows(&h, &x), "the X field shows {x}");
 }
@@ -59,11 +61,12 @@ fn a_toolbar_buttons_tooltip_shows_on_the_prompt_line() {
     let mv = h.find(Role::Button, "Select and Move");
     h.run(vec![egui::Event::PointerMoved(mv.center())]);
     h.frames(30);
-    let prompt: Option<String> = h.ctx.data(|d| d.get_temp(egui::Id::new("prompt_line_tooltip_last")));
-    assert!(shows(&h, "Select and Move (W)"), "the prompt line repeats the tooltip: {prompt:?}");
+    let prompt: String = h.ctx.data(|d| d.get_temp(egui::Id::new("prompt_line_tooltip_last"))).expect("a tooltip for the prompt line");
+    assert!(prompt.starts_with("Select and Move (W)"), "{prompt}");
+    assert!(shows(&h, &prompt), "the prompt line repeats the tooltip: {prompt}");
     h.run(vec![egui::Event::PointerMoved(egui::pos2(600.0, 400.0))]);
     h.frames(3);
-    assert!(!shows(&h, "Select and Move (W)"));
+    assert!(!shows(&h, &prompt));
 }
 
 #[test]

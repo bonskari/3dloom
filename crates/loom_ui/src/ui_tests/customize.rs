@@ -139,6 +139,21 @@ fn new_toolbar(h: &mut Harness, name: &str) -> egui::Rect {
     window_rect(h, crate::toolbars::window_id(name)).expect("it floats")
 }
 
+/// Drags from `a` to `b` as `Harness::drag` does; true when a drag-and-drop
+/// payload was being carried just before the release.
+fn drag_carrying(h: &mut Harness, a: egui::Pos2, b: egui::Pos2) -> bool {
+    let m = h.mods;
+    h.run(vec![egui::Event::PointerMoved(a)]);
+    h.run(vec![egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: m }]);
+    for i in 1..=8 {
+        h.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 8.0))]);
+    }
+    let carried = egui::DragAndDrop::has_any_payload(&h.ctx);
+    h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
+    h.frames(1);
+    carried
+}
+
 /// Replaces the text of the Customize dialog's Search field with `text`.
 fn search_for(h: &mut Harness, text: &str) {
     let win = customize_ui_rect(h);
@@ -160,8 +175,8 @@ fn drag_action(h: &mut Harness, action: &str, to: egui::Pos2) {
     search_for(h, action);
     let rows = h.find_all(Role::Button, action);
     let row = rows.iter().copied().find(|r| customize_ui_rect(h).contains_rect(*r)).unwrap_or_else(|| panic!("{action} in the action list: {rows:?} in {:?}", customize_ui_rect(h)));
-    h.drag(row.center(), to);
-    h.frames(2);
+    assert!(drag_carrying(h, row.center(), to), "dragging {action} carries it");
+    h.frames(1);
     // Clear the search for the next drag.
     search_for(h, "");
 }
@@ -203,8 +218,9 @@ fn ctrl_drag_copies_a_button_to_another_toolbar_and_alt_drag_moves_it() {
     let b = window_rect(&h, crate::toolbars::window_id("B")).unwrap();
     let all = h.find_all(Role::Button, "Select All").into_iter().find(|r| a.contains_rect(*r)).unwrap();
     h.mods = egui::Modifiers::CTRL;
-    h.drag(all.center(), b.center());
+    let carried = drag_carrying(&mut h, all.center(), b.center());
     h.mods = egui::Modifiers::NONE;
+    assert!(carried, "the Ctrl+drag carries the button");
     assert_eq!(h.app.state.ui_custom.toolbar("A").unwrap().items, ["Select All", "Select None"]);
     assert_eq!(h.app.state.ui_custom.toolbar("B").unwrap().items, ["Select All"], "Ctrl+drag copies");
     h.frames(2);

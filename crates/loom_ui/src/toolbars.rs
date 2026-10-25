@@ -80,7 +80,8 @@ pub fn host(ctx: &egui::Context, app: &mut LoomApp, name: &str, edges: &[Dock], 
         }
         Dock::Left | Dock::Right => {
             let panel = if dock == Dock::Left { egui::SidePanel::left(panel_id(name)) } else { egui::SidePanel::right(panel_id(name)) };
-            let r = panel.resizable(!locked).default_width(44.0).min_width(28.0).show(ctx, |ui| body(ui, app, true));
+            // A column: separators and drop-downs must not stretch it across the viewports.
+            let r = panel.resizable(!locked).default_width(44.0).width_range(28.0..=96.0).show(ctx, |ui| body(ui, app, true));
             Hosted { response: r.response, vertical: true }
         }
         Dock::Float => {

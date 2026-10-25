@@ -82,19 +82,19 @@ fn dragging_the_panel_pans_it_when_it_is_taller_than_the_window() {
     h.cmd(Command::ConvertToEditablePoly);
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(4);
-    // A plain label senses no drag: a drag over it pans the panel.
+    // A checkbox senses clicks only: a drag over it pans the panel.
     let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).unwrap().rect;
     let (text, grab) = h
         .widgets
         .iter()
-        .filter(|(r, t, w)| *r == Role::Label && !t.trim().is_empty() && panel.contains_rect(*w) && w.center().y > panel.center().y)
+        .filter(|(r, t, w)| *r == Role::CheckBox && !t.trim().is_empty() && panel.contains_rect(*w) && w.center().y > panel.center().y)
         .max_by(|a, b| a.2.center().y.total_cmp(&b.2.center().y))
         .map(|(_, t, w)| (t.clone(), *w))
         .unwrap_or_else(|| panic!("a label low in the panel: {:?}", h.widgets.iter().filter(|w| panel.contains_rect(w.2)).map(|w| (w.0, w.1.clone())).collect::<Vec<_>>()));
     let before = grab.center().y;
     h.drag(grab.center(), grab.center() - egui::vec2(0.0, 120.0));
     h.frames(2);
-    let after = h.widgets.iter().filter(|(r, t, w)| *r == Role::Label && *t == text && panel.contains_rect(*w)).map(|w| w.2.center().y).fold(f32::MAX, f32::min);
+    let after = h.widgets.iter().filter(|(r, t, w)| *r == Role::CheckBox && *t == text && panel.contains_rect(*w)).map(|w| w.2.center().y).fold(f32::MAX, f32::min);
     assert!(after < before - 60.0, "the panel scrolled up under the drag: {text:?} {before} -> {after}");
 }
 
