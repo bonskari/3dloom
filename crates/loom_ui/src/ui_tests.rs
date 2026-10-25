@@ -20,6 +20,7 @@ mod skin_wrap;
 mod biped;
 mod lightcam2;
 mod bake;
+mod cursors;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
@@ -40,11 +41,13 @@ struct Harness {
     textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
     /// Seconds between frames (a loaded machine draws fewer per second).
     frame_time: f64,
+    /// The last frame's mouse cursor.
+    cursor: egui::CursorIcon,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0 };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0, cursor: egui::CursorIcon::Default };
         h.ctx.enable_accesskit();
         h.frames(3);
         h
@@ -70,6 +73,7 @@ impl Harness {
         self.app.raw_input_hook(&self.ctx, &mut input);
         let app = &mut self.app;
         let out = self.ctx.run(input, |ctx| app.frame(ctx));
+        self.cursor = out.platform_output.cursor_icon;
         self.commands.extend(out.platform_output.commands);
         self.textures.extend(out.textures_delta.set);
         self.shapes = out.shapes;
