@@ -1343,11 +1343,12 @@ impl Surface {
             // Metal makes its own highlight from the diffuse colour, which dims as the level rises.
             Shader::Metal => {
                 specular = self.diffuse * level;
-                color *= 1.0 - 0.75 * level.min(1.0);
+                // Half at most: the one headlight lobe cannot show a metal's glancing reflections.
+                color *= 1.0 - 0.5 * level.min(1.0);
             }
             Shader::Strauss => {
                 let (g, m) = (self.glossiness / 100.0, sh.metalness / 100.0);
-                color *= (1.0 - m * g) * (1.0 - g * g * g);
+                color *= (1.0 - 0.5 * m * g) * (1.0 - 0.5 * g * g * g);
                 specular = Vec3::ONE.lerp(self.diffuse, m) * (0.1 + 0.9 * g);
             }
             // Light passes through: both sides show.
