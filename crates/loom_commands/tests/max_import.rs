@@ -92,8 +92,11 @@ fn imported_stacks_evaluate_to_the_bounds_the_file_stored() {
     let m = s.scene.evaluated(id, None).value.mesh.clone();
     assert!(m.face_count() > 0);
     let (lo, hi) = m.aabb();
-    // Revolved about the object's Y through the (moved) pivot: symmetric in X and Z.
-    assert!((lo.x + hi.x).abs() < 0.02 && (lo.z + hi.z).abs() < 0.02, "{lo} {hi}");
+    // Revolved about its Direction axis through the (moved) pivot: symmetric across it.
+    let loom_scene::Modifier::Lathe { direction, .. } = &s.scene.node(id).unwrap().modifiers[0].modifier else { panic!() };
+    for k in (0..3).filter(|k| *k != direction.get() as usize) {
+        assert!((lo[k] + hi[k]).abs() < 0.02, "axis {}: {lo} {hi}", direction.get());
+    }
     let doc = loom_max::read(&std::fs::read(&p).unwrap()).unwrap();
     let file_node = doc.nodes.iter().find(|n| n.name == s.scene.node(id).unwrap().name).unwrap();
     let axis_world = s.scene.object_matrix(id).transform_point3(glam::Vec3::ZERO);

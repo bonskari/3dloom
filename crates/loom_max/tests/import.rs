@@ -201,7 +201,8 @@ fn deformers_maps_and_shapes_keep_their_settings() {
     let loom_max::MaxKind::Shape(s) = &n.kind else { panic!() };
     assert_eq!((s.splines[0].knots.len(), s.splines[0].closed), (5, false));
     let l = &n.modifiers[0];
-    assert_eq!((param(l, "Degrees"), param(l, "Segments"), param(l, "Direction"), param(l, "Align")), (360.0, 20.0, 1.0, 3.0));
+    assert_eq!((param(l, "Degrees"), param(l, "Segments"), param(l, "Direction")), (360.0, 20.0, 1.0));
+    assert!(!l.params.iter().any(|(n, _)| *n == "Align"), "the axis stays on the pivot");
     assert!(l.gizmo.is_none());
     assert!((s.splines[0].knots[0].pos - glam::Vec3::new(0.72 - 0.59, 3.32, 0.0)).length() < 0.01, "{}", s.splines[0].knots[0].pos);
 }

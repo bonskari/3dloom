@@ -340,7 +340,8 @@ fn lathe_axis(kind: &mut MaxKind, modifiers: &mut Vec<MaxModifier>, offset: &mut
     }
     let lathe = &mut modifiers[0];
     lathe.gizmo = None;
-    lathe.params.extend([("Direction", dir as f64), ("Align", 3.0)]);
+    // Loom's Lathe starts on its pivot alignment (no Align button down).
+    lathe.params.push(("Direction", dir as f64));
 }
 
 /// A layer's name (0x1010, single-byte text in the sample files) and colour (0x1030).
