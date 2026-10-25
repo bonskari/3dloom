@@ -29,6 +29,7 @@ pub use execute::file_action;
 pub mod file;
 pub mod scene_file;
 pub mod bvh_io;
+pub mod retarget;
 pub mod fbx_io;
 pub mod exchange;
 pub mod obj_io;
