@@ -21,7 +21,7 @@ fn pref(s: &mut AppState, name: &str, value: f64) {
 }
 
 fn units(s: &mut AppState, system: &str, display: &str) {
-    execute(s, Command::SetUnits { system_unit: Some(system.into()), system_scale: None, display: Some(display.into()), custom_name: None, custom_value: None, custom_unit: None }).unwrap();
+    execute(s, Command::SetUnits { system_unit: Some(system.into()), system_scale: None, display: Some(display.into()), custom_name: None, custom_value: None, custom_unit: None, fraction: None, default_feet: None, respect_system_units: None }).unwrap();
 }
 
 fn assign(s: &mut AppState, group: &str, action: &str, chord: &str) -> serde_json::Value {
@@ -184,6 +184,9 @@ fn reset_keeps_the_users_units_and_an_opened_file_does_not_change_them() {
     let mut other = AppState::new();
     execute(&mut other, Command::SaveFile { path: p(&path) }).unwrap();
     execute(&mut s, Command::OpenFile { path: p(&path) }).unwrap();
+    // Other system units: the Units Mismatch dialog asks; Adopt the file's unit scale.
+    assert_eq!(s.dialog, Some(Dialog::UnitsMismatch));
+    execute(&mut s, Command::UnitsMismatchReply { rescale: false }).unwrap();
     assert_eq!(s.units.system_unit, loom_commands::SystemUnit::Inches, "the scene's units load with it");
     assert_eq!(Settings::capture(&s).units.system_unit, loom_commands::SystemUnit::Centimeters, "the saved defaults stay the user's");
     execute(&mut s, Command::ResetFile).unwrap();

@@ -33,7 +33,7 @@ fn the_status_line_counts_the_selection_by_type() {
 #[test]
 fn the_grid_size_shows_in_the_display_units() {
     let mut h = Harness::new();
-    h.cmd(Command::SetUnits { system_unit: None, system_scale: None, display: Some("Centimeters".into()), custom_name: None, custom_value: None, custom_unit: None });
+    h.cmd(Command::SetUnits { system_unit: None, system_scale: None, display: Some("Centimeters".into()), custom_name: None, custom_value: None, custom_unit: None, fraction: None, default_feet: None, respect_system_units: None });
     let expect = format!("Grid = {}", h.app.state.format_units(h.app.state.home_grid.spacing));
     assert!(expect.contains("cm"), "{expect}");
     assert!(shows(&h, &expect));

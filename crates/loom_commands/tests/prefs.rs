@@ -45,16 +45,16 @@ fn reference_coordinate_system_is_per_tool_unless_constant() {
 fn units_display_formats_metres() {
     let mut s = state();
     assert_eq!(s.format_units(12.5), "12.5");
-    execute(&mut s, Command::SetUnits { system_unit: None, system_scale: None, display: Some("Meters".into()), custom_name: None, custom_value: None, custom_unit: None }).unwrap();
+    execute(&mut s, Command::SetUnits { system_unit: None, system_scale: None, display: Some("Meters".into()), custom_name: None, custom_value: None, custom_unit: None, fraction: None, default_feet: None, respect_system_units: None }).unwrap();
     // System unit is inches by default: 100 units = 2.54 m.
     assert_eq!(s.format_units(100.0), "2.54m");
-    execute(&mut s, Command::SetUnits { system_unit: Some("Centimeters".into()), system_scale: None, display: Some("Millimeters".into()), custom_name: None, custom_value: None, custom_unit: None }).unwrap();
+    execute(&mut s, Command::SetUnits { system_unit: Some("Centimeters".into()), system_scale: None, display: Some("Millimeters".into()), custom_name: None, custom_value: None, custom_unit: None, fraction: None, default_feet: None, respect_system_units: None }).unwrap();
     assert_eq!(s.format_units(2.5), "25.0mm");
-    execute(&mut s, Command::SetUnits { system_unit: None, system_scale: None, display: Some("Decimal Feet".into()), custom_name: None, custom_value: None, custom_unit: None }).unwrap();
+    execute(&mut s, Command::SetUnits { system_unit: None, system_scale: None, display: Some("Decimal Feet".into()), custom_name: None, custom_value: None, custom_unit: None, fraction: None, default_feet: None, respect_system_units: None }).unwrap();
     assert_eq!(s.format_units(30.48), "1.0'");
-    execute(&mut s, Command::SetUnits { system_unit: None, system_scale: None, display: Some("Custom".into()), custom_name: Some("FL".into()), custom_value: Some(2.0), custom_unit: Some("Centimeters".into()) }).unwrap();
+    execute(&mut s, Command::SetUnits { system_unit: None, system_scale: None, display: Some("Custom".into()), custom_name: Some("FL".into()), custom_value: Some(2.0), custom_unit: Some("Centimeters".into()), fraction: None, default_feet: None, respect_system_units: None }).unwrap();
     assert_eq!(s.format_units(5.0), "2.5FL");
-    assert!(execute(&mut s, Command::SetUnits { system_unit: None, system_scale: None, display: Some("Parsecs".into()), custom_name: None, custom_value: None, custom_unit: None }).is_err());
+    assert!(execute(&mut s, Command::SetUnits { system_unit: None, system_scale: None, display: Some("Parsecs".into()), custom_name: None, custom_value: None, custom_unit: None, fraction: None, default_feet: None, respect_system_units: None }).is_err());
     execute(&mut s, Command::UnitsSetup).unwrap();
     assert_eq!(s.dialog, Some(loom_commands::Dialog::UnitsSetup));
 }

@@ -151,7 +151,7 @@ fn settings_round_trip() {
     execute(&mut s, Command::NamedSelectionSet { name: "boxes".into() }).unwrap();
     execute(&mut s, Command::ViewportLayout { layout: loom_commands::ViewportLayout::TwoV }).unwrap();
     execute(&mut s, Command::SetTimeConfiguration { start: Some(10), end: Some(200), fps: Some(25.0) }).unwrap();
-    execute(&mut s, Command::SetUnits { system_unit: Some("Meters".into()), system_scale: None, display: Some("Centimeters".into()), custom_name: None, custom_value: None, custom_unit: None }).unwrap();
+    execute(&mut s, Command::SetUnits { system_unit: Some("Meters".into()), system_scale: None, display: Some("Centimeters".into()), custom_name: None, custom_value: None, custom_unit: None, fraction: None, default_feet: None, respect_system_units: None }).unwrap();
     s.viewports[0].camera.distance = 123.0;
     let settings = SceneSettings::from_state(&s);
     let json = serde_json::to_string(&settings).unwrap();

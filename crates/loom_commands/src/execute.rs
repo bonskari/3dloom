@@ -65,6 +65,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::ui_custom::handles(&c) => crate::ui_custom::execute(state, c),
         c if crate::time_tags::handles(&c) => crate::time_tags::execute(state, c),
         c if crate::viewport_config::handles(&c) => crate::viewport_config::execute(state, c),
+        c if crate::paths::handles(&c) => crate::paths::execute(state, c),
+        c if crate::switcher::handles(&c) => crate::switcher::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
         c if crate::display::handles(&c) => crate::display::execute(state, c),
         c if crate::render::handles(&c) => crate::render::execute(state, c),
@@ -141,9 +143,47 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             };
             let path = std::path::PathBuf::from(path);
             let doc = crate::file::read(&path)?;
+            // A file in other system units: the Units Mismatch dialog asks (Respect System Units in Files).
+            let file_metres = doc.settings.units.system_scale as f64 * doc.settings.units.system_unit.metres();
+            let ours = &state.default_units;
+            let our_metres = ours.system_scale as f64 * ours.system_unit.metres();
+            if (file_metres / our_metres - 1.0).abs() > 1e-6 {
+                if ours.respect_system_units {
+                    state.units_mismatch = Some(path.clone());
+                    state.dialog = Some(Dlg::UnitsMismatch);
+                    return Ok(json!({ "dialog": "UnitsMismatch", "file_unit": doc.settings.units.system_unit.label(), "file_scale": doc.settings.units.system_scale }));
+                }
+                // Not respected: the file's numbers in our system units.
+                let (unit, scale) = (ours.system_unit, ours.system_scale);
+                crate::settings::note_recent(state, &path);
+                load_document(state, doc, Some(path));
+                state.units.system_unit = unit;
+                state.units.system_scale = scale;
+                return Ok(json!({ "nodes": state.scene.len() }));
+            }
             crate::settings::note_recent(state, &path);
             load_document(state, doc, Some(path));
             Ok(json!({ "nodes": state.scene.len() }))
+        }
+        C::UnitsMismatchReply { rescale } => {
+            let path = state.units_mismatch.take().ok_or("no Units Mismatch is waiting")?;
+            if state.dialog == Some(Dlg::UnitsMismatch) {
+                state.dialog = None;
+            }
+            let doc = crate::file::read(&path)?;
+            let file_metres = doc.settings.units.system_scale as f64 * doc.settings.units.system_unit.metres();
+            let ours = state.default_units.clone();
+            let our_metres = ours.system_scale as f64 * ours.system_unit.metres();
+            crate::settings::note_recent(state, &path);
+            load_document(state, doc, Some(path));
+            if rescale {
+                // Rescale the file's objects to the system unit scale.
+                state.units.system_unit = ours.system_unit;
+                state.units.system_scale = ours.system_scale;
+                execute(state, C::RescaleWorldUnits { factor: (file_metres / our_metres) as f32 })?;
+            }
+            // Adopt: the scene keeps the file's unit scale (new scenes keep the user's).
+            Ok(json!({ "nodes": state.scene.len(), "rescaled": rescale }))
         }
         C::SaveFile { path } => {
             let target = match (path, state.file.clone()) {
@@ -1547,7 +1587,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(Dlg::UnitsSetup);
             Ok(json!({}))
         }
-        C::SetUnits { system_unit, system_scale, display, custom_name, custom_value, custom_unit } => {
+        C::SetUnits { system_unit, system_scale, display, custom_name, custom_value, custom_unit, fraction, default_feet, respect_system_units } => {
             use crate::state::{DisplayUnits, SystemUnit};
             if let Some(u) = system_unit {
                 state.units.system_unit = SystemUnit::parse(&u).ok_or_else(|| format!("unknown system unit {u:?}"))?;
@@ -1557,14 +1597,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             if let Some(d) = display {
                 state.units.display = match d.as_str() {
-                    "Generic" => DisplayUnits::Generic,
-                    "Millimeters" => DisplayUnits::Millimeters,
-                    "Centimeters" => DisplayUnits::Centimeters,
-                    "Meters" => DisplayUnits::Meters,
-                    "Kilometers" => DisplayUnits::Kilometers,
-                    "Decimal Inches" => DisplayUnits::DecimalInches,
-                    "Decimal Feet" => DisplayUnits::DecimalFeet,
-                    "Feet w/ Decimal Inches" => DisplayUnits::FeetDecimalInches,
+                    n if DisplayUnits::by_name(n).is_some() => DisplayUnits::by_name(n).expect("checked"),
                     "Custom" => {
                         let (name, value, unit) = match &state.units.display {
                             DisplayUnits::Custom { name, value, unit } => (name.clone(), *value, *unit),
@@ -1582,6 +1615,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 if let Some(n) = custom_name { *name = n; }
                 if let Some(v) = custom_value { *value = v.max(1e-6); }
                 if let Some(u) = custom_unit { *unit = SystemUnit::parse(&u).ok_or_else(|| format!("unknown custom unit {u:?}"))?; }
+            }
+            if let Some(f) = fraction {
+                if !DisplayUnits::FRACTIONS.contains(&f) {
+                    return Err(format!("fraction 1/{f}: one of {:?}", DisplayUnits::FRACTIONS));
+                }
+                state.units.fraction = f;
+            }
+            if let Some(f) = default_feet {
+                state.units.default_feet = f;
+            }
+            if let Some(r) = respect_system_units {
+                state.units.respect_system_units = r;
             }
             state.default_units = state.units.clone();
             Ok(json!({ "display": state.units.display.label(), "example": state.format_units(1.0) }))

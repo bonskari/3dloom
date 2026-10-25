@@ -42,6 +42,22 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
         Dialog::ExportFile | Dialog::ExportSelected | Dialog::ArchiveFile => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
         _ => String::new(),
     };
+    // Configure User Paths > File I/O: the folder of this kind of file.
+    let entry = match dialog {
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::MergeFile | Dialog::SaveSelected => Some("Scenes"),
+        Dialog::ImportFile => Some("Import"),
+        Dialog::ExportFile | Dialog::ExportSelected => Some("Export"),
+        Dialog::ArchiveFile => Some("Archives"),
+        Dialog::SaveAnimation | Dialog::LoadAnimation => Some("Animations"),
+        Dialog::RenderFile | Dialog::SaveRenderedImage => Some("Render Output"),
+        _ => None,
+    };
+    if let Some(d) = entry.and_then(|e| app.state.paths.dir(e)) {
+        let keep_scene_folder = matches!(dialog, Dialog::SaveFileAs | Dialog::SaveFileAsCopy) && app.state.file.is_some();
+        if !keep_scene_folder {
+            return (d.to_path_buf(), name);
+        }
+    }
     let dir = app.state.file.as_ref().and_then(|f| f.parent()).filter(|d| d.is_dir()).map(|d| d.to_path_buf()).unwrap_or_else(|| app.file_dir.clone());
     (dir, name)
 }

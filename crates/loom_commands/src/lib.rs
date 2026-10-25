@@ -60,6 +60,8 @@ pub mod settings;
 pub mod ui_custom;
 pub mod time_tags;
 pub mod viewport_config;
+pub mod paths;
+pub mod switcher;
 pub use keymap::{parse_chord, Chord, Key, Keymap};
 pub mod viewport;
 pub use viewport::{default_kinds, Degradation, HideCategories, LayoutSplits, NavMode, Shading, Transparency, Viewport, ViewportLayout, BrowserFor, Dialog, UiFileKind, NewKeep, PendingFileAction, PolySettingsKind};

@@ -1,5 +1,6 @@
 //! Modeless dialogs opened by commands (`AppState::dialog`).
 
+pub mod configure_paths;
 pub mod align;
 pub mod array;
 pub mod spacing_tool;
@@ -158,6 +159,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ObjectProperties => object_properties::show(ctx, app, &mut open),
         Dialog::Preferences => preferences::show(ctx, app, &mut open),
         Dialog::UnitsSetup => units_setup::show(ctx, app, &mut open),
+        Dialog::UnitsMismatch => units_setup::units_mismatch(ctx, app, &mut open),
+        Dialog::ConfigurePaths => configure_paths::show(ctx, app, &mut open),
+        Dialog::Switcher => switcher(ctx, app, &mut open),
         Dialog::CustomizeUI => customize_ui::show(ctx, app, &mut open),
         Dialog::PolySettings(kind) => poly_settings::show(ctx, app, kind, &mut open),
         Dialog::Detach => detach::show(ctx, app, &mut open),
@@ -265,5 +269,59 @@ fn import_summary(ctx: &egui::Context, app: &mut LoomApp) {
     });
     if !open || ok {
         app.state.import_report.clear();
+    }
+}
+
+/// Custom UI and Defaults Switcher: the defaults set for tool options and the
+/// UI scheme; Set applies both.
+fn switcher(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("switcher_picks");
+    let mut picks: (String, String, String) = ctx.data(|d| d.get_temp(id)).unwrap_or_else(|| ("Default".into(), "Default UI".into(), String::new()));
+    let sets = loom_commands::switcher::defaults_sets();
+    let schemes = loom_commands::switcher::schemes();
+    let mut done = false;
+    egui::Window::new("Choose initial settings for tool options and UI layout").id(egui::Id::new("Custom UI and Defaults Switcher")).open(open).collapsible(false).default_width(520.0).show(ctx, |ui| {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(240.0);
+                ui.label(egui::RichText::new("Initial settings for tool options").strong());
+                for s in &sets {
+                    if ui.selectable_label(picks.0 == *s, s).clicked() {
+                        picks.0 = s.clone();
+                    }
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut picks.2).hint_text("new set name").desired_width(130.0));
+                    if ui.button("Save Current").on_hover_text("Save the current preferences and units as a defaults set").clicked() && app.dispatch(Command::SaveDefaultsSet { name: picks.2.clone() }).is_ok() {
+                        picks.0 = picks.2.trim().to_owned();
+                        picks.2.clear();
+                    }
+                });
+            });
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("UI schemes").strong());
+                for s in &schemes {
+                    if ui.selectable_label(picks.1 == *s, s).clicked() {
+                        picks.1 = s.clone();
+                    }
+                }
+            });
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button("Set").clicked() {
+                let _ = app.dispatch(Command::SwitchDefaults { name: picks.0.clone() });
+                let _ = app.dispatch(Command::SwitchUiScheme { name: picks.1.clone() });
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                done = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, picks));
+    if done {
+        *open = false;
     }
 }

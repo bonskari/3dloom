@@ -900,7 +900,7 @@ impl LoomApp {
         if let Some(i) = index.get(&key) {
             return loom_render::TextureSel::Bitmap(*i);
         }
-        match load_bitmap(&mut self.bitmap_cache, path) {
+        match load_bitmap(&mut self.bitmap_cache, &self.state.paths, path) {
             Some(bm) => {
                 bitmaps.push((key.clone(), bm));
                 index.insert(key, bitmaps.len() as u32 - 1);
@@ -950,7 +950,8 @@ impl LoomApp {
     pub fn map_images(&mut self, map: &loom_scene::Map) -> loom_scene::maps::Images {
         let mut images = loom_scene::maps::Images::new();
         let cache = &mut self.bitmap_cache;
-        loom_scene::maps::load_images(map, &mut images, &mut |path| load_bitmap(cache, path).map(|b| std::sync::Arc::new(loom_scene::maps::Image { width: b.width, height: b.height, rgba: b.rgba.clone() })));
+        let paths = &self.state.paths;
+        loom_scene::maps::load_images(map, &mut images, &mut |path| load_bitmap(cache, paths, path).map(|b| std::sync::Arc::new(loom_scene::maps::Image { width: b.width, height: b.height, rgba: b.rgba.clone() })));
         images
     }
 
@@ -1235,7 +1236,8 @@ impl LoomApp {
         if let Some(t) = self.background_textures.get(&key) {
             return t.clone();
         }
-        let loaded = image::open(path).ok().map(|img| {
+        let found = self.state.paths.resolve_bitmap(path).unwrap_or_else(|| std::path::PathBuf::from(path));
+        let loaded = image::open(found).ok().map(|img| {
             let rgba = img.to_rgba8();
             let size = [rgba.width() as usize, rgba.height() as usize];
             let ci = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
@@ -1446,11 +1448,13 @@ pub(crate) fn draws_see_through(n: &loom_scene::Node) -> bool {
     n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }))
 }
 
-fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>, path: &str) -> Option<std::sync::Arc<loom_render::Bitmap>> {
+fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>, paths: &loom_commands::paths::UserPaths, path: &str) -> Option<std::sync::Arc<loom_render::Bitmap>> {
     cache
         .entry(path.to_owned())
         .or_insert_with(|| {
-            image::open(path).ok().map(|img| {
+            // Configure User Paths > External Files: a bitmap not at its path is looked for by name.
+            let found = paths.resolve_bitmap(path).unwrap_or_else(|| std::path::PathBuf::from(path));
+            image::open(found).ok().map(|img| {
                 // GPU textures are capped at 8192 px a side (the common wgpu limit): larger maps shrink.
                 let max = 8192u32;
                 let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };

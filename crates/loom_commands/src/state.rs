@@ -1003,10 +1003,47 @@ pub enum DisplayUnits {
     DecimalFeet,
     FeetDecimalInches,
     Custom { name: String, value: f32, unit: SystemUnit },
+    FractionalInches,
+    FractionalFeet,
+    FeetFractionalInches,
 }
 
 impl DisplayUnits {
-    pub const NAMES: [&'static str; 9] = ["Generic", "Millimeters", "Centimeters", "Meters", "Kilometers", "Decimal Inches", "Decimal Feet", "Feet w/ Decimal Inches", "Custom"];
+    pub const NAMES: [&'static str; 12] = ["Generic", "Millimeters", "Centimeters", "Meters", "Kilometers", "Fractional Inches", "Decimal Inches", "Fractional Feet", "Decimal Feet", "Feet w/ Fractional Inches", "Feet w/ Decimal Inches", "Custom"];
+
+    /// The US Standard units, in the Units Setup list's order.
+    pub const US: [&'static str; 6] = ["Fractional Inches", "Decimal Inches", "Fractional Feet", "Decimal Feet", "Feet w/ Fractional Inches", "Feet w/ Decimal Inches"];
+
+    /// The fraction denominators the fractional units offer.
+    pub const FRACTIONS: [u32; 9] = [1, 2, 4, 8, 10, 16, 32, 64, 100];
+
+    /// A display unit by its Units Setup name (Custom takes its own fields).
+    pub fn by_name(name: &str) -> Option<DisplayUnits> {
+        Some(match name {
+            "Generic" => DisplayUnits::Generic,
+            "Millimeters" => DisplayUnits::Millimeters,
+            "Centimeters" => DisplayUnits::Centimeters,
+            "Meters" => DisplayUnits::Meters,
+            "Kilometers" => DisplayUnits::Kilometers,
+            "Fractional Inches" => DisplayUnits::FractionalInches,
+            "Decimal Inches" => DisplayUnits::DecimalInches,
+            "Fractional Feet" => DisplayUnits::FractionalFeet,
+            "Decimal Feet" => DisplayUnits::DecimalFeet,
+            "Feet w/ Fractional Inches" => DisplayUnits::FeetFractionalInches,
+            "Feet w/ Decimal Inches" => DisplayUnits::FeetDecimalInches,
+            _ => return None,
+        })
+    }
+
+    /// Shown with a fraction (Fractional Inches / Feet, Feet w/ Fractional Inches).
+    pub fn fractional(&self) -> bool {
+        matches!(self, DisplayUnits::FractionalInches | DisplayUnits::FractionalFeet | DisplayUnits::FeetFractionalInches)
+    }
+
+    /// Feet and inches together (where Default Units applies).
+    pub fn feet_and_inches(&self) -> bool {
+        matches!(self, DisplayUnits::FeetDecimalInches | DisplayUnits::FeetFractionalInches)
+    }
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -1019,6 +1056,9 @@ impl DisplayUnits {
             DisplayUnits::DecimalFeet => "Decimal Feet",
             DisplayUnits::FeetDecimalInches => "Feet w/ Decimal Inches",
             DisplayUnits::Custom { .. } => "Custom",
+            DisplayUnits::FractionalInches => "Fractional Inches",
+            DisplayUnits::FractionalFeet => "Fractional Feet",
+            DisplayUnits::FeetFractionalInches => "Feet w/ Fractional Inches",
         }
     }
 
@@ -1030,8 +1070,8 @@ impl DisplayUnits {
             DisplayUnits::Centimeters => (0.01, "cm".into()),
             DisplayUnits::Meters => (1.0, "m".into()),
             DisplayUnits::Kilometers => (1000.0, "km".into()),
-            DisplayUnits::DecimalInches => (0.0254, "\"".into()),
-            DisplayUnits::DecimalFeet | DisplayUnits::FeetDecimalInches => (0.3048, "'".into()),
+            DisplayUnits::DecimalInches | DisplayUnits::FractionalInches => (0.0254, "\"".into()),
+            DisplayUnits::DecimalFeet | DisplayUnits::FeetDecimalInches | DisplayUnits::FractionalFeet | DisplayUnits::FeetFractionalInches => (0.3048, "'".into()),
             DisplayUnits::Custom { name, value, unit } => ((*value as f64) * unit.metres(), name.clone()),
         })
     }
@@ -1043,11 +1083,28 @@ pub struct UnitsSetup {
     /// System Unit Setup: 1 unit = `system_scale` system units.
     pub system_scale: f32,
     pub display: DisplayUnits,
+    /// The fractional units' denominator (1/8 shows eighths).
+    #[serde(default = "eighths")]
+    pub fraction: u32,
+    /// Default Units of Feet w/ Inches: a number typed without a unit is feet (else inches).
+    #[serde(default = "feet")]
+    pub default_feet: bool,
+    /// System Unit Setup > Respect System Units in Files.
+    #[serde(default = "feet")]
+    pub respect_system_units: bool,
+}
+
+fn eighths() -> u32 {
+    8
+}
+
+fn feet() -> bool {
+    true
 }
 
 impl Default for UnitsSetup {
     fn default() -> Self {
-        Self { system_unit: SystemUnit::Inches, system_scale: 1.0, display: DisplayUnits::Generic }
+        Self { system_unit: SystemUnit::Inches, system_scale: 1.0, display: DisplayUnits::Generic, fraction: 8, default_feet: true, respect_system_units: true }
     }
 }
 
@@ -1077,16 +1134,18 @@ impl UnitsSetup {
             .collect();
         let scene_metres = self.system_scale as f64 * self.system_unit.metres();
         if let Some((ft, rest)) = t.split_once('\'') {
-            let feet: f64 = ft.trim().parse().ok()?;
+            let feet: f64 = number(ft)?;
             let rest = rest.trim().trim_end_matches('"').trim();
-            let inches: f64 = if rest.is_empty() { 0.0 } else { rest.parse().ok()? };
+            let inches: f64 = if rest.is_empty() { 0.0 } else { number(rest)? };
             let sign = if ft.trim().starts_with('-') { -1.0 } else { 1.0 };
             return Some((feet + sign * inches / 12.0) * (0.3048 / scene_metres));
         }
         let i = t.find(|c: char| c.is_alphabetic() || c == '"').unwrap_or(t.len());
-        let v: f64 = t[..i].trim().parse().ok()?;
+        let v: f64 = number(&t[..i])?;
         let unit = t[i..].trim().to_ascii_lowercase();
         let metres = match unit.as_str() {
+            // Feet w/ Inches: a bare number is in the Default Units.
+            "" if self.display.feet_and_inches() && !self.default_feet => 0.0254,
             "" => return Some(v / self.display_factor().0),
             "\"" | "in" => 0.0254,
             "ft" => 0.3048,
@@ -1103,6 +1162,38 @@ impl UnitsSetup {
     pub fn format(&self, v: f32, decimals: usize) -> String {
         let (f, suffix) = self.display_factor();
         let d = v as f64 * f;
+        if self.display.fractional() {
+            let den = self.fraction.max(1) as f64;
+            // A whole number and a reduced fraction of `den`: 3 1/8.
+            let frac = |x: f64| {
+                let sign = if x < 0.0 { "-" } else { "" };
+                let n = (x.abs() * den).round() as u64;
+                let (whole, mut num) = (n / den as u64, n % den as u64);
+                let mut d = den as u64;
+                let g = gcd(num, d);
+                if g > 1 {
+                    num /= g;
+                    d /= g;
+                }
+                match (whole, num) {
+                    (w, 0) => format!("{sign}{w}"),
+                    (0, n) => format!("{sign}{n}/{d}"),
+                    (w, n) => format!("{sign}{w} {n}/{d}"),
+                }
+            };
+            return match self.display {
+                DisplayUnits::FeetFractionalInches => {
+                    let total_in = d * 12.0;
+                    let sign = if total_in < 0.0 { "-" } else { "" };
+                    let feet = (total_in.abs() / 12.0).trunc();
+                    let inches = total_in.abs() - feet * 12.0;
+                    // 11 63/64" can round up to a whole foot.
+                    let (feet, inches) = if (inches * den).round() >= 12.0 * den { (feet + 1.0, 0.0) } else { (feet, inches) };
+                    format!("{sign}{}'{}\"", feet as i64, frac(inches))
+                }
+                _ => format!("{}{suffix}", frac(d)),
+            };
+        }
         let rounded = (d * 10f64.powi(decimals as i32)).round() / 10f64.powi(decimals as i32);
         if suffix.is_empty() {
             return trim_float(rounded, decimals);
@@ -1114,6 +1205,29 @@ impl UnitsSetup {
         }
         format!("{}{suffix}", trim_float(rounded, decimals))
     }
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a.max(1) } else { gcd(b, a % b) }
+}
+
+/// A number, a fraction (1/8) or a whole number and a fraction (3 1/8).
+fn number(text: &str) -> Option<f64> {
+    let t = text.trim();
+    if let Ok(v) = t.parse::<f64>() {
+        return Some(v);
+    }
+    let (whole, frac) = match t.rsplit_once(' ') {
+        Some((w, f)) => (w.trim().parse::<f64>().ok()?, f),
+        None => (0.0, t),
+    };
+    let (n, d) = frac.split_once('/')?;
+    let (n, d): (f64, f64) = (n.trim().parse().ok()?, d.trim().parse().ok()?);
+    if d == 0.0 {
+        return None;
+    }
+    let sign = if whole < 0.0 || (whole == 0.0 && t.starts_with('-')) { -1.0 } else { 1.0 };
+    Some(sign * (whole.abs() + n.abs() / d))
 }
 
 /// Decimal string with at most `decimals` places and at least one.
@@ -1685,6 +1799,10 @@ pub struct AppState {
     pub time_tags: Vec<crate::time_tags::TimeTag>,
     /// Viewport Configuration > Adaptive Degradation.
     pub degradation: crate::viewport::Degradation,
+    /// The file the Units Mismatch dialog is open for.
+    pub units_mismatch: Option<std::path::PathBuf>,
+    /// Customize > Configure User Paths (saved in the settings file).
+    pub paths: crate::paths::UserPaths,
     /// New and reset scenes take the saved startup viewport configuration (the app sets it; tests do not).
     pub use_viewport_defaults: bool,
     pub fps: f32,
@@ -1920,6 +2038,8 @@ impl AppState {
             bones_ik_chain: false,
             time_tags: Vec::new(),
             degradation: Default::default(),
+            units_mismatch: None,
+            paths: Default::default(),
             use_viewport_defaults: false,
             current_frame: 0,
             frame_range: (0, 100),

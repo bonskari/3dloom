@@ -474,6 +474,12 @@ pub enum Dialog {
     /// Customize User Interface > Keyboard > Save / Load (.kbd).
     SaveShortcuts,
     LoadShortcuts,
+    /// Customize > Configure User Paths.
+    ConfigurePaths,
+    /// Customize > Custom UI and Defaults Switcher.
+    Switcher,
+    /// File > Open of a file in other system units: Rescale or Adopt.
+    UnitsMismatch,
     /// Customize User Interface > Toolbars / Menus / Quads / Colors: Save or Load a file.
     UiFile { kind: UiFileKind, save: bool },
     /// Customize > Save / Load Custom UI Scheme (.ui).

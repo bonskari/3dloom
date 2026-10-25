@@ -78,6 +78,8 @@ pub struct Settings {
     pub exchange: crate::exchange::ExchangeOptions,
     /// Toolbars, quad menus, menus, colours and the rollout order.
     pub custom: crate::ui_custom::UiCustom,
+    /// Configure User Paths.
+    pub paths: crate::paths::UserPaths,
 }
 
 impl Default for Settings {
@@ -97,6 +99,7 @@ impl Settings {
             last_folder: None,
             exchange: state.exchange.clone(),
             custom: state.ui_custom.clone(),
+            paths: state.paths.clone(),
         }
     }
 
@@ -118,6 +121,7 @@ impl Settings {
         state.recent_files.truncate(state.prefs.recent_files_count);
         state.exchange = self.exchange.clone();
         state.ui_custom = self.custom.clone();
+        state.paths = self.paths.clone();
         state.startup_custom = self.custom.clone();
     }
 
