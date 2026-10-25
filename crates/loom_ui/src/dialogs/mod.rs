@@ -80,6 +80,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             d.remove::<u32>(egui::Id::new("clone_options_copies"));
             file_dialog::clear_state(d);
             merge::clear_state(d);
+            select_from_scene::clear_state(d);
             d.remove::<String>(egui::Id::new("auto_backup_name_edit"));
             for k in ["Weld", "Chamfer", "ConnectEdges", "Bridge", "Extrude", "Inset", "Bevel", "Outline", "Hinge", "MSmooth", "Tessellate", "Relax"] {
                 let id = egui::Id::new("poly_settings").with(k);

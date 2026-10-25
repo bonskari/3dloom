@@ -246,14 +246,17 @@ fn delete_and_move_at_sub_object_level_with_nothing_selected_are_no_ops() {
     assert_eq!(s.undo.labels().len(), before);
 }
 
+/// Undo gives back the sub-object selection from before the step, whose ids
+/// are valid for the mesh the undo restores (not the extruded one's).
 #[test]
-fn undo_clears_stale_sub_selection() {
+fn undo_restores_the_sub_selection_from_before_the_step() {
     let mut s = state();
     let id = box_at(&mut s, 0.0);
     execute(&mut s, Command::SelectFacesFacing { node: Some(id.0), direction: [0.0, 0.0, 1.0], tolerance: 0.9 }).unwrap();
+    let before: Vec<_> = s.sub_selection.iter().collect();
     execute(&mut s, Command::ExtrudeFaces { distance: 1.0 }).unwrap();
     execute(&mut s, Command::UndoSceneOperation).unwrap();
-    assert!(s.sub_selection.is_empty());
+    assert_eq!(s.sub_selection.iter().collect::<Vec<_>>(), before);
 }
 
 #[test]
