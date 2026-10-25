@@ -218,7 +218,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
     let mut mtl: Vec<MtlMaterial> = Vec::new();
     for id in ids {
         let Some(node) = state.scene.node(*id) else { continue };
-        if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
+        if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }) {
             continue;
         }
         let mut mesh = state.scene.eval_mesh(*id).value.mesh.clone();

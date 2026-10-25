@@ -198,6 +198,7 @@ pub fn fbx_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     });
                 });
                 check(ui, app, D, "cameras", "Cameras", o.cameras);
+                check(ui, app, D, "lights", "Lights", o.lights);
                 check(ui, app, D, "embed_media", "Embed Media", o.embed_media);
             });
             section(ui, "Advanced Options", true, |ui| {
@@ -362,6 +363,7 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     });
                 });
                 check(ui, app, D, "cameras", "Cameras", o.cameras);
+                check(ui, app, D, "lights", "Lights", o.lights);
             });
             section(ui, "Advanced Options", true, |ui| {
                 section(ui, "Units", true, |ui| {

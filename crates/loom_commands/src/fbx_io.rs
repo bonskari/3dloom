@@ -33,11 +33,10 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
     ro.skins = o.deformations && o.skins;
     ro.morphs = o.deformations && o.morphs;
     let mut doc = loom_fbx::read_with(&bytes, &ro).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !o.cameras {
-        for n in &mut doc.nodes {
-            if matches!(n.kind, FbxKind::Camera { .. }) {
-                n.kind = FbxKind::Empty;
-            }
+    // Cameras / Lights off: those nodes come in as plain empties (dropped unless they hold children).
+    for n in &mut doc.nodes {
+        if (!o.cameras && matches!(n.kind, FbxKind::Camera { .. })) || (!o.lights && matches!(n.kind, FbxKind::Light(_))) {
+            n.kind = FbxKind::Empty;
         }
     }
     // Empties without children are dropped; their children go to the grandparent.
@@ -101,6 +100,7 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
         let object = match &n.kind {
             FbxKind::Mesh { mesh, .. } => ObjectKind::EditablePoly(loom_scene::PolyObject::from_mesh(mesh.clone())),
             FbxKind::Camera { fov_deg } => ObjectKind::camera_object(*fov_deg),
+            FbxKind::Light(l) => ObjectKind::Light(Box::new(light_from_fbx(l))),
             FbxKind::Bone { length, .. } if o.bones_as_dummies => ObjectKind::dummy(length.max(0.001) * 0.25),
             FbxKind::Bone { length, size } => {
                 let mut b = ObjectKind::bone(length.max(0.001));
@@ -119,6 +119,9 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
         let mut node = Node::new(&name, object);
         if matches!(n.kind, FbxKind::Bone { .. }) {
             node.wire_color = [180, 180, 100];
+        }
+        if matches!(n.kind, FbxKind::Light(_)) {
+            node.wire_color = crate::light::LIGHT_COLOR;
         }
         if let FbxKind::Mesh { materials, .. } = &n.kind {
             node.materials = materials.clone();
@@ -420,9 +423,10 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         .iter()
         .copied()
         .filter(|id| o.cameras || !state.scene.node(*id).is_some_and(|n| matches!(n.object, ObjectKind::Camera { .. })))
+        .filter(|id| o.lights || !state.scene.node(*id).is_some_and(|n| matches!(n.object, ObjectKind::Light(_))))
         .filter(|id| {
             state.scene.node(*id).is_some_and(|n| match &n.object {
-                ObjectKind::Camera { .. } | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_) => true,
+                ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_) => true,
                 _ => state.scene.eval_mesh(*id).value.mesh.face_count() > 0 || n.object.display_output().face_count() > 0,
             })
         })
@@ -438,6 +442,16 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         let mut blend_shapes: Vec<FbxBlendShape> = Vec::new();
         let kind = match &node.object {
             ObjectKind::Camera { fov, .. } => FbxKind::Camera { fov_deg: fov.get() },
+            ObjectKind::Light(l) => match light_to_fbx(l) {
+                Some(light) => {
+                    // A target light's aim comes from its LookAt constraint: write the evaluated rotation.
+                    let parent = node.parent.map(|p| state.scene.world_matrix(p)).unwrap_or(Mat4::IDENTITY);
+                    let local = Transform::from_matrix(parent.inverse() * state.scene.world_matrix(id));
+                    nodes.push(FbxNode { name: node.name.clone(), parent: node.parent.filter(|p| set.contains(p)).and_then(|p| index_of.get(&p).copied()), translation: node.transform.position.get(), rotation_deg: local.rotation.get(), scale: node.transform.scale.get(), kind: FbxKind::Light(light), skin: None, blend_shapes: Vec::new() });
+                    continue;
+                }
+                None => FbxKind::Empty,
+            },
             ObjectKind::Group { .. } => FbxKind::Empty,
             ObjectKind::Bone { length, width, height, .. } => FbxKind::Bone { length: length.get(), size: width.get().max(height.get()) },
             ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } => FbxKind::Empty,
@@ -705,4 +719,59 @@ fn sampled(frames: &[f32], values: &[glam::Vec3], filters: &loom_fbx::CurveFilte
         }
     }
     loom_scene::Param { controller: loom_scene::param::Controller::Keys(k) }
+}
+
+/// An FBX light as a standard light (free: FBX carries no target).
+fn light_from_fbx(l: &loom_fbx::FbxLight) -> loom_scene::light::LightObject {
+    use loom_scene::light::{LightObject, LightType};
+    let mut o = LightObject::new(match l.light_type {
+        1 => LightType::Directional,
+        2 => LightType::Spot,
+        _ => LightType::Omni,
+    });
+    o.color.set(glam::Vec3::from(l.color).clamp(glam::Vec3::ZERO, glam::Vec3::ONE));
+    o.multiplier.set(l.intensity);
+    o.on.set(l.cast_light);
+    o.shadows_on.set(l.cast_shadows);
+    if o.light_type == LightType::Spot && l.outer_angle > 0.0 {
+        let _ = o.set_parameter("Falloff", l.outer_angle as f64);
+        let _ = o.set_parameter("Hotspot", l.inner_angle.min(l.outer_angle) as f64);
+    }
+    o.decay.set(l.decay.min(2));
+    o.decay_start.set(l.decay_start.max(0.0));
+    if let Some((a, b)) = l.near {
+        o.near_use.set(true);
+        o.near_start.set(a);
+        o.near_end.set(b);
+    }
+    if let Some((a, b)) = l.far {
+        o.far_use.set(true);
+        o.far_start.set(a);
+        o.far_end.set(b);
+    }
+    o
+}
+
+/// A standard light as an FBX light (a Skylight has no FBX equivalent).
+fn light_to_fbx(l: &loom_scene::light::LightObject) -> Option<loom_fbx::FbxLight> {
+    use loom_scene::light::LightType;
+    let light_type = match l.light_type {
+        LightType::Omni => 0,
+        LightType::Directional => 1,
+        LightType::Spot => 2,
+        LightType::Skylight => return None,
+    };
+    Some(loom_fbx::FbxLight {
+        light_type,
+        color: l.color.get().to_array(),
+        intensity: l.multiplier.get(),
+        inner_angle: l.hotspot.get(),
+        outer_angle: l.falloff.get(),
+        cast_light: l.on.get(),
+        cast_shadows: l.shadows_on.get(),
+        decay: l.decay.get(),
+        decay_start: l.decay_start.get(),
+        near: l.near_use.get().then(|| (l.near_start.get(), l.near_end.get())),
+        far: l.far_use.get().then(|| (l.far_start.get(), l.far_end.get())),
+    })
 }

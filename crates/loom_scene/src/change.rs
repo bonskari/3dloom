@@ -94,6 +94,11 @@ pub enum Change {
         before: Option<crate::material::MaterialId>,
         after: Option<crate::material::MaterialId>,
     },
+    /// Render Setup values.
+    SetRenderSettings {
+        before: Box<crate::render::RenderSettings>,
+        after: Box<crate::render::RenderSettings>,
+    },
     Group(Vec<Change>),
 }
 
@@ -219,6 +224,10 @@ impl Change {
                 node.material = *after;
                 Ok(())
             }
+            Change::SetRenderSettings { after, .. } => {
+                scene.render = (**after).clone();
+                Ok(())
+            }
             Change::SetIkChains { after, .. } => {
                 scene.ik_chains = after.clone();
                 scene.bump_version();
@@ -336,6 +345,7 @@ impl Change {
             Change::SetIkChains { before: b, after: a } => Change::SetIkChains { before: a.clone(), after: b.clone() },
             Change::SetMaterials { before: b, after: a } => Change::SetMaterials { before: a.clone(), after: b.clone() },
             Change::SetMaterial { id, before: b, after: a } => Change::SetMaterial { id: *id, before: *a, after: *b },
+            Change::SetRenderSettings { before: b, after: a } => Change::SetRenderSettings { before: a.clone(), after: b.clone() },
             Change::Group(changes) => {
                 // Inverses must be computed against the progressively
                 // changed scene, so simulate on a copy.

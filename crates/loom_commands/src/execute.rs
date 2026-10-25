@@ -5,7 +5,7 @@ use crate::command::{Axis, Command, PrimitiveKind, SelectOp, ShapeKind};
 use crate::state::{AlignPoint, AppState, DialogPurpose, NormalAlignPicks, SpacingContext, PickMode, SelectionMode, SubObjectId, Tool, ViewKind};
 use glam::Mat3;
 use crate::viewport::Dialog as Dlg;
-use crate::state::{AxisConstraint, CloneKind, CoordSystem};
+use crate::state::{AxisConstraint, CenterMode, CloneKind, CoordSystem, SavedManagers};
 use crate::transform::frame_for;
 use loom_scene::NodeProps;
 use crate::viewport::{default_kinds, Dialog, NavMode, Shading, Viewport};
@@ -26,6 +26,14 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     let rebases_pose = state.set_key_mode && !crate::anim_cmds::is_pose_edit(&cmd);
     let position = state.undo.position();
     let r = execute_inner(state, cmd);
+    // Axis constraints are kept separately at object and sub-object level.
+    let sub = state.selection_mode != SelectionMode::Object;
+    if sub != state.constraint_level_sub && !state.prefs.ref_coord_constant {
+        let t = tool_index(state.active_tool);
+        state.constraint_by_tool[state.constraint_level_sub as usize][t] = state.axis_constraint;
+        state.axis_constraint = state.constraint_by_tool[sub as usize][t];
+    }
+    state.constraint_level_sub = sub;
     if rebases_pose && state.set_key_mode && state.undo.position() != position {
         crate::anim_cmds::start_pose(state);
     }
@@ -42,7 +50,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
-        c @ (C::Render { .. } | C::RenderSetup { .. }) => crate::render::execute(state, c),
+        c if crate::render::handles(&c) => crate::render::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
@@ -459,7 +467,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SpinnerSnapToggle => toggle(&mut state.prefs.spinner_snap, "spinner_snap"),
         C::ShowRibbonToggle => toggle(&mut state.show_ribbon, "show_ribbon"),
-        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
+        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
         | C::RenameModifier { .. } | C::SelectStackEntry { .. } | C::SetModifierParameter { .. } | C::ModifierSubobjectLevel { .. } | C::ShowEndResultToggle | C::PinStackToggle
         | C::MakeUnique | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
         | C::PickModifierNode { .. } | C::SwitchToControlPointLevel | C::SwitchToLatticeLevel | C::SwitchToSetVolumeLevel | C::SwitchToTopLevel | C::SelectControlPoints { .. }
@@ -513,7 +521,19 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SelectObject => set_tool(state, Tool::Select),
         C::SelectAndMove => set_tool(state, Tool::Move),
         C::SelectAndRotate => set_tool(state, Tool::Rotate),
-        C::SelectAndScale | C::ScaleCycle => set_tool(state, Tool::Scale),
+        C::SelectAndScale => set_tool(state, Tool::Scale),
+        C::ScaleCycle => {
+            if state.active_tool == Tool::Scale {
+                state.scale_kind = state.scale_kind.next();
+            }
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": state.scale_kind.label() }))
+        }
+        C::ScaleType { kind } => {
+            state.scale_kind = kind;
+            set_tool(state, Tool::Scale)?;
+            Ok(json!({ "tool": kind.label() }))
+        }
         C::SubObjectLevelCycle if state.spline_selected() => {
             state.selection_mode = match state.selection_mode {
                 SelectionMode::Object => SelectionMode::Vertex,
@@ -620,13 +640,74 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::HomeView => {
+            // The ViewCube Home view: a Perspective view, the default one or Set Current View as Home.
             state.record_view();
-            let kind = state.active().kind;
-            let fresh = Viewport::new(kind);
+            let home = state.home_view;
             let vp = state.active_mut();
-            vp.camera = fresh.camera;
+            vp.kind = ViewKind::Perspective;
+            match home {
+                Some(h) => {
+                    vp.camera = h.camera();
+                    vp.fov_y_radians = h.fov_y_radians;
+                }
+                None => vp.camera = Viewport::new(ViewKind::Perspective).camera,
+            }
             Ok(camera_json(state))
         }
+        C::SetCurrentViewAsHome => {
+            if matches!(state.active().kind, ViewKind::Camera(_)) {
+                return Err("the Home view is set from a non-camera view".into());
+            }
+            state.home_view = Some(crate::state::SavedView::of(state.active()));
+            Ok(json!({}))
+        }
+        C::ViewCubeToggle => toggle(&mut state.viewcube.show, "viewcube"),
+        C::SetViewCubeOptions { show, all_views, size, inactive_opacity, compass } => {
+            let v = &mut state.viewcube;
+            if let Some(b) = show { v.show = b; }
+            if let Some(b) = all_views { v.all_views = b; }
+            if let Some(n) = size { v.size = n.min(3) as u8; }
+            if let Some(o) = inactive_opacity { v.inactive_opacity = (o / 100.0).clamp(0.0, 1.0); }
+            if let Some(b) = compass { v.compass = b; }
+            Ok(json!({ "show": v.show, "all_views": v.all_views, "size": v.size, "inactive_opacity": v.inactive_opacity * 100.0, "compass": v.compass }))
+        }
+        C::SaveActiveView => {
+            let vp = state.active();
+            if matches!(vp.kind, ViewKind::Camera(_)) {
+                return Err("camera views are not saved".into());
+            }
+            let mut saved = crate::state::SavedView::of(vp);
+            saved.shading = Some(vp.shading);
+            let label = vp.kind.label().to_owned();
+            state.saved_views.insert(label.clone(), saved);
+            Ok(json!({ "saved": label }))
+        }
+        C::RestoreActiveView => {
+            let label = state.active().kind.label();
+            let Some(saved) = state.saved_views.get(label).copied() else {
+                return Err(format!("no saved {label} view"));
+            };
+            state.record_view();
+            let vp = state.active_mut();
+            vp.camera = saved.camera();
+            vp.fov_y_radians = saved.fov_y_radians;
+            if let Some(sh) = saved.shading {
+                vp.shading = sh;
+            }
+            Ok(camera_json(state))
+        }
+        C::ShadeSelectedToggle => {
+            state.mesh_dirty = true;
+            toggle(&mut state.shade_selected, "shade_selected")
+        }
+        C::DollyCameraMode => nav_toggle(state, NavMode::DollyCamera),
+        C::DollyTargetMode => nav_toggle(state, NavMode::DollyTarget),
+        C::DollyCameraTargetMode => nav_toggle(state, NavMode::DollyBoth),
+        C::PerspectiveMode => nav_toggle(state, NavMode::Perspective),
+        C::RollCameraMode => nav_toggle(state, NavMode::RollCamera),
+        C::TruckCameraMode => nav_toggle(state, NavMode::TruckCamera),
+        C::OrbitCameraMode => nav_toggle(state, NavMode::OrbitCamera),
+        C::PanCameraMode => nav_toggle(state, NavMode::PanCamera),
         C::TimeConfiguration => {
             state.dialog = Some(Dlg::TimeConfiguration);
             Ok(json!({}))
@@ -663,7 +744,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             frame_all(state, bounds)
         }
         C::ZoomMode => nav_toggle(state, NavMode::Zoom),
-        C::PanView | C::PanViewport => nav_toggle(state, NavMode::Pan),
+        C::PanViewport { point: Some(p) } => {
+            // The view slides (no turn, no zoom) until `p` is at its centre.
+            state.record_view();
+            let cam = &mut state.active_mut().camera;
+            let to_eye = cam.basis().2;
+            let p = Vec3::from(p);
+            cam.target = p - to_eye * to_eye.dot(p - cam.target);
+            Ok(camera_json(state))
+        }
+        C::PanView | C::PanViewport { point: None } => nav_toggle(state, NavMode::Pan),
         C::OrbitViewMode => nav_toggle(state, NavMode::Orbit),
         C::ZoomRegionMode => nav_toggle(state, NavMode::ZoomRegion),
         C::FieldOfViewMode => nav_toggle(state, NavMode::Fov),
@@ -728,7 +818,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ViewportLightingToggle => toggle(&mut state.active_mut().scene_lights, "scene_lights"),
         C::ShadeSelectedFacesToggle => toggle(&mut state.shade_selected_faces, "shade_selected_faces"),
         C::SelectionBracketToggle => toggle(&mut state.selection_brackets, "selection_brackets"),
-        C::BackgroundLockToggle => toggle(&mut state.active_mut().background_locked, "background_locked"),
+        C::BackgroundLockToggle => {
+            let on = !state.active().background_locked;
+            set_background_lock(state.active_mut(), on);
+            Ok(json!({ "background_locked": on }))
+        }
+        C::ResetBackgroundTransform => {
+            let vp = state.active_mut();
+            if vp.background_locked {
+                set_background_lock(vp, true);
+            }
+            Ok(json!({}))
+        }
         C::UpdateBackgroundImage => {
             state.active_mut().background_version += 1;
             Ok(json!({}))
@@ -737,15 +838,39 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(Dialog::ViewportBackground);
             Ok(json!({}))
         }
-        C::SetViewportBackground { path } => {
-            let vp = state.active_mut();
-            vp.background = path;
-            vp.background_version += 1;
+        C::SetViewportBackground { path, aspect, lock, display, all_views } => {
+            let aspect = match aspect {
+                Some(a) => Some(crate::viewport::BackgroundAspect::from_label(&a).ok_or_else(|| format!("unknown aspect ratio `{a}` (Match Viewport, Match Bitmap, Match Rendering Output)"))?),
+                None => None,
+            };
+            let active = state.active_viewport;
+            for (i, vp) in state.viewports.iter_mut().enumerate() {
+                if i != active && all_views != Some(true) {
+                    continue;
+                }
+                if let Some(p) = &path {
+                    vp.background = (!p.is_empty()).then(|| p.clone());
+                    vp.background_version += 1;
+                    vp.background_display = true;
+                }
+                if let Some(a) = aspect {
+                    vp.background_aspect = a;
+                }
+                if let Some(d) = display {
+                    vp.background_display = d;
+                }
+                if let Some(l) = lock {
+                    if l != vp.background_locked {
+                        set_background_lock(vp, l);
+                    }
+                }
+            }
             Ok(json!({}))
         }
         C::SelectByName => open_by_name(state, DialogPurpose::Select),
-        C::ConfigureViewports => {
+        C::ConfigureViewports { panel } => {
             state.dialog = Some(Dialog::ViewportConfiguration);
+            state.config_panel = panel;
             Ok(json!({}))
         }
         C::CloseDialog => {
@@ -788,8 +913,28 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 });
             match cam {
                 Some(id) => set_view(state, ViewKind::Camera(id)),
+                None if state.scene.nodes().filter(|n| matches!(n.object, ObjectKind::Camera { .. })).count() > 1 => {
+                    // Several cameras and none selected: the Select Camera list.
+                    state.dialog = Some(Dialog::SelectCamera);
+                    Ok(json!({ "camera": Value::Null, "dialog": "Select Camera" }))
+                }
                 None => Ok(json!({ "camera": Value::Null })),
             }
+        }
+        C::SpotDirectionalLightView => {
+            let aims = |id: &NodeId| matches!(state.scene.node(*id).map(|n| &n.object), Some(ObjectKind::Light(l)) if l.light_type.aims());
+            let light = state.selection.iter().copied().find(|id| aims(id)).or_else(|| {
+                let lights: Vec<NodeId> = state.scene.nodes().map(|n| n.id).filter(|id| aims(id)).collect();
+                (lights.len() == 1).then(|| lights[0])
+            });
+            match light {
+                Some(id) => set_view(state, ViewKind::Camera(id)),
+                None => Ok(json!({ "light": Value::Null })),
+            }
+        }
+        C::ViewportDefaultLights { count } => {
+            state.active_mut().default_lights = count.clamp(1, 2);
+            Ok(json!({ "default_lights": count.clamp(1, 2) }))
         }
         C::ViewportLayout { layout } => {
             state.layout = layout;
@@ -1039,6 +1184,17 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.pick_mode = None;
                     execute(state, Command::AlignCameraTo { point, normal })
                 }
+                Some(PickMode::WorkingPivotSurface) => {
+                    // On the surface, Z along its normal (or the view with Align To View).
+                    state.pick_mode = None;
+                    state.working_pivot.origin = Vec3::from(point);
+                    state.working_pivot.rotation = if state.working_pivot_align_to_view {
+                        Quat::from_mat3(&crate::transform::view_axes(state, state.active_viewport)).normalize()
+                    } else {
+                        Quat::from_rotation_arc(Vec3::Z, Vec3::from(normal).normalize_or(Vec3::Z))
+                    };
+                    Ok(json!({ "origin": point }))
+                }
                 Some(PickMode::UvwMapNormal) => {
                     state.pick_mode = None;
                     execute(state, Command::UvwMapAlignTo { point, normal })
@@ -1203,6 +1359,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Some(PickMode::SplineBind) => crate::spline::bind_at(state, Vec3::from(point)),
             Some(PickMode::TrimExtendModifier) => crate::spline::trim_extend_click(state, point),
+            Some(PickMode::WorkingPivotView) => {
+                state.pick_mode = None;
+                state.working_pivot.origin = Vec3::from(point);
+                if state.working_pivot_align_to_view {
+                    state.working_pivot.rotation = Quat::from_mat3(&crate::transform::view_axes(state, state.active_viewport)).normalize();
+                }
+                Ok(json!({ "origin": point }))
+            }
             _ => Err("no point pick mode active".into()),
         },
         C::SpaceObjects { start, end, count, spacing, start_offset, end_offset, context, follow, kind } => {
@@ -1663,7 +1827,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::CreateProBoolean => {
             let id = state.selection.iter().next().copied().ok_or("select the base object first")?;
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-            if node.object.is_shape() || matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
+            if node.object.is_shape() || matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }) {
                 return Err("ProBoolean needs a mesh object".into());
             }
             let base = state.scene.eval_mesh(id).value.mesh.clone();
@@ -1761,7 +1925,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. }) => crate::camera::execute(state, c),
+        c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. }) => crate::camera::execute(state, c),
+        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister) => crate::light::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
@@ -1829,6 +1994,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SelectionRegion { shape } => {
             state.selection_region = shape;
             Ok(json!({ "region": shape.label() }))
+        }
+        C::ReferenceCoordinateSystem { system: CoordSystem::Pick } => {
+            // Pick: the next clicked object's axes become the system (Pick Hit).
+            state.pick_mode = Some(PickMode::CoordSystem);
+            Ok(json!({ "pick": true }))
         }
         C::ReferenceCoordinateSystem { system } => {
             state.coord_system = system;
@@ -1917,6 +2087,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.affect_pivot_only = !state.affect_pivot_only;
             if state.affect_pivot_only {
                 state.affect_object_only = false;
+                state.affect_hierarchy_only = false;
             }
             Ok(json!({ "affect_pivot_only": state.affect_pivot_only }))
         }
@@ -1924,9 +2095,130 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.affect_object_only = !state.affect_object_only;
             if state.affect_object_only {
                 state.affect_pivot_only = false;
+                state.affect_hierarchy_only = false;
             }
             Ok(json!({ "affect_object_only": state.affect_object_only }))
         }
+        C::AffectHierarchyOnly => {
+            state.affect_hierarchy_only = !state.affect_hierarchy_only;
+            if state.affect_hierarchy_only {
+                state.affect_pivot_only = false;
+                state.affect_object_only = false;
+            }
+            Ok(json!({ "affect_hierarchy_only": state.affect_hierarchy_only }))
+        }
+        C::DontAffectChildren => toggle(&mut state.dont_affect_children, "dont_affect_children"),
+        C::EditWorkingPivot => {
+            if state.edit_working_pivot {
+                // Ending the edit restores the tool and the managers it started with.
+                state.edit_working_pivot = false;
+                if let Some(saved) = state.working_pivot_saved.0.take() {
+                    restore_managers(state, saved);
+                }
+            } else {
+                state.working_pivot_saved.0 = Some(save_managers(state));
+                state.edit_working_pivot = true;
+                state.coord_by_tool = [CoordSystem::Local; 4];
+                state.coord_system = CoordSystem::Local;
+            }
+            Ok(json!({ "edit_working_pivot": state.edit_working_pivot }))
+        }
+        C::UseWorkingPivot => {
+            if state.use_working_pivot {
+                state.use_working_pivot = false;
+                if let Some(saved) = state.working_pivot_saved.1.take() {
+                    let tool = state.active_tool;
+                    restore_managers(state, SavedManagers { tool, ..saved });
+                }
+            } else {
+                // Every transform uses the Working system about the working pivot.
+                state.working_pivot_saved.1 = Some(save_managers(state));
+                state.use_working_pivot = true;
+                let tc = CenterMode::TransformCoordinate;
+                state.coord_by_tool = [CoordSystem::Working; 4];
+                state.coord_system = CoordSystem::Working;
+                state.center_by_tool = [(tc, tc); 4];
+                (state.center_single, state.center_multi) = (tc, tc);
+                state.refresh_center_mode();
+            }
+            Ok(json!({ "use_working_pivot": state.use_working_pivot }))
+        }
+        C::WorkingPivotAlignToView => {
+            let axes = crate::transform::view_axes(state, state.active_viewport);
+            state.working_pivot.rotation = Quat::from_mat3(&axes).normalize();
+            Ok(json!({}))
+        }
+        C::WorkingPivotReset => {
+            let origin = if state.selection_mode != SelectionMode::Object && !state.sub_selection.is_empty() {
+                // Sub-objects: the average of the selected vertices.
+                let pts: Vec<Vec3> = selected_vertices(state)
+                    .into_iter()
+                    .flat_map(|(n, vs)| {
+                        let m = state.scene.object_matrix(n);
+                        let mesh = state.scene.node(n).map(|nd| nd.cage_mesh().into_owned());
+                        vs.into_iter().filter_map(move |v| mesh.as_ref()?.vertex_position(v).map(|p| m.transform_point3(p)))
+                    })
+                    .collect();
+                if pts.is_empty() {
+                    return Ok(json!({}));
+                }
+                pts.iter().sum::<Vec3>() / pts.len() as f32
+            } else {
+                // The pivot of the last-selected object (the highest id here).
+                match state.selection.iter().next_back() {
+                    Some(id) => state.scene.world_matrix(*id).w_axis.truncate(),
+                    None => return Ok(json!({})),
+                }
+            };
+            state.working_pivot.origin = origin;
+            Ok(json!({ "origin": origin.to_array() }))
+        }
+        C::PlacePivotToView => toggle_pick_mode(state, PickMode::WorkingPivotView),
+        C::PlacePivotToSurface => toggle_pick_mode(state, PickMode::WorkingPivotSurface),
+        C::PlacePivotAlignToViewToggle => toggle(&mut state.working_pivot_align_to_view, "align_to_view"),
+        C::SetWorkingPivot { position, rotation_deg } => {
+            if let Some(p) = position {
+                state.working_pivot.origin = Vec3::from(p);
+            }
+            if let Some(r) = rotation_deg {
+                state.working_pivot.rotation = Quat::from_euler(glam::EulerRot::XYZ, r[0].to_radians(), r[1].to_radians(), r[2].to_radians());
+            }
+            Ok(json!({ "origin": state.working_pivot.origin.to_array() }))
+        }
+        C::AlignPivotToWorld if state.affect_object_only => {
+            // Affect Object Only: the object turns to the world; the pivot stays.
+            object_offset_change(state, "Align to World", |state, id, off| {
+                let (_, wq, _) = state.scene.world_matrix(id).to_scale_rotation_translation();
+                let (s, _, t) = off.to_scale_rotation_translation();
+                Mat4::from_scale_rotation_translation(s, wq.inverse(), t)
+            })
+        }
+        C::CenterObjectToPivot => object_offset_change(state, "Center to Pivot", |state, id, off| {
+            // Shift the offset so the bounds centre lands on the pivot.
+            let Some((min, max)) = state.object_bounds(id) else { return off };
+            let centre_local = state.scene.world_matrix(id).inverse().transform_point3((min + max) * 0.5);
+            Mat4::from_translation(-centre_local) * off
+        }),
+        C::AlignObjectToPivot => object_offset_change(state, "Align to Pivot", |_, _, off| {
+            let (s, _, t) = off.to_scale_rotation_translation();
+            Mat4::from_scale_rotation_translation(s, Quat::IDENTITY, t)
+        }),
+        C::AlignPivotToObject => pivot_world_change(state, "Align to Object", |state, id| {
+            // The pivot turns to the object's own axes.
+            let (_, oq, _) = state.scene.object_matrix(id).to_scale_rotation_translation();
+            let (ws, _, wt) = state.scene.world_matrix(id).to_scale_rotation_translation();
+            (Mat4::from_scale_rotation_translation(ws, oq, wt), None)
+        }),
+        C::ResetTransform => pivot_world_change(state, "Reset Transform", |state, id| {
+            // The local axes turn to the world.
+            let (ws, _, wt) = state.scene.world_matrix(id).to_scale_rotation_translation();
+            (Mat4::from_scale_rotation_translation(ws, Quat::IDENTITY, wt), None)
+        }),
+        C::ResetScale => pivot_world_change(state, "Reset Scale", |state, id| {
+            // The node scale becomes 100 %; the object offset takes it.
+            let (_, wq, wt) = state.scene.world_matrix(id).to_scale_rotation_translation();
+            (Mat4::from_rotation_translation(wq, wt), Some(Vec3::ONE))
+        }),
         C::CenterPivotToObject => {
             let ids = selected_ids(state);
             let mut changes = Vec::new();
@@ -2152,6 +2444,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     }
                     return Ok(json!({ "parent": id.0 }));
                 }
+                Some(PickMode::CoordSystem) => {
+                    state.pick_mode = None;
+                    return execute(state, C::PickCoordinateSystem { id: id.0 });
+                }
                 Some(PickMode::AlignTarget) => {
                     state.pick_mode = None;
                     state.align_target = Some(id);
@@ -2168,10 +2464,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     let to = state.scene.world_matrix(id).w_axis.truncate();
                     return transform_selection_each(state, "Quick Align", &|_, _| (Mat4::from_translation(to - from), Vec3::ZERO));
                 }
-                Some(PickMode::NormalAlignSource | PickMode::NormalAlignTarget | PickMode::AlignCamera) => {
+                Some(PickMode::NormalAlignSource | PickMode::NormalAlignTarget | PickMode::AlignCamera | PickMode::WorkingPivotSurface) => {
                     return Err("this pick mode needs a surface pick (Pick Surface)".into());
                 }
-                Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex) => {
+                Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex | PickMode::WorkingPivotView) => {
                     return Err("this pick mode needs a point pick (Pick Point)".into());
                 }
                 Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB | PickMode::SwiftLoop | PickMode::BridgeEdge1 | PickMode::BridgeEdge2) => {
@@ -2191,20 +2487,27 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let mut changes = Vec::new();
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-                if matches!(node.object, ObjectKind::Camera { .. }) {
+                if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }) {
                     continue;
                 }
+                // As the reference: rotation and scale (and the pivot offset) go into
+                // a new XForm modifier on top of the stack; collapsing bakes them.
                 let t = &node.transform;
-                let bake = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
-                let mut mesh = node.cage_mesh().into_owned();
-                edit_ops::transform_mesh(&mut mesh, bake)?;
+                let held = Mat4::from_scale_rotation_translation(t.scale.get(), t.rotation_quat(), Vec3::ZERO) * node.object_offset.matrix();
+                let mut xform = Modifier::by_name("XForm").ok_or("no XForm modifier")?;
+                if let Some(g) = xform.gizmo_mut() {
+                    *g = Transform::from_matrix(held);
+                }
+                let mut stack = node.modifiers.clone();
+                let at = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
+                stack.insert(at, loom_scene::ModifierSlot::new(xform));
                 let mut after_t = t.clone();
                 after_t.rotation.set(Vec3::ZERO);
                 after_t.scale.set(Vec3::ONE);
                 let mut props = node.props();
                 props.object_offset = Transform::default();
                 let new_world = state.scene.parent_frame(id) * after_t.matrix();
-                changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(node.object.with_mesh(mesh)) });
+                changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.extend(keep_children(state, id, new_world));
                 changes.push(Change::SetTransform { id, before: t.clone(), after: after_t });
@@ -2318,6 +2621,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::MoveSelection { delta, .. } if state.trajectory_keys && !state.trajectory_selected.is_empty() => crate::motion::execute(state, C::TrajectoryMoveKeys { delta }),
         C::MoveSelection { delta, system } => {
             let saved = with_system(state, system);
+            gimbal_as_parent(state);
             let vp = state.active_viewport;
             let r = transform_selection_each(state, "Move", &|st, id| (frame_for(st, vp, id).move_matrix(Vec3::from(delta)), Vec3::ZERO));
             state.coord_system = saved;
@@ -2331,27 +2635,37 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Axis::Y => Vec3::Y,
                 Axis::Z => Vec3::Z,
             };
+            let centre = animate_pivot(state);
             let r = transform_selection_each(state, "Rotate", &|st, id| {
                 let f = frame_for(st, vp, id);
-                (f.rotate_matrix(a, degrees.to_radians()), euler_hint(st, id, f.axes * a * degrees))
+                // Gimbal: the rotation is exactly one Euler track.
+                let hint = if st.coord_system == CoordSystem::Gimbal { a * degrees } else { euler_hint(st, id, f.axes * a * degrees) };
+                (f.rotate_matrix(a, degrees.to_radians()), hint)
             });
+            state.center_mode = centre;
             state.coord_system = saved;
             r
         }
         C::ScaleSelection { factors, system } => {
             let saved = with_system(state, system);
+            gimbal_as_parent(state);
             let vp = state.active_viewport;
+            let centre = animate_pivot(state);
             let r = transform_selection_each(state, "Scale", &|st, id| (frame_for(st, vp, id).scale_matrix(Vec3::from(factors)), Vec3::ZERO));
+            state.center_mode = centre;
             state.coord_system = saved;
             r
         }
         C::RotateSelectionFree { quat } => {
             let q = Quat::from_xyzw(quat[0], quat[1], quat[2], quat[3]).normalize();
             let vp = state.active_viewport;
-            transform_selection_each(state, "Rotate", &|st, id| {
+            let centre = animate_pivot(state);
+            let r = transform_selection_each(state, "Rotate", &|st, id| {
                 let (ax, ang) = q.to_axis_angle();
                 (frame_for(st, vp, id).rotate_quat_matrix(q), euler_hint(st, id, ax * ang.to_degrees()))
-            })
+            });
+            state.center_mode = centre;
+            r
         }
         C::TransformGizmoXConstraint => {
             state.axis_constraint = AxisConstraint::X;
@@ -2389,12 +2703,22 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let id = NodeId(id);
             state.scene.node(id).ok_or_else(|| missing(id))?;
             state.pick_coord_node = Some(id);
+            // The list keeps the four most recently picked objects.
+            state.pick_coord_recent.retain(|r| *r != id);
+            state.pick_coord_recent.insert(0, id);
+            state.pick_coord_recent.truncate(4);
             state.coord_system = CoordSystem::Pick;
+            if state.prefs.ref_coord_constant {
+                state.coord_by_tool = [CoordSystem::Pick; 4];
+            } else {
+                state.coord_by_tool[tool_index(state.active_tool)] = CoordSystem::Pick;
+            }
             Ok(json!({ "system": "Pick", "node": id.0 }))
         }
 
         C::SelectNodes { ids, op } => {
-            if state.selection_locked {
+            // Edit Working Pivot locks the selection to the working pivot.
+            if state.selection_locked || state.edit_working_pivot {
                 return Ok(json!({ "locked": true }));
             }
             let ids: BTreeSet<NodeId> = ids
@@ -2581,9 +2905,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             )?;
             Ok(json!({}))
         }
-        C::Orbit { yaw, pitch, distance, target } => {
+        C::Orbit { yaw, pitch, distance, target, roll } => {
             state.record_view();
             let cam = &mut state.active_mut().camera;
+            if let Some(r) = roll {
+                cam.roll = loom_input::camera_control::wrap_angle(r.to_radians());
+            }
             if let Some(y) = yaw {
                 cam.yaw = y.to_radians();
             }
@@ -2749,7 +3076,7 @@ fn compound_boolean(state: &mut AppState, b: NodeId, operation: u32, move_operan
     }
     let node = state.scene.node(id).ok_or_else(|| missing(id))?;
     let bnode = state.scene.node(b).ok_or_else(|| missing(b))?;
-    if node.object.is_shape() || bnode.object.is_shape() || matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Group { .. }) {
+    if node.object.is_shape() || bnode.object.is_shape() || matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }) {
         return Err("Boolean needs two mesh objects".into());
     }
     let a_mesh = state.scene.eval_mesh(id).value.mesh.clone();
@@ -2789,9 +3116,48 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 }
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
+    let change = share_with_instances(&state.scene, change);
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
     Ok(())
+}
+
+/// Instances share one object: a replaced object (a sub-object edit, a
+/// parameter, an attach) is replaced on every member of the node's instance
+/// group that the change does not already cover.
+fn share_with_instances(scene: &loom_scene::Scene, change: Change) -> Change {
+    fn replaced<'a>(c: &'a Change, out: &mut Vec<(NodeId, &'a ObjectKind)>, removed: &mut BTreeSet<NodeId>) {
+        match c {
+            Change::ReplaceObject { id, after, .. } => out.push((*id, &**after)),
+            Change::RemoveNode(id) => {
+                removed.insert(*id);
+            }
+            Change::Group(cs) => cs.iter().for_each(|c| replaced(c, out, removed)),
+            _ => {}
+        }
+    }
+    let mut objects = Vec::new();
+    let mut done = BTreeSet::new();
+    replaced(&change, &mut objects, &mut done);
+    if objects.is_empty() {
+        return change;
+    }
+    done.extend(objects.iter().map(|(id, _)| *id));
+    let mut extra = Vec::new();
+    for (id, after) in objects {
+        let Some(node) = scene.node(id) else { continue };
+        let root = node.instance_of.unwrap_or(id);
+        for member in scene.nodes().filter(|n| n.id == root || n.instance_of == Some(root)) {
+            if done.insert(member.id) {
+                extra.push(Change::ReplaceObject { id: member.id, before: Box::new(member.object.clone()), after: Box::new(after.clone()) });
+            }
+        }
+    }
+    if extra.is_empty() {
+        return change;
+    }
+    extra.insert(0, change);
+    Change::Group(extra)
 }
 
 /// Commits a structural edit (link, unlink, group) that only re-expresses a
@@ -3004,11 +3370,20 @@ fn tool_index(tool: Tool) -> usize {
 }
 
 fn set_tool(state: &mut AppState, tool: Tool) -> Result<Value, String> {
+    let old = tool_index(state.active_tool);
     state.active_tool = tool;
-    // A reference coordinate system is remembered per transform unless
-    // Preferences > Reference Coordinate System > Constant is on.
+    // The transform managers (coordinate system, centre, axis constraint)
+    // are remembered per transform unless Preferences > Reference
+    // Coordinate System > Constant is on.
     if !state.prefs.ref_coord_constant {
-        state.coord_system = state.coord_by_tool[tool_index(tool)];
+        state.center_by_tool[old] = (state.center_single, state.center_multi);
+        let level = state.constraint_level_sub as usize;
+        state.constraint_by_tool[level][old] = state.axis_constraint;
+        let i = tool_index(tool);
+        state.coord_system = state.coord_by_tool[i];
+        (state.center_single, state.center_multi) = state.center_by_tool[i];
+        state.axis_constraint = state.constraint_by_tool[level][i];
+        state.refresh_center_mode();
     }
     Ok(json!({ "tool": tool.label() }))
 }
@@ -3059,6 +3434,7 @@ fn set_view(state: &mut AppState, kind: ViewKind) -> Result<Value, String> {
     if let Some((yaw, pitch)) = kind.angles() {
         vp.camera.yaw = yaw;
         vp.camera.pitch = pitch;
+        vp.camera.roll = 0.0;
     }
     Ok(camera_json(state))
 }
@@ -3092,6 +3468,12 @@ fn zoom(state: &mut AppState, factor: f32) -> Result<Value, String> {
     let cam = &mut state.active_mut().camera;
     cam.distance = (cam.distance * factor).max(0.05);
     Ok(camera_json(state))
+}
+
+/// Lock Zoom/Pan on (anchored to the viewport's current view) or off.
+fn set_background_lock(vp: &mut Viewport, on: bool) {
+    vp.background_locked = on;
+    vp.background_anchor = on.then_some((vp.camera.target, vp.camera.distance));
 }
 
 fn nav_toggle(state: &mut AppState, mode: NavMode) -> Result<Value, String> {
@@ -3289,6 +3671,18 @@ fn type_in_system(state: &AppState, absolute: bool) -> CoordSystem {
 /// Current Transform Type-In absolute values for the active tool.
 pub fn type_in_values(state: &AppState) -> Vec3 {
     let first = state.selection.iter().next().copied();
+    if state.slice_plane_mode {
+        // Slice Plane mode: the fields show the plane (world position / Euler XYZ).
+        let sp = &state.slice_plane;
+        return match state.active_tool {
+            Tool::Rotate => {
+                let (x, y, z) = sp.rotation.to_euler(glam::EulerRot::XYZ);
+                Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
+            }
+            Tool::Scale => Vec3::splat(100.0),
+            _ => sp.origin,
+        };
+    }
     match state.active_tool {
         Tool::Rotate => first.and_then(|id| state.scene.node(id)).map(|n| {
             let (_, q, _) = state.scene.world_matrix(n.id).to_scale_rotation_translation();
@@ -3312,6 +3706,12 @@ fn transform_type_in(state: &mut AppState, absolute: bool, values: Vec3) -> Resu
         return Ok(json!({}));
     }
     let system = Some(type_in_system(state, absolute));
+    if state.slice_plane_mode && absolute && matches!(state.active_tool, Tool::Rotate | Tool::Move | Tool::Select) {
+        // Slice Plane mode: absolute values place the plane (world), never the object.
+        let (position, rotation_deg) = if state.active_tool == Tool::Rotate { (None, Some(values.to_array())) } else { (Some(values.to_array()), None) };
+        execute(state, Command::SetSlicePlane { position, rotation_deg, size: None })?;
+        return Ok(json!({ "values": type_in_values(state).to_array() }));
+    }
     match state.active_tool {
         Tool::Rotate => {
             let delta = if absolute { values - type_in_values(state) } else { values };
@@ -3457,6 +3857,36 @@ fn euler_hint(state: &AppState, id: Option<NodeId>, world_rot_deg: Vec3) -> Vec3
     }
 }
 
+fn save_managers(state: &AppState) -> SavedManagers {
+    SavedManagers { coord_by_tool: state.coord_by_tool, center_by_tool: state.center_by_tool, center: (state.center_single, state.center_multi), tool: state.active_tool }
+}
+
+fn restore_managers(state: &mut AppState, s: SavedManagers) {
+    state.coord_by_tool = s.coord_by_tool;
+    state.center_by_tool = s.center_by_tool;
+    (state.center_single, state.center_multi) = s.center;
+    state.active_tool = s.tool;
+    state.coord_system = state.coord_by_tool[tool_index(s.tool)];
+    state.refresh_center_mode();
+}
+
+/// Gimbal moves and scales in the Parent system.
+fn gimbal_as_parent(state: &mut AppState) {
+    if state.coord_system == CoordSystem::Gimbal {
+        state.coord_system = CoordSystem::Parent;
+    }
+}
+
+/// With Auto Key on, Rotate and Scale use each object's pivot (Local Center
+/// During Animate); returns the centre for the caller to restore.
+fn animate_pivot(state: &mut AppState) -> crate::state::CenterMode {
+    let saved = state.center_mode;
+    if crate::transform::animate_forces_pivot(state) {
+        state.center_mode = crate::state::CenterMode::PivotPoint;
+    }
+    saved
+}
+
 /// Temporarily applies an explicit reference coordinate system; returns the
 /// previous one for the caller to restore.
 fn with_system(state: &mut AppState, system: Option<CoordSystem>) -> CoordSystem {
@@ -3513,6 +3943,16 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
                 continue;
             }
+            if level == 2 {
+                if let Some(d) = stack[a].modifier.deformer_mut() {
+                    // Center: only the center point moves; the gizmo stays.
+                    let g = d.gizmo.matrix();
+                    let c = g.inverse().transform_point3(local_m.transform_point3(g.transform_point3(d.center.get())));
+                    d.center.set(c);
+                    changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+                    continue;
+                }
+            }
             if let Some(gizmo) = stack[a].modifier.gizmo_mut() {
                 let cur = gizmo.matrix();
                 let next = if level == 2 {
@@ -3527,6 +3967,15 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
         }
         commit(state, label, Change::Group(changes))?;
         return Ok(json!({}));
+    }
+    if state.edit_working_pivot {
+        // Edit Working Pivot: the transform tools move the working pivot.
+        let (m, _) = matrix_for(state, None);
+        let (_, rot, _) = m.to_scale_rotation_translation();
+        let wp = &mut state.working_pivot;
+        wp.origin = m.transform_point3(wp.origin);
+        wp.rotation = (rot * wp.rotation).normalize();
+        return Ok(json!({ "working_pivot": wp.origin.to_array() }));
     }
     if state.slice_plane_mode {
         // Slice Plane mode: the transform tools move the plane, not the mesh.
@@ -3612,6 +4061,25 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
             let parent_world = state.scene.parent_frame(id);
             let world = state.scene.world_matrix(id);
+            if state.affect_pivot_only && label == "Scale" {
+                // A Scale transform has no effect on the pivot.
+                continue;
+            }
+            if state.affect_hierarchy_only {
+                // Rotate/Scale swing and stretch the links: each child's
+                // position follows the transform, nothing turns or resizes.
+                if label == "Rotate" || label == "Scale" {
+                    for c in state.scene.children(id) {
+                        let Some(child) = state.scene.node(c) else { continue };
+                        let wc = state.scene.world_matrix(c);
+                        let (cs, cq, ct) = wc.to_scale_rotation_translation();
+                        let target = Mat4::from_scale_rotation_translation(cs, cq, m.transform_point3(ct));
+                        let after = Transform::from_matrix_near(state.scene.parent_frame(c).inverse() * target, &child.transform, Vec3::ZERO);
+                        changes.push(Change::SetTransform { id: c, before: child.transform.clone(), after });
+                    }
+                }
+                continue;
+            }
             if state.affect_object_only {
                 // Move the mesh relative to the pivot; the pivot stays.
                 let local_m = world.inverse() * m * world;
@@ -3631,6 +4099,9 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 props.object_offset = Transform::from_matrix(new_world.inverse() * mesh_world);
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.extend(keep_children(state, id, new_world));
+            } else if state.dont_affect_children {
+                // Adjust Transform > Don't Affect Children.
+                changes.extend(keep_children(state, id, parent_world * after.matrix()));
             }
             changes.push(Change::SetTransform {
                 id,
@@ -3646,6 +4117,50 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
         return Ok(json!({}));
     }
     commit(state, label, Change::Group(changes))?;
+    Ok(json!({}))
+}
+
+/// Hierarchy > Pivot alignment acting on the object (Affect Object Only):
+/// `f` maps each selected node's object offset matrix to the new one.
+fn object_offset_change(state: &mut AppState, label: &str, f: impl Fn(&AppState, NodeId, Mat4) -> Mat4) -> Result<Value, String> {
+    let ids = selected_ids(state);
+    let mut changes = Vec::new();
+    for id in ids {
+        let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+        let mut props = node.props();
+        props.object_offset = Transform::from_matrix(f(state, id, node.object_offset.matrix()));
+        changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
+    }
+    if !changes.is_empty() {
+        commit(state, label, Change::Group(changes))?;
+    }
+    Ok(json!({}))
+}
+
+/// Moves each selected node's pivot to the world matrix `f` gives (and, if
+/// set, the local scale), with the object offset compensating so the mesh
+/// stays, and the children kept in place.
+fn pivot_world_change(state: &mut AppState, label: &str, f: impl Fn(&AppState, NodeId) -> (Mat4, Option<Vec3>)) -> Result<Value, String> {
+    let ids = selected_ids(state);
+    let mut changes = Vec::new();
+    for id in ids {
+        let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+        let parent_world = state.scene.parent_frame(id);
+        let (target, scale) = f(state, id);
+        let mut after = Transform::from_matrix_near(parent_world.inverse() * target, &node.transform, Vec3::ZERO);
+        if let Some(sc) = scale {
+            after.scale.set(sc);
+        }
+        let new_world = parent_world * after.matrix();
+        let mut props = node.props();
+        props.object_offset = Transform::from_matrix(new_world.inverse() * state.scene.object_matrix(id));
+        changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
+        changes.extend(keep_children(state, id, new_world));
+        changes.push(Change::SetTransform { id, before: node.transform.clone(), after });
+    }
+    if !changes.is_empty() {
+        commit(state, label, Change::Group(changes))?;
+    }
     Ok(json!({}))
 }
 
@@ -4031,6 +4546,7 @@ fn camera_json(state: &AppState) -> Value {
         "shading": vp.shading.label(),
         "yaw_deg": c.yaw.to_degrees(),
         "pitch_deg": c.pitch.to_degrees(),
+        "roll_deg": c.roll.to_degrees(),
         "distance": c.distance,
         "target": [c.target.x, c.target.y, c.target.z],
     })
@@ -4083,6 +4599,7 @@ fn snapshot(state: &AppState) -> Value {
         "selection": selection_json(state),
         "dialog": state.dialog.map(|d| format!("{d:?}")),
         "material_editor": state.material_editor_open,
+        "rendered_frame": crate::render::state_json(state),
         "pick_mode": state.pick_mode.map(|p| format!("{p:?}")),
         "poly_drag": state.poly_drag.map(|p| format!("{p:?}")),
         "poly_settings": serde_json::to_value(state.poly_settings).unwrap_or(Value::Null),

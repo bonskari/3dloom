@@ -201,6 +201,11 @@ pub enum PickMode {
     UnwrapSplineMap,
     /// Animation > Constraints / Motion panel Add … Target: the clicked object is the target.
     Constraint(crate::motion::ConstraintPick),
+    /// Reference Coordinate System > Pick: the clicked object's axes become the system.
+    CoordSystem,
+    /// Working Pivot > Place Pivot To: View (a point in the screen plane) / Surface.
+    WorkingPivotView,
+    WorkingPivotSurface,
 }
 
 /// Paint Deformation brushes.
@@ -227,6 +232,22 @@ pub enum PolyConstraint {
     Edges,
     Faces,
     Normals,
+}
+
+/// Hierarchy > Working Pivot: the scene's one working pivot (world space).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub struct WorkingPivot {
+    pub origin: Vec3,
+    pub rotation: glam::Quat,
+}
+
+/// Transform manager settings put aside while a Working Pivot mode is on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SavedManagers {
+    pub coord_by_tool: [CoordSystem; 4],
+    pub center_by_tool: [(CenterMode, CenterMode); 4],
+    pub center: (CenterMode, CenterMode),
+    pub tool: Tool,
 }
 
 /// The Slice Plane gizmo (world space).
@@ -284,7 +305,7 @@ pub struct CompoundSettings {
 
 impl Default for CompoundSettings {
     fn default() -> Self {
-        Self { boolean_op: 0, move_operand: true, proboolean_op: 0, loft_path_percent: 0.0 }
+        Self { boolean_op: 2, move_operand: true, proboolean_op: 0, loft_path_percent: 0.0 }
     }
 }
 
@@ -490,10 +511,11 @@ impl SelectionFilter {
     pub fn accepts(self, node: &Node) -> bool {
         match self {
             SelectionFilter::All => true,
-            SelectionFilter::Geometry => !matches!(node.object, ObjectKind::Camera { .. }) && !node.object.is_shape(),
+            SelectionFilter::Geometry => !matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_)) && !node.object.is_shape(),
             SelectionFilter::Shapes => node.object.is_shape(),
             SelectionFilter::Cameras => matches!(node.object, ObjectKind::Camera { .. }),
-            // No lights, helpers, bones, IK chains or points exist yet.
+            SelectionFilter::Lights => matches!(node.object, ObjectKind::Light(_)),
+            // No helpers, bones, IK chains or points exist yet.
             _ => false,
         }
     }
@@ -523,6 +545,34 @@ impl SelectionRegion {
     }
 }
 
+/// Main Toolbar > Scale flyout: Uniform, Non-Uniform or Squash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ScaleKind {
+    #[default]
+    Uniform,
+    NonUniform,
+    Squash,
+}
+
+impl ScaleKind {
+    pub const ALL: [ScaleKind; 3] = [ScaleKind::Uniform, ScaleKind::NonUniform, ScaleKind::Squash];
+    pub fn label(self) -> &'static str {
+        match self {
+            ScaleKind::Uniform => "Select and Uniform Scale",
+            ScaleKind::NonUniform => "Select and Non-uniform Scale",
+            ScaleKind::Squash => "Select and Squash",
+        }
+    }
+    /// The next flyout button (Scale Cycle).
+    pub fn next(self) -> ScaleKind {
+        match self {
+            ScaleKind::Uniform => ScaleKind::NonUniform,
+            ScaleKind::NonUniform => ScaleKind::Squash,
+            ScaleKind::Squash => ScaleKind::Uniform,
+        }
+    }
+}
+
 /// Main Toolbar > Reference Coordinate System.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CoordSystem {
@@ -534,11 +584,13 @@ pub enum CoordSystem {
     Local,
     Gimbal,
     Grid,
+    /// The working pivot's axes (Hierarchy > Working Pivot).
+    Working,
     Pick,
 }
 
 impl CoordSystem {
-    pub const ALL: [CoordSystem; 8] = [CoordSystem::View, CoordSystem::Screen, CoordSystem::World, CoordSystem::Parent, CoordSystem::Local, CoordSystem::Gimbal, CoordSystem::Grid, CoordSystem::Pick];
+    pub const ALL: [CoordSystem; 9] = [CoordSystem::View, CoordSystem::Screen, CoordSystem::World, CoordSystem::Parent, CoordSystem::Local, CoordSystem::Gimbal, CoordSystem::Grid, CoordSystem::Working, CoordSystem::Pick];
     pub fn label(self) -> &'static str {
         match self {
             CoordSystem::View => "View",
@@ -548,6 +600,7 @@ impl CoordSystem {
             CoordSystem::Local => "Local",
             CoordSystem::Gimbal => "Gimbal",
             CoordSystem::Grid => "Grid",
+            CoordSystem::Working => "Working",
             CoordSystem::Pick => "Pick",
         }
     }
@@ -586,6 +639,10 @@ pub struct GizmoPrefs {
 
 fn default_gizmo_size() -> f32 {
     20.0
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for GizmoPrefs {
@@ -643,6 +700,10 @@ pub struct Prefs {
     pub auto_backup_interval_min: f32,
     /// Auto Backup File Name (default "AutoBackup").
     pub auto_backup_name: String,
+    /// Preferences > Animation > Local Center During Animate: with Auto Key
+    /// on, Rotate and Scale use each object's pivot (default on).
+    #[serde(default = "default_true")]
+    pub local_center_during_animate: bool,
     /// Preferences > Files > Recent Files in File Menu (0-50, default 10).
     pub recent_files_count: usize,
 }
@@ -666,6 +727,7 @@ impl Default for Prefs {
             auto_backup_count: 3,
             auto_backup_interval_min: 5.0,
             auto_backup_name: "AutoBackup".into(),
+            local_center_during_animate: true,
             recent_files_count: 10,
         }
     }
@@ -673,13 +735,13 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 29] = [
+    pub const NAMES: [&'static str; 30] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
-        "Scale Size", "Rotation Increment", "Space Locks Selection", "Recent Files in File Menu",
+        "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -695,6 +757,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => b(self.spinner_wrap_cursor),
             "Viewport Tooltips" => b(self.viewport_tooltips),
             "Space Locks Selection" => b(self.space_selection_lock),
+            "Local Center During Animate" => b(self.local_center_during_animate),
             "Show Cross Hair Cursor" => b(self.show_cross_hair),
             "Auto Backup Enable" => b(self.auto_backup_enable),
             "Auto Backup Count" => self.auto_backup_count as f64,
@@ -733,6 +796,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => self.spinner_wrap_cursor = on,
             "Viewport Tooltips" => self.viewport_tooltips = on,
             "Space Locks Selection" => self.space_selection_lock = on,
+            "Local Center During Animate" => self.local_center_during_animate = on,
             "Auto Backup Enable" => self.auto_backup_enable = on,
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
@@ -1050,6 +1114,54 @@ impl Tool {
     }
 }
 
+/// Viewport Configuration > ViewCube.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViewCubeSettings {
+    /// Show the ViewCube (Alt+Ctrl+V).
+    pub show: bool,
+    /// Show in All Views (else only in the active one).
+    pub all_views: bool,
+    /// ViewCube Size: 0 Large, 1 Normal, 2 Small, 3 Tiny.
+    pub size: u8,
+    /// Inactive Opacity, 0..=1.
+    pub inactive_opacity: f32,
+    /// Show Compass Below the ViewCube.
+    pub compass: bool,
+}
+
+impl Default for ViewCubeSettings {
+    fn default() -> Self {
+        Self { show: true, all_views: false, size: 1, inactive_opacity: 0.5, compass: true }
+    }
+}
+
+/// A stored view: the ViewCube Home view and Views > Save Active View.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SavedView {
+    pub target: [f32; 3],
+    pub distance: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+    #[serde(default)]
+    pub roll: f32,
+    pub fov_y_radians: f32,
+    /// Save Active View keeps the shading; the Home view does not.
+    #[serde(default)]
+    pub shading: Option<crate::viewport::Shading>,
+}
+
+impl SavedView {
+    pub fn of(vp: &crate::viewport::Viewport) -> Self {
+        let c = &vp.camera;
+        Self { target: c.target.to_array(), distance: c.distance, yaw: c.yaw, pitch: c.pitch, roll: c.roll, fov_y_radians: vp.fov_y_radians, shading: None }
+    }
+
+    pub fn camera(&self) -> OrbitCamera {
+        OrbitCamera { target: Vec3::from_array(self.target), distance: self.distance, yaw: self.yaw, pitch: self.pitch, roll: self.roll }
+    }
+}
+
 /// Which viewport view the (single, for now) viewport shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewKind {
@@ -1186,6 +1298,16 @@ pub struct AppState {
     pub focus_modify: bool,
     pub ui_locked: bool,
     pub shade_selected_faces: bool,
+    /// Views > Shade Selected: selected objects shaded in wireframe views.
+    pub shade_selected: bool,
+    /// Viewport Configuration > ViewCube.
+    pub viewcube: ViewCubeSettings,
+    /// The Viewport Configuration panel to show when the dialog opens next.
+    pub config_panel: Option<String>,
+    /// ViewCube Home view (Set Current View as Home); None = the default Perspective.
+    pub home_view: Option<SavedView>,
+    /// Views > Save Active View, one per view label ("Top", "Perspective"...).
+    pub saved_views: BTreeMap<String, SavedView>,
     pub selection_brackets: bool,
     pub hide_floating_dialogs: bool,
     pub hide_category: HideCategories,
@@ -1207,9 +1329,13 @@ pub struct AppState {
     /// Main Toolbar > Window/Crossing: true = Window (fully enclosed only).
     pub window_selection: bool,
     pub selection_region: SelectionRegion,
+    /// The Scale flyout's button: how Select and Scale scales.
+    pub scale_kind: ScaleKind,
     pub coord_system: CoordSystem,
     /// Node whose coordinate system `CoordSystem::Pick` uses.
     pub pick_coord_node: Option<NodeId>,
+    /// The four most recently picked systems, newest first (names in the list).
+    pub pick_coord_recent: Vec<NodeId>,
     pub center_mode: CenterMode,
     /// The centre is remembered separately for single and multiple selections.
     pub center_single: CenterMode,
@@ -1234,6 +1360,13 @@ pub struct AppState {
     /// Reference coordinate system remembered per transform tool
     /// (Preferences > Reference Coordinate System > Constant off).
     pub coord_by_tool: [CoordSystem; 4],
+    /// Use Center (single, multiple) and axis constraint remembered per
+    /// transform tool, like `coord_by_tool`; the constraint also per level
+    /// ([object, sub-object][tool]).
+    pub center_by_tool: [(CenterMode, CenterMode); 4],
+    pub constraint_by_tool: [[AxisConstraint; 4]; 2],
+    /// Which level `axis_constraint` belongs to (true = sub-object).
+    pub constraint_level_sub: bool,
     /// Keyboard Shortcut Override Toggle: when off only Main UI shortcuts work.
     pub keyboard_override: bool,
     pub named_sets: BTreeMap<String, Vec<NodeId>>,
@@ -1283,6 +1416,19 @@ pub struct AppState {
     pub affect_pivot_only: bool,
     /// Hierarchy > Pivot: Move/Rotate act on the object offset only.
     pub affect_object_only: bool,
+    /// Hierarchy > Pivot: Rotate/Scale act on the links to the children only.
+    pub affect_hierarchy_only: bool,
+    /// Hierarchy > Adjust Transform > Don't Affect Children.
+    pub dont_affect_children: bool,
+    pub working_pivot: WorkingPivot,
+    /// Working Pivot > Edit Working Pivot: the transform tools move the working pivot.
+    pub edit_working_pivot: bool,
+    /// Working Pivot > Use Working Pivot: every transform uses the Working system.
+    pub use_working_pivot: bool,
+    /// Working Pivot > Place Pivot To > Align To View.
+    pub working_pivot_align_to_view: bool,
+    /// What Edit / Use Working Pivot restore when they end.
+    pub working_pivot_saved: (Option<SavedManagers>, Option<SavedManagers>),
     pub selection_locked: bool,
     pub snaps_on: bool,
     pub angle_snap_on: bool,
@@ -1402,19 +1548,24 @@ pub struct AppState {
     pub file: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
     pub mesh_dirty: bool,
-    /// Render SetUp output size in pixels.
-    pub render_size: (u32, u32),
     /// A Render waiting for the UI's renderer (the command layer has no GPU).
     pub pending_render: Option<RenderRequest>,
+    /// The Rendered Frame Window, its image and the render in progress.
+    pub rendered: crate::render::RenderedFrame,
 }
 
-/// Render the active view of `viewport` to the PNG `path` at `width` x `height`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A render for the UI's renderer: viewport `viewport` with `settings`
+/// (Render Setup at the time of the request), into the Rendered Frame Window.
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderRequest {
-    pub path: String,
-    pub width: u32,
-    pub height: u32,
     pub viewport: usize,
+    pub settings: loom_scene::render::RenderSettings,
+    /// The selection, for Area to Render > Selected.
+    pub selection: Vec<NodeId>,
+    /// Also write the image here when done.
+    pub save_path: Option<String>,
+    /// Iterative: Region and Selected keep the rest of the window's image.
+    pub iterative: bool,
 }
 
 impl Default for AppState {
@@ -1446,13 +1597,18 @@ impl AppState {
             show_ribbon: false,
             show_command_panel: true,
             startup_ui: crate::settings::UiLayout::DEFAULT,
-            show_end_result: true,
+            show_end_result: false,
             pin_stack: false,
             show_modifier_set: false,
             modifier_set: vec!["XForm".into(), "Normal".into(), "Smooth".into(), "Poly Select".into()],
             focus_modify: false,
             ui_locked: false,
             shade_selected_faces: false,
+            shade_selected: false,
+            viewcube: ViewCubeSettings::default(),
+            config_panel: None,
+            home_view: None,
+            saved_views: BTreeMap::new(),
             selection_brackets: true,
             hide_floating_dialogs: false,
             hide_category: HideCategories::default(),
@@ -1467,8 +1623,10 @@ impl AppState {
             selection_filter: SelectionFilter::All,
             window_selection: false,
             selection_region: SelectionRegion::Rectangular,
+            scale_kind: ScaleKind::Uniform,
             coord_system: CoordSystem::View,
             pick_coord_node: None,
+            pick_coord_recent: Vec::new(),
             center_mode: CenterMode::PivotPoint,
             center_single: CenterMode::PivotPoint,
             center_multi: CenterMode::Selection,
@@ -1481,6 +1639,9 @@ impl AppState {
             region_points_reset: false,
             manipulate: false,
             coord_by_tool: [CoordSystem::View; 4],
+            center_by_tool: [(CenterMode::PivotPoint, CenterMode::Selection); 4],
+            constraint_by_tool: [[AxisConstraint::XY; 4]; 2],
+            constraint_level_sub: false,
             keyboard_override: true,
             ffd_selection: BTreeSet::new(),
             vertex_paint_brush: false,
@@ -1511,6 +1672,13 @@ impl AppState {
             soft_cache: Default::default(),
             affect_pivot_only: false,
             affect_object_only: false,
+            affect_hierarchy_only: false,
+            dont_affect_children: false,
+            working_pivot: WorkingPivot::default(),
+            edit_working_pivot: false,
+            use_working_pivot: false,
+            working_pivot_align_to_view: false,
+            working_pivot_saved: (None, None),
             selection_locked: false,
             snaps_on: false,
             angle_snap_on: false,
@@ -1572,8 +1740,8 @@ impl AppState {
             pending_file_action: None,
             exit_requested: false,
             uv_editor: UvEditor::default(),
-            render_size: (640, 480),
             pending_render: None,
+            rendered: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,
@@ -1656,6 +1824,7 @@ impl AppState {
         let c = &self.hide_category;
         !match node.object {
             ObjectKind::Camera { .. } => c.cameras,
+            ObjectKind::Light(_) => c.lights,
             ref o if o.is_shape() => c.shapes,
             _ => c.geometry,
         }
@@ -1976,6 +2145,9 @@ impl AppState {
         if self.slice_plane_mode {
             return self.slice_plane.origin;
         }
+        if self.edit_working_pivot {
+            return self.working_pivot.origin;
+        }
         self.selection_bounds()
             .map(|(a, b)| (a + b) * 0.5)
             .unwrap_or(Vec3::ZERO)
@@ -1989,7 +2161,7 @@ mod tests {
 
     /// Screen-right vector of an orbit camera looking at the origin.
     fn screen_right(yaw: f32, pitch: f32) -> Vec3 {
-        let cam = OrbitCamera { yaw, pitch, distance: 10.0, target: Vec3::ZERO };
+        let cam = OrbitCamera { yaw, pitch, distance: 10.0, target: Vec3::ZERO, roll: 0.0 };
         let forward = (cam.target - cam.eye_position()).normalize();
         forward.cross(Vec3::Z).normalize()
     }

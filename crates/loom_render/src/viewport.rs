@@ -10,10 +10,54 @@ use crate::mesh_buffer::{GpuVertex, MeshBuffer};
 struct ViewUniform {
     view_proj: [[f32; 4]; 4],
     camera_pos: [f32; 4], // xyz used, w padding
-    /// x = lighting mode (0 headlight, 1 flat, 2 scene/key light), yzw unused.
+    /// x = lighting mode (0 headlight, 1 flat, 2 the lights below), y = light count.
     params: [f32; 4],
     /// Hidden Line: draw every mesh in this colour (a > 0 enables).
     override_color: [f32; 4],
+    /// Ambient light (rgb) of mode 2.
+    ambient: [f32; 4],
+    lights: [GpuLight; MAX_VIEW_LIGHTS],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+struct GpuLight {
+    /// xyz position, w kind (0 point, 1 spot, 2 directional).
+    pos_kind: [f32; 4],
+    /// xyz direction the light travels, w cos(hotspot / 2).
+    dir_hot: [f32; 4],
+    /// rgb colour times multiplier, a cos(falloff / 2).
+    color_fall: [f32; 4],
+    /// Near start, near end, far start, far end.
+    atten: [f32; 4],
+    /// Decay exponent (0, 1, 2), decay start, near used, far used.
+    decay: [f32; 4],
+}
+
+/// The most lights a shaded viewport draws.
+pub const MAX_VIEW_LIGHTS: usize = 8;
+
+/// How the light reaches a point in the shaded viewport.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ViewLightKind {
+    #[default]
+    Point,
+    /// Hotspot and falloff as full cone angles in degrees.
+    Spot { hotspot: f32, falloff: f32 },
+    Directional,
+}
+
+/// One light of the shaded viewport (linear colour times multiplier).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ViewLight {
+    pub kind: ViewLightKind,
+    pub position: Vec3,
+    pub direction: Vec3,
+    pub color: Vec3,
+    pub decay: u32,
+    pub decay_start: f32,
+    pub near: Option<(f32, f32)>,
+    pub far: Option<(f32, f32)>,
 }
 
 /// Shading viewport label menu modes the renderer understands.
@@ -21,6 +65,38 @@ struct ViewUniform {
 pub struct ViewShading {
     pub lighting: u32,
     pub override_color: Option<[f32; 3]>,
+    /// Lighting mode 2: up to [`MAX_VIEW_LIGHTS`] lights and the ambient light.
+    pub lights: [Option<ViewLight>; MAX_VIEW_LIGHTS],
+    pub ambient: [f32; 3],
+}
+
+impl ViewShading {
+    /// Mode 2 with `lights` (the first [`MAX_VIEW_LIGHTS`]) and `ambient`.
+    pub fn with_lights(mut self, lights: &[ViewLight], ambient: [f32; 3]) -> Self {
+        self.lighting = 2;
+        self.lights = [None; MAX_VIEW_LIGHTS];
+        for (slot, l) in self.lights.iter_mut().zip(lights) {
+            *slot = Some(*l);
+        }
+        self.ambient = ambient;
+        self
+    }
+}
+
+fn gpu_light(l: &ViewLight) -> GpuLight {
+    let (kind, hot, fall) = match l.kind {
+        ViewLightKind::Point => (0.0, -2.0, -2.0),
+        ViewLightKind::Spot { hotspot, falloff } => (1.0, (hotspot * 0.5).to_radians().cos(), (falloff * 0.5).to_radians().cos()),
+        ViewLightKind::Directional => (2.0, -2.0, -2.0),
+    };
+    let (near, far) = (l.near.unwrap_or((0.0, 0.0)), l.far.unwrap_or((0.0, 0.0)));
+    GpuLight {
+        pos_kind: [l.position.x, l.position.y, l.position.z, kind],
+        dir_hot: [l.direction.x, l.direction.y, l.direction.z, hot],
+        color_fall: [l.color.x, l.color.y, l.color.z, fall],
+        atten: [near.0, near.1, far.0, far.1],
+        decay: [l.decay as f32, l.decay_start, l.near.is_some() as u32 as f32, l.far.is_some() as u32 as f32],
+    }
 }
 
 /// Number of simultaneous viewports (uniform slots) supported.
@@ -200,11 +276,20 @@ impl ViewportRenderer {
 
     pub fn update_view(&self, queue: &Queue, slot: usize, view_proj: Mat4, camera_pos: Vec3, shading: ViewShading) {
         let oc = shading.override_color.map_or([0.0; 4], |c| [c[0], c[1], c[2], 1.0]);
+        let mut lights = [GpuLight::zeroed(); MAX_VIEW_LIGHTS];
+        let mut count = 0;
+        for l in shading.lights.iter().flatten() {
+            lights[count] = gpu_light(l);
+            count += 1;
+        }
+        let a = shading.ambient;
         let u = ViewUniform {
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: [camera_pos.x, camera_pos.y, camera_pos.z, 0.0],
-            params: [shading.lighting as f32, 0.0, 0.0, 0.0],
+            params: [shading.lighting as f32, count as f32, 0.0, 0.0],
             override_color: oc,
+            ambient: [a[0], a[1], a[2], 0.0],
+            lights,
         };
         let slot = slot.min(MAX_VIEWPORTS - 1);
         queue.write_buffer(&self.slots[slot].0, 0, bytemuck::bytes_of(&u));
@@ -215,6 +300,8 @@ impl ViewportRenderer {
     ///
     /// `selected` lists indices into `meshes` of currently-selected meshes —
     /// each selected mesh additionally gets a white wireframe overlay.
+    /// `shade_only`: in a wireframe view (`shaded` false), these meshes are
+    /// shaded anyway (Views > Shade Selected).
     #[allow(clippy::too_many_arguments)]
     pub fn record_into_pass(
         &self,
@@ -224,6 +311,7 @@ impl ViewportRenderer {
         selected: &[usize],
         show_edges: bool,
         shaded: bool,
+        shade_only: &[usize],
         grid: Option<GridPlane>,
         orthographic: bool,
         textures: &TextureSet,
@@ -232,10 +320,11 @@ impl ViewportRenderer {
         if let Some(plane) = grid {
             self.grid.record(pass, bind_group, plane, orthographic);
         }
-        if shaded {
+        let shade = shaded_meshes(meshes.len(), shaded, shade_only);
+        if !shade.is_empty() {
             // Opaque meshes first (per-object cull setting), then see-through.
             for transparent in [false, true] {
-                for mb in meshes.iter().filter(|mb| mb.index_count > 0 && (mb.style.alpha < 1.0) == transparent) {
+                for mb in shade.iter().map(|i| meshes[*i]).filter(|mb| mb.index_count > 0 && (mb.style.alpha < 1.0) == transparent) {
                     let pipeline = if transparent {
                         &self.mesh_pipeline_blend
                     } else if mb.style.backface_cull {
@@ -268,6 +357,16 @@ impl ViewportRenderer {
                 }
             }
         }
+    }
+}
+
+/// The meshes a viewport draws shaded: all of them in a shaded view, else
+/// only `shade_only` (Shade Selected in a wireframe view).
+pub fn shaded_meshes(count: usize, shaded: bool, shade_only: &[usize]) -> Vec<usize> {
+    if shaded {
+        (0..count).collect()
+    } else {
+        shade_only.iter().copied().filter(|i| *i < count).collect()
     }
 }
 
@@ -317,5 +416,18 @@ impl ViewportRenderer {
     pub fn make_texture_set(&self, device: &Device, queue: &Queue, bitmaps: &[crate::mesh_buffer::Bitmap]) -> TextureSet {
         let (none, checker) = self.base_textures(device, queue);
         TextureSet { none, checker, bitmaps: bitmaps.iter().enumerate().map(|(i, b)| self.bitmap_texture(device, queue, b, &format!("texture_bitmap_{i}"))).collect() }
+    }
+}
+
+#[cfg(test)]
+mod shade_tests {
+    use super::shaded_meshes;
+
+    /// Shade Selected: a wireframe view shades the selected meshes only.
+    #[test]
+    fn wireframe_views_shade_only_the_shade_selected_meshes() {
+        assert_eq!(shaded_meshes(3, true, &[]), vec![0, 1, 2]);
+        assert_eq!(shaded_meshes(3, false, &[]), Vec::<usize>::new());
+        assert_eq!(shaded_meshes(3, false, &[2, 7]), vec![2]);
     }
 }

@@ -82,7 +82,7 @@ fn show_native(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mu
     }
 }
 
-/// Bitmap formats that load (`loom_commands::images::READ_EXTENSIONS`) and that save.
+/// Bitmap formats that load (`loom_commands::render::IMAGE_READ_FORMATS`) and that save (`IMAGE_FORMATS`).
 const IMAGES_READ: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr,dds,gif";
 const IMAGES_WRITE: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr";
 
@@ -97,10 +97,12 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::ExportSelected => ("Export Selected", "fbx,obj", "Save"),
         Dialog::MergeFile => ("Merge File", "loom", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", IMAGES_READ, "Open"),
+        Dialog::BackgroundFile => ("Select Background Image", IMAGES_READ, "Open"),
         Dialog::MaterialMap { .. } => ("Select Bitmap Image File", IMAGES_READ, "Open"),
         Dialog::PickUvTexture => ("Pick Texture", IMAGES_READ, "Open"),
         Dialog::SaveUvw => ("Save UVW", "uvw", "Save"),
         Dialog::RenderFile => ("Render Output File", IMAGES_WRITE, "Save"),
+        Dialog::SaveRenderedImage => ("Save Image", IMAGES_WRITE, "Save"),
         Dialog::LoadUvw => ("Load UVW", "uvw", "Open"),
         Dialog::BitmapFit => ("Bitmap Fit", IMAGES_READ, "Open"),
         Dialog::SaveShortcuts => ("Save Shortcut File As", "kbd", "Save"),
@@ -133,7 +135,8 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
             amount: None,
         },
         Dialog::SaveUvw => Command::SaveUvw { path: Some(p) },
-        Dialog::RenderFile => Command::Render { path: Some(p), width: None, height: None },
+        Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: Some(p) },
+        Dialog::SaveRenderedImage => Command::SaveRenderedImage { path: Some(p) },
         Dialog::LoadUvw => Command::LoadUvw { path: Some(p) },
         Dialog::SaveShortcuts => Command::SaveShortcuts { path: Some(p) },
         Dialog::LoadShortcuts => Command::LoadShortcuts { path: Some(p) },
@@ -264,6 +267,12 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
     }
     if let Some(parent) = path.parent() {
         app.file_dir = parent.to_path_buf();
+    }
+    if dialog == Dialog::BackgroundFile {
+        // Back to the Viewport Background dialog with the file in its field.
+        app.background_pick = Some(path.to_string_lossy().into_owned());
+        app.state.dialog = Some(Dialog::ViewportBackground);
+        return true;
     }
     if dialog == Dialog::PickTexture {
         // Show Map in Viewport > Bitmap on the selected object.

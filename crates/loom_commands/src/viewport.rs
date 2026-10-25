@@ -42,12 +42,51 @@ pub struct Viewport {
     pub clip: (f32, f32),
     /// Perspective field of view (vertical), per viewport.
     pub fov_y_radians: f32,
+    /// Illuminate with Scene Lights (Ctrl+L switches to Default Lights);
+    /// a scene with no light that is on is lit by the default lights.
     pub scene_lights: bool,
+    /// Default Lights: 1 light (from the viewer) or 2 (key and fill).
+    pub default_lights: u32,
     pub background: Option<String>,
     pub background_locked: bool,
+    /// Lock Zoom/Pan: the view (target, distance) the image was locked in; it
+    /// zooms and pans with the scene from there.
+    pub background_anchor: Option<(glam::Vec3, f32)>,
+    /// Aspect Ratio: Match Viewport / Match Bitmap / Match Rendering Output.
+    pub background_aspect: BackgroundAspect,
+    /// Display Background.
+    pub background_display: bool,
     /// Bumped by Update Background Image so the UI reloads the file.
     pub background_version: u32,
     pub view_undo: ViewUndo,
+}
+
+/// Viewport Background > Aspect Ratio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum BackgroundAspect {
+    /// Stretched to the viewport.
+    #[default]
+    Viewport,
+    /// The bitmap's own aspect, fitted in the viewport.
+    Bitmap,
+    /// The render output's aspect (Render Setup size), fitted in the viewport.
+    Rendering,
+}
+
+impl BackgroundAspect {
+    pub const ALL: [BackgroundAspect; 3] = [BackgroundAspect::Viewport, BackgroundAspect::Bitmap, BackgroundAspect::Rendering];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BackgroundAspect::Viewport => "Match Viewport",
+            BackgroundAspect::Bitmap => "Match Bitmap",
+            BackgroundAspect::Rendering => "Match Rendering Output",
+        }
+    }
+
+    pub fn from_label(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.label().eq_ignore_ascii_case(s))
+    }
 }
 
 /// The default Perspective (and ViewCube Home) angles: looking at the origin
@@ -76,9 +115,13 @@ impl Viewport {
             clipping: false,
             clip: (0.0, 1000.0),
             fov_y_radians: 45f32.to_radians(),
-            scene_lights: false,
+            scene_lights: true,
+            default_lights: 1,
             background: None,
             background_locked: false,
+            background_anchor: None,
+            background_aspect: BackgroundAspect::Viewport,
+            background_display: true,
             background_version: 0,
             view_undo: ViewUndo::default(),
         }
@@ -264,15 +307,25 @@ pub struct HideCategories {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dialog {
     SelectFromScene,
-    /// Rendering > Render: choose the PNG the active view renders to.
+    /// C with several cameras and none selected: pick the camera to look through.
+    SelectCamera,
+    /// Render Setup > Render Output > Files...: the file a Production render saves to.
     RenderFile,
-    /// Rendering > Render SetUp: the output size.
+    /// Rendering > Render Setup (F10).
     RenderSetup,
+    /// Tools > Light Lister.
+    LightLister,
+    /// General Parameters > Exclude...: the Exclude/Include dialog of a light.
+    LightExclude { light: u64 },
+    /// Rendered Frame Window > Save Image.
+    SaveRenderedImage,
     /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).
     MaterialMap { channel: u8 },
     ViewportConfiguration,
     TimeConfiguration,
     ViewportBackground,
+    /// Viewport Background > Files...: pick the image; then back to the dialog.
+    BackgroundFile,
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,
@@ -312,6 +365,8 @@ pub enum Dialog {
     CloseSpline,
     /// Editable Spline > Refine with Connect on an existing vertex: Refine / Connect Only.
     RefineVertex,
+    /// A base parameter change under a topology-dependent modifier: Yes / Hold/Yes / No.
+    TopologyWarning,
     /// File > Import (FBX, OBJ, .max).
     ImportFile,
     SaveAnimation,

@@ -450,3 +450,41 @@ fn obj_hidden_objects_option() {
     export(&mut s, &f);
     assert!(std::fs::read_to_string(&f).unwrap().contains("o Box001"));
 }
+
+#[test]
+fn fbx_lights_option_both_ways() {
+    let d = dir("fbx_lights");
+    let mut s = AppState::new();
+    boxed(&mut s, 0.0);
+    execute(&mut s, Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let f = d.join("l.fbx");
+    let lights = |path: &Path| loom_fbx::read(&std::fs::read(path).unwrap(), 0.01).unwrap().nodes.iter().filter(|n| matches!(n.kind, loom_fbx::FbxKind::Light(_))).count();
+    export(&mut s, &f);
+    assert_eq!(lights(&f), 1);
+    let mut t = AppState::new();
+    opt(&mut t, "fbx_import", "lights", json!(false));
+    import(&mut t, &f);
+    assert!(!t.scene.nodes().any(|n| matches!(n.object, ObjectKind::Light(_))), "Lights off on import");
+    opt(&mut s, "fbx_export", "lights", json!(false));
+    export(&mut s, &f);
+    assert_eq!(lights(&f), 0, "Lights off on export");
+}
+
+#[test]
+fn render_output_saves_every_listed_image_format() {
+    let dir = dir("image_formats");
+    let mut img = image::RgbaImage::new(8, 4);
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        *p = image::Rgba([(x * 30) as u8, (y * 60) as u8, 128, 255]);
+    }
+    for ext in loom_commands::render::IMAGE_FORMATS {
+        let path = dir.join(format!("t.{ext}"));
+        loom_commands::render::save_image(&img, &path.to_string_lossy()).unwrap_or_else(|e| panic!("{ext}: {e}"));
+        let back = image::open(&path).unwrap_or_else(|e| panic!("{ext}: {e}"));
+        assert_eq!((back.width(), back.height()), (8, 4), "{ext}");
+    }
+    // The read-only formats are in the bitmap list, and every listed format decodes with this build.
+    for ext in loom_commands::render::IMAGE_READ_FORMATS {
+        assert!(image::ImageFormat::from_extension(ext).is_some_and(|f| f.reading_enabled()), "{ext}");
+    }
+}

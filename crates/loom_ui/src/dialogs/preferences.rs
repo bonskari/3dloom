@@ -12,6 +12,7 @@ enum Tab {
     Viewports,
     Gizmos,
     Files,
+    Animation,
 }
 
 fn set(app: &mut LoomApp, name: &str, value: f64) {
@@ -28,7 +29,7 @@ fn check(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str) {
 fn number(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str, range: std::ops::RangeInclusive<f64>, decimals: usize) {
     let mut v = app.state.prefs.get(name).unwrap_or(0.0);
     ui.label(label);
-    if ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.1)).range(range).fixed_decimals(decimals)).changed() {
+    if ui.add(crate::spinner::spin(ui, &mut v, range).speed(app.spinner_speed(0.1)).fixed_decimals(decimals)).changed() {
         set(app, name, v);
     }
 }
@@ -42,6 +43,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.selectable_value(&mut tab, Tab::Viewports, "Viewports");
             ui.selectable_value(&mut tab, Tab::Gizmos, "Gizmos");
             ui.selectable_value(&mut tab, Tab::Files, "Files");
+            ui.selectable_value(&mut tab, Tab::Animation, "Animation");
         });
         ui.separator();
         match tab {
@@ -89,6 +91,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         }
                     });
                     ui.label(format!("Folder: {}", loom_commands::autosave::autoback_dir().display()));
+                });
+            }
+            Tab::Animation => {
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Animate").strong());
+                    check(ui, app, "Local Center During Animate", "Local Center During Animate");
                 });
             }
             Tab::Viewports => {

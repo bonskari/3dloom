@@ -24,4 +24,7 @@ glam        = { workspace = true }
 rfd         = "0.17"
 
 [dev-dependencies]
+pollster = { workspace = true }
+# The UI tests find widgets by their label, as a screen reader would.
+eframe      = { workspace = true, features = ["accesskit"] }
 loom_fbx = { workspace = true }

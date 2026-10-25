@@ -16,6 +16,15 @@ fn layout() -> GizmoLayout {
 }
 
 #[test]
+fn squash_keeps_the_volume() {
+    let f = scale_gizmo::squash_factors(Handle::Axis(Axis::X), 4.0);
+    assert!(f.abs_diff_eq(Vec3::new(4.0, 0.5, 0.5), 1e-6), "{f}");
+    let f = scale_gizmo::squash_factors(Handle::Plane(Plane::XY), 2.0);
+    assert!(f.abs_diff_eq(Vec3::new(2.0, 2.0, 0.25), 1e-6), "{f}");
+    assert_eq!(scale_gizmo::squash_factors(Handle::Uniform, 2.0), Vec3::splat(2.0));
+}
+
+#[test]
 fn axis_handle_hit_within_8px() {
     let p = top_projection();
     let l = layout();

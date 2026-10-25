@@ -50,7 +50,27 @@ pub fn general_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
         sep(),
         check("Viewport Clipping", vp.clipping, Command::ViewportClipping),
         sep(),
-        item("Configure Viewports...", Command::ConfigureViewports),
+        MenuEntry { label: "ViewCube".into(), checked: false, action: Action::Submenu({
+            let mut v = vec![check("Show the ViewCube", s.viewcube.show, Command::ViewCubeToggle), sep()];
+            v.extend(viewcube_entries(app, index));
+            v
+        }) },
+        sep(),
+        item("Configure Viewports...", Command::ConfigureViewports { panel: None }),
+    ]
+}
+
+/// The ViewCube menu (right-click the cube; also [+] > ViewCube).
+pub fn viewcube_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
+    let vp = &app.state.viewports[index];
+    vec![
+        item("Home", Command::HomeView),
+        check("Orthographic", vp.is_orthographic(), Command::OrthographicUserView),
+        check("Perspective", !vp.is_orthographic(), Command::PerspectiveUserView),
+        sep(),
+        item("Set Current View as Home", Command::SetCurrentViewAsHome),
+        sep(),
+        item("Configure...", Command::ConfigureViewports { panel: Some("ViewCube".into()) }),
     ]
 }
 
@@ -68,6 +88,16 @@ pub fn pov_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
         .collect();
     if !cameras.is_empty() {
         v.push(MenuEntry { label: "Cameras".into(), checked: false, action: Action::Submenu(cameras) });
+    }
+    // Lights: the spot and directional lights a light view can look through.
+    let lights: Vec<MenuEntry> = s
+        .scene
+        .nodes()
+        .filter(|n| matches!(&n.object, loom_scene::ObjectKind::Light(l) if l.light_type.aims()))
+        .map(|n| check(&n.name, vp.kind == ViewKind::Camera(n.id), Command::ViewportView { index: idx, kind: ViewKind::Camera(n.id) }))
+        .collect();
+    if !lights.is_empty() {
+        v.push(MenuEntry { label: "Lights".into(), checked: false, action: Action::Submenu(lights) });
     }
     for kind in [
         ViewKind::Perspective,
@@ -106,6 +136,21 @@ pub fn shading_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
         },
         sep(),
         check("Edged Faces", vp.edged_faces, Command::ViewEdgedFacesToggle),
+        MenuEntry { label: "Lighting and Shadows".into(), checked: false, action: Action::Submenu(lighting_entries(vp)) },
+    ]
+}
+
+/// Shading > Lighting and Shadows: scene or default lights, and how many
+/// default lights. Choosing the current entry keeps it.
+fn lighting_entries(vp: &loom_commands::Viewport) -> Vec<MenuEntry> {
+    let keep = Command::ViewportDefaultLights { count: vp.default_lights };
+    let switch = |to_scene: bool| if vp.scene_lights == to_scene { keep.clone() } else { Command::ViewportLightingToggle };
+    vec![
+        check("Illuminate with Scene Lights", vp.scene_lights, switch(true)),
+        check("Illuminate with Default Lights", !vp.scene_lights, switch(false)),
+        sep(),
+        check("Default Lights: 1 Light", vp.default_lights < 2, Command::ViewportDefaultLights { count: 1 }),
+        check("Default Lights: 2 Lights", vp.default_lights >= 2, Command::ViewportDefaultLights { count: 2 }),
     ]
 }
 
@@ -168,6 +213,6 @@ mod tests {
         assert_eq!(g[0].label, "Minimize Viewport");
         assert!(g.iter().any(|e| e.label == "Show Grids" && !e.checked));
         let shading = labels(&shading_entries(&app, 3));
-        assert_eq!(shading, vec!["Smooth + Highlights", "Wireframe", "Realistic (Bevy)", "Other", "", "Edged Faces"]);
+        assert_eq!(shading, vec!["Smooth + Highlights", "Wireframe", "Realistic (Bevy)", "Other", "", "Edged Faces", "Lighting and Shadows"]);
     }
 }

@@ -64,6 +64,11 @@ schema_for! {
     String => json!({"type":"string"}),
     [f32; 3] => json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}),
 }
+impl ArgSchema for loom_scene::render::RenderArea {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["View","Selected","Region","Crop","Blowup"]})
+    }
+}
 impl ArgSchema for loom_scene::anim::Ort {
     fn schema() -> Value {
         json!({"type":"string","enum":["Constant","Cycle","Loop","PingPong","Linear","RelativeRepeat"]})
@@ -304,6 +309,11 @@ impl ArgSchema for crate::state::SelectionFilter {
 impl ArgSchema for crate::state::SelectionRegion {
     fn schema() -> Value {
         json!({"type":"string","enum":["Rectangular","Circular","Fence","Lasso","Paint"]})
+    }
+}
+impl ArgSchema for crate::state::ScaleKind {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Uniform","NonUniform","Squash"]})
     }
 }
 impl ArgSchema for crate::state::CoordSystem {
@@ -657,7 +667,8 @@ commands! {
     SelectAndMove => "Select and Move", MainUI, "Activate the Select and Move tool (W).";
     SelectAndRotate => "Select and Rotate", MainUI, "Activate the Select and Rotate tool (E).";
     SelectAndScale => "Select and Scale", MainUI, "Activate the Select and Scale tool (R).";
-    ScaleCycle => "Scale Cycle", MainUI, "Cycle the scale tool modes (Ctrl+E).";
+    ScaleCycle => "Scale Cycle", MainUI, "Cycle the Scale flyout: Uniform, Non-Uniform, Squash (Ctrl+E); from another tool it first turns on Scale.";
+    ScaleType => "Scale Type", Loom, "Main Toolbar > Scale flyout: Uniform (all axes alike), NonUniform (the handle's axes) or Squash (the handle's axes, the others the opposite way); turns on Scale." { kind: crate::state::ScaleKind };
     SubObjectLevelCycle => "Sub-object Level Cycle", MainUI, "Cycle vertex, edge, face sub-object levels (Insert).";
     SubObjectSelectionToggle => "Sub-object Selection Toggle", MainUI, "Toggle between object and sub-object level (Ctrl+B).";
     SelectionLockToggle => "Selection Lock Toggle", MainUI, "Lock or unlock the selection (Space).";
@@ -679,12 +690,12 @@ commands! {
     MaximizeViewportToggle => "Maximize Viewport Toggle", MainUI, "Maximize or restore the active viewport (Alt+W).";
     DisableViewport => "Disable Viewport", MainUI, "Toggle updates of the active viewport (D).";
     RedrawAllViews => "Redraw All Views", MainUI, "Redraw every viewport (`).";
-    HomeView => "Home View", MainUI, "Reset the active viewport to its default view (Alt+Home).";
+    HomeView => "Home View", MainUI, "ViewCube Home (Alt+Home): the active viewport goes to the Home view, a Perspective view (the default one, or the one Set Current View as Home stored).";
     ZoomIn2X => "Zoom In 2X", MainUI, "Zoom the active viewport in by a factor of two (Alt+Shift+Ctrl+Z).";
     ZoomOut2X => "Zoom Out 2X", MainUI, "Zoom the active viewport out by a factor of two (Alt+Shift+Z).";
     ZoomMode => "Zoom Mode", MainUI, "Toggle the modal Zoom tool (Alt+Z).";
     PanView => "Pan View", MainUI, "Toggle the modal Pan View tool (Ctrl+P).";
-    PanViewport => "Pan Viewport", MainUI, "Pan the active viewport interactively (I).";
+    PanViewport => "Pan Viewport", MainUI, "I: pan the active view so `point` (the world point under the cursor) becomes its centre; without a point, toggle the Pan tool." { point: Option<[f32; 3]> };
     OrbitViewMode => "Orbit View Mode", MainUI, "Toggle the modal Orbit tool (Ctrl+R).";
     ZoomRegionMode => "Zoom Region Mode", MainUI, "Toggle the modal Zoom Region tool (Ctrl+W).";
     FieldOfViewMode => "Field-of-View Mode", Loom, "Toggle the modal Field-of-View tool (Perspective viewports).";
@@ -696,6 +707,7 @@ commands! {
     AddModifier => "Add Modifier", Loom, "Add a modifier from the Modifier List above the active entry of the selected objects." { name: String };
     DeleteModifier => "Delete Modifier", Loom, "Remove stack entry `index` (0 = bottom) from the selected objects." { index: u32 };
     MoveModifier => "Move Modifier", Loom, "Reorder the stack: entry `from` goes to position `to`." { from: u32, to: u32 };
+    CopyModifier => "Copy Modifier", Loom, "Shift-drag (copy) / Ctrl-drag (`instance`) in the stack: a copy of entry `from` is inserted so it ends up at position `to` (0 = bottom, up to the stack length)." { from: u32, to: u32, instance: bool };
     ToggleModifier => "Toggle Modifier", Loom, "Modifier on / off (the stack lightbulb)." { index: u32, on: bool };
     ToggleModifierInViewport => "Toggle Modifier In Viewport", Loom, "Modifier on / off in viewports only." { index: u32, on: bool };
     RenameModifier => "Rename Modifier", Loom, "Rename a stack entry." { index: u32, name: String };
@@ -814,10 +826,26 @@ commands! {
     HideShapesToggle => "Hide Shapes Toggle", MainUI, "Hide or show all shapes (Shift+S).";
     IsolateSelection => "Isolate Selection", MainUI, "Hide everything but the selection, or exit isolation (Alt+Q).";
     ExitIsolation => "Exit Isolation", Loom, "Leave Isolate Selection mode and unhide what it hid.";
-    ConfigureViewports => "Configure Viewports", Loom, "Open the Viewport Configuration dialog.";
+    ConfigureViewports => "Configure Viewports", Loom, "Open the Viewport Configuration dialog, optionally on a panel (\"Rendering Method\", \"Layout\", \"Safe Frames\", \"ViewCube\")." { panel: Option<String> };
     CloseDialog => "Close Dialog", Loom, "Close the open modeless dialog.";
     SelectByName => "Select By Name", MainUI, "Open the Select From Scene dialog (H).";
-    CameraView => "Camera View", MainUI, "Switch the active viewport to the selected or only camera (C).";
+    CameraView => "Camera View", MainUI, "Switch the active viewport to the selected or only camera (C); with several cameras and none selected, open the Select Camera list.";
+    ViewCubeToggle => "Show the ViewCube Toggle", MainUI, "Show or hide the ViewCube (Alt+Ctrl+V).";
+    SetViewCubeOptions => "Set ViewCube Options", Loom, "Viewport Configuration > ViewCube: show it, in all views or the active one only, size (0 Large, 1 Normal, 2 Small, 3 Tiny), inactive opacity 0-100, compass." { show: Option<bool>, all_views: Option<bool>, size: Option<u32>, inactive_opacity: Option<f32>, compass: Option<bool> };
+    SetCurrentViewAsHome => "Set Current View as Home", MainUI, "ViewCube menu: the active view becomes the Home view (saved with the scene).";
+    SaveActiveView => "Save Active View", MainUI, "Views > Save Active <View> View: store the active view (one slot per view: Top, Front, Perspective...).";
+    RestoreActiveView => "Restore Active View", MainUI, "Views > Restore Active <View> View: bring back the view saved for the active view's kind.";
+    ShadeSelectedToggle => "Shade Selected", MainUI, "Views > Shade Selected: selected objects are shaded in wireframe viewports.";
+    CreateCameraFromView => "Create Camera From View", MainUI, "Views > Create Camera From View (Ctrl+C): a Target camera matching the active Perspective view, which then looks through it; with a camera selected, that camera is moved to match the view.";
+    DollyCameraMode => "Dolly Camera Mode", MainUI, "Camera viewport: drag to move the camera along its line of sight.";
+    DollyTargetMode => "Dolly Target Mode", MainUI, "Camera viewport: drag to move the target along the line of sight (Target cameras).";
+    DollyCameraTargetMode => "Dolly Camera + Target Mode", MainUI, "Camera viewport: drag to move camera and target together (Target cameras).";
+    PerspectiveMode => "Perspective Mode", MainUI, "Camera viewport: drag to change FOV and dolly together, keeping the composition.";
+    RollCameraMode => "Roll Camera Mode", MainUI, "Camera viewport: drag horizontally to roll the camera about its line of sight.";
+    TruckCameraMode => "Truck Camera Mode", MainUI, "Camera viewport: drag to move the camera (and target) parallel to the view plane.";
+    OrbitCameraMode => "Orbit Camera Mode", MainUI, "Camera viewport: drag to rotate the camera about its target.";
+    PanCameraMode => "Pan Camera Mode", MainUI, "Camera viewport: drag to rotate the target about the camera.";
+    NavigateCamera => "Navigate Camera", Loom, "Camera viewport controls on the active viewport's camera (one scene undo step): op dolly / dolly_target / dolly_both / perspective (x = factor on the target distance, < 1 closer), roll (x degrees), truck (x, y world units along the view's right / up), orbit / pan (x degrees about world Z, y degrees vertically), fov (x degrees)." { op: String, x: f32, y: Option<f32> };
     ViewportBackground => "Viewport Background", MainUI, "Open the Viewport Background dialog (Alt+B).";
     BackgroundLockToggle => "Background Lock Toggle", MainUI, "Lock the background image to the view (Alt+Ctrl+B).";
     UpdateBackgroundImage => "Update Background Image", MainUI, "Reload the active viewport's background image (Alt+Shift+Ctrl+B).";
@@ -839,7 +867,8 @@ commands! {
     ViewportView => "Viewport View", Loom, "Set the point of view of a viewport by index." { index: u32, kind: crate::state::ViewKind };
     ViewportShading => "Viewport Shading", Loom, "Set the active viewport's shading mode and edged faces." { shading: crate::viewport::Shading, edged_faces: Option<bool> };
     SetSplits => "Set Splits", Loom, "Move the viewport layout splitters (fractions 0.05–0.95)." { x: Option<f32>, y: Option<f32> };
-    SetViewportBackground => "Set Viewport Background", Loom, "Set or clear the active viewport's background image path." { path: Option<String> };
+    SetViewportBackground => "Set Viewport Background", Loom, "Viewport Background dialog OK: the image file (omitted = keep, empty = remove), Aspect Ratio (Match Viewport, Match Bitmap, Match Rendering Output), Lock Zoom/Pan, Display Background, for the active viewport or all of them." { path: Option<String>, aspect: Option<String>, lock: Option<bool>, display: Option<bool>, all_views: Option<bool> };
+    ResetBackgroundTransform => "Reset Background Transform", MainUI, "Views > Viewport Background > Reset Background Transform: a locked background image is fitted to the active view again.";
     ShowStatisticsToggle => "Show Statistics Toggle", MainUI, "Show or hide polygon statistics (7).";
     ViewEdgedFacesToggle => "View Edged Faces Toggle", MainUI, "Toggle edged faces (F4).";
     WireframeSmoothHighlightsToggle => "Wireframe / Smooth+Highlights Toggle", MainUI, "Toggle wireframe and shaded display (F3).";
@@ -1047,8 +1076,22 @@ commands! {
     SetKeyMode => "Set Key Mode", MainUI, "Toggle Set Key mode ('): pose freely, then Set Keys commits the pose as keys; changing frame discards it.";
     SetKeys => "Set Keys", MainUI, "Key the filtered tracks of the selection at the current frame (K); in Set Key mode, commit the pose.";
     MaterialEditorToggle => "Material Editor Toggle", MainUI, "Open or close the Material Editor (M).";
-    Render => "Render", MainUI, "Render the active view to a PNG (`path`; without it the file dialog shows) at `width` x `height` (default: the Render SetUp size), with lights and shadows." { path: Option<String>, width: Option<u32>, height: Option<u32> };
-    RenderSetup => "Render SetUp...", MainUI, "Render SetUp: set the output size (`width`, `height`); with neither the dialog shows." { width: Option<u32>, height: Option<u32> };
+    Render => "Render", MainUI, "Render Production (Shift+Q): render the Rendered Frame Window's viewport (the active one unless Lock to Viewport) with the Render Setup settings into the Rendered Frame Window, without blocking; `path` also saves the image there (png, jpg, bmp, tga, exr), as Save File does with the Render Output file; `width` x `height` override the output size for this render." { path: Option<String>, width: Option<u32>, height: Option<u32> };
+    RenderIterative => "Render Iterative", MainUI, "Render Iterative: render into the Rendered Frame Window without saving a file; Region and Selected keep the rest of the window's image.";
+    RenderLast => "Render Last", MainUI, "Render Last (F9): repeat the last render (same viewport and area), without saving a file.";
+    RenderSetup => "Render SetUp...", MainUI, "Render Setup > Common: output size (`width`, `height`, 1-8192; with Image Aspect locked one changes the other), `image_aspect` (sets Height), `pixel_aspect`, the two aspect locks, Options `render_hidden` / `force_two_sided`, Render Output `output` file (empty clears) and `save_file`; with no argument the dialog shows (F10)." { width: Option<u32>, height: Option<u32>, image_aspect: Option<f32>, pixel_aspect: Option<f32>, lock_image_aspect: Option<bool>, lock_pixel_aspect: Option<bool>, render_hidden: Option<bool>, force_two_sided: Option<bool>, save_file: Option<bool>, output: Option<String> };
+    BevyRendererSettings => "Bevy Renderer Settings", Loom, "Render Setup > Renderer (Bevy): 4x MSAA `antialiasing`, `supersampling` 1-4 (samples per pixel side), key light `shadows`, `shadow_map_size` 512-8192, `background` and `ambient` colours (sRGB 0-1); omitted fields keep their value." { antialiasing: Option<bool>, supersampling: Option<u32>, shadows: Option<bool>, shadow_map_size: Option<u32>, background: Option<[f32; 3]>, ambient: Option<[f32; 3]> };
+    AreaToRender => "Area to Render", Loom, "Rendered Frame Window > Area to Render: View, Selected, Region, Crop or Blowup, and the `region` rectangle [x0, y0, x1, y1] as fractions of the frame (y down) for Region / Crop, or the Blowup one (kept at the output's shape)." { area: Option<loom_scene::render::RenderArea>, region: Option<[f32; 4]> };
+    EditRegion => "Edit Region", MainUI, "Rendered Frame Window > Edit Region: toggle editing the render region in the viewport (View and Selected switch to Region).";
+    RenderViewport => "Render Viewport", Loom, "Rendered Frame Window / Render Setup: the `viewport` to render (index), Lock to Viewport (`lock`) and Production or Iterative (`iterative`)." { viewport: Option<u32>, lock: Option<bool>, iterative: Option<bool> };
+    RenderedFrameWindow => "Rendered Frame Window", MainUI, "Open or close the Rendered Frame Window.";
+    SaveRenderedImage => "Save Image", MainUI, "Rendered Frame Window > Save Image: write the rendered image to `path` (png, jpg, bmp, tga, exr by extension); without it the file dialog shows." { path: Option<String> };
+    CopyRenderedImage => "Copy Image", MainUI, "Rendered Frame Window > Copy Image: put the image as displayed (channel toggles applied) on the clipboard.";
+    CloneRenderedFrameWindow => "Clone Rendered Frame Window", MainUI, "Rendered Frame Window > Clone: a new window holding a copy of the image, to compare with the next render.";
+    ClearRenderedFrameWindow => "Clear Rendered Frame Window", MainUI, "Rendered Frame Window > Clear: remove the image from the window.";
+    RenderedFrameWindowChannels => "Rendered Frame Window Channels", Loom, "Rendered Frame Window channel toggles: Enable Red / Green / Blue Channel, Display Alpha Channel (`alpha`), Monochrome (`mono`); omitted ones keep their state." { red: Option<bool>, green: Option<bool>, blue: Option<bool>, alpha: Option<bool>, mono: Option<bool> };
+    CancelRender => "Cancel Render", MainUI, "Rendering progress > Cancel: stop the render in progress; the buckets done so far stay in the window.";
+    PauseRender => "Pause Render", MainUI, "Rendering progress > Pause / Resume.";
     MaterialEditorSlot => "Material Editor Slot", Loom, "Make sample slot `slot` (0-23) the active one." { slot: u32 };
     SetMaterialColor => "Set Material Color", Loom, "Blinn Basic Parameters colour of a slot's material (slot omitted = active): Ambient, Diffuse or Specular, 0-255 RGB; Ambient follows Diffuse while locked." { slot: Option<u32>, which: String, rgb: [u8; 3] };
     SetMaterialParameter => "Set Material Parameter", Loom, "A slot's material value by label: Specular Level, Glossiness, Soften, Self-Illumination, Opacity, 2-Sided, Wire, Faceted, Ambient/Diffuse Lock, Show Map in Viewport (booleans as 0/1)." { slot: Option<u32>, name: String, value: f64 };
@@ -1346,6 +1389,13 @@ commands! {
     CreateCamera => "Create Camera", Loom, "Create a camera at the active viewport's eye looking at its target (Target camera gets a target node)." { target: bool };
     CreateCameraAt => "Create Camera At", Loom, "Create > Cameras: a camera at `position` looking at `look_at`; a Target camera puts its target node there, a Free camera keeps the gap as its Target Distance." { target: bool, position: [f32; 3], look_at: [f32; 3] };
     CameraType => "Camera Type", Loom, "Camera Parameters > Type: make a camera a Target camera (adds a target at Target Distance) or a Free camera (removes its target, keeps its aim)." { id: u64, target: bool };
+    CreateLight => "Create Light", Loom, "Create > Lights > Standard: a light at `position`. Target Spot / Target Direct put their target node at `target`; Free Spot / Free Direct aim at `target` and keep the gap as Target Distance; Omni and Skylight ignore it." { kind: crate::light::LightKind, position: [f32; 3], target: [f32; 3] };
+    LightType => "Light Type", Loom, "General Parameters > Light Type and Targeted: make a standard light an Omni, Spot or Directional light, with or without a target (a new target goes at Target Distance; removing one keeps the aim)." { id: u64, light_type: crate::light::LightTypeArg, targeted: bool };
+    SetLightExclusion => "Set Light Exclusion", Loom, "Exclude/Include dialog: the objects light `id` excludes (or, with `include`, the only ones it affects) for `scope` 0 Illumination, 1 Shadow Casting, 2 Both." { id: u64, include: bool, scope: u32, nodes: Vec<u64> };
+    SetLightProjectorMap => "Set Light Projector Map", Loom, "Advanced Effects > Projector Map: the bitmap light `id` projects (none clears it)." { id: u64, path: Option<String> };
+    LightLister => "Light Lister...", Loom, "Tools > Light Lister: a dialog with every light's main settings.";
+    SpotDirectionalLightView => "Spot/Directional Light View", MainUI, "Switch the active viewport to the view from the selected (or only) spot or directional light (Shift+4).";
+    ViewportDefaultLights => "Viewport Default Lights", Loom, "Viewport Configuration > Lighting: the active viewport's default lighting uses `count` 1 or 2 lights." { count: u32 };
     CreateBiped => "Create Biped", Loom, "Systems > Biped: a biped standing with its feet at `position`, `height` tall (default 1.8 m in scene units), root named `name` (default Bip001, Bip002, ...), with optional Structure values. Only the centre of mass is selected; Figure Mode is on." { position: [f32; 3], height: Option<f32>, name: Option<String>, arms: Option<bool>, neck_links: Option<u32>, spine_links: Option<u32>, leg_links: Option<u32>, tail_links: Option<u32>, fingers: Option<u32>, finger_links: Option<u32>, toes: Option<u32>, toe_links: Option<u32> };
     SetBipedStructure => "Set Biped Structure", Loom, "Biped Structure rollout (Figure Mode only) of the biped `id` (its root or any part): Height, Arms, Neck Links 1-25, Spine Links 1-10, Leg Links 3-4, Tail Links 0-25, Fingers 0-5, Finger Links 1-4, Toes 1-5, Toe Links 1-3. Parts are rebuilt with their names kept." { id: u64, height: Option<f32>, arms: Option<bool>, neck_links: Option<u32>, spine_links: Option<u32>, leg_links: Option<u32>, tail_links: Option<u32>, fingers: Option<u32>, finger_links: Option<u32>, toes: Option<u32>, toe_links: Option<u32> };
     BipedFigureMode => "Biped Figure Mode", Loom, "Biped rollout > Figure Mode of the selected biped: toggles it, or sets it with `on`. On shows the figure pose, off brings back the animated pose." { on: Option<bool> };
@@ -1500,7 +1550,7 @@ commands! {
     WindowCrossingSelectionToggle => "Window/Crossing Selection Toggle", Loom, "Main Toolbar > Window/Crossing: region selection takes fully enclosed objects only (Window) or anything touched (Crossing).";
     CycleSelectionMethod => "Cycle Selection Method", MainUI, "Cycle the Selection Region flyout: Rectangular, Circular, Fence, Lasso, Paint (Ctrl+F).";
     SelectionRegion => "Selection Region", Loom, "Main Toolbar > Selection Region flyout: Rectangular, Circular, Fence, Lasso or Paint." { shape: crate::state::SelectionRegion };
-    ReferenceCoordinateSystem => "Reference Coordinate System", Loom, "Main Toolbar > Reference Coordinate System list (View, Screen, World, Parent, Local, Gimbal, Grid, Pick)." { system: crate::state::CoordSystem };
+    ReferenceCoordinateSystem => "Reference Coordinate System", Loom, "Main Toolbar > Reference Coordinate System list (View, Screen, World, Parent, Local, Gimbal, Grid, Pick); Pick waits for a clicked object (Pick Hit)." { system: crate::state::CoordSystem };
     UseCenter => "Use Center", Loom, "Main Toolbar > Use Center flyout: Pivot Point, Selection or Transform Coordinate centre." { mode: crate::state::CenterMode };
     KeyboardShortcutOverrideToggle => "Keyboard Shortcut Override Toggle", Loom, "Main Toolbar: when off, only Main UI shortcuts are active (sub-object level keys 1–5 are a group shortcut).";
     SelectAndLink => "Select and Link", Loom, "Main Toolbar > Select and Link: the next clicked object becomes the parent of the selection.";
@@ -1513,10 +1563,25 @@ commands! {
     UnhideNodes => "Unhide Nodes", Loom, "Unhide objects by id." { ids: Vec<u64> };
     FreezeNodes => "Freeze Nodes", Loom, "Freeze objects by id." { ids: Vec<u64> };
     UnfreezeNodes => "Unfreeze Nodes", Loom, "Unfreeze objects by id." { ids: Vec<u64> };
-    AffectPivotOnly => "Affect Pivot Only", Loom, "Toggle Hierarchy > Pivot > Affect Pivot Only: Move/Rotate act on the pivot, the mesh stays.";
+    AffectPivotOnly => "Affect Pivot Only", Loom, "Toggle Hierarchy > Pivot > Affect Pivot Only: Move/Rotate act on the pivot, the mesh stays (Scale has no effect).";
     AffectObjectOnly => "Affect Object Only", Loom, "Toggle Hierarchy > Pivot > Affect Object Only: Move/Rotate act on the object, the pivot stays.";
     CenterPivotToObject => "Center to Object", Loom, "Move the selected objects' pivots to their bounds centre (Hierarchy > Pivot > Center to Object).";
-    AlignPivotToWorld => "Align to World", Loom, "Align the selected objects' pivots to the world axes (Hierarchy > Pivot > Align to World).";
+    AffectHierarchyOnly => "Affect Hierarchy Only", Loom, "Toggle Hierarchy > Pivot > Affect Hierarchy Only: Rotate/Scale swing and stretch the links to the children; no object turns or resizes.";
+    AlignPivotToWorld => "Align to World", Loom, "Hierarchy > Pivot > Align to World: turn the pivot (Affect Pivot Only) or, with Affect Object Only, the object to the world axes.";
+    AlignPivotToObject => "Align to Object", Loom, "Hierarchy > Pivot > Align to Object (Affect Pivot Only): turn the pivot to the object's own axes; the mesh stays.";
+    CenterObjectToPivot => "Center to Pivot", Loom, "Hierarchy > Pivot > Center to Pivot (Affect Object Only): move the object so its bounds centre is at the pivot.";
+    AlignObjectToPivot => "Align to Pivot", Loom, "Hierarchy > Pivot > Align to Pivot (Affect Object Only): turn the object to the pivot's axes.";
+    DontAffectChildren => "Don't Affect Children", Loom, "Toggle Hierarchy > Adjust Transform > Don't Affect Children: transforms leave the children where they are.";
+    ResetTransform => "Reset Transform", Loom, "Hierarchy > Adjust Transform > Reset: Transform: the local axes turn to the world; the mesh and the children stay.";
+    EditWorkingPivot => "Edit Working Pivot", Loom, "Toggle Hierarchy > Working Pivot > Edit Working Pivot: the transform tools move and turn the working pivot (Local system at first).";
+    UseWorkingPivot => "Use Working Pivot", Loom, "Toggle Hierarchy > Working Pivot > Use Working Pivot: every transform uses the Working system about the working pivot.";
+    WorkingPivotAlignToView => "Working Pivot Align To View", Loom, "Hierarchy > Working Pivot > Align To View: the working pivot's XY plane faces the active view.";
+    WorkingPivotReset => "Working Pivot Reset", Loom, "Hierarchy > Working Pivot > Reset: the working pivot goes to the selected object's pivot (sub-objects: their centre).";
+    PlacePivotToView => "Place Pivot To View", Loom, "Hierarchy > Working Pivot > Place Pivot To: View: the next click places the working pivot in the screen plane through it.";
+    PlacePivotToSurface => "Place Pivot To Surface", Loom, "Hierarchy > Working Pivot > Place Pivot To: Surface: the next click places the working pivot on the surface, Z along its normal.";
+    PlacePivotAlignToViewToggle => "Place Pivot Align To View", Loom, "Toggle Hierarchy > Working Pivot > Place Pivot To > Align To View: placing also aligns the working pivot to the view.";
+    SetWorkingPivot => "Set Working Pivot", Loom, "Place the working pivot: world position and/or Euler XYZ rotation in degrees." { position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]> };
+    ResetScale => "Reset Scale", Loom, "Hierarchy > Adjust Transform > Reset: Scale: the node scale becomes 100 % with no visual change (the object takes the scale).";
     ResetPivot => "Reset Pivot", Loom, "Reset the selected objects' pivots to the object origin (Hierarchy > Pivot > Reset Pivot).";
     SetPivot => "Set Pivot", Loom, "Set a node's pivot (node transform) without moving the mesh." { id: u64, position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]> };
     SetNodeLocks => "Set Node Locks", Loom, "Hierarchy > Link Info > Locks: per-axis move/rotate/scale locks (true = locked)." { id: u64, move_axes: Option<[bool; 3]>, rotate_axes: Option<[bool; 3]>, scale_axes: Option<[bool; 3]> };
@@ -1531,7 +1596,7 @@ commands! {
     UnhideByName => "Unhide By Name", Loom, "Open the Select From Scene dialog to unhide objects by name.";
     FreezeByName => "Freeze By Name", Loom, "Open the Select From Scene dialog to freeze objects by name.";
     UnfreezeByName => "Unfreeze By Name", Loom, "Open the Select From Scene dialog to unfreeze objects by name.";
-    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm: bake rotation and scale into the mesh and reset the node transform (position kept).";
+    ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm > Reset Selected: the node's rotation and scale (and pivot offset) move into a new XForm modifier on top of the stack, the node keeps only its position; collapse the stack to bake them.";
     RescaleWorldUnits => "Rescale World Units", Loom, "Utilities > Rescale World Units: scale the whole scene by a factor." { factor: f32 };
     Measure => "Measure", Loom, "Utilities > Measure: dimensions, surface area, volume and centre of mass of the selection.";
     SetWireColor => "Set Wire Color", Loom, "Set a node's object colour (Name and Color rollout)." { id: u64, rgb: [u8; 3] };
@@ -1569,7 +1634,7 @@ commands! {
     ConnectEdgeRing => "Connect Edge Ring", Loom, "Connect the selected edge ring with a new loop.";
     Rename => "Rename", Loom, "Rename a node." { id: u64, name: String };
     SetParent => "Set Parent", Loom, "Link a node to a parent (null unlinks), keeping its world transform." { id: u64, parent: Option<u64> };
-    Orbit => "Orbit", Loom, "Set the orbit camera (degrees for angles)." { yaw: Option<f32>, pitch: Option<f32>, distance: Option<f32>, target: Option<[f32; 3]> };
+    Orbit => "Orbit", Loom, "Set the orbit camera (degrees for angles; roll turns the view about its line of sight)." { yaw: Option<f32>, pitch: Option<f32>, distance: Option<f32>, target: Option<[f32; 3]>, roll: Option<f32> };
     Hotkey => "Hotkey", Loom, "Press a keyboard shortcut by name, e.g. \"W\", \"Ctrl+Z\", \"Alt+Ctrl+Z\"." { chord: String };
     Overlays => "Overlays", Loom, "Toggle edge and vertex overlays." { edges: Option<bool>, vertices: Option<bool> };
 }
@@ -1656,11 +1721,9 @@ pub const DEFERRED_SPLINE: &[(&str, &str)] = &[];
 /// spec section that excludes them.
 pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
     ("Environment Dialog Toggle", "3"),
-    ("Render Last", "3"),
     ("Create Animated Sequence File...", "3"),
     ("Hide Particle Systems Toggle", "3"),
     ("Hide Space Warps Toggle", "3"),
-    ("Spot/Directional Light View", "3"),
     ("Sound Toggle", "3"),
     ("Adaptive Degradation Toggle", "3"),
     // Legacy OpenGL-driver-only feature, not in the spec's viewport list.

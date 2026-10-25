@@ -10,6 +10,9 @@ use eframe::egui;
 use loom_commands::{Command, SelectionMode};
 use loom_scene::Modifier;
 
+/// A stack entry being dragged: (node, entry index).
+struct StackDrag(u64, usize);
+
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     create::name_and_color(ui, app);
     let Some(id) = app.state.selection.iter().next().copied() else {
@@ -111,7 +114,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let mut toggle: Option<(usize, bool)> = None;
     let mut delete: Option<usize> = None;
     let mut collapse_to: Option<usize> = None;
-    let mut move_to: Option<(usize, usize)> = None;
+    let mut dropped: Option<(usize, usize, Option<bool>)> = None;
     let mut rename: Option<(usize, String)> = None;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_height(90.0);
@@ -170,21 +173,17 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
                 let label = if instance.is_some() { format!("{name}  (instanced)") } else { name.clone() };
                 let text = if active == Some(i) { egui::RichText::new(label).strong() } else { egui::RichText::new(label) };
-                let r = ui.add(egui::SelectableLabel::new(active == Some(i), text));
+                let r = ui.add(egui::SelectableLabel::new(active == Some(i), text)).interact(egui::Sense::click_and_drag());
                 if r.clicked() {
                     select = Some(Some(i));
                 }
-                // Drag to reorder: dropping on another row moves the entry there.
-                let drag_id = egui::Id::new(("stack_drag", id.0));
-                if r.drag_started() {
-                    ui.ctx().data_mut(|d| d.insert_temp(drag_id, i));
-                }
-                if r.hovered() && ui.input(|inp| inp.pointer.any_released()) {
-                    if let Some(from) = ui.ctx().data(|d| d.get_temp::<usize>(drag_id)) {
-                        if from != i {
-                            move_to = Some((from, i));
-                        }
-                        ui.ctx().data_mut(|d| d.remove::<usize>(drag_id));
+                // Drag onto another row: moves the entry there; Shift copies it,
+                // Ctrl instances it.
+                r.dnd_set_drag_payload(StackDrag(id.0, i));
+                if let Some(p) = r.dnd_release_payload::<StackDrag>() {
+                    if p.0 == id.0 && p.1 != i {
+                        let m = ui.input(|inp| inp.modifiers);
+                        dropped = Some((p.1, i, if m.shift { Some(false) } else if m.ctrl || m.command { Some(true) } else { None }));
                     }
                 }
                 r.context_menu(|ui| {
@@ -317,8 +316,16 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     if let Some(i) = collapse_to {
         let _ = app.dispatch(Command::CollapseTo { index: i as u32 });
     }
-    if let Some((from, to)) = move_to {
-        let _ = app.dispatch(Command::MoveModifier { from: from as u32, to: to as u32 });
+    match dropped {
+        Some((from, to, None)) => {
+            let _ = app.dispatch(Command::MoveModifier { from: from as u32, to: to as u32 });
+        }
+        Some((from, row, Some(instance))) => {
+            // The copy lands on the far side of the row it is dropped on, as a move does.
+            let to = if row > from { row + 1 } else { row };
+            let _ = app.dispatch(Command::CopyModifier { from: from as u32, to: to as u32, instance });
+        }
+        None => {}
     }
     if let Some((i, name)) = rename {
         let _ = app.dispatch(Command::RenameModifier { index: i as u32, name });
@@ -445,10 +452,10 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             });
             egui::Grid::new("hsds_adaptive_grid").num_columns(2).show(ui, |ui| {
                 ui.label("Max Level:");
-                ui.add(egui::DragValue::new(&mut lvl).range(1..=8));
+                ui.add(crate::spinner::spin(ui, &mut lvl, 1..=8));
                 ui.end_row();
                 ui.label("Max Angle:");
-                ui.add(egui::DragValue::new(&mut ang).speed(0.5).range(0.0..=180.0));
+                ui.add(crate::spinner::spin(ui, &mut ang, 0.0..=180.0).speed(0.5));
                 ui.end_row();
             });
             ui.ctx().data_mut(|m| m.insert_temp(id, (lvl, ang)));
@@ -619,7 +626,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Planar Angle").clicked() {
                     let _ = app.dispatch(Command::PlanarThreshold);
                 }
-                if ui.add(egui::DragValue::new(&mut a).speed(0.5).range(0.0..=180.0).fixed_decimals(1)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut a, 0.0..=180.0).speed(0.5).fixed_decimals(1)).changed() {
                     set(app, "Planar Angle", a as f64);
                 }
             });
@@ -628,7 +635,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Select MatID").clicked() {
                     let _ = app.dispatch(Command::SelectByMaterialIdUnwrap);
                 }
-                if ui.add(egui::DragValue::new(&mut m).range(1..=65535)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut m, 1..=65535)).changed() {
                     set(app, "Select MatID", m as f64);
                 }
             });
@@ -637,7 +644,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 if ui.button("Select SG").clicked() {
                     let _ = app.dispatch(Command::SelectBySmoothingGroupUnwrap);
                 }
-                if ui.add(egui::DragValue::new(&mut g).range(1..=32)).changed() {
+                if ui.add(crate::spinner::spin(ui, &mut g, 1..=32)).changed() {
                     set(app, "Select SG", g as f64);
                 }
             });
@@ -664,7 +671,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                     let _ = app.dispatch(Command::UnwrapMapChannel { channel: 1 });
                 }
                 let mut c = ch.max(1);
-                if ui.add_enabled(ch > 0, egui::DragValue::new(&mut c).range(1..=99)).changed() {
+                if ui.add_enabled(ch > 0, crate::spinner::spin(ui, &mut c, 1..=99)).changed() {
                     let _ = app.dispatch(Command::UnwrapMapChannel { channel: c });
                 }
                 if ui.radio(ch == 0, "Vertex Color Channel").clicked() && ch != 0 {
@@ -804,7 +811,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 ui.horizontal(|ui| {
                     for (i, label) in (if kind == 4 { ["Side", "Radial", "Height"] } else { ["Length", "Width", "Height"] }).iter().enumerate() {
                         ui.label(*label);
-                        ui.add(egui::DragValue::new(&mut d[i]).range(2..=32));
+                        ui.add(crate::spinner::spin(ui, &mut d[i], 2..=32));
                     }
                 });
                 ui.ctx().data_mut(|m| m.insert_temp(key, d));
@@ -827,14 +834,22 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
     if params.is_empty() || matches!(modifier, Modifier::Skin(_) | Modifier::Morpher(_) | Modifier::SkinMorph(_) | Modifier::SkinWrap(_) | Modifier::EditNormals(_)) {
         return;
     }
+    // Smooth: the smoothing groups are 32 buttons under the other parameters.
+    let smooth_groups = match &modifier {
+        Modifier::Smooth { groups, .. } => Some(groups.get()),
+        _ => None,
+    };
     rollout(ui, "Parameters", true, |ui| {
         egui::Grid::new(("modifier_params", id.0, index)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             for (pname, value) in params {
+                if smooth_groups.is_some() && pname == "Smoothing Groups" {
+                    continue;
+                }
                 ui.label(pname);
                 match value {
                     loom_scene::ParamValue::Float(f) => {
                         let mut v = f;
-                        let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision));
+                        let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision));
                         if r.drag_started() {
                             app.state.undo.begin(pname);
                         }
@@ -857,7 +872,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                     }
                     loom_scene::ParamValue::Int(i) => {
                         let mut v = i;
-                        let r = ui.add(egui::DragValue::new(&mut v).speed(app.spinner_speed(0.1)));
+                        let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.1)));
                         if r.drag_started() {
                             app.state.undo.begin(pname);
                         }
@@ -878,6 +893,20 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                 ui.end_row();
             }
         });
+        if let Some(bits) = smooth_groups {
+            ui.label("Smoothing Groups:");
+            // 8 to a row; a click toggles that group.
+            egui::Grid::new(("smooth_groups", id.0, index)).spacing([2.0, 2.0]).show(ui, |ui| {
+                for g in 0..32u32 {
+                    if ui.add(egui::SelectableLabel::new(bits & (1 << g) != 0, (g + 1).to_string())).clicked() {
+                        let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: "Smoothing Groups".into(), value: (bits ^ (1 << g)) as f64 });
+                    }
+                    if g % 8 == 7 {
+                        ui.end_row();
+                    }
+                }
+            });
+        }
     });
 }
 

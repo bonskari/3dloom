@@ -31,19 +31,19 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         egui::Grid::new("paint_deform_grid").num_columns(2).show(ui, |ui| {
             ui.label("Push/Pull Value:");
             let mut v = paint.push_pull_value;
-            if ui.add(egui::DragValue::new(&mut v).speed(0.1).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut v, ..).speed(0.1).fixed_decimals(2)).changed() {
                 let _ = app.dispatch(Command::PaintDeformSettings { value: Some(v), size: None, strength: None, direction: None });
             }
             ui.end_row();
             ui.label("Brush Size:");
             let mut s = paint.brush_size;
-            if ui.add(egui::DragValue::new(&mut s).speed(0.1).range(0.01..=f32::MAX).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut s, 0.01..=f32::MAX).speed(0.1).fixed_decimals(2)).changed() {
                 let _ = app.dispatch(Command::PaintDeformSettings { value: None, size: Some(s), strength: None, direction: None });
             }
             ui.end_row();
             ui.label("Brush Strength:");
             let mut st = paint.brush_strength;
-            if ui.add(egui::DragValue::new(&mut st).speed(0.01).range(0.0..=1.0).fixed_decimals(2)).changed() {
+            if ui.add(crate::spinner::spin(ui, &mut st, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
                 let _ = app.dispatch(Command::PaintDeformSettings { value: None, size: None, strength: Some(st), direction: None });
             }
             ui.end_row();

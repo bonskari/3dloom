@@ -121,6 +121,7 @@ pub struct FbxExportOptions {
     pub xyz_curve_sync: bool,
     // Include
     pub cameras: bool,
+    pub lights: bool,
     pub embed_media: bool,
     // Advanced options
     /// Automatic: the file is written in the system unit; off: in `units`.
@@ -163,6 +164,7 @@ impl Default for FbxExportOptions {
             key_reducer_precision: 1.0,
             xyz_curve_sync: false,
             cameras: true,
+            lights: true,
             embed_media: false,
             // Centimetres by default: the file Unreal's default import reads at the right size.
             units_automatic: false,
@@ -208,6 +210,7 @@ pub struct FbxImportOptions {
     pub bone_taper: f32,
     pub lock_width_height: bool,
     pub cameras: bool,
+    pub lights: bool,
     /// Automatic: converted to the system unit; off: the file's numbers are read as `units`.
     pub units_automatic: bool,
     pub units: SystemUnit,
@@ -240,6 +243,7 @@ impl Default for FbxImportOptions {
             bone_taper: 90.0,
             lock_width_height: true,
             cameras: true,
+            lights: true,
             units_automatic: true,
             units: SystemUnit::Inches,
         }
