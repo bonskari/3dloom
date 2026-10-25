@@ -146,7 +146,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 }
             }
             ui.add_space(8.0);
-            if ui.small_button(if app.ribbon_minimized { "v" } else { "^" }).on_hover_text("Minimize / show the ribbon panels").clicked() {
+            if ui.small_button(if app.ribbon_minimized { crate::icons::DOWN } else { crate::icons::UP }).on_hover_text("Minimize / show the ribbon panels").clicked() {
                 app.ribbon_minimized = !app.ribbon_minimized;
             }
         });
