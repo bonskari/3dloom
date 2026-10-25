@@ -1551,6 +1551,10 @@ pub struct AppState {
     pub soft_edit: bool,
     /// The Track View window (Curve Editor / Dope Sheet).
     pub track_view: crate::track_view::TrackViewState,
+    /// Tools > Scene Explorer windows (saved with the scene).
+    pub explorers: crate::explorer::Explorers,
+    /// Graph Editors > Schematic View windows (saved with the scene).
+    pub schematics: crate::schematic::Schematics,
     /// Track bar: each node's tracks and key times, by (version, geom_version).
     pub key_time_cache: crate::anim_cmds::KeyTimeCache,
     /// Bone Tools > Bone Edit Mode.
@@ -1798,6 +1802,8 @@ impl AppState {
             import_report: Vec::new(),
             soft_edit: false,
             track_view: Default::default(),
+            explorers: Default::default(),
+            schematics: Default::default(),
             key_time_cache: Default::default(),
             bone_edit_mode: false,
             display_bones_only: false,

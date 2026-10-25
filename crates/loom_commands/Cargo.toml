@@ -17,6 +17,7 @@ loom_fbx   = { workspace = true }
 loom_max   = { workspace = true }
 crc32fast  = "1.5"
 flate2     = "1"
+regex      = "1"
 
 [dev-dependencies]
 loom_render = { workspace = true }

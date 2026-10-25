@@ -71,6 +71,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::vertex_paint::handles(&c) => crate::vertex_paint::execute(state, c),
         C::AssignVertexColors { light_model, by_vertex, shadows, update } => crate::assign_vertex_colors::assign(state, light_model, by_vertex, shadows, update),
         c if c.group() == crate::Group::TrackView || crate::track_view::handles(&c) => crate::track_view::execute(state, c),
+        c if crate::explorer::handles(&c) => crate::explorer::execute(state, c),
+        c if crate::schematic::handles(&c) => crate::schematic::execute(state, c),
         C::UnwrapUvwModifier => crate::unwrap::execute(state, cmd),
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
         c if c.group() == crate::Group::Skin => crate::skin::execute(state, c),
@@ -3014,26 +3016,48 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::SetParent { id, parent } => {
-            let id = NodeId(id);
-            let before = state.scene.node(id).ok_or_else(|| missing(id))?.parent;
-            let after = parent.map(NodeId);
-            if let Some(p) = after {
-                state.scene.node(p).ok_or_else(|| missing(p))?;
+            let change = link_change(state, NodeId(id), parent.map(NodeId))?;
+            commit_static(state, "Link", change)?;
+            Ok(json!({}))
+        }
+        C::SetNodesProperty { ids, name, value } => {
+            let ids: Vec<NodeId> = ids.into_iter().map(NodeId).collect();
+            match name.as_str() {
+                "Hidden" => {
+                    set_flags(state, if value { "Hide" } else { "Unhide" }, ids, |_, f| (value, f))?;
+                    prune_selection_hidden(state);
+                }
+                "Frozen" => {
+                    set_flags(state, if value { "Freeze" } else { "Unfreeze" }, ids, |h, _| (h, value))?;
+                    prune_selection_hidden(state);
+                }
+                n if loom_scene::DisplayProps::default().get(n).is_some() => props_change(state, n, ids, |p, _| {
+                    p.display.set(n, value);
+                })?,
+                n if loom_scene::RenderProps::default().get(n).is_some() => props_change(state, n, ids, |p, _| {
+                    p.render.set(n, value);
+                })?,
+                n => return Err(format!("no on/off object property `{n}`")),
             }
-            // SetParent keeps world transform by rewriting the local one, so
-            // record the transform too for an exact undo.
-            let t_before = state.scene.node(id).ok_or_else(|| missing(id))?.transform.clone();
-            let mut sim = state.scene.clone();
-            sim.set_parent(id, after);
-            let t_after = sim.node(id).ok_or_else(|| missing(id))?.transform.clone();
-            commit_static(
-                state,
-                "Link",
-                Change::Group(vec![
-                    Change::SetTransform { id, before: t_before, after: t_after },
-                    Change::SetParent { id, before, after },
-                ]),
-            )?;
+            Ok(json!({}))
+        }
+        C::RenameNodes { ids, name } => {
+            let mut changes = Vec::new();
+            for (i, id) in ids.into_iter().map(NodeId).enumerate() {
+                let before = state.scene.node(id).ok_or_else(|| missing(id))?.name.clone();
+                // The others take numbered versions of the name: door01, door02...
+                let after = if i == 0 { name.clone() } else { format!("{name}{i:02}") };
+                changes.push(Change::SetName { id, before, after });
+            }
+            if !changes.is_empty() {
+                commit(state, "Rename", Change::Group(changes))?;
+            }
+            Ok(json!({}))
+        }
+        C::DeleteNodes { ids } => {
+            let ids: Vec<NodeId> = ids.into_iter().map(NodeId).filter(|id| state.scene.node(*id).is_some()).collect();
+            delete_nodes(state, ids)?;
+            prune_selection(state);
             Ok(json!({}))
         }
         C::Orbit { yaw, pitch, distance, target, roll } => {
@@ -3800,27 +3824,53 @@ fn loop_mode_select(state: &mut AppState, node: NodeId, mesh: &Mesh, mode: Selec
 /// Delete. Deleting polygons that would leave vertices with no polygon asks
 /// first (`delete_isolated` None opens the prompt); the answer comes back as
 /// Delete Polygons.
+/// Deletes objects (with their group members and tape partners) in one undo step.
+fn delete_nodes(state: &mut AppState, ids: Vec<NodeId>) -> Result<(), String> {
+    let ids: Vec<NodeId> = with_group_members(state, ids);
+    // Deleting either end of a tape deletes the tape.
+    let ids = crate::helpers::with_tape_partners(state, ids);
+    if ids.is_empty() {
+        return Ok(());
+    }
+    // Children first so a removed head never reparents members that go too.
+    let mut ids = ids;
+    ids.sort_by_key(|id| std::cmp::Reverse(state.scene.depth(*id)));
+    commit(
+        state,
+        "Delete",
+        Change::Group(ids.into_iter().map(Change::RemoveNode).collect()),
+    )?;
+    prune_camera_views(state);
+    Ok(())
+}
+
+/// The change linking `id` to `parent` (None unlinks) that keeps its world
+/// transform: the local transform is recorded too, for an exact undo.
+pub(crate) fn link_change(state: &AppState, id: NodeId, parent: Option<NodeId>) -> Result<Change, String> {
+    let before = state.scene.node(id).ok_or_else(|| missing(id))?.parent;
+    if let Some(p) = parent {
+        state.scene.node(p).ok_or_else(|| missing(p))?;
+        if p == id || state.scene.is_descendant(p, id) {
+            return Err(format!("{} cannot be linked to its own child", state.scene.node(id).map(|n| n.name.as_str()).unwrap_or_default()));
+        }
+    }
+    let t_before = state.scene.node(id).ok_or_else(|| missing(id))?.transform.clone();
+    let mut sim = state.scene.clone();
+    sim.set_parent(id, parent);
+    let t_after = sim.node(id).ok_or_else(|| missing(id))?.transform.clone();
+    Ok(Change::Group(vec![Change::SetTransform { id, before: t_before, after: t_after }, Change::SetParent { id, before, after: parent }]))
+}
+
 fn delete(state: &mut AppState, delete_isolated: Option<bool>) -> Result<Value, String> {
     if state.selection_mode != SelectionMode::Object && state.sub_selection.is_empty() {
         return Ok(json!({}));
     }
     if state.selection_mode == SelectionMode::Object {
-        let ids: Vec<NodeId> = with_group_members(state, state.selection.iter().copied().collect());
-        // Deleting either end of a tape deletes the tape.
-        let ids = crate::helpers::with_tape_partners(state, ids);
-        if ids.is_empty() {
-            return Ok(json!({}));
+        let had = !state.selection.is_empty();
+        delete_nodes(state, state.selection.iter().copied().collect())?;
+        if had {
+            clear_selection(state);
         }
-        // Children first so a removed head never reparents members that go too.
-        let mut ids = ids;
-        ids.sort_by_key(|id| std::cmp::Reverse(state.scene.depth(*id)));
-        commit(
-            state,
-            "Delete",
-            Change::Group(ids.into_iter().map(Change::RemoveNode).collect()),
-        )?;
-        clear_selection(state);
-        prune_camera_views(state);
         return Ok(json!({}));
     }
     if state.spline_selected() {

@@ -143,6 +143,10 @@ pub struct SceneSettings {
     pub saved_views: BTreeMap<String, crate::state::SavedView>,
     /// File > File Properties and the Summary Info description.
     pub file_properties: FileProperties,
+    /// The Scene Explorers (Tools menu), open or closed.
+    pub scene_explorers: crate::explorer::Explorers,
+    /// The Schematic Views (Graph Editors menu), open or closed.
+    pub schematic_views: crate::schematic::Schematics,
 }
 
 /// File > File Properties: the Summary fields, the Summary Info
@@ -226,6 +230,8 @@ impl SceneSettings {
             home_view: s.home_view,
             saved_views: s.saved_views.clone(),
             file_properties: s.file_properties.clone(),
+            scene_explorers: s.explorers.clone(),
+            schematic_views: s.schematics.clone(),
         }
     }
 
@@ -256,6 +262,8 @@ impl SceneSettings {
         s.home_view = self.home_view;
         s.saved_views = self.saved_views.clone();
         s.file_properties = self.file_properties.clone();
+        s.explorers = self.scene_explorers.clone();
+        s.schematics = self.schematic_views.clone();
         s.scene.set_time(s.current_frame as f32);
     }
 }
