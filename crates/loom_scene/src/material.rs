@@ -20,10 +20,12 @@ pub enum MapType {
     Gradient,
     Noise,
     Mix,
+    /// Normal Bump: a tangent-space normal map in its Normal component.
+    NormalBump,
 }
 
 impl MapType {
-    pub const ALL: [MapType; 5] = [MapType::Bitmap, MapType::Checker, MapType::Gradient, MapType::Mix, MapType::Noise];
+    pub const ALL: [MapType; 6] = [MapType::Bitmap, MapType::Checker, MapType::Gradient, MapType::Mix, MapType::Noise, MapType::NormalBump];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -32,6 +34,7 @@ impl MapType {
             MapType::Gradient => "Gradient",
             MapType::Noise => "Noise",
             MapType::Mix => "Mix",
+            MapType::NormalBump => "Normal Bump",
         }
     }
 
@@ -46,6 +49,7 @@ impl MapType {
             MapType::Checker | MapType::Noise => &["Color #1", "Color #2"],
             MapType::Gradient => &["Color #1", "Color #2", "Color #3"],
             MapType::Mix => &["Color #1", "Color #2", "Mix Amount"],
+            MapType::NormalBump => &["Normal"],
         }
     }
 }
@@ -135,11 +139,14 @@ pub struct MapParams {
     pub low: f32,
     /// Mix Amount 0–100.
     pub mix_amount: f32,
+    /// Normal Bump: Flip Red (X), Flip Green (Y) of the normal map.
+    pub flip_red: bool,
+    pub flip_green: bool,
 }
 
 impl Default for MapParams {
     fn default() -> Self {
-        Self { soften: 0.0, position: 0.5, radial: false, noise_type: 0, size: 25.0, levels: 3.0, phase: 0.0, high: 1.0, low: 0.0, mix_amount: 0.0 }
+        Self { soften: 0.0, position: 0.5, radial: false, noise_type: 0, size: 25.0, levels: 3.0, phase: 0.0, high: 1.0, low: 0.0, mix_amount: 0.0, flip_red: false, flip_green: false }
     }
 }
 
@@ -181,6 +188,8 @@ impl Map {
     pub fn new(kind: MapType, amount: f32) -> Self {
         let colors = match kind {
             MapType::Gradient => default_map_colors(),
+            // A flat normal until a normal map is in the Normal component.
+            MapType::NormalBump => [Vec3::new(0.5, 0.5, 1.0), Vec3::ONE, Vec3::ONE],
             _ => [Vec3::ZERO, Vec3::ONE, Vec3::ONE],
         };
         Self { path: String::new(), amount, enabled: true, kind, name: String::new(), coords: MapCoords::default(), crop: Cropping::default(), colors, sub_maps: [None, None, None], params: MapParams::default() }
@@ -252,6 +261,8 @@ impl Map {
             "High" => p.high = v.clamp(0.0, 1.0),
             "Low" => p.low = v.clamp(0.0, 1.0),
             "Mix Amount" => p.mix_amount = v.clamp(0.0, 100.0),
+            "Flip Red (X)" => p.flip_red = on,
+            "Flip Green (Y)" => p.flip_green = on,
             "Amount" => self.amount = v,
             "Enabled" => self.enabled = on,
             other => {

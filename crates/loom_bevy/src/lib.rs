@@ -548,8 +548,12 @@ impl BevyRenderer {
         }
         if let Some(map) = s.bump_map.as_ref() {
             if let Some(img) = self.baked(map) {
-                let key = format!("bump:{}:{}", loom_scene::maps::texture_key(map), map.amount);
-                m.normal_map_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || loom_scene::maps::bump_to_normal(&img, map.amount / 100.0));
+                let key = format!("bump:{}:{}:{}{}", loom_scene::maps::texture_key(map), map.amount, map.params.flip_red, map.params.flip_green);
+                m.normal_map_texture = if map.kind == loom_scene::material::MapType::NormalBump {
+                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::normal_bump(&img, map.params.flip_red, map.params.flip_green))
+                } else {
+                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || loom_scene::maps::bump_to_normal(&img, map.amount / 100.0))
+                };
             }
         }
         if let Some(map) = s.specular_level_map.as_ref() {

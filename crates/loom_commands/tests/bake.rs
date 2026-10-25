@@ -83,6 +83,15 @@ fn a_flat_planes_normals_map_is_flat() {
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     let node = s.scene.node(p).unwrap();
     assert!(node.material.is_none() && node.modifiers.is_empty());
+    // Output into Normal Bump: a Normal Bump map holds the normals.
+    let r = execute_json(&mut s, &json!({ "cmd": "Texture Element Settings", "args": { "index": 0, "component": "Output into Normal Bump", "on": true } }));
+    assert_eq!(r["ok"], true, "{r}");
+    execute(&mut s, Command::BakeTextures).unwrap();
+    let shell = s.scene.node(p).unwrap().material.unwrap();
+    let MaterialKind::Shell(sh) = &s.scene.materials[&shell].kind else { panic!("a Shell material") };
+    let bump = s.scene.materials[&sh.materials[1].unwrap()].bump_map.clone().expect("the bump map");
+    assert_eq!(bump.kind, loom_scene::material::MapType::NormalBump);
+    assert_eq!(bump.sub_maps[0].as_ref().map(|m| m.path.as_str()), Some(path.to_string_lossy().as_ref()));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

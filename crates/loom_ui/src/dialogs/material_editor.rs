@@ -1132,6 +1132,21 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             let masked = map.sub_maps[2].as_ref().is_some_and(|m| m.enabled);
             ui.add_enabled_ui(!masked, |ui| map_spinner(ui, app, "Mix Amount:", "Mix Amount", map.params.mix_amount, 0.0..=100.0, 1));
         }),
+        MapType::NormalBump => crate::command_panel::rollout(ui, "Parameters", true, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Normal:");
+                map_button(ui, app, "Normal", map.sub_maps[0].as_deref(), false);
+                let mut on = map.sub_maps[0].as_ref().is_some_and(|s| s.enabled);
+                if ui.add_enabled(map.sub_maps[0].is_some(), egui::Checkbox::new(&mut on, "")).changed() {
+                    let _ = app.dispatch(Command::SetMapParameter { name: "Normal Map On".into(), value: if on { 1.0 } else { 0.0 } });
+                }
+            });
+            ui.label(egui::RichText::new("Channel Direction").strong());
+            ui.horizontal(|ui| {
+                map_check(ui, app, "Flip Red (X)", "Flip Red (X)", map.params.flip_red);
+                map_check(ui, app, "Flip Green (Y)", "Flip Green (Y)", map.params.flip_green);
+            });
+        }),
     }
 }
 

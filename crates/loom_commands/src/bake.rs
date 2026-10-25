@@ -222,14 +222,15 @@ fn bake_geometry(e: &BakeElement, low: &[Triangle], high: Option<(&Bvh, f32)>, s
     (img, range)
 }
 
-/// The (Target Map Slot, file) pairs the elements put into object `name`'s baked material.
-fn slot_maps(elements: &[BakeElement], dir: &Path, name: &str) -> Vec<(String, String)> {
-    elements.iter().filter(|e| e.enabled && !e.target_slot.is_empty()).map(|e| (e.target_slot.clone(), e.path(dir, name).to_string_lossy().into_owned())).collect()
+/// What the elements put into object `name`'s baked material: (Target Map
+/// Slot, file, as a Normal Bump map).
+fn slot_maps(elements: &[BakeElement], dir: &Path, name: &str) -> Vec<(String, String, bool)> {
+    elements.iter().filter(|e| e.enabled && !e.target_slot.is_empty()).map(|e| (e.target_slot.clone(), e.path(dir, name).to_string_lossy().into_owned(), e.kind == ElementKind::Normals && e.normal_bump)).collect()
 }
 
 /// Puts bitmaps into material `id`'s slots (every sub-material of a
 /// Multi/Sub-Object material that is a Standard one). A Diffuse map shows in viewports.
-fn put_maps(lib: &mut MaterialLibrary, id: MaterialId, maps: &[(String, String)], depth: u32) -> Result<(), String> {
+fn put_maps(lib: &mut MaterialLibrary, id: MaterialId, maps: &[(String, String, bool)], depth: u32) -> Result<(), String> {
     let Some(m) = lib.get(&id) else { return Ok(()) };
     match &m.kind {
         MaterialKind::MultiSub(list) if depth < 8 => {
@@ -241,8 +242,16 @@ fn put_maps(lib: &mut MaterialLibrary, id: MaterialId, maps: &[(String, String)]
         }
         MaterialKind::Standard => {
             let m = lib.get_mut(&id).expect("checked");
-            for (slot, path) in maps {
-                *m.map_slot_mut(slot)? = Some(Map::bitmap(path.clone(), default_amount(slot)));
+            for (slot, path, normal_bump) in maps {
+                let map = if *normal_bump {
+                    // Output into Normal Bump: the normals in a Normal Bump map's Normal component.
+                    let mut n = Map::new(loom_scene::material::MapType::NormalBump, default_amount(slot));
+                    n.sub_maps[0] = Some(Box::new(Map::bitmap(path.clone(), 100.0)));
+                    n
+                } else {
+                    Map::bitmap(path.clone(), default_amount(slot))
+                };
+                *m.map_slot_mut(slot)? = Some(map);
                 if slot == "Diffuse Color" {
                     m.show_map_in_viewport = true;
                 }

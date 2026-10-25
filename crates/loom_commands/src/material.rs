@@ -472,7 +472,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({ "map": map }))
         }
         C::NewMap { map, kind } => {
-            let ty = MapType::from_label(&kind).ok_or_else(|| format!("no map type \"{kind}\" (Bitmap, Checker, Gradient, Mix, Noise)"))?;
+            let ty = MapType::from_label(&kind).ok_or_else(|| format!("no map type \"{kind}\" (Bitmap, Checker, Gradient, Mix, Noise, Normal Bump)"))?;
             edit_level(state, "New Map", |lib, slots, id, maps| {
                 let mut new = Map::new(ty, if maps.is_empty() { default_amount(&map) } else { 100.0 });
                 new.name = next_map_name(lib);
