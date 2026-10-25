@@ -2357,7 +2357,7 @@ fn multi_sub_from_the_type_button_colours_faces_by_material_id() {
     h.frames(12);
     h.click(window_text(&h, "Material/Map Browser", "OK"));
     h.frames(2);
-    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ReplaceMaterial { kind: 1, map: false }));
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ReplaceMaterial { kind: loom_scene::material::MaterialKind::TYPES.iter().position(|t| *t == "Multi/Sub-Object").unwrap() as u8, map: false }));
     h.click(window_text(&h, "Replace Material", "Keep old material as sub-material?"));
     h.frames(12);
     h.click(window_text(&h, "Replace Material", "OK"));
