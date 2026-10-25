@@ -265,6 +265,9 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
         };
         t2.extend(ops);
         (Some(Quadrant { title: "tools 1", items: t1 }), Some(Quadrant { title: "tools 2", items: t2 }))
+    } else if s.selection.iter().any(|id| s.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Grid { .. }))) {
+        // A selected grid object: tools 1 activates it or the home grid.
+        (Some(Quadrant { title: "tools 1", items: vec![e("Activate Grid", Command::ActivateGridObject), e("Activate Home Grid", Command::ActivateHomeGrid), e("Align Grid to View", Command::AlignGridToView)] }), None)
     } else {
         (None, None)
     };

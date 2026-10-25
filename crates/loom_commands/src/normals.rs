@@ -83,6 +83,54 @@ fn level(state: &mut AppState, level: u32, select_by: Option<u32>) -> Result<Val
     Ok(state_json(state))
 }
 
+/// The Edit Normals entry when its Normal level is on: what the viewport
+/// clicks and the transform tools work on.
+pub fn normal_level(state: &AppState) -> Option<(NodeId, usize)> {
+    let (id, index) = entry(state)?;
+    let n = state.scene.node(id)?;
+    (n.active_entry == Some(index) && n.modifiers.get(index)?.sub_level == 1).then_some((id, index))
+}
+
+/// World centre of the selected normals' vertices at the Normal level (the
+/// transform gizmo's place).
+pub fn selected_center(state: &AppState) -> Option<glam::Vec3> {
+    let (id, index) = normal_level(state)?;
+    let d = data(state, id, index)?;
+    if d.selection.is_empty() {
+        return None;
+    }
+    let input = input_mesh(state, id, index);
+    let groups = d.groups_for(&input);
+    let world = state.scene.object_matrix(id);
+    let mut seen = std::collections::BTreeSet::new();
+    let (mut sum, mut n) = (glam::Vec3::ZERO, 0.0);
+    for (i, g) in groups.iter().enumerate() {
+        if d.selection.contains(g) && seen.insert(*g) {
+            if let Some(p) = input.vertex_position(input.half_edges()[i].origin) {
+                sum += world.transform_point3(p);
+                n += 1.0;
+            }
+        }
+    }
+    (n > 0.0).then(|| sum / n)
+}
+
+/// Select And Rotate at the Normal level: the selected normals turn by the
+/// rotation part of the world matrix `m` (Move and Scale do nothing to them).
+/// None when the Normal level is not on.
+pub fn transform(state: &mut AppState, label: &str, m: glam::Mat4) -> Option<Result<Value, String>> {
+    let (id, index) = normal_level(state)?;
+    let world = state.scene.object_matrix(id);
+    let (_, q, _) = (world.inverse() * m * world).to_scale_rotation_translation();
+    if data(state, id, index)?.selection.is_empty() || q.angle_between(glam::Quat::IDENTITY) < 1e-6 {
+        return Some(Ok(state_json(state)));
+    }
+    Some(edit(state, label, |d, i| {
+        d.rotate_by(i, q);
+        Ok(())
+    }))
+}
+
 pub fn state_json(state: &AppState) -> Value {
     let Some((id, index)) = entry(state) else { return Value::Null };
     let Some(d) = data(state, id, index) else { return Value::Null };

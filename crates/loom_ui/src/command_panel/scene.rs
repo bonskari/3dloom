@@ -28,7 +28,7 @@ pub fn icon_kind(object: &ObjectKind) -> IconKind {
     match object {
         o if o.is_shape() => IconKind::Shape,
         O::Camera { .. } => IconKind::Camera,
-        O::Dummy { .. } | O::Point { .. } | O::IkGoal { .. } => IconKind::Helper,
+        O::Dummy { .. } | O::Point { .. } | O::Tape { .. } | O::Protractor { .. } | O::Compass { .. } | O::Grid { .. } | O::IkGoal { .. } => IconKind::Helper,
         O::Bone { .. } => IconKind::Bone,
         O::Group { .. } => IconKind::Group,
         O::Boolean { .. } | O::ProBoolean { .. } | O::Loft { .. } => IconKind::Compound,

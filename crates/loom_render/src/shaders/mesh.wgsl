@@ -32,6 +32,7 @@ struct VsIn {
     @location(2) uv:       vec2<f32>,
     @location(3) color:    vec4<f32>,
     @location(4) spec:     vec4<f32>,
+    @location(5) extra:    vec4<f32>,
 };
 
 struct VsOut {
@@ -41,6 +42,7 @@ struct VsOut {
     @location(2) uv:           vec2<f32>,
     @location(3) color:        vec4<f32>,
     @location(4) spec:         vec4<f32>,
+    @location(5) extra:        vec4<f32>,
 };
 
 fn ramp(x: f32, s: f32, e: f32) -> f32 {
@@ -82,14 +84,21 @@ fn vs(in: VsIn) -> VsOut {
     out.uv = in.uv;
     out.color = in.color;
     out.spec = in.spec;
+    out.extra = in.extra;
     return out;
 }
 
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
-    // Object colour, replaced by the map (checker / bitmap) where it is opaque.
+    // Object colour, replaced by the map (checker / bitmap) where it is
+    // opaque, by the map's Amount; a decal axis (Tile off) leaves the colour
+    // outside 0-1.
     let t = textureSample(map_tex, map_samp, vec2<f32>(in.uv.x, 1.0 - in.uv.y));
-    var base = mix(in.color.rgb, t.rgb, t.a);
+    var a = t.a * in.extra.y;
+    if ((in.extra.z > 0.5 && (in.uv.x < 0.0 || in.uv.x > 1.0)) || (in.extra.w > 0.5 && (in.uv.y < 0.0 || in.uv.y > 1.0))) {
+        a = 0.0;
+    }
+    var base = mix(in.color.rgb, t.rgb, a);
     if (view.override_color.a > 0.0) {
         base = view.override_color.rgb;
     } else if (in.spec.a < 0.0) {
@@ -127,10 +136,12 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 spec = spec + l.color_fall.rgb * k * pow(clamp(abs(dot(n, h)), 0.0, 1.0), in.spec.a);
             }
         }
-        return vec4<f32>(base * lit + in.spec.rgb * spec, in.color.a);
+        // Self-Illumination: the colour shows unlit by that much.
+        return vec4<f32>(mix(base * lit, base, in.extra.x) + in.spec.rgb * spec, in.color.a);
     }
     let ambient = select(0.42, 1.0, mode > 0.5 && mode < 1.5);
-    var color = base * (ambient + (1.0 - ambient) * diff);
+    // Self-Illumination: the colour shows unlit by that much.
+    var color = mix(base * (ambient + (1.0 - ambient) * diff), base, in.extra.x);
     // Blinn highlight of the material (none in Flat or without a material).
     if (in.spec.a > 0.0 && !(mode > 0.5 && mode < 1.5)) {
         let h = normalize(light + to_cam);

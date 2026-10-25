@@ -111,6 +111,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.label(egui::RichText::new("Viewport Parameters").strong());
                     check(ui, app, "Viewport Tooltips", "Viewport tooltips");
                     check(ui, app, "Show Cross Hair Cursor", "Show cross hair cursor");
+                    ui.horizontal(|ui| number(ui, app, "Grid Nudge Distance", "Grid Nudge Distance:", 0.0..=10_000.0, 3));
                 });
             }
             Tab::Gizmos => {

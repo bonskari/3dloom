@@ -37,7 +37,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             ui.menu_button("File", |ui| {
                 use loom_commands::PendingFileAction as A;
                 if menu_button(ui, &app.state, "New", "New Scene").clicked() {
-                    app.request_file_action(A::New);
+                    app.new_scene();
                     ui.close_menu();
                 }
                 if ui.button("Reset").clicked() {
@@ -65,11 +65,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Save As...", "Save File As");
                 item(ui, app, "Save Copy As...", "Save File As Copy");
                 item(ui, app, "Save Incremental", "Save Incremental (+)");
+                cmd(ui, app, "Save Selected...", Command::SaveSelected { path: None });
+                cmd(ui, app, "Archive...", Command::ArchiveFile { path: None });
                 ui.separator();
                 item(ui, app, "Merge...", "Merge File");
                 item(ui, app, "Import...", "Import File");
                 item(ui, app, "Export...", "Export File");
                 item(ui, app, "Export Selected...", "Export Selected");
+                ui.separator();
+                cmd(ui, app, "Summary Info...", Command::SummaryInfo);
+                cmd(ui, app, "File Properties...", Command::FileProperties);
                 ui.separator();
                 if ui.button("Exit").clicked() {
                     app.request_file_action(A::Exit);
@@ -147,17 +152,30 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     item(ui, app, "Align...", "Align");
                     item(ui, app, "Quick Align", "Quick Align");
                     item(ui, app, "Spacing Tool...", "Spacing Tool");
+                    cmd(ui, app, "Clone and Align...", Command::CloneAndAlignDialog);
                     ui.separator();
                     item(ui, app, "Align to View...", "Align to View Dialog");
                     item(ui, app, "Normal Align...", "Normal Align ");
                     item(ui, app, "Align Camera", "Align Camera");
+                    cmd(ui, app, "Place Highlight", Command::PlaceHighlight);
                 });
+                cmd(ui, app, "Snapshot...", Command::SnapshotDialog);
                 ui.separator();
                 ui.menu_button("Grids and Snaps", |ui| {
                     cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
                     ui.separator();
                     let grid = app.state.active().show_grid;
                     check_item(ui, app, "Show Home Grid", "Hide Grids Toggle", grid);
+                    cmd(ui, app, "Activate Home Grid", Command::ActivateHomeGrid);
+                    let grid_selected = app.state.selection.iter().any(|id| app.state.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Grid { .. })));
+                    if ui.add_enabled(grid_selected, egui::Button::new("Activate Grid Object")).clicked() {
+                        let _ = app.dispatch(Command::ActivateGridObject);
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(app.state.active_grid().is_some(), egui::Button::new("Align Grid to View")).clicked() {
+                        let _ = app.dispatch(Command::AlignGridToView);
+                        ui.close_menu();
+                    }
                     ui.separator();
                     check_item(ui, app, "Snaps Toggle", "Snaps Toggle", app.state.snaps_on);
                     check_item(ui, app, "Angle Snap Toggle", "Angle Snap Toggle", app.state.angle_snap_on);
@@ -166,13 +184,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     let axis = app.state.snaps.use_axis_constraints;
                     check_item(ui, app, "Snaps Use Axis Constraints", Command::EnableAxisConstraintsInSnapsToggle.name(), axis);
                 });
-                cmd(ui, app, "Measure Distance", Command::Measure);
+                cmd(ui, app, "Measure Distance", Command::MeasureDistance);
                 ui.separator();
                 let ribbon = app.state.show_ribbon;
                 check_item(ui, app, "Graphite Modeling Tools", "Show Ribbon Toggle", ribbon);
             });
             ui.menu_button("Group", |ui| {
-                cmd(ui, app, "Group", Command::Group { name: None });
+                if menu_button(ui, &app.state, "Group...", "Group").clicked() {
+                    // The reference asks for the group name first.
+                    if app.state.selection.is_empty() {
+                        app.state.status_prompt = "select objects to group".into();
+                    } else {
+                        app.state.dialog = Some(loom_commands::Dialog::GroupName);
+                    }
+                    ui.close_menu();
+                }
                 cmd(ui, app, "Ungroup", Command::Ungroup);
                 ui.separator();
                 cmd(ui, app, "Open", Command::GroupOpen);
@@ -254,6 +280,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             }
                         }
                     });
+                });
+                ui.menu_button("Helpers", |ui| {
+                    for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass")] {
+                        if ui.button(label).clicked() {
+                            app.create_category = crate::Category::Helpers;
+                            app.panel_tab = crate::Tab::Create;
+                            app.start_create(Some(crate::CreateKind::Helper(kind)));
+                            ui.close_menu();
+                        }
+                    }
                 });
                 ui.menu_button("Cameras", |ui| {
                     // Turns on the creation tool: drag (Target) or click (Free) in a viewport.
@@ -380,6 +416,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     check_item(ui, app, "Show Main Toolbar", "Show Main Toolbar Toggle", app.state.show_main_toolbar);
                     check_item(ui, app, "Show Track Bar", "Show Track Bar Toggle", app.state.show_track_bar);
                     check_item(ui, app, "Show Ribbon", "Show Ribbon Toggle", app.state.show_ribbon);
+                    check_item(ui, app, "Show Layers Toolbar", "Show Layers Toolbar Toggle", app.state.show_layers_toolbar);
                 });
                 check_item(ui, app, "Lock UI Layout", "Lock User Interface Toggle", app.state.ui_locked);
                 ui.separator();

@@ -360,8 +360,11 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let (object, base, colour) = match kind.as_str() {
                 "dummy" => (ObjectKind::dummy(size.max(0.001)), "Dummy", [120, 200, 120]),
                 "point" => (ObjectKind::point(size.max(0.001)), "Point", [120, 200, 120]),
+                "protractor" => (ObjectKind::protractor(), "Protractor", [120, 200, 120]),
+                "compass" => (ObjectKind::compass(size.max(0.001)), "Compass", [120, 200, 120]),
+                "grid" => (ObjectKind::grid(size.max(0.001), size.max(0.001)), "Grid", [120, 200, 120]),
                 "ikgoal" => (ObjectKind::IkGoal { chain: 0 }, "IK Chain", [0, 200, 255]),
-                other => return Err(format!("unknown helper kind {other:?} (dummy, point, ikgoal)")),
+                other => return Err(format!("unknown helper kind {other:?} (dummy, point, protractor, compass, grid, ikgoal)")),
             };
             let mut node = Node::new(&state.scene.next_name(base), object);
             node.transform.position.set(Vec3::from(position));
@@ -370,6 +373,10 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             commit(state, &format!("Create {base}"), Change::AddNode(node))?;
             state.selection = BTreeSet::from([id]);
             state.sub_selection.clear();
+            // User Grids > Activate grids when creating.
+            if kind == "grid" && state.user_grids.activate_when_created {
+                state.active_grid = Some(id);
+            }
             Ok(json!({ "node": id.0 }))
         }
         C::Dummy => execute(state, C::CreateHelper { kind: "dummy".into(), position: [0.0; 3], size: 10.0 }),

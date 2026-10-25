@@ -105,6 +105,10 @@ pub enum DialogPurpose {
     Attach,
     /// Skin > Bones > Add.
     SkinAddBones,
+    /// Select By Name while Select and Link is on: the Select Parent dialog.
+    LinkParent,
+    /// Select By Name while Group > Attach is on: the Attach To Group dialog.
+    GroupAttach,
 }
 
 /// A one-shot viewport pick mode (Display panel "by Hit" buttons, Select and Link).
@@ -136,6 +140,8 @@ pub enum PickMode {
     SelectByColor,
     /// Select and Link: the next clicked object becomes the selection's parent.
     Link,
+    /// Material Editor > Pick Material From Object: the eyedropper.
+    PickMaterial,
     /// Align (Alt+A): pick the target object, then the Align dialog opens.
     AlignTarget,
     /// Quick Align (Shift+A): pick the target object.
@@ -208,6 +214,17 @@ pub enum PickMode {
     /// Working Pivot > Place Pivot To: View (a point in the screen plane) / Surface.
     WorkingPivotView,
     WorkingPivotSurface,
+    /// Protractor > Pick Object 1 / 2: the clicked object.
+    ProtractorObject(u8),
+    /// Tools > Measure Distance: first and second point.
+    MeasureDistanceA,
+    MeasureDistanceB,
+    /// Clone and Align > Pick: each clicked object joins the destinations.
+    CloneAlignDestination,
+    /// Place Highlight: drag over a surface.
+    PlaceHighlight,
+    /// Spacing Tool > Pick Path: the clicked shape is the path.
+    SpacingPath,
 }
 
 /// Paint Deformation brushes.
@@ -352,6 +369,10 @@ pub struct PolySettings {
     pub relax_hold_boundary: bool,
     pub relax_hold_outer: bool,
     pub auto_smooth_threshold: f32,
+    /// PolyDraw > Branch Taper: the branch end is 1 + this times the start size.
+    pub branch_taper: f32,
+    /// PolyDraw > Minimum Distance: pixels the mouse moves between branch segments.
+    pub branch_min_distance: f32,
 }
 
 impl Default for PolySettings {
@@ -393,6 +414,8 @@ impl Default for PolySettings {
             relax_hold_boundary: true,
             relax_hold_outer: false,
             auto_smooth_threshold: 45.0,
+            branch_taper: -0.5,
+            branch_min_distance: 10.0,
         }
     }
 }
@@ -715,6 +738,13 @@ pub struct Prefs {
     pub local_center_during_animate: bool,
     /// Preferences > Files > Recent Files in File Menu (0-50, default 10).
     pub recent_files_count: usize,
+    /// Preferences > Viewports > Grid Nudge Distance (Nudge Grid Up / Down, default 1.0).
+    #[serde(default = "default_nudge")]
+    pub grid_nudge_distance: f32,
+}
+
+fn default_nudge() -> f32 {
+    1.0
 }
 
 impl Default for Prefs {
@@ -739,19 +769,21 @@ impl Default for Prefs {
             auto_backup_name: "AutoBackup".into(),
             local_center_during_animate: true,
             recent_files_count: 10,
+            grid_nudge_distance: 1.0,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 31] = [
+    pub const NAMES: [&'static str; 32] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
         "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
+        "Grid Nudge Distance",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -774,6 +806,7 @@ impl Prefs {
             "Auto Backup Count" => self.auto_backup_count as f64,
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
             "Recent Files in File Menu" => self.recent_files_count as f64,
+            "Grid Nudge Distance" => self.grid_nudge_distance as f64,
             "Transform Gizmos" => b(self.gizmos.enabled),
             "Show Axis Labels" => b(self.gizmos.show_axis_labels),
             "Allow Multiple Gizmos" => b(self.gizmos.allow_multiple),
@@ -814,6 +847,7 @@ impl Prefs {
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
             "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
+            "Grid Nudge Distance" => self.grid_nudge_distance = f.max(0.0),
             "Transform Gizmos" => self.gizmos.enabled = on,
             "Show Axis Labels" => self.gizmos.show_axis_labels = on,
             "Allow Multiple Gizmos" => self.gizmos.allow_multiple = on,
@@ -1284,6 +1318,10 @@ pub struct AppState {
     pub ffd_selection: BTreeSet<u32>,
     /// VertexPaint: the viewport brush is on.
     pub vertex_paint_brush: bool,
+    /// VertexPaint: Pick Color From Object (the eyedropper) is on.
+    pub vertex_paint_pick: bool,
+    /// VertexPaint: Face Selection is on (viewport clicks select the faces painting is limited to).
+    pub vertex_paint_faces: bool,
     pub selection_mode: SelectionMode,
     pub active_tool: Tool,
     pub viewports: Vec<Viewport>,
@@ -1329,6 +1367,10 @@ pub struct AppState {
     /// Rendering > Material Editor (M): its own modeless window, open beside
     /// `dialog` so the bitmap chooser its Maps buttons open does not close it.
     pub material_editor_open: bool,
+    /// Material Editor > Material/Map Navigator: its own modeless window.
+    pub material_navigator_open: bool,
+    /// Bumped by Reload Bitmaps: the viewports read their image files again.
+    pub bitmap_generation: u64,
     /// Display panel and viewport display settings (Display Color, statistics, Object Color dialog...).
     pub display: crate::display::DisplaySettings,
     /// What a Select From Scene style dialog is for (Hide/Freeze by Name...).
@@ -1341,6 +1383,17 @@ pub struct AppState {
     pub normal_align: Option<NormalAlignPicks>,
     /// Spacing Tool > Pick Points: the two picked path ends.
     pub spacing_points: [Option<Vec3>; 2],
+    /// Tools > Grids and Snaps > Activate Grid Object: the grid that is the
+    /// construction plane (None: the home grid). Read it with `active_grid()`.
+    pub active_grid: Option<NodeId>,
+    /// Tools > Measure Distance: the first picked point.
+    pub measure_from: Option<Vec3>,
+    /// Spacing Tool > Pick Path: the picked shape (None: the picked points).
+    pub spacing_path: Option<NodeId>,
+    /// Clone and Align: the destination objects.
+    pub clone_align_destinations: Vec<NodeId>,
+    /// Place Highlight: each moved object's position before it began.
+    pub place_highlight_from: Vec<(NodeId, Vec3)>,
     pub selection_filter: SelectionFilter,
     /// Main Toolbar > Window/Crossing: true = Window (fully enclosed only).
     pub window_selection: bool,
@@ -1426,6 +1479,8 @@ pub struct AppState {
     pub pick_point_a: Option<(NodeId, u32, Vec3)>,
     /// Active Paint Deformation brush.
     pub paint_deform: Option<PaintMode>,
+    /// Freeform > PolyDraw > Branches is on.
+    pub branches: bool,
     /// Soft selection weights per node, keyed by a hash of what they depend on.
     pub soft_cache: std::cell::RefCell<std::collections::HashMap<NodeId, (u64, Vec<f32>)>>,
     /// Hierarchy > Pivot: Move/Rotate act on the pivot only.
@@ -1453,6 +1508,8 @@ pub struct AppState {
     pub snaps: crate::snap::SnapSettings,
     /// Grid and Snap Settings > Home Grid.
     pub home_grid: crate::snap::HomeGrid,
+    /// Grid and Snap Settings > User Grids.
+    pub user_grids: crate::snap::UserGrids,
     /// The renderer rebuilds its grid buffers when set.
     pub grid_dirty: bool,
     pub auto_key: bool,
@@ -1556,6 +1613,14 @@ pub struct AppState {
     pub seam_point: Option<u32>,
     /// Merge dialog: the chosen file and its object names.
     pub merge_pending: Option<(std::path::PathBuf, Vec<String>)>,
+    /// FBX / OBJ import and export options (the format dialogs; saved in the settings).
+    pub exchange: crate::exchange::ExchangeOptions,
+    /// The file an FBX / OBJ options dialog is open for, and whether it exports the selection only.
+    pub exchange_pending: Option<(std::path::PathBuf, bool)>,
+    /// Customize > Show UI > Show Layers Toolbar.
+    pub show_layers_toolbar: bool,
+    /// File > File Properties and Summary Info > Description (saved in the scene file).
+    pub file_properties: crate::file::FileProperties,
     /// The scene's file (File > Save writes here); None = Untitled.
     pub file: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
@@ -1607,7 +1672,7 @@ impl AppState {
             isolation: None,
             expert_mode: false,
             show_main_toolbar: true,
-            show_ribbon: false,
+            show_ribbon: true,
             show_command_panel: true,
             startup_ui: crate::settings::UiLayout::DEFAULT,
             show_end_result: false,
@@ -1627,6 +1692,8 @@ impl AppState {
             hide_category: HideCategories::default(),
             dialog: None,
             material_editor_open: false,
+            material_navigator_open: false,
+            bitmap_generation: 0,
             display: Default::default(),
             dialog_purpose: DialogPurpose::Select,
             pick_mode: None,
@@ -1634,6 +1701,11 @@ impl AppState {
             normal_align_source: None,
             normal_align: None,
             spacing_points: [None, None],
+            active_grid: None,
+            measure_from: None,
+            spacing_path: None,
+            clone_align_destinations: Vec::new(),
+            place_highlight_from: Vec::new(),
             selection_filter: SelectionFilter::All,
             window_selection: false,
             selection_region: SelectionRegion::Rectangular,
@@ -1659,6 +1731,8 @@ impl AppState {
             keyboard_override: true,
             ffd_selection: BTreeSet::new(),
             vertex_paint_brush: false,
+            vertex_paint_pick: false,
+            vertex_paint_faces: false,
             named_sets: BTreeMap::new(),
             select_by_vertex: false,
             ignore_backfacing: false,
@@ -1683,6 +1757,7 @@ impl AppState {
             preserve_uvs: false,
             pick_point_a: None,
             paint_deform: None,
+            branches: false,
             soft_cache: Default::default(),
             affect_pivot_only: false,
             affect_object_only: false,
@@ -1699,6 +1774,7 @@ impl AppState {
             percent_snap_on: false,
             snaps: crate::snap::SnapSettings::default(),
             home_grid: crate::snap::HomeGrid::default(),
+            user_grids: crate::snap::UserGrids::default(),
             grid_dirty: true,
             auto_key: false,
             set_key_mode: false,
@@ -1759,6 +1835,10 @@ impl AppState {
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,
+            exchange: Default::default(),
+            exchange_pending: None,
+            show_layers_toolbar: false,
+            file_properties: Default::default(),
             file: None,
             mesh_dirty: false,
         }
@@ -1853,7 +1933,7 @@ impl AppState {
         let mut any = false;
         for id in ids {
             let Some(node) = self.scene.node(id) else { continue };
-            if !self.is_visible(node) || node.display.ignore_extents {
+            if !self.is_visible(node) || self.scene.display_of(node).ignore_extents {
                 continue;
             }
             let world = self.scene.object_matrix(id);

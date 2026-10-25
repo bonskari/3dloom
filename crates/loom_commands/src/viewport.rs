@@ -321,6 +321,20 @@ pub enum Dialog {
     SaveRenderedImage,
     /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).
     MaterialMap { channel: u8 },
+    /// Material Editor, Bitmap level > Bitmap: choose the image of the map being edited.
+    MaterialBitmap,
+    /// Material/Map Browser, choosing what `for_` asks for.
+    MaterialBrowser(BrowserFor),
+    /// Replace Material / Replace Map dialog before the Type button turns the
+    /// current level into the compound type at `MaterialKind::TYPES[kind]`
+    /// (a map: `MapType::ALL[kind]`).
+    ReplaceMaterial { kind: u8, map: bool },
+    /// Material Editor Options.
+    MaterialEditorOptions,
+    /// Bitmap Parameters > View Image: Specify Cropping/Placement.
+    SpecifyCropping,
+    /// Copy (Instance) Map: dragging map button `from` onto `to` (indexes into MAP_SLOTS).
+    CopyMap { from: u8, to: u8 },
     ViewportConfiguration,
     TimeConfiguration,
     ViewportBackground,
@@ -336,6 +350,10 @@ pub enum Dialog {
     Mirror,
     Array,
     SpacingTool,
+    /// Tools > Snapshot.
+    Snapshot,
+    /// Tools > Align > Clone and Align (modeless).
+    CloneAndAlign,
     ObjectProperties,
     Preferences,
     UnitsSetup,
@@ -367,7 +385,7 @@ pub enum Dialog {
     RefineVertex,
     /// A base parameter change under a topology-dependent modifier: Yes / Hold/Yes / No.
     TopologyWarning,
-    /// File > Import (OBJ).
+    /// File > Import (FBX, OBJ, .max).
     ImportFile,
     SaveAnimation,
     LoadAnimation,
@@ -378,14 +396,20 @@ pub enum Dialog {
     KeyInfo,
     TrackViewFilters,
     TrackViewUtilities,
-    /// File > Export (OBJ).
+    /// File > Export (FBX, OBJ).
     ExportFile,
-    /// File > Export Selected (OBJ).
+    /// File > Export Selected (FBX, OBJ).
     ExportSelected,
     /// File > Merge: pick the file; then the object list.
     MergeFile,
     /// File > Merge: the file's object list (`AppState::merge_pending`).
     MergeObjects,
+    /// FBX Importer / Exporter and OBJ Importer / Exporter options for the
+    /// file in `AppState::exchange_pending` (after Import / Export picks it).
+    FbxImportOptions,
+    FbxExportOptions,
+    ObjImportOptions,
+    ObjExportOptions,
     /// Animation > Bone Tools...
     BoneTools,
     /// Skin > Weight Table.
@@ -418,6 +442,35 @@ pub enum Dialog {
     /// Point Cache > Record / Load file pickers for stack entry `index`.
     PointCacheRecord { index: u32, start: i32, end: i32 },
     PointCacheLoad { index: u32 },
+    /// File > New on a scene with objects: Keep Objects and Hierarchy / Keep Objects / New All.
+    NewScene,
+    /// File > Reset after the save prompt: "Do you really want to reset?"
+    ConfirmReset,
+    /// File > Save As > Save Selected.
+    SaveSelected,
+    /// File > Save As > Archive.
+    ArchiveFile,
+    /// File > Summary Info.
+    SummaryInfo,
+    /// File > File Properties.
+    FileProperties,
+    /// Group > Group: the group name.
+    GroupName,
+    /// Layer Manager > Layer Properties of `layer`.
+    LayerProperties { layer: u32 },
+}
+
+/// What the Material/Map Browser is choosing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BrowserFor {
+    /// The Type button at a material level: a material type.
+    MaterialType,
+    /// The Type button at a map level: a map type.
+    MapType,
+    /// An empty map button at the current level: index into `MAP_SLOTS`.
+    Map(u8),
+    /// Get Material: a material from the scene or the editor's slots.
+    GetMaterial,
 }
 
 /// What runs after the Save Changes prompt is answered.
@@ -427,8 +480,27 @@ pub enum PendingFileAction {
     /// File > Recent: the n-th file of `AppState::recent_files`.
     OpenRecent(usize),
     New,
+    /// New Scene dialog: keep the objects (and their hierarchy).
+    NewKeeping(NewKeep),
     Reset,
     Exit,
+}
+
+/// New Scene dialog: what the new scene keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NewKeep {
+    ObjectsAndHierarchy,
+    Objects,
+}
+
+impl NewKeep {
+    /// The `NewSceneKeep` argument.
+    pub fn arg(self) -> &'static str {
+        match self {
+            NewKeep::ObjectsAndHierarchy => "objects_and_hierarchy",
+            NewKeep::Objects => "objects",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

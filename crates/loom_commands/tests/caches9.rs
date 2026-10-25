@@ -237,3 +237,39 @@ fn point_cache_retries_a_missing_file() {
         assert!(a.distance(*c) < 1e-3, "{a} vs {c}");
     }
 }
+
+fn hsds_cage_faces(s: &AppState, id: NodeId) -> usize {
+    s.scene.node(id).unwrap().cage_mesh().face_count()
+}
+
+#[test]
+fn hsds_level_list_picks_the_edited_level_and_display_hides_finer_levels() {
+    let mut s = AppState::new();
+    let b = boxed(&mut s, 10.0);
+    add(&mut s, "HSDS");
+    execute(&mut s, Command::ModifierSubobjectLevel { index: 0, level: 3 }).unwrap();
+    execute(&mut s, Command::HsdsSubdivide { faces: Some(vec![0]) }).unwrap();
+    let level1 = faces(&s, b);
+    execute(&mut s, Command::HsdsSubdivide { faces: Some(vec![0]) }).unwrap();
+    let level2 = faces(&s, b);
+    assert!(level2 > level1 && level1 > 6);
+    assert_eq!(hsds_cage_faces(&s, b), level2, "after Subdivide the new level is the one edited");
+    // Picking Level 1 in the list: its polygons are the cage the levels pick on.
+    execute(&mut s, Command::HsdsSelectLevel { level: 1 }).unwrap();
+    assert_eq!(hsds_cage_faces(&s, b), level1);
+    assert!(execute(&mut s, Command::HsdsSubdivide { faces: Some(vec![0]) }).is_err(), "Subdivide works on the finest level only");
+    execute(&mut s, Command::HsdsSelectLevel { level: 0 }).unwrap();
+    assert_eq!(hsds_cage_faces(&s, b), 6, "Base Level: the input's polygons");
+    assert!(execute(&mut s, Command::HsdsSelectLevel { level: 3 }).is_err(), "no Level 3");
+    // Display next to Base Level: Level 1 and 2 are turned off.
+    execute(&mut s, Command::HsdsDisplay { level: 0 }).unwrap();
+    assert_eq!(faces(&s, b), 6);
+    execute(&mut s, Command::HsdsDisplay { level: 1 }).unwrap();
+    assert_eq!(faces(&s, b), level1);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(faces(&s, b), 6, "Display is an undo step");
+    execute(&mut s, Command::HsdsDisplay { level: 2 }).unwrap();
+    assert_eq!(faces(&s, b), level2, "Display on the finest level shows every level");
+    let st = execute(&mut s, Command::State).unwrap();
+    assert_eq!(st["hsds"]["levels"], 2);
+}

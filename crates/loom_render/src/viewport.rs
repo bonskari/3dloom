@@ -220,7 +220,7 @@ impl ViewportRenderer {
                     buffers: &[VertexBufferLayout {
                         array_stride: std::mem::size_of::<GpuVertex>() as u64,
                         step_mode: VertexStepMode::Vertex,
-                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4],
+                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4],
                     }],
                 },
                 fragment: Some(FragmentState {
@@ -315,6 +315,7 @@ impl ViewportRenderer {
         grid: Option<GridPlane>,
         orthographic: bool,
         textures: &TextureSet,
+        lines: Option<&crate::mesh_buffer::LineBuffer>,
     ) {
         let bind_group = &self.slots[slot.min(MAX_VIEWPORTS - 1)].1;
         if let Some(plane) = grid {
@@ -322,23 +323,33 @@ impl ViewportRenderer {
         }
         let shade = shaded_meshes(meshes.len(), shaded, shade_only);
         if !shade.is_empty() {
-            // Opaque meshes first (per-object cull setting), then see-through.
+            // Opaque faces first (per-surface cull setting), then see-through;
+            // one draw per range (texture / transparency / culling).
             for transparent in [false, true] {
-                for mb in shade.iter().map(|i| meshes[*i]).filter(|mb| mb.index_count > 0 && (mb.style.alpha < 1.0) == transparent) {
-                    let pipeline = if transparent {
-                        &self.mesh_pipeline_blend
-                    } else if mb.style.backface_cull {
-                        &self.mesh_pipeline_cull
-                    } else {
-                        &self.mesh_pipeline
-                    };
-                    pass.set_pipeline(pipeline);
-                    pass.set_bind_group(0, bind_group, &[]);
-                    pass.set_bind_group(1, textures.bind_group(mb.style.texture), &[]);
-                    pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
-                    pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);
-                    pass.draw_indexed(0..mb.index_count, 0, 0..1);
+                for mb in shade.iter().map(|i| meshes[*i]).filter(|mb| mb.index_count > 0) {
+                    for r in mb.ranges.iter().filter(|r| r.count > 0 && r.transparent == transparent) {
+                        let pipeline = if transparent {
+                            &self.mesh_pipeline_blend
+                        } else if r.cull {
+                            &self.mesh_pipeline_cull
+                        } else {
+                            &self.mesh_pipeline
+                        };
+                        pass.set_pipeline(pipeline);
+                        pass.set_bind_group(0, bind_group, &[]);
+                        pass.set_bind_group(1, textures.bind_group(r.texture), &[]);
+                        pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
+                        pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);
+                        pass.draw_indexed(r.start..r.start + r.count, 0, 0..1);
+                    }
                 }
+            }
+            // Wire materials: their faces' edges.
+            pass.set_pipeline(self.grid.line_pipeline());
+            pass.set_bind_group(0, bind_group, &[]);
+            for mb in shade.iter().map(|i| meshes[*i]).filter(|mb| mb.wire_vertex_count > 0) {
+                pass.set_vertex_buffer(0, mb.wire_vertex_buffer.slice(..));
+                pass.draw(0..mb.wire_vertex_count, 0..1);
             }
         }
         if show_edges || !selected.is_empty() {
@@ -356,6 +367,12 @@ impl ViewportRenderer {
                     pass.draw(0..mb.edge_vertex_count, 0..1);
                 }
             }
+        }
+        if let Some(lines) = lines {
+            pass.set_pipeline(self.grid.line_pipeline());
+            pass.set_bind_group(0, bind_group, &[]);
+            pass.set_vertex_buffer(0, lines.buffer.slice(..));
+            pass.draw(0..lines.count, 0..1);
         }
     }
 }

@@ -240,6 +240,28 @@ pub fn extrude_faces(mesh: &mut Mesh, faces: &[FaceId], height: f32, kind: Extru
     lift(mesh, faces, kind, 1, &f)
 }
 
+/// PolyDraw Branches: each group of polygons extrudes in one segment per entry
+/// of `offsets`, the cap's centre moving by that offset from where it started;
+/// the outline scales from 1 to 1 + `taper` along the way. Past zero (taper
+/// below −1) it grows again; it never gets smaller than 2 % of the start.
+pub fn branch(mesh: &mut Mesh, faces: &[FaceId], offsets: &[Vec3], taper: f32) -> Result<Vec<FaceId>, String> {
+    if offsets.is_empty() {
+        return Err("the branch needs a path".into());
+    }
+    let snapshot = mesh.clone();
+    let n = offsets.len();
+    let centre = |g: &BTreeSet<FaceId>| -> Vec3 {
+        let vs: BTreeSet<VertexId> = g.iter().flat_map(|f| snapshot.face_vertex_ids(*f).unwrap_or_default()).collect();
+        vs.iter().filter_map(|v| snapshot.vertex_position(*v)).sum::<Vec3>() / vs.len().max(1) as f32
+    };
+    let f = |g: &BTreeSet<FaceId>, _: VertexId, p: Vec3, t: f32| -> Vec3 {
+        let c = centre(g);
+        let k = ((t * n as f32).round() as usize).clamp(1, n);
+        c + offsets[k - 1] + (p - c) * (1.0 + taper * t).abs().max(0.02)
+    };
+    lift(mesh, faces, ExtrudeKind::Group, n as u32, &f)
+}
+
 /// Inset: the polygons shrink by `amount` inside a ring of new polygons.
 pub fn inset(mesh: &mut Mesh, faces: &[FaceId], amount: f32, by_polygon: bool) -> Result<Vec<FaceId>, String> {
     let snapshot = mesh.clone();

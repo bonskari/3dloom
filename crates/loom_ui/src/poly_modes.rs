@@ -206,6 +206,97 @@ pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState
     true
 }
 
+/// A Branches drag in progress: the polygons it grows from and the path so far.
+#[derive(Clone)]
+struct BranchDrag {
+    node: u64,
+    faces: Vec<u32>,
+    /// World points on the plane facing the view through the polygons' centre.
+    path: Vec<Vec3>,
+    normal: Vec3,
+    /// Where the last path point was taken, on screen.
+    last: egui::Pos2,
+}
+
+/// Freeform > PolyDraw > Branches: a drag from a polygon (Shift: from the
+/// selected polygons) draws the branch path on a plane facing the view, one
+/// point per Minimum Distance pixels; the release grows the branch (one
+/// undo). At Polygon level Ctrl+click selects a polygon, Ctrl+Alt+click adds
+/// one. Returns true while Branches owns the pointer.
+pub fn branches_drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState, hovered: bool, p: egui::Pos2, projection: &Projection) -> bool {
+    if !app.state.branches {
+        return false;
+    }
+    let id = egui::Id::new("branch_drag");
+    let mods = ctx.input(|i| i.modifiers);
+    if pointer.button_pressed(egui::PointerButton::Primary) && hovered {
+        app.poly_dragging = true;
+        let hit = pick_face(app, p, projection.rect, projection.view, projection.proj).and_then(|pick| match pick {
+            Pick::SubObject { mesh, id: SubObjectId::Face(f) } => Some((app.world_meshes()[mesh].0, f.0)),
+            _ => None,
+        });
+        if mods.ctrl || mods.command {
+            if let (Some((node, f)), SelectionMode::Face) = (hit, app.state.selection_mode) {
+                let op = if mods.alt { loom_commands::SelectOp::Add } else { loom_commands::SelectOp::Replace };
+                let _ = app.dispatch(Command::SelectSub { node: Some(node.0), ids: vec![f], op });
+            }
+            return true;
+        }
+        let from = if mods.shift {
+            app.state.sub_selection.by_node().into_iter().find_map(|(n, ids)| {
+                let faces: Vec<u32> = ids.iter().filter_map(|s| if let SubObjectId::Face(f) = s { Some(f.0) } else { None }).collect();
+                (!faces.is_empty()).then_some((n, faces))
+            })
+        } else {
+            hit.map(|(n, f)| (n, vec![f]))
+        };
+        if let Some((node, faces)) = from {
+            let Some((_, mesh)) = app.world_meshes().iter().find(|(n, _)| *n == node) else { return true };
+            let pts: Vec<Vec3> = faces.iter().flat_map(|f| mesh.face_positions(loom_mesh::FaceId(*f)).unwrap_or_default()).collect();
+            if !pts.is_empty() {
+                let start = pts.iter().copied().sum::<Vec3>() / pts.len() as f32;
+                let drag = BranchDrag { node: node.0, faces, path: vec![start], normal: projection.toward_viewer_at(start), last: p };
+                ctx.data_mut(|d| d.insert_temp(id, drag));
+            }
+        }
+        return true;
+    }
+    let Some(mut drag) = ctx.data(|d| d.get_temp::<BranchDrag>(id)) else {
+        // The release of a press Branches took (a Ctrl+click) is its own too.
+        let owned = app.poly_dragging;
+        if pointer.button_released(egui::PointerButton::Primary) {
+            app.poly_dragging = false;
+        }
+        return owned;
+    };
+    if pointer.button_down(egui::PointerButton::Primary) && p.distance(drag.last) >= app.state.poly_settings.branch_min_distance {
+        if let Some(w) = projection.hit_plane(p, drag.path[0], drag.normal) {
+            drag.path.push(w);
+            drag.last = p;
+            ctx.data_mut(|d| d.insert_temp(id, drag.clone()));
+            ctx.request_repaint();
+        }
+    }
+    if pointer.button_released(egui::PointerButton::Primary) || !pointer.button_down(egui::PointerButton::Primary) {
+        ctx.data_mut(|d| d.remove::<BranchDrag>(id));
+        app.poly_dragging = false;
+        if drag.path.len() >= 2 {
+            let cmd = Command::Branch { node: drag.node, faces: drag.faces, path: drag.path.iter().map(|v| v.to_array()).collect(), taper: app.state.poly_settings.branch_taper };
+            if let Err(e) = app.dispatch(cmd) {
+                app.last_error = Some(e);
+            }
+        }
+    }
+    true
+}
+
+/// The Branches path being drawn, as a polyline.
+fn draw_branch_path(painter: &egui::Painter, projection: &Projection) {
+    let Some(drag) = painter.ctx().data(|d| d.get_temp::<BranchDrag>(egui::Id::new("branch_drag"))) else { return };
+    let pts: Vec<egui::Pos2> = drag.path.iter().filter_map(|w| projection.screen(*w)).collect();
+    painter.add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(80, 220, 80))));
+}
+
 fn selection_centre(app: &LoomApp) -> Vec3 {
     let mut sum = Vec3::ZERO;
     let mut n = 0.0;
@@ -237,8 +328,11 @@ fn vertex_screen(app: &LoomApp, projection: &Projection, node: NodeId, v: u32) -
 /// Create's polyline through the picked vertices.
 pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hover: Option<egui::Pos2>) {
     let stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255));
+    draw_branch_path(painter, projection);
     draw_skin(painter, app, projection);
     draw_normals(painter, app, projection);
+    draw_hsds_cage(painter, app, projection);
+    draw_vertex_paint_faces(painter, app, projection);
     // Modifier gizmo: the input's bounding box in the gizmo frame, orange.
     for id in app.state.selection.iter() {
         let Some(n) = app.state.scene.node(*id) else { continue };
@@ -457,20 +551,35 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hov
 /// Control Points or Set Volume level is on.
 /// Skin > Edit Envelopes: the current bone's envelope capsule (inner red,
 /// outer purple), cross-section rings and the vertices coloured by weight.
-/// Edit Normals at the Normal level: every normal as a line from its corner's
-/// vertex (blue, selected red), Display Length long.
-fn draw_normals(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
-    let Some((id, index)) = loom_commands::normals::entry(&app.state) else { return };
-    let Some(n) = app.state.scene.node(id) else { return };
-    if n.active_entry != Some(index) || n.modifiers[index].sub_level != 1 {
-        return;
-    }
-    let loom_scene::Modifier::EditNormals(d) = &n.modifiers[index].modifier else { return };
+/// Edit Normals colours: unspecified (follow the smoothing groups) dark
+/// blue, explicit (turned or set by hand) green, selected red.
+pub const NORMAL_UNSPECIFIED: egui::Color32 = egui::Color32::from_rgb(40, 70, 220);
+pub const NORMAL_EXPLICIT: egui::Color32 = egui::Color32::from_rgb(40, 220, 60);
+pub const NORMAL_SELECTED: egui::Color32 = egui::Color32::from_rgb(255, 40, 40);
+
+/// One normal of the Edit Normals entry at its Normal level, on screen.
+struct ScreenNormal {
+    id: u32,
+    from: egui::Pos2,
+    to: egui::Pos2,
+    explicit: bool,
+    selected: bool,
+    /// It points away from the viewer (Ignore Backfacing skips it).
+    back: bool,
+}
+
+/// Every normal of the Edit Normals entry at its Normal level as a screen
+/// line from its corner's vertex, Display Length long.
+fn normals_on_screen(app: &LoomApp, projection: &Projection) -> Option<Vec<ScreenNormal>> {
+    let (id, index) = loom_commands::normals::normal_level(&app.state)?;
+    let n = app.state.scene.node(id)?;
+    let loom_scene::Modifier::EditNormals(d) = &n.modifiers[index].modifier else { return None };
     let input = loom_commands::normals::input_mesh(&app.state, id, index);
     let groups = d.groups_for(&input);
     let world = app.state.scene.object_matrix(id);
     let all = d.normals(&input, &groups);
     let mut drawn = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
     for (i, g) in groups.iter().enumerate() {
         if *g == loom_scene::edit_normals::NO_GROUP || !drawn.insert(*g) {
             continue;
@@ -481,8 +590,168 @@ fn draw_normals(painter: &egui::Painter, app: &LoomApp, projection: &Projection)
         let a = world.transform_point3(p);
         let b = world.transform_point3(p + dir * d.display_length);
         if let (Some(sa), Some(sb)) = (projection.screen(a), projection.screen(b)) {
-            let c = if d.selection.contains(g) { egui::Color32::from_rgb(255, 60, 60) } else { egui::Color32::from_rgb(80, 120, 255) };
-            painter.line_segment([sa, sb], egui::Stroke::new(1.5_f32, c));
+            let back = (b - a).dot(projection.toward_viewer_at(a)) < 0.0;
+            out.push(ScreenNormal { id: *g, from: sa, to: sb, explicit: d.explicit.contains_key(g), selected: d.selection.contains(g), back });
+        }
+    }
+    Some(out)
+}
+
+fn draw_normals(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
+    for n in normals_on_screen(app, projection).unwrap_or_default() {
+        let c = if n.selected { NORMAL_SELECTED } else if n.explicit { NORMAL_EXPLICIT } else { NORMAL_UNSPECIFIED };
+        painter.line_segment([n.from, n.to], egui::Stroke::new(1.5_f32, c));
+    }
+}
+
+fn segment_distance(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
+    let ab = b - a;
+    let t = if ab.length_sq() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+    p.distance(a + ab * t)
+}
+
+/// Edit Normals at the Normal level: a click (nearest within 8 px) or a
+/// region selects normals, or the normals of the vertices / edges / faces
+/// under Select By; Ctrl adds, Alt removes, a click on nothing clears.
+/// False when the Normal level is not on.
+pub fn normals_pick(app: &mut LoomApp, projection: &Projection, region: Option<&crate::region::Region>, p: egui::Pos2, mods: loom_input::Modifiers) -> bool {
+    let Some(normals) = normals_on_screen(app, projection) else { return false };
+    let Some((id, index)) = loom_commands::normals::normal_level(&app.state) else { return false };
+    let Some(loom_scene::Modifier::EditNormals(d)) = app.state.scene.node(id).map(|n| &n.modifiers[index].modifier) else { return false };
+    let (by, ignore_back) = (d.select_by, d.ignore_backfacing);
+    let ids: Vec<u32> = if by == 0 {
+        let shown = normals.iter().filter(|n| !(ignore_back && n.back));
+        match region {
+            // A region takes the normals whose line it touches (sampled along the line).
+            Some(r) => shown
+                .filter(|n| {
+                    let steps = ((n.to - n.from).length() / 3.0).ceil().max(1.0) as usize;
+                    (0..=steps).any(|k| r.contains(n.from + (n.to - n.from) * (k as f32 / steps as f32)))
+                })
+                .map(|n| n.id)
+                .collect(),
+            None => shown.map(|n| (n.id, segment_distance(p, n.from, n.to))).filter(|(_, d)| *d <= 8.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(g, _)| vec![g]).unwrap_or_default(),
+        }
+    } else {
+        let input = loom_commands::normals::input_mesh(&app.state, id, index);
+        mesh_ids_at(projection, &input, app.state.scene.object_matrix(id), by, ignore_back, region, p)
+    };
+    let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
+    let _ = app.dispatch(Command::EditNormalsSelect { ids, op });
+    true
+}
+
+/// Vertex (1), edge (2) or face (3) ids of `input` (placed by `world`)
+/// under a click or in a region.
+#[allow(clippy::too_many_arguments)]
+fn mesh_ids_at(projection: &Projection, input: &loom_mesh::Mesh, world: Mat4, by: u32, ignore_back: bool, region: Option<&crate::region::Region>, p: egui::Pos2) -> Vec<u32> {
+    let wp: Vec<Vec3> = input.vertices().iter().map(|v| world.transform_point3(v.position)).collect();
+    let sp: Vec<Option<egui::Pos2>> = wp.iter().map(|q| projection.screen(*q)).collect();
+    let face_front: Vec<bool> = (0..input.face_count() as u32)
+        .map(|f| {
+            let f = loom_mesh::FaceId(f);
+            let vs = input.face_vertex_ids(f).unwrap_or_default();
+            let c = vs.iter().map(|v| wp[v.0 as usize]).sum::<Vec3>() / vs.len().max(1) as f32;
+            world.transform_vector3(input.face_normal(f)).dot(projection.toward_viewer_at(c)) >= 0.0
+        })
+        .collect();
+    let he = input.half_edges();
+    let front_he = |i: usize| -> bool { !ignore_back || [Some(i), Some(he[i].twin.0 as usize)].iter().flatten().any(|h| he.get(*h).and_then(|h| h.face).is_some_and(|f| face_front[f.0 as usize])) };
+    match by {
+        1 => {
+            let visible: Vec<bool> = (0..wp.len()).map(|v| !ignore_back || he.iter().any(|h| h.origin.0 as usize == v && h.face.is_some_and(|f| face_front[f.0 as usize]))).collect();
+            let cands = sp.iter().enumerate().filter_map(|(v, s)| s.filter(|_| visible[v]).map(|s| (v as u32, s)));
+            match region {
+                Some(r) => cands.filter(|(_, s)| r.contains(*s)).map(|(v, _)| v).collect(),
+                None => cands.map(|(v, s)| (v, s.distance(p))).filter(|(_, d)| *d <= 8.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(v, _)| vec![v]).unwrap_or_default(),
+            }
+        }
+        2 => {
+            let edges = (0..he.len()).filter(|i| input.canonical_edge_id(loom_mesh::HalfEdgeId(*i as u32)).is_some_and(|c| c.0 as usize == *i) && front_he(*i)).filter_map(|i| {
+                let (a, b) = (sp[he[i].origin.0 as usize]?, sp[he[he[i].next.0 as usize].origin.0 as usize]?);
+                Some((i as u32, a, b))
+            });
+            match region {
+                Some(r) => edges.filter(|(_, a, b)| r.contains(*a) && r.contains(*b)).map(|(e, _, _)| e).collect(),
+                None => edges.map(|(e, a, b)| (e, segment_distance(p, a, b))).filter(|(_, d)| *d <= 6.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(e, _)| vec![e]).unwrap_or_default(),
+            }
+        }
+        _ => {
+            let eye = projection.view.inverse().w_axis.truncate();
+            let faces = (0..input.face_count()).filter(|f| !ignore_back || face_front[*f]).filter_map(|f| {
+                let vs = input.face_vertex_ids(loom_mesh::FaceId(f as u32)).unwrap_or_default();
+                let poly: Option<Vec<egui::Pos2>> = vs.iter().map(|v| sp[v.0 as usize]).collect();
+                let c = vs.iter().map(|v| wp[v.0 as usize]).sum::<Vec3>() / vs.len().max(1) as f32;
+                Some((f as u32, poly?, c.distance(eye)))
+            });
+            match region {
+                Some(r) => faces.filter(|(_, poly, _)| {
+                    let c = poly.iter().fold(egui::Vec2::ZERO, |a, q| a + q.to_vec2()) / poly.len().max(1) as f32;
+                    r.contains(c.to_pos2())
+                }).map(|(f, _, _)| f).collect(),
+                None => faces.filter(|(_, poly, _)| crate::region::Region::Polygon(poly.clone()).contains(p)).min_by(|a, b| a.2.total_cmp(&b.2)).map(|(f, _, _)| vec![f]).unwrap_or_default(),
+            }
+        }
+    }
+}
+
+/// VertexPaint > Face Selection: a click or region selects faces of the
+/// entry's input (Ctrl adds, Alt removes, a click on nothing clears).
+/// False when Face Selection is off.
+pub fn vertex_paint_face_pick(app: &mut LoomApp, projection: &Projection, region: Option<&crate::region::Region>, p: egui::Pos2, mods: loom_input::Modifiers) -> bool {
+    if !app.state.vertex_paint_faces {
+        return false;
+    }
+    let Some((id, index)) = loom_commands::vertex_paint::entry(&app.state) else { return false };
+    let input = loom_commands::vertex_paint::input_mesh(&app.state, id, index);
+    let ids = mesh_ids_at(projection, &input, app.state.scene.object_matrix(id), 3, true, region, p);
+    let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
+    let _ = app.dispatch(Command::VertexPaintSelectFaces { ids, op });
+    true
+}
+
+/// VertexPaint's selected faces: red outline over a faint red fill.
+pub const VERTEX_PAINT_FACE: egui::Color32 = egui::Color32::from_rgb(255, 30, 30);
+
+fn draw_vertex_paint_faces(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
+    let Some((id, index)) = loom_commands::vertex_paint::entry(&app.state) else { return };
+    let Some(loom_scene::Modifier::VertexPaint { faces, .. }) = app.state.scene.node(id).map(|n| &n.modifiers[index].modifier) else { return };
+    if faces.is_empty() {
+        return;
+    }
+    let input = loom_commands::vertex_paint::input_mesh(&app.state, id, index);
+    let world = app.state.scene.object_matrix(id);
+    for f in faces {
+        let Some(vs) = input.face_vertex_ids(loom_mesh::FaceId(*f)) else { continue };
+        let pts: Option<Vec<egui::Pos2>> = vs.iter().map(|v| input.vertex_position(*v).and_then(|q| projection.screen(world.transform_point3(q)))).collect();
+        let Some(pts) = pts else { continue };
+        if pts.len() >= 3 {
+            painter.add(egui::Shape::convex_polygon(pts.clone(), egui::Color32::from_rgba_unmultiplied(255, 0, 0, 60), egui::Stroke::NONE));
+        }
+        for i in 0..pts.len() {
+            painter.line_segment([pts[i], pts[(i + 1) % pts.len()]], egui::Stroke::new(1.5_f32, VERTEX_PAINT_FACE));
+        }
+    }
+}
+
+/// HSDS at a sub-object level: the cage of the level being edited, yellow.
+pub const HSDS_CAGE: egui::Color32 = egui::Color32::from_rgb(255, 230, 0);
+
+fn draw_hsds_cage(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
+    for (id, mesh) in app.world_meshes() {
+        let Some(n) = app.state.scene.node(*id) else { continue };
+        if !app.state.selection.contains(id) || !n.active_entry.and_then(|a| n.modifiers.get(a)).is_some_and(|s| s.sub_level > 0 && matches!(s.modifier, loom_scene::Modifier::Hsds(_))) {
+            continue;
+        }
+        let pts: Vec<Option<egui::Pos2>> = mesh.vertices().iter().map(|v| projection.screen(v.position)).collect();
+        for (i, he) in mesh.half_edges().iter().enumerate() {
+            if (i as u32) > he.twin.0 {
+                continue;
+            }
+            let b = mesh.half_edges()[he.next.0 as usize].origin;
+            if let (Some(a), Some(b)) = (pts[he.origin.0 as usize], pts[b.0 as usize]) {
+                painter.line_segment([a, b], egui::Stroke::new(1.0_f32, HSDS_CAGE));
+            }
         }
     }
 }
