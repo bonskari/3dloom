@@ -980,7 +980,6 @@ fn attach_node(state: &mut AppState, other: NodeId) -> Result<Value, String> {
     let omesh = onode.cage_mesh().into_owned();
     let other_to_this = state.scene.object_matrix(target).inverse() * state.scene.object_matrix(other);
     let tnode = state.scene.node(target).ok_or("missing node")?;
-    let before = tnode.object.clone();
     let mut mesh = tnode.cage_mesh().into_owned();
     if tnode.edits_tri_mesh() {
         // An Editable Mesh takes the other object as triangles, its edge flags kept.
