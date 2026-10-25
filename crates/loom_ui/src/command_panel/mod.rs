@@ -94,9 +94,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 Tab::Scene => scene::show(ui, app),
                 Tab::Create => create::show(ui, app),
                 Tab::Modify => modify::show(ui, app),
-                Tab::Hierarchy => hierarchy::show(ui, app),
-                Tab::Motion => motion::show(ui, app),
-                Tab::Display => display::show(ui, app),
+                // The selected object's name and colour head these panels too.
+                Tab::Hierarchy => {
+                    create::name_and_color(ui, app);
+                    hierarchy::show(ui, app)
+                }
+                Tab::Motion => {
+                    create::name_and_color(ui, app);
+                    motion::show(ui, app)
+                }
+                Tab::Display => {
+                    create::name_and_color(ui, app);
+                    display::show(ui, app)
+                }
                 Tab::Utilities => utilities::show(ui, app),
             }
         });

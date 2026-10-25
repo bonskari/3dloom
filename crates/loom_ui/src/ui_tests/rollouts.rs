@@ -85,3 +85,18 @@ fn dragging_the_panel_pans_it_when_it_is_taller_than_the_window() {
     let after = h.widgets_labelled("By Vertex").first().map(|r| r.center().y).unwrap_or(f32::MIN);
     assert!(after < before - 60.0, "the panel scrolled up under the drag: {before} -> {after}");
 }
+
+#[test]
+fn hierarchy_motion_and_display_panels_show_the_name_and_colour() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    let name = h.app.state.scene.node(id).unwrap().name.clone();
+    for tab in [crate::Tab::Hierarchy, crate::Tab::Motion, crate::Tab::Display] {
+        h.app.panel_tab = tab;
+        h.frames(3);
+        let cp = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).unwrap().rect;
+        assert!(h.text_rect(&name, cp).is_some(), "{tab:?} shows {name}");
+        assert!(h.text_rect("Name and Color", cp).is_some(), "{tab:?} has the Name and Color rollout");
+    }
+}
