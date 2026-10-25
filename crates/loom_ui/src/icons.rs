@@ -278,6 +278,33 @@ pub const INVERT_AXIS: &str = ph::SWAP;
 pub const MATERIAL_ID: &str = ph::PUZZLE_PIECE;
 pub const POLYDRAW: &str = ph::PENCIL_SIMPLE;
 
+// Scene Explorer.
+pub const CHECKED: &str = ph::CHECK;
+pub const DISPLAY_ALL: &str = ph::CHECK_SQUARE;
+pub const DISPLAY_NONE: &str = ph::X_SQUARE;
+pub const INVERT_DISPLAY: &str = ph::SWAP;
+pub const LOCK_CELL_EDITING: &str = ph::LOCK_SIMPLE;
+pub const SELECT_ALL: &str = ph::SELECTION_ALL;
+pub const SELECT_NONE: &str = ph::SELECTION_SLASH;
+pub const SELECT_INVERT: &str = ph::SELECTION_INVERSE;
+pub const SYNC_SELECTION: &str = ph::ARROWS_CLOCKWISE;
+pub const SORT_ASCENDING: &str = ph::SORT_ASCENDING;
+pub const SORT_DESCENDING: &str = ph::SORT_DESCENDING;
+
+// Schematic View.
+pub const SCHEMATIC_VIEW: &str = ph::GRAPH;
+pub const DISPLAY_FLOATER: &str = ph::FUNNEL;
+pub const CONNECT_TOOL: &str = ph::PLUGS_CONNECTED;
+pub const DELETE_OBJECTS: &str = ph::TRASH;
+pub const HIERARCHY_MODE: &str = ph::TREE_STRUCTURE;
+pub const REFERENCES_MODE: &str = ph::SHARE_NETWORK;
+pub const ALWAYS_ARRANGE: &str = ph::GRID_FOUR;
+pub const ARRANGE_SELECTED: &str = ph::TEXT_INDENT;
+pub const FREE_ALL: &str = ph::SQUARES_FOUR;
+pub const FREE_SELECTED: &str = ph::SELECTION_FOREGROUND;
+pub const MOVE_CHILDREN: &str = ph::FLOW_ARROW;
+pub const PAN_TO_SELECTED: &str = ph::CROSSHAIR;
+
 // Small dialog buttons.
 pub const CLEAR: &str = ph::X;
 pub const HIGHLIGHT: &str = ph::CARET_RIGHT;

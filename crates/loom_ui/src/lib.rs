@@ -32,6 +32,8 @@ pub mod shortcuts;
 pub mod viewports;
 pub mod uv_editor;
 pub mod track_view;
+pub mod scene_explorer;
+pub mod schematic_view;
 pub mod update_menu;
 #[cfg(test)]
 mod ui_tests;
@@ -1283,6 +1285,7 @@ impl LoomApp {
         if self.state.rendered.progress.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = self.dispatch(Command::CancelRender);
         }
+        scene_explorer::pre_hotkeys(ctx, self);
         hotkeys::handle(ctx, self);
         // An image file dropped on an object: a material with it as the Diffuse map.
         let dropped: Vec<std::path::PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
@@ -1335,6 +1338,8 @@ impl LoomApp {
         command_panel::utilities::measure_floater(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
+        scene_explorer::show(ctx, self);
+        schematic_view::show(ctx, self);
         rendered_frame::show(ctx, self);
         self.finish_realistic_frame(ctx);
     }

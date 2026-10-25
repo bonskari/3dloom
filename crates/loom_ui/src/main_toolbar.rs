@@ -55,7 +55,7 @@ pub const ITEMS: &[Item] = &[
     item("Manage Layers", Plan::Now),
     item("Graphite Modeling Tools", Plan::Now),
     item("Curve Editor", Plan::Now),
-    item("Schematic View", Plan::Phase3),
+    item("Schematic View", Plan::Now),
     item("Material Editor", Plan::Now),
     item("Render Setup", Plan::Now),
     item("Rendered Frame Window", Plan::Now),
@@ -372,6 +372,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         ui.separator();
                         if Icon::new(icons::CURVE_EDITOR, Command::TrackViewFloater.name()).tip("Curve Editor (Open)").on(app.state.track_view.open && app.state.track_view.mode == loom_commands::track_view::TvMode::CurveEditor).show(ui, &app.state).clicked() {
                             let _ = app.dispatch(Command::TrackViewFloater);
+                        }
+                    }
+                    "Schematic View" => {
+                        let on = app.state.schematics.list.iter().any(|v| v.open);
+                        if Icon::new(icons::SCHEMATIC_VIEW, Command::OpenSchematicView { name: None }.name()).tip("Schematic View (Open)").on(on).show(ui, &app.state).clicked() {
+                            let _ = app.dispatch(Command::OpenSchematicView { name: None });
                         }
                     }
                     "Material Editor" => {

@@ -186,6 +186,23 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 });
                 cmd(ui, app, "Measure Distance", Command::MeasureDistance);
                 ui.separator();
+                cmd(ui, app, "New Scene Explorer", Command::NewSceneExplorer);
+                cmd(ui, app, "Manage Scene Explorer...", Command::ManageSceneExplorer);
+                let explorers: Vec<String> = app.state.explorers.list.iter().map(|e| e.name.clone()).collect();
+                if !explorers.is_empty() {
+                    ui.menu_button("Saved Scene Explorers", |ui| {
+                        for n in &explorers {
+                            if ui.button(n).clicked() {
+                                let _ = app.dispatch(Command::OpenSceneExplorer { name: Some(n.clone()) });
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                }
+                if let Some(last) = app.state.explorers.get(None).map(|e| e.name.clone()) {
+                    cmd(ui, app, &format!("Open Explorer: {last}"), Command::OpenSceneExplorer { name: None });
+                }
+                ui.separator();
                 let ribbon = app.state.show_ribbon;
                 check_item(ui, app, "Graphite Modeling Tools", "Show Ribbon Toggle", ribbon);
             });
@@ -396,6 +413,27 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             ui.menu_button("Graph Editors", |ui| {
                 cmd(ui, app, "Track View - Curve Editor...", Command::OpenCurveEditor);
                 cmd(ui, app, "Track View - Dope Sheet...", Command::OpenDopeSheet);
+                ui.separator();
+                cmd(ui, app, "New Schematic View...", Command::NewSchematicView);
+                let views: Vec<String> = app.state.schematics.list.iter().map(|v| v.name.clone()).collect();
+                if !views.is_empty() {
+                    ui.menu_button("Delete Schematic View", |ui| {
+                        for n in &views {
+                            if ui.button(n).clicked() {
+                                let _ = app.dispatch(Command::DeleteSchematicView { name: n.clone() });
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button("Saved Schematic Views", |ui| {
+                        for n in &views {
+                            if ui.button(n).clicked() {
+                                let _ = app.dispatch(Command::OpenSchematicView { name: Some(n.clone()) });
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                }
             });
             ui.menu_button("Rendering", |ui| {
                 cmd(ui, app, "Render", Command::Render { path: None, width: None, height: None });

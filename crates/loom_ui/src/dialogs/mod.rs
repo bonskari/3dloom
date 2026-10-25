@@ -193,6 +193,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::FileProperties => scene_dialogs::file_properties(ctx, app, &mut open),
         Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
         Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
+        Dialog::ManageSceneExplorer => crate::scene_explorer::manage(ctx, app, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
     if !open && app.state.dialog == Some(dialog) {
