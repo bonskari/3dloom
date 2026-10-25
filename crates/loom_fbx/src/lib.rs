@@ -7,9 +7,12 @@ pub mod binary;
 pub mod curves;
 pub mod document;
 pub mod read;
+pub mod profile;
 pub mod write;
 
 pub use document::{FbxAnim, FbxBlendShape, FbxDocument, FbxKind, FbxLayer, FbxLight, FbxNode, FbxSkin, FbxTake, WriteAxes, WriteOpts};
 pub use document::{CurveFilters, FbxInfo, FbxMaterial, FbxTexture, ReadOpts};
 pub use read::{info, read, read_with};
 pub use write::{material_names, write, write_raw_faces};
+
+pub use profile::body_only_profile;
