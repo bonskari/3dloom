@@ -230,7 +230,7 @@ pub fn document(path: &Path) -> Result<(crate::file::Document, Vec<String>), Str
     // Layers by name: "0" is the scene's own layer 0.
     let mut layer_ids = Vec::with_capacity(doc.layers.len());
     for l in &doc.layers {
-        let id = match scene.layers.iter().find(|x| x.name == l.name) {
+        let id = match scene.layers.iter().find(|x| x.name == l.name || (l.name == "0" && x.id == 0)) {
             Some(x) => x.id,
             None => {
                 let id = scene.layers.iter().map(|x| x.id + 1).max().unwrap_or(1);
