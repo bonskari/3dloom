@@ -12,6 +12,7 @@ enum Tab {
     Snaps,
     Options,
     HomeGrid,
+    UserGrids,
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
@@ -22,13 +23,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.selectable_value(&mut tab, Tab::Snaps, "Snaps");
             ui.selectable_value(&mut tab, Tab::Options, "Options");
             ui.selectable_value(&mut tab, Tab::HomeGrid, "Home Grid");
-            ui.add_enabled(false, egui::SelectableLabel::new(false, "User Grids"));
+            ui.selectable_value(&mut tab, Tab::UserGrids, "User Grids");
         });
         ui.separator();
         match tab {
             Tab::Snaps => snaps_tab(ui, app),
             Tab::Options => options_tab(ui, app),
             Tab::HomeGrid => home_grid_tab(ui, app),
+            Tab::UserGrids => user_grids_tab(ui, app),
         }
     });
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
@@ -50,10 +52,33 @@ fn snaps_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.end_row();
         }
     });
-    if ui.button("Clear All").clicked() {
-        for name in SnapTargets::NAMES {
-            let _ = app.dispatch(Command::SnapTarget { name: name.to_owned(), on: false });
+    ui.horizontal(|ui| {
+        // The Snap Override in use (Shift+right-click Snaps menu).
+        ui.label(match &app.state.snaps.override_target {
+            Some(name) => format!("Override {name}"),
+            None => "Override OFF".to_owned(),
+        });
+        if ui.button("Clear All").clicked() {
+            for name in SnapTargets::NAMES {
+                let _ = app.dispatch(Command::SnapTarget { name: name.to_owned(), on: false });
+            }
         }
+    });
+}
+
+fn user_grids_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let u = app.state.user_grids;
+    ui.label(egui::RichText::new("Grid Object Automation").strong());
+    let mut on = u.activate_when_created;
+    if ui.checkbox(&mut on, "Activate grids when creating").changed() {
+        let _ = app.dispatch(Command::UserGridSettings { activate_when_created: Some(on), autogrid_object_space: None });
+    }
+    ui.label(egui::RichText::new("AutoGrid").strong());
+    let mut object = u.autogrid_object_space;
+    let a = ui.radio_value(&mut object, false, "World space").changed();
+    let b = ui.radio_value(&mut object, true, "Object space").changed();
+    if a || b {
+        let _ = app.dispatch(Command::UserGridSettings { activate_when_created: None, autogrid_object_space: Some(object) });
     }
 }
 
@@ -68,6 +93,11 @@ fn options_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         let mut d = s.marker_display;
         if ui.checkbox(&mut d, "Display").changed() {
             set(app, Command::SnapSettings { mode: None, marker_display: Some(d), marker_size: None, preview_radius_px: None, radius_px: None, angle_deg: None, percent: None, use_axis_constraints: None, show_rubber_band: None });
+        }
+        ui.label("Color:");
+        let mut c = egui::Color32::from_rgb(s.marker_color[0], s.marker_color[1], s.marker_color[2]);
+        if ui.color_edit_button_srgba(&mut c).changed() {
+            set(app, Command::SnapMarkerColor { rgb: [c.r(), c.g(), c.b()] });
         }
         ui.label("Size:");
         let mut v = s.marker_size;
@@ -130,7 +160,7 @@ fn home_grid_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.end_row();
         let mut v = g.major_every;
         ui.label("Major Lines every Nth Grid Line:");
-        if ui.add(crate::spinner::spin(ui, &mut v, 1..=100).speed(0.1)).changed() {
+        if ui.add(crate::spinner::spin(ui, &mut v, 2..=100).speed(0.1)).changed() {
             let _ = app.dispatch(Command::HomeGrid { spacing: None, major_every: Some(v), perspective_extent: None, inhibit_subdivision: None, inhibit_resize: None, dynamic_update_all: None });
         }
         ui.end_row();

@@ -134,3 +134,41 @@ fn snap_modes_restrict_to_the_construction_plane() {
     s.snaps.mode = SnapMode::Snap2D;
     assert!(snap::resolve(&s, &q).is_none());
 }
+
+fn snap_settings(preview: Option<f32>, radius: Option<f32>) -> Command {
+    Command::SnapSettings { mode: None, marker_display: None, marker_size: None, preview_radius_px: preview, radius_px: radius, angle_deg: None, percent: None, use_axis_constraints: None, show_rubber_band: None }
+}
+
+#[test]
+fn snap_preview_radius_and_snap_radius_push_each_other() {
+    let mut s = state();
+    assert_eq!((s.snaps.preview_radius_px, s.snaps.radius_px), (30.0, 20.0));
+    // Preview below the snap radius lowers the snap radius to it.
+    execute(&mut s, snap_settings(Some(15.0), None)).unwrap();
+    assert_eq!((s.snaps.preview_radius_px, s.snaps.radius_px), (15.0, 15.0));
+    // Snap radius above the preview raises the preview to it.
+    execute(&mut s, snap_settings(None, Some(40.0))).unwrap();
+    assert_eq!((s.snaps.preview_radius_px, s.snaps.radius_px), (40.0, 40.0));
+}
+
+#[test]
+fn snap_marker_colour_and_major_lines_minimum() {
+    let mut s = state();
+    assert_eq!(s.snaps.marker_color, [0, 220, 255]);
+    execute(&mut s, Command::SnapMarkerColor { rgb: [255, 0, 0] }).unwrap();
+    assert_eq!(s.snaps.marker_color, [255, 0, 0]);
+    execute(&mut s, Command::HomeGrid { spacing: None, major_every: Some(1), perspective_extent: None, inhibit_subdivision: None, inhibit_resize: None, dynamic_update_all: None }).unwrap();
+    assert_eq!(s.home_grid.major_every, 2, "major lines every 2nd line at least");
+}
+
+#[test]
+fn user_grids_activate_grids_when_creating() {
+    let mut s = state();
+    execute(&mut s, Command::CreateHelper { kind: "grid".into(), position: [0.0; 3], size: 50.0 }).unwrap();
+    assert_eq!(s.active_grid(), None, "off by default");
+    execute(&mut s, Command::UserGridSettings { activate_when_created: Some(true), autogrid_object_space: None }).unwrap();
+    let r = execute(&mut s, Command::CreateHelper { kind: "grid".into(), position: [0.0; 3], size: 50.0 }).unwrap();
+    assert_eq!(s.active_grid().map(|g| g.0), r["node"].as_u64());
+    execute(&mut s, Command::UserGridSettings { activate_when_created: None, autogrid_object_space: Some(true) }).unwrap();
+    assert!(s.user_grids.autogrid_object_space && s.user_grids.activate_when_created);
+}

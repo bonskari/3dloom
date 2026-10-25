@@ -12,6 +12,8 @@ mod transforms;
 mod menus;
 mod display;
 mod environment;
+mod ribbon;
+mod precision;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
@@ -572,7 +574,7 @@ fn m_opens_the_material_editor_and_an_assigned_material_colours_the_viewport() {
     h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
     h.cmd(Command::SetMaterialParameter { slot: None, name: "Specular Level".into(), value: 80.0 });
     h.cmd(Command::AssignMaterialToSelection);
-    let style = h.app.world_styles[0];
+    let style = h.app.world_styles[0].clone();
     assert!(style.color[0] > 0.9 && style.color[1] < 0.05, "faces take the diffuse colour: {:?}", style.color);
     assert!(style.specular[3] > 0.0, "and the highlight");
     assert!(style.wire_color.is_some(), "edges keep the object colour");
@@ -2218,47 +2220,84 @@ fn material_editor_stays_open_across_a_map_pick_and_cancel() {
     let mut h = Harness::new();
     material_editor(&mut h);
     h.cmd(Command::MaterialEditorSlot { slot: 2 });
+    // The Maps rollout (closed by default), below the collapsed Blinn Basic Parameters.
     let win = material_editor_rect(&h);
-    // Diffuse Color's map button opens the bitmap chooser over the editor.
-    click_text(&mut h, "None", win, 0.0);
-    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialMap { channel: 0 }));
-    assert!(h.app.state.material_editor_open, "the chooser leaves the editor open");
-    assert!(h.text_rect("Get Material", win).is_some(), "and the editor is still drawn");
+    click_text(&mut h, "Blinn Basic Parameters", win, 0.0);
+    click_in_editor(&mut h, "Maps", 0.0);
+    // Diffuse Color's map button goes through the Material/Map Browser first.
+    h.click(row_text(&h, "Diffuse Color", "None", material_editor_rect(&h)));
+    h.frames(2);
+    let diffuse = loom_scene::material::MAP_SLOTS.iter().position(|s| *s == "Diffuse Color").unwrap() as u8;
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialBrowser(loom_commands::BrowserFor::Map(diffuse))));
+    assert!(h.app.state.material_editor_open, "the Browser leaves the editor open");
+    // Bitmap, double-clicked: the bitmap chooser follows.
+    h.frames(12);
+    let bitmap = window_text(&h, "Material/Map Browser", "Bitmap");
+    h.click(bitmap);
+    h.click(bitmap);
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialBitmap));
+    assert!(h.app.state.material_editor_open);
     click_text(&mut h, "Cancel", SCREEN, 0.0);
     assert_eq!(h.app.state.dialog, None, "Cancel closes the chooser");
     assert!(h.app.state.material_editor_open, "but not the editor");
     assert_eq!(h.app.state.scene.material_editor.active, 2, "on the same slot");
-    assert!(editor_material(&h).map("Diffuse Color").is_none());
-    // Choose a file: the map goes into the slot and the editor stays.
-    click_text(&mut h, "None", win, 0.0);
+    let map = editor_material(&h).map("Diffuse Color").cloned().expect("the Bitmap stays, with no file yet, as in the reference");
+    assert!(map.path.is_empty());
+    assert!(h.text_rect("Bitmap Parameters", material_editor_rect(&h)).is_some(), "the editor shows the Bitmap's level");
+    // Bitmap: None opens the chooser; the file goes into the map and the editor stays.
+    h.click(row_text(&h, "Bitmap:", "None", material_editor_rect(&h)));
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialBitmap));
     click_text(&mut h, "File name:", SCREEN, 40.0);
     h.run(vec![egui::Event::Text("wood.png".into())]);
     click_text(&mut h, "Open", SCREEN, 0.0);
     assert_eq!(h.app.state.dialog, None);
     assert!(h.app.state.material_editor_open);
     assert_eq!(h.app.state.scene.material_editor.active, 2);
-    let map = editor_material(&h).map("Diffuse Color").cloned().expect("the chosen bitmap is the Diffuse Color map");
+    let map = editor_material(&h).map("Diffuse Color").cloned().unwrap();
     assert!(map.path.ends_with("wood.png"), "{}", map.path);
+    // Go to Parent: back at the material, its map button shows the bitmap.
+    click_in_editor(&mut h, "Go to Parent", 0.0);
+    assert!(h.app.state.scene.material_editor.path.is_empty(), "Go to Parent goes up to the material");
+    assert!(h.text_rect("Shader Basic Parameters", material_editor_rect(&h)).is_some());
     assert!(h.text_rect("wood.png", material_editor_rect(&h)).is_some(), "the button shows the bitmap");
+    // The map button goes back down to the map.
+    click_in_editor(&mut h, "wood.png", 0.0);
+    assert_eq!(h.app.state.scene.material_editor.path, vec![loom_scene::material::NavStep::Map("Diffuse Color".into())]);
+}
+
+/// Clicks the text `label` in the Material Editor window.
+fn click_in_editor(h: &mut Harness, label: &str, dx: f32) {
+    let win = material_editor_rect(h);
+    click_text(h, label, win, dx);
+}
+
+/// The text `text` on the same row as the label `row` inside `within`.
+fn row_text(h: &Harness, row: &str, text: &str, within: egui::Rect) -> egui::Pos2 {
+    let label = h.text_centers(row).into_iter().find(|p| within.contains(*p)).unwrap_or_else(|| panic!("{row:?} is not shown"));
+    h.text_centers(text).into_iter().filter(|p| within.contains(*p) && (p.y - label.y).abs() < 8.0 && p.x > label.x).min_by(|a, b| a.x.total_cmp(&b.x)).unwrap_or_else(|| panic!("no {text:?} on the {row:?} row"))
 }
 
 #[test]
 fn only_the_map_buttons_open_a_chooser_from_the_material_editor() {
     let mut h = Harness::new();
     material_editor(&mut h);
+    h.cmd(Command::SetMaterialEditorOption { name: "Slots".into(), value: 24.0 });
     let stays = |h: &Harness, what: &str| {
         assert_eq!(h.app.state.dialog, None, "{what} opened a dialog");
         assert!(h.app.state.material_editor_open, "{what} closed the editor");
     };
-    // Sample slot 8 (second row, second column).
+    // Sample slot 8 (second row, second column) of the 6 × 4 windows.
     let win = material_editor_rect(&h);
-    let get = h.text_rect("Get Material", win).unwrap();
-    let slot_h = (get.top() - win.top() - 30.0) / 4.0;
-    h.click(egui::pos2(win.left() + 6.0 + 68.0 + 32.0, win.top() + 30.0 + slot_h * 1.5));
+    let menu = h.text_rect("Material", win).expect("the menu bar");
+    let top = menu.bottom() + 6.0;
+    let pitch = 56.0 + 4.0;
+    h.click(egui::pos2(win.left() + 8.0 + pitch + 28.0, top + pitch + 28.0));
     h.frames(2);
     assert_eq!(h.app.state.scene.material_editor.active, 7, "the slot click lands");
     stays(&h, "a sample slot");
-    for (label, dx) in [("Get Material", 0.0), ("Assign to Selection", 0.0), ("Reset", 0.0), ("Show Map in Viewport", 0.0), ("Wire", 0.0), ("2-Sided", 0.0), ("Faceted", 0.0), ("Lock Ambient and Diffuse", 0.0), ("Self-Illumination", 20.0), ("Opacity", 20.0), ("Glossiness", 20.0), ("Standard", 0.0), ("Shader Basic Parameters", 0.0)] {
+    for (label, dx) in [("Assign to Selection", 0.0), ("Reset", 0.0), ("Show Map in Viewport", 0.0), ("Wire", 0.0), ("2-Sided", 0.0), ("Faceted", 0.0), ("Lock Ambient and Diffuse", 0.0), ("Self-Illumination", 20.0), ("Opacity", 20.0), ("Glossiness", 20.0), ("Shader Basic Parameters", 0.0)] {
         let win = material_editor_rect(&h);
         click_text(&mut h, label, win, dx);
         stays(&h, label);
@@ -2281,6 +2320,137 @@ fn only_the_map_buttons_open_a_chooser_from_the_material_editor() {
     stays(&h, "the Diffuse swatch");
     h.key(egui::Key::Escape);
     stays(&h, "Escape");
+    // Get Material and the Type button open the Material/Map Browser, as in the reference.
+    click_in_editor(&mut h, "Get Material", 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialBrowser(loom_commands::BrowserFor::GetMaterial)));
+    click_text(&mut h, "Cancel", SCREEN, 0.0);
+    stays(&h, "the Browser's Cancel");
+    click_in_editor(&mut h, "Standard", 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialBrowser(loom_commands::BrowserFor::MaterialType)));
+}
+
+/// The Type button, the Browser and the Replace Material dialog make a
+/// Multi/Sub-Object material; faces then draw with their ID's colour in the
+/// shaded viewport (the vertex data the wgpu renderer uploads).
+#[test]
+fn multi_sub_from_the_type_button_colours_faces_by_material_id() {
+    let mut h = Harness::new();
+    material_editor(&mut h);
+    let node = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    click_in_editor(&mut h, "Standard", 0.0);
+    // Single clicks, apart (not a double-click): select, then OK.
+    h.frames(12);
+    h.click(window_text(&h, "Material/Map Browser", "Multi/Sub-Object"));
+    h.frames(12);
+    h.click(window_text(&h, "Material/Map Browser", "OK"));
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ReplaceMaterial { kind: 1, map: false }));
+    h.click(window_text(&h, "Replace Material", "Keep old material as sub-material?"));
+    h.frames(12);
+    h.click(window_text(&h, "Replace Material", "OK"));
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, None);
+    let m = editor_material(&h);
+    let loom_scene::material::MaterialKind::MultiSub(list) = &m.kind else { panic!("a Multi/Sub-Object material: {:?}", m.kind) };
+    assert_eq!(list.len(), 10);
+    assert!(h.text_rect("Multi/Sub-Object Basic Parameters", material_editor_rect(&h)).is_some());
+    // Set Number opens its dialog; 2 sub-materials.
+    click_in_editor(&mut h, "Set Number", 0.0);
+    window_text(&h, "Set Number of Materials", "Number of Materials:");
+    h.click(window_text(&h, "Set Number of Materials", "Cancel"));
+    assert!(h.text_centers("Number of Materials:").is_empty(), "Cancel closes it");
+    h.cmd(Command::MultiSubSetNumber { number: 2 });
+    h.cmd(Command::MultiSubSetEntry { index: 1, id: None, name: None, enabled: None, color: Some([0, 0, 255]) });
+    click_in_editor(&mut h, "Assign to Selection", 0.0);
+    assert!(h.app.state.scene.node(node).unwrap().material.is_some());
+    // Polygon level: Set ID 2 on two faces.
+    h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Face });
+    h.cmd(Command::SelectSub { node: Some(node.0), ids: vec![0, 1], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::SetMaterialId { id: 2 });
+    h.cmd(Command::SelectSub { node: Some(node.0), ids: vec![2, 3, 4, 5], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::SetMaterialId { id: 1 });
+    let style = h.app.world_styles[0].clone();
+    assert!(style.sub.is_some(), "a per-ID style");
+    let mesh = h.app.world_display()[0].clone();
+    let (verts, _, _) = loom_render::triangulate_styled(&mesh, &style);
+    // sRGB 255 → linear 1.0: red faces (ID 1, the old material) and blue ones (ID 2).
+    let mut red = 0;
+    let mut blue = 0;
+    let mut first = 0usize;
+    for (i, f) in mesh.faces().iter().enumerate().filter(|(_, f)| !f.hidden) {
+        let n = mesh.face_vertex_ids(loom_mesh::FaceId(i as u32)).unwrap().len();
+        let c = verts[first].color;
+        match f.material_id + 1 {
+            1 => {
+                assert!(c[0] > 0.9 && c[2] < 0.05, "ID 1 is red: {c:?}");
+                red += 1;
+            }
+            2 => {
+                assert!(c[2] > 0.9 && c[0] < 0.05, "ID 2 is blue: {c:?}");
+                blue += 1;
+            }
+            other => panic!("unexpected ID {other}"),
+        }
+        first += n;
+    }
+    assert_eq!((red, blue), (4, 2));
+    // Go to a sub-material and back up with Go to Parent.
+    h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Object });
+    let loom_scene::material::MaterialKind::MultiSub(list) = &editor_material(&h).kind else { unreachable!() };
+    let sub = list[1].material.unwrap();
+    let sub_label = format!("{} (Standard)", h.app.state.scene.materials[&sub].name);
+    click_in_editor(&mut h, &sub_label, 0.0);
+    assert_eq!(h.app.state.scene.material_editor.path, vec![loom_scene::material::NavStep::Sub(1)]);
+    assert!(h.text_rect("Blinn Basic Parameters", material_editor_rect(&h)).is_some(), "the sub-material's rollouts");
+    click_in_editor(&mut h, "Go to Parent", 0.0);
+    assert!(h.app.state.scene.material_editor.path.is_empty());
+}
+
+/// Get Material picks from the scene's materials in the Browser; the
+/// eyedropper picks from an object clicked in the viewport; a slot dragged
+/// onto an object assigns it.
+#[test]
+fn browser_get_material_eyedropper_and_dragging_a_slot_onto_an_object() {
+    let mut h = Harness::new();
+    material_editor(&mut h);
+    let node = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::RenameMaterial { slot: None, name: "Brick".into() });
+    h.cmd(Command::AssignMaterialToSelection);
+    let brick = h.app.state.scene.material_editor.slots[0].unwrap();
+    h.cmd(Command::MaterialEditorSlot { slot: 3 });
+    click_in_editor(&mut h, "Get Material", 0.0);
+    let entry = window_text(&h, "Material/Map Browser", "Brick [Standard]");
+    h.click(entry);
+    h.click(entry);
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(h.app.state.scene.material_editor.slots[3], Some(brick), "Browse From Scene put Brick in the slot");
+    // A point on the box the editor window does not cover.
+    let win = material_editor_rect(&h);
+    let vp = h.app.viewport_rects[h.app.state.active_viewport];
+    let on_box = [Vec3::new(15.0, 0.0, 15.0), Vec3::new(15.0, 10.0, 25.0), Vec3::new(10.0, -15.0, 25.0), Vec3::new(0.0, 0.0, 30.0), Vec3::new(14.0, 14.0, 30.0)]
+        .into_iter()
+        .map(|p| h.screen_of(p))
+        .find(|p| !win.contains(*p) && vp.contains(*p))
+        .expect("part of the box is outside the editor window");
+    // Eyedropper.
+    h.cmd(Command::MaterialEditorSlot { slot: 5 });
+    click_in_editor(&mut h, "Pick", 0.0);
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::PickMaterial));
+    h.click(on_box);
+    assert_eq!(h.app.state.scene.material_editor.slots[5], Some(brick), "the eyedropper picked the box's material");
+    assert_eq!(h.app.state.pick_mode, None);
+    // Drag sample slot 1 (top row, second) onto the box.
+    h.cmd(Command::SetMaterialColor { slot: Some(1), which: "Diffuse".into(), rgb: [0, 200, 0] });
+    let win = material_editor_rect(&h);
+    let menu = h.text_rect("Material", win).unwrap();
+    let slot1 = egui::pos2(win.left() + 8.0 + 100.0 + 48.0, menu.bottom() + 6.0 + 48.0);
+    h.drag(slot1, on_box);
+    h.frames(2);
+    let assigned = h.app.state.scene.node(node).unwrap().material;
+    assert_eq!(assigned, h.app.state.scene.material_editor.slots[1], "the dragged slot's material is on the box");
+    assert!(h.app.world_styles[0].color[1] > 0.3, "and colours it");
 }
 
 /// The rect of a viewport label of the active viewport: 0 = [+], 1 = POV, 2 = shading.
@@ -2986,6 +3156,32 @@ fn cancel_expert_mode_button_brings_the_interface_back() {
     assert!(!h.app.state.expert_mode, "the button ends Expert Mode");
 }
 
+
+
+/// An image file dropped from the file manager onto selected polygons gets
+/// a material of its own there (a Multi/Sub-Object material is built).
+#[test]
+fn an_image_file_dropped_on_selected_polygons_assigns_it_there() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let node = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Face });
+    h.cmd(Command::SelectSub { node: Some(node.0), ids: vec![0], op: loom_commands::SelectOp::Replace });
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.time += 1.0 / 30.0;
+    let input = egui::RawInput { screen_rect: Some(h.screen), time: Some(h.time), dropped_files: vec![egui::DroppedFile { path: Some("/x/bfrontgarage.jpg".into()), ..Default::default() }], ..Default::default() };
+    let app = &mut h.app;
+    h.shapes = h.ctx.run(input, |ctx| app.frame(ctx)).shapes;
+    h.frames(2);
+    let multi = h.app.state.scene.node(node).unwrap().material.expect("the drop assigned a material");
+    let loom_scene::material::MaterialKind::MultiSub(list) = &h.app.state.scene.materials[&multi].kind else { panic!("a Multi/Sub-Object material") };
+    let mesh = h.app.state.scene.node(node).unwrap().cage_mesh().into_owned();
+    let row = list.iter().find(|e| e.id == mesh.faces()[0].material_id + 1).expect("the face's ID has a sub-material");
+    assert_eq!(h.app.state.scene.materials[&row.material.unwrap()].diffuse_map.as_ref().unwrap().path, "/x/bfrontgarage.jpg");
+    assert!(h.app.world_styles[0].sub.is_some(), "the viewport draws it per ID");
+}
+
 /// AutoGrid: with a create tool waiting, a tripod sits on the surface under
 /// the cursor with Z along the face normal; off the surface there is none.
 #[test]
@@ -3550,6 +3746,140 @@ fn vertex_paint_dialog_face_selection_paint_all_new_layer_and_eyedropper() {
     assert_eq!(h.text_centers("Paint All").len(), 1, "Edit opens it again");
 }
 
+/// A scratch folder for the file-dialog tests.
+fn exchange_dir(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join("loom-ui-exchange").join(name);
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// The rect of an FBX / OBJ options window (by its id).
+fn options_rect(h: &Harness, id: &str) -> egui::Rect {
+    h.ctx.memory(|m| m.area_rect(egui::Id::new(id))).unwrap_or_else(|| panic!("the {id} window is shown"))
+}
+
+/// The texts painted inside `within` last frame, with their rects (for failure messages).
+fn texts_in(h: &Harness, within: egui::Rect) -> Vec<(String, egui::Rect)> {
+    fn walk(shape: &egui::Shape, within: egui::Rect, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, within, out)),
+            egui::Shape::Text(t) => {
+                let r = t.galley.rect.translate(t.pos.to_vec2());
+                if within.intersects(r) {
+                    out.push((t.galley.text().to_owned(), r));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for c in &h.shapes {
+        walk(&c.shape, within, &mut out);
+    }
+    out
+}
+
+/// Clicks a control of an options window, scrolling its options down to it
+/// first; says what the window shows if it is not there.
+fn click_option(h: &mut Harness, label: &str, id: &str) {
+    let win = options_rect(h, id);
+    for _ in 0..12 {
+        if h.text_rect(label, win).is_some() {
+            break;
+        }
+        let m = h.mods;
+        h.run(vec![egui::Event::PointerMoved(win.center()), egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -120.0), modifiers: m }]);
+        // Let the scroll settle before looking again.
+        h.frames(20);
+    }
+    if h.text_rect(label, win).is_none() {
+        panic!("{label:?} is not in {id} {win:?}: {:?}", texts_in(h, win));
+    }
+    click_text(h, label, win, 0.0);
+}
+
+/// Types `path` into the in-app file dialog's File name field and clicks `button`.
+fn choose_file(h: &mut Harness, path: &std::path::Path, button: &str) {
+    click_text(h, "File name:", SCREEN, 40.0);
+    // Replace the offered name.
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Text(path.to_string_lossy().into_owned())]);
+    click_text(h, button, SCREEN, 0.0);
+}
+
+/// File > Export to .fbx shows the FBX Export options; a click on Triangulate
+/// and OK write a triangulated file.
+#[test]
+fn fbx_export_goes_through_its_options_dialog() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let path = exchange_dir("fbx_export").join("box.fbx");
+    h.cmd(Command::ExportFile { path: None });
+    choose_file(&mut h, &path, "Save");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxExportOptions), "the options come before the file is written");
+    assert!(!path.exists());
+    assert!(!h.app.state.exchange.fbx_export.triangulate);
+    let win = options_rect(&h, "fbx_export_options");
+    click_text(&mut h, "Triangulate", win, 0.0);
+    assert!(h.app.state.exchange.fbx_export.triangulate, "the check box sets the option");
+    assert!(h.text_rect("User defined", SCREEN).is_some(), "the preset shows it was changed");
+    click_option(&mut h, "OK", "fbx_export_options");
+    assert_eq!(h.app.state.dialog, None);
+    assert!(path.exists(), "OK wrote the file ({})", h.app.state.status_prompt);
+    let doc = loom_fbx::read(&std::fs::read(&path).unwrap(), 0.01).unwrap();
+    let loom_fbx::FbxKind::Mesh { mesh, .. } = &doc.nodes[0].kind else { panic!("{:?}", doc.nodes[0].kind) };
+    assert_eq!(mesh.face_count(), 12, "triangulated");
+}
+
+/// File > Import of an .fbx: Cancel in the FBX Import options imports nothing;
+/// with Cameras off, OK imports the meshes without the camera.
+#[test]
+fn fbx_import_options_cancel_and_cameras_off() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::CreateCamera { target: false });
+    let path = exchange_dir("fbx_import").join("scene.fbx");
+    h.cmd(Command::ExportFile { path: Some(path.to_string_lossy().into_owned()) });
+    h.cmd(Command::NewScene);
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxImportOptions));
+    click_option(&mut h, "Cancel", "fbx_import_options");
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(h.app.state.scene.len(), 0, "Cancel imports nothing");
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    let win = options_rect(&h, "fbx_import_options");
+    click_option(&mut h, "Cameras", "fbx_import_options");
+    assert!(!h.app.state.exchange.fbx_import.cameras);
+    click_option(&mut h, "OK", "fbx_import_options");
+    let kinds: Vec<bool> = h.app.state.scene.nodes().map(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).collect();
+    assert_eq!(kinds, vec![false], "the box only");
+}
+
+/// File > Import of an .obj: the OBJ Import options list the file's objects;
+/// unchecking one leaves it out.
+#[test]
+fn obj_import_options_pick_the_objects() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let path = exchange_dir("obj_import").join("two.obj");
+    std::fs::write(&path, "o Left\nv 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\no Right\nv 5 0 0\nv 6 0 0\nv 6 1 0\nf 4 5 6\n").unwrap();
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ObjImportOptions));
+    let win = options_rect(&h, "obj_import_options");
+    assert!(h.text_rect("Left (1)", win).is_some() && h.text_rect("Right (1)", win).is_some(), "the file's objects are listed");
+    click_text(&mut h, "Right (1)", win, 0.0);
+    click_text(&mut h, "Import", win, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    let names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    assert_eq!(names, vec!["Left".to_string()]);
+}
+
 /// At a sub-object level the first empty click clears the sub-objects and
 /// keeps the object; a second one lets go of the object and ends the level.
 #[test]
@@ -3571,4 +3901,77 @@ fn a_second_empty_click_at_polygon_level_releases_the_object_and_the_level() {
     assert_eq!(h.app.state.selection_mode, SelectionMode::Object, "and ends Polygon level");
 }
 
+/// A Checker map with Show Map in Viewport on a Multi/Sub sub-material shows
+/// its checks in the shaded viewport (the faces' UVs vary and the texture
+/// holds both colours), as the screenshot scene sets it up.
+#[test]
+fn a_checker_sub_material_shows_checks_in_the_viewport() {
+    let mut h = Harness::new();
+    // With the editor open, as a person does it.
+    material_editor(&mut h);
+    let node = *h.app.state.selection.iter().next().unwrap();
+    for c in [
+        Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) },
+        Command::MultiSubSetNumber { number: 3 },
+        Command::MultiSubSetEntry { index: 0, id: None, name: Some("Red".into()), enabled: None, color: Some([200, 30, 30]) },
+        Command::MaterialEditorGoToSub { index: 2 },
+        Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() },
+        Command::SetMapParameter { name: "Tiling U".into(), value: 3.0 },
+        Command::SetMapParameter { name: "Tiling V".into(), value: 3.0 },
+        Command::SetMapColor { which: "Color #2".into(), rgb: [240, 200, 40] },
+        Command::MaterialEditorGoToParent,
+        Command::SetMaterialParameter { slot: None, name: "Show Map in Viewport".into(), value: 1.0 },
+        Command::MaterialEditorGoToParent,
+        Command::AssignMaterialToSelection,
+        Command::SelectionMode { mode: loom_commands::SelectionMode::Face },
+        Command::SelectSub { node: Some(node.0), ids: vec![2, 3], op: loom_commands::SelectOp::Replace },
+        Command::SetMaterialId { id: 3 },
+        Command::SelectionMode { mode: loom_commands::SelectionMode::Object },
+        Command::UvwMapModifier,
+    ] {
+        h.cmd(c);
+    }
+    let style = h.app.world_styles[0].clone();
+    let sub = style.sub.as_ref().expect("per-ID styles");
+    let checker = sub.by_id[&2];
+    let loom_render::TextureSel::Bitmap(i) = checker.texture else { panic!("ID 3 shows its map: {:?}", checker.texture) };
+    let mesh = h.app.world_display()[0].clone();
+    let (verts, _, _) = loom_render::triangulate_styled(&mesh, &style);
+    let mut first = 0usize;
+    let mut uvs = Vec::new();
+    for (f, face) in mesh.faces().iter().enumerate().filter(|(_, f)| !f.hidden) {
+        let n = mesh.face_vertex_ids(loom_mesh::FaceId(f as u32)).unwrap().len();
+        if face.material_id == 2 {
+            uvs.extend(verts[first..first + n].iter().map(|v| v.uv));
+        }
+        first += n;
+    }
+    assert!(uvs.iter().any(|u| *u != uvs[0]), "the checker faces have varying UVs: {uvs:?}");
+    let upload = h.app.pending_upload.lock().unwrap().clone();
+    let bitmaps = upload.map(|u| u.2).unwrap_or_default();
+    let bm = &bitmaps.get(i as usize).expect("the baked checker is uploaded").1;
+    let px: std::collections::BTreeSet<[u8; 3]> = bm.rgba.chunks(4).map(|p| [p[0], p[1], p[2]]).collect();
+    assert!(px.contains(&[0, 0, 0]) && px.contains(&[240, 200, 40]), "both checker colours: {} colours", px.len());
+    // Each checker face shows both colours: sample the texture as the shader
+    // does (repeat, V flipped) over the face's UV quad.
+    let at = |u: f32, v: f32| {
+        let (w, hh) = (bm.width as f32, bm.height as f32);
+        let x = ((u.rem_euclid(1.0) * w) as u32).min(bm.width - 1);
+        let y = (((1.0 - v).rem_euclid(1.0) * hh) as u32).min(bm.height - 1);
+        let i = ((y * bm.width + x) * 4) as usize;
+        [bm.rgba[i], bm.rgba[i + 1], bm.rgba[i + 2]]
+    };
+    for quad in uvs.chunks(4) {
+        let mut seen = std::collections::BTreeSet::new();
+        for a in 0..=8 {
+            for b in 0..=8 {
+                let (s, t) = (a as f32 / 8.0, b as f32 / 8.0);
+                let lerp = |p: [f32; 2], q: [f32; 2], k: f32| [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
+                let uv = lerp(lerp(quad[0], quad[1], s), lerp(quad[3], quad[2], s), t);
+                seen.insert(at(uv[0], uv[1]));
+            }
+        }
+        assert!(seen.len() > 1, "a checker face shows one colour; its UVs: {quad:?}");
+    }
+}
 mod scene;

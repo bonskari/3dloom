@@ -14,7 +14,9 @@ use std::sync::Arc;
 /// Largest output side in pixels.
 pub const MAX_RENDER_SIZE: u32 = 8192;
 /// Image files Save Image writes, by extension.
-pub const IMAGE_FORMATS: &[&str] = &["png", "jpg", "jpeg", "bmp", "tga", "exr"];
+pub const IMAGE_FORMATS: &[&str] = &["png", "jpg", "jpeg", "bmp", "tga", "tif", "tiff", "exr", "hdr"];
+/// Bitmap formats maps and backgrounds load from (GIF read only).
+pub const IMAGE_READ_FORMATS: &[&str] = &["png", "jpg", "jpeg", "bmp", "tga", "tif", "tiff", "exr", "hdr", "gif"];
 
 /// Rendered Frame Window channel toggles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,7 +228,7 @@ pub fn save_image(img: &image::RgbaImage, path: &str) -> Result<(), String> {
     let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
     let err = |e: image::ImageError| format!("{path}: {e}");
     match ext.as_str() {
-        "png" | "tga" => img.save(path).map_err(err),
+        "png" | "tga" | "tif" | "tiff" => img.save(path).map_err(err),
         // No alpha in these formats.
         "jpg" | "jpeg" | "bmp" => image::DynamicImage::ImageRgba8(img.clone()).to_rgb8().save(path).map_err(err),
         "exr" => {
@@ -238,6 +240,18 @@ pub fn save_image(img: &image::RgbaImage, path: &str) -> Result<(), String> {
             let mut f = image::Rgba32FImage::new(img.width(), img.height());
             for (o, p) in f.pixels_mut().zip(img.pixels()) {
                 o.0 = [lin(p.0[0]), lin(p.0[1]), lin(p.0[2]), p.0[3] as f32 / 255.0];
+            }
+            f.save(path).map_err(err)
+        }
+        // Radiance HDR: linear RGB floats, no alpha.
+        "hdr" => {
+            let lin = |c: u8| {
+                let x = c as f32 / 255.0;
+                if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
+            };
+            let mut f = image::Rgb32FImage::new(img.width(), img.height());
+            for (o, p) in f.pixels_mut().zip(img.pixels()) {
+                o.0 = [lin(p.0[0]), lin(p.0[1]), lin(p.0[2])];
             }
             f.save(path).map_err(err)
         }

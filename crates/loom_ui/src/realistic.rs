@@ -17,6 +17,8 @@ pub struct BevyView {
     render_state: egui_wgpu::RenderState,
     /// `LoomApp::world_version` last synced into Bevy.
     synced: Option<u64>,
+    /// `AppState::bitmap_generation` Bevy last read its image files at.
+    bitmap_generation: u64,
     /// Egui texture per viewport, with the Bevy view generation it shows.
     textures: HashMap<u32, (u64, egui::TextureId)>,
     /// The environment the Exposure Control preview was rendered with.
@@ -165,7 +167,7 @@ impl LoomApp {
             self.gpu = if loom_bevy::supported(&rs.adapter) {
                 let rs = rs.clone();
                 let renderer = loom_bevy::BevyRenderer::new(rs.adapter.clone(), rs.device.clone(), rs.queue.clone());
-                Gpu::Running(Box::new(BevyView { renderer, render_state: rs, synced: None, textures: HashMap::new(), preview_env: None }))
+                Gpu::Running(Box::new(BevyView { renderer, render_state: rs, synced: None, bitmap_generation: 0, textures: HashMap::new(), preview_env: None }))
             } else {
                 self.last_error = Some("Realistic shading needs a Vulkan, Metal or DirectX 12 GPU".into());
                 Gpu::Failed
@@ -185,7 +187,7 @@ impl LoomApp {
     /// Renders show geometry, not helpers or camera icons.
     fn renderable(object: &loom_scene::ObjectKind) -> bool {
         use loom_scene::ObjectKind as K;
-        !matches!(object, K::Dummy { .. } | K::Point { .. } | K::IkGoal { .. } | K::Group { .. } | K::Camera { .. } | K::Light(_))
+        !matches!(object, K::Dummy { .. } | K::Point { .. } | K::Tape { .. } | K::Protractor { .. } | K::Compass { .. } | K::Grid { .. } | K::IkGoal { .. } | K::Group { .. } | K::Camera { .. } | K::Light(_))
     }
 
     fn sync_bevy(&mut self) {
@@ -202,14 +204,20 @@ impl LoomApp {
         let lights = loom_scene::light::scene_lights(&self.state.scene, |n| self.state.scene.is_renderable(n));
         let display = self.world_display.clone();
         let scene = &self.state.scene;
+        let generation = self.state.bitmap_generation;
         let Gpu::Running(b) = &mut self.gpu else { return };
         if b.synced == Some(version) {
             return;
         }
+        if b.bitmap_generation != generation {
+            // Bitmap > Reload: Bevy reads the image files again too.
+            b.renderer.reload_bitmaps();
+            b.bitmap_generation = generation;
+        }
         let list: Vec<loom_bevy::SceneObject> = objects
             .iter()
             .filter_map(|(id, i, wire, renderable)| {
-                Some(loom_bevy::SceneObject { id: *id, mesh: display.get(*i)?, wire_color: *wire, material: scene.node_material(loom_scene::NodeId(*id)), renderable: *renderable, flags: render_flags(scene, loom_scene::NodeId(*id)) })
+                Some(loom_bevy::SceneObject { id: *id, mesh: display.get(*i)?, wire_color: *wire, surfaces: scene.node_surfaces(loom_scene::NodeId(*id)), renderable: *renderable, flags: render_flags(scene, loom_scene::NodeId(*id)) })
             })
             .collect();
         b.renderer.sync(&list);
@@ -349,7 +357,7 @@ impl LoomApp {
         let scene = &self.state.scene;
         let hidden_objects: Vec<loom_bevy::SceneObject> = hidden
             .iter()
-            .filter_map(|(id, mesh)| scene.node(*id).map(|n| loom_bevy::SceneObject { id: id.0, mesh, wire_color: n.wire_color, material: scene.node_material(*id), renderable: scene.is_renderable(n), flags: render_flags(scene, *id) }))
+            .filter_map(|(id, mesh)| scene.node(*id).map(|n| loom_bevy::SceneObject { id: id.0, mesh, wire_color: n.wire_color, surfaces: scene.node_surfaces(*id), renderable: scene.is_renderable(n), flags: render_flags(scene, *id) }))
             .collect();
         let selected_only = (s.area == RenderArea::Selected).then(|| req.selection.iter().map(|n| n.0).collect());
         let options = loom_bevy::RenderOptions {

@@ -15,7 +15,8 @@ struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { axes: [true; 3], current: AlignPoint::Center, target: AlignPoint::Center, orientation: [false; 3], scale: [false; 3] }
+        // Every option starts off, as in the reference.
+        Self { axes: [false; 3], current: AlignPoint::Center, target: AlignPoint::Center, orientation: [false; 3], scale: [false; 3] }
     }
 }
 

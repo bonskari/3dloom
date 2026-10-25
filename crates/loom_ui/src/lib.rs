@@ -9,6 +9,7 @@ pub mod gizmo;
 mod hotkeys;
 pub mod icons;
 pub mod label_menus;
+mod helper_overlay;
 mod layers_toolbar;
 mod light_overlay;
 pub mod live;
@@ -138,6 +139,13 @@ pub enum CreateKind {
 pub enum HelperKind {
     Dummy,
     Point,
+    /// Dragged corner to corner.
+    Grid,
+    /// Dragged from the tape to its target.
+    Tape,
+    Protractor,
+    /// Dragged out to its radius.
+    Compass,
 }
 
 impl HelperKind {
@@ -145,13 +153,32 @@ impl HelperKind {
         match self {
             HelperKind::Dummy => "dummy",
             HelperKind::Point => "point",
+            HelperKind::Grid => "grid",
+            HelperKind::Tape => "tape",
+            HelperKind::Protractor => "protractor",
+            HelperKind::Compass => "compass",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            HelperKind::Dummy => "Dummy",
+            HelperKind::Point => "Point",
+            HelperKind::Grid => "Grid",
+            HelperKind::Tape => "Tape",
+            HelperKind::Protractor => "Protractor",
+            HelperKind::Compass => "Compass",
         }
     }
     pub fn default_size(self) -> f32 {
         match self {
             HelperKind::Dummy => 10.0,
             HelperKind::Point => 20.0,
+            HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass => 0.0,
         }
+    }
+    /// Created by a drag (a session) rather than a click.
+    pub fn dragged(self) -> bool {
+        matches!(self, HelperKind::Grid | HelperKind::Tape | HelperKind::Compass)
     }
 }
 
@@ -217,6 +244,8 @@ pub struct LoomApp {
     pub create: Option<CreateSession>,
     /// A Target camera being dragged out.
     pub camera_create: Option<create_tool::CameraSession>,
+    /// Create > Helpers > Grid / Compass being dragged out.
+    pub helper_create: Option<create_tool::HelperSession>,
     /// A biped being dragged out.
     pub biped_create: Option<create_tool::BipedSession>,
     /// Create Biped rollout: the structure the next biped gets.
@@ -227,6 +256,12 @@ pub struct LoomApp {
     pub hierarchy_sub: HierarchySub,
     pub utility: Utility,
     pub rescale_factor: f32,
+    /// Utilities > Measure > Lock Selected: the nodes measured while locked.
+    pub measure_lock: Option<Vec<u64>>,
+    /// Utilities > Measure > New Floater: the modeless Measure window is open.
+    pub measure_floater: bool,
+    /// Place Highlight: a drag over a surface is placing the selection.
+    pub place_highlight_drag: bool,
     pub transform_drag: Option<DragState>,
     /// A Shift+drag clone in progress: the drag moved a Copy of the original;
     /// on release the Clone Options dialog finalises kind and count.
@@ -277,7 +312,13 @@ pub struct LoomApp {
     /// An Extrude / Bevel / … drag mode owns the left button (no click-select).
     pub poly_dragging: bool,
     pub ribbon_tab: ribbon::RibbonTab,
-    pub ribbon_minimized: bool,
+    /// How much of the ribbon shows, and what its Minimize / Maximize button does.
+    pub ribbon_state: ribbon::RibbonState,
+    pub ribbon_minimize: ribbon::MinimizeOption,
+    /// The panel open under its title while the ribbon is minimized.
+    pub ribbon_popup: Option<&'static str>,
+    /// Minimized to tabs: a clicked tab's panels show until the mouse leaves.
+    pub ribbon_peek: bool,
     /// A Paint Deformation stroke is in progress.
     pub deform_painting: bool,
     /// Edit Geometry > Named Selections name field.
@@ -306,6 +347,10 @@ pub struct LoomApp {
     pub background_textures: std::collections::HashMap<(String, u32), Option<egui::TextureHandle>>,
     /// Show Map in Viewport bitmaps decoded once per path.
     pub bitmap_cache: std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>,
+    /// Maps baked to textures (cropped / placed / mirrored bitmaps, procedural maps), by texture key.
+    pub baked_cache: std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>,
+    /// `state.bitmap_generation` the caches were filled at (Reload clears them).
+    pub bitmap_generation: u64,
     pub last_error: Option<String>,
     /// The last raw input events (live diagnostics).
     pub input_log: live::InputLog,
@@ -403,6 +448,8 @@ impl LoomApp {
             rfw: Default::default(),
             pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(Vec::new()), Vec::new(), Vec::new())))),
             bitmap_cache: std::collections::HashMap::new(),
+            baked_cache: std::collections::HashMap::new(),
+            bitmap_generation: 0,
             create_kind: None,
             create_compound: false,
             compound_kind: None,
@@ -418,6 +465,7 @@ impl LoomApp {
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
             camera_create: None,
+            helper_create: None,
             biped_create: None,
             biped_defaults: loom_scene::biped::BipedStructure::new(1.0),
             last_biped: None,
@@ -425,6 +473,9 @@ impl LoomApp {
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
             rescale_factor: 1.0,
+            measure_lock: None,
+            measure_floater: false,
+            place_highlight_drag: false,
             transform_drag: None,
             shift_clone: None,
             preview: None,
@@ -450,7 +501,10 @@ impl LoomApp {
             soft_painting: false,
             poly_dragging: false,
             ribbon_tab: ribbon::RibbonTab::Modeling,
-            ribbon_minimized: false,
+            ribbon_state: Default::default(),
+            ribbon_minimize: Default::default(),
+            ribbon_popup: None,
+            ribbon_peek: false,
             deform_painting: false,
             named_sub_selection_name: String::new(),
             shift_sources: Vec::new(),
@@ -620,6 +674,12 @@ impl LoomApp {
     }
 
     fn rebuild_world_meshes(&mut self) {
+        if self.bitmap_generation != self.state.bitmap_generation {
+            // Bitmap Parameters > Reload: read the image files again.
+            self.bitmap_cache.clear();
+            self.baked_cache.clear();
+            self.bitmap_generation = self.state.bitmap_generation;
+        }
         let srgb_f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
         let srgb = |c: u8| srgb_f(c as f32 / 255.0);
         let mut meshes = Vec::new();
@@ -632,6 +692,23 @@ impl LoomApp {
         let link_only = |n: &loom_scene::Node| n.display.display_links && n.display.link_replaces_object && n.parent.is_some();
         let visible: Vec<NodeId> = self.state.scene.nodes().filter(|n| self.state.is_visible(n) && !link_only(n) && (!bones_only || n.object.is_bone() || n.object.is_helper())).map(|n| n.id).collect();
         let display_color = (self.state.display.wireframe_color, self.state.display.shaded_color);
+        use loom_commands::display::ColorSource;
+        // Material looks first (they load and bake maps, which needs `&mut self`).
+        // Display Color > Shaded: Object Color leaves the faces in the object colour.
+        let wanted: Vec<_> = visible
+            .iter()
+            .map(|id| {
+                let n = self.state.scene.node(*id).expect("collected above");
+                let d = self.state.scene.display_of(n);
+                let gray = n.frozen && d.show_frozen_in_gray;
+                (self.state.scene.node_surfaces(*id).filter(|_| !gray && display_color.1 == ColorSource::Material), d.texture)
+            })
+            .collect();
+        let mut looks = Vec::with_capacity(wanted.len());
+        for (surfaces, texture) in wanted {
+            looks.push(self.material_look(surfaces, texture, &mut bitmaps, &mut bitmap_index));
+        }
+        let mut looks = looks.into_iter();
         for id in visible {
             let n = self.state.scene.node(id).expect("collected above");
             // Display Properties By Layer come from the layer.
@@ -672,55 +749,22 @@ impl LoomApp {
                 [srgb(c[0]), srgb(c[1]), srgb(c[2])]
             };
             let see_through = d.see_through || draws_see_through(n);
-            // An assigned material colours the faces (its diffuse, opacity and
-            // highlight); edges and wireframe keep the object colour.
-            let material = self.state.scene.node_material(n.id).cloned();
-            // Display Color: wireframes (and edges) and shaded faces each in
-            // the object colour or the material's diffuse colour.
-            use loom_commands::display::ColorSource;
-            let wire_color = match &material {
+            // An assigned material colours the faces (its diffuse, opacity,
+            // highlight and self-illumination; a Multi/Sub-Object material per
+            // face material ID); edges and wireframe keep the object colour,
+            // or with Display Color > Wireframe: Material Color the diffuse.
+            let (mut base, mut sub, has_material) = looks.next().expect("one look per visible node");
+            let wire_color = match self.state.scene.node_material(n.id) {
                 Some(m) if display_color.0 == ColorSource::Material && !gray => {
                     let d = m.diffuse.get();
                     Some([srgb_f(d.x), srgb_f(d.y), srgb_f(d.z)])
                 }
-                Some(_) => Some(color),
-                None => Some(color),
+                _ => Some(color),
             };
-            let (color, opacity, specular) = match &material {
-                Some(m) if !gray && display_color.1 == ColorSource::Material => {
-                    let d = m.diffuse.get();
-                    let s = m.specular.get() * (m.specular_level.get() / 100.0);
-                    // Glossiness 0–100 → a Blinn exponent from 2 to 2048.
-                    let exponent = 2.0 * 2f32.powf(m.glossiness.get() / 10.0);
-                    let spec = if m.specular_level.get() > 0.0 { [srgb_f(s.x), srgb_f(s.y), srgb_f(s.z), exponent] } else { [0.0; 4] };
-                    ([srgb_f(d.x), srgb_f(d.y), srgb_f(d.z)], (m.opacity.get() / 100.0).clamp(0.0, 1.0), spec)
-                }
-                _ => (color, 1.0, [0.0; 4]),
-            };
-            // Show Map in Viewport on the material shows its diffuse bitmap.
-            let material_map = material.as_ref().filter(|m| m.show_map_in_viewport).and_then(|m| m.diffuse_map.as_ref()).map(|b| b.path.clone());
-            let display_texture = match (&n.display.texture, material_map) {
-                (loom_scene::TextureDisplay::None, Some(path)) => loom_scene::TextureDisplay::Bitmap(path),
-                (t, _) => t.clone(),
-            };
-            let texture = match &display_texture {
-                loom_scene::TextureDisplay::None => loom_render::TextureSel::None,
-                loom_scene::TextureDisplay::Checker => loom_render::TextureSel::Checker,
-                loom_scene::TextureDisplay::Bitmap(path) => match bitmap_index.get(path) {
-                    Some(i) => loom_render::TextureSel::Bitmap(*i),
-                    None => match load_bitmap(&mut self.bitmap_cache, path) {
-                        Some(bm) => {
-                            bitmaps.push((path.clone(), bm));
-                            bitmap_index.insert(path.clone(), bitmaps.len() as u32 - 1);
-                            loom_render::TextureSel::Bitmap(bitmaps.len() as u32 - 1)
-                        }
-                        None => {
-                            self.last_error = Some(format!("could not load map {path}"));
-                            loom_render::TextureSel::None
-                        }
-                    },
-                },
-            };
+            if !has_material {
+                base.color = color;
+            }
+            let (color, opacity, specular) = (base.color, base.alpha, base.specular);
             // A visibility track below 1 shows the object partly transparent (never fully hidden in shaded views).
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
             // Skin > Display > Show Colored Faces (in Edit Envelopes): the faces shade by the current bone's weight.
@@ -746,7 +790,24 @@ impl LoomApp {
                     color = [1.0; 3];
                 }
             }
-            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: d.backface_cull, vertex_colors, texture, specular, wire_color, diagonals: !d.edges_only, unlit });
+            let fade = if see_through { 0.35 * visibility } else { visibility };
+            if let Some(s) = sub.as_mut() {
+                for st in s.by_id.values_mut().chain(std::iter::once(&mut s.missing)) {
+                    st.alpha *= fade;
+                }
+            }
+            styles.push(loom_render::MeshStyle {
+                color,
+                alpha: fade * opacity,
+                backface_cull: d.backface_cull,
+                vertex_colors,
+                specular,
+                wire_color,
+                diagonals: !d.edges_only,
+                unlit,
+                sub: sub.map(std::sync::Arc::new),
+                ..base
+            });
             display.push(shown.unwrap_or_else(|| mesh.clone()));
             meshes.push((n.id, mesh));
         }
@@ -757,6 +818,136 @@ impl LoomApp {
         if let Ok(mut slot) = self.pending_upload.lock() {
             *slot = Some((self.world_display.clone(), self.world_styles.clone(), bitmaps));
         }
+    }
+
+    /// A node's material as a viewport style: (the whole mesh's style, the
+    /// per material ID styles of a Multi/Sub-Object material, whether a
+    /// material colours it). Display > Show Map in Viewport shows over it.
+    fn material_look(
+        &mut self,
+        surfaces: Option<loom_scene::material::Surfaces>,
+        display_texture: loom_scene::TextureDisplay,
+        bitmaps: &mut Vec<(String, std::sync::Arc<loom_render::Bitmap>)>,
+        index: &mut std::collections::HashMap<String, u32>,
+    ) -> (loom_render::MeshStyle, Option<loom_render::SubStyles>, bool) {
+        let mut base = loom_render::MeshStyle::default();
+        let mut sub = None;
+        match &surfaces {
+            Some(loom_scene::material::Surfaces::Single(s)) => {
+                let st = self.surface_style(s, bitmaps, index);
+                base = loom_render::MeshStyle { color: st.color, alpha: st.alpha, specular: st.specular, self_illum: st.self_illum, texture: st.texture, uv: st.uv, decal: st.decal, texture_amount: st.texture_amount, faceted: st.faceted, two_sided: st.two_sided, wire: st.wire, ..Default::default() };
+            }
+            Some(loom_scene::material::Surfaces::PerId(list)) => {
+                let mut by_id = std::collections::BTreeMap::new();
+                for (id, s) in list {
+                    by_id.insert(*id, self.surface_style(s, bitmaps, index));
+                }
+                let missing = self.surface_style(&loom_scene::material::Surface::black(), bitmaps, index);
+                sub = Some(loom_render::SubStyles { by_id, missing });
+            }
+            None => {}
+        }
+        let sel = match &display_texture {
+            loom_scene::TextureDisplay::None => None,
+            loom_scene::TextureDisplay::Checker => Some(loom_render::TextureSel::Checker),
+            loom_scene::TextureDisplay::Bitmap(path) => Some(self.bitmap_texture(path, bitmaps, index)),
+        };
+        if let Some(sel) = sel {
+            let plain = |st: &mut loom_render::SurfaceStyle| {
+                st.texture = sel;
+                st.uv = loom_render::UV_IDENTITY;
+                st.decal = [false; 2];
+                st.texture_amount = 1.0;
+            };
+            let mut st = base.surface();
+            plain(&mut st);
+            (base.texture, base.uv, base.decal, base.texture_amount) = (st.texture, st.uv, st.decal, st.texture_amount);
+            if let Some(s) = sub.as_mut() {
+                s.by_id.values_mut().chain(std::iter::once(&mut s.missing)).for_each(plain);
+            }
+        }
+        (base, sub, surfaces.is_some())
+    }
+
+    /// A bitmap file as a viewport texture (loaded once per path).
+    fn bitmap_texture(&mut self, path: &str, bitmaps: &mut Vec<(String, std::sync::Arc<loom_render::Bitmap>)>, index: &mut std::collections::HashMap<String, u32>) -> loom_render::TextureSel {
+        // The GPU keeps textures by this key: a Reload makes new ones.
+        let key = format!("{}|{path}", self.state.bitmap_generation);
+        if let Some(i) = index.get(&key) {
+            return loom_render::TextureSel::Bitmap(*i);
+        }
+        match load_bitmap(&mut self.bitmap_cache, path) {
+            Some(bm) => {
+                bitmaps.push((key.clone(), bm));
+                index.insert(key, bitmaps.len() as u32 - 1);
+                loom_render::TextureSel::Bitmap(bitmaps.len() as u32 - 1)
+            }
+            None => {
+                self.last_error = Some(format!("could not load map {path}"));
+                loom_render::TextureSel::None
+            }
+        }
+    }
+
+    /// A map baked to a viewport texture (cropping, mirror, procedural maps),
+    /// cached by what changes its pixels.
+    fn map_texture(&mut self, map: &loom_scene::Map, bitmaps: &mut Vec<(String, std::sync::Arc<loom_render::Bitmap>)>, index: &mut std::collections::HashMap<String, u32>) -> loom_render::TextureSel {
+        let plain = map.kind == loom_scene::material::MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1];
+        if plain {
+            return self.bitmap_texture(&map.path, bitmaps, index);
+        }
+        let key = format!("{}:{}", self.state.bitmap_generation, loom_scene::maps::texture_key(map));
+        if let Some(i) = index.get(&key) {
+            return loom_render::TextureSel::Bitmap(*i);
+        }
+        let baked = match self.baked_cache.get(&key) {
+            Some(b) => b.clone(),
+            None => {
+                let images = self.map_images(map);
+                let b = loom_scene::maps::bake(map, &images).map(|i| std::sync::Arc::new(loom_render::Bitmap { width: i.width, height: i.height, rgba: i.rgba }));
+                self.baked_cache.insert(key.clone(), b.clone());
+                b
+            }
+        };
+        match baked {
+            Some(bm) => {
+                bitmaps.push((key.clone(), bm));
+                index.insert(key, bitmaps.len() as u32 - 1);
+                loom_render::TextureSel::Bitmap(bitmaps.len() as u32 - 1)
+            }
+            None => {
+                self.last_error = Some(format!("could not load map {}", map.path));
+                loom_render::TextureSel::None
+            }
+        }
+    }
+
+    /// The images a map tree reads, from the bitmap cache.
+    pub fn map_images(&mut self, map: &loom_scene::Map) -> loom_scene::maps::Images {
+        let mut images = loom_scene::maps::Images::new();
+        let cache = &mut self.bitmap_cache;
+        loom_scene::maps::load_images(map, &mut images, &mut |path| load_bitmap(cache, path).map(|b| std::sync::Arc::new(loom_scene::maps::Image { width: b.width, height: b.height, rgba: b.rgba.clone() })));
+        images
+    }
+
+    /// How a resolved material surface draws in the shaded viewports (linear colours).
+    fn surface_style(&mut self, s: &loom_scene::material::Surface, bitmaps: &mut Vec<(String, std::sync::Arc<loom_render::Bitmap>)>, index: &mut std::collections::HashMap<String, u32>) -> loom_render::SurfaceStyle {
+        let srgb_f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
+        let lin = |c: glam::Vec3| [srgb_f(c.x), srgb_f(c.y), srgb_f(c.z)];
+        // Glossiness 0–100 → a Blinn exponent from 2 to 2048.
+        let exponent = 2.0 * 2f32.powf(s.glossiness / 10.0);
+        let spec = if s.specular_level > 0.0 {
+            let c = lin(s.specular);
+            [c[0], c[1], c[2], exponent]
+        } else {
+            [0.0; 4]
+        };
+        // Show Map in Viewport on the material shows its diffuse map.
+        let (texture, uv, decal, amount) = match s.viewport_map() {
+            Some(m) => (self.map_texture(m, bitmaps, index), m.coords.matrix(), m.coords.decal(), (m.amount / 100.0).clamp(0.0, 1.0)),
+            None => (loom_render::TextureSel::None, loom_render::UV_IDENTITY, [false; 2], 1.0),
+        };
+        loom_render::SurfaceStyle { color: lin(s.diffuse), alpha: s.opacity, specular: spec, self_illum: s.self_illum, texture, uv, decal, texture_amount: amount, faceted: s.faceted, two_sided: s.two_sided, wire: s.wire }
     }
 
     pub fn world_styles(&self) -> &[loom_render::MeshStyle] {
@@ -1077,6 +1268,17 @@ impl LoomApp {
             let _ = self.dispatch(Command::CancelRender);
         }
         hotkeys::handle(ctx, self);
+        // An image file dropped on an object: a material with it as the Diffuse map.
+        let dropped: Vec<std::path::PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        if !dropped.is_empty() {
+            let at = ctx.input(|i| i.pointer.latest_pos());
+            for path in dropped {
+                let image = path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["png", "jpg", "jpeg", "bmp", "tga", "tif", "tiff"].contains(&e.to_ascii_lowercase().as_str()));
+                if let (true, Some(node)) = (image, at.and_then(|p| viewport_widget::node_at(self, p))) {
+                    let _ = self.dispatch(Command::DropBitmap { path: path.to_string_lossy().into_owned(), node: Some(node.0) });
+                }
+            }
+        }
         // "Close spline?" answered Yes: the line is closed, so the Line tool ends it.
         if let Some(line) = self.line.take() {
             if line.is_closed(self) {
@@ -1114,6 +1316,7 @@ impl LoomApp {
             }
         }
         dialogs::show(ctx, self);
+        command_panel::utilities::measure_floater(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
         rendered_frame::show(ctx, self);

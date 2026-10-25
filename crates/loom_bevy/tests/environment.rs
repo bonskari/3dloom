@@ -35,7 +35,7 @@ fn moved(mut m: loom_mesh::Mesh, by: Vec3) -> loom_mesh::Mesh {
 }
 
 fn object(id: u64, mesh: &loom_mesh::Mesh) -> SceneObject<'_> {
-    SceneObject { id, mesh, wire_color: [230, 230, 230], material: None, renderable: true, flags: Default::default() }
+    SceneObject { id, mesh, wire_color: [230, 230, 230], surfaces: None, renderable: true, flags: Default::default() }
 }
 
 /// Looks along +Y from y = -100 at the height of the boxes' centres.
