@@ -2267,8 +2267,8 @@ fn draw_patch_lattice(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, v
     if app.state.selection_mode == SelectionMode::Object {
         return;
     }
-    let handle = egui::Stroke::new(1.0, egui::Color32::from_rgb(230, 200, 60));
-    let lattice = egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 160, 40));
+    let handle = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(230, 200, 60));
+    let lattice = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(200, 160, 40));
     for id in &app.state.selection {
         let Some(node) = app.state.scene.node(*id) else { continue };
         let Some(p) = node.edit_patch() else { continue };
