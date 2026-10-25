@@ -21,7 +21,8 @@ fn pick_diffuse_map(h: &mut Harness, kind: &str) {
     assert_eq!(h.app.state.dialog, None, "a double-click picks {kind}");
     // The editor's rollouts from their top (the Browser's wheel may have reached them).
     let win = material_editor_rect(h);
-    h.run(vec![egui::Event::PointerMoved(win.center())]);
+    // Over the rollouts (the lower part of the editor, below the sample slots).
+    h.run(vec![egui::Event::PointerMoved(win.center_bottom() - egui::vec2(0.0, 60.0))]);
     for _ in 0..5 {
         h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 2000.0), modifiers: egui::Modifiers::NONE }]);
     }
