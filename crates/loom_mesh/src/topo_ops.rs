@@ -1524,6 +1524,84 @@ mod tests {
         }
     }
 
+    /// A chamfered box stays a clean convex solid: closed, planar faces with
+    /// area, every normal pointing away from the centre.
+    fn assert_clean_solid(m: &Mesh, centre: Vec3, what: &str) {
+        m.check_invariants().unwrap();
+        assert_eq!(border_count(m), 0, "{what}: open edges");
+        assert_eq!(coincident_pairs(m), 0, "{what}: coincident vertices");
+        for f in 0..m.face_count() as u32 {
+            let ids = m.face_vertex_ids(FaceId(f)).unwrap();
+            let pts: Vec<Vec3> = ids.iter().map(|v| m.vertex_position(*v).unwrap()).collect();
+            let mut n = Vec3::ZERO;
+            for i in 0..pts.len() {
+                n += pts[i].cross(pts[(i + 1) % pts.len()]);
+            }
+            assert!(n.length() * 0.5 > 1e-4, "{what}: face {f} has no area");
+            let n = n.normalize();
+            let c = pts.iter().copied().sum::<Vec3>() / pts.len() as f32;
+            for p in &pts {
+                assert!((*p - c).dot(n).abs() < 1e-3, "{what}: face {f} is not planar: {pts:?}");
+            }
+            assert!(n.dot(c - centre) > 0.0, "{what}: face {f} faces inwards");
+        }
+    }
+
+    fn box_edges(base: &Mesh, keep: impl Fn(Vec3, Vec3) -> bool) -> Vec<HalfEdgeId> {
+        (0..base.half_edges().len() as u32).map(HalfEdgeId).filter(|h| base.canonical_edge_id(*h) == Some(*h)).filter(|h| {
+            let (a, b) = base.edge_vertices(*h).unwrap();
+            keep(base.vertex_position(a).unwrap(), base.vertex_position(b).unwrap())
+        }).collect()
+    }
+
+    #[test]
+    fn chamfer_box_vertical_all_and_single_edges_like_the_reference() {
+        let base = crate::standard_primitives::box_segmented(40.0, 40.0, 40.0, [1, 1, 1]);
+        let lo = (0..8).map(|v| base.vertex_position(VertexId(v)).unwrap()).fold(Vec3::splat(f32::MAX), Vec3::min);
+        let hi = (0..8).map(|v| base.vertex_position(VertexId(v)).unwrap()).fold(Vec3::splat(f32::MIN), Vec3::max);
+        let centre = (lo + hi) * 0.5;
+        let vertical = box_edges(&base, |a, b| (a.x - b.x).abs() < 1e-4 && (a.y - b.y).abs() < 1e-4);
+        assert_eq!(vertical.len(), 4);
+        let all = box_edges(&base, |_, _| true);
+        assert_eq!(all.len(), 12);
+        let amount = 3.0;
+        for (name, edges, seg1_faces, seg3_faces) in [("vertical", vertical.clone(), 10, 18), ("all", all.clone(), 26, 50), ("single", vec![vertical[0]], 7, 9)] {
+            for (segs, faces) in [(1, seg1_faces), (3, seg3_faces)] {
+                let what = format!("{name} edges, {segs} segments");
+                let mut m = base.clone();
+                chamfer_edges(&mut m, &edges, amount, segs, false).unwrap_or_else(|e| panic!("{what}: {e}"));
+                assert_eq!(m.face_count(), faces, "{what}: face count");
+                assert_clean_solid(&m, centre, &what);
+                // Every vertex stays on the box's surface.
+                for v in 0..m.vertex_count() as u32 {
+                    let p = m.vertex_position(VertexId(v)).unwrap();
+                    let on = (0..3).any(|i| (p[i] - lo[i]).abs() < 1e-3 || (p[i] - hi[i]).abs() < 1e-3);
+                    assert!(on, "{what}: vertex {p} left the surface");
+                }
+            }
+        }
+        // Segments 1: the old corners are gone and every vertex sits `amount`
+        // in from the chamfered edges along the faces next to them.
+        let mut m = base.clone();
+        chamfer_edges(&mut m, &vertical, amount, 1, false).unwrap();
+        assert_eq!(m.vertex_count(), 16);
+        for v in 0..16 {
+            let p = m.vertex_position(VertexId(v)).unwrap();
+            let mut d: Vec<f32> = (0..2).map(|i| (p[i] - lo[i]).abs().min((p[i] - hi[i]).abs())).collect();
+            d.sort_by(f32::total_cmp);
+            assert!(d[0] < 1e-3 && (d[1] - amount).abs() < 1e-3, "vertical: vertex {p} is not {amount} in from the corner");
+        }
+        let mut m = base.clone();
+        chamfer_edges(&mut m, &all, amount, 1, false).unwrap();
+        assert_eq!(m.vertex_count(), 24);
+        for v in 0..24 {
+            let p = m.vertex_position(VertexId(v)).unwrap();
+            let mut d: Vec<f32> = (0..3).map(|i| (p[i] - lo[i]).abs().min((p[i] - hi[i]).abs())).collect();
+            d.sort_by(f32::total_cmp);
+            assert!(d[0] < 1e-3 && (d[1] - amount).abs() < 1e-3 && (d[2] - amount).abs() < 1e-3, "all: vertex {p} is not {amount} in along both faces");
+        }
+    }
+
     #[test]
     fn chamfer_edge_makes_segments_faces() {
         let mut m = box_primitive(Vec3::splat(0.5));
