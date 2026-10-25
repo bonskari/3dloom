@@ -206,6 +206,97 @@ pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState
     true
 }
 
+/// A Branches drag in progress: the polygons it grows from and the path so far.
+#[derive(Clone)]
+struct BranchDrag {
+    node: u64,
+    faces: Vec<u32>,
+    /// World points on the plane facing the view through the polygons' centre.
+    path: Vec<Vec3>,
+    normal: Vec3,
+    /// Where the last path point was taken, on screen.
+    last: egui::Pos2,
+}
+
+/// Freeform > PolyDraw > Branches: a drag from a polygon (Shift: from the
+/// selected polygons) draws the branch path on a plane facing the view, one
+/// point per Minimum Distance pixels; the release grows the branch (one
+/// undo). At Polygon level Ctrl+click selects a polygon, Ctrl+Alt+click adds
+/// one. Returns true while Branches owns the pointer.
+pub fn branches_drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState, hovered: bool, p: egui::Pos2, projection: &Projection) -> bool {
+    if !app.state.branches {
+        return false;
+    }
+    let id = egui::Id::new("branch_drag");
+    let mods = ctx.input(|i| i.modifiers);
+    if pointer.button_pressed(egui::PointerButton::Primary) && hovered {
+        app.poly_dragging = true;
+        let hit = pick_face(app, p, projection.rect, projection.view, projection.proj).and_then(|pick| match pick {
+            Pick::SubObject { mesh, id: SubObjectId::Face(f) } => Some((app.world_meshes()[mesh].0, f.0)),
+            _ => None,
+        });
+        if mods.ctrl || mods.command {
+            if let (Some((node, f)), SelectionMode::Face) = (hit, app.state.selection_mode) {
+                let op = if mods.alt { loom_commands::SelectOp::Add } else { loom_commands::SelectOp::Replace };
+                let _ = app.dispatch(Command::SelectSub { node: Some(node.0), ids: vec![f], op });
+            }
+            return true;
+        }
+        let from = if mods.shift {
+            app.state.sub_selection.by_node().into_iter().find_map(|(n, ids)| {
+                let faces: Vec<u32> = ids.iter().filter_map(|s| if let SubObjectId::Face(f) = s { Some(f.0) } else { None }).collect();
+                (!faces.is_empty()).then_some((n, faces))
+            })
+        } else {
+            hit.map(|(n, f)| (n, vec![f]))
+        };
+        if let Some((node, faces)) = from {
+            let Some((_, mesh)) = app.world_meshes().iter().find(|(n, _)| *n == node) else { return true };
+            let pts: Vec<Vec3> = faces.iter().flat_map(|f| mesh.face_positions(loom_mesh::FaceId(*f)).unwrap_or_default()).collect();
+            if !pts.is_empty() {
+                let start = pts.iter().copied().sum::<Vec3>() / pts.len() as f32;
+                let drag = BranchDrag { node: node.0, faces, path: vec![start], normal: projection.toward_viewer_at(start), last: p };
+                ctx.data_mut(|d| d.insert_temp(id, drag));
+            }
+        }
+        return true;
+    }
+    let Some(mut drag) = ctx.data(|d| d.get_temp::<BranchDrag>(id)) else {
+        // The release of a press Branches took (a Ctrl+click) is its own too.
+        let owned = app.poly_dragging;
+        if pointer.button_released(egui::PointerButton::Primary) {
+            app.poly_dragging = false;
+        }
+        return owned;
+    };
+    if pointer.button_down(egui::PointerButton::Primary) && p.distance(drag.last) >= app.state.poly_settings.branch_min_distance {
+        if let Some(w) = projection.hit_plane(p, drag.path[0], drag.normal) {
+            drag.path.push(w);
+            drag.last = p;
+            ctx.data_mut(|d| d.insert_temp(id, drag.clone()));
+            ctx.request_repaint();
+        }
+    }
+    if pointer.button_released(egui::PointerButton::Primary) || !pointer.button_down(egui::PointerButton::Primary) {
+        ctx.data_mut(|d| d.remove::<BranchDrag>(id));
+        app.poly_dragging = false;
+        if drag.path.len() >= 2 {
+            let cmd = Command::Branch { node: drag.node, faces: drag.faces, path: drag.path.iter().map(|v| v.to_array()).collect(), taper: app.state.poly_settings.branch_taper };
+            if let Err(e) = app.dispatch(cmd) {
+                app.last_error = Some(e);
+            }
+        }
+    }
+    true
+}
+
+/// The Branches path being drawn, as a polyline.
+fn draw_branch_path(painter: &egui::Painter, projection: &Projection) {
+    let Some(drag) = painter.ctx().data(|d| d.get_temp::<BranchDrag>(egui::Id::new("branch_drag"))) else { return };
+    let pts: Vec<egui::Pos2> = drag.path.iter().filter_map(|w| projection.screen(*w)).collect();
+    painter.add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(80, 220, 80))));
+}
+
 fn selection_centre(app: &LoomApp) -> Vec3 {
     let mut sum = Vec3::ZERO;
     let mut n = 0.0;
@@ -237,6 +328,7 @@ fn vertex_screen(app: &LoomApp, projection: &Projection, node: NodeId, v: u32) -
 /// Create's polyline through the picked vertices.
 pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hover: Option<egui::Pos2>) {
     let stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255));
+    draw_branch_path(painter, projection);
     draw_skin(painter, app, projection);
     draw_normals(painter, app, projection);
     // Modifier gizmo: the input's bounding box in the gizmo frame, orange.

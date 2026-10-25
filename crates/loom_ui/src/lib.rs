@@ -276,7 +276,13 @@ pub struct LoomApp {
     /// An Extrude / Bevel / … drag mode owns the left button (no click-select).
     pub poly_dragging: bool,
     pub ribbon_tab: ribbon::RibbonTab,
-    pub ribbon_minimized: bool,
+    /// How much of the ribbon shows, and what its Minimize / Maximize button does.
+    pub ribbon_state: ribbon::RibbonState,
+    pub ribbon_minimize: ribbon::MinimizeOption,
+    /// The panel open under its title while the ribbon is minimized.
+    pub ribbon_popup: Option<&'static str>,
+    /// Minimized to tabs: a clicked tab's panels show until the mouse leaves.
+    pub ribbon_peek: bool,
     /// A Paint Deformation stroke is in progress.
     pub deform_painting: bool,
     /// Edit Geometry > Named Selections name field.
@@ -449,7 +455,10 @@ impl LoomApp {
             soft_painting: false,
             poly_dragging: false,
             ribbon_tab: ribbon::RibbonTab::Modeling,
-            ribbon_minimized: false,
+            ribbon_state: Default::default(),
+            ribbon_minimize: Default::default(),
+            ribbon_popup: None,
+            ribbon_peek: false,
             deform_painting: false,
             named_sub_selection_name: String::new(),
             shift_sources: Vec::new(),

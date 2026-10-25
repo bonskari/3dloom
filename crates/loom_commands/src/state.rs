@@ -1610,7 +1610,7 @@ impl AppState {
             isolation: None,
             expert_mode: false,
             show_main_toolbar: true,
-            show_ribbon: false,
+            show_ribbon: true,
             show_command_panel: true,
             startup_ui: crate::settings::UiLayout::DEFAULT,
             show_end_result: false,

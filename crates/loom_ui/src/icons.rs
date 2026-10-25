@@ -213,6 +213,71 @@ pub const LEVEL_FACE: &str = ph::SQUARE;
 pub const EXPAND_SELECTION: &str = ph::PLUS;
 pub const CONTRACT_SELECTION: &str = ph::MINUS;
 
+// Graphite Modeling Tools ribbon.
+pub const LEVEL_BORDER: &str = ph::CIRCLE_DASHED;
+pub const LEVEL_POLYGON: &str = ph::SQUARE;
+pub const LEVEL_ELEMENT: &str = ph::CUBE;
+pub const MODIFY_MODE: &str = ph::RAINBOW;
+pub const PREVIOUS_MODIFIER: &str = ph::ARROW_DOWN;
+pub const NEXT_MODIFIER: &str = ph::ARROW_UP;
+pub const TOGGLE_COMMAND_PANEL: &str = ph::SIDEBAR_SIMPLE;
+pub const PREVIEW_SELECTION: &str = ph::CURSOR_CLICK;
+pub const IGNORE_BACKFACING: &str = ph::EYE_CLOSED;
+pub const SOFT_SELECTION: &str = ph::DROP_HALF;
+pub const COLLAPSE_STACK: &str = ph::STACK_SIMPLE;
+pub const CONVERT_TO_POLY: &str = ph::POLYGON;
+pub const APPLY_EDIT_POLY: &str = ph::PLUS_SQUARE;
+pub const REPEAT_LAST: &str = ph::REPEAT_ONCE;
+pub const QUICKSLICE: &str = ph::KNIFE;
+pub const SWIFT_LOOP: &str = ph::LINE_VERTICAL;
+pub const CUT: &str = ph::SCISSORS;
+pub const USE_NURMS: &str = ph::DROP;
+pub const CONSTRAIN_NONE: &str = ph::PROHIBIT;
+pub const CONSTRAIN_EDGE: &str = ph::LINE_SEGMENT;
+pub const CONSTRAIN_FACE: &str = ph::SQUARE_HALF;
+pub const CONSTRAIN_NORMAL: &str = ph::ARROW_UP_RIGHT;
+pub const GROW: &str = ph::PLUS;
+pub const SHRINK: &str = ph::MINUS;
+pub const LOOP: &str = ph::DOTS_THREE;
+pub const RING: &str = ph::CIRCLE_NOTCH;
+pub const LOOP_MODE: &str = ph::ARROWS_CLOCKWISE;
+pub const RELAX: &str = ph::WAVE_SINE;
+pub const CREATE: &str = ph::PLUS_CIRCLE;
+pub const ATTACH: &str = ph::PAPERCLIP;
+pub const COLLAPSE_SUB: &str = ph::ARROWS_IN;
+pub const DETACH: &str = ph::ARROWS_SPLIT;
+pub const SLICE_PLANE: &str = ph::SELECTION_SLASH;
+pub const EXTRUDE: &str = ph::ARROW_FAT_UP;
+pub const CHAMFER: &str = ph::CORNERS_IN;
+pub const WELD: &str = ph::ARROWS_IN_SIMPLE;
+pub const REMOVE: &str = ph::ERASER;
+pub const BREAK: &str = ph::LINK_BREAK;
+pub const TARGET_WELD: &str = ph::TARGET;
+pub const BRIDGE: &str = ph::BRIDGE;
+pub const SPLIT: &str = ph::ARROWS_MERGE;
+pub const INSERT_VERTEX: &str = ph::DOT_OUTLINE;
+pub const CONNECT: &str = ph::LINE_SEGMENTS;
+pub const CAP: &str = ph::CIRCLE_HALF_TILT;
+pub const BEVEL: &str = ph::ARROW_FAT_LINE_UP;
+pub const INSET: &str = ph::FRAME_CORNERS;
+pub const OUTLINE: &str = ph::SELECTION_FOREGROUND;
+pub const HINGE: &str = ph::DOOR_OPEN;
+pub const FLIP: &str = ph::FLIP_VERTICAL;
+pub const EXTRUDE_ON_SPLINE: &str = ph::PATH;
+pub const CREATE_SHAPE: &str = ph::BEZIER_CURVE;
+pub const MSMOOTH: &str = ph::CIRCLES_THREE;
+pub const TESSELLATE: &str = ph::GRID_FOUR;
+pub const MAKE_PLANAR: &str = ph::ALIGN_CENTER_VERTICAL;
+pub const GRID_ALIGN: &str = ph::GRID_NINE;
+pub const AUTO_SMOOTH: &str = ph::MAGIC_WAND;
+pub const CLEAR_SMOOTHING: &str = ph::ERASER;
+pub const BRANCHES: &str = ph::TREE;
+pub const PAINT_DEFORM: &str = ph::PAINT_BRUSH_BROAD;
+pub const BY_HALF: &str = ph::CIRCLE_HALF;
+pub const INVERT_AXIS: &str = ph::SWAP;
+pub const MATERIAL_ID: &str = ph::PUZZLE_PIECE;
+pub const POLYDRAW: &str = ph::PENCIL_SIMPLE;
+
 // Small dialog buttons.
 pub const CLEAR: &str = ph::X;
 pub const HIGHLIGHT: &str = ph::CARET_RIGHT;
@@ -234,12 +299,13 @@ pub struct Icon<'a> {
     on: bool,
     enabled: bool,
     color: Option<egui::Color32>,
+    label: Option<&'a str>,
 }
 
 impl<'a> Icon<'a> {
     /// `glyph` for the command named `action`; the tooltip is the action and its chord.
     pub fn new(glyph: &'a str, action: &'a str) -> Self {
-        Icon { glyph, action, text: None, hint: None, on: false, enabled: true, color: None }
+        Icon { glyph, action, text: None, hint: None, on: false, enabled: true, color: None, label: None }
     }
     /// Tooltip text in place of the action name (the chord of `action` still follows it).
     pub fn tip(mut self, text: &'a str) -> Self {
@@ -264,6 +330,11 @@ impl<'a> Icon<'a> {
         self.color = Some(color);
         self
     }
+    /// Text drawn after the glyph (the ribbon's buttons carry both).
+    pub fn label(mut self, label: &'a str) -> Self {
+        self.label = Some(label);
+        self
+    }
 
     /// The hover text: "Select and Move (W)", with the hint after a semicolon.
     pub fn hover_text(&self, state: &AppState) -> String {
@@ -275,7 +346,10 @@ impl<'a> Icon<'a> {
     }
 
     pub fn show(self, ui: &mut egui::Ui, state: &AppState) -> egui::Response {
-        let mut text = egui::RichText::new(self.glyph).size(SIZE);
+        let mut text = match self.label {
+            Some(l) => egui::RichText::new(format!("{}  {l}", self.glyph)),
+            None => egui::RichText::new(self.glyph).size(SIZE),
+        };
         if let Some(c) = self.color {
             text = text.color(c);
         }
