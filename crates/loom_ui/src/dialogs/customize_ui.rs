@@ -128,6 +128,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
 fn action_list(ui: &mut egui::Ui, height: f32) -> Option<String> {
     let group_id = egui::Id::new("customize_ui_group");
     let search_id = egui::Id::new("customize_ui_search");
+    let category_id = egui::Id::new("customize_ui_category");
     let mut group: String = ui.ctx().data(|d| d.get_temp(group_id)).unwrap_or_else(|| "Main UI".to_owned());
     let mut search: String = ui.ctx().data(|d| d.get_temp(search_id)).unwrap_or_default();
     let mut double = None;
@@ -166,6 +167,7 @@ fn action_list(ui: &mut egui::Ui, height: f32) -> Option<String> {
     ui.ctx().data_mut(|d| {
         d.insert_temp(group_id, group);
         d.insert_temp(search_id, search);
+        d.insert_temp(category_id, category);
     });
     double
 }
@@ -198,6 +200,9 @@ fn drop_list(ui: &mut egui::Ui, id: &str, height: f32, body: impl FnOnce(&mut eg
     })
 }
 
+/// The Category list's every-action entry.
+const ALL_COMMANDS: &str = "All Commands";
+
 /// Keyboard panel.
 fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
     let ctx = ui.ctx().clone();
@@ -209,6 +214,8 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
     let hotkey_id = egui::Id::new(HOTKEY_FIELD);
     let mut group: String = ctx.data(|d| d.get_temp(group_id)).unwrap_or_else(|| "Main UI".to_owned());
     let mut search: String = ctx.data(|d| d.get_temp(search_id)).unwrap_or_default();
+    // Category: All Commands, or the actions of one menu.
+    let mut category: String = ctx.data(|d| d.get_temp(category_id)).unwrap_or_else(|| ALL_COMMANDS.to_owned());
     let mut written: Option<String> = ctx.data(|d| d.get_temp(written_id));
     let mut action: Option<String> = ctx.data(|d| d.get_temp(action_id));
     let mut chord: Option<Chord> = ctx.data(|d| d.get_temp(chord_id));
@@ -228,7 +235,12 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
         v.sort();
     }
     let needle = search.to_lowercase();
-    let actions: Vec<&'static str> = loom_commands::keymap::group_actions(&group).into_iter().filter(|a| needle.is_empty() || a.to_lowercase().contains(&needle)).collect();
+    let in_category: Option<Vec<String>> = (category != ALL_COMMANDS).then(|| crate::menubar::menu_actions(app, &category));
+    let actions: Vec<&'static str> = loom_commands::keymap::group_actions(&group)
+        .into_iter()
+        .filter(|a| needle.is_empty() || a.to_lowercase().contains(&needle))
+        .filter(|a| in_category.as_ref().map_or(true, |v| v.iter().any(|x| x == a)))
+        .collect();
     ui.horizontal(|ui| {
         ui.label("Group:");
         egui::ComboBox::from_id_salt("customize_group").selected_text(group.clone()).show_ui(ui, |ui| {
@@ -236,6 +248,13 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
                 if ui.selectable_value(&mut group, g.to_owned(), g).clicked() {
                     action = None;
                 }
+            }
+        });
+        ui.label("Category:");
+        egui::ComboBox::from_id_salt("customize_category").selected_text(category.clone()).show_ui(ui, |ui| {
+            ui.selectable_value(&mut category, ALL_COMMANDS.to_owned(), ALL_COMMANDS);
+            for m in loom_commands::ui_custom::BUILTIN_MENUS {
+                ui.selectable_value(&mut category, m.to_owned(), m);
             }
         });
         let mut active = app.state.keyboard_override;

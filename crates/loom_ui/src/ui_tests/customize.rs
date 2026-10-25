@@ -444,3 +444,16 @@ fn the_customize_quick_access_menu_hides_the_menu_bar_and_a_button() {
     h.frames(2);
     assert!(edit_menu_on_bar(&h));
 }
+
+#[test]
+fn the_keyboard_category_lists_one_menus_actions() {
+    let mut h = Harness::new();
+    let win = customize(&mut h, "Keyboard");
+    assert!(h.text_rect("Select All", win).is_some(), "All Commands lists Select All");
+    h.click(h.find(Role::ComboBox, "All Commands").center());
+    h.click(menu_entry(&h, "Views"));
+    h.frames(2);
+    let win = customize_ui_rect(&h);
+    assert!(h.text_rect("Save Active View", win).is_some(), "a Views menu action");
+    assert!(h.text_rect("Select All", win).is_none(), "not an Edit menu action");
+}

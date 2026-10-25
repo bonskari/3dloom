@@ -10,6 +10,8 @@ thread_local! {
     /// While set, the menu functions list their entries' labels here instead
     /// of hiding the ones the user deleted (the Menus panel shows them all).
     static RECORD: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+    /// While recording: the actions of the entries drawn (Customize User Interface > Category).
+    static ACTIONS: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
     /// The menu bar menu being drawn (whose deleted entries are skipped).
     static CURRENT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
@@ -23,10 +25,19 @@ fn shown(app: &LoomApp, label: &str) -> bool {
     CURRENT.with(|c| !app.state.ui_custom.menus.is_hidden(&c.borrow(), plain))
 }
 
+fn record_action(action: &str) {
+    ACTIONS.with(|r| {
+        if let Some(v) = r.borrow_mut().as_mut() {
+            v.push(action.to_owned());
+        }
+    });
+}
+
 fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str) {
     if !shown(app, label) {
         return;
     }
+    record_action(action);
     if menu_button(ui, &app.state, label, action).clicked() {
         app.dispatch_named(action);
         ui.close_menu();
@@ -43,6 +54,7 @@ fn cmd(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, c: Command) {
     if !shown(app, label) {
         return;
     }
+    record_action(c.name());
     if menu_button(ui, &app.state, label, c.name()).clicked() {
         let _ = app.dispatch(c);
         ui.close_menu();
@@ -71,12 +83,22 @@ fn sub(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, body: impl FnOnce(&mut
 
 /// The labels of menu `name`'s own entries (submenus by their names), as the Menus panel lists them.
 pub fn menu_labels(app: &mut LoomApp, name: &str) -> Vec<String> {
+    record(app, name).0
+}
+
+/// The actions built-in menu `name` runs (submenus included).
+pub fn menu_actions(app: &mut LoomApp, name: &str) -> Vec<String> {
+    record(app, name).1
+}
+
+fn record(app: &mut LoomApp, name: &str) -> (Vec<String>, Vec<String>) {
     RECORD.with(|r| *r.borrow_mut() = Some(Vec::new()));
+    ACTIONS.with(|r| *r.borrow_mut() = Some(Vec::new()));
     let ctx = egui::Context::default();
     let _ = ctx.run(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| builtin_menu(ui, app, name));
     });
-    RECORD.with(|r| r.borrow_mut().take()).unwrap_or_default()
+    (RECORD.with(|r| r.borrow_mut().take()).unwrap_or_default(), ACTIONS.with(|r| r.borrow_mut().take()).unwrap_or_default())
 }
 
 /// A title as a menu bar label: the accelerator letter underlined while Alt is held or the keyboard opened the bar.
