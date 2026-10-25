@@ -93,7 +93,7 @@ fn seven_shows_the_statistics_of_the_scene() {
     h.key(egui::Key::Num7);
     assert!(h.app.state.show_statistics);
     assert_eq!(crate::viewport_widget::statistics_counts(&h.app, false), [6, 12, 12, 8], "a box: 6 polygons, 12 triangles, 12 edges, 8 vertices");
-    assert!(!h.texts("Polys:").is_empty() && !h.texts("Total").is_empty(), "the statistics show in the active viewport");
+    assert!(!h.text_rects("Polys:").is_empty() && !h.text_rects("Total").is_empty(), "the statistics show in the active viewport");
     h.cmd(Command::SetStatistics { polygons: Some(false), triangles: None, edges: None, vertices: None, fps: None, scope: None, default_settings: None });
-    assert!(h.texts("Polys:").is_empty(), "Polygon Count off hides its line");
+    assert!(h.text_rects("Polys:").is_empty(), "Polygon Count off hides its line");
 }
