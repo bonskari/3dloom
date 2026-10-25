@@ -96,5 +96,6 @@ fn save_as_default_is_what_reset_scenes_start_with() {
     // Without the app's flag (tests, scripts) a reset keeps the program's views.
     let mut u = AppState::new();
     execute(&mut u, Command::ResetFile).unwrap();
-    assert_eq!(u.active().shading, AppState::new().active().shading);
+    let shadings = |s: &AppState| s.viewports.iter().map(|v| v.shading).collect::<Vec<_>>();
+    assert_eq!(shadings(&u), shadings(&AppState::new()));
 }

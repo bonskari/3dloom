@@ -18,8 +18,20 @@ fn window_rect(h: &Harness, id: egui::Id) -> Option<egui::Rect> {
 /// The topmost entry `label` of an open popup menu (a context menu or a submenu).
 fn menu_entry(h: &Harness, label: &str) -> egui::Pos2 {
     let open = menus(h);
-    let all = h.find_all(Role::Button, label);
+    let all = h.find_all(Role::Button, label.trim());
     all.iter().copied().find(|r| open.iter().any(|m| m.contains_rect(*r))).unwrap_or_else(|| panic!("no menu entry {label:?} in {open:?}: {all:?}")).center()
+}
+
+/// The Customize dialog's drop-down list that shows `text`.
+fn combo_showing(h: &Harness, text: &str) -> egui::Rect {
+    let win = customize_ui_rect(h);
+    let texts = h.text_rects(text);
+    h.widgets
+        .iter()
+        .filter(|(r, _, w)| *r == Role::ComboBox && win.contains_rect(*w))
+        .map(|w| w.2)
+        .find(|w| texts.iter().any(|t| w.expand(2.0).contains_rect(*t)))
+        .unwrap_or_else(|| panic!("no drop-down showing {text:?}"))
 }
 
 fn point_at(h: &mut Harness, p: egui::Pos2) {
@@ -127,22 +139,31 @@ fn new_toolbar(h: &mut Harness, name: &str) -> egui::Rect {
     window_rect(h, crate::toolbars::window_id(name)).expect("it floats")
 }
 
-/// Drags action `action` from the Customize dialog's action list to `to`.
-fn drag_action(h: &mut Harness, action: &str, to: egui::Pos2) {
+/// Replaces the text of the Customize dialog's Search field with `text`.
+fn search_for(h: &mut Harness, text: &str) {
     let win = customize_ui_rect(h);
     let search = h.text_rect("Search:", win).expect("the search field");
-    type_into(h, search.center() + egui::vec2(search.width() / 2.0 + 40.0, 0.0), action);
+    h.click(search.center() + egui::vec2(search.width() / 2.0 + 40.0, 0.0));
+    // Select what is there, then type over it.
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: false, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    if text.is_empty() {
+        h.key(egui::Key::Backspace);
+    } else {
+        h.run(vec![egui::Event::Text(text.to_owned())]);
+    }
     h.frames(1);
-    let row = h.find_all(Role::Button, action).into_iter().find(|r| customize_ui_rect(h).contains_rect(*r)).unwrap_or_else(|| panic!("{action} in the action list"));
+}
+
+/// Drags action `action` from the Customize dialog's action list to `to`.
+fn drag_action(h: &mut Harness, action: &str, to: egui::Pos2) {
+    search_for(h, action);
+    let rows = h.find_all(Role::Button, action);
+    let row = rows.iter().copied().find(|r| customize_ui_rect(h).contains_rect(*r)).unwrap_or_else(|| panic!("{action} in the action list: {rows:?} in {:?}", customize_ui_rect(h)));
     h.drag(row.center(), to);
     h.frames(2);
     // Clear the search for the next drag.
-    let win = customize_ui_rect(h);
-    let search = h.text_rect("Search:", win).unwrap();
-    h.click(search.center() + egui::vec2(search.width() / 2.0 + 40.0, 0.0));
-    for _ in 0..action.len() {
-        h.key(egui::Key::Backspace);
-    }
+    search_for(h, "");
 }
 
 #[test]
@@ -211,7 +232,7 @@ fn edit_button_appearance_makes_a_text_button_with_its_own_tooltip() {
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Edit Button Appearance"))).expect("the dialog");
     let text_radio = h.text_rect("Text Button", win).unwrap();
     h.click(text_radio.center());
-    let field = h.text_rect("Select and Move", win).into_iter().find(|r| r.min.y > text_radio.max.y).expect("the label field under Text Button");
+    let field = h.text_rects("Select and Move").into_iter().find(|r| win.contains_rect(*r) && r.min.y > text_radio.max.y).expect("the label field under Text Button");
     type_into(&mut h, field.center(), "MOVE");
     let ok = h.text_rect("OK", win).unwrap();
     h.click(ok.center());
@@ -284,7 +305,8 @@ fn a_quad_shortcut_opens_a_user_quad_set_and_show_all_quads_off_shows_one_quadra
     // The pointer toward the upper right: only that quadrant's entries show.
     point_at(&mut h, at + egui::vec2(30.0, -30.0));
     h.cmd(Command::ShowQuadMenu { set: "Mine".into() });
-    point_at(&mut h, at + egui::vec2(30.0, -30.0));
+    let c = h.app.quad_menu.expect("Show Quad Menu opens it").at;
+    point_at(&mut h, c + egui::vec2(30.0, -30.0));
     let open = menus(&h);
     let shown = |h: &Harness, l: &str| h.find_all(Role::Button, l).iter().any(|r| open.iter().any(|m| m.contains_rect(*r)));
     assert!(shown(&h, "Select All") && !shown(&h, "Select None"), "one quadrant at a time");
@@ -305,7 +327,7 @@ fn a_new_menu_on_the_menu_bar_runs_its_actions_and_a_deleted_entry_leaves_its_me
     h.click(h.text_rect("On Menu Bar", customize_ui_rect(&h)).unwrap().center());
     assert!(h.app.state.ui_custom.menus.user_menu("Game").unwrap().on_bar);
     // The Edit menu: right-click its own Clone entry > Delete Menu Item.
-    let combo = h.find(Role::ComboBox, "Game");
+    let combo = combo_showing(&h, "Game");
     h.click(combo.center());
     h.click(menu_entry(&h, "Edit"));
     h.frames(2);
@@ -377,7 +399,7 @@ fn colors_panel_colours_the_viewport_background_and_the_scheme_turns_the_ui_ligh
     h.cmd(Command::SetUiColor { element: "Perspective Background Top".into(), color: [200, 10, 10] });
     assert!(has_fill(&h, egui::Color32::from_rgb(200, 10, 10)), "the Perspective gradient starts with it");
     assert!(h.ctx.style().visuals.dark_mode);
-    let scheme = h.find(Role::ComboBox, "Dark");
+    let scheme = combo_showing(&h, "Dark");
     h.click(scheme.center());
     h.click(menu_entry(&h, "Light"));
     h.frames(2);
@@ -454,11 +476,14 @@ fn the_customize_quick_access_menu_hides_the_menu_bar_and_a_button() {
 fn the_keyboard_category_lists_one_menus_actions() {
     let mut h = Harness::new();
     let win = customize(&mut h, "Keyboard");
-    assert!(h.text_rect("Select All", win).is_some(), "All Commands lists Select All");
-    h.click(h.find(Role::ComboBox, "All Commands").center());
+    // The list draws only the rows in view: search narrows it first.
+    let _ = win;
+    search_for(&mut h, "Select");
+    assert!(h.text_rect("Select All", customize_ui_rect(&h)).is_some(), "All Commands lists Select All");
+    h.click(combo_showing(&h, "All Commands").center());
     h.click(menu_entry(&h, "Views"));
     h.frames(2);
-    let win = customize_ui_rect(&h);
-    assert!(h.text_rect("Save Active View", win).is_some(), "a Views menu action");
-    assert!(h.text_rect("Select All", win).is_none(), "not an Edit menu action");
+    assert!(h.text_rect("Select All", customize_ui_rect(&h)).is_none(), "Select All is not a Views menu action");
+    search_for(&mut h, "Save Active");
+    assert!(h.text_rect("Save Active View", customize_ui_rect(&h)).is_some(), "a Views menu action");
 }

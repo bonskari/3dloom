@@ -51,7 +51,8 @@ fn holding_a_flyout_button_opens_it_and_the_release_picks_an_entry() {
     h.run(vec![egui::Event::PointerMoved(entry.center())]);
     h.run(vec![egui::Event::PointerButton { pos: entry.center(), button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
     h.frames(2);
-    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::OrbitSelected, "releasing over the entry picks it");
+    let open: Vec<egui::Rect> = menus(&h);
+    assert_eq!(h.app.state.nav_mode, loom_input::NavMode::OrbitSelected, "releasing over the entry {entry:?} picks it (popups after: {open:?})");
 }
 
 #[test]

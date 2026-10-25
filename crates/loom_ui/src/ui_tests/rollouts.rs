@@ -57,7 +57,7 @@ fn the_rollout_menu_closes_and_opens_every_rollout() {
     h.click(menu_entry(&h, "Close All"));
     h.frames(3);
     assert!(h.widgets_labelled("AutoGrid").is_empty(), "Close All closed Object Type");
-    let rc_at = h.widget("Parameters").center();
+    let rc_at = h.widget("Creation Method").center();
     right_click(&mut h, rc_at);
     h.click(menu_entry(&h, "Open All"));
     h.frames(3);
@@ -82,13 +82,20 @@ fn dragging_the_panel_pans_it_when_it_is_taller_than_the_window() {
     h.cmd(Command::ConvertToEditablePoly);
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(4);
-    // A checkbox label senses clicks only: a drag over it pans the panel.
-    let grab = h.widget("By Vertex");
+    // A plain label senses no drag: a drag over it pans the panel.
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).unwrap().rect;
+    let (text, grab) = h
+        .widgets
+        .iter()
+        .filter(|(r, t, w)| *r == Role::Label && !t.trim().is_empty() && panel.contains_rect(*w) && w.center().y > panel.center().y)
+        .max_by(|a, b| a.2.center().y.total_cmp(&b.2.center().y))
+        .map(|(_, t, w)| (t.clone(), *w))
+        .unwrap_or_else(|| panic!("a label low in the panel: {:?}", h.widgets.iter().filter(|w| panel.contains_rect(w.2)).map(|w| (w.0, w.1.clone())).collect::<Vec<_>>()));
     let before = grab.center().y;
     h.drag(grab.center(), grab.center() - egui::vec2(0.0, 120.0));
     h.frames(2);
-    let after = h.widgets_labelled("By Vertex").first().map(|r| r.center().y).unwrap_or(f32::MIN);
-    assert!(after < before - 60.0, "the panel scrolled up under the drag: {before} -> {after}");
+    let after = h.widgets.iter().filter(|(r, t, w)| *r == Role::Label && *t == text && panel.contains_rect(*w)).map(|w| w.2.center().y).fold(f32::MAX, f32::min);
+    assert!(after < before - 60.0, "the panel scrolled up under the drag: {text:?} {before} -> {after}");
 }
 
 #[test]

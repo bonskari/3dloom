@@ -7,7 +7,7 @@ use egui::accesskit::Role;
 
 fn menu_entry(h: &Harness, label: &str) -> egui::Pos2 {
     let open = menus(h);
-    let all = h.find_all(Role::Button, label);
+    let all = h.find_all(Role::Button, label.trim());
     all.iter().copied().find(|r| open.iter().any(|m| m.contains_rect(*r))).unwrap_or_else(|| panic!("no menu entry {label:?}")).center()
 }
 
