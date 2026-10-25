@@ -80,7 +80,8 @@ fn alt_right_click_quad_sets_the_reference_coordinate_system() {
 #[test]
 fn right_click_on_spinner_snap_opens_preferences() {
     let mut h = Harness::new();
-    right_click(&mut h, h.find(Role::Button, "Spinner Snap Toggle").center());
+    let p = h.find(Role::Button, "Spinner Snap Toggle").center();
+    right_click(&mut h, p);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::Preferences));
     assert!(!h.app.state.prefs.spinner_snap, "the right-click does not toggle it");
 }
@@ -118,7 +119,8 @@ fn slider_thumb(h: &Harness) -> egui::Pos2 {
 fn right_click_on_the_time_slider_opens_create_key() {
     let mut h = Harness::new();
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
-    right_click(&mut h, slider_thumb(&h));
+    let p = slider_thumb(&h);
+    right_click(&mut h, p);
     let d = h.app.track_bar.create_key.expect("the Create Key dialog opens");
     assert_eq!((d.source, d.destination), (0, 0));
     h.click_text_anywhere("Cancel");
@@ -150,7 +152,8 @@ fn the_track_bar_opens_and_closes_the_mini_curve_editor() {
 #[test]
 fn right_click_on_a_time_control_opens_time_configuration() {
     let mut h = Harness::new();
-    right_click(&mut h, h.find(Role::Button, "Go to Start Frame").center());
+    let p = h.find(Role::Button, "Go to Start Frame").center();
+    right_click(&mut h, p);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::TimeConfiguration));
     assert!(!h.app.state.playing);
 }
