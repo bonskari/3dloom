@@ -32,8 +32,6 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     }
     egui::TopBottomPanel::top("menubar").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
-            quick_access(ui, app);
-            ui.separator();
             ui.menu_button("File", |ui| {
                 use loom_commands::PendingFileAction as A;
                 if menu_button(ui, &app.state, "New", "New Scene").clicked() {
@@ -480,27 +478,6 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             }
         });
     });
-}
-
-/// The Quick Access toolbar: New Scene, Open File, Save File, Undo, Redo.
-fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
-    use loom_commands::PendingFileAction as A;
-    use crate::icons::{self, Icon};
-    if Icon::new(icons::NEW_SCENE, "New Scene").show(ui, &app.state).clicked() {
-        app.request_file_action(A::New);
-    }
-    if Icon::new(icons::OPEN_FILE, "Open File").show(ui, &app.state).clicked() {
-        app.request_file_action(A::Open);
-    }
-    if Icon::new(icons::SAVE_FILE, "Save File").show(ui, &app.state).clicked() {
-        app.dispatch_named("Save File");
-    }
-    if Icon::new(icons::UNDO, "Undo Scene Operation").enabled(app.state.undo.can_undo()).show(ui, &app.state).clicked() {
-        app.dispatch_named("Undo Scene Operation");
-    }
-    if Icon::new(icons::REDO, "Redo Scene Operation").enabled(app.state.undo.can_redo()).show(ui, &app.state).clicked() {
-        app.dispatch_named("Redo Scene Operation");
-    }
 }
 
 /// One object is selected and it has instances (Edit > Select Instances).

@@ -41,18 +41,79 @@ fn light(h: &Harness, id: NodeId) -> loom_scene::light::LightObject {
     h.app.state.scene.node(id).unwrap().object.light().expect("a light").clone()
 }
 
-/// The ground-plane (z = 0) point under screen point `p` in the active viewport as it is now.
-fn ground_hit(h: &Harness, p: egui::Pos2) -> Vec3 {
-    let i = h.app.state.active_viewport;
-    let rect = h.app.viewport_rects[i];
-    let inv = h.app.camera_for(i).view_projection(rect.width() / rect.height()).inverse();
-    let ndc = |z: f32| inv.project_point3(Vec3::new((p.x - rect.min.x) / rect.width() * 2.0 - 1.0, 1.0 - (p.y - rect.min.y) / rect.height() * 2.0, z));
-    let (a, b) = (ndc(0.0), ndc(1.0));
-    a + (b - a) * (a.z / (a.z - b.z))
-}
-
 fn sel(h: &Harness) -> Vec<NodeId> {
     h.app.state.selection.iter().copied().collect()
+}
+
+fn panel_width(h: &Harness) -> f32 {
+    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).expect("panel state").rect.width()
+}
+
+/// The texts right of `x` on a tall screen (what widens the panel).
+fn widest_texts(h: &mut Harness) -> Vec<(String, f32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(String, f32)>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            egui::Shape::Text(t) => out.push((t.galley.text().to_string(), t.galley.rect.translate(t.pos.to_vec2()).max.x)),
+            _ => {}
+        }
+    }
+    h.time += 0.03;
+    let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 4000.0))), time: Some(h.time), ..Default::default() };
+    let app = &mut h.app;
+    let shapes = h.ctx.run(input, |ctx| app.frame(ctx)).shapes;
+    let mut all = Vec::new();
+    for s in &shapes {
+        walk(&s.shape, &mut all);
+    }
+    all.sort_by(|a, b| b.1.total_cmp(&a.1));
+    all.truncate(10);
+    all
+}
+
+/// Creating a light ends on the Modify panel: its rollouts must not widen
+/// the command panel, or every viewport shifts after a creation.
+#[test]
+fn light_and_sun_rollouts_keep_the_command_panel_width() {
+    use loom_commands::light::LightKind;
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 4000.0));
+    h.frames(3);
+    let start = panel_width(&h);
+    let mut cases: Vec<(String, Command)> = LightKind::ALL.iter().chain(LightKind::PHOTOMETRIC.iter()).map(|k| (k.label().to_owned(), Command::CreateLight { kind: *k, position: [0.0, -80.0, 60.0], target: [0.0; 3] })).collect();
+    cases.push(("Sunlight".into(), Command::CreateSunlight { daylight: false, position: [0.0; 3], radius: 30.0, orbital_scale: None }));
+    for (label, cmd) in cases {
+        h.cmd(Command::ResetFile);
+        h.cmd(cmd);
+        h.app.panel_tab = crate::Tab::Modify;
+        h.frames(3);
+        let w = panel_width(&h);
+        let wide = if (w - start).abs() > 1.0 {
+            let mut v: Vec<(String, f32, f32)> = h.widgets.iter().filter(|w| w.2.min.x > 1000.0).map(|w| (format!("{:?} {}", w.0, w.1), w.2.min.x, w.2.max.x)).collect();
+            v.sort_by(|a, b| b.2.total_cmp(&a.2));
+            v.truncate(12);
+            format!("{v:?} {:?}", widest_texts(&mut h))
+        } else {
+            String::new()
+        };
+        assert!((w - start).abs() <= 1.0, "{label}: the panel grew from {start} to {w}; rightmost widgets {wide}");
+    }
+}
+
+/// The view does not move when a creation drag ends (the panel keeps its width).
+#[test]
+fn creating_a_target_light_does_not_move_the_viewports() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.panel_tab = crate::Tab::Create;
+    h.frames(2);
+    let before = h.app.viewport_rects.clone();
+    h.app.create_kind = Some(crate::CreateKind::Light(loom_commands::light::LightKind::TargetLight));
+    let (a, b) = (h.screen_of(Vec3::new(-40.0, -40.0, 0.0)), h.screen_of(Vec3::new(30.0, 20.0, 0.0)));
+    h.drag(a, b);
+    h.frames(2);
+    assert_eq!(h.app.panel_tab, crate::Tab::Modify, "creation ends on the Modify panel");
+    assert_eq!(h.app.viewport_rects, before);
 }
 
 #[test]
@@ -90,10 +151,7 @@ fn dragging_a_target_light_puts_the_light_at_the_press_and_its_target_at_the_rel
     let t = l.target.expect("a target light");
     let at = h.app.state.scene.world_matrix(t).w_axis.truncate();
     let eye = h.app.state.scene.world_matrix(id).w_axis.truncate();
-    // Where the release lands with the viewport as it is after the drag
-    // (the panel shows the new light's rollouts, which can resize the view).
-    let want = ground_hit(&h, b);
-    assert!(at.distance(want) < 0.5, "target at the release: {at} (want {want}), light at {eye}");
+    assert!(at.distance(to) < 0.5, "target at the release: {at}, light at {eye}");
 }
 
 #[test]
@@ -142,8 +200,7 @@ fn dragging_a_sunlight_sizes_its_compass_and_places_the_sun() {
         _ => 0.0,
     };
     let at = h.app.state.scene.world_matrix(compass).w_axis.truncate();
-    let want = ground_hit(&h, b).distance(at);
-    assert!((radius - want).abs() < 0.5, "the drag sets the compass radius: {radius} (want {want}), compass at {at}");
+    assert!((radius - 40.0).abs() < 0.5, "the drag sets the compass radius: {radius}, compass at {at}");
     let sun = h.app.state.scene.nodes().find(|n| matches!(&n.object, loom_scene::ObjectKind::Light(l) if l.sun.is_some())).expect("a sun").id;
     assert_eq!(h.app.state.scene.node(sun).unwrap().parent, Some(compass));
     let d = h.app.state.scene.world_matrix(sun).w_axis.truncate().length();

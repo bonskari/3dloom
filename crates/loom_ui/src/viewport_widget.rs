@@ -669,17 +669,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
 
                     // Left mouse button:
-                    //   Alt+LMB → click subtracts from the selection, drag orbits like Alt+MMB.
+                    //   Alt+LMB → click or region removes from the selection (as in the reference).
                     //   LMB without Alt → click-pick on release if drag was minimal,
                     //                     marquee area-select otherwise.
                     if let Some(start) = app.alt_click {
                         if pointer.button_down(egui::PointerButton::Primary) && start.distance(p) >= 4.0 {
                             app.alt_click = None;
-                            if !mods.ctrl && app.state.viewports[index].kind.angles().is_some() {
-                                let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
-                            }
-                            app.state.record_view_as("Orbit");
-                            nav_event(app, index, rect, InputEvent::MouseDown { button: MouseButton::Left, pos: Vec2::new(start.x, start.y), mods });
+                            app.drag_select_start = Some(start);
+                            app.region_points.clear();
                         }
                     }
                     if app.transform_drag.is_none()

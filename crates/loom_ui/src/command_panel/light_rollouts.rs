@@ -75,7 +75,17 @@ fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, prefix: &str, color:
 }
 
 fn combo(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, choices: &[&str], current: u32) {
-    egui::ComboBox::from_id_salt((name, id.0)).selected_text(choices.get(current as usize).copied().unwrap_or("")).show_ui(ui, |ui| {
+    // A long choice (a lamp name) is cut to the room left on the row: a
+    // wider box would widen the command panel and shift every viewport.
+    let room = (ui.available_width() - ui.spacing().icon_width - ui.spacing().button_padding.x * 2.0 - ui.spacing().item_spacing.x).max(40.0);
+    let text = choices.get(current as usize).copied().unwrap_or("");
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let width = ui.fonts(|f| f.layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE).size().x);
+    let mut cb = egui::ComboBox::from_id_salt((name, id.0)).selected_text(text);
+    if width > room {
+        cb = cb.width(room).truncate();
+    }
+    cb.show_ui(ui, |ui| {
         for (i, c) in choices.iter().enumerate() {
             if ui.selectable_label(current == i as u32, *c).clicked() && current != i as u32 {
                 set(app, id, name, i as f64);
@@ -380,10 +390,9 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
         ui.label("Dimming:");
         let resulting = ph.from_candela(ph.candela.get() * ph.dim(), unit, l.falloff.get());
         ui.label(format!("Resulting Intensity: {resulting:.1} {}", INTENSITY_UNITS[unit.min(2) as usize]));
-        ui.horizontal(|ui| {
-            check(ui, app, id, "Dimming On", "", ph.dimming_on.get());
-            number(ui, app, id, "Dimming", "%", ph.dimming.get(), false);
-        });
+        // The toggle and the percentage on rows of their own: side by side they widened the panel.
+        check(ui, app, id, "Dimming On", "Dimming", ph.dimming_on.get());
+        number(ui, app, id, "Dimming", "Percent:", ph.dimming.get(), false);
         check(ui, app, id, "Incandescent Shift", "Incandescent lamp color shift when dimming", ph.incandescent_shift.get());
         ui.separator();
         ui.label("Far Attenuation:");
@@ -477,6 +486,9 @@ fn sunlight(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
         ui.horizontal(|ui| {
             whole(ui, "Month:", s.month, 1..=12, &mut e.month);
             whole(ui, "Day:", s.day, 1..=31, &mut e.day);
+        });
+        // Year on its own row: three spinners side by side widened the panel.
+        ui.horizontal(|ui| {
             ui.label("Year:");
             let mut y = s.year;
             let r = ui.add(crate::spinner::spin(ui, &mut y, 1900..=2100).speed(0.1));
