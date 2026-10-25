@@ -147,7 +147,7 @@ pub fn fbx_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let mut done = false;
     let range = app.state.frame_range;
     egui::Window::new(file_title(app, "FBX Export")).id(egui::Id::new("fbx_export_options")).open(open).default_pos(window_pos(ctx)).resizable(false).default_width(360.0).show(ctx, |ui| {
-        egui::ScrollArea::vertical().max_height(scroll_height(ctx)).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height((ui.available_height() - 40.0).min(scroll_height(ctx))).show(ui, |ui| {
             presets(ui, ctx, app, D, &o.preset);
             section(ui, "Include", true, |ui| {
                 section(ui, "Geometry", true, |ui| {
@@ -280,7 +280,7 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         }
     };
     egui::Window::new(file_title(app, "FBX Import")).id(egui::Id::new("fbx_import_options")).open(open).default_pos(window_pos(ctx)).resizable(false).default_width(360.0).show(ctx, |ui| {
-        egui::ScrollArea::vertical().max_height(scroll_height(ctx)).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height((ui.available_height() - 40.0).min(scroll_height(ctx))).show(ui, |ui| {
             presets(ui, ctx, app, D, &o.preset);
             section(ui, "Statistics", false, |ui| {
                 if let Some(e) = info["error"].as_str() {
