@@ -1435,6 +1435,8 @@ impl Modifier {
             (Modifier::Surface { flip, .. }, "Flip Normals") => *flip = b,
             (Modifier::Surface { remove_interior, .. }, "Remove Interior Patches") => *remove_interior = b,
             (Modifier::Surface { steps, .. }, "Steps") => *steps = u.min(100),
+            (Modifier::EditPatch { patch, .. }, "View Steps") => patch.steps.set(u.min(100)),
+            (Modifier::EditPatch { patch, .. }, "Show Interior Edges") => patch.show_interior = b,
             (Modifier::BevelProfile { cap_start, .. }, "Cap Start") => *cap_start = b,
             (Modifier::BevelProfile { cap_end, .. }, "Cap End") => *cap_end = b,
             (Modifier::AffectRegion(d), "Falloff") => d.falloff.set(v.max(0.0)),

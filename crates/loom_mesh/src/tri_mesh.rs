@@ -538,6 +538,29 @@ pub fn split(mesh: &Mesh, faces: &[FaceId]) -> Result<(Mesh, Mesh), String> {
     Ok((build(&keep, &kv)?, build(&part, &pv)?))
 }
 
+/// Attach: `other` joins `mesh` as triangles (its own edge flags kept, its
+/// polygons cut), moved by `other_to_this`.
+pub fn attach(mesh: &Mesh, other: &Mesh, other_to_this: glam::Mat4) -> Result<Mesh, String> {
+    let other = from_poly(other)?;
+    let (mut im, mut vis) = read(mesh);
+    let (oim, ovis) = read(&other);
+    let base = im.positions.len() as u32;
+    for (i, p) in oim.positions.iter().enumerate() {
+        let id = im.add_vertex(other_to_this.transform_point3(*p), None);
+        im.vattrs[id as usize] = oim.vattrs[i];
+        if oim.keep.contains(&(i as u32)) {
+            im.keep.insert(id);
+        }
+    }
+    for (f, v) in oim.faces.iter().zip(ovis) {
+        let mut nf = f.clone();
+        nf.ids = f.ids.iter().map(|i| i + base).collect();
+        im.faces.push(nf);
+        vis.push(v);
+    }
+    build(&im, &vis)
+}
+
 /// The faces' normals at a vertex, summed (unit length).
 fn region_normals(mesh: &Mesh, im: &IndexedMesh, sel: &BTreeSet<usize>) -> BTreeMap<u32, Vec3> {
     let mut n: BTreeMap<u32, Vec3> = BTreeMap::new();
