@@ -4058,3 +4058,40 @@ fn a_bitmap_on_an_imported_skinned_character_shows_in_the_viewport() {
     let bm = &bitmaps.get(t as usize).expect("the bitmap is uploaded").1;
     assert_eq!((bm.width, bm.height), (8, 8));
 }
+
+/// An FBX whose material has a diffuse bitmap (external file, or embedded in
+/// the .fbx) imports with Show Map in Viewport on, and its box shows the
+/// bitmap in the shaded viewport with varying UVs.
+#[test]
+fn an_imported_fbx_with_a_diffuse_bitmap_shows_it_in_the_viewport() {
+    for embed in [false, true] {
+        let mut h = Harness::new();
+        let dir = std::env::temp_dir().join(format!("loom-shadedtex-fbx-{}-{embed}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("checks.png");
+        image::RgbaImage::from_fn(8, 8, |x, y| if (x + y) % 2 == 0 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) }).save(&png).unwrap();
+        poly_box(&mut h);
+        h.cmd(Command::DropBitmap { path: png.to_string_lossy().into(), node: None });
+        h.cmd(Command::SetExchangeOption { dialog: "fbx_export".into(), name: "embed_media".into(), value: serde_json::json!(embed) });
+        let fbx = dir.join("box.fbx");
+        h.cmd(Command::ExportFile { path: Some(fbx.to_string_lossy().into()) });
+        assert!(fbx.exists());
+        if embed {
+            std::fs::remove_file(&png).unwrap();
+        }
+        h.cmd(Command::NewScene);
+        h.cmd(Command::ImportFile { path: Some(fbx.to_string_lossy().into()) });
+        h.frames(2);
+        let scene = &h.app.state.scene;
+        let i = h.app.world_meshes().iter().position(|(n, _)| scene.node(*n).is_some_and(|n| n.material.is_some())).expect("the imported box has its material");
+        let style = h.app.world_styles[i].clone();
+        let loom_render::TextureSel::Bitmap(t) = style.texture else { panic!("embed {embed}: the bitmap shows: {:?} {:?}", style.texture, h.app.last_error) };
+        let (verts, _, _) = loom_render::triangulate_styled(&h.app.world_display()[i], &style);
+        assert!(verts.iter().any(|v| v.uv != verts[0].uv), "the box keeps its UVs");
+        let upload = h.app.pending_upload.lock().unwrap().clone();
+        let bitmaps = upload.map(|u| u.2).unwrap_or_default();
+        let bm = &bitmaps.get(t as usize).expect("the bitmap is uploaded").1;
+        assert_eq!((bm.width, bm.height, &bm.rgba[..4]), (8, 8, &[255, 0, 0, 255][..]));
+    }
+}
