@@ -29,6 +29,13 @@ fn find_text(h: &mut Harness, label: &str) -> Option<egui::Rect> {
     all.into_iter().rev().find(|(t, _)| t == label).map(|(_, r)| r)
 }
 
+/// Clicks the button whose accessible name is `name` (icon buttons carry
+/// their name), below the menu bar.
+fn click_named(h: &mut Harness, name: &str) {
+    let r = h.find_all(egui::accesskit::Role::Button, name).into_iter().find(|r| r.min.y > 30.0).unwrap_or_else(|| panic!("no button named {name:?}"));
+    h.click(r.center());
+}
+
 fn click_text(h: &mut Harness, label: &str) {
     let r = find_text(h, label).unwrap_or_else(|| panic!("no widget labelled {label:?}"));
     h.click(r.center());
@@ -738,7 +745,7 @@ fn the_command_panel_keeps_its_width_across_tabs_and_poly_levels() {
     }
     h.app.panel_tab = crate::Tab::Create;
     for cat in ["Shapes", "Lights", "Cameras", "Helpers", "Space Warps", "Systems", "Geometry"] {
-        click_text(&mut h, cat);
+        click_named(&mut h, cat);
         h.frames(2);
         assert!((panel_width(&h) - start).abs() <= 1.0, "Create > {cat}: the panel grew from {start} to {}", panel_width(&h));
     }
@@ -857,16 +864,16 @@ fn navigation_buttons_zoom_pan_orbit_and_right_click_leaves_them() {
     let r = h.app.viewport_rects[h.app.state.active_viewport];
     let c = r.center();
     let cam = h.app.state.active().camera.clone();
-    click_text(&mut h, "Zoom");
+    click_named(&mut h, "Zoom Mode");
     assert_eq!(h.app.state.nav_mode, loom_input::NavMode::Zoom);
     h.drag(c, c + egui::vec2(0.0, -60.0));
     assert!((h.app.state.active().camera.distance - cam.distance).abs() > 0.1, "Zoom drag changes the distance");
     assert!(h.app.state.selection.len() == 1, "and does not touch the selection");
-    click_text(&mut h, "Pan");
+    click_named(&mut h, "Pan View");
     let t = h.app.state.active().camera.target;
     h.drag(c, c + egui::vec2(60.0, 0.0));
     assert!(h.app.state.active().camera.target.distance(t) > 0.1, "Pan drag moves the target");
-    click_text(&mut h, "Orbit");
+    click_named(&mut h, "Orbit View Mode");
     let yaw = h.app.state.active().camera.yaw;
     h.drag(c, c + egui::vec2(60.0, 0.0));
     assert_ne!(h.app.state.active().camera.yaw, yaw, "Orbit drag orbits");
@@ -997,7 +1004,7 @@ fn modifier_stack_drag_reorders_and_trash_removes() {
     assert_eq!(names(&h), vec!["Taper".to_string(), "Bend".to_string()], "dragging Taper onto Bend puts it below");
     click_text(&mut h, "Bend");
     assert_eq!(h.app.state.scene.node(id).unwrap().active_entry, Some(1), "Bend (now on top) is active");
-    click_text(&mut h, "🗑");
+    click_named(&mut h, "Remove modifier from the stack");
     assert_eq!(names(&h), vec!["Taper".to_string()], "the trash removes the active entry");
 }
 
@@ -1138,7 +1145,7 @@ fn ctrl_z_after_a_click_restores_the_previous_selection() {
 fn command_panel_tabs_switch_on_click() {
     let mut h = Harness::new();
     for (label, tab) in [("Modify", crate::Tab::Modify), ("Hierarchy", crate::Tab::Hierarchy), ("Motion", crate::Tab::Motion), ("Display", crate::Tab::Display), ("Utilities", crate::Tab::Utilities), ("Create", crate::Tab::Create)] {
-        click_text(&mut h, label);
+        click_named(&mut h, label);
         assert_eq!(h.app.panel_tab, tab, "{label}");
     }
 }
