@@ -287,9 +287,13 @@ fn an_action_dropped_into_a_quadrant_shows_in_the_quad_menu_and_a_deleted_entry_
     let lr = h.text_rect("Lower Right", win).unwrap();
     h.click(lr.center());
     let list = h.text_rect("Clone", customize_ui_rect(&h)).expect("the program's Clone entry is listed");
-    drag_action(&mut h, "Select All", list.center() + egui::vec2(0.0, 30.0));
+    // An action at the top of the list, dragged into the entries.
+    let win = customize_ui_rect(&h);
+    let below = h.text_rect("Search:", win).expect("the action list").max.y;
+    let row = h.find_all(Role::Button, "Undo Scene Operation").into_iter().find(|r| win.contains_rect(*r) && r.max.x < list.min.x && r.min.y > below).expect("Undo Scene Operation in the action list");
+    assert!(drag_carrying(&mut h, row.center(), list.center() + egui::vec2(0.0, 30.0)), "the drag carries the action");
     let q = h.app.state.ui_custom.quad("Default Viewport Quad");
-    assert_eq!(q.items[1].iter().map(|i| i.item.as_str()).collect::<Vec<_>>(), ["Select All"]);
+    assert_eq!(q.items[1].iter().map(|i| i.item.as_str()).collect::<Vec<_>>(), ["Undo Scene Operation"]);
     // Right-click the program's Clone entry: Delete Menu Item.
     let clone = h.text_rect("Clone", customize_ui_rect(&h)).unwrap();
     right_click(&mut h, clone.center());
@@ -313,11 +317,10 @@ fn an_action_dropped_into_a_quadrant_shows_in_the_quad_menu_and_a_deleted_entry_
     assert!(h.has(Role::Button, "moves"), "the quadrant shows its label");
     let open = menus(&h);
     assert!(!h.find_all(Role::Button, "Clone").iter().any(|r| open.iter().any(|m| m.contains_rect(*r))), "Clone is gone from the quad");
-    let entry = h.find_all(Role::Button, "Select All").into_iter().find(|r| open.iter().any(|m| m.contains_rect(*r))).expect("Select All in the quad");
+    let entry = h.find_all(Role::Button, "Undo Scene Operation").into_iter().find(|r| open.iter().any(|m| m.contains_rect(*r))).expect("Undo Scene Operation in the quad");
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
-    h.cmd(Command::SelectNone);
     h.click(entry.center());
-    assert_eq!(h.app.state.selection.len(), 1, "the added entry runs");
+    assert_eq!(h.app.state.scene.len(), 0, "the added entry runs: the box is undone");
 }
 
 #[test]
