@@ -97,7 +97,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::ExportSelected => ("Export Selected", "fbx,obj", "Save"),
         Dialog::SaveSelected => ("Save Selected", "loom", "Save"),
         Dialog::ArchiveFile => ("Archive", "zip,txt", "Save"),
-        Dialog::MergeFile => ("Merge File", "loom", "Open"),
+        Dialog::MergeFile => ("Merge File", "loom,max", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", IMAGES_READ, "Open"),
         Dialog::BackgroundFile => ("Select Background Image", IMAGES_READ, "Open"),
         Dialog::MaterialMap { .. } | Dialog::MaterialBitmap => ("Select Bitmap Image File", IMAGES_READ, "Open"),
@@ -307,8 +307,8 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
         }
     }
     if dialog == Dialog::MergeFile {
-        return match loom_commands::file::read(&path) {
-            Ok(doc) => {
+        return match loom_commands::file::read_any(&path) {
+            Ok((doc, _)) => {
                 let names: Vec<String> = doc.scene.nodes().map(|n| n.name.clone()).collect();
                 app.state.merge_pending = Some((path, names));
                 app.state.dialog = Some(Dialog::MergeObjects);

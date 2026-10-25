@@ -298,9 +298,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Ok(json!({ "dialog": "MergeFile" }));
             };
             let path = std::path::PathBuf::from(path);
-            let doc = crate::file::read(&path)?;
+            let (doc, warnings) = crate::file::read_any(&path)?;
             let label = format!("Merge {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
             let ids = crate::file::merge(state, &doc, names.as_deref(), duplicates.as_deref().unwrap_or_default(), &label)?;
+            if crate::max_io::is_max(&path) {
+                state.import_report = warnings;
+            }
             state.selection_mode = SelectionMode::Object;
             Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
         }

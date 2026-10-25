@@ -310,6 +310,15 @@ pub fn read(path: &Path) -> Result<Document, String> {
     Ok(doc)
 }
 
+/// A .loom file, or a .max file read as a document (with what it left out).
+pub fn read_any(path: &Path) -> Result<(Document, Vec<String>), String> {
+    if crate::max_io::is_max(path) {
+        crate::max_io::document(path)
+    } else {
+        Ok((read(path)?, Vec::new()))
+    }
+}
+
 /// A GUI-less overview of a document (the MCP `loom_read_file` tool).
 pub fn summary(doc: &Document) -> Value {
     let nodes: Vec<Value> = doc
@@ -362,8 +371,53 @@ pub struct MergeDuplicate {
 /// dropped (world transform kept), instances of nodes outside the set
 /// turned into copies, layers kept by name (created when the scene lacks
 /// them). A name the scene already has follows its answer in `duplicates`
-/// (auto-renamed without one). Returns the new ids.
+/// (auto-renamed without one). Their materials come along (a library
+/// material of the same name and settings is shared). Returns the new ids.
 pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], label: &str) -> Result<Vec<NodeId>, String> {
+    // New ids follow the merge order (parents first).
+    let mut ids: Vec<NodeId> = merge_map(state, doc, names, duplicates, label)?.into_values().collect();
+    ids.sort();
+    Ok(ids)
+}
+
+/// Copies `id` (and the sub-materials it holds) from `src` into `library`,
+/// sharing a library material of the same name and settings; returns its id there.
+fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::MaterialId, library: &mut loom_scene::MaterialLibrary, done: &mut BTreeMap<loom_scene::MaterialId, loom_scene::MaterialId>, depth: u32) -> Option<loom_scene::MaterialId> {
+    use loom_scene::material::MaterialKind;
+    if let Some(d) = done.get(&id) {
+        return Some(*d);
+    }
+    let mut m = src.get(&id)?.clone();
+    if depth > 16 {
+        return None;
+    }
+    match &mut m.kind {
+        MaterialKind::Standard => {}
+        MaterialKind::MultiSub(list) => {
+            for s in list.iter_mut() {
+                s.material = s.material.and_then(|c| carry_material(src, c, library, done, depth + 1));
+            }
+        }
+        MaterialKind::Blend(b) => {
+            for c in b.materials.iter_mut() {
+                *c = c.and_then(|c| carry_material(src, c, library, done, depth + 1));
+            }
+        }
+    }
+    let to = match library.iter().find(|(_, x)| **x == m) {
+        Some((k, _)) => *k,
+        None => {
+            let k = loom_scene::material::next_material_id(library);
+            library.insert(k, m);
+            k
+        }
+    };
+    done.insert(id, to);
+    Some(to)
+}
+
+/// `merge`, returning each merged node's file id → its new id.
+pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], label: &str) -> Result<BTreeMap<NodeId, NodeId>, String> {
     let src = &doc.scene;
     let mut chosen: Vec<NodeId> = match names {
         None => src.nodes().map(|n| n.id).collect(),
@@ -392,12 +446,24 @@ pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, dup
         !(in_scene.contains(name) && answer(name).is_some_and(|d| d.action == "skip"))
     });
     if chosen.is_empty() {
-        return Ok(Vec::new());
+        return Ok(BTreeMap::new());
     }
     // Parents before children, so Scene::add_node sees the parent.
     chosen.sort_by_key(|id| (src.depth(*id), id.0));
     chosen.dedup();
-    let mut changes = Vec::with_capacity(chosen.len() + 1);
+    let mut changes = Vec::with_capacity(chosen.len() + 2);
+    // Materials the merged objects use, into the scene's library.
+    let mut library = state.scene.materials.clone();
+    let mut material_map = BTreeMap::new();
+    for id in &chosen {
+        if let Some(m) = src.node(*id).and_then(|n| n.material) {
+            carry_material(&src.materials, m, &mut library, &mut material_map, 0);
+        }
+    }
+    if library != state.scene.materials {
+        let slots = state.scene.material_editor.clone();
+        changes.push(Change::SetMaterials { before: Box::new((state.scene.materials.clone(), slots.clone())), after: Box::new((library, slots)) });
+    }
     // Layers by name: reuse the scene's, create the missing ones.
     let mut layers = state.scene.layers.clone();
     let mut layer_map: BTreeMap<u32, u32> = BTreeMap::new();
@@ -454,6 +520,7 @@ pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, dup
         }
         node.remap_ids(&remap);
         node.layer = layer_map.get(&node.layer).copied().unwrap_or(state.scene.current_layer);
+        node.material = node.material.and_then(|m| material_map.get(&m).copied());
         let action = if in_scene.contains(&node.name) { answer(&node.name).map(|d| d.action.as_str()).unwrap_or("auto_rename") } else { "auto_rename" };
         match action {
             "merge" | "delete_old" => {}
@@ -486,5 +553,5 @@ pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, dup
     state.mesh_dirty = true;
     state.selection = ids.iter().copied().collect();
     state.sub_selection.clear();
-    Ok(ids)
+    Ok(map)
 }

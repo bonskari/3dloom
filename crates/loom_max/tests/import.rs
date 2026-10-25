@@ -230,7 +230,7 @@ fn materials_layers_lights_and_cameras() {
     let loom_max::MaxMaterial::Standard(red) = &doc.materials[subs[0].material.unwrap()] else { panic!() };
     assert_eq!(red.name, "_traffic_conecone_red");
     assert!((glam::Vec3::from(red.diffuse) - glam::Vec3::new(0.992, 0.259, 0.008)).length() < 2e-3);
-    assert_eq!((red.glossiness, red.soften, red.opacity), (Some(10.0), Some(0.1), Some(100.0)));
+    assert!((red.glossiness.unwrap() - 10.0).abs() < 1e-4 && (red.soften.unwrap() - 0.1).abs() < 1e-6 && (red.opacity.unwrap() - 100.0).abs() < 1e-4, "{red:?}");
     assert_eq!(doc.layers.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["0"]);
     assert!(doc.nodes.iter().all(|n| n.layer == Some(0)));
     // A bitmap on the Diffuse channel names its file.

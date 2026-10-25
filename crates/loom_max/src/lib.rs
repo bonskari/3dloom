@@ -471,7 +471,7 @@ pub fn read(bytes: &[u8]) -> Result<MaxDoc, String> {
                 MaxKind::Dummy { size }
             }
             Some(o) if scene.is(o, SPLINE_SHAPE) || scene.is(o, LINE) => match shape::read(&scene.objects[o]) {
-                Ok(s) => MaxKind::Shape(s),
+                Ok(s) => MaxKind::Shape(MaxShape { line: scene.is(o, LINE), ..s }),
                 Err(e) => {
                     w.push(format!("{name}: {} not read ({e}); a helper keeps its place", scene.name(o)));
                     MaxKind::Other(scene.name(o))

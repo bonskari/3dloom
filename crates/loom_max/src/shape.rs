@@ -35,6 +35,8 @@ pub struct MaxSpline {
 pub struct MaxShape {
     pub splines: Vec<MaxSpline>,
     pub steps: u32,
+    /// A Line object (listed as Line), not a SplineShape.
+    pub line: bool,
 }
 
 const KNOT: usize = 52;
@@ -72,5 +74,5 @@ pub fn read(obj: &Chunk) -> Result<MaxShape, String> {
         }
         splines.push(MaxSpline { knots, closed });
     }
-    Ok(MaxShape { splines, steps })
+    Ok(MaxShape { splines, steps, line: false })
 }
