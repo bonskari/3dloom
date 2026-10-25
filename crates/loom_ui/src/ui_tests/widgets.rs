@@ -145,6 +145,9 @@ fn the_track_bar_opens_and_closes_the_mini_curve_editor() {
     assert!(h.app.track_bar.mini_curve_editor);
     assert!(h.has(Role::Button, "Close Mini Curve Editor") && !h.has(Role::Button, "Open Mini Curve Editor"), "it replaces the track bar");
     assert!(!h.text_rects("Mini Curve Editor").is_empty());
+    let popups: Vec<(egui::Id, egui::Rect)> = h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().filter(|l| l.order == egui::Order::Foreground).filter_map(|l| m.area_rect(l.id).map(|r| (l.id, r))).collect());
+    let inside: Vec<&(Role, String, egui::Rect)> = h.widgets.iter().filter(|w| popups.iter().any(|(_, r)| r.contains_rect(w.2))).take(12).collect();
+    assert!(popups.is_empty(), "no popup opens with it: {popups:?}, widgets in it: {inside:?}");
     let close = h.find(Role::Button, "Close Mini Curve Editor");
     h.click(close.center());
     assert!(!h.app.track_bar.mini_curve_editor, "Close at {close:?} closes it; hit: {}", h.app.ui_hit(&h.ctx, close.center()));
