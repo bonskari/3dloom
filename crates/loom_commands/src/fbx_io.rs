@@ -681,12 +681,16 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
             kind
         };
         let parent = node.parent.filter(|p| set.contains(p)).and_then(|p| index_of.get(&p).copied());
-        let (translation, rotation_deg, scale) = if parent.is_some() {
-            (node.transform.position.get(), node.transform.rotation.get(), node.transform.scale.get())
+        // Constant evaluated corrections need a default transform too: the
+        // animation baker intentionally omits tracks that never change.
+        let world = state.scene.world_matrix(id);
+        let local = if parent.is_some() {
+            node.parent.map(|p| state.scene.world_matrix(p).inverse() * world).unwrap_or(world)
         } else {
-            let t = Transform::from_matrix(state.scene.world_matrix(id));
-            (t.position.get(), t.rotation.get(), t.scale.get())
+            world
         };
+        let t = Transform::from_matrix(local);
+        let (translation, rotation_deg, scale) = (t.position.get(), t.rotation.get(), t.scale.get());
         nodes.push(FbxNode { name: node.name.clone(), parent, translation, rotation_deg, scale, kind, skin, blend_shapes });
     }
     if nodes.is_empty() {
