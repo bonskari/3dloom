@@ -382,7 +382,7 @@ pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, dup
 
 /// Copies `id` (and the sub-materials it holds) from `src` into `library`,
 /// sharing a library material of the same name and settings; returns its id there.
-fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::MaterialId, library: &mut loom_scene::MaterialLibrary, done: &mut BTreeMap<loom_scene::MaterialId, loom_scene::MaterialId>, depth: u32) -> Option<loom_scene::MaterialId> {
+pub(crate) fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::MaterialId, library: &mut loom_scene::MaterialLibrary, done: &mut BTreeMap<loom_scene::MaterialId, loom_scene::MaterialId>, depth: u32) -> Option<loom_scene::MaterialId> {
     use loom_scene::material::MaterialKind;
     if let Some(d) = done.get(&id) {
         return Some(*d);
@@ -418,6 +418,22 @@ fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::MaterialId,
 
 /// `merge`, returning each merged node's file id → its new id.
 pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], label: &str) -> Result<BTreeMap<NodeId, NodeId>, String> {
+    let (changes, map) = merge_changes(state, doc, names, duplicates)?;
+    if changes.is_empty() {
+        return Ok(map);
+    }
+    state.undo.commit(label, Change::Group(changes), &mut state.scene)?;
+    state.mesh_dirty = true;
+    let mut ids: Vec<NodeId> = map.values().copied().collect();
+    ids.sort();
+    state.selection = ids.into_iter().collect();
+    state.sub_selection.clear();
+    Ok(map)
+}
+
+/// What `merge` commits (layers, materials, the deleted old objects, the new
+/// nodes) and the file id → new id map, without committing.
+pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate]) -> Result<(Vec<Change>, BTreeMap<NodeId, NodeId>), String> {
     let src = &doc.scene;
     let mut chosen: Vec<NodeId> = match names {
         None => src.nodes().map(|n| n.id).collect(),
@@ -446,7 +462,7 @@ pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>,
         !(in_scene.contains(name) && answer(name).is_some_and(|d| d.action == "skip"))
     });
     if chosen.is_empty() {
-        return Ok(BTreeMap::new());
+        return Ok((Vec::new(), BTreeMap::new()));
     }
     // Parents before children, so Scene::add_node sees the parent.
     chosen.sort_by_key(|id| (src.depth(*id), id.0));
@@ -499,7 +515,6 @@ pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>,
     let map: BTreeMap<NodeId, NodeId> = chosen.iter().enumerate().map(|(i, id)| (*id, NodeId(first + i as u64))).collect();
     let remap = |id: NodeId| map.get(&id).copied();
     let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().filter(|n| !old.contains(&n.id)).map(|n| n.name.clone()).collect();
-    let mut ids = Vec::with_capacity(chosen.len());
     for old_id in &chosen {
         let mut node = src.node(*old_id).expect("chosen from the file").clone();
         // A parent left behind: keep the world transform.
@@ -546,12 +561,7 @@ pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>,
             _ => {}
         }
         taken.insert(node.name.clone());
-        ids.push(node.id);
         changes.push(Change::AddNode(node));
     }
-    state.undo.commit(label, Change::Group(changes), &mut state.scene)?;
-    state.mesh_dirty = true;
-    state.selection = ids.iter().copied().collect();
-    state.sub_selection.clear();
-    Ok(map)
+    Ok((changes, map))
 }

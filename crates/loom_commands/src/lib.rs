@@ -27,6 +27,7 @@ pub mod fbx_io;
 pub mod exchange;
 pub mod obj_io;
 pub mod max_io;
+pub mod xref;
 pub mod rig;
 pub mod helpers;
 pub mod extras;

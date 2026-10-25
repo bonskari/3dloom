@@ -307,6 +307,23 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.selection_mode = SelectionMode::Object;
             Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
         }
+        C::XrefObjects { path, names, automatic } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::XrefObjectsFile);
+                return Ok(json!({ "dialog": "XrefObjectsFile" }));
+            };
+            state.selection_mode = SelectionMode::Object;
+            crate::xref::add(state, std::path::Path::new(&path), names.as_deref(), false, automatic.unwrap_or(true))
+        }
+        C::XrefScene { path, automatic } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::XrefSceneFile);
+                return Ok(json!({ "dialog": "XrefSceneFile" }));
+            };
+            crate::xref::add(state, std::path::Path::new(&path), None, true, automatic.unwrap_or(true))
+        }
+        C::UpdateXrefs { path } => crate::xref::update(state, path.as_deref()),
+        C::RemoveXref { path } => crate::xref::remove(state, &path),
         C::AutoBackupNow => {
             let path = crate::autosave::backup_now(state)?;
             Ok(json!({ "path": path }))
@@ -3204,6 +3221,7 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 }
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
+    crate::xref::guard(&state.scene, &change)?;
     let change = share_with_instances(&state.scene, change);
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
