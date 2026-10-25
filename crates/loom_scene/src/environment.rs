@@ -120,21 +120,20 @@ impl Default for Fog {
     }
 }
 
-/// Volume Fog Parameters (no gizmo: the fog fills the scene).
+/// Volume Fog Parameters (no gizmo: the fog fills the scene; without noise
+/// its density is even, so it is drawn exactly, with no steps to set).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VolumeFog {
     pub color: Param<Vec3>,
     /// 0–20.
     pub density: Param<f32>,
-    /// Max Steps: raymarching samples.
-    pub max_steps: u32,
     pub fog_background: bool,
 }
 
 impl Default for VolumeFog {
     fn default() -> Self {
-        Self { color: p(Vec3::ONE), density: p(5.0), max_steps: 64, fog_background: true }
+        Self { color: p(Vec3::ONE), density: p(5.0), fog_background: true }
     }
 }
 

@@ -183,9 +183,9 @@ fn fog_volume_fog_and_volume_light_parameters() {
     assert!(err(&mut s, "Fog Parameters", json!({ "index": 0, "top": 1.0, "bottom": 2.0 })).contains("Top"));
     ok(&mut s, "Add Atmosphere", json!({ "kind": "Volume Fog" }));
     assert!(err(&mut s, "Fog Parameters", json!({ "index": 1, "near": 1.0 })).contains("not a Fog"));
-    ok(&mut s, "Volume Fog Parameters", json!({ "index": 1, "density": 12.0, "color": [0.9, 0.9, 1.0], "max_steps": 32 }));
+    ok(&mut s, "Volume Fog Parameters", json!({ "index": 1, "density": 12.0, "color": [0.9, 0.9, 1.0], "fog_background": false }));
     let AtmosphereKind::VolumeFog(v) = &s.scene.environment.atmospheres[1].kind else { panic!("volume fog") };
-    assert_eq!((v.density.get(), v.max_steps), (12.0, 32));
+    assert_eq!((v.density.get(), v.fog_background), (12.0, false));
 
     // Volume Light picks lights only.
     let light = ok(&mut s, "Create Light", json!({ "kind": "omni", "position": [0.0, 0.0, 50.0], "target": [0.0, 0.0, 0.0] }))["id"].as_u64().unwrap();

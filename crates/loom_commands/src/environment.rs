@@ -252,16 +252,10 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             commit(state, "Fog Parameters", e)?;
             Ok(json!({ "index": index }))
         }
-        C::VolumeFogParameters { index, color, density, max_steps, fog_background } => {
+        C::VolumeFogParameters { index, color, density, fog_background } => {
             let AtmosphereKind::VolumeFog(f) = &mut atmosphere_mut(&mut e, index)?.kind else { return Err(not_a(index, "Volume Fog")) };
             set_opt(&mut f.color, color.map(colour).transpose()?);
             set_opt(&mut f.density, density.map(|v| range("density", v, 0.0, 20.0)).transpose()?);
-            if let Some(s) = max_steps {
-                if !(1..=256).contains(&s) {
-                    return Err(format!("max steps {s}: 1-256"));
-                }
-                f.max_steps = s;
-            }
             if let Some(v) = fog_background {
                 f.fog_background = v;
             }
