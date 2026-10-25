@@ -7,6 +7,7 @@ pub mod create_tool;
 pub mod dialogs;
 pub mod gizmo;
 mod hotkeys;
+pub mod icons;
 pub mod label_menus;
 mod light_overlay;
 pub mod live;
@@ -1011,6 +1012,7 @@ impl LoomApp {
     /// One frame of the whole UI (what eframe calls each repaint; the UI
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
+        icons::install(ctx);
         ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);

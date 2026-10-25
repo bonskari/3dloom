@@ -347,19 +347,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
 /// The Quick Access toolbar: New Scene, Open File, Save File, Undo, Redo.
 fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
     use loom_commands::PendingFileAction as A;
-    if ui.button("🗋").on_hover_name(&app.state, "New Scene").clicked() {
+    use crate::icons::{self, Icon};
+    if Icon::new(icons::NEW_SCENE, "New Scene").show(ui, &app.state).clicked() {
         app.request_file_action(A::New);
     }
-    if ui.button("🗁").on_hover_name(&app.state, "Open File").clicked() {
+    if Icon::new(icons::OPEN_FILE, "Open File").show(ui, &app.state).clicked() {
         app.request_file_action(A::Open);
     }
-    if ui.button("💾").on_hover_name(&app.state, "Save File").clicked() {
+    if Icon::new(icons::SAVE_FILE, "Save File").show(ui, &app.state).clicked() {
         app.dispatch_named("Save File");
     }
-    if ui.add_enabled(app.state.undo.can_undo(), egui::Button::new("Undo")).on_hover_name(&app.state, "Undo Scene Operation").clicked() {
+    if Icon::new(icons::UNDO, "Undo Scene Operation").enabled(app.state.undo.can_undo()).show(ui, &app.state).clicked() {
         app.dispatch_named("Undo Scene Operation");
     }
-    if ui.add_enabled(app.state.undo.can_redo(), egui::Button::new("Redo")).on_hover_name(&app.state, "Redo Scene Operation").clicked() {
+    if Icon::new(icons::REDO, "Redo Scene Operation").enabled(app.state.undo.can_redo()).show(ui, &app.state).clicked() {
         app.dispatch_named("Redo Scene Operation");
     }
 }
