@@ -1450,6 +1450,8 @@ pub struct AppState {
     pub material_editor_open: bool,
     /// Material Editor > Material/Map Navigator: its own modeless window.
     pub material_navigator_open: bool,
+    /// The Material Editor's current material library (Put to Library, Mtl Library).
+    pub material_library: crate::material_library::MaterialLibraryState,
     /// Bumped by Reload Bitmaps: the viewports read their image files again.
     pub bitmap_generation: u64,
     /// Display panel and viewport display settings (Display Color, statistics, Object Color dialog...).
@@ -1779,6 +1781,7 @@ impl AppState {
             dialog: None,
             material_editor_open: false,
             material_navigator_open: false,
+            material_library: Default::default(),
             bitmap_generation: 0,
             display: Default::default(),
             dialog_purpose: DialogPurpose::Select,

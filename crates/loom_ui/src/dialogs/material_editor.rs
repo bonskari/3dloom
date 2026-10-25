@@ -559,6 +559,10 @@ fn menu(ui: &mut egui::Ui, app: &mut LoomApp) {
                 app.state.dialog = Some(Dialog::MaterialBrowser(if at_map { BrowserFor::MapType } else { BrowserFor::MaterialType }));
                 ui.close_menu();
             }
+            ui.separator();
+            if workflow_buttons(ui, app) {
+                ui.close_menu();
+            }
         });
         ui.menu_button("Navigation", |ui| {
             if ui.button("Go to Parent").clicked() {
@@ -689,6 +693,12 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("material_magnify"), Some(slot)));
             ui.close_menu();
         }
+        let used = app.state.scene.material_editor.slots[slot].is_some_and(|id| app.state.scene.nodes().any(|n| n.material == Some(id)));
+        if ui.add_enabled(used, egui::Button::new("Select By Material")).clicked() {
+            let _ = app.dispatch(Command::MaterialEditorSlot { slot: slot as u32 });
+            select_by_material(app);
+            ui.close_menu();
+        }
         ui.separator();
         let shown = app.state.scene.material_editor.options.slots_shown;
         for (label, n) in [("3 X 2 Sample Windows", 6u32), ("5 X 3 Sample Windows", 15), ("6 X 4 Sample Windows", 24)] {
@@ -786,7 +796,78 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         if ui.add_enabled(below_top, egui::Button::new("Go Forward to Sibling")).clicked() {
             let _ = app.dispatch(Command::MaterialEditorGoForwardToSibling);
         }
+        workflow_buttons(ui, app);
     });
+}
+
+/// Put Material to Scene, Make Material Copy, Make Unique, Put to Library,
+/// Select By Material (toolbar and Material menu alike).
+fn workflow_buttons(ui: &mut egui::Ui, app: &mut LoomApp) -> bool {
+    let ed = &app.state.scene.material_editor;
+    let top = ed.slots[ed.active].filter(|id| app.state.scene.materials.contains_key(id));
+    let at_sub = matches!(ed.path.last(), Some(NavStep::Sub(_)));
+    let used = top.is_some_and(|id| app.state.scene.nodes().any(|n| n.material == Some(id)));
+    let mut clicked = false;
+    if ui.add_enabled(top.is_some(), egui::Button::new("Put Material to Scene")).on_hover_text("Objects using a material of this name get this one").clicked() {
+        let _ = app.dispatch(Command::PutMaterialToScene);
+        clicked = true;
+    }
+    if ui.add_enabled(used, egui::Button::new("Make Material Copy")).on_hover_text("The slot gets a copy no object uses").clicked() {
+        let _ = app.dispatch(Command::MakeMaterialCopy);
+        clicked = true;
+    }
+    if ui.add_enabled(at_sub, egui::Button::new("Make Unique")).on_hover_text("This sub-material gets a copy of its own").clicked() {
+        let _ = app.dispatch(Command::MakeUnique);
+        clicked = true;
+    }
+    if ui.button("Put to Library").clicked() {
+        app.state.dialog = Some(Dialog::PutToLibrary);
+        clicked = true;
+    }
+    if ui.add_enabled(used, egui::Button::new("Select By Material")).clicked() {
+        select_by_material(app);
+        clicked = true;
+    }
+    clicked
+}
+
+/// Select By Material: the objects using the slot's material are selected
+/// and Select From Scene opens with them highlighted.
+fn select_by_material(app: &mut LoomApp) {
+    if app.dispatch(Command::SelectByMaterial).is_ok() {
+        let _ = app.dispatch(Command::SelectByName);
+    }
+}
+
+/// Put to Library: the name, then OK puts the slot's material into the current library.
+pub fn put_to_library(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("put_to_library_name");
+    let mut name: String = ctx.data(|d| d.get_temp(id)).unwrap_or_else(|| app.state.scene.slot_material(app.state.scene.material_editor.active).name);
+    let mut done = None;
+    egui::Window::new("Put to Library").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Name:");
+            ui.text_edit_singleline(&mut name);
+        });
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                done = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                done = Some(false);
+            }
+        });
+    });
+    match done {
+        Some(ok) => {
+            if ok {
+                let _ = app.dispatch(Command::PutToLibrary { name: Some(name) });
+            }
+            ctx.data_mut(|d| d.remove::<String>(id));
+            *open = false;
+        }
+        None => ctx.data_mut(|d| d.insert_temp(id, name)),
+    }
 }
 
 /// Eyedropper, the name field and the Type button.
@@ -1419,8 +1500,18 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
         }
         egui::ScrollArea::vertical().id_salt("multi_sub_list").max_height(10.0 * 24.0).show(ui, |ui| {
             egui::Grid::new("multi_sub_rows").num_columns(6).spacing([6.0, 3.0]).show(ui, |ui| {
-                for h in ["", "ID", "Name", "Sub-Material", "", "On/Off"] {
-                    ui.label(egui::RichText::new(h).small());
+                // The ID / Name / Sub-Material headers sort the list.
+                for (h, sort) in [("", None), ("ID", Some("ID")), ("Name", Some("Name")), ("Sub-Material", Some("Sub")), ("", None), ("On/Off", None)] {
+                    match sort {
+                        Some(by) => {
+                            if ui.small_button(h).on_hover_text(format!("Sort by {h}")).clicked() {
+                                let _ = app.dispatch(Command::MultiSubSort { by: by.into() });
+                            }
+                        }
+                        None => {
+                            ui.label(egui::RichText::new(h).small());
+                        }
+                    }
                 }
                 ui.end_row();
                 for (i, s) in list.iter().enumerate() {
@@ -1740,14 +1831,17 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
     let wants_map = matches!(for_, BrowserFor::Map(_) | BrowserFor::MapType);
     let mut picked: Option<String> = None;
     let mut cancel = false;
+    let icons_id = egui::Id::new("material_browser_icons");
+    let mut icons: bool = ctx.data(|d| d.get_temp(icons_id)).unwrap_or(false);
     egui::Window::new("Material/Map Browser").open(open).collapsible(false).resizable(false).default_width(360.0).show(ctx, |ui| {
         ui.label(egui::RichText::new("Browse From:").strong());
         ui.horizontal_wrapped(|ui| {
-            for (i, label) in ["Mtl Editor", "Active Slot", "Selected", "Scene", "New"].iter().enumerate() {
+            // 5 Mtl Library comes first, as in the reference.
+            for (i, label) in [(5u8, "Mtl Library"), (0, "Mtl Editor"), (1, "Active Slot"), (2, "Selected"), (3, "Scene"), (4, "New")] {
                 // Maps and material types come only from New; Get Material only from existing materials.
                 let enabled = if for_ == BrowserFor::GetMaterial { i != 4 } else { i == 4 };
-                if ui.add_enabled(enabled, egui::RadioButton::new(from == i as u8, *label)).clicked() {
-                    from = i as u8;
+                if ui.add_enabled(enabled, egui::RadioButton::new(from == i, label)).clicked() {
+                    from = i;
                     selected = None;
                 }
             }
@@ -1757,7 +1851,14 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
             let (mut materials, mut maps) = (!wants_map, wants_map);
             ui.add_enabled(false, egui::Checkbox::new(&mut materials, "Materials"));
             ui.add_enabled(false, egui::Checkbox::new(&mut maps, "Maps"));
+            ui.separator();
+            ui.label(egui::RichText::new("View:").strong());
+            ui.radio_value(&mut icons, false, "List");
+            ui.radio_value(&mut icons, true, "List + Icons");
         });
+        if from == 5 {
+            library_file_row(ui, app, selected.as_deref());
+        }
         ui.separator();
         let entries: Vec<(String, String)> = if from == 4 {
             if wants_map {
@@ -1765,6 +1866,8 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
             } else {
                 MaterialKind::TYPES.iter().map(|t| (t.to_string(), t.to_string())).collect()
             }
+        } else if from == 5 {
+            app.state.material_library.entries.iter().map(|e| (format!("lib:{}", e.name), format!("{} [{}]", e.name, e.material().map_or("?", |m| m.kind.label())))).collect()
         } else {
             browse_materials(app, from)
         };
@@ -1773,7 +1876,18 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
                 ui.weak("(none)");
             }
             for (key, label) in &entries {
-                let r = ui.selectable_label(selected.as_deref() == Some(key.as_str()), label);
+                let r = ui
+                    .horizontal(|ui| {
+                        if icons && from != 4 {
+                            if let Some(sample) = browser_sample(app, key) {
+                                let setup = PreviewSetup::from_options(&app.state.scene.material_editor.options, SampleType::Sphere, (0.0, 0.0));
+                                let tex = preview_texture(ui.ctx(), app, egui::Id::new(("material_browser_icon", key.clone())), &sample, 24, &setup);
+                                ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(24.0, 24.0)));
+                            }
+                        }
+                        ui.selectable_label(selected.as_deref() == Some(key.as_str()), label)
+                    })
+                    .inner;
                 if r.clicked() {
                     selected = Some(key.clone());
                 }
@@ -1795,6 +1909,7 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
     ctx.data_mut(|d| {
         d.insert_temp(from_id, from);
         d.insert_temp(sel_id, selected.clone());
+        d.insert_temp(icons_id, icons);
     });
     if cancel {
         *open = false;
@@ -1837,12 +1952,60 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
             }
         }
         BrowserFor::GetMaterial => {
-            if let Ok(id) = choice.parse::<u32>() {
+            if let Some(name) = choice.strip_prefix("lib:") {
+                let _ = app.dispatch(Command::GetFromLibrary { name: name.into() });
+            } else if let Ok(id) = choice.parse::<u32>() {
                 let _ = app.dispatch(Command::GetMaterial { material: id });
             }
             app.state.dialog = None;
         }
     }
+}
+
+/// The sample a Browser row shows (List + Icons): a scene or library material.
+fn browser_sample(app: &LoomApp, key: &str) -> Option<Sample> {
+    if let Some(name) = key.strip_prefix("lib:") {
+        let e = app.state.material_library.entries.iter().find(|e| e.name == name)?;
+        let s = loom_scene::material::surfaces(&e.materials, e.root)?;
+        return Some(Sample::Surfaces(s));
+    }
+    let id = MaterialId(key.parse().ok()?);
+    Some(Sample::Surfaces(loom_scene::material::surfaces(&app.state.scene.materials, id)?))
+}
+
+/// Mtl Library > File: Open, Merge, Save, Save As, New, and Delete for the selected material.
+fn library_file_row(ui: &mut egui::Ui, app: &mut LoomApp, selected: Option<&str>) {
+    let lib = &app.state.material_library;
+    let title = match &lib.path {
+        Some(p) => format!("{}{}", std::path::Path::new(p).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(), if lib.dirty { " *" } else { "" }),
+        None => format!("(unsaved library){}", if lib.dirty { " *" } else { "" }),
+    };
+    let has_path = lib.path.is_some();
+    ui.label(egui::RichText::new(title).italics());
+    ui.horizontal_wrapped(|ui| {
+        ui.label(egui::RichText::new("File:").strong());
+        if ui.button("Open...").clicked() {
+            app.state.dialog = Some(Dialog::OpenMaterialLibrary);
+        }
+        if ui.button("Merge...").clicked() {
+            app.state.dialog = Some(Dialog::MergeMaterialLibrary);
+        }
+        if ui.add_enabled(has_path, egui::Button::new("Save")).clicked() {
+            let _ = app.dispatch(Command::SaveMaterialLibrary { path: None });
+        }
+        if ui.button("Save As...").clicked() {
+            app.state.dialog = Some(Dialog::SaveMaterialLibrary);
+        }
+        if ui.button("New").clicked() {
+            let _ = app.dispatch(Command::NewMaterialLibrary);
+        }
+        let name = selected.and_then(|s| s.strip_prefix("lib:"));
+        if ui.add_enabled(name.is_some(), egui::Button::new("Delete from Library")).clicked() {
+            if let Some(n) = name {
+                let _ = app.dispatch(Command::DeleteFromLibrary { name: n.into() });
+            }
+        }
+    });
 }
 
 /// Materials to browse: (id, label) from the editor's slots, the active

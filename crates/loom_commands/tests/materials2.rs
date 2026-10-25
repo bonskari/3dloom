@@ -243,3 +243,125 @@ fn shader_and_extended_values_survive_a_loom_file() {
     assert_eq!((m.shading.shader, m.shading.metalness), (Shader::Strauss, 55.0));
     assert!((m.extended.ior - 1.33).abs() < 1e-5);
 }
+
+fn boxed(s: &mut AppState, x: f32) -> loom_scene::NodeId {
+    execute(s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [x, 0.0, 0.0], size: [10.0; 3] }).unwrap();
+    *s.selection.iter().next().unwrap()
+}
+
+#[test]
+fn make_material_copy_cools_the_slot_and_put_to_scene_puts_it_back() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s, 0.0);
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let hot = s.scene.node(a).unwrap().material.unwrap();
+    execute(&mut s, Command::MakeMaterialCopy).unwrap();
+    let copy = s.scene.material_editor.slots[0].unwrap();
+    assert_ne!(copy, hot, "the slot holds a copy");
+    assert_eq!(s.scene.materials[&copy].name, s.scene.materials[&hot].name, "with the same name");
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [0, 255, 0] }).unwrap();
+    assert_ne!(s.scene.materials[&hot].diffuse.get(), glam::Vec3::Y, "editing the copy leaves the scene alone");
+    execute(&mut s, Command::PutMaterialToScene).unwrap();
+    assert_eq!(s.scene.node(a).unwrap().material, Some(copy), "the object takes the edited copy");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.node(a).unwrap().material, Some(hot));
+    // Nothing of that name in the scene: an error.
+    execute(&mut s, Command::RenameMaterial { slot: None, name: "Other".into() }).unwrap();
+    assert!(execute(&mut s, Command::PutMaterialToScene).is_err());
+}
+
+#[test]
+fn make_unique_gives_a_shared_sub_material_a_copy() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) }).unwrap();
+    execute(&mut s, Command::MultiSubSetNumber { number: 2 }).unwrap();
+    let top = s.scene.material_editor.slots[0].unwrap();
+    // Share sub-material 1 in row 2 too (as an instance would be).
+    let first = s.scene.materials[&top].children()[0].unwrap();
+    if let loom_scene::material::MaterialKind::MultiSub(list) = &mut s.scene.materials.get_mut(&top).unwrap().kind {
+        list[1].material = Some(first);
+    }
+    assert!(execute(&mut s, Command::MakeUnique).is_err(), "not at a sub-material level");
+    execute(&mut s, Command::MaterialEditorGoToSub { index: 1 }).unwrap();
+    execute(&mut s, Command::MakeUnique).unwrap();
+    let kids = s.scene.materials[&top].children();
+    assert_eq!(kids[0], Some(first));
+    assert_ne!(kids[1], Some(first), "row 2 has its own copy now");
+}
+
+#[test]
+fn select_by_material_selects_its_users() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s, 0.0);
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let _b = boxed(&mut s, 30.0);
+    let c = boxed(&mut s, 60.0);
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    execute(&mut s, Command::SelectNodes { ids: vec![], op: loom_commands::SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::SelectByMaterial).unwrap();
+    assert_eq!(s.selection.iter().copied().collect::<Vec<_>>(), vec![a, c]);
+    execute(&mut s, Command::MaterialEditorSlot { slot: 3 }).unwrap();
+    assert!(execute(&mut s, Command::SelectByMaterial).is_err(), "an unused slot has no users");
+}
+
+#[test]
+fn multi_sub_rows_sort_by_id_name_and_sub_material() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) }).unwrap();
+    execute(&mut s, Command::MultiSubSetNumber { number: 3 }).unwrap();
+    for (i, (id, name)) in [(3u32, "b"), (1, "c"), (2, "a")].into_iter().enumerate() {
+        execute(&mut s, Command::MultiSubSetEntry { index: i as u32, id: Some(id), name: Some(name.into()), enabled: None, color: None }).unwrap();
+    }
+    let rows = |s: &AppState| match &s.scene.slot_material(0).kind {
+        loom_scene::material::MaterialKind::MultiSub(l) => l.iter().map(|r| (r.id, r.name.clone())).collect::<Vec<_>>(),
+        _ => panic!(),
+    };
+    execute(&mut s, Command::MultiSubSort { by: "ID".into() }).unwrap();
+    assert_eq!(rows(&s).iter().map(|r| r.0).collect::<Vec<_>>(), vec![1, 2, 3]);
+    execute(&mut s, Command::MultiSubSort { by: "Name".into() }).unwrap();
+    assert_eq!(rows(&s).iter().map(|r| r.1.as_str()).collect::<Vec<_>>(), vec!["a", "b", "c"]);
+    assert!(execute(&mut s, Command::MultiSubSort { by: "Colour".into() }).is_err());
+}
+
+#[test]
+fn material_libraries_put_get_save_open_and_merge() {
+    let dir = std::env::temp_dir().join(format!("loom-matlib-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = AppState::new();
+    // A Blend with two sub-materials goes into the library with them.
+    execute(&mut s, Command::SetMaterialType { kind: "Blend".into(), keep_old: Some(false) }).unwrap();
+    execute(&mut s, Command::RenameMaterial { slot: None, name: "Mix Me".into() }).unwrap();
+    execute(&mut s, Command::PutToLibrary { name: None }).unwrap();
+    execute(&mut s, Command::MaterialEditorSlot { slot: 1 }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] }).unwrap();
+    execute(&mut s, Command::PutToLibrary { name: Some("Red".into()) }).unwrap();
+    assert_eq!(s.material_library.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["Mix Me", "Red"]);
+    assert_eq!(s.material_library.entries[0].materials.len(), 3, "the Blend and its two materials");
+    let path = dir.join("mine.lmat").to_string_lossy().into_owned();
+    execute(&mut s, Command::SaveMaterialLibrary { path: Some(path.clone()) }).unwrap();
+    assert!(!s.material_library.dirty);
+
+    // A fresh session opens it and gets the Blend into a slot as new materials.
+    let mut t = AppState::new();
+    execute(&mut t, Command::OpenMaterialLibrary { path: path.clone() }).unwrap();
+    assert_eq!(t.material_library.entries.len(), 2);
+    execute(&mut t, Command::MaterialEditorSlot { slot: 5 }).unwrap();
+    execute(&mut t, Command::GetFromLibrary { name: "Mix Me".into() }).unwrap();
+    let m = t.scene.slot_material(5);
+    assert_eq!((m.name.as_str(), m.kind.label()), ("Mix Me", "Blend"));
+    let kids: Vec<_> = m.children().into_iter().flatten().collect();
+    assert_eq!(kids.len(), 2);
+    assert!(kids.iter().all(|k| t.scene.materials.contains_key(k)), "its sub-materials came along");
+    execute(&mut t, Command::UndoSceneOperation).unwrap();
+    assert_ne!(t.scene.slot_material(5).name, "Mix Me", "one undo step");
+
+    // Merge adds (and replaces by name); Delete removes; New empties.
+    execute(&mut t, Command::NewMaterialLibrary).unwrap();
+    execute(&mut t, Command::PutToLibrary { name: Some("Red".into()) }).unwrap();
+    execute(&mut t, Command::MergeMaterialLibrary { path: path.clone(), names: None }).unwrap();
+    assert_eq!(t.material_library.entries.len(), 2, "Red replaced, Mix Me added");
+    execute(&mut t, Command::DeleteFromLibrary { name: "Red".into() }).unwrap();
+    assert_eq!(t.material_library.entries.len(), 1);
+    assert!(execute(&mut t, Command::GetFromLibrary { name: "Red".into() }).is_err());
+    assert!(execute(&mut t, Command::OpenMaterialLibrary { path: dir.join("missing.lmat").to_string_lossy().into_owned() }).is_err());
+}

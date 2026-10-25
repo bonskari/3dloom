@@ -56,6 +56,11 @@ pub fn handles(c: &C) -> bool {
             | C::SetSampleType { .. }
             | C::PickMaterialFromObject
             | C::MaterialMapNavigator
+            | C::MakeMaterialCopy
+            | C::MakeUnique
+            | C::PutMaterialToScene
+            | C::SelectByMaterial
+            | C::MultiSubSort { .. }
     )
 }
 
@@ -277,6 +282,50 @@ fn add_sub(lib: &mut MaterialLibrary, id: MaterialId) -> Result<u16, String> {
     let next = list.iter().map(|s| s.id).max().unwrap_or(0) + 1;
     list.push(SubMaterial { id: next, name: String::new(), material: Some(material), enabled: true });
     Ok(next)
+}
+
+/// Gives `m`'s sub-materials (and theirs) copies of their own in `lib`.
+pub(crate) fn deep_copy(lib: &mut MaterialLibrary, m: &mut StandardMaterial) {
+    for c in m.children_mut() {
+        if let Some(src) = c.and_then(|c| lib.get(&c).cloned()) {
+            let mut sub = src;
+            deep_copy(lib, &mut sub);
+            let id = next_material_id(lib);
+            lib.insert(id, sub);
+            *c = Some(id);
+        }
+    }
+}
+
+/// How many places use material `id`: objects, sample slots and other materials' sub-material buttons.
+fn references(state: &AppState, lib: &MaterialLibrary, id: MaterialId) -> usize {
+    let nodes = state.scene.nodes().filter(|n| n.material == Some(id)).count();
+    let slots = state.scene.material_editor.slots.iter().filter(|s| **s == Some(id)).count();
+    let parents: usize = lib.values().map(|m| m.children().iter().filter(|c| **c == Some(id)).count()).sum();
+    nodes + slots + parents
+}
+
+/// The objects using material `id` itself or through a compound material.
+pub fn users_of(state: &AppState, id: MaterialId) -> Vec<NodeId> {
+    let lib = &state.scene.materials;
+    let uses = |top: MaterialId| {
+        let mut stack = vec![top];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(m) = stack.pop() {
+            if m == id {
+                return true;
+            }
+            if seen.insert(m) {
+                stack.extend(lib.get(&m).map(|x| x.children()).unwrap_or_default().into_iter().flatten());
+            }
+        }
+        false
+    };
+    state.scene.nodes().filter(|n| n.material.is_some_and(uses)).map(|n| n.id).collect()
+}
+
+fn execute_select(state: &mut AppState, ids: Vec<u64>) -> Result<Value, String> {
+    crate::execute::execute(state, C::SelectNodes { ids, op: crate::SelectOp::Replace })
 }
 
 /// How many nodes use material `id` directly.
@@ -644,20 +693,6 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let mut after = before.clone();
             let mut m = state.scene.slot_material(f);
             // A dragged copy is a new material; a compound one copies its sub-materials too.
-            fn deep_copy(lib: &mut MaterialLibrary, m: &mut StandardMaterial) {
-                let copy_child = |lib: &mut MaterialLibrary, c: &mut Option<MaterialId>| {
-                    if let Some(src) = c.and_then(|c| lib.get(&c).cloned()) {
-                        let mut sub = src;
-                        deep_copy(lib, &mut sub);
-                        let id = next_material_id(lib);
-                        lib.insert(id, sub);
-                        *c = Some(id);
-                    }
-                };
-                for c in m.children_mut() {
-                    copy_child(lib, c);
-                }
-            }
             deep_copy(&mut after.0, &mut m);
             let id = next_material_id(&after.0);
             after.0.insert(id, m);
@@ -796,6 +831,85 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             state.pick_mode = Some(crate::state::PickMode::PickMaterial);
             Ok(json!({}))
         }
+        C::MakeMaterialCopy => {
+            let i = state.scene.material_editor.active;
+            let Some(old) = state.scene.material_editor.slots[i].filter(|id| state.scene.materials.contains_key(id)) else { return Err("the slot's material is not in the scene".into()) };
+            let before = snapshot(state);
+            let mut after = before.clone();
+            let mut m = after.0[&old].clone();
+            deep_copy(&mut after.0, &mut m);
+            let id = next_material_id(&after.0);
+            after.0.insert(id, m);
+            after.1.slots[i] = Some(id);
+            after.1.path.clear();
+            commit(state, "Make Material Copy", Change::SetMaterials { before, after })?;
+            Ok(json!({ "slot": i, "material": id.0 }))
+        }
+        C::MakeUnique => {
+            let ed = state.scene.material_editor.clone();
+            let Some(NavStep::Sub(index)) = ed.path.last().cloned() else {
+                return Err(if ed.path.is_empty() { "Make Unique works on a sub-material level".into() } else { "maps are never shared: this map is already unique".into() });
+            };
+            let top = ed.slots[ed.active].ok_or("no material in this slot")?;
+            let (parent, _) = resolve_level(&state.scene.materials, top, &ed.path[..ed.path.len() - 1]);
+            let Level::Material(parent) = parent else { return Err("no parent material".into()) };
+            let Some(sub) = state.scene.materials.get(&parent).and_then(|m| m.children().get(index as usize).copied().flatten()) else { return Err("no sub-material here".into()) };
+            if references(state, &state.scene.materials, sub) < 2 {
+                return Ok(json!({ "material": sub.0, "unique": true }));
+            }
+            let before = snapshot(state);
+            let mut after = before.clone();
+            let mut m = after.0[&sub].clone();
+            deep_copy(&mut after.0, &mut m);
+            let id = next_material_id(&after.0);
+            after.0.insert(id, m);
+            if let Some(slot) = after.0.get_mut(&parent).and_then(|p| p.children_mut().into_iter().nth(index as usize)) {
+                *slot = Some(id);
+            }
+            commit(state, "Make Unique", Change::SetMaterials { before, after })?;
+            Ok(json!({ "material": id.0 }))
+        }
+        C::PutMaterialToScene => {
+            let i = state.scene.material_editor.active;
+            let id = state.scene.material_editor.slots[i].filter(|id| state.scene.materials.contains_key(id)).ok_or("the slot holds no material yet")?;
+            let name = state.scene.materials[&id].name.clone();
+            let changes: Vec<Change> = state
+                .scene
+                .nodes()
+                .filter(|n| n.material.is_some_and(|m| m != id && state.scene.materials.get(&m).is_some_and(|mm| mm.name == name)))
+                .map(|n| Change::SetMaterial { id: n.id, before: n.material, after: Some(id) })
+                .collect();
+            if changes.is_empty() {
+                return Err(format!("no material named \"{name}\" in the scene"));
+            }
+            let n = changes.len();
+            commit(state, "Put Material to Scene", Change::Group(changes))?;
+            state.mesh_dirty = true;
+            Ok(json!({ "material": id.0, "objects": n }))
+        }
+        C::SelectByMaterial => {
+            let i = state.scene.material_editor.active;
+            let id = state.scene.material_editor.slots[i].ok_or("the slot's material is not in the scene")?;
+            let ids: Vec<u64> = users_of(state, id).into_iter().map(|n| n.0).collect();
+            if ids.is_empty() {
+                return Err("no object uses this material".into());
+            }
+            execute_select(state, ids)
+        }
+        C::MultiSubSort { by } => edit_level(state, "Sort", |lib, _, id, _| {
+            let names: std::collections::BTreeMap<MaterialId, String> = lib.iter().map(|(k, m)| (*k, m.name.clone())).collect();
+            let list = multi_list(lib, id)?;
+            match by.as_str() {
+                "ID" => list.sort_by_key(|s| s.id),
+                "Name" => list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.id.cmp(&b.id))),
+                "Sub" | "Sub-Material" => list.sort_by(|a, b| {
+                    let n = |s: &SubMaterial| s.material.and_then(|m| names.get(&m)).map(|n| n.to_lowercase()).unwrap_or_default();
+                    n(a).cmp(&n(b)).then(a.id.cmp(&b.id))
+                }),
+                other => return Err(format!("no sort \"{other}\" (ID, Name, Sub)")),
+            }
+            Ok(json!({ "by": by }))
+        }),
         C::SetMaterialEditorOption { name, value } => {
             state.scene.material_editor.options.set(&name, value)?;
             Ok(json!({ "option": name, "value": value }))

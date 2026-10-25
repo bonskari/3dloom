@@ -115,6 +115,9 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::LoadAnimation => ("Load Animation", "lxaf", "Open"),
         Dialog::PointCacheRecord { .. } => ("Save Points", "pc2", "Save"),
         Dialog::PointCacheLoad { .. } => ("Load Points", "pc2", "Open"),
+        Dialog::OpenMaterialLibrary => ("Open Material Library", "lmat", "Open"),
+        Dialog::MergeMaterialLibrary => ("Merge Material Library", "lmat", "Open"),
+        Dialog::SaveMaterialLibrary => ("Save Material Library", "lmat", "Save"),
         _ => ("File", "loom", "OK"),
     }
 }
@@ -151,6 +154,9 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::LoadAnimation => Command::LoadAnimation { path: Some(p), offset: None },
         Dialog::PointCacheRecord { index, start, end } => Command::PointCacheRecord { index, path: p, start, end },
         Dialog::PointCacheLoad { index } => Command::PointCacheLoad { index, path: p },
+        Dialog::OpenMaterialLibrary => Command::OpenMaterialLibrary { path: p },
+        Dialog::MergeMaterialLibrary => Command::MergeMaterialLibrary { path: p, names: None },
+        Dialog::SaveMaterialLibrary => Command::SaveMaterialLibrary { path: Some(p) },
         _ => return None,
     })
 }

@@ -1180,6 +1180,18 @@ commands! {
     SetSampleType => "Set Sample Type", Loom, "Sample Type flyout: Sphere, Cylinder or Cube for the active slot." { kind: String };
     PickMaterialFromObject => "Pick Material From Object", Loom, "Material Editor eyedropper: the next clicked object's material goes into the active slot (its sub-material when its selected polygons all use one ID).";
     MaterialMapNavigator => "Material/Map Navigator", Loom, "Open or close the Material/Map Navigator.";
+    MakeMaterialCopy => "Make Material Copy", Loom, "Material Editor > Make Material Copy: the active slot gets a copy of its material (same name, copies of its sub-materials), no longer the one objects use.";
+    MakeUnique => "Make Unique", Loom, "Material Editor > Make Unique: the sub-material at the current level, used in more than one place, gets a copy of its own here.";
+    PutMaterialToScene => "Put Material to Scene", Loom, "Material Editor > Put Material to Scene: the objects using a scene material with the active slot material's name get the slot's material.";
+    SelectByMaterial => "Select By Material", Loom, "Material Editor > Select By Material: select the objects that use the active slot's material (directly or as a sub-material).";
+    MultiSubSort => "Multi/Sub Sort", Loom, "Multi/Sub-Object Basic Parameters: sort the list by `by` = ID, Name or Sub (the sub-materials' names)." { by: String };
+    PutToLibrary => "Put to Library", Loom, "Material Editor > Put to Library: the active slot's material (with its sub-materials) into the current material library, under `name` (omitted = the material's name; the same name replaces)." { name: Option<String> };
+    GetFromLibrary => "Get From Library", Loom, "Material/Map Browser, Browse From Mtl Library: a copy of the library material `name` goes into the active slot." { name: String };
+    DeleteFromLibrary => "Delete From Library", Loom, "Material/Map Browser, Mtl Library: remove the material `name` from the current library." { name: String };
+    NewMaterialLibrary => "New Material Library", Loom, "Material/Map Browser, Mtl Library > File: start an empty material library.";
+    OpenMaterialLibrary => "Open Material Library", Loom, "Material/Map Browser, Mtl Library > File > Open: read a material library file (.lmat) as the current library." { path: String };
+    MergeMaterialLibrary => "Merge Material Library", Loom, "Material/Map Browser, Mtl Library > File > Merge: add a library file's materials (`names` omitted = all) to the current library; the same name replaces." { path: String, names: Option<Vec<String>> };
+    SaveMaterialLibrary => "Save Material Library", Loom, "Material/Map Browser, Mtl Library > File > Save / Save As: write the current library to `path` (omitted = the file it came from)." { path: Option<String> };
     SetKeySelectionList => "Set Key Selection List", Loom, "The Selection List beside Auto Key / Set Key: which objects Set Keys keys (a named selection set; none = Selected)." { name: Option<String> };
     SetKeySelected => "Set Key Selected", MainUI, "Key the filtered tracks of the selected objects at the current frame.";
     ClearSetKeyModeBuffer => "Clear Set Key Mode Buffer", MainUI, "Discard the Set Key mode pose.";
