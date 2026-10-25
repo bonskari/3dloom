@@ -77,6 +77,12 @@ Overlapping/touching target ranges and unowned target keys are rejected rather
 than overwritten. Gaps use native curve interpolation; this is not an
 independent overlapping NLA/crossfade mixer.
 
+## Exporting rig animation
+
+Keep Bake Animation enabled in FBX Export to sample the evaluated LoomRig pose
+throughout the animation. Constant FK/IK corrections are included in exported
+default transforms as well. Export leaves the original scene keys intact.
+
 ## Preview performance
 
 Preferences > Viewports exposes Texture Preview Size and Texture Preview Budget

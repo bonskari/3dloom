@@ -4,6 +4,7 @@
 mod kimodo;
 mod async_import;
 mod preview_cache;
+mod opacity_preview;
 mod loomrig_panel;
 mod clip_timeline;
 mod rig_timeline;
@@ -757,15 +758,20 @@ impl LoomApp {
         let mut paths=std::collections::BTreeSet::new();
         let mut variants=std::collections::BTreeSet::new();
         let mut plain_paths=std::collections::BTreeSet::new();
+        let mut opacity_variants=std::collections::BTreeSet::new();
         for (surfaces,texture) in &wanted {
             if let loom_scene::TextureDisplay::Bitmap(path)=texture {paths.insert(path.clone());plain_paths.insert(path.clone());}
             if let Some(surfaces)=surfaces {
                 let surfaces:Vec<_>=match surfaces {loom_scene::material::Surfaces::Single(s)=>vec![s.as_ref()],loom_scene::material::Surfaces::PerId(list)=>list.values().collect()};
-                for surface in surfaces {if let Some(map)=surface.viewport_map(){collect_preview_paths(map,&mut paths);if plain_preview_map(map){plain_paths.insert(map.path.clone());}else{variants.insert(loom_scene::maps::texture_key(map));}}}
+                for surface in surfaces {
+                    if let Some(map)=surface.viewport_map(){collect_preview_paths(map,&mut paths);if surface.opacity_map.is_none(){if plain_preview_map(map){plain_paths.insert(map.path.clone());}else{variants.insert(loom_scene::maps::texture_key(map));}}}
+                    if let Some(map)=surface.opacity_map.as_ref(){collect_preview_paths(map,&mut paths);opacity_variants.insert(opacity_preview::key(surface));}
+                }
             }
         }
-        let side=preview_cache::preview_side(self.state.prefs.viewport_texture_max_size,self.state.prefs.viewport_texture_budget_mb as u64*1024*1024,paths.len().max(plain_paths.len()+variants.len()));
+        let side=preview_cache::preview_side(self.state.prefs.viewport_texture_max_size,self.state.prefs.viewport_texture_budget_mb as u64*1024*1024,(paths.len()+opacity_variants.len()).max(plain_paths.len()+variants.len()+opacity_variants.len()));
         if side!=self.preview_max_side {self.preview_max_side=side;self.baked_cache.clear();}
+        paths.extend(opacity_variants.into_iter().map(|key|format!("{}:{}:{key}",self.state.bitmap_generation,self.preview_max_side)));
         self.texture_previews.retain_paths(&paths);
         let active_bakes:std::collections::BTreeSet<_>=variants.into_iter().map(|key|format!("{}:{}:{key}",self.state.bitmap_generation,self.preview_max_side)).collect();
         self.baked_cache.retain(|key,_|active_bakes.contains(key));
@@ -901,7 +907,7 @@ impl LoomApp {
         match &surfaces {
             Some(loom_scene::material::Surfaces::Single(s)) => {
                 let st = self.surface_style(s, bitmaps, index);
-                base = loom_render::MeshStyle { color: st.color, alpha: st.alpha, specular: st.specular, self_illum: st.self_illum, texture: st.texture, uv: st.uv, decal: st.decal, texture_amount: st.texture_amount, faceted: st.faceted, two_sided: st.two_sided, wire: st.wire, ..Default::default() };
+                base = loom_render::MeshStyle { color: st.color, alpha: st.alpha, specular: st.specular, self_illum: st.self_illum, texture: st.texture, texture_alpha: st.texture_alpha, uv: st.uv, decal: st.decal, texture_amount: st.texture_amount, faceted: st.faceted, two_sided: st.two_sided, wire: st.wire, ..Default::default() };
             }
             Some(loom_scene::material::Surfaces::PerId(list)) => {
                 let mut by_id = std::collections::BTreeMap::new();
@@ -924,10 +930,11 @@ impl LoomApp {
                 st.uv = loom_render::UV_IDENTITY;
                 st.decal = [false; 2];
                 st.texture_amount = 1.0;
+                st.texture_alpha = false;
             };
             let mut st = base.surface();
             plain(&mut st);
-            (base.texture, base.uv, base.decal, base.texture_amount) = (st.texture, st.uv, st.decal, st.texture_amount);
+            (base.texture, base.uv, base.decal, base.texture_amount,base.texture_alpha) = (st.texture, st.uv, st.decal, st.texture_amount,st.texture_alpha);
             if let Some(s) = sub.as_mut() {
                 s.by_id.values_mut().chain(std::iter::once(&mut s.missing)).for_each(plain);
             }
@@ -1006,6 +1013,32 @@ impl LoomApp {
         images
     }
 
+    /// A composed opacity preview is produced on the existing bounded decoder worker.
+    fn opacity_texture(&mut self,surface:&loom_scene::material::Surface,bitmaps:&mut Vec<(String,std::sync::Arc<loom_render::Bitmap>)>,index:&mut std::collections::HashMap<String,u32>)->Option<loom_render::TextureSel>{
+        let key=format!("{}:{}:{}",self.state.bitmap_generation,self.preview_max_side,opacity_preview::key(surface));
+        if let Some(i)=index.get(&key){return Some(loom_render::TextureSel::Bitmap(*i));}
+        let bitmap=if let Some(bitmap)=self.texture_previews.get(&key){Some(bitmap)}else{
+            if self.texture_previews.is_pending(&key){return None;}
+            if let Some(error)=self.texture_previews.error(&key){self.last_error=Some(error.to_owned());return None;}
+            let mut paths=std::collections::BTreeSet::new();
+            for map in surface.viewport_map().into_iter().chain(surface.opacity_map.as_ref()){collect_preview_paths(map,&mut paths);}
+            let mut snapshots=Vec::new();let mut ready=true;
+            for path in paths {
+                match self.texture_previews.request(&path,self.preview_max_side,self.state.bitmap_generation){
+                    Some(bitmap)=>snapshots.push((path,bitmap)),
+                    None=>{ready=false;if let Some(error)=self.texture_previews.error(&path){self.last_error=Some(error.to_owned());}}
+                }
+            }
+            if !ready{return None;}
+            let surface=surface.clone();let side=self.preview_max_side;
+            self.texture_previews.request_task(&key,side,self.state.bitmap_generation,Box::new(move||{
+                let images=snapshots.into_iter().map(|(path,b)|(path,Some(std::sync::Arc::new(loom_scene::maps::Image{width:b.width,height:b.height,rgba:b.rgba.clone()})))).collect();
+                opacity_preview::compose(&surface,&images,side).ok_or_else(||"Opacity preview inputs could not be evaluated".into())
+            }))
+        };
+        bitmap.map(|bitmap|{bitmaps.push((key.clone(),bitmap));let i=bitmaps.len()as u32-1;index.insert(key,i);loom_render::TextureSel::Bitmap(i)})
+    }
+
     /// How a resolved material surface draws in the shaded viewports (linear colours).
     fn surface_style(&mut self, s: &loom_scene::material::Surface, bitmaps: &mut Vec<(String, std::sync::Arc<loom_render::Bitmap>)>, index: &mut std::collections::HashMap<String, u32>) -> loom_render::SurfaceStyle {
         let srgb_f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
@@ -1019,11 +1052,14 @@ impl LoomApp {
             [0.0; 4]
         };
         // Show Map in Viewport on the material shows its diffuse map.
-        let (texture, uv, decal, amount) = match s.viewport_map() {
-            Some(m) => (self.map_texture(m, bitmaps, index), m.coords.matrix(), m.coords.decal(), (m.amount / 100.0).clamp(0.0, 1.0)),
-            None => (loom_render::TextureSel::None, loom_render::UV_IDENTITY, [false; 2], 1.0),
-        };
-        loom_render::SurfaceStyle { color: lin(s.diffuse), alpha: s.opacity, specular: spec, self_illum: s.self_illum, texture, uv, decal, texture_amount: amount, faceted: s.faceted, two_sided: s.two_sided, wire: s.wire }
+        let (texture, uv, decal, amount,texture_alpha) = if s.opacity_map.is_some(){
+            let texture=self.opacity_texture(s,bitmaps,index);
+            (texture.unwrap_or(loom_render::TextureSel::None),loom_render::UV_IDENTITY,[false;2],1.0,texture.is_some())
+        }else{match s.viewport_map() {
+            Some(m) => (self.map_texture(m, bitmaps, index), m.coords.matrix(), m.coords.decal(), (m.amount / 100.0).clamp(0.0, 1.0),false),
+            None => (loom_render::TextureSel::None, loom_render::UV_IDENTITY, [false; 2], 1.0,false),
+        }};
+        loom_render::SurfaceStyle { color: lin(s.diffuse), alpha: s.opacity, specular: spec, self_illum: s.self_illum, texture, texture_alpha, uv, decal, texture_amount: amount, faceted: s.faceted, two_sided: s.two_sided, wire: s.wire }
     }
 
     pub fn world_styles(&self) -> &[loom_render::MeshStyle] {
