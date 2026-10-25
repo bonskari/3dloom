@@ -5,7 +5,10 @@ use glam::{Mat4, Vec3};
 use loom_bevy::{BevyRenderer, SceneObject, ViewCamera};
 
 fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    // No GL backend: an EGL context torn down while another test thread uses or
+    // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
+    // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
     if !loom_bevy::supported(&adapter) {
         return None;

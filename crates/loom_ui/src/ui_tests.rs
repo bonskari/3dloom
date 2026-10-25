@@ -49,7 +49,10 @@ impl Harness {
     /// The app on a real GPU (Realistic viewports and Render run), or None
     /// on a machine without a Vulkan / Metal / DirectX 12 adapter.
     fn with_gpu() -> Option<Self> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        // No GL backend: an EGL context torn down while another test thread uses or
+        // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
+        // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
         let rs = pollster::block_on(egui_wgpu::RenderState::create(&crate::wgpu_configuration(), &instance, None, None, 1, false)).ok()?;
         if !loom_bevy::supported(&rs.adapter) {
             return None;
