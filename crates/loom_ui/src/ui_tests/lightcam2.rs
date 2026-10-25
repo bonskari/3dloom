@@ -41,6 +41,16 @@ fn light(h: &Harness, id: NodeId) -> loom_scene::light::LightObject {
     h.app.state.scene.node(id).unwrap().object.light().expect("a light").clone()
 }
 
+/// The ground-plane (z = 0) point under screen point `p` in the active viewport as it is now.
+fn ground_hit(h: &Harness, p: egui::Pos2) -> Vec3 {
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let inv = h.app.camera_for(i).view_projection(rect.width() / rect.height()).inverse();
+    let ndc = |z: f32| inv.project_point3(Vec3::new((p.x - rect.min.x) / rect.width() * 2.0 - 1.0, 1.0 - (p.y - rect.min.y) / rect.height() * 2.0, z));
+    let (a, b) = (ndc(0.0), ndc(1.0));
+    a + (b - a) * (a.z / (a.z - b.z))
+}
+
 fn sel(h: &Harness) -> Vec<NodeId> {
     h.app.state.selection.iter().copied().collect()
 }
@@ -80,7 +90,10 @@ fn dragging_a_target_light_puts_the_light_at_the_press_and_its_target_at_the_rel
     let t = l.target.expect("a target light");
     let at = h.app.state.scene.world_matrix(t).w_axis.truncate();
     let eye = h.app.state.scene.world_matrix(id).w_axis.truncate();
-    assert!(at.distance(to) < 0.5, "target at the release: {at}, light at {eye}");
+    // Where the release lands with the viewport as it is after the drag
+    // (the panel shows the new light's rollouts, which can resize the view).
+    let want = ground_hit(&h, b);
+    assert!(at.distance(want) < 0.5, "target at the release: {at} (want {want}), light at {eye}");
 }
 
 #[test]
@@ -129,7 +142,8 @@ fn dragging_a_sunlight_sizes_its_compass_and_places_the_sun() {
         _ => 0.0,
     };
     let at = h.app.state.scene.world_matrix(compass).w_axis.truncate();
-    assert!((radius - 40.0).abs() < 1.0, "the drag sets the compass radius: {radius}, compass at {at}");
+    let want = ground_hit(&h, b).distance(at);
+    assert!((radius - want).abs() < 0.5, "the drag sets the compass radius: {radius} (want {want}), compass at {at}");
     let sun = h.app.state.scene.nodes().find(|n| matches!(&n.object, loom_scene::ObjectKind::Light(l) if l.sun.is_some())).expect("a sun").id;
     assert_eq!(h.app.state.scene.node(sun).unwrap().parent, Some(compass));
     let d = h.app.state.scene.world_matrix(sun).w_axis.truncate().length();
@@ -148,9 +162,9 @@ fn a_light_view_shows_the_light_controls() {
     h.cmd(Command::SelectNone);
     assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Camera(spot), "the light view");
     let names: Vec<&str> = h.widgets.iter().filter(|w| w.0 == Role::Button).map(|w| w.1.as_str()).collect();
-    assert!(h.has(Role::Button, "Light Hotspot Mode") && h.has(Role::Button, "Light Falloff Mode"), "{names:?}");
-    assert!(!h.has(Role::Button, "Perspective Mode"), "camera controls are swapped out");
-    h.click(h.find(Role::Button, "Light Falloff Mode").center());
+    assert!(h.has(Role::Button, "Light Hotspot") && h.has(Role::Button, "Light Falloff"), "{names:?}");
+    assert!(!h.has(Role::Button, "Perspective"), "camera controls are swapped out");
+    h.click(h.find(Role::Button, "Light Falloff").center());
     assert_eq!(h.app.state.nav_mode, loom_input::NavMode::LightFalloff);
     // A drag in the view widens or narrows the falloff.
     let before = light(&h, spot).falloff.get();
