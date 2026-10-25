@@ -902,7 +902,7 @@ impl LoomApp {
     /// A map baked to a viewport texture (cropping, mirror, procedural maps),
     /// cached by what changes its pixels.
     fn map_texture(&mut self, map: &loom_scene::Map, bitmaps: &mut Vec<(String, std::sync::Arc<loom_render::Bitmap>)>, index: &mut std::collections::HashMap<String, u32>) -> loom_render::TextureSel {
-        let plain = map.kind == loom_scene::material::MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1];
+        let plain = loom_scene::maps::is_plain_bitmap(map);
         if plain {
             return self.bitmap_texture(&map.path, bitmaps, index);
         }

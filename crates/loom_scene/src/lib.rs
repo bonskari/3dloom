@@ -20,6 +20,7 @@ pub mod tracks;
 pub mod scene;
 pub mod material;
 pub mod maps;
+pub mod map_params;
 pub mod render;
 pub mod bake;
 
