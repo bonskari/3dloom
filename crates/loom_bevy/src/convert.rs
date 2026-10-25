@@ -147,7 +147,7 @@ pub fn compose_base(diffuse: glam::Vec3, map: Option<(&MapImage, &Map)>, opacity
 /// green down, so green is inverted unless Flip Green; Flip Red inverts red.
 pub fn normal_bump(img: &MapImage, flip_red: bool, flip_green: bool) -> MapImage {
     let mut out = img.clone();
-    for px in out.rgba.chunks_exact_mut(4) {
+    for px in out.rgba.as_chunks_mut::<4>().0 {
         if flip_red {
             px[0] = 255 - px[0];
         }
