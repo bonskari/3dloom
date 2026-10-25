@@ -180,6 +180,10 @@ fn wrapped(h: &mut Harness) -> (NodeId, NodeId) {
 fn skin_wrap_add_by_picking_control_vertices_locals_display_and_bake() {
     let mut h = Harness::new();
     let (control, hi) = wrapped(&mut h);
+    let spot = h.screen_of(Vec3::new(15.0, -15.0, 0.0));
+    h.click(spot);
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![control], "a plain click there picks the control plane");
+    h.cmd(Command::SelectNodes { ids: vec![hi.0], op: loom_commands::SelectOp::Replace });
     h.click_widget("Add");
     assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::SkinWrapControl));
     h.click(h.screen_of(Vec3::new(15.0, -15.0, 0.0)));
