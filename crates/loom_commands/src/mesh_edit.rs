@@ -202,7 +202,7 @@ pub fn current_level(state: &AppState) -> u32 {
         SelectionMode::Object => 0,
         SelectionMode::Vertex => if patch && m.handle_level { 2 } else { 1 },
         SelectionMode::Edge | SelectionMode::Border => if patch { 3 } else { 2 },
-        SelectionMode::Face => if patch { 4 } else if m.polygon_level { 4 } else { 3 },
+        SelectionMode::Face => if patch || m.polygon_level { 4 } else { 3 },
         SelectionMode::Element => 5,
     }
 }
