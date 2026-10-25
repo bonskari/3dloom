@@ -75,7 +75,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     let _ = app.dispatch(Command::SetLayerFrozen { layer: l.id, on: frozen });
                 }
                 ui.label(counts[i].to_string());
-                if ui.selectable_label(highlighted == Some(l.id), "▸").on_hover_text("Highlight this layer").clicked() {
+                let r = ui.selectable_label(highlighted == Some(l.id), crate::icons::HIGHLIGHT);
+                crate::icons::named(&r, egui::WidgetType::SelectableLabel, "Highlight this layer");
+                if r.on_hover_text("Highlight this layer").clicked() {
                     highlighted = Some(l.id);
                 }
                 ui.end_row();

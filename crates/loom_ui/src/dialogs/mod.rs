@@ -7,6 +7,7 @@ pub mod align_to_view;
 pub mod clone_options;
 pub mod customize_ui;
 pub mod object_properties;
+pub mod object_color;
 pub mod preferences;
 pub mod units_setup;
 pub mod mirror;
@@ -42,9 +43,10 @@ use loom_commands::{Command, Dialog};
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     import_summary(ctx, app);
     // A previewing dialog that went away without OK (Close Dialog, Escape,
-    // another dialog) leaves the scene as it was.
+    // another dialog) leaves the scene as it was. An Extrude-mode drag
+    // previews with no window open; its release keeps the result.
     if let Some(p) = app.preview {
-        if app.state.dialog != Some(p.dialog) {
+        if app.state.dialog != Some(p.dialog) && !app.poly_dragging {
             app.preview_undo();
             app.state.align_target = None;
             app.state.normal_align = None;
@@ -99,6 +101,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         material_editor::show(ctx, app, &mut open);
         if !open {
             app.state.material_editor_open = false;
+        }
+    }
+    // Object Color opens over the Object Properties dialog and leaves it open.
+    if app.state.display.object_color_open {
+        let mut open = true;
+        object_color::show(ctx, app, &mut open);
+        if !open {
+            app.state.display.object_color_open = false;
         }
     }
     let Some(dialog) = app.state.dialog else { return };

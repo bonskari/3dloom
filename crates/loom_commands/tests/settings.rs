@@ -34,6 +34,7 @@ fn settings_round_trip_through_json() {
     let mut s = AppState::new();
     pref(&mut s, "Gizmo Size", 35.0);
     pref(&mut s, "Space Locks Selection", 1.0);
+    pref(&mut s, "Keep Creating", 1.0);
     pref(&mut s, "Spinner Precision", 1.0);
     pref(&mut s, "Recent Files in File Menu", 4.0);
     execute(&mut s, Command::SetAutoBackupName { name: "MyBak".into() }).unwrap();
@@ -55,6 +56,7 @@ fn settings_round_trip_through_json() {
     assert_eq!(t.prefs, s.prefs);
     assert_eq!(t.prefs.gizmos.size, 35.0);
     assert!(t.prefs.space_selection_lock);
+    assert!(t.prefs.keep_creating);
     assert_eq!(t.prefs.auto_backup_name, "MyBak");
     assert_eq!(t.units, s.units);
     assert_eq!(t.format_units(100.0), "1.0m");
@@ -209,4 +211,18 @@ fn ui_schemes_save_load_and_revert_to_the_startup_layout() {
     assert!(execute(&mut s, Command::LoadCustomUiScheme { path: p(&d.join("missing.ui")) }).is_err());
     execute(&mut s, Command::LoadCustomUiScheme { path: None }).unwrap();
     assert_eq!(s.dialog, Some(Dialog::LoadCustomUiScheme));
+}
+
+/// Keep Creating starts at KEEP_CREATING_DEFAULT (off: one object, then Select); the
+/// toggle and Set Preference "Keep Creating" switch it.
+#[test]
+fn keep_creating_starts_at_its_default_and_toggles() {
+    let mut s = AppState::new();
+    assert_eq!(s.prefs.keep_creating, loom_commands::state::KEEP_CREATING_DEFAULT);
+    pref(&mut s, "Keep Creating", 0.0);
+    assert_eq!(execute(&mut s, Command::KeepCreatingToggle).unwrap()["keep_creating"], true);
+    assert!(s.prefs.keep_creating);
+    pref(&mut s, "Keep Creating", 0.0);
+    assert!(!s.prefs.keep_creating);
+    assert_eq!(s.prefs.get("Keep Creating"), Some(0.0));
 }
