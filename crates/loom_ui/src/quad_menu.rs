@@ -448,7 +448,8 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadran
     let picked = |label: &str| last.as_ref().is_some_and(|l| l.label == label);
     for item in &q.items {
         let width = ui.available_width() - SETTINGS_W;
-        ui.horizontal(|ui| {
+        // Cross-aligned to the left (not ui.horizontal's centre): button labels stay left-aligned.
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             match &item.action {
                 Action::Command(cmd) => {
