@@ -3027,6 +3027,36 @@ fn options_rect(h: &Harness, id: &str) -> egui::Rect {
     h.ctx.memory(|m| m.area_rect(egui::Id::new(id))).unwrap_or_else(|| panic!("the {id} window is shown"))
 }
 
+/// The texts painted inside `within` last frame, with their rects (for failure messages).
+fn texts_in(h: &Harness, within: egui::Rect) -> Vec<(String, egui::Rect)> {
+    fn walk(shape: &egui::Shape, within: egui::Rect, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, within, out)),
+            egui::Shape::Text(t) => {
+                let r = t.galley.rect.translate(t.pos.to_vec2());
+                if within.intersects(r) {
+                    out.push((t.galley.text().to_owned(), r));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for c in &h.shapes {
+        walk(&c.shape, within, &mut out);
+    }
+    out
+}
+
+/// Clicks a button of an options window, saying what the window shows if it is not there.
+fn click_option(h: &mut Harness, label: &str, id: &str) {
+    let win = options_rect(h, id);
+    if h.text_rect(label, win).is_none() {
+        panic!("{label:?} is not in {id} {win:?}: {:?}", texts_in(h, win));
+    }
+    click_text(h, label, win, 0.0);
+}
+
 /// Types `path` into the in-app file dialog's File name field and clicks `button`.
 fn choose_file(h: &mut Harness, path: &std::path::Path, button: &str) {
     click_text(h, "File name:", SCREEN, 40.0);
@@ -3050,9 +3080,8 @@ fn fbx_export_goes_through_its_options_dialog() {
     let win = options_rect(&h, "fbx_export_options");
     click_text(&mut h, "Triangulate", win, 0.0);
     assert!(h.app.state.exchange.fbx_export.triangulate, "the check box sets the option");
-    let win = options_rect(&h, "fbx_export_options");
     assert!(h.text_rect("User defined", SCREEN).is_some(), "the preset shows it was changed");
-    click_text(&mut h, "OK", win, 0.0);
+    click_option(&mut h, "OK", "fbx_export_options");
     assert_eq!(h.app.state.dialog, None);
     let doc = loom_fbx::read(&std::fs::read(&path).unwrap(), 0.01).unwrap();
     let loom_fbx::FbxKind::Mesh { mesh, .. } = &doc.nodes[0].kind else { panic!("{:?}", doc.nodes[0].kind) };
@@ -3073,16 +3102,15 @@ fn fbx_import_options_cancel_and_cameras_off() {
     h.cmd(Command::ImportFile { path: None });
     choose_file(&mut h, &path, "Open");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxImportOptions));
-    let win = options_rect(&h, "fbx_import_options");
-    click_text(&mut h, "Cancel", win, 0.0);
+    click_option(&mut h, "Cancel", "fbx_import_options");
     assert_eq!(h.app.state.dialog, None);
     assert_eq!(h.app.state.scene.len(), 0, "Cancel imports nothing");
     h.cmd(Command::ImportFile { path: None });
     choose_file(&mut h, &path, "Open");
     let win = options_rect(&h, "fbx_import_options");
-    click_text(&mut h, "Cameras", win, 0.0);
+    click_option(&mut h, "Cameras", "fbx_import_options");
     assert!(!h.app.state.exchange.fbx_import.cameras);
-    click_text(&mut h, "OK", win, 0.0);
+    click_option(&mut h, "OK", "fbx_import_options");
     let kinds: Vec<bool> = h.app.state.scene.nodes().map(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).collect();
     assert_eq!(kinds, vec![false], "the box only");
 }
