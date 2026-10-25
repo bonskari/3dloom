@@ -322,7 +322,7 @@ fn edit_poly_modifier_polygons_pick_and_levels_stay_in_step() {
 }
 
 #[test]
-fn alt_click_removes_and_alt_drag_orbits() {
+fn alt_click_removes_and_alt_drag_region_removes() {
     let mut h = Harness::new();
     poly_box(&mut h);
     let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
@@ -332,16 +332,13 @@ fn alt_click_removes_and_alt_drag_orbits() {
     h.mods = egui::Modifiers::NONE;
     h.click(p);
     assert_eq!(h.app.state.selection.len(), 1);
-    let yaw = h.app.state.active().camera.yaw;
+    // Alt+drag is a region that removes what it crosses, as in the reference; the view stays.
+    let (yaw, pitch) = (h.app.state.active().camera.yaw, h.app.state.active().camera.pitch);
     h.mods = egui::Modifiers::ALT;
-    h.drag(p, p + egui::vec2(120.0, 0.0));
+    h.drag(p + egui::vec2(-60.0, -60.0), p + egui::vec2(60.0, 60.0));
     h.mods = egui::Modifiers::NONE;
-    assert_ne!(h.app.state.active().camera.yaw, yaw, "Alt+drag orbits");
-    assert_eq!(h.app.state.selection.len(), 1, "and keeps the selection");
-    // A plain drag afterwards is a selection drag again, not a stuck orbit.
-    let yaw = h.app.state.active().camera.yaw;
-    h.drag(p + egui::vec2(-200.0, -150.0), p + egui::vec2(-180.0, -130.0));
-    assert_eq!(h.app.state.active().camera.yaw, yaw);
+    assert!(h.app.state.selection.is_empty(), "Alt+region removes the box");
+    assert_eq!((h.app.state.active().camera.yaw, h.app.state.active().camera.pitch), (yaw, pitch), "and doesn't orbit");
 }
 
 #[test]
