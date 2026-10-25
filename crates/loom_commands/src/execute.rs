@@ -2849,6 +2849,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.prefs.gizmos.size = (state.prefs.gizmos.size - 2.0).max(1.0);
             Ok(json!({ "size": state.prefs.gizmos.size }))
         }
+        C::SetAxisConstraint { constraint } => {
+            state.axis_constraint = match constraint.to_ascii_uppercase().as_str() {
+                "X" => AxisConstraint::X,
+                "Y" => AxisConstraint::Y,
+                "Z" => AxisConstraint::Z,
+                "XY" => AxisConstraint::XY,
+                "YZ" => AxisConstraint::YZ,
+                "ZX" => AxisConstraint::ZX,
+                _ => return Err(format!("unknown axis constraint {constraint:?} (X, Y, Z, XY, YZ, ZX)")),
+            };
+            Ok(json!({ "constraint": format!("{:?}", state.axis_constraint) }))
+        }
         C::TransformGizmoPlaneConstraintCycle => {
             state.axis_constraint = match state.axis_constraint {
                 AxisConstraint::XY => AxisConstraint::YZ,

@@ -258,7 +258,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             // Perspective views get a vertical gradient; axis views stay flat.
             // Painted first: everything else, the labels included, goes over it.
             if !(app.state.viewports[index].background.is_some() && app.state.viewports[index].background_display) && !app.state.viewports[index].is_orthographic() {
-                draw_background_gradient(&painter, rect);
+                draw_background_gradient(&painter, rect, app.color("Perspective Background Top"), app.color("Perspective Background Bottom"));
             }
             let over_label = draw_labels(ui, app, index, rect);
 
@@ -1204,7 +1204,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     grid_params: {
                         let g = &app.state.home_grid;
                         let cells = (g.perspective_extent.max(1) * g.major_every.max(1)) as i32;
-                        loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10 }
+                        loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10, colors: [app.color_f32("Home Grid"), app.color_f32("Home Grid Major Lines"), app.color_f32("Home Grid World Axes")] }
                     },
                     helper_lines: helper_depth_lines.clone(),
                 },
@@ -1604,11 +1604,12 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         (app.state.view_label(index), vp.shading.label(), vp.disabled)
     };
     let font = egui::FontId::proportional(13.0);
+    let label_color = app.color("Viewport Label Text");
     let mut x = rect.min.x + 6.0;
     let y = rect.min.y + 4.0;
     let items: [(String, u8); 3] = [("[ + ]".to_owned(), 0), (format!("[ {kind} ]"), 1), (format!("[ {shading} ]"), 2)];
     for (text, which) in items {
-        let galley = painter.layout_no_wrap(text, font.clone(), egui::Color32::from_gray(225));
+        let galley = painter.layout_no_wrap(text, font.clone(), label_color);
         let size = galley.size();
         let r = egui::Rect::from_min_size(egui::pos2(x, y), size);
         let entries = match which {
@@ -1634,12 +1635,12 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
             });
         let hovered = resp.is_some_and(|r| r.response.hovered()) || ui.rect_contains_pointer(r);
         over |= hovered;
-        let color = if hovered { egui::Color32::WHITE } else { egui::Color32::from_gray(225) };
+        let color = if hovered { egui::Color32::WHITE } else { label_color };
         painter.galley(r.min, galley, color);
         x += size.x + 10.0;
     }
     if disabled {
-        painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font.clone(), egui::Color32::from_gray(225));
+        painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font.clone(), label_color);
     }
     // Working Pivot modes show under the viewport name.
     let wp = match (app.state.edit_working_pivot, app.state.use_working_pivot) {
@@ -1648,7 +1649,7 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         _ => None,
     };
     if let Some(t) = wp {
-        painter.text(egui::pos2(rect.min.x + 6.0, y + 18.0), egui::Align2::LEFT_TOP, t, font, egui::Color32::from_gray(225));
+        painter.text(egui::pos2(rect.min.x + 6.0, y + 18.0), egui::Align2::LEFT_TOP, t, font, label_color);
     }
     over
 }
@@ -2771,7 +2772,7 @@ fn draw_statistics(painter: &egui::Painter, app: &LoomApp, rect: egui::Rect, dt:
         rows.push(("FPS:".to_owned(), vec![if dt > 0.0 { format!("{:.3}", 1.0 / dt) } else { "-".to_owned() }]));
     }
     let font = egui::FontId::monospace(12.0);
-    let color = egui::Color32::from_gray(230);
+    let color = app.color("Viewport Statistics Text");
     let top = rect.top() + 24.0;
     for (r, (label, values)) in rows.iter().enumerate() {
         let y = top + r as f32 * 15.0;
@@ -3008,13 +3009,10 @@ mod tests {
 }
 
 /// Perspective background: dark at the top, where the viewport labels sit,
-/// lighter toward the bottom.
-const GRADIENT_TOP: egui::Color32 = egui::Color32::from_rgb(38, 38, 38);
-const GRADIENT_BOTTOM: egui::Color32 = egui::Color32::from_rgb(96, 96, 96);
-
-fn draw_background_gradient(painter: &egui::Painter, rect: egui::Rect) {
+/// lighter toward the bottom (Customize User Interface > Colors).
+fn draw_background_gradient(painter: &egui::Painter, rect: egui::Rect, top: egui::Color32, bottom: egui::Color32) {
     let mut mesh = egui::Mesh::default();
-    for (pos, color) in [(rect.left_top(), GRADIENT_TOP), (rect.right_top(), GRADIENT_TOP), (rect.right_bottom(), GRADIENT_BOTTOM), (rect.left_bottom(), GRADIENT_BOTTOM)] {
+    for (pos, color) in [(rect.left_top(), top), (rect.right_top(), top), (rect.right_bottom(), bottom), (rect.left_bottom(), bottom)] {
         mesh.colored_vertex(pos, color);
     }
     mesh.add_triangle(0, 1, 2);

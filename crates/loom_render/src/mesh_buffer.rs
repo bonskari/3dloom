@@ -101,6 +101,8 @@ pub struct MeshStyle {
     pub wire: bool,
     /// A Multi/Sub-Object material: each face draws with its material ID's style.
     pub sub: Option<std::sync::Arc<SubStyles>>,
+    /// The wireframe colour of a selected object (Customize User Interface > Colors > Selection).
+    pub selection_color: [f32; 3],
 }
 
 impl Default for MeshStyle {
@@ -123,6 +125,7 @@ impl Default for MeshStyle {
             sub: None,
             diagonals: false,
             unlit: false,
+            selection_color: [1.0, 1.0, 1.0],
         }
     }
 }
@@ -229,7 +232,7 @@ impl MeshBuffer {
         let selected_edge_vertex_buffer = edge_buffer(
             device,
             &edges,
-            [1.0, 1.0, 1.0],
+            style.selection_color,
             "loom_mesh_selected_edge_buffer",
         );
 

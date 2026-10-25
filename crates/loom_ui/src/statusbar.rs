@@ -57,6 +57,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         });
         return;
     }
+    RED.with(|c| c.set(app.color("Auto Key Background")));
     egui::TopBottomPanel::bottom("statusbar").show(ctx, |ui| {
         // The status bar is two rows: selection / lock / coordinates / grid over
         // the prompt line, then the animation and viewport navigation blocks.
@@ -246,7 +247,12 @@ fn coordinate_fields(ui: &mut egui::Ui, app: &mut LoomApp) {
 }
 
 fn red(on: bool) -> egui::Color32 {
-    if on { egui::Color32::from_rgb(200, 50, 50) } else { egui::Color32::from_gray(70) }
+    if on { RED.with(|c| c.get()) } else { egui::Color32::from_gray(70) }
+}
+
+thread_local! {
+    /// Auto Key Background (Customize User Interface > Colors), set each frame.
+    static RED: std::cell::Cell<egui::Color32> = const { std::cell::Cell::new(egui::Color32::from_rgb(200, 50, 50)) };
 }
 
 /// The animation controls: the big Set Keys button, Auto Key over

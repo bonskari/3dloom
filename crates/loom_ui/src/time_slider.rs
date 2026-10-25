@@ -80,7 +80,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(avail, 18.0), egui::Sense::click_and_drag());
             let painter = ui.painter_at(rect);
             // Auto Key turns the slider red.
-            let bg = if app.state.auto_key { egui::Color32::from_rgb(130, 40, 40) } else { egui::Color32::from_gray(60) };
+            let bg = if app.state.auto_key { app.color("Auto Key Background").gamma_multiply(0.65) } else { egui::Color32::from_gray(60) };
             painter.rect_filled(rect, 2.0, bg);
             let thumb = thumb_rect(rect, frame, (start, end));
             painter.rect_filled(thumb, 2.0, egui::Color32::from_gray(120));
@@ -181,16 +181,27 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
     }
     let x = x_of(frame as f32);
     painter.line_segment([egui::pos2(x, rect.min.y), egui::pos2(x, rect.max.y)], egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(100, 170, 255)));
-    // The selection's keys (by the track bar filter).
-    let times = loom_commands::anim_cmds::selection_key_times(&app.state);
+    // The selection's keys (by the track bar filter), coloured by what they key:
+    // position, rotation and scale keys apart from the others.
+    let kinds = loom_commands::anim_cmds::selection_key_kinds(&app.state);
+    let times: Vec<f32> = kinds.iter().map(|(t, _)| *t).collect();
     let mut tb = app.track_bar.clone();
     tb.selected.retain(|s| times.iter().any(|t| (*t - *s as f32).abs() < 0.5));
     let drag_dt = tb.drag_from.zip(resp.interact_pointer_pos()).map(|(a, p)| (f_of(p.x) - a).round()).unwrap_or(0.0);
-    for t in &times {
+    for (t, k) in &kinds {
         let sel = tb.selected.iter().any(|s| (*t - *s as f32).abs() < 0.5);
         let shown = if sel && resp.dragged() { *t + drag_dt } else { *t };
         let r = egui::Rect::from_center_size(egui::pos2(x_of(shown), rect.center().y + 2.0), egui::vec2(5.0, 11.0));
-        painter.rect_filled(r, 0.0, if sel { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 60, 60) });
+        if sel {
+            painter.rect_filled(r, 0.0, app.color("Selected Keys"));
+            continue;
+        }
+        // A key of several kinds shows a band of each colour.
+        let bands: Vec<egui::Color32> = [(k.position, "Position Keys"), (k.rotation, "Rotation Keys"), (k.scale, "Scale Keys"), (k.other, "Other Keys")].iter().filter(|(on, _)| *on).map(|(_, e)| app.color(e)).collect();
+        let h = r.height() / bands.len().max(1) as f32;
+        for (i, c) in bands.iter().enumerate() {
+            painter.rect_filled(egui::Rect::from_min_size(egui::pos2(r.min.x, r.min.y + i as f32 * h), egui::vec2(r.width(), h)), 0.0, *c);
+        }
     }
     let key_at = |x: f32| times.iter().copied().find(|t| (x_of(*t) - x).abs() < 4.0);
     if resp.clicked() {

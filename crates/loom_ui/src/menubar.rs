@@ -6,7 +6,27 @@ use eframe::egui;
 use crate::shortcuts::{menu_button, HoverShortcut};
 use loom_commands::{Command, PrimitiveKind};
 
+thread_local! {
+    /// While set, the menu functions list their entries' labels here instead
+    /// of hiding the ones the user deleted (the Menus panel shows them all).
+    static RECORD: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+    /// The menu bar menu being drawn (whose deleted entries are skipped).
+    static CURRENT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Notes an entry's label; false when the user deleted it from this menu (it is not drawn).
+fn shown(app: &LoomApp, label: &str) -> bool {
+    let plain = label.trim_start_matches(['\u{2714}', ' ']);
+    if RECORD.with(|r| r.borrow_mut().as_mut().map(|v| v.push(plain.to_owned())).is_some()) {
+        return true;
+    }
+    CURRENT.with(|c| !app.state.ui_custom.menus.is_hidden(&c.borrow(), plain))
+}
+
 fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str) {
+    if !shown(app, label) {
+        return;
+    }
     if menu_button(ui, &app.state, label, action).clicked() {
         app.dispatch_named(action);
         ui.close_menu();
@@ -15,15 +35,227 @@ fn item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str) {
 
 /// A toggle item: a check mark shows its state (as in the viewport label menus).
 fn check_item(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, action: &str, on: bool) {
-    let label = if on { format!("✔ {label}") } else { format!("    {label}") };
+    let label = if on { format!("\u{2714} {label}") } else { format!("    {label}") };
     item(ui, app, &label, action);
 }
 
 fn cmd(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, c: Command) {
+    if !shown(app, label) {
+        return;
+    }
     if menu_button(ui, &app.state, label, c.name()).clicked() {
         let _ = app.dispatch(c);
         ui.close_menu();
     }
+}
+
+/// A plain entry with no action of its own; true when clicked (the menu closes).
+fn entry(ui: &mut egui::Ui, app: &LoomApp, label: &str) -> bool {
+    if !shown(app, label) {
+        return false;
+    }
+    let clicked = ui.button(label).clicked();
+    if clicked {
+        ui.close_menu();
+    }
+    clicked
+}
+
+/// A submenu entry.
+fn sub(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, body: impl FnOnce(&mut egui::Ui, &mut LoomApp)) {
+    if !shown(app, label) {
+        return;
+    }
+    ui.menu_button(label, |ui| body(ui, app));
+}
+
+/// The labels of menu `name`'s own entries (submenus by their names), as the Menus panel lists them.
+pub fn menu_labels(app: &mut LoomApp, name: &str) -> Vec<String> {
+    RECORD.with(|r| *r.borrow_mut() = Some(Vec::new()));
+    let ctx = egui::Context::default();
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| builtin_menu(ui, app, name));
+    });
+    RECORD.with(|r| r.borrow_mut().take()).unwrap_or_default()
+}
+
+/// A title as a menu bar label: the accelerator letter underlined while Alt is held or the keyboard opened the bar.
+fn title_text(ui: &egui::Ui, title: &str) -> egui::WidgetText {
+    let (text, key) = loom_commands::ui_custom::accelerator(title);
+    let underline = ui.input(|i| i.modifiers.alt) || ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new(KEYBOARD_ID))).unwrap_or(false);
+    let Some(key) = key.filter(|_| underline) else { return text.into() };
+    let at = text.char_indices().find(|(_, c)| c.to_ascii_lowercase() == key).map(|(i, _)| i).unwrap_or(0);
+    let mut job = egui::text::LayoutJob::default();
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let color = ui.visuals().widgets.inactive.text_color();
+    let plain = egui::TextFormat { font_id: font.clone(), color, ..Default::default() };
+    let marked = egui::TextFormat { underline: egui::Stroke::new(1.0, color), ..plain.clone() };
+    let ch_len = text[at..].chars().next().map(char::len_utf8).unwrap_or(0);
+    job.append(&text[..at], 0.0, plain.clone());
+    job.append(&text[at..at + ch_len], 0.0, marked);
+    job.append(&text[at + ch_len..], 0.0, plain);
+    job.into()
+}
+
+/// Memory: the Alt key put the menu bar into keyboard mode (the next letter opens a menu).
+const KEYBOARD_ID: &str = "menubar_keyboard";
+/// Memory: the menu a keyboard accelerator opens next frame.
+const OPEN_ID: &str = "menubar_open";
+
+/// A menu bar menu: its title (the user's), its own entries without the
+/// ones the user deleted, then the entries the user added.
+fn menu(ui: &mut egui::Ui, app: &mut LoomApp, name: &str) {
+    let title = app.state.ui_custom.menus.title(name);
+    let text = title_text(ui, &title);
+    let bar_id = ui.id();
+    let r = ui.menu_button(text, |ui| {
+        let previous = CURRENT.with(|c| std::mem::replace(&mut *c.borrow_mut(), name.to_owned()));
+        if loom_commands::ui_custom::BUILTIN_MENUS.contains(&name) {
+            builtin_menu(ui, app, name);
+            let extra = app.state.ui_custom.menus.extra.get(name).cloned().unwrap_or_default();
+            if !extra.is_empty() {
+                ui.separator();
+            }
+            custom_items(ui, app, &extra);
+        } else if let Some(m) = app.state.ui_custom.menus.user_menu(name).cloned() {
+            custom_items(ui, app, &m.items);
+        }
+        CURRENT.with(|c| *c.borrow_mut() = previous);
+    });
+    // An accelerator pressed last frame opens this menu now.
+    let open: Option<String> = ui.ctx().data(|d| d.get_temp(egui::Id::new(OPEN_ID)));
+    if open.as_deref() == Some(name) {
+        ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::new(OPEN_ID)));
+        let mut bar = egui::menu::BarState::load(ui.ctx(), bar_id);
+        *bar = Some(egui::menu::MenuRoot::new(r.response.rect.left_bottom(), r.response.id));
+        bar.store(ui.ctx(), bar_id);
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Entries the user added to a menu (or a quad): actions, separators and menus.
+pub(crate) fn custom_items(ui: &mut egui::Ui, app: &mut LoomApp, items: &[loom_commands::ui_custom::CustomItem]) {
+    for it in items {
+        if it.is_separator() {
+            ui.separator();
+        } else if let Some(m) = it.menu() {
+            let title = if it.name.is_empty() { app.state.ui_custom.menus.title(m) } else { it.name.clone() };
+            let m = m.to_owned();
+            ui.menu_button(loom_commands::ui_custom::accelerator(&title).0, |ui| {
+                if loom_commands::ui_custom::BUILTIN_MENUS.contains(&m.as_str()) {
+                    let previous = CURRENT.with(|c| std::mem::replace(&mut *c.borrow_mut(), m.clone()));
+                    builtin_menu(ui, app, &m);
+                    CURRENT.with(|c| *c.borrow_mut() = previous);
+                } else if let Some(u) = app.state.ui_custom.menus.user_menu(&m).cloned() {
+                    custom_items(ui, app, &u.items);
+                }
+            });
+        } else {
+            let (label, key) = loom_commands::ui_custom::accelerator(it.label());
+            // The accelerator of an entry the user named runs it while its menu is open.
+            let pressed = key.is_some_and(|k| menu_key(ui, k));
+            if menu_button(ui, &app.state, &label, &it.item).clicked() || pressed {
+                app.dispatch_named(&it.item);
+                ui.close_menu();
+            }
+        }
+    }
+}
+
+/// The menu bar's menus in order: the program's, with the user's menus that are on the bar before Help.
+fn bar_menus(app: &LoomApp) -> Vec<String> {
+    let mut v: Vec<String> = loom_commands::ui_custom::BUILTIN_MENUS.iter().filter(|m| **m != "Help").map(|m| (*m).to_owned()).collect();
+    v.extend(app.state.ui_custom.menus.user.iter().filter(|u| u.on_bar).map(|u| u.name.clone()));
+    v.push("Help".into());
+    v
+}
+
+/// Alt pressed and released alone puts the bar into keyboard mode; then (or
+/// with Alt held, when that chord has no shortcut) a menu's accelerator
+/// letter opens it. Esc or a click leaves keyboard mode. While a menu is
+/// open its letters go to the menu, not to the shortcuts. Runs before the
+/// shortcuts so the keys it takes never reach them.
+pub(crate) fn keyboard(ctx: &egui::Context, app: &LoomApp) {
+    let kb_id = egui::Id::new(KEYBOARD_ID);
+    let alone_id = egui::Id::new("menubar_alt_alone");
+    let mut keyboard: bool = ctx.data(|d| d.get_temp(kb_id)).unwrap_or(false);
+    let mut alone: bool = ctx.data(|d| d.get_temp(alone_id)).unwrap_or(false);
+    let menu_open = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new(BAR_ID))).is_some_and(|bar| egui::menu::BarState::load(ctx, bar).is_some());
+    let (alt, events, pointer) = ctx.input(|i| (i.modifiers.alt, i.events.clone(), i.pointer.any_pressed() || i.pointer.any_down() || i.raw_scroll_delta != egui::Vec2::ZERO));
+    let mut open = None;
+    let mut taken = Vec::new();
+    let mut menu_keys = Vec::new();
+    if !ctx.wants_keyboard_input() {
+        for e in &events {
+            let egui::Event::Key { key, pressed: true, modifiers, .. } = e else { continue };
+            if *key == egui::Key::Escape {
+                keyboard = false;
+                continue;
+            }
+            alone = false;
+            let name = key.name();
+            let letter = name.chars().next().filter(|_| name.chars().count() == 1).map(|c| c.to_ascii_lowercase());
+            let Some(letter) = letter else { continue };
+            if menu_open && !modifiers.any() {
+                menu_keys.push(letter);
+                taken.push((*modifiers, *key));
+                continue;
+            }
+            let with_alt = modifiers.alt && !modifiers.ctrl && !modifiers.shift;
+            let bound = loom_commands::parse_chord(&format!("Alt+{}", letter.to_ascii_uppercase())).ok().and_then(|c| app.state.hotkey(c)).is_some();
+            if (keyboard && !modifiers.any()) || (with_alt && !bound) {
+                open = bar_menus(app).into_iter().find(|m| loom_commands::ui_custom::accelerator(&app.state.ui_custom.menus.title(m)).1 == Some(letter));
+                if keyboard || open.is_some() {
+                    taken.push((*modifiers, *key));
+                }
+                keyboard = false;
+            }
+        }
+    }
+    for (m, k) in taken {
+        ctx.input_mut(|i| i.consume_key(m, k));
+    }
+    // Alt went down and up with nothing else pressed between.
+    let was_alt: bool = ctx.data(|d| d.get_temp(egui::Id::new("menubar_alt_down"))).unwrap_or(false);
+    if alt && !was_alt {
+        alone = true;
+    }
+    if pointer {
+        alone = false;
+        if ctx.input(|i| i.pointer.any_pressed()) {
+            keyboard = false;
+        }
+    }
+    if !alt && was_alt && alone {
+        keyboard = !keyboard;
+        alone = false;
+    }
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::new("menubar_alt_down"), alt);
+        d.insert_temp(kb_id, keyboard);
+        d.insert_temp(alone_id, alone);
+        d.insert_temp(egui::Id::new(MENU_KEYS_ID), menu_keys);
+        if let Some(m) = open {
+            d.insert_temp(egui::Id::new(OPEN_ID), m);
+        }
+    });
+    if open_pending(ctx) {
+        ctx.request_repaint();
+    }
+}
+
+/// Memory: the menu bar's id (to tell whether one of its menus is open).
+const BAR_ID: &str = "menubar_bar_id";
+/// Memory: letters pressed this frame while a menu was open (the accelerators of its entries).
+const MENU_KEYS_ID: &str = "menubar_menu_keys";
+
+/// Was accelerator `letter` pressed this frame while a menu is open?
+fn menu_key(ui: &egui::Ui, letter: char) -> bool {
+    ui.ctx().data(|d| d.get_temp::<Vec<char>>(egui::Id::new(MENU_KEYS_ID))).is_some_and(|v| v.contains(&letter))
+}
+
+fn open_pending(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<String>(egui::Id::new(OPEN_ID))).is_some()
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
@@ -32,416 +264,451 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     }
     egui::TopBottomPanel::top("menubar").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(BAR_ID), ui.id()));
             quick_access(ui, app);
             ui.separator();
-            ui.menu_button("File", |ui| {
-                use loom_commands::PendingFileAction as A;
-                if menu_button(ui, &app.state, "New", "New Scene").clicked() {
-                    app.new_scene();
-                    ui.close_menu();
-                }
-                if ui.button("Reset").clicked() {
-                    app.request_file_action(A::Reset);
-                    ui.close_menu();
-                }
-                ui.separator();
-                if menu_button(ui, &app.state, "Open...", "Open File").clicked() {
-                    app.request_file_action(A::Open);
-                    ui.close_menu();
-                }
-                ui.menu_button("Recent", |ui| {
-                    if app.state.recent_files.is_empty() {
-                        ui.label("(none)");
-                    }
-                    for (i, path) in app.state.recent_files.clone().iter().enumerate() {
-                        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        if ui.button(format!("{} {name}", i + 1)).on_hover_text(path.display().to_string()).clicked() {
-                            app.request_file_action(A::OpenRecent(i));
-                            ui.close_menu();
-                        }
-                    }
-                });
-                item(ui, app, "Save", "Save File");
-                item(ui, app, "Save As...", "Save File As");
-                item(ui, app, "Save Copy As...", "Save File As Copy");
-                item(ui, app, "Save Incremental", "Save Incremental (+)");
-                cmd(ui, app, "Save Selected...", Command::SaveSelected { path: None });
-                cmd(ui, app, "Archive...", Command::ArchiveFile { path: None });
-                ui.separator();
-                item(ui, app, "Merge...", "Merge File");
-                item(ui, app, "Import...", "Import File");
-                item(ui, app, "Export...", "Export File");
-                item(ui, app, "Export Selected...", "Export Selected");
-                ui.separator();
-                cmd(ui, app, "Summary Info...", Command::SummaryInfo);
-                cmd(ui, app, "File Properties...", Command::FileProperties);
-                ui.separator();
-                if ui.button("Exit").clicked() {
-                    app.request_file_action(A::Exit);
-                    ui.close_menu();
-                }
-            });
-            ui.menu_button("Edit", |ui| {
-                let undo = app.state.undo.labels().last().cloned().unwrap_or_default();
-                item(ui, app, &format!("Undo {undo}"), "Undo Scene Operation");
-                item(ui, app, "Redo", "Redo Scene Operation");
-                ui.separator();
-                item(ui, app, "Hold", "Hold");
-                item(ui, app, "Fetch", "Fetch");
-                ui.separator();
-                item(ui, app, "Delete", "Delete Objects");
-                item(ui, app, "Clone", "Clone");
-                ui.separator();
-                item(ui, app, "Move", "Select and Move");
-                item(ui, app, "Rotate", "Select and Rotate");
-                item(ui, app, "Scale", "Select and Scale");
-                item(ui, app, "Transform Type-In...", "Transform Type-In Dialog Toggle");
-                ui.separator();
-                item(ui, app, "Select All", "Select All");
-                item(ui, app, "Select None", "Select None");
-                item(ui, app, "Select Invert", "Select Invert");
-                ui.separator();
-                item(ui, app, "Select Similar", "Select Similar");
-                // Unavailable unless one object with instances is selected, as in the reference.
-                let instances = has_instances(&app.state);
-                ui.add_enabled_ui(instances, |ui| item(ui, app, "Select Instances", "Select Instances"));
-                ui.menu_button("Select By", |ui| {
-                    item(ui, app, "Color", "Select By Color Pick");
-                    item(ui, app, "Name...", "Select By Name");
-                });
-                ui.menu_button("Region", |ui| {
-                    let window = app.state.window_selection;
-                    for (label, on) in [("Window", window), ("Crossing", !window)] {
-                        let label = if on { format!("✔ {label}") } else { format!("    {label}") };
-                        if ui.button(label).clicked() {
-                            if !on {
-                                let _ = app.dispatch(Command::WindowCrossingSelectionToggle);
-                            }
-                            ui.close_menu();
-                        }
-                    }
-                    ui.separator();
-                    for shape in loom_commands::SelectionRegion::ALL {
-                        // "Rectangular Region" … "Paint Selection Region", as the reference's menu names them.
-                        let name = match shape {
-                            loom_commands::SelectionRegion::Paint => shape.label().to_owned(),
-                            _ => shape.label().replace(" Selection Region", " Region"),
-                        };
-                        let label = if app.state.selection_region == shape { format!("✔ {name}") } else { format!("    {name}") };
-                        if ui.button(label).clicked() {
-                            let _ = app.dispatch(Command::SelectionRegion { shape });
-                            ui.close_menu();
-                        }
-                    }
-                });
-                ui.separator();
-                cmd(ui, app, "Edit Named Selection Sets...", Command::EditNamedSelectionSets);
-                ui.separator();
-                item(ui, app, "Object Properties...", "Object Properties");
-            });
-            ui.menu_button("Tools", |ui| {
-                // The reference's order; its items Loom has no tool for are left out.
-                item(ui, app, "Isolate Selection", "Isolate Selection");
-                cmd(ui, app, "Manage Layers...", Command::LayerManager);
-                ui.separator();
-                cmd(ui, app, "Light Lister...", Command::LightLister);
-                ui.separator();
-                item(ui, app, "Mirror...", "Mirror");
-                cmd(ui, app, "Array...", Command::Array);
-                ui.menu_button("Align", |ui| {
-                    item(ui, app, "Align...", "Align");
-                    item(ui, app, "Quick Align", "Quick Align");
-                    item(ui, app, "Spacing Tool...", "Spacing Tool");
-                    cmd(ui, app, "Clone and Align...", Command::CloneAndAlignDialog);
-                    ui.separator();
-                    item(ui, app, "Align to View...", "Align to View Dialog");
-                    item(ui, app, "Normal Align...", "Normal Align ");
-                    item(ui, app, "Align Camera", "Align Camera");
-                    cmd(ui, app, "Place Highlight", Command::PlaceHighlight);
-                });
-                cmd(ui, app, "Snapshot...", Command::SnapshotDialog);
-                ui.separator();
-                ui.menu_button("Grids and Snaps", |ui| {
-                    cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
-                    ui.separator();
-                    let grid = app.state.active().show_grid;
-                    check_item(ui, app, "Show Home Grid", "Hide Grids Toggle", grid);
-                    cmd(ui, app, "Activate Home Grid", Command::ActivateHomeGrid);
-                    let grid_selected = app.state.selection.iter().any(|id| app.state.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Grid { .. })));
-                    if ui.add_enabled(grid_selected, egui::Button::new("Activate Grid Object")).clicked() {
-                        let _ = app.dispatch(Command::ActivateGridObject);
-                        ui.close_menu();
-                    }
-                    if ui.add_enabled(app.state.active_grid().is_some(), egui::Button::new("Align Grid to View")).clicked() {
-                        let _ = app.dispatch(Command::AlignGridToView);
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    check_item(ui, app, "Snaps Toggle", "Snaps Toggle", app.state.snaps_on);
-                    check_item(ui, app, "Angle Snap Toggle", "Angle Snap Toggle", app.state.angle_snap_on);
-                    check_item(ui, app, "Percent Snap Toggle", "Percent Snap Toggle", app.state.percent_snap_on);
-                    check_item(ui, app, "Spinner Snap Toggle", "Spinner Snap Toggle", app.state.prefs.spinner_snap);
-                    let axis = app.state.snaps.use_axis_constraints;
-                    check_item(ui, app, "Snaps Use Axis Constraints", Command::EnableAxisConstraintsInSnapsToggle.name(), axis);
-                });
-                cmd(ui, app, "Measure Distance", Command::MeasureDistance);
-                ui.separator();
-                let ribbon = app.state.show_ribbon;
-                check_item(ui, app, "Graphite Modeling Tools", "Show Ribbon Toggle", ribbon);
-            });
-            ui.menu_button("Group", |ui| {
-                if menu_button(ui, &app.state, "Group...", "Group").clicked() {
-                    // The reference asks for the group name first.
-                    if app.state.selection.is_empty() {
-                        app.state.status_prompt = "select objects to group".into();
-                    } else {
-                        app.state.dialog = Some(loom_commands::Dialog::GroupName);
-                    }
-                    ui.close_menu();
-                }
-                cmd(ui, app, "Ungroup", Command::Ungroup);
-                ui.separator();
-                cmd(ui, app, "Open", Command::GroupOpen);
-                cmd(ui, app, "Close", Command::GroupClose);
-                ui.separator();
-                cmd(ui, app, "Attach", Command::GroupAttach);
-                cmd(ui, app, "Detach", Command::GroupDetach);
-                ui.separator();
-                cmd(ui, app, "Explode", Command::GroupExplode);
-                ui.separator();
-                ui.add_enabled(false, egui::Button::new("Assembly")).on_disabled_hover_text("Assemblies (luminaires) are out of scope");
-            });
-            ui.menu_button("Views", |ui| {
-                item(ui, app, "Undo View Change", "Undo Viewport Operation");
-                item(ui, app, "Redo View Change", "Redo Viewport Operation");
-                ui.separator();
-                // The active view's name is part of the item, as in the reference.
-                let view = app.state.active().kind.label();
-                item(ui, app, &format!("Save Active {view} View"), "Save Active View");
-                item(ui, app, &format!("Restore Active {view} View"), "Restore Active View");
-                ui.separator();
-                item(ui, app, "Viewport Configuration...", "Configure Viewports");
-                item(ui, app, "Viewport Background...", "Viewport Background");
-                item(ui, app, "Update Background Image", "Update Background Image");
-                item(ui, app, "Reset Background Transform", "Reset Background Transform");
-                item(ui, app, "Show Floating Dialogs", "Show Floating Dialogs");
-                ui.separator();
-                let (gizmo, shade) = (app.state.prefs.gizmos.enabled, app.state.shade_selected);
-                check_item(ui, app, "Show Transform Gizmo", "Transform Gizmo Toggle", gizmo);
-                check_item(ui, app, "Shade Selected", "Shade Selected", shade);
-                item(ui, app, "Create Camera From View", "Create Camera From View");
-                item(ui, app, "Redraw All Views", "Redraw All Views");
-                ui.separator();
-                for (label, action) in [
-                    ("Top", "Top View"), ("Bottom", "Bottom View"), ("Front", "Front View"), ("Back", "Back View"),
-                    ("Left", "Left View"), ("Right", "Right View"), ("Perspective", "Perspective User View"), ("Orthographic", "Orthographic User View"),
-                ] {
-                    item(ui, app, label, action);
-                }
-                ui.separator();
-                item(ui, app, "Zoom Extents", "Zoom Extents");
-                item(ui, app, "Zoom Extents All", "Zoom Extents All");
-                item(ui, app, "Zoom Extents Selected", "Zoom Extents Selected");
-                ui.separator();
-                let vp = app.state.active();
-                let (grid, edged, safe) = (vp.show_grid, vp.edged_faces, vp.safe_frames);
-                check_item(ui, app, "Show Grid", "Hide Grids Toggle", grid);
-                check_item(ui, app, "Show Statistics", "Show Statistics Toggle", app.state.show_statistics);
-                check_item(ui, app, "Edged Faces", "View Edged Faces Toggle", edged);
-                item(ui, app, "Wireframe / Smooth+Highlights", "Wireframe / Smooth+Highlights Toggle");
-                check_item(ui, app, "Show Safe Frames", "Viewport Safeframes Toggle", safe);
-                ui.separator();
-                check_item(ui, app, "Expert Mode", "Expert Mode Toggle", app.state.expert_mode);
-            });
-            ui.menu_button("Create", |ui| {
-                ui.menu_button("Standard Primitives", |ui| {
-                    for kind in PrimitiveKind::ALL {
-                        if ui.button(kind.label()).clicked() {
-                            app.create_kind = Some(crate::CreateKind::Primitive(kind));
-                            app.create_category = crate::Category::Geometry;
-                            app.panel_tab = crate::Tab::Create;
-                            ui.close_menu();
-                        }
-                    }
-                });
-                ui.menu_button("Lights", |ui| {
-                    ui.menu_button("Standard Lights", |ui| {
-                        for (kind, label) in [
-                            (loom_commands::light::LightKind::TargetSpot, "Target Spotlight"), (loom_commands::light::LightKind::FreeSpot, "Free Spotlight"),
-                            (loom_commands::light::LightKind::TargetDirect, "Target Directional"), (loom_commands::light::LightKind::FreeDirect, "Directional"),
-                            (loom_commands::light::LightKind::Omni, "Omni"), (loom_commands::light::LightKind::Skylight, "Skylight"),
-                        ] {
-                            if ui.button(label).clicked() {
-                                let _ = app.dispatch(Command::SelectObject);
-                                app.create_kind = Some(crate::CreateKind::Light(kind));
-                                app.create_category = crate::Category::Lights;
-                                app.panel_tab = crate::Tab::Create;
-                                ui.close_menu();
-                            }
-                        }
-                    });
-                });
-                ui.menu_button("Helpers", |ui| {
-                    for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass")] {
-                        if ui.button(label).clicked() {
-                            app.create_category = crate::Category::Helpers;
-                            app.panel_tab = crate::Tab::Create;
-                            app.start_create(Some(crate::CreateKind::Helper(kind)));
-                            ui.close_menu();
-                        }
-                    }
-                });
-                ui.menu_button("Cameras", |ui| {
-                    // Turns on the creation tool: drag (Target) or click (Free) in a viewport.
-                    for (label, target) in [("Target Camera", true), ("Free Camera", false)] {
-                        if ui.button(label).clicked() {
-                            app.create_kind = Some(crate::CreateKind::Camera { target });
-                            app.create_category = crate::Category::Cameras;
-                            app.panel_tab = crate::Tab::Create;
-                            ui.close_menu();
-                        }
-                    }
-                    ui.separator();
-                    cmd(ui, app, "Create Camera From View", Command::CreateCameraFromView);
-                });
-                ui.menu_button("Shapes", |ui| {
-                    let kinds = std::iter::once((crate::CreateKind::Line, "Line")).chain(loom_commands::ShapeKind::ALL.iter().map(|k| (crate::CreateKind::Shape(*k), k.label())));
-                    for (kind, label) in kinds {
-                        if ui.button(label).clicked() {
-                            if let Some(line) = app.line.take() {
-                                line.finish(app);
-                            }
-                            app.create_category = crate::Category::Shapes;
-                            app.panel_tab = crate::Tab::Create;
-                            app.start_create(Some(kind));
-                            ui.close_menu();
-                        }
-                    }
-                });
-                ui.menu_button("Compound", |ui| {
-                    for kind in crate::command_panel::compound::CompoundKind::ALL {
-                        if ui.button(kind.label()).clicked() {
-                            app.create_category = crate::Category::Geometry;
-                            app.create_compound = true;
-                            app.compound_kind = Some(kind);
-                            app.create_kind = None;
-                            app.panel_tab = crate::Tab::Create;
-                            let _ = app.dispatch(Command::SelectObject);
-                            ui.close_menu();
-                        }
-                    }
-                });
-                ui.separator();
-                let mut keep = app.state.prefs.keep_creating;
-                if ui.checkbox(&mut keep, "Keep Creating").changed() {
-                    let _ = app.dispatch(Command::KeepCreatingToggle);
-                    ui.close_menu();
-                }
-                ui.separator();
-                item(ui, app, "Test Room", "Test Room");
-            });
-            ui.menu_button("Modifiers", |ui| {
-                let has = app.has_selection();
-                for (category, entries) in MODIFIERS_MENU {
-                    ui.menu_button(*category, |ui| {
-                        for (label, name) in *entries {
-                            if ui.add_enabled(has, egui::Button::new(*label)).clicked() {
-                                if let Err(e) = app.dispatch(Command::AddModifier { name: (*name).into() }) {
-                                    app.state.status_prompt = e;
-                                }
-                                ui.close_menu();
-                            }
-                        }
-                    });
-                }
-            });
-            ui.menu_button("Animation", |ui| {
-                cmd(ui, app, "Load Animation...", Command::LoadAnimation { path: None, offset: None });
-                cmd(ui, app, "Save Animation...", Command::SaveAnimation { path: None });
-                ui.separator();
-                ui.menu_button("Constraints", |ui| {
-                    for (label, kind) in [("Attachment Constraint", "Attachment Constraint"), ("Path Constraint", "Path Constraint"), ("Position Constraint", "Position Constraint"), ("Link Constraint", "Link Constraint"), ("LookAt Constraint", "LookAt Constraint"), ("Orientation Constraint", "Orientation Constraint")] {
-                        cmd(ui, app, label, Command::StartConstraintPick { kind: kind.into() });
-                    }
-                });
-                ui.menu_button("Position Controllers", |ui| {
-                    for c in ["Position XYZ", "Bezier Position", "TCB Position", "Linear Position", "Noise Position", "Position List"] {
-                        controller_item(ui, app, "Position", c);
-                    }
-                });
-                ui.menu_button("Rotation Controllers", |ui| {
-                    for c in ["Euler XYZ", "Bezier Rotation", "TCB Rotation", "Linear Rotation", "Noise Rotation", "Rotation List"] {
-                        controller_item(ui, app, "Rotation", c);
-                    }
-                });
-                ui.menu_button("Scale Controllers", |ui| {
-                    for c in ["ScaleXYZ", "Bezier Scale", "TCB Scale", "Linear Scale", "Noise Scale", "Scale List"] {
-                        controller_item(ui, app, "Scale", c);
-                    }
-                });
-                ui.separator();
-                cmd(ui, app, "Delete Selected Animation", Command::DeleteSelectedAnimation);
-                ui.separator();
-                ui.menu_button("IK Solvers", |ui| {
-                    item(ui, app, "HI Solver", "History-Independent IK Solver");
-                    item(ui, app, "IK Limb Solver", "IK Limb Solver");
-                    item(ui, app, "Spline IK Solver", "Spline IK Solver");
-                });
-                ui.separator();
-                item(ui, app, "Bone Tools...", "Bone Tools...");
-                ui.separator();
-                item(ui, app, "Display Bones", "Display Bones");
-                item(ui, app, "Display Bones and Objects", "Display Bones and Objects");
-            });
-            ui.menu_button("Graph Editors", |ui| {
-                cmd(ui, app, "Track View - Curve Editor...", Command::OpenCurveEditor);
-                cmd(ui, app, "Track View - Dope Sheet...", Command::OpenDopeSheet);
-            });
-            ui.menu_button("Rendering", |ui| {
-                cmd(ui, app, "Render", Command::Render { path: None, width: None, height: None });
-                cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
-                cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
-                ui.separator();
-                cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
-            });
-            ui.menu_button("Customize", |ui| {
-                cmd(ui, app, "Customize User Interface...", Command::CustomizeUserInterface);
-                ui.separator();
-                cmd(ui, app, "Load Custom UI Scheme...", Command::LoadCustomUiScheme { path: None });
-                cmd(ui, app, "Save Custom UI Scheme...", Command::SaveCustomUiScheme { path: None, parts: None });
-                item(ui, app, "Revert to Startup Layout", "Revert to Startup UI");
-                ui.separator();
-                ui.menu_button("Show UI", |ui| {
-                    check_item(ui, app, "Show Command Panel", "Show Command Panel Toggle", app.state.show_command_panel);
-                    check_item(ui, app, "Show Main Toolbar", "Show Main Toolbar Toggle", app.state.show_main_toolbar);
-                    check_item(ui, app, "Show Track Bar", "Show Track Bar Toggle", app.state.show_track_bar);
-                    check_item(ui, app, "Show Ribbon", "Show Ribbon Toggle", app.state.show_ribbon);
-                    check_item(ui, app, "Show Layers Toolbar", "Show Layers Toolbar Toggle", app.state.show_layers_toolbar);
-                });
-                check_item(ui, app, "Lock UI Layout", "Lock User Interface Toggle", app.state.ui_locked);
-                ui.separator();
-                cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
-                cmd(ui, app, "Units Setup...", Command::UnitsSetup);
-                ui.separator();
-                cmd(ui, app, "Preferences...", Command::Preferences);
-            });
-            ui.menu_button("Help", |ui| {
-                if ui.button("3dLoom on GitHub").on_hover_text(REPO_URL).clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(REPO_URL));
-                    ui.close_menu();
-                }
-                if ui.button("Releases").clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(format!("{REPO_URL}/releases")));
-                    ui.close_menu();
-                }
-                ui.separator();
-                ui.label(format!("3dLoom {} — a 3D modelling application", env!("LOOM_VERSION")));
-            });
+            for m in bar_menus(app) {
+                menu(ui, app, &m);
+            }
             if let Some(handle) = app.update.clone() {
                 crate::update_menu::show(ui, &handle);
             }
         });
     });
+}
+
+/// The menu bar menu `name`'s own entries (what `menu` shows before the user's added entries).
+pub(crate) fn builtin_menu(ui: &mut egui::Ui, app: &mut LoomApp, name: &str) {
+    match name {
+        "File" => file_menu(ui, app),
+        "Edit" => edit_menu(ui, app),
+        "Tools" => tools_menu(ui, app),
+        "Group" => group_menu(ui, app),
+        "Views" => views_menu(ui, app),
+        "Create" => create_menu(ui, app),
+        "Modifiers" => modifiers_menu(ui, app),
+        "Animation" => animation_menu(ui, app),
+        "Graph Editors" => graph_editors_menu(ui, app),
+        "Rendering" => rendering_menu(ui, app),
+        "Customize" => customize_menu(ui, app),
+        "Help" => help_menu(ui, app),
+        _ => {}
+    }
+}
+
+fn file_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    use loom_commands::PendingFileAction as A;
+    if menu_button(ui, &app.state, "New", "New Scene").clicked() {
+        app.new_scene();
+        ui.close_menu();
+    }
+    if entry(ui, app, "Reset") {
+        app.request_file_action(A::Reset);
+        ui.close_menu();
+    }
+    ui.separator();
+    if menu_button(ui, &app.state, "Open...", "Open File").clicked() {
+        app.request_file_action(A::Open);
+        ui.close_menu();
+    }
+    sub(ui, app, "Recent", |ui, app| {
+        if app.state.recent_files.is_empty() {
+            ui.label("(none)");
+        }
+        for (i, path) in app.state.recent_files.clone().iter().enumerate() {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            if ui.button(format!("{} {name}", i + 1)).on_hover_text(path.display().to_string()).clicked() {
+                app.request_file_action(A::OpenRecent(i));
+                ui.close_menu();
+            }
+        }
+    });
+    item(ui, app, "Save", "Save File");
+    item(ui, app, "Save As...", "Save File As");
+    item(ui, app, "Save Copy As...", "Save File As Copy");
+    item(ui, app, "Save Incremental", "Save Incremental (+)");
+    cmd(ui, app, "Save Selected...", Command::SaveSelected { path: None });
+    cmd(ui, app, "Archive...", Command::ArchiveFile { path: None });
+    ui.separator();
+    item(ui, app, "Merge...", "Merge File");
+    item(ui, app, "Import...", "Import File");
+    item(ui, app, "Export...", "Export File");
+    item(ui, app, "Export Selected...", "Export Selected");
+    ui.separator();
+    cmd(ui, app, "Summary Info...", Command::SummaryInfo);
+    cmd(ui, app, "File Properties...", Command::FileProperties);
+    ui.separator();
+    if entry(ui, app, "Exit") {
+        app.request_file_action(A::Exit);
+        ui.close_menu();
+    }
+}
+
+fn edit_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let undo = app.state.undo.labels().last().cloned().unwrap_or_default();
+    item(ui, app, &format!("Undo {undo}"), "Undo Scene Operation");
+    item(ui, app, "Redo", "Redo Scene Operation");
+    ui.separator();
+    item(ui, app, "Hold", "Hold");
+    item(ui, app, "Fetch", "Fetch");
+    ui.separator();
+    item(ui, app, "Delete", "Delete Objects");
+    item(ui, app, "Clone", "Clone");
+    ui.separator();
+    item(ui, app, "Move", "Select and Move");
+    item(ui, app, "Rotate", "Select and Rotate");
+    item(ui, app, "Scale", "Select and Scale");
+    item(ui, app, "Transform Type-In...", "Transform Type-In Dialog Toggle");
+    ui.separator();
+    item(ui, app, "Select All", "Select All");
+    item(ui, app, "Select None", "Select None");
+    item(ui, app, "Select Invert", "Select Invert");
+    ui.separator();
+    item(ui, app, "Select Similar", "Select Similar");
+    // Unavailable unless one object with instances is selected, as in the reference.
+    let instances = has_instances(&app.state);
+    ui.add_enabled_ui(instances, |ui| item(ui, app, "Select Instances", "Select Instances"));
+    sub(ui, app, "Select By", |ui, app| {
+        item(ui, app, "Color", "Select By Color Pick");
+        item(ui, app, "Name...", "Select By Name");
+    });
+    sub(ui, app, "Region", |ui, app| {
+        let window = app.state.window_selection;
+        for (label, on) in [("Window", window), ("Crossing", !window)] {
+            let label = if on { format!("✔ {label}") } else { format!("    {label}") };
+            if ui.button(label).clicked() {
+                if !on {
+                    let _ = app.dispatch(Command::WindowCrossingSelectionToggle);
+                }
+                ui.close_menu();
+            }
+        }
+        ui.separator();
+        for shape in loom_commands::SelectionRegion::ALL {
+            // "Rectangular Region" … "Paint Selection Region", as the reference's menu names them.
+            let name = match shape {
+                loom_commands::SelectionRegion::Paint => shape.label().to_owned(),
+                _ => shape.label().replace(" Selection Region", " Region"),
+            };
+            let label = if app.state.selection_region == shape { format!("✔ {name}") } else { format!("    {name}") };
+            if ui.button(label).clicked() {
+                let _ = app.dispatch(Command::SelectionRegion { shape });
+                ui.close_menu();
+            }
+        }
+    });
+    ui.separator();
+    cmd(ui, app, "Edit Named Selection Sets...", Command::EditNamedSelectionSets);
+    ui.separator();
+    item(ui, app, "Object Properties...", "Object Properties");
+}
+
+fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    // The reference's order; its items Loom has no tool for are left out.
+    item(ui, app, "Isolate Selection", "Isolate Selection");
+    cmd(ui, app, "Manage Layers...", Command::LayerManager);
+    ui.separator();
+    cmd(ui, app, "Light Lister...", Command::LightLister);
+    ui.separator();
+    item(ui, app, "Mirror...", "Mirror");
+    cmd(ui, app, "Array...", Command::Array);
+    sub(ui, app, "Align", |ui, app| {
+        item(ui, app, "Align...", "Align");
+        item(ui, app, "Quick Align", "Quick Align");
+        item(ui, app, "Spacing Tool...", "Spacing Tool");
+        cmd(ui, app, "Clone and Align...", Command::CloneAndAlignDialog);
+        ui.separator();
+        item(ui, app, "Align to View...", "Align to View Dialog");
+        item(ui, app, "Normal Align...", "Normal Align ");
+        item(ui, app, "Align Camera", "Align Camera");
+        cmd(ui, app, "Place Highlight", Command::PlaceHighlight);
+    });
+    cmd(ui, app, "Snapshot...", Command::SnapshotDialog);
+    ui.separator();
+    sub(ui, app, "Grids and Snaps", |ui, app| {
+        cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
+        ui.separator();
+        let grid = app.state.active().show_grid;
+        check_item(ui, app, "Show Home Grid", "Hide Grids Toggle", grid);
+        cmd(ui, app, "Activate Home Grid", Command::ActivateHomeGrid);
+        let grid_selected = app.state.selection.iter().any(|id| app.state.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Grid { .. })));
+        if ui.add_enabled(grid_selected, egui::Button::new("Activate Grid Object")).clicked() {
+            let _ = app.dispatch(Command::ActivateGridObject);
+            ui.close_menu();
+        }
+        if ui.add_enabled(app.state.active_grid().is_some(), egui::Button::new("Align Grid to View")).clicked() {
+            let _ = app.dispatch(Command::AlignGridToView);
+            ui.close_menu();
+        }
+        ui.separator();
+        check_item(ui, app, "Snaps Toggle", "Snaps Toggle", app.state.snaps_on);
+        check_item(ui, app, "Angle Snap Toggle", "Angle Snap Toggle", app.state.angle_snap_on);
+        check_item(ui, app, "Percent Snap Toggle", "Percent Snap Toggle", app.state.percent_snap_on);
+        check_item(ui, app, "Spinner Snap Toggle", "Spinner Snap Toggle", app.state.prefs.spinner_snap);
+        let axis = app.state.snaps.use_axis_constraints;
+        check_item(ui, app, "Snaps Use Axis Constraints", Command::EnableAxisConstraintsInSnapsToggle.name(), axis);
+    });
+    cmd(ui, app, "Measure Distance", Command::MeasureDistance);
+    ui.separator();
+    let ribbon = app.state.show_ribbon;
+    check_item(ui, app, "Graphite Modeling Tools", "Show Ribbon Toggle", ribbon);
+}
+
+fn group_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    if menu_button(ui, &app.state, "Group...", "Group").clicked() {
+        // The reference asks for the group name first.
+        if app.state.selection.is_empty() {
+            app.state.status_prompt = "select objects to group".into();
+        } else {
+            app.state.dialog = Some(loom_commands::Dialog::GroupName);
+        }
+        ui.close_menu();
+    }
+    cmd(ui, app, "Ungroup", Command::Ungroup);
+    ui.separator();
+    cmd(ui, app, "Open", Command::GroupOpen);
+    cmd(ui, app, "Close", Command::GroupClose);
+    ui.separator();
+    cmd(ui, app, "Attach", Command::GroupAttach);
+    cmd(ui, app, "Detach", Command::GroupDetach);
+    ui.separator();
+    cmd(ui, app, "Explode", Command::GroupExplode);
+    ui.separator();
+    ui.add_enabled(false, egui::Button::new("Assembly")).on_disabled_hover_text("Assemblies (luminaires) are out of scope");
+}
+
+fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    item(ui, app, "Undo View Change", "Undo Viewport Operation");
+    item(ui, app, "Redo View Change", "Redo Viewport Operation");
+    ui.separator();
+    // The active view's name is part of the item, as in the reference.
+    let view = app.state.active().kind.label();
+    item(ui, app, &format!("Save Active {view} View"), "Save Active View");
+    item(ui, app, &format!("Restore Active {view} View"), "Restore Active View");
+    ui.separator();
+    item(ui, app, "Viewport Configuration...", "Configure Viewports");
+    item(ui, app, "Viewport Background...", "Viewport Background");
+    item(ui, app, "Update Background Image", "Update Background Image");
+    item(ui, app, "Reset Background Transform", "Reset Background Transform");
+    item(ui, app, "Show Floating Dialogs", "Show Floating Dialogs");
+    ui.separator();
+    let (gizmo, shade) = (app.state.prefs.gizmos.enabled, app.state.shade_selected);
+    check_item(ui, app, "Show Transform Gizmo", "Transform Gizmo Toggle", gizmo);
+    check_item(ui, app, "Shade Selected", "Shade Selected", shade);
+    item(ui, app, "Create Camera From View", "Create Camera From View");
+    item(ui, app, "Redraw All Views", "Redraw All Views");
+    ui.separator();
+    for (label, action) in [
+        ("Top", "Top View"), ("Bottom", "Bottom View"), ("Front", "Front View"), ("Back", "Back View"),
+        ("Left", "Left View"), ("Right", "Right View"), ("Perspective", "Perspective User View"), ("Orthographic", "Orthographic User View"),
+    ] {
+        item(ui, app, label, action);
+    }
+    ui.separator();
+    item(ui, app, "Zoom Extents", "Zoom Extents");
+    item(ui, app, "Zoom Extents All", "Zoom Extents All");
+    item(ui, app, "Zoom Extents Selected", "Zoom Extents Selected");
+    ui.separator();
+    let vp = app.state.active();
+    let (grid, edged, safe) = (vp.show_grid, vp.edged_faces, vp.safe_frames);
+    check_item(ui, app, "Show Grid", "Hide Grids Toggle", grid);
+    check_item(ui, app, "Show Statistics", "Show Statistics Toggle", app.state.show_statistics);
+    check_item(ui, app, "Edged Faces", "View Edged Faces Toggle", edged);
+    item(ui, app, "Wireframe / Smooth+Highlights", "Wireframe / Smooth+Highlights Toggle");
+    check_item(ui, app, "Show Safe Frames", "Viewport Safeframes Toggle", safe);
+    ui.separator();
+    check_item(ui, app, "Expert Mode", "Expert Mode Toggle", app.state.expert_mode);
+}
+
+fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    sub(ui, app, "Standard Primitives", |ui, app| {
+        for kind in PrimitiveKind::ALL {
+            if ui.button(kind.label()).clicked() {
+                app.create_kind = Some(crate::CreateKind::Primitive(kind));
+                app.create_category = crate::Category::Geometry;
+                app.panel_tab = crate::Tab::Create;
+                ui.close_menu();
+            }
+        }
+    });
+    sub(ui, app, "Lights", |ui, app| {
+        ui.menu_button("Standard Lights", |ui| {
+            for (kind, label) in [
+                (loom_commands::light::LightKind::TargetSpot, "Target Spotlight"), (loom_commands::light::LightKind::FreeSpot, "Free Spotlight"),
+                (loom_commands::light::LightKind::TargetDirect, "Target Directional"), (loom_commands::light::LightKind::FreeDirect, "Directional"),
+                (loom_commands::light::LightKind::Omni, "Omni"), (loom_commands::light::LightKind::Skylight, "Skylight"),
+            ] {
+                if ui.button(label).clicked() {
+                    let _ = app.dispatch(Command::SelectObject);
+                    app.create_kind = Some(crate::CreateKind::Light(kind));
+                    app.create_category = crate::Category::Lights;
+                    app.panel_tab = crate::Tab::Create;
+                    ui.close_menu();
+                }
+            }
+        });
+    });
+    sub(ui, app, "Helpers", |ui, app| {
+        for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass")] {
+            if ui.button(label).clicked() {
+                app.create_category = crate::Category::Helpers;
+                app.panel_tab = crate::Tab::Create;
+                app.start_create(Some(crate::CreateKind::Helper(kind)));
+                ui.close_menu();
+            }
+        }
+    });
+    sub(ui, app, "Cameras", |ui, app| {
+        // Turns on the creation tool: drag (Target) or click (Free) in a viewport.
+        for (label, target) in [("Target Camera", true), ("Free Camera", false)] {
+            if ui.button(label).clicked() {
+                app.create_kind = Some(crate::CreateKind::Camera { target });
+                app.create_category = crate::Category::Cameras;
+                app.panel_tab = crate::Tab::Create;
+                ui.close_menu();
+            }
+        }
+        ui.separator();
+        cmd(ui, app, "Create Camera From View", Command::CreateCameraFromView);
+    });
+    sub(ui, app, "Shapes", |ui, app| {
+        let kinds = std::iter::once((crate::CreateKind::Line, "Line")).chain(loom_commands::ShapeKind::ALL.iter().map(|k| (crate::CreateKind::Shape(*k), k.label())));
+        for (kind, label) in kinds {
+            if ui.button(label).clicked() {
+                if let Some(line) = app.line.take() {
+                    line.finish(app);
+                }
+                app.create_category = crate::Category::Shapes;
+                app.panel_tab = crate::Tab::Create;
+                app.start_create(Some(kind));
+                ui.close_menu();
+            }
+        }
+    });
+    sub(ui, app, "Compound", |ui, app| {
+        for kind in crate::command_panel::compound::CompoundKind::ALL {
+            if ui.button(kind.label()).clicked() {
+                app.create_category = crate::Category::Geometry;
+                app.create_compound = true;
+                app.compound_kind = Some(kind);
+                app.create_kind = None;
+                app.panel_tab = crate::Tab::Create;
+                let _ = app.dispatch(Command::SelectObject);
+                ui.close_menu();
+            }
+        }
+    });
+    ui.separator();
+    let mut keep = app.state.prefs.keep_creating;
+    if ui.checkbox(&mut keep, "Keep Creating").changed() {
+        let _ = app.dispatch(Command::KeepCreatingToggle);
+        ui.close_menu();
+    }
+    ui.separator();
+    item(ui, app, "Test Room", "Test Room");
+}
+
+fn modifiers_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let has = app.has_selection();
+    for (category, entries) in MODIFIERS_MENU {
+        sub(ui, app, category, |ui, app| {
+            for (label, name) in *entries {
+                if ui.add_enabled(has, egui::Button::new(*label)).clicked() {
+                    if let Err(e) = app.dispatch(Command::AddModifier { name: (*name).into() }) {
+                        app.state.status_prompt = e;
+                    }
+                    ui.close_menu();
+                }
+            }
+        });
+    }
+}
+
+fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    cmd(ui, app, "Load Animation...", Command::LoadAnimation { path: None, offset: None });
+    cmd(ui, app, "Save Animation...", Command::SaveAnimation { path: None });
+    ui.separator();
+    sub(ui, app, "Constraints", |ui, app| {
+        for (label, kind) in [("Attachment Constraint", "Attachment Constraint"), ("Path Constraint", "Path Constraint"), ("Position Constraint", "Position Constraint"), ("Link Constraint", "Link Constraint"), ("LookAt Constraint", "LookAt Constraint"), ("Orientation Constraint", "Orientation Constraint")] {
+            cmd(ui, app, label, Command::StartConstraintPick { kind: kind.into() });
+        }
+    });
+    sub(ui, app, "Position Controllers", |ui, app| {
+        for c in ["Position XYZ", "Bezier Position", "TCB Position", "Linear Position", "Noise Position", "Position List"] {
+            controller_item(ui, app, "Position", c);
+        }
+    });
+    sub(ui, app, "Rotation Controllers", |ui, app| {
+        for c in ["Euler XYZ", "Bezier Rotation", "TCB Rotation", "Linear Rotation", "Noise Rotation", "Rotation List"] {
+            controller_item(ui, app, "Rotation", c);
+        }
+    });
+    sub(ui, app, "Scale Controllers", |ui, app| {
+        for c in ["ScaleXYZ", "Bezier Scale", "TCB Scale", "Linear Scale", "Noise Scale", "Scale List"] {
+            controller_item(ui, app, "Scale", c);
+        }
+    });
+    ui.separator();
+    cmd(ui, app, "Delete Selected Animation", Command::DeleteSelectedAnimation);
+    ui.separator();
+    sub(ui, app, "IK Solvers", |ui, app| {
+        item(ui, app, "HI Solver", "History-Independent IK Solver");
+        item(ui, app, "IK Limb Solver", "IK Limb Solver");
+        item(ui, app, "Spline IK Solver", "Spline IK Solver");
+    });
+    ui.separator();
+    item(ui, app, "Bone Tools...", "Bone Tools...");
+    ui.separator();
+    item(ui, app, "Display Bones", "Display Bones");
+    item(ui, app, "Display Bones and Objects", "Display Bones and Objects");
+}
+
+fn graph_editors_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    cmd(ui, app, "Track View - Curve Editor...", Command::OpenCurveEditor);
+    cmd(ui, app, "Track View - Dope Sheet...", Command::OpenDopeSheet);
+}
+
+fn rendering_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    cmd(ui, app, "Render", Command::Render { path: None, width: None, height: None });
+    cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
+    cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
+    ui.separator();
+    cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
+}
+
+fn customize_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    cmd(ui, app, "Customize User Interface...", Command::CustomizeUserInterface);
+    ui.separator();
+    cmd(ui, app, "Load Custom UI Scheme...", Command::LoadCustomUiScheme { path: None });
+    cmd(ui, app, "Save Custom UI Scheme...", Command::SaveCustomUiScheme { path: None, parts: None });
+    item(ui, app, "Revert to Startup Layout", "Revert to Startup UI");
+    ui.separator();
+    sub(ui, app, "Show UI", |ui, app| {
+        check_item(ui, app, "Show Command Panel", "Show Command Panel Toggle", app.state.show_command_panel);
+        check_item(ui, app, "Show Main Toolbar", "Show Main Toolbar Toggle", app.state.show_main_toolbar);
+        check_item(ui, app, "Show Track Bar", "Show Track Bar Toggle", app.state.show_track_bar);
+        check_item(ui, app, "Show Ribbon", "Show Ribbon Toggle", app.state.show_ribbon);
+        check_item(ui, app, "Show Layers Toolbar", "Show Layers Toolbar Toggle", app.state.show_layers_toolbar);
+    });
+    check_item(ui, app, "Lock UI Layout", "Lock User Interface Toggle", app.state.ui_locked);
+    ui.separator();
+    cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
+    cmd(ui, app, "Units Setup...", Command::UnitsSetup);
+    ui.separator();
+    cmd(ui, app, "Preferences...", Command::Preferences);
+}
+
+fn help_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
+    if entry(ui, app, "3dLoom on GitHub") {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(REPO_URL));
+        ui.close_menu();
+    }
+    if entry(ui, app, "Releases") {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(format!("{REPO_URL}/releases")));
+        ui.close_menu();
+    }
+    ui.separator();
+    ui.label(format!("3dLoom {} — a 3D modelling application", env!("LOOM_VERSION")));
 }
 
 /// The Quick Access toolbar: New Scene, Open File, Save File, Undo, Redo.

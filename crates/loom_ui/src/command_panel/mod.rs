@@ -79,26 +79,55 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         app.panel_tab = Tab::Modify;
         app.state.focus_modify = false;
     }
-    egui::SidePanel::right("command_panel")
-        .default_width(270.0)
-        .resizable(!app.state.ui_locked)
-        .show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for tab in Tab::ALL {
-                    if crate::icons::Icon::new(tab.icon(), tab.label()).on(app.panel_tab == tab).show(ui, &app.state).clicked() {
-                        app.panel_tab = tab;
-                    }
+    let body = |ui: &mut egui::Ui, app: &mut LoomApp| {
+        // The panel's empty area (above the tabs): the Customize Display menu (dock left / right, float).
+        let bg = ui.interact(ui.max_rect(), ui.id().with("command_panel_bg"), egui::Sense::click());
+        bg.context_menu(|ui| crate::toolbars::customize_display_menu(ui, app, "Command Panel"));
+        ui.horizontal_wrapped(|ui| {
+            for tab in Tab::ALL {
+                if crate::icons::Icon::new(tab.icon(), tab.label()).on(app.panel_tab == tab).show(ui, &app.state).clicked() {
+                    app.panel_tab = tab;
                 }
-            });
-            ui.separator();
-            egui::ScrollArea::vertical().show(ui, |ui| match app.panel_tab {
-                Tab::Scene => scene::show(ui, app),
-                Tab::Create => create::show(ui, app),
-                Tab::Modify => modify::show(ui, app),
-                Tab::Hierarchy => hierarchy::show(ui, app),
-                Tab::Motion => motion::show(ui, app),
-                Tab::Display => display::show(ui, app),
-                Tab::Utilities => utilities::show(ui, app),
-            });
+            }
         });
+        ui.separator();
+        egui::ScrollArea::vertical().show(ui, |ui| match app.panel_tab {
+            Tab::Scene => scene::show(ui, app),
+            Tab::Create => create::show(ui, app),
+            Tab::Modify => modify::show(ui, app),
+            Tab::Hierarchy => hierarchy::show(ui, app),
+            Tab::Motion => motion::show(ui, app),
+            Tab::Display => display::show(ui, app),
+            Tab::Utilities => utilities::show(ui, app),
+        });
+    };
+    use loom_commands::ui_custom::Dock;
+    match app.state.ui_custom.dock("Command Panel") {
+        Dock::Float => {
+            let mut open = true;
+            let pos = app.state.ui_custom.float_pos("Command Panel");
+            let r = egui::Window::new("Command Panel")
+                .id(crate::toolbars::window_id("Command Panel"))
+                .default_pos(egui::pos2(pos[0], pos[1]))
+                .default_size(egui::vec2(270.0, 560.0))
+                .collapsible(false)
+                .movable(!app.state.ui_locked)
+                .open(&mut open)
+                .show(ctx, |ui| body(ui, app));
+            if let Some(r) = r {
+                let min = r.response.rect.min;
+                let moved = (pos[0] - min.x).abs() > 1.0 || (pos[1] - min.y).abs() > 1.0;
+                if moved && !ctx.input(|i| i.pointer.any_down()) {
+                    let _ = app.dispatch(loom_commands::Command::DockToolbar { name: "Command Panel".into(), dock: "Float".into(), pos: Some([min.x, min.y]) });
+                }
+            }
+            if !open {
+                let _ = app.dispatch(loom_commands::Command::ShowToolbar { name: "Command Panel".into(), on: Some(false) });
+            }
+        }
+        dock => {
+            let panel = if dock == Dock::Left { egui::SidePanel::left("command_panel") } else { egui::SidePanel::right("command_panel") };
+            panel.default_width(270.0).resizable(!app.state.ui_locked).show(ctx, |ui| body(ui, app));
+        }
+    }
 }

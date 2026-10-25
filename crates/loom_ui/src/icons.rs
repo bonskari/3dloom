@@ -374,6 +374,127 @@ pub fn small(ui: &mut egui::Ui, glyph: &str, name: &str) -> egui::Response {
     r.on_hover_text(name)
 }
 
+/// The icons actions have where the program shows them on a button: the
+/// Customize User Interface Action lists show them, and an action dropped on
+/// a toolbar becomes this icon (actions without one become text buttons).
+pub const ACTION_ICONS: &[(&str, &str)] = &[
+    ("Undo Scene Operation", UNDO),
+    ("Redo Scene Operation", REDO),
+    ("Select and Link", LINK),
+    ("Unlink Selection", UNLINK),
+    ("Select Object", SELECT_OBJECT),
+    ("Select By Name", SELECT_BY_NAME),
+    ("Window/Crossing Selection Toggle", CROSSING),
+    ("Select and Move", MOVE),
+    ("Select and Rotate", ROTATE),
+    ("Select and Scale", SCALE),
+    ("Select and Manipulate", MANIPULATE),
+    ("Keyboard Shortcut Override Toggle", KEYBOARD_OVERRIDE),
+    ("Snaps Toggle", SNAP),
+    ("Angle Snap Toggle", ANGLE_SNAP),
+    ("Percent Snap Toggle", PERCENT_SNAP),
+    ("Spinner Snap Toggle", SPINNER_SNAP),
+    ("Edit Named Selection Sets", NAMED_SETS),
+    ("Mirror", MIRROR),
+    ("Align", ALIGN),
+    ("Quick Align", QUICK_ALIGN),
+    ("Normal Align ", NORMAL_ALIGN),
+    ("Align Camera", ALIGN_CAMERA),
+    ("Align to View Dialog", ALIGN_TO_VIEW),
+    ("Layer Manager", LAYERS),
+    ("Show Ribbon Toggle", GRAPHITE),
+    ("Track View Floater", CURVE_EDITOR),
+    ("Material Editor Toggle", MATERIAL_EDITOR),
+    ("Render SetUp...", RENDER_SETUP),
+    ("Rendered Frame Window", RENDERED_FRAME_WINDOW),
+    ("Render", RENDER),
+    ("New Scene", NEW_SCENE),
+    ("Open File", OPEN_FILE),
+    ("Save File", SAVE_FILE),
+    ("Selection Lock Toggle", LOCKED),
+    ("Set Keys", SET_KEYS),
+    ("Next/Previous Key Mode Toggle", KEY_MODE),
+    ("Time Configuration", TIME_CONFIGURATION),
+    ("Go to Start Frame", GO_TO_START),
+    ("Backup Time One Unit", PREVIOUS_FRAME),
+    ("Play Animation", PLAY),
+    ("Forward Time One Unit", NEXT_FRAME),
+    ("Go to End Frame", GO_TO_END),
+    ("Zoom Mode", ZOOM),
+    ("Zoom All", ZOOM_ALL),
+    ("Zoom Extents", ZOOM_EXTENTS),
+    ("Zoom Extents All", ZOOM_EXTENTS_ALL),
+    ("Zoom Region Mode", ZOOM_REGION),
+    ("Field-of-View Mode", FIELD_OF_VIEW),
+    ("Pan View", PAN),
+    ("Orbit View Mode", ORBIT),
+    ("Maximize Viewport Toggle", MAXIMIZE),
+    ("Hide Selection", HIDE),
+    ("Unhide All", UNHIDE_ALL),
+    ("Freeze Selection", FREEZE),
+    ("Unfreeze All", UNFREEZE_ALL),
+    ("Repeat Last Operation", REPEAT_LAST),
+    ("Quickslice Mode", QUICKSLICE),
+    ("Swift Loop Mode", SWIFT_LOOP),
+    ("Cut", CUT),
+    ("Grow Selection", GROW),
+    ("Shrink Selection", SHRINK),
+    ("Select Edge Loop", LOOP),
+    ("Select Edge Ring", RING),
+    ("Relax", RELAX),
+    ("Create", CREATE),
+    ("Attach", ATTACH),
+    ("Detach", DETACH),
+    ("Slice Plane Mode", SLICE_PLANE),
+    ("Extrude Mode", EXTRUDE),
+    ("Chamfer Mode", CHAMFER),
+    ("Weld Settings", WELD),
+    ("Remove", REMOVE),
+    ("Break", BREAK),
+    ("Target Weld Mode", TARGET_WELD),
+    ("Bridge Settings", BRIDGE),
+    ("Split Edges", SPLIT),
+    ("Insert Vertex Mode", INSERT_VERTEX),
+    ("Connect", CONNECT),
+    ("Cap", CAP),
+    ("Bevel Mode", BEVEL),
+    ("Inset Mode", INSET),
+    ("Outline Mode", OUTLINE),
+    ("Hinge from Edge Mode", HINGE),
+    ("Flip Normals", FLIP),
+    ("MeshSmooth", MSMOOTH),
+    ("Tessellate", TESSELLATE),
+    ("Make Planar", MAKE_PLANAR),
+    ("Convert to Editable Poly", CONVERT_TO_POLY),
+];
+
+/// The icon an action shows on a button, if it has one.
+pub fn for_action(action: &str) -> Option<&'static str> {
+    ACTION_ICONS.iter().find(|(a, _)| *a == action).map(|(_, g)| *g)
+}
+
+/// Edit Button Appearance > Image Button: the icons to choose from, by name.
+pub const GALLERY: &[(&str, &str)] = &[
+    ("Undo", UNDO), ("Redo", REDO), ("Link", LINK), ("Unlink", UNLINK), ("Select", SELECT_OBJECT), ("Select By Name", SELECT_BY_NAME),
+    ("Move", MOVE), ("Rotate", ROTATE), ("Scale", SCALE), ("Manipulate", MANIPULATE), ("Keyboard", KEYBOARD_OVERRIDE), ("Snap", SNAP),
+    ("Angle Snap", ANGLE_SNAP), ("Percent Snap", PERCENT_SNAP), ("Spinner Snap", SPINNER_SNAP), ("Named Sets", NAMED_SETS), ("Mirror", MIRROR),
+    ("Align", ALIGN), ("Quick Align", QUICK_ALIGN), ("Normal Align", NORMAL_ALIGN), ("Camera", ALIGN_CAMERA), ("View", ALIGN_TO_VIEW),
+    ("Layers", LAYERS), ("Ribbon", GRAPHITE), ("Curve Editor", CURVE_EDITOR), ("Material Editor", MATERIAL_EDITOR), ("Render Setup", RENDER_SETUP),
+    ("Frame Window", RENDERED_FRAME_WINDOW), ("Render", RENDER), ("New", NEW_SCENE), ("Open", OPEN_FILE), ("Save", SAVE_FILE),
+    ("Geometry", GEOMETRY), ("Shapes", SHAPES), ("Lights", LIGHTS), ("Cameras", CAMERAS), ("Helpers", HELPERS), ("Systems", SYSTEMS),
+    ("Pin", PIN_STACK), ("Settings", SETTINGS), ("Lock", LOCKED), ("Key", SET_KEYS), ("Clock", TIME_CONFIGURATION), ("Play", PLAY),
+    ("Zoom", ZOOM), ("Zoom All", ZOOM_ALL), ("Zoom Extents", ZOOM_EXTENTS), ("Zoom Region", ZOOM_REGION), ("Pan", PAN), ("Orbit", ORBIT),
+    ("Maximize", MAXIMIZE), ("Hide", HIDE), ("Unhide", UNHIDE_ALL), ("Freeze", FREEZE), ("Unfreeze", UNFREEZE_ALL), ("Repeat", REPEAT_LAST),
+    ("Cut", CUT), ("Grow", GROW), ("Shrink", SHRINK), ("Loop", LOOP), ("Ring", RING), ("Relax", RELAX), ("Create", CREATE), ("Attach", ATTACH),
+    ("Detach", DETACH), ("Extrude", EXTRUDE), ("Chamfer", CHAMFER), ("Weld", WELD), ("Bridge", BRIDGE), ("Connect", CONNECT), ("Bevel", BEVEL),
+    ("Inset", INSET), ("Outline", OUTLINE), ("Flip", FLIP), ("Smooth", MSMOOTH), ("Tessellate", TESSELLATE), ("Bone", KIND_BONE), ("Group", KIND_GROUP),
+];
+
+/// A gallery icon by its name.
+pub fn by_name(name: &str) -> Option<&'static str> {
+    GALLERY.iter().find(|(n, _)| *n == name).map(|(_, g)| *g)
+}
+
 /// A menu or list row: the icon, then its name.
 pub fn labeled(glyph: &str, label: &str) -> String {
     format!("{glyph}  {label}")

@@ -108,9 +108,9 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
         if let Some(q) = plane_quad(l, p, plane) {
             let active = hl == Some(Handle::Plane(plane));
             let (ua, va) = plane.axes();
-            let fill = if active { HOVER.gamma_multiply(0.45) } else { egui::Color32::TRANSPARENT };
+            let fill = if active { hover().gamma_multiply(0.45) } else { egui::Color32::TRANSPARENT };
             painter.add(egui::Shape::convex_polygon(q.to_vec(), fill, egui::Stroke::NONE));
-            let c = |a: Axis| if active { HOVER } else { axis_color(a) };
+            let c = |a: Axis| if active { hover() } else { axis_color(a) };
             // The plane handle is drawn as an open corner bracket (the two outer edges).
             painter.line_segment([q[1], q[2]], egui::Stroke::new(1.5, c(va)));
             painter.line_segment([q[3], q[2]], egui::Stroke::new(1.5, c(ua)));
@@ -119,7 +119,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
     for a in [Axis::X, Axis::Y, Axis::Z] {
         if let Some((s, e)) = axis_segment(l, p, a, 0.0, 1.0) {
             let active = hl == Some(Handle::Axis(a));
-            let color = if active { HOVER } else { axis_color(a) };
+            let color = if active { hover() } else { axis_color(a) };
             painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
             arrow_cone(painter, l, p, a, color);
             if l.axis_labels {
@@ -132,7 +132,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
         let active = hl == Some(Handle::CenterBox);
         let r = egui::Rect::from_center_size(o, egui::vec2(CENTER_PX * 2.0, CENTER_PX * 2.0));
         if l.center_box {
-            painter.rect_filled(r, 0.0, if active { HOVER } else { egui::Color32::from_gray(200) });
+            painter.rect_filled(r, 0.0, if active { hover() } else { egui::Color32::from_gray(200) });
             painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::BLACK), egui::StrokeKind::Middle);
         }
         if let Some(d) = drag {
@@ -142,7 +142,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
                 egui::Align2::LEFT_TOP,
                 format!("[{:.2}, {:.2}, {:.2}]", off.x, off.y, off.z),
                 egui::FontId::proportional(11.0),
-                HOVER,
+                hover(),
             );
         }
     }

@@ -629,6 +629,47 @@ fn node_key_times(state: &AppState, id: NodeId) -> Vec<(TrackPath, Vec<f32>)> {
     entry
 }
 
+/// The kinds of track a track bar key belongs to (the track bar colours
+/// position, rotation and scale keys apart from the others).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeyKinds {
+    pub position: bool,
+    pub rotation: bool,
+    pub scale: bool,
+    pub other: bool,
+}
+
+/// Each key time of the selection's tracks (as the track bar filter shows
+/// them) with the kinds of track keyed there.
+pub fn selection_key_kinds(state: &AppState) -> Vec<(f32, KeyKinds)> {
+    let mut out: Vec<(f32, KeyKinds)> = Vec::new();
+    for id in &state.selection {
+        for (t, ts) in node_key_times(state, *id) {
+            if !track_bar_allows(state, &t) {
+                continue;
+            }
+            for time in ts {
+                let i = match out.iter().position(|(x, _)| (*x - time).abs() < 1e-4) {
+                    Some(i) => i,
+                    None => {
+                        out.push((time, KeyKinds::default()));
+                        out.len() - 1
+                    }
+                };
+                let k = &mut out[i].1;
+                match (t.owner == TrackOwner::Transform, t.pointer.as_str()) {
+                    (true, "/position") => k.position = true,
+                    (true, "/rotation") => k.rotation = true,
+                    (true, "/scale") => k.scale = true,
+                    _ => k.other = true,
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out
+}
+
 /// Every key time of the selection's tracks (as the track bar filter shows them).
 pub fn selection_key_times(state: &AppState) -> Vec<f32> {
     let mut times = Vec::new();

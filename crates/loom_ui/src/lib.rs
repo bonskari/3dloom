@@ -23,6 +23,7 @@ mod menubar;
 mod statusbar;
 pub mod spinner;
 pub mod tools;
+pub mod toolbars;
 pub mod viewport_gizmo;
 mod viewport_widget;
 pub mod poly_modes;
@@ -358,6 +359,8 @@ pub struct LoomApp {
     /// `state.bitmap_generation` the caches were filled at (Reload clears them).
     pub bitmap_generation: u64,
     pub last_error: Option<String>,
+    /// Edit Button Appearance is open for this action.
+    pub button_look: Option<String>,
     /// The last raw input events (live diagnostics).
     pub input_log: live::InputLog,
 }
@@ -528,6 +531,7 @@ impl LoomApp {
             quad_last: None,
             background_textures: std::collections::HashMap::new(),
             last_error: None,
+            button_look: None,
             input_log: Default::default(),
         }
     }
@@ -753,7 +757,7 @@ impl LoomApp {
             }
             let gray = n.frozen && d.show_frozen_in_gray;
             let color = if gray {
-                [0.35, 0.35, 0.35]
+                self.color_f32("Frozen")
             } else {
                 let c = self.state.scene.display_color(n);
                 [srgb(c[0]), srgb(c[1]), srgb(c[2])]
@@ -815,6 +819,7 @@ impl LoomApp {
                 wire_color,
                 diagonals: !d.edges_only,
                 unlit,
+                selection_color: self.color_f32("Selection"),
                 sub: sub.map(std::sync::Arc::new),
                 ..base
             });
@@ -1234,6 +1239,49 @@ impl LoomApp {
         loaded
     }
 
+    /// A Customize User Interface > Colors element's colour.
+    pub fn color(&self, element: &str) -> egui::Color32 {
+        let c = self.state.ui_custom.colors.get(element);
+        egui::Color32::from_rgb(c[0], c[1], c[2])
+    }
+
+    /// An element's colour as the line and mesh buffers take it (0–1 per channel).
+    pub fn color_f32(&self, element: &str) -> [f32; 3] {
+        let c = self.state.ui_custom.colors.get(element);
+        [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0]
+    }
+
+    /// The UI's colours: the scheme picked in Customize User Interface > Colors
+    /// (Dark, Light, or the Custom Colors UI Appearance on the dark scheme).
+    fn apply_ui_scheme(&self, ctx: &egui::Context) {
+        let colors = &self.state.ui_custom.colors;
+        let id = egui::Id::new("ui_scheme_applied");
+        if ctx.data(|d| d.get_temp::<loom_commands::ui_custom::UiColors>(id)).as_ref() == Some(colors) {
+            return;
+        }
+        let mut v = if colors.scheme == "Light" { egui::Visuals::light() } else { egui::Visuals::dark() };
+        if colors.scheme == "Custom Colors" {
+            let c = |n: &str| {
+                let c = colors.appearance(n);
+                egui::Color32::from_rgb(c[0], c[1], c[2])
+            };
+            v.panel_fill = c("Panel Background");
+            v.window_fill = c("Window Background");
+            v.override_text_color = Some(c("Text"));
+            v.widgets.inactive.weak_bg_fill = c("Button");
+            v.widgets.inactive.bg_fill = c("Button");
+            v.widgets.hovered.weak_bg_fill = c("Button Hovered");
+            v.widgets.hovered.bg_fill = c("Button Hovered");
+            v.widgets.active.weak_bg_fill = c("Button Pressed");
+            v.widgets.active.bg_fill = c("Button Pressed");
+            v.selection.bg_fill = c("Selection Highlight");
+            v.hyperlink_color = c("Hyperlink");
+            v.extreme_bg_color = c("Text Field Background");
+        }
+        ctx.set_visuals(v);
+        ctx.data_mut(|d| d.insert_temp(id, colors.clone()));
+    }
+
     pub fn has_selection(&self) -> bool {
         match self.state.selection_mode {
             loom_commands::SelectionMode::Object => !self.state.selection.is_empty(),
@@ -1257,6 +1305,8 @@ impl LoomApp {
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
         icons::install(ctx);
+        self.apply_ui_scheme(ctx);
+        gizmo::set_colors([self.color("X Axis"), self.color("Y Axis"), self.color("Z Axis"), self.color("Active Axis")]);
         spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);
         ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
@@ -1290,6 +1340,8 @@ impl LoomApp {
         if self.state.rendered.progress.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = self.dispatch(Command::CancelRender);
         }
+        // The menu bar's keyboard accelerators take their keys before the shortcuts see them.
+        menubar::keyboard(ctx, self);
         hotkeys::handle(ctx, self);
         // An image file dropped on an object: a material with it as the Diffuse map.
         let dropped: Vec<std::path::PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
@@ -1321,24 +1373,29 @@ impl LoomApp {
             self.camera_controller.set_mode(self.state.nav_mode);
         }
         menubar::show(ctx, self);
-        main_toolbar::show(ctx, self);
-        layers_toolbar::show(ctx, self);
+        use loom_commands::ui_custom::Dock;
+        toolbars::show_edges(ctx, self, &[Dock::Top, Dock::Float]);
         ribbon::show(ctx, self);
         // Bottom panels first so they span the full width under the Command Panel.
         statusbar::show(ctx, self);
         time_slider::show(ctx, self);
+        toolbars::show_edges(ctx, self, &[Dock::Bottom]);
         command_panel::show(ctx, self);
+        // Toolbars docked at the sides sit inside the Command Panel.
+        toolbars::show_edges(ctx, self, &[Dock::Left, Dock::Right]);
         if self.end_result_key() != self.shown_end_result_key {
             // A tab switch changes what Show End Result off shows.
             self.sync_after_command();
         }
         viewports::show(ctx, self);
+        quad_menu::open_requested(ctx, self);
         if let Some(open) = self.quad_menu {
             if quad_menu::show(ctx, self, open) {
                 self.quad_menu = None;
             }
         }
         dialogs::show(ctx, self);
+        toolbars::button_appearance(ctx, self);
         command_panel::utilities::measure_floater(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);

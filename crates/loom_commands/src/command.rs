@@ -948,7 +948,7 @@ commands! {
     NewToolbar => "New Toolbar", Loom, "Customize User Interface > Toolbars > New: a new, empty floating toolbar named `name`." { name: String };
     DeleteToolbar => "Delete Toolbar", Loom, "Customize User Interface > Toolbars > Delete: remove a toolbar the user made." { name: String };
     RenameToolbar => "Rename Toolbar", Loom, "Customize User Interface > Toolbars > Rename: rename a toolbar the user made to `to`." { name: String, to: String };
-    ShowToolbar => "Show Toolbar", Loom, "Show (`on` true), hide (false) or toggle (omitted) a toolbar: Command Panel, Main Toolbar, Axis Constraints, Layers, Extras, Render Shortcuts, Snaps or one of the user's toolbars (the toolbar right-click menu, Toolbars panel > Hide)." { name: String, on: Option<bool> };
+    ShowToolbar => "Show Toolbar", Loom, "Show (`on` true), hide (false) or toggle (omitted) a toolbar: Command Panel, Main Toolbar, Axis Constraints, Layers, Extras, Snaps or one of the user's toolbars (the toolbar right-click menu, Toolbars panel > Hide)." { name: String, on: Option<bool> };
     DockToolbar => "Dock Toolbar", Loom, "The toolbar right-click menu: dock a toolbar (or the command panel: Left / Right / Float) Top, Bottom, Left, Right, or Float it; `pos` is the floating window's top-left corner." { name: String, dock: String, pos: Option<[f32; 2]> };
     AddToolbarButton => "Add Toolbar Button", Loom, "Toolbars panel: drop `action` (or \"-\" for a separator) onto a user toolbar at `index` (end when omitted)." { toolbar: String, action: String, index: Option<u32> };
     RemoveToolbarButton => "Remove Toolbar Button", Loom, "A user toolbar button's right-click > Delete Button." { toolbar: String, index: u32 };
@@ -966,6 +966,7 @@ commands! {
     HideQuadItem => "Hide Quad Item", Loom, "Quads panel > Delete Menu Item for one of the program's entries (by its label), or bring it back (`hidden` false)." { set: String, quadrant: u32, label: String, hidden: bool };
     RenameQuadItem => "Rename Quad Item", Loom, "Quads panel > Edit Menu Item Name for an entry the user added (empty: its own name)." { set: String, quadrant: u32, index: u32, name: String };
     SetShowAllQuads => "Set Show All Quads", Loom, "Quads panel > Show All Quads: off shows only the quadrant under the pointer." { set: String, on: bool };
+    SetQuadShortcut => "Set Quad Shortcut", Loom, "Quads panel > Quad Shortcut: the chord (chart spelling, e.g. Shift+Alt+Q) that opens quad set `set` at the pointer; empty removes it." { set: String, chord: String };
     ShowQuadMenu => "Show Quad Menu", Loom, "Open quad set `set` at the pointer in the viewport under it (what a Quad Shortcut does)." { set: String };
     SetQuadOption => "Set Quad Option", Loom, "Advanced Quad Menu Options: Starting Quadrant, Uniform Quad Width, Mirror Quads, Vertical Margins, Opacity Amount, Reposition Quad When Off Screen, Move Cursor When Repositioned, Return Cursor After Repositioned, Title Font, Title Size, Menu Font, Menu Size, Animation Type (None / Stretch / Fade), Steps, Pause." { name: String, value: String };
     SetQuadColor => "Set Quad Color", Loom, "Advanced Quad Menu Options > Colors: `element` (Title Bar Background, Title Bar Text, Background, Text, Highlighted Text, Disabled Text, Border) in `quadrant`; locked elements set all four quadrants." { element: String, quadrant: u32, color: Option<[u8; 3]>, locked: Option<bool> };
@@ -1782,6 +1783,7 @@ commands! {
     TransformGizmoSizeUp => "Transform Gizmo Size Up", MainUI, "Grow the transform gizmo by 2 % of the viewport (=).";
     TransformGizmoSizeDown => "Transform Gizmo Size Down", MainUI, "Shrink the transform gizmo by 2 % of the viewport (-).";
     TransformGizmoPlaneConstraintCycle => "Transform Gizmo Plane Constraint Cycle", MainUI, "Cycle the plane constraint XY, YZ, ZX (F8).";
+    SetAxisConstraint => "Set Axis Constraint", Loom, "Axis Constraints toolbar: restrict transforms to X, Y, Z, or the XY, YZ or ZX plane." { constraint: String };
     PickCoordinateSystem => "Pick Coordinate System", Loom, "Use a node's coordinate system as the reference coordinate system (Pick)." { id: u64 };
     SelectionMode => "Selection Mode", Loom, "Set object or sub-object selection level; clears the selection." { mode: crate::state::SelectionMode };
     SelectNodes => "Select Nodes", Loom, "Select nodes by id." { ids: Vec<u64>, op: SelectOp };

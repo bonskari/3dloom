@@ -41,7 +41,7 @@ impl Dock {
 }
 
 /// The toolbars that come with the program, in the Customize Display menu's order.
-pub const BUILTIN_TOOLBARS: [&str; 7] = ["Command Panel", "Main Toolbar", "Axis Constraints", "Layers", "Extras", "Render Shortcuts", "Snaps"];
+pub const BUILTIN_TOOLBARS: [&str; 6] = ["Command Panel", "Main Toolbar", "Axis Constraints", "Layers", "Extras", "Snaps"];
 
 /// A toolbar item that is a separator line.
 pub const SEPARATOR: &str = "-";
@@ -133,11 +133,13 @@ pub struct QuadSet {
     pub show_all: bool,
     /// A set the user made (only these can be deleted).
     pub user: bool,
+    /// Quad Shortcut: the chord (chart spelling) that opens the set at the pointer; empty: none.
+    pub shortcut: String,
 }
 
 impl Default for QuadSet {
     fn default() -> Self {
-        QuadSet { labels: Default::default(), items: Default::default(), hidden: Default::default(), show_all: true, user: false }
+        QuadSet { labels: Default::default(), items: Default::default(), hidden: Default::default(), show_all: true, user: false, shortcut: String::new() }
     }
 }
 
@@ -294,7 +296,7 @@ pub const COLOR_ELEMENTS: &[(&str, &str, [u8; 3])] = &[
     ("Viewports", "Perspective Background Bottom", [96, 96, 96]),
     ("Viewports", "Active Viewport Border", [255, 230, 0]),
     ("Viewports", "Viewport Label Text", [225, 225, 225]),
-    ("Viewports", "Viewport Statistics Text", [225, 225, 225]),
+    ("Viewports", "Viewport Statistics Text", [230, 230, 230]),
     ("Grids", "Home Grid", [97, 97, 97]),
     ("Grids", "Home Grid Major Lines", [140, 140, 140]),
     ("Grids", "Home Grid World Axes", [0, 0, 0]),
@@ -323,7 +325,7 @@ pub const APPEARANCE_ELEMENTS: &[(&str, [u8; 3])] = &[
     ("Button Pressed", [55, 55, 55]),
     ("Selection Highlight", [0, 92, 128]),
     ("Hyperlink", [90, 170, 255]),
-    ("Tooltip Background", [10, 10, 10]),
+    ("Text Field Background", [10, 10, 10]),
 ];
 
 /// Colors panel > Scheme.
@@ -389,7 +391,7 @@ impl UiCustom {
         self.docks.get(name).copied().unwrap_or(match name {
             "Command Panel" => Dock::Right,
             "Main Toolbar" | "Layers" => Dock::Top,
-            "Axis Constraints" | "Extras" | "Render Shortcuts" | "Snaps" => Dock::Float,
+            "Axis Constraints" | "Extras" | "Snaps" => Dock::Float,
             _ => Dock::Float,
         })
     }
@@ -411,6 +413,10 @@ impl UiCustom {
     }
     fn toolbar_mut(&mut self, name: &str) -> Result<&mut Toolbar, String> {
         self.toolbars.iter_mut().find(|t| t.name == name).ok_or_else(|| format!("no toolbar {name:?} of yours"))
+    }
+    /// The quad set a Quad Shortcut chord opens.
+    pub fn quad_for_shortcut(&self, chord: &str) -> Option<&str> {
+        self.quads.iter().find(|(_, q)| !q.shortcut.is_empty() && q.shortcut == chord).map(|(n, _)| n.as_str())
     }
     pub fn quad(&self, set: &str) -> QuadSet {
         self.quads.get(set).cloned().unwrap_or_default()
@@ -472,7 +478,7 @@ fn set_shown(state: &mut AppState, name: &str, on: Option<bool>) -> Result<bool,
         "Command Panel" => flip(&mut state.show_command_panel),
         "Main Toolbar" => flip(&mut state.show_main_toolbar),
         "Layers" => flip(&mut state.show_layers_toolbar),
-        "Axis Constraints" | "Extras" | "Render Shortcuts" | "Snaps" => {
+        "Axis Constraints" | "Extras" | "Snaps" => {
             let v = state.ui_custom.shown.entry(name.to_owned()).or_insert(false);
             flip(v)
         }
@@ -486,7 +492,7 @@ pub fn is_shown(state: &AppState, name: &str) -> bool {
         "Command Panel" => state.show_command_panel,
         "Main Toolbar" => state.show_main_toolbar,
         "Layers" => state.show_layers_toolbar,
-        "Axis Constraints" | "Extras" | "Render Shortcuts" | "Snaps" => state.ui_custom.shown.get(name).copied().unwrap_or(false),
+        "Axis Constraints" | "Extras" | "Snaps" => state.ui_custom.shown.get(name).copied().unwrap_or(false),
         _ => state.ui_custom.toolbar(name).is_some_and(|t| t.shown),
     }
 }
@@ -559,6 +565,7 @@ pub fn handles(c: &C) -> bool {
             | C::HideQuadItem { .. }
             | C::RenameQuadItem { .. }
             | C::SetShowAllQuads { .. }
+            | C::SetQuadShortcut { .. }
             | C::ShowQuadMenu { .. }
             | C::SetQuadOption { .. }
             | C::SetQuadColor { .. }
@@ -793,6 +800,19 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         C::SetShowAllQuads { set, on } => {
             quad_set_mut(state, &set)?.show_all = on;
             Ok(json!({ "set": set, "show_all": on }))
+        }
+        C::SetQuadShortcut { set, chord } => {
+            let text = if chord.trim().is_empty() { String::new() } else { crate::keymap::parse_chord(&chord)?.chart_text() };
+            // A chord opens one quad set only.
+            if !text.is_empty() {
+                for q in state.ui_custom.quads.values_mut() {
+                    if q.shortcut == text {
+                        q.shortcut.clear();
+                    }
+                }
+            }
+            quad_set_mut(state, &set)?.shortcut = text.clone();
+            Ok(json!({ "set": set, "shortcut": text }))
         }
         C::ShowQuadMenu { set } => {
             if !state.ui_custom.quad_sets().contains(&set) {

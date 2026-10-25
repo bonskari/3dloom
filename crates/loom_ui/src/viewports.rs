@@ -36,7 +36,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         ctx.request_repaint();
     }
     egui::CentralPanel::default()
-        .frame(egui::Frame::central_panel(&ctx.style()).fill(egui::Color32::from_rgb(80, 80, 80)).inner_margin(0.0))
+        .frame(egui::Frame::central_panel(&ctx.style()).fill(app.color("Viewport Background")).inner_margin(0.0))
         .show(ctx, |ui| {
             let panel = ui.available_rect_before_wrap();
             let rects = cell_rects(app, panel);
@@ -50,7 +50,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             if let Some(active) = rects.get(app.state.active_viewport) {
                 if active.width() >= 1.0 {
                     // Auto Key draws the active viewport's frame red.
-                    let c = if app.state.auto_key { egui::Color32::from_rgb(220, 30, 30) } else { ACTIVE_FRAME };
+                    let c = if app.state.auto_key { egui::Color32::from_rgb(220, 30, 30) } else { app.color("Active Viewport Border") };
                     ui.painter().rect_stroke(*active, 0.0, egui::Stroke::new(if app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
                 }
             }
