@@ -27,6 +27,7 @@ fn color(app: &LoomApp, n: &loom_scene::Node, kind: LineKind) -> [u8; 3] {
     match kind {
         LineKind::Wire => wire,
         LineKind::Target => TARGET_LINE,
+        LineKind::Rgb(c) => c,
         LineKind::Axis(0) => [220, 40, 40],
         LineKind::Axis(1) => [40, 200, 40],
         LineKind::Axis(_) => [40, 80, 230],

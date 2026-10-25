@@ -1445,6 +1445,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Some(PickMode::SplineBind) => crate::spline::bind_at(state, Vec3::from(point)),
             Some(PickMode::TrimExtendModifier) => crate::spline::trim_extend_click(state, point),
             Some(PickMode::MeasureDistanceA | PickMode::MeasureDistanceB) => crate::helpers::measure_pick(state, Vec3::from(point)),
+            Some(PickMode::BipedFootstep) => crate::biped_footsteps::execute(state, C::BipedAppendFootstep { position: Some(point), left: None }),
             Some(PickMode::WorkingPivotView) => {
                 state.pick_mode = None;
                 state.working_pivot.origin = Vec3::from(point);
@@ -2561,7 +2562,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.pick_mode = None;
                     return crate::stack::execute(state, C::UvwMapAcquire { node: id.0 });
                 }
-                Some(PickMode::UvwMapNormal | PickMode::UvwMapRegionA | PickMode::UvwMapRegionB) => return Err("pick a surface point, not an object".into()),
+                Some(PickMode::UvwMapNormal | PickMode::UvwMapRegionA | PickMode::UvwMapRegionB | PickMode::BipedFootstep) => return Err("pick a surface point, not an object".into()),
                 Some(PickMode::SeamPointA | PickMode::SeamPointB) => return Err("Point To Point Seam picks a vertex, not an object".into()),
                 Some(PickMode::TvTargetWeldSource | PickMode::TvTargetWeldTarget) => return Err("Target Weld picks a texture vertex in the Edit UVWs window".into()),
                 // Pick Bone / Add keep picking until right-click or the button again.
@@ -2580,6 +2581,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::Constraint(kind)) => {
                     state.pick_mode = None;
                     return crate::motion::pick_constraint(state, kind, id);
+                }
+                Some(PickMode::BipedXtraParent) => {
+                    state.pick_mode = None;
+                    let (root, name, reorient) = state.biped_xtra_pick.take().ok_or("no Xtra to pick a parent for")?;
+                    return crate::biped::set_xtra(state, root, &name, None, None, Some(id.0), reorient);
                 }
                 Some(PickMode::PickMaterial) => {
                     state.pick_mode = None;
@@ -3106,7 +3112,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({ "edges": state.active().edged_faces, "vertices": state.show_vertices }))
         }
-        c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. }) => crate::biped::execute(state, c),
+        c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. } | C::BipedCreateXtra { .. } | C::BipedDeleteXtra { .. } | C::BipedCreateOppositeXtra { .. } | C::BipedSetXtra { .. } | C::BipedPickXtraParent { .. } | C::BipedSaveFile { .. } | C::BipedLoadFile { .. }) => crate::biped::execute(state, c),
+        c @ (C::BipedFootstepMode { .. } | C::BipedFootstepCreation { .. } | C::BipedCreateMultipleFootsteps { .. } | C::BipedAppendFootstep { .. } | C::BipedActivateFootsteps | C::BipedDeactivateFootsteps | C::BipedDeleteFootsteps) => crate::biped_footsteps::execute(state, c),
         c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
         c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. }) => crate::extras::execute(state, c),

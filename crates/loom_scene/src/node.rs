@@ -1375,8 +1375,11 @@ impl ObjectKind {
             Self::Grid { length, width, spacing, color, plane } => vec![("Length", f(length)), ("Width", f(width)), ("Grid", f(spacing)), ("Active Color", i(color)), ("Display", i(plane))],
             Self::IkGoal { .. } => Vec::new(),
             Self::Biped(bs) => {
-                let mut v = vec![("Arms", b(&bs.arms))];
-                v.extend(crate::biped::BipedStructure::LINKS.iter().map(|(n, _, _)| (*n, Int(bs.count(n).unwrap_or(0)))));
+                use crate::biped::BipedStructure as S;
+                let mut v = vec![("Body Type", Int(bs.body_type.index()))];
+                v.extend(S::FLAGS.iter().map(|n| (*n, ParamValue::Bool(bs.flag(n).unwrap_or(false)))));
+                v.extend(S::LINKS.iter().chain(S::TWISTS.iter()).map(|(n, _, _)| (*n, Int(bs.count(n).unwrap_or(0)))));
+                v.push(("Ankle Attach", f(&bs.ankle_attach)));
                 v.push(("Height", f(&bs.height)));
                 v
             }

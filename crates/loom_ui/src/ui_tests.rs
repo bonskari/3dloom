@@ -17,6 +17,7 @@ mod ribbon;
 mod precision;
 mod skin2;
 mod skin_wrap;
+mod biped;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 

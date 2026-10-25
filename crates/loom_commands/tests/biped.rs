@@ -4,15 +4,21 @@
 use glam::Vec3;
 use loom_commands::{execute, AppState, Axis, Command, PrimitiveKind, SelectOp};
 use loom_scene::{Modifier, NodeId, ObjectKind};
+use serde_json::json;
 use std::collections::BTreeMap;
 
+/// A command from its registry name and JSON arguments (absent options are None).
+fn cmd(name: &str, args: serde_json::Value) -> Command {
+    serde_json::from_value(json!({ "cmd": name, "args": args })).unwrap()
+}
+
 fn create(s: &mut AppState) -> NodeId {
-    let r = execute(s, Command::CreateBiped { position: [0.0; 3], height: None, name: None, arms: None, neck_links: None, spine_links: None, leg_links: None, tail_links: None, fingers: None, finger_links: None, toes: None, toe_links: None }).unwrap();
+    let r = execute(s, cmd("Create Biped", json!({ "position": [0.0, 0.0, 0.0] }))).unwrap();
     NodeId(r["root"].as_u64().unwrap())
 }
 
 fn structure(s: &mut AppState, root: NodeId, f: impl FnOnce(&mut Command)) -> Result<serde_json::Value, String> {
-    let mut c = Command::SetBipedStructure { id: root.0, height: None, arms: None, neck_links: None, spine_links: None, leg_links: None, tail_links: None, fingers: None, finger_links: None, toes: None, toe_links: None };
+    let mut c = cmd("Set Biped Structure", json!({ "id": root.0 }));
     f(&mut c);
     execute(s, c)
 }
@@ -102,7 +108,7 @@ fn a_new_biped_has_the_reference_names_hierarchy_colours_and_height() {
     let foot_bottom = s.scene.object_matrix(id_of(&s, "Bip001 L Foot")).transform_point3(lo).z;
     assert!(foot_bottom.abs() < 0.01 * h, "foot on the ground: {foot_bottom}");
     // A second biped is Bip002.
-    let r = execute(&mut s, Command::CreateBiped { position: [100.0, 0.0, 0.0], height: Some(50.0), name: None, arms: None, neck_links: None, spine_links: None, leg_links: None, tail_links: None, fingers: None, finger_links: None, toes: None, toe_links: None }).unwrap();
+    let r = execute(&mut s, cmd("Create Biped", json!({ "position": [100.0, 0.0, 0.0], "height": 50.0 }))).unwrap();
     assert_eq!(r["name"], "Bip002");
     assert!((pos(&s, "Bip002 HeadNub").z - 50.0).abs() < 0.5);
 }

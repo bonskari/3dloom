@@ -26,6 +26,7 @@ pub mod time_configuration;
 pub mod viewport_background;
 pub mod viewport_configuration;
 pub mod file_dialog;
+pub mod biped_footsteps;
 pub mod material_editor;
 pub mod render_setup;
 pub mod lights;
@@ -169,7 +170,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
-        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
         Dialog::FbxImportOptions => exchange_options::fbx_import(ctx, app, &mut open),
@@ -197,6 +198,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::SummaryInfo => scene_dialogs::summary_info(ctx, app, &mut open),
         Dialog::FileProperties => scene_dialogs::file_properties(ctx, app, &mut open),
         Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
+        Dialog::BipedMultipleFootsteps => biped_footsteps::show(ctx, app, &mut open),
         Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
