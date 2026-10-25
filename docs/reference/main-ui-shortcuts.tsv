@@ -54,6 +54,7 @@ Redraw All Views	`
 Render	Shift+Q
 Render Last	F9
 Render SetUp...	F10
+Render To Texture	0
 Save File	Ctrl+S
 Scale Cycle	Ctrl+E
 Select All	Ctrl+A

@@ -118,6 +118,11 @@ impl Scene {
         self.node(id).and_then(|n| n.material).and_then(|m| crate::material::surfaces(&self.materials, m))
     }
 
+    /// As `node_surfaces`, a Shell material resolving to the material `view` picks.
+    pub fn node_surfaces_for(&self, id: NodeId, view: crate::material::ShellView) -> Option<crate::material::Surfaces> {
+        self.node(id).and_then(|n| n.material).and_then(|m| crate::material::surfaces_for(&self.materials, m, view))
+    }
+
     pub fn new() -> Self {
         Self {
             nodes: BTreeMap::new(),
