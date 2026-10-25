@@ -243,14 +243,16 @@ fn xtras_create_mirror_reparent_rename_and_delete() {
     assert!((a.x + b.x).abs() < 1e-3 && (a.y - b.y).abs() < 1e-3 && a.x.abs() > 1.0, "{a} mirrors {b}");
     assert!(x(&mut s, "Biped Create Opposite Xtra", json!({ "name": "Xtra01" })).is_err(), "only one opposite");
     // Links and Pick Parent with Reorient: the tail moves to the end of the head.
-    x(&mut s, "Biped Set Xtra", json!({ "name": "Xtra01", "links": 3, "parent": id_of(&s, "Bip001 Head").0 })).unwrap();
+    let head = id_of(&s, "Bip001 Head").0;
+    x(&mut s, "Biped Set Xtra", json!({ "name": "Xtra01", "links": 3, "parent": head })).unwrap();
     let t = tree(&s, root);
     assert_eq!(t["Bip001 Xtra01"].as_deref(), Some("Bip001 Head"));
     assert!(t.contains_key("Bip001 Xtra012"));
     assert!(pos(&s, "Bip001 Xtra01").distance(pos(&s, "Bip001 HeadNub")) < 0.5, "reoriented to the head's end");
     // Without Reorient the tail keeps its place.
     let before = pos(&s, "Bip001 Xtra01Opp");
-    x(&mut s, "Biped Set Xtra", json!({ "name": "Xtra01Opp", "parent": id_of(&s, "Bip001 Xtra011").0, "reorient": false })).unwrap();
+    let link = id_of(&s, "Bip001 Xtra011").0;
+    x(&mut s, "Biped Set Xtra", json!({ "name": "Xtra01Opp", "parent": link, "reorient": false })).unwrap();
     assert_eq!(tree(&s, root)["Bip001 Xtra01Opp"].as_deref(), Some("Bip001 Xtra011"));
     assert!(pos(&s, "Bip001 Xtra01Opp").distance(before) < 1e-3);
     // Renaming keeps the nodes and the child's parent link.
@@ -278,7 +280,8 @@ fn pick_parent_takes_the_clicked_part() {
     execute(&mut s, cmd("Biped Create Xtra", json!({ "id": root.0 }))).unwrap();
     execute(&mut s, cmd("Biped Pick Xtra Parent", json!({ "name": "Xtra01" }))).unwrap();
     assert_eq!(s.pick_mode, Some(loom_commands::PickMode::BipedXtraParent));
-    execute(&mut s, Command::PickHit { id: id_of(&s, "Bip001 L Hand").0 }).unwrap();
+    let hand = id_of(&s, "Bip001 L Hand").0;
+    execute(&mut s, Command::PickHit { id: hand }).unwrap();
     assert_eq!(s.pick_mode, None);
     assert_eq!(tree(&s, root)["Bip001 Xtra01"].as_deref(), Some("Bip001 L Hand"));
 }
