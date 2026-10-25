@@ -7,6 +7,8 @@ pub mod display;
 pub mod hierarchy;
 pub mod light_rollouts;
 pub mod modify;
+pub mod modify_mesh;
+pub mod modify_patch;
 pub mod modify_poly;
 pub mod modify_spline;
 pub mod motion;

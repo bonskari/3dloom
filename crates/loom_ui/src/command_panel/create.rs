@@ -58,6 +58,34 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     match app.create_category {
+        Category::Geometry if app.create_patch_grids => {
+            egui::ComboBox::from_id_salt("create_geometry_class").selected_text("Patch Grids").show_ui(ui, |ui| {
+                if ui.selectable_label(false, "Standard Primitives").clicked() {
+                    app.create_patch_grids = false;
+                    app.create_kind = None;
+                }
+                if ui.selectable_label(false, "Compound Objects").clicked() {
+                    app.create_patch_grids = false;
+                    app.create_compound = true;
+                    app.create_kind = None;
+                }
+                let _ = ui.selectable_label(true, "Patch Grids");
+            });
+            rollout(ui, "Object Type", true, |ui| {
+                autogrid_and_pin(ui, app);
+                ui.horizontal(|ui| {
+                    for (quad, label) in [(true, "Quad Patch"), (false, "Tri Patch")] {
+                        let kind = CreateKind::PatchGrid { quad };
+                        let on = app.create_kind == Some(kind);
+                        if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, label)).clicked() {
+                            app.start_create((!on).then_some(kind));
+                        }
+                    }
+                });
+            });
+            name_and_color(ui, app);
+            parameters(ui, app);
+        }
         Category::Geometry if app.create_compound => {
             egui::ComboBox::from_id_salt("create_geometry_class").selected_text("Compound Objects").show_ui(ui, |ui| {
                 if ui.selectable_label(false, "Standard Primitives").clicked() {
@@ -65,6 +93,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     app.compound_kind = None;
                 }
                 let _ = ui.selectable_label(true, "Compound Objects");
+                if ui.selectable_label(false, "Patch Grids").clicked() {
+                    app.create_compound = false;
+                    app.compound_kind = None;
+                    app.create_patch_grids = true;
+                }
             });
             rollout(ui, "Object Type", true, |ui| {
                 autogrid_and_pin(ui, app);
@@ -91,6 +124,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = ui.selectable_label(true, "Standard Primitives");
                 if ui.selectable_label(false, "Compound Objects").clicked() {
                     app.create_compound = true;
+                    app.create_kind = None;
+                }
+                if ui.selectable_label(false, "Patch Grids").clicked() {
+                    app.create_patch_grids = true;
                     app.create_kind = None;
                 }
             });

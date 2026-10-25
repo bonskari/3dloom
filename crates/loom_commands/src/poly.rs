@@ -130,6 +130,18 @@ enum Hide {
 
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
     match cmd {
+        // Editable Mesh / Patch: keys 1-5 are their own five levels.
+        C::VertexLevel | C::EdgeLevel | C::BorderLevel | C::FaceLevel | C::ElementLevel if crate::mesh_edit::mesh_or_patch_selected(state) => {
+            let level = match cmd {
+                C::VertexLevel => 1,
+                C::EdgeLevel => 2,
+                C::BorderLevel => 3,
+                C::FaceLevel => 4,
+                _ => 5,
+            };
+            let level = if crate::mesh_edit::current_level(state) == level { 0 } else { level };
+            crate::execute(state, C::SubObjectLevel { level })
+        }
         C::VertexLevel => set_level(state, SelectionMode::Vertex),
         C::EdgeLevel => set_level(state, SelectionMode::Edge),
         C::BorderLevel => set_level(state, SelectionMode::Border),

@@ -235,6 +235,33 @@ impl PolyObject {
     }
 }
 
+/// An Editable Patch: the patch lattice plus its Surface rollout settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatchObject {
+    pub patch: loom_mesh::patch::PatchMesh,
+    /// Surface > View Steps: segments per patch edge are Steps + 1.
+    pub steps: Param<u32>,
+    /// Surface > Show Interior Edges.
+    #[serde(default)]
+    pub show_interior: bool,
+}
+
+impl PatchObject {
+    pub fn from_patch(patch: loom_mesh::patch::PatchMesh) -> Self {
+        Self { patch, steps: Param::new(5), show_interior: false }
+    }
+
+    /// The same settings with a new lattice (every patch edit goes through here).
+    pub fn with_patch(&self, patch: loom_mesh::patch::PatchMesh) -> Self {
+        Self { patch, steps: self.steps.clone(), show_interior: self.show_interior }
+    }
+
+    /// The tessellated surface the viewports show.
+    pub fn surface(&self) -> Mesh {
+        self.patch.tessellate(self.steps.get(), self.show_interior)
+    }
+}
+
 /// What a node is. Parametric kinds mirror the Create panel
 /// rollouts (same parameter names) and rebuild their mesh from the
 /// parameters; `EditablePoly` owns its mesh.
@@ -310,6 +337,15 @@ pub const SHAPE_COMMON_NAMES: [&str; 14] = [
 pub enum ObjectKind {
     EditablePoly(PolyObject),
     EditableSpline(ShapeObject),
+    /// An Editable Mesh: its mesh is all triangles, polygons are triangles
+    /// joined by invisible edges (the mesh's edge flags).
+    EditableMesh(PolyObject),
+    /// An Editable Patch.
+    EditablePatch(PatchObject),
+    /// Create > Patch Grids > Quad Patch: `width` × `length` in quad patches.
+    QuadPatch { length: Param<f32>, width: Param<f32>, length_segs: Param<u32>, width_segs: Param<u32> },
+    /// Create > Patch Grids > Tri Patch: a rectangle of two tri patches.
+    TriPatch { length: Param<f32>, width: Param<f32> },
     Rectangle { length: Param<f32>, width: Param<f32>, corner_radius: Param<f32>, common: ShapeCommon },
     Circle { radius: Param<f32>, common: ShapeCommon },
     Ellipse { length: Param<f32>, width: Param<f32>, common: ShapeCommon },
@@ -977,6 +1013,57 @@ impl ObjectKind {
     pub fn loft_object(path: loom_shape::Shape, shapes: Vec<(f32, loom_shape::Shape)>) -> Self {
         Self::Loft { path, shapes, shape_steps: p(5), path_steps: p(5), cap_start: p(true), cap_end: p(true), contour: p(true), flip_normals: p(false), cache: CompoundCache::default() }
     }
+    pub fn quad_patch_object(length: f32, width: f32) -> Self {
+        Self::QuadPatch { length: p(length), width: p(width), length_segs: p(1), width_segs: p(1) }
+    }
+    pub fn tri_patch_object(length: f32, width: f32) -> Self {
+        Self::TriPatch { length: p(length), width: p(width) }
+    }
+
+    /// Steps the Patch Grids tessellate with.
+    pub const PATCH_GRID_STEPS: u32 = 5;
+
+    /// The patch lattice of a patch object (Patch Grids build theirs).
+    pub fn patch_mesh(&self) -> Option<loom_mesh::patch::PatchMesh> {
+        use loom_mesh::patch::PatchMesh;
+        match self {
+            Self::EditablePatch(p) => Some(p.patch.clone()),
+            Self::QuadPatch { length, width, length_segs, width_segs } => Some(PatchMesh::quad_grid(length.get(), width.get(), length_segs.get(), width_segs.get())),
+            Self::TriPatch { length, width } => Some(PatchMesh::tri_grid(length.get(), width.get())),
+            _ => None,
+        }
+    }
+
+    pub fn patch(&self) -> Option<&PatchObject> {
+        match self {
+            Self::EditablePatch(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub fn patch_mut(&mut self) -> Option<&mut PatchObject> {
+        match self {
+            Self::EditablePatch(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// This object as an Editable Patch with `patch` (a patch keeps its settings).
+    pub fn with_patch(&self, patch: loom_mesh::patch::PatchMesh) -> ObjectKind {
+        match self {
+            Self::EditablePatch(p) => Self::EditablePatch(p.with_patch(patch)),
+            _ => Self::EditablePatch(PatchObject::from_patch(patch)),
+        }
+    }
+
+    /// The Editable Mesh data (the triangle mesh and its rollout settings).
+    pub fn tri_mesh(&self) -> Option<&PolyObject> {
+        match self {
+            Self::EditableMesh(p) => Some(p),
+            _ => None,
+        }
+    }
+
     pub fn line_object(shape: loom_shape::Shape) -> Self {
         Self::EditableSpline(ShapeObject { shape, soft: SoftSelection::default(), is_line: true, hidden: Default::default() })
     }
@@ -1085,7 +1172,9 @@ impl ObjectKind {
     /// Base name for the Create panel object type ("Box", "Sphere", ...).
     pub fn base_name(&self) -> &'static str {
         match self {
-            Self::EditablePoly(_) => "Object",
+            Self::EditablePoly(_) | Self::EditableMesh(_) | Self::EditablePatch(_) => "Object",
+            Self::QuadPatch { .. } => "QuadPatch",
+            Self::TriPatch { .. } => "TriPatch",
             Self::Box { .. } => "Box",
             Self::Cone { .. } => "Cone",
             Self::Sphere { .. } => "Sphere",
@@ -1183,6 +1272,8 @@ impl ObjectKind {
     pub fn stack_name(&self) -> &'static str {
         match self {
             Self::EditablePoly(_) => "Editable Poly",
+            Self::EditableMesh(_) => "Editable Mesh",
+            Self::EditablePatch(_) => "Editable Patch",
             Self::EditableSpline(s) => if s.is_line { "Line" } else { "Editable Spline" },
             Self::Light(l) => l.stack_name(),
             other => other.base_name(),
@@ -1197,6 +1288,10 @@ impl ObjectKind {
         let b = |x: &Param<bool>| Bool(x.get());
         match self {
             Self::EditablePoly(p) => vec![("Iterations", i(&p.subdiv.iterations)), ("Smoothness", f(&p.subdiv.smoothness))],
+            Self::EditableMesh(_) => Vec::new(),
+            Self::EditablePatch(p) => vec![("View Steps", i(&p.steps)), ("Show Interior Edges", Bool(p.show_interior))],
+            Self::QuadPatch { length, width, length_segs, width_segs } => vec![("Length", f(length)), ("Width", f(width)), ("Length Segs", i(length_segs)), ("Width Segs", i(width_segs))],
+            Self::TriPatch { length, width } => vec![("Length", f(length)), ("Width", f(width))],
             Self::Box { length, width, height, length_segs, width_segs, height_segs, gen_mapping } => vec![
                 ("Length", f(length)), ("Width", f(width)), ("Height", f(height)),
                 ("Length Segs", i(length_segs)), ("Width Segs", i(width_segs)), ("Height Segs", i(height_segs)),
@@ -1304,6 +1399,13 @@ impl ObjectKind {
                 _ => Err(format!("Editable Poly has no parameter {name:?}")),
             };
         }
+        if let Self::EditablePatch(p) = self {
+            return match name {
+                "View Steps" => { p.steps.set((value.round().max(0.0) as u32).min(100)); Ok(()) }
+                "Show Interior Edges" => { p.show_interior = value != 0.0; Ok(()) }
+                _ => Err(format!("Editable Patch has no parameter {name:?}")),
+            };
+        }
         if let Self::Biped(b) = self {
             return b.set(name, value);
         }
@@ -1365,6 +1467,10 @@ impl ObjectKind {
             (Self::Pyramid { depth_segs, .. }, "Depth Segs") => { int(depth_segs, 1); ok }
             (Self::Pyramid { height_segs, .. }, "Height Segs") => { int(height_segs, 1); ok }
             (Self::Plane { length, .. }, "Length") => { fl(length, 0.0); ok }
+            (Self::QuadPatch { length, .. }, "Length") | (Self::TriPatch { length, .. }, "Length") => { fl(length, 0.0); ok }
+            (Self::QuadPatch { width, .. }, "Width") | (Self::TriPatch { width, .. }, "Width") => { fl(width, 0.0); ok }
+            (Self::QuadPatch { length_segs, .. }, "Length Segs") => { length_segs.set((value.round().max(1.0) as u32).min(100)); ok }
+            (Self::QuadPatch { width_segs, .. }, "Width Segs") => { width_segs.set((value.round().max(1.0) as u32).min(100)); ok }
             (Self::Plane { length_segs, .. }, "Length Segs") => { int(length_segs, 1); ok }
             (Self::Teapot { body, .. }, "Body") => { bl(body); ok }
             (Self::Teapot { handle, .. }, "Handle") => { bl(handle); ok }
@@ -1472,6 +1578,11 @@ impl ObjectKind {
     pub fn with_mesh(&self, mesh: Mesh) -> ObjectKind {
         match self {
             Self::EditablePoly(p) => Self::EditablePoly(p.with_mesh(mesh)),
+            // An Editable Mesh stays triangles: polygons a tool made are cut
+            // again, edges keep their visibility.
+            Self::EditableMesh(p) => Self::EditableMesh(p.with_mesh(loom_mesh::tri_mesh::retriangulate_like(&p.mesh, mesh.clone()).unwrap_or(mesh))),
+            // An Editable Patch: the edited cage moves the lattice.
+            Self::EditablePatch(p) => Self::EditablePatch(p.with_patch(p.patch.with_cage(&mesh))),
             _ => Self::EditablePoly(PolyObject::from_mesh(mesh)),
         }
     }
@@ -1480,7 +1591,9 @@ impl ObjectKind {
     pub fn mesh(&self) -> Cow<'_, Mesh> {
         use loom_mesh::*;
         match self {
-            Self::EditablePoly(p) => Cow::Borrowed(&p.mesh),
+            Self::EditablePoly(p) | Self::EditableMesh(p) => Cow::Borrowed(&p.mesh),
+            Self::EditablePatch(p) => Cow::Owned(p.surface()),
+            Self::QuadPatch { .. } | Self::TriPatch { .. } => Cow::Owned(self.patch_mesh().unwrap_or_default().tessellate(Self::PATCH_GRID_STEPS, false)),
             Self::Box { length, width, height, length_segs, width_segs, height_segs, gen_mapping } => {
                 Cow::Owned(mapped(box_segmented(length.get(), width.get(), height.get(), [length_segs.get(), width_segs.get(), height_segs.get()]), gen_mapping.get(), AutoMap::Box))
             }
@@ -1911,31 +2024,68 @@ impl Axes3 {
 }
 
 impl Node {
-    /// The stack entry being edited as an Edit Poly, when the active entry is one.
+    /// The stack entry being edited as an Edit Poly (or Edit Mesh), when the active entry is one.
     pub fn editing_entry(&self) -> Option<usize> {
         let a = self.active_entry?;
-        matches!(self.modifiers.get(a)?.modifier, crate::modifier::Modifier::EditPoly { .. }).then_some(a)
+        matches!(self.modifiers.get(a)?.modifier, crate::modifier::Modifier::EditPoly { .. } | crate::modifier::Modifier::EditMesh { .. }).then_some(a)
     }
 
-    /// The Editable Poly the user edits: the active Edit Poly entry's, else
-    /// the base object's.
+    /// The Editable Poly the user edits: the active Edit Poly / Edit Mesh
+    /// entry's, else the base object's (an Editable Poly or Editable Mesh).
     pub fn edit_poly(&self) -> Option<&PolyObject> {
         match self.editing_entry() {
             Some(a) => self.modifiers[a].modifier.edit_poly(),
-            None => self.object.poly(),
+            None => self.object.poly().or_else(|| self.object.tri_mesh()),
         }
     }
 
     pub fn edit_poly_mut(&mut self) -> Option<&mut PolyObject> {
         match self.editing_entry() {
             Some(a) => self.modifiers[a].modifier.edit_poly_mut(),
-            None => self.object.poly_mut(),
+            None => match &mut self.object {
+                ObjectKind::EditablePoly(p) | ObjectKind::EditableMesh(p) => Some(p),
+                _ => None,
+            },
+        }
+    }
+
+    /// What the user edits is an Editable Mesh (or an Edit Mesh entry):
+    /// triangles with edge visibility.
+    pub fn edits_tri_mesh(&self) -> bool {
+        match self.editing_entry() {
+            Some(a) => matches!(self.modifiers[a].modifier, crate::modifier::Modifier::EditMesh { .. }),
+            None => matches!(self.object, ObjectKind::EditableMesh(_)) && self.editing_spline_entry().is_none() && self.editing_patch_entry().is_none(),
+        }
+    }
+
+    /// The stack entry being edited as an Edit Patch, when the active entry is one.
+    pub fn editing_patch_entry(&self) -> Option<usize> {
+        let a = self.active_entry?;
+        matches!(self.modifiers.get(a)?.modifier, crate::modifier::Modifier::EditPatch { .. }).then_some(a)
+    }
+
+    /// The Editable Patch the user edits: the active Edit Patch entry's, else the base object's.
+    pub fn edit_patch(&self) -> Option<&PatchObject> {
+        match self.editing_patch_entry() {
+            Some(a) => self.modifiers[a].modifier.edit_patch(),
+            None => self.object.patch(),
+        }
+    }
+
+    pub fn edit_patch_mut(&mut self) -> Option<&mut PatchObject> {
+        match self.editing_patch_entry() {
+            Some(a) => self.modifiers[a].modifier.edit_patch_mut(),
+            None => self.object.patch_mut(),
         }
     }
 
     /// The mesh sub-object editing and picking work on: the active Edit
     /// Poly's mesh, the active Edit Spline's knots, else the base object's.
     pub fn cage_mesh(&self) -> Cow<'_, Mesh> {
+        // A patch: its lattice (vertices, then handles, one polygon per patch).
+        if let Some(p) = self.edit_patch() {
+            return Cow::Owned(p.patch.cage());
+        }
         if let Some(a) = self.editing_spline_entry() {
             if let Some(so) = self.modifiers[a].modifier.edit_spline() {
                 return Cow::Owned(shape_cage_mesh(&so.shape, true));

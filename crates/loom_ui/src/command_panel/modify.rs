@@ -22,6 +22,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let Some(node) = app.state.scene.node(id) else { return };
     let stack_name = node.object.stack_name().to_owned();
     let is_poly = node.object.poly().is_some();
+    let is_tri = matches!(node.object, loom_scene::ObjectKind::EditableMesh(_));
+    let is_patch = matches!(node.object, loom_scene::ObjectKind::EditablePatch(_));
     let is_spline = node.object.spline().is_some();
     let is_group = matches!(node.object, loom_scene::ObjectKind::Group { .. });
     let node_instanced = node.instance_of.is_some();
@@ -261,7 +263,19 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             });
         });
-        if base_open {
+        if base_open && (is_tri || is_patch) {
+            // Editable Mesh / Patch: two levels share a selection mode, so rows go by level number.
+            let cur = if base_in_level { loom_commands::mesh_edit::current_level(&app.state) } else { 0 };
+            for (i, (l, _)) in base_levels.iter().enumerate() {
+                let lvl = i as u32 + 1;
+                if level_row(ui, l, cur == lvl, None) {
+                    if active.is_some() {
+                        let _ = app.dispatch(Command::SelectStackEntry { index: None });
+                    }
+                    let _ = app.dispatch(Command::SubObjectLevel { level: if cur == lvl { 0 } else { lvl } });
+                }
+            }
+        } else if base_open {
             for (l, m) in &base_levels {
                 let current = base_in_level && mode == *m;
                 if level_row(ui, l, current, crate::shortcuts::chord(&app.state, crate::shortcuts::level_action(*m))) {
@@ -343,7 +357,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     // Rollouts of the active entry.
     match active {
         None => {
+            if is_patch {
+                super::modify_patch::show(ui, app, None);
+                return;
+            }
             create::parameters(ui, app);
+            if is_tri {
+                super::modify_mesh::show(ui, app);
+                return;
+            }
             if is_spline {
                 super::modify_spline::selection::show(ui, app);
                 super::modify_poly::soft_selection::show(ui, app);
@@ -395,6 +417,15 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         super::modify_spline::selection::show(ui, app);
         super::modify_poly::soft_selection::show(ui, app);
         super::modify_spline::geometry::show(ui, app);
+        return;
+    }
+    if matches!(modifier, Modifier::EditMesh { .. }) {
+        // Edit Mesh: the Editable Mesh rollouts work on the entry's data.
+        super::modify_mesh::show(ui, app);
+        return;
+    }
+    if matches!(modifier, Modifier::EditPatch { .. }) {
+        super::modify_patch::show(ui, app, Some(index));
         return;
     }
     if matches!(modifier, Modifier::EditPoly { .. }) {
@@ -954,8 +985,14 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
 /// The stack's base-object Convert To entries for this object.
 pub(crate) fn base_convert_entries(object: &loom_scene::ObjectKind) -> Vec<(&'static str, Command)> {
     let mut v = Vec::new();
+    if !matches!(object, loom_scene::ObjectKind::EditableMesh(_)) {
+        v.push(("Editable Mesh", Command::ConvertToEditableMesh));
+    }
     if object.poly().is_none() {
         v.push(("Editable Poly", Command::ConvertToEditablePoly));
+    }
+    if object.patch().is_none() {
+        v.push(("Editable Patch", Command::ConvertToEditablePatch));
     }
     if object.shape().is_some() && object.spline().is_none() {
         v.push(("Editable Spline", Command::ConvertToEditableSpline));
@@ -973,9 +1010,10 @@ mod convert_tests {
         loom_commands::execute(&mut s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
         let id = *s.selection.iter().next().unwrap();
         let entries = base_convert_entries(&s.scene.node(id).unwrap().object);
-        assert_eq!(entries.iter().map(|(l, _)| *l).collect::<Vec<_>>(), ["Editable Poly"]);
-        loom_commands::execute(&mut s, entries[0].1.clone()).unwrap();
+        assert_eq!(entries.iter().map(|(l, _)| *l).collect::<Vec<_>>(), ["Editable Mesh", "Editable Poly", "Editable Patch"]);
+        loom_commands::execute(&mut s, entries[1].1.clone()).unwrap();
         assert!(s.scene.node(id).unwrap().object.poly().is_some());
-        assert!(base_convert_entries(&s.scene.node(id).unwrap().object).is_empty(), "already Editable Poly");
+        let left: Vec<&str> = base_convert_entries(&s.scene.node(id).unwrap().object).iter().map(|(l, _)| *l).collect();
+        assert_eq!(left, ["Editable Mesh", "Editable Patch"], "already Editable Poly");
     }
 }

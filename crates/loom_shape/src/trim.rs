@@ -319,13 +319,25 @@ pub fn cross_section(shape: &Shape, splines: &[usize], kind: KnotKind) -> Vec<Sp
         .collect()
 }
 
-/// Surface: every closed region of three or four segments in the spline
-/// cage (knots joined within `threshold`) becomes a Coons patch of
-/// `steps + 1` divisions a side. Patches face away from the cage centre
-/// (`flip` turns them); `remove_interior` drops patches all of whose edges
-/// three or more patches share.
-pub fn surface(shape: &Shape, threshold: f32, steps: u32, flip: bool, remove_interior: bool) -> Mesh {
-    // Nodes: welded knot positions.
+type SurfaceEdge = (usize, usize, Bezier);
+
+/// The Bezier of the cage edge u→v.
+fn edge_curve(edges: &[SurfaceEdge], u: usize, v: usize) -> Option<Bezier> {
+    edges.iter().find_map(|e| {
+        if e.0 == u && e.1 == v {
+            Some(e.2)
+        } else if e.0 == v && e.1 == u {
+            Some([e.2[3], e.2[2], e.2[1], e.2[0]])
+        } else {
+            None
+        }
+    })
+}
+
+/// Surface's cage: welded knots, the Bezier edges between them and the
+/// closed regions of three or four edges.
+#[allow(clippy::type_complexity)]
+fn surface_cycles(shape: &Shape, threshold: f32, remove_interior: bool) -> (Vec<Vec3>, Vec<SurfaceEdge>, Vec<Vec<usize>>) {
     let mut nodes: Vec<Vec3> = Vec::new();
     let node_of = |p: Vec3, nodes: &mut Vec<Vec3>| -> usize {
         if let Some(i) = nodes.iter().position(|q| q.distance(p) <= threshold.max(1e-5)) {
@@ -345,17 +357,6 @@ pub fn surface(shape: &Shape, threshold: f32, steps: u32, flip: bool, remove_int
             }
         }
     }
-    let edge = |u: usize, v: usize| -> Option<Bezier> {
-        edges.iter().find_map(|e| {
-            if e.0 == u && e.1 == v {
-                Some(e.2)
-            } else if e.0 == v && e.1 == u {
-                Some([e.2[3], e.2[2], e.2[1], e.2[0]])
-            } else {
-                None
-            }
-        })
-    };
     let nbrs: Vec<Vec<usize>> = (0..nodes.len()).map(|u| edges.iter().filter_map(|e| if e.0 == u { Some(e.1) } else if e.1 == u { Some(e.0) } else { None }).collect()).collect();
     let mut cycles: Vec<Vec<usize>> = Vec::new();
     let mut seen: std::collections::BTreeSet<Vec<usize>> = Default::default();
@@ -400,6 +401,46 @@ pub fn surface(shape: &Shape, threshold: f32, steps: u32, flip: bool, remove_int
         }
         cycles.retain(|c| (0..c.len()).any(|k| uses[&edge_key(c[k], c[(k + 1) % c.len()])] < 3));
     }
+    (nodes, edges, cycles)
+}
+
+/// Surface as patches (what Edit Patch above it edits): one tri / quad
+/// patch per region, its edges the cage's Bezier segments, facing as
+/// `surface` makes them face.
+pub fn surface_patches(shape: &Shape, threshold: f32, flip: bool, remove_interior: bool) -> loom_mesh::patch::PatchMesh {
+    use loom_mesh::patch::{PatchEdge, PatchMesh};
+    let (nodes, edges, cycles) = surface_cycles(shape, threshold, remove_interior);
+    let centre = nodes.iter().copied().sum::<Vec3>() / nodes.len().max(1) as f32;
+    let mut pm = PatchMesh { verts: nodes.clone(), ..Default::default() };
+    for (a, b, bz) in &edges {
+        let h = pm.vecs.len() as u32;
+        pm.vecs.push(bz[1]);
+        pm.vecs.push(bz[2]);
+        pm.edges.push(PatchEdge { v: [*a as u32, *b as u32], vec: [h, h + 1] });
+    }
+    for c in cycles {
+        let pts: Vec<Vec3> = c.iter().map(|i| nodes[*i]).collect();
+        let n0 = (pts[1] - pts[0]).cross(pts[pts.len() - 1] - pts[0]);
+        let mid = pts.iter().copied().sum::<Vec3>() / pts.len() as f32;
+        let outward = n0.dot(mid - centre) >= 0.0;
+        let mut v: Vec<u32> = c.iter().map(|i| *i as u32).collect();
+        if outward == flip {
+            v.reverse();
+        }
+        pm.patches.push(loom_mesh::patch::Patch::new(v));
+    }
+    pm.compact();
+    pm
+}
+
+/// Surface: every closed region of three or four segments in the spline
+/// cage (knots joined within `threshold`) becomes a Coons patch of
+/// `steps + 1` divisions a side. Patches face away from the cage centre
+/// (`flip` turns them); `remove_interior` drops patches all of whose edges
+/// three or more patches share.
+pub fn surface(shape: &Shape, threshold: f32, steps: u32, flip: bool, remove_interior: bool) -> Mesh {
+    let (nodes, edges, cycles) = surface_cycles(shape, threshold, remove_interior);
+    let edge = |u: usize, v: usize| edge_curve(&edges, u, v);
     let centre = nodes.iter().copied().sum::<Vec3>() / nodes.len().max(1) as f32;
     let div = (steps + 1) as usize;
     let mut im = IndexedMesh::default();

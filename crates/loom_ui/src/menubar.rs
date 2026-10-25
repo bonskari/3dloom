@@ -541,7 +541,7 @@ const REPO_URL: &str = "https://github.com/bonskari/3dloom";
 pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
     ("Selection Modifiers", &[("Mesh Select", "Mesh Select"), ("Poly Select", "Poly Select"), ("Spline Select", "Spline Select"), ("Vol. Select", "Vol. Select")]),
     ("Patch/Spline Editing", &[
-        ("CrossSection", "CrossSection"), ("Delete Spline", "Delete Spline"), ("Edit Spline", "Edit Spline"), ("Fillet/Chamfer", "Fillet/Chamfer"), ("Lathe", "Lathe"),
+        ("CrossSection", "CrossSection"), ("Delete Spline", "Delete Spline"), ("Edit Patch", "Edit Patch"), ("Edit Spline", "Edit Spline"), ("Fillet/Chamfer", "Fillet/Chamfer"), ("Lathe", "Lathe"),
         ("Normalize Spline", "Normalize Spline"), ("Renderable Spline", "Renderable Spline"), ("Surface", "Surface"), ("Sweep", "Sweep"), ("Trim/Extend", "Trim/Extend"),
     ]),
     ("Mesh Editing", &[

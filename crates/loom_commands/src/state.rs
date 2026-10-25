@@ -60,8 +60,87 @@ impl SelectionMode {
 pub fn base_sub_levels(object: &loom_scene::ObjectKind) -> Vec<(&'static str, SelectionMode)> {
     match object {
         loom_scene::ObjectKind::EditablePoly(_) => SelectionMode::ALL.iter().map(|m| (m.label(), *m)).collect(),
+        // Face and Polygon both select faces (Polygon takes whole polygons).
+        loom_scene::ObjectKind::EditableMesh(_) => MESH_LEVELS.to_vec(),
+        // Vertex and Handle both pick lattice points (Handle the handles).
+        loom_scene::ObjectKind::EditablePatch(_) => PATCH_LEVELS.to_vec(),
         loom_scene::ObjectKind::EditableSpline(_) => vec![("Vertex", SelectionMode::Vertex), ("Segment", SelectionMode::Edge), ("Spline", SelectionMode::Face)],
         _ => Vec::new(),
+    }
+}
+
+/// Editable Mesh / Edit Mesh sub-object levels with their selection modes.
+pub const MESH_LEVELS: [(&str, SelectionMode); 5] =
+    [("Vertex", SelectionMode::Vertex), ("Edge", SelectionMode::Edge), ("Face", SelectionMode::Face), ("Polygon", SelectionMode::Face), ("Element", SelectionMode::Element)];
+
+/// Editable Patch / Edit Patch sub-object levels with their selection modes.
+pub const PATCH_LEVELS: [(&str, SelectionMode); 5] =
+    [("Vertex", SelectionMode::Vertex), ("Handle", SelectionMode::Vertex), ("Edge", SelectionMode::Edge), ("Patch", SelectionMode::Face), ("Element", SelectionMode::Element)];
+
+/// Editable Mesh / Editable Patch rollout settings, and which of two levels
+/// sharing a selection mode is active.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MeshPatchSettings {
+    /// Editable Mesh at the Face mode is at its Polygon level (a click takes the polygon).
+    pub polygon_level: bool,
+    /// Editable Patch at the Vertex mode is at its Handle level.
+    pub handle_level: bool,
+    /// Selection > Ignore Visible Edges (Polygon level): polygons by Planar Thresh.
+    pub ignore_visible_edges: bool,
+    /// Selection > Planar Thresh (degrees).
+    pub planar_thresh: f32,
+    /// Surface Properties (Edge) > Auto Edge Threshold (degrees).
+    pub auto_edge_threshold: f32,
+    pub auto_edge_mode: loom_mesh::tri_mesh::AutoEdgeMode,
+    /// Edit Geometry > Explode angle (degrees).
+    pub explode_angle: f32,
+    /// Edit Geometry > Explode to Objects (else to Elements).
+    pub explode_to_objects: bool,
+    /// Edit Geometry > Tessellate Tension (percent).
+    pub tension: f32,
+    /// Edit Geometry > Tessellate by Face-Center (else by Edge).
+    pub face_center: bool,
+    /// Edit Geometry > Extrude amount.
+    pub extrude: f32,
+    /// Edit Geometry > Bevel outline amount.
+    pub outline: f32,
+    /// Editable Patch > Geometry > Extrude & Bevel: Extrusion.
+    pub patch_extrude: f32,
+    /// Editable Patch > Geometry > Extrude & Bevel: Outlining.
+    pub patch_outline: f32,
+    /// Editable Patch > Geometry > Weld Threshold.
+    pub patch_weld_threshold: f32,
+    /// Editable Patch > Surface > Relax Value.
+    pub relax_amount: f32,
+    /// Editable Patch > Surface > Iterations.
+    pub relax_iterations: u32,
+    /// Editable Patch > Surface > Keep Boundary Points Fixed.
+    pub relax_keep_boundary: bool,
+}
+
+impl Default for MeshPatchSettings {
+    fn default() -> Self {
+        Self {
+            polygon_level: false,
+            handle_level: false,
+            ignore_visible_edges: false,
+            planar_thresh: 45.0,
+            auto_edge_threshold: 24.0,
+            auto_edge_mode: Default::default(),
+            explode_angle: 24.0,
+            explode_to_objects: true,
+            tension: 25.0,
+            face_center: false,
+            extrude: 10.0,
+            outline: 0.0,
+            patch_extrude: 10.0,
+            patch_outline: 0.0,
+            patch_weld_threshold: 0.1,
+            relax_amount: 0.5,
+            relax_iterations: 1,
+            relax_keep_boundary: true,
+        }
     }
 }
 
@@ -1312,6 +1391,8 @@ pub struct AppState {
     pub undo: UndoStack,
     pub selection: BTreeSet<NodeId>,
     pub sub_selection: SubSelection,
+    /// Editable Mesh / Editable Patch settings and level flags.
+    pub mesh_patch: MeshPatchSettings,
     /// Selection before / after each undo step (selection undo).
     pub sel_history: crate::sel_undo::SelHistory,
     /// Selected control points of the active FFD entry (lattice indices).
@@ -1662,6 +1743,7 @@ impl AppState {
             undo: UndoStack::new(100),
             selection: BTreeSet::new(),
             sub_selection: SubSelection::default(),
+            mesh_patch: MeshPatchSettings::default(),
             sel_history: Default::default(),
             selection_mode: SelectionMode::Object,
             active_tool: Tool::Select,
@@ -2157,6 +2239,20 @@ impl AppState {
     /// Sub-object level name as the selected object calls it (Editable Spline:
     /// Vertex / Segment / Spline; Editable Poly: Vertex / Edge / Border / Polygon / Element).
     pub fn level_label(&self, mode: SelectionMode) -> &'static str {
+        if self.patch_selected() {
+            return match mode {
+                SelectionMode::Vertex if self.mesh_patch.handle_level => "Handle",
+                SelectionMode::Face => "Patch",
+                other => other.label(),
+            };
+        }
+        if self.tri_mesh_selected() {
+            return match mode {
+                SelectionMode::Face if !self.mesh_patch.polygon_level => "Face",
+                SelectionMode::Face => "Polygon",
+                other => other.label(),
+            };
+        }
         if self.spline_selected() {
             match mode {
                 SelectionMode::Edge | SelectionMode::Border => "Segment",
@@ -2166,6 +2262,16 @@ impl AppState {
         } else {
             mode.label()
         }
+    }
+
+    /// An Editable Mesh (or an active Edit Mesh entry) is selected.
+    pub fn tri_mesh_selected(&self) -> bool {
+        self.selection.iter().any(|id| self.scene.node(*id).is_some_and(|n| n.edits_tri_mesh()))
+    }
+
+    /// An Editable Patch (or an active Edit Patch entry) is selected.
+    pub fn patch_selected(&self) -> bool {
+        self.selection.iter().any(|id| self.scene.node(*id).is_some_and(|n| n.edit_patch().is_some()))
     }
 
     /// A selected node's active stack entry is an Edit Poly: its shortcut group is live.
@@ -2220,7 +2326,8 @@ impl AppState {
             if self.edit_poly_active() {
                 groups.push("Edit Poly");
             }
-            if self.poly_selected() {
+            // An Editable Patch takes the level keys 1-5 of the group too.
+            if self.poly_selected() || self.patch_selected() {
                 groups.push("Editable Poly");
             }
         }
