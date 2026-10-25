@@ -106,7 +106,18 @@ fn tiles_preset_and_gaps_from_its_rollouts() {
     pick_diffuse_map(&mut h, "Tiles");
     let win = material_editor_rect(&h);
     for label in ["Standard Controls", "Advanced Controls", "Preset Type:", "Horiz. Count:", "Grout Setup", "Mirror"] {
-        assert!(h.text_rect(label, win).is_some(), "{label:?} at the Tiles level");
+        if h.text_rect(label, win).is_none() {
+            fn all(shape: &egui::Shape, out: &mut Vec<String>) {
+                match shape {
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| all(s, out)),
+                    egui::Shape::Text(t) => out.push(format!("{}@{:?}", t.galley.text(), t.pos)),
+                    _ => {}
+                }
+            }
+            let mut v = Vec::new();
+            h.shapes.iter().for_each(|c| all(&c.shape, &mut v));
+            panic!("{label:?} at the Tiles level; win {win:?}; shown: {v:?}; kind {:?}", diffuse(&h).kind);
+        }
     }
     pick_in_list(&mut h, "Preset Type:", "Stack Bond", "Running Bond");
     assert_eq!(diffuse(&h).extra.preset, 1);
