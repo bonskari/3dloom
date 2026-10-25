@@ -12,7 +12,7 @@
 use crate::state::{AppState, SelectionMode};
 use loom_max::{MaxKind, MaxMaterial};
 use loom_scene::material::{MaterialId, MaterialKind, StandardMaterial, SubMaterial};
-use loom_scene::{Change, Modifier, ModifierSlot, Node, NodeId, ObjectKind, Transform};
+use loom_scene::{Modifier, ModifierSlot, Node, NodeId, ObjectKind, Transform};
 use serde_json::{json, Value};
 use std::path::Path;
 
