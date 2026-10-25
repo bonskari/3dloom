@@ -17,6 +17,7 @@ pub mod spline;
 pub mod snap;
 pub mod state;
 pub mod transform;
+pub mod sel_undo;
 
 pub use command::{registry, Axis, Command, CommandInfo, Group, PrimitiveKind, SaveChangesReply, SelectOp, DEFERRED, DEFERRED_UNWRAP, OUT_OF_SCOPE, ShapeKind, UNWRAP_ALIASES};
 pub mod unwrap;

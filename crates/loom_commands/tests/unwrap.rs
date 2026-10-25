@@ -179,6 +179,8 @@ fn seams_from_edge_selection_and_point_to_point() {
     assert!(data(&s, a).seams.len() > 2, "{:?}", data(&s, a).seams);
     execute(&mut s, Command::PeltSeamToEdgeSelReplace).unwrap();
     assert!(s.sub_selection.len() >= 3);
+    // Seam to Edge Sel is a selection step: undo it, then the path.
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(data(&s, a).seams.len(), 2, "one undo removes the point-to-point path");
 }

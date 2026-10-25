@@ -282,16 +282,14 @@ fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| playback_buttons(ui, app));
         ui.horizontal(|ui| {
             let key_mode = app.state.key_step_mode;
-            if Icon::new(icons::KEY_MODE, Command::NextPreviousKeyModeToggle.name()).tip("Key Mode Toggle").on(key_mode).show(ui, &app.state).clicked() {
-                let _ = app.dispatch(Command::NextPreviousKeyModeToggle);
-            }
+            let r = Icon::new(icons::KEY_MODE, Command::NextPreviousKeyModeToggle.name()).tip("Key Mode Toggle").on(key_mode).show(ui, &app.state);
+            time_control(app, r, Command::NextPreviousKeyModeToggle);
             let mut frame = app.state.current_frame;
             if ui.add(crate::spinner::spin(ui, &mut frame, app.state.frame_range.0..=app.state.frame_range.1)).on_hover_text("Current Frame (Go To Frame)").changed() {
                 let _ = app.dispatch(Command::SetFrame { frame });
             }
-            if Icon::new(icons::TIME_CONFIGURATION, Command::TimeConfiguration.name()).tip("Time Configuration").show(ui, &app.state).clicked() {
-                let _ = app.dispatch(Command::TimeConfiguration);
-            }
+            let r = Icon::new(icons::TIME_CONFIGURATION, Command::TimeConfiguration.name()).tip("Time Configuration").show(ui, &app.state);
+            time_control(app, r, Command::TimeConfiguration);
         });
     });
 }
@@ -363,23 +361,28 @@ fn default_tangents(ui: &mut egui::Ui, app: &mut LoomApp) {
     .on_hover_text("Default In/Out Tangents for New Keys");
 }
 
+/// Right-clicking a time control opens Time Configuration, as in the reference.
+fn time_control(app: &mut LoomApp, r: egui::Response, cmd: Command) {
+    if r.clicked() {
+        let _ = app.dispatch(cmd);
+    }
+    if r.secondary_clicked() {
+        let _ = app.dispatch(Command::TimeConfiguration);
+    }
+}
+
 /// Go To Start, Previous, Play / Stop, Next, Go To End.
 fn playback_buttons(ui: &mut egui::Ui, app: &mut LoomApp) {
-    if Icon::new(icons::GO_TO_START, "Go to Start Frame").show(ui, &app.state).clicked() {
-        let _ = app.dispatch(Command::GoToStartFrame);
-    }
+    let r = Icon::new(icons::GO_TO_START, "Go to Start Frame").show(ui, &app.state);
+    time_control(app, r, Command::GoToStartFrame);
     let key_mode = app.state.key_step_mode;
-    if Icon::new(if key_mode { icons::PREVIOUS_KEY } else { icons::PREVIOUS_FRAME }, Command::BackupTimeOneUnit.name()).tip(if key_mode { "Previous Key" } else { "Previous Frame" }).show(ui, &app.state).clicked() {
-        let _ = app.dispatch(Command::BackupTimeOneUnit);
-    }
+    let r = Icon::new(if key_mode { icons::PREVIOUS_KEY } else { icons::PREVIOUS_FRAME }, Command::BackupTimeOneUnit.name()).tip(if key_mode { "Previous Key" } else { "Previous Frame" }).show(ui, &app.state);
+    time_control(app, r, Command::BackupTimeOneUnit);
     let playing = app.state.playing;
-    if Icon::new(if playing { icons::STOP } else { icons::PLAY }, Command::PlayAnimation.name()).tip("Play / Stop Animation").on(playing).show(ui, &app.state).clicked() {
-        let _ = app.dispatch(Command::PlayAnimation);
-    }
-    if Icon::new(if key_mode { icons::NEXT_KEY } else { icons::NEXT_FRAME }, Command::ForwardTimeOneUnit.name()).tip(if key_mode { "Next Key" } else { "Next Frame" }).show(ui, &app.state).clicked() {
-        let _ = app.dispatch(Command::ForwardTimeOneUnit);
-    }
-    if Icon::new(icons::GO_TO_END, "Go to End Frame").show(ui, &app.state).clicked() {
-        let _ = app.dispatch(Command::GoToEndFrame);
-    }
+    let r = Icon::new(if playing { icons::STOP } else { icons::PLAY }, Command::PlayAnimation.name()).tip("Play / Stop Animation").on(playing).show(ui, &app.state);
+    time_control(app, r, Command::PlayAnimation);
+    let r = Icon::new(if key_mode { icons::NEXT_KEY } else { icons::NEXT_FRAME }, Command::ForwardTimeOneUnit.name()).tip(if key_mode { "Next Key" } else { "Next Frame" }).show(ui, &app.state);
+    time_control(app, r, Command::ForwardTimeOneUnit);
+    let r = Icon::new(icons::GO_TO_END, "Go to End Frame").show(ui, &app.state);
+    time_control(app, r, Command::GoToEndFrame);
 }

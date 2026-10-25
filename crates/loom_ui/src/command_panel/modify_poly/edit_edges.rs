@@ -63,6 +63,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.add_enabled(has, egui::Button::new("Create Shape From Selection")).on_hover_text("The selected edges become a new Editable Spline").clicked() {
                 let _ = app.dispatch(Command::CreateShapeFromEdges { name: None, smooth });
             }
+        });
+        // The shape type on its own row: beside the button it widened the panel.
+        ui.horizontal(|ui| {
+            let smooth = app.state.spline_settings.create_shape_smooth;
             if ui.radio(!smooth, "Linear").clicked() {
                 let _ = app.dispatch(Command::SplineSettings { name: "Create Shape Smooth".into(), value: 0.0 });
             }

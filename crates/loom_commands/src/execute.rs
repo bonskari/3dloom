@@ -25,7 +25,17 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     // (creating, deleting, modifiers…) becomes the buffer's new start.
     let rebases_pose = state.set_key_mode && !crate::anim_cmds::is_pose_edit(&cmd);
     let position = state.undo.position();
+    // Selection undo: the outermost command records what it did to the selection.
+    let outer = crate::sel_undo::enter(state);
+    // Undo / Redo restore selections themselves; Open, Reset and Fetch start the history over.
+    let undo_cmd = matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation);
+    if outer && matches!(cmd, Command::OpenFile { .. } | Command::ResetFile | Command::Fetch) {
+        crate::sel_undo::forget(state);
+    }
+    let undo_cmd = undo_cmd || matches!(cmd, Command::OpenFile { .. } | Command::ResetFile | Command::Fetch);
+    let sel_before = (outer && !undo_cmd).then(|| crate::sel_undo::snap(state));
     let r = execute_inner(state, cmd);
+    crate::sel_undo::leave(state);
     // Axis constraints are kept separately at object and sub-object level.
     let sub = state.selection_mode != SelectionMode::Object;
     if sub != state.constraint_level_sub && !state.prefs.ref_coord_constant {
@@ -40,6 +50,9 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     loom_scene::anim::set_animate(animate);
     state.scene.set_time(state.current_frame as f32);
     crate::stack::sync_selection(state);
+    if let Some(before) = sel_before {
+        crate::sel_undo::record(state, before, position);
+    }
     r
 }
 
@@ -80,13 +93,20 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::UndoSceneOperation => {
             let label = state.undo.undo(&mut state.scene);
-            prune_selection(state);
+            // The step undone sat at the position just above the new top.
+            let pos = state.undo.position() + 1;
+            if label.is_none() || !crate::sel_undo::undone(state, pos) {
+                prune_selection(state);
+            }
             state.mesh_dirty = true;
             Ok(json!({ "undone": label }))
         }
         C::RedoSceneOperation => {
             let label = state.undo.redo(&mut state.scene);
-            prune_selection(state);
+            let pos = state.undo.position();
+            if label.is_none() || !crate::sel_undo::redone(state, pos) {
+                prune_selection(state);
+            }
             state.mesh_dirty = true;
             Ok(json!({ "redone": label }))
         }
@@ -515,6 +535,29 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Ok(selection_json(state));
             }
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
+        }
+        C::SelectInstances => {
+            // The instance group: every node sharing the selected node's source.
+            let ids: Vec<NodeId> = state.selection.iter().copied().collect();
+            if ids.len() != 1 {
+                return Err("Select Instances needs exactly one selected object".into());
+            }
+            let root = |mut n: NodeId| {
+                while let Some(src) = state.scene.node(n).and_then(|x| x.instance_of) {
+                    n = src;
+                }
+                n
+            };
+            let group = root(ids[0]);
+            let ids: Vec<u64> = state.scene.nodes().filter(|n| root(n.id) == group).map(|n| n.id.0).collect();
+            if ids.len() < 2 {
+                return Err("the selected object has no instances".into());
+            }
+            execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
+        }
+        C::SelectByColorPick => {
+            state.pick_mode = Some(PickMode::SelectByColor);
+            Ok(json!({}))
         }
         C::SelectSimilar => {
             let kinds: BTreeSet<&'static str> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.object.base_name()).collect();
@@ -2540,6 +2583,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     }
                     return Ok(json!({ "parent": id.0 }));
                 }
+                Some(PickMode::SelectByColor) => {
+                    state.pick_mode = None;
+                    let rgb = state.scene.node(id).ok_or_else(|| missing(id))?.wire_color;
+                    return execute(state, C::SelectByColor { rgb });
+                }
                 Some(PickMode::CoordSystem) => {
                     state.pick_mode = None;
                     return execute(state, C::PickCoordinateSystem { id: id.0 });
@@ -3445,9 +3493,9 @@ fn clear_selection(state: &mut AppState) {
 fn prune_selection(state: &mut AppState) {
     let scene = &state.scene;
     state.selection.retain(|id| scene.node(*id).is_some());
-    // Sub-object ids are indices into a mesh that may just have changed
-    // topology; they would silently point at other faces.
-    state.sub_selection.clear();
+    // A step without a recorded selection (an interactive drag) keeps the
+    // sub-object ids that still name an element of their mesh.
+    crate::sel_undo::keep_valid(state);
     prune_camera_views(state);
 }
 

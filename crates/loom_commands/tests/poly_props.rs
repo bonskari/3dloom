@@ -24,7 +24,10 @@ fn material_id_set_and_select() {
     execute(&mut s, Command::SelectNone).unwrap();
     execute(&mut s, Command::SelectByMaterialId { id: 9, clear: true }).unwrap();
     assert_eq!(s.sub_selection.len(), 2);
-    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    // Undo: Select By Material ID, Select None, then Set Material ID.
+    for _ in 0..3 {
+        execute(&mut s, Command::UndoSceneOperation).unwrap();
+    }
     assert_eq!(s.scene.node(a).unwrap().object.mesh().faces()[0].material_id, before0);
 }
 
