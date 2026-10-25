@@ -1668,6 +1668,8 @@ pub struct AppState {
     pub skin_clipboard_weights: Vec<(Vec3, Vec<(NodeId, f32)>)>,
     /// Skin > Gizmos: the current gizmo index.
     pub skin_gizmo: Option<usize>,
+    /// Skin: cross section and lattice selections, pick modes, buffers, the Load Envelopes file.
+    pub skin_ui: crate::skin::SkinUi,
     /// Morpher > Channel List: the current channel; Skin Morph: the current morph.
     pub morph_channel: usize,
     pub skin_morph_current: Option<usize>,
@@ -1892,7 +1894,7 @@ impl AppState {
             skin_paste_tolerance: 0.1,
             skin_paint: false,
             skin_painter: crate::skin::Painter::default(),
-            skin_filter_vertices: true,
+            skin_filter_vertices: false,
             skin_filter_envelopes: true,
             skin_filter_cross_sections: true,
             skin_backface_cull: false,
@@ -1900,6 +1902,7 @@ impl AppState {
             skin_clipboard_envelope: None,
             skin_clipboard_weights: Vec::new(),
             skin_gizmo: None,
+            skin_ui: crate::skin::SkinUi::default(),
             morph_channel: 0,
             skin_morph_current: None,
             bones_ik_chain: false,
@@ -2350,6 +2353,9 @@ impl AppState {
         }
         if self.edit_working_pivot {
             return self.working_pivot.origin;
+        }
+        if let Some(p) = crate::skin::pivot(self) {
+            return p;
         }
         self.selection_bounds()
             .map(|(a, b)| (a + b) * 0.5)

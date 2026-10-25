@@ -192,7 +192,8 @@ impl Scene {
     /// The cache key of a node: its version plus the versions of the nodes
     /// its instanced modifiers point at.
     fn eval_key(&self, id: NodeId) -> u64 {
-        self.eval_key_depth(id, 0)
+        // A render evaluates apart from the viewports (Skin's Fast Updates).
+        self.eval_key_depth(id, 0) ^ if crate::anim::rendering() { 0x9e37_79b9_7f4a_7c15 } else { 0 }
     }
 
     /// A referenced node's whole evaluation key folds in (a Skin Wrap base
@@ -360,8 +361,9 @@ impl Scene {
             }
         };
         let self_world_at = |t: f32| -> glam::Mat4 { self.at_time(t, || self.object_matrix(id)) };
-        let ctx = EvalCtx { object_world, object_inverse: object_world.inverse(), lookup: Some(&lookup), shape_lookup: Some(&shape_lookup), eval_shape_lookup: Some(&eval_shape_lookup), world_lookup: Some(&world_lookup), eval_lookup: Some(&eval_lookup), self_world_at: Some(&self_world_at), camera_fov: Some(&camera_fov) };
-        let mut value = StackValue { mesh: node.map(|n| n.object.display_output()).unwrap_or_default(), selection: None, shape: node.and_then(|n| n.object.shape()), shape_selection: None, warnings: Vec::new(), patch: node.and_then(|n| n.object.patch_mesh()) };
+        let bone_squashes = |other: NodeId| -> bool { matches!(self.nodes.get(&other).map(|n| &n.object), Some(crate::node::ObjectKind::Bone { stretch, .. }) if stretch.get() == 2) };
+        let ctx = EvalCtx { object_world, object_inverse: object_world.inverse(), lookup: Some(&lookup), shape_lookup: Some(&shape_lookup), eval_shape_lookup: Some(&eval_shape_lookup), world_lookup: Some(&world_lookup), eval_lookup: Some(&eval_lookup), self_world_at: Some(&self_world_at), camera_fov: Some(&camera_fov), bone_squashes: Some(&bone_squashes) };
+        let mut value = StackValue { mesh: node.map(|n| n.object.display_output()).unwrap_or_default(), selection: None, shape: node.and_then(|n| n.object.shape()), shape_selection: None, warnings: Vec::new(), patch: node.and_then(|n| n.object.patch_mesh()), patch_steps: node.and_then(|n| n.object.patch_steps()) };
         let mut warnings = Vec::new();
         if let Some(n) = node {
             // An Editable Poly at a sub-object level passes its selection up.
@@ -408,9 +410,10 @@ impl Scene {
                     value.shape = None;
                     value.shape_selection = None;
                 }
-                // Patches flow up from Surface and Edit Patch only.
-                if !matches!(modifier, crate::modifier::Modifier::Surface { .. } | crate::modifier::Modifier::EditPatch { .. }) {
+                // Patches flow up from Surface, Edit Patch and Skin (which moves the lattice) only.
+                if !matches!(modifier, crate::modifier::Modifier::Surface { .. } | crate::modifier::Modifier::EditPatch { .. } | crate::modifier::Modifier::Skin(_)) {
                     value.patch = None;
+                    value.patch_steps = None;
                 }
             }
         }

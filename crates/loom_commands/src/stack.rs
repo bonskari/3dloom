@@ -108,6 +108,19 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     };
                     entry.modifier.fit_uvw_map(&input);
                 }
+                if name == "Always Deform" && value != 0.0 {
+                    if let Modifier::Skin(d) = &mut entry.modifier {
+                        // Always Deform back on: the bones' and the mesh's pose at the Ref. Frame is the new bind pose.
+                        let scene = &state.scene;
+                        let d = &mut **d;
+                        scene.at_time(d.ref_frame, || {
+                            for b in &mut d.bones {
+                                b.bind_inverse = scene.world_matrix(b.node).inverse();
+                            }
+                            d.mesh_bind = scene.object_matrix(target);
+                        });
+                    }
+                }
                 changes.push(Change::SetStack { id: target, before: tnode.modifiers.clone(), after: stack });
             }
             commit_change(state, &name, Change::Group(changes))?;

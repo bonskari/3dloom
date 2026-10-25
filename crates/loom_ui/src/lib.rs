@@ -681,7 +681,7 @@ impl LoomApp {
         (!self.state.show_end_result && self.panel_tab == command_panel::Tab::Modify).then(|| self.state.selection.iter().copied().collect())
     }
 
-    fn rebuild_world_meshes(&mut self) {
+    pub(crate) fn rebuild_world_meshes(&mut self) {
         if self.bitmap_generation != self.state.bitmap_generation {
             // Bitmap Parameters > Reload: read the image files again.
             self.bitmap_cache.clear();
@@ -790,10 +790,9 @@ impl LoomApp {
             if vertex_colors {
                 color = [1.0; 3];
             }
-            if let (Some(d), Some((skinned, weights))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
-                if skinned == id && d.vertex_count() == weights.len() {
-                    for (v, w) in d.vertices_mut().iter_mut().zip(weights) {
-                        let c = loom_commands::skin::weight_color(w);
+            if let (Some(d), Some((skinned, colors))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
+                if skinned == id && d.vertex_count() == colors.len() {
+                    for (v, c) in d.vertices_mut().iter_mut().zip(colors) {
                         v.color = [srgb(c[0]), srgb(c[1]), srgb(c[2])];
                     }
                     vertex_colors = true;

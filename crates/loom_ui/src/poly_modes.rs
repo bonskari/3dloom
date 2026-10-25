@@ -922,7 +922,7 @@ pub fn skin_paint(app: &mut LoomApp, ctx: &egui::Context, painter: &egui::Painte
             }
         } else if pointer.delta() != egui::Vec2::ZERO || pointer.button_pressed(egui::PointerButton::Primary) {
             if let Some((_, at, _)) = hit(app, p) {
-                let _ = app.dispatch(Command::SkinPaintStroke { points: vec![at.to_array()], erase: mods.alt });
+                let _ = app.dispatch(Command::SkinPaintStroke { points: vec![at.to_array()], erase: mods.alt, pressure: None });
             }
         }
         ctx.request_repaint();

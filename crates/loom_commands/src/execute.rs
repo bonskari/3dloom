@@ -77,6 +77,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
         c if c.group() == crate::Group::Skin => crate::skin::execute(state, c),
         c @ (C::SkinAddBones { .. } | C::SkinRemoveBone { .. } | C::SkinSelectBone { .. } | C::SkinSelectVertices { .. } | C::SkinSetVertexWeight { .. } | C::SkinSetEnvelope { .. } | C::SkinSetCustomWeight { .. } | C::SkinNormalize | C::SkinRigidToggle | C::SkinBakeSelectedVerts | C::MirrorModeSkin | C::PasteGreenToBlue | C::PasteBlueToGreen | C::MirrorPaste | C::SkinAddGizmo { .. } | C::SkinRemoveGizmo | C::SkinSelectGizmo { .. } | C::SkinAddGizmoKey | C::SkinSetGizmoKey { .. } | C::SkinSetGizmoDelta { .. } | C::SkinSetGizmoOption { .. } | C::SkinSetVertexWeights { .. } | C::SkinSetScaleWeight { .. } | C::SkinSetPasteTolerance { .. } | C::SkinSelectBoneByName { .. } | C::SkinEnvelopeVisibility | C::SkinPaintWeightsToggle | C::SkinPaintStroke { .. } | C::SkinSetPainterOption { .. } | C::SkinPainterOptionsDialog) => crate::skin::execute(state, c),
+        c if crate::skin::handles(&c) => crate::skin::execute(state, c),
         c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin) => crate::morph::execute(state, c),
         C::NewScene => {
             let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
@@ -682,7 +683,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             frame_all(state, bounds)
         }
         C::ZoomExtentsSelected => {
-            let bounds = state.selection_bounds().or_else(|| state.scene_bounds());
+            // At the Skin's Envelope level: the selected vertices, else the current envelope.
+            let bounds = crate::skin::focus_bounds(state).or_else(|| state.selection_bounds()).or_else(|| state.scene_bounds());
             frame(state, bounds)
         }
         C::ZoomViewportIn => zoom(state, 0.8),
@@ -4163,6 +4165,13 @@ fn with_system(state: &mut AppState, system: Option<CoordSystem>) -> CoordSystem
 type MatrixFor<'a> = &'a dyn Fn(&AppState, Option<NodeId>) -> (Mat4, Vec3);
 
 fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: MatrixFor) -> Result<Value, String> {
+    // Skin > Edit Envelopes: the transform tools move envelope end points / lattice points only.
+    if state.skin_active() && matches!(label, "Move" | "Rotate" | "Scale") {
+        let (m, _) = matrix_for(state, None);
+        if let Some(r) = crate::skin::transform(state, label, m) {
+            return r;
+        }
+    }
     if let Some((id, _)) = crate::normals::normal_level(state) {
         let (m, _) = matrix_for(state, Some(id));
         if let Some(r) = crate::normals::transform(state, label, m) {

@@ -1034,6 +1034,15 @@ impl ObjectKind {
         }
     }
 
+    /// The tessellation of a patch object: (View Steps, Show Interior Edges).
+    pub fn patch_steps(&self) -> Option<(u32, bool)> {
+        match self {
+            Self::EditablePatch(p) => Some((p.steps.get(), p.show_interior)),
+            Self::QuadPatch { .. } | Self::TriPatch { .. } => Some((Self::PATCH_GRID_STEPS, false)),
+            _ => None,
+        }
+    }
+
     pub fn patch(&self) -> Option<&PatchObject> {
         match self {
             Self::EditablePatch(p) => Some(p),

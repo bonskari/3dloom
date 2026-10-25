@@ -418,6 +418,15 @@ pub enum Dialog {
     WeightTool,
     /// Skin > Weight Properties > Painter Options.
     PainterOptions,
+    /// Skin > Envelope Properties > Paste to Multiple Bones: pick the bones.
+    PasteToMultipleBones,
+    /// Skin > Advanced Parameters > Save / Load: the envelope file (.env).
+    SkinSaveEnvelopes,
+    SkinLoadEnvelopes,
+    /// Skin > Load Envelopes: match the file's bones to the current ones.
+    LoadEnvelopes,
+    /// Skin > Gizmo Parameters > Edit Angle Keys Curves.
+    AngleKeysCurves,
     /// Display > Show Map in Viewport > Bitmap: pick the image file.
     PickTexture,
     /// UVW Map > Bitmap Fit: pick the image whose aspect the gizmo takes.
