@@ -744,6 +744,7 @@ fn the_command_panel_keeps_its_width_across_tabs_and_poly_levels() {
         assert!((panel_width(&h) - start).abs() <= 1.0, "{tab:?}: the panel grew from {start} to {}", panel_width(&h));
     }
     h.app.panel_tab = crate::Tab::Create;
+    h.frames(2);
     for cat in ["Shapes", "Lights", "Cameras", "Helpers", "Space Warps", "Systems", "Geometry"] {
         click_named(&mut h, cat);
         h.frames(2);
