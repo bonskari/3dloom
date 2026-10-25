@@ -3108,7 +3108,7 @@ fn edit_normals_click_ctrl_alt_and_empty_click_select_normals() {
     assert!(normal_selection(&h).is_empty(), "an empty click clears the normals");
     assert!(h.app.state.selection.contains(&id), "and keeps the object");
     // A region selects the normals whose lines it holds.
-    h.drag(a.1 - egui::vec2(6.0, 6.0), a.1 + egui::vec2(6.0, 6.0));
+    h.drag(a.1 - egui::vec2(10.0, 10.0), a.1 + egui::vec2(10.0, 10.0));
     assert!(normal_selection(&h).contains(&a.0), "region picks {:?}", normal_selection(&h));
 }
 
