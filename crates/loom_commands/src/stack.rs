@@ -240,6 +240,11 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         }
         C::VertexPaintBrushToggle => {
             state.vertex_paint_brush = !state.vertex_paint_brush;
+            if state.vertex_paint_brush {
+                // One viewport mode at a time: Paint, Pick Color or Face Selection.
+                state.vertex_paint_pick = false;
+                state.vertex_paint_faces = false;
+            }
             Ok(json!({ "vertex_paint_brush": state.vertex_paint_brush }))
         }
         C::VertexPaintStroke { node, points, rgb, size, opacity } => {
@@ -251,20 +256,21 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 None => n.object.display_output(),
             };
             let mut stack = n.modifiers.clone();
-            let Modifier::VertexPaint { paint, .. } = &mut stack[a].modifier else { unreachable!() };
+            let Modifier::VertexPaint { paint, coverage, faces, .. } = &mut stack[a].modifier else { unreachable!() };
             let target = [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0];
             let radius = size.max(1e-3);
+            // A face selection restricts the brush to its faces' vertices.
+            let only = crate::vertex_paint::face_vertices(&input, faces);
             let mut touched = 0;
             for pt in &points {
                 let c = glam::Vec3::from(*pt);
                 for (i, v) in input.vertices().iter().enumerate() {
                     let d = v.position.distance(c);
-                    if d > radius {
+                    if d > radius || only.as_ref().is_some_and(|o| !o.contains(&(i as u32))) {
                         continue;
                     }
                     let k = (opacity.clamp(0.0, 1.0) * (1.0 - d / radius)).clamp(0.0, 1.0);
-                    let cur = paint.get(&(i as u32)).copied().unwrap_or(v.color);
-                    paint.insert(i as u32, [cur[0] + (target[0] - cur[0]) * k, cur[1] + (target[1] - cur[1]) * k, cur[2] + (target[2] - cur[2]) * k]);
+                    crate::vertex_paint::composite(paint, coverage, i as u32, target, k);
                     touched += 1;
                 }
             }
@@ -899,12 +905,53 @@ fn entry_input(state: &AppState, id: NodeId, index: usize) -> loom_mesh::Mesh {
     }
 }
 
-/// Rebuilds an HSDS entry's cage (its finest level) from the current input.
+/// Rebuilds an HSDS entry's cage (the level being edited) from the current input.
 fn refresh_hsds_cage(state: &mut AppState, id: NodeId, index: usize) {
     let input = entry_input(state, id, index);
     if let Some(Modifier::Hsds(d)) = state.scene.node_mut(id).and_then(|n| n.modifiers.get_mut(index)).map(|s| &mut s.modifier) {
-        d.cage = loom_scene::caches9::hsds_mesh(d, &input).map(|(m, _)| m).unwrap_or(input);
+        d.cage = loom_scene::caches9::hsds_mesh_upto(d, &input, d.edited_level()).map(|(m, _)| m).unwrap_or(input);
     }
+}
+
+/// HSDS > level of detail list: the picked level is the one the sub-object
+/// levels pick on (not an undo step, like the level buttons).
+pub fn hsds_select_level(state: &mut AppState, level: u32) -> Result<Value, String> {
+    let (id, index) = entry_of(state, |m| matches!(m, Modifier::Hsds(_))).ok_or("select an object with an HSDS modifier")?;
+    if let Some(Modifier::Hsds(d)) = state.scene.node_mut(id).and_then(|n| n.modifiers.get_mut(index)).map(|s| &mut s.modifier) {
+        if level as usize > d.levels.len() {
+            return Err(format!("HSDS has Base Level and {} level(s)", d.levels.len()));
+        }
+        d.level = (level as usize != d.levels.len()).then_some(level);
+    }
+    refresh_hsds_cage(state, id, index);
+    state.sub_selection.clear();
+    state.mesh_dirty = true;
+    Ok(hsds_json(state))
+}
+
+/// HSDS > Display next to a level: the result shows only up to it (the finest shows all).
+pub fn hsds_display(state: &mut AppState, level: u32) -> Result<Value, String> {
+    let (id, index) = entry_of(state, |m| matches!(m, Modifier::Hsds(_))).ok_or("select an object with an HSDS modifier")?;
+    let before = state.scene.node(id).ok_or("missing node")?.modifiers.clone();
+    let mut after = before.clone();
+    if let Modifier::Hsds(d) = &mut after[index].modifier {
+        if level as usize > d.levels.len() {
+            return Err(format!("HSDS has Base Level and {} level(s)", d.levels.len()));
+        }
+        d.display = (level as usize != d.levels.len()).then_some(level);
+    }
+    if after != before {
+        commit_change(state, "HSDS Display", Change::SetStack { id, before, after })?;
+        state.mesh_dirty = true;
+    }
+    Ok(hsds_json(state))
+}
+
+/// The selected HSDS entry for State: its level count, the edited and the displayed level.
+pub fn hsds_json(state: &AppState) -> Value {
+    let Some((id, index)) = entry_of(state, |m| matches!(m, Modifier::Hsds(_))) else { return Value::Null };
+    let Some(Modifier::Hsds(d)) = state.scene.node(id).and_then(|n| n.modifiers.get(index)).map(|s| &s.modifier) else { return Value::Null };
+    json!({ "node": id.0, "index": index, "levels": d.levels.len(), "level": d.edited_level(), "display": d.displayed_levels() })
 }
 
 /// The selected node's entry of a modifier kind: the active one, else the topmost.
@@ -921,6 +968,9 @@ pub fn hsds_subdivide(state: &mut AppState, faces: Option<Vec<u32>>) -> Result<V
     let input = entry_input(state, id, index);
     let node = state.scene.node(id).ok_or("missing node")?;
     let Modifier::Hsds(d) = &node.modifiers[index].modifier else { unreachable!() };
+    if d.edited_level() != d.levels.len() {
+        return Err(format!("HSDS: Subdivide splits polygons of the finest level; pick Level {} in the list", d.levels.len()));
+    }
     let (finest, warning) = loom_scene::caches9::hsds_mesh(d, &input)?;
     if let Some(w) = warning {
         return Err(w);
@@ -950,6 +1000,9 @@ pub fn hsds_subdivide(state: &mut AppState, faces: Option<Vec<u32>>) -> Result<V
     let mut after = before.clone();
     if let Modifier::Hsds(d) = &mut after[index].modifier {
         d.levels.push(loom_scene::caches9::HsdsLevel { faces, vertex_count: finest.vertex_count(), face_count: finest.face_count() });
+        // The new level is the one edited and shown.
+        d.level = None;
+        d.display = None;
         d.cage = loom_scene::caches9::hsds_mesh(d, &input).map(|(m, _)| m)?;
     }
     commit_change(state, "Subdivide", Change::SetStack { id, before, after })?;
@@ -1069,6 +1122,10 @@ fn add_modifier(state: &mut AppState, name: &str) -> Result<Value, String> {
                 let mut slot = ModifierSlot::new(modifier);
                 if name == "Edit Mesh" {
                     slot.name = "Edit Mesh".to_owned();
+                }
+                if matches!(slot.modifier, Modifier::EditNormals(_)) {
+                    // Edit Normals starts at its Normal level: the normals show at once.
+                    slot.sub_level = 1;
                 }
                 stack.insert(at, slot);
                 inserted.push((*id, at));

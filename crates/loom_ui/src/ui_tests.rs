@@ -3325,6 +3325,364 @@ fn a_scene_named_on_the_command_line_opens() {
     assert_eq!(next.app.state.recent_files.first(), Some(&path));
 }
 
+/// A 30-unit box with an Edit Normals modifier (at its Normal level), framed.
+fn normals_box(h: &mut Harness) -> loom_scene::NodeId {
+    // Tall enough for the whole Modify panel.
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = selected(h)[0];
+    h.cmd(Command::AddModifier { name: "Edit Normals".into() });
+    h.app.panel_tab = crate::Tab::Modify;
+    framed(h);
+    id
+}
+
+/// Each normal's (world start, direction), by id.
+fn normal_lines(h: &Harness) -> Vec<(u32, Vec3, Vec3)> {
+    let (id, index) = loom_commands::normals::entry(&h.app.state).unwrap();
+    let input = loom_commands::normals::input_mesh(&h.app.state, id, index);
+    let loom_scene::Modifier::EditNormals(d) = &h.app.state.scene.node(id).unwrap().modifiers[index].modifier else { panic!() };
+    let groups = d.groups_for(&input);
+    let all = d.normals(&input, &groups);
+    let world = h.app.state.scene.object_matrix(id);
+    let mut out: Vec<(u32, Vec3, Vec3)> = Vec::new();
+    for (i, g) in groups.iter().enumerate() {
+        if *g != loom_scene::edit_normals::NO_GROUP && !out.iter().any(|o| o.0 == *g) {
+            let p = world.transform_point3(input.vertex_position(input.half_edges()[i].origin).unwrap());
+            out.push((*g, p, world.transform_vector3(all[g]).normalize()));
+        }
+    }
+    out
+}
+
+/// Screen points 60% along the normals that face the viewer, well apart from every other normal's line.
+fn clear_normal_points(h: &Harness) -> Vec<(u32, egui::Pos2)> {
+    let eye = h.app.camera_for(h.app.state.active_viewport).view_matrix().inverse().w_axis.truncate();
+    let lines = normal_lines(h);
+    let seg: Vec<(u32, egui::Pos2, egui::Pos2)> = lines.iter().map(|(g, p, d)| (*g, h.screen_of(*p), h.screen_of(*p + *d * 10.0))).collect();
+    let dist = |q: egui::Pos2, a: egui::Pos2, b: egui::Pos2| {
+        let ab = b - a;
+        let t = if ab.length_sq() < 1e-6 { 0.0 } else { ((q - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+        q.distance(a + ab * t)
+    };
+    lines
+        .iter()
+        .filter(|(_, p, d)| d.dot(eye - *p) > 0.0)
+        .map(|(g, p, d)| (*g, h.screen_of(*p + *d * 6.0)))
+        .filter(|(g, s)| seg.iter().all(|(o, a, b)| o == g || dist(*s, *a, *b) > 12.0))
+        .filter(|(_, s)| h.app.viewport_rects[h.app.state.active_viewport].shrink(20.0).contains(*s))
+        .collect()
+}
+
+fn normal_selection(h: &Harness) -> Vec<u32> {
+    let st = loom_commands::normals::state_json(&h.app.state);
+    st["selected"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect()
+}
+
+/// Line segments painted last frame in `color`.
+fn segments_coloured(h: &Harness, color: egui::Color32) -> usize {
+    fn walk(s: &egui::Shape, c: egui::Color32, n: &mut usize) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, c, n)),
+            egui::Shape::LineSegment { stroke, .. } if stroke.color == c => *n += 1,
+            _ => {}
+        }
+    }
+    let mut n = 0;
+    h.shapes.iter().for_each(|c| walk(&c.shape, color, &mut n));
+    n
+}
+
+#[test]
+fn edit_normals_click_ctrl_alt_and_empty_click_select_normals() {
+    let mut h = Harness::new();
+    let id = normals_box(&mut h);
+    let pts = clear_normal_points(&h);
+    assert!(pts.len() >= 2, "visible normals to click: {pts:?}");
+    let (a, b) = (pts[0], pts[1]);
+    h.click(a.1);
+    assert_eq!(normal_selection(&h), vec![a.0], "a click selects the normal");
+    assert!(h.app.state.selection.contains(&id), "the object stays selected");
+    panel_text(&h, &format!("Normal {} Selected", a.0 + 1));
+    h.mods = egui::Modifiers::CTRL;
+    h.click(b.1);
+    h.mods = egui::Modifiers::NONE;
+    let mut both = vec![a.0, b.0];
+    both.sort();
+    assert_eq!(normal_selection(&h), both, "Ctrl adds");
+    panel_text(&h, "2 Normals Selected");
+    h.mods = egui::Modifiers::ALT;
+    h.click(a.1);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(normal_selection(&h), vec![b.0], "Alt removes");
+    let rect = h.app.viewport_rects[h.app.state.active_viewport];
+    h.click(egui::pos2(rect.right() - 60.0, rect.bottom() - 60.0));
+    assert!(normal_selection(&h).is_empty(), "an empty click clears the normals");
+    assert!(h.app.state.selection.contains(&id), "and keeps the object");
+    // A region selects the normals whose lines it holds.
+    h.drag(a.1 - egui::vec2(10.0, 10.0), a.1 + egui::vec2(10.0, 10.0));
+    assert!(normal_selection(&h).contains(&a.0), "region picks {:?}", normal_selection(&h));
+}
+
+#[test]
+fn edit_normals_draws_explicit_normals_green_and_the_rotate_tool_turns_them() {
+    let mut h = Harness::new();
+    let id = normals_box(&mut h);
+    h.frames(1);
+    assert_eq!(segments_coloured(&h, crate::poly_modes::NORMAL_EXPLICIT), 0, "no explicit normals yet");
+    assert!(segments_coloured(&h, crate::poly_modes::NORMAL_UNSPECIFIED) >= 20, "unspecified normals blue");
+    let (g, at) = clear_normal_points(&h)[0];
+    h.click(at);
+    assert_eq!(normal_selection(&h), vec![g]);
+    assert_eq!(segments_coloured(&h, crate::poly_modes::NORMAL_SELECTED), 1, "the selected normal red");
+    let before = normal_lines(&h).into_iter().find(|l| l.0 == g).unwrap().2;
+    let world = h.app.state.scene.world_matrix(id);
+    // Select And Rotate (E is Make Explicit at the Normal level, so the toolbar
+    // command): drag on an axis ring of the gizmo, which sits on the normal.
+    h.cmd(Command::SelectAndRotate);
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let cam = h.app.camera_for(i);
+    let projection = crate::gizmo::Projection::new(cam.view_matrix(), cam.projection_matrix(rect.width() / rect.height()), rect);
+    let layout = crate::gizmo::layout_for(&h.app, i, rect.height());
+    let o = projection.screen(layout.origin).unwrap();
+    assert!(o.distance(h.screen_of(normal_lines(&h).into_iter().find(|l| l.0 == g).unwrap().1)) < 1.0, "the gizmo is on the normal");
+    let start = (0..360)
+        .flat_map(|deg| (10..800).step_by(2).map(move |r| (deg as f32, r as f32)))
+        .map(|(deg, r)| o + egui::vec2(deg.to_radians().cos(), deg.to_radians().sin()) * r)
+        .find(|p| matches!(crate::gizmo::hit(&h.app, &layout, &projection, *p), Some(crate::gizmo::Handle::Axis(_))))
+        .expect("an axis ring on screen");
+    let tangent = (start - o).normalized().rot90() * 40.0;
+    h.drag(start, start + tangent);
+    let after = normal_lines(&h).into_iter().find(|l| l.0 == g).unwrap().2;
+    assert!(after.distance(before) > 0.05, "the normal turned: {before} -> {after}");
+    assert_eq!(h.app.state.scene.world_matrix(id), world, "the object did not rotate");
+    assert_eq!(normal_selection(&h), vec![g]);
+    // Deselect: the turned normal is now drawn green (explicit).
+    h.cmd(Command::SelectObject);
+    h.click(egui::pos2(rect.right() - 60.0, rect.bottom() - 60.0));
+    assert_eq!(segments_coloured(&h, crate::poly_modes::NORMAL_EXPLICIT), 1, "the rotated normal is explicit");
+}
+
+#[test]
+fn hsds_element_button_shows_the_yellow_cage_and_the_level_list_displays_a_level() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = selected(&h)[0];
+    h.cmd(Command::AddModifier { name: "HSDS".into() });
+    h.app.panel_tab = crate::Tab::Modify;
+    framed(&mut h);
+    assert_eq!(segments_coloured(&h, crate::poly_modes::HSDS_CAGE), 0, "no cage at the top level");
+    // The rollout's Element button (the stack lists the levels too, above it).
+    let right = h.app.viewport_rects[h.app.state.active_viewport].right();
+    let element = h.text_centers("Element").into_iter().filter(|p| p.x > right).max_by(|a, b| a.y.total_cmp(&b.y)).expect("Element");
+    h.click(element);
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers[0].sub_level, 4, "the rollout's Element button");
+    assert_eq!(segments_coloured(&h, crate::poly_modes::HSDS_CAGE), 12, "the box's 12 cage edges, yellow");
+    h.cmd(Command::SelectSub { node: None, ids: vec![0], op: loom_commands::SelectOp::Replace });
+    h.click(panel_text(&h, "Subdivide"));
+    let level1 = h.app.state.scene.eval_mesh(id).value.mesh.face_count();
+    assert!(level1 > 6, "subdivided");
+    panel_text(&h, "Level 1");
+    // Display next to Base Level: Level 1 is turned off.
+    let base = panel_text(&h, "Base Level");
+    let display = h.text_centers("Display").into_iter().find(|p| (p.y - base.y).abs() < 4.0).expect("Display next to Base Level");
+    h.click(display);
+    assert_eq!(h.app.state.scene.eval_mesh(id).value.mesh.face_count(), 6, "only the base level shows");
+    // Picking Base Level in the list: the cage is the original polygons.
+    h.click(base);
+    assert_eq!(h.app.state.scene.node(id).unwrap().cage_mesh().face_count(), 6);
+}
+
+fn vertex_paint_state(h: &mut Harness) -> serde_json::Value {
+    h.app.dispatch(Command::State).unwrap()["vertex_paint"].clone()
+}
+
+#[test]
+fn vertex_paint_dialog_face_selection_paint_all_new_layer_and_eyedropper() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = selected(&h)[0];
+    h.cmd(Command::AddModifier { name: "VertexPaint".into() });
+    h.app.panel_tab = crate::Tab::Modify;
+    framed(&mut h);
+    for (n, v) in [("Color R", 1.0), ("Color G", 0.0), ("Color B", 0.0)] {
+        h.cmd(Command::SetModifierParameter { index: 0, name: n.into(), value: v });
+    }
+    // The floating dialog opens with the modifier.
+    h.click(window_text(&h, "VertexPaint", "Face Selection"));
+    assert!(h.app.state.vertex_paint_faces);
+    h.click(h.screen_of(top_face_point()));
+    let st = vertex_paint_state(&mut h);
+    assert_eq!(st["faces"].as_array().unwrap().len(), 1, "a click selects the face under it: {st}");
+    assert_eq!(segments_coloured(&h, crate::poly_modes::VERTEX_PAINT_FACE), 4, "the selected quad outlined");
+    h.click(window_text(&h, "VertexPaint", "Paint All"));
+    let m = h.app.state.scene.eval_mesh(id).value.mesh.clone();
+    for v in m.vertices() {
+        let red = v.color[0] > 0.99 && v.color[1] < 0.01;
+        assert_eq!(red, v.position.z > 29.9, "only the top face's corners red: {v:?}");
+    }
+    // Layer > New Layer > OK adds a second VertexPaint.
+    h.click(window_text(&h, "VertexPaint", "New Layer"));
+    h.click(window_text(&h, "New Layer", "OK"));
+    let n = h.app.state.scene.node(id).unwrap();
+    assert_eq!(n.modifiers.len(), 2);
+    assert_eq!(n.active_entry, Some(1));
+    // The eyedropper takes the red from the top face into the new layer's swatch.
+    h.cmd(Command::SetModifierParameter { index: 1, name: "Color R".into(), value: 0.0 });
+    h.cmd(Command::SetModifierParameter { index: 1, name: "Color G".into(), value: 1.0 });
+    h.click(window_text(&h, "VertexPaint", "Pick Color"));
+    assert!(h.app.state.vertex_paint_pick && !h.app.state.vertex_paint_faces, "one mode at a time");
+    let corner = h.screen_of(Vec3::new(14.0, 14.0, 30.0));
+    h.drag(corner - egui::vec2(3.0, 3.0), corner);
+    let c = vertex_paint_state(&mut h)["color"].clone();
+    assert!(c[0].as_f64().unwrap() > 0.9 && c[1].as_f64().unwrap() < 0.1, "picked red: {c}");
+    // Closed (its close box), the dialog stays hidden until the rollout's Edit button.
+    h.cmd(Command::VertexPaintPickColorToggle);
+    crate::dialogs::vertex_paint::set_hidden(&h.ctx, true);
+    h.frames(2);
+    assert!(h.text_centers("Paint All").is_empty(), "hidden");
+    h.click(panel_text(&h, "Edit"));
+    h.frames(1);
+    assert_eq!(h.text_centers("Paint All").len(), 1, "Edit opens it again");
+}
+
+/// A scratch folder for the file-dialog tests.
+fn exchange_dir(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join("loom-ui-exchange").join(name);
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// The rect of an FBX / OBJ options window (by its id).
+fn options_rect(h: &Harness, id: &str) -> egui::Rect {
+    h.ctx.memory(|m| m.area_rect(egui::Id::new(id))).unwrap_or_else(|| panic!("the {id} window is shown"))
+}
+
+/// The texts painted inside `within` last frame, with their rects (for failure messages).
+fn texts_in(h: &Harness, within: egui::Rect) -> Vec<(String, egui::Rect)> {
+    fn walk(shape: &egui::Shape, within: egui::Rect, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, within, out)),
+            egui::Shape::Text(t) => {
+                let r = t.galley.rect.translate(t.pos.to_vec2());
+                if within.intersects(r) {
+                    out.push((t.galley.text().to_owned(), r));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for c in &h.shapes {
+        walk(&c.shape, within, &mut out);
+    }
+    out
+}
+
+/// Clicks a control of an options window, scrolling its options down to it
+/// first; says what the window shows if it is not there.
+fn click_option(h: &mut Harness, label: &str, id: &str) {
+    let win = options_rect(h, id);
+    for _ in 0..12 {
+        if h.text_rect(label, win).is_some() {
+            break;
+        }
+        let m = h.mods;
+        h.run(vec![egui::Event::PointerMoved(win.center()), egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -120.0), modifiers: m }]);
+        // Let the scroll settle before looking again.
+        h.frames(20);
+    }
+    if h.text_rect(label, win).is_none() {
+        panic!("{label:?} is not in {id} {win:?}: {:?}", texts_in(h, win));
+    }
+    click_text(h, label, win, 0.0);
+}
+
+/// Types `path` into the in-app file dialog's File name field and clicks `button`.
+fn choose_file(h: &mut Harness, path: &std::path::Path, button: &str) {
+    click_text(h, "File name:", SCREEN, 40.0);
+    // Replace the offered name.
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Text(path.to_string_lossy().into_owned())]);
+    click_text(h, button, SCREEN, 0.0);
+}
+
+/// File > Export to .fbx shows the FBX Export options; a click on Triangulate
+/// and OK write a triangulated file.
+#[test]
+fn fbx_export_goes_through_its_options_dialog() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let path = exchange_dir("fbx_export").join("box.fbx");
+    h.cmd(Command::ExportFile { path: None });
+    choose_file(&mut h, &path, "Save");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxExportOptions), "the options come before the file is written");
+    assert!(!path.exists());
+    assert!(!h.app.state.exchange.fbx_export.triangulate);
+    let win = options_rect(&h, "fbx_export_options");
+    click_text(&mut h, "Triangulate", win, 0.0);
+    assert!(h.app.state.exchange.fbx_export.triangulate, "the check box sets the option");
+    assert!(h.text_rect("User defined", SCREEN).is_some(), "the preset shows it was changed");
+    click_option(&mut h, "OK", "fbx_export_options");
+    assert_eq!(h.app.state.dialog, None);
+    assert!(path.exists(), "OK wrote the file ({})", h.app.state.status_prompt);
+    let doc = loom_fbx::read(&std::fs::read(&path).unwrap(), 0.01).unwrap();
+    let loom_fbx::FbxKind::Mesh { mesh, .. } = &doc.nodes[0].kind else { panic!("{:?}", doc.nodes[0].kind) };
+    assert_eq!(mesh.face_count(), 12, "triangulated");
+}
+
+/// File > Import of an .fbx: Cancel in the FBX Import options imports nothing;
+/// with Cameras off, OK imports the meshes without the camera.
+#[test]
+fn fbx_import_options_cancel_and_cameras_off() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::CreateCamera { target: false });
+    let path = exchange_dir("fbx_import").join("scene.fbx");
+    h.cmd(Command::ExportFile { path: Some(path.to_string_lossy().into_owned()) });
+    h.cmd(Command::NewScene);
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxImportOptions));
+    click_option(&mut h, "Cancel", "fbx_import_options");
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(h.app.state.scene.len(), 0, "Cancel imports nothing");
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    let win = options_rect(&h, "fbx_import_options");
+    click_option(&mut h, "Cameras", "fbx_import_options");
+    assert!(!h.app.state.exchange.fbx_import.cameras);
+    click_option(&mut h, "OK", "fbx_import_options");
+    let kinds: Vec<bool> = h.app.state.scene.nodes().map(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).collect();
+    assert_eq!(kinds, vec![false], "the box only");
+}
+
+/// File > Import of an .obj: the OBJ Import options list the file's objects;
+/// unchecking one leaves it out.
+#[test]
+fn obj_import_options_pick_the_objects() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let path = exchange_dir("obj_import").join("two.obj");
+    std::fs::write(&path, "o Left\nv 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\no Right\nv 5 0 0\nv 6 0 0\nv 6 1 0\nf 4 5 6\n").unwrap();
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ObjImportOptions));
+    let win = options_rect(&h, "obj_import_options");
+    assert!(h.text_rect("Left (1)", win).is_some() && h.text_rect("Right (1)", win).is_some(), "the file's objects are listed");
+    click_text(&mut h, "Right (1)", win, 0.0);
+    click_text(&mut h, "Import", win, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    let names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    assert_eq!(names, vec!["Left".to_string()]);
+}
+
 /// At a sub-object level the first empty click clears the sub-objects and
 /// keeps the object; a second one lets go of the object and ends the level.
 #[test]
@@ -3345,3 +3703,5 @@ fn a_second_empty_click_at_polygon_level_releases_the_object_and_the_level() {
     assert!(h.app.state.selection.is_empty(), "the second click lets go of the object");
     assert_eq!(h.app.state.selection_mode, SelectionMode::Object, "and ends Polygon level");
 }
+
+mod scene;

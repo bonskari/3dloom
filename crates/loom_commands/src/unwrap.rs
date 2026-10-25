@@ -1162,7 +1162,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let (mesh, ch) = working(&e);
             let solid = mode.eq_ignore_ascii_case("solid");
             let img = render_template(&mesh, ch, width, height, solid);
-            img.save(&path).map_err(|e| format!("{path}: {e}"))?;
+            crate::render::save_image(&img, &path)?;
             Ok(json!({ "path": path, "width": width, "height": height }))
         }
         C::SaveUvw { path } => {

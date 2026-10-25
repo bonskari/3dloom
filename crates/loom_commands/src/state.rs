@@ -105,6 +105,10 @@ pub enum DialogPurpose {
     Attach,
     /// Skin > Bones > Add.
     SkinAddBones,
+    /// Select By Name while Select and Link is on: the Select Parent dialog.
+    LinkParent,
+    /// Select By Name while Group > Attach is on: the Attach To Group dialog.
+    GroupAttach,
 }
 
 /// A one-shot viewport pick mode (Display panel "by Hit" buttons, Select and Link).
@@ -1302,6 +1306,10 @@ pub struct AppState {
     pub ffd_selection: BTreeSet<u32>,
     /// VertexPaint: the viewport brush is on.
     pub vertex_paint_brush: bool,
+    /// VertexPaint: Pick Color From Object (the eyedropper) is on.
+    pub vertex_paint_pick: bool,
+    /// VertexPaint: Face Selection is on (viewport clicks select the faces painting is limited to).
+    pub vertex_paint_faces: bool,
     pub selection_mode: SelectionMode,
     pub active_tool: Tool,
     pub viewports: Vec<Viewport>,
@@ -1587,6 +1595,14 @@ pub struct AppState {
     pub seam_point: Option<u32>,
     /// Merge dialog: the chosen file and its object names.
     pub merge_pending: Option<(std::path::PathBuf, Vec<String>)>,
+    /// FBX / OBJ import and export options (the format dialogs; saved in the settings).
+    pub exchange: crate::exchange::ExchangeOptions,
+    /// The file an FBX / OBJ options dialog is open for, and whether it exports the selection only.
+    pub exchange_pending: Option<(std::path::PathBuf, bool)>,
+    /// Customize > Show UI > Show Layers Toolbar.
+    pub show_layers_toolbar: bool,
+    /// File > File Properties and Summary Info > Description (saved in the scene file).
+    pub file_properties: crate::file::FileProperties,
     /// The scene's file (File > Save writes here); None = Untitled.
     pub file: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
@@ -1694,6 +1710,8 @@ impl AppState {
             keyboard_override: true,
             ffd_selection: BTreeSet::new(),
             vertex_paint_brush: false,
+            vertex_paint_pick: false,
+            vertex_paint_faces: false,
             named_sets: BTreeMap::new(),
             select_by_vertex: false,
             ignore_backfacing: false,
@@ -1795,6 +1813,10 @@ impl AppState {
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,
+            exchange: Default::default(),
+            exchange_pending: None,
+            show_layers_toolbar: false,
+            file_properties: Default::default(),
             file: None,
             mesh_dirty: false,
         }
@@ -1889,7 +1911,7 @@ impl AppState {
         let mut any = false;
         for id in ids {
             let Some(node) = self.scene.node(id) else { continue };
-            if !self.is_visible(node) || node.display.ignore_extents {
+            if !self.is_visible(node) || self.scene.display_of(node).ignore_extents {
                 continue;
             }
             let world = self.scene.object_matrix(id);

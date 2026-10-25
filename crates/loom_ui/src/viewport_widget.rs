@@ -458,6 +458,34 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
+                    // VertexPaint > Pick Color From Object: drag over the object, the swatch follows.
+                    if app.state.vertex_paint_pick {
+                        if let Some((target, _)) = loom_commands::vertex_paint::entry(&app.state) {
+                            let down = pointer.button_down(egui::PointerButton::Primary) && (response.hovered() || app.deform_painting);
+                            if pointer.button_pressed(egui::PointerButton::Primary) && response.hovered() {
+                                app.deform_painting = true;
+                                app.poly_dragging = true;
+                                app.state.undo.begin("Pick Color");
+                            }
+                            if down && app.deform_painting && (pointer.is_moving() || pointer.button_pressed(egui::PointerButton::Primary)) {
+                                if let Some((hit, point, _)) = surface_hit_node(app, p, rect, view, proj) {
+                                    if hit == target {
+                                        let local = app.state.scene.object_matrix(target).inverse().transform_point3(point);
+                                        let _ = app.dispatch(Command::VertexPaintPickColor { node: target.0, point: local.to_array() });
+                                    }
+                                }
+                                ctx.request_repaint();
+                            }
+                            if pointer.button_released(egui::PointerButton::Primary) && app.deform_painting {
+                                app.deform_painting = false;
+                                app.poly_dragging = false;
+                                app.state.undo.end();
+                            }
+                            if down || app.deform_painting {
+                                app.drag_select_start = None;
+                            }
+                        }
+                    }
                     // Skin > Paint Weights brush.
                     crate::poly_modes::skin_paint(app, &ctx, &painter, &pointer, response.hovered(), p, rect, view, proj, &projection);
                     // Paint Deformation brush: LMB paints on the selected poly (Ctrl inverts, Shift relaxes).
@@ -527,6 +555,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && app.manip_drag.is_none()
                         && !app.poly_dragging
                         && app.state.active_tool != Tool::Select
+                        && app.state.pick_mode != Some(loom_commands::PickMode::Link)
                         && app.has_selection()
                         && !(app.poly_dragging && matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)))
                     {
@@ -786,8 +815,13 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.creation_finished();
                         }
                         if app.alt_click.take().is_some() {
-                            // Alt+click removes: Skin vertices at Edit Envelopes, else the picked items.
-                            if !(app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods)) {
+                            // Alt+click removes: normals at the Edit Normals Normal level, VertexPaint
+                            // faces with Face Selection on, Skin vertices at Edit Envelopes, else the picked items.
+                            let special = app.state.pick_mode.is_none()
+                                && (crate::poly_modes::normals_pick(app, &projection, None, p, mods)
+                                    || crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods)
+                                    || crate::poly_modes::skin_pick(app, &projection, None, p, mods));
+                            if !special {
                                 let picked = picks_at(app, p, rect, view, proj, view_proj);
                                 apply_picks(app, picked, mods);
                             }
@@ -852,6 +886,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         crate::spline_modes::click(app, p, rect, view_proj);
                                     } else if crate::poly_modes::is_poly_pick(app.state.pick_mode) {
                                         crate::poly_modes::click(app, index, p, rect, view, proj);
+                                    } else if app.state.pick_mode.is_none() && crate::poly_modes::normals_pick(app, &projection, None, p, mods) {
+                                    } else if app.state.pick_mode.is_none() && crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::ffd_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_some() && !matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)) {
@@ -867,9 +903,22 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                             apply_click_picks(app, picked, mods);
                                         }
                                     }
+                                } else if app.state.pick_mode == Some(loom_commands::PickMode::Link) {
+                                    // Select and Link: drag from the child to the parent.
+                                    let child = pick_object(app, start, rect, view, proj).and_then(|k| if let Pick::Object(i) = k { Some(app.world_meshes()[i].0) } else { None });
+                                    let parent = pick_object(app, p, rect, view, proj).and_then(|k| if let Pick::Object(i) = k { Some(app.world_meshes()[i].0) } else { None });
+                                    if let (Some(child), Some(parent)) = (child, parent) {
+                                        let child = app.state.selection_target(child);
+                                        if child != parent {
+                                            if !app.state.selection.contains(&child) {
+                                                let _ = app.dispatch(Command::SelectNodes { ids: vec![child.0], op: SelectOp::Replace });
+                                            }
+                                            let _ = app.dispatch(Command::PickHit { id: parent.0 });
+                                        }
+                                    }
                                 } else {
                                     let region = drag_region(app, start, p);
-                                    if !crate::poly_modes::skin_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::ffd_pick(app, &projection, Some(&region), p, mods) {
+                                    if !crate::poly_modes::normals_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::vertex_paint_face_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::skin_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::ffd_pick(app, &projection, Some(&region), p, mods) {
                                         // Auto Window/Crossing by Direction: left-to-right = Window, right-to-left = Crossing.
                                         let window = if app.state.prefs.auto_window_crossing { p.x >= start.x } else { app.state.window_selection };
                                         let items = region_select_mode(app, &region, rect, view_proj, window);
@@ -1243,7 +1292,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             // --- Marquee overlay (drawn after the 3D scene) ---
             if let Some(start) = app.drag_select_start.filter(|_| is_active) {
                 if let Some(end) = pointer.interact_pos() {
-                    draw_region(&painter, &drag_region(app, start, end));
+                    if app.state.pick_mode == Some(loom_commands::PickMode::Link) {
+                        // Select and Link's rubber-band line from the child to the pointer.
+                        painter.add(egui::Shape::dashed_line(&[start, end], egui::Stroke::new(1.0_f32, egui::Color32::WHITE), 4.0, 3.0));
+                    } else {
+                        draw_region(&painter, &drag_region(app, start, end));
+                    }
                 }
                 ctx.request_repaint(); // keep redrawing while dragging
             } else if is_active && app.state.selection_region == loom_commands::SelectionRegion::Fence && !app.region_points.is_empty() {
@@ -2175,7 +2229,7 @@ fn draw_mode_overlays(
     {
         let color = egui::Color32::from_gray(210);
         for (id, mesh) in app.world_meshes() {
-            let ticks = app.state.scene.node(*id).is_some_and(|n| n.display.vertex_ticks);
+            let ticks = app.state.scene.node(*id).is_some_and(|n| app.state.scene.display_of(n).vertex_ticks);
             // Vertex level shows only the edited (selected) objects' vertices.
             let edited = vertex_level && app.state.selection.contains(id);
             if !app.state.show_vertices && !edited && !ticks {
@@ -2480,7 +2534,7 @@ fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Ma
 fn trajectory_nodes(app: &LoomApp) -> Vec<loom_scene::NodeId> {
     let mut ids: Vec<loom_scene::NodeId> = if app.state.show_trajectories || app.motion_trajectories || app.state.trajectory_keys { app.state.selection.iter().copied().collect() } else { Vec::new() };
     for n in app.state.scene.nodes() {
-        if n.display.trajectory && app.state.is_visible(n) && !ids.contains(&n.id) {
+        if app.state.scene.display_of(n).trajectory && app.state.is_visible(n) && !ids.contains(&n.id) {
             ids.push(n.id);
         }
     }

@@ -1623,6 +1623,12 @@ pub struct DisplayProps {
     /// Show Map in Viewport: none, the checker, or a bitmap.
     #[serde(default)]
     pub texture: TextureDisplay,
+    /// Object Color By Layer: the viewport shows the layer's colour instead of the object's.
+    #[serde(default)]
+    pub color_by_layer: bool,
+    /// Object Properties > Display Properties By Layer: the layer's display properties apply.
+    #[serde(default)]
+    pub by_layer: bool,
     /// Edges Only: wireframes show polygon edges only; off adds the
     /// triangulation diagonals as dashed lines.
     #[serde(default = "default_true")]
@@ -1662,6 +1668,8 @@ impl Default for DisplayProps {
             vertex_colors_shaded: false,
             display_links: false,
             link_replaces_object: false,
+            color_by_layer: false,
+            by_layer: false,
         }
     }
 }
@@ -1723,11 +1731,13 @@ pub struct RenderProps {
     pub visible_to_camera: bool,
     pub receive_shadows: bool,
     pub cast_shadows: bool,
+    /// Rendering Control By Layer: the layer's rendering control applies.
+    pub by_layer: bool,
 }
 
 impl Default for RenderProps {
     fn default() -> Self {
-        Self { renderable: true, inherit_visibility: true, visible_to_camera: true, receive_shadows: true, cast_shadows: true }
+        Self { renderable: true, inherit_visibility: true, visible_to_camera: true, receive_shadows: true, cast_shadows: true, by_layer: false }
     }
 }
 

@@ -39,7 +39,7 @@ pub fn clear_state(d: &mut egui::util::IdTypeMap) {
 fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     let name = match dialog {
         Dialog::SaveFileAs | Dialog::SaveFileAsCopy => app.state.file.as_ref().and_then(|f| f.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Untitled.loom".into()),
-        Dialog::ExportFile | Dialog::ExportSelected => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
+        Dialog::ExportFile | Dialog::ExportSelected | Dialog::ArchiveFile => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
         _ => String::new(),
     };
     let dir = app.state.file.as_ref().and_then(|f| f.parent()).filter(|d| d.is_dir()).map(|d| d.to_path_buf()).unwrap_or_else(|| app.file_dir.clone());
@@ -51,10 +51,7 @@ fn show_native(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mu
     let (title, exts, ok_label) = purpose(dialog);
     let id = egui::Id::new("file_dialog_native");
     let Some(slot) = ctx.data(|d| d.get_temp::<Native>(id)) else {
-        let mut ext_list: Vec<&str> = exts.split(',').collect();
-        if ext_list == ["png"] {
-            ext_list.extend(["jpg", "jpeg"]);
-        }
+        let ext_list: Vec<&str> = exts.split(',').collect();
         let (dir, name) = defaults(app, dialog, ext_list[0]);
         let filter = ext_list.iter().map(|x| format!("*.{x}")).collect::<Vec<_>>().join(", ");
         let mut d = rfd::FileDialog::new().set_title(title).add_filter(filter, &ext_list).set_directory(dir);
@@ -85,6 +82,10 @@ fn show_native(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mu
     }
 }
 
+/// Bitmap formats that load (`loom_commands::render::IMAGE_READ_FORMATS`) and that save (`IMAGE_FORMATS`).
+const IMAGES_READ: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr,gif";
+const IMAGES_WRITE: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr";
+
 /// Title, extension, "Open"/"Save" button text and the command to run.
 fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
     match dialog {
@@ -94,16 +95,18 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::ImportFile => ("Import File", "fbx,obj,max", "Open"),
         Dialog::ExportFile => ("Export File", "fbx,obj", "Save"),
         Dialog::ExportSelected => ("Export Selected", "fbx,obj", "Save"),
+        Dialog::SaveSelected => ("Save Selected", "loom", "Save"),
+        Dialog::ArchiveFile => ("Archive", "zip,txt", "Save"),
         Dialog::MergeFile => ("Merge File", "loom", "Open"),
-        Dialog::PickTexture => ("Select Bitmap Image File", "png", "Open"),
-        Dialog::BackgroundFile => ("Select Background Image", "png", "Open"),
-        Dialog::MaterialMap { .. } => ("Select Bitmap Image File", "png", "Open"),
-        Dialog::PickUvTexture => ("Pick Texture", "png", "Open"),
+        Dialog::PickTexture => ("Select Bitmap Image File", IMAGES_READ, "Open"),
+        Dialog::BackgroundFile => ("Select Background Image", IMAGES_READ, "Open"),
+        Dialog::MaterialMap { .. } => ("Select Bitmap Image File", IMAGES_READ, "Open"),
+        Dialog::PickUvTexture => ("Pick Texture", IMAGES_READ, "Open"),
         Dialog::SaveUvw => ("Save UVW", "uvw", "Save"),
-        Dialog::RenderFile => ("Render Output File", "png,jpg,bmp,tga,exr", "Save"),
-        Dialog::SaveRenderedImage => ("Save Image", "png,jpg,bmp,tga,exr", "Save"),
+        Dialog::RenderFile => ("Render Output File", IMAGES_WRITE, "Save"),
+        Dialog::SaveRenderedImage => ("Save Image", IMAGES_WRITE, "Save"),
         Dialog::LoadUvw => ("Load UVW", "uvw", "Open"),
-        Dialog::BitmapFit => ("Bitmap Fit", "png", "Open"),
+        Dialog::BitmapFit => ("Bitmap Fit", IMAGES_READ, "Open"),
         Dialog::SaveShortcuts => ("Save Shortcut File As", "kbd", "Save"),
         Dialog::LoadShortcuts => ("Load Shortcut File", "kbd", "Open"),
         Dialog::SaveCustomUiScheme => ("Save Custom UI Scheme", "ui", "Save"),
@@ -125,6 +128,8 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::ImportFile => Command::ImportFile { path: Some(p) },
         Dialog::ExportFile => Command::ExportFile { path: Some(p) },
         Dialog::ExportSelected => Command::ExportSelected { path: Some(p) },
+        Dialog::SaveSelected => Command::SaveSelected { path: Some(p) },
+        Dialog::ArchiveFile => Command::ArchiveFile { path: Some(p) },
         Dialog::BitmapFit => Command::UvwMapBitmapFit { path: p },
         Dialog::PickUvTexture => Command::PickTexture { path: p },
         Dialog::MaterialMap { channel } => Command::SetMaterialMap {
@@ -193,7 +198,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mut b
                 }
                 if p.is_dir() {
                     dirs.push(p);
-                } else if p.extension().map(|e| ext_list.iter().any(|x| e.eq_ignore_ascii_case(x)) || (ext == "png" && (e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")))).unwrap_or(false) {
+                } else if p.extension().map(|e| ext_list.iter().any(|x| e.eq_ignore_ascii_case(x))).unwrap_or(false) {
                     files.push(p);
                 }
             }
@@ -226,7 +231,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mut b
             if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !st.name.trim().is_empty() {
                 chosen = Some(st.dir.join(st.name.trim()));
             }
-            ui.label(if ext == "png" { "*.png, *.jpg".to_owned() } else { ext_list.iter().map(|x| format!("*.{x}")).collect::<Vec<_>>().join(", ") });
+            ui.label(ext_list.iter().map(|x| format!("*.{x}")).collect::<Vec<_>>().join(", "));
         });
         ui.horizontal(|ui| {
             if ui.add_enabled(!st.name.trim().is_empty(), egui::Button::new(ok_label)).clicked() {
@@ -240,7 +245,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mut b
     if let Some(path) = chosen {
         if apply(ctx, app, dialog, path) {
             done = true;
-        } else if app.state.dialog == Some(Dialog::MergeObjects) {
+        } else if app.state.dialog != Some(dialog) {
+            // Another dialog took over (Merge's object list, the FBX / OBJ options).
             ctx.data_mut(|d| d.remove::<St>(id));
             return;
         }
@@ -282,6 +288,22 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
                 false
             }
         };
+    }
+    // FBX and OBJ: the format's options dialog first; its OK imports or exports.
+    if matches!(dialog, Dialog::ImportFile | Dialog::ExportFile | Dialog::ExportSelected) {
+        let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        let options = match (dialog, ext.as_str()) {
+            (Dialog::ImportFile, "fbx") => Some(Dialog::FbxImportOptions),
+            (Dialog::ImportFile, "obj") => Some(Dialog::ObjImportOptions),
+            (Dialog::ExportFile | Dialog::ExportSelected, "fbx") => Some(Dialog::FbxExportOptions),
+            (Dialog::ExportFile | Dialog::ExportSelected, "obj") => Some(Dialog::ObjExportOptions),
+            _ => None,
+        };
+        if let Some(d) = options {
+            app.state.exchange_pending = Some((path, dialog == Dialog::ExportSelected));
+            app.state.dialog = Some(d);
+            return false;
+        }
     }
     if dialog == Dialog::MergeFile {
         return match loom_commands::file::read(&path) {

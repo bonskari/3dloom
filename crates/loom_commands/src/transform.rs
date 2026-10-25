@@ -154,7 +154,10 @@ pub fn frame_for_system(state: &AppState, viewport: usize, id: Option<NodeId>, s
             None => Mat3::IDENTITY,
         },
     };
+    let normals = crate::normals::selected_center(state);
     let origin = match state.center_mode {
+        // Edit Normals at the Normal level: the gizmo sits on the selected normals.
+        _ if normals.is_some() => normals.unwrap_or_default(),
         // Edit Working Pivot: the tools turn the working pivot about itself.
         _ if state.edit_working_pivot => state.working_pivot.origin,
         CenterMode::TransformCoordinate if system == CoordSystem::Working => state.working_pivot.origin,

@@ -55,6 +55,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
+        c if crate::vertex_paint::handles(&c) => crate::vertex_paint::execute(state, c),
+        C::AssignVertexColors { light_model, by_vertex, shadows, update } => crate::assign_vertex_colors::assign(state, light_model, by_vertex, shadows, update),
         c if c.group() == crate::Group::TrackView || crate::track_view::handles(&c) => crate::track_view::execute(state, c),
         C::UnwrapUvwModifier => crate::unwrap::execute(state, cmd),
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
@@ -255,40 +257,33 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 let ids = crate::fbx_io::import(state, &path)?;
                 return Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }));
             }
-            let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Object".into());
-            let objects = loom_mesh::obj::parse(&text, &stem).map_err(|e| format!("{}: {e}", path.display()))?;
-            if objects.is_empty() {
-                return Err(format!("{}: no faces", path.display()));
-            }
-            let mut changes = Vec::with_capacity(objects.len());
-            let mut ids = Vec::with_capacity(objects.len());
-            let first = state.scene.next_id();
-            let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().map(|n| n.name.clone()).collect();
-            for (i, o) in objects.into_iter().enumerate() {
-                let name = if taken.contains(&o.name) { unique_name(&o.name, &taken) } else { o.name.clone() };
-                taken.insert(name.clone());
-                let mut node = Node::new(&name, ObjectKind::EditablePoly(loom_scene::PolyObject::from_mesh(o.mesh)));
-                node.wire_color = loom_scene::OBJECT_COLORS[((first as usize) + i) % loom_scene::OBJECT_COLORS.len()];
-                node.layer = state.scene.current_layer;
-                ids.push(first + i as u64);
-                changes.push(Change::AddNode(node));
-            }
-            let label = format!("Import {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-            commit(state, &label, Change::Group(changes))?;
-            state.selection = ids.iter().map(|i| NodeId(*i)).collect();
-            state.sub_selection.clear();
-            state.selection_mode = SelectionMode::Object;
-            Ok(json!({ "nodes": ids }))
+            crate::obj_io::import(state, &path)
         }
         C::ExportFile { path } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::ExportFile);
                 return Ok(json!({ "dialog": "ExportFile" }));
             };
-            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| state.is_visible(n)).map(|n| n.id).collect();
+            // OBJ Hidden Objects: hidden objects go too.
+            let hidden = !crate::fbx_io::is_fbx(std::path::Path::new(&path)) && state.exchange.obj_export.hidden_objects;
+            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| hidden || state.is_visible(n)).map(|n| n.id).collect();
             export_any(state, &ids, std::path::Path::new(&path))
         }
+        C::SetExchangeOption { dialog, name, value } => {
+            state.exchange.set(&dialog, &name, value)?;
+            state.exchange.describe(&dialog)
+        }
+        C::ExchangeOptions { dialog } => state.exchange.describe(&dialog),
+        C::SaveExchangePreset { dialog, name } => {
+            state.exchange.save_preset(&dialog, &name)?;
+            state.exchange.describe(&dialog)
+        }
+        C::DeleteExchangePreset { dialog, name } => {
+            state.exchange.delete_preset(&dialog, &name)?;
+            state.exchange.describe(&dialog)
+        }
+        C::FbxFileInfo { path } => crate::fbx_io::file_info(state, std::path::Path::new(&path)),
+        C::ObjFileInfo { path } => crate::obj_io::file_info(std::path::Path::new(&path)),
         C::ExportSelected { path } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::ExportSelected);
@@ -297,7 +292,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let ids: Vec<NodeId> = state.selection.iter().copied().collect();
             export_any(state, &ids, std::path::Path::new(&path))
         }
-        C::MergeFile { path, names } => {
+        C::MergeFile { path, names, duplicates } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::MergeFile);
                 return Ok(json!({ "dialog": "MergeFile" }));
@@ -305,7 +300,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let path = std::path::PathBuf::from(path);
             let doc = crate::file::read(&path)?;
             let label = format!("Merge {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-            let ids = crate::file::merge(state, &doc, names.as_deref(), &label)?;
+            let ids = crate::file::merge(state, &doc, names.as_deref(), duplicates.as_deref().unwrap_or_default(), &label)?;
             state.selection_mode = SelectionMode::Object;
             Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
         }
@@ -493,6 +488,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SplineIkControlCreateHelpers => crate::stack::spline_ik_create_helpers(state),
         C::HsdsSubdivide { faces } => crate::stack::hsds_subdivide(state, faces),
         C::HsdsAdaptiveSubdivide { max_level, max_angle } => crate::stack::hsds_adaptive(state, max_level, max_angle),
+        C::HsdsSelectLevel { level } => crate::stack::hsds_select_level(state, level),
+        C::HsdsDisplay { level } => crate::stack::hsds_display(state, level),
         C::PointCacheRecord { index, path, start, end } => crate::stack::point_cache_record(state, index as usize, &path, start, end),
         C::PointCacheLoad { index, path } => crate::stack::point_cache_load(state, index as usize, Some(&path)),
         C::PointCacheUnload { index } => crate::stack::point_cache_load(state, index as usize, None),
@@ -525,7 +522,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::Group { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
         | C::CreateLayer { .. } | C::DeleteLayer { .. } | C::RenameLayer { .. } | C::SetCurrentLayer { .. } | C::SetLayerHidden { .. } | C::SetLayerFrozen { .. }
-        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } => crate::groups::execute(state, cmd),
+        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } | C::SetCurrentLayerToSelection | C::SetLayerColor { .. }
+        | C::SetLayerRenderable { .. } | C::SetAllLayersHidden { .. } | C::SetAllLayersFrozen { .. } | C::SetColorByLayer { .. }
+        | C::SetDisplayByLayer { .. } | C::SetRenderByLayer { .. } | C::LayerProperties { .. } | C::SetLayerDisplayProperty { .. } | C::SetLayerRenderProperty { .. } => crate::groups::execute(state, cmd),
+        C::NewSceneKeep { .. } | C::SaveSelected { .. } | C::ArchiveFile { .. } | C::SummaryInfo | C::FileProperties | C::SetFileProperty { .. } | C::SetCustomFileProperty { .. } => crate::scene_file::execute(state, cmd),
+        C::ShowLayersToolbarToggle => toggle(&mut state.show_layers_toolbar, "show_layers_toolbar"),
 
         C::SelectObject => set_tool(state, Tool::Select),
         C::SelectAndMove => set_tool(state, Tool::Move),
@@ -876,7 +877,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        C::SelectByName => open_by_name(state, DialogPurpose::Select),
+        C::SelectByName => {
+            // The dialog follows the active pick mode, as Select Parent / Attach To Group.
+            let purpose = match state.pick_mode {
+                Some(PickMode::Link) => DialogPurpose::LinkParent,
+                Some(PickMode::GroupAttach) => DialogPurpose::GroupAttach,
+                _ => DialogPurpose::Select,
+            };
+            open_by_name(state, purpose)
+        }
         C::ConfigureViewports { panel } => {
             state.dialog = Some(Dialog::ViewportConfiguration);
             state.config_panel = panel;
@@ -2362,6 +2371,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             })?;
             Ok(json!({}))
         }
+        C::SetSelectionDisplayProperty { name, value } => {
+            if loom_scene::DisplayProps::default().get(&name).is_none() {
+                return Err(format!("no display property `{name}`"));
+            }
+            let ids = selected_ids(state);
+            props_change(state, &name, ids, |p, _| {
+                p.display.set(&name, value);
+            })?;
+            Ok(json!({}))
+        }
         C::SetDisplayProperty { id, name, value } => {
             if loom_scene::DisplayProps::default().get(&name).is_none() {
                 return Err(format!("no display property `{name}`"));
@@ -3339,36 +3358,13 @@ fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<
     state.mesh_dirty = true;
 }
 
-/// Writes the evaluated meshes of `ids` (geometry only: shapes count when
-/// their viewport render makes faces) as one OBJ file.
 /// Export by extension: `.fbx` → FBX, anything else → OBJ.
 fn export_any(state: &AppState, ids: &[NodeId], path: &std::path::Path) -> Result<Value, String> {
     if crate::fbx_io::is_fbx(path) {
         crate::fbx_io::export(state, ids, path)
     } else {
-        export_obj(state, ids, path)
+        crate::obj_io::export(state, ids, path)
     }
-}
-
-fn export_obj(state: &AppState, ids: &[NodeId], path: &std::path::Path) -> Result<Value, String> {
-    let mut objects = Vec::new();
-    for id in ids {
-        let Some(node) = state.scene.node(*id) else { continue };
-        if matches!(node.object, ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. }) {
-            continue;
-        }
-        let mesh = state.scene.eval_mesh(*id).value.mesh.clone();
-        if mesh.face_count() == 0 {
-            continue;
-        }
-        objects.push((node.name.clone(), mesh, state.scene.object_matrix(*id)));
-    }
-    if objects.is_empty() {
-        return Err("nothing to export: no geometry objects".into());
-    }
-    let text = loom_mesh::obj::write(&objects);
-    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(json!({ "path": path, "objects": objects.len() }))
 }
 
 /// `Box` → `Box001`, `Box002`… (trailing digits replaced), the first not in `taken`.
@@ -3394,7 +3390,12 @@ pub fn file_action(state: &mut AppState, action: crate::viewport::PendingFileAct
     use Command as C;
     match action {
         A::New => execute(state, C::NewScene),
-        A::Reset => execute(state, C::ResetFile),
+        A::Reset => {
+            // After the save prompt, the reference asks once more.
+            state.dialog = Some(crate::viewport::Dialog::ConfirmReset);
+            Ok(json!({ "dialog": "ConfirmReset" }))
+        }
+        A::NewKeeping(keep) => execute(state, C::NewSceneKeep { keep: keep.arg().into() }),
         A::Open => execute(state, C::OpenFile { path: None }),
         A::OpenRecent(i) => {
             let path = state.recent_files.get(i).ok_or_else(|| format!("no recent file {}", i + 1))?.to_string_lossy().into_owned();
@@ -4070,6 +4071,12 @@ fn with_system(state: &mut AppState, system: Option<CoordSystem>) -> CoordSystem
 type MatrixFor<'a> = &'a dyn Fn(&AppState, Option<NodeId>) -> (Mat4, Vec3);
 
 fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: MatrixFor) -> Result<Value, String> {
+    if let Some((id, _)) = crate::normals::normal_level(state) {
+        let (m, _) = matrix_for(state, Some(id));
+        if let Some(r) = crate::normals::transform(state, label, m) {
+            return r;
+        }
+    }
     let mut changes = Vec::new();
     // A modifier gizmo level (XForm Gizmo / Center): the tools move the gizmo.
     let gizmo_targets: Vec<(NodeId, usize, u32)> = state
@@ -4780,6 +4787,8 @@ fn snapshot(state: &AppState) -> Value {
         "frame": state.current_frame,
         "animation": crate::anim_cmds::state_json(state),
         "edit_normals": crate::normals::state_json(state),
+        "hsds": crate::stack::hsds_json(state),
+        "vertex_paint": crate::vertex_paint::state_json(state),
         "undo_labels": state.undo.labels(),
     })
 }

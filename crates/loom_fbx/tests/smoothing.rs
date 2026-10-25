@@ -109,7 +109,7 @@ fn export_writes_the_group_bits_by_polygon() {
     for (i, f) in mesh.faces_mut().iter_mut().enumerate() {
         f.smoothing_groups = [0, 1, 2, 1 << 31, 6, 1 << 20][i];
     }
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node("Box", mesh.clone())], unit_metres: 0.01, anim: None }, &WriteOpts::default());
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node("Box", mesh.clone())], unit_metres: 0.01, anim: None, ..Default::default() }, &WriteOpts::default());
     let written: Vec<Vec<u32>> = loom_fbx::binary::smoothing_by_geometry(&bytes).into_values().collect();
     assert_eq!(written, [mesh.faces().iter().map(|f| f.smoothing_groups).collect::<Vec<u32>>()]);
     let back = loom_fbx::read(&bytes, 0.01).unwrap();

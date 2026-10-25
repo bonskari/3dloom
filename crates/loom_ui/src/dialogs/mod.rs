@@ -33,9 +33,12 @@ pub mod save_changes;
 pub mod spline_prompts;
 pub mod topology_warning;
 pub mod merge;
+pub mod exchange_options;
+pub mod scene_dialogs;
 pub mod unwrap_dialogs;
 pub mod rig_dialogs;
 pub mod track_view_dialogs;
+pub mod vertex_paint;
 
 use crate::LoomApp;
 use eframe::egui;
@@ -82,6 +85,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             d.remove::<u32>(egui::Id::new("clone_options_copies"));
             file_dialog::clear_state(d);
             merge::clear_state(d);
+            exchange_options::clear_state(d);
+            select_from_scene::clear_state(d);
             d.remove::<String>(egui::Id::new("auto_backup_name_edit"));
             for k in ["Weld", "Chamfer", "ConnectEdges", "Bridge", "Extrude", "Inset", "Bevel", "Outline", "Hinge", "MSmooth", "Tessellate", "Relax"] {
                 let id = egui::Id::new("poly_settings").with(k);
@@ -103,6 +108,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             app.state.material_editor_open = false;
         }
     }
+    // The VertexPaint dialog floats while a VertexPaint entry is active in the Modify panel.
+    vertex_paint::show(ctx, app);
     // Object Color opens over the Object Properties dialog and leaves it open.
     if app.state.display.object_color_open {
         let mut open = true;
@@ -152,6 +159,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
+        Dialog::FbxImportOptions => exchange_options::fbx_import(ctx, app, &mut open),
+        Dialog::FbxExportOptions => exchange_options::fbx_export(ctx, app, &mut open),
+        Dialog::ObjImportOptions => exchange_options::obj_import(ctx, app, &mut open),
+        Dialog::ObjExportOptions => exchange_options::obj_export(ctx, app, &mut open),
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
         Dialog::WeightTable => rig_dialogs::weight_table(ctx, app, &mut open),
         Dialog::WeightTool => rig_dialogs::weight_tool(ctx, app, &mut open),
@@ -163,6 +174,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::KeyInfo => track_view_dialogs::key_info(ctx, app, &mut open),
         Dialog::TrackViewFilters => track_view_dialogs::filters(ctx, app, &mut open),
         Dialog::TrackViewUtilities => track_view_dialogs::utilities(ctx, app, &mut open),
+        Dialog::SaveSelected | Dialog::ArchiveFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::NewScene => scene_dialogs::new_scene(ctx, app, &mut open),
+        Dialog::ConfirmReset => scene_dialogs::confirm_reset(ctx, app, &mut open),
+        Dialog::SummaryInfo => scene_dialogs::summary_info(ctx, app, &mut open),
+        Dialog::FileProperties => scene_dialogs::file_properties(ctx, app, &mut open),
+        Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
+        Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
     if !open && app.state.dialog == Some(dialog) {
