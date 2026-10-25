@@ -107,7 +107,7 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                     let _ = app.dispatch(Command::Rename { id: first.0, name: name.clone() });
                 }
             }
-            if crate::dialogs::object_color::swatch(ui, app.state.scene.display_color(&node)).clicked() {
+            if crate::dialogs::object_color::swatch(ui, app.state.scene.display_color(node)).clicked() {
                 let _ = app.dispatch(Command::ObjectColorDialog);
             }
             // Object colour By Layer / By Object.
