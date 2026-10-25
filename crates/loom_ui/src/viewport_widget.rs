@@ -576,6 +576,63 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             set_constraint_from_handle(app, handle);
                         }
                     }
+                    // Select and Move / Rotate / Scale: pressing on an object (not on the
+                    // gizmo) selects it if needed and drags it under the active axis constraint.
+                    if pointer.button_pressed(egui::PointerButton::Primary)
+                        && response.hovered()
+                        && app.transform_drag.is_none()
+                        && app.manip_drag.is_none()
+                        && app.state.active_tool != Tool::Select
+                        && !mods.alt
+                        && !mods.ctrl
+                        && app.state.nav_mode == loom_input::NavMode::None
+                        && app.state.pick_mode.is_none()
+                        && app.create_kind.is_none()
+                        && app.create.is_none()
+                        && !app.poly_dragging
+                        && app.state.paint_deform.is_none()
+                        && !app.state.vertex_paint_brush
+                    {
+                        let object_level = app.state.selection_mode == SelectionMode::Object;
+                        // Sub-objects (not splines, whose knots have their own drags; no Shift clone).
+                        let pick = if object_level {
+                            pick_object(app, p, rect, view, proj)
+                        } else if !mods.shift && !app.state.spline_selected() {
+                            pick_at(app, p, rect, view, proj, view_proj).filter(|k| matches!(k, Pick::SubObject { .. }))
+                        } else {
+                            None
+                        };
+                        if let Some(pick) = pick {
+                            let selected = match pick {
+                                Pick::Object(i) => app.state.selection.contains(&app.world_meshes()[i].0),
+                                Pick::SubObject { mesh, id } => app.state.sub_selection.contains(app.world_meshes()[mesh].0, id),
+                            };
+                            if !selected {
+                                apply_picks(app, vec![pick], mods);
+                            }
+                            if app.has_selection() && (object_level || !app.state.sub_selection.is_empty()) {
+                                let mut drag = DragState::new(body_drag_handle(app.state.active_tool, app.state.axis_constraint), p);
+                                drag.shift = mods.shift;
+                                app.begin_transform_drag(drag);
+                                if mods.shift {
+                                    app.shift_sources = app.state.selection.iter().copied().collect();
+                                    let _ = app.dispatch(Command::CloneOptions { kind: loom_commands::CloneKind::Copy, copies: 1, name: None, offset: None, rotate_deg: None, scale: None });
+                                }
+                            }
+                        }
+                    }
+                    // The motion first, so a release in the same frame keeps the last step.
+                    if let Some(mut drag) = app.transform_drag {
+                        if pointer.delta() != egui::Vec2::ZERO || pointer.button_released(egui::PointerButton::Primary) {
+                            let layout = gizmo::layout_for(app, index, rect.height());
+                            if drag.snap_start.is_none() {
+                                drag.snap_start = Some(layout.origin);
+                            }
+                            gizmo::drag(app, &mut drag, &layout, &projection, p, index);
+                            app.transform_drag = Some(drag);
+                            ctx.request_repaint();
+                        }
+                    }
                     // Place Highlight: the press and drag place the selection on
                     // the reflected view ray; the release ends the mode.
                     if app.state.pick_mode == Some(loom_commands::PickMode::PlaceHighlight) && app.transform_drag.is_none() {
@@ -604,17 +661,6 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 app.shift_clone = Some(crate::ShiftClone { tool: app.state.active_tool, sources: std::mem::take(&mut app.shift_sources), offset: drag.offset, rotate_deg: drag.rotate_deg, quat: drag.quat, scale: drag.factors, undo_len: app.state.undo.len() });
                                 let _ = app.dispatch(Command::Clone);
                             }
-                        }
-                    }
-                    if let Some(mut drag) = app.transform_drag {
-                        if pointer.delta() != egui::Vec2::ZERO {
-                            let layout = gizmo::layout_for(app, index, rect.height());
-                            if drag.snap_start.is_none() {
-                                drag.snap_start = Some(layout.origin);
-                            }
-                            gizmo::drag(app, &mut drag, &layout, &projection, p, index);
-                            app.transform_drag = Some(drag);
-                            ctx.request_repaint();
                         }
                     }
 
@@ -988,7 +1034,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     // Right click cancels a creation in progress or a by-Hit mode;
                     // otherwise it opens the quad menu (on the click).
                     if pointer.button_pressed(egui::PointerButton::Secondary) && response.hovered() && !over_label && !over_cube {
-                        if let Some(session) = app.create.take() {
+                        if app.transform_drag.is_some() {
+                            app.cancel_transform_drag();
+                        } else if let Some(session) = app.create.take() {
                             session.cancel(app);
                         } else if app.create_kind.is_some() && app.bone_points.is_empty() && app.line.is_none() {
                             // A right-click with nothing being dragged out ends the create mode.
@@ -1013,7 +1061,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         } else {
                             // A right-click elsewhere while one is open reopens it there.
                             let mut open = crate::quad_menu::Open::new(p, index);
-                            open.kind = if mods.shift { crate::quad_menu::QuadKind::Snaps } else if mods.ctrl { crate::quad_menu::QuadKind::Create } else if mods.alt { crate::quad_menu::QuadKind::Animation } else { crate::quad_menu::QuadKind::Default };
+                            open.kind = crate::quad_menu::QuadKind::for_modifiers(mods);
                             app.quad_menu = Some(open);
                         }
                     }
@@ -2511,6 +2559,28 @@ fn draw_manipulator(painter: &egui::Painter, p: &Projection, m: &Manipulator, ho
 }
 
 /// Picking a gizmo handle also sets the Axis Constraints toolbar.
+/// The gizmo handle a drag on the object body uses: the active axis constraint
+/// (Rotate turns about a plane's normal; an XYZ constraint is the screen plane,
+/// screen rotation or uniform scale).
+fn body_drag_handle(tool: Tool, c: loom_commands::AxisConstraint) -> gizmo::Handle {
+    use gizmo::{Handle as H, Plane as P};
+    use loom_commands::AxisConstraint as C;
+    match (tool, c) {
+        (_, C::X) => H::Axis(Axis::X),
+        (_, C::Y) => H::Axis(Axis::Y),
+        (_, C::Z) => H::Axis(Axis::Z),
+        (Tool::Rotate, C::XY) => H::Axis(Axis::Z),
+        (Tool::Rotate, C::YZ) => H::Axis(Axis::X),
+        (Tool::Rotate, C::ZX) => H::Axis(Axis::Y),
+        (Tool::Rotate, C::XYZ) => H::Screen,
+        (Tool::Scale, C::XYZ) => H::Uniform,
+        (_, C::XYZ) => H::CenterBox,
+        (_, C::XY) => H::Plane(P::XY),
+        (_, C::YZ) => H::Plane(P::YZ),
+        (_, C::ZX) => H::Plane(P::ZX),
+    }
+}
+
 fn set_constraint_from_handle(app: &mut LoomApp, handle: gizmo::Handle) {
     use loom_commands::AxisConstraint as C;
     let c = match handle {

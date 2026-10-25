@@ -113,6 +113,18 @@ impl UndoStack {
         Ok(())
     }
 
+    /// An entry that changes nothing in the scene (a selection change, whose
+    /// state the caller keeps beside the stack): it takes its place in the
+    /// undo order and clears redo, but does not make a saved scene unsaved.
+    pub fn push_marker(&mut self, label: &str) {
+        let at_saved = self.saved == Some(self.undo.len());
+        self.version += 1;
+        self.push_entry((label.to_owned(), Change::Group(Vec::new())));
+        if at_saved {
+            self.saved = Some(self.undo.len());
+        }
+    }
+
     /// Starts an interactive transaction; commits until `end` become one
     /// undo entry.
     pub fn begin(&mut self, label: &str) {

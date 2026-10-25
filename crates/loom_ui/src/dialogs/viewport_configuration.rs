@@ -85,7 +85,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     let mut fov = app.state.active().fov_y_radians.to_degrees();
                     ui.horizontal(|ui| {
                         ui.label("Field Of View:");
-                        if ui.add(egui::DragValue::new(&mut fov).range(1.0..=175.0).speed(0.5).fixed_decimals(1)).changed() {
+                        if ui.add(crate::spinner::spin(ui, &mut fov, 1.0..=175.0).speed(0.5).fixed_decimals(1)).changed() {
                             let _ = app.dispatch(Command::SetFov { degrees: fov });
                         }
                     });
@@ -121,8 +121,8 @@ fn safe_frames_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { action_safe, title_safe, user_safe, .. } = c { *[action_safe, title_safe, user_safe][which] = Some(v) }));
             }
             let mut p = pct;
-            let h = ui.add(egui::DragValue::new(&mut p[0]).range(0.0..=99.0).speed(0.5).suffix("%")).changed();
-            let w = ui.add(egui::DragValue::new(&mut p[1]).range(0.0..=99.0).speed(0.5).suffix("%")).changed();
+            let h = ui.add(crate::spinner::spin(ui, &mut p[0], 0.0..=99.0).speed(0.5).suffix("%")).changed();
+            let w = ui.add(crate::spinner::spin(ui, &mut p[1], 0.0..=99.0).speed(0.5).suffix("%")).changed();
             if h || w {
                 let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { action, title, user, .. } = c { *[action, title, user][which] = Some(p) }));
             }

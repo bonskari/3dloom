@@ -90,7 +90,7 @@ fn main_toolbar_icons_run_their_commands() {
     click_icon(&mut h, "main_toolbar", icons::PERCENT_SNAP, "Percent Snap Toggle (Ctrl+Shift+P); right-click: Grid and Snap Settings");
     assert_ne!(h.app.state.percent_snap_on, percent);
     let spinner = h.app.state.prefs.spinner_snap;
-    click_icon(&mut h, "main_toolbar", icons::SPINNER_SNAP, "Spinner Snap Toggle");
+    click_icon(&mut h, "main_toolbar", icons::SPINNER_SNAP, "Spinner Snap Toggle; right-click: Preferences");
     assert_ne!(h.app.state.prefs.spinner_snap, spinner);
 
     let window = h.app.state.window_selection;

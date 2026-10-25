@@ -2,6 +2,8 @@
 //! slider with its "current / end" readout and step arrows (red while Auto
 //! Key is on), and the track bar with the selection's keys: click selects,
 //! drag moves, Shift-drag copies, right-click opens the track bar menu.
+//! A right-click on the slider opens the Create Key dialog; a right-drag
+//! fills it with the frame it started on and the frame it ended on.
 
 use crate::LoomApp;
 use eframe::egui;
@@ -14,6 +16,28 @@ pub struct TrackBarState {
     pub selected: Vec<i32>,
     pub drag_from: Option<f32>,
     pub menu_frame: Option<i32>,
+    /// The open Create Key dialog.
+    pub create_key: Option<CreateKeyDialog>,
+    /// The frame a right-drag on the slider started on.
+    pub right_drag_from: Option<i32>,
+    /// The Mini Curve Editor replaces the track bar.
+    pub mini_curve_editor: bool,
+}
+
+/// Create Key: copy the pose at Source Time to keys at Destination Time.
+#[derive(Debug, Clone, Copy)]
+pub struct CreateKeyDialog {
+    pub source: i32,
+    pub destination: i32,
+    pub position: bool,
+    pub rotation: bool,
+    pub scale: bool,
+}
+
+impl CreateKeyDialog {
+    pub fn new(source: i32, destination: i32) -> Self {
+        Self { source, destination, position: true, rotation: true, scale: true }
+    }
 }
 
 fn run(app: &mut LoomApp, cmd: Command) {
@@ -43,7 +67,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     if app.state.expert_mode {
         return;
     }
-    let h = if app.state.show_track_bar { 44.0 } else { 24.0 };
+    let mini = app.state.show_track_bar && app.track_bar.mini_curve_editor;
+    let h = if app.state.show_track_bar && !mini { 44.0 } else { 24.0 };
     egui::TopBottomPanel::bottom("time_slider").exact_height(h).show(ctx, |ui| {
         let (start, end) = app.state.frame_range;
         let frame = app.state.current_frame;
@@ -68,14 +93,73 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                 }
             }
+            if resp.drag_started_by(egui::PointerButton::Secondary) {
+                app.track_bar.right_drag_from = Some(frame);
+            }
+            if resp.drag_stopped_by(egui::PointerButton::Secondary) {
+                if let Some(source) = app.track_bar.right_drag_from.take() {
+                    app.track_bar.create_key = Some(CreateKeyDialog::new(source, app.state.current_frame));
+                }
+            }
+            if resp.secondary_clicked() {
+                app.track_bar.create_key = Some(CreateKeyDialog::new(frame, frame));
+            }
             if crate::icons::Icon::new(crate::icons::NEXT_FRAME, "Forward Time One Unit").show(ui, &app.state).clicked() {
                 run(app, Command::ForwardTimeOneUnit);
             }
         });
-        if app.state.show_track_bar {
-            track_bar(ui, app);
+        if app.state.show_track_bar && !mini {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                if crate::icons::Icon::new(crate::icons::CURVE_EDITOR, "Open Mini Curve Editor").show(ui, &app.state).clicked() {
+                    app.track_bar.mini_curve_editor = true;
+                }
+                track_bar(ui, app);
+            });
         }
     });
+    if mini {
+        // Above the time slider, where the track bar was; a fixed height so the content never grows the panel (and moves its rows) frame to frame.
+        egui::TopBottomPanel::bottom("mini_curve_editor").exact_height(280.0).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if crate::icons::Icon::new(crate::icons::CURVE_EDITOR, "Close Mini Curve Editor").on(true).show(ui, &app.state).clicked() {
+                    app.track_bar.mini_curve_editor = false;
+                }
+                ui.label("Mini Curve Editor");
+            });
+            ui.push_id("mini_curve_editor", |ui| crate::track_view::mini_curve_editor(ui, app));
+        });
+    }
+    create_key_dialog(ctx, app);
+}
+
+fn create_key_dialog(ctx: &egui::Context, app: &mut LoomApp) {
+    let Some(mut d) = app.track_bar.create_key else { return };
+    let mut open = true;
+    let mut done = false;
+    egui::Window::new("Create Key").collapsible(false).resizable(false).open(&mut open).show(ctx, |ui| {
+        egui::Grid::new("create_key_times").show(ui, |ui| {
+            ui.label("Source Time:");
+            ui.add(crate::spinner::spin(ui, &mut d.source, ..));
+            ui.end_row();
+            ui.label("Destination Time:");
+            ui.add(crate::spinner::spin(ui, &mut d.destination, ..));
+            ui.end_row();
+        });
+        ui.checkbox(&mut d.position, "Position");
+        ui.checkbox(&mut d.rotation, "Rotation");
+        ui.checkbox(&mut d.scale, "Scale");
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                run(app, Command::CreateKey { source: Some(d.source), destination: Some(d.destination), position: Some(d.position), rotation: Some(d.rotation), scale: Some(d.scale) });
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                done = true;
+            }
+        });
+    });
+    app.track_bar.create_key = (open && !done).then_some(d);
 }
 
 fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -211,7 +295,7 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.separator();
         if ui.button("Create Key...").clicked() {
-            run(app, Command::CreateKey { source: Some(frame), destination: Some(at), position: None, rotation: None, scale: None });
+            app.track_bar.create_key = Some(CreateKeyDialog::new(frame, at));
             ui.close_menu();
         }
         if ui.button(format!("Go to Time ({at})")).clicked() {
