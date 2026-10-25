@@ -35,6 +35,7 @@ pub mod helpers;
 pub mod extras;
 pub mod spacing;
 pub mod biped;
+pub mod biped_footsteps;
 pub mod camera;
 pub mod light;
 pub mod skin;

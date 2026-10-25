@@ -897,7 +897,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             } else if let Some(start) = app.drag_select_start.take() {
                                 let drag_px = (start - p).length();
                                 if drag_px < 4.0 {
-                                    if matches!(app.state.pick_mode, Some(loom_commands::PickMode::SpacingPointA | loom_commands::PickMode::SpacingPointB | loom_commands::PickMode::MeasureDistanceA | loom_commands::PickMode::MeasureDistanceB)) {
+                                    if matches!(app.state.pick_mode, Some(loom_commands::PickMode::SpacingPointA | loom_commands::PickMode::SpacingPointB | loom_commands::PickMode::MeasureDistanceA | loom_commands::PickMode::MeasureDistanceB | loom_commands::PickMode::BipedFootstep)) {
                                         // Spacing Tool > Pick Points, Measure Distance: the snap point, else the construction plane.
                                         let point = snap_at(app, index, &projection, p, None, false).map(|h| h.point).or_else(|| creation_anchor(app, index, p, rect, view, proj).map(|(a, _)| a));
                                         if let Some(pt) = point {

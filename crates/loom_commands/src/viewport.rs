@@ -432,6 +432,8 @@ pub enum Dialog {
     NormalMapping,
     UnfoldMapping,
     PeltMap,
+    /// Biped > Footstep Creation > Create Multiple Footsteps.
+    BipedMultipleFootsteps,
     /// Biped rollout > Save File / Load File of a figure (.fig) in Figure Mode.
     BipedSaveFig,
     BipedLoadFig,

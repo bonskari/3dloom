@@ -297,6 +297,8 @@ pub enum PickMode {
     ProtractorObject(u8),
     /// Biped Structure > Xtras > Pick Parent: the clicked part becomes the tail's parent.
     BipedXtraParent,
+    /// Biped Footstep Creation > Create Footsteps (append): each click places a footstep.
+    BipedFootstep,
     /// Tools > Measure Distance: first and second point.
     MeasureDistanceA,
     MeasureDistanceB,

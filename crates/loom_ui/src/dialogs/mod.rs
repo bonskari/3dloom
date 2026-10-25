@@ -26,6 +26,7 @@ pub mod time_configuration;
 pub mod viewport_background;
 pub mod viewport_configuration;
 pub mod file_dialog;
+pub mod biped_footsteps;
 pub mod material_editor;
 pub mod render_setup;
 pub mod lights;
@@ -192,6 +193,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::SummaryInfo => scene_dialogs::summary_info(ctx, app, &mut open),
         Dialog::FileProperties => scene_dialogs::file_properties(ctx, app, &mut open),
         Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
+        Dialog::BipedMultipleFootsteps => biped_footsteps::show(ctx, app, &mut open),
         Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.

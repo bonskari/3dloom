@@ -291,6 +291,7 @@ pub fn figure_mode(state: &mut AppState, root: NodeId, on: Option<bool>) -> Resu
     let apply = if on { std::mem::take(&mut s.figure_pose) } else { std::mem::take(&mut s.anim_pose) };
     if on {
         s.anim_pose = live;
+        s.footstep_mode = false;
     } else {
         s.figure_pose = live;
     }
@@ -527,6 +528,8 @@ pub fn save_fig(state: &AppState, root: NodeId, path: &std::path::Path) -> Resul
     }
     s.figure_pose.clear();
     s.anim_pose.clear();
+    s.footsteps.clear();
+    s.footstep_mode = false;
     let pose: Vec<(String, Transform)> = parts(state, root).into_iter().filter_map(|(suffix, id)| state.scene.node(id).map(|n| (suffix, Transform::from_matrix(n.transform.matrix())))).collect();
     let n = pose.len();
     let fig = FigFile { format: FIG_FORMAT.into(), version: 1, structure: s, pose };
@@ -551,6 +554,9 @@ pub fn load_fig(state: &mut AppState, root: NodeId, path: &std::path::Path) -> R
     s.figure_mode = true;
     s.figure_pose = cur.figure_pose;
     s.anim_pose = cur.anim_pose;
+    s.footsteps = cur.footsteps;
+    s.gait = cur.gait;
+    s.footstep_mode = false;
     state.undo.begin("Load Figure");
     let r = rebuild(state, root, s, "Load Figure").and_then(|_| {
         let all = parts(state, root);

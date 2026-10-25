@@ -73,6 +73,85 @@ pub struct Xtra {
 /// Length of an extra tail, in heights.
 pub const XTRA_LENGTH: f32 = 0.25;
 
+/// Ankle height above the ground, foot block length and width, in heights.
+pub const ANKLE_HEIGHT: f32 = 0.045;
+pub const FOOT_LENGTH: f32 = 0.11;
+pub const FOOT_WIDTH: f32 = 0.06;
+
+/// Footstep Creation: the gait new footsteps get.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum Gait {
+    #[default]
+    Walk,
+    Run,
+    Jump,
+}
+
+impl Gait {
+    pub const ALL: [Gait; 3] = [Gait::Walk, Gait::Run, Gait::Jump];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Gait::Walk => "Walk",
+            Gait::Run => "Run",
+            Gait::Jump => "Jump",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|g| g.label().eq_ignore_ascii_case(name.trim()))
+    }
+
+    /// Create Multiple Footsteps > Parametric Stride Length default.
+    pub fn default_stride(self) -> f32 {
+        match self {
+            Gait::Walk => 0.75,
+            Gait::Run => 1.5,
+            Gait::Jump => 2.4,
+        }
+    }
+}
+
+/// Footstep Creation rollout: the gait and its timing parameters, in frames.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct GaitTiming {
+    pub gait: Gait,
+    /// Walk Footstep: frames a walking foot is on the ground.
+    pub walk_footstep: u32,
+    /// Double Support: frames both feet are down during a walk.
+    pub double_support: u32,
+    /// Run Footstep: frames a running foot is on the ground.
+    pub run_footstep: u32,
+    /// Airborne (run): frames with both feet up.
+    pub run_airborne: u32,
+    /// 2 Feet Down (jump): frames both feet are down.
+    pub jump_two_feet_down: u32,
+    /// Airborne (jump).
+    pub jump_airborne: u32,
+}
+
+impl Default for GaitTiming {
+    fn default() -> Self {
+        Self { gait: Gait::Walk, walk_footstep: 15, double_support: 3, run_footstep: 10, run_airborne: 5, jump_two_feet_down: 15, jump_airborne: 13 }
+    }
+}
+
+/// One footstep: where and when a foot is planted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Footstep {
+    pub left: bool,
+    /// The ground point under the ankle, in world space.
+    pub position: Vec3,
+    /// The foot's heading about world Z in degrees; 0 faces -Y.
+    pub heading: f32,
+    /// The frames the foot is planted.
+    pub start: f32,
+    pub end: f32,
+    /// Activated: the biped has keys for it.
+    pub active: bool,
+}
+
 /// The Structure rollout.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -113,6 +192,12 @@ pub struct BipedStructure {
     pub calf_twists: Param<u32>,
     pub horse_link_twists: Param<u32>,
     pub xtras: Vec<Xtra>,
+    /// Footstep Mode (Biped rollout): footsteps can be created and edited.
+    pub footstep_mode: bool,
+    /// The footsteps in creation order (numbered from 0 in the viewports).
+    pub footsteps: Vec<Footstep>,
+    /// The Footstep Creation rollout's gait and timing.
+    pub gait: GaitTiming,
     /// Figure Mode (Biped rollout): the structure can be edited and the parts
     /// show the figure pose. A mode, not an animatable parameter.
     #[serde(default)]
@@ -167,6 +252,9 @@ impl BipedStructure {
             calf_twists: Param::new(0),
             horse_link_twists: Param::new(0),
             xtras: Vec::new(),
+            footstep_mode: false,
+            footsteps: Vec::new(),
+            gait: GaitTiming::default(),
             figure_mode: true,
             figure_pose: Vec::new(),
             anim_pose: Vec::new(),
@@ -602,7 +690,7 @@ pub fn layout(s: &BipedStructure) -> Vec<PartSpec> {
         }
         // Legs: thigh, calf (and a horse link with four links), foot, toes.
         let hip = v(sx * pr.hip, 0.0, COM_HEIGHT - 0.03);
-        let ankle_h = 0.045;
+        let ankle_h = ANKLE_HEIGHT;
         let ankle = v(sx * pr.hip, 0.0, ankle_h);
         let thigh = format!("{tag} Thigh");
         let calf = format!("{tag} Calf");
@@ -620,8 +708,8 @@ pub fn layout(s: &BipedStructure) -> Vec<PartSpec> {
         let leg_end = if s.leg_links.get() >= 4 { format!("{tag} HorseLink") } else { format!("{tag} Calf") };
         // Foot: pivot at the ankle, pointing forward; the block reaches the
         // ground and the ankle sits Ankle Attach of the way from the heel.
-        let foot_len = 0.11 * h;
-        let foot_w = 0.06 * h * pr.limb.clamp(0.7, 1.0);
+        let foot_len = FOOT_LENGTH * h;
+        let foot_w = FOOT_WIDTH * h * pr.limb.clamp(0.7, 1.0);
         let attach = s.ankle_attach.get().clamp(0.0, 1.0);
         let foot_d = pr.foot * ankle_h * h;
         let foot = format!("{tag} Foot");

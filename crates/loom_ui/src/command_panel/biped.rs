@@ -208,6 +208,68 @@ fn xtras_group(ui: &mut egui::Ui, app: &mut LoomApp, root: NodeId, s: &BipedStru
     store(ui, "biped_xtra_symmetrical", symmetrical);
 }
 
+/// Footstep Mode: the Footstep Creation and Footstep Operations rollouts.
+fn footstep_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, s: &BipedStructure) {
+    use loom_scene::biped::Gait;
+    let g = s.gait.clone();
+    let timing = |gait: Option<Gait>| Command::BipedFootstepCreation { gait: gait.map(|g| g.label().to_owned()), walk_footstep: None, double_support: None, run_footstep: None, run_airborne: None, jump_two_feet_down: None, jump_airborne: None };
+    rollout(ui, "Footstep Creation", true, |ui| {
+        ui.horizontal(|ui| {
+            for gait in Gait::ALL {
+                if ui.add(egui::Button::new(gait.label()).selected(g.gait == gait)).clicked() {
+                    run(app, timing(Some(gait)));
+                }
+            }
+        });
+        let picking = app.state.pick_mode == Some(loom_commands::PickMode::BipedFootstep);
+        if ui.add(egui::Button::new("Create Footsteps (append)").selected(picking)).clicked() {
+            run(app, if picking { Command::ExitPickMode } else { Command::BipedAppendFootstep { position: None, left: None } });
+        }
+        if ui.button("Create Multiple Footsteps").clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::BipedMultipleFootsteps);
+        }
+        let rows: [(&str, u32, u32); 2] = match g.gait {
+            Gait::Walk => [("Walk Footstep:", g.walk_footstep, 2), ("Double Support:", g.double_support, 0)],
+            Gait::Run => [("Run Footstep:", g.run_footstep, 1), ("Airborne:", g.run_airborne, 0)],
+            Gait::Jump => [("2 Feet Down:", g.jump_two_feet_down, 1), ("Airborne:", g.jump_airborne, 0)],
+        };
+        egui::Grid::new("biped_gait_timing").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+            for (i, (label, value, min)) in rows.into_iter().enumerate() {
+                ui.label(label);
+                let mut v = value;
+                if ui.add(crate::spinner::spin(ui, &mut v, min..=1000).speed(0.1)).changed() {
+                    let mut c = timing(None);
+                    if let Command::BipedFootstepCreation { walk_footstep, double_support, run_footstep, run_airborne, jump_two_feet_down, jump_airborne, .. } = &mut c {
+                        let slot = match (g.gait, i) {
+                            (Gait::Walk, 0) => walk_footstep,
+                            (Gait::Walk, _) => double_support,
+                            (Gait::Run, 0) => run_footstep,
+                            (Gait::Run, _) => run_airborne,
+                            (Gait::Jump, 0) => jump_two_feet_down,
+                            (Gait::Jump, _) => jump_airborne,
+                        };
+                        *slot = Some(v);
+                    }
+                    run(app, c);
+                }
+                ui.end_row();
+            }
+        });
+    });
+    rollout(ui, "Footstep Operations", true, |ui| {
+        if ui.button("Create Keys for Inactive Footsteps").clicked() {
+            run(app, Command::BipedActivateFootsteps);
+        }
+        if ui.button("Deactivate Footsteps").clicked() {
+            run(app, Command::BipedDeactivateFootsteps);
+        }
+        if ui.button("Delete Footsteps").clicked() {
+            run(app, Command::BipedDeleteFootsteps);
+        }
+        ui.label(format!("{} footsteps, {} active", s.footsteps.len(), s.footsteps.iter().filter(|f| f.active).count()));
+    });
+}
+
 fn biped_of(app: &LoomApp, id: NodeId) -> Option<(NodeId, BipedStructure)> {
     let root = loom_commands::biped::root_of(&app.state, id)?;
     let s = loom_commands::biped::structure(&app.state, root)?.clone();
@@ -254,6 +316,10 @@ pub fn motion_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
         if ui.add(egui::Button::new(label).selected(s.figure_mode)).clicked() {
             run(app, Command::BipedFigureMode { on: Some(!s.figure_mode) });
         }
+        let label = if s.footstep_mode { "Footstep Mode (on)" } else { "Footstep Mode" };
+        if ui.add(egui::Button::new(label).selected(s.footstep_mode)).clicked() {
+            run(app, Command::BipedFootstepMode { on: Some(!s.footstep_mode) });
+        }
         // Figure files (.fig) load and save in Figure Mode.
         ui.horizontal(|ui| {
             if ui.add_enabled(s.figure_mode, egui::Button::new("Load File")).on_hover_text("Load a figure file (.fig)").clicked() {
@@ -264,6 +330,9 @@ pub fn motion_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
             }
         });
     });
+    if s.footstep_mode {
+        footstep_rollouts(ui, app, &s);
+    }
     rollout(ui, "Structure", true, |ui| {
         ui.add_enabled_ui(s.figure_mode, |ui| {
             if let Some((name, value)) = structure_grid(ui, "motion_biped_structure", &s, true) {
