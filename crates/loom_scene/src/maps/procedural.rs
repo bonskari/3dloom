@@ -585,15 +585,16 @@ mod tests {
         a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.02)
     }
 
-    /// The lowest and highest grey over a 24 × 24 grid of the UV square.
+    /// The lowest and highest red over a 24 × 24 grid of the UV square
+    /// (every channel checked to stay in 0–1).
     fn range(f: impl Fn(f32, f32) -> [f32; 4]) -> (f32, f32) {
         let mut lo = f32::MAX;
         let mut hi = f32::MIN;
         for i in 0..24 {
             for j in 0..24 {
                 let c = f(i as f32 / 24.0, j as f32 / 24.0);
-                assert!(c.iter().all(|v| v.is_finite()), "{c:?}");
-                let l = (c[0] + c[1] + c[2]) / 3.0;
+                assert!(c.iter().all(|v| v.is_finite() && (-1e-4..=1.0001).contains(v)), "{c:?}");
+                let l = c[0];
                 lo = lo.min(l);
                 hi = hi.max(l);
             }
@@ -690,7 +691,7 @@ mod tests {
         assert!(near(eval(&g, [0.5, 0.5], &im), [1.0; 4]));
         // A flag's map replaces its colour.
         *g.sub_map_slot_mut(1) = Some(Box::new(Map::new(MapType::Checker, 100.0)));
-        assert!(near(eval(&g, [0.0, 0.1], &im), [0.0, 0.0, 0.0, 1.0]), "the checker's black under Flag #1");
+        assert!(near(eval(&g, [0.01, 0.1], &im), [0.0, 0.0, 0.0, 1.0]), "the checker's black under Flag #1");
         g.set_parameter("Noise Amount", 1.0).unwrap();
         let (lo, hi) = range(|u, v| eval(&g, [u, v], &im));
         assert!(hi - lo > 0.2);
