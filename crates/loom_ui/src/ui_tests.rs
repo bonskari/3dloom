@@ -20,6 +20,7 @@ mod skin_wrap;
 mod biped;
 mod lightcam2;
 mod bake;
+mod oswindows;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 

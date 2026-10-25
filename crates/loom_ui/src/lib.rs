@@ -36,6 +36,7 @@ pub mod viewports;
 pub mod uv_editor;
 pub mod track_view;
 pub mod update_menu;
+pub mod os_window;
 #[cfg(test)]
 mod ui_tests;
 
@@ -289,6 +290,8 @@ pub struct LoomApp {
     pub last_dialog: Option<loom_commands::Dialog>,
     /// Directory the file dialog opens in (the last one used).
     pub file_dir: std::path::PathBuf,
+    /// Where the floating OS windows are (saved in the settings file).
+    pub os_window_rects: os_window::Rects,
     /// System (xdg-desktop-portal) file dialogs; off when remote-controlled.
     pub native_file_dialogs: bool,
     /// Title last sent to the window, so it is only resent on change.
@@ -408,6 +411,7 @@ impl LoomApp {
                     if let Some(dir) = settings.last_folder.filter(|d| d.is_dir()) {
                         self.file_dir = dir;
                     }
+                    self.os_window_rects = settings.windows;
                 }
                 Err(e) => self.last_error = Some(format!("{}: {e}", path.display())),
             },
@@ -433,6 +437,7 @@ impl LoomApp {
     pub fn settings(&self) -> loom_commands::settings::Settings {
         let mut s = loom_commands::settings::Settings::capture(&self.state);
         s.last_folder = Some(self.file_dir.clone());
+        s.windows = self.os_window_rects.clone();
         s
     }
 
@@ -506,6 +511,7 @@ impl LoomApp {
             preview: None,
             last_dialog: None,
             file_dir: std::env::current_dir().unwrap_or_default(),
+            os_window_rects: Default::default(),
             native_file_dialogs: dialogs::file_dialog::use_native(std::env::var("LOOM_CONTROL_PORT").ok().as_deref()),
             last_title: String::new(),
             viewport_rects: Vec::new(),
@@ -1391,11 +1397,13 @@ impl LoomApp {
                 self.quad_menu = None;
             }
         }
+        os_window::begin(ctx, self.state.prefs.floating_os_windows, &self.os_window_rects);
         dialogs::show(ctx, self);
         command_panel::utilities::measure_floater(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
         rendered_frame::show(ctx, self);
+        self.os_window_rects = os_window::rects(ctx);
         self.finish_realistic_frame(ctx);
     }
 }

@@ -78,6 +78,9 @@ pub struct Settings {
     pub project_folder: Option<PathBuf>,
     /// FBX / OBJ import and export options and saved presets.
     pub exchange: crate::exchange::ExchangeOptions,
+    /// Where the floating OS windows were left (the UI fills it in): by
+    /// window, the outer position and the inner size, `[x, y, w, h]`.
+    pub windows: BTreeMap<String, [f32; 4]>,
 }
 
 impl Default for Settings {
@@ -97,6 +100,7 @@ impl Settings {
             last_folder: None,
             exchange: state.exchange.clone(),
             project_folder: state.project_folder.clone(),
+            windows: BTreeMap::new(),
         }
     }
 
