@@ -3109,6 +3109,7 @@ fn edit_normals_click_ctrl_alt_and_empty_click_select_normals() {
     assert!(h.app.state.selection.contains(&id), "and keeps the object");
     // A region selects the normals whose lines it holds.
     h.drag(a.1 - egui::vec2(10.0, 10.0), a.1 + egui::vec2(10.0, 10.0));
+    eprintln!("DBG a={a:?} undo={:?} sel={:?} lines={:?}", h.app.state.undo.labels(), h.app.state.selection, normal_lines(&h).iter().find(|l| l.0 == a.0).map(|l| (h.screen_of(l.1), h.screen_of(l.1 + l.2 * 10.0))));
     assert!(normal_selection(&h).contains(&a.0), "region picks {:?}", normal_selection(&h));
 }
 
