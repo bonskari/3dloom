@@ -110,7 +110,8 @@ fn matte_shadow_shows_only_the_shadows_and_ink_n_paint_paints_flat_bands() {
     let sphere = loom_mesh::sphere_segmented(10.0, 32, 0.0);
     r.sync(&[object(&sphere, surfaces(&l, MaterialId(3)), 3)]);
     let img = shot(&mut r, &camera(Vec3::new(-10.0, -40.0, 20.0), Vec3::Z), 96, [0.0, 0.0, 0.0, 1.0]);
-    let mut colours: Vec<[u8; 3]> = img.pixels().filter(|p| p.0[0] > 0 || p.0[1] > 0 || p.0[2] > 0).map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+    // Colours to steps of 8 (the views' deband dithering moves them by a level or two).
+    let mut colours: Vec<[u8; 3]> = img.pixels().filter(|p| p.0[0] > 8 || p.0[1] > 8 || p.0[2] > 8).map(|p| [(p.0[0] + 4) / 8, (p.0[1] + 4) / 8, (p.0[2] + 4) / 8]).collect();
     let covered = colours.len();
     colours.sort();
     colours.dedup();
