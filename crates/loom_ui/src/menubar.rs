@@ -71,6 +71,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.separator();
                 item(ui, app, "Merge...", "Merge File");
                 cmd(ui, app, "Replace...", Command::ReplaceFile { path: None, names: None, materials: None });
+                ui.menu_button("References", |ui| {
+                    cmd(ui, app, "XRef Objects...", Command::XrefObjects { path: None, names: None, automatic: None });
+                    cmd(ui, app, "XRef Scene...", Command::XrefScene { path: None, automatic: None });
+                    cmd(ui, app, "Update XRefs", Command::UpdateXrefs { path: None });
+                });
                 item(ui, app, "Import...", "Import File");
                 item(ui, app, "Export...", "Export File");
                 item(ui, app, "Export Selected...", "Export Selected");
@@ -433,6 +438,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
                 cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
                 ui.separator();
+                cmd(ui, app, "Render To Texture...", Command::RenderToTexture);
+                ui.separator();
                 cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
             });
             ui.menu_button("Customize", |ui| {
@@ -549,7 +556,7 @@ pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
         ("Skin", "Skin"), ("Skin Morph", "Skin Morph"), ("Skin Wrap", "Skin Wrap"), ("Spline IK Control", "Spline IK Control"),
     ]),
     ("UV Coordinates", &[
-        ("Camera Map", "Camera Map"), ("Camera Map (WSM)", "Camera Map (WSM)"), ("MapScaler", "MapScaler"), ("MapScaler (WSM)", "MapScaler (WSM)"), ("Unwrap UVW", "Unwrap UVW"),
+        ("Camera Map", "Camera Map"), ("Camera Map (WSM)", "Camera Map (WSM)"), ("MapScaler", "MapScaler"), ("MapScaler (WSM)", "MapScaler (WSM)"), ("Projection", "Projection"), ("Unwrap UVW", "Unwrap UVW"),
         ("UVW Map", "UVW Map"), ("UVW Mapping Add", "UVW Mapping Add"), ("UVW Mapping Clear", "UVW Mapping Clear"), ("UVW XForm", "UVW XForm"),
     ]),
     ("Cache Tools", &[("Point Cache", "Point Cache"), ("Point Cache (WSM)", "Point Cache (WSM)")]),

@@ -28,6 +28,7 @@ pub mod viewport_configuration;
 pub mod file_dialog;
 pub mod material_editor;
 pub mod render_setup;
+pub mod render_to_texture;
 pub mod lights;
 pub mod assets;
 pub mod save_changes;
@@ -111,6 +112,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     }
     // The VertexPaint dialog floats while a VertexPaint entry is active in the Modify panel.
     vertex_paint::show(ctx, app);
+    // Render To Texture is modeless: it stays open beside the other dialogs.
+    render_to_texture::show(ctx, app);
     if app.state.material_navigator_open {
         let mut open = true;
         material_editor::navigator(ctx, app, &mut open);
@@ -166,7 +169,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::Detach => detach::show(ctx, app, &mut open),
         Dialog::DeleteIsolatedVertices => delete_isolated::show(ctx, app, &mut open),
         Dialog::LayerManager => manage_layers::show(ctx, app, &mut open),
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::SaveCustomUiScheme | Dialog::LoadCustomUiScheme | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::SaveCustomUiScheme | Dialog::LoadCustomUiScheme | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile | Dialog::XrefObjectsFile | Dialog::XrefSceneFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::SaveChanges(action) => save_changes::show(ctx, app, action, &mut open),
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),

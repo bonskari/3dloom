@@ -91,7 +91,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
         }
     } else {
-        egui::Window::new(format!("Merge - {file_name}")).open(open).resizable(true).default_width(320.0).show(ctx, |ui| {
+        let title = if app.state.merge_as_xref { "XRef Merge" } else { "Merge" };
+        egui::Window::new(format!("{title} - {file_name}")).open(open).resizable(true).default_width(320.0).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Find:");
                 if ui.text_edit_singleline(&mut st.find).changed() && !st.find.is_empty() {
@@ -122,7 +123,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     let chosen: Vec<String> = st.chosen.iter().map(|i| names[*i].clone()).collect();
                     let mut pending: Vec<String> = chosen.iter().filter(|n| app.state.scene.nodes().any(|x| &x.name == *n)).cloned().collect();
                     pending.dedup();
-                    if pending.is_empty() {
+                    // XRef objects keep their file names (renamed here when taken), no question.
+                    if pending.is_empty() || app.state.merge_as_xref {
                         run = Some((chosen, Vec::new()));
                     } else {
                         st.asking = Some(Asking { names: chosen, rename: pending[0].clone(), pending, answers: Vec::new(), apply_to_all: false });
@@ -135,7 +137,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         });
     }
     if let Some((chosen, answers)) = run {
-        match app.dispatch(Command::MergeFile { path: Some(path.to_string_lossy().into_owned()), names: Some(chosen), duplicates: Some(answers) }) {
+        let p = path.to_string_lossy().into_owned();
+        let cmd = if app.state.merge_as_xref { Command::XrefObjects { path: Some(p), names: Some(chosen), automatic: None } } else { Command::MergeFile { path: Some(p), names: Some(chosen), duplicates: Some(answers) } };
+        match app.dispatch(cmd) {
             Ok(_) => done = true,
             Err(e) => {
                 app.state.status_prompt = e;
@@ -146,6 +150,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     if done {
         *open = false;
         app.state.merge_pending = None;
+        app.state.merge_as_xref = false;
         ctx.data_mut(|d| d.remove::<St>(state_id()));
     } else {
         ctx.data_mut(|d| d.insert_temp(state_id(), st));

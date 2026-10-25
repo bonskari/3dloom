@@ -473,6 +473,9 @@ pub enum Modifier {
     Hsds(Box<crate::caches9::HsdsData>),
     /// Point Cache and Point Cache (WSM) (`world`).
     PointCache(Box<crate::caches9::PointCacheData>),
+    /// Projection: the high-resolution objects Render To Texture projects
+    /// normals from, and the cage it projects with; passes its input through.
+    Projection(Box<crate::bake::ProjectionData>),
     /// FFD 2x2x2 / 3x3x3 / 4x4x4 / FFD(box) / FFD(cyl): `kind` 0–4. The
     /// control `points` are in gizmo space, their `rest` positions and the
     /// lattice volume `lo..hi` (the unit cube of `loom_mesh::ffd`) in object space.
@@ -601,7 +604,7 @@ impl Modifier {
         "Shell", "Skew", "Skin", "Skin Morph", "Skin Wrap", "Slice", "Smooth", "Spherify", "Spline Select", "Squeeze", "STL Check", "Stretch", "Subdivide", "Surface", "Sweep", "Symmetry", "Taper", "Tessellate", "Trim/Extend", "TurboSmooth", "Turn To Mesh", "Turn To Poly",
         "Twist", "Unwrap UVW", "UVW Map", "UVW XForm", "VertexPaint", "Vol. Select", "Wave", "XForm",
         "Affect Region", "Flex", "PathDeform", "Spline IK Control", "Substitute", "Vertex Weld",
-        "Camera Map", "MapScaler", "UVW Mapping Add", "UVW Mapping Clear", "HSDS", "Point Cache",
+        "Camera Map", "MapScaler", "UVW Mapping Add", "UVW Mapping Clear", "HSDS", "Point Cache", "Projection",
     ];
 
     /// The Modifier List, WORLD-SPACE MODIFIERS group (always applied
@@ -708,6 +711,7 @@ impl Modifier {
             "Subdivide (WSM)" => Modifier::Subdivide { size: f(10.0), world: true },
             "HSDS" => Modifier::Hsds(Box::default()),
             "Point Cache" => Modifier::PointCache(Box::default()),
+            "Projection" => Modifier::Projection(Box::default()),
             "Point Cache (WSM)" => Modifier::PointCache(Box::new(crate::caches9::PointCacheData { world: true, ..Default::default() })),
             "Cap Holes" => Modifier::CapHoles,
             "STL Check" => Modifier::STLCheck { check: Param::new(false), test: Param::new(4), select_faces: Param::new(false) },
@@ -796,6 +800,7 @@ impl Modifier {
             Modifier::Subdivide { world, .. } => if *world { "Subdivide (WSM)" } else { "Subdivide" },
             Modifier::Hsds(_) => "HSDS",
             Modifier::PointCache(d) => if d.world { "Point Cache (WSM)" } else { "Point Cache" },
+            Modifier::Projection(_) => "Projection",
             Modifier::CapHoles => "Cap Holes",
             Modifier::STLCheck { .. } => "STL Check",
             Modifier::DeleteMesh => "DeleteMesh",
@@ -1298,6 +1303,7 @@ impl Modifier {
             Modifier::Subdivide { size, .. } => vec![("Size", Float(size.get()))],
             Modifier::Hsds(d) => vec![("Smooth Result", Bool(d.smooth_result))],
             Modifier::PointCache(d) => vec![("Strength", Float(d.strength.get())), ("Relative Offset", Bool(d.relative)), ("Playback Type", Int(d.playback)), ("Start Frame", Float(d.start_frame))],
+            Modifier::Projection(d) => vec![("Push Amount", Float(d.push.get()))],
             Modifier::CapHoles | Modifier::DeleteMesh | Modifier::TurnToMesh => Vec::new(),
             Modifier::STLCheck { check, test, select_faces } => vec![("Check", Bool(check.get())), ("Test", Int(test.get())), ("Select Faces", Bool(select_faces.get()))],
             Modifier::FaceExtrude { amount, scale } => vec![("Amount", Float(amount.get())), ("Scale", Float(scale.get()))],
@@ -1574,6 +1580,7 @@ impl Modifier {
             (Modifier::PointCache(d), "Relative Offset") => d.relative = b,
             (Modifier::PointCache(d), "Playback Type") => d.playback = u.min(1),
             (Modifier::PointCache(d), "Start Frame") => d.start_frame = v,
+            (Modifier::Projection(d), "Push Amount") => d.push.set(v),
             (Modifier::STLCheck { check, .. }, "Check") => check.set(b),
             (Modifier::STLCheck { test, .. }, "Test") => test.set(u.min(4)),
             (Modifier::STLCheck { select_faces, .. }, "Select Faces") => select_faces.set(b),
@@ -2000,6 +2007,7 @@ impl Modifier {
             Modifier::UvwMappingClear { channel } => crate::mapping9::mapping_clear(*channel, v),
             Modifier::Hsds(d) => crate::caches9::hsds(d, v),
             Modifier::PointCache(d) => crate::caches9::point_cache(d, v, ctx),
+            Modifier::Projection(_) => Ok(v),
             Modifier::RenderableSpline(r) => {
                 let mut sh = v.shape.take().ok_or("Renderable Spline needs a shape below it")?;
                 sh.render = (**r).clone();
