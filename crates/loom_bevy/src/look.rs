@@ -23,32 +23,32 @@ pub use uniform::LookParams;
 // The ShaderType derive's generated layout checks are never called.
 #[allow(dead_code)]
 mod uniform {
-use super::*;
+    use super::*;
 
-/// The shader's uniform.
-#[derive(ShaderType, Reflect, Debug, Clone, Copy, Default, PartialEq)]
-pub struct LookParams {
-    pub flags: u32,
-    /// Falloff Type: 0 Towards/Away, 1 Perpendicular/Parallel, 2 Fresnel, 3 Shadow/Light, 4 Distance Blend.
-    pub falloff_type: u32,
-    /// Falloff Direction: 0 the viewing direction, 1 `dir` (world).
-    pub falloff_dir: u32,
-    /// Ink 'n Paint Paint Levels.
-    pub levels: u32,
-    /// Falloff: the Side colour (the material's base colour is the Front).
-    pub side: Vec4,
-    /// Falloff: the direction; xy of `near_far` the Distance Blend range, z the Fresnel IOR.
-    pub dir: Vec4,
-    pub near_far: Vec4,
-    /// Ink 'n Paint: Lighted, Shaded, Highlight (w 1 = on), Ink colour (w = width, 0 = no ink).
-    pub lighted: Vec4,
-    pub shaded: Vec4,
-    pub highlight: Vec4,
-    pub ink: Vec4,
-    /// Matte/Shadow: shadow colour (w = Shadow Brightness); x of `matte_flags` Receive Shadows.
-    pub matte: Vec4,
-    pub matte_flags: Vec4,
-}
+    /// The shader's uniform.
+    #[derive(ShaderType, Reflect, Debug, Clone, Copy, Default, PartialEq)]
+    pub struct LookParams {
+        pub flags: u32,
+        /// Falloff Type: 0 Towards/Away, 1 Perpendicular/Parallel, 2 Fresnel, 3 Shadow/Light, 4 Distance Blend.
+        pub falloff_type: u32,
+        /// Falloff Direction: 0 the viewing direction, 1 `dir` (world).
+        pub falloff_dir: u32,
+        /// Ink 'n Paint Paint Levels.
+        pub levels: u32,
+        /// Falloff: the Side colour (the material's base colour is the Front).
+        pub side: Vec4,
+        /// Falloff: the direction; xy of `near_far` the Distance Blend range, z the Fresnel IOR.
+        pub dir: Vec4,
+        pub near_far: Vec4,
+        /// Ink 'n Paint: Lighted, Shaded, Highlight (w 1 = on), Ink colour (w = width, 0 = no ink).
+        pub lighted: Vec4,
+        pub shaded: Vec4,
+        pub highlight: Vec4,
+        pub ink: Vec4,
+        /// Matte/Shadow: shadow colour (w = Shadow Brightness); x of `matte_flags` Receive Shadows.
+        pub matte: Vec4,
+        pub matte_flags: Vec4,
+    }
 }
 
 /// The extension over Bevy's standard material.
