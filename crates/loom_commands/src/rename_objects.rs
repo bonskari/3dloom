@@ -55,7 +55,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if ids.is_empty() {
                 return Err("nothing to rename".into());
             }
-            let spec = RenameSpec { base_name, prefix, remove_first, suffix, remove_last, numbered: base_number.map(|b| (b, step.unwrap_or(1))) };
+            let spec = RenameSpec { base_name, prefix, remove_first: remove_first.map(|n| n as usize), suffix, remove_last: remove_last.map(|n| n as usize), numbered: base_number.map(|b| (b as i64, step.unwrap_or(1) as i64)) };
             let mut changes = Vec::new();
             let mut names = Vec::new();
             for (i, id) in ids.iter().enumerate() {

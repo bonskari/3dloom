@@ -8,7 +8,7 @@ fn names(s: &AppState) -> Vec<String> {
     v
 }
 
-fn rename(ids: Option<Vec<u64>>, base: Option<&str>, prefix: Option<&str>, first: Option<usize>, suffix: Option<&str>, last: Option<usize>, number: Option<(i64, i64)>) -> Command {
+fn rename(ids: Option<Vec<u64>>, base: Option<&str>, prefix: Option<&str>, first: Option<u32>, suffix: Option<&str>, last: Option<u32>, number: Option<(i32, i32)>) -> Command {
     Command::RenameObjects {
         ids,
         base_name: base.map(str::to_owned),

@@ -15,8 +15,8 @@ struct Form {
     suffix: (bool, String),
     remove_last: (bool, u32),
     numbered: bool,
-    base_number: i64,
-    step: i64,
+    base_number: i32,
+    step: i32,
 }
 
 fn text_option(ui: &mut egui::Ui, label: &str, v: &mut (bool, String)) {
@@ -82,9 +82,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ids: f.pick.then(|| f.picked.clone()),
                 base_name: opt(&f.base),
                 prefix: opt(&f.prefix),
-                remove_first: f.remove_first.0.then_some(f.remove_first.1 as usize),
+                remove_first: f.remove_first.0.then_some(f.remove_first.1),
                 suffix: opt(&f.suffix),
-                remove_last: f.remove_last.0.then_some(f.remove_last.1 as usize),
+                remove_last: f.remove_last.0.then_some(f.remove_last.1),
                 base_number: f.numbered.then_some(f.base_number),
                 step: f.numbered.then_some(f.step),
             };
