@@ -371,6 +371,8 @@ pub struct LineSession {
     pub node: NodeId,
     /// Construction plane basis the knots land on.
     pub normal: Vec3,
+    /// The first knot (a point of that plane).
+    pub origin: Vec3,
     press: Option<egui::Pos2>,
     dragged: bool,
 }
@@ -385,7 +387,7 @@ impl LineSession {
             app.state.undo.end();
             return None;
         };
-        Some(Self { node, normal, press: None, dragged: false })
+        Some(Self { node, normal, origin: point, press: None, dragged: false })
     }
 
     /// Screen position of the first knot, to close the spline by clicking it.
@@ -482,6 +484,8 @@ pub struct CameraSession {
     pub target: NodeId,
     /// Normal of the construction plane the target slides on.
     pub normal: Vec3,
+    /// A point of that plane (where the press landed).
+    pub origin: Vec3,
 }
 
 impl CameraSession {
@@ -492,7 +496,7 @@ impl CameraSession {
         if target.is_none() {
             app.state.undo.end();
         }
-        target.map(|target| Self { target, normal })
+        target.map(|target| Self { target, normal, origin: anchor })
     }
 
     pub fn on_drag(&self, app: &mut LoomApp, at: Vec3) {
@@ -512,7 +516,19 @@ impl CameraSession {
         if target.is_none() {
             app.state.undo.end();
         }
-        target.map(|target| Self { target, normal })
+        target.map(|target| Self { target, normal, origin: anchor })
+    }
+
+    /// Create > Helpers > Tape: the press places the tape, the drag moves
+    /// its target (the same session as a target camera).
+    pub fn begin_tape(app: &mut LoomApp, anchor: Vec3, normal: Vec3) -> Option<Self> {
+        app.state.undo.begin("Create Tape");
+        let r = app.dispatch(Command::CreateTape { position: anchor.to_array(), target: anchor.to_array() });
+        let target = r.ok().and_then(|v| v["target"].as_u64()).map(NodeId);
+        if target.is_none() {
+            app.state.undo.end();
+        }
+        target.map(|target| Self { target, normal, origin: anchor })
     }
 
     /// Create > Lights > Free Spot / Free Direct / Omni / Skylight: a click
@@ -528,6 +544,62 @@ impl CameraSession {
     pub fn place_free(app: &mut LoomApp, anchor: Vec3, normal: Vec3) {
         let look = anchor - normal * loom_scene::camera::DEFAULT_TARGET_DISTANCE;
         let _ = app.dispatch(Command::CreateCameraAt { target: false, position: anchor.to_array(), look_at: look.to_array() });
+    }
+}
+
+/// Create > Helpers > Grid / Compass: the press places the helper on the
+/// construction plane, the drag sizes it (Grid corner to corner, Compass
+/// its radius), the release finishes. One undo entry.
+#[derive(Debug, Clone)]
+pub struct HelperSession {
+    pub kind: crate::HelperKind,
+    pub node: NodeId,
+    pub anchor: Vec3,
+    /// Construction plane basis (right, up, normal).
+    pub basis: (Vec3, Vec3, Vec3),
+}
+
+impl HelperSession {
+    pub fn begin(app: &mut LoomApp, kind: crate::HelperKind, anchor: Vec3, basis: (Vec3, Vec3, Vec3)) -> Option<Self> {
+        let label = format!("Create {}", kind.label());
+        app.state.undo.begin(&label);
+        let r = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: 0.0 });
+        let Some(node) = r.ok().and_then(|v| v["node"].as_u64()).map(NodeId) else {
+            app.state.undo.end();
+            return None;
+        };
+        // Local Z along the construction plane normal.
+        let e = glam::Quat::from_rotation_arc(Vec3::Z, basis.2).to_euler(glam::EulerRot::XYZ);
+        let _ = app.dispatch(Command::SetTransform { id: node.0, position: None, rotation_deg: Some([e.0.to_degrees(), e.1.to_degrees(), e.2.to_degrees()]), scale: None });
+        Some(Self { kind, node, anchor, basis })
+    }
+
+    fn set(&self, app: &mut LoomApp, name: &str, value: f32) {
+        let _ = app.dispatch(Command::SetParameter { id: self.node.0, name: name.into(), value: value as f64 });
+    }
+
+    /// `at`: the pointer on the construction plane.
+    pub fn on_drag(&self, app: &mut LoomApp, at: Vec3) {
+        let d = at - self.anchor;
+        match self.kind {
+            crate::HelperKind::Grid => {
+                let (u, v) = (d.dot(self.basis.0), d.dot(self.basis.1));
+                let rot = glam::Quat::from_rotation_arc(Vec3::Z, self.basis.2);
+                // The grid's local X / Y after its rotation onto the plane.
+                let (gx, gy) = (rot * Vec3::X, rot * Vec3::Y);
+                let corner = self.anchor + self.basis.0 * u + self.basis.1 * v;
+                let centre = (self.anchor + corner) * 0.5;
+                let _ = app.dispatch(Command::SetTransform { id: self.node.0, position: Some(centre.to_array()), rotation_deg: None, scale: None });
+                self.set(app, "Width", (corner - self.anchor).dot(gx).abs());
+                self.set(app, "Length", (corner - self.anchor).dot(gy).abs());
+            }
+            crate::HelperKind::Compass => self.set(app, "Radius", d.length()),
+            _ => {}
+        }
+    }
+
+    pub fn finish(self, app: &mut LoomApp) {
+        app.state.undo.end();
     }
 }
 

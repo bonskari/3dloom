@@ -314,6 +314,35 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({ "loop_mode": state.loop_mode }))
         }
         C::SelectByHalf { axis, invert } => select_by_half(state, axis, invert),
+        C::BranchesMode => {
+            state.branches = !state.branches;
+            if state.branches {
+                state.pick_mode = None;
+                state.poly_drag = None;
+                state.paint_deform = None;
+            }
+            Ok(json!({ "branches": state.branches }))
+        }
+        C::Branch { node, faces, path, taper } => {
+            if path.len() < 2 {
+                return Err("a branch needs at least two path points".into());
+            }
+            let id = NodeId(node);
+            let inv = state.scene.object_matrix(id).inverse();
+            let start = inv.transform_point3(glam::Vec3::from(path[0]));
+            let offsets: Vec<glam::Vec3> = path[1..].iter().map(|p| inv.transform_point3(glam::Vec3::from(*p)) - start).collect();
+            edit_meshes(state, "Branches", vec![(id, faces.into_iter().map(FaceId).collect())], |mesh, _, ids| po::branch(mesh, &ids, &offsets, taper).map(|_| ()))?;
+            Ok(selection_json(state))
+        }
+        C::BranchSettings { taper, min_distance } => {
+            if let Some(t) = taper {
+                state.poly_settings.branch_taper = t;
+            }
+            if let Some(d) = min_distance {
+                state.poly_settings.branch_min_distance = d.max(1.0);
+            }
+            Ok(json!({ "taper": state.poly_settings.branch_taper, "min_distance": state.poly_settings.branch_min_distance }))
+        }
         C::Extrude { height, width, kind } => {
             state.poly_settings.extrude_height = height;
             state.poly_settings.extrude_width = width.max(0.0);
@@ -572,6 +601,7 @@ fn open_settings(state: &mut AppState, kind: PolySettingsKind) -> Result<Value, 
 
 fn toggle_drag(state: &mut AppState, mode: PolyDrag) -> Result<Value, String> {
     state.poly_drag = if state.poly_drag == Some(mode) { None } else { Some(mode) };
+    state.branches = false;
     state.pick_mode = None;
     Ok(json!({ "drag": state.poly_drag.map(|m| format!("{m:?}")) }))
 }
@@ -580,6 +610,7 @@ fn toggle_pick(state: &mut AppState, first: PickMode, family: &[PickMode]) -> Re
     state.pick_source = None;
     state.pick_mode = if state.pick_mode.is_some_and(|m| family.contains(&m)) { None } else { Some(first) };
     state.poly_drag = None;
+    state.branches = false;
     Ok(json!({ "pick": state.pick_mode.map(|m| format!("{m:?}")) }))
 }
 

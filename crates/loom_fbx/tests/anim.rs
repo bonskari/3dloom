@@ -30,7 +30,7 @@ fn keyed_node_round_trips() {
         scale: frames.iter().map(|f| Vec3::splat(1.0 + 0.05 * *f)).collect(),
         frames,
     };
-    let doc = FbxDocument { nodes: vec![n], unit_metres: 0.01, anim: Some(FbxTake { name: "Take 001".into(), fps: 30.0, start: 0, end: 20, tracks: vec![(0, anim.clone())] }), layers: Vec::new() };
+    let doc = FbxDocument { nodes: vec![n], unit_metres: 0.01, anim: Some(FbxTake { name: "Take 001".into(), fps: 30.0, start: 0, end: 20, tracks: vec![(0, anim.clone())] }), ..Default::default() };
     let bytes = loom_fbx::write(&doc, &WriteOpts::default());
     let back = loom_fbx::read(&bytes, 0.01).unwrap();
     let take = back.anim.expect("the take survives");

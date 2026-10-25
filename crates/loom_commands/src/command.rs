@@ -79,6 +79,11 @@ impl ArgSchema for crate::track_view::KeyArg {
         json!({"type":"object","properties":{"id":{"type":"integer","minimum":0},"track":{"type":"string"},"comp":{"type":"integer","minimum":0},"time":{"type":"number"}},"required":["id","track","time"]})
     }
 }
+impl ArgSchema for Value {
+    fn schema() -> Value {
+        json!({})
+    }
+}
 impl ArgSchema for crate::file::MergeDuplicate {
     fn schema() -> Value {
         json!({"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["merge","skip","delete_old","rename","auto_rename"]},"new_name":{"type":"string"}},"required":["name","action"]})
@@ -641,8 +646,14 @@ commands! {
     UvwMapAlignTo => "UVW Map Align To", Loom, "Normal Align's pick: the gizmo's Z along `normal` at `point` (world), then Fit." { point: [f32; 3], normal: [f32; 3] };
     SetTextureDisplay => "Set Texture Display", Loom, "Display > Show Map in Viewport: `kind` none / checker / bitmap (with `path`)." { id: u64, kind: String, path: Option<String> };
     ImportFile => "Import File", MainUI, "Import an FBX, a Wavefront OBJ (each `o` / `g` block an Editable Poly) or a .max scene file (nodes, hierarchy, transforms, pivots, Editable Poly / Mesh with UVs and material ids, Box / Cylinder / Plane; modifier stacks and render objects are reported, not imported), one undo entry; without `path` the Import dialog shows." { path: Option<String> };
-    ExportFile => "Export File", MainUI, "Export every visible geometry object to a Wavefront OBJ (world space, n-gons, smoothing groups, material ids); without `path` the Export dialog shows." { path: Option<String> };
-    ExportSelected => "Export Selected", MainUI, "Export the selected geometry objects to a Wavefront OBJ; without `path` the dialog shows." { path: Option<String> };
+    ExportFile => "Export File", MainUI, "Export the visible objects by the file's extension: .fbx (hierarchy, meshes, cameras, bones, skin / morph deformers, animation, materials and textures) or .obj (+ .mtl), with the FBX / OBJ export options (`Set Exchange Option`); without `path` the Export dialog shows, then the format's options dialog." { path: Option<String> };
+    ExportSelected => "Export Selected", MainUI, "Export the selected objects to .fbx or .obj as Export File does; without `path` the dialog shows." { path: Option<String> };
+    SetExchangeOption => "Set Exchange Option", Loom, "Set one FBX / OBJ import or export option. `dialog`: fbx_export, fbx_import, obj_export or obj_import; `name`: the option's field as `Exchange Options` lists it (e.g. fbx_export triangulate, up_axis \"Y-up\"/\"Z-up\", version 7400/7500, ascii, units_automatic, units; fbx_import file_content \"Add\"/\"Add and update animation\"/\"Update animation\", take; obj_export faces \"Triangles\"/\"Quads\"/\"Polygons\"; obj_import normals, objects [names]), or `preset` with a preset name; `value` any JSON value of the option's type. A change makes the preset \"User defined\"." { dialog: String, name: String, value: Value };
+    ExchangeOptions => "Exchange Options", Loom, "The current options and presets of an FBX / OBJ import or export dialog (`dialog`: fbx_export, fbx_import, obj_export, obj_import)." { dialog: String };
+    SaveExchangePreset => "Save Exchange Preset", Loom, "Edit/Save preset: save the dialog's current options as a named preset (kept in the settings)." { dialog: String, name: String };
+    DeleteExchangePreset => "Delete Exchange Preset", Loom, "Delete a user preset of an FBX / OBJ options dialog." { dialog: String, name: String };
+    FbxFileInfo => "FBX File Info", Loom, "The FBX Importer's Statistics for a file: name, folder, version, creator, creation time, axis and units of the file and the system, the units scale factor, frame rates, takes and element counts." { path: String };
+    ObjFileInfo => "OBJ File Info", Loom, "The OBJ Importer's file info: the file's objects with their face counts, the total face count and which features it holds (normals, texture coordinates, smoothing groups, materials)." { path: String };
     MergeFile => "Merge File", MainUI, "Merge objects from another .loom file: all of them, or those in `names`; fresh ids, objects keep their layers (by name, created when missing), one undo entry. A name the scene already has follows its Duplicate Name answer in `duplicates` (merge keeps both, skip, delete_old, rename to `new_name`, auto_rename = the default). Without `path` the Merge dialog shows." { path: Option<String>, names: Option<Vec<String>>, duplicates: Option<Vec<crate::file::MergeDuplicate>> };
     SaveChangesReply => "Save Changes Reply", Loom, "Answer the open Save Changes prompt: Yes saves (Save As when untitled) and then runs the pending New / Reset / Open / Exit, No runs it without saving, Cancel keeps the scene." { reply: crate::command::SaveChangesReply };
     AutoBackupNow => "Auto Backup Now", Loom, "Write the next Auto Backup file (autoback/<name>NN.loom) now, regardless of the interval.";
@@ -911,6 +922,8 @@ commands! {
     Array => "Array", Loom, "Open the Array dialog for the selection (Tools > Array).";
     ArrayObjects => "Array Objects", Loom, "Array dialog OK: `count` = 1D/2D/3D counts; per-member increments `mv` (units), `rotate` (degrees), `scale` (percent) in the reference system about the transform centre, or totals over the row when `totals` [move, rotate, scale]; `row_2d` / `row_3d` incremental row offsets." { mv: [f32; 3], rotate: [f32; 3], scale: [f32; 3], totals: [bool; 3], re_orient: bool, uniform: bool, kind: crate::state::CloneKind, count: [u32; 3], row_2d: [f32; 3], row_3d: [f32; 3] };
     SpacingTool => "Spacing Tool", MainUI, "Open the Spacing Tool dialog (Shift+I).";
+    SpacingPickPath => "Spacing Pick Path", Loom, "Spacing Tool > Pick Path: the next clicked shape is the path (all its splines).";
+    SpaceAlongPath => "Space Along Path", Loom, "Spacing Tool > Apply: clones of the selection along the shape `path` (each spline) or the line from start to end, placed by Distribution mode `distribution` (0 Free Center … 18 Divide Evenly, No Objects at Ends; see spacing::DISTRIBUTIONS) from count / spacing / offsets; Edges spaces between bounding-box edges; follow turns local X along the path." { path: Option<u64>, start: [f32; 3], end: [f32; 3], distribution: u32, count: u32, spacing: f32, start_offset: f32, end_offset: f32, context: crate::state::SpacingContext, follow: bool, kind: crate::state::CloneKind };
     SpacingPickPoints => "Spacing Pick Points", Loom, "Spacing Tool > Pick Points: start picking the two path ends.";
     PickPoint => "Pick Point", Loom, "Spacing Tool > Pick Points: a world point for the current pick stage." { point: [f32; 3] };
     SpaceObjects => "Space Objects", Loom, "Spacing Tool Apply: distribute `count` clones of the selection along the line from `start` to `end` (offsets shrink the span); `spacing` fixes the step instead of dividing evenly; Edges context measures between bounding boxes; `follow` turns local X along the line." { start: [f32; 3], end: [f32; 3], count: u32, spacing: Option<f32>, start_offset: f32, end_offset: f32, context: crate::state::SpacingContext, follow: bool, kind: crate::state::CloneKind };
@@ -1086,6 +1099,8 @@ commands! {
     SnapToFrozenObjectsToggle => "Snap To Frozen Objects Toggle", MainUI, "Snap to frozen objects (Alt+F2).";
     GridAndSnapSettings => "Grid and Snap Settings", Loom, "Open the Grid and Snap Settings dialog (Tools > Grids and Snaps; right-click a snap toggle).";
     SnapTarget => "Snap Target", Loom, "Turn one Snaps tab target on or off: Grid Points, Pivot, Perpendicular, Vertex, Edge/Segment, Face, Grid Lines, Bounding Box, Tangent, Endpoint, Midpoint, Center Face." { name: String, on: bool };
+    SnapMarkerColor => "Snap Marker Color", Loom, "Grid and Snap Settings > Options > Marker > Color: the snap marker's colour (sRGB)." { rgb: [u8; 3] };
+    UserGridSettings => "User Grid Settings", Loom, "Grid and Snap Settings > User Grids: Activate grids when creating; AutoGrid in Object space (else World space). Omitted fields keep their value." { activate_when_created: Option<bool>, autogrid_object_space: Option<bool> };
     SnapOverride => "Snap Override", Loom, "Use one snap target for the next snap only (Snaps shortcut menu); \"None\" disables snapping for the next click; omit to clear." { name: Option<String> };
     SnapSettings => "Snap Settings", Loom, "Set Options tab values; omitted fields keep their value." { mode: Option<crate::snap::SnapMode>, marker_display: Option<bool>, marker_size: Option<f32>, preview_radius_px: Option<f32>, radius_px: Option<f32>, angle_deg: Option<f32>, percent: Option<f32>, use_axis_constraints: Option<bool>, show_rubber_band: Option<bool> };
     HomeGrid => "Home Grid", Loom, "Set Home Grid tab values; omitted fields keep their value." { spacing: Option<f32>, major_every: Option<u32>, perspective_extent: Option<u32>, inhibit_subdivision: Option<bool>, inhibit_resize: Option<bool>, dynamic_update_all: Option<bool> };
@@ -1121,6 +1136,35 @@ commands! {
     AssignMaterialToSelection => "Assign Material to Selection", Loom, "Assign the active slot's material to the selected objects.";
     GetMaterialFromObject => "Get Material From Object", Loom, "Pick Material From Object: put a node's material (node omitted = the selected one) into the active slot." { node: Option<u64> };
     ResetMaterial => "Reset Material", Loom, "Reset a slot's material to the default Standard material (objects using it change too)." { slot: Option<u32> };
+    SetMaterialType => "Set Material Type", Loom, "Type button: make the material at the Material Editor's current level Standard, Multi/Sub-Object or Blend. For a compound type `keep_old` (Replace Material dialog: Keep old material as sub-material) makes the old material the first sub-material; otherwise it is discarded." { kind: String, keep_old: Option<bool> };
+    MultiSubSetNumber => "Multi/Sub Set Number", Loom, "Multi/Sub-Object Basic Parameters > Set Number: the number of sub-materials (fewer removes from the end, more adds new Standard ones)." { number: u32 };
+    MultiSubAdd => "Multi/Sub Add", Loom, "Multi/Sub-Object > Add: a new Standard sub-material with the next unused material ID.";
+    MultiSubDelete => "Multi/Sub Delete", Loom, "Multi/Sub-Object > Delete: remove the sub-material at list position `index` (0-based)." { index: u32 };
+    MultiSubSetEntry => "Multi/Sub Set Entry", Loom, "A Multi/Sub-Object list row (0-based `index`): its material ID, Name, On/Off and the colour swatch (the sub-material's Diffuse, 0-255 RGB)." { index: u32, id: Option<u32>, name: Option<String>, enabled: Option<bool>, color: Option<[u8; 3]> };
+    MaterialEditorGoToSub => "Material Editor Go To Sub-Material", Loom, "Click a sub-material button (Multi/Sub-Object row `index`, Blend Material 1 = 0 / 2 = 1): edit that sub-material; an empty one gets a new Standard material." { index: u32 };
+    MaterialEditorGoToMap => "Material Editor Go To Map", Loom, "Click a map button that holds a map: edit that map (Maps rollout channel, a Blend's Mask, or a map's Color #1 / #2 / #3 / Mix Amount)." { map: String };
+    NewMap => "New Map", Loom, "Material/Map Browser > New for a map button at the current level: put a new Bitmap, Checker, Gradient, Mix or Noise map in slot `map` and go to its level." { map: String, kind: String };
+    SetMapType => "Set Map Type", Loom, "Type button at a map level: replace the map by a new one of `kind`; `keep_old` (Replace Map dialog) keeps the old map as the new one's Color #1 map." { kind: String, keep_old: Option<bool> };
+    MaterialEditorGoToParent => "Go to Parent", Loom, "Material Editor > Go to Parent: up one level in the active slot's material.";
+    MaterialEditorGoForwardToSibling => "Go Forward to Sibling", Loom, "Material Editor > Go Forward to Sibling: the next map or sub-material of the same parent.";
+    MaterialEditorNavigate => "Material Editor Navigate", Loom, "Material/Map Navigator: go to the level reached by `path` from the active slot's top material; a step is a sub-material list position (\"0\") or a map slot name (\"Diffuse Color\")." { path: Vec<String> };
+    SetMapParameter => "Set Map Parameter", Loom, "A value of the map at the current level by label: Offset U/V, Tiling U/V, Mirror U/V, Tile U/V, Angle W, Map Channel, Blur, Apply, Crop, Place, U, V, W, H, Soften, Color 2 Position, Radial, Noise Type (0 Regular, 1 Fractal, 2 Turbulence), Size, Levels, Phase, High, Low, Mix Amount, \"<component> Map On\" (booleans as 0/1)." { name: String, value: f64 };
+    SetMapColor => "Set Map Color", Loom, "Color #1 / #2 / #3 of the map at the current level, 0-255 RGB." { which: String, rgb: [u8; 3] };
+    SwapMapColors => "Swap Map Colors", Loom, "Checker / Noise / Mix > Swap: Color #1 and #2 (with their maps) trade places.";
+    SetMapBitmap => "Set Map Bitmap", Loom, "Bitmap Parameters > Bitmap: the image file of the Bitmap map at the current level." { path: String };
+    ReloadBitmaps => "Reload Bitmaps", Loom, "Bitmap Parameters > Reload: read the image files again.";
+    SetMaterialMapAmount => "Set Material Map Amount", Loom, "Maps rollout Amount of channel `map` at the current material level, whatever the map's type: 0-100 (Bump -999-999)." { map: String, amount: f32 };
+    SetMaterialMapEnabled => "Set Material Map Enabled", Loom, "Maps rollout check box of channel `map` at the current material level." { map: String, enabled: bool };
+    CopyMap => "Copy Map", Loom, "Drag a map button onto another at the current level: Copy (Instance) Map dialog Copy, or Swap with `swap`." { from: String, to: String, swap: bool };
+    CopyMaterialToSlot => "Copy Material To Slot", Loom, "Drag a sample slot onto another: the target slot gets a copy of the material (a new, unassigned material)." { from: u32, to: u32 };
+    AssignMaterialToNode => "Assign Material To Node", Loom, "Drag a sample slot (omitted = the active one) onto an object in a viewport: assign its material to that object." { node: u64, slot: Option<u32> };
+    AssignMaterialToFaces => "Assign Material To Faces", Loom, "Drag a sample slot (omitted = active) onto selected polygons: builds or extends a Multi/Sub-Object material on the object as the reference does and gives the faces the sub-material's ID." { slot: Option<u32> };
+    DropBitmap => "Drop Bitmap", Loom, "Drop an image file on an object in a viewport: a new Standard material with it as the Diffuse Color map (Show Map in Viewport on) goes into the first unused sample slot and onto the object's selected polygons (building a Multi/Sub-Object material), or onto the whole object when none are selected; one undo step. `node` omitted = the selected object." { path: String, node: Option<u64> };
+    GetMaterial => "Get Material", Loom, "Material/Map Browser (Browse From Scene / Mtl Editor): put material `material` into the active slot." { material: u32 };
+    SetMaterialEditorOption => "Set Material Editor Option", Loom, "Material Editor Options / toolbar: Top Light Multiplier, Back Light Multiplier, Background Intensity, Backlight, Background, Sample UV Tiling (1-4), Slots (6, 15, 24), Antialias, Simple Multi Display Below Top Level, Display Maps as 2D (booleans as 0/1)." { name: String, value: f64 };
+    SetSampleType => "Set Sample Type", Loom, "Sample Type flyout: Sphere, Cylinder or Cube for the active slot." { kind: String };
+    PickMaterialFromObject => "Pick Material From Object", Loom, "Material Editor eyedropper: the next clicked object's material goes into the active slot (its sub-material when its selected polygons all use one ID).";
+    MaterialMapNavigator => "Material/Map Navigator", Loom, "Open or close the Material/Map Navigator.";
     SetKeySelectionList => "Set Key Selection List", Loom, "The Selection List beside Auto Key / Set Key: which objects Set Keys keys (a named selection set; none = Selected)." { name: Option<String> };
     SetKeySelected => "Set Key Selected", MainUI, "Key the filtered tracks of the selected objects at the current frame.";
     ClearSetKeyModeBuffer => "Clear Set Key Mode Buffer", MainUI, "Discard the Set Key mode pose.";
@@ -1434,7 +1478,25 @@ commands! {
     ConnectBones => "Connect Bones", Loom, "Bone Tools > Connect: a new bone from one bone's tip to another bone's base, which becomes its child." { id: u64, to: u64 };
     CreateEndBone => "Create End Bone", Loom, "Bone Tools > Create End: a nub bone at the tip of the bone." { id: u64 };
     SetBoneFins => "Set Bone Fins", Loom, "Bone Tools > Fin Adjustment Tools: side / front / back fins on the selected bones." { side: Option<bool>, front: Option<bool>, back: Option<bool> };
-    CreateHelper => "Create Helper", Loom, "Helpers > Dummy / Point (or an IK goal): kind \"dummy\", \"point\", \"ikgoal\"." { kind: String, position: [f32; 3], size: f32 };
+    CreateHelper => "Create Helper", Loom, "Helpers > Dummy / Point / Protractor / Compass / Grid (or an IK goal): kind \"dummy\", \"point\", \"protractor\", \"compass\" (size = radius), \"grid\" (size = length and width), \"ikgoal\"." { kind: String, position: [f32; 3], size: f32 };
+    CreateTape => "Create Tape", Loom, "Helpers > Tape: Tape## at position and Tape##.Target at target; returns id and target." { position: [f32; 3], target: [f32; 3] };
+    HelperReadout => "Helper Readout", Loom, "A Tape's Length and World Space Angles (to X/Y/Z axis, to XY/YZ/ZX plane) or a Protractor's object names and Angle." { id: u64 };
+    ProtractorPickObject => "Protractor Pick Object", Loom, "Protractor > Pick Object 1 / 2: the next clicked object (which 1 or 2)." { which: u32 };
+    SetProtractorObject => "Set Protractor Object", Loom, "Set a protractor's object 1 or 2 (null clears it)." { id: u64, which: u32, object: Option<u64> };
+    ActivateGridObject => "Activate Grid Object", Loom, "Tools > Grids and Snaps > Activate Grid Object: the selected grid helper becomes the construction plane in every viewport.";
+    AlignGridToView => "Align Grid to View", Loom, "Tools > Grids and Snaps > Align Grid to View: the active grid object turns to lie in the active view's plane, its top at the top of the view.";
+    NudgeGridUp => "Nudge Grid Up", Loom, "Move the active grid object along its normal by Preferences > Viewports > Grid Nudge Distance.";
+    NudgeGridDown => "Nudge Grid Down", Loom, "Move the active grid object against its normal by the Grid Nudge Distance.";
+    ActivateHomeGrid => "Activate Home Grid", Loom, "Tools > Grids and Snaps > Activate Home Grid: the home grid is the construction plane again.";
+    SnapshotDialog => "Snapshot Dialog", Loom, "Tools > Snapshot: open the Snapshot dialog for the selection.";
+    Snapshot => "Snapshot", Loom, "Tools > Snapshot: clone the selection as it is at the current frame (range false) or at `copies` frames spread from `from` to `to`; method 0 Copy, 1 Instance, 2 Reference, 3 Mesh. Returns the created ids." { range: bool, from: i32, to: i32, copies: u32, method: u32 };
+    CloneAndAlignDialog => "Clone and Align Dialog", Loom, "Tools > Align > Clone and Align: open the modeless Clone and Align dialog.";
+    CloneAndAlignPick => "Clone and Align Pick", Loom, "Clone and Align > Pick: toggles picking destination objects in the viewports.";
+    CloneAndAlignSetDestinations => "Clone and Align Set Destinations", Loom, "Clone and Align > Pick List / Clear All: set the destination objects (sources are left out)." { ids: Vec<u64> };
+    CloneAndAlign => "Clone and Align", Loom, "Clone and Align > Apply: clone the selection onto each destination, aligning position / orientation on the chosen world axes with offsets in the destination's local axes; link makes each clone a child of its destination." { destinations: Vec<u64>, kind: crate::state::CloneKind, link: bool, position: [bool; 3], position_offset: [f32; 3], orientation: [bool; 3], orientation_offset: [f32; 3], match_scale: [bool; 3] };
+    PlaceHighlight => "Place Highlight", Loom, "Align flyout > Place Highlight: toggles the mode; dragging over a surface places the selection on the reflected view ray.";
+    PlaceHighlightAt => "Place Highlight At", Loom, "Place Highlight at a surface point with its normal, for a view ray direction: the selection moves onto the reflected ray at its original distance and aims its -Z at the point." { point: [f32; 3], normal: [f32; 3], ray: [f32; 3] };
+    MeasureDistance => "Measure Distance", Loom, "Tools > Measure Distance: click two points; the status bar shows the distance and the X / Y / Z deltas.";
     Dummy => "Dummy", MainUI, "Create a Dummy helper at the origin (Dummy create mode).";
     HistoryIndependentIkSolver => "History-Independent IK Solver", MainUI, "Animation > IK Solvers > HI Solver: an IK chain from the first selected bone to the last, with a goal at the end joint.";
     IkLimbSolver => "IK Limb Solver", MainUI, "Animation > IK Solvers > IK Limb Solver: a two-bone chain on the selected bones.";
@@ -1658,7 +1720,9 @@ commands! {
     UnfreezeByName => "Unfreeze By Name", Loom, "Open the Select From Scene dialog to unfreeze objects by name.";
     ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm > Reset Selected: the node's rotation and scale (and pivot offset) move into a new XForm modifier on top of the stack, the node keeps only its position; collapse the stack to bake them.";
     RescaleWorldUnits => "Rescale World Units", Loom, "Utilities > Rescale World Units: scale the whole scene by a factor." { factor: f32 };
-    Measure => "Measure", Loom, "Utilities > Measure: dimensions, surface area, volume and centre of mass of the selection.";
+    Measure => "Measure", Loom, "Utilities > Measure: object name (or Multiple Objects Selected), dimensions, surface area, volume (volume_open: the mesh has holes), solid centre of mass and shape length of the selection.";
+    MeasureNodes => "Measure Nodes", Loom, "Utilities > Measure with Lock Selected: the same read-outs for the given nodes." { ids: Vec<u64> };
+    MeasureCreateCenterPoint => "Measure Create Center Point", Loom, "Utilities > Measure > Create Center Point: a Point helper at the selection's centre of mass.";
     SetWireColor => "Set Wire Color", Loom, "Set a node's object colour (Name and Color rollout)." { id: u64, rgb: [u8; 3] };
     SetTransform => "Set Transform", Loom, "Set a node's local position, rotation (degrees, Euler XYZ) and/or scale." { id: u64, position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]>, scale: Option<[f32; 3]> };
     MoveSelection => "Move Selection", Loom, "Translate the selection; the delta is in the reference coordinate system (`system`, default the toolbar's)." { delta: [f32; 3], system: Option<crate::state::CoordSystem> };
@@ -1687,6 +1751,9 @@ commands! {
     SwiftLoop => "Swift Loop", Loom, "Insert the edge loop through raw edge `edge` of `node`, `t` along it from its canonical origin (what a Swift Loop click does)." { node: u64, edge: u32, t: f32 };
     LoopMode => "Loop Mode", Loom, "Toggle Modify Selection > Loop Mode: a clicked edge selects its loop (Alt deselects it); two adjacent vertices or polygons select their loop.";
     SelectByHalf => "Select By Half", Loom, "Selection > By Half: select the sub-objects whose centre is on the positive side of the pivot along `axis`; `invert` selects the negative side (Invert Axis)." { axis: Axis, invert: bool };
+    BranchesMode => "Branches", Loom, "Freeform > PolyDraw > Branches on / off: drag from a polygon (Shift: from the selected polygons) to grow a tapering branch.";
+    Branch => "Branch", Loom, "Grow a branch from polygons `faces` of `node` through the world points `path` (the first is where the drag started): one segment per further point, the end scaled by 1 + `taper`." { node: u64, faces: Vec<u32>, path: Vec<[f32; 3]>, taper: f32 };
+    BranchSettings => "Branch Settings", Loom, "PolyDraw settings: Branch Taper and Minimum Distance (pixels between branch segments); omitted fields keep their value." { taper: Option<f32>, min_distance: Option<f32> };
     BridgeSpecificEdges => "Bridge Specific Edges", Loom, "Bridge Edges dialog: on bridges the two picked edges (Pick Edge 1 / 2), off bridges the edge selection (Use Edge Selection)." { on: bool };
     PickBridgeEdge => "Pick Bridge Edge", Loom, "Bridge Edges dialog > Pick Edge 1 (`which` 1) / Pick Edge 2 (2): the next edge pick (Pick Sub) becomes that edge." { which: u32 };
     DeletePolygons => "Delete Polygons", Loom, "Delete the selected polygons; `delete_isolated` also deletes the vertices left with no polygon (the answer to the Delete prompt)." { delete_isolated: bool };

@@ -266,7 +266,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             rollout(ui, "Object Type", true, |ui| {
                 autogrid_and_pin(ui, app);
                 egui::Grid::new("helper_type").num_columns(2).show(ui, |ui| {
-                    for (i, (kind, label)) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point")].iter().enumerate() {
+                    for (i, (kind, label)) in [crate::HelperKind::Dummy, crate::HelperKind::Point, crate::HelperKind::Grid, crate::HelperKind::Tape, crate::HelperKind::Protractor, crate::HelperKind::Compass].map(|k| (k, k.label())).iter().enumerate() {
                         let on = app.create_kind == Some(CreateKind::Helper(*kind));
                         if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, *label)).clicked() {
                             app.start_create((!on).then_some(CreateKind::Helper(*kind)));
@@ -405,6 +405,14 @@ pub fn parameters(ui: &mut egui::Ui, app: &mut LoomApp) {
         super::light_rollouts::show(ui, app, id);
         return;
     }
+    if matches!(node.object, loom_scene::ObjectKind::Tape { .. }) {
+        tape_parameters(ui, app, id);
+        return;
+    }
+    if matches!(node.object, loom_scene::ObjectKind::Protractor { .. }) {
+        protractor_parameters(ui, app, id);
+        return;
+    }
     let (is_compound, is_shape) = (node.object.is_compound(), node.object.is_shape());
     if is_compound && !matches!(app.panel_tab, crate::Tab::Create) {
         super::compound::rollouts(ui, app, None);
@@ -485,6 +493,72 @@ pub(super) fn spin(app: &mut LoomApp, id: loom_scene::NodeId, name: &str, r: &eg
     if r.drag_stopped() {
         app.state.undo.end();
     }
+}
+
+/// Tape > Parameters: Length (the measured distance, read-only unless
+/// Specify Length), Specify Length, and the World Space Angles read-outs.
+fn tape_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
+    let Some(loom_scene::ObjectKind::Tape { specify_length, length, .. }) = app.state.scene.node(id).map(|n| &n.object) else { return };
+    let (specified, typed) = (specify_length.get(), length.get());
+    let r = loom_commands::helpers::readout(&app.state, id).unwrap_or_default();
+    let f = |v: &serde_json::Value| v.as_f64().unwrap_or(0.0) as f32;
+    rollout(ui, "Parameters", true, |ui| {
+        egui::Grid::new(("tape_params", id.0)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+            ui.label("Length:");
+            let shown = if specified { typed } else { f(&r["length"]) };
+            let mut v = shown;
+            let resp = ui.add_enabled(specified, app.length_drag(ui, &mut v, app.spinner_speed(0.5)));
+            spin(app, id, "Length", &resp, v as f64, shown as f64);
+            ui.end_row();
+        });
+        let mut on = specified;
+        if ui.checkbox(&mut on, "Specify Length").changed() {
+            // Turning it on starts from the measured length.
+            if on {
+                let _ = app.dispatch(Command::SetParameter { id: id.0, name: "Length".into(), value: r["length"].as_f64().unwrap_or(0.0) });
+            }
+            let _ = app.dispatch(Command::SetParameter { id: id.0, name: "Specify Length".into(), value: if on { 1.0 } else { 0.0 } });
+        }
+        ui.separator();
+        ui.label("World Space Angles");
+        egui::Grid::new(("tape_angles", id.0)).num_columns(2).spacing([8.0, 2.0]).show(ui, |ui| {
+            for (i, name) in ["To X Axis:", "To Y Axis:", "To Z Axis:"].iter().enumerate() {
+                ui.label(*name);
+                ui.label(format!("{:.3}", f(&r["to_axis"][i])));
+                ui.end_row();
+            }
+            for (i, name) in ["To XY Plane:", "To YZ Plane:", "To ZX Plane:"].iter().enumerate() {
+                ui.label(*name);
+                ui.label(format!("{:.3}", f(&r["to_plane"][i])));
+                ui.end_row();
+            }
+        });
+    });
+}
+
+/// Protractor > Parameters: the picked objects' names above Pick Object 1 /
+/// Pick Object 2, and the Angle read-out.
+fn protractor_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
+    let r = loom_commands::helpers::readout(&app.state, id).unwrap_or_default();
+    let picking = app.state.pick_mode;
+    rollout(ui, "Parameters", true, |ui| {
+        for which in [1u32, 2] {
+            ui.label(r[format!("object{which}")].as_str().unwrap_or("None").to_owned());
+            let on = picking == Some(loom_commands::PickMode::ProtractorObject(which as u8));
+            let label = format!("Pick Object {which}");
+            if ui.add_sized([150.0, 22.0], egui::SelectableLabel::new(on, label.as_str())).clicked() {
+                if on {
+                    let _ = app.dispatch(Command::ExitPickMode);
+                } else if let Err(e) = app.dispatch(Command::ProtractorPickObject { which }) {
+                    app.state.status_prompt = e;
+                }
+            }
+        }
+        ui.horizontal(|ui| {
+            ui.label("Angle:");
+            ui.label(r["angle"].as_f64().map(|a| format!("{a:.3}")).unwrap_or_else(|| "0.0".into()));
+        });
+    });
 }
 
 /// The camera Parameters rollout: Lens / FOV, Orthographic Projection,

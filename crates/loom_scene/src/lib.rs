@@ -19,12 +19,13 @@ pub mod param;
 pub mod tracks;
 pub mod scene;
 pub mod material;
+pub mod maps;
 pub mod render;
 
 pub use node::{Axes3, DisplayProps, RenderProps, TextureDisplay, Node, NodeId, NodeProps, ObjectKind, PaintDeform, PaintDirection, ParamValue, PatchObject, PolyObject, ShapeCommon, ShapeObject, SoftSelection, SubdivSurface, Transform, OBJECT_COLORS};
 pub use param::{Controller, Param};
 pub use scene::{Layer, Scene};
-pub use material::{BitmapMap, MaterialEditorSlots, MaterialId, MaterialLibrary, StandardMaterial};
+pub use material::{Map, MaterialEditorSlots, MaterialId, MaterialLibrary, StandardMaterial};
 pub use modifier::{EvalCtx, Evaluated, Modifier, ModifierSlot, StackValue, StoredSelection, UnwrapUvw};
 pub mod change;
 pub mod undo;
