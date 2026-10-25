@@ -83,7 +83,7 @@ fn show_native(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mu
 }
 
 /// Bitmap formats that load (`loom_commands::render::IMAGE_READ_FORMATS`) and that save (`IMAGE_FORMATS`).
-const IMAGES_READ: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr,dds,gif";
+const IMAGES_READ: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr,gif";
 const IMAGES_WRITE: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr";
 
 /// Title, extension, "Open"/"Save" button text and the command to run.

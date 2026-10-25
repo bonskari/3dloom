@@ -90,6 +90,11 @@ fn presets(ui: &mut egui::Ui, ctx: &egui::Context, app: &mut LoomApp, dialog: &s
     });
 }
 
+/// The options' scroll height: OK / Cancel stay on screen.
+fn scroll_height(ctx: &egui::Context) -> f32 {
+    (ctx.screen_rect().height() - 220.0).clamp(200.0, 620.0)
+}
+
 fn section(ui: &mut egui::Ui, title: &str, open: bool, body: impl FnOnce(&mut egui::Ui)) {
     egui::CollapsingHeader::new(egui::RichText::new(title).strong()).default_open(open).show(ui, body);
 }
@@ -136,7 +141,7 @@ pub fn fbx_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let mut done = false;
     let range = app.state.frame_range;
     egui::Window::new(file_title(app, "FBX Export")).id(egui::Id::new("fbx_export_options")).open(open).resizable(true).default_width(360.0).show(ctx, |ui| {
-        egui::ScrollArea::vertical().max_height(560.0).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(scroll_height(ctx)).show(ui, |ui| {
             presets(ui, ctx, app, D, &o.preset);
             section(ui, "Include", true, |ui| {
                 section(ui, "Geometry", true, |ui| {
@@ -269,7 +274,7 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         }
     };
     egui::Window::new(file_title(app, "FBX Import")).id(egui::Id::new("fbx_import_options")).open(open).resizable(true).default_width(360.0).show(ctx, |ui| {
-        egui::ScrollArea::vertical().max_height(560.0).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(scroll_height(ctx)).show(ui, |ui| {
             presets(ui, ctx, app, D, &o.preset);
             section(ui, "Statistics", false, |ui| {
                 if let Some(e) = info["error"].as_str() {

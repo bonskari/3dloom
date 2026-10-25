@@ -15,8 +15,8 @@ use std::sync::Arc;
 pub const MAX_RENDER_SIZE: u32 = 8192;
 /// Image files Save Image writes, by extension.
 pub const IMAGE_FORMATS: &[&str] = &["png", "jpg", "jpeg", "bmp", "tga", "tif", "tiff", "exr", "hdr"];
-/// Bitmap formats maps and backgrounds load from (DDS and GIF read only).
-pub const IMAGE_READ_FORMATS: &[&str] = &["png", "jpg", "jpeg", "bmp", "tga", "tif", "tiff", "exr", "hdr", "dds", "gif"];
+/// Bitmap formats maps and backgrounds load from (GIF read only).
+pub const IMAGE_READ_FORMATS: &[&str] = &["png", "jpg", "jpeg", "bmp", "tga", "tif", "tiff", "exr", "hdr", "gif"];
 
 /// Rendered Frame Window channel toggles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
