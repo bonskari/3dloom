@@ -128,7 +128,6 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
 fn action_list(ui: &mut egui::Ui, height: f32) -> Option<String> {
     let group_id = egui::Id::new("customize_ui_group");
     let search_id = egui::Id::new("customize_ui_search");
-    let category_id = egui::Id::new("customize_ui_category");
     let mut group: String = ui.ctx().data(|d| d.get_temp(group_id)).unwrap_or_else(|| "Main UI".to_owned());
     let mut search: String = ui.ctx().data(|d| d.get_temp(search_id)).unwrap_or_default();
     let mut double = None;
@@ -167,7 +166,6 @@ fn action_list(ui: &mut egui::Ui, height: f32) -> Option<String> {
     ui.ctx().data_mut(|d| {
         d.insert_temp(group_id, group);
         d.insert_temp(search_id, search);
-        d.insert_temp(category_id, category);
     });
     double
 }
@@ -208,6 +206,7 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
     let ctx = ui.ctx().clone();
     let group_id = egui::Id::new("customize_ui_group");
     let search_id = egui::Id::new("customize_ui_search");
+    let category_id = egui::Id::new("customize_ui_category");
     let written_id = egui::Id::new("customize_ui_written");
     let action_id = egui::Id::new("customize_ui_action");
     let chord_id = egui::Id::new("customize_ui_chord");
@@ -334,6 +333,7 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
     ctx.data_mut(|d| {
         d.insert_temp(group_id, group);
         d.insert_temp(search_id, search);
+        d.insert_temp(category_id, category);
         match action {
             Some(a) => d.insert_temp(action_id, a),
             None => d.remove::<String>(action_id),
