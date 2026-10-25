@@ -166,8 +166,8 @@ impl Default for FbxExportOptions {
             cameras: true,
             lights: true,
             embed_media: false,
-            // Centimetres by default: the file Unreal's default import reads at the right size.
-            units_automatic: false,
+            // Automatic, as the reference: the file is in the system unit (scale factor 1).
+            units_automatic: true,
             units: SystemUnit::Centimeters,
             up_axis: UpAxis::Y,
             ascii: false,

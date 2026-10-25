@@ -746,6 +746,26 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
         let parent = n.parent.and_then(|p| model_ids.get(p).copied()).unwrap_or(0);
         connections.children.push(Record::leaf("C", vec![Prop::Str("OO".into()), Prop::I64(model_ids[i]), Prop::I64(parent)]));
     }
+    // Display layers: a CollectionExclusive each, its models connected to it.
+    let mut n_display = 0;
+    for l in &doc.layers {
+        let lid = ids.next();
+        n_display += 1;
+        let c = l.color;
+        objects.children.push(
+            Record::with("CollectionExclusive", vec![Prop::I64(lid), object_name(&l.name, "DisplayLayer"), Prop::Str("DisplayLayer".into())]).child(
+                Record::new("Properties70")
+                    .child(p("Color", "ColorRGB", "Color", "", vec![Prop::F64(c.x as f64), Prop::F64(c.y as f64), Prop::F64(c.z as f64)]))
+                    .child(p("Show", "bool", "", "", vec![Prop::I32(l.visible as i32)]))
+                    .child(p("Freeze", "bool", "", "", vec![Prop::I32(l.frozen as i32)])),
+            ),
+        );
+        for ni in &l.nodes {
+            if let Some(mid) = model_ids.get(*ni) {
+                connections.children.push(Record::leaf("C", vec![Prop::Str("OO".into()), Prop::I64(*mid), Prop::I64(lid)]));
+            }
+        }
+    }
     // The take: one stack, one base layer, T / R / S curve nodes per moving node.
     let (mut n_stack, mut n_layer, mut n_cnode, mut n_curve) = (0, 0, 0, 0);
     let mut take_name = String::new();
@@ -832,7 +852,7 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
     let object_type = |name: &str, count: i32| Record::with("ObjectType", vec![Prop::Str(name.into())]).child(Record::leaf("Count", vec![Prop::I32(count)]));
     let mut definitions = Record::new("Definitions")
         .child(Record::leaf("Version", vec![Prop::I32(100)]))
-        .child(Record::leaf("Count", vec![Prop::I32(1 + n_model + n_geom + n_mat + n_attr + n_deformer + n_pose + n_stack + n_layer + n_cnode + n_curve + n_texture + n_video + n_set + n_selnode)]))
+        .child(Record::leaf("Count", vec![Prop::I32(1 + n_model + n_geom + n_mat + n_attr + n_deformer + n_pose + n_stack + n_layer + n_cnode + n_curve + n_texture + n_video + n_set + n_selnode + n_display)]))
         .child(object_type("GlobalSettings", 1));
     for (name, count) in [
         ("Model", n_model),
@@ -849,6 +869,7 @@ pub fn write(doc: &FbxDocument, opts: &WriteOpts) -> Vec<u8> {
         ("AnimationCurve", n_curve),
         ("Collection", n_set),
         ("SelectionNode", n_selnode),
+        ("CollectionExclusive", n_display),
     ] {
         if count > 0 {
             definitions = definitions.child(object_type(name, count));

@@ -31,7 +31,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             ui.menu_button("File", |ui| {
                 use loom_commands::PendingFileAction as A;
                 if menu_button(ui, &app.state, "New", "New Scene").clicked() {
-                    app.request_file_action(A::New);
+                    app.new_scene();
                     ui.close_menu();
                 }
                 if ui.button("Reset").clicked() {
@@ -59,11 +59,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Save As...", "Save File As");
                 item(ui, app, "Save Copy As...", "Save File As Copy");
                 item(ui, app, "Save Incremental", "Save Incremental (+)");
+                cmd(ui, app, "Save Selected...", Command::SaveSelected { path: None });
+                cmd(ui, app, "Archive...", Command::ArchiveFile { path: None });
                 ui.separator();
                 item(ui, app, "Merge...", "Merge File");
                 item(ui, app, "Import...", "Import File");
                 item(ui, app, "Export...", "Export File");
                 item(ui, app, "Export Selected...", "Export Selected");
+                ui.separator();
+                cmd(ui, app, "Summary Info...", Command::SummaryInfo);
+                cmd(ui, app, "File Properties...", Command::FileProperties);
                 ui.separator();
                 if ui.button("Exit").clicked() {
                     app.request_file_action(A::Exit);
@@ -120,7 +125,15 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 cmd(ui, app, "Measure", Command::Measure);
             });
             ui.menu_button("Group", |ui| {
-                cmd(ui, app, "Group", Command::Group { name: None });
+                if menu_button(ui, &app.state, "Group...", "Group").clicked() {
+                    // The reference asks for the group name first.
+                    if app.state.selection.is_empty() {
+                        app.state.status_prompt = "select objects to group".into();
+                    } else {
+                        app.state.dialog = Some(loom_commands::Dialog::GroupName);
+                    }
+                    ui.close_menu();
+                }
                 cmd(ui, app, "Ungroup", Command::Ungroup);
                 ui.separator();
                 cmd(ui, app, "Open", Command::GroupOpen);
@@ -323,6 +336,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     item(ui, app, "Show Main Toolbar", "Show Main Toolbar Toggle");
                     item(ui, app, "Show Track Bar", "Show Track Bar Toggle");
                     item(ui, app, "Show Ribbon", "Show Ribbon Toggle");
+                    item(ui, app, "Show Layers Toolbar", "Show Layers Toolbar Toggle");
                 });
                 item(ui, app, "Lock UI Layout", "Lock User Interface Toggle");
                 ui.separator();

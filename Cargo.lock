@@ -3104,6 +3104,8 @@ dependencies = [
 name = "loom_commands"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
+ "flate2",
  "glam",
  "image",
  "loom_fbx",

@@ -88,9 +88,10 @@ fn fbx_axis_units_format_and_triangulate() {
     export(&mut s, &f);
     let i = loom_fbx::info(&std::fs::read(&f).unwrap()).unwrap();
     assert_eq!(i.up_axis, "Y-up");
-    assert!((i.unit_metres - 0.01).abs() < 1e-9, "centimetres by default: {}", i.unit_metres);
+    assert!((i.unit_metres - 0.0254).abs() < 1e-9, "Automatic by default: the system unit (inches): {}", i.unit_metres);
     opt(&mut s, "fbx_export", "up_axis", json!("Z-up"));
-    opt(&mut s, "fbx_export", "units_automatic", json!(true));
+    opt(&mut s, "fbx_export", "units_automatic", json!(false));
+    opt(&mut s, "fbx_export", "units", json!("Centimeters"));
     opt(&mut s, "fbx_export", "ascii", json!(true));
     opt(&mut s, "fbx_export", "version", json!(7500));
     opt(&mut s, "fbx_export", "triangulate", json!(true));
@@ -98,7 +99,7 @@ fn fbx_axis_units_format_and_triangulate() {
     let bytes = std::fs::read(&f).unwrap();
     let i = loom_fbx::info(&bytes).unwrap();
     assert_eq!((i.up_axis.as_str(), i.ascii, i.version), ("Z-up", true, 7500));
-    assert!((i.unit_metres - 0.0254).abs() < 1e-9, "Automatic: the system unit (inches): {}", i.unit_metres);
+    assert!((i.unit_metres - 0.01).abs() < 1e-9, "converted to centimetres: {}", i.unit_metres);
     execute(&mut s, Command::NewScene).unwrap();
     import(&mut s, &f);
     let n = s.scene.nodes().next().unwrap();
@@ -238,7 +239,8 @@ fn fbx_import_bones_as_dummies_and_units_override() {
     assert!(s.scene.nodes().any(|n| matches!(n.object, ObjectKind::Dummy { .. })));
     let skinned = s.scene.nodes().find(|n| n.modifiers.iter().any(|m| matches!(m.modifier, Modifier::Skin(_)))).expect("the skin still binds to the dummies");
     let _ = skinned;
-    // Units: the file's numbers read as metres make the box 100 times bigger than centimetres would.
+    // Units: the file's numbers read as metres make the box 100 times bigger than centimetres would
+    // (the file is in inches: Automatic writes the system unit).
     let mut a = AppState::new();
     boxed(&mut a, 0.0);
     let f = d.join("u.fbx");
@@ -258,8 +260,8 @@ fn fbx_import_bones_as_dummies_and_units_override() {
     import(&mut m, &f);
     assert!((size(&cm) / size(&m) - 100.0).abs() < 1e-2, "{} vs {}", size(&cm), size(&m));
     let info = execute(&mut m, Command::FbxFileInfo { path: f.to_string_lossy().into_owned() }).unwrap();
-    assert_eq!(info["file_units"], "Centimeters");
-    assert!((info["scale_factor"].as_f64().unwrap() - 0.01).abs() < 1e-9, "{info}");
+    assert_eq!(info["file_units"], "Inches");
+    assert!((info["scale_factor"].as_f64().unwrap() - 0.0254).abs() < 1e-9, "{info}");
     assert_eq!(info["file_axis_direction"], "Y-up");
 }
 

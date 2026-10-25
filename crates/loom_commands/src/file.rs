@@ -141,6 +141,61 @@ pub struct SceneSettings {
     pub home_view: Option<crate::state::SavedView>,
     /// Views > Save Active View slots.
     pub saved_views: BTreeMap<String, crate::state::SavedView>,
+    /// File > File Properties and the Summary Info description.
+    pub file_properties: FileProperties,
+}
+
+/// File > File Properties: the Summary fields, the Summary Info
+/// description and the Custom name / value list.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FileProperties {
+    pub title: String,
+    pub subject: String,
+    pub author: String,
+    pub manager: String,
+    pub company: String,
+    pub category: String,
+    pub keywords: String,
+    pub comments: String,
+    /// Summary Info > Description.
+    pub description: String,
+    pub custom: BTreeMap<String, String>,
+}
+
+impl FileProperties {
+    /// The Summary tab fields in dialog order (plus Description).
+    pub const FIELDS: [&'static str; 9] = ["Title", "Subject", "Author", "Manager", "Company", "Category", "Keywords", "Comments", "Description"];
+
+    pub fn field_mut(&mut self, name: &str) -> Option<&mut String> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "title" => &mut self.title,
+            "subject" => &mut self.subject,
+            "author" => &mut self.author,
+            "manager" => &mut self.manager,
+            "company" => &mut self.company,
+            "category" => &mut self.category,
+            "keywords" => &mut self.keywords,
+            "comments" => &mut self.comments,
+            "description" => &mut self.description,
+            _ => return None,
+        })
+    }
+
+    pub fn field(&self, name: &str) -> Option<&str> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "title" => &self.title,
+            "subject" => &self.subject,
+            "author" => &self.author,
+            "manager" => &self.manager,
+            "company" => &self.company,
+            "category" => &self.category,
+            "keywords" => &self.keywords,
+            "comments" => &self.comments,
+            "description" => &self.description,
+            _ => return None,
+        })
+    }
 }
 
 impl Default for SceneSettings {
@@ -170,6 +225,7 @@ impl SceneSettings {
             display: s.display.clone(),
             home_view: s.home_view,
             saved_views: s.saved_views.clone(),
+            file_properties: s.file_properties.clone(),
         }
     }
 
@@ -199,6 +255,7 @@ impl SceneSettings {
         s.display = self.display.clone();
         s.home_view = self.home_view;
         s.saved_views = self.saved_views.clone();
+        s.file_properties = self.file_properties.clone();
         s.scene.set_time(s.current_frame as f32);
     }
 }
@@ -289,12 +346,24 @@ pub fn summary(doc: &Document) -> Value {
     })
 }
 
+/// The Duplicate Name answer for one merged object whose name the scene
+/// already has: `merge` (keep both names), `skip`, `delete_old` (the scene's
+/// objects of that name go), `rename` (to `new_name`) or `auto_rename`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MergeDuplicate {
+    pub name: String,
+    pub action: String,
+    #[serde(default)]
+    pub new_name: Option<String>,
+}
+
 /// Merges `doc`'s nodes (all, or those named in `names`) into the scene as
-/// one undo entry: fresh ids, references remapped, colliding names renamed,
-/// parents outside the set dropped (world transform kept), instances of
-/// nodes outside the set turned into copies, merged nodes on the current
-/// layer. Returns the new ids.
-pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, label: &str) -> Result<Vec<NodeId>, String> {
+/// one undo entry: fresh ids, references remapped, parents outside the set
+/// dropped (world transform kept), instances of nodes outside the set
+/// turned into copies, layers kept by name (created when the scene lacks
+/// them). A name the scene already has follows its answer in `duplicates`
+/// (auto-renamed without one). Returns the new ids.
+pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], label: &str) -> Result<Vec<NodeId>, String> {
     let src = &doc.scene;
     let mut chosen: Vec<NodeId> = match names {
         None => src.nodes().map(|n| n.id).collect(),
@@ -310,20 +379,66 @@ pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, lab
     if chosen.is_empty() {
         return Err("nothing to merge".into());
     }
+    for d in duplicates {
+        if !matches!(d.action.as_str(), "merge" | "skip" | "delete_old" | "rename" | "auto_rename") {
+            return Err(format!("unknown duplicate-name answer {:?} (merge / skip / delete_old / rename / auto_rename)", d.action));
+        }
+    }
+    let answer = |name: &str| duplicates.iter().find(|d| d.name == name);
+    let in_scene: std::collections::BTreeSet<String> = state.scene.nodes().map(|n| n.name.clone()).collect();
+    // Skipped objects stay behind.
+    chosen.retain(|id| {
+        let name = &src.node(*id).expect("chosen from the file").name;
+        !(in_scene.contains(name) && answer(name).is_some_and(|d| d.action == "skip"))
+    });
+    if chosen.is_empty() {
+        return Ok(Vec::new());
+    }
     // Parents before children, so Scene::add_node sees the parent.
     chosen.sort_by_key(|id| (src.depth(*id), id.0));
     chosen.dedup();
+    let mut changes = Vec::with_capacity(chosen.len() + 1);
+    // Layers by name: reuse the scene's, create the missing ones.
+    let mut layers = state.scene.layers.clone();
+    let mut layer_map: BTreeMap<u32, u32> = BTreeMap::new();
+    for id in &chosen {
+        let l = src.node(*id).expect("chosen from the file").layer;
+        if layer_map.contains_key(&l) {
+            continue;
+        }
+        let to = match src.layer(l) {
+            None => state.scene.current_layer,
+            Some(sl) => match layers.iter().find(|x| x.name == sl.name) {
+                Some(x) => x.id,
+                None => {
+                    let nid = layers.iter().map(|x| x.id + 1).max().unwrap_or(1);
+                    let mut nl = sl.clone();
+                    nl.id = nid;
+                    layers.push(nl);
+                    nid
+                }
+            },
+        };
+        layer_map.insert(l, to);
+    }
+    if layers != state.scene.layers {
+        changes.push(Change::SetLayers { before: (state.scene.layers.clone(), state.scene.current_layer), after: (layers, state.scene.current_layer) });
+    }
+    // Delete Old: the scene's objects of that name go first (children first).
+    let merged_names: std::collections::BTreeSet<&str> = chosen.iter().filter_map(|c| src.node(*c)).map(|n| n.name.as_str()).collect();
+    let mut old: Vec<NodeId> = state.scene.nodes().filter(|n| merged_names.contains(n.name.as_str()) && answer(&n.name).is_some_and(|d| d.action == "delete_old")).map(|n| n.id).collect();
+    old.sort_by_key(|id| std::cmp::Reverse(state.scene.depth(*id)));
+    changes.extend(old.iter().map(|id| Change::RemoveNode(*id)));
     let first = state.scene.next_id();
     let map: BTreeMap<NodeId, NodeId> = chosen.iter().enumerate().map(|(i, id)| (*id, NodeId(first + i as u64))).collect();
     let remap = |id: NodeId| map.get(&id).copied();
-    let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().map(|n| n.name.clone()).collect();
-    let mut changes = Vec::with_capacity(chosen.len());
+    let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().filter(|n| !old.contains(&n.id)).map(|n| n.name.clone()).collect();
     let mut ids = Vec::with_capacity(chosen.len());
-    for old in &chosen {
-        let mut node = src.node(*old).expect("chosen from the file").clone();
+    for old_id in &chosen {
+        let mut node = src.node(*old_id).expect("chosen from the file").clone();
         // A parent left behind: keep the world transform.
         if node.parent.is_some_and(|p| !map.contains_key(&p)) {
-            node.transform = loom_scene::Transform::from_matrix(src.world_matrix(*old));
+            node.transform = loom_scene::Transform::from_matrix(src.world_matrix(*old_id));
         }
         // An instance whose source stays behind becomes a copy with the resolved stack.
         if node.instance_of.is_some_and(|s| !map.contains_key(&s)) {
@@ -331,25 +446,37 @@ pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, lab
         }
         for (i, slot) in node.modifiers.iter_mut().enumerate() {
             if slot.instance_of.is_some_and(|(s, _)| !map.contains_key(&s)) {
-                if let Some(m) = src.resolved_modifier(*old, i) {
+                if let Some(m) = src.resolved_modifier(*old_id, i) {
                     slot.modifier = m;
                 }
                 slot.instance_of = None;
             }
         }
         node.remap_ids(&remap);
-        node.layer = state.scene.current_layer;
-        if taken.contains(&node.name) {
-            let base = node.name.trim_end_matches(|c: char| c.is_ascii_digit()).to_owned();
-            let base = if base.is_empty() { node.name.clone() } else { base };
-            let mut n = 1;
-            node.name = loop {
-                let candidate = format!("{base}{n:03}");
-                if !taken.contains(&candidate) {
-                    break candidate;
+        node.layer = layer_map.get(&node.layer).copied().unwrap_or(state.scene.current_layer);
+        let action = if in_scene.contains(&node.name) { answer(&node.name).map(|d| d.action.as_str()).unwrap_or("auto_rename") } else { "auto_rename" };
+        match action {
+            "merge" | "delete_old" => {}
+            "rename" => {
+                let to = answer(&node.name).and_then(|d| d.new_name.clone()).map(|n| n.trim().to_owned()).unwrap_or_default();
+                if to.is_empty() || taken.contains(&to) {
+                    return Err(format!("{to:?} is not a free name for {:?}", node.name));
                 }
-                n += 1;
-            };
+                node.name = to;
+            }
+            _ if taken.contains(&node.name) => {
+                let base = node.name.trim_end_matches(|c: char| c.is_ascii_digit()).to_owned();
+                let base = if base.is_empty() { node.name.clone() } else { base };
+                let mut n = 1;
+                node.name = loop {
+                    let candidate = format!("{base}{n:03}");
+                    if !taken.contains(&candidate) {
+                        break candidate;
+                    }
+                    n += 1;
+                };
+            }
+            _ => {}
         }
         taken.insert(node.name.clone());
         ids.push(node.id);

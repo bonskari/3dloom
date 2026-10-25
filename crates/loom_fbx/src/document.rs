@@ -21,7 +21,21 @@ pub struct FbxDocument {
     pub selection_sets: Vec<(String, Vec<usize>)>,
     /// (node, preview levels, render levels): a mesh written as the cage of a smooth surface.
     pub subdivision: Vec<(usize, u32, u32)>,
+    /// Display layers (the Layer Manager's layers).
+    pub layers: Vec<FbxLayer>,
 }
+
+/// A display layer: name, colour (0-1), Show / Freeze and its nodes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FbxLayer {
+    pub name: String,
+    pub color: Vec3,
+    pub visible: bool,
+    pub frozen: bool,
+    /// Indices into `FbxDocument::nodes`.
+    pub nodes: Vec<usize>,
+}
+
 
 /// A material as FBX carries it (a Phong or Lambert surface). Colours 0–1.
 #[derive(Debug, Clone, PartialEq)]

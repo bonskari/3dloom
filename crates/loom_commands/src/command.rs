@@ -84,6 +84,11 @@ impl ArgSchema for Value {
         json!({})
     }
 }
+impl ArgSchema for crate::file::MergeDuplicate {
+    fn schema() -> Value {
+        json!({"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["merge","skip","delete_old","rename","auto_rename"]},"new_name":{"type":"string"}},"required":["name","action"]})
+    }
+}
 impl<T: ArgSchema> ArgSchema for Option<T> {
     fn schema() -> Value {
         T::schema()
@@ -649,7 +654,7 @@ commands! {
     DeleteExchangePreset => "Delete Exchange Preset", Loom, "Delete a user preset of an FBX / OBJ options dialog." { dialog: String, name: String };
     FbxFileInfo => "FBX File Info", Loom, "The FBX Importer's Statistics for a file: name, folder, version, creator, creation time, axis and units of the file and the system, the units scale factor, frame rates, takes and element counts." { path: String };
     ObjFileInfo => "OBJ File Info", Loom, "The OBJ Importer's file info: the file's objects with their face counts, the total face count and which features it holds (normals, texture coordinates, smoothing groups, materials)." { path: String };
-    MergeFile => "Merge File", MainUI, "Merge objects from another .loom file: all of them, or those in `names`; fresh ids, colliding names renamed, one undo entry. Without `path` the Merge dialog shows." { path: Option<String>, names: Option<Vec<String>> };
+    MergeFile => "Merge File", MainUI, "Merge objects from another .loom file: all of them, or those in `names`; fresh ids, objects keep their layers (by name, created when missing), one undo entry. A name the scene already has follows its Duplicate Name answer in `duplicates` (merge keeps both, skip, delete_old, rename to `new_name`, auto_rename = the default). Without `path` the Merge dialog shows." { path: Option<String>, names: Option<Vec<String>>, duplicates: Option<Vec<crate::file::MergeDuplicate>> };
     SaveChangesReply => "Save Changes Reply", Loom, "Answer the open Save Changes prompt: Yes saves (Save As when untitled) and then runs the pending New / Reset / Open / Exit, No runs it without saving, Cancel keeps the scene." { reply: crate::command::SaveChangesReply };
     AutoBackupNow => "Auto Backup Now", Loom, "Write the next Auto Backup file (autoback/<name>NN.loom) now, regardless of the interval.";
     SetAutoBackupName => "Set Auto Backup Name", Loom, "Preferences > Files > Auto Backup File Name." { name: String };
@@ -816,6 +821,25 @@ commands! {
     MoveToLayer => "Move To Layer", Loom, "Move the selected objects onto a layer." { layer: u32 };
     AddSelectionToCurrentLayer => "Add Selection To Current Layer", Loom, "Layer Manager > Add Selection to Current Layer.";
     SelectLayerObjects => "Select Layer Objects", Loom, "Select every selectable object on a layer." { layer: u32 };
+    SetCurrentLayerToSelection => "Set Current Layer to Selection's Layer", Loom, "Layers toolbar: the layer of the selected objects becomes current (refused when they are on different layers).";
+    SetLayerColor => "Set Layer Color", Loom, "Layer Manager > Color: the layer colour (0-255 RGB); objects whose colour is By Layer show it." { layer: u32, rgb: [u8; 3] };
+    SetLayerRenderable => "Set Layer Renderable", Loom, "Layer Manager > Render: the layer's Renderable; off, renders leave out its objects whose Rendering Control is By Layer." { layer: u32, on: bool };
+    SetAllLayersHidden => "Set All Layers Hidden", Loom, "Layer Manager > Hide/Unhide All Layers." { on: bool };
+    SetAllLayersFrozen => "Set All Layers Frozen", Loom, "Layer Manager > Freeze/Unfreeze All Layers." { on: bool };
+    SetDisplayByLayer => "Set Display By Layer", Loom, "Object Properties > Display Properties By Layer / By Object for the selection: By Layer draws with the layer's display properties." { on: bool };
+    SetRenderByLayer => "Set Render By Layer", Loom, "Object Properties > Rendering Control By Layer / By Object for the selection: By Layer renders with the layer's rendering control (Renderable, shadows, camera visibility)." { on: bool };
+    LayerProperties => "Layer Properties", Loom, "Layer Manager: open the Layer Properties dialog of a layer." { layer: u32 };
+    SetLayerDisplayProperty => "Set Layer Display Property", Loom, "Layer Properties > Display Properties checkbox by name (as Set Display Property) for objects set By Layer." { layer: u32, name: String, value: bool };
+    SetLayerRenderProperty => "Set Layer Render Property", Loom, "Layer Properties > Rendering Control checkbox by name (Renderable, Inherit Visibility, Visible to Camera, Receive Shadows, Cast Shadows) for objects set By Layer." { layer: u32, name: String, value: bool };
+    SetColorByLayer => "Set Color By Layer", Loom, "Object Color > By Layer / By Object for the selected objects: By Layer shows the layer's colour." { on: bool };
+    ShowLayersToolbarToggle => "Show Layers Toolbar Toggle", Loom, "Customize > Show UI > Show Layers Toolbar (layer list, New Layer, Add Selection to Current Layer, Select Objects in Current Layer, Set Current Layer to Selection's Layer).";
+    NewSceneKeep => "New Scene Keep", Loom, "File > New > New Scene dialog: `objects_and_hierarchy` keeps the objects and their links but removes animation keys; `objects` also unlinks them; `all` is New Scene. The scene becomes untitled." { keep: String };
+    SaveSelected => "Save Selected", Loom, "File > Save As > Save Selected: the selected objects with their ancestors (and group members) to a new .loom; the current file stays. Without `path` the dialog shows." { path: Option<String> };
+    ArchiveFile => "Archive", Loom, "File > Save As > Archive: a .zip of the scene file and every bitmap it uses, or with a .txt path a list of those files. Without `path` the dialog shows." { path: Option<String> };
+    SummaryInfo => "Summary Info", Loom, "File > Summary Info: open the dialog with scene totals, the description and the materials list.";
+    FileProperties => "File Properties", Loom, "File > File Properties: open the Summary / Contents / Custom dialog.";
+    SetFileProperty => "Set File Property", Loom, "File Properties > Summary field (Title, Subject, Author, Manager, Company, Category, Keywords, Comments) or Summary Info > Description; saved with the scene." { name: String, value: String };
+    SetCustomFileProperty => "Set Custom File Property", Loom, "File Properties > Custom: add or change a named property; no `value` deletes it." { name: String, value: Option<String> };
     ShowRibbonToggle => "Show Ribbon Toggle", Loom, "Show or hide the Graphite Modeling Tools ribbon (Main Toolbar button, Customize > Show UI > Show Ribbon).";
     LockUserInterfaceToggle => "Lock User Interface Toggle", MainUI, "Lock or unlock the UI layout (Alt+0).";
     ExpertModeToggle => "Expert Mode Toggle", MainUI, "Toggle Expert Mode: only the viewports are shown (Ctrl+X).";
@@ -1587,6 +1611,7 @@ commands! {
     SetPivot => "Set Pivot", Loom, "Set a node's pivot (node transform) without moving the mesh." { id: u64, position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]> };
     SetNodeLocks => "Set Node Locks", Loom, "Hierarchy > Link Info > Locks: per-axis move/rotate/scale locks (true = locked)." { id: u64, move_axes: Option<[bool; 3]>, rotate_axes: Option<[bool; 3]>, scale_axes: Option<[bool; 3]> };
     SetNodeInherit => "Set Node Inherit", Loom, "Hierarchy > Link Info > Inherit: which parent transform components the node inherits (true = inherit)." { id: u64, move_axes: Option<[bool; 3]>, rotate_axes: Option<[bool; 3]>, scale_axes: Option<[bool; 3]> };
+    SetSelectionDisplayProperty => "Set Selection Display Property", Loom, "Display > Display Properties checkbox by name on every selected object, one undo step." { name: String, value: bool };
     SetDisplayProperty => "Set Display Property", Loom, "Display > Display Properties / Link Display checkbox by name: See-Through, Display as Box, Backface Cull, Edges Only, Vertex Ticks, Trajectory, Ignore Extents, Show Frozen in Gray, Vertex Color, Vertex Color Shaded, Display Links, Link Replaces Object." { id: u64, name: String, value: bool };
     SetRenderProperty => "Set Render Property", Loom, "Object Properties > Rendering Control checkbox by name for the selection: Renderable, Inherit Visibility, Visible to Camera, Receive Shadows, Cast Shadows." { name: String, value: bool };
     SetObjectVisibility => "Set Object Visibility", Loom, "Object Properties > Rendering Control > Visibility (0–1) for the selection: sets (and under Auto Key keys) the visibility track." { value: f32 };

@@ -32,7 +32,8 @@ pub enum Gpu {
 /// Object Properties > Rendering Control of node `id` for the renderer.
 fn render_flags(scene: &loom_scene::Scene, id: loom_scene::NodeId) -> loom_bevy::ObjectFlags {
     let Some(n) = scene.node(id) else { return Default::default() };
-    loom_bevy::ObjectFlags { cast_shadows: n.render.cast_shadows, receive_shadows: n.render.receive_shadows, visible_to_camera: n.render.visible_to_camera, visibility: scene.render_visibility(id) }
+    let r = scene.render_of(n);
+    loom_bevy::ObjectFlags { cast_shadows: r.cast_shadows, receive_shadows: r.receive_shadows, visible_to_camera: r.visible_to_camera, visibility: scene.render_visibility(id) }
 }
 
 /// Output pixels per bucket side.
@@ -173,9 +174,9 @@ impl LoomApp {
             .iter()
             .enumerate()
             .filter(|(_, (id, _))| !self.is_light_proxy(*id))
-            .filter_map(|(i, (id, _))| self.state.scene.node(*id).map(|n| (id.0, i, n.wire_color, Self::renderable(&n.object) && n.render.renderable)))
+            .filter_map(|(i, (id, _))| self.state.scene.node(*id).map(|n| (id.0, i, self.state.scene.display_color(n), Self::renderable(&n.object) && self.state.scene.is_renderable(n))))
             .collect();
-        let lights = loom_scene::light::scene_lights(&self.state.scene, |n| n.render.renderable);
+        let lights = loom_scene::light::scene_lights(&self.state.scene, |n| self.state.scene.is_renderable(n));
         let display = self.world_display.clone();
         let scene = &self.state.scene;
         let Gpu::Running(b) = &mut self.gpu else { return };
@@ -276,7 +277,7 @@ impl LoomApp {
         let scene = &self.state.scene;
         let hidden_objects: Vec<loom_bevy::SceneObject> = hidden
             .iter()
-            .filter_map(|(id, mesh)| scene.node(*id).map(|n| loom_bevy::SceneObject { id: id.0, mesh, wire_color: n.wire_color, material: scene.node_material(*id), renderable: n.render.renderable, flags: render_flags(scene, *id) }))
+            .filter_map(|(id, mesh)| scene.node(*id).map(|n| loom_bevy::SceneObject { id: id.0, mesh, wire_color: n.wire_color, material: scene.node_material(*id), renderable: scene.is_renderable(n), flags: render_flags(scene, *id) }))
             .collect();
         let selected_only = (s.area == RenderArea::Selected).then(|| req.selection.iter().map(|n| n.0).collect());
         let options = loom_bevy::RenderOptions {

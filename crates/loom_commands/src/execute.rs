@@ -290,7 +290,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let ids: Vec<NodeId> = state.selection.iter().copied().collect();
             export_any(state, &ids, std::path::Path::new(&path))
         }
-        C::MergeFile { path, names } => {
+        C::MergeFile { path, names, duplicates } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::MergeFile);
                 return Ok(json!({ "dialog": "MergeFile" }));
@@ -298,7 +298,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let path = std::path::PathBuf::from(path);
             let doc = crate::file::read(&path)?;
             let label = format!("Merge {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-            let ids = crate::file::merge(state, &doc, names.as_deref(), &label)?;
+            let ids = crate::file::merge(state, &doc, names.as_deref(), duplicates.as_deref().unwrap_or_default(), &label)?;
             state.selection_mode = SelectionMode::Object;
             Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
         }
@@ -518,7 +518,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::Group { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
         | C::CreateLayer { .. } | C::DeleteLayer { .. } | C::RenameLayer { .. } | C::SetCurrentLayer { .. } | C::SetLayerHidden { .. } | C::SetLayerFrozen { .. }
-        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } => crate::groups::execute(state, cmd),
+        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } | C::SetCurrentLayerToSelection | C::SetLayerColor { .. }
+        | C::SetLayerRenderable { .. } | C::SetAllLayersHidden { .. } | C::SetAllLayersFrozen { .. } | C::SetColorByLayer { .. }
+        | C::SetDisplayByLayer { .. } | C::SetRenderByLayer { .. } | C::LayerProperties { .. } | C::SetLayerDisplayProperty { .. } | C::SetLayerRenderProperty { .. } => crate::groups::execute(state, cmd),
+        C::NewSceneKeep { .. } | C::SaveSelected { .. } | C::ArchiveFile { .. } | C::SummaryInfo | C::FileProperties | C::SetFileProperty { .. } | C::SetCustomFileProperty { .. } => crate::scene_file::execute(state, cmd),
+        C::ShowLayersToolbarToggle => toggle(&mut state.show_layers_toolbar, "show_layers_toolbar"),
 
         C::SelectObject => set_tool(state, Tool::Select),
         C::SelectAndMove => set_tool(state, Tool::Move),
@@ -869,7 +873,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        C::SelectByName => open_by_name(state, DialogPurpose::Select),
+        C::SelectByName => {
+            // The dialog follows the active pick mode, as Select Parent / Attach To Group.
+            let purpose = match state.pick_mode {
+                Some(PickMode::Link) => DialogPurpose::LinkParent,
+                Some(PickMode::GroupAttach) => DialogPurpose::GroupAttach,
+                _ => DialogPurpose::Select,
+            };
+            open_by_name(state, purpose)
+        }
         C::ConfigureViewports { panel } => {
             state.dialog = Some(Dialog::ViewportConfiguration);
             state.config_panel = panel;
@@ -2322,6 +2334,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             })?;
             Ok(json!({}))
         }
+        C::SetSelectionDisplayProperty { name, value } => {
+            if loom_scene::DisplayProps::default().get(&name).is_none() {
+                return Err(format!("no display property `{name}`"));
+            }
+            let ids = selected_ids(state);
+            props_change(state, &name, ids, |p, _| {
+                p.display.set(&name, value);
+            })?;
+            Ok(json!({}))
+        }
         C::SetDisplayProperty { id, name, value } => {
             if loom_scene::DisplayProps::default().get(&name).is_none() {
                 return Err(format!("no display property `{name}`"));
@@ -3341,7 +3363,12 @@ pub fn file_action(state: &mut AppState, action: crate::viewport::PendingFileAct
     use Command as C;
     match action {
         A::New => execute(state, C::NewScene),
-        A::Reset => execute(state, C::ResetFile),
+        A::Reset => {
+            // After the save prompt, the reference asks once more.
+            state.dialog = Some(crate::viewport::Dialog::ConfirmReset);
+            Ok(json!({ "dialog": "ConfirmReset" }))
+        }
+        A::NewKeeping(keep) => execute(state, C::NewSceneKeep { keep: keep.arg().into() }),
         A::Open => execute(state, C::OpenFile { path: None }),
         A::OpenRecent(i) => {
             let path = state.recent_files.get(i).ok_or_else(|| format!("no recent file {}", i + 1))?.to_string_lossy().into_owned();
