@@ -810,7 +810,7 @@ fn standard_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                 }
                 ui.horizontal(|ui| {
                     map_button(ui, app, channel, map.as_ref(), false);
-                    if map.is_some() && ui.small_button("✕").on_hover_text("Clear the map").clicked() {
+                    if map.is_some() && ui.small_button(crate::icons::CLEAR).on_hover_text("Clear the map").clicked() {
                         let _ = app.dispatch(Command::SetMaterialMap { slot: None, map: (*channel).into(), path: None, amount: None });
                     }
                 });

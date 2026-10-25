@@ -7,6 +7,6 @@ pub mod document;
 pub mod read;
 pub mod write;
 
-pub use document::{FbxAnim, FbxBlendShape, FbxDocument, FbxKind, FbxNode, FbxSkin, FbxTake, WriteAxes, WriteOpts};
+pub use document::{FbxAnim, FbxBlendShape, FbxDocument, FbxKind, FbxLight, FbxNode, FbxSkin, FbxTake, WriteAxes, WriteOpts};
 pub use read::read;
 pub use write::{material_names, write, write_raw_faces};

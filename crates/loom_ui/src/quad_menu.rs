@@ -323,7 +323,7 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, q: &Quadrant, close: &mut b
                 }
             }
             Action::Submenu(children) => {
-                ui.menu_button(format!("{}  ▸", item.label), |ui| {
+                ui.menu_button(format!("{}  {}", item.label, crate::icons::SUBMENU), |ui| {
                     ui.set_min_width(170.0);
                     for c in children {
                         if let Action::Command(cmd) = &c.action {

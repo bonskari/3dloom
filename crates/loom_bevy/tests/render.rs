@@ -79,6 +79,108 @@ fn a_view_follows_its_camera() {
     assert_eq!(img.get_pixel(1, 1).0[3], 0);
 }
 
+/// Renders `camera` with `options` in `n` x `n` buckets, as the UI does.
+fn bucketed(r: &mut BevyRenderer, camera: &ViewCamera, (w, h): (u32, u32), options: loom_bevy::RenderOptions, n: u32) -> image::RgbaImage {
+    r.begin_render(options);
+    let mut out = image::RgbaImage::new(w, h);
+    let (tw, th) = (w / n, h / n);
+    for by in 0..n {
+        for bx in 0..n {
+            let sub = [(bx * tw) as f32 / w as f32, (by * th) as f32 / h as f32, ((bx + 1) * tw) as f32 / w as f32, ((by + 1) * th) as f32 / h as f32];
+            for _ in 0..if bx + by == 0 { 4 } else { 1 } {
+                r.set_render_bucket(camera, w as f32 / h as f32, sub, [tw, th]).unwrap();
+                r.update();
+            }
+            image::imageops::replace(&mut out, &r.read_render().unwrap(), (bx * tw) as i64, (by * th) as i64);
+        }
+    }
+    r.end_render();
+    out
+}
+
+/// A red spot light straight down onto a white plane: the scene light
+/// replaces the default key light and lights only inside its cone (also
+/// in a bucketed render); a box under it shadows the plane unless it is
+/// excluded from shadow casting or Render Setup turns shadows off; the
+/// Render Setup ambient colour adds to the scene lights.
+#[test]
+fn a_red_spot_lights_a_plane_only_inside_its_cone() {
+    let Some((adapter, device, queue)) = gpu() else {
+        eprintln!("a_red_spot_lights_a_plane_only_inside_its_cone: no GPU adapter, skipped");
+        return;
+    };
+    use loom_bevy::RenderOptions;
+    use loom_scene::light::{default_lights, Emitter, Exclusion};
+    let mut r = BevyRenderer::new(adapter, device, queue);
+    let plane = loom_mesh::plane_segmented(400.0, 400.0, 1, 1);
+    let mut blocker = loom_mesh::box_primitive(Vec3::splat(5.0));
+    let _ = loom_mesh::edit_ops::translate_mesh(&mut blocker, Vec3::new(0.0, 0.0, 50.0));
+    let objects = |with_box: bool| {
+        let mut v = vec![SceneObject { id: 1, mesh: &plane, wire_color: [255, 255, 255], surfaces: None, renderable: true }];
+        if with_box {
+            v.push(SceneObject { id: 2, mesh: &blocker, wire_color: [255, 255, 255], surfaces: None, renderable: true });
+        }
+        v
+    };
+    let mut spot = default_lights(1, Mat4::IDENTITY)[0].clone();
+    spot.id = loom_scene::NodeId(10);
+    spot.emitter = Emitter::Spot { hotspot: 30.0, falloff: 40.0 };
+    spot.position = Vec3::new(0.0, 0.0, 100.0);
+    spot.direction = Vec3::NEG_Z;
+    spot.color = Vec3::new(1.0, 0.0, 0.0);
+    spot.shadows = true;
+    // From the side, low enough to see the ground under the box.
+    let eye = Vec3::new(150.0, 0.0, 60.0);
+    let size = (160u32, 120u32);
+    let camera = ViewCamera { view: Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Z), projection: Mat4::perspective_rh(50f32.to_radians(), size.0 as f32 / size.1 as f32, 1.0, 2000.0) };
+    let pixel = |p: Vec3| {
+        let c = camera.projection * camera.view * p.extend(1.0);
+        let n = c.truncate() / c.w;
+        (((n.x + 1.0) * 0.5 * size.0 as f32) as u32, ((1.0 - n.y) * 0.5 * size.1 as f32) as u32)
+    };
+    let at = |img: &image::RgbaImage, p: Vec3| {
+        let (x, y) = pixel(p);
+        img.get_pixel(x, y).0
+    };
+    // No ambient light: what the spot lights is all there is.
+    let dark = || RenderOptions { ambient: [0.0; 3], ..Default::default() };
+    let (inside_p, outside_p) = (Vec3::new(0.0, 10.0, 0.0), Vec3::new(-20.0, 100.0, 0.0));
+
+    r.sync(&objects(false));
+    r.sync_lights(std::slice::from_ref(&spot));
+    assert!(!r.default_lighting(), "a scene light replaces the default lighting");
+    for buckets in [1, 4] {
+        let img = bucketed(&mut r, &camera, size, dark(), buckets);
+        let (inside, outside) = (at(&img, inside_p), at(&img, outside_p));
+        assert!(inside[0] > 80 && inside[1] < 30 && inside[2] < 30, "{buckets} buckets: red inside the cone: {inside:?}");
+        assert!(outside[0] < 15 && outside[1] < 15 && outside[2] < 15, "{buckets} buckets: dark outside the cone: {outside:?}");
+    }
+    // The Render Setup ambient colour adds to the scene lights.
+    let img = bucketed(&mut r, &camera, size, RenderOptions { ambient: [0.0, 0.0, 1.0], ..Default::default() }, 1);
+    let outside = at(&img, outside_p);
+    assert!(outside[2] > 40 && outside[0] < 15, "a blue ambient light outside the cone: {outside:?}");
+
+    // A box above the centre shadows it ...
+    r.sync(&objects(true));
+    r.sync_lights(std::slice::from_ref(&spot));
+    let under = at(&bucketed(&mut r, &camera, size, dark(), 1), Vec3::ZERO);
+    assert!(under[0] < 40, "the box shadows the centre: {under:?}");
+    // ... unless Render Setup turns shadows off ...
+    let under = at(&bucketed(&mut r, &camera, size, RenderOptions { shadows: false, ..dark() }, 1), Vec3::ZERO);
+    assert!(under[0] > 80, "no shadows with Render Setup shadows off: {under:?}");
+    // ... or the spot excludes the box from shadow casting.
+    spot.exclusion = Exclusion { include: false, scope: 1, nodes: vec![loom_scene::NodeId(2)] };
+    r.sync_lights(std::slice::from_ref(&spot));
+    let under = at(&bucketed(&mut r, &camera, size, dark(), 1), Vec3::ZERO);
+    assert!(under[0] > 80, "an excluded box casts no shadow: {under:?}");
+
+    // No lights again: the default lighting comes back.
+    r.sync_lights(&[]);
+    assert!(r.default_lighting());
+    let c = at(&bucketed(&mut r, &camera, size, dark(), 1), outside_p);
+    assert!(c[0] > 60 && c[1] > 60 && c[2] > 60, "the default key light lights the plane white: {c:?}");
+}
+
 fn render_buckets(r: &mut BevyRenderer, camera: &ViewCamera, size: u32, tile: u32) -> image::RgbaImage {
     r.begin_render(Default::default());
     let mut out = image::RgbaImage::new(size, size);

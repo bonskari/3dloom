@@ -26,6 +26,7 @@ pub mod max_io;
 pub mod rig;
 pub mod biped;
 pub mod camera;
+pub mod light;
 pub mod skin;
 pub mod morph;
 pub mod autosave;

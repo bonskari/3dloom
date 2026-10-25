@@ -38,7 +38,7 @@ pub fn mode_with_settings(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, hov
     if ui.selectable_label(on, label).on_hover_text(hover).clicked() {
         let _ = app.dispatch(mode);
     }
-    if ui.small_button("□").on_hover_text(format!("{label} Settings")).clicked() {
+    if ui.small_button(crate::icons::SETTINGS).on_hover_text(format!("{label} Settings")).clicked() {
         let _ = app.dispatch(settings);
     }
 }

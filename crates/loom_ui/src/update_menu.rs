@@ -46,7 +46,7 @@ fn title(news: bool) -> egui::WidgetText {
     let font = egui::FontId::proportional(14.0);
     job.append("Update", 0.0, egui::TextFormat { font_id: font.clone(), color: egui::Color32::from_gray(220), ..Default::default() });
     if news {
-        job.append(" ●", 0.0, egui::TextFormat { font_id: font, color: egui::Color32::from_rgb(230, 40, 40), ..Default::default() });
+        job.append(" •", 0.0, egui::TextFormat { font_id: font, color: egui::Color32::from_rgb(230, 40, 40), ..Default::default() });
     }
     job.into()
 }

@@ -35,7 +35,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             ui.add_enabled_ui(has, |ui| action(ui, app, "Bridge", "Bridge two selected polygons", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }));
-            if ui.small_button("□").on_hover_text("Bridge Settings").clicked() {
+            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Bridge Settings").clicked() {
                 let _ = app.dispatch(Command::BridgeSettings);
             }
             ui.add_enabled_ui(has, |ui| action(ui, app, "Flip", "Flip Normals of the selected polygons (whole elements)", Command::FlipNormals));

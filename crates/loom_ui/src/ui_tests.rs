@@ -7,6 +7,8 @@ use eframe::egui;
 use glam::Vec3;
 use loom_commands::{Command, PrimitiveKind, SelectionMode};
 
+mod transforms;
+mod icons;
 mod menus;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
@@ -26,11 +28,13 @@ struct Harness {
     commands: Vec<egui::OutputCommand>,
     /// Every texture upload so far.
     textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
+    /// Seconds between frames (a loaded machine draws fewer per second).
+    frame_time: f64,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new() };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0 };
         h.ctx.enable_accesskit();
         h.frames(3);
         h
@@ -50,7 +54,7 @@ impl Harness {
     }
 
     fn run(&mut self, events: Vec<egui::Event>) {
-        self.time += 1.0 / 30.0;
+        self.time += self.frame_time;
         let mut input = egui::RawInput { screen_rect: Some(self.screen), time: Some(self.time), modifiers: self.mods, events, ..Default::default() };
         // As eframe does before each frame.
         self.app.raw_input_hook(&self.ctx, &mut input);
@@ -75,11 +79,11 @@ impl Harness {
     /// Every text `label` painted last frame in the Command Panel, top to bottom.
     fn widgets_labelled(&self, label: &str) -> Vec<egui::Rect> {
         let panel = egui::containers::panel::PanelState::load(&self.ctx, egui::Id::new("command_panel")).expect("the Command Panel").rect;
-        self.texts(label).into_iter().filter(|r| panel.contains_rect(*r)).collect()
+        self.text_rects(label).into_iter().filter(|r| panel.contains_rect(*r)).collect()
     }
 
     /// Every text `label` painted last frame, top to bottom (its rect).
-    fn texts(&self, label: &str) -> Vec<egui::Rect> {
+    fn text_rects(&self, label: &str) -> Vec<egui::Rect> {
         fn find(shape: &egui::Shape, text: &str, out: &mut Vec<egui::Rect>) {
             match shape {
                 egui::Shape::Vec(v) => v.iter().for_each(|s| find(s, text, out)),
@@ -112,7 +116,7 @@ impl Harness {
 
     /// Clicks the one text `label` shown anywhere (a dialog's button).
     fn click_text_anywhere(&mut self, label: &str) {
-        let v = self.texts(label);
+        let v = self.text_rects(label);
         assert_eq!(v.len(), 1, "one {label:?} shown: {v:?}");
         self.click(v[0].center());
     }
@@ -1021,7 +1025,7 @@ fn inject(h: &mut Harness, events: serde_json::Value) {
     let mut q = crate::live::InputQueue::default();
     q.push(crate::live::parse_input(&events).unwrap());
     while !q.is_empty() {
-        h.time += 1.0 / 30.0;
+        h.time += h.frame_time;
         let mut input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(h.time), ..Default::default() };
         q.apply(&mut input);
         let app = &mut h.app;
@@ -1069,6 +1073,22 @@ fn injected_alt_drag_orbits_like_a_mouse() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [50.0, 0.0, 0.0], size: [10.0; 3] });
     inject(&mut h, serde_json::json!([{ "type": "modifiers", "mods": ["ctrl"] }, { "type": "key", "key": "A", "mods": ["ctrl"] }, { "type": "modifiers", "mods": [] }]));
     assert_eq!(h.app.state.selection.len(), 2, "Ctrl+A selects all");
+}
+
+#[test]
+fn middle_drag_pans_even_when_frames_come_slowly() {
+    // At 8 frames a second egui's smoothed pointer velocity stays zero (it
+    // wants three positions within 0.1 s), yet every frame the pointer moved.
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    h.frame_time = 1.0 / 8.0;
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center();
+    let target = h.app.state.active().camera.target;
+    h.drag_with(egui::PointerButton::Middle, c, c + egui::vec2(80.0, 40.0));
+    assert_ne!(h.app.state.active().camera.target, target, "a slow mouse drag pans");
+    let target = h.app.state.active().camera.target;
+    inject(&mut h, serde_json::json!([{ "type": "drag", "button": "middle", "from": [c.x, c.y], "to": [c.x + 80.0, c.y + 40.0] }]));
+    assert_ne!(h.app.state.active().camera.target, target, "so does a slow injected drag");
 }
 
 #[test]
@@ -1768,7 +1788,7 @@ fn show_end_result_starts_off_and_only_the_edited_object_shows_up_to_its_active_
     let mut h = Harness::new();
     let b = tapered_box(&mut h, 40.0);
     let a = tapered_box(&mut h, 0.0);
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     assert!(!h.app.state.show_end_result, "off by default");
     assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3, "the top entry is active: the whole stack shows");
     // The base object in the stack: A shows its box, B (not being edited) its end result.
@@ -1777,12 +1797,14 @@ fn show_end_result_starts_off_and_only_the_edited_object_shows_up_to_its_active_
     assert!((drawn_width(&h, a) - 10.0).abs() < 1e-3, "{}", drawn_width(&h, a));
     assert!((drawn_width(&h, b) - 20.0).abs() < 1e-3, "{}", drawn_width(&h, b));
     // Leaving the Modify panel shows the end result again.
-    h.click_widget("Create");
+    let cp = panel(&h, "command_panel");
+    let tab = *h.find_all(egui::accesskit::Role::Button, "Create").iter().find(|r| cp.contains(r.center())).expect("the Create tab");
+    h.click(tab.center());
     assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3);
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     assert!((drawn_width(&h, a) - 10.0).abs() < 1e-3);
     // Show End Result on: the whole stack.
-    h.click_widget("⏚");
+    h.click(h.find(egui::accesskit::Role::Button, "Show End Result On/Off Toggle").center());
     assert!(h.app.state.show_end_result);
     assert!((drawn_width(&h, a) - 20.0).abs() < 1e-3);
 }
@@ -1793,7 +1815,7 @@ fn smooth_modifier_has_32_smoothing_group_buttons() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     let id = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::AddModifier { name: "Smooth".into() });
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     let groups = |h: &Harness| match &h.app.state.scene.node(id).unwrap().modifiers[0].modifier {
         loom_scene::Modifier::Smooth { groups, .. } => groups.get(),
         _ => panic!("Smooth"),
@@ -1820,7 +1842,7 @@ fn shift_and_ctrl_drag_in_the_stack_copy_and_instance_a_modifier() {
     let id = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::AddModifier { name: "Bend".into() });
     h.cmd(Command::AddModifier { name: "Taper".into() });
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     let names = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
     let instances = |h: &Harness| h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.instance_of.map(|(_, i)| i)).collect::<Vec<_>>();
     // Shift-drag Taper down onto Bend: a copy below Bend.
@@ -1854,7 +1876,7 @@ fn base_parameter_change_under_edit_poly_asks_yes_hold_yes_no() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     let id = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::AddModifier { name: "Edit Poly".into() });
-    h.click_widget("Modify");
+    h.click(h.find(egui::accesskit::Role::Button, "Modify").center());
     h.click_widget("Box");
     let height = |h: &Harness| h.app.state.scene.node(id).unwrap().object.parameters().into_iter().find(|(n, _)| *n == "Height").unwrap().1;
     // The spinner's edit goes through dispatch, as a drag does.
@@ -1862,7 +1884,7 @@ fn base_parameter_change_under_edit_poly_asks_yes_hold_yes_no() {
     h.frames(2);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::TopologyWarning));
     assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "nothing changes before the answer");
-    assert_eq!(h.texts("Hold/Yes").len(), 1);
+    assert_eq!(h.text_centers("Hold/Yes").len(), 1);
     h.click_text_anywhere("No");
     assert_eq!(h.app.state.dialog, None);
     assert_eq!(height(&h), loom_scene::ParamValue::Float(10.0), "No keeps the old value");
@@ -2367,7 +2389,8 @@ fn modifier_stack_right_click_menus_close() {
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(2);
     let cp = panel(&h, "command_panel");
-    let bend = find_context_menu(&mut h, cp.min.x as i32..cp.max.x as i32, cp.min.y as i32..cp.max.y as i32, 6, |_| true);
+    // Start below the panel edge: the toolbar's Render flyout sits right above it.
+    let bend = find_context_menu(&mut h, cp.min.x as i32..cp.max.x as i32, cp.min.y as i32 + 8..cp.max.y as i32, 6, |_| true);
     // Rename, Delete, Off.
     let m = menus(&h)[0];
     h.click(menu_row(&h, m, 2));
@@ -2449,6 +2472,86 @@ fn status_bar_flyouts_close() {
     h.click(menu_row(&h, m, 0));
     assert!(menus(&h).is_empty(), "an item closes the flyout");
     assert_context_menu_closes(&mut h, p, "status bar flyout");
+}
+
+fn light_of(h: &Harness, id: loom_scene::NodeId) -> loom_scene::light::LightObject {
+    h.app.state.scene.node(id).unwrap().object.light().expect("a light").clone()
+}
+
+#[test]
+fn the_lights_category_buttons_start_light_creation() {
+    let mut h = Harness::new();
+    h.app.panel_tab = crate::Tab::Create;
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Lights", cp, 0.0);
+    click_text(&mut h, "Target Spot", cp, 0.0);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Light(loom_commands::light::LightKind::TargetSpot)));
+    click_text(&mut h, "Omni", cp, 0.0);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Light(loom_commands::light::LightKind::Omni)));
+}
+
+#[test]
+fn clicking_an_omni_places_it_and_its_icon_selects_it() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Light(loom_commands::light::LightKind::Omni));
+    let at = Vec3::new(20.0, -10.0, 0.0);
+    let p = h.screen_of(at);
+    h.click(p);
+    let id = *h.app.state.selection.iter().next().expect("the new omni is selected");
+    assert_eq!(light_of(&h, id).light_type, loom_scene::light::LightType::Omni);
+    assert!(h.app.state.scene.world_matrix(id).w_axis.truncate().distance(at) < 0.5);
+    h.app.create_kind = None;
+    h.cmd(Command::SelectNone);
+    h.click(p);
+    assert!(h.app.state.selection.contains(&id), "a click on the icon selects the light");
+}
+
+#[test]
+fn dragging_a_target_spot_puts_the_light_at_the_press_and_the_target_at_the_release() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Light(loom_commands::light::LightKind::TargetSpot));
+    let (from, to) = (Vec3::new(-40.0, -40.0, 0.0), Vec3::new(30.0, 20.0, 0.0));
+    let (a, b) = (h.screen_of(from), h.screen_of(to));
+    h.drag(a, b);
+    let spot = *h.app.state.selection.iter().next().expect("the new spot is selected");
+    let t = light_of(&h, spot).target.expect("a target spot");
+    let eye = h.app.state.scene.world_matrix(spot).w_axis.truncate();
+    let at = h.app.state.scene.world_matrix(t).w_axis.truncate();
+    assert!(eye.distance(from) < 0.5, "light at the press: {eye}");
+    assert!(at.distance(to) < 0.5, "target at the release: {at}");
+    let forward = -h.app.state.scene.world_matrix(spot).z_axis.truncate().normalize();
+    assert!(forward.distance((to - from).normalize()) < 1e-2, "the spot aims at its target");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.len(), 0, "one undo step removes light and target");
+}
+
+#[test]
+fn modify_rollouts_edit_a_light() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::FreeSpot, position: [0.0, 0.0, 80.0], target: [0.0; 3] }).unwrap();
+    let spot = loom_scene::NodeId(r["id"].as_u64().unwrap());
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    let cp = panel(&h, "command_panel");
+    assert!(h.text_rect("Free Spot", cp).is_some(), "the stack names the light type");
+    assert!(h.text_rect("Intensity/Color/Attenuation", cp).is_some());
+    click_text(&mut h, "Targeted", cp, 0.0);
+    let t = light_of(&h, spot).target.expect("Targeted adds a target");
+    assert!(h.app.state.scene.node(t).is_some());
+    click_text(&mut h, "Exclude...", cp, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::LightExclude { light: spot.0 }));
+    click_text(&mut h, "Cancel", SCREEN, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    // Shift+4: the view from the selected spot.
+    h.mods = egui::Modifiers::SHIFT;
+    h.key(egui::Key::Num4);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Camera(spot));
+    let c = h.app.camera_for(h.app.state.active_viewport);
+    assert!((c.fov_x_radians.unwrap().to_degrees() - 45.0).abs() < 1e-3, "the light view spans the falloff");
 }
 
 // --- Rendering: the Rendered Frame Window, Render Setup, the render region ---
@@ -3013,10 +3116,10 @@ fn camera_view_swaps_the_navigation_buttons_and_truck_moves_the_camera_with_one_
     h.cmd(Command::CameraView);
     maximized(&mut h);
     h.cmd(Command::SelectNone);
-    let screen = h.ctx.screen_rect();
-    assert!(h.text_rect("Truck", screen).is_some() && h.text_rect("Roll", screen).is_some(), "camera viewport controls");
-    assert!(h.text_rect("Pan", screen).is_none());
-    click_text(&mut h, "Truck", screen, 0.0);
+    use egui::accesskit::Role;
+    assert!(h.has(Role::Button, "Truck Camera Mode") && h.has(Role::Button, "Roll Camera Mode"), "camera viewport controls");
+    assert!(!h.has(Role::Button, "Pan View"));
+    h.click(h.find(Role::Button, "Truck Camera Mode").center());
     assert_eq!(h.app.state.nav_mode, loom_input::NavMode::TruckCamera);
     let eye = |h: &Harness| h.app.state.scene.world_matrix(cam).w_axis.truncate();
     let before = eye(&h);
@@ -3125,4 +3228,25 @@ fn a_scene_named_on_the_command_line_opens() {
     assert_eq!(next.app.state.scene.len(), 1);
     assert_eq!(next.app.state.file.as_deref(), Some(path.as_path()));
     assert_eq!(next.app.state.recent_files.first(), Some(&path));
+}
+
+/// At a sub-object level the first empty click clears the sub-objects and
+/// keeps the object; a second one lets go of the object and ends the level.
+#[test]
+fn a_second_empty_click_at_polygon_level_releases_the_object_and_the_level() {
+    let mut h = Harness::new();
+    poly_plane(&mut h);
+    h.key(egui::Key::Num4);
+    h.cmd(Command::SelectAll);
+    assert!(h.sub_count() > 0);
+    let p = empty_point(&h);
+    h.click(p);
+    h.frames(10);
+    assert_eq!(h.sub_count(), 0, "the first click clears the polygons");
+    assert_eq!(h.app.state.selection.len(), 1, "and keeps the object");
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Face);
+    h.click(p);
+    h.frames(10);
+    assert!(h.app.state.selection.is_empty(), "the second click lets go of the object");
+    assert_eq!(h.app.state.selection_mode, SelectionMode::Object, "and ends Polygon level");
 }
