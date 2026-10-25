@@ -1606,7 +1606,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         | C::AutoSmooth | C::PaintDeformPushPull | C::PaintDeformRelax | C::SetMaterialId { .. } | C::SelectByMaterialId { .. } | C::SetSmoothingGroups { .. } | C::ClearSmoothingGroups
         | C::SelectBySmoothingGroup { .. } | C::AutoSmoothThreshold { .. } | C::SetVertexColor { .. } | C::SetVertexIllumination { .. } | C::SetVertexAlpha { .. } | C::SelectByVertexColor { .. }
         | C::SubdivisionSurface { .. } | C::PaintDeformRevert | C::PaintDeformCommit | C::PaintDeformCancel | C::PaintDeformSettings { .. } | C::PaintDeformStroke { .. }
-        | C::CleanRemove | C::SwiftLoopMode | C::SwiftLoop { .. } | C::LoopMode | C::SelectByHalf { .. } | C::BridgeSpecificEdges { .. } | C::PickBridgeEdge { .. } => {
+        | C::CleanRemove | C::SwiftLoopMode | C::SwiftLoop { .. } | C::LoopMode | C::SelectByHalf { .. } | C::BranchesMode | C::Branch { .. } | C::BranchSettings { .. } | C::BridgeSpecificEdges { .. } | C::PickBridgeEdge { .. } => {
             crate::poly::execute(state, cmd)
         }
         C::SnapsToggle => toggle(&mut state.snaps_on, "snaps"),

@@ -1631,6 +1631,9 @@ commands! {
     SwiftLoop => "Swift Loop", Loom, "Insert the edge loop through raw edge `edge` of `node`, `t` along it from its canonical origin (what a Swift Loop click does)." { node: u64, edge: u32, t: f32 };
     LoopMode => "Loop Mode", Loom, "Toggle Modify Selection > Loop Mode: a clicked edge selects its loop (Alt deselects it); two adjacent vertices or polygons select their loop.";
     SelectByHalf => "Select By Half", Loom, "Selection > By Half: select the sub-objects whose centre is on the positive side of the pivot along `axis`; `invert` selects the negative side (Invert Axis)." { axis: Axis, invert: bool };
+    BranchesMode => "Branches", Loom, "Freeform > PolyDraw > Branches on / off: drag from a polygon (Shift: from the selected polygons) to grow a tapering branch.";
+    Branch => "Branch", Loom, "Grow a branch from polygons `faces` of `node` through the world points `path` (the first is where the drag started): one segment per further point, the end scaled by 1 + `taper`." { node: u64, faces: Vec<u32>, path: Vec<[f32; 3]>, taper: f32 };
+    BranchSettings => "Branch Settings", Loom, "PolyDraw settings: Branch Taper and Minimum Distance (pixels between branch segments); omitted fields keep their value." { taper: Option<f32>, min_distance: Option<f32> };
     BridgeSpecificEdges => "Bridge Specific Edges", Loom, "Bridge Edges dialog: on bridges the two picked edges (Pick Edge 1 / 2), off bridges the edge selection (Use Edge Selection)." { on: bool };
     PickBridgeEdge => "Pick Bridge Edge", Loom, "Bridge Edges dialog > Pick Edge 1 (`which` 1) / Pick Edge 2 (2): the next edge pick (Pick Sub) becomes that edge." { which: u32 };
     DeletePolygons => "Delete Polygons", Loom, "Delete the selected polygons; `delete_isolated` also deletes the vertices left with no polygon (the answer to the Delete prompt)." { delete_isolated: bool };
