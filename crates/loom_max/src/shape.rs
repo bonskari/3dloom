@@ -55,7 +55,7 @@ pub fn read(obj: &Chunk) -> Result<MaxShape, String> {
         }
         let closed = sp.child(0x290d).and_then(|c| c.u32s().first().copied()).unwrap_or(0) != 0;
         let mut knots = Vec::with_capacity(n);
-        for k in data.chunks_exact(KNOT) {
+        for k in data.as_chunks::<KNOT>().0 {
             let u = |o: usize| u32::from_le_bytes(k[o..o + 4].try_into().unwrap());
             let f = |o: usize| f32::from_le_bytes(k[o..o + 4].try_into().unwrap());
             let v = |o: usize| Vec3::new(f(o), f(o + 4), f(o + 8));

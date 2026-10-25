@@ -67,16 +67,19 @@ const PHONG: (u32, u32, u32) = (0x37, 0, 0x10b0);
 const METAL: (u32, u32, u32) = (0x39, 0, 0x10b0);
 
 /// File names by asset id (FileAssetMetaData2: per record a 16-byte id, a
-/// u32-counted UTF-16 type name and a u32-counted UTF-16 path, both counts
-/// including the terminating zero).
+/// UTF-16 type name and a UTF-16 path, each a u32 character count, the
+/// characters and a terminating zero the count leaves out).
 pub fn assets(b: &[u8]) -> BTreeMap<[u8; 16], String> {
     let mut out = BTreeMap::new();
     let mut o = 0usize;
     let rd = |o: &mut usize| -> Option<String> {
         let n = u32::from_le_bytes(b.get(*o..*o + 4)?.try_into().ok()?) as usize;
         let s = b.get(*o + 4..*o + 4 + n.checked_mul(2)?)?;
-        *o += 4 + n * 2;
-        let u: Vec<u16> = s.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).take_while(|c| *c != 0).collect();
+        if b.get(*o + 4 + n * 2..*o + 6 + n * 2)? != [0, 0] {
+            return None;
+        }
+        *o += 6 + n * 2;
+        let u: Vec<u16> = s.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
         Some(String::from_utf16_lossy(&u))
     };
     while o + 16 <= b.len() {

@@ -73,8 +73,11 @@ enum Conv {
     RadToDeg,
 }
 
-/// Per modifier class: the Loom name and (file parameter number, Loom name, conversion).
-fn table(id: (u32, u32, u32)) -> Option<(&'static str, &'static [(u32, &'static str, Conv)])> {
+/// (file parameter number, Loom name, conversion) of one modifier class.
+type ParamMap = &'static [(u32, &'static str, Conv)];
+
+/// Per modifier class: the Loom name and its parameter map.
+fn table(id: (u32, u32, u32)) -> Option<(&'static str, ParamMap)> {
     use Conv::*;
     Some(match id {
         BEND => ("Bend", &[(0, "Angle", Same), (1, "Direction", Same), (2, "Bend Axis", Same), (3, "Limit Effect", Same), (4, "Lower Limit", Same), (5, "Upper Limit", Same)]),
@@ -166,7 +169,7 @@ pub fn read(scene: &Scene, m: usize, ctx: &Context, node: &str, w: &mut Vec<Stri
             };
             // The file runs z fastest, then y, then x.
             let mut points = vec![Vec3::ZERO; 64];
-            for (k, p) in pts.chunks_exact(3).enumerate() {
+            for (k, p) in pts.as_chunks::<3>().0.iter().enumerate() {
                 let (i, j, l) = (k / 16, (k / 4) % 4, k % 4);
                 points[i + 4 * (j + 4 * l)] = Vec3::new(p[0], p[1], p[2]);
             }
@@ -202,7 +205,9 @@ fn unwrap_uvs(local: &crate::chunk::Chunk) -> Result<UnwrapUvs, String> {
         return Err("texture vertex layout not recognised".into());
     }
     let verts: Vec<Vec3> = tv.data[4..]
-        .chunks_exact(24)
+        .as_chunks::<24>()
+        .0
+        .iter()
         .map(|c| {
             let f = |o: usize| f32::from_le_bytes(c[o..o + 4].try_into().unwrap());
             Vec3::new(f(0), f(4), f(8))

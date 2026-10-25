@@ -45,7 +45,7 @@ pub fn int_table(pb: &Chunk, id: u16) -> Option<Vec<i32>> {
     if body.len() != n.checked_mul(5)? {
         return None;
     }
-    Some(body.chunks_exact(5).map(|c| i32::from_le_bytes([c[1], c[2], c[3], c[4]])).collect())
+    Some(body.as_chunks::<5>().0.iter().map(|c| i32::from_le_bytes([c[1], c[2], c[3], c[4]])).collect())
 }
 
 /// Values by parameter index (ParamBlock) or id (ParamBlock2). Animated
