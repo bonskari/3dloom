@@ -3250,3 +3250,53 @@ fn a_second_empty_click_at_polygon_level_releases_the_object_and_the_level() {
     assert!(h.app.state.selection.is_empty(), "the second click lets go of the object");
     assert_eq!(h.app.state.selection_mode, SelectionMode::Object, "and ends Polygon level");
 }
+
+/// A Checker map with Show Map in Viewport on a Multi/Sub sub-material shows
+/// its checks in the shaded viewport (the faces' UVs vary and the texture
+/// holds both colours), as the screenshot scene sets it up.
+#[test]
+fn a_checker_sub_material_shows_checks_in_the_viewport() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let node = *h.app.state.selection.iter().next().unwrap();
+    for c in [
+        Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) },
+        Command::MultiSubSetNumber { number: 3 },
+        Command::MaterialEditorGoToSub { index: 2 },
+        Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() },
+        Command::SetMapParameter { name: "Tiling U".into(), value: 3.0 },
+        Command::SetMapColor { which: "Color #2".into(), rgb: [240, 200, 40] },
+        Command::MaterialEditorGoToParent,
+        Command::SetMaterialParameter { slot: None, name: "Show Map in Viewport".into(), value: 1.0 },
+        Command::MaterialEditorGoToParent,
+        Command::AssignMaterialToSelection,
+        Command::SelectionMode { mode: loom_commands::SelectionMode::Face },
+        Command::SelectSub { node: Some(node.0), ids: vec![2, 3], op: loom_commands::SelectOp::Replace },
+        Command::SetMaterialId { id: 3 },
+        Command::SelectionMode { mode: loom_commands::SelectionMode::Object },
+        Command::UvwMapModifier,
+    ] {
+        h.cmd(c);
+    }
+    let style = h.app.world_styles[0].clone();
+    let sub = style.sub.as_ref().expect("per-ID styles");
+    let checker = sub.by_id[&2];
+    let loom_render::TextureSel::Bitmap(i) = checker.texture else { panic!("ID 3 shows its map: {:?}", checker.texture) };
+    let mesh = h.app.world_display()[0].clone();
+    let (verts, _, _) = loom_render::triangulate_styled(&mesh, &style);
+    let mut first = 0usize;
+    let mut uvs = Vec::new();
+    for (f, face) in mesh.faces().iter().enumerate().filter(|(_, f)| !f.hidden) {
+        let n = mesh.face_vertex_ids(loom_mesh::FaceId(f as u32)).unwrap().len();
+        if face.material_id == 2 {
+            uvs.extend(verts[first..first + n].iter().map(|v| v.uv));
+        }
+        first += n;
+    }
+    assert!(uvs.iter().any(|u| *u != uvs[0]), "the checker faces have varying UVs: {uvs:?}");
+    let upload = h.app.pending_upload.lock().unwrap().clone();
+    let bitmaps = upload.map(|u| u.2).unwrap_or_default();
+    let bm = &bitmaps.get(i as usize).expect("the baked checker is uploaded").1;
+    let px: std::collections::BTreeSet<[u8; 3]> = bm.rgba.chunks(4).map(|p| [p[0], p[1], p[2]]).collect();
+    assert!(px.contains(&[0, 0, 0]) && px.contains(&[240, 200, 40]), "both checker colours: {} colours", px.len());
+}
