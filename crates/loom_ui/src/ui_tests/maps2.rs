@@ -43,7 +43,8 @@ fn double_click_in_browser(h: &mut Harness, kind: &str) {
         let list = h.text_rects("Bitmap").into_iter().chain(h.text_rects("Mix")).find(|r| area.contains_rect(*r)).map_or(area.center(), |r| r.center());
         h.run(vec![egui::Event::PointerMoved(list)]);
         h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -60.0), modifiers: egui::Modifiers::NONE }]);
-        h.frames(2);
+        // Until the smooth scroll settles, so the rows stay where they are found.
+        h.frames(30);
     }
     panic!("{kind:?} never shows in the Browser");
 }
@@ -106,18 +107,7 @@ fn tiles_preset_and_gaps_from_its_rollouts() {
     pick_diffuse_map(&mut h, "Tiles");
     let win = material_editor_rect(&h);
     for label in ["Standard Controls", "Advanced Controls", "Preset Type:", "Horiz. Count:", "Grout Setup", "Mirror"] {
-        if h.text_rect(label, win).is_none() {
-            fn all(shape: &egui::Shape, out: &mut Vec<String>) {
-                match shape {
-                    egui::Shape::Vec(v) => v.iter().for_each(|s| all(s, out)),
-                    egui::Shape::Text(t) if t.pos.x < 440.0 && t.pos.y > 40.0 && t.pos.y < 900.0 => out.push(format!("{}@{:?}", t.galley.text(), t.pos)),
-                    _ => {}
-                }
-            }
-            let mut v = Vec::new();
-            h.shapes.iter().for_each(|c| all(&c.shape, &mut v));
-            panic!("{label:?} at the Tiles level; win {win:?}; shown: {v:?}; kind {:?}", diffuse(&h).kind);
-        }
+        assert!(h.text_rect(label, win).is_some(), "{label:?} at the Tiles level");
     }
     pick_in_list(&mut h, "Preset Type:", "Stack Bond", "Running Bond");
     assert_eq!(diffuse(&h).extra.preset, 1);
