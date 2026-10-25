@@ -60,10 +60,29 @@ pub struct ViewLight {
     pub far: Option<(f32, f32)>,
 }
 
+/// Per-view drawing switches (`ViewShading::flags`): the Rendering Level
+/// variants and the Viewport Configuration rendering options.
+pub mod view_flags {
+    /// Smooth / Facets: no specular highlights.
+    pub const NO_HIGHLIGHTS: u32 = 1;
+    /// Facets / Facets + Highlights: each face shaded flat.
+    pub const FACETED: u32 = 2;
+    /// Transparency None: see-through faces draw opaque.
+    pub const OPAQUE: u32 = 4;
+    /// Transparency Simple: see-through faces draw as a screen door.
+    pub const SCREEN_DOOR: u32 = 8;
+    /// Disable Textures: maps are not shown.
+    pub const NO_TEXTURES: u32 = 16;
+    /// Force 2-Sided: back faces draw too.
+    pub const TWO_SIDED: u32 = 32;
+}
+
 /// Shading viewport label menu modes the renderer understands.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ViewShading {
     pub lighting: u32,
+    /// `view_flags` bits.
+    pub flags: u32,
     pub override_color: Option<[f32; 3]>,
     /// Lighting mode 2: up to [`MAX_VIEW_LIGHTS`] lights and the ambient light.
     pub lights: [Option<ViewLight>; MAX_VIEW_LIGHTS],
@@ -286,7 +305,7 @@ impl ViewportRenderer {
         let u = ViewUniform {
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: [camera_pos.x, camera_pos.y, camera_pos.z, 0.0],
-            params: [shading.lighting as f32, count as f32, 0.0, 0.0],
+            params: [shading.lighting as f32, count as f32, shading.flags as f32, 0.0],
             override_color: oc,
             ambient: [a[0], a[1], a[2], 0.0],
             lights,
@@ -316,6 +335,7 @@ impl ViewportRenderer {
         orthographic: bool,
         textures: &TextureSet,
         lines: Option<&crate::mesh_buffer::LineBuffer>,
+        flags: u32,
     ) {
         let bind_group = &self.slots[slot.min(MAX_VIEWPORTS - 1)].1;
         if let Some(plane) = grid {
@@ -325,12 +345,14 @@ impl ViewportRenderer {
         if !shade.is_empty() {
             // Opaque faces first (per-surface cull setting), then see-through;
             // one draw per range (texture / transparency / culling).
+            // Transparency None / Simple: see-through faces draw with the opaque ones.
+            let blend = flags & (view_flags::OPAQUE | view_flags::SCREEN_DOOR) == 0;
             for transparent in [false, true] {
                 for mb in shade.iter().map(|i| meshes[*i]).filter(|mb| mb.index_count > 0) {
                     for r in mb.ranges.iter().filter(|r| r.count > 0 && r.transparent == transparent) {
-                        let pipeline = if transparent {
+                        let pipeline = if transparent && blend {
                             &self.mesh_pipeline_blend
-                        } else if r.cull {
+                        } else if r.cull && flags & view_flags::TWO_SIDED == 0 {
                             &self.mesh_pipeline_cull
                         } else {
                             &self.mesh_pipeline

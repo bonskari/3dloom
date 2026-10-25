@@ -111,6 +111,16 @@ pub fn pov_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
     ] {
         v.push(check(kind.label(), vp.kind == kind, Command::ViewportView { index: idx, kind }));
     }
+    // A camera view: select the camera, or its target.
+    if let ViewKind::Camera(id) = vp.kind {
+        if let Some(loom_scene::ObjectKind::Camera { target, .. }) = s.scene.node(id).map(|n| &n.object) {
+            v.push(sep());
+            v.push(item("Select Camera", Command::SelectNodes { ids: vec![id.0], op: loom_commands::SelectOp::Replace }));
+            if let Some(t) = target.filter(|t| s.scene.node(*t).is_some()) {
+                v.push(item("Select Camera Target", Command::SelectNodes { ids: vec![t.0], op: loom_commands::SelectOp::Replace }));
+            }
+        }
+    }
     v.push(sep());
     v.push(check("Show Safe Frames", vp.safe_frames, Command::ViewportSafeframesToggle));
     v.push(item("Undo View Change", Command::UndoViewportOperation));
@@ -118,25 +128,36 @@ pub fn pov_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
     v
 }
 
-/// Shading viewport label menu (legacy names).
+/// Shading viewport label menu: the rendering levels (the less used under
+/// Other), Edged Faces, Transparency, Lighting and Shadows, Viewport Background.
 pub fn shading_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
     let vp = &app.state.viewports[index];
     let set = |s: Shading| Command::ViewportShading { shading: s, edged_faces: None };
+    let level = |s: Shading| check(s.label(), vp.shading == s, set(s));
+    let transparency = |t: loom_commands::Transparency| check(t.label(), vp.transparency == t, Command::SetViewportRendering { apply_to: None, shading: None, edged_faces: None, transparency: Some(t.label().into()), disable_textures: None, force_two_sided: None });
     vec![
-        check("Smooth + Highlights", vp.shading == Shading::SmoothHighlights, set(Shading::SmoothHighlights)),
-        check("Wireframe", vp.shading == Shading::Wireframe, set(Shading::Wireframe)),
+        level(Shading::SmoothHighlights),
+        level(Shading::Wireframe),
         check("Realistic (Bevy)", vp.shading == Shading::Realistic, set(Shading::Realistic)),
         MenuEntry {
             label: "Other".into(),
             checked: false,
-            action: Action::Submenu(vec![
-                check("Hidden Line", vp.shading == Shading::HiddenLine, set(Shading::HiddenLine)),
-                check("Flat", vp.shading == Shading::Flat, set(Shading::Flat)),
-            ]),
+            action: Action::Submenu(vec![level(Shading::Smooth), level(Shading::FacetsHighlights), level(Shading::Facets), level(Shading::Flat), level(Shading::HiddenLine), level(Shading::BoundingBox)]),
         },
         sep(),
         check("Edged Faces", vp.edged_faces, Command::ViewEdgedFacesToggle),
+        MenuEntry { label: "Transparency".into(), checked: false, action: Action::Submenu(loom_commands::Transparency::ALL.into_iter().map(transparency).collect()) },
         MenuEntry { label: "Lighting and Shadows".into(), checked: false, action: Action::Submenu(lighting_entries(vp)) },
+        MenuEntry {
+            label: "Viewport Background".into(),
+            checked: false,
+            action: Action::Submenu(vec![
+                check("Show Background", vp.background.is_some() && vp.background_display, Command::SetViewportBackground { path: None, display: Some(!(vp.background.is_some() && vp.background_display)), aspect: None, all_views: None, lock: None }),
+                item("Viewport Background...", Command::ViewportBackground),
+                item("Update Background Image", Command::UpdateBackgroundImage),
+                item("Reset Background Transform", Command::ResetBackgroundTransform),
+            ]),
+        },
     ]
 }
 
@@ -213,6 +234,9 @@ mod tests {
         assert_eq!(g[0].label, "Minimize Viewport");
         assert!(g.iter().any(|e| e.label == "Show Grids" && !e.checked));
         let shading = labels(&shading_entries(&app, 3));
-        assert_eq!(shading, vec!["Smooth + Highlights", "Wireframe", "Realistic (Bevy)", "Other", "", "Edged Faces", "Lighting and Shadows"]);
+        assert_eq!(shading, vec!["Smooth + Highlights", "Wireframe", "Realistic (Bevy)", "Other", "", "Edged Faces", "Transparency", "Lighting and Shadows", "Viewport Background"]);
+        let other = shading_entries(&app, 3).into_iter().find(|e| e.label == "Other").unwrap();
+        let Action::Submenu(o) = other.action else { panic!("a submenu") };
+        assert_eq!(labels(&o), ["Smooth", "Facets + Highlights", "Facets", "Flat", "Hidden Line", "Bounding Box"]);
     }
 }

@@ -834,7 +834,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: Open) -> bool {
             });
         area.show(ctx, |ui| {
             ui.set_opacity((o.opacity / 100.0).clamp(0.1, 1.0) * fade);
-            let frame = egui::Frame::popup(ui.style()).fill(look.background).stroke(egui::Stroke::new(1.0, look.border));
+            let frame = egui::Frame::popup(ui.style()).fill(look.background).stroke(egui::Stroke::new(1.0_f32, look.border));
             frame.show(ui, |ui| {
                 ui.set_min_width(look.width);
                 ui.set_max_width(look.width);

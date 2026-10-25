@@ -189,7 +189,7 @@ fn drop_list(ui: &mut egui::Ui, id: &str, height: f32, body: impl FnOnce(&mut eg
     };
     let hovering = r.dnd_hover_payload::<ActionDrag>().is_some();
     if hovering {
-        ui.painter().rect_stroke(r.rect, 2.0, egui::Stroke::new(1.5, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(r.rect, 2.0, egui::Stroke::new(1.5_f32, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
     }
     let at = ui.input(|i| i.pointer.interact_pos());
     r.dnd_release_payload::<ActionDrag>().map(|p| {

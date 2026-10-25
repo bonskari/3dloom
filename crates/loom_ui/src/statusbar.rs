@@ -80,6 +80,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     coordinate_fields(ui, app);
                     ui.separator();
                     ui.label(format!("Grid = {}", app.state.format_units(app.state.grid_spacing())));
+                    ui.separator();
+                    // Adaptive Degradation: gold while on, aqua while it degrades the views.
+                    let d = &app.state.degradation;
+                    let fill = if app.degrading { egui::Color32::from_rgb(60, 200, 210) } else if d.on { egui::Color32::from_rgb(210, 170, 40) } else { egui::Color32::from_gray(70) };
+                    let text = egui::RichText::new("AD").color(if d.on { egui::Color32::BLACK } else { egui::Color32::WHITE });
+                    let r = ui.add(egui::Button::new(text).fill(fill));
+                    icons::named(&r, egui::WidgetType::Button, Command::AdaptiveDegradationToggle.name());
+                    let r = r.on_hover_name(&app.state, Command::AdaptiveDegradationToggle.name());
+                    if r.clicked() {
+                        let _ = app.dispatch(Command::AdaptiveDegradationToggle);
+                    }
+                    if r.secondary_clicked() {
+                        let _ = app.dispatch(Command::ConfigureViewports { panel: Some("Adaptive Degradation".into()) });
+                    }
                 });
                 ui.horizontal(|ui| {
                     let s = &app.state;

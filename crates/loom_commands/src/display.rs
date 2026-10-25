@@ -77,11 +77,17 @@ pub struct SafeFrames {
     pub user: [f32; 2],
     /// 12-Field Grid: 4 x 3 when true, else 12 x 9.
     pub grid_4x3: bool,
+    /// Lock (Action, Title, User): one Both value sets horizontal and vertical.
+    #[serde(default)]
+    pub lock: [bool; 3],
+    /// Region (when Region Rendering): the render region's outline stays in the view.
+    #[serde(default)]
+    pub region: bool,
 }
 
 impl Default for SafeFrames {
     fn default() -> Self {
-        Self { live_area: true, action_safe: true, title_safe: true, user_safe: false, grid: false, action: [10.0, 10.0], title: [20.0, 20.0], user: [30.0, 30.0], grid_4x3: true }
+        Self { live_area: true, action_safe: true, title_safe: true, user_safe: false, grid: false, action: [10.0, 10.0], title: [20.0, 20.0], user: [30.0, 30.0], grid_4x3: true, lock: [false; 3], region: false }
     }
 }
 
@@ -206,8 +212,23 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             d.display_selected_edged = !d.display_selected_edged;
             Ok(json!({ "display_selected_edged": d.display_selected_edged }))
         }
-        C::SetSafeFrames { live_area, action_safe, title_safe, user_safe, grid, action, title, user, grid_4x3 } => {
+        C::SetSafeFrames { live_area, action_safe, title_safe, user_safe, grid, action, title, user, grid_4x3, lock, region, default_settings } => {
+            if default_settings == Some(true) {
+                d.safe_frames = SafeFrames::default();
+            }
             let s = &mut d.safe_frames;
+            if let Some(l) = lock {
+                for (i, v) in l.iter().take(3).enumerate() {
+                    s.lock[i] = *v;
+                }
+            }
+            if let Some(r) = region {
+                s.region = r;
+            }
+            // A locked frame takes one size for both directions (the horizontal one).
+            let lock = s.lock;
+            let both = |v: Option<[f32; 2]>, i: usize| v.map(|p| if lock[i] { [p[0], p[0]] } else { p });
+            let (action, title, user) = (both(action, 0), both(title, 1), both(user, 2));
             for (v, f) in [(live_area, &mut s.live_area), (action_safe, &mut s.action_safe), (title_safe, &mut s.title_safe), (user_safe, &mut s.user_safe), (grid, &mut s.grid), (grid_4x3, &mut s.grid_4x3)] {
                 if let Some(v) = v {
                     *f = v;

@@ -361,6 +361,8 @@ pub struct LoomApp {
     pub last_error: Option<String>,
     /// Edit Button Appearance is open for this action.
     pub button_look: Option<String>,
+    /// Adaptive Degradation is degrading the views this frame.
+    pub degrading: bool,
     /// The Add / Edit Time Tag dialog.
     pub tag_dialog: Option<statusbar::TagDialog>,
     /// The last raw input events (live diagnostics).
@@ -385,6 +387,9 @@ impl LoomApp {
         if let Some(path) = loom_commands::settings::settings_path() {
             app.use_settings_file(path);
         }
+        // Viewport Configuration > Save as Default: the startup views.
+        app.state.use_viewport_defaults = true;
+        loom_commands::viewport_config::apply_defaults(&mut app.state);
         app
     }
 
@@ -534,6 +539,7 @@ impl LoomApp {
             background_textures: std::collections::HashMap::new(),
             last_error: None,
             button_look: None,
+            degrading: false,
             tag_dialog: None,
             input_log: Default::default(),
         }

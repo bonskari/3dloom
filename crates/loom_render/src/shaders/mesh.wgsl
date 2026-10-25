@@ -94,7 +94,26 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // opaque, by the map's Amount; a decal axis (Tile off) leaves the colour
     // outside 0-1.
     let t = textureSample(map_tex, map_samp, vec2<f32>(in.uv.x, 1.0 - in.uv.y));
+    // The face's own normal, for Facets (derivatives need uniform control flow: here, first).
+    let face_n = normalize(cross(dpdx(in.world_pos), dpdy(in.world_pos)));
+    let flags = u32(view.params.z);
     var a = t.a * in.extra.y;
+    if ((flags & 16u) != 0u) {
+        a = 0.0;
+    }
+    // Transparency None: opaque; Simple: every other pixel of a see-through face.
+    var alpha = in.color.a;
+    if ((flags & 4u) != 0u) {
+        alpha = 1.0;
+    }
+    if ((flags & 8u) != 0u && alpha < 0.99) {
+        let p = vec2<u32>(in.clip.xy);
+        if (((p.x + p.y) & 1u) == 0u) {
+            discard;
+        }
+        alpha = 1.0;
+    }
+    let highlights = (flags & 1u) == 0u;
     if ((in.extra.z > 0.5 && (in.uv.x < 0.0 || in.uv.x > 1.0)) || (in.extra.w > 0.5 && (in.uv.y < 0.0 || in.uv.y > 1.0))) {
         a = 0.0;
     }
@@ -103,10 +122,13 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         base = view.override_color.rgb;
     } else if (in.spec.a < 0.0) {
         // Unlit colours (vertex colours without Shaded).
-        return vec4<f32>(base, in.color.a);
+        return vec4<f32>(base, alpha);
     }
 
-    let n = normalize(in.world_normal);
+    var n = normalize(in.world_normal);
+    if ((flags & 2u) != 0u) {
+        n = face_n;
+    }
     let mode = view.params.x;
     let to_cam = normalize(view.camera_pos.xyz - in.world_pos);
     var diff = 1.0;
@@ -131,21 +153,21 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             }
             let k = falloff(l, dist, dot(-to_light, l.dir_hot.xyz));
             lit = lit + l.color_fall.rgb * k * clamp(abs(dot(n, to_light)), 0.0, 1.0);
-            if (in.spec.a > 0.0) {
+            if (in.spec.a > 0.0 && highlights) {
                 let h = normalize(to_light + to_cam);
                 spec = spec + l.color_fall.rgb * k * pow(clamp(abs(dot(n, h)), 0.0, 1.0), in.spec.a);
             }
         }
         // Self-Illumination: the colour shows unlit by that much.
-        return vec4<f32>(mix(base * lit, base, in.extra.x) + in.spec.rgb * spec, in.color.a);
+        return vec4<f32>(mix(base * lit, base, in.extra.x) + in.spec.rgb * spec, alpha);
     }
     let ambient = select(0.42, 1.0, mode > 0.5 && mode < 1.5);
     // Self-Illumination: the colour shows unlit by that much.
     var color = mix(base * (ambient + (1.0 - ambient) * diff), base, in.extra.x);
     // Blinn highlight of the material (none in Flat or without a material).
-    if (in.spec.a > 0.0 && !(mode > 0.5 && mode < 1.5)) {
+    if (in.spec.a > 0.0 && highlights && !(mode > 0.5 && mode < 1.5)) {
         let h = normalize(light + to_cam);
         color = color + in.spec.rgb * pow(clamp(abs(dot(n, h)), 0.0, 1.0), in.spec.a);
     }
-    return vec4<f32>(color, in.color.a);
+    return vec4<f32>(color, alpha);
 }

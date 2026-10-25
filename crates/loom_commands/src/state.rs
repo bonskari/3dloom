@@ -1683,6 +1683,10 @@ pub struct AppState {
     pub frame_range: (i32, i32),
     /// The status bar's time tags (saved with the scene).
     pub time_tags: Vec<crate::time_tags::TimeTag>,
+    /// Viewport Configuration > Adaptive Degradation.
+    pub degradation: crate::viewport::Degradation,
+    /// New and reset scenes take the saved startup viewport configuration (the app sets it; tests do not).
+    pub use_viewport_defaults: bool,
     pub fps: f32,
     /// Status bar coordinate display: Offset mode (vs Absolute).
     pub offset_mode: bool,
@@ -1915,6 +1919,8 @@ impl AppState {
             skin_morph_current: None,
             bones_ik_chain: false,
             time_tags: Vec::new(),
+            degradation: Default::default(),
+            use_viewport_defaults: false,
             current_frame: 0,
             frame_range: (0, 100),
             fps: 30.0,

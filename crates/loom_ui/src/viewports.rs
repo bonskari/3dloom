@@ -32,6 +32,10 @@ pub fn cell_rects(app: &LoomApp, panel: egui::Rect) -> Vec<egui::Rect> {
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let animating = ctx.input(|i| app.update_view_animation(i.stable_dt.clamp(0.001, 0.1)));
+    // Adaptive Degradation: navigating (or dragging a transform) slower than Maintain FPS.
+    let navigating = app.camera_controller.is_dragging() || app.transform_drag.is_some() || app.camera_nav_open;
+    let dt = ctx.input(|i| i.stable_dt);
+    app.degrading = app.state.degradation.on && navigating && dt > 1.0 / app.state.degradation.maintain_fps.max(1.0);
     if animating {
         ctx.request_repaint();
     }

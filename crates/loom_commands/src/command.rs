@@ -903,6 +903,12 @@ commands! {
     ViewportLayout => "Viewport Layout", Loom, "Set one of the 14 Viewport Configuration layouts." { layout: crate::viewport::ViewportLayout };
     ActiveViewport => "Active Viewport", Loom, "Activate a viewport by index." { index: u32 };
     ViewportView => "Viewport View", Loom, "Set the point of view of a viewport by index." { index: u32, kind: crate::state::ViewKind };
+    SetViewportRendering => "Set Viewport Rendering", Loom, "Viewport Configuration > Rendering Method with Apply To (`apply_to`: Active Only, All Viewports or All But Active; default Active Only): Rendering Level (`shading`: Smooth + Highlights, Smooth, Facets + Highlights, Facets, Flat, Hidden Line, Wireframe, Bounding Box, Realistic), Edged Faces, Transparency (None, Simple, Best), Disable Textures, Force 2-Sided." { apply_to: Option<String>, shading: Option<String>, edged_faces: Option<bool>, transparency: Option<String>, disable_textures: Option<bool>, force_two_sided: Option<bool> };
+    AdaptiveDegradationToggle => "Adaptive Degradation Toggle", MainUI, "Turn Adaptive Degradation on or off (O): while a view is navigated and the frame rate drops under Maintain FPS, views draw at a simpler level.";
+    SetAdaptiveDegradation => "Set Adaptive Degradation", Loom, "Viewport Configuration > Adaptive Degradation: the General (inactive views) and Active levels views drop to, Maintain FPS, Never Degrade Selected, Degrade to Default Lighting." { general: Option<String>, active: Option<String>, maintain_fps: Option<f32>, never_degrade_selected: Option<bool>, degrade_to_default_lighting: Option<bool> };
+    SetViewportLighting => "Set Viewport Lighting", Loom, "Viewport Configuration > Lighting and Shadows with Apply To (Active Only, All Viewports, All But Active): Illuminate with Scene Lights (`scene_lights`) or the default lights, 1 or 2 default lights, Enable Hardware Shading (`hardware`: the views show Realistic, off: back to Smooth + Highlights)." { apply_to: Option<String>, scene_lights: Option<bool>, default_lights: Option<u32>, hardware: Option<bool> };
+    SetRenderRegions => "Set Render Regions", Loom, "Viewport Configuration > Regions: the Sub Region and Blowup Region rectangles [x0, y0, x1, y1] as fractions of the render output (y down)." { region: Option<[f32; 4]>, blowup: Option<[f32; 4]> };
+    SaveViewportDefaults => "Save Viewport Defaults", Loom, "Viewport Configuration > Save as Default: new and reset scenes start with this viewport configuration (layout, views, rendering levels, options; saved in the config folder).";
     ViewportShading => "Viewport Shading", Loom, "Set the active viewport's shading mode and edged faces." { shading: crate::viewport::Shading, edged_faces: Option<bool> };
     SetSplits => "Set Splits", Loom, "Move the viewport layout splitters (fractions 0.05–0.95)." { x: Option<f32>, y: Option<f32> };
     SetViewportBackground => "Set Viewport Background", Loom, "Viewport Background dialog OK: the image file (omitted = keep, empty = remove), Aspect Ratio (Match Viewport, Match Bitmap, Match Rendering Output), Lock Zoom/Pan, Display Background, for the active viewport or all of them." { path: Option<String>, aspect: Option<String>, lock: Option<bool>, display: Option<bool>, all_views: Option<bool> };
@@ -1754,7 +1760,7 @@ commands! {
     HideBoneObjectsToggle => "Hide Bone Objects Toggle", Loom, "Display > Hide by Category > Bone Objects.";
     SetStatistics => "Set Statistics", Loom, "Viewport Configuration > Statistics: Polygon / Triangle / Edge / Vertex Count, Frames Per Second, scope Total, Selection or Total + Selection; default_settings restores the defaults first." { polygons: Option<bool>, triangles: Option<bool>, edges: Option<bool>, vertices: Option<bool>, fps: Option<bool>, scope: Option<String>, default_settings: Option<bool> };
     DisplaySelectedEdgedFacesToggle => "Display Selected with Edged Faces Toggle", Loom, "Viewport Configuration > Rendering Method: shaded viewports draw the edges of selected objects.";
-    SetSafeFrames => "Set Safe Frames", Loom, "Viewport Configuration > Safe Frames: Live Area, Action / Title / User Safe (insets in percent, horizontal and vertical), 12-Field Grid (4x3 or 12x9)." { live_area: Option<bool>, action_safe: Option<bool>, title_safe: Option<bool>, user_safe: Option<bool>, grid: Option<bool>, action: Option<[f32; 2]>, title: Option<[f32; 2]>, user: Option<[f32; 2]>, grid_4x3: Option<bool> };
+    SetSafeFrames => "Set Safe Frames", Loom, "Viewport Configuration > Safe Frames: Live Area, Action / Title / User Safe (insets in percent, horizontal and vertical), 12-Field Grid (4x3 or 12x9)." { live_area: Option<bool>, action_safe: Option<bool>, title_safe: Option<bool>, user_safe: Option<bool>, grid: Option<bool>, action: Option<[f32; 2]>, title: Option<[f32; 2]>, user: Option<[f32; 2]>, grid_4x3: Option<bool> , lock: Option<Vec<bool>>, region: Option<bool>, default_settings: Option<bool> };
     ObjectColorDialog => "Object Color Dialog", Loom, "Open the Object Color dialog (the object colour swatch).";
     SetObjectColor => "Set Object Color", Loom, "Object Color dialog OK: colour the selection (one undo step); the colour becomes the current colour for new objects." { rgb: [u8; 3] };
     SetAssignRandomColors => "Set Assign Random Colors", Loom, "Object Color dialog > Assign Random Colors: new objects get palette colours in turn; off, the current colour." { on: bool };
@@ -1904,7 +1910,6 @@ pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
     ("Hide Particle Systems Toggle", "3"),
     ("Hide Space Warps Toggle", "3"),
     ("Sound Toggle", "3"),
-    ("Adaptive Degradation Toggle", "3"),
     // Legacy OpenGL-driver-only feature, not in the spec's viewport list.
     ("Virtual Viewport Pan Down", "6.1"),
     ("Virtual Viewport Pan Left", "6.1"),

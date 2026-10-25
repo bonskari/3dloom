@@ -57,6 +57,8 @@ struct Frame {
 
 thread_local! {
     static FRAME: RefCell<Option<Frame>> = const { RefCell::new(None) };
+    /// Inside a rollout's body: a rollout there is part of it, not of the panel's list.
+    static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 fn memory_id(panel: &str) -> egui::Id {
@@ -101,7 +103,7 @@ fn shown_order(natural: &[String], order: &[String]) -> Vec<String> {
 /// A rollout: a collapsible section with a title bar. In the command panel
 /// its title bar drags it to another place and right-clicks open the rollout menu.
 pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl FnOnce(&mut egui::Ui)) {
-    let in_panel = FRAME.with(|f| f.borrow().is_some());
+    let in_panel = FRAME.with(|f| f.borrow().is_some()) && DEPTH.with(|d| d.get()) == 0;
     if !in_panel {
         egui::CollapsingHeader::new(egui::RichText::new(title).strong()).default_open(default_open).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
@@ -115,21 +117,19 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
         let mut f = f.borrow_mut();
         let f = f.as_mut().expect("in the panel");
         let k = f.drawn.len();
-        let order = f.order.clone()?;
-        if f.fallback || !f.memory.contiguous || f.memory.natural.get(k).is_none_or(|d| d.title != title) {
-            f.fallback = true;
-            return None;
-        }
-        let spacing = ui.spacing().item_spacing.y;
         let cursor = ui.cursor().min;
         if let Some(y) = f.expect_y {
             if (cursor.y - y).abs() > 0.5 {
                 // Something sits between rollouts: they keep the code's order.
                 f.contiguous = false;
-                f.fallback = true;
-                return None;
             }
         }
+        let order = f.order.clone()?;
+        if f.fallback || !f.contiguous || !f.memory.contiguous || f.memory.natural.get(k).is_none_or(|d| d.title != title) {
+            f.fallback = true;
+            return None;
+        }
+        let spacing = ui.spacing().item_spacing.y;
         let (top, left, width) = *f.top.get_or_insert((cursor.y, cursor.x, ui.available_width()));
         let natural: Vec<String> = f.memory.natural.iter().map(|d| d.title.clone()).collect();
         let shown = shown_order(&natural, &order);
@@ -142,7 +142,9 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
     let draw = |ui: &mut egui::Ui| {
         let r = egui::CollapsingHeader::new(egui::RichText::new(title).strong()).id_salt(title).default_open(default_open).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
+            DEPTH.with(|d| d.set(d.get() + 1));
             body(ui);
+            DEPTH.with(|d| d.set(d.get() - 1));
         });
         (r.header_response.id, r.header_response)
     };
@@ -152,11 +154,6 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
             let (id, header) = draw(&mut child);
             let h = child.min_rect().height();
             ui.allocate_space(egui::vec2(width, slot));
-            FRAME.with(|f| {
-                if let Some(f) = f.borrow_mut().as_mut() {
-                    f.expect_y = Some(ui.cursor().min.y);
-                }
-            });
             (id, header, h)
         }
         None => {
@@ -164,6 +161,11 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
             (r.inner.0, r.inner.1, r.response.rect.height())
         }
     };
+    FRAME.with(|f| {
+        if let Some(f) = f.borrow_mut().as_mut() {
+            f.expect_y = Some(ui.cursor().min.y);
+        }
+    });
     menu_and_drag(ui, title, &header);
     FRAME.with(|f| {
         if let Some(f) = f.borrow_mut().as_mut() {
@@ -195,7 +197,7 @@ fn menu_and_drag(ui: &mut egui::Ui, title: &str, header: &egui::Response) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         if let Some(p) = ui.ctx().pointer_interact_pos() {
             let x = r.rect.x_range();
-            ui.painter().with_clip_rect(ui.clip_rect()).hline(x, p.y, egui::Stroke::new(2.0, ui.visuals().selection.stroke.color));
+            ui.painter().with_clip_rect(ui.clip_rect()).hline(x, p.y, egui::Stroke::new(2.0_f32, ui.visuals().selection.stroke.color));
         }
     }
     if r.drag_stopped() {

@@ -64,6 +64,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
         c if crate::ui_custom::handles(&c) => crate::ui_custom::execute(state, c),
         c if crate::time_tags::handles(&c) => crate::time_tags::execute(state, c),
+        c if crate::viewport_config::handles(&c) => crate::viewport_config::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
         c if crate::display::handles(&c) => crate::display::execute(state, c),
         c if crate::render::handles(&c) => crate::render::execute(state, c),
@@ -209,6 +210,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.named_sets.clear();
             state.named_sub_selections.clear();
             state.time_tags.clear();
+            if state.use_viewport_defaults {
+                crate::viewport_config::apply_defaults(state);
+            }
             state.undo = loom_scene::UndoStack::new(state.undo.limit());
             state.autosave.last_version = None;
             clear_selection(state);

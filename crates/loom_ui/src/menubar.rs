@@ -3,7 +3,7 @@
 
 use crate::LoomApp;
 use eframe::egui;
-use crate::shortcuts::{menu_button, HoverShortcut};
+use crate::shortcuts::menu_button;
 use loom_commands::{Command, PrimitiveKind};
 
 thread_local! {
@@ -89,7 +89,7 @@ fn title_text(ui: &egui::Ui, title: &str) -> egui::WidgetText {
     let font = egui::TextStyle::Button.resolve(ui.style());
     let color = ui.visuals().widgets.inactive.text_color();
     let plain = egui::TextFormat { font_id: font.clone(), color, ..Default::default() };
-    let marked = egui::TextFormat { underline: egui::Stroke::new(1.0, color), ..plain.clone() };
+    let marked = egui::TextFormat { underline: egui::Stroke::new(1.0_f32, color), ..plain.clone() };
     let ch_len = text[at..].chars().next().map(char::len_utf8).unwrap_or(0);
     job.append(&text[..at], 0.0, plain.clone());
     job.append(&text[at..at + ch_len], 0.0, marked);
@@ -127,7 +127,7 @@ fn menu(ui: &mut egui::Ui, app: &mut LoomApp, name: &str) {
     if open.as_deref() == Some(name) {
         ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::new(OPEN_ID)));
         let mut bar = egui::menu::BarState::load(ui.ctx(), bar_id);
-        *bar = Some(egui::menu::MenuRoot::new(r.response.rect.left_bottom(), r.response.id));
+        **bar = Some(egui::menu::MenuRoot::new(r.response.rect.left_bottom(), r.response.id));
         bar.store(ui.ctx(), bar_id);
         ui.ctx().request_repaint();
     }
@@ -495,6 +495,8 @@ fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     let (gizmo, shade) = (app.state.prefs.gizmos.enabled, app.state.shade_selected);
     check_item(ui, app, "Show Transform Gizmo", "Transform Gizmo Toggle", gizmo);
     check_item(ui, app, "Shade Selected", "Shade Selected", shade);
+    let degrade = app.state.degradation.on;
+    check_item(ui, app, "Adaptive Degradation", "Adaptive Degradation Toggle", degrade);
     item(ui, app, "Create Camera From View", "Create Camera From View");
     item(ui, app, "Redraw All Views", "Redraw All Views");
     ui.separator();

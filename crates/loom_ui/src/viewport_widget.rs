@@ -225,6 +225,7 @@ impl CallbackTrait for ViewportCallback {
                 self.orthographic,
                 textures,
                 res.helper_lines.get(self.slot).and_then(|l| l.as_ref()),
+                self.shading.flags,
             );
         }
     }
@@ -1137,6 +1138,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 .map(|(i, _)| i)
                 .collect();
 
+            // Adaptive Degradation: a simpler level while views are navigated too slowly.
+            let level = shown_shading(app, index);
             let (wire, grid_plane, edged_faces, show_grid, view_shading) = {
                 let vp = &app.state.viewports[index];
                 let grid_plane = match vp.kind {
@@ -1144,18 +1147,42 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     loom_commands::ViewKind::Left | loom_commands::ViewKind::Right => loom_render::GridPlane::YZ,
                     _ => loom_render::GridPlane::XY,
                 };
-                let lighting = match vp.shading {
-                    loom_commands::Shading::Flat => 1,
+                use loom_commands::Shading as S;
+                let lighting = match level {
+                    S::Flat => 1,
                     _ => 0,
                 };
                 // Hidden Line: faces in the viewport colour hide the lines behind them.
-                let override_color = (vp.shading == loom_commands::Shading::HiddenLine).then_some([0.0806, 0.0806, 0.0806]);
-                let mut view_shading = loom_render::ViewShading { lighting, override_color, ..Default::default() };
-                if lighting == 0 && override_color.is_none() {
-                    view_shading = crate::light_overlay::view_lighting(app, vp, view, view_shading);
+                let override_color = (level == S::HiddenLine).then_some([0.0806, 0.0806, 0.0806]);
+                let mut flags = 0;
+                if matches!(level, S::Smooth | S::Facets) {
+                    flags |= loom_render::view_flags::NO_HIGHLIGHTS;
                 }
-                let edges = vp.edged_faces || vp.shading == loom_commands::Shading::HiddenLine;
-                (vp.shading == loom_commands::Shading::Wireframe, grid_plane, edges, vp.show_grid, view_shading)
+                if matches!(level, S::Facets | S::FacetsHighlights) {
+                    flags |= loom_render::view_flags::FACETED;
+                }
+                flags |= match vp.transparency {
+                    loom_commands::Transparency::None => loom_render::view_flags::OPAQUE,
+                    loom_commands::Transparency::Simple => loom_render::view_flags::SCREEN_DOOR,
+                    loom_commands::Transparency::Best => 0,
+                };
+                if vp.disable_textures {
+                    flags |= loom_render::view_flags::NO_TEXTURES;
+                }
+                if vp.force_two_sided {
+                    flags |= loom_render::view_flags::TWO_SIDED;
+                }
+                let mut view_shading = loom_render::ViewShading { lighting, override_color, flags, ..Default::default() };
+                if lighting == 0 && override_color.is_none() {
+                    // Degrade to Default Lighting: no scene lights while degraded.
+                    let mut lit = vp.clone();
+                    if app.degrading && app.state.degradation.degrade_to_default_lighting {
+                        lit.scene_lights = false;
+                    }
+                    view_shading = crate::light_overlay::view_lighting(app, &lit, view, view_shading);
+                }
+                let edges = (vp.edged_faces && level != S::BoundingBox) || level == S::HiddenLine;
+                (!level.shaded(), grid_plane, edges, vp.show_grid, view_shading)
             };
             // Viewport background image: fitted by its Aspect Ratio and, with
             // Lock Zoom/Pan, zoomed and panned with the scene since the lock.
@@ -1179,10 +1206,13 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     None => ctx.request_repaint(),
                 }
             }
-            let shade_only = if app.state.shade_selected { selected.clone() } else { Vec::new() };
+            // Never Degrade Selected: the selection keeps its own look while the view degrades.
+            let keep_selected = app.degrading && app.state.degradation.never_degrade_selected && app.state.viewports[index].shading.shaded();
+            let shade_only = if app.state.shade_selected || keep_selected { selected.clone() } else { Vec::new() };
             // Shaded views without Edged Faces outline the selection only
             // with Display Selected with Edged Faces (the brackets show it otherwise).
-            let selected = if wire || edged_faces || app.state.display.display_selected_edged || app.state.selection_mode != SelectionMode::Object { selected } else { Vec::new() };
+            let bbox = level == loom_commands::Shading::BoundingBox;
+            let selected = if (wire && !bbox) || edged_faces || app.state.display.display_selected_edged || app.state.selection_mode != SelectionMode::Object { selected } else { Vec::new() };
             // Helper line art: depth-tested on the GPU, drawn over everything
             // with Draw On Top (and in Realistic views, which have no line pass).
             let (helper_depth_lines, helper_top_lines) = crate::helper_overlay::lines(app, view_proj, rect, realistic);
@@ -1195,7 +1225,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     upload: app.pending_upload.clone(),
                     shading: view_shading,
                     selected,
-                    show_edges: edged_faces || wire || app.state.selection_mode.is_edge_level(),
+                    show_edges: (edged_faces || wire || app.state.selection_mode.is_edge_level()) && level != loom_commands::Shading::BoundingBox,
                     shaded: !wire,
                     shade_only,
                     // An active grid object replaces the home grid.
@@ -1251,6 +1281,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                 }
             }
+            if level == loom_commands::Shading::BoundingBox {
+                draw_bounding_boxes(&painter, app, view_proj, rect, keep_selected);
+            }
             if app.state.selection_brackets && app.state.selection_mode == SelectionMode::Object {
                 draw_selection_brackets(&painter, app, view_proj, rect);
                 // Bones tool preview: the joints clicked so far.
@@ -1272,6 +1305,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             }
             if app.state.viewports[index].safe_frames {
                 draw_safe_frames(&painter, app, rect);
+                // Safe Frames > Region: the render region's outline stays while it is not being edited.
+                let r = &app.state.scene.render;
+                if app.state.display.safe_frames.region && r.area.uses_region() && !app.state.rendered.edit_region && index == loom_commands::render::render_viewport(&app.state) {
+                    let frame = crate::rendered_frame::output_frame(app, index, rect);
+                    let a = r.area_rect();
+                    let area = egui::Rect::from_min_max(frame.min + egui::vec2(a[0], a[1]) * frame.size(), frame.min + egui::vec2(a[2], a[3]) * frame.size());
+                    painter.rect_stroke(area, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255)), egui::StrokeKind::Middle);
+                }
             }
             draw_trajectories(&painter, app, view_proj, rect);
             draw_links(&painter, app, view_proj, rect);
@@ -1673,6 +1714,42 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
     let vp = &app.state.viewports[index];
     let height = if vp.is_orthographic() { vp.camera.distance * 0.8284 } else { 2.0 * vp.camera.distance * (vp.fov_y_radians * 0.5).tan() };
     (height / rect.height().max(1.0)).max(1e-4)
+}
+
+/// The level viewport `index` draws at: its own, or while Adaptive
+/// Degradation degrades, the Active or General level.
+pub(crate) fn shown_shading(app: &LoomApp, index: usize) -> loom_commands::Shading {
+    let own = app.state.viewports[index].shading;
+    if !app.degrading || own == loom_commands::Shading::Realistic {
+        return own;
+    }
+    let d = &app.state.degradation;
+    let to = if index == app.state.active_viewport { d.active } else { d.general };
+    // Never more detailed than the view's own level.
+    let rank = |s: loom_commands::Shading| loom_commands::Shading::LEVELS.iter().position(|l| *l == s).unwrap_or(0);
+    if rank(to) > rank(own) { to } else { own }
+}
+
+/// Bounding Box: each visible object as its local bounding box, in its
+/// wireframe colour (white when selected; `skip_selected`: the selection is drawn shaded).
+fn draw_bounding_boxes(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, rect: egui::Rect, skip_selected: bool) {
+    for n in app.state.scene.nodes().filter(|n| app.state.is_visible(n)) {
+        let selected = app.state.selection.contains(&n.id);
+        if selected && skip_selected {
+            continue;
+        }
+        let (min, max) = n.cage_mesh().aabb();
+        let m = app.state.scene.object_matrix(n.id);
+        let c = |x: f32, y: f32, z: f32| project_world_to_screen(m.transform_point3(Vec3::new(x, y, z)), view_proj, rect);
+        let corners = [c(min.x, min.y, min.z), c(max.x, min.y, min.z), c(max.x, max.y, min.z), c(min.x, max.y, min.z), c(min.x, min.y, max.z), c(max.x, min.y, max.z), c(max.x, max.y, max.z), c(min.x, max.y, max.z)];
+        let wc = app.state.scene.display_color(n);
+        let color = if selected { app.color("Selection") } else { egui::Color32::from_rgb(wc[0], wc[1], wc[2]) };
+        for (a, b) in [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)] {
+            if let (Some(p), Some(q)) = (corners[a], corners[b]) {
+                painter.line_segment([p, q], egui::Stroke::new(1.0_f32, color));
+            }
+        }
+    }
 }
 
 /// The pointer's world position on the active viewport's construction plane
