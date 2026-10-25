@@ -440,3 +440,27 @@ fn object_properties_by_layer_buttons_and_layer_properties() {
     assert!(h.app.state.scene.layer(props).unwrap().display.see_through);
     assert!(h.app.state.scene.display_of(h.app.state.scene.node(a).unwrap()).see_through, "the By Layer object draws see-through");
 }
+
+#[test]
+fn zz_debug_modify_context_menu() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    let at = find_context_menu(&mut h, cp.min.x as i32..cp.max.x as i32, cp.min.y as i32 + 8..cp.max.y as i32, 6, |_| true);
+    let m = menus(&h)[0];
+    let mut texts = Vec::new();
+    fn walk(s: &egui::Shape, m: egui::Rect, out: &mut Vec<String>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|x| walk(x, m, out)),
+            egui::Shape::Text(t) if m.contains(t.pos) => out.push(t.galley.text().to_owned()),
+            _ => {}
+        }
+    }
+    for c in &h.shapes {
+        walk(&c.shape, m, &mut texts);
+    }
+    panic!("DEBUG at {at:?} menu {m:?} texts {texts:?} cp {cp:?}");
+}
