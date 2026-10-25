@@ -2560,7 +2560,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.pick_mode = None;
                     return crate::stack::execute(state, C::UvwMapAcquire { node: id.0 });
                 }
-                Some(PickMode::UvwMapNormal | PickMode::UvwMapRegionA | PickMode::UvwMapRegionB) => return Err("pick a surface point, not an object".into()),
+                Some(PickMode::UvwMapNormal | PickMode::UvwMapRegionA | PickMode::UvwMapRegionB | PickMode::BipedFootstep) => return Err("pick a surface point, not an object".into()),
                 Some(PickMode::SeamPointA | PickMode::SeamPointB) => return Err("Point To Point Seam picks a vertex, not an object".into()),
                 Some(PickMode::TvTargetWeldSource | PickMode::TvTargetWeldTarget) => return Err("Target Weld picks a texture vertex in the Edit UVWs window".into()),
                 Some(PickMode::ModifierNode) => {
