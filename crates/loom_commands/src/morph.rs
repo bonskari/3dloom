@@ -616,7 +616,16 @@ pub(crate) fn tools(state: &mut AppState, cmd: Command) -> Result<Value, String>
         C::SkinMorphSelectionTool { tool } => edit_skin_morph(state, &tool.clone(), |d, id, index, st| {
             use loom_mesh::select_ops::{self as so, SubLevel};
             let mesh = input_mesh(st, id, index);
-            let seeds: Vec<loom_mesh::HalfEdgeId> = so::convert_selection(&mesh, SubLevel::Vertex, &d.selection, SubLevel::Edge, true).into_iter().map(loom_mesh::HalfEdgeId).collect();
+            // The edges with both ends selected.
+            let selected: BTreeSet<u32> = d.selection.iter().copied().collect();
+            let seeds: Vec<loom_mesh::HalfEdgeId> = d
+                .selection
+                .iter()
+                .flat_map(|v| so::vertex_edges(&mesh, loom_mesh::VertexId(*v)))
+                .filter(|e| mesh.edge_vertices(*e).is_some_and(|(a, b)| selected.contains(&a.0) && selected.contains(&b.0)))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
             d.selection = match tool.as_str() {
                 "Grow" => so::grow(&mesh, SubLevel::Vertex, &d.selection),
                 "Shrink" => so::shrink(&mesh, SubLevel::Vertex, &d.selection),
