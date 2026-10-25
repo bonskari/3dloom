@@ -154,7 +154,7 @@ pub fn frame_for_system(state: &AppState, viewport: usize, id: Option<NodeId>, s
             None => Mat3::IDENTITY,
         },
     };
-    let normals = crate::normals::selected_center(state);
+    let normals = crate::normals::selected_center(state).or_else(|| crate::morph::points_center(state));
     let origin = match state.center_mode {
         // Edit Normals at the Normal level: the gizmo sits on the selected normals.
         _ if normals.is_some() => normals.unwrap_or_default(),

@@ -77,7 +77,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
         c if c.group() == crate::Group::Skin => crate::skin::execute(state, c),
         c @ (C::SkinAddBones { .. } | C::SkinRemoveBone { .. } | C::SkinSelectBone { .. } | C::SkinSelectVertices { .. } | C::SkinSetVertexWeight { .. } | C::SkinSetEnvelope { .. } | C::SkinSetCustomWeight { .. } | C::SkinNormalize | C::SkinRigidToggle | C::SkinBakeSelectedVerts | C::MirrorModeSkin | C::PasteGreenToBlue | C::PasteBlueToGreen | C::MirrorPaste | C::SkinAddGizmo { .. } | C::SkinRemoveGizmo | C::SkinSelectGizmo { .. } | C::SkinAddGizmoKey | C::SkinSetGizmoKey { .. } | C::SkinSetGizmoDelta { .. } | C::SkinSetGizmoOption { .. } | C::SkinSetVertexWeights { .. } | C::SkinSetScaleWeight { .. } | C::SkinSetPasteTolerance { .. } | C::SkinSelectBoneByName { .. } | C::SkinEnvelopeVisibility | C::SkinPaintWeightsToggle | C::SkinPaintStroke { .. } | C::SkinSetPainterOption { .. } | C::SkinPainterOptionsDialog) => crate::skin::execute(state, c),
-        c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin) => crate::morph::execute(state, c),
+        c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin | C::SkinMorphSelect { .. } | C::SkinMorphPickBone | C::SkinMorphSelectPoints { .. } | C::SkinMorphSelectionTool { .. } | C::SkinMorphSetOption { .. } | C::SkinMorphSetCurve { .. } | C::SkinMorphResetGraph | C::SkinMorphEdit { .. } | C::SkinMorphClearVerts { .. } | C::SkinMorphRemoveVerts { .. } | C::SkinMorphSetJointType { .. } | C::SkinMorphSetExternal { .. } | C::SkinMorphPickExternal | C::SkinMorphReloadTarget { .. } | C::SkinMorphPasteMirror { .. } | C::SkinWrapPickControl | C::SkinWrapSelectControlVerts { .. } | C::SkinWrapSetLocal { .. } | C::SkinWrapMirrorSelected | C::SkinWrapBakeControlVerts | C::SkinWrapRetrieveControlVerts | C::SkinWrapPatchPick { .. } | C::SkinWrapPatchSetSampleRate { .. } | C::SkinWrapPatchResample) => crate::morph::execute(state, c),
         C::NewScene => {
             let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
             if ids.is_empty() {
@@ -2562,6 +2562,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::UvwMapNormal | PickMode::UvwMapRegionA | PickMode::UvwMapRegionB) => return Err("pick a surface point, not an object".into()),
                 Some(PickMode::SeamPointA | PickMode::SeamPointB) => return Err("Point To Point Seam picks a vertex, not an object".into()),
                 Some(PickMode::TvTargetWeldSource | PickMode::TvTargetWeldTarget) => return Err("Target Weld picks a texture vertex in the Edit UVWs window".into()),
+                // Pick Bone / Add keep picking until right-click or the button again.
+                Some(PickMode::SkinMorphBone) => return crate::morph::execute(state, C::SkinMorphAddBones { ids: vec![id.0] }),
+                Some(PickMode::SkinWrapControl) => return crate::morph::execute(state, C::SkinWrapAddBase { id: id.0 }),
+                Some(PickMode::SkinMorphExternal) => {
+                    state.pick_mode = None;
+                    let morph = state.skin_morph_current.ok_or("no morph is highlighted")? as u32;
+                    return crate::morph::execute(state, C::SkinMorphSetExternal { morph, node: Some(id.0) });
+                }
                 Some(PickMode::ModifierNode) => {
                     let Some(index) = state.selection.iter().next().and_then(|n| state.scene.node(*n)).and_then(|n| n.active_entry) else { return Err("no active stack entry".into()) };
                     state.pick_mode = None;
@@ -4169,6 +4177,15 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
             return r;
         }
     }
+    // Skin Morph Points: the tools shape the morph (Edit mode, or on the fly
+    // with Beginner Mode off); Skin Wrap Control Vertices: nothing moves.
+    if let Some((id, _)) = crate::morph::points_level(state) {
+        let (m, _) = matrix_for(state, Some(id));
+        return crate::morph::transform_points(state, label, m);
+    }
+    if crate::morph::control_vertex_level(state).is_some() {
+        return Ok(json!({}));
+    }
     let mut changes = Vec::new();
     // A modifier gizmo level (XForm Gizmo / Center): the tools move the gizmo.
     let gizmo_targets: Vec<(NodeId, usize, u32)> = state
@@ -4861,6 +4878,7 @@ fn snapshot(state: &AppState) -> Value {
         "morpher": crate::morph::morpher_status(state),
         "skin_morph": crate::morph::skin_morph_status(state),
         "skin_wrap": crate::morph::skin_wrap_status(state),
+        "skin_wrap_patch": crate::morph::skin_wrap_patch_status(state),
         "file": state.file.as_ref().map(|p| p.to_string_lossy().into_owned()),
         "dirty": state.dirty(),
         "ik_chains": state.scene.ik_chains.iter().map(|c| json!({ "id": c.id, "name": c.name, "solver": c.solver.label(), "start": c.start.0, "end": c.end.0, "goal": c.goal.0, "enabled": c.enabled, "swivel": c.swivel_deg, "spline": c.spline.map(|s| s.0) })).collect::<Vec<_>>(),

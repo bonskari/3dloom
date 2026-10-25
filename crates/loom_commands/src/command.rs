@@ -1515,6 +1515,7 @@ commands! {
     SkinModifier => "Skin Modifier", Skin, "Add a Skin modifier to the selection (bind bones with Add Bones).";
     SkinMorphModifier => "Skin Morph Modifier", Skin, "Add a Skin Morph modifier to the selection.";
     SkinWrapModifier => "Skin Wrap Modifier", Skin, "Add a Skin Wrap modifier to the selection.";
+    SkinWrapPatchModifier => "Skin Wrap Patch Modifier", Skin, "Add a Skin Wrap Patch modifier to the selection (a patch object deforms it after Pick Patch).";
     AddBonesSkin => "Add Bones (Skin)", Skin, "Skin > Bones > Add: pick bones from the scene (Select From Scene dialog).";
     SkinAddBones => "Skin Add Bones", Loom, "Skin > Bones > Add by id: bind the bones at their current pose." { ids: Vec<u64> };
     RemoveMultipleBonesSkin => "Remove Multiple Bones (Skin)", Skin, "Skin > Bones > Remove: the selected bone leaves the list; its weights go to the others.";
@@ -1622,14 +1623,38 @@ commands! {
     SkinMorphRemoveBone => "Skin Morph Remove Bone", Loom, "Skin Morph > Remove Bone." { id: u64 };
     SkinMorphCreateMorph => "Skin Morph Create Morph", Loom, "Skin Morph > Create Morph: a morph keyed at the bone's current angle." { bone: u64 };
     SkinMorphSetVertexDelta => "Skin Morph Set Vertex Delta", Loom, "Skin Morph > Edit: a vertex's delta (bone frame) for a morph." { morph: u32, vertex: u32, delta: [f32; 3] };
-    SkinMorphSetMorph => "Skin Morph Set Morph", Loom, "Skin Morph > Local Properties: Enabled, Angle, Influence Angle, Falloff." { morph: u32, name: String, value: f64 };
+    SkinMorphSetMorph => "Skin Morph Set Morph", Loom, "Skin Morph > Local Properties: Enabled, Angle, Influence Angle, Falloff (0 Linear, 1 Sinual, 2 Fast, 3 Slow, 4 Custom), Reload Only Selected Verts." { morph: u32, name: String, value: f64 };
     SkinMorphRenameMorph => "Skin Morph Rename Morph", Loom, "Skin Morph: the morph's name." { morph: u32, name: String };
     SkinMorphDeleteMorph => "Skin Morph Delete Morph", Loom, "Skin Morph > Delete Morph." { morph: u32 };
-    SkinMorphReload => "Skin Morph Reload", Loom, "Skin Morph > Reload: the morph's angle key becomes the bone's current angle." { morph: u32 };
+    SkinMorphReload => "Skin Morph Reload", Loom, "Skin Morph > Reset Orientation: the morph's pose becomes the bone's current orientation." { morph: u32 };
+    SkinMorphSelect => "Skin Morph Select", Loom, "Skin Morph list: the highlighted bone (yellow in the viewports) and morph (null clears)." { bone: Option<u64>, morph: Option<u32> };
+    SkinMorphPickBone => "Skin Morph Pick Bone", Loom, "Skin Morph > Pick Bone: toggles picking bones in the viewports (each click adds one; right-click ends).";
+    SkinMorphSelectPoints => "Skin Morph Select Points", Loom, "Skin Morph Points level: select vertices by id (replace / add / subtract)." { ids: Vec<u32>, op: SelectOp };
+    SkinMorphSelectionTool => "Skin Morph Selection Tool", Loom, "Skin Morph > Selection: Ring, Loop, Shrink or Grow the Points selection." { tool: String };
+    SkinMorphSetOption => "Skin Morph Set Option", Loom, "Skin Morph Selection / Copy and Paste / Options settings: Use Soft Selection, Radius, Use Edge Limit, Edge Limit, Mirror Plane (0 X 1 Y 2 Z), Mirror Offset, Mirror Threshold, Show Mirror Plane, Preview Bone, Preview Vertices, Beginner Mode, Show Driver Bone Matrix, Show Morph Bone Matrix, Show Current Angle, Show Edges, Matrix Size, Bone Size." { name: String, value: f64 };
+    SkinMorphSetCurve => "Skin Morph Set Curve", Loom, "Skin Morph graphs: `graph` \"Soft Selection\" or \"Falloff\" (the morph's Custom Falloff); points [x, y] with x 0..1 in order." { graph: String, morph: Option<u32>, points: Vec<[f32; 2]> };
+    SkinMorphResetGraph => "Skin Morph Reset Graph", Loom, "Skin Morph > Selection > Reset Graph: the soft selection graph returns to its default.";
+    SkinMorphEdit => "Skin Morph Edit", Loom, "Skin Morph > Edit: toggles shaping the morph; the bone is posed at the morph and transforming Points makes its deltas." { morph: u32 };
+    SkinMorphClearVerts => "Skin Morph Clear Verts", Loom, "Skin Morph > Clear Verts: the selected vertices stay in the morph with zero deltas." { morph: u32 };
+    SkinMorphRemoveVerts => "Skin Morph Remove Verts", Loom, "Skin Morph > Remove Verts: the selected vertices leave the morph." { morph: u32 };
+    SkinMorphSetJointType => "Skin Morph Set Joint Type", Loom, "Skin Morph > Joint Type of a bone: Ball Joint (all rotation) or Planar Joint (rotation in the parent's plane)." { bone: u64, planar: bool };
+    SkinMorphSetExternal => "Skin Morph Set External Mesh", Loom, "Skin Morph > External Mesh: the morph's target object (null = none)." { morph: u32, node: Option<u64> };
+    SkinMorphPickExternal => "Skin Morph Pick External Mesh", Loom, "Skin Morph > External Mesh button: the next clicked object becomes the current morph's target.";
+    SkinMorphReloadTarget => "Skin Morph Reload Target", Loom, "Skin Morph > Reload Target: the morph's deltas from its External Mesh (only the selected vertices with Reload Only Selected Verts)." { morph: u32 };
+    SkinMorphPasteMirror => "Skin Morph Paste Mirror", Loom, "Skin Morph > Paste Mirror: the bone's morphs copied to the bone on the other side of the mirror plane." { bone: u64 };
     SkinWrapAddBase => "Skin Wrap Add Base", Loom, "Skin Wrap > Add: a base object the wrapped mesh follows (binds now)." { id: u64 };
     SkinWrapRemoveBase => "Skin Wrap Remove Base", Loom, "Skin Wrap > Remove a base object." { id: u64 };
-    SkinWrapSetOption => "Skin Wrap Set Option", Loom, "Skin Wrap settings (rebinds): Deformation Engine 0 Face / 1 Vertex, Falloff, Distance Influence, Face Limit, Threshold, Weight All Points." { name: String, value: f64 };
-    SkinWrapReset => "Skin Wrap Reset", Loom, "Skin Wrap > Reset: rebind to the bases' current pose.";
+    SkinWrapSetOption => "Skin Wrap Set Option", Loom, "Skin Wrap settings: Deformation Engine 0 Face / 1 Vertex, Falloff, Distance Influence, Face Limit, Threshold, Weight All Points, Blend To Base Mesh, Blend Distance (these rebind); Show Mirror Data, Mirror Plane, Mirror Offset, Mirror Threshold, Display Loops, Display Axis, Display Face Limit, Display Unassigned Points, Display Control Verts." { name: String, value: f64 };
+    SkinWrapReset => "Skin Wrap Reset", Loom, "Skin Wrap > Reset: every control vertex's local values go back to 1.0 and the mesh rebinds to the control objects' current pose.";
+    SkinWrapPickControl => "Skin Wrap Pick Control", Loom, "Skin Wrap > Add: toggles picking control objects in the viewports (each click adds one; right-click ends).";
+    SkinWrapSelectControlVerts => "Skin Wrap Select Control Verts", Loom, "Skin Wrap Control Vertices level: select control vertices as [control object index, vertex] pairs." { ids: Vec<[u32; 2]>, op: SelectOp };
+    SkinWrapSetLocal => "Skin Wrap Set Local", Loom, "Skin Wrap local parameters of the selected control vertices (rebinds): Local Strength, Local Scale Mult, Local X, Local Y, Local Z." { name: String, value: f64 };
+    SkinWrapMirrorSelected => "Skin Wrap Mirror Selected", Loom, "Skin Wrap > Mirror Selected: each selected control vertex's local settings go to the control vertices near its mirror image.";
+    SkinWrapBakeControlVerts => "Skin Wrap Bake Control Verts", Loom, "Skin Wrap > Bake Control Verts: local strength / scale and Falloff, Distance Infl., Face Limit are stored on the control objects.";
+    SkinWrapRetrieveControlVerts => "Skin Wrap Retrieve Control Verts", Loom, "Skin Wrap > Retrieve Control Verts: the settings baked on the control objects come back (rebinds).";
+    SkinWrapPatchPick => "Skin Wrap Patch Pick", Loom, "Skin Wrap Patch > Pick Patch: the patch object that deforms the mesh (samples it now)." { node: u64 };
+    SkinWrapPatchSetSampleRate => "Skin Wrap Patch Set Sample Rate", Loom, "Skin Wrap Patch > Sample Rate: samples per patch edge (resamples)." { rate: u32 };
+    SkinWrapPatchResample => "Skin Wrap Patch Resample", Loom, "Skin Wrap Patch > Resample: rebind to the patch as it is now.";
     SkinWrapConvertToSkin => "Skin Wrap Convert To Skin", Loom, "Skin Wrap > Convert To Skin: a Skin modifier with the base's bones and weights blended from the bound faces; the wrap turns off.";
     SetParameter => "Set Parameter", Loom, "Set a parametric object's rollout parameter by its name (e.g. \"Height Segs\", \"Radius 1\", \"Slice On\")." { id: u64, name: String, value: f64 };
     ConvertToEditablePoly => "Convert to Editable Poly", Loom, "Collapse the selected objects to Editable Poly (quad menu > Convert To).";
@@ -1868,5 +1893,4 @@ pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
 /// Actions that later plans implement; each names its plan.
 pub const DEFERRED: &[(&str, &str)] = &[
     ("History-Dependent IK Solver", "spec: HD Solver out of scope"),
-    ("Skin Wrap Patch Modifier", "no patch objects"),
     ];

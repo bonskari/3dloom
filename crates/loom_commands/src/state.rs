@@ -304,6 +304,12 @@ pub enum PickMode {
     PlaceHighlight,
     /// Spacing Tool > Pick Path: the clicked shape is the path.
     SpacingPath,
+    /// Skin Morph > Pick Bone: each clicked bone joins the list.
+    SkinMorphBone,
+    /// Skin Morph > External Mesh: the clicked object becomes the current morph's target.
+    SkinMorphExternal,
+    /// Skin Wrap > Add: each clicked object becomes a control object.
+    SkinWrapControl,
 }
 
 /// Paint Deformation brushes.
@@ -1671,6 +1677,8 @@ pub struct AppState {
     /// Morpher > Channel List: the current channel; Skin Morph: the current morph.
     pub morph_channel: usize,
     pub skin_morph_current: Option<usize>,
+    /// Skin Morph list: the highlighted bone (Create Morph acts on it).
+    pub skin_morph_bone: Option<NodeId>,
     /// Systems > Bones > IK Chain Assignment: new chains get an HI solver.
     pub bones_ik_chain: bool,
     pub current_frame: i32,
@@ -1902,6 +1910,7 @@ impl AppState {
             skin_gizmo: None,
             morph_channel: 0,
             skin_morph_current: None,
+            skin_morph_bone: None,
             bones_ik_chain: false,
             current_frame: 0,
             frame_range: (0, 100),

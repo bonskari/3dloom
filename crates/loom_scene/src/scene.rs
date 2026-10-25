@@ -360,7 +360,13 @@ impl Scene {
             }
         };
         let self_world_at = |t: f32| -> glam::Mat4 { self.at_time(t, || self.object_matrix(id)) };
-        let ctx = EvalCtx { object_world, object_inverse: object_world.inverse(), lookup: Some(&lookup), shape_lookup: Some(&shape_lookup), eval_shape_lookup: Some(&eval_shape_lookup), world_lookup: Some(&world_lookup), eval_lookup: Some(&eval_lookup), self_world_at: Some(&self_world_at), camera_fov: Some(&camera_fov) };
+        let eval_patch_lookup = |other: NodeId| -> Option<(glam::Mat4, loom_mesh::patch::PatchMesh)> {
+            if !self.nodes.contains_key(&other) || self.eval_in_progress.borrow().contains(&other) {
+                return None;
+            }
+            Some((self.object_matrix(other), self.evaluated(other, None).value.patch.clone()?))
+        };
+        let ctx = EvalCtx { object_world, object_inverse: object_world.inverse(), lookup: Some(&lookup), shape_lookup: Some(&shape_lookup), eval_shape_lookup: Some(&eval_shape_lookup), world_lookup: Some(&world_lookup), eval_lookup: Some(&eval_lookup), self_world_at: Some(&self_world_at), camera_fov: Some(&camera_fov), eval_patch_lookup: Some(&eval_patch_lookup) };
         let mut value = StackValue { mesh: node.map(|n| n.object.display_output()).unwrap_or_default(), selection: None, shape: node.and_then(|n| n.object.shape()), shape_selection: None, warnings: Vec::new(), patch: node.and_then(|n| n.object.patch_mesh()) };
         let mut warnings = Vec::new();
         if let Some(n) = node {
