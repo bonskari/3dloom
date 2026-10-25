@@ -75,6 +75,62 @@ fn structure_rollout_body_type_and_check_boxes() {
     assert!(!structure(&h, root).triangle_pelvis.get());
 }
 
+/// Footstep Mode, Create Multiple Footsteps through its dialog, then Create
+/// Keys for Inactive Footsteps: the biped walks when the time changes.
+#[test]
+fn footsteps_from_the_dialog_make_the_biped_walk() {
+    let mut h = Harness::new();
+    let root = biped(&mut h);
+    h.click_widget("Footstep Mode");
+    h.frames(2);
+    assert!(structure(&h, root).footstep_mode && !structure(&h, root).figure_mode);
+    h.click_widget("Create Multiple Footsteps");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::BipedMultipleFootsteps));
+    assert!(!h.text_rects("Create Multiple Footsteps: Walk").is_empty(), "the Walk dialog");
+    h.click_text_anywhere("OK");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(structure(&h, root).footsteps.len(), 4);
+    let com0 = h.app.state.scene.world_matrix(root).w_axis.truncate();
+    h.click_widget("Create Keys for Inactive Footsteps");
+    h.frames(2);
+    assert!(structure(&h, root).footsteps.iter().all(|f| f.active));
+    h.cmd(Command::SetFrame { frame: 45 });
+    h.frames(1);
+    let com = h.app.state.scene.world_matrix(root).w_axis.truncate();
+    assert!(com.y < com0.y - 20.0, "the biped walked forward: {com} from {com0}");
+}
+
+/// Create Footsteps (append): clicks in the Top view place footsteps there.
+#[test]
+fn create_footsteps_append_takes_viewport_clicks() {
+    let mut h = Harness::new();
+    let root = biped(&mut h);
+    h.cmd(Command::BipedFootstepMode { on: Some(true) });
+    h.cmd(Command::TopView);
+    maximized(&mut h);
+    let cam = &mut h.app.state.active_mut().camera;
+    cam.target = Vec3::new(0.0, -40.0, 0.0);
+    cam.distance = 250.0;
+    h.frames(2);
+    h.click_widget("Create Footsteps (append)");
+    h.frames(1);
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::BipedFootstep));
+    let pts = [Vec3::new(-5.0, -20.0, 0.0), Vec3::new(5.0, -45.0, 0.0)];
+    for p in pts {
+        let at = h.screen_of(p);
+        h.click(at);
+        h.frames(1);
+    }
+    let f = structure(&h, root).footsteps;
+    assert_eq!(f.len(), 2, "{}", h.app.state.status_prompt);
+    for (fs, p) in f.iter().zip(pts) {
+        assert!(fs.position.distance(p) < 1.5, "{} vs {p}", fs.position);
+    }
+    assert!(!f[0].left && f[1].left);
+}
+
 /// Save File and Load File on the Biped rollout go through the file dialog.
 #[test]
 fn save_and_load_file_write_and_read_a_figure() {
