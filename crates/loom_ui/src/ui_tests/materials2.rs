@@ -32,13 +32,15 @@ fn scroll_to(h: &mut Harness, label: &str) {
         // Shown inside the window, not under its bottom edge.
         let inner = win.shrink2(egui::vec2(0.0, 12.0));
         if h.text_rects(label).into_iter().any(|r| inner.contains_rect(r)) {
-            return;
+            break;
         }
         let p = win.center();
         h.run(vec![egui::Event::PointerMoved(p)]);
         h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -120.0), modifiers: egui::Modifiers::NONE }]);
         h.frames(2);
     }
+    // Let the scrolling come to rest before clicking.
+    h.frames(20);
 }
 
 /// The spinner right of the label `label` inside the Material Editor.
@@ -160,15 +162,15 @@ fn raytrace_and_architectural_rollouts() {
     choose_type(&mut h, "Raytrace", "Architectural");
     let win = material_editor_rect(&h);
     assert!(h.text_rect("Physical Qualities", win).is_some());
-    // Templates drop-down: Mirror.
+    // Templates drop-down: Glass - Clear (near the top of the list).
     scroll_to(&mut h, "User Defined");
     click_in_editor(&mut h, "User Defined", 0.0);
     h.frames(2);
-    let mirror = *h.text_centers("Mirror").last().expect("Mirror in the list");
-    h.click(mirror);
+    let glass = *h.text_centers("Glass - Clear").last().expect("Glass - Clear in the list");
+    h.click(glass);
     h.frames(2);
     let loom_scene::material::MaterialKind::Architectural(a) = editor_material(&h).kind else { panic!("Architectural") };
-    assert_eq!(loom_scene::material_types::ARCH_TEMPLATES[a.template as usize].0, "Mirror");
+    assert_eq!(loom_scene::material_types::ARCH_TEMPLATES[a.template as usize].0, "Glass - Clear");
 }
 
 #[test]
