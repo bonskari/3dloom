@@ -154,6 +154,30 @@ pub fn compose_base(diffuse: glam::Vec3, map: Option<(&MapImage, &Map)>, opacity
     MapImage { width: w, height: h, rgba }
 }
 
+/// `map` as a `size` square texture in another map's frame: texel `m` (that
+/// map's map space, as the material's UV transform gives it) shows `map` at
+/// the surface UV the frame `[a, b, c, d, e, f]` maps to `m`.
+pub fn bake_in_frame(map: &Map, frame: &[f32; 6], size: u32, images: &loom_scene::maps::Images) -> MapImage {
+    let det = frame[0] * frame[4] - frame[1] * frame[3];
+    let inv = if det.abs() < 1e-12 {
+        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    } else {
+        let (a, b, d, e) = (frame[4] / det, -frame[1] / det, -frame[3] / det, frame[0] / det);
+        [a, b, -(a * frame[2] + b * frame[5]), d, e, -(d * frame[2] + e * frame[5])]
+    };
+    let n = size.max(1);
+    let mut rgba = Vec::with_capacity((n * n * 4) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            let m = [(x as f32 + 0.5) / n as f32, 1.0 - (y as f32 + 0.5) / n as f32];
+            let uv = [inv[0] * m[0] + inv[1] * m[1] + inv[2], inv[3] * m[0] + inv[4] * m[1] + inv[5]];
+            let c = loom_scene::maps::eval(map, uv, images);
+            rgba.extend(c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
+        }
+    }
+    MapImage { width: n, height: n, rgba }
+}
+
 /// A Normal Bump map's normal image as Bevy reads normal maps (green
 /// toward the top of the image): the reference's tangent normal maps point
 /// green down, so green is inverted unless Flip Green; Flip Red inverts red.
@@ -502,6 +526,25 @@ mod tests {
         // Specular Level 0: no specular reflection.
         lm.specular_level.set(0.0);
         assert_eq!(material_from_loom(Some(&lm), [0, 0, 0]).reflectance, 0.0);
+    }
+
+    #[test]
+    fn a_map_with_other_coordinates_bakes_into_the_frame() {
+        use loom_scene::material::MapType;
+        // A checker tiled 2 x 2 in the frame of a map tiled 1 x 1: four checks a side per frame tile.
+        let mut checker = BitmapMap::new(MapType::Checker, 100.0);
+        checker.set_parameter("Tiling U", 2.0).unwrap();
+        checker.set_parameter("Tiling V", 2.0).unwrap();
+        let frame = BitmapMap::new(MapType::Bitmap, 100.0);
+        let img = bake_in_frame(&checker, &frame.coords.matrix(), 16, &Default::default());
+        let px = |x: u32, y: u32| img.rgba[((y * 16 + x) * 4) as usize];
+        let row: Vec<u8> = (0..16).map(|x| px(x, 15)).collect();
+        let changes = row.windows(2).filter(|w| w[0] != w[1]).count();
+        assert_eq!(changes, 3, "four checks across: {row:?}");
+        // In its own frame it bakes as one tile of two checks.
+        let own = bake_in_frame(&checker, &checker.coords.matrix(), 16, &Default::default());
+        let row: Vec<u8> = (0..16).map(|x| own.rgba[((15 * 16 + x) * 4) as usize]).collect();
+        assert_eq!(row.windows(2).filter(|w| w[0] != w[1]).count(), 1, "{row:?}");
     }
 
     #[test]

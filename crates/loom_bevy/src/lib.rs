@@ -552,11 +552,23 @@ impl BevyRenderer {
     fn surface_material(&mut self, surface: Option<&Surface>, wire_color: [u8; 3]) -> StandardMaterial {
         let mut m = material_from_surface(surface, wire_color);
         let Some(s) = surface else { return m };
-        let diffuse = s.diffuse_map.as_ref().and_then(|map| self.baked(map).map(|img| (img, map.clone())));
-        let opacity = s.opacity_map.as_ref().and_then(|map| self.baked(map).map(|img| (img, map.clone())));
+        // Bevy has one UV transform per material: the first map's Coordinates
+        // (Diffuse, else Opacity, Bump, Specular Level, Self-Illumination);
+        // a map with other Coordinates is baked into that map's frame.
+        let frame = [&s.diffuse_map, &s.opacity_map, &s.bump_map, &s.specular_level_map, &s.self_illum_map].into_iter().flatten().next().cloned();
+        if let Some(f) = &frame {
+            m.uv_transform = convert::uv_transform(f);
+        }
+        let frame = frame.as_ref();
+        let diffuse = s.diffuse_map.as_ref().and_then(|map| self.in_frame(map, frame).map(|(img, k)| (img, map.clone(), k)));
+        let opacity = s.opacity_map.as_ref().and_then(|map| self.in_frame(map, frame).map(|(img, k)| (img, map.clone(), k)));
+        let diffuse = diffuse.map(|(i, m, k)| ((i, m), k));
+        let opacity = opacity.map(|(i, m, k)| ((i, m), k));
+        let (diffuse, diffuse_key) = (diffuse.as_ref().map(|d| d.0.clone()), diffuse.as_ref().map(|d| d.1.clone()).unwrap_or_default());
+        let (opacity, opacity_key) = (opacity.as_ref().map(|d| d.0.clone()), opacity.as_ref().map(|d| d.1.clone()).unwrap_or_default());
         if diffuse.is_some() || opacity.is_some() {
-            let key = format!("base:{:?}:{}:{}:{}", s.diffuse, s.opacity, diffuse.as_ref().map(|(_, m)| loom_scene::maps::texture_key(m) + &m.amount.to_string()).unwrap_or_default(), opacity.as_ref().map(|(_, m)| loom_scene::maps::texture_key(m) + &m.amount.to_string()).unwrap_or_default());
-            let decal = diffuse.as_ref().map(|(_, m)| m.coords.decal()).unwrap_or([false; 2]);
+            let key = format!("base:{:?}:{}:{}:{}:{}:{}", s.diffuse, s.opacity, diffuse.as_ref().map(|(_, m)| m.amount.to_string()).unwrap_or_default(), diffuse_key, opacity.as_ref().map(|(_, m)| m.amount.to_string()).unwrap_or_default(), opacity_key);
+            let decal = frame.map(|m| m.coords.decal()).unwrap_or([false; 2]);
             m.base_color_texture = self.texture_from(&key, TextureFormat::Rgba8UnormSrgb, decal, || convert::compose_base(s.diffuse, diffuse.as_ref().map(|(i, m)| (i.as_ref(), m)), s.opacity, opacity.as_ref().map(|(i, m)| (i.as_ref(), m))));
             if m.base_color_texture.is_some() {
                 // The texture carries the colour (and the alpha); only the self-lit share is taken off.
@@ -566,14 +578,10 @@ impl BevyRenderer {
                     m.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
                 }
             }
-            let coords = diffuse.as_ref().or(opacity.as_ref()).map(|(_, m)| m);
-            if let Some(c) = coords {
-                m.uv_transform = convert::uv_transform(c);
-            }
         }
         if let Some(map) = s.bump_map.as_ref() {
-            if let Some(img) = self.baked(map) {
-                let key = format!("bump:{}:{}:{}{}", loom_scene::maps::texture_key(map), map.amount, map.params.flip_red, map.params.flip_green);
+            if let Some((img, k)) = self.in_frame(map, frame) {
+                let key = format!("bump:{k}:{}:{}{}", map.amount, map.params.flip_red, map.params.flip_green);
                 m.normal_map_texture = if map.kind == loom_scene::material::MapType::NormalBump {
                     self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::normal_bump(&img, map.params.flip_red, map.params.flip_green))
                 } else {
@@ -582,22 +590,41 @@ impl BevyRenderer {
             }
         }
         if let Some(map) = s.specular_level_map.as_ref() {
-            if let Some(img) = self.baked(map) {
-                let key = format!("spec:{}:{}", loom_scene::maps::texture_key(map), map.amount);
+            if let Some((img, k)) = self.in_frame(map, frame) {
+                let key = format!("spec:{k}:{}", map.amount);
                 m.specular_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::luminance(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
                 // The texture's alpha 0–1 maps to reflectance 0–0.5 times this.
                 m.reflectance = (s.specular_level / 100.0).clamp(0.0, 2.0);
             }
         }
         if let Some(map) = s.self_illum_map.as_ref() {
-            if let Some(img) = self.baked(map) {
-                let key = format!("illum:{}:{}", loom_scene::maps::texture_key(map), map.amount);
+            if let Some((img, k)) = self.in_frame(map, frame) {
+                let key = format!("illum:{k}:{}", map.amount);
                 m.emissive_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::luminance(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
                 let d = Color::srgb(s.diffuse.x, s.diffuse.y, s.diffuse.z).to_linear();
                 m.emissive = bevy::color::LinearRgba::rgb(d.red, d.green, d.blue);
             }
         }
         m
+    }
+
+    /// `map` as a texture under the material's UV transform (the Coordinates
+    /// of `frame`) and a key for its pixels: its own tile when its Coordinates
+    /// are the frame's, else baked through the frame (exact when the two
+    /// tilings repeat together, as integer ratios do).
+    fn in_frame(&mut self, map: &Map, frame: Option<&Map>) -> Option<(std::sync::Arc<loom_scene::maps::Image>, String)> {
+        let key = loom_scene::maps::texture_key(map);
+        let same = frame.is_none_or(|f| f.coords.matrix() == map.coords.matrix() && f.coords.mirror == map.coords.mirror);
+        let img = self.baked(map)?;
+        if same {
+            return Some((img, key));
+        }
+        let f = frame.expect("checked");
+        let fm = f.coords.matrix();
+        let fkey = format!("{key}@{fm:?}{:?}", f.coords.mirror);
+        let size = img.width.max(img.height).clamp(256, 2048);
+        let images = self.images.clone();
+        Some((std::sync::Arc::new(convert::bake_in_frame(map, &fm, size, &images)), fkey))
     }
 
     /// A map baked to pixels (one map-space tile), its bitmaps read once per path.
