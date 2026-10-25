@@ -85,7 +85,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         let mut name: String = ui.ctx().data(|d| d.get_temp(name_id)).unwrap_or_else(|| l.name.clone());
                         let edit = egui::TextEdit::singleline(&mut name).desired_width(150.0);
                         let edit = if highlighted.contains(&l.id) { edit.background_color(ui.visuals().selection.bg_fill) } else { edit };
-                        let r = ui.add(edit);
+                        let r = ui.add_sized([150.0, 18.0], edit);
                         if r.clicked() || r.gained_focus() {
                             if ui.input(|inp| inp.modifiers.ctrl) {
                                 highlighted.insert(l.id);
