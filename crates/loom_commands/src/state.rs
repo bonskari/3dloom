@@ -724,6 +724,13 @@ pub struct Prefs {
     pub local_center_during_animate: bool,
     /// Preferences > Files > Recent Files in File Menu (0-50, default 10).
     pub recent_files_count: usize,
+    /// Preferences > Viewports > Grid Nudge Distance (Nudge Grid Up / Down, default 1.0).
+    #[serde(default = "default_nudge")]
+    pub grid_nudge_distance: f32,
+}
+
+fn default_nudge() -> f32 {
+    1.0
 }
 
 impl Default for Prefs {
@@ -748,19 +755,21 @@ impl Default for Prefs {
             auto_backup_name: "AutoBackup".into(),
             local_center_during_animate: true,
             recent_files_count: 10,
+            grid_nudge_distance: 1.0,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 31] = [
+    pub const NAMES: [&'static str; 32] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
         "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
+        "Grid Nudge Distance",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -783,6 +792,7 @@ impl Prefs {
             "Auto Backup Count" => self.auto_backup_count as f64,
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
             "Recent Files in File Menu" => self.recent_files_count as f64,
+            "Grid Nudge Distance" => self.grid_nudge_distance as f64,
             "Transform Gizmos" => b(self.gizmos.enabled),
             "Show Axis Labels" => b(self.gizmos.show_axis_labels),
             "Allow Multiple Gizmos" => b(self.gizmos.allow_multiple),
@@ -823,6 +833,7 @@ impl Prefs {
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
             "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
+            "Grid Nudge Distance" => self.grid_nudge_distance = f.max(0.0),
             "Transform Gizmos" => self.gizmos.enabled = on,
             "Show Axis Labels" => self.gizmos.show_axis_labels = on,
             "Allow Multiple Gizmos" => self.gizmos.allow_multiple = on,

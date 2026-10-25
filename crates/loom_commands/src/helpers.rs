@@ -313,6 +313,25 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.mesh_dirty = true;
             Ok(json!({}))
         }
+        C::AlignGridToView => {
+            let g = state.active_grid().ok_or("activate a grid object first")?;
+            // The displayed plane faces the viewer: X right, Y up, Z toward the eye.
+            let view = crate::transform::screen_axes(state, state.active_viewport);
+            let (lu, lv) = loom_scene::node::grid_plane_axes(match &state.scene.node(g).map(|n| &n.object) {
+                Some(ObjectKind::Grid { plane, .. }) => plane.get(),
+                _ => 0,
+            });
+            let local = glam::Mat3::from_cols(lu, lv, lu.cross(lv));
+            let rot = glam::Quat::from_mat3(&(view * local.transpose())).normalize();
+            let world = state.scene.world_matrix(g);
+            let (scale, _, at) = world.to_scale_rotation_translation();
+            let local_m = state.scene.parent_frame(g).inverse() * Mat4::from_scale_rotation_translation(scale, rot, at);
+            let node = state.scene.node(g).ok_or_else(|| missing(g))?;
+            commit(state, "Align Grid to View", Change::SetTransform { id: g, before: node.transform.clone(), after: loom_scene::Transform::from_matrix(local_m) })?;
+            Ok(json!({}))
+        }
+        C::NudgeGridUp => nudge_grid(state, 1.0),
+        C::NudgeGridDown => nudge_grid(state, -1.0),
         C::MeasureDistance => {
             state.pick_mode = Some(PickMode::MeasureDistanceA);
             state.measure_from = None;
@@ -321,6 +340,18 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         _ => Err("not a helper command".into()),
     }
+}
+
+/// Nudge Grid Up / Down: the active grid moves along its normal by the
+/// Grid Nudge Distance (`sign` +1 up, -1 down).
+fn nudge_grid(state: &mut AppState, sign: f32) -> Result<Value, String> {
+    let g = state.active_grid().ok_or("activate a grid object first")?;
+    let (_, _, _, n) = grid_plane(state, g).ok_or("not a grid")?;
+    let world = state.scene.world_matrix(g);
+    let local_m = state.scene.parent_frame(g).inverse() * Mat4::from_translation(n * state.prefs.grid_nudge_distance * sign) * world;
+    let node = state.scene.node(g).ok_or_else(|| missing(g))?;
+    commit(state, "Nudge Grid", Change::SetTransform { id: g, before: node.transform.clone(), after: loom_scene::Transform::from_matrix(local_m) })?;
+    Ok(json!({}))
 }
 
 /// Tools > Measure Distance: a point pick; the second one reports the

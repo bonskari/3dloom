@@ -118,6 +118,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         let _ = app.dispatch(Command::ActivateGridObject);
                         ui.close_menu();
                     }
+                    if ui.add_enabled(app.state.active_grid().is_some(), egui::Button::new("Align Grid to View")).clicked() {
+                        let _ = app.dispatch(Command::AlignGridToView);
+                        ui.close_menu();
+                    }
                     ui.separator();
                     cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
                     item(ui, app, "Snaps Toggle", "Snaps Toggle");

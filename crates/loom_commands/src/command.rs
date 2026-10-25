@@ -1411,6 +1411,9 @@ commands! {
     ProtractorPickObject => "Protractor Pick Object", Loom, "Protractor > Pick Object 1 / 2: the next clicked object (which 1 or 2)." { which: u32 };
     SetProtractorObject => "Set Protractor Object", Loom, "Set a protractor's object 1 or 2 (null clears it)." { id: u64, which: u32, object: Option<u64> };
     ActivateGridObject => "Activate Grid Object", Loom, "Tools > Grids and Snaps > Activate Grid Object: the selected grid helper becomes the construction plane in every viewport.";
+    AlignGridToView => "Align Grid to View", Loom, "Tools > Grids and Snaps > Align Grid to View: the active grid object turns to lie in the active view's plane, its top at the top of the view.";
+    NudgeGridUp => "Nudge Grid Up", Loom, "Move the active grid object along its normal by Preferences > Viewports > Grid Nudge Distance.";
+    NudgeGridDown => "Nudge Grid Down", Loom, "Move the active grid object against its normal by the Grid Nudge Distance.";
     ActivateHomeGrid => "Activate Home Grid", Loom, "Tools > Grids and Snaps > Activate Home Grid: the home grid is the construction plane again.";
     SnapshotDialog => "Snapshot Dialog", Loom, "Tools > Snapshot: open the Snapshot dialog for the selection.";
     Snapshot => "Snapshot", Loom, "Tools > Snapshot: clone the selection as it is at the current frame (range false) or at `copies` frames spread from `from` to `to`; method 0 Copy, 1 Instance, 2 Reference, 3 Mesh. Returns the created ids." { range: bool, from: i32, to: i32, copies: u32, method: u32 };

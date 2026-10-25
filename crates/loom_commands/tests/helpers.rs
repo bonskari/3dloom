@@ -260,3 +260,33 @@ fn measure_create_center_point_puts_a_point_at_the_centre_of_mass() {
     assert!(matches!(s.scene.node(p).unwrap().object, ObjectKind::Point { .. }));
     assert!(s.scene.world_matrix(p).w_axis.truncate().distance(Vec3::new(10.0, 0.0, 5.0)) < 1e-3);
 }
+
+#[test]
+fn nudge_grid_moves_the_active_grid_along_its_normal() {
+    let mut s = AppState::new();
+    let g = helper(&mut s, "grid", [0.0, 0.0, 10.0], 100.0);
+    assert!(execute(&mut s, Command::NudgeGridUp).is_err(), "needs an active grid");
+    execute(&mut s, Command::ActivateGridObject).unwrap();
+    execute(&mut s, Command::SetPreference { name: "Grid Nudge Distance".into(), value: 2.5 }).unwrap();
+    execute(&mut s, Command::NudgeGridUp).unwrap();
+    assert!(s.scene.world_matrix(g).w_axis.truncate().distance(Vec3::new(0.0, 0.0, 12.5)) < 1e-4);
+    execute(&mut s, Command::NudgeGridDown).unwrap();
+    execute(&mut s, Command::NudgeGridDown).unwrap();
+    assert!(s.scene.world_matrix(g).w_axis.truncate().distance(Vec3::new(0.0, 0.0, 7.5)) < 1e-4);
+}
+
+#[test]
+fn align_grid_to_view_turns_the_grid_to_face_the_view() {
+    let mut s = AppState::new();
+    let g = helper(&mut s, "grid", [5.0, 5.0, 5.0], 100.0);
+    execute(&mut s, Command::ActivateGridObject).unwrap();
+    let front = s.viewports.iter().position(|v| v.kind == loom_commands::ViewKind::Front).unwrap();
+    execute(&mut s, Command::ActiveViewport { index: front as u32 }).unwrap();
+    execute(&mut s, Command::AlignGridToView).unwrap();
+    let w = s.scene.world_matrix(g);
+    // The Front view looks along +Y: the grid's normal points back at the viewer (-Y), its Y up.
+    assert!(w.z_axis.truncate().normalize().distance(-Vec3::Y) < 1e-4, "{w}");
+    assert!(w.y_axis.truncate().normalize().distance(Vec3::Z) < 1e-4, "{w}");
+    assert!(w.w_axis.truncate().distance(Vec3::splat(5.0)) < 1e-4, "it stays where it is");
+    assert!(s.construction_plane(0).3.distance(-Vec3::Y) < 1e-4);
+}
