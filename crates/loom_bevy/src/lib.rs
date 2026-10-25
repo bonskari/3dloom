@@ -635,7 +635,7 @@ impl BevyRenderer {
                 std::sync::Arc::new(loom_scene::maps::Image { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
             })
         });
-        let plain = map.kind == loom_scene::material::MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1];
+        let plain = loom_scene::maps::is_plain_bitmap(map);
         if plain {
             return self.images.get(&map.path).cloned().flatten();
         }

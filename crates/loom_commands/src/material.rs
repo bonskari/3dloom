@@ -171,7 +171,7 @@ fn edit_map(state: &mut AppState, label: &str, f: impl FnOnce(&mut Map) -> Resul
 /// "Map #N": one more than the maps the library holds.
 fn next_map_name(lib: &MaterialLibrary) -> String {
     fn count(m: &Map) -> usize {
-        1 + m.sub_maps.iter().flatten().map(|s| count(s)).sum::<usize>()
+        1 + m.components().map(count).sum::<usize>()
     }
     let n: usize = lib.values().map(|m| m.map_slots().iter().filter_map(|s| m.map(s)).map(count).sum::<usize>()).sum();
     format!("Map #{}", n + 1)
@@ -186,7 +186,7 @@ fn children(lib: &MaterialLibrary, id: MaterialId, maps: &[String]) -> Vec<NavSt
         return out;
     }
     let Some(map) = map_at(m, maps) else { return Vec::new() };
-    map.kind.color_slots().iter().enumerate().filter(|(i, _)| map.sub_maps[*i].is_some()).map(|(_, s)| NavStep::Map((*s).to_owned())).collect()
+    map.slot_names().into_iter().enumerate().filter(|(i, _)| map.sub_map(*i).is_some()).map(|(_, s)| NavStep::Map(s)).collect()
 }
 
 /// Changes the material at the current level to `kind`.
@@ -568,7 +568,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({ "map": map }))
         }
         C::NewMap { map, kind } => {
-            let ty = MapType::from_label(&kind).ok_or_else(|| format!("no map type \"{kind}\" (Bitmap, Checker, Gradient, Mix, Noise, Normal Bump)"))?;
+            let ty = MapType::from_label(&kind).ok_or_else(|| format!("no map type \"{kind}\" ({})", MapType::ALL.map(|t| t.label()).join(", ")))?;
             edit_level(state, "New Map", |lib, slots, id, maps| {
                 let mut new = Map::new(ty, if maps.is_empty() { default_amount(&map) } else { 100.0 });
                 new.name = next_map_name(lib);
@@ -592,8 +592,10 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 let mut new = Map::new(ty, old.amount);
                 new.enabled = old.enabled;
                 new.name = old.name.clone();
-                if keep_old.unwrap_or(false) && !ty.color_slots().is_empty() {
-                    new.sub_maps[0] = Some(Box::new(old));
+                if keep_old.unwrap_or(false) {
+                    if let Some(i) = new.keep_old_slot() {
+                        *new.sub_map_slot_mut(i) = Some(Box::new(old));
+                    }
                 }
                 *m = new;
                 Ok(())

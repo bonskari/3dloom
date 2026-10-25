@@ -23,10 +23,61 @@ pub enum MapType {
     Mix,
     /// Normal Bump: a tangent-space normal map in its Normal component.
     NormalBump,
+    Swirl,
+    Tiles,
+    GradientRamp,
+    Cellular,
+    Dent,
+    Marble,
+    PerlinMarble,
+    Planet,
+    Smoke,
+    Speckle,
+    Splat,
+    Stucco,
+    Waves,
+    Wood,
+    Composite,
+    Mask,
+    RgbMultiply,
+    RgbTint,
+    Output,
+    ColorCorrection,
+    VertexColor,
+    Falloff,
 }
 
 impl MapType {
-    pub const ALL: [MapType; 6] = [MapType::Bitmap, MapType::Checker, MapType::Gradient, MapType::Mix, MapType::Noise, MapType::NormalBump];
+    pub const ALL: [MapType; 28] = [
+        MapType::Bitmap,
+        MapType::Cellular,
+        MapType::Checker,
+        MapType::ColorCorrection,
+        MapType::Composite,
+        MapType::Dent,
+        MapType::Falloff,
+        MapType::Gradient,
+        MapType::GradientRamp,
+        MapType::Marble,
+        MapType::Mask,
+        MapType::Mix,
+        MapType::Noise,
+        MapType::NormalBump,
+        MapType::Output,
+        MapType::PerlinMarble,
+        MapType::Planet,
+        MapType::RgbMultiply,
+        MapType::RgbTint,
+        MapType::Smoke,
+        MapType::Speckle,
+        MapType::Splat,
+        MapType::Stucco,
+        MapType::Swirl,
+        MapType::Tiles,
+        MapType::VertexColor,
+        MapType::Waves,
+        MapType::Wood,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -36,6 +87,28 @@ impl MapType {
             MapType::Noise => "Noise",
             MapType::Mix => "Mix",
             MapType::NormalBump => "Normal Bump",
+            MapType::Swirl => "Swirl",
+            MapType::Tiles => "Tiles",
+            MapType::GradientRamp => "Gradient Ramp",
+            MapType::Cellular => "Cellular",
+            MapType::Dent => "Dent",
+            MapType::Marble => "Marble",
+            MapType::PerlinMarble => "Perlin Marble",
+            MapType::Planet => "Planet",
+            MapType::Smoke => "Smoke",
+            MapType::Speckle => "Speckle",
+            MapType::Splat => "Splat",
+            MapType::Stucco => "Stucco",
+            MapType::Waves => "Waves",
+            MapType::Wood => "Wood",
+            MapType::Composite => "Composite",
+            MapType::Mask => "Mask",
+            MapType::RgbMultiply => "RGB Multiply",
+            MapType::RgbTint => "RGB Tint",
+            MapType::Output => "Output",
+            MapType::ColorCorrection => "Color Correction",
+            MapType::VertexColor => "Vertex Color",
+            MapType::Falloff => "Falloff",
         }
     }
 
@@ -43,11 +116,24 @@ impl MapType {
         Self::ALL.into_iter().find(|t| t.label() == s)
     }
 
-    /// The names of the map's colour components (each can hold a sub-map).
+    /// The names of the map's colour components (each can hold a sub-map);
+    /// a Composite's and a Gradient Ramp's grow (`Map::slot_names`).
     pub fn color_slots(self) -> &'static [&'static str] {
         match self {
-            MapType::Bitmap => &[],
+            MapType::Bitmap | MapType::VertexColor => &[],
             MapType::Checker | MapType::Noise => &["Color #1", "Color #2"],
+            MapType::Dent | MapType::Marble | MapType::PerlinMarble | MapType::Smoke | MapType::Speckle | MapType::Splat | MapType::Stucco | MapType::Waves | MapType::Wood | MapType::RgbMultiply => &["Color #1", "Color #2"],
+            MapType::Swirl => &["Base", "Swirl"],
+            MapType::Tiles => &["Tiles", "Grout"],
+            MapType::GradientRamp => &["Source Map", "Flag #1", "Flag #2", "Flag #3"],
+            MapType::Cellular => &["Cell Color", "Division #1", "Division #2"],
+            MapType::Planet => &["Color #1", "Color #2", "Color #3", "Color #4", "Color #5", "Color #6", "Color #7", "Color #8"],
+            MapType::Composite => &["Layer 1", "Mask 1"],
+            MapType::Mask => &["Map", "Mask"],
+            MapType::RgbTint => &["R", "G", "B", "Map"],
+            MapType::Output => &["Map"],
+            MapType::ColorCorrection => &["Map", "Hue Tint"],
+            MapType::Falloff => &["Front", "Side"],
             MapType::Gradient => &["Color #1", "Color #2", "Color #3"],
             MapType::Mix => &["Color #1", "Color #2", "Mix Amount"],
             MapType::NormalBump => &["Normal"],
@@ -177,6 +263,24 @@ pub struct Map {
     pub sub_maps: [Option<Box<Map>>; 3],
     #[serde(default)]
     pub params: MapParams,
+    /// Coordinates rollout of a 3D map.
+    #[serde(default)]
+    pub coords3: crate::map_params::Coords3,
+    #[serde(default)]
+    pub output: crate::map_params::MapOutput,
+    #[serde(default)]
+    pub extra: crate::map_params::MoreParams,
+    /// Composite layers.
+    #[serde(default)]
+    pub layers: Vec<crate::map_params::CompositeLayer>,
+    /// Gradient Ramp flags.
+    #[serde(default)]
+    pub flags: Vec<crate::map_params::RampFlag>,
+    /// Colour components past the third.
+    #[serde(default)]
+    pub extra_colors: Vec<Vec3>,
+    #[serde(default)]
+    pub extra_maps: Vec<Option<Box<Map>>>,
 }
 
 fn default_map_colors() -> [Vec3; 3] {
@@ -193,7 +297,27 @@ impl Map {
             MapType::NormalBump => [Vec3::new(0.5, 0.5, 1.0), Vec3::ONE, Vec3::ONE],
             _ => [Vec3::ZERO, Vec3::ONE, Vec3::ONE],
         };
-        Self { path: String::new(), amount, enabled: true, kind, name: String::new(), coords: MapCoords::default(), crop: Cropping::default(), colors, sub_maps: [None, None, None], params: MapParams::default() }
+        let mut map = Self {
+            path: String::new(),
+            amount,
+            enabled: true,
+            kind,
+            name: String::new(),
+            coords: MapCoords::default(),
+            crop: Cropping::default(),
+            colors,
+            sub_maps: [None, None, None],
+            params: MapParams::default(),
+            coords3: Default::default(),
+            output: Default::default(),
+            extra: Default::default(),
+            layers: Vec::new(),
+            flags: Vec::new(),
+            extra_colors: Vec::new(),
+            extra_maps: Vec::new(),
+        };
+        map.init_more();
+        map
     }
 
     pub fn bitmap(path: impl Into<String>, amount: f32) -> Self {
@@ -210,7 +334,7 @@ impl Map {
     }
 
     pub fn sub_map_index(&self, slot: &str) -> Option<usize> {
-        self.kind.color_slots().iter().position(|s| *s == slot)
+        self.slot_names().iter().position(|s| s == slot)
     }
 
     /// Sets a parameter by its rollout label (booleans as 0 / 1), clamped to its range.
@@ -243,7 +367,7 @@ impl Map {
                 c.mirror[1] &= !on;
             }
             "Angle W" => c.angle = v,
-            "Map Channel" => c.map_channel = (value.round() as u32).clamp(1, 99),
+            "Map Channel" => c.map_channel = (value.round().max(0.0) as u32).clamp(if self.kind == MapType::VertexColor { 0 } else { 1 }, 99),
             "Blur" => c.blur = v.clamp(0.01, 100.0),
             "Apply" => k.apply = on,
             "Place" => k.place = on,
@@ -269,9 +393,12 @@ impl Map {
             other => {
                 if let Some(slot) = other.strip_suffix(" Map On") {
                     let i = self.sub_map_index(slot).ok_or_else(|| format!("no map component \"{slot}\""))?;
-                    if let Some(m) = self.sub_maps[i].as_mut() {
+                    if let Some(m) = self.sub_map_slot_mut(i).as_mut() {
                         m.enabled = on;
                     }
+                    return Ok(());
+                }
+                if self.set_more_parameter(other, value)? {
                     return Ok(());
                 }
                 return Err(format!("no map parameter \"{other}\""));
@@ -280,15 +407,14 @@ impl Map {
         Ok(())
     }
 
-    /// Color #1–#3 from 0–255 RGB.
+    /// A colour component's swatch (Color #1, Base, Flag #2, R...) from 0–255 RGB.
     pub fn set_color(&mut self, which: &str, rgb: [u8; 3]) -> Result<(), String> {
-        let i = match which {
-            "Color #1" => 0,
-            "Color #2" => 1,
-            "Color #3" => 2,
-            other => return Err(format!("no map colour \"{other}\" (Color #1, Color #2, Color #3)")),
-        };
-        self.colors[i] = Vec3::new(rgb[0] as f32, rgb[1] as f32, rgb[2] as f32) / 255.0;
+        let names = self.slot_names();
+        let i = names.iter().position(|s| s == which).filter(|i| self.slot_has_color(*i)).ok_or_else(|| {
+            let with: Vec<&str> = names.iter().enumerate().filter(|(i, _)| self.slot_has_color(*i)).map(|(_, s)| s.as_str()).collect();
+            format!("no map colour \"{which}\" ({})", with.join(", "))
+        })?;
+        *self.color_mut(i) = Vec3::new(rgb[0] as f32, rgb[1] as f32, rgb[2] as f32) / 255.0;
         Ok(())
     }
 
@@ -1114,7 +1240,7 @@ pub fn resolve_level(lib: &MaterialLibrary, top: MaterialId, path: &[NavStep]) -
                 let exists = if maps.is_empty() {
                     lib.get(&id).and_then(|m| m.map(slot)).is_some()
                 } else {
-                    lib.get(&id).and_then(|m| map_at(m, &maps)).and_then(|m| m.sub_map_index(slot).and_then(|i| m.sub_maps[i].as_ref())).is_some()
+                    lib.get(&id).and_then(|m| map_at(m, &maps)).and_then(|m| m.sub_map_index(slot).and_then(|i| m.sub_map(i))).is_some()
                 };
                 if !exists {
                     return (level, n);
@@ -1133,7 +1259,7 @@ pub fn map_at<'a>(m: &'a StandardMaterial, maps: &[String]) -> Option<&'a Map> {
     let (first, rest) = maps.split_first()?;
     let mut map = m.map(first)?;
     for slot in rest {
-        map = map.sub_maps[map.sub_map_index(slot)?].as_deref()?;
+        map = map.sub_map(map.sub_map_index(slot)?)?;
     }
     Some(map)
 }
@@ -1143,7 +1269,7 @@ pub fn map_at_mut<'a>(m: &'a mut StandardMaterial, maps: &[String]) -> Option<&'
     let mut map = m.map_slot_mut(first).ok()?.as_mut()?;
     for slot in rest {
         let i = map.sub_map_index(slot)?;
-        map = map.sub_maps[i].as_deref_mut()?;
+        map = map.sub_map_slot_mut(i).as_deref_mut()?;
     }
     Some(map)
 }
@@ -1152,8 +1278,8 @@ pub fn map_at_mut<'a>(m: &'a mut StandardMaterial, maps: &[String]) -> Option<&'
 /// (or of the material itself when `maps` is empty).
 pub fn map_slot_at_mut<'a>(m: &'a mut StandardMaterial, maps: &[String], slot: &str) -> Result<&'a mut Option<Box<Map>>, String> {
     let parent = map_at_mut(m, maps).ok_or("no such map level")?;
-    let i = parent.sub_map_index(slot).ok_or_else(|| format!("a {} map has no component \"{slot}\"", parent.kind.label()))?;
-    Ok(&mut parent.sub_maps[i])
+    let i = parent.sub_map_index(slot).filter(|i| parent.slot_has_map(*i)).ok_or_else(|| format!("a {} map has no map component \"{slot}\"", parent.kind.label()))?;
+    Ok(parent.sub_map_slot_mut(i))
 }
 
 /// What one surface draws with, resolved from a (possibly compound)
