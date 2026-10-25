@@ -83,8 +83,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 });
             });
         });
+        // Label above the radios, as in Max: on one row they widened the panel.
+        ui.label("Preview Selection");
         ui.horizontal(|ui| {
-            ui.label("Preview Selection:");
             for (p, l) in [(PreviewSelect::Off, "Off"), (PreviewSelect::SubObj, "SubObj"), (PreviewSelect::Multi, "Multi")] {
                 if ui.radio(app.state.preview_selection == p, l).clicked() && app.state.preview_selection != p {
                     while app.state.preview_selection != p {

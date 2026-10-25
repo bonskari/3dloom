@@ -136,13 +136,16 @@ fn undo_spline_ik_control_create_helpers() {
     // Undo the move: the knot is back; undo Create Helpers: no helpers, no links.
     undo(&mut s);
     assert!((knots(&s)[2] - moved[2]).length() > 4.0);
+    // The helper selection is an undo step of its own.
+    undo(&mut s);
     undo(&mut s);
     assert_eq!(s.scene.nodes().count(), nodes);
     assert!(helpers.iter().all(|h| s.scene.node(*h).is_none()));
     assert_eq!(stack(&s, line), before);
-    // Redo: the helpers and the moved knot come back.
-    execute(&mut s, Command::RedoSceneOperation).unwrap();
-    execute(&mut s, Command::RedoSceneOperation).unwrap();
+    // Redo: the helpers, the helper selection and the moved knot come back.
+    for _ in 0..3 {
+        execute(&mut s, Command::RedoSceneOperation).unwrap();
+    }
     assert_eq!(s.scene.nodes().count(), nodes + 3);
     assert!(same(&knots(&s), &moved));
 }

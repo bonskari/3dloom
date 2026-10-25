@@ -223,7 +223,7 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                 ui.horizontal(|ui| {
                     ui.label("Visibility:");
                     let mut v = node.visibility.as_ref().map_or(1.0, |p| p.get());
-                    let r = ui.add(egui::DragValue::new(&mut v).range(0.0..=1.0).speed(0.01).fixed_decimals(3));
+                    let r = ui.add(crate::spinner::spin(ui, &mut v, 0.0..=1.0).speed(0.01).fixed_decimals(3));
                     if r.drag_started() {
                         app.state.undo.begin("Visibility");
                     }

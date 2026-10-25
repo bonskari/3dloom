@@ -136,6 +136,8 @@ pub enum PickMode {
     HideByHit,
     FreezeByHit,
     UnfreezeByHit,
+    /// Edit > Select By > Color: the next clicked object gives the colour.
+    SelectByColor,
     /// Select and Link: the next clicked object becomes the selection's parent.
     Link,
     /// Material Editor > Pick Material From Object: the eyedropper.
@@ -1310,6 +1312,8 @@ pub struct AppState {
     pub undo: UndoStack,
     pub selection: BTreeSet<NodeId>,
     pub sub_selection: SubSelection,
+    /// Selection before / after each undo step (selection undo).
+    pub sel_history: crate::sel_undo::SelHistory,
     /// Selected control points of the active FFD entry (lattice indices).
     pub ffd_selection: BTreeSet<u32>,
     /// VertexPaint: the viewport brush is on.
@@ -1660,6 +1664,7 @@ impl AppState {
             undo: UndoStack::new(100),
             selection: BTreeSet::new(),
             sub_selection: SubSelection::default(),
+            sel_history: Default::default(),
             selection_mode: SelectionMode::Object,
             active_tool: Tool::Select,
             viewports: default_kinds(ViewportLayout::FourGrid).into_iter().map(Viewport::new).collect(),

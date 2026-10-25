@@ -815,6 +815,8 @@ commands! {
     SelectChild => "Select Child", MainUI, "Select the first child of each selected object (PageDown).";
     SelectChildren => "Select Children", MainUI, "Select every child of the selected objects (Ctrl+PageDown).";
     SelectSimilar => "Select Similar", MainUI, "Select every object of the same kind as the selection (Ctrl+Q).";
+    SelectInstances => "Select Instances", MainUI, "Edit > Select Instances: select every instance of the one selected object.";
+    SelectByColorPick => "Select By Color Pick", MainUI, "Edit > Select By > Color: the next clicked object selects every visible, unfrozen object of its object colour.";
     Group => "Group", MainUI, "Group the selected objects under a new group head (Group menu > Group)." { name: Option<String> };
     Ungroup => "Ungroup", MainUI, "Ungroup the selected groups: members keep their place, the head goes.";
     GroupOpen => "Open Group", MainUI, "Open the selected groups so their members can be selected and edited.";

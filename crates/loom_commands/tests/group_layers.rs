@@ -110,6 +110,8 @@ fn layer_hidden_hides_members_in_picks() {
     execute(&mut s, Command::SetLayerFrozen { layer, on: true }).unwrap();
     execute(&mut s, Command::SelectNodes { ids: vec![ids[0].0], op: SelectOp::Replace }).unwrap();
     assert!(s.selection.is_empty(), "frozen layer objects cannot be selected");
+    // The selection change (it emptied the selection) is an undo step of its own.
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert!(!s.scene.layer(layer).unwrap().frozen);
 }

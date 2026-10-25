@@ -11,6 +11,7 @@ mod icons;
 mod transforms;
 mod menus;
 mod display;
+mod widgets;
 mod ribbon;
 mod precision;
 
@@ -3931,6 +3932,7 @@ fn a_second_empty_click_at_polygon_level_releases_the_object_and_the_level() {
     assert_eq!(h.app.state.selection_mode, SelectionMode::Object, "and ends Polygon level");
 }
 
+mod qa;
 /// A Checker map with Show Map in Viewport on a Multi/Sub sub-material shows
 /// its checks in the shaded viewport (the faces' UVs vary and the texture
 /// holds both colours), as the screenshot scene sets it up.
