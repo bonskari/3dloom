@@ -2378,14 +2378,17 @@ fn modifier_stack_right_click_menus_close() {
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(2);
     let cp = panel(&h, "command_panel");
-    // Start below the panel edge: the toolbar's Render flyout sits right above it.
-    let bend = find_context_menu(&mut h, cp.min.x as i32..cp.max.x as i32, cp.min.y as i32 + 8..cp.max.y as i32, 6, |_| true);
+    // The stack rows by their names (the panel's other rows have menus of their own).
+    let in_panel = |h: &Harness, t: &str| *h.text_rects(t).iter().find(|r| cp.contains_rect(**r)).unwrap_or_else(|| panic!("{t} in the stack"));
+    let bend = in_panel(&h, "Bend").center();
+    right_click(&mut h, bend);
     // Rename, Delete, Off.
     let m = menus(&h)[0];
     h.click(menu_row(&h, m, 2));
     assert!(!h.app.state.scene.node(id).unwrap().modifiers[0].enabled, "Off runs");
     assert!(menus(&h).is_empty(), "and closes the menu");
-    let base = find_context_menu(&mut h, bend.x as i32..bend.x as i32 + 1, bend.y as i32..cp.max.y as i32, 3, |r| (r.height() - m.height()).abs() > 1.0);
+    let base = in_panel(&h, "Box").center();
+    right_click(&mut h, base);
     let m = menus(&h)[0];
     let row = menu_row(&h, m, 0);
     hover(&mut h, row);
