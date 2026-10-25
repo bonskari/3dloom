@@ -416,9 +416,8 @@ impl Default for Environment {
             map_mapping: EnvMapping::Screen,
             tint: p(Vec3::ONE),
             level: p(1.0),
-            // White, as the Bevy renderer's ambient light always was here
-            // (the reference defaults to black next to its default lights).
-            ambient: p(Vec3::ONE),
+            // Black, as the reference: what no light reaches renders black.
+            ambient: p(Vec3::ZERO),
             exposure: ExposureControl::default(),
             atmospheres: Vec::new(),
             effects: Vec::new(),

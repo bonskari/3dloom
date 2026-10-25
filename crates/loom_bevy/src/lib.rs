@@ -59,7 +59,7 @@ const LIGHT_LAYER: usize = 4;
 /// to Camera off) with the default key light: only that light is on this
 /// layer. Kept far above the per-light layers.
 const SHADOW_ONLY_LAYER: usize = 1023;
-/// Brightness of the ambient light that the Render Setup colour tints.
+/// Brightness of the ambient light at the Environment's Ambient white.
 const AMBIENT_BRIGHTNESS: f32 = 250.0;
 
 /// Render Setup values a render uses (the Bevy renderer panel and the
@@ -151,6 +151,12 @@ const METER_STOPS: f32 = 4.0;
 const KEY_LIGHT_FROM: Vec3 = Vec3::new(0.8, -0.45, 1.0);
 /// The default key light's illuminance (lux) at Global Lighting Level 1.
 const KEY_LIGHT_LUX: f32 = 3000.0;
+/// The reference's default lighting is two lights: the key above the scene
+/// and a fill from below on the other side, so with the default black
+/// ambient nothing is left unlit. The fill is as much weaker as loom's
+/// two-light viewport default (0.35 against 0.75) and casts no shadows.
+const FILL_LIGHT_FROM: Vec3 = Vec3::new(-0.8, 0.45, -1.0);
+const FILL_LIGHT_LUX: f32 = KEY_LIGHT_LUX * 0.35 / 0.75;
 
 /// The device a shared Bevy renderer needs: the adapter's features (less
 /// the ones Bevy itself leaves off) and its limits, as Bevy asks for them
@@ -182,6 +188,8 @@ pub struct BevyRenderer {
     images: loom_scene::maps::Images,
     /// The default key light, while the scene has no light that is on.
     light: Option<Entity>,
+    /// The default fill light, with the key light.
+    fill: Option<Entity>,
     /// The scene's lights (from `sync_lights`) and their Bevy entities by node id.
     samples: Vec<loom_scene::light::LightSample>,
     scene_lights: HashMap<u64, lights::Synced>,
@@ -242,9 +250,11 @@ impl BevyRenderer {
         }
         app.finish();
         app.cleanup();
-        app.insert_resource(AmbientLight { color: Color::WHITE, brightness: AMBIENT_BRIGHTNESS, affects_lightmapped_meshes: true });
+        // The default Environment's ambient is black.
+        app.insert_resource(AmbientLight { color: Color::WHITE, brightness: 0.0, affects_lightmapped_meshes: true });
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         let light = Some(Self::spawn_key_light(&mut app));
+        let fill = Some(Self::spawn_fill_light(&mut app));
         Self {
             app,
             device,
@@ -254,6 +264,7 @@ impl BevyRenderer {
             textures: HashMap::new(),
             images: Default::default(),
             light,
+            fill,
             samples: Vec::new(),
             scene_lights: HashMap::new(),
             bounds: None,
@@ -270,7 +281,7 @@ impl BevyRenderer {
         }
     }
 
-    /// Default lighting: a key light with shadows.
+    /// Default lighting: the key light, with shadows.
     fn spawn_key_light(app: &mut App) -> Entity {
         app.world_mut()
             .spawn((
@@ -282,9 +293,20 @@ impl BevyRenderer {
             .id()
     }
 
+    /// Default lighting: the fill light, from below on the other side.
+    fn spawn_fill_light(app: &mut App) -> Entity {
+        app.world_mut()
+            .spawn((
+                DirectionalLight { illuminance: FILL_LIGHT_LUX, shadows_enabled: false, ..Default::default() },
+                Transform::from_translation(FILL_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
+                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER]),
+            ))
+            .id()
+    }
+
     /// Brings the Bevy lights in line with the scene's lights (call after
-    /// `sync`, which measures the scene). With none, the default key light
-    /// lights the scene; otherwise the scene lights replace it. A render's
+    /// `sync`, which measures the scene). With none, the default key and fill
+    /// lights light the scene; otherwise the scene lights replace it. A render's
     /// Render Setup options (shadows, shadow map size, ambient) apply on top.
     pub fn sync_lights(&mut self, samples: &[loom_scene::light::LightSample]) {
         let relayer = samples.iter().map(|s| (s.id, &s.exclusion)).ne(self.samples.iter().map(|s| (s.id, &s.exclusion)));
@@ -311,15 +333,22 @@ impl BevyRenderer {
             if self.light.is_none() {
                 self.light = Some(Self::spawn_key_light(&mut self.app));
             }
-        } else if let Some(e) = self.light.take() {
-            self.app.world_mut().despawn(e);
+            if self.fill.is_none() {
+                self.fill = Some(Self::spawn_fill_light(&mut self.app));
+            }
+        } else {
+            for e in [self.light.take(), self.fill.take()].into_iter().flatten() {
+                self.app.world_mut().despawn(e);
+            }
         }
-        if let Some(e) = self.light {
+        let b = light_tint.max_element();
+        let color = if b > 0.0 { Color::linear_rgb(light_tint.x / b, light_tint.y / b, light_tint.z / b) } else { Color::BLACK };
+        for (e, lux, key) in [(self.light, KEY_LIGHT_LUX, true), (self.fill, FILL_LIGHT_LUX, false)] {
+            let Some(e) = e else { continue };
             if let Some(mut l) = self.app.world_mut().get_mut::<DirectionalLight>(e) {
-                l.shadows_enabled = shadows;
-                let b = light_tint.max_element();
-                l.illuminance = KEY_LIGHT_LUX * b;
-                l.color = if b > 0.0 { Color::linear_rgb(light_tint.x / b, light_tint.y / b, light_tint.z / b) } else { Color::BLACK };
+                l.shadows_enabled = key && shadows;
+                l.illuminance = lux * b;
+                l.color = color;
             }
         }
         // The Environment's ambient colour (sRGB), plus the skylights and Ambient Only lights.

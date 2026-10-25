@@ -52,6 +52,8 @@ fn eight_opens_the_environment_panel_and_effects_the_effects_panel() {
 fn background_and_global_lighting_are_undoable_and_saved() {
     let mut s = AppState::new();
     let before = s.scene.environment.clone();
+    // The reference's defaults: black background and ambient, white tint, level 1.
+    assert_eq!((before.background.get(), before.ambient.get(), before.tint.get(), before.level.get()), (Vec3::ZERO, Vec3::ZERO, Vec3::ONE, 1.0));
     ok(&mut s, "Environment Settings", json!({ "background": [0.2, 0.4, 0.6] }));
     ok(&mut s, "Environment Settings", json!({ "tint": [1.0, 0.5, 0.5], "level": 2.0, "ambient": [0.1, 0.1, 0.1] }));
     ok(&mut s, "Environment Settings", json!({ "map": "/tmp/sky.png", "mapping": "Spherical" }));

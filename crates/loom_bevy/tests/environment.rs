@@ -293,6 +293,55 @@ fn depth_of_field_blurs_out_of_focus_edges() {
     assert!(soft(&off, fy, fx.saturating_sub(12), fx + 12) <= far_sharp + 1, "Effects off: no blur");
 }
 
+/// The default environment (black ambient) with no scene lights: the
+/// default key and fill lights leave no face of a box black; a face the
+/// key light misses is lit, more dimly, by the fill.
+#[test]
+fn default_lighting_lights_every_side() {
+    let mut r = renderer!("default_lighting_lights_every_side");
+    let b = loom_mesh::box_primitive(Vec3::splat(10.0));
+    r.sync(&[object(1, &b)]);
+    r.sync_lights(&[]);
+    assert!(r.default_lighting());
+    let size = (120, 120);
+    // From -X, a little below: the -X face (away from the key light) and the -Y face.
+    let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(-40.0, -40.0, 2.0), Vec3::new(0.0, 0.0, 5.0), Vec3::Z), projection: Mat4::perspective_rh(40f32.to_radians(), 1.0, 0.5, 5000.0) };
+    let img = render(&mut r, &cam, size, RenderOptions::default(), 1);
+    let at = |p: Vec3| {
+        let (x, y) = pixel(&cam, size, p);
+        img.get_pixel(x, y).0
+    };
+    let (fill_side, key_side) = (at(Vec3::new(-5.0, 2.0, 5.0)), at(Vec3::new(2.0, -5.0, 5.0)));
+    assert!(fill_side[3] == 255 && luma(fill_side) > 25.0, "the fill light lights the side the key misses: {fill_side:?}");
+    assert!(luma(key_side) > luma(fill_side), "the key side is brighter: {key_side:?} vs {fill_side:?}");
+}
+
+/// With scene lights (no default lights) and the default black ambient,
+/// what no light reaches renders black.
+#[test]
+fn scene_lit_renders_leave_unlit_areas_black() {
+    let mut r = renderer!("scene_lit_renders_leave_unlit_areas_black");
+    let plane = loom_mesh::plane_segmented(400.0, 400.0, 1, 1);
+    r.sync(&[SceneObject { id: 1, mesh: &plane, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() }]);
+    let mut spot = loom_scene::light::default_lights(1, Mat4::IDENTITY)[0].clone();
+    spot.id = loom_scene::NodeId(7);
+    spot.position = Vec3::new(0.0, 0.0, 100.0);
+    spot.direction = Vec3::new(0.0, 0.0, -1.0);
+    spot.emitter = loom_scene::light::Emitter::Spot { hotspot: 20.0, falloff: 30.0 };
+    r.sync_lights(std::slice::from_ref(&spot));
+    assert!(!r.default_lighting());
+    let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -1.0, 300.0), Vec3::ZERO, Vec3::Y), projection: Mat4::perspective_rh(60f32.to_radians(), 1.0, 0.5, 5000.0) };
+    let size = (100, 100);
+    let img = render(&mut r, &cam, size, RenderOptions::default(), 1);
+    let at = |p: Vec3| {
+        let (x, y) = pixel(&cam, size, p);
+        img.get_pixel(x, y).0
+    };
+    let (inside, outside) = (at(Vec3::ZERO), at(Vec3::new(150.0, 150.0, 0.0)));
+    assert!(luma(inside) > 80.0, "lit inside the cone: {inside:?}");
+    assert_eq!((outside[0], outside[1], outside[2], outside[3]), (0, 0, 0, 255), "black outside it");
+}
+
 /// Volume Fog without gizmos fills the scene (not the space between the
 /// camera and it): a box behind another is fogged about the same seen from
 /// near or far away.
