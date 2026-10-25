@@ -45,6 +45,29 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
         }
     }
     let mut changes = Vec::new();
+    // The file's display layers: the scene's layer of that name ("0" is layer 0), else a new one.
+    let mut layers = state.scene.layers.clone();
+    let mut layer_of: BTreeMap<usize, u32> = BTreeMap::new();
+    for fl in &doc.layers {
+        let lid = match layers.iter().find(|l| l.name == fl.name || (fl.name == "0" && l.id == 0)) {
+            Some(l) => l.id,
+            None => {
+                let id = layers.iter().map(|l| l.id + 1).max().unwrap_or(1);
+                let mut l = loom_scene::Layer::new(id, fl.name.clone());
+                l.color = (fl.color * 255.0).round().clamp(glam::Vec3::ZERO, glam::Vec3::splat(255.0)).to_array().map(|v| v as u8);
+                l.hidden = !fl.visible;
+                l.frozen = fl.frozen;
+                layers.push(l);
+                id
+            }
+        };
+        for ni in &fl.nodes {
+            layer_of.insert(*ni, lid);
+        }
+    }
+    if layers != state.scene.layers {
+        changes.push(Change::SetLayers { before: (state.scene.layers.clone(), state.scene.current_layer), after: (layers, state.scene.current_layer) });
+    }
     let mut ids = Vec::new();
     for (i, n) in doc.nodes.iter().enumerate() {
         if !keep[i] {
@@ -92,7 +115,7 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
         }
         node.parent = p.and_then(|pi| id_of.get(&pi).copied());
         node.wire_color = OBJECT_COLORS[((first as usize) + ids.len()) % OBJECT_COLORS.len()];
-        node.layer = state.scene.current_layer;
+        node.layer = layer_of.get(&i).copied().unwrap_or(state.scene.current_layer);
         let id = NodeId(first + ids.len() as u64);
         node.id = id;
         // Morpher below Skin (FBX order); both built now that every id is known.
@@ -295,7 +318,21 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
     }
     let count = nodes.len();
     let anim = bake_take(state, &exported_ids, &nodes);
-    let doc = FbxDocument { nodes, unit_metres: unit_metres(state), anim };
+    // The exported objects' layers, as display layers.
+    let mut layers: Vec<loom_fbx::FbxLayer> = Vec::new();
+    for (i, id) in exported_ids.iter().enumerate() {
+        let Some(l) = state.scene.node(*id).and_then(|n| state.scene.layer(n.layer)) else { continue };
+        let at = match layers.iter().position(|x| x.name == l.name) {
+            Some(k) => k,
+            None => {
+                let c = l.color.map(|v| v as f32 / 255.0);
+                layers.push(loom_fbx::FbxLayer { name: l.name.clone(), color: glam::Vec3::from_array(c), visible: !l.hidden, frozen: l.frozen, nodes: Vec::new() });
+                layers.len() - 1
+            }
+        };
+        layers[at].nodes.push(i);
+    }
+    let doc = FbxDocument { nodes, unit_metres: unit_metres(state), anim, layers };
     let bytes = loom_fbx::write(&doc, &WriteOpts { creator: format!("3dloom {}", env!("CARGO_PKG_VERSION")), ..Default::default() });
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(json!({ "path": path, "objects": count }))

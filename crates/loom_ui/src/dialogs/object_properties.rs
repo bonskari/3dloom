@@ -107,8 +107,13 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                     let _ = app.dispatch(Command::Rename { id: first.0, name: name.clone() });
                 }
             }
-            if crate::dialogs::object_color::swatch(ui, node.wire_color).clicked() {
+            if crate::dialogs::object_color::swatch(ui, app.state.scene.display_color(node)).clicked() {
                 let _ = app.dispatch(Command::ObjectColorDialog);
+            }
+            // Object colour By Layer / By Object.
+            let by_layer = node.display.color_by_layer;
+            if ui.selectable_label(by_layer, if by_layer { "By Layer" } else { "By Object" }).on_hover_text("Object colour from the layer or from the object").clicked() {
+                let _ = app.dispatch(Command::SetColorByLayer { on: !by_layer });
             }
         });
         egui::Grid::new("object_info").num_columns(4).spacing([12.0, 2.0]).show(ui, |ui| {
@@ -167,7 +172,10 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Display Properties").strong());
-                    ui.add_enabled(false, egui::Button::new("By Object")).on_disabled_hover_text("By Layer display properties come with the layer properties");
+                    let by_layer = nodes.iter().all(|n| n.display.by_layer);
+                    if ui.button(if by_layer { "By Layer" } else { "By Object" }).on_hover_text("Display properties from the layer or from the object").clicked() {
+                        let _ = app.dispatch(Command::SetDisplayByLayer { on: !by_layer });
+                    }
                 });
                 for prop in DisplayProps::NAMES {
                     if prop == "Vertex Color Shaded" {
@@ -199,7 +207,10 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Rendering Control").strong());
-                    ui.add_enabled(false, egui::Button::new("By Object")).on_disabled_hover_text("By Layer rendering control comes with the layer properties");
+                    let by_layer = nodes.iter().all(|n| n.render.by_layer);
+                    if ui.button(if by_layer { "By Layer" } else { "By Object" }).on_hover_text("Rendering control from the layer or from the object").clicked() {
+                        let _ = app.dispatch(Command::SetRenderByLayer { on: !by_layer });
+                    }
                 });
                 // For lights Renderable is the only control (off turns the light off in renders).
                 let lights_only = nodes.iter().all(|n| matches!(n.object, loom_scene::ObjectKind::Light(_)));

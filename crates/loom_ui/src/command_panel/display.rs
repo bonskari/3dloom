@@ -111,14 +111,17 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         };
         let Some(node) = app.state.scene.node(id) else { return };
         let props = node.display.clone();
+        // Every selected object: a box shows mixed when they differ.
+        let all: Vec<DisplayProps> = app.state.selection.iter().filter_map(|n| app.state.scene.node(*n)).map(|n| n.display.clone()).collect();
         for name in DisplayProps::NAMES {
             if name == "Vertex Color Shaded" {
                 continue;
             }
-            let mut v = props.get(name).unwrap_or(false);
+            let on = all.iter().filter(|p| p.get(name) == Some(true)).count();
+            let mut v = on == all.len();
             let label = if name == "Vertex Color" { "Vertex Colors" } else { name };
-            if ui.checkbox(&mut v, label).changed() {
-                let _ = app.dispatch(Command::SetDisplayProperty { id: id.0, name: name.into(), value: v });
+            if ui.add(egui::Checkbox::new(&mut v, label).indeterminate(on > 0 && on < all.len())).changed() {
+                let _ = app.dispatch(Command::SetSelectionDisplayProperty { name: name.into(), value: v });
             }
         }
         ui.horizontal(|ui| {
@@ -134,11 +137,16 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             let is_none = props.texture == loom_scene::TextureDisplay::None;
             let is_checker = props.texture == loom_scene::TextureDisplay::Checker;
             let is_bitmap = matches!(props.texture, loom_scene::TextureDisplay::Bitmap(_));
+            let ids: Vec<u64> = app.state.selection.iter().map(|n| n.0).collect();
             if ui.radio(is_none, "None").clicked() && !is_none {
-                let _ = app.dispatch(Command::SetTextureDisplay { id: id.0, kind: "none".into(), path: None });
+                for id in &ids {
+                    let _ = app.dispatch(Command::SetTextureDisplay { id: *id, kind: "none".into(), path: None });
+                }
             }
             if ui.radio(is_checker, "Checker").clicked() && !is_checker {
-                let _ = app.dispatch(Command::SetTextureDisplay { id: id.0, kind: "checker".into(), path: None });
+                for id in &ids {
+                    let _ = app.dispatch(Command::SetTextureDisplay { id: *id, kind: "checker".into(), path: None });
+                }
             }
             if ui.radio(is_bitmap, "Bitmap...").clicked() {
                 app.state.dialog = Some(loom_commands::Dialog::PickTexture);

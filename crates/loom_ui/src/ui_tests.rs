@@ -3612,3 +3612,4 @@ fn a_checker_sub_material_shows_checks_in_the_viewport() {
         assert!(seen.len() > 1, "a checker face shows one colour; its UVs: {quad:?}");
     }
 }
+mod scene;

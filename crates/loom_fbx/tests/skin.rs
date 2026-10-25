@@ -55,7 +55,7 @@ fn blend_shapes_round_trip() {
     let mesh = loom_mesh::box_segmented(10.0, 10.0, 10.0, [1, 1, 1]);
     let mut node = FbxNode::new("Head", FbxKind::Mesh { mesh, materials: vec![] });
     node.blend_shapes.push(FbxBlendShape { name: "smile".into(), offsets: vec![(0, Vec3::Z * 2.0), (3, Vec3::X)], weight: 30.0 });
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node], unit_metres: 0.01, anim: None }, &WriteOpts::default());
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node], unit_metres: 0.01, anim: None, layers: Vec::new() }, &WriteOpts::default());
     let s = ufbx::load_memory(&bytes, ufbx::LoadOpts { strict: true, ..Default::default() }).unwrap();
     assert_eq!(s.blend_deformers.len(), 1);
     let back = loom_fbx::read(&bytes, 0.01).unwrap();
@@ -74,7 +74,7 @@ fn bones_write_as_limb_nodes_with_their_size() {
     let mut child = FbxNode::new("Bone002", FbxKind::Bone { length: 5.0, size: 4.0 });
     child.parent = Some(0);
     child.translation = Vec3::X * 10.0;
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![root, child], unit_metres: 0.01, anim: None }, &WriteOpts::default());
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![root, child], unit_metres: 0.01, anim: None, layers: Vec::new() }, &WriteOpts::default());
     let s = ufbx::load_memory(&bytes, ufbx::LoadOpts { strict: true, ..Default::default() }).unwrap();
     assert_eq!(s.bones.len(), 2);
     let back = loom_fbx::read(&bytes, 0.01).unwrap();

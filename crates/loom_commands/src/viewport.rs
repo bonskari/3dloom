@@ -432,6 +432,22 @@ pub enum Dialog {
     /// Point Cache > Record / Load file pickers for stack entry `index`.
     PointCacheRecord { index: u32, start: i32, end: i32 },
     PointCacheLoad { index: u32 },
+    /// File > New on a scene with objects: Keep Objects and Hierarchy / Keep Objects / New All.
+    NewScene,
+    /// File > Reset after the save prompt: "Do you really want to reset?"
+    ConfirmReset,
+    /// File > Save As > Save Selected.
+    SaveSelected,
+    /// File > Save As > Archive.
+    ArchiveFile,
+    /// File > Summary Info.
+    SummaryInfo,
+    /// File > File Properties.
+    FileProperties,
+    /// Group > Group: the group name.
+    GroupName,
+    /// Layer Manager > Layer Properties of `layer`.
+    LayerProperties { layer: u32 },
 }
 
 /// What the Material/Map Browser is choosing.
@@ -454,8 +470,27 @@ pub enum PendingFileAction {
     /// File > Recent: the n-th file of `AppState::recent_files`.
     OpenRecent(usize),
     New,
+    /// New Scene dialog: keep the objects (and their hierarchy).
+    NewKeeping(NewKeep),
     Reset,
     Exit,
+}
+
+/// New Scene dialog: what the new scene keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NewKeep {
+    ObjectsAndHierarchy,
+    Objects,
+}
+
+impl NewKeep {
+    /// The `NewSceneKeep` argument.
+    pub fn arg(self) -> &'static str {
+        match self {
+            NewKeep::ObjectsAndHierarchy => "objects_and_hierarchy",
+            NewKeep::Objects => "objects",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -9,6 +9,7 @@ pub mod gizmo;
 mod hotkeys;
 pub mod icons;
 pub mod label_menus;
+mod layers_toolbar;
 mod light_overlay;
 pub mod live;
 pub mod main_toolbar;
@@ -586,6 +587,15 @@ impl LoomApp {
         }
     }
 
+    /// File > New / Ctrl+N: the New Scene dialog when the scene has objects, else a new scene.
+    pub fn new_scene(&mut self) {
+        if self.state.scene.len() > 0 {
+            self.state.dialog = Some(loom_commands::Dialog::NewScene);
+        } else {
+            self.request_file_action(loom_commands::PendingFileAction::New);
+        }
+    }
+
     /// File > New / Reset / Open / Exit: asks to save first when the scene is dirty.
     pub fn request_file_action(&mut self, action: loom_commands::PendingFileAction) {
         if self.state.dirty() {
@@ -641,8 +651,9 @@ impl LoomApp {
             .iter()
             .map(|id| {
                 let n = self.state.scene.node(*id).expect("collected above");
-                let gray = n.frozen && n.display.show_frozen_in_gray;
-                (self.state.scene.node_surfaces(*id).filter(|_| !gray && display_color.1 == ColorSource::Material), n.display.texture.clone())
+                let d = self.state.scene.display_of(n);
+                let gray = n.frozen && d.show_frozen_in_gray;
+                (self.state.scene.node_surfaces(*id).filter(|_| !gray && display_color.1 == ColorSource::Material), d.texture)
             })
             .collect();
         let mut looks = Vec::with_capacity(wanted.len());
@@ -652,6 +663,8 @@ impl LoomApp {
         let mut looks = looks.into_iter();
         for id in visible {
             let n = self.state.scene.node(id).expect("collected above");
+            // Display Properties By Layer come from the layer.
+            let d = self.state.scene.display_of(n);
             let mut mesh = n.cage_mesh().into_owned();
             // What the GPU draws: the stack result (NURMS included), or with
             // Show End Result off only up to the active entry of the object
@@ -668,7 +681,7 @@ impl LoomApp {
             } else {
                 Some(self.state.scene.eval_mesh(id).value.mesh.clone())
             };
-            if n.display.display_as_box {
+            if d.display_as_box {
                 // Display as Box: the object's local bounding box.
                 let (min, max) = mesh.aabb();
                 mesh = loom_mesh::box_primitive((max - min) * 0.5);
@@ -680,13 +693,14 @@ impl LoomApp {
             if let Some(d) = shown.as_mut() {
                 let _ = loom_mesh::edit_ops::transform_mesh(d, world);
             }
-            let gray = n.frozen && n.display.show_frozen_in_gray;
+            let gray = n.frozen && d.show_frozen_in_gray;
             let color = if gray {
                 [0.35, 0.35, 0.35]
             } else {
-                [srgb(n.wire_color[0]), srgb(n.wire_color[1]), srgb(n.wire_color[2])]
+                let c = self.state.scene.display_color(n);
+                [srgb(c[0]), srgb(c[1]), srgb(c[2])]
             };
-            let see_through = draws_see_through(n);
+            let see_through = d.see_through || draws_see_through(n);
             // An assigned material colours the faces (its diffuse, opacity,
             // highlight and self-illumination; a Multi/Sub-Object material per
             // face material ID); edges and wireframe keep the object colour,
@@ -706,11 +720,11 @@ impl LoomApp {
             // A visibility track below 1 shows the object partly transparent (never fully hidden in shaded views).
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
             // Skin > Display > Show Colored Faces (in Edit Envelopes): the faces shade by the current bone's weight.
-            let mut vertex_colors = n.display.vertex_colors;
+            let mut vertex_colors = d.vertex_colors;
             let mut color = color;
             // Vertex Channel Display shows the vertex colours themselves,
             // lit only with Shaded on.
-            let unlit = vertex_colors && !n.display.vertex_colors_shaded;
+            let unlit = vertex_colors && !d.vertex_colors_shaded;
             if vertex_colors {
                 color = [1.0; 3];
             }
@@ -733,11 +747,11 @@ impl LoomApp {
             styles.push(loom_render::MeshStyle {
                 color,
                 alpha: fade * opacity,
-                backface_cull: n.display.backface_cull,
+                backface_cull: d.backface_cull,
                 vertex_colors,
                 specular,
                 wire_color,
-                diagonals: !n.display.edges_only,
+                diagonals: !d.edges_only,
                 unlit,
                 sub: sub.map(std::sync::Arc::new),
                 ..base
@@ -1233,6 +1247,7 @@ impl LoomApp {
         }
         menubar::show(ctx, self);
         main_toolbar::show(ctx, self);
+        layers_toolbar::show(ctx, self);
         ribbon::show(ctx, self);
         // Bottom panels first so they span the full width under the Command Panel.
         statusbar::show(ctx, self);

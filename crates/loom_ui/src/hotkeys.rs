@@ -94,7 +94,7 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
             use loom_commands::PendingFileAction as A;
             match name {
                 // These discard the scene: ask about unsaved changes first, as the menu does.
-                "New Scene" => app.request_file_action(A::New),
+                "New Scene" => app.new_scene(),
                 "Open File" => app.request_file_action(A::Open),
                 "Reset File" => app.request_file_action(A::Reset),
                 // I: the point under the cursor becomes the view's centre.
