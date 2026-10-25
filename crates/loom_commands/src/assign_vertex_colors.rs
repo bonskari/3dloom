@@ -23,8 +23,11 @@ fn linear_to_srgb(x: f32) -> f32 {
     if x <= 0.0031308 { x * 12.92 } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 }
 }
 
+/// World triangles of the objects that cast a light's shadows.
+type Occluders = Vec<(NodeId, [Vec3; 3])>;
+
 /// Every other shadow-casting object's world triangles.
-fn occluders(state: &AppState, light: &LightSample) -> Vec<(NodeId, [Vec3; 3])> {
+fn occluders(state: &AppState, light: &LightSample) -> Occluders {
     let mut out = Vec::new();
     for n in state.scene.nodes() {
         if n.hidden || matches!(n.object, ObjectKind::Camera { .. }) || n.object.light().is_some() || n.object.is_shape() || light.exclusion.excludes(n.id, false) {
@@ -43,7 +46,7 @@ fn occluders(state: &AppState, light: &LightSample) -> Vec<(NodeId, [Vec3; 3])> 
 }
 
 /// Linear light reaching world point `p` with normal `n` from every light.
-fn irradiance(lights: &[(LightSample, Vec<(NodeId, [Vec3; 3])>)], id: NodeId, p: Vec3, n: Vec3, shadows: bool) -> Vec3 {
+fn irradiance(lights: &[(LightSample, Occluders)], id: NodeId, p: Vec3, n: Vec3, shadows: bool) -> Vec3 {
     let mut sum = Vec3::ZERO;
     for (l, occ) in lights {
         if l.exclusion.excludes(id, true) {
@@ -118,7 +121,7 @@ pub fn vertex_colors(state: &AppState, id: NodeId, model: u32, by_vertex: bool, 
         // No lights: the default lighting, a light from above.
         lights = loom_scene::light::default_lights(1, glam::Mat4::IDENTITY);
     }
-    let with_occ: Vec<(LightSample, Vec<(NodeId, [Vec3; 3])>)> = lights.into_iter().map(|l| {
+    let with_occ: Vec<(LightSample, Occluders)> = lights.into_iter().map(|l| {
         let occ = if shadows && l.shadows && model != 2 { occluders(state, &l) } else { Vec::new() };
         (l, occ)
     }).collect();
