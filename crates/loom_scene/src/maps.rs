@@ -219,6 +219,15 @@ fn perlin(p: Vec3) -> f32 {
 /// clamped by the caller). Colour components' own maps are evaluated over the
 /// first tile. None when the map is a Bitmap that cannot be loaded.
 pub fn bake(map: &Map, images: &Images) -> Option<Image> {
+    bake_with_limit(map, images, 2048)
+}
+
+/// Bake directly within the caller's pixel-size cap, including placed images
+/// and procedural maps. A zero cap disables output without allocating pixels.
+pub fn bake_with_limit(map: &Map, images: &Images, max_side: u32) -> Option<Image> {
+    if max_side == 0 {
+        return None;
+    }
     if map.kind == MapType::Bitmap && images.get(&map.path).cloned().flatten().is_none() {
         return None;
     }
@@ -239,7 +248,7 @@ pub fn bake(map: &Map, images: &Images) -> Option<Image> {
         // A placed image keeps its pixels: the tile grows by the scale-down.
         size = ((size.0 as f32 / map.crop.w.max(0.05)) as u32, (size.1 as f32 / map.crop.h.max(0.05)) as u32);
     }
-    let (w, h) = (size.0.clamp(1, 2048), size.1.clamp(1, 2048));
+    let (w, h) = (size.0.clamp(1, max_side), size.1.clamp(1, max_side));
     let inv = invert(map.coords.matrix());
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
