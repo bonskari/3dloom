@@ -673,6 +673,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         app.camera_create = crate::create_tool::CameraSession::begin_light(app, kind, anchor, basis.2);
                                     } else {
                                         crate::create_tool::CameraSession::place_light(app, kind, anchor, basis.2);
+                                        app.creation_finished();
                                     }
                                 }
                             } else if app.create_kind == Some(crate::CreateKind::Line) {

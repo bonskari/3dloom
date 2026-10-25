@@ -652,8 +652,8 @@ fn the_object_type_pin_toggles_keep_creating_in_every_category() {
     let mut h = Harness::new();
     let mut on = loom_commands::state::KEEP_CREATING_DEFAULT;
     for category in ["Geometry", "Shapes", "Lights", "Cameras", "Helpers", "Systems"] {
-        h.click_widget(category);
-        h.click_widget("Pin");
+        h.click(h.find(egui::accesskit::Role::Button, category).center());
+        h.click(h.find(egui::accesskit::Role::Button, crate::command_panel::create::PIN_TIP).center());
         on = !on;
         assert_eq!(h.app.state.prefs.keep_creating, on, "{category}: the Pin switched Keep Creating");
     }
@@ -692,7 +692,7 @@ fn cylinder_and_line_end_the_create_mode_only_when_finished() {
     assert!(h.app.quad_menu.is_none());
 }
 
-/// The Keyboard Entry Create button, a Target camera drag and a Dummy click
+/// The Keyboard Entry Create button, a Target camera drag, a Dummy and an Omni click
 /// each make one object and end the mode.
 #[test]
 fn keyboard_entry_camera_and_helper_creation_end_the_create_mode() {
@@ -722,6 +722,15 @@ fn keyboard_entry_camera_and_helper_creation_end_the_create_mode() {
     h.click(p);
     assert_eq!(h.app.state.scene.len(), 1);
     assert!(h.app.create_kind.is_none(), "a Dummy click ends the mode");
+
+    let mut h = Harness::new();
+    keep_creating(&mut h, false);
+    wide_view(&mut h);
+    h.app.start_create(Some(crate::CreateKind::Light(loom_commands::light::LightKind::Omni)));
+    let p = h.screen_of(Vec3::new(20.0, -10.0, 0.0));
+    h.click(p);
+    assert_eq!(h.app.state.scene.len(), 1);
+    assert!(h.app.create_kind.is_none(), "an Omni click ends the mode");
 }
 
 /// Create menu > Keep Creating and Preferences > General switch it too.

@@ -207,7 +207,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = ui.selectable_label(true, "Standard");
             });
             rollout(ui, "Object Type", true, |ui| {
-                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                autogrid_and_pin(ui, app);
                 egui::Grid::new("light_type").num_columns(2).show(ui, |ui| {
                     for (i, kind) in loom_commands::light::LightKind::ALL.iter().enumerate() {
                         let on = app.create_kind == Some(CreateKind::Light(*kind));
@@ -288,11 +288,13 @@ fn autogrid_and_pin(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
 }
 
+/// The Pin's tooltip (and its name for screen readers).
+pub const PIN_TIP: &str = "Keep Creating (pin): the create tool stays on after each object";
+
 /// The Pin (Keep Creating): on, the create tool stays on after each object.
 fn pin(ui: &mut egui::Ui, app: &mut LoomApp) {
-    use crate::shortcuts::HoverShortcut;
-    let r = ui.add(egui::SelectableLabel::new(app.state.prefs.keep_creating, "Pin"));
-    if r.on_hover_cmd(&app.state, "Keep Creating (pin): the create tool stays on after each object", "Keep Creating Toggle").clicked() {
+    let pin = crate::icons::Icon::new(crate::icons::KEEP_CREATING, Command::KeepCreatingToggle.name()).tip(PIN_TIP).on(app.state.prefs.keep_creating);
+    if pin.show(ui, &app.state).clicked() {
         let _ = app.dispatch(Command::KeepCreatingToggle);
     }
 }
