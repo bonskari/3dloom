@@ -69,11 +69,6 @@ impl ArgSchema for loom_scene::render::RenderArea {
         json!({"type":"string","enum":["View","Selected","Region","Crop","Blowup"]})
     }
 }
-impl ArgSchema for [f32; 2] {
-    fn schema() -> Value {
-        json!({"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2})
-    }
-}
 impl ArgSchema for loom_scene::environment::EnvMapping {
     fn schema() -> Value {
         json!({"type":"string","enum":["Screen","Spherical","Cylindrical","ShrinkWrap"]})
