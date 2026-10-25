@@ -8,7 +8,7 @@ use crate::execute::{commit, unique_name};
 use crate::state::{AppState, SelectionMode};
 use glam::Vec3;
 use loom_mesh::obj::{MtlMaterial, ObjFaceMode, ObjNormalMode, ObjOut, ObjReadOpts, ObjWriteOpts};
-use loom_scene::material::{BitmapMap, MaterialId, StandardMaterial};
+use loom_scene::material::{Map as BitmapMap, MaterialId, StandardMaterial};
 use loom_scene::{Change, Node, NodeId, ObjectKind};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -53,11 +53,11 @@ pub fn material_from_mtl(m: &MtlMaterial, dir: &Path, default_bump: f32, black_a
     if kd > 0.0 {
         s.self_illum.set((v(m.ke).max_element() / kd * 100.0).clamp(0.0, 100.0));
     }
-    let map = |p: &Option<String>, amount: f32| p.as_ref().filter(|p| !p.is_empty()).map(|p| BitmapMap { path: resolve(dir, p), amount, enabled: true });
+    let map = |p: &Option<String>, amount: f32| p.as_ref().filter(|p| !p.is_empty()).map(|p| BitmapMap::bitmap(resolve(dir, p), amount));
     s.diffuse_map = map(&m.map_kd, 100.0);
     s.specular_level_map = map(&m.map_ks, 100.0);
     s.opacity_map = map(&m.map_d, 100.0);
-    s.bump_map = m.map_bump.as_ref().filter(|(p, _)| !p.is_empty()).map(|(p, bm)| BitmapMap { path: resolve(dir, p), amount: bm.map_or(default_bump, |b| b * 100.0), enabled: true });
+    s.bump_map = m.map_bump.as_ref().filter(|(p, _)| !p.is_empty()).map(|(p, bm)| BitmapMap::bitmap(resolve(dir, p), bm.map_or(default_bump, |b| b * 100.0)));
     s.show_map_in_viewport = show_maps && s.diffuse_map.is_some();
     s
 }

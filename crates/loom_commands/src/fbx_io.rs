@@ -286,7 +286,7 @@ fn resolve_texture(t: &loom_fbx::FbxTexture, fbx: &Path) -> String {
 /// specular factor, Glossiness from the Phong exponent (10·log2), Opacity,
 /// Self-Illumination and the Diffuse / Specular Level / Opacity / Bump maps.
 pub fn material_from_fbx(m: &loom_fbx::FbxMaterial, fbx: &Path) -> loom_scene::material::StandardMaterial {
-    use loom_scene::material::{BitmapMap, StandardMaterial};
+    use loom_scene::material::{Map as BitmapMap, StandardMaterial};
     let mut s = StandardMaterial::new(m.name.clone());
     let v = |c: [f32; 3]| glam::Vec3::from(c).clamp(glam::Vec3::ZERO, glam::Vec3::ONE);
     s.diffuse.set(v(m.diffuse));
@@ -307,7 +307,7 @@ pub fn material_from_fbx(m: &loom_fbx::FbxMaterial, fbx: &Path) -> loom_scene::m
         };
         if slot.is_none() {
             let amount = if matches!(t.property.as_str(), "Bump" | "NormalMap") { (t.amount * 100.0).clamp(-999.0, 999.0) } else { 100.0 };
-            *slot = Some(BitmapMap { path: resolve_texture(t, fbx), amount, enabled: true });
+            *slot = Some(BitmapMap::bitmap(resolve_texture(t, fbx), amount));
         }
     }
     s.show_map_in_viewport = s.diffuse_map.is_some();
