@@ -8,8 +8,10 @@ use loom_scene::biped::BipedStructure;
 use loom_scene::{NodeId, ObjectKind};
 use serde_json::{json, Value};
 
+/// A command by registry name; `{}` stands for no arguments.
 fn cmd(name: &str, args: Value) -> Command {
-    serde_json::from_value(json!({ "cmd": name, "args": args })).unwrap()
+    let v = if args == json!({}) { json!({ "cmd": name }) } else { json!({ "cmd": name, "args": args }) };
+    serde_json::from_value(v.clone()).or_else(|_| serde_json::from_value(json!({ "cmd": name, "args": args }))).unwrap_or_else(|e| panic!("{v}: {e}"))
 }
 
 fn create(s: &mut AppState) -> NodeId {
