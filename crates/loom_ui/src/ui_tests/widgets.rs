@@ -145,8 +145,10 @@ fn the_track_bar_opens_and_closes_the_mini_curve_editor() {
     assert!(h.app.track_bar.mini_curve_editor);
     assert!(h.has(Role::Button, "Close Mini Curve Editor") && !h.has(Role::Button, "Open Mini Curve Editor"), "it replaces the track bar");
     assert!(!h.text_rects("Mini Curve Editor").is_empty());
-    h.click(h.find(Role::Button, "Close Mini Curve Editor").center());
-    assert!(!h.app.track_bar.mini_curve_editor && h.has(Role::Button, "Open Mini Curve Editor"));
+    let close = h.find(Role::Button, "Close Mini Curve Editor");
+    h.click(close.center());
+    assert!(!h.app.track_bar.mini_curve_editor, "Close at {close:?} closes it; hit: {}", h.app.ui_hit(&h.ctx, close.center()));
+    assert!(h.has(Role::Button, "Open Mini Curve Editor"), "the track bar is back");
 }
 
 #[test]
@@ -220,7 +222,7 @@ fn tools_menu_align_holds_the_spacing_tool_and_grids_snaps_use_axis_constraints(
 fn views_menu_toggles_the_transform_gizmo() {
     let mut h = Harness::new();
     let on = h.app.state.prefs.gizmos.enabled;
-    menu_path(&mut h, &["Views", "Show Transform Gizmo"]);
+    menu_path(&mut h, &["Views", if on { "✔ Show Transform Gizmo" } else { "Show Transform Gizmo" }]);
     assert_ne!(h.app.state.prefs.gizmos.enabled, on);
     assert!(menus(&h).is_empty(), "the menu closed");
 }
