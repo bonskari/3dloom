@@ -1284,6 +1284,10 @@ pub struct AppState {
     pub ffd_selection: BTreeSet<u32>,
     /// VertexPaint: the viewport brush is on.
     pub vertex_paint_brush: bool,
+    /// VertexPaint: Pick Color From Object (the eyedropper) is on.
+    pub vertex_paint_pick: bool,
+    /// VertexPaint: Face Selection is on (viewport clicks select the faces painting is limited to).
+    pub vertex_paint_faces: bool,
     pub selection_mode: SelectionMode,
     pub active_tool: Tool,
     pub viewports: Vec<Viewport>,
@@ -1662,6 +1666,8 @@ impl AppState {
             keyboard_override: true,
             ffd_selection: BTreeSet::new(),
             vertex_paint_brush: false,
+            vertex_paint_pick: false,
+            vertex_paint_faces: false,
             named_sets: BTreeMap::new(),
             select_by_vertex: false,
             ignore_backfacing: false,

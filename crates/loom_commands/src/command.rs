@@ -726,6 +726,13 @@ commands! {
     ResetLattice => "Reset Lattice", Loom, "FFD: put every control point back to its rest position.";
     ConformToShape => "Conform To Shape", Loom, "FFD: move each control point along the line to the lattice centre onto the object's surface.";
     VertexPaintBrushToggle => "Vertex Paint Brush", Loom, "VertexPaint: toggle painting in the viewports with the entry's colour, brush size and opacity.";
+    VertexPaintPickColorToggle => "Vertex Paint Pick Color", Loom, "VertexPaint > Pick Color From Object: toggle the eyedropper (drag over the object to take its colour).";
+    VertexPaintPickColor => "Vertex Paint Pick Color At", Loom, "VertexPaint: the active entry's colour becomes the colour shown at an object-space point of `node`." { node: u64, point: [f32; 3] };
+    VertexPaintFaceSelectToggle => "Vertex Paint Face Selection", Loom, "VertexPaint > Face Selection: toggle selecting the faces the brush and Paint All are limited to.";
+    VertexPaintSelectFaces => "Vertex Paint Select Faces", Loom, "VertexPaint: select faces of the entry's input (none = paint everywhere)." { ids: Vec<u32>, op: SelectOp };
+    VertexPaintPaintAll => "Vertex Paint Paint All", Loom, "VertexPaint > Paint All: fill the selected faces (every face when none is selected) with the entry's colour at its opacity.";
+    VertexPaintNewLayer => "Vertex Paint New Layer", Loom, "VertexPaint > Layer > New Layer: another VertexPaint above the active one, named `name`, blending by `mode` (index in the Mode list)." { name: String, mode: u32 };
+    AssignVertexColors => "Assign Vertex Colors", Loom, "Utilities > Assign Vertex Colors: bake the scene lights and the diffuse colour into vertex colours (Light Model 0 Lighting + Diffuse, 1 Lighting Only, 2 Diffuse; Color by Vertex or by Face; Shadows). `update` false = Assign To Selected (a new VertexPaint on each selected object), true = the active VertexPaint's Assign." { light_model: u32, by_vertex: bool, shadows: bool, update: bool };
     VertexPaintStroke => "Vertex Paint Stroke", Loom, "VertexPaint: paint the active VertexPaint entry at object-space points (0-255 colour, brush size, opacity)." { node: u64, points: Vec<[f32; 3]>, rgb: [u8; 3], size: f32, opacity: f32 };
     AttachSpline => "Attach (Spline)", MainUI, "Editable Spline > Attach: click a shape to attach it.";
     AttachMultipleSpline => "Attach Multiple (Spline)", MainUI, "Editable Spline > Attach Mult.: the other selected shapes join the first.";
@@ -1358,6 +1365,8 @@ commands! {
     SplineTangentPaste => "Spline Tangent Paste", Loom, "Editable Spline > Tangent Paste: paste the copied handle's angle onto flat knot `knot` (`length` = Paste Length: its length too)." { knot: u32, side_in: bool, length: bool };
     HsdsSubdivide => "HSDS Subdivide", Loom, "HSDS > Subdivide: the polygons `faces` of the finest level (null = the current polygon selection) split into a new level." { faces: Option<Vec<u32>> };
     HsdsAdaptiveSubdivide => "HSDS Adaptive Subdivide", Loom, "HSDS > Adaptive Subdivision: up to `max_level` new levels, each splitting the polygons with an edge sharper than `max_angle` degrees." { max_level: u32, max_angle: f32 };
+    HsdsSelectLevel => "HSDS Select Level", Loom, "HSDS > level of detail list: edit level `level` (0 = Base Level); the sub-object levels pick on its polygons." { level: u32 };
+    HsdsDisplay => "HSDS Display", Loom, "HSDS > Display next to a level: the result shows only up to `level` (0 = Base Level; the finest level shows every level)." { level: u32 };
     PointCacheRecord => "Point Cache Record", Loom, "Point Cache > Record: the stack below entry `index` from frame `start` to `end` into the .pc2 file `path` (world positions for the WSM), then plays it." { index: u32, path: String, start: i32, end: i32 };
     PointCacheLoad => "Point Cache Load", Loom, "Point Cache > Load: play back the .pc2 file `path` on entry `index`." { index: u32, path: String };
     PointCacheUnload => "Point Cache Unload", Loom, "Point Cache > Unload: entry `index` stops playing its file." { index: u32 };

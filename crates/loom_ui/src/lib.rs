@@ -729,6 +729,10 @@ impl LoomApp {
             // Vertex Channel Display shows the vertex colours themselves,
             // lit only with Shaded on.
             let unlit = vertex_colors && !d.vertex_colors_shaded;
+            // A VertexPaint (Vertex Color channel) in the stack shows its colours shaded.
+            if !vertex_colors && n.modifiers.iter().any(|s| s.enabled && s.enabled_in_viewport && matches!(&s.modifier, loom_scene::Modifier::VertexPaint { channel, .. } if channel.get() == 0)) {
+                vertex_colors = true;
+            }
             if vertex_colors {
                 color = [1.0; 3];
             }

@@ -24,6 +24,11 @@ pub struct HsdsLevel {
 pub struct HsdsData {
     pub levels: Vec<HsdsLevel>,
     pub smooth_result: bool,
+    /// The level picked in the level of detail list (0 = Base Level), whose
+    /// polygons the sub-object levels pick on; None = the finest.
+    pub level: Option<u32>,
+    /// Display: the result shows up to this level; None = every level.
+    pub display: Option<u32>,
     /// The finest level's mesh, the cage picked at the sub-object levels
     /// (rebuilt by the commands; not saved).
     #[serde(skip)]
@@ -33,9 +38,14 @@ pub struct HsdsData {
 /// The mesh after every level, or the input and a warning when the input no
 /// longer has the topology the levels were made on.
 pub fn hsds_mesh(d: &HsdsData, input: &Mesh) -> Result<(Mesh, Option<String>), String> {
+    hsds_mesh_upto(d, input, d.levels.len())
+}
+
+/// The mesh after the first `upto` levels (`hsds_mesh` for every level).
+pub fn hsds_mesh_upto(d: &HsdsData, input: &Mesh, upto: usize) -> Result<(Mesh, Option<String>), String> {
     let s = if d.smooth_result { 1.0 } else { 0.0 };
     let mut m = input.clone();
-    for (i, level) in d.levels.iter().enumerate() {
+    for (i, level) in d.levels.iter().enumerate().take(upto) {
         if m.vertex_count() != level.vertex_count || m.face_count() != level.face_count {
             return Ok((input.clone(), Some(format!("HSDS: the topology below changed at level {}; its {} subdivision level(s) were dropped", i + 1, d.levels.len()))));
         }
@@ -45,8 +55,20 @@ pub fn hsds_mesh(d: &HsdsData, input: &Mesh) -> Result<(Mesh, Option<String>), S
     Ok((m, None))
 }
 
+impl HsdsData {
+    /// The level being edited: the picked one, else the finest.
+    pub fn edited_level(&self) -> usize {
+        self.level.map_or(self.levels.len(), |l| (l as usize).min(self.levels.len()))
+    }
+
+    /// The levels the result shows.
+    pub fn displayed_levels(&self) -> usize {
+        self.display.map_or(self.levels.len(), |l| (l as usize).min(self.levels.len()))
+    }
+}
+
 pub fn hsds(d: &HsdsData, mut v: StackValue) -> Result<StackValue, String> {
-    let (m, warning) = hsds_mesh(d, &v.mesh)?;
+    let (m, warning) = hsds_mesh_upto(d, &v.mesh, d.displayed_levels())?;
     if let Some(w) = warning {
         v.warnings.push(w);
         return Ok(v);
@@ -82,6 +104,8 @@ pub fn hsds_adaptive(d: &mut HsdsData, input: &Mesh, max_level: u32, max_angle: 
         let faces: Vec<FaceId> = level.faces.iter().map(|f| FaceId(*f)).collect();
         m = loom_mesh::geom_ops::msmooth_faces(&m, Some(&faces), if d.smooth_result { 1.0 } else { 0.0 }, false, false)?;
     }
+    d.level = None;
+    d.display = None;
     d.cage = m;
     Ok(())
 }

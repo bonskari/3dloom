@@ -323,8 +323,12 @@ impl EditNormalsData {
     }
 
     pub fn rotate(&mut self, input: &Mesh, axis: Vec3, degrees: f32) {
+        self.rotate_by(input, glam::Quat::from_axis_angle(axis.normalize_or_zero(), degrees.to_radians()));
+    }
+
+    /// Turns the selected normals by `q` (object space); they become explicit.
+    pub fn rotate_by(&mut self, input: &Mesh, q: glam::Quat) {
         let groups = self.begin(input);
-        let q = glam::Quat::from_axis_angle(axis.normalize_or_zero(), degrees.to_radians());
         let all = self.normals(input, &groups);
         for g in self.selection.clone() {
             let n = all.get(&g).copied().unwrap_or(Vec3::ZERO);
