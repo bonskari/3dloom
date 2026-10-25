@@ -891,6 +891,8 @@ commands! {
     ShadeSelectedFacesToggle => "Viewport Selection Shade Selected Faces Toggle", MainUI, "Shade selected faces red in the viewports (F2).";
     SelectionBracketToggle => "Viewport Selection Show Selection Bracket Toggle", MainUI, "Show or hide selection brackets (J).";
     TimeConfiguration => "Time Configuration", Loom, "Open the Time Configuration dialog.";
+    SetTimeDisplay => "Set Time Display", Loom, "Time Configuration > Time Display: Frames, SMPTE, FrameTicks or MmSsTicks (the time slider, track bar and time fields)." { mode: crate::time_display::TimeDisplay };
+    SetKeySteps => "Set Key Steps", Loom, "Time Configuration > Key Steps: Use TrackBar, Selected Objects Only, Use Current Transform, Position / Rotation / Scale (the keys Key Mode steps between)." { use_track_bar: Option<bool>, selected_only: Option<bool>, use_current_transform: Option<bool>, position: Option<bool>, rotation: Option<bool>, scale: Option<bool> };
     AddTimeTag => "Add Time Tag", Loom, "Time Tag box > Add Tag: tag frame `time` (the current frame when omitted) as `name`; `lock` keeps its frame; `relative_to` makes it follow another tag at the present offset." { name: String, time: Option<i32>, lock: Option<bool>, relative_to: Option<String> };
     EditTimeTag => "Edit Time Tag", Loom, "Edit Time Tag dialog: rename, move (`time`, unless locked), Lock Time, Relative To another tag (empty: none)." { name: String, new_name: Option<String>, time: Option<i32>, lock: Option<bool>, relative_to: Option<String> };
     DeleteTimeTag => "Delete Time Tag", Loom, "Edit Time Tag > Delete; tags relative to it keep their frames." { name: String };

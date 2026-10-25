@@ -159,6 +159,8 @@ pub struct SceneSettings {
     pub time_tags: Vec<crate::time_tags::TimeTag>,
     /// Viewport Configuration > Adaptive Degradation.
     pub degradation: crate::viewport::Degradation,
+    /// Time Configuration > Time Display and Key Steps.
+    pub time_config: crate::time_display::TimeConfig,
 }
 
 /// File > File Properties: the Summary fields, the Summary Info
@@ -244,6 +246,7 @@ impl SceneSettings {
             file_properties: s.file_properties.clone(),
             time_tags: s.time_tags.clone(),
             degradation: s.degradation.clone(),
+            time_config: s.time_config,
         }
     }
 
@@ -276,6 +279,7 @@ impl SceneSettings {
         s.file_properties = self.file_properties.clone();
         s.time_tags = self.time_tags.clone();
         s.degradation = self.degradation.clone();
+        s.time_config = self.time_config;
         s.scene.set_time(s.current_frame as f32);
     }
 }

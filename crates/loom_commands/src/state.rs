@@ -1868,6 +1868,8 @@ pub struct AppState {
     pub frame_range: (i32, i32),
     /// The status bar's time tags (saved with the scene).
     pub time_tags: Vec<crate::time_tags::TimeTag>,
+    /// Time Configuration > Time Display and Key Steps (saved with the scene).
+    pub time_config: crate::time_display::TimeConfig,
     /// Viewport Configuration > Adaptive Degradation.
     pub degradation: crate::viewport::Degradation,
     /// The file the Units Mismatch dialog is open for.
@@ -2110,6 +2112,7 @@ impl AppState {
             skin_morph_current: None,
             bones_ik_chain: false,
             time_tags: Vec::new(),
+            time_config: Default::default(),
             degradation: Default::default(),
             units_mismatch: None,
             paths: Default::default(),

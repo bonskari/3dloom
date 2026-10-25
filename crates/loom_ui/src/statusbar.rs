@@ -371,7 +371,11 @@ fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
             let r = Icon::new(icons::KEY_MODE, Command::NextPreviousKeyModeToggle.name()).tip("Key Mode Toggle").on(key_mode).show(ui, &app.state);
             time_control(app, r, Command::NextPreviousKeyModeToggle);
             let mut frame = app.state.current_frame;
-            if ui.add(crate::spinner::spin(ui, &mut frame, app.state.frame_range.0..=app.state.frame_range.1)).on_hover_text("Current Frame (Go To Frame)").changed() {
+            let (fps, mode) = (app.state.fps, app.state.time_config.display);
+            let field = crate::spinner::spin(ui, &mut frame, app.state.frame_range.0..=app.state.frame_range.1)
+                .custom_formatter(move |v, _| loom_commands::time_display::format(v.round() as i32, fps, mode))
+                .custom_parser(move |t| loom_commands::time_display::parse(t, fps, mode));
+            if ui.add(field).on_hover_text("Current Frame (Go To Frame)").changed() {
                 let _ = app.dispatch(Command::SetFrame { frame });
             }
             let r = Icon::new(icons::TIME_CONFIGURATION, Command::TimeConfiguration.name()).tip("Time Configuration").show(ui, &app.state);

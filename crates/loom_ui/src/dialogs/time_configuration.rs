@@ -1,5 +1,5 @@
-//! Time Configuration dialog: Frame Rate, Playback (loop/real time state)
-//! and Animation (active time segment) groups.
+//! Time Configuration dialog: Frame Rate, Time Display, Playback (loop/real
+//! time state), Animation (active time segment) and Key Steps groups.
 
 use crate::LoomApp;
 use eframe::egui;
@@ -12,13 +12,14 @@ struct Snapshot {
     fps: f32,
     frame: i32,
     playback: loom_commands::anim_cmds::Playback,
+    time_config: loom_commands::time_display::TimeConfig,
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let (start, end) = app.state.frame_range;
     let fps = app.state.fps;
     let snap_id = egui::Id::new("time_configuration_snapshot");
-    let snap: Snapshot = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(snap_id, || Snapshot { range: app.state.frame_range, fps: app.state.fps, frame: app.state.current_frame, playback: app.state.playback.clone() }).clone());
+    let snap: Snapshot = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(snap_id, || Snapshot { range: app.state.frame_range, fps: app.state.fps, frame: app.state.current_frame, playback: app.state.playback.clone(), time_config: app.state.time_config }).clone());
     let mut done = false;
     egui::Window::new("Time Configuration").open(open).resizable(false).show(ctx, |ui| {
         ui.group(|ui| {
@@ -37,6 +38,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let mut v = fps;
                 if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=1000.0)).changed() {
                     let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: None, fps: Some(v) });
+                }
+            });
+        });
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("Time Display").strong());
+            ui.horizontal(|ui| {
+                for mode in loom_commands::time_display::TimeDisplay::ALL {
+                    if ui.radio(app.state.time_config.display == mode, mode.label()).clicked() {
+                        let _ = app.dispatch(Command::SetTimeDisplay { mode });
+                    }
                 }
             });
         });
@@ -112,6 +123,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             });
             ui.ctx().data_mut(|d| d.insert_temp(id, (ns, ne)));
         });
+        key_steps(ui, app);
         ui.horizontal(|ui| {
             if ui.button("OK").clicked() {
                 done = true;
@@ -121,6 +133,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let _ = app.dispatch(Command::SetTimeConfiguration { start: Some(snap.range.0), end: Some(snap.range.1), fps: Some(snap.fps) });
                 let _ = app.dispatch(Command::SetPlayback { real_time: Some(p.real_time), loop_playback: Some(p.loop_playback), speed: Some(p.speed), direction: Some(p.direction) });
                 let _ = app.dispatch(Command::SetFrame { frame: snap.frame });
+                let k = snap.time_config.key_steps;
+                let _ = app.dispatch(Command::SetTimeDisplay { mode: snap.time_config.display });
+                let _ = app.dispatch(Command::SetKeySteps { use_track_bar: Some(k.use_track_bar), selected_only: Some(k.selected_only), use_current_transform: Some(k.use_current_transform), position: Some(k.position), rotation: Some(k.rotation), scale: Some(k.scale) });
                 done = true;
             }
         });
@@ -131,4 +146,33 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     if done {
         let _ = app.dispatch(Command::CloseDialog);
     }
+}
+
+/// Key Steps: which keys the Key Mode buttons step between.
+fn key_steps(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let k = app.state.time_config.key_steps;
+    let none = Command::SetKeySteps { use_track_bar: None, selected_only: None, use_current_transform: None, position: None, rotation: None, scale: None };
+    ui.group(|ui| {
+        ui.label(egui::RichText::new("Key Steps").strong());
+        let mut set = |ui: &mut egui::Ui, on: bool, label: &str, f: &dyn Fn(&mut Command, bool)| {
+            let mut v = on;
+            if ui.checkbox(&mut v, label).changed() {
+                let mut c = none.clone();
+                f(&mut c, v);
+                let _ = app.dispatch(c);
+            }
+        };
+        set(ui, k.use_track_bar, "Use TrackBar", &|c, v| if let Command::SetKeySteps { use_track_bar, .. } = c { *use_track_bar = Some(v) });
+        ui.add_enabled_ui(!k.use_track_bar, |ui| {
+            set(ui, k.selected_only, "Selected Objects Only", &|c, v| if let Command::SetKeySteps { selected_only, .. } = c { *selected_only = Some(v) });
+            set(ui, k.use_current_transform, "Use Current Transform", &|c, v| if let Command::SetKeySteps { use_current_transform, .. } = c { *use_current_transform = Some(v) });
+            ui.add_enabled_ui(!k.use_current_transform, |ui| {
+                ui.horizontal(|ui| {
+                    set(ui, k.position, "Position", &|c, v| if let Command::SetKeySteps { position, .. } = c { *position = Some(v) });
+                    set(ui, k.rotation, "Rotation", &|c, v| if let Command::SetKeySteps { rotation, .. } = c { *rotation = Some(v) });
+                    set(ui, k.scale, "Scale", &|c, v| if let Command::SetKeySteps { scale, .. } = c { *scale = Some(v) });
+                });
+            });
+        });
+    });
 }

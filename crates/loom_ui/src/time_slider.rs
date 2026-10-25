@@ -84,7 +84,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             painter.rect_filled(rect, 2.0, bg);
             let thumb = thumb_rect(rect, frame, (start, end));
             painter.rect_filled(thumb, 2.0, egui::Color32::from_gray(120));
-            painter.text(thumb.center(), egui::Align2::CENTER_CENTER, format!("{frame} / {end}"), egui::FontId::proportional(12.0), egui::Color32::WHITE);
+            painter.text(thumb.center(), egui::Align2::CENTER_CENTER, {
+                let (fps, mode) = (app.state.fps, app.state.time_config.display);
+                let f = |x| loom_commands::time_display::format(x, fps, mode);
+                format!("{} / {}", f(frame), f(end))
+            }, egui::FontId::proportional(12.0), egui::Color32::WHITE);
             if resp.dragged() || resp.clicked() {
                 if let Some(p) = resp.interact_pointer_pos() {
                     let f = frame_at(rect, p.x, (start, end));
@@ -176,7 +180,7 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
     while f <= end {
         let x = x_of(f as f32);
         painter.line_segment([egui::pos2(x, rect.max.y - 4.0), egui::pos2(x, rect.max.y)], egui::Stroke::new(1.0_f32, egui::Color32::from_gray(150)));
-        painter.text(egui::pos2(x + 2.0, rect.min.y), egui::Align2::LEFT_TOP, f.to_string(), egui::FontId::proportional(10.0), egui::Color32::from_gray(190));
+        painter.text(egui::pos2(x + 2.0, rect.min.y), egui::Align2::LEFT_TOP, loom_commands::time_display::format(f, app.state.fps, app.state.time_config.display), egui::FontId::proportional(10.0), egui::Color32::from_gray(190));
         f += step;
     }
     let x = x_of(frame as f32);
