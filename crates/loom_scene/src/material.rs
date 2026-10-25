@@ -1579,7 +1579,7 @@ pub fn apply_split(mesh: &mut loom_mesh::Mesh, split: &FaceSplit, world_up: Vec3
             let z0 = position / 50.0 - 1.0;
             let w = blend / 100.0;
             let t = if w <= 0.0 {
-                if nz >= z0 { 1.0 } else { 0.0 }
+                if nz > z0 || *position <= 0.0 { 1.0 } else { 0.0 }
             } else {
                 ((nz - (z0 - w)) / (2.0 * w)).clamp(0.0, 1.0)
             };
@@ -1822,7 +1822,7 @@ mod tests {
         };
         assert_eq!(colour_of(&mesh, Vec3::Z), Vec3::X, "the top face shows the top material");
         assert_eq!(colour_of(&mesh, -Vec3::Z), Vec3::Z, "the bottom face the bottom one");
-        assert_eq!(colour_of(&mesh, Vec3::X), Vec3::X, "at Position 50 a side (normal z 0) counts as top");
+        assert_eq!(colour_of(&mesh, Vec3::X), Vec3::Z, "at Position 50 a side (normal z 0) is not above the boundary");
         // Position 100: everything bottom; Local follows the object's up.
         lib.get_mut(&MaterialId(4)).unwrap().set_parameter("Position", 100.0).unwrap();
         let (per_id, split) = split_surfaces(&surfaces(&lib, MaterialId(4)).unwrap()).unwrap();

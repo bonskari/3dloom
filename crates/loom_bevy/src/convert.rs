@@ -2,7 +2,7 @@
 //! No GPU needed, so all of it is unit tested.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::color::Color;
+use bevy::color::{Alpha, Color};
 use bevy::math::{Mat4, Vec3};
 use bevy::pbr::StandardMaterial;
 use bevy::render::alpha::AlphaMode;

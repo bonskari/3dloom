@@ -1181,7 +1181,7 @@ commands! {
     PickMaterialFromObject => "Pick Material From Object", Loom, "Material Editor eyedropper: the next clicked object's material goes into the active slot (its sub-material when its selected polygons all use one ID).";
     MaterialMapNavigator => "Material/Map Navigator", Loom, "Open or close the Material/Map Navigator.";
     MakeMaterialCopy => "Make Material Copy", Loom, "Material Editor > Make Material Copy: the active slot gets a copy of its material (same name, copies of its sub-materials), no longer the one objects use.";
-    MakeUnique => "Make Unique", Loom, "Material Editor > Make Unique: the sub-material at the current level, used in more than one place, gets a copy of its own here.";
+    MaterialMakeUnique => "Material Make Unique", Loom, "Material Editor > Make Unique: the sub-material at the current level, used in more than one place, gets a copy of its own here.";
     PutMaterialToScene => "Put Material to Scene", Loom, "Material Editor > Put Material to Scene: the objects using a scene material with the active slot material's name get the slot's material.";
     SelectByMaterial => "Select By Material", Loom, "Material Editor > Select By Material: select the objects that use the active slot's material (directly or as a sub-material).";
     MultiSubSort => "Multi/Sub Sort", Loom, "Multi/Sub-Object Basic Parameters: sort the list by `by` = ID, Name or Sub (the sub-materials' names)." { by: String };

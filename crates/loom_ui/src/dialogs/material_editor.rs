@@ -817,7 +817,7 @@ fn workflow_buttons(ui: &mut egui::Ui, app: &mut LoomApp) -> bool {
         clicked = true;
     }
     if ui.add_enabled(at_sub, egui::Button::new("Make Unique")).on_hover_text("This sub-material gets a copy of its own").clicked() {
-        let _ = app.dispatch(Command::MakeUnique);
+        let _ = app.dispatch(Command::MaterialMakeUnique);
         clicked = true;
     }
     if ui.button("Put to Library").clicked() {

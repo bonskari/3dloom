@@ -57,7 +57,7 @@ pub fn handles(c: &C) -> bool {
             | C::PickMaterialFromObject
             | C::MaterialMapNavigator
             | C::MakeMaterialCopy
-            | C::MakeUnique
+            | C::MaterialMakeUnique
             | C::PutMaterialToScene
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
@@ -845,7 +845,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             commit(state, "Make Material Copy", Change::SetMaterials { before, after })?;
             Ok(json!({ "slot": i, "material": id.0 }))
         }
-        C::MakeUnique => {
+        C::MaterialMakeUnique => {
             let ed = state.scene.material_editor.clone();
             let Some(NavStep::Sub(index)) = ed.path.last().cloned() else {
                 return Err(if ed.path.is_empty() { "Make Unique works on a sub-material level".into() } else { "maps are never shared: this map is already unique".into() });

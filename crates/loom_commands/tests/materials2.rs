@@ -281,9 +281,9 @@ fn make_unique_gives_a_shared_sub_material_a_copy() {
     if let loom_scene::material::MaterialKind::MultiSub(list) = &mut s.scene.materials.get_mut(&top).unwrap().kind {
         list[1].material = Some(first);
     }
-    assert!(execute(&mut s, Command::MakeUnique).is_err(), "not at a sub-material level");
+    assert!(execute(&mut s, Command::MaterialMakeUnique).is_err(), "not at a sub-material level");
     execute(&mut s, Command::MaterialEditorGoToSub { index: 1 }).unwrap();
-    execute(&mut s, Command::MakeUnique).unwrap();
+    execute(&mut s, Command::MaterialMakeUnique).unwrap();
     let kids = s.scene.materials[&top].children();
     assert_eq!(kids[0], Some(first));
     assert_ne!(kids[1], Some(first), "row 2 has its own copy now");
