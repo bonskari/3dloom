@@ -43,9 +43,9 @@ fn color(app: &LoomApp, n: &loom_scene::Node, kind: LineKind) -> [u8; 3] {
                 // Home Color / Home Intensity: the home grid's lines.
                 2 | 3 if major => [0, 0, 0],
                 2 | 3 => [166, 166, 166],
-                // Gray: two shades of gray.
-                _ if major => [60, 60, 60],
-                _ => [140, 140, 140],
+                // Gray: two shades of gray (light lines, dark main axes, like the home grid).
+                _ if major => [30, 30, 30],
+                _ => [175, 175, 175],
             }
         }
     }
