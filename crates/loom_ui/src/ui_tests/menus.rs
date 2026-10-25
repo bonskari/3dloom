@@ -17,11 +17,17 @@ fn type_text(h: &mut Harness, text: &str) {
 /// Opens a menu bar menu and its submenus, then clicks the item.
 fn menu_path(h: &mut Harness, path: &[&str]) {
     h.click(h.find(Role::Button, path[0]).center());
+    // The entry in the open menu, not a Command Panel icon of the same name (Shapes).
+    let in_menu = |h: &Harness, label: &str| {
+        let cp = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).map(|p| p.rect);
+        let all = h.find_all(Role::Button, label);
+        all.iter().copied().find(|r| !cp.is_some_and(|c| c.contains(r.center()))).unwrap_or_else(|| panic!("no menu entry {label:?}: {all:?}")).center()
+    };
     for sub in &path[1..path.len() - 1] {
-        let p = h.find(Role::Button, sub).center();
+        let p = in_menu(h, sub);
         point_at(h, p);
     }
-    let p = h.find(Role::Button, path[path.len() - 1]).center();
+    let p = in_menu(h, path[path.len() - 1]);
     h.click(p);
 }
 

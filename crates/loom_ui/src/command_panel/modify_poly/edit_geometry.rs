@@ -46,7 +46,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.selectable_label(on, "Attach").on_hover_text("Attach: click an object").clicked() {
                 let _ = app.dispatch(Command::Attach);
             }
-            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Attach List").clicked() {
+            if crate::icons::small(ui, crate::icons::SETTINGS, "Attach List").clicked() {
                 let _ = app.dispatch(Command::AttachList);
             }
             ui.add_enabled_ui(has, |ui| action(ui, app, "Detach", "Detach the selection", Command::Detach));
@@ -78,11 +78,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             action(ui, app, "MSmooth", "MeshSmooth with the current settings", Command::MeshSmooth);
-            if ui.small_button(crate::icons::SETTINGS).on_hover_text("MeshSmooth Settings").clicked() {
+            if crate::icons::small(ui, crate::icons::SETTINGS, "MeshSmooth Settings").clicked() {
                 let _ = app.dispatch(Command::MeshSmoothSettings);
             }
             ui.add_enabled_ui(has, |ui| action(ui, app, "Tessellate", "Tessellate the selection", Command::Tessellate));
-            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Tessellate Settings").clicked() {
+            if crate::icons::small(ui, crate::icons::SETTINGS, "Tessellate Settings").clicked() {
                 let _ = app.dispatch(Command::TessellateSettings);
             }
         });
@@ -102,7 +102,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             action(ui, app, "Relax", "Relax the selection with the current settings", Command::Relax { amount: ps.relax_amount, iterations: ps.relax_iterations, hold_boundary: ps.relax_hold_boundary, hold_outer: ps.relax_hold_outer });
-            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Relax Settings").clicked() {
+            if crate::icons::small(ui, crate::icons::SETTINGS, "Relax Settings").clicked() {
                 let _ = app.dispatch(Command::RelaxSettings);
             }
         });

@@ -201,7 +201,7 @@ pub fn handle_drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::Point
         }
     }
     let Some(h) = st else { return false };
-    if pointer.is_moving() && pointer.button_down(egui::PointerButton::Primary) {
+    if pointer.delta() != egui::Vec2::ZERO && pointer.button_down(egui::PointerButton::Primary) {
         // The handle moves on the view plane through the knot.
         let node = NodeId(h.node);
         let Some(shape) = app.state.scene.node(node).and_then(|n| n.edit_shape()) else { return true };
@@ -269,7 +269,7 @@ pub fn fillet_drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::Point
     }
     // Elsewhere a click selects vertices as usual.
     let Some(mut s) = st else { return false };
-    if pointer.is_moving() && pointer.button_down(egui::PointerButton::Primary) {
+    if pointer.delta() != egui::Vec2::ZERO && pointer.button_down(egui::PointerButton::Primary) {
         // Each move redoes the operation from the original vertices, so the
         // drag leaves one undo entry.
         if s.applied.is_some_and(|v| v == app.state.undo.version()) {

@@ -95,6 +95,8 @@ pub const CAMERAS: &str = ph::VIDEO_CAMERA;
 pub const HELPERS: &str = ph::RULER;
 pub const SPACE_WARPS: &str = ph::WAVES;
 pub const SYSTEMS: &str = ph::GEAR_SIX;
+/// The Object Type rollout's Pin (Keep Creating).
+pub const KEEP_CREATING: &str = ph::PUSH_PIN;
 
 // Scene tab object kinds.
 pub const KIND_GEOMETRY: &str = ph::CUBE;
@@ -284,6 +286,18 @@ impl<'a> Icon<'a> {
         r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, self.enabled, self.on, name));
         r.on_hover_text(&hover).on_disabled_hover_text(hover)
     }
+}
+
+/// Gives a glyph-only widget its name for screen readers (and the UI tests).
+pub fn named(r: &egui::Response, typ: egui::WidgetType, name: &str) {
+    r.widget_info(|| egui::WidgetInfo::labeled(typ, r.enabled(), name));
+}
+
+/// A small glyph button (a rollout's settings box, a step arrow) named and tooltipped `name`.
+pub fn small(ui: &mut egui::Ui, glyph: &str, name: &str) -> egui::Response {
+    let r = ui.small_button(glyph);
+    named(&r, egui::WidgetType::Button, name);
+    r.on_hover_text(name)
 }
 
 /// A menu or list row: the icon, then its name.

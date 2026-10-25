@@ -193,3 +193,35 @@ fn modifier_stack_icons_run_their_commands() {
     assert_ne!(h.app.state.show_end_result, end);
 }
 
+/// The widgets whose accessible name is only icon glyphs (Private Use Area code points).
+fn glyph_only_names(h: &Harness) -> Vec<String> {
+    let pua = |c: char| ('\u{e000}'..='\u{f8ff}').contains(&c);
+    h.widgets
+        .iter()
+        .filter(|(_, t, _)| t.chars().any(pua) && t.chars().all(|c| pua(c) || c.is_whitespace() || c.is_ascii_digit() || c == '.'))
+        .map(|(r, t, rect)| format!("{r:?} {t:?} at {rect:?}"))
+        .collect()
+}
+
+#[test]
+fn every_icon_button_has_a_name() {
+    let mut h = Harness::new();
+    let mut bad = glyph_only_names(&h);
+    // The Modify panel with a stack, an Editable Poly at Edge level, Track View, Edit UVWs and the Material Editor.
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.app.panel_tab = Tab::Modify;
+    h.frames(2);
+    bad.extend(glyph_only_names(&h));
+    h.cmd(Command::CollapseAll);
+    h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Edge });
+    bad.extend(glyph_only_names(&h));
+    h.cmd(Command::AddModifier { name: "Unwrap UVW".into() });
+    h.cmd(Command::EditUvws);
+    h.cmd(Command::TrackViewFloater);
+    h.cmd(Command::MaterialEditorToggle);
+    bad.extend(glyph_only_names(&h));
+    bad.dedup();
+    assert!(bad.is_empty(), "icon-only widgets without a name: {bad:#?}");
+}
+

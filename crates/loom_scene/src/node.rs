@@ -1495,27 +1495,69 @@ pub struct DisplayProps {
     /// Show Map in Viewport: none, the checker, or a bitmap.
     #[serde(default)]
     pub texture: TextureDisplay,
+    /// Edges Only: wireframes show polygon edges only; off adds the
+    /// triangulation diagonals as dashed lines.
+    #[serde(default = "default_true")]
+    pub edges_only: bool,
+    /// Trajectory: the viewports draw this object's motion path.
+    #[serde(default)]
+    pub trajectory: bool,
+    /// Vertex Channel Display > Shaded: vertex colours lit by the viewport
+    /// lighting; off shows the raw colours.
+    #[serde(default)]
+    pub vertex_colors_shaded: bool,
+    /// Link Display > Display Links: the link to the parent is drawn.
+    #[serde(default)]
+    pub display_links: bool,
+    /// Link Display > Link Replaces Object: only the link is drawn.
+    #[serde(default)]
+    pub link_replaces_object: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for DisplayProps {
     fn default() -> Self {
-        Self { see_through: false, display_as_box: false, backface_cull: false, vertex_ticks: false, ignore_extents: false, show_frozen_in_gray: true, vertex_colors: false, texture: TextureDisplay::None }
+        Self {
+            see_through: false,
+            display_as_box: false,
+            backface_cull: false,
+            vertex_ticks: false,
+            ignore_extents: false,
+            show_frozen_in_gray: true,
+            vertex_colors: false,
+            texture: TextureDisplay::None,
+            edges_only: true,
+            trajectory: false,
+            vertex_colors_shaded: false,
+            display_links: false,
+            link_replaces_object: false,
+        }
     }
 }
 
 impl DisplayProps {
-    /// Checkbox names, in rollout order.
-    pub const NAMES: [&'static str; 7] = ["See-Through", "Display as Box", "Backface Cull", "Vertex Ticks", "Ignore Extents", "Show Frozen in Gray", "Vertex Color"];
+    /// Display Properties checkbox names, in rollout order.
+    pub const NAMES: [&'static str; 10] = ["See-Through", "Display as Box", "Backface Cull", "Edges Only", "Vertex Ticks", "Trajectory", "Ignore Extents", "Show Frozen in Gray", "Vertex Color", "Vertex Color Shaded"];
+    /// Link Display rollout checkbox names.
+    pub const LINK_NAMES: [&'static str; 2] = ["Display Links", "Link Replaces Object"];
 
     pub fn get(&self, name: &str) -> Option<bool> {
         Some(match name {
             "See-Through" => self.see_through,
             "Display as Box" => self.display_as_box,
             "Backface Cull" => self.backface_cull,
+            "Edges Only" => self.edges_only,
             "Vertex Ticks" => self.vertex_ticks,
+            "Trajectory" => self.trajectory,
             "Ignore Extents" => self.ignore_extents,
             "Show Frozen in Gray" => self.show_frozen_in_gray,
             "Vertex Color" => self.vertex_colors,
+            "Vertex Color Shaded" => self.vertex_colors_shaded,
+            "Display Links" => self.display_links,
+            "Link Replaces Object" => self.link_replaces_object,
             _ => return None,
         })
     }
@@ -1525,10 +1567,64 @@ impl DisplayProps {
             "See-Through" => self.see_through = value,
             "Display as Box" => self.display_as_box = value,
             "Backface Cull" => self.backface_cull = value,
+            "Edges Only" => self.edges_only = value,
             "Vertex Ticks" => self.vertex_ticks = value,
+            "Trajectory" => self.trajectory = value,
             "Ignore Extents" => self.ignore_extents = value,
             "Show Frozen in Gray" => self.show_frozen_in_gray = value,
             "Vertex Color" => self.vertex_colors = value,
+            "Vertex Color Shaded" => self.vertex_colors_shaded = value,
+            "Display Links" => self.display_links = value,
+            "Link Replaces Object" => self.link_replaces_object = value,
+            _ => return false,
+        }
+        true
+    }
+}
+
+/// Object Properties > Rendering Control, per object: what renders see of
+/// the object. The viewports draw it regardless.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RenderProps {
+    /// Off: the object is left out of renders (and casts no shadows there).
+    pub renderable: bool,
+    /// The rendered visibility is multiplied by the parent's.
+    pub inherit_visibility: bool,
+    /// Off: cameras do not see the object; its shadows still render.
+    pub visible_to_camera: bool,
+    pub receive_shadows: bool,
+    pub cast_shadows: bool,
+}
+
+impl Default for RenderProps {
+    fn default() -> Self {
+        Self { renderable: true, inherit_visibility: true, visible_to_camera: true, receive_shadows: true, cast_shadows: true }
+    }
+}
+
+impl RenderProps {
+    /// Rendering Control checkbox names, in dialog order.
+    pub const NAMES: [&'static str; 5] = ["Renderable", "Inherit Visibility", "Visible to Camera", "Receive Shadows", "Cast Shadows"];
+
+    pub fn get(&self, name: &str) -> Option<bool> {
+        Some(match name {
+            "Renderable" => self.renderable,
+            "Inherit Visibility" => self.inherit_visibility,
+            "Visible to Camera" => self.visible_to_camera,
+            "Receive Shadows" => self.receive_shadows,
+            "Cast Shadows" => self.cast_shadows,
+            _ => return None,
+        })
+    }
+
+    pub fn set(&mut self, name: &str, value: bool) -> bool {
+        match name {
+            "Renderable" => self.renderable = value,
+            "Inherit Visibility" => self.inherit_visibility = value,
+            "Visible to Camera" => self.visible_to_camera = value,
+            "Receive Shadows" => self.receive_shadows = value,
+            "Cast Shadows" => self.cast_shadows = value,
             _ => return false,
         }
         true
@@ -1543,6 +1639,9 @@ pub struct NodeProps {
     pub inherit: Axes3,
     pub display: DisplayProps,
     pub instance_of: Option<NodeId>,
+    pub render: RenderProps,
+    /// Object Properties > User Defined: free text kept with the scene.
+    pub user_props: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1600,6 +1699,12 @@ pub struct Node {
     /// Track View > Visibility Track: 0 invisible … 1 fully visible.
     #[serde(default)]
     pub visibility: Option<Param<f32>>,
+    /// Object Properties > Rendering Control.
+    #[serde(default)]
+    pub render: RenderProps,
+    /// Object Properties > User Defined.
+    #[serde(default)]
+    pub user_props: String,
 }
 
 impl Node {
@@ -1649,6 +1754,8 @@ impl PartialEq for Node {
             && self.instance_of == o.instance_of
             && self.constraints == o.constraints
             && self.visibility == o.visibility
+            && self.render == o.render
+            && self.user_props == o.user_props
     }
 }
 
@@ -1743,7 +1850,7 @@ impl Node {
     }
 
     pub fn props(&self) -> NodeProps {
-        NodeProps { object_offset: self.object_offset.clone(), locks: self.locks, inherit: self.inherit, display: self.display.clone(), instance_of: self.instance_of }
+        NodeProps { object_offset: self.object_offset.clone(), locks: self.locks, inherit: self.inherit, display: self.display.clone(), instance_of: self.instance_of, render: self.render.clone(), user_props: self.user_props.clone() }
     }
 
     pub fn set_props(&mut self, p: NodeProps) {
@@ -1752,6 +1859,8 @@ impl Node {
         self.inherit = p.inherit;
         self.display = p.display.clone();
         self.instance_of = p.instance_of;
+        self.render = p.render;
+        self.user_props = p.user_props;
     }
 }
 
@@ -1782,6 +1891,8 @@ impl Node {
             material: None,
             constraints: Default::default(),
             visibility: None,
+            render: RenderProps::default(),
+            user_props: String::new(),
             version: 0,
             geom_version: 0,
             instance_of: None,
