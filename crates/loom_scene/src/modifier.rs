@@ -596,7 +596,7 @@ impl Modifier {
     /// The Modifier List (object-space modifiers), in list order; grows
     /// with every task of phase 3.
     pub const LIST: &'static [&'static str] = &[
-        "Bend", "Bevel", "Bevel Profile", "Cap Holes", "CrossSection", "Delete Spline", "DeleteMesh", "Displace", "Edit Mesh", "Edit Normals", "Edit Poly", "Edit Spline", "Extrude", "Face Extrude", "Fillet/Chamfer", "FFD 2x2x2", "FFD 3x3x3", "FFD 4x4x4", "FFD(box)", "FFD(cyl)", "Lathe", "Lattice", "Linked XForm",
+        "Bend", "Bevel", "Bevel Profile", "Cap Holes", "CrossSection", "Delete Spline", "DeleteMesh", "Displace", "Edit Mesh", "Edit Normals", "Edit Patch", "Edit Poly", "Edit Spline", "Extrude", "Face Extrude", "Fillet/Chamfer", "FFD 2x2x2", "FFD 3x3x3", "FFD 4x4x4", "FFD(box)", "FFD(cyl)", "Lathe", "Lattice", "Linked XForm",
         "Material", "Material By Element", "Melt", "Mesh Select", "MeshSmooth", "Mirror", "Morpher", "MultiRes", "Noise", "Normal", "Normalize Spline", "Optimize", "Poly Select", "Preserve", "ProOptimizer", "Push", "Relax", "Renderable Spline", "Ripple",
         "Shell", "Skew", "Skin", "Skin Morph", "Skin Wrap", "Slice", "Smooth", "Spherify", "Spline Select", "Squeeze", "STL Check", "Stretch", "Subdivide", "Surface", "Sweep", "Symmetry", "Taper", "Tessellate", "Trim/Extend", "TurboSmooth", "Turn To Mesh", "Turn To Poly",
         "Twist", "Unwrap UVW", "UVW Map", "UVW XForm", "VertexPaint", "Vol. Select", "Wave", "XForm",

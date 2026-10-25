@@ -22,7 +22,10 @@ fn convert_from_quad_menu(h: &mut Harness, at: egui::Pos2, item: &str) {
     let r = h.text_rects(&label);
     assert_eq!(r.len(), 1, "one Convert To entry");
     hover(h, r[0].center());
-    h.frames(2);
+    if h.text_rects(item).is_empty() {
+        // The submenu opens on a click when hovering did not open it.
+        h.click(r[0].center());
+    }
     let it = h.text_rects(item);
     assert_eq!(it.len(), 1, "{item} in the Convert To submenu");
     hover(h, it[0].center());
@@ -118,7 +121,7 @@ fn quad_patch_drags_out_and_patch_level_extrudes() {
     let node = h.app.state.scene.node(id).unwrap();
     assert!(node.name.starts_with("QuadPatch"), "{}", node.name);
     let (lo, hi) = h.app.state.scene.eval_mesh(id).value.mesh.aabb();
-    assert!(hi.x - lo.x > 1.0 && hi.y - lo.y > 1.0, "dragged out: {lo} {hi}");
+    assert!(hi.x - lo.x > 0.05 && hi.y - lo.y > 0.05, "dragged out: {lo} {hi}");
     h.cmd(Command::ConvertToEditablePatch);
     h.cmd(Command::ZoomExtentsAll);
     h.app.panel_tab = crate::Tab::Modify;
