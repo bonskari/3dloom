@@ -132,12 +132,14 @@ fn parameters_by_label_are_clamped_and_undo() {
         let mut s = AppState::new();
         execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: (*kind).into() }).unwrap();
         let fresh = diffuse(&s);
+        let undo = s.undo.len();
         for (name, set, want) in params.iter() {
             param(&mut s, name, *set);
             let got = stored(&diffuse(&s), name);
             assert!((got - want).abs() < 1e-4, "{kind} {name}: set {set}, got {got}, want {want}");
         }
-        for _ in 0..params.len() {
+        // A value that does not change (Vertex Color's Map Channel 0) adds no undo step.
+        for _ in undo..s.undo.len() {
             execute(&mut s, Command::UndoSceneOperation).unwrap();
         }
         assert_eq!(diffuse(&s), fresh, "{kind}: every change undone");
