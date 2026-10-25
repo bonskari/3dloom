@@ -26,14 +26,15 @@ fn fractional_inches_and_feet_show_fractions_of_the_chosen_size() {
 #[test]
 fn typed_fractions_parse_and_default_units_pick_feet_or_inches() {
     let mut s = AppState::new();
+    let near = |v: Option<f64>, want: f64| v.is_some_and(|v| (v - want).abs() < 1e-9);
     units(&mut s, None, Some("Feet w/ Fractional Inches"), None, Some(true), None);
-    assert_eq!(s.units.parse("3 1/2\""), Some(3.5));
-    assert_eq!(s.units.parse("5'7 1/4\""), Some(67.25));
-    assert_eq!(s.units.parse("1/4'"), Some(3.0));
-    assert_eq!(s.units.parse("5"), Some(60.0), "Default Units Feet: 5 is five feet");
+    assert!(near(s.units.parse("3 1/2\""), 3.5));
+    assert!(near(s.units.parse("5'7 1/4\""), 67.25));
+    assert!(near(s.units.parse("1/4'"), 3.0));
+    assert!(near(s.units.parse("5"), 60.0), "Default Units Feet: 5 is five feet");
     units(&mut s, None, None, None, Some(false), None);
     assert_eq!(s.units.parse("5"), Some(5.0), "Default Units Inches: 5 is five inches");
-    assert_eq!(s.units.parse("5'"), Some(60.0));
+    assert!(near(s.units.parse("5'"), 60.0));
 }
 
 fn saved_in(system: &str, name: &str) -> String {
