@@ -154,6 +154,8 @@ impl Default for VolumeLight {
     }
 }
 
+// A handful of entries in a list: boxing the larger kinds buys nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AtmosphereKind {
     Fog(Fog),
@@ -337,6 +339,8 @@ impl Default for DepthOfField {
     }
 }
 
+// A handful of entries in a list: boxing the larger kinds buys nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EffectKind {
     Glow(Glow),

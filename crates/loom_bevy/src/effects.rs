@@ -186,7 +186,7 @@ fn sample(src: &[[f32; 4]], w: usize, h: usize, x: f32, y: f32) -> [f32; 4] {
 
 /// A blur along direction `dir` (unit, pixels) of half-length `r`, the
 /// trail (−100 to 100) weighting the positive side more (or less).
-fn line_blur(src: &[[f32; 4]], w: usize, h: usize, x: usize, y: usize, dir: [f32; 2], r: f32, trail: f32) -> [f32; 4] {
+fn line_blur(src: &[[f32; 4]], [w, h]: [usize; 2], [x, y]: [usize; 2], dir: [f32; 2], r: f32, trail: f32) -> [f32; 4] {
     if r < 0.5 {
         return src[y * w + x];
     }
@@ -218,8 +218,8 @@ fn blur(img: &mut RgbaImage, b: &Blur) {
         BlurType::Directional => {
             let a = b.rotation.to_radians();
             let (u, v) = ([a.cos(), a.sin()], [-a.sin(), a.cos()]);
-            let pass1: Vec<[f32; 4]> = (0..w * h).map(|i| line_blur(&src, w, h, i % w, i / w, u, b.u_radius, b.u_trail)).collect();
-            (0..w * h).map(|i| line_blur(&pass1, w, h, i % w, i / w, v, b.v_radius, b.v_trail)).collect()
+            let pass1: Vec<[f32; 4]> = (0..w * h).map(|i| line_blur(&src, [w, h], [i % w, i / w], u, b.u_radius, b.u_trail)).collect();
+            (0..w * h).map(|i| line_blur(&pass1, [w, h], [i % w, i / w], v, b.v_radius, b.v_trail)).collect()
         }
         BlurType::Radial => {
             let [ox, oy] = b.origin;
@@ -233,7 +233,7 @@ fn blur(img: &mut RgbaImage, b: &Blur) {
                         return src[i];
                     }
                     // The least blur at the origin, the full radius at the farthest corner.
-                    line_blur(&src, w, h, x, y, [dx / d, dy / d], b.radius * d / far, -b.radial_trail)
+                    line_blur(&src, [w, h], [x, y], [dx / d, dy / d], b.radius * d / far, -b.radial_trail)
                 })
                 .collect()
         }
