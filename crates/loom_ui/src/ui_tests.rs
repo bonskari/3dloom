@@ -4044,17 +4044,14 @@ fn a_bitmap_on_an_imported_skinned_character_shows_in_the_viewport() {
     }
     h.frames(2);
     let i = h.app.world_meshes().iter().position(|(n, _)| *n == skinned).unwrap();
-    eprintln!("PROBE before show map: {:?} err {:?}", h.app.world_styles[i].texture, h.app.last_error);
     // At the Bitmap's level, as the reference's steps go: Show Standard Map in Viewport.
     assert!(!h.app.state.scene.material_editor.path.is_empty(), "the editor is at the map level");
     click_in_editor(&mut h, "Show Map in Viewport", 0.0);
     h.frames(2);
     let style = h.app.world_styles[i].clone();
-    eprintln!("PROBE after: {:?} sub {:?} err {:?}", style.texture, style.sub.as_ref().map(|s| s.by_id.len()), h.app.last_error);
     let loom_render::TextureSel::Bitmap(t) = style.texture else { panic!("the bitmap shows: {:?}", style.texture) };
     let mesh = h.app.world_display()[i].clone();
     let (verts, _, _) = loom_render::triangulate_styled(&mesh, &style);
-    eprintln!("PROBE verts {} map1 {:?}", verts.len(), mesh.map(1).is_some());
     assert!(verts.iter().any(|v| v.uv != verts[0].uv), "the posed mesh keeps its UVs");
     let upload = h.app.pending_upload.lock().unwrap().clone();
     let bitmaps = upload.map(|u| u.2).unwrap_or_default();
