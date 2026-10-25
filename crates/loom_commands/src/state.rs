@@ -215,6 +215,8 @@ pub enum PickMode {
     CloneAlignDestination,
     /// Place Highlight: drag over a surface.
     PlaceHighlight,
+    /// Spacing Tool > Pick Path: the clicked shape is the path.
+    SpacingPath,
 }
 
 /// Paint Deformation brushes.
@@ -1351,6 +1353,8 @@ pub struct AppState {
     pub active_grid: Option<NodeId>,
     /// Tools > Measure Distance: the first picked point.
     pub measure_from: Option<Vec3>,
+    /// Spacing Tool > Pick Path: the picked shape (None: the picked points).
+    pub spacing_path: Option<NodeId>,
     /// Clone and Align: the destination objects.
     pub clone_align_destinations: Vec<NodeId>,
     /// Place Highlight: each moved object's position before it began.
@@ -1467,6 +1471,8 @@ pub struct AppState {
     pub snaps: crate::snap::SnapSettings,
     /// Grid and Snap Settings > Home Grid.
     pub home_grid: crate::snap::HomeGrid,
+    /// Grid and Snap Settings > User Grids.
+    pub user_grids: crate::snap::UserGrids,
     /// The renderer rebuilds its grid buffers when set.
     pub grid_dirty: bool,
     pub auto_key: bool,
@@ -1649,6 +1655,7 @@ impl AppState {
             spacing_points: [None, None],
             active_grid: None,
             measure_from: None,
+            spacing_path: None,
             clone_align_destinations: Vec::new(),
             place_highlight_from: Vec::new(),
             selection_filter: SelectionFilter::All,
@@ -1716,6 +1723,7 @@ impl AppState {
             percent_snap_on: false,
             snaps: crate::snap::SnapSettings::default(),
             home_grid: crate::snap::HomeGrid::default(),
+            user_grids: crate::snap::UserGrids::default(),
             grid_dirty: true,
             auto_key: false,
             set_key_mode: false,

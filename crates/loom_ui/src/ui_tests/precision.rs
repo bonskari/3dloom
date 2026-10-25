@@ -305,3 +305,49 @@ fn array_dialog_shows_equivalent_totals_previews_as_boxes_and_keeps_its_settings
     let row = row_spinners(&h, h.find(egui::accesskit::Role::Label, "Move"));
     assert!(row[3].0.starts_with("75"), "{row:?}");
 }
+
+#[test]
+fn spacing_tool_picks_a_path_and_uses_the_distribution_list() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreateShape { kind: loom_commands::ShapeKind::Arc, position: [0.0; 3], size: [60.0, 60.0, 0.0] });
+    let arc = *h.app.state.selection.iter().next().unwrap();
+    for (name, v) in [("Radius", 30.0), ("From", 0.0), ("To", 180.0)] {
+        h.cmd(Command::SetParameter { id: arc.0, name: name.into(), value: v });
+    }
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0, 0.0, -60.0], size: [4.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    wide_view(&mut h);
+    h.cmd(Command::SpacingTool);
+    h.click_text_anywhere("Pick Path");
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::SpacingPath));
+    let on_arc = h.screen_of(Vec3::new(0.0, 30.0, 0.0));
+    h.click(on_arc);
+    assert_eq!(h.app.state.spacing_path, Some(arc), "the click on the arc picked it");
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![b]);
+    assert_eq!(h.text_rects("Arc001").len(), 1, "the path's name shows");
+    h.click_text_anywhere("Divide Evenly, Objects at Ends");
+    h.click_text_anywhere("Divide Evenly, No Objects at Ends");
+    h.click_text_anywhere("Apply");
+    // Count 3 with no objects at the ends: a quarter, half and three quarters along.
+    let mut at: Vec<Vec3> = h.app.state.selection.iter().map(|id| h.app.state.scene.world_matrix(*id).w_axis.truncate()).collect();
+    at.sort_by(|a, b| b.x.total_cmp(&a.x));
+    assert_eq!(at.len(), 3, "{at:?}");
+    let r = 30.0 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(at[0].distance(Vec3::new(r, r, 0.0)) < 0.5 && at[1].distance(Vec3::new(0.0, 30.0, 0.0)) < 0.5 && at[2].distance(Vec3::new(-r, r, 0.0)) < 0.5, "{at:?}");
+}
+
+#[test]
+fn grid_and_snap_settings_shows_the_override_marker_colour_and_user_grids() {
+    let mut h = Harness::new();
+    h.cmd(Command::GridAndSnapSettings);
+    assert_eq!(h.text_rects("Override OFF").len(), 1);
+    h.cmd(Command::SnapOverride { name: Some("Vertex".into()) });
+    assert_eq!(h.text_rects("Override Vertex").len(), 1, "the label names the override in use");
+    h.click_text_anywhere("User Grids");
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Activate grids when creating").center());
+    assert!(h.app.state.user_grids.activate_when_created);
+    h.click_text_anywhere("Object space");
+    assert!(h.app.state.user_grids.autogrid_object_space);
+    h.click_text_anywhere("Options");
+    assert_eq!(h.text_rects("Color:").len(), 1, "Marker > Color swatch");
+}

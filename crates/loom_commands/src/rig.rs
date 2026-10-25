@@ -373,6 +373,10 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             commit(state, &format!("Create {base}"), Change::AddNode(node))?;
             state.selection = BTreeSet::from([id]);
             state.sub_selection.clear();
+            // User Grids > Activate grids when creating.
+            if kind == "grid" && state.user_grids.activate_when_created {
+                state.active_grid = Some(id);
+            }
             Ok(json!({ "node": id.0 }))
         }
         C::Dummy => execute(state, C::CreateHelper { kind: "dummy".into(), position: [0.0; 3], size: 10.0 }),

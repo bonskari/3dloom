@@ -1596,10 +1596,18 @@ pub(crate) fn creation_anchor(app: &LoomApp, index: usize, p: egui::Pos2, rect: 
     // The active grid's plane in every view, else the view's home grid plane.
     let (o, u, v, n) = app.state.construction_plane(index);
     if app.autogrid {
-        if let Some((point, normal)) = surface_hit(app, p, rect, view, proj) {
+        if let Some((node, point, normal)) = surface_hit_node(app, p, rect, view, proj) {
             let n = normal.normalize_or_zero();
             let helper = if n.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
-            let u = helper.cross(n).normalize_or_zero();
+            let mut u = helper.cross(n).normalize_or_zero();
+            // User Grids > AutoGrid Object space: X follows the hit object's X.
+            if app.state.user_grids.autogrid_object_space {
+                let ox = app.state.scene.world_matrix(node).x_axis.truncate();
+                let along = (ox - n * ox.dot(n)).normalize_or_zero();
+                if along != Vec3::ZERO {
+                    u = along;
+                }
+            }
             let v = n.cross(u);
             return Some((point, (u, v, n)));
         }
@@ -2289,7 +2297,7 @@ fn draw_snap_marker(painter: &egui::Painter, app: &LoomApp, hit: &loom_commands:
     }
     let c = egui::pos2(hit.screen.x, hit.screen.y);
     let r = (s.marker_size * 0.5).max(3.0);
-    let color = egui::Color32::from_rgb(0, 220, 255);
+    let color = egui::Color32::from_rgb(s.marker_color[0], s.marker_color[1], s.marker_color[2]);
     let stroke = egui::Stroke::new(1.5, color);
     match hit.kind {
         K::GridPoint => {
