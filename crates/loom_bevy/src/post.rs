@@ -38,22 +38,30 @@ use bevy::render::{Render, RenderApp, RenderSet};
 
 const SHADER: Handle<Shader> = weak_handle!("6b0f5a9e-3d4c-4a8e-9b7d-1f2e3c4d5a6b");
 
-/// The pass's values for one view (see `env_pass.wgsl`).
-// The ShaderType derive adds a size check per field that nothing calls.
-#[allow(dead_code)]
-#[derive(Component, ShaderType, Clone, Copy, Debug, Default, PartialEq)]
-pub struct EnvUniform {
-    pub background: Vec4,
-    pub map: Vec4,
-    pub frame: Vec4,
-    pub fog_color: [Vec4; 4],
-    pub fog_a: [Vec4; 4],
-    pub fog_b: [Vec4; 4],
-    pub dof: Vec4,
-    pub dof_loss: Vec4,
-    /// x: exposure multiplier, y: contrast, z: 1 = applied here (HDR views
-    /// without a tonemapping curve, which Bevy leaves ungraded).
-    pub grade: Vec4,
+pub use uniform::EnvUniform;
+
+mod uniform {
+    // The ShaderType derive adds a size check per field that nothing calls.
+    #![allow(dead_code)]
+    use bevy::ecs::component::Component;
+    use bevy::math::Vec4;
+    use bevy::render::render_resource::ShaderType;
+
+    /// The pass's values for one view (see `env_pass.wgsl`).
+    #[derive(Component, ShaderType, Clone, Copy, Debug, Default, PartialEq)]
+    pub struct EnvUniform {
+        pub background: Vec4,
+        pub map: Vec4,
+        pub frame: Vec4,
+        pub fog_color: [Vec4; 4],
+        pub fog_a: [Vec4; 4],
+        pub fog_b: [Vec4; 4],
+        pub dof: Vec4,
+        pub dof_loss: Vec4,
+        /// x: exposure multiplier, y: contrast, z: 1 = applied here (HDR views
+        /// without a tonemapping curve, which Bevy leaves ungraded).
+        pub grade: Vec4,
+    }
 }
 
 impl EnvUniform {
