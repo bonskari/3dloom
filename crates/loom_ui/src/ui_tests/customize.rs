@@ -397,3 +397,50 @@ fn track_bar_keys_take_the_colour_of_what_they_key() {
     h.cmd(Command::SetUiColor { element: "Rotation Keys".into(), color: [1, 2, 250] });
     assert!(has_fill(&h, egui::Color32::from_rgb(1, 2, 250)) && !has_fill(&h, rot), "Colors > Track Bar sets it");
 }
+
+#[test]
+fn the_undo_history_list_goes_back_several_operations_at_once() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    let before = h.app.state.undo.labels();
+    assert!(before.len() >= 2, "two operations to undo: {before:?}");
+    h.click(h.find(Role::ComboBox, "Undo History").center());
+    h.frames(2);
+    // The list shows the most recent first; the second one goes back through both.
+    let second = before[before.len() - 2].clone();
+    let open = menus(&h);
+    let r = open.iter().find_map(|m| h.text_rect(&second, *m)).unwrap_or_else(|| panic!("no {second:?} in the Undo History list"));
+    h.click(r.center());
+    h.frames(2);
+    assert_eq!(h.app.state.undo.labels().len(), before.len() - 2);
+    assert_eq!(h.app.state.undo.redo_labels().len(), 2, "both are on the Redo list");
+}
+
+/// The Edit menu's title on the menu bar.
+fn edit_menu_on_bar(h: &Harness) -> bool {
+    h.find_all(Role::Button, "Edit").into_iter().any(|r| r.max.y < 30.0)
+}
+
+#[test]
+fn the_customize_quick_access_menu_hides_the_menu_bar_and_a_button() {
+    let mut h = Harness::new();
+    assert!(h.has(Role::Button, "Save File") && edit_menu_on_bar(&h));
+    h.click(h.find(Role::Button, "Customize Quick Access Toolbar").center());
+    h.frames(2);
+    h.click(menu_entry(&h, "\u{2714} Save File"));
+    h.frames(2);
+    assert!(!h.has(Role::Button, "Save File"), "Save File is off the Quick Access toolbar");
+    assert!(h.has(Role::Button, "Open File"));
+    h.click(h.find(Role::Button, "Customize Quick Access Toolbar").center());
+    h.frames(2);
+    h.click(menu_entry(&h, "Hide Menu Bar"));
+    h.frames(2);
+    assert!(h.app.state.ui_custom.menu_bar_hidden);
+    assert!(!edit_menu_on_bar(&h), "no Edit menu on the bar");
+    assert!(h.has(Role::Button, "Open File"), "the Quick Access toolbar stays");
+    h.click(h.find(Role::Button, "Customize Quick Access Toolbar").center());
+    h.frames(2);
+    h.click(menu_entry(&h, "Show Menu Bar"));
+    h.frames(2);
+    assert!(edit_menu_on_bar(&h));
+}
