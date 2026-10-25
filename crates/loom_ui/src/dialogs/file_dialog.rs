@@ -138,7 +138,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
             amount: None,
         },
         Dialog::SaveUvw => Command::SaveUvw { path: Some(p) },
-        Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: Some(p) },
+        Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(p) },
         Dialog::SaveRenderedImage => Command::SaveRenderedImage { path: Some(p) },
         Dialog::LoadUvw => Command::LoadUvw { path: Some(p) },
         Dialog::SaveShortcuts => Command::SaveShortcuts { path: Some(p) },

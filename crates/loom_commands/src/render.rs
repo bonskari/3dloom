@@ -196,7 +196,7 @@ fn blowup_rect(r: [f32; 4]) -> [f32; 4] {
     [cx - s * 0.5, cy - s * 0.5, cx + s * 0.5, cy + s * 0.5]
 }
 
-fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Value, String> {
+pub(crate) fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Value, String> {
     if state.rendered.progress.is_some() || state.pending_render.is_some() {
         return Err("a render is in progress".into());
     }
@@ -204,6 +204,12 @@ fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Value, String> 
     req.selection = state.selection.iter().copied().collect();
     if req.settings.area == RenderArea::Selected && req.selection.is_empty() {
         return Err("Area to Render is Selected but nothing is selected".into());
+    }
+    if req.preview {
+        // Exposure Control's thumbnail: the Rendered Frame Window and Render Last stay as they are.
+        let out = json!({ "pending": true, "preview": true, "width": req.settings.width, "height": req.settings.height });
+        state.pending_render = Some(req);
+        return Ok(out);
     }
     let s = &req.settings;
     let name = viewport_name(state, req.viewport);
@@ -252,11 +258,11 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             // Production saves the Render Output file when Save File is on;
             // Iterative never writes files.
             let save_path = path.or_else(|| (!iterative && settings.save_file).then(|| settings.output_path.clone()).flatten());
-            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative })
+            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative, preview: false })
         }
         C::RenderIterative => {
             let settings = state.scene.render.clone();
-            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path: None, iterative: true })
+            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path: None, iterative: true, preview: false })
         }
         C::RenderLast => {
             let Some(last) = state.rendered.last.clone() else {
@@ -265,8 +271,8 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             // The same view, area and settings; never saved to a file.
             start(state, RenderRequest { save_path: None, ..last })
         }
-        C::RenderSetup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, save_file, output } => {
-            if [width.is_none(), height.is_none(), image_aspect.is_none(), pixel_aspect.is_none(), lock_image_aspect.is_none(), lock_pixel_aspect.is_none(), render_hidden.is_none(), force_two_sided.is_none(), save_file.is_none(), output.is_none()].iter().all(|n| *n) {
+        C::RenderSetup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, atmospherics, effects, save_file, output } => {
+            if [width.is_none(), height.is_none(), image_aspect.is_none(), pixel_aspect.is_none(), lock_image_aspect.is_none(), lock_pixel_aspect.is_none(), render_hidden.is_none(), force_two_sided.is_none(), atmospherics.is_none(), effects.is_none(), save_file.is_none(), output.is_none()].iter().all(|n| *n) {
                 state.dialog = Some(Dialog::RenderSetup);
                 return Ok(json!({ "dialog": "RenderSetup" }));
             }
@@ -318,6 +324,12 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if let Some(v) = force_two_sided {
                 s.force_two_sided = v;
             }
+            if let Some(v) = atmospherics {
+                s.atmospherics = v;
+            }
+            if let Some(v) = effects {
+                s.effects = v;
+            }
             if let Some(p) = output {
                 let p = p.trim().to_owned();
                 // Choosing a file turns Save File on; an empty name clears it.
@@ -333,7 +345,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Render Setup", s)?;
             Ok(settings_json(&state.scene.render))
         }
-        C::BevyRendererSettings { antialiasing, supersampling, shadows, shadow_map_size, background, ambient } => {
+        C::BevyRendererSettings { antialiasing, supersampling, shadows, shadow_map_size } => {
             let mut s = state.scene.render.clone();
             let b = &mut s.bevy;
             if let Some(v) = antialiasing {
@@ -353,13 +365,6 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     return Err(format!("shadow map size {v}: 512 to 8192"));
                 }
                 b.shadow_map_size = v;
-            }
-            let colour = |c: [f32; 3]| if c.iter().all(|v| (0.0..=1.0).contains(v)) { Ok(c) } else { Err(format!("colour {c:?}: 0-1")) };
-            if let Some(c) = background {
-                b.background = colour(c)?;
-            }
-            if let Some(c) = ambient {
-                b.ambient = colour(c)?;
             }
             set_settings(state, "Render Setup", s)?;
             Ok(settings_json(&state.scene.render))

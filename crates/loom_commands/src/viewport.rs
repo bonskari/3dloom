@@ -56,6 +56,9 @@ pub struct Viewport {
     pub background_aspect: BackgroundAspect,
     /// Display Background.
     pub background_display: bool,
+    /// Use Environment Background: the Environment's background colour or
+    /// map shows instead of the image file.
+    pub background_use_environment: bool,
     /// Bumped by Update Background Image so the UI reloads the file.
     pub background_version: u32,
     pub view_undo: ViewUndo,
@@ -122,6 +125,7 @@ impl Viewport {
             background_anchor: None,
             background_aspect: BackgroundAspect::Viewport,
             background_display: true,
+            background_use_environment: false,
             background_version: 0,
             view_undo: ViewUndo::default(),
         }

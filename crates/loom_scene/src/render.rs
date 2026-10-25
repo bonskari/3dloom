@@ -1,6 +1,6 @@
 //! Render Setup settings saved with the scene: the Common panel (output
 //! size, options, render output, area to render) and the Bevy renderer's own
-//! panel.
+//! panel. The background and ambient colours are the Environment's.
 
 use serde::{Deserialize, Serialize};
 
@@ -51,15 +51,11 @@ pub struct BevyRenderSettings {
     pub shadows: bool,
     /// Shadow map size in pixels (512–8192).
     pub shadow_map_size: u32,
-    /// Background colour, sRGB 0–1 (its alpha is 0: Display Alpha shows it black).
-    pub background: [f32; 3],
-    /// Ambient (environment) light colour, sRGB 0–1.
-    pub ambient: [f32; 3],
 }
 
 impl Default for BevyRenderSettings {
     fn default() -> Self {
-        Self { antialiasing: true, supersampling: 1, shadows: true, shadow_map_size: 4096, background: [0.0; 3], ambient: [1.0; 3] }
+        Self { antialiasing: true, supersampling: 1, shadows: true, shadow_map_size: 4096 }
     }
 }
 
@@ -80,6 +76,10 @@ pub struct RenderSettings {
     pub render_hidden: bool,
     /// Options > Force 2-Sided.
     pub force_two_sided: bool,
+    /// Options > Atmospherics: the Environment's atmosphere list renders.
+    pub atmospherics: bool,
+    /// Options > Effects: the rendering effects list applies.
+    pub effects: bool,
     /// Render Output > Save File, and the file Files... chose.
     pub save_file: bool,
     pub output_path: Option<String>,
@@ -102,6 +102,8 @@ impl Default for RenderSettings {
             lock_pixel_aspect: false,
             render_hidden: false,
             force_two_sided: false,
+            atmospherics: true,
+            effects: true,
             save_file: false,
             output_path: None,
             area: RenderArea::View,

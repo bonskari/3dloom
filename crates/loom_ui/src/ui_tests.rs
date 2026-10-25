@@ -3009,7 +3009,7 @@ fn autogrid_tripod_follows_the_cursor_over_surfaces() {
 fn viewport_background_dialog_sets_aspect_and_picks_the_viewport() {
     let mut h = Harness::new();
     h.cmd(Command::ActiveViewport { index: 1 }); // Front
-    h.cmd(Command::SetViewportBackground { path: Some("/tmp/ref.png".into()), aspect: None, lock: None, display: None, all_views: None });
+    h.cmd(Command::SetViewportBackground { path: Some("/tmp/ref.png".into()), use_environment: None, aspect: None, lock: None, display: None, all_views: None });
     h.cmd(Command::ViewportBackground);
     let screen = h.ctx.screen_rect();
     click_text(&mut h, "Match Bitmap", screen, 0.0);

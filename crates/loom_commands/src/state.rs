@@ -1572,6 +1572,8 @@ pub struct AppState {
     pub pending_render: Option<RenderRequest>,
     /// The Rendered Frame Window, its image and the render in progress.
     pub rendered: crate::render::RenderedFrame,
+    /// The Environment and Effects dialog (open panel, exposure preview).
+    pub environment_ui: crate::environment::EnvironmentUi,
 }
 
 /// A render for the UI's renderer: viewport `viewport` with `settings`
@@ -1586,6 +1588,9 @@ pub struct RenderRequest {
     pub save_path: Option<String>,
     /// Iterative: Region and Selected keep the rest of the window's image.
     pub iterative: bool,
+    /// Exposure Control > Render Preview: into the rollout's thumbnail
+    /// (`AppState::environment_ui`), not the Rendered Frame Window.
+    pub preview: bool,
 }
 
 impl Default for AppState {
@@ -1765,6 +1770,7 @@ impl AppState {
             uv_editor: UvEditor::default(),
             pending_render: None,
             rendered: Default::default(),
+            environment_ui: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,

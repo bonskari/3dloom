@@ -56,6 +56,9 @@ pub struct Scene {
     /// Render Setup (saved with the scene, as the reference does).
     #[serde(default)]
     pub render: crate::render::RenderSettings,
+    /// Rendering > Environment and Effects (saved with the scene).
+    #[serde(default)]
+    pub environment: crate::environment::Environment,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -126,6 +129,7 @@ impl Scene {
             materials: Default::default(),
             material_editor: Default::default(),
             render: Default::default(),
+            environment: Default::default(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             eval_in_progress: Default::default(),

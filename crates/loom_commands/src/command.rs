@@ -69,6 +69,31 @@ impl ArgSchema for loom_scene::render::RenderArea {
         json!({"type":"string","enum":["View","Selected","Region","Crop","Blowup"]})
     }
 }
+impl ArgSchema for [f32; 2] {
+    fn schema() -> Value {
+        json!({"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2})
+    }
+}
+impl ArgSchema for loom_scene::environment::EnvMapping {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Screen","Spherical","Cylindrical","ShrinkWrap"]})
+    }
+}
+impl ArgSchema for loom_scene::environment::ExposureKind {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["None","Automatic","Linear","Logarithmic"]})
+    }
+}
+impl ArgSchema for loom_scene::environment::LayerFalloff {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Top","Bottom","None"]})
+    }
+}
+impl ArgSchema for loom_scene::environment::BlurType {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Uniform","Directional","Radial"]})
+    }
+}
 impl ArgSchema for loom_scene::anim::Ort {
     fn schema() -> Value {
         json!({"type":"string","enum":["Constant","Cycle","Loop","PingPong","Linear","RelativeRepeat"]})
@@ -888,7 +913,7 @@ commands! {
     ViewportView => "Viewport View", Loom, "Set the point of view of a viewport by index." { index: u32, kind: crate::state::ViewKind };
     ViewportShading => "Viewport Shading", Loom, "Set the active viewport's shading mode and edged faces." { shading: crate::viewport::Shading, edged_faces: Option<bool> };
     SetSplits => "Set Splits", Loom, "Move the viewport layout splitters (fractions 0.05–0.95)." { x: Option<f32>, y: Option<f32> };
-    SetViewportBackground => "Set Viewport Background", Loom, "Viewport Background dialog OK: the image file (omitted = keep, empty = remove), Aspect Ratio (Match Viewport, Match Bitmap, Match Rendering Output), Lock Zoom/Pan, Display Background, for the active viewport or all of them." { path: Option<String>, aspect: Option<String>, lock: Option<bool>, display: Option<bool>, all_views: Option<bool> };
+    SetViewportBackground => "Set Viewport Background", Loom, "Viewport Background dialog OK: the image file (omitted = keep, empty = remove), Use Environment Background (the Environment's background colour or map instead of the file), Aspect Ratio (Match Viewport, Match Bitmap, Match Rendering Output), Lock Zoom/Pan, Display Background, for the active viewport or all of them." { path: Option<String>, use_environment: Option<bool>, aspect: Option<String>, lock: Option<bool>, display: Option<bool>, all_views: Option<bool> };
     ResetBackgroundTransform => "Reset Background Transform", MainUI, "Views > Viewport Background > Reset Background Transform: a locked background image is fitted to the active view again.";
     ShowStatisticsToggle => "Show Statistics Toggle", MainUI, "Show or hide polygon statistics (7).";
     ViewEdgedFacesToggle => "View Edged Faces Toggle", MainUI, "Toggle edged faces (F4).";
@@ -1100,8 +1125,28 @@ commands! {
     Render => "Render", MainUI, "Render Production (Shift+Q): render the Rendered Frame Window's viewport (the active one unless Lock to Viewport) with the Render Setup settings into the Rendered Frame Window, without blocking; `path` also saves the image there (png, jpg, bmp, tga, exr), as Save File does with the Render Output file; `width` x `height` override the output size for this render." { path: Option<String>, width: Option<u32>, height: Option<u32> };
     RenderIterative => "Render Iterative", MainUI, "Render Iterative: render into the Rendered Frame Window without saving a file; Region and Selected keep the rest of the window's image.";
     RenderLast => "Render Last", MainUI, "Render Last (F9): repeat the last render (same viewport and area), without saving a file.";
-    RenderSetup => "Render SetUp...", MainUI, "Render Setup > Common: output size (`width`, `height`, 1-8192; with Image Aspect locked one changes the other), `image_aspect` (sets Height), `pixel_aspect`, the two aspect locks, Options `render_hidden` / `force_two_sided`, Render Output `output` file (empty clears) and `save_file`; with no argument the dialog shows (F10)." { width: Option<u32>, height: Option<u32>, image_aspect: Option<f32>, pixel_aspect: Option<f32>, lock_image_aspect: Option<bool>, lock_pixel_aspect: Option<bool>, render_hidden: Option<bool>, force_two_sided: Option<bool>, save_file: Option<bool>, output: Option<String> };
-    BevyRendererSettings => "Bevy Renderer Settings", Loom, "Render Setup > Renderer (Bevy): 4x MSAA `antialiasing`, `supersampling` 1-4 (samples per pixel side), key light `shadows`, `shadow_map_size` 512-8192, `background` and `ambient` colours (sRGB 0-1); omitted fields keep their value." { antialiasing: Option<bool>, supersampling: Option<u32>, shadows: Option<bool>, shadow_map_size: Option<u32>, background: Option<[f32; 3]>, ambient: Option<[f32; 3]> };
+    RenderSetup => "Render SetUp...", MainUI, "Render Setup > Common: output size (`width`, `height`, 1-8192; with Image Aspect locked one changes the other), `image_aspect` (sets Height), `pixel_aspect`, the two aspect locks, Options `render_hidden` / `force_two_sided` / `atmospherics` / `effects`, Render Output `output` file (empty clears) and `save_file`; with no argument the dialog shows (F10)." { width: Option<u32>, height: Option<u32>, image_aspect: Option<f32>, pixel_aspect: Option<f32>, lock_image_aspect: Option<bool>, lock_pixel_aspect: Option<bool>, render_hidden: Option<bool>, force_two_sided: Option<bool>, atmospherics: Option<bool>, effects: Option<bool>, save_file: Option<bool>, output: Option<String> };
+    BevyRendererSettings => "Bevy Renderer Settings", Loom, "Render Setup > Renderer (Bevy): 4x MSAA `antialiasing`, `supersampling` 1-4 (samples per pixel side), key light `shadows`, `shadow_map_size` 512-8192; omitted fields keep their value. The background and ambient colours are the Environment's (Environment Settings)." { antialiasing: Option<bool>, supersampling: Option<u32>, shadows: Option<bool>, shadow_map_size: Option<u32> };
+    EnvironmentDialogToggle => "Environment Dialog Toggle", MainUI, "Rendering > Environment (8): open or close the Environment and Effects dialog on its Environment panel.";
+    RenderingEffects => "Rendering Effects", Loom, "Rendering > Effects: the Environment and Effects dialog on its Effects panel.";
+    EnvironmentSettings => "Environment Settings", Loom, "Environment panel > Common Parameters: Background `background` colour, Environment Map `map` (a bitmap file; choosing one turns Use Map on, empty removes it), `use_map`, the map's `mapping` (Screen, Spherical, Cylindrical, ShrinkWrap), Global Lighting `tint`, `level` (multiplies every light but ambient) and `ambient`; colours sRGB 0-1; under Auto Key a change at a nonzero frame keys it." { background: Option<[f32; 3]>, map: Option<String>, use_map: Option<bool>, mapping: Option<loom_scene::environment::EnvMapping>, tint: Option<[f32; 3]>, level: Option<f32>, ambient: Option<[f32; 3]> };
+    ExposureControl => "Exposure Control", Loom, "Environment panel > Exposure Control: the control `kind` (None, Automatic, Linear, Logarithmic), Active, Process Background and Environment Maps, Brightness 0-100 (Logarithmic 0-200), Contrast 0-100, Exposure Value -5 to 5 (Automatic, Linear), Mid Tones 0.01-20 (Logarithmic)." { kind: Option<loom_scene::environment::ExposureKind>, active: Option<bool>, process_background: Option<bool>, brightness: Option<f32>, contrast: Option<f32>, exposure_value: Option<f32>, mid_tones: Option<f32> };
+    ExposureRenderPreview => "Exposure Render Preview", Loom, "Exposure Control > Render Preview: render the active view small into the rollout's preview thumbnail (with the exposure control applied).";
+    AddAtmosphere => "Add Atmosphere", Loom, "Atmosphere > Add: append a `kind` (Fog, Volume Fog, Volume Light) to the atmosphere list, named `name` or after its kind." { kind: String, name: Option<String> };
+    DeleteAtmosphere => "Delete Atmosphere", Loom, "Atmosphere > Delete: remove list entry `index`." { index: u32 };
+    AtmosphereEntry => "Atmosphere Entry", Loom, "Atmosphere list entry `index`: its Name, Active, and Move Up / Move Down by `move_by` places (negative is up)." { index: u32, name: Option<String>, active: Option<bool>, move_by: Option<i32> };
+    FogParameters => "Fog Parameters", Loom, "Fog atmosphere `index`: Color, Fog Background, Type (`layered`), Standard Exponential / Near % / Far % (0-100, at the camera's environment ranges or the scene's near and far side), Layered Top / Bottom (world units) / Density % / Falloff (Top, Bottom, None)." { index: u32, color: Option<[f32; 3]>, fog_background: Option<bool>, layered: Option<bool>, exponential: Option<bool>, near: Option<f32>, far: Option<f32>, top: Option<f32>, bottom: Option<f32>, density: Option<f32>, falloff: Option<loom_scene::environment::LayerFalloff> };
+    VolumeFogParameters => "Volume Fog Parameters", Loom, "Volume Fog atmosphere `index` (fills the scene): Color, Density 0-20, Max Steps 1-256, Fog Background." { index: u32, color: Option<[f32; 3]>, density: Option<f32>, max_steps: Option<u32>, fog_background: Option<bool> };
+    VolumeLightParameters => "Volume Light Parameters", Loom, "Volume Light atmosphere `index`: Pick Light (`add_light`, a light node id) / Remove Light, Fog Color, Density % 0-100." { index: u32, add_light: Option<u64>, remove_light: Option<u64>, fog_color: Option<[f32; 3]>, density: Option<f32> };
+    AddEffect => "Add Effect", Loom, "Effects > Add: append a `kind` (Lens Effects (a Glow), Blur, Brightness and Contrast, Color Balance, Film Grain, Depth of Field) to the effects list, named `name` or after its kind." { kind: String, name: Option<String> };
+    DeleteEffect => "Delete Effect", Loom, "Effects > Delete: remove list entry `index`." { index: u32 };
+    EffectEntry => "Effect Entry", Loom, "Effects list entry `index`: its Name, Active, and Move Up / Move Down by `move_by` places (negative is up)." { index: u32, name: Option<String>, active: Option<bool>, move_by: Option<i32> };
+    GlowParameters => "Glow Parameters", Loom, "Lens Effects Glow `index`: Size (% of the image diagonal), Intensity %, Use Source Color 0-100, Radial Color inner / outer, Bright filter 0-255 (pixels brighter than it glow)." { index: u32, size: Option<f32>, intensity: Option<f32>, use_source_color: Option<f32>, inner_color: Option<[f32; 3]>, outer_color: Option<[f32; 3]>, bright: Option<f32> };
+    BlurParameters => "Blur Parameters", Loom, "Blur `index`: Blur Type (Uniform, Directional, Radial), Pixel Radius, Directional U / V Pixel Radius, U / V Trail (-100 to 100), Rotation, Radial Trail and X / Y Origin (pixels), Affect Alpha, Pixel Selections Whole Image or Non-Background, Brighten % and Blend %." { index: u32, blur_type: Option<loom_scene::environment::BlurType>, radius: Option<f32>, u_radius: Option<f32>, v_radius: Option<f32>, u_trail: Option<f32>, v_trail: Option<f32>, rotation: Option<f32>, radial_trail: Option<f32>, origin: Option<[f32; 2]>, affect_alpha: Option<bool>, non_background: Option<bool>, brighten: Option<f32>, blend: Option<f32> };
+    BrightnessContrastParameters => "Brightness and Contrast Parameters", Loom, "Brightness and Contrast `index`: Brightness 0-1, Contrast 0-1 (0.5 leaves the image as it is), Ignore Background." { index: u32, brightness: Option<f32>, contrast: Option<f32>, ignore_background: Option<bool> };
+    ColorBalanceParameters => "Color Balance Parameters", Loom, "Color Balance `index`: Cyan/Red, Magenta/Green, Yellow/Blue (-100 to 100), Preserve Luminosity, Ignore Background." { index: u32, cyan_red: Option<f32>, magenta_green: Option<f32>, yellow_blue: Option<f32>, preserve_luminosity: Option<bool>, ignore_background: Option<bool> };
+    FilmGrainParameters => "Film Grain Parameters", Loom, "Film Grain `index`: Grain 0-10, Ignore Background." { index: u32, grain: Option<f32>, ignore_background: Option<bool> };
+    DepthOfFieldParameters => "Depth of Field Parameters", Loom, "Depth of Field `index`: Focal Point Pick Node (`focal_node` id, 0 removes it: Use Camera), Horiz / Vert Focal Loss (pixels), Focal Range and Focal Limit (world units either side of the focal point)." { index: u32, focal_node: Option<u64>, horiz_loss: Option<f32>, vert_loss: Option<f32>, focal_range: Option<f32>, focal_limit: Option<f32> };
     AreaToRender => "Area to Render", Loom, "Rendered Frame Window > Area to Render: View, Selected, Region, Crop or Blowup, and the `region` rectangle [x0, y0, x1, y1] as fractions of the frame (y down) for Region / Crop, or the Blowup one (kept at the output's shape)." { area: Option<loom_scene::render::RenderArea>, region: Option<[f32; 4]> };
     EditRegion => "Edit Region", MainUI, "Rendered Frame Window > Edit Region: toggle editing the render region in the viewport (View and Selected switch to Region).";
     RenderViewport => "Render Viewport", Loom, "Rendered Frame Window / Render Setup: the `viewport` to render (index), Lock to Viewport (`lock`) and Production or Iterative (`iterative`)." { viewport: Option<u32>, lock: Option<bool>, iterative: Option<bool> };
@@ -1758,7 +1803,6 @@ pub const DEFERRED_SPLINE: &[(&str, &str)] = &[];
 /// Actions that this program deliberately does not implement, with the
 /// spec section that excludes them.
 pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
-    ("Environment Dialog Toggle", "3"),
     ("Create Animated Sequence File...", "3"),
     ("Hide Particle Systems Toggle", "3"),
     ("Hide Space Warps Toggle", "3"),
