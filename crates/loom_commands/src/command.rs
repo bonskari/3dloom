@@ -1835,6 +1835,8 @@ commands! {
     DeletePolygons => "Delete Polygons", Loom, "Delete the selected polygons; `delete_isolated` also deletes the vertices left with no polygon (the answer to the Delete prompt)." { delete_isolated: bool };
     Collapse => "Collapse", Loom, "Collapse the selected sub-objects to their centre.";
     ConnectEdgeRing => "Connect Edge Ring", Loom, "Connect the selected edge ring with a new loop.";
+    RenameObjectsDialog => "Rename Objects", Loom, "Open Tools > Rename Objects.";
+    RenameObjects => "Rename Objects Apply", Loom, "Tools > Rename Objects: rename `ids` (the selection when omitted): Base Name replaces the name, Remove First / Last drop characters, Prefix and Suffix are added, Base Number (+ Step per object) is appended." { ids: Option<Vec<u64>>, base_name: Option<String>, prefix: Option<String>, remove_first: Option<usize>, suffix: Option<String>, remove_last: Option<usize>, base_number: Option<i64>, step: Option<i64> };
     Rename => "Rename", Loom, "Rename a node." { id: u64, name: String };
     SetParent => "Set Parent", Loom, "Link a node to a parent (null unlinks), keeping its world transform." { id: u64, parent: Option<u64> };
     Orbit => "Orbit", Loom, "Set the orbit camera (degrees for angles; roll turns the view about its line of sight)." { yaw: Option<f32>, pitch: Option<f32>, distance: Option<f32>, target: Option<[f32; 3]>, roll: Option<f32> };

@@ -65,6 +65,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::ui_custom::handles(&c) => crate::ui_custom::execute(state, c),
         c if crate::time_tags::handles(&c) => crate::time_tags::execute(state, c),
         c if crate::time_display::handles(&c) => crate::time_display::execute(state, c),
+        c if crate::rename_objects::handles(&c) => crate::rename_objects::execute(state, c),
         c if crate::viewport_config::handles(&c) => crate::viewport_config::execute(state, c),
         c if crate::paths::handles(&c) => crate::paths::execute(state, c),
         c if crate::switcher::handles(&c) => crate::switcher::execute(state, c),

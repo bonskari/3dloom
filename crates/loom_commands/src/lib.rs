@@ -60,6 +60,7 @@ pub mod settings;
 pub mod ui_custom;
 pub mod time_tags;
 pub mod time_display;
+pub mod rename_objects;
 pub mod viewport_config;
 pub mod paths;
 pub mod switcher;

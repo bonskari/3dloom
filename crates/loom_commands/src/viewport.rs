@@ -478,6 +478,8 @@ pub enum Dialog {
     ConfigurePaths,
     /// Customize > Custom UI and Defaults Switcher.
     Switcher,
+    /// Tools > Rename Objects.
+    RenameObjects,
     /// File > Open of a file in other system units: Rescale or Adopt.
     UnitsMismatch,
     /// Customize User Interface > Toolbars / Menus / Quads / Colors: Save or Load a file.

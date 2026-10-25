@@ -433,6 +433,7 @@ fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         cmd(ui, app, "Place Highlight", Command::PlaceHighlight);
     });
     cmd(ui, app, "Snapshot...", Command::SnapshotDialog);
+    cmd(ui, app, "Rename Objects...", Command::RenameObjectsDialog);
     cmd(ui, app, "Grab Viewport", Command::GrabViewport);
     ui.separator();
     sub(ui, app, "Grids and Snaps", |ui, app| {

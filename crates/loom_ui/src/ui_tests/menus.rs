@@ -252,3 +252,23 @@ fn modifier_list_t_then_enter_adds_taper() {
     let top = h.app.state.scene.node(id).unwrap().modifiers.last().map(|m| m.name.clone());
     assert_eq!(top.as_deref(), Some("Taper"));
 }
+
+#[test]
+fn tools_rename_objects_renames_the_selection() {
+    let mut h = Harness::new();
+    for x in [0.0, 30.0] {
+        h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [x, 0.0, 0.0], size: [10.0; 3] });
+    }
+    h.cmd(Command::SelectAll);
+    menu_path(&mut h, &["Tools", "Rename Objects..."]);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenameObjects));
+    let base = h.find(Role::CheckBox, "Base Name:");
+    h.click(base.center());
+    h.click(right_of(&h, Role::TextInput, base).center());
+    h.run(vec![egui::Event::Text("Pillar".into())]);
+    h.click(h.find(Role::CheckBox, "Numbered").center());
+    h.click(h.find(Role::Button, "Rename").center());
+    let mut names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    names.sort();
+    assert_eq!(names, ["Pillar0", "Pillar1"], "Base Number 0, Step 1");
+}
