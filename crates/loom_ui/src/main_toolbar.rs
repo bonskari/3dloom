@@ -180,13 +180,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             SelectionRegion::Lasso => icons::REGION_LASSO,
                             SelectionRegion::Paint => icons::REGION_PAINT,
                         };
-                        egui::ComboBox::from_id_salt("selection_region").selected_text(egui::RichText::new(glyph(cur)).size(icons::SIZE)).width(34.0).show_ui(ui, |ui| {
+                        let region = egui::ComboBox::from_id_salt("selection_region").selected_text(egui::RichText::new(glyph(cur)).size(icons::SIZE)).width(34.0).show_ui(ui, |ui| {
                             for r in SelectionRegion::ALL {
                                 if ui.selectable_label(cur == r, icons::labeled(glyph(r), r.label())).clicked() {
                                     let _ = app.dispatch(Command::SelectionRegion { shape: r });
                                 }
                             }
                         });
+                        icons::named(&region.response, egui::WidgetType::ComboBox, cur.label());
                     }
                     "Window/Crossing Selection Toggle" => {
                         let w = app.state.window_selection;
@@ -240,7 +241,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         let shown = if forced { CenterMode::PivotPoint } else { cur };
                         let glyph = |m: CenterMode| match m { CenterMode::PivotPoint => icons::PIVOT_CENTER, CenterMode::Selection => icons::SELECTION_CENTER, CenterMode::TransformCoordinate => icons::COORDINATE_CENTER };
                         ui.add_enabled_ui(!forced, |ui| {
-                            egui::ComboBox::from_id_salt("use_center").selected_text(egui::RichText::new(glyph(shown)).size(icons::SIZE)).width(34.0).show_ui(ui, |ui| {
+                            let r = egui::ComboBox::from_id_salt("use_center").selected_text(egui::RichText::new(glyph(shown)).size(icons::SIZE)).width(34.0).show_ui(ui, |ui| {
                                 for m in CenterMode::ALL {
                                     // Local uses each object's own centre: Use Transform Center is unavailable.
                                     let off = m == CenterMode::TransformCoordinate && app.state.coord_system == CoordSystem::Local;
@@ -249,6 +250,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                                     }
                                 }
                             });
+                            icons::named(&r.response, egui::WidgetType::ComboBox, shown.label());
                         });
                         ui.separator();
                     }

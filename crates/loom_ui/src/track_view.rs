@@ -356,7 +356,9 @@ fn hierarchy(ui: &mut egui::Ui, app: &mut LoomApp, h: f32) {
             let has_children = !matches!(r.kind, TvItemKind::Track(_) | TvItemKind::Note(_));
             if has_children {
                 let sign = if collapsed.contains(&r.id) { icons::EXPAND } else { icons::COLLAPSE };
-                if ui.small_button(sign).clicked() {
+                let r = ui.small_button(sign);
+                icons::named(&r, egui::WidgetType::Button, if sign == icons::EXPAND { "Expand" } else { "Collapse" });
+                if r.clicked() {
                     app.state.track_view.highlighted = vec![r.id.clone()];
                     run(app, Command::ExpandTrackToggle);
                 }

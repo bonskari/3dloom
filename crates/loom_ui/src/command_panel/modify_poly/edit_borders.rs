@@ -29,11 +29,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             ui.add_enabled_ui(has, |ui| action(ui, app, "Bridge", "Bridge the two selected borders", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }));
-            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Bridge Settings").clicked() {
+            if crate::icons::small(ui, crate::icons::SETTINGS, "Bridge Settings").clicked() {
                 let _ = app.dispatch(Command::BridgeSettings);
             }
             ui.add_enabled_ui(has, |ui| action_keyed(ui, app, "Connect", "Connect", "Connect", Command::ConnectEdges { segments: ps.connect_segments, pinch: ps.connect_pinch, slide: ps.connect_slide }));
-            if ui.small_button(crate::icons::SETTINGS).on_hover_text("Connect Edge Settings").clicked() {
+            if crate::icons::small(ui, crate::icons::SETTINGS, "Connect Edge Settings").clicked() {
                 let _ = app.dispatch(Command::ConnectEdgeSettings);
             }
         });

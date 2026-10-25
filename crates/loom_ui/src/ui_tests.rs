@@ -2298,7 +2298,8 @@ fn the_lights_category_buttons_start_light_creation() {
     h.app.panel_tab = crate::Tab::Create;
     h.frames(2);
     let cp = panel(&h, "command_panel");
-    click_text(&mut h, "Lights", cp, 0.0);
+    // The category buttons are icons, named for screen readers.
+    h.click(h.find(egui::accesskit::Role::Button, "Lights").center());
     click_text(&mut h, "Target Spot", cp, 0.0);
     assert_eq!(h.app.create_kind, Some(crate::CreateKind::Light(loom_commands::light::LightKind::TargetSpot)));
     click_text(&mut h, "Omni", cp, 0.0);
