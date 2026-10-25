@@ -1530,8 +1530,9 @@ fn modifier_usage_path() -> Option<std::path::PathBuf> {
 pub fn length_drag_value<'a>(ui: &egui::Ui, units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, range: impl std::ops::RangeBounds<f32>, speed: f64) -> egui::DragValue<'a> {
     let (factor, suffix) = units.display_factor();
     let units = units.clone();
+    let current = *value as f64;
     spinner::spin(ui, value, range)
         .speed(speed)
         .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
-        .custom_parser(move |text| units.parse(text))
+        .custom_parser(move |text| spinner::typed(text, current, &|s| units.parse(s)))
 }
