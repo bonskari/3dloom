@@ -73,7 +73,9 @@ field name, enums as tagged objects or strings as serde derives them.
   weighted targets and initial offset, or `Attachment` with face and
   barycentric A / B; `rotation`: `LookAt` (targets, axis, flip, upnode,
   offset) or `Orientation`; `link`: `[frame, parent or null]` switches)
-  and `visibility` (an optional Param, 0–1).
+  and `visibility` (an optional Param, 0–1), `render` (Object Properties >
+  Rendering Control: `renderable`, `inherit_visibility`, `visible_to_camera`,
+  `receive_shadows`, `cast_shadows`) and `user_props` (User Defined text).
 - `next_id`: the next free node id.
 - `track_data`: Track View `note_tracks` (node, optional track, keys with
   time / text / locked), `track_sets` (name → track keys `{node, owner,
@@ -102,7 +104,11 @@ count, background image path and lock),
 `named_sub_selections` (named selection sets), `selection`, `frame_range`,
 `fps`, `current_frame`, `real_time`, `loop_playback`, `play_speed`,
 `play_direction` (Time Configuration) and `default_tangent` (the
-Default In / Out Tangents for new keys).
+Default In / Out Tangents for new keys), and `display` (Display Color
+`wireframe_color` / `shaded_color`, `hide_frozen`, `hide_bones`, the
+Statistics panel `statistics`, `display_selected_edged`, the Safe Frames
+panel `safe_frames`, and the Object Color dialog's `assign_random_colors`,
+`current_color`, `custom_colors`).
 
 Animation clips (Animation > Save / Load Animation) are their own JSON
 files, `.lxaf`: `{format: "loom-animation", version, fps, range, nodes:

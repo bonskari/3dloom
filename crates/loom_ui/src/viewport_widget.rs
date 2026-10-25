@@ -617,6 +617,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 let mut session = session.clone();
                                 if session.on_click(app, p) {
                                     app.create = None;
+                                    app.creation_finished();
                                 } else {
                                     app.create = Some(session);
                                 }
@@ -635,7 +636,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         anchor = hit.point;
                                         app.consume_snap_override();
                                     }
-                                    let _ = app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() });
+                                    if app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() }).is_ok() {
+                                        app.creation_finished();
+                                    }
                                 }
                             } else if app.create_kind == Some(crate::CreateKind::Biped) {
                                 // Biped: the press puts the feet down, the drag sets the height.
@@ -657,6 +660,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         app.camera_create = crate::create_tool::CameraSession::begin(app, anchor, basis.2);
                                     } else {
                                         crate::create_tool::CameraSession::place_free(app, anchor, basis.2);
+                                        app.creation_finished();
                                     }
                                 }
                             } else if let Some(crate::CreateKind::Light(kind)) = app.create_kind {
@@ -669,6 +673,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         app.camera_create = crate::create_tool::CameraSession::begin_light(app, kind, anchor, basis.2);
                                     } else {
                                         crate::create_tool::CameraSession::place_light(app, kind, anchor, basis.2);
+                                        app.creation_finished();
                                     }
                                 }
                             } else if app.create_kind == Some(crate::CreateKind::Line) {
@@ -730,10 +735,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                         if let Some(session) = app.camera_create.take() {
                             session.finish(app);
+                            app.creation_finished();
                         }
                         if let Some(session) = app.biped_create.take() {
                             let hit = plane_hit(p, rect, view, proj, session.normal);
                             session.finish(app, hit, p);
+                            app.creation_finished();
                         }
                         if app.alt_click.take().is_some() {
                             // Alt+click removes: Skin vertices at Edit Envelopes, else the picked items.
@@ -743,7 +750,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         } else if app.transform_drag.is_none() {
                             if let Some(mut session) = app.create.take() {
-                                if !session.on_release(app, p) {
+                                if session.on_release(app, p) {
+                                    app.creation_finished();
+                                } else {
                                     app.create = Some(session);
                                 }
                             } else if let Some(start) = app.drag_select_start.filter(|_| app.state.nav_mode == loom_input::NavMode::ZoomRegion) {
@@ -880,10 +889,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.create_kind = None;
                         } else if let Some(line) = app.line.take() {
                             line.finish(app);
+                            app.creation_finished();
                         } else if !app.bone_points.is_empty() {
                             let points: Vec<[f32; 3]> = app.bone_points.drain(..).map(|p| p.to_array()).collect();
-                            if points.len() >= 2 {
-                                let _ = app.dispatch(Command::CreateBoneChain { points, name: None });
+                            if points.len() >= 2 && app.dispatch(Command::CreateBoneChain { points, name: None }).is_ok() {
+                                app.creation_finished();
                             }
                         } else if loom_commands::skin::painting(&app.state) {
                             // Right-click ends Paint Weights.
@@ -1016,6 +1026,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
             }
             let shade_only = if app.state.shade_selected { selected.clone() } else { Vec::new() };
+            // Shaded views without Edged Faces outline the selection only
+            // with Display Selected with Edged Faces (the brackets show it otherwise).
+            let selected = if wire || edged_faces || app.state.display.display_selected_edged || app.state.selection_mode != SelectionMode::Object { selected } else { Vec::new() };
             let cb = (!realistic).then(|| egui_wgpu::Callback::new_paint_callback(
                 rect,
                 ViewportCallback {
@@ -1093,12 +1106,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                 }
             }
+            if app.state.show_statistics && is_active {
+                draw_statistics(&painter, app, rect, ctx.input(|i| i.stable_dt));
+            }
             if app.state.viewports[index].safe_frames {
-                draw_safe_frames(&painter, rect);
+                draw_safe_frames(&painter, app, rect);
             }
-            if app.state.show_trajectories || app.motion_trajectories || app.state.trajectory_keys {
-                draw_trajectories(&painter, app, view_proj, rect);
-            }
+            draw_trajectories(&painter, app, view_proj, rect);
+            draw_links(&painter, app, view_proj, rect);
             if is_active && app.has_selection() {
                 let layout = gizmo::layout_for(app, index, rect.height());
                 let hovered = hover_pos.and_then(|p| gizmo::hit(app, &layout, &projection, p));
@@ -2371,9 +2386,22 @@ fn draw_selection_brackets(painter: &egui::Painter, app: &LoomApp, view_proj: Ma
 /// safe (90 %) and title-safe (80 %) regions.
 /// The selection's motion paths: a line through every frame, white frame
 /// ticks, red key boxes (white when selected), the current frame in yellow.
+/// The objects whose trajectories show: the selection while Show
+/// Trajectories (or the Motion panel's Trajectories mode) is on, plus every
+/// visible object with the Trajectory display property.
+fn trajectory_nodes(app: &LoomApp) -> Vec<loom_scene::NodeId> {
+    let mut ids: Vec<loom_scene::NodeId> = if app.state.show_trajectories || app.motion_trajectories || app.state.trajectory_keys { app.state.selection.iter().copied().collect() } else { Vec::new() };
+    for n in app.state.scene.nodes() {
+        if n.display.trajectory && app.state.is_visible(n) && !ids.contains(&n.id) {
+            ids.push(n.id);
+        }
+    }
+    ids
+}
+
 fn draw_trajectories(painter: &egui::Painter, app: &LoomApp, view_proj: glam::Mat4, rect: egui::Rect) {
     let frame = app.state.current_frame;
-    for id in &app.state.selection {
+    for id in &trajectory_nodes(app) {
         let Some((pts, keys)) = loom_commands::motion::trajectory(&app.state, *id) else { continue };
         let screen: Vec<Option<egui::Pos2>> = pts.iter().map(|(_, p)| project_world_to_screen(*p, view_proj, rect)).collect();
         for w in screen.windows(2) {
@@ -2410,13 +2438,128 @@ fn trajectory_hit(app: &LoomApp, view_proj: glam::Mat4, rect: egui::Rect, p: egu
     None
 }
 
-fn draw_safe_frames(painter: &egui::Painter, rect: egui::Rect) {
-    let aspect = 4.0 / 3.0;
+/// Link Display > Display Links: a link from each such visible object's
+/// pivot to its parent's pivot, in the object colour, with a diamond at the
+/// child end.
+fn draw_links(painter: &egui::Painter, app: &LoomApp, view_proj: glam::Mat4, rect: egui::Rect) {
+    let scene = &app.state.scene;
+    for n in scene.nodes().filter(|n| n.display.display_links && app.state.is_visible(n)) {
+        let Some(parent) = n.parent else { continue };
+        let child = scene.world_matrix(n.id).w_axis.truncate();
+        let to = scene.world_matrix(parent).w_axis.truncate();
+        let (Some(a), Some(b)) = (project_world_to_screen(child, view_proj, rect), project_world_to_screen(to, view_proj, rect)) else { continue };
+        let c = n.wire_color;
+        let color = if app.state.selection.contains(&n.id) { egui::Color32::WHITE } else { egui::Color32::from_rgb(c[0], c[1], c[2]) };
+        painter.line_segment([a, b], egui::Stroke::new(1.5_f32, color));
+        let d = 4.0;
+        painter.add(egui::Shape::convex_polygon(vec![a + egui::vec2(0.0, -d), a + egui::vec2(d, 0.0), a + egui::vec2(0.0, d), a + egui::vec2(-d, 0.0)], egui::Color32::TRANSPARENT, egui::Stroke::new(1.0_f32, color)));
+    }
+}
+
+/// Polygon, triangle, edge and vertex counts of what the viewports draw:
+/// every visible object, or only the selected ones.
+pub(crate) fn statistics_counts(app: &LoomApp, selection_only: bool) -> [usize; 4] {
+    let mut c = [0usize; 4];
+    for (i, (id, _)) in app.world_meshes().iter().enumerate() {
+        if selection_only && !app.state.selection.contains(id) {
+            continue;
+        }
+        let m = app.drawn_mesh(i);
+        for f in 0..m.face_count() {
+            if let Some(v) = m.face_vertex_ids(FaceId(f as u32)) {
+                c[0] += 1;
+                c[1] += v.len().saturating_sub(2);
+            }
+        }
+        c[2] += m.unique_edges().len();
+        c[3] += m.vertex_count();
+    }
+    c
+}
+
+/// Show Statistics (7): the counts the Statistics panel picks, for Total,
+/// Selection or both, and the frame rate, under the viewport labels.
+fn draw_statistics(painter: &egui::Painter, app: &LoomApp, rect: egui::Rect, dt: f32) {
+    use loom_commands::display::StatisticsScope;
+    let s = app.state.display.statistics;
+    let mut columns: Vec<(&str, [usize; 4])> = Vec::new();
+    if s.scope != StatisticsScope::Selection {
+        columns.push(("Total", statistics_counts(app, false)));
+    }
+    if s.scope != StatisticsScope::Total {
+        columns.push(("Selected", statistics_counts(app, true)));
+    }
+    let group = |n: usize| {
+        let d = n.to_string();
+        let mut out = String::new();
+        for (i, ch) in d.chars().enumerate() {
+            if i > 0 && (d.len() - i) % 3 == 0 {
+                out.push(',');
+            }
+            out.push(ch);
+        }
+        out
+    };
+    let mut rows: Vec<(String, Vec<String>)> = vec![(String::new(), columns.iter().map(|c| c.0.to_owned()).collect())];
+    for (on, label, k) in [(s.polygons, "Polys:", 0), (s.triangles, "Tris:", 1), (s.edges, "Edges:", 2), (s.vertices, "Verts:", 3)] {
+        if on {
+            rows.push((label.to_owned(), columns.iter().map(|c| group(c.1[k])).collect()));
+        }
+    }
+    if s.fps {
+        rows.push(("FPS:".to_owned(), vec![if dt > 0.0 { format!("{:.3}", 1.0 / dt) } else { "-".to_owned() }]));
+    }
+    let font = egui::FontId::monospace(12.0);
+    let color = egui::Color32::from_gray(230);
+    let top = rect.top() + 24.0;
+    for (r, (label, values)) in rows.iter().enumerate() {
+        let y = top + r as f32 * 15.0;
+        painter.text(egui::pos2(rect.left() + 10.0, y), egui::Align2::LEFT_TOP, label, font.clone(), color);
+        for (c, v) in values.iter().enumerate() {
+            painter.text(egui::pos2(rect.left() + 130.0 + c as f32 * 90.0, y), egui::Align2::RIGHT_TOP, v, font.clone(), color);
+        }
+    }
+}
+
+/// The live area: the render output's image aspect fitted into the viewport.
+pub(crate) fn safe_frame_live_area(app: &LoomApp, rect: egui::Rect) -> egui::Rect {
+    let aspect = app.state.scene.render.image_aspect().max(0.01);
     let (w, h) = if rect.width() / rect.height() > aspect { (rect.height() * aspect, rect.height()) } else { (rect.width(), rect.width() / aspect) };
-    let live = egui::Rect::from_center_size(rect.center(), egui::vec2(w, h));
-    painter.rect_stroke(live, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 230, 0)), egui::StrokeKind::Middle);
-    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.05, h * 0.05)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(90, 200, 255)), egui::StrokeKind::Middle);
-    painter.rect_stroke(live.shrink2(egui::vec2(w * 0.10, h * 0.10)), 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 150, 60)), egui::StrokeKind::Middle);
+    egui::Rect::from_center_size(rect.center(), egui::vec2(w, h))
+}
+
+/// Safe Frames: Live Area (render aspect), Action / Title / User Safe
+/// frames (percent smaller than the live area) and the 12-Field Grid.
+fn draw_safe_frames(painter: &egui::Painter, app: &LoomApp, rect: egui::Rect) {
+    let s = app.state.display.safe_frames;
+    let live = safe_frame_live_area(app, rect);
+    let (w, h) = (live.width(), live.height());
+    let frame = |pct: [f32; 2]| live.shrink2(egui::vec2(w * pct[0] / 200.0, h * pct[1] / 200.0));
+    let stroke = |c: [u8; 3]| egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(c[0], c[1], c[2]));
+    if s.live_area {
+        painter.rect_stroke(live, 0.0, stroke([255, 230, 0]), egui::StrokeKind::Middle);
+    }
+    if s.action_safe {
+        painter.rect_stroke(frame(s.action), 0.0, stroke([90, 200, 255]), egui::StrokeKind::Middle);
+    }
+    if s.title_safe {
+        painter.rect_stroke(frame(s.title), 0.0, stroke([255, 150, 60]), egui::StrokeKind::Middle);
+    }
+    if s.user_safe {
+        painter.rect_stroke(frame(s.user), 0.0, stroke([230, 90, 230]), egui::StrokeKind::Middle);
+    }
+    if s.grid {
+        let (cols, rows) = if s.grid_4x3 { (4, 3) } else { (12, 9) };
+        let st = egui::Stroke::new(1.0_f32, egui::Color32::from_gray(150));
+        for i in 1..cols {
+            let x = live.left() + w * i as f32 / cols as f32;
+            painter.line_segment([egui::pos2(x, live.top()), egui::pos2(x, live.bottom())], st);
+        }
+        for i in 1..rows {
+            let y = live.top() + h * i as f32 / rows as f32;
+            painter.line_segment([egui::pos2(live.left(), y), egui::pos2(live.right(), y)], st);
+        }
+    }
 }
 
 /// The soft selection gradient: red (1) → orange → yellow → blue (0).

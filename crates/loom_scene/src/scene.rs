@@ -822,6 +822,17 @@ impl Scene {
         Mat4::from_scale_rotation_translation(scale, rot, pos)
     }
 
+    /// Rendered visibility 0–1: the node's Visibility track (1 without one),
+    /// times the parent's while Inherit Visibility is on.
+    pub fn render_visibility(&self, id: NodeId) -> f32 {
+        let Some(node) = self.nodes.get(&id) else { return 1.0 };
+        let own = node.visibility.as_ref().map_or(1.0, |p| p.get().clamp(0.0, 1.0));
+        match node.parent {
+            Some(p) if node.render.inherit_visibility => own * self.render_visibility(p),
+            _ => own,
+        }
+    }
+
     /// World matrix of the node's mesh (pivot world × object offset).
     pub fn object_matrix(&self, id: NodeId) -> Mat4 {
         let Some(node) = self.nodes.get(&id) else {

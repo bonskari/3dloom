@@ -480,6 +480,20 @@ impl LoomApp {
         self.create_kind = kind;
     }
 
+    /// The create tool finished an object. Keep Creating off: the create mode
+    /// ends, the Select tool comes on and the Modify panel shows the new
+    /// object; on, the tool stays for the next one.
+    pub fn creation_finished(&mut self) {
+        if self.state.prefs.keep_creating || self.create_kind.is_none() {
+            return;
+        }
+        self.create_kind = None;
+        let _ = self.dispatch(Command::SelectObject);
+        if !self.state.selection.is_empty() {
+            self.panel_tab = Tab::Modify;
+        }
+    }
+
     /// Picking a transform tool (Select, Move, Rotate, Scale) ends the create
     /// mode, cancelling an object still being dragged out.
     fn end_create_mode_for(&mut self, command: &str) {
@@ -604,7 +618,10 @@ impl LoomApp {
         let mut bitmaps: Vec<(String, std::sync::Arc<loom_render::Bitmap>)> = Vec::new();
         let mut bitmap_index: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         let bones_only = self.state.display_bones_only;
-        let visible: Vec<NodeId> = self.state.scene.nodes().filter(|n| self.state.is_visible(n) && (!bones_only || n.object.is_bone() || n.object.is_helper())).map(|n| n.id).collect();
+        // Link Replaces Object: a linked object shows as its link only.
+        let link_only = |n: &loom_scene::Node| n.display.display_links && n.display.link_replaces_object && n.parent.is_some();
+        let visible: Vec<NodeId> = self.state.scene.nodes().filter(|n| self.state.is_visible(n) && !link_only(n) && (!bones_only || n.object.is_bone() || n.object.is_helper())).map(|n| n.id).collect();
+        let display_color = (self.state.display.wireframe_color, self.state.display.shaded_color);
         for id in visible {
             let n = self.state.scene.node(id).expect("collected above");
             let mut mesh = n.cage_mesh().into_owned();
@@ -645,9 +662,19 @@ impl LoomApp {
             // An assigned material colours the faces (its diffuse, opacity and
             // highlight); edges and wireframe keep the object colour.
             let material = self.state.scene.node_material(n.id).cloned();
-            let wire_color = material.as_ref().map(|_| color);
+            // Display Color: wireframes (and edges) and shaded faces each in
+            // the object colour or the material's diffuse colour.
+            use loom_commands::display::ColorSource;
+            let wire_color = match &material {
+                Some(m) if display_color.0 == ColorSource::Material && !gray => {
+                    let d = m.diffuse.get();
+                    Some([srgb_f(d.x), srgb_f(d.y), srgb_f(d.z)])
+                }
+                Some(_) => Some(color),
+                None => Some(color),
+            };
             let (color, opacity, specular) = match &material {
-                Some(m) if !gray => {
+                Some(m) if !gray && display_color.1 == ColorSource::Material => {
                     let d = m.diffuse.get();
                     let s = m.specular.get() * (m.specular_level.get() / 100.0);
                     // Glossiness 0–100 → a Blinn exponent from 2 to 2048.
@@ -686,6 +713,12 @@ impl LoomApp {
             // Skin > Display > Show Colored Faces (in Edit Envelopes): the faces shade by the current bone's weight.
             let mut vertex_colors = n.display.vertex_colors;
             let mut color = color;
+            // Vertex Channel Display shows the vertex colours themselves,
+            // lit only with Shaded on.
+            let unlit = vertex_colors && !n.display.vertex_colors_shaded;
+            if vertex_colors {
+                color = [1.0; 3];
+            }
             if let (Some(d), Some((skinned, weights))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
                 if skinned == id && d.vertex_count() == weights.len() {
                     for (v, w) in d.vertices_mut().iter_mut().zip(weights) {
@@ -696,7 +729,7 @@ impl LoomApp {
                     color = [1.0; 3];
                 }
             }
-            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors, texture, specular, wire_color });
+            styles.push(loom_render::MeshStyle { color, alpha: if see_through { 0.35 * visibility * opacity } else { visibility * opacity }, backface_cull: n.display.backface_cull, vertex_colors, texture, specular, wire_color, diagonals: !n.display.edges_only, unlit });
             display.push(shown.unwrap_or_else(|| mesh.clone()));
             meshes.push((n.id, mesh));
         }
@@ -1031,6 +1064,7 @@ impl LoomApp {
         if let Some(line) = self.line.take() {
             if line.is_closed(self) {
                 line.finish(self);
+                self.creation_finished();
             } else {
                 self.line = Some(line);
             }
