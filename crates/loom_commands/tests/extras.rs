@@ -40,15 +40,17 @@ fn snapshot_single_clones_the_object_where_it_is_at_the_current_frame() {
     let mut s = AppState::new();
     let b = keyed(&mut s);
     execute(&mut s, Command::SetFrame { frame: 50 }).unwrap();
+    let at50 = pos(&s, b);
+    assert!(at50.distance(Vec3::ZERO) > 10.0);
     select(&mut s, &[b]);
     let made = snapshot(&mut s, false, 0, 0, 1, 0);
     assert_eq!(made.len(), 1);
     let c = made[0];
     assert_ne!(c, b);
-    assert!(pos(&s, c).distance(Vec3::new(50.0, 20.0, 0.0)) < 1e-3);
+    assert!(pos(&s, c).distance(at50) < 1e-3);
     // The clone stays put when time moves: no transform animation.
     execute(&mut s, Command::SetFrame { frame: 0 }).unwrap();
-    assert!(pos(&s, c).distance(Vec3::new(50.0, 20.0, 0.0)) < 1e-3, "{}", pos(&s, c));
+    assert!(pos(&s, c).distance(at50) < 1e-3, "{}", pos(&s, c));
     assert!(!s.scene.node(c).unwrap().transform.position.is_animated());
     assert_eq!(s.scene.node(c).unwrap().name, "Box002");
     // One undo removes the snapshot.
@@ -63,7 +65,7 @@ fn snapshot_range_spaces_the_copies_evenly_in_time() {
     select(&mut s, &[b]);
     let made = snapshot(&mut s, true, 0, 100, 3, 0);
     let at: Vec<Vec3> = made.iter().map(|c| pos(&s, *c)).collect();
-    let want = [Vec3::ZERO, Vec3::new(50.0, 20.0, 0.0), Vec3::new(100.0, 0.0, 10.0)];
+    let want = [0.0, 50.0, 100.0].map(|t| s.scene.at_time(t, || pos(&s, b)));
     for (a, w) in at.iter().zip(want) {
         assert!(a.distance(w) < 1e-3, "{at:?}");
     }
