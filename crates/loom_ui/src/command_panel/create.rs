@@ -307,14 +307,14 @@ pub fn name_and_color(ui: &mut egui::Ui, app: &mut LoomApp) {
         };
         let Some(node) = app.state.scene.node(id) else { return };
         let mut name = node.name.clone();
-        let mut rgb = node.wire_color;
+        let rgb = node.wire_color;
         ui.horizontal(|ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(170.0));
             if r.lost_focus() && name != app.state.scene.node(id).map(|n| n.name.clone()).unwrap_or_default() {
                 let _ = app.dispatch(Command::Rename { id: id.0, name: name.clone() });
             }
-            if ui.color_edit_button_srgb(&mut rgb).changed() {
-                let _ = app.dispatch(Command::SetWireColor { id: id.0, rgb });
+            if crate::dialogs::object_color::swatch(ui, rgb).clicked() {
+                let _ = app.dispatch(Command::ObjectColorDialog);
             }
         });
     });
