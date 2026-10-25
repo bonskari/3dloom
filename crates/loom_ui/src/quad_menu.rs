@@ -48,7 +48,7 @@ pub enum QuadKind {
 
 impl QuadKind {
     /// The quad a right-click with these modifiers opens.
-    pub fn for_modifiers(m: egui::Modifiers) -> Self {
+    pub fn for_modifiers(m: loom_input::Modifiers) -> Self {
         if m.shift {
             QuadKind::Snaps
         } else if m.ctrl && m.alt {
@@ -606,8 +606,8 @@ mod tests {
 
     #[test]
     fn modifiers_pick_the_quad() {
-        use egui::Modifiers as M;
-        let cases = [(M::NONE, QuadKind::Default), (M::SHIFT, QuadKind::Snaps), (M::CTRL, QuadKind::Create), (M::ALT, QuadKind::Animation), (M::CTRL | M::ALT, QuadKind::Render)];
+        let m = |shift, ctrl, alt| loom_input::Modifiers { alt, ctrl, shift };
+        let cases = [(m(false, false, false), QuadKind::Default), (m(true, false, false), QuadKind::Snaps), (m(false, true, false), QuadKind::Create), (m(false, false, true), QuadKind::Animation), (m(false, true, true), QuadKind::Render)];
         for (m, kind) in cases {
             assert_eq!(QuadKind::for_modifiers(m), kind, "{m:?}");
         }
