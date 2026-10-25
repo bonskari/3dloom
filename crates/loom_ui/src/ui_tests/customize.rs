@@ -54,8 +54,10 @@ fn type_into(h: &mut Harness, at: egui::Pos2, text: &str) {
 #[test]
 fn the_toolbar_right_click_menu_docks_the_main_toolbar_left_and_floats_it() {
     let mut h = Harness::new();
-    right_click(&mut h, main_toolbar_blank(&h));
-    point_at(&mut h, menu_entry(&h, "Dock"));
+    let rc_at = main_toolbar_blank(&h);
+    right_click(&mut h, rc_at);
+    let rc_at = menu_entry(&h, "Dock");
+    point_at(&mut h, rc_at);
     h.click(menu_entry(&h, "    Left"));
     assert_eq!(h.app.state.ui_custom.dock("Main Toolbar"), loom_commands::ui_custom::Dock::Left);
     h.frames(2);
@@ -81,7 +83,8 @@ fn the_command_panel_docks_left_from_its_right_click_menu() {
     assert!(r.max.x > 1200.0, "at the right edge first");
     // Above the tabs: the panel's own empty area.
     right_click(&mut h, egui::pos2(r.max.x - 8.0, r.min.y + 2.0));
-    point_at(&mut h, menu_entry(&h, "Dock"));
+    let rc_at = menu_entry(&h, "Dock");
+    point_at(&mut h, rc_at);
     h.click(menu_entry(&h, "    Left"));
     h.frames(2);
     let r = panel_rect(&h, "command_panel");
@@ -92,7 +95,8 @@ fn the_command_panel_docks_left_from_its_right_click_menu() {
 #[test]
 fn the_right_click_menu_shows_the_axis_constraints_toolbar_whose_buttons_restrict_axes() {
     let mut h = Harness::new();
-    right_click(&mut h, main_toolbar_blank(&h));
+    let rc_at = main_toolbar_blank(&h);
+    right_click(&mut h, rc_at);
     h.click(menu_entry(&h, "    Axis Constraints"));
     h.frames(2);
     assert!(loom_commands::ui_custom::is_shown(&h.app.state, "Axis Constraints"));
@@ -101,7 +105,8 @@ fn the_right_click_menu_shows_the_axis_constraints_toolbar_whose_buttons_restric
     h.click(h.find(Role::Button, "Restrict to XY Plane").center());
     assert_eq!(h.app.state.axis_constraint, loom_commands::AxisConstraint::XY);
     // The Snaps toolbar's targets are toggles.
-    right_click(&mut h, main_toolbar_blank(&h));
+    let rc_at = main_toolbar_blank(&h);
+    right_click(&mut h, rc_at);
     h.click(menu_entry(&h, "    Snaps"));
     h.frames(2);
     let was = h.app.state.snaps.targets.get("Vertex").unwrap_or(false);
@@ -254,7 +259,7 @@ fn an_action_dropped_into_a_quadrant_shows_in_the_quad_menu_and_a_deleted_entry_
     let entry = h.find_all(Role::Button, "Select All").into_iter().find(|r| open.iter().any(|m| m.contains_rect(*r))).expect("Select All in the quad");
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     h.cmd(Command::SelectNone);
-    h.click(entry);
+    h.click(entry.center());
     assert_eq!(h.app.state.selection.len(), 1, "the added entry runs");
 }
 

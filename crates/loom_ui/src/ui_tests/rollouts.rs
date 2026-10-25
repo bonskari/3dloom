@@ -39,7 +39,8 @@ fn dragging_a_rollout_title_moves_the_rollout_and_the_order_stays() {
     h.frames(3);
     assert!(h.widgets_labelled("Length:").len() + h.widgets_labelled("Create").len() > 0, "its contents show under its title");
     // Reset Rollout Order from the right-click menu.
-    right_click(&mut h, h.widget("Object Type").center());
+    let rc_at = h.widget("Object Type").center();
+    right_click(&mut h, rc_at);
     h.click(menu_entry(&h, "Reset Rollout Order"));
     h.frames(3);
     assert!(!h.app.state.ui_custom.rollout_order.contains_key("Create"));
@@ -51,19 +52,23 @@ fn the_rollout_menu_closes_and_opens_every_rollout() {
     let mut h = Harness::new();
     box_panel(&mut h);
     assert!(!h.widgets_labelled("AutoGrid").is_empty(), "Object Type is open");
-    right_click(&mut h, h.widget("Name and Color").center());
+    let rc_at = h.widget("Name and Color").center();
+    right_click(&mut h, rc_at);
     h.click(menu_entry(&h, "Close All"));
     h.frames(3);
     assert!(h.widgets_labelled("AutoGrid").is_empty(), "Close All closed Object Type");
-    right_click(&mut h, h.widget("Parameters").center());
+    let rc_at = h.widget("Parameters").center();
+    right_click(&mut h, rc_at);
     h.click(menu_entry(&h, "Open All"));
     h.frames(3);
     assert!(!h.widgets_labelled("AutoGrid").is_empty(), "Open All opened it again");
     // The menu lists the rollouts: picking one opens it.
-    right_click(&mut h, h.widget("Object Type").center());
+    let rc_at = h.widget("Object Type").center();
+    right_click(&mut h, rc_at);
     h.click(menu_entry(&h, "Close All"));
     h.frames(2);
-    right_click(&mut h, h.widget("Object Type").center());
+    let rc_at = h.widget("Object Type").center();
+    right_click(&mut h, rc_at);
     h.click(menu_entry(&h, "Object Type"));
     h.frames(3);
     assert!(!h.widgets_labelled("AutoGrid").is_empty(), "the picked rollout opens");
