@@ -113,8 +113,9 @@ pub fn pov_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
     }
     v.push(sep());
     v.push(check("Show Safe Frames", vp.safe_frames, Command::ViewportSafeframesToggle));
-    v.push(item("Undo View Change", Command::UndoViewportOperation));
-    v.push(item("Redo View Change", Command::RedoViewportOperation));
+    // The change it would undo, as the reference names it ("Undo View Zoom").
+    v.push(item(&format!("Undo View {}", vp.view_undo.undo_label().unwrap_or("Change")), Command::UndoViewportOperation));
+    v.push(item(&format!("Redo View {}", vp.view_undo.redo_label().unwrap_or("Change")), Command::RedoViewportOperation));
     v
 }
 

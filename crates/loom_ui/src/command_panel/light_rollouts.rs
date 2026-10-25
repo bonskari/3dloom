@@ -90,6 +90,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
         skylight(ui, app, id, &l);
         return;
     }
+    if l.photometric.is_some() {
+        photometric(ui, app, id, &l);
+        return;
+    }
+    if l.sun.is_some() {
+        sunlight(ui, app, id, &l);
+    }
     general(ui, app, id, &l);
     intensity(ui, app, id, &l);
     if l.light_type.aims() {
@@ -169,14 +176,10 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
                     let arg = loom_commands::light::LightTypeArg::of(l.light_type).expect("aiming types");
                     let _ = app.dispatch(Command::LightType { id: id.0, light_type: arg, targeted: t });
                 }
-                if has_target {
-                    let (factor, suffix) = app.unit_display();
-                    ui.label(format!("{:.*}{}", app.state.prefs.spinner_precision, distance as f64 * factor, suffix));
-                } else {
-                    let mut v = distance;
-                    let r = ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.5)));
-                    spin(app, id, "Target Distance", &r, v as f64, distance as f64);
-                }
+                // A target light's spinner moves its target along the beam.
+                let mut v = distance;
+                let r = ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.5)));
+                spin(app, id, "Target Distance", &r, v as f64, distance as f64);
             });
         });
         ui.separator();
@@ -274,4 +277,248 @@ fn skylight(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
         });
         number(ui, app, id, "Ray Bias", "Ray Bias:", l.ray_bias.get(), false);
     });
+}
+
+/// Photometric light rollouts: Templates, General Parameters (with Light
+/// Distribution), Intensity/Color/Attenuation, Distribution (Spotlight),
+/// Shape/Area Shadows and Shadow Map Params.
+fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
+    use loom_scene::light::{DISTRIBUTIONS, DIST_SPOT, INTENSITY_UNITS, LAMP_NAMES, LIGHT_SHAPES, TEMPLATES};
+    let Some(ph) = l.photometric.clone() else { return };
+    rollout(ui, "Templates", true, |ui| {
+        egui::ComboBox::from_id_salt(("photometric_template", id.0)).selected_text("(Select a template)").show_ui(ui, |ui| {
+            for (i, t) in TEMPLATES.iter().enumerate() {
+                if ui.selectable_label(false, t.0).clicked() {
+                    let _ = app.dispatch(Command::PhotometricTemplate { id: id.0, index: i as u32 });
+                }
+            }
+        });
+    });
+    let has_target = l.target.is_some_and(|t| app.state.scene.node(t).is_some());
+    let distance = loom_scene::light::target_distance(&app.state.scene, id).unwrap_or(l.target_distance.get());
+    rollout(ui, "General Parameters", true, |ui| {
+        ui.label("Light Properties:");
+        ui.horizontal(|ui| {
+            check(ui, app, id, "On", "On", l.on.get());
+            let mut t = has_target;
+            if ui.checkbox(&mut t, "Targeted").changed() {
+                let arg = loom_commands::light::LightTypeArg::of(l.light_type).expect("photometric lights are omni or spot");
+                let _ = app.dispatch(Command::LightType { id: id.0, light_type: arg, targeted: t });
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Targ. Dist:");
+            let mut v = distance;
+            let r = ui.add(app.length_drag(ui, &mut v, app.spinner_speed(0.5)));
+            spin(app, id, "Target Distance", &r, v as f64, distance as f64);
+        });
+        ui.separator();
+        ui.label("Shadows:");
+        ui.horizontal(|ui| {
+            check(ui, app, id, "Shadows On", "On", l.shadows_on.get());
+            combo(ui, app, id, "Shadow Type", &SHADOW_TYPES, l.shadow_type.get());
+        });
+        if ui.button("Exclude...").clicked() {
+            app.state.dialog = Some(loom_commands::Dialog::LightExclude { light: id.0 });
+        }
+        ui.separator();
+        ui.label("Light Distribution (Type):");
+        combo(ui, app, id, "Distribution", &DISTRIBUTIONS, ph.distribution.get());
+        if ph.distribution.get() == loom_scene::light::DIST_WEB {
+            ui.label(egui::RichText::new("Drawn as Uniform Spherical (the renderers read no IES files).").small());
+        }
+    });
+    rollout(ui, "Intensity/Color/Attenuation", true, |ui| {
+        ui.label("Color:");
+        let kelvin = ph.use_kelvin.get();
+        ui.horizontal(|ui| {
+            if ui.radio(!kelvin, "").clicked() && kelvin {
+                set(app, id, "Use Kelvin", 0.0);
+            }
+            combo(ui, app, id, "Lamp", &LAMP_NAMES, ph.lamp.get());
+        });
+        ui.horizontal(|ui| {
+            if ui.radio(kelvin, "Kelvin:").clicked() && !kelvin {
+                set(app, id, "Use Kelvin", 1.0);
+            }
+            let k = ph.kelvin.get();
+            let mut v = k;
+            let r = ui.add_enabled(kelvin, crate::spinner::spin(ui, &mut v, 1000.0..=20000.0).speed(app.spinner_speed(10.0)).fixed_decimals(1));
+            spin(app, id, "Kelvin", &r, v as f64, k as f64);
+            let c = loom_scene::light::kelvin_to_srgb(ph.temperature());
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 16.0), egui::Sense::hover());
+            ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb((c.x * 255.0) as u8, (c.y * 255.0) as u8, (c.z * 255.0) as u8));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Filter Color:");
+            swatch(ui, app, id, "Filter Color", ph.filter_color.get());
+        });
+        ui.separator();
+        ui.label("Intensity:");
+        let unit = ph.intensity_unit.get();
+        ui.horizontal(|ui| {
+            for (i, u) in INTENSITY_UNITS.iter().enumerate() {
+                if ui.radio(unit == i as u32, *u).clicked() && unit != i as u32 {
+                    set(app, id, "Intensity Unit", i as f64);
+                }
+            }
+        });
+        let value = ph.from_candela(ph.candela.get(), unit, l.falloff.get());
+        ui.horizontal(|ui| {
+            let mut v = value;
+            let r = ui.add(crate::spinner::spin(ui, &mut v, 0.0..).speed(app.spinner_speed(1.0)).fixed_decimals(1));
+            spin(app, id, "Intensity", &r, v as f64, value as f64);
+            if unit == 2 {
+                ui.label("at");
+                let d = ph.lux_distance.get();
+                let mut dv = d;
+                let r = ui.add(app.length_drag(ui, &mut dv, app.spinner_speed(0.5)));
+                spin(app, id, "Lux Distance", &r, dv as f64, d as f64);
+            }
+        });
+        ui.separator();
+        ui.label("Dimming:");
+        let resulting = ph.from_candela(ph.candela.get() * ph.dim(), unit, l.falloff.get());
+        ui.label(format!("Resulting Intensity: {resulting:.1} {}", INTENSITY_UNITS[unit.min(2) as usize]));
+        ui.horizontal(|ui| {
+            check(ui, app, id, "Dimming On", "", ph.dimming_on.get());
+            number(ui, app, id, "Dimming", "%", ph.dimming.get(), false);
+        });
+        check(ui, app, id, "Incandescent Shift", "Incandescent lamp color shift when dimming", ph.incandescent_shift.get());
+        ui.separator();
+        ui.label("Far Attenuation:");
+        ui.horizontal(|ui| {
+            check(ui, app, id, "Far Use", "Use", l.far_use.get());
+            check(ui, app, id, "Far Show", "Show", l.far_show.get());
+        });
+        number(ui, app, id, "Far Start", "Start:", l.far_start.get(), true);
+        number(ui, app, id, "Far End", "End:", l.far_end.get(), true);
+    });
+    if ph.distribution.get() == DIST_SPOT {
+        rollout(ui, "Distribution (Spotlight)", true, |ui| {
+            number(ui, app, id, "Hotspot", "Hotspot/Beam:", l.hotspot.get(), false);
+            number(ui, app, id, "Falloff", "Falloff/Field:", l.falloff.get(), false);
+        });
+    }
+    rollout(ui, "Shape/Area Shadows", false, |ui| {
+        ui.label("Emit light from (Shape):");
+        combo(ui, app, id, "Light Shape", &LIGHT_SHAPES, ph.shape.get());
+        match ph.shape.get() {
+            1 => number(ui, app, id, "Shape Length", "Length:", ph.shape_length.get(), true),
+            2 => {
+                number(ui, app, id, "Shape Length", "Length:", ph.shape_length.get(), true);
+                number(ui, app, id, "Shape Width", "Width:", ph.shape_width.get(), true);
+            }
+            3..=5 => number(ui, app, id, "Shape Radius", "Radius:", ph.shape_radius.get(), true),
+            _ => {}
+        }
+        check(ui, app, id, "Render Shape", "Light Shape Visible in Rendering", ph.render_shape.get());
+    });
+    rollout(ui, "Shadow Map Params", false, |ui| {
+        number(ui, app, id, "Map Bias", "Bias:", l.map_bias.get(), false);
+        int(ui, app, id, "Map Size", "Size:", l.map_size.get());
+    });
+}
+
+/// A sun's Control Parameters: location (Get Location), time and date,
+/// time zone and daylight saving, orbital scale and North Direction.
+fn sunlight(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
+    let Some(s) = l.sun.clone() else { return };
+    let north = app
+        .state
+        .scene
+        .node(id)
+        .and_then(|n| n.parent)
+        .and_then(|p| app.state.scene.node(p))
+        .map(|c| c.transform.rotation.get().z)
+        .unwrap_or(0.0);
+    #[derive(Default)]
+    struct Edit {
+        latitude: Option<f32>,
+        longitude: Option<f32>,
+        time_zone: Option<f32>,
+        year: Option<i32>,
+        month: Option<u32>,
+        day: Option<u32>,
+        hour: Option<u32>,
+        minute: Option<u32>,
+        dst: Option<bool>,
+        north: Option<f32>,
+        orbital_scale: Option<f32>,
+    }
+    let mut e = Edit::default();
+    let float = |ui: &mut egui::Ui, label: &str, v: f32, range: std::ops::RangeInclusive<f32>, out: &mut Option<f32>| {
+        ui.horizontal(|ui| {
+            ui.label(label);
+            let mut x = v;
+            let r = ui.add(crate::spinner::spin(ui, &mut x, range).speed(0.05).fixed_decimals(2));
+            if (r.lost_focus() || r.drag_stopped() || r.changed() && !r.dragged()) && x != v {
+                *out = Some(x);
+            }
+        });
+    };
+    let whole = |ui: &mut egui::Ui, label: &str, v: u32, range: std::ops::RangeInclusive<u32>, out: &mut Option<u32>| {
+        ui.label(label);
+        let mut x = v;
+        let r = ui.add(crate::spinner::spin(ui, &mut x, range).speed(0.1));
+        if (r.lost_focus() || r.drag_stopped() || r.changed() && !r.dragged()) && x != v {
+            *out = Some(x);
+        }
+    };
+    rollout(ui, "Control Parameters", true, |ui| {
+        let (az, alt) = s.solar_position();
+        ui.label(format!("Azimuth: {az:.1}   Altitude: {alt:.1}"));
+        ui.separator();
+        ui.label("Time");
+        ui.horizontal(|ui| {
+            whole(ui, "Hours:", s.hour, 0..=23, &mut e.hour);
+            whole(ui, "Mins.:", s.minute, 0..=59, &mut e.minute);
+        });
+        ui.horizontal(|ui| {
+            whole(ui, "Month:", s.month, 1..=12, &mut e.month);
+            whole(ui, "Day:", s.day, 1..=31, &mut e.day);
+            ui.label("Year:");
+            let mut y = s.year;
+            let r = ui.add(crate::spinner::spin(ui, &mut y, 1900..=2100).speed(0.1));
+            if (r.lost_focus() || r.drag_stopped() || r.changed() && !r.dragged()) && y != s.year {
+                e.year = Some(y);
+            }
+        });
+        float(ui, "Time Zone:", s.time_zone, -12.0..=14.0, &mut e.time_zone);
+        let mut dst = s.dst;
+        if ui.checkbox(&mut dst, "Daylight Saving Time").changed() {
+            e.dst = Some(dst);
+        }
+        ui.separator();
+        ui.label("Location");
+        ui.horizontal(|ui| {
+            if ui.button("Get Location...").clicked() {
+                app.state.dialog = Some(loom_commands::Dialog::GeographicLocation { sun: id.0 });
+            }
+            ui.label(if s.location.is_empty() { "(custom)" } else { s.location.as_str() });
+        });
+        float(ui, "Latitude:", s.latitude, -90.0..=90.0, &mut e.latitude);
+        float(ui, "Longitude:", s.longitude, -180.0..=180.0, &mut e.longitude);
+        ui.separator();
+        ui.label("Site");
+        float(ui, "Orbital Scale:", s.orbital_scale, 0.001..=1e6, &mut e.orbital_scale);
+        float(ui, "North Direction:", north, -360.0..=360.0, &mut e.north);
+    });
+    if e.latitude.is_some() || e.longitude.is_some() || e.time_zone.is_some() || e.year.is_some() || e.month.is_some() || e.day.is_some() || e.hour.is_some() || e.minute.is_some() || e.dst.is_some() || e.north.is_some() || e.orbital_scale.is_some() {
+        let _ = app.dispatch(Command::SunlightParameters {
+            id: id.0,
+            location: None,
+            latitude: e.latitude,
+            longitude: e.longitude,
+            time_zone: e.time_zone,
+            year: e.year,
+            month: e.month,
+            day: e.day,
+            hour: e.hour,
+            minute: e.minute,
+            dst: e.dst,
+            north: e.north,
+            orbital_scale: e.orbital_scale,
+        });
+    }
 }

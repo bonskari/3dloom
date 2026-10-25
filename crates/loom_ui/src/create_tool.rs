@@ -93,7 +93,7 @@ impl CreateSession {
             CreateKind::Primitive(k) => (k, None),
             CreateKind::PatchGrid { .. } => (PrimitiveKind::Plane, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
-            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) => return None,
+            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) | CreateKind::SunSystem { .. } => return None,
         };
         let label = match patch {
             Some(q) => format!("Create {}", if q { "Quad Patch" } else { "Tri Patch" }),
@@ -596,6 +596,41 @@ impl HelperSession {
             crate::HelperKind::Compass => self.set(app, "Radius", d.length()),
             _ => {}
         }
+    }
+
+    pub fn finish(self, app: &mut LoomApp) {
+        app.state.undo.end();
+    }
+}
+
+/// Systems > Sunlight / Daylight: the press puts the compass on the
+/// construction plane, the drag sets its radius (the sun's orbital scale
+/// follows at four radii), the release finishes. One undo entry.
+#[derive(Debug, Clone)]
+pub struct SunSession {
+    pub compass: NodeId,
+    pub sun: NodeId,
+    pub anchor: Vec3,
+    pub normal: Vec3,
+}
+
+impl SunSession {
+    pub fn begin(app: &mut LoomApp, daylight: bool, anchor: Vec3, normal: Vec3) -> Option<Self> {
+        app.state.undo.begin(if daylight { "Create Daylight" } else { "Create Sunlight" });
+        let r = app.dispatch(Command::CreateSunlight { daylight, position: anchor.to_array(), radius: 1.0, orbital_scale: None });
+        let ids = r.ok().and_then(|v| Some((NodeId(v["compass"].as_u64()?), NodeId(v["sun"].as_u64()?))));
+        let Some((compass, sun)) = ids else {
+            app.state.undo.end();
+            return None;
+        };
+        Some(Self { compass, sun, anchor, normal })
+    }
+
+    /// `at`: the pointer on the construction plane.
+    pub fn on_drag(&self, app: &mut LoomApp, at: Vec3) {
+        let r = (at - self.anchor).length().max(1e-3);
+        let _ = app.dispatch(Command::SetParameter { id: self.compass.0, name: "Radius".into(), value: r as f64 });
+        let _ = app.dispatch(Command::SunlightParameters { id: self.sun.0, location: None, latitude: None, longitude: None, time_zone: None, year: None, month: None, day: None, hour: None, minute: None, dst: None, north: None, orbital_scale: Some(r * 4.0) });
     }
 
     pub fn finish(self, app: &mut LoomApp) {

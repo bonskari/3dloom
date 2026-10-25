@@ -358,7 +358,58 @@ impl Default for ObjImportOptions {
     }
 }
 
-/// All four dialogs plus the user's saved presets (dialog → name → options).
+/// The Import STL File dialog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StlImportOptions {
+    pub preset: String,
+    /// Weld vertices closer than `weld_threshold` (off: every face keeps its own).
+    pub weld: bool,
+    pub weld_threshold: f32,
+    pub auto_smooth: bool,
+    pub smooth_angle: f32,
+    pub remove_double_faces: bool,
+    /// Flip faces so neighbours agree (the reference's Unify Normals).
+    pub unify_normals: bool,
+}
+
+impl Default for StlImportOptions {
+    fn default() -> Self {
+        Self { preset: "Default".into(), weld: true, weld_threshold: 0.01, auto_smooth: true, smooth_angle: 30.0, remove_double_faces: true, unify_normals: true }
+    }
+}
+
+/// The Export STL File dialog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StlExportOptions {
+    pub preset: String,
+    /// Binary (true) or ASCII.
+    pub binary: bool,
+}
+
+impl Default for StlExportOptions {
+    fn default() -> Self {
+        Self { preset: "Default".into(), binary: true }
+    }
+}
+
+/// The 3DS Import dialog.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TdsImportOptions {
+    pub preset: String,
+    /// Completely replace the current scene (off: merge into it).
+    pub replace_scene: bool,
+}
+
+impl Default for TdsImportOptions {
+    fn default() -> Self {
+        Self { preset: "Default".into(), replace_scene: false }
+    }
+}
+
+/// All the dialogs plus the user's saved presets (dialog → name → options).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExchangeOptions {
@@ -366,11 +417,14 @@ pub struct ExchangeOptions {
     pub fbx_import: FbxImportOptions,
     pub obj_export: ObjExportOptions,
     pub obj_import: ObjImportOptions,
+    pub stl_import: StlImportOptions,
+    pub stl_export: StlExportOptions,
+    pub tds_import: TdsImportOptions,
     pub user_presets: BTreeMap<String, BTreeMap<String, Value>>,
 }
 
 /// The dialog keys `SetExchangeOption` takes.
-pub const DIALOGS: [&str; 4] = ["fbx_export", "fbx_import", "obj_export", "obj_import"];
+pub const DIALOGS: [&str; 7] = ["fbx_export", "fbx_import", "obj_export", "obj_import", "stl_import", "stl_export", "3ds_import"];
 
 fn dialog_key(dialog: &str) -> Result<&'static str, String> {
     let d = dialog.trim().to_ascii_lowercase().replace([' ', '-'], "_");
@@ -391,6 +445,9 @@ pub fn builtin_presets(dialog: &str) -> Vec<(String, Value)> {
         }
         "obj_export" => vec![("Default".into(), to(&ObjExportOptions::default()))],
         "obj_import" => vec![("Default".into(), to(&ObjImportOptions::default()))],
+        "stl_import" => vec![("Default".into(), to(&StlImportOptions::default()))],
+        "stl_export" => vec![("Default".into(), to(&StlExportOptions::default()))],
+        "3ds_import" => vec![("Default".into(), to(&TdsImportOptions::default()))],
         _ => Vec::new(),
     }
 }
@@ -401,6 +458,9 @@ impl ExchangeOptions {
             "fbx_export" => serde_json::to_value(&self.fbx_export),
             "fbx_import" => serde_json::to_value(&self.fbx_import),
             "obj_export" => serde_json::to_value(&self.obj_export),
+            "stl_import" => serde_json::to_value(&self.stl_import),
+            "stl_export" => serde_json::to_value(&self.stl_export),
+            "3ds_import" => serde_json::to_value(&self.tds_import),
             _ => serde_json::to_value(&self.obj_import),
         }
         .expect("plain data")
@@ -421,6 +481,9 @@ impl ExchangeOptions {
                 self.fbx_import.take = take;
             }
             "obj_export" => self.obj_export = serde_json::from_value(v).map_err(bad)?,
+            "stl_import" => self.stl_import = serde_json::from_value(v).map_err(bad)?,
+            "stl_export" => self.stl_export = serde_json::from_value(v).map_err(bad)?,
+            "3ds_import" => self.tds_import = serde_json::from_value(v).map_err(bad)?,
             _ => {
                 let objects = self.obj_import.objects.take();
                 self.obj_import = serde_json::from_value(v).map_err(bad)?;

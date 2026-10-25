@@ -315,6 +315,22 @@ pub enum Dialog {
     RenderSetup,
     /// Tools > Light Lister.
     LightLister,
+    /// Views > Add Default Lights to Scene.
+    AddDefaultLights,
+    /// Sunlight Control Parameters > Get Location: the city list.
+    GeographicLocation { sun: u64 },
+    /// File > Replace: the scene file to take objects from.
+    ReplaceFile,
+    /// File > Replace: the objects of `AppState::replace_source` to replace.
+    ReplaceObjects,
+    /// File > Set Project Folder: the folder chooser.
+    ProjectFolder,
+    /// File > Asset Tracking.
+    AssetTracking,
+    /// File > Open found files the scene names missing.
+    MissingFiles,
+    /// Edit > Select By > Layer.
+    SelectByLayer,
     /// General Parameters > Exclude...: the Exclude/Include dialog of a light.
     LightExclude { light: u64 },
     /// Rendered Frame Window > Save Image.
@@ -404,12 +420,20 @@ pub enum Dialog {
     MergeFile,
     /// File > Merge: the file's object list (`AppState::merge_pending`).
     MergeObjects,
+    /// File > XRef Objects: pick the file; then the object list.
+    XrefObjectsFile,
+    /// File > XRef Scene: pick the file.
+    XrefSceneFile,
     /// FBX Importer / Exporter and OBJ Importer / Exporter options for the
     /// file in `AppState::exchange_pending` (after Import / Export picks it).
     FbxImportOptions,
     FbxExportOptions,
     ObjImportOptions,
     ObjExportOptions,
+    /// Import / Export STL File and 3DS Import options (same pending file).
+    StlImportOptions,
+    StlExportOptions,
+    TdsImportOptions,
     /// Animation > Bone Tools...
     BoneTools,
     /// Skin > Weight Table.

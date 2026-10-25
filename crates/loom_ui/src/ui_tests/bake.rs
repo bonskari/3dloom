@@ -78,18 +78,14 @@ fn a_lighting_map_renders_on_the_gpu_from_the_dialog() {
         eprintln!("a_lighting_map_renders_on_the_gpu_from_the_dialog: no GPU adapter, skipped");
         return;
     };
+    // Taller than the default: the Add... list ends below 800 under a two-row Main Toolbar.
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0));
     let p = plane(&mut h);
     h.cmd(Command::RenderToTexture);
     let dir = output_dir(&mut h, "lighting");
-    eprintln!("DEBUG win {:?} add {:?}", window(&h), button(&h, "Add..."));
     h.click(button(&h, "Add..."));
-    eprintln!("DEBUG buttons {:?}", h.widgets.iter().filter(|w| w.0 == Role::Button).map(|w| (w.1.clone(), w.2.min)).collect::<Vec<_>>());
-    eprintln!("DEBUG last_error {:?} dialog {:?}", h.app.last_error, h.app.state.dialog);
     h.click(h.find(Role::Button, "LightingMap").center());
-    eprintln!("DEBUG3 elements {:?} render at {:?} win {:?}", h.app.state.scene.render.bake.elements.len(), button(&h, "Render"), window(&h));
     h.click(button(&h, "Render"));
-    eprintln!("DEBUG4 pending {:?} err {:?}", h.app.state.pending_bake.is_some(), h.app.last_error);
     for _ in 0..10 {
         if h.app.state.pending_bake.is_none() {
             break;
@@ -98,7 +94,6 @@ fn a_lighting_map_renders_on_the_gpu_from_the_dialog() {
     }
     assert!(h.app.state.pending_bake.is_none(), "the renderer took the request");
     let name = h.app.state.scene.node(p).unwrap().name.clone();
-    eprintln!("DEBUG2 dir {:?} files {:?} err {:?} prompt {:?}", dir, std::fs::read_dir(&dir).map(|d| d.map(|e| e.unwrap().file_name()).collect::<Vec<_>>()), h.app.last_error, h.app.state.status_prompt);
     let img = image::open(dir.join(format!("{name}LightingMap.tga"))).expect("the lighting map").to_rgba8();
     assert_eq!(img.dimensions(), (256, 256));
     // The default key light lights the plane: every texel on it is lit.
