@@ -280,7 +280,7 @@ pub fn axis_segment(l: &GizmoLayout, p: &Projection, a: Axis, from: f32, to: f32
 /// `viewport_height` is the viewport's height in pixels: the gizmo is sized as a
 /// percent of the viewport, so it grows with a maximized view.
 pub fn layout_for(app: &LoomApp, viewport: usize, viewport_height: f32) -> GizmoLayout {
-    let frame = loom_commands::frame_for(&app.state, viewport, app.state.selection.iter().next().copied().filter(|_| app.state.selection.len() == 1 || app.state.coord_system == CoordSystem::Local));
+    let frame = loom_commands::frame_for(&app.state, viewport, app.state.selection.iter().next().copied().filter(|_| app.state.selection.len() == 1 || matches!(app.state.coord_system, CoordSystem::Local | CoordSystem::Gimbal)));
     let g = app.state.prefs.gizmos;
     let mut layout = GizmoLayout {
         origin: frame.origin,
@@ -309,8 +309,8 @@ pub fn hit(app: &LoomApp, l: &GizmoLayout, p: &Projection, pointer: egui::Pos2) 
     match app.state.active_tool {
         Tool::Move => move_gizmo::hit(l, p, pointer),
         Tool::Rotate => rotate_gizmo::hit(l, p, pointer),
-        // Uniform Scale: any part of the gizmo scales all three axes alike.
-        Tool::Scale if app.state.scale_kind == loom_commands::ScaleKind::Uniform => scale_gizmo::hit(l, p, pointer).map(|_| Handle::Uniform),
+        // The gizmo's centre scales uniformly and its axis / plane handles
+        // non-uniformly whichever flyout button is on (Squash changes the math).
         Tool::Scale => scale_gizmo::hit(l, p, pointer),
         Tool::Select => None,
     }

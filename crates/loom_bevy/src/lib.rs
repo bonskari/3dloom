@@ -4,6 +4,7 @@
 //! viewport background, and renders the active view to a PNG for Render.
 
 pub mod convert;
+pub mod lights;
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,7 +15,7 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::entity::Entity;
 use bevy::image::{Image, ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Vec3;
-use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, DirectionalLightShadowMap, MeshMaterial3d, StandardMaterial};
+use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, DirectionalLightShadowMap, MeshMaterial3d, PointLightShadowMap, StandardMaterial};
 use bevy::render::camera::{Camera, ClearColorConfig, RenderTarget};
 use bevy::render::mesh::{Mesh, Mesh3d};
 use bevy::render::render_asset::RenderAssets;
@@ -41,6 +42,12 @@ const VIEWPORT_LAYER: usize = 0;
 const RENDER_LAYER: usize = 1;
 const SELECTED_LAYER: usize = 2;
 const HIDDEN_LAYER: usize = 3;
+/// Scene lights are on this layer, which every camera sees and no object is
+/// on, plus `LIGHT_LAYER + 1 + i` for light i: an object is on a light's own
+/// layer unless the light excludes it from shadow casting.
+const LIGHT_LAYER: usize = 4;
+/// Brightness of the ambient light that the Render Setup colour tints.
+const AMBIENT_BRIGHTNESS: f32 = 250.0;
 
 /// Render Setup values a render uses (the Bevy renderer panel and the
 /// Common options that reach the renderer).
@@ -126,7 +133,11 @@ pub struct BevyRenderer {
     objects: HashMap<u64, Object>,
     views: HashMap<u32, View>,
     textures: HashMap<String, Option<Handle<Image>>>,
-    light: Entity,
+    /// The default key light, while the scene has no light that is on.
+    light: Option<Entity>,
+    /// The scene's lights (from `sync_lights`) and their Bevy entities by node id.
+    samples: Vec<loom_scene::light::LightSample>,
+    scene_lights: HashMap<u64, lights::Synced>,
     /// Scene bounds (centre, radius) for the shadow range.
     bounds: Option<(Vec3, f32)>,
     /// Updates still wanted after a change (pipelines compiling, first frames).
@@ -169,31 +180,138 @@ impl BevyRenderer {
         }
         app.finish();
         app.cleanup();
-        app.insert_resource(AmbientLight { color: Color::WHITE, brightness: 250.0, affects_lightmapped_meshes: true });
+        app.insert_resource(AmbientLight { color: Color::WHITE, brightness: AMBIENT_BRIGHTNESS, affects_lightmapped_meshes: true });
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
-        let light = app
-            .world_mut()
+        let light = Some(Self::spawn_key_light(&mut app));
+        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), light, samples: Vec::new(), scene_lights: HashMap::new(), bounds: None, settle: 3, hidden: HashMap::new(), render: None }
+    }
+
+    /// Default lighting: a key light with shadows.
+    fn spawn_key_light(app: &mut App) -> Entity {
+        app.world_mut()
             .spawn((
                 DirectionalLight { illuminance: 3000.0, shadows_enabled: true, ..Default::default() },
                 Transform::from_translation(KEY_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
                 // The key light lights (and shadows) every layer.
                 RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER]),
             ))
-            .id();
-        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), light, bounds: None, settle: 3, hidden: HashMap::new(), render: None }
+            .id()
+    }
+
+    /// Brings the Bevy lights in line with the scene's lights (call after
+    /// `sync`, which measures the scene). With none, the default key light
+    /// lights the scene; otherwise the scene lights replace it. A render's
+    /// Render Setup options (shadows, shadow map size, ambient) apply on top.
+    pub fn sync_lights(&mut self, samples: &[loom_scene::light::LightSample]) {
+        let relayer = samples.iter().map(|s| (s.id, &s.exclusion)).ne(self.samples.iter().map(|s| (s.id, &s.exclusion)));
+        self.samples = samples.to_vec();
+        self.apply_lights();
+        if relayer {
+            self.relayer();
+        }
+        self.settle = self.settle.max(3);
+    }
+
+    /// Builds the Bevy light entities and the ambient light from the scene
+    /// lights and the render in progress.
+    fn apply_lights(&mut self) {
+        let (centre, radius) = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
+        let options = self.render.as_ref().map(|r| r.options.clone());
+        let shadows = options.as_ref().is_none_or(|o| o.shadows);
+        let tint = options.as_ref().map_or([1.0; 3], |o| o.ambient);
+        if self.samples.is_empty() {
+            if self.light.is_none() {
+                self.light = Some(Self::spawn_key_light(&mut self.app));
+            }
+        } else if let Some(e) = self.light.take() {
+            self.app.world_mut().despawn(e);
+        }
+        if let Some(e) = self.light {
+            if let Some(mut l) = self.app.world_mut().get_mut::<DirectionalLight>(e) {
+                l.shadows_enabled = shadows;
+            }
+        }
+        // The Render Setup ambient colour (sRGB tint), plus the skylights and Ambient Only lights.
+        let t = Color::srgb(tint[0], tint[1], tint[2]).to_linear();
+        let (sky_color, sky) = lights::ambient(&self.samples);
+        let sky_color = sky_color.to_linear();
+        let sum = Vec3::new(t.red, t.green, t.blue) * AMBIENT_BRIGHTNESS + Vec3::new(sky_color.red, sky_color.green, sky_color.blue) * sky;
+        let b = sum.max_element();
+        let color = if b > 0.0 { Color::linear_rgb(sum.x / b, sum.y / b, sum.z / b) } else { Color::BLACK };
+        self.app.insert_resource(AmbientLight { color, brightness: b.max(0.0), affects_lightmapped_meshes: true });
+        let mut seen = HashSet::new();
+        let mut map_size = 0usize;
+        let samples = self.samples.clone();
+        for (i, s) in samples.iter().enumerate() {
+            let Some(kind) = lights::kind(s) else { continue };
+            seen.insert(s.id.0);
+            let centre_distance = (Vec3::from(s.position.to_array()) - centre).length();
+            let world = self.app.world_mut();
+            let entity = match self.scene_lights.get(&s.id.0) {
+                Some(l) if l.kind == kind => l.entity,
+                other => {
+                    if let Some(l) = other {
+                        world.despawn(l.entity);
+                    }
+                    let e = world.spawn(Transform::IDENTITY).id();
+                    self.scene_lights.insert(s.id.0, lights::Synced { entity: e, kind });
+                    e
+                }
+            };
+            let mut s = s.clone();
+            s.shadows &= shadows;
+            let mut e = world.entity_mut(entity);
+            e.insert((lights::transform(&s), RenderLayers::from_layers(&[LIGHT_LAYER, LIGHT_LAYER + 1 + i])));
+            match kind {
+                lights::Kind::Point => {
+                    e.insert(lights::point(&s, centre_distance, radius));
+                }
+                lights::Kind::Spot => {
+                    e.insert(lights::spot(&s, centre_distance, radius));
+                }
+                lights::Kind::Directional => {
+                    e.insert(lights::directional(&s));
+                }
+            }
+            if s.shadows && kind != lights::Kind::Directional {
+                map_size = map_size.max(s.map_size as usize);
+            }
+        }
+        let gone: Vec<u64> = self.scene_lights.keys().filter(|id| !seen.contains(id)).copied().collect();
+        for id in gone {
+            if let Some(l) = self.scene_lights.remove(&id) {
+                self.app.world_mut().despawn(l.entity);
+            }
+        }
+        if map_size > 0 {
+            self.app.insert_resource(PointLightShadowMap { size: map_size.clamp(128, 8192) });
+        }
+    }
+
+    /// The Bevy light entity of scene light `id` (tests and debugging).
+    pub fn light_entity(&self, id: u64) -> Option<Entity> {
+        self.scene_lights.get(&id).map(|l| l.entity)
+    }
+
+    /// Whether the default key light is lighting the scene.
+    pub fn default_lighting(&self) -> bool {
+        self.light.is_some()
     }
 
     /// The layers an object is on: viewports, renders, and the selection's
     /// layer while a Selected render runs.
     fn object_layers(&self, id: u64, renderable: bool, hidden: bool) -> RenderLayers {
-        if hidden {
-            return RenderLayers::layer(HIDDEN_LAYER);
-        }
-        let mut l = vec![VIEWPORT_LAYER];
-        if renderable {
+        let mut l = if hidden { vec![HIDDEN_LAYER] } else { vec![VIEWPORT_LAYER] };
+        if renderable && !hidden {
             l.push(RENDER_LAYER);
             if self.render.as_ref().and_then(|r| r.options.selected_only.as_ref()).is_some_and(|s| s.contains(&id)) {
                 l.push(SELECTED_LAYER);
+            }
+        }
+        // The layers of the scene lights whose shadows the object casts.
+        for (i, s) in self.samples.iter().enumerate() {
+            if !s.exclusion.excludes(loom_scene::NodeId(id), false) {
+                l.push(LIGHT_LAYER + 1 + i);
             }
         }
         RenderLayers::from_layers(&l)
@@ -386,7 +504,8 @@ impl BevyRenderer {
             cam.clear_color = ClearColorConfig::Custom(clear);
             cam.is_active = true;
         }
-        e.insert((projection, Transform::from_matrix(view.inverse()), if msaa { Msaa::Sample4 } else { Msaa::Off }, layers));
+        // Every view sees the scene lights' layer.
+        e.insert((projection, Transform::from_matrix(view.inverse()), if msaa { Msaa::Sample4 } else { Msaa::Off }, layers.with(LIGHT_LAYER)));
     }
 
     /// Starts a render with `options`: shadows, shadow map size, ambient
@@ -396,10 +515,6 @@ impl BevyRenderer {
         self.end_render();
         let world = self.app.world_mut();
         world.insert_resource(DirectionalLightShadowMap { size: options.shadow_map_size.clamp(512, 8192) as usize });
-        world.insert_resource(AmbientLight { color: Color::srgb(options.ambient[0], options.ambient[1], options.ambient[2]), brightness: 250.0, affects_lightmapped_meshes: true });
-        if let Some(mut l) = world.get_mut::<DirectionalLight>(self.light) {
-            l.shadows_enabled = options.shadows;
-        }
         let mut two_sided = Vec::new();
         if options.force_two_sided {
             let handles: Vec<Handle<StandardMaterial>> = self.objects.values().chain(self.hidden.values()).map(|o| o.material_handle.clone()).collect();
@@ -413,13 +528,16 @@ impl BevyRenderer {
             }
         }
         self.render = Some(ActiveRender { options, two_sided });
+        self.apply_lights();
         self.relayer();
         self.settle = self.settle.max(3);
     }
 
-    /// Puts every object on its layers again (the Selected layer changed).
+    /// Puts every object on its layers again (the Selected layer or a light's exclusions changed).
     fn relayer(&mut self) {
-        let list: Vec<(Entity, RenderLayers)> = self.objects.iter().map(|(id, o)| (o.entity, self.object_layers(*id, o.renderable, false))).collect();
+        let shown = self.objects.iter().map(|(id, o)| (o.entity, self.object_layers(*id, o.renderable, false)));
+        let hidden = self.hidden.iter().map(|(id, o)| (o.entity, self.object_layers(*id, o.renderable, true)));
+        let list: Vec<(Entity, RenderLayers)> = shown.chain(hidden).collect();
         for (e, l) in list {
             self.app.world_mut().entity_mut(e).insert(l);
         }
@@ -453,12 +571,9 @@ impl BevyRenderer {
             self.app.world_mut().despawn(v.camera);
         }
         let Some(r) = self.render.take() else { return };
+        self.apply_lights();
         let world = self.app.world_mut();
         world.insert_resource(DirectionalLightShadowMap { size: 2048 });
-        world.insert_resource(AmbientLight { color: Color::WHITE, brightness: 250.0, affects_lightmapped_meshes: true });
-        if let Some(mut l) = world.get_mut::<DirectionalLight>(self.light) {
-            l.shadows_enabled = true;
-        }
         let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
         for (h, double_sided, cull) in r.two_sided {
             if let Some(m) = mats.get_mut(&h) {
@@ -485,7 +600,11 @@ impl BevyRenderer {
         }
         let Some((min, max)) = range else { return };
         let config = CascadeShadowConfigBuilder { num_cascades: 1, minimum_distance: min, maximum_distance: max.max(min + 1e-3), first_cascade_far_bound: max.max(min + 1e-3), overlap_proportion: 0.2 }.build();
-        self.app.world_mut().entity_mut(self.light).insert(config);
+        let directional = self.scene_lights.values().filter(|l| l.kind == lights::Kind::Directional).map(|l| l.entity);
+        let entities: Vec<Entity> = self.light.into_iter().chain(directional).collect();
+        for e in entities {
+            self.app.world_mut().entity_mut(e).insert(config.clone());
+        }
     }
 
     /// Renders every view set since the last update.
