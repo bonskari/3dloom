@@ -1224,14 +1224,15 @@ fn diagnostics_show_a_held_alt_press_until_reset_interaction() {
 }
 
 #[test]
-fn injected_alt_drag_orbits_like_a_mouse() {
+fn injected_alt_drag_removes_like_a_mouse() {
     let mut h = Harness::new();
     poly_box(&mut h);
     let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
     let yaw = h.app.state.active().camera.yaw;
     inject(&mut h, serde_json::json!([{ "type": "drag", "from": [p.x, p.y], "to": [p.x + 120.0, p.y], "mods": ["alt"] }]));
-    assert_ne!(h.app.state.active().camera.yaw, yaw, "the injected Alt+drag orbits");
-    assert_eq!(h.app.state.selection.len(), 1, "and keeps the selection");
+    assert_eq!(h.app.state.active().camera.yaw, yaw, "the injected Alt+drag does not orbit");
+    assert!(h.app.state.selection.is_empty(), "it is a region that removes the box from the selection");
+    h.cmd(Command::SelectAll);
     // Held modifiers and keys: Ctrl+A selects all, after a new box.
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [50.0, 0.0, 0.0], size: [10.0; 3] });
     inject(&mut h, serde_json::json!([{ "type": "modifiers", "mods": ["ctrl"] }, { "type": "key", "key": "A", "mods": ["ctrl"] }, { "type": "modifiers", "mods": [] }]));
@@ -1792,12 +1793,12 @@ fn viewport_navigation_orbits_pans_and_zooms() {
     h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: egui::vec2(0.0, 3.0), modifiers: egui::Modifiers::NONE }]);
     h.frames(1);
     assert_ne!(camera(&h).2, before.2, "the wheel zooms");
-    // Alt+LMB drag orbits.
+    // Alt+LMB drag is a removing region, not navigation.
     let before = camera(&h);
     h.mods = egui::Modifiers::ALT;
     h.drag(c, c + egui::vec2(-100.0, 50.0));
     h.mods = egui::Modifiers::NONE;
-    assert_ne!(camera(&h).0, before.0, "Alt+LMB drag orbits");
+    assert_eq!(camera(&h), before, "Alt+LMB drag does not orbit");
 }
 
 /// A button pressed with `mods` at `a`, moved to `b`, then the window loses the
@@ -1826,7 +1827,7 @@ fn press_then_lose_focus(h: &mut Harness, button: egui::PointerButton, mods: egu
 }
 
 /// After the lost release: hovering does not navigate, and Alt+MMB, MMB,
-/// Alt+LMB drag and Alt+click work as before.
+/// Alt+LMB drag (a removing region) and Alt+click work as before.
 fn navigation_works_again(h: &mut Harness, c: egui::Pos2, label: &str) {
     let before = camera(h);
     hover_to(h, c, c + egui::vec2(60.0, 40.0));
@@ -1844,7 +1845,7 @@ fn navigation_works_again(h: &mut Harness, c: egui::Pos2, label: &str) {
     h.mods = egui::Modifiers::ALT;
     h.drag(c, c + egui::vec2(-100.0, 30.0));
     h.mods = egui::Modifiers::NONE;
-    assert_ne!(camera(h).0, before.0, "{label}: Alt+LMB drag orbits");
+    assert_eq!(camera(h), before, "{label}: Alt+LMB drag does not orbit");
     // Alt+click on the box removes it from the selection.
     h.cmd(Command::ZoomExtentsAll);
     let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
