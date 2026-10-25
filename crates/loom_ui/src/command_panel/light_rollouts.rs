@@ -137,7 +137,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
             });
         });
     });
-    shadow_rollouts(ui, app, id, l);
+    shadow_rollouts(ui, app, id, &l);
     rollout(ui, "Bevy Light", false, |ui| {
         number(ui, app, id, "Source Radius", "Source Radius:", l.source_radius.get(), true);
         number(ui, app, id, "Shadow Normal Bias", "Normal Bias:", l.shadow_normal_bias.get(), false);

@@ -350,12 +350,13 @@ fn shadow_colour_density_and_area_size_change_the_shadow() {
     let mut spot = default_lights(1, Mat4::IDENTITY)[0].clone();
     spot.id = loom_scene::NodeId(10);
     spot.emitter = Emitter::Spot { hotspot: 60.0, falloff: 70.0 };
-    spot.position = Vec3::new(0.0, 0.0, 120.0);
-    spot.direction = Vec3::NEG_Z;
+    // From the side and above: the box's shadow falls beside it (x 15..46),
+    // where the camera straight above sees it.
+    spot.position = Vec3::new(-60.0, 0.0, 120.0);
+    spot.direction = Vec3::new(60.0, 0.0, -90.0).normalize();
     spot.color = Vec3::splat(0.8);
     spot.shadows = true;
-    spot.target_distance = 120.0;
-    // Straight down from above: the plane fills the image, the shadow in the middle.
+    spot.target_distance = 144.0;
     let size = (160u32, 160u32);
     let camera = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -1.0, 400.0), Vec3::ZERO, Vec3::Y), projection: Mat4::perspective_rh(30f32.to_radians(), 1.0, 1.0, 2000.0) };
     let pixel = |p: Vec3| {
@@ -373,7 +374,7 @@ fn shadow_colour_density_and_area_size_change_the_shadow() {
         let (x, y) = pixel(p);
         img.get_pixel(x, y).0
     };
-    let (under, lit) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(45.0, 0.0, 0.0));
+    let (under, lit) = (Vec3::new(28.0, 0.0, 0.0), Vec3::new(70.0, 0.0, 0.0));
     spot.shadow_transmission = Vec3::ZERO;
     let img = render(&spot);
     let (full, open) = (at(&img, under), at(&img, lit));
@@ -388,7 +389,7 @@ fn shadow_colour_density_and_area_size_change_the_shadow() {
     let penumbra = |img: &image::RgbaImage| {
         (0..80)
             .filter(|i| {
-                let v = at(img, Vec3::new(*i as f32 * 0.5, 0.0, 0.0))[0] as f32;
+                let v = at(img, Vec3::new(30.0 + *i as f32 * 0.4, 0.0, 0.0))[0] as f32;
                 v > full[0] as f32 + 15.0 && v < open[0] as f32 - 15.0
             })
             .count()
