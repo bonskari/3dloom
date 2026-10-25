@@ -1,6 +1,7 @@
 //! egui/eframe UI shell: menubar, command panel, statusbar, viewport widget.
 //! All scene mutations go through `loom_commands::execute` via `dispatch`.
 
+mod kimodo;
 mod camera_overlay;
 mod command_panel;
 pub mod create_tool;
@@ -315,6 +316,7 @@ pub struct LoomApp {
     pub track_bar: time_slider::TrackBarState,
     /// The Motion panel shows Trajectories (the viewports draw the paths).
     pub motion_trajectories: bool,
+    pub(crate) kimodo: kimodo::Panel,
     /// A manipulator drag in progress (Select and Manipulate).
     pub manip_drag: Option<ManipDrag>,
     /// Selection rollout > By Angle: clicking a polygon also selects
@@ -520,6 +522,7 @@ impl LoomApp {
             tv_drag: None,
             track_bar: Default::default(),
             motion_trajectories: false,
+            kimodo: Default::default(),
             manip_drag: None,
             by_angle: None,
             soft_brush: SoftBrush { value: 1.0, size: 20.0, strength: 1.0 },
@@ -1287,6 +1290,7 @@ impl LoomApp {
     /// One frame of the whole UI (what eframe calls each repaint; the UI
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
+        kimodo::poll(self, ctx);
         icons::install(ctx);
         spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);
         ctx.input(|i| self.input_log.record(&i.raw, i.time));

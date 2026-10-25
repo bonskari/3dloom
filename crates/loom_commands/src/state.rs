@@ -788,6 +788,8 @@ pub const KEEP_CREATING_DEFAULT: bool = false;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
+    /// Motion > Kimodo > Settings; local user configuration, never scene data.
+    pub kimodo_api_url: String,
     pub gizmos: GizmoPrefs,
     /// Preferences > General > Spinners > Use Snap (Spinner Snap Toggle).
     pub spinner_snap: bool,
@@ -839,6 +841,7 @@ fn default_nudge() -> f32 {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
+            kimodo_api_url: String::new(),
             gizmos: GizmoPrefs::default(),
             spinner_snap: false,
             spinner_snap_value: 1.0,
@@ -1426,6 +1429,7 @@ pub struct AppState {
     pub mesh_patch: MeshPatchSettings,
     /// Selection before / after each undo step (selection undo).
     pub sel_history: crate::sel_undo::SelHistory,
+    pub(crate) timing_history: crate::timing_undo::TimingHistory,
     /// Selected control points of the active FFD entry (lattice indices).
     pub ffd_selection: BTreeSet<u32>,
     /// VertexPaint: the viewport brush is on.
@@ -1794,6 +1798,7 @@ impl AppState {
             sub_selection: SubSelection::default(),
             mesh_patch: MeshPatchSettings::default(),
             sel_history: Default::default(),
+            timing_history: Default::default(),
             selection_mode: SelectionMode::Object,
             active_tool: Tool::Select,
             viewports: default_kinds(ViewportLayout::FourGrid).into_iter().map(Viewport::new).collect(),

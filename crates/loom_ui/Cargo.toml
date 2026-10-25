@@ -11,6 +11,8 @@ loom_commands = { workspace = true }
 loom_scene  = { workspace = true }
 serde_json  = { workspace = true }
 log = "0.4"
+ureq = { version = "2", features = ["json"] }
+url = "2"
 image = { workspace = true }
 loom_render = { workspace = true }
 loom_bevy   = { workspace = true }

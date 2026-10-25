@@ -168,9 +168,18 @@ pub fn solve(chain: &IkChain, bones: &[IkBone], goal_world: Vec3, spline: Option
             }
         }
         IkSolver::Limb => {
-            // Two bones: the elbow from the law of cosines, in the plane the
-            // swivel angle turns about the root→goal axis (0 = the first bone's +Y).
+            // Legacy scenes can contain a Limb chain with the wrong number
+            // of segments. It cannot be solved analytically; keep its FK pose.
+            if n != 2 {
+                return bones.iter().zip(q).map(|(b, r)| (b.id, r)).collect();
+            }
+            // Two bones: preserve the existing elbow/knee bend side, with
+            // the swivel rotating that plane about the root→goal axis.
             let ws = worlds(bones, &q);
+            let fk_tip = ws[1].transform_point3(bones[1].tip);
+            if chain.swivel_deg.abs() < 1e-6 && fk_tip.distance_squared(goal_world) < 1e-10 {
+                return bones.iter().zip(q).map(|(b, r)| (b.id, r)).collect();
+            }
             let root = ws[0].transform_point3(Vec3::ZERO);
             let a = bones[0].tip.length().max(1e-4);
             let b = if n > 1 { bones[1].tip.length().max(1e-4) } else { 0.0 };
@@ -180,8 +189,14 @@ pub fn solve(chain: &IkChain, bones: &[IkBone], goal_world: Vec3, spline: Option
             if u == Vec3::ZERO {
                 return bones.iter().zip(q).map(|(b, r)| (b.id, r)).collect();
             }
-            let pole = ws[0].transform_vector3(perpendicular(bones[0].tip));
-            let mut v = pole - u * pole.dot(u);
+            let elbow_direction = ws[1].transform_point3(Vec3::ZERO) - root;
+            let mut v = elbow_direction - u * elbow_direction.dot(u);
+            if v.length_squared() < 1e-8 {
+                // A straight limb has no bend plane: retain the old local-up
+                // convention until an elbow/knee direction is available.
+                let pole = ws[0].transform_vector3(perpendicular(bones[0].tip));
+                v = pole - u * pole.dot(u);
+            }
             if v.length_squared() < 1e-8 {
                 v = Vec3::Z - u * Vec3::Z.dot(u);
                 if v.length_squared() < 1e-8 {

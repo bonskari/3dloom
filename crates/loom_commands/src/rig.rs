@@ -495,6 +495,12 @@ fn create_ik_chain(state: &mut AppState, start: NodeId, end: NodeId, solver: IkS
     if !state.scene.ancestors(end).contains(&start) {
         return Err("the end bone must descend from the start bone".into());
     }
+    if solver == IkSolver::Limb {
+        let segments = state.scene.ancestors(end).iter().position(|id| *id == start).map(|i| i + 1);
+        if segments != Some(2) {
+            return Err("IK Limb requires exactly two segments (start, middle, end joints)".into());
+        }
+    }
     let id = state.scene.ik_chains.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     let name = name.unwrap_or_else(|| state.scene.next_name("IK Chain"));
     let base = state.scene.fk_world_matrix(end).transform_point3(Vec3::ZERO);

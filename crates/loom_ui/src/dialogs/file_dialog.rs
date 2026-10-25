@@ -103,7 +103,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::OpenFile => ("Open File", "loom,max", "Open"),
         Dialog::SaveFileAs => ("Save File As", "loom", "Save"),
         Dialog::SaveFileAsCopy => ("Save Copy As", "loom", "Save"),
-        Dialog::ImportFile => ("Import File", "fbx,obj,max,3ds,stl,dxf", "Open"),
+        Dialog::ImportFile => ("Import File", "fbx,bvh,obj,max,3ds,stl,dxf", "Open"),
         Dialog::ExportFile => ("Export File", "fbx,obj,3ds,stl,dxf", "Save"),
         Dialog::ExportSelected => ("Export Selected", "fbx,obj,3ds,stl,dxf", "Save"),
         Dialog::SaveSelected => ("Save Selected", "loom", "Save"),

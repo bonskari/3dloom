@@ -20,6 +20,7 @@ pub mod snap;
 pub mod state;
 pub mod transform;
 pub mod sel_undo;
+mod timing_undo;
 
 pub use command::{registry, Axis, Command, CommandInfo, Group, PrimitiveKind, SaveChangesReply, SelectOp, DEFERRED, DEFERRED_UNWRAP, OUT_OF_SCOPE, ShapeKind, UNWRAP_ALIASES};
 pub mod unwrap;
@@ -27,6 +28,7 @@ pub use keymap::unwrap_chart_rows;
 pub use execute::file_action;
 pub mod file;
 pub mod scene_file;
+pub mod bvh_io;
 pub mod fbx_io;
 pub mod exchange;
 pub mod obj_io;

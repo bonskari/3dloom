@@ -33,8 +33,15 @@ impl Layer {
     }
 }
 
+static NEXT_SCENE_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+fn fresh_scene_instance() -> u64 {
+    NEXT_SCENE_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scene {
+    #[serde(skip, default = "fresh_scene_instance")]
+    instance_id: u64,
     nodes: BTreeMap<NodeId, Node>,
     next_id: u64,
     #[serde(default = "default_layers")]
@@ -112,6 +119,9 @@ impl Default for Scene {
 }
 
 impl Scene {
+    /// Runtime project identity: survives clones, changes for new/opened scenes.
+    pub fn instance_id(&self) -> u64 { self.instance_id }
+
     /// The material Material Editor slot `slot` shows: its library material,
     /// or the slot's untouched default.
     pub fn slot_material(&self, slot: usize) -> crate::material::StandardMaterial {
@@ -142,6 +152,7 @@ impl Scene {
 
     pub fn new() -> Self {
         Self {
+            instance_id: fresh_scene_instance(),
             nodes: BTreeMap::new(),
             next_id: 1,
             layers: default_layers(),

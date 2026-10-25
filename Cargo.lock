@@ -3164,6 +3164,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "loom_bake"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "image",
+ "loom_mesh",
+]
+
+[[package]]
 name = "loom_bevy"
 version = "0.1.0"
 dependencies = [
@@ -3185,6 +3194,7 @@ dependencies = [
  "flate2",
  "glam",
  "image",
+ "loom_bake",
  "loom_fbx",
  "loom_input",
  "loom_max",
@@ -3283,6 +3293,7 @@ dependencies = [
  "glam",
  "image",
  "log",
+ "loom_bake",
  "loom_bevy",
  "loom_commands",
  "loom_fbx",
@@ -3294,6 +3305,8 @@ dependencies = [
  "pollster",
  "rfd",
  "serde_json",
+ "ureq",
+ "url",
  "wgpu",
 ]
 
@@ -5264,6 +5277,8 @@ dependencies = [
  "once_cell",
  "rustls",
  "rustls-pki-types",
+ "serde",
+ "serde_json",
  "url",
  "webpki-roots 0.26.11",
 ]

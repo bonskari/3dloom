@@ -96,6 +96,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::UndoSceneOperation => {
             let label = state.undo.undo(&mut state.scene);
+            if label.is_some() {
+                let timing_id = state.undo.redo_entry_id();
+                crate::timing_undo::restore(state, timing_id, false);
+            }
             // The step undone sat at the position just above the new top.
             let pos = state.undo.position() + 1;
             if label.is_none() || !crate::sel_undo::undone(state, pos) {
@@ -106,6 +110,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::RedoSceneOperation => {
             let label = state.undo.redo(&mut state.scene);
+            if label.is_some() {
+                let timing_id = state.undo.undo_entry_id();
+                crate::timing_undo::restore(state, timing_id, true);
+            }
             let pos = state.undo.position();
             if label.is_none() || !crate::sel_undo::redone(state, pos) {
                 prune_selection(state);
@@ -288,6 +296,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let path = std::path::PathBuf::from(path);
             if crate::max_io::is_max(&path) {
                 return crate::max_io::import(state, &path);
+            }
+            if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("bvh")) {
+                let ids = crate::bvh_io::import(state, &path)?;
+                return Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }));
             }
             if crate::fbx_io::is_fbx(&path) {
                 let ids = crate::fbx_io::import(state, &path)?;

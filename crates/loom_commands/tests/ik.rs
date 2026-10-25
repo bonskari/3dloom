@@ -69,3 +69,30 @@ fn limb_and_spline_chains_through_commands() {
     let base = s.scene.world_matrix(NodeId(tail[0])).transform_point3(glam::Vec3::ZERO);
     assert!(base.x.abs() > 5.0 || base.y.abs() > 5.0, "bones moved onto the shape: {base:?}");
 }
+
+#[test]
+fn limb_creation_rejects_wrong_segment_count_without_scene_changes() {
+    for (start, end) in [(0, 1), (0, 3)] {
+        let mut s = AppState::new();
+        let r = execute(&mut s, Command::CreateBoneChain { points: vec![[0., 0., 0.], [10., 0., 0.], [10., 10., 0.], [10., 20., 0.]], name: None }).unwrap();
+        let ids: Vec<u64> = serde_json::from_value(r["nodes"].clone()).unwrap();
+        let before = serde_json::to_value(&s.scene).unwrap();
+        let undo = s.undo.len();
+        assert!(execute(&mut s, Command::CreateIkChain { start: ids[start], end: ids[end], solver: "limb".into(), name: None }).is_err());
+        assert_eq!(serde_json::to_value(&s.scene).unwrap(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
+#[test]
+fn creating_limb_preserves_existing_fk_pose_and_controllers() {
+    let mut s = AppState::new();
+    let r = execute(&mut s, Command::CreateBoneChain { points: vec![[0., 0., 0.], [10., 0., 0.], [10., 10., 0.]], name: None }).unwrap();
+    let ids: Vec<u64> = serde_json::from_value(r["nodes"].clone()).unwrap();
+    let before: Vec<_> = ids.iter().map(|id| (s.scene.world_matrix(NodeId(*id)), s.scene.node(NodeId(*id)).unwrap().clone())).collect();
+    execute(&mut s, Command::CreateIkChain { start: ids[0], end: ids[2], solver: "limb".into(), name: None }).unwrap();
+    for (id, (world, node)) in ids.iter().zip(&before) {
+        assert!(s.scene.world_matrix(NodeId(*id)).abs_diff_eq(*world, 1e-4), "joint {id} must not pop");
+        assert_eq!(serde_json::to_value(s.scene.node(NodeId(*id)).unwrap()).unwrap(), serde_json::to_value(node).unwrap(), "existing node/controller/hierarchy unchanged");
+    }
+}

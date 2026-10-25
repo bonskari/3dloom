@@ -18,6 +18,7 @@ mod precision;
 mod skin2;
 mod skin_wrap;
 mod biped;
+mod kimodo;
 mod lightcam2;
 mod bake;
 

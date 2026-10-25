@@ -72,3 +72,40 @@ fn spline_ik_lays_bones_along_the_shape() {
     let t = tip(&b, &rots);
     assert!((t - Vec3::new(0.0, 30.0, 0.0)).length() < 0.1, "{t:?}");
 }
+
+#[test]
+fn malformed_legacy_limb_keeps_fk_without_panicking() {
+    for lengths in [&[10.0][..], &[10.0, 10.0, 10.0][..]] {
+        let b = bones(lengths);
+        let solved = solve(&chain(IkSolver::Limb, b.len()), &b, Vec3::new(5., 5., 0.), None);
+        for (bone, (_, q)) in b.iter().zip(&solved) {
+            assert!(q.is_finite());
+            assert!(bone.rotation.abs_diff_eq(*q, 1e-6));
+        }
+    }
+}
+
+#[test]
+fn limb_uses_the_existing_bend_side_when_goal_moves() {
+    let mut b = bones(&[10.0, 10.0]);
+    b[1].rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+    let c = chain(IkSolver::Limb, 2);
+    let goal = Vec3::new(10., 11., 0.);
+    let solved = solve(&c, &b, goal, None);
+    let elbow = Mat4::from_quat(solved[0].1).transform_point3(Vec3::X * 10.0);
+    assert!(elbow.x > elbow.y, "preserve elbow on original (positive X) side of root-goal axis: {elbow:?}");
+    assert!((tip(&b, &solved) - goal).length() < 1e-3);
+}
+
+#[test]
+fn limb_at_fk_endpoint_keeps_twist_and_every_local_rotation() {
+    let mut b = bones(&[10., 10.]);
+    b[0].rotation = Quat::from_rotation_x(0.4);
+    b[1].rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+    let fk: Vec<_> = b.iter().map(|b| (b.id, b.rotation)).collect();
+    let goal = tip(&b, &fk);
+    let solved = solve(&chain(IkSolver::Limb, 2), &b, goal, None);
+    for ((_, expected), (_, actual)) in fk.iter().zip(&solved) {
+        assert!(expected.dot(*actual).abs() > 0.999999);
+    }
+}

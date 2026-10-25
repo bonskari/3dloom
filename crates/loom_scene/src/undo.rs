@@ -1,12 +1,22 @@
 use crate::change::Change;
 use crate::scene::Scene;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_ENTRY_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug)]
+struct Entry {
+    id: u64,
+    label: String,
+    change: Change,
+}
 
 /// Change-level undo/redo. Each entry stores the inverse of what was
 /// applied, so undo is cheap even for large scenes.
 #[derive(Debug, Default)]
 pub struct UndoStack {
-    undo: Vec<(String, Change)>,
-    redo: Vec<(String, Change)>,
+    undo: Vec<Entry>,
+    redo: Vec<Entry>,
     limit: usize,
     /// An open interactive transaction (a gizmo drag): inverses collect
     /// here, exempt from the limit, and land as one entry on `end`.
@@ -64,7 +74,7 @@ impl UndoStack {
         if self.saved.is_some_and(|s| s > self.undo.len()) {
             self.saved = None;
         }
-        self.undo.push(entry);
+        self.undo.push(Entry { id: NEXT_ENTRY_ID.fetch_add(1, Ordering::Relaxed), label: entry.0, change: entry.1 });
         if self.undo.len() > self.limit {
             self.undo.remove(0);
             self.trimmed += 1;
@@ -154,30 +164,45 @@ impl UndoStack {
         // A drag whose release was lost must not absorb later commits.
         self.depth = 0;
         self.end();
-        let (label, inverse) = self.undo.pop()?;
+        let Entry { id, label, change: inverse } = self.undo.pop()?;
         self.version += 1;
         let redo = inverse.inverse(scene);
         if let Err(e) = inverse.apply(scene) {
             // Keep the entry so the history is not silently lost.
-            self.undo.push((format!("{label} (failed: {e})"), inverse));
+            self.undo.push(Entry { id, label: format!("{label} (failed: {e})"), change: inverse });
             return None;
         }
-        self.redo.push((label.clone(), redo));
+        self.redo.push(Entry { id, label: label.clone(), change: redo });
         Some(label)
     }
 
     pub fn redo(&mut self, scene: &mut Scene) -> Option<String> {
         self.depth = 0;
         self.end();
-        let (label, change) = self.redo.pop()?;
+        let Entry { id, label, change } = self.redo.pop()?;
         self.version += 1;
         let inverse = change.inverse(scene);
         if let Err(e) = change.apply(scene) {
-            self.redo.push((format!("{label} (failed: {e})"), change));
+            self.redo.push(Entry { id, label: format!("{label} (failed: {e})"), change });
             return None;
         }
-        self.undo.push((label.clone(), inverse));
+        self.undo.push(Entry { id, label: label.clone(), change: inverse });
         Some(label)
+    }
+
+    /// Stable identity of a history step, retained through undo/redo and
+    /// never reused by a branch or a fresh stack. Sidecar state uses this,
+    /// rather than a history position that can name a different step later.
+    pub fn undo_entry_id(&self) -> Option<u64> {
+        self.undo.last().map(|e| e.id)
+    }
+
+    pub fn redo_entry_id(&self) -> Option<u64> {
+        self.redo.last().map(|e| e.id)
+    }
+
+    pub fn contains_entry(&self, id: u64) -> bool {
+        self.undo.iter().chain(&self.redo).any(|e| e.id == id)
     }
 
     pub fn len(&self) -> usize {
@@ -201,7 +226,7 @@ impl UndoStack {
 
     /// Labels of undoable operations, most recent last.
     pub fn labels(&self) -> Vec<String> {
-        self.undo.iter().map(|(l, _)| l.clone()).collect()
+        self.undo.iter().map(|e| e.label.clone()).collect()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -350,4 +375,31 @@ mod tests {
         stack.undo(&mut scene).unwrap();
         assert_eq!(scene.nodes().count(), 0);
     }
+    #[test]
+    fn entry_identity_survives_redo_but_never_branches_resets_or_eviction() {
+        let mut stack = UndoStack::new(3);
+        let mut scene = Scene::new();
+        add_box(&mut stack, &mut scene);
+        let first = stack.undo_entry_id().unwrap();
+        stack.undo(&mut scene).unwrap();
+        assert_eq!(stack.redo_entry_id(), Some(first));
+        stack.redo(&mut scene).unwrap();
+        assert_eq!(stack.undo_entry_id(), Some(first));
+        stack.undo(&mut scene).unwrap();
+        add_box(&mut stack, &mut scene);
+        let branch = stack.undo_entry_id().unwrap();
+        assert_ne!(branch, first);
+        assert!(!stack.contains_entry(first));
+        add_box(&mut stack, &mut scene);
+        let latest = stack.undo_entry_id().unwrap();
+        stack.set_limit(1);
+        assert!(!stack.contains_entry(branch));
+        assert_eq!(stack.undo_entry_id(), Some(latest));
+        stack.undo(&mut scene).unwrap();
+        assert_eq!(stack.redo_entry_id(), Some(latest));
+        stack = UndoStack::new(1);
+        add_box(&mut stack, &mut scene);
+        assert_ne!(stack.undo_entry_id(), Some(latest));
+    }
+
 }
