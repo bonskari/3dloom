@@ -713,9 +713,17 @@ impl LoomApp {
             })
             .collect();
         let mut looks = Vec::with_capacity(wanted.len());
+        // Top/Bottom: per-ID surfaces for its bands; the faces get their IDs below.
+        let mut splits = Vec::with_capacity(wanted.len());
         for (surfaces, texture) in wanted {
+            let (surfaces, split) = match surfaces.as_ref().and_then(loom_scene::material::split_surfaces) {
+                Some((s, split)) => (Some(s), Some(split)),
+                None => (surfaces, None),
+            };
+            splits.push(split);
             looks.push(self.material_look(surfaces, texture, &mut bitmaps, &mut bitmap_index));
         }
+        let mut splits = splits.into_iter();
         let mut looks = looks.into_iter();
         for id in visible {
             let n = self.state.scene.node(id).expect("collected above");
@@ -818,7 +826,12 @@ impl LoomApp {
                 sub: sub.map(std::sync::Arc::new),
                 ..base
             });
-            display.push(shown.unwrap_or_else(|| mesh.clone()));
+            let mut shown = shown.unwrap_or_else(|| mesh.clone());
+            if let Some(split) = splits.next().flatten() {
+                // World Z, or the object's own Z for Local.
+                loom_scene::material::apply_split(&mut shown, &split, glam::Vec3::Z, world.transform_vector3(glam::Vec3::Z));
+            }
+            display.push(shown);
             meshes.push((n.id, mesh));
         }
         self.world_meshes = meshes;
@@ -944,11 +957,11 @@ impl LoomApp {
     fn surface_style(&mut self, s: &loom_scene::material::Surface, bitmaps: &mut Vec<(String, std::sync::Arc<loom_render::Bitmap>)>, index: &mut std::collections::HashMap<String, u32>) -> loom_render::SurfaceStyle {
         let srgb_f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
         let lin = |c: glam::Vec3| [srgb_f(c.x), srgb_f(c.y), srgb_f(c.z)];
-        // Glossiness 0–100 → a Blinn exponent from 2 to 2048.
-        let exponent = 2.0 * 2f32.powf(s.glossiness / 10.0);
-        let spec = if s.specular_level > 0.0 {
-            let c = lin(s.specular);
-            [c[0], c[1], c[2], exponent]
+        // Each shader folded into the one Blinn lobe (Glossiness 0–100 → exponent 2–2048).
+        let look = s.viewport_look();
+        let spec = if look.specular != glam::Vec3::ZERO {
+            let c = lin(look.specular);
+            [c[0], c[1], c[2], look.exponent]
         } else {
             [0.0; 4]
         };
@@ -957,7 +970,7 @@ impl LoomApp {
             Some(m) => (self.map_texture(m, bitmaps, index), m.coords.matrix(), m.coords.decal(), (m.amount / 100.0).clamp(0.0, 1.0)),
             None => (loom_render::TextureSel::None, loom_render::UV_IDENTITY, [false; 2], 1.0),
         };
-        loom_render::SurfaceStyle { color: lin(s.diffuse), alpha: s.opacity, specular: spec, self_illum: s.self_illum, texture, uv, decal, texture_amount: amount, faceted: s.faceted, two_sided: s.two_sided, wire: s.wire }
+        loom_render::SurfaceStyle { color: lin(look.color), alpha: look.alpha, specular: spec, self_illum: look.self_illum, texture, uv, decal, texture_amount: amount, faceted: s.faceted, two_sided: look.two_sided, wire: s.wire }
     }
 
     pub fn world_styles(&self) -> &[loom_render::MeshStyle] {

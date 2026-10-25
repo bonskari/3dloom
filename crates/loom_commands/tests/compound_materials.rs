@@ -58,7 +58,7 @@ fn type_button_makes_a_multi_sub_and_keeps_the_old_material_as_id_1() {
     execute(&mut s, Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) }).unwrap();
     let list = sub_list(&s, top(&s));
     assert_ne!(diffuse(&s, list[0].material.unwrap()), [255, 0, 0]);
-    assert!(execute(&mut s, Command::SetMaterialType { kind: "Raytrace".into(), keep_old: None }).is_err());
+    assert!(execute(&mut s, Command::SetMaterialType { kind: "Lambert".into(), keep_old: None }).is_err());
 }
 
 #[test]

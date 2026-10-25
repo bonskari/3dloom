@@ -2,7 +2,7 @@
 //! No GPU needed, so all of it is unit tested.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::color::Color;
+use bevy::color::{Alpha, Color};
 use bevy::math::{Mat4, Vec3};
 use bevy::pbr::StandardMaterial;
 use bevy::render::alpha::AlphaMode;
@@ -10,7 +10,7 @@ use bevy::render::camera::{OrthographicProjection, PerspectiveProjection, Projec
 use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::primitives::Aabb;
 use loom_scene::maps::Image as MapImage;
-use loom_scene::material::{Map, StandardMaterial as LoomMaterial, Surface};
+use loom_scene::material::{Map, Shader, StandardMaterial as LoomMaterial, Surface};
 
 /// A loom mesh triangulated for Bevy: one vertex per face corner.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,6 +61,18 @@ impl MeshData {
         let first = it.next()?;
         let (min, max) = it.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p)));
         Some(Aabb::from_min_max(min, max))
+    }
+
+    /// The same triangles facing the other way (a Double Sided material's back).
+    pub fn flipped(&self) -> Self {
+        let mut out = self.clone();
+        for n in out.normals.iter_mut() {
+            *n = [-n[0], -n[1], -n[2]];
+        }
+        for t in out.indices.chunks_exact_mut(3) {
+            t.swap(1, 2);
+        }
+        out
     }
 
     pub fn to_bevy(&self) -> Mesh {
@@ -142,6 +154,30 @@ pub fn compose_base(diffuse: glam::Vec3, map: Option<(&MapImage, &Map)>, opacity
     MapImage { width: w, height: h, rgba }
 }
 
+/// `map` as a `size` square texture in another map's frame: texel `m` (that
+/// map's map space, as the material's UV transform gives it) shows `map` at
+/// the surface UV the frame `[a, b, c, d, e, f]` maps to `m`.
+pub fn bake_in_frame(map: &Map, frame: &[f32; 6], size: u32, images: &loom_scene::maps::Images) -> MapImage {
+    let det = frame[0] * frame[4] - frame[1] * frame[3];
+    let inv = if det.abs() < 1e-12 {
+        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    } else {
+        let (a, b, d, e) = (frame[4] / det, -frame[1] / det, -frame[3] / det, frame[0] / det);
+        [a, b, -(a * frame[2] + b * frame[5]), d, e, -(d * frame[2] + e * frame[5])]
+    };
+    let n = size.max(1);
+    let mut rgba = Vec::with_capacity((n * n * 4) as usize);
+    for y in 0..n {
+        for x in 0..n {
+            let m = [(x as f32 + 0.5) / n as f32, 1.0 - (y as f32 + 0.5) / n as f32];
+            let uv = [inv[0] * m[0] + inv[1] * m[1] + inv[2], inv[3] * m[0] + inv[4] * m[1] + inv[5]];
+            let c = loom_scene::maps::eval(map, uv, images);
+            rgba.extend(c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
+        }
+    }
+    MapImage { width: n, height: n, rgba }
+}
+
 /// A Normal Bump map's normal image as Bevy reads normal maps (green
 /// toward the top of the image): the reference's tangent normal maps point
 /// green down, so green is inverted unless Flip Green; Flip Red inverts red.
@@ -201,22 +237,121 @@ pub fn material_from_surface(surface: Option<&Surface>, wire_color: [u8; 3]) -> 
             ..Default::default()
         },
         Some(m) => {
-            let d = m.diffuse;
+            let sh = &m.shading;
+            let mut d = m.diffuse;
+            if sh.shader.has_diffuse_level() {
+                d *= sh.diffuse_level / 100.0;
+            }
+            if sh.shader.has_roughness() {
+                // PBR has no diffuse roughness: Oren-Nayar's darkening of facing surfaces.
+                d *= loom_scene::material::oren_nayar_dim(sh.roughness);
+            }
             let alpha = m.opacity;
             let s = m.self_illum;
             let lit = d * (1.0 - s);
-            let glow = Color::srgb(d.x, d.y, d.z).to_linear() * s;
-            StandardMaterial {
+            let glow = Color::srgb(d.x, d.y, d.z).to_linear() * s + Color::srgb(m.self_illum_color.x, m.self_illum_color.y, m.self_illum_color.z).to_linear();
+            let two_sided = m.two_sided || sh.shader == Shader::Translucent;
+            let mut out = StandardMaterial {
                 base_color: Color::srgba(lit.x, lit.y, lit.z, alpha),
                 emissive: bevy::color::LinearRgba::rgb(glow.red, glow.green, glow.blue),
                 perceptual_roughness: (1.0 - m.glossiness / 100.0).clamp(0.0, 1.0),
                 reflectance: (m.specular_level / 100.0 * 0.5).clamp(0.0, 1.0),
-                alpha_mode: if alpha < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque },
-                double_sided: m.two_sided,
-                cull_mode: if m.two_sided { None } else { Some(bevy::render::render_resource::Face::Back) },
+                // Advanced Transparency Type: Filter and Subtractive blend, Additive adds.
+                alpha_mode: match (alpha < 1.0, m.extended.transparency_type) {
+                    (false, _) => AlphaMode::Opaque,
+                    (true, 2) => AlphaMode::Add,
+                    (true, _) => AlphaMode::Blend,
+                },
+                ior: m.extended.ior.max(1.0),
+                double_sided: two_sided,
+                cull_mode: if two_sided { None } else { Some(bevy::render::render_resource::Face::Back) },
                 ..Default::default()
+            };
+            match sh.shader {
+                Shader::Blinn | Shader::OrenNayarBlinn => {}
+                // Phong's wider highlight at the same Glossiness.
+                Shader::Phong => out.perceptual_roughness = (out.perceptual_roughness * 1.25).min(1.0),
+                Shader::Metal => out.metallic = 1.0,
+                Shader::Strauss => {
+                    out.metallic = (sh.metalness / 100.0).clamp(0.0, 1.0);
+                    out.reflectance = 0.5;
+                }
+                Shader::Anisotropic => {
+                    out.anisotropy_strength = (sh.anisotropy / 100.0).clamp(0.0, 1.0);
+                    out.anisotropy_rotation = sh.orientation.to_radians();
+                }
+                Shader::MultiLayer => {
+                    // The first layer anisotropic, the second a clear coat over it.
+                    out.anisotropy_strength = (sh.anisotropy / 100.0).clamp(0.0, 1.0);
+                    out.anisotropy_rotation = sh.orientation.to_radians();
+                    out.clearcoat = (sh.level2 / 100.0).clamp(0.0, 1.0);
+                    out.clearcoat_perceptual_roughness = (1.0 - sh.glossiness2 / 100.0).clamp(0.0, 1.0);
+                }
+                Shader::Translucent => {
+                    // Light scattered through: the Translucent colour times the Filter colour.
+                    let t = sh.translucent_color * m.extended.filter_color;
+                    out.diffuse_transmission = ((t.x + t.y + t.z) / 3.0).clamp(0.0, 1.0);
+                    out.thickness = 0.0;
+                }
             }
+            apply_surface_hints(&mut out, m, lit);
+            out
         }
+    }
+}
+
+/// The other material types' values on the PBR material: metalness, the
+/// Raytrace Reflect colour, refraction (transmission), translucency, a
+/// Shellac clear coat, Raw Diffuse Texture, Ink 'n Paint and Matte/Shadow.
+fn apply_surface_hints(out: &mut StandardMaterial, m: &Surface, lit: glam::Vec3) {
+    let alpha = out.base_color.alpha();
+    let mut base = lit;
+    out.metallic = out.metallic.max(m.metallic.clamp(0.0, 1.0));
+    let reflect = m.reflect.max_element().clamp(0.0, 1.0);
+    if reflect > 0.0 {
+        if m.fresnel {
+            // Fresnel reflections are a dielectric's: brighter at grazing angles, not a metal.
+            out.reflectance = out.reflectance.max(reflect);
+        } else {
+            // Reflect over a dark diffuse is coloured chrome.
+            out.metallic = out.metallic.max(reflect);
+            base = base.lerp(m.reflect / reflect, reflect);
+        }
+    }
+    if m.transmission > 0.0 {
+        // The renderer refracts what is behind (tinted by the filter colour)
+        // instead of blending it as the viewports do.
+        let t = m.transmission.clamp(0.0, 1.0);
+        out.specular_transmission = t;
+        out.thickness = 0.0;
+        base = base.lerp(m.extended.filter_color, t);
+        let a = m.opacity;
+        out.base_color = Color::srgba(base.x, base.y, base.z, a);
+        out.alpha_mode = if a < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque };
+    } else {
+        out.base_color = Color::srgba(base.x, base.y, base.z, alpha);
+    }
+    if m.translucency > 0.0 {
+        out.diffuse_transmission = out.diffuse_transmission.max(m.translucency.clamp(0.0, 1.0));
+        out.double_sided = true;
+        out.cull_mode = None;
+    }
+    if m.coat > 0.0 {
+        out.clearcoat = out.clearcoat.max(m.coat);
+        out.clearcoat_perceptual_roughness = (1.0 - m.coat_glossiness / 100.0).clamp(0.0, 1.0);
+    }
+    if m.unlit {
+        out.unlit = true;
+    }
+    if m.toon.is_some() {
+        // Ink 'n Paint: the look shader paints the bands and the ink; matte underneath.
+        out.perceptual_roughness = 1.0;
+        out.reflectance = 0.0;
+    }
+    if m.matte.is_some() {
+        // Matte/Shadow: the look shader shows only its shadows over what is behind.
+        out.base_color = Color::WHITE;
+        out.alpha_mode = AlphaMode::Blend;
     }
 }
 
@@ -391,6 +526,112 @@ mod tests {
         // Specular Level 0: no specular reflection.
         lm.specular_level.set(0.0);
         assert_eq!(material_from_loom(Some(&lm), [0, 0, 0]).reflectance, 0.0);
+    }
+
+    #[test]
+    fn a_map_with_other_coordinates_bakes_into_the_frame() {
+        use loom_scene::material::MapType;
+        // A checker tiled 2 x 2 in the frame of a map tiled 1 x 1: four checks a side per frame tile.
+        let mut checker = BitmapMap::new(MapType::Checker, 100.0);
+        checker.set_parameter("Tiling U", 2.0).unwrap();
+        checker.set_parameter("Tiling V", 2.0).unwrap();
+        let frame = BitmapMap::new(MapType::Bitmap, 100.0);
+        let img = bake_in_frame(&checker, &frame.coords.matrix(), 16, &Default::default());
+        let px = |x: u32, y: u32| img.rgba[((y * 16 + x) * 4) as usize];
+        let row: Vec<u8> = (0..16).map(|x| px(x, 15)).collect();
+        let changes = row.windows(2).filter(|w| w[0] != w[1]).count();
+        assert_eq!(changes, 3, "four checks across: {row:?}");
+        // In its own frame it bakes as one tile of two checks.
+        let own = bake_in_frame(&checker, &checker.coords.matrix(), 16, &Default::default());
+        let row: Vec<u8> = (0..16).map(|x| own.rgba[((15 * 16 + x) * 4) as usize]).collect();
+        assert_eq!(row.windows(2).filter(|w| w[0] != w[1]).count(), 1, "{row:?}");
+    }
+
+    #[test]
+    fn each_shader_maps_to_its_pbr_fields() {
+        let mut lm = LoomMaterial::new("m");
+        lm.glossiness.set(60.0);
+        let pbr = |lm: &LoomMaterial| material_from_loom(Some(lm), [0, 0, 0]);
+        assert_eq!(pbr(&lm).metallic, 0.0);
+        lm.shading.shader = Shader::Metal;
+        assert_eq!(pbr(&lm).metallic, 1.0, "Metal is a metal");
+        lm.shading.shader = Shader::Strauss;
+        lm.shading.metalness = 40.0;
+        assert!((pbr(&lm).metallic - 0.4).abs() < 1e-6, "Strauss Metalness");
+        lm.shading.shader = Shader::Anisotropic;
+        lm.shading.anisotropy = 80.0;
+        lm.shading.orientation = 90.0;
+        let a = pbr(&lm);
+        assert!((a.anisotropy_strength - 0.8).abs() < 1e-6 && (a.anisotropy_rotation - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        lm.shading.shader = Shader::MultiLayer;
+        lm.shading.level2 = 50.0;
+        lm.shading.glossiness2 = 80.0;
+        let ml = pbr(&lm);
+        assert!((ml.clearcoat - 0.5).abs() < 1e-6 && (ml.clearcoat_perceptual_roughness - 0.2).abs() < 1e-5, "the second layer is a clear coat");
+        lm.shading.shader = Shader::OrenNayarBlinn;
+        lm.diffuse.set(Vec3::splat(0.5));
+        lm.shading.diffuse_level = 200.0;
+        let onb = pbr(&lm);
+        assert!((onb.base_color.to_srgba().red - 1.0).abs() < 1e-5, "Diffuse Level 200 doubles the colour");
+        lm.shading.shader = Shader::Translucent;
+        lm.shading.translucent_color = Vec3::ONE;
+        lm.extended.filter_color = Vec3::ONE;
+        let tr = pbr(&lm);
+        assert!(tr.diffuse_transmission > 0.99 && tr.double_sided && tr.cull_mode.is_none(), "light passes through");
+        // Extended Parameters: IOR and the Additive transparency type.
+        lm.extended.ior = 2.4;
+        lm.opacity.set(50.0);
+        lm.extended.transparency_type = 2;
+        let e = pbr(&lm);
+        assert!((e.ior - 2.4).abs() < 1e-6);
+        assert_eq!(e.alpha_mode, AlphaMode::Add);
+        // Self-Illumination Color mode glows in its colour.
+        lm.shading.shader = Shader::Blinn;
+        lm.shading.self_illum_color_on = true;
+        lm.shading.self_illum_color = Vec3::new(0.0, 0.0, 1.0);
+        let g = pbr(&lm);
+        assert!(g.emissive.blue > 0.99 && g.emissive.red == 0.0, "{:?}", g.emissive);
+    }
+
+    #[test]
+    fn other_material_types_map_to_pbr() {
+        use loom_scene::material::{MaterialKind, Surface};
+        let pbr = |m: &LoomMaterial| material_from_surface(Some(&Surface::from_material(m)), [0, 0, 0]);
+        // Raytrace: Reflect over black diffuse is coloured chrome; Transparency refracts.
+        let mut rt = LoomMaterial::new("rt");
+        rt.kind = MaterialKind::Raytrace(Box::default());
+        rt.set_color("Diffuse", [0, 0, 0]).unwrap();
+        rt.set_color("Reflect", [255, 0, 0]).unwrap();
+        let chrome = pbr(&rt);
+        assert_eq!(chrome.metallic, 1.0);
+        assert!(chrome.base_color.to_srgba().red > 0.99 && chrome.base_color.to_srgba().green < 0.01);
+        rt.set_color("Reflect", [0, 0, 0]).unwrap();
+        rt.set_color("Transparency", [255, 255, 255]).unwrap();
+        rt.set_parameter("Index of Refr.", 1.5).unwrap();
+        let glass = pbr(&rt);
+        assert!(glass.specular_transmission > 0.99 && (glass.ior - 1.5).abs() < 1e-6);
+        assert_eq!(glass.alpha_mode, AlphaMode::Opaque, "refraction, not blending");
+        assert!(glass.base_color.to_srgba().red > 0.99, "tinted by the (white) transparency colour");
+        // Architectural Raw Diffuse Texture is unlit; Mirror is a metal.
+        let mut arch = LoomMaterial::new("arch");
+        arch.kind = MaterialKind::Architectural(Box::default());
+        arch.set_parameter("Raw Diffuse Texture", 1.0).unwrap();
+        assert!(pbr(&arch).unlit);
+        arch.set_parameter("Template", 11.0).unwrap();
+        assert_eq!(pbr(&arch).metallic, 1.0);
+        // Matte/Shadow blends its shadows over what is behind (the look shader).
+        let mut matte = LoomMaterial::new("matte");
+        matte.kind = MaterialKind::MatteShadow(Box::default());
+        assert_eq!(pbr(&matte).alpha_mode, AlphaMode::Blend);
+        let p = crate::look::params(Some(&Surface::from_material(&matte)));
+        assert_eq!(p.flags, crate::look::MATTE);
+        assert_eq!(p.matte_flags.x, 1.0, "Receive Shadows on");
+        let mut ink = LoomMaterial::new("ink");
+        ink.kind = MaterialKind::InkPaint(Box::default());
+        let p = crate::look::params(Some(&Surface::from_material(&ink)));
+        assert_eq!((p.flags, p.levels), (crate::look::TOON, 2));
+        assert_eq!(p.ink.w, 2.0, "Ink Width 2 with the outline on");
+        assert_eq!(crate::look::params(Some(&Surface::from_material(&LoomMaterial::new("plain")))).flags, 0);
     }
 
     #[test]

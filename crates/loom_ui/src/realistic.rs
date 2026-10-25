@@ -36,7 +36,8 @@ pub enum Gpu {
 fn render_flags(scene: &loom_scene::Scene, id: loom_scene::NodeId) -> loom_bevy::ObjectFlags {
     let Some(n) = scene.node(id) else { return Default::default() };
     let r = scene.render_of(n);
-    loom_bevy::ObjectFlags { cast_shadows: r.cast_shadows, receive_shadows: r.receive_shadows, visible_to_camera: r.visible_to_camera, visibility: scene.render_visibility(id) }
+    let up = scene.object_matrix(id).transform_vector3(glam::Vec3::Z);
+    loom_bevy::ObjectFlags { cast_shadows: r.cast_shadows, receive_shadows: r.receive_shadows, visible_to_camera: r.visible_to_camera, visibility: scene.render_visibility(id), local_up: up.to_array() }
 }
 
 /// Output pixels per bucket side.

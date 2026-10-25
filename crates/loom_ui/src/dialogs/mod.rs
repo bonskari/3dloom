@@ -132,6 +132,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let mut open = true;
     match dialog {
         Dialog::MaterialMap { .. } | Dialog::MaterialBitmap => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::OpenMaterialLibrary | Dialog::MergeMaterialLibrary | Dialog::SaveMaterialLibrary => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::PutToLibrary => material_editor::put_to_library(ctx, app, &mut open),
         Dialog::MaterialBrowser(for_) => material_editor::browser(ctx, app, for_, &mut open),
         Dialog::ReplaceMaterial { kind, map } => material_editor::replace_material(ctx, app, kind, map, &mut open),
         Dialog::MaterialEditorOptions => material_editor::options(ctx, app, &mut open),
