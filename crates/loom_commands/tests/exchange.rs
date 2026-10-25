@@ -2,7 +2,7 @@
 //! effect on the files and the scene; materials and textures both ways.
 
 use loom_commands::{execute, AppState, Command, PrimitiveKind, SelectOp};
-use loom_scene::material::{BitmapMap, MaterialId, StandardMaterial};
+use loom_scene::material::{Map as BitmapMap, MaterialId, StandardMaterial};
 use loom_scene::{Modifier, NodeId, ObjectKind};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -47,8 +47,8 @@ fn assign(s: &mut AppState, id: NodeId, name: &str, map: &Path) -> MaterialId {
     m.specular_level.set(40.0);
     m.glossiness.set(30.0);
     m.opacity.set(80.0);
-    m.diffuse_map = Some(BitmapMap { path: map.to_string_lossy().into_owned(), amount: 100.0, enabled: true });
-    m.bump_map = Some(BitmapMap { path: map.to_string_lossy().into_owned(), amount: 45.0, enabled: true });
+    m.diffuse_map = Some(BitmapMap::bitmap(map.to_string_lossy().into_owned(), 100.0));
+    m.bump_map = Some(BitmapMap::bitmap(map.to_string_lossy().into_owned(), 45.0));
     let mid = loom_scene::material::next_material_id(&s.scene.materials);
     s.scene.materials.insert(mid, m);
     s.scene.node_mut(id).unwrap().material = Some(mid);
