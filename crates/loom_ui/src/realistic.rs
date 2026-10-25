@@ -161,7 +161,7 @@ impl LoomApp {
     /// Renders show geometry, not helpers or camera icons.
     fn renderable(object: &loom_scene::ObjectKind) -> bool {
         use loom_scene::ObjectKind as K;
-        !matches!(object, K::Dummy { .. } | K::Point { .. } | K::IkGoal { .. } | K::Group { .. } | K::Camera { .. } | K::Light(_))
+        !matches!(object, K::Dummy { .. } | K::Point { .. } | K::Tape { .. } | K::Protractor { .. } | K::Compass { .. } | K::Grid { .. } | K::IkGoal { .. } | K::Group { .. } | K::Camera { .. } | K::Light(_))
     }
 
     fn sync_bevy(&mut self) {

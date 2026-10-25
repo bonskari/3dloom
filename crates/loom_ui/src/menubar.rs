@@ -108,6 +108,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 });
                 ui.separator();
                 ui.menu_button("Grids and Snaps", |ui| {
+                    item(ui, app, "Show Home Grid", "Hide Grids Toggle");
+                    cmd(ui, app, "Activate Home Grid", Command::ActivateHomeGrid);
+                    let grid_selected = app.state.selection.iter().any(|id| app.state.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Grid { .. })));
+                    if ui.add_enabled(grid_selected, egui::Button::new("Activate Grid Object")).clicked() {
+                        let _ = app.dispatch(Command::ActivateGridObject);
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
                     item(ui, app, "Snaps Toggle", "Snaps Toggle");
                     item(ui, app, "Angle Snap Toggle", "Angle Snap Toggle");
@@ -117,7 +125,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.separator();
                 cmd(ui, app, "Light Lister...", Command::LightLister);
                 ui.separator();
-                cmd(ui, app, "Measure", Command::Measure);
+                cmd(ui, app, "Measure Distance", Command::MeasureDistance);
             });
             ui.menu_button("Group", |ui| {
                 cmd(ui, app, "Group", Command::Group { name: None });
@@ -239,6 +247,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             }
                         }
                     });
+                });
+                ui.menu_button("Helpers", |ui| {
+                    for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass")] {
+                        if ui.button(label).clicked() {
+                            app.create_category = crate::Category::Helpers;
+                            app.panel_tab = crate::Tab::Create;
+                            app.start_create(Some(crate::CreateKind::Helper(kind)));
+                            ui.close_menu();
+                        }
+                    }
                 });
                 ui.menu_button("Cameras", |ui| {
                     // Turns on the creation tool: drag (Target) or click (Free) in a viewport.

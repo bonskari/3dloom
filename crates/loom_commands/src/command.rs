@@ -1401,7 +1401,14 @@ commands! {
     ConnectBones => "Connect Bones", Loom, "Bone Tools > Connect: a new bone from one bone's tip to another bone's base, which becomes its child." { id: u64, to: u64 };
     CreateEndBone => "Create End Bone", Loom, "Bone Tools > Create End: a nub bone at the tip of the bone." { id: u64 };
     SetBoneFins => "Set Bone Fins", Loom, "Bone Tools > Fin Adjustment Tools: side / front / back fins on the selected bones." { side: Option<bool>, front: Option<bool>, back: Option<bool> };
-    CreateHelper => "Create Helper", Loom, "Helpers > Dummy / Point (or an IK goal): kind \"dummy\", \"point\", \"ikgoal\"." { kind: String, position: [f32; 3], size: f32 };
+    CreateHelper => "Create Helper", Loom, "Helpers > Dummy / Point / Protractor / Compass / Grid (or an IK goal): kind \"dummy\", \"point\", \"protractor\", \"compass\" (size = radius), \"grid\" (size = length and width), \"ikgoal\"." { kind: String, position: [f32; 3], size: f32 };
+    CreateTape => "Create Tape", Loom, "Helpers > Tape: Tape## at position and Tape##.Target at target; returns id and target." { position: [f32; 3], target: [f32; 3] };
+    HelperReadout => "Helper Readout", Loom, "A Tape's Length and World Space Angles (to X/Y/Z axis, to XY/YZ/ZX plane) or a Protractor's object names and Angle." { id: u64 };
+    ProtractorPickObject => "Protractor Pick Object", Loom, "Protractor > Pick Object 1 / 2: the next clicked object (which 1 or 2)." { which: u32 };
+    SetProtractorObject => "Set Protractor Object", Loom, "Set a protractor's object 1 or 2 (null clears it)." { id: u64, which: u32, object: Option<u64> };
+    ActivateGridObject => "Activate Grid Object", Loom, "Tools > Grids and Snaps > Activate Grid Object: the selected grid helper becomes the construction plane in every viewport.";
+    ActivateHomeGrid => "Activate Home Grid", Loom, "Tools > Grids and Snaps > Activate Home Grid: the home grid is the construction plane again.";
+    MeasureDistance => "Measure Distance", Loom, "Tools > Measure Distance: click two points; the status bar shows the distance and the X / Y / Z deltas.";
     Dummy => "Dummy", MainUI, "Create a Dummy helper at the origin (Dummy create mode).";
     HistoryIndependentIkSolver => "History-Independent IK Solver", MainUI, "Animation > IK Solvers > HI Solver: an IK chain from the first selected bone to the last, with a goal at the end joint.";
     IkLimbSolver => "IK Limb Solver", MainUI, "Animation > IK Solvers > IK Limb Solver: a two-bone chain on the selected bones.";

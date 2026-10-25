@@ -9,6 +9,7 @@ pub mod gizmo;
 mod hotkeys;
 pub mod icons;
 pub mod label_menus;
+mod helper_overlay;
 mod light_overlay;
 pub mod live;
 pub mod main_toolbar;
@@ -137,6 +138,13 @@ pub enum CreateKind {
 pub enum HelperKind {
     Dummy,
     Point,
+    /// Dragged corner to corner.
+    Grid,
+    /// Dragged from the tape to its target.
+    Tape,
+    Protractor,
+    /// Dragged out to its radius.
+    Compass,
 }
 
 impl HelperKind {
@@ -144,13 +152,32 @@ impl HelperKind {
         match self {
             HelperKind::Dummy => "dummy",
             HelperKind::Point => "point",
+            HelperKind::Grid => "grid",
+            HelperKind::Tape => "tape",
+            HelperKind::Protractor => "protractor",
+            HelperKind::Compass => "compass",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            HelperKind::Dummy => "Dummy",
+            HelperKind::Point => "Point",
+            HelperKind::Grid => "Grid",
+            HelperKind::Tape => "Tape",
+            HelperKind::Protractor => "Protractor",
+            HelperKind::Compass => "Compass",
         }
     }
     pub fn default_size(self) -> f32 {
         match self {
             HelperKind::Dummy => 10.0,
             HelperKind::Point => 20.0,
+            HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass => 0.0,
         }
+    }
+    /// Created by a drag (a session) rather than a click.
+    pub fn dragged(self) -> bool {
+        matches!(self, HelperKind::Grid | HelperKind::Tape | HelperKind::Compass)
     }
 }
 
@@ -216,6 +243,8 @@ pub struct LoomApp {
     pub create: Option<CreateSession>,
     /// A Target camera being dragged out.
     pub camera_create: Option<create_tool::CameraSession>,
+    /// Create > Helpers > Grid / Compass being dragged out.
+    pub helper_create: Option<create_tool::HelperSession>,
     /// A biped being dragged out.
     pub biped_create: Option<create_tool::BipedSession>,
     /// Create Biped rollout: the structure the next biped gets.
@@ -417,6 +446,7 @@ impl LoomApp {
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
             camera_create: None,
+            helper_create: None,
             biped_create: None,
             biped_defaults: loom_scene::biped::BipedStructure::new(1.0),
             last_biped: None,

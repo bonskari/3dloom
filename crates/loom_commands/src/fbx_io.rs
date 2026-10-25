@@ -199,7 +199,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         .copied()
         .filter(|id| {
             state.scene.node(*id).is_some_and(|n| match &n.object {
-                ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_) => true,
+                ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_) => true,
                 _ => state.scene.eval_mesh(*id).value.mesh.face_count() > 0 || n.object.display_output().face_count() > 0,
             })
         })
@@ -225,7 +225,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
             },
             ObjectKind::Group { .. } => FbxKind::Empty,
             ObjectKind::Bone { length, width, height, .. } => FbxKind::Bone { length: length.get(), size: width.get().max(height.get()) },
-            ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } => FbxKind::Empty,
+            ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::Tape { .. } | ObjectKind::Protractor { .. } | ObjectKind::Compass { .. } | ObjectKind::Grid { .. } | ObjectKind::IkGoal { .. } => FbxKind::Empty,
             // A biped's centre of mass is the skeleton's root joint.
             ObjectKind::Biped(b) => FbxKind::Bone { length: 0.0, size: loom_scene::biped::root_size(b.height.get()) },
             _ => {

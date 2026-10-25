@@ -206,6 +206,11 @@ pub enum PickMode {
     /// Working Pivot > Place Pivot To: View (a point in the screen plane) / Surface.
     WorkingPivotView,
     WorkingPivotSurface,
+    /// Protractor > Pick Object 1 / 2: the clicked object.
+    ProtractorObject(u8),
+    /// Tools > Measure Distance: first and second point.
+    MeasureDistanceA,
+    MeasureDistanceB,
 }
 
 /// Paint Deformation brushes.
@@ -1337,6 +1342,11 @@ pub struct AppState {
     pub normal_align: Option<NormalAlignPicks>,
     /// Spacing Tool > Pick Points: the two picked path ends.
     pub spacing_points: [Option<Vec3>; 2],
+    /// Tools > Grids and Snaps > Activate Grid Object: the grid that is the
+    /// construction plane (None: the home grid). Read it with `active_grid()`.
+    pub active_grid: Option<NodeId>,
+    /// Tools > Measure Distance: the first picked point.
+    pub measure_from: Option<Vec3>,
     pub selection_filter: SelectionFilter,
     /// Main Toolbar > Window/Crossing: true = Window (fully enclosed only).
     pub window_selection: bool,
@@ -1629,6 +1639,8 @@ impl AppState {
             normal_align_source: None,
             normal_align: None,
             spacing_points: [None, None],
+            active_grid: None,
+            measure_from: None,
             selection_filter: SelectionFilter::All,
             window_selection: false,
             selection_region: SelectionRegion::Rectangular,

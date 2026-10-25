@@ -543,6 +543,44 @@ pub enum ObjectKind {
         axis_tripod: Param<bool>,
         cross: Param<bool>,
         box_: Param<bool>,
+        /// A small X at the centre.
+        #[serde(default = "no")]
+        center_marker: Param<bool>,
+        /// Size in pixels at the point instead of world units.
+        #[serde(default = "no")]
+        constant_screen_size: Param<bool>,
+        /// Drawn over everything instead of hidden behind geometry.
+        #[serde(default = "no")]
+        draw_on_top: Param<bool>,
+    },
+    /// Helpers > Tape: a tape measure from this node to its target node
+    /// (aimed down local -Z at it by a LookAt constraint, like a target camera).
+    Tape {
+        target: Option<NodeId>,
+        /// Specify Length: the tape line has `length` instead of reaching the target.
+        specify_length: Param<bool>,
+        length: Param<f32>,
+    },
+    /// Helpers > Protractor: the angle at this node between the pivots of two picked objects.
+    Protractor {
+        object1: Option<NodeId>,
+        object2: Option<NodeId>,
+    },
+    /// Helpers > Compass: a non-rendering compass rose (N along local +Y).
+    Compass {
+        show_rose: Param<bool>,
+        radius: Param<f32>,
+    },
+    /// Helpers > Grid: a user grid; the active one is the construction plane.
+    Grid {
+        length: Param<f32>,
+        width: Param<f32>,
+        /// Grid Spacing (the smallest square).
+        spacing: Param<f32>,
+        /// Active Color: 0 Gray, 1 Object Color, 2 Home Color, 3 Home Intensity.
+        color: Param<u32>,
+        /// Display: 0 XY Plane, 1 YZ Plane, 2 ZX Plane.
+        plane: Param<u32>,
     },
     /// The goal of an IK chain (Hierarchy > IK), drawn like a Point.
     IkGoal {
@@ -604,6 +642,51 @@ pub fn bone_axis_of(dir: Vec3) -> u32 {
         2
     } else {
         5
+    }
+}
+
+/// Helpers > Compass: a flat four-pointed star of `radius` in local XY, N along +Y.
+pub fn compass_rose_mesh(radius: f32) -> Mesh {
+    let r = radius.max(1e-3);
+    let w = r * 0.18;
+    let mut polys = Vec::new();
+    for (dx, dy) in [(0.0f32, 1.0f32), (1.0, 0.0), (0.0, -1.0), (-1.0, 0.0)] {
+        let dir = Vec3::new(dx, dy, 0.0);
+        let side = Vec3::new(dy, -dx, 0.0) * w;
+        polys.push(vec![Vec3::ZERO, dir * w - side, dir * r]);
+        polys.push(vec![Vec3::ZERO, dir * r, dir * w + side]);
+    }
+    loom_mesh::build_merged(&polys)
+}
+
+/// Helpers > Grid: thin strips along the outline and the two main axes of
+/// the displayed plane (0 XY, 1 YZ, 2 ZX), so the grid is picked by its
+/// lines and never hides what lies behind it.
+pub fn grid_plane_mesh(length: f32, width: f32, plane: u32) -> Mesh {
+    let (u, v) = grid_plane_axes(plane);
+    let (hl, hw) = (length.max(1e-3) * 0.5, width.max(1e-3) * 0.5);
+    let t = hl.min(hw) * 0.01;
+    // The strips never share a vertex (each is its own patch).
+    let g = (t * 0.05).max(1e-3);
+    let quad = |a: (f32, f32), b: (f32, f32)| vec![u * a.0 + v * a.1, u * b.0 + v * a.1, u * b.0 + v * b.1, u * a.0 + v * b.1];
+    loom_mesh::build_merged(&[
+        quad((-hw, -hl), (hw, -hl + t)),
+        quad((-hw, hl - t), (hw, hl)),
+        quad((-hw, -hl + t + g), (-hw + t, hl - t - g)),
+        quad((hw - t, -hl + t + g), (hw, hl - t - g)),
+        quad((-hw + t + g, -t * 0.5), (hw - t - g, t * 0.5)),
+        quad((-t * 0.5, -hl + t + g), (t * 0.5, -t * 0.5 - g)),
+        quad((-t * 0.5, t * 0.5 + g), (t * 0.5, hl - t - g)),
+    ])
+}
+
+/// The local axes spanning a grid's displayed plane (0 XY, 1 YZ, 2 ZX), as
+/// (width axis, length axis); their cross product is the plane normal.
+pub fn grid_plane_axes(plane: u32) -> (Vec3, Vec3) {
+    match plane {
+        1 => (Vec3::Y, Vec3::Z),
+        2 => (Vec3::Z, Vec3::X),
+        _ => (Vec3::X, Vec3::Y),
     }
 }
 
@@ -820,11 +903,25 @@ impl ObjectKind {
         Self::Dummy { size: p(size) }
     }
     pub fn point(size: f32) -> Self {
-        Self::Point { size: p(size), axis_tripod: p(true), cross: p(true), box_: p(false) }
+        Self::Point { size: p(size), axis_tripod: p(true), cross: p(true), box_: p(false), center_marker: p(false), constant_screen_size: p(false), draw_on_top: p(false) }
+    }
+    /// A tape of length 0 whose target node is `target`.
+    pub fn tape(target: NodeId) -> Self {
+        Self::Tape { target: Some(target), specify_length: p(false), length: p(0.0) }
+    }
+    pub fn protractor() -> Self {
+        Self::Protractor { object1: None, object2: None }
+    }
+    pub fn compass(radius: f32) -> Self {
+        Self::Compass { show_rose: p(true), radius: p(radius) }
+    }
+    /// A grid of `length` × `width` with 10-unit spacing showing its XY plane.
+    pub fn grid(length: f32, width: f32) -> Self {
+        Self::Grid { length: p(length), width: p(width), spacing: p(10.0), color: p(0), plane: p(0) }
     }
     /// Helpers and other non-geometry nodes (Dummy, Point, IK goal, Group, Camera).
     pub fn is_helper(&self) -> bool {
-        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
+        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
     }
     pub fn is_bone(&self) -> bool {
         matches!(self, Self::Bone { .. })
@@ -1004,6 +1101,10 @@ impl ObjectKind {
             Self::Bone { .. } => "Bone",
             Self::Dummy { .. } => "Dummy",
             Self::Point { .. } => "Point",
+            Self::Tape { .. } => "Tape",
+            Self::Protractor { .. } => "Protractor",
+            Self::Compass { .. } => "Compass",
+            Self::Grid { .. } => "Grid",
             Self::IkGoal { .. } => "IK Chain",
             Self::Biped(_) => "Biped",
             Self::Light(l) => l.base_name(),
@@ -1062,6 +1163,8 @@ impl ObjectKind {
             (Self::Torus { .. }, "Smooth") => Some(&["All", "Sides", "None", "Segments"]),
             (Self::Sphere { .. }, "Chop/Squash") => Some(&["Chop", "Squash"]),
             (Self::Camera { .. }, "FOV Direction") => Some(&crate::camera::FOV_DIRECTIONS),
+            (Self::Grid { .. }, "Active Color") => Some(&["Gray", "Object Color", "Home Color", "Home Intensity"]),
+            (Self::Grid { .. }, "Display") => Some(&["XY Plane", "YZ Plane", "ZX Plane"]),
             (Self::Light(l), name) => l.choices(name),
             _ => None,
         }
@@ -1158,7 +1261,14 @@ impl ObjectKind {
                 ("Bone On", b(bone_on)), ("Freeze Length", b(freeze_length)), ("Stretch", i(stretch)), ("Stretch Axis", i(stretch_axis)),
             ],
             Self::Dummy { size } => vec![("Size", f(size))],
-            Self::Point { size, axis_tripod, cross, box_ } => vec![("Size", f(size)), ("Axis Tripod", b(axis_tripod)), ("Cross", b(cross)), ("Box", b(box_))],
+            Self::Point { size, axis_tripod, cross, box_, center_marker, constant_screen_size, draw_on_top } => vec![
+                ("Center Marker", b(center_marker)), ("Axis Tripod", b(axis_tripod)), ("Cross", b(cross)), ("Box", b(box_)),
+                ("Size", f(size)), ("Constant Screen Size", b(constant_screen_size)), ("Draw On Top", b(draw_on_top)),
+            ],
+            Self::Tape { specify_length, length, .. } => vec![("Length", f(length)), ("Specify Length", b(specify_length))],
+            Self::Protractor { .. } => Vec::new(),
+            Self::Compass { show_rose, radius } => vec![("Show Compass Rose", b(show_rose)), ("Radius", f(radius))],
+            Self::Grid { length, width, spacing, color, plane } => vec![("Length", f(length)), ("Width", f(width)), ("Grid", f(spacing)), ("Active Color", i(color)), ("Display", i(plane))],
             Self::IkGoal { .. } => Vec::new(),
             Self::Biped(bs) => {
                 let mut v = vec![("Arms", b(&bs.arms))];
@@ -1327,6 +1437,18 @@ impl ObjectKind {
             (Self::Point { axis_tripod, .. }, "Axis Tripod") => { bl(axis_tripod); ok }
             (Self::Point { cross, .. }, "Cross") => { bl(cross); ok }
             (Self::Point { box_, .. }, "Box") => { bl(box_); ok }
+            (Self::Point { center_marker, .. }, "Center Marker") => { bl(center_marker); ok }
+            (Self::Point { constant_screen_size, .. }, "Constant Screen Size") => { bl(constant_screen_size); ok }
+            (Self::Point { draw_on_top, .. }, "Draw On Top") => { bl(draw_on_top); ok }
+            (Self::Tape { length, .. }, "Length") => { fl(length, 0.0); ok }
+            (Self::Tape { specify_length, .. }, "Specify Length") => { bl(specify_length); ok }
+            (Self::Compass { show_rose, .. }, "Show Compass Rose") => { bl(show_rose); ok }
+            (Self::Compass { radius, .. }, "Radius") => { fl(radius, 0.001); ok }
+            (Self::Grid { length, .. }, "Length") => { fl(length, 0.001); ok }
+            (Self::Grid { width, .. }, "Width") => { fl(width, 0.001); ok }
+            (Self::Grid { spacing, .. }, "Grid") => { fl(spacing, 0.001); ok }
+            (Self::Grid { color, .. }, "Active Color") => { color.set((value.round().max(0.0) as u32).min(3)); ok }
+            (Self::Grid { plane, .. }, "Display") => { plane.set((value.round().max(0.0) as u32).min(2)); ok }
             (kind, name) => Err(format!("{} has no parameter `{name}`", kind.base_name())),
         }
     }
@@ -1431,6 +1553,12 @@ impl ObjectKind {
             // Point: a small cube a tenth of its size; the tripod/cross draw as an overlay.
             Self::Point { size, .. } => Cow::Owned(box_primitive(Vec3::splat(size.get() * 0.1))),
             Self::IkGoal { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
+            // Tape and Protractor: a small box at the pivot to pick; the lines draw as an overlay.
+            Self::Tape { .. } | Self::Protractor { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
+            // Compass: the four-pointed rose as a flat star (N along +Y).
+            Self::Compass { radius, .. } => Cow::Owned(compass_rose_mesh(radius.get())),
+            // Grid: its displayed plane as a flat rectangle; the grid lines draw as an overlay.
+            Self::Grid { length, width, plane, .. } => Cow::Owned(grid_plane_mesh(length.get(), width.get(), plane.get())),
             // The centre of mass: an octahedron.
             Self::Biped(b) => Cow::Owned(loom_mesh::standard_primitives::geosphere_primitive(crate::biped::root_size(b.height.get()), 1, loom_mesh::standard_primitives::GeoBase::Octa)),
             Self::Boolean { a, b, display, .. } => {
@@ -1722,8 +1850,12 @@ impl Node {
             slot.instance_of = slot.instance_of.and_then(|(id, i)| f(id).map(|id| (id, i)));
             slot.modifier.remap_ids(f);
         }
-        if let ObjectKind::Camera { target, .. } = &mut self.object {
+        if let ObjectKind::Camera { target, .. } | ObjectKind::Tape { target, .. } = &mut self.object {
             *target = target.and_then(f);
+        }
+        if let ObjectKind::Protractor { object1, object2 } = &mut self.object {
+            *object1 = object1.and_then(f);
+            *object2 = object2.and_then(f);
         }
         if let ObjectKind::Light(l) = &mut self.object {
             l.target = l.target.and_then(f);

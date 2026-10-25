@@ -1368,6 +1368,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Some(PickMode::SplineBind) => crate::spline::bind_at(state, Vec3::from(point)),
             Some(PickMode::TrimExtendModifier) => crate::spline::trim_extend_click(state, point),
+            Some(PickMode::MeasureDistanceA | PickMode::MeasureDistanceB) => crate::helpers::measure_pick(state, Vec3::from(point)),
             Some(PickMode::WorkingPivotView) => {
                 state.pick_mode = None;
                 state.working_pivot.origin = Vec3::from(point);
@@ -2506,8 +2507,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::NormalAlignSource | PickMode::NormalAlignTarget | PickMode::AlignCamera | PickMode::WorkingPivotSurface) => {
                     return Err("this pick mode needs a surface pick (Pick Surface)".into());
                 }
-                Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex | PickMode::WorkingPivotView) => {
+                Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex | PickMode::WorkingPivotView | PickMode::MeasureDistanceA | PickMode::MeasureDistanceB) => {
                     return Err("this pick mode needs a point pick (Pick Point)".into());
+                }
+                Some(PickMode::ProtractorObject(which)) => {
+                    state.pick_mode = None;
+                    let protractor = state.selection.iter().copied().find(|p| state.scene.node(*p).is_some_and(|n| matches!(n.object, ObjectKind::Protractor { .. }))).ok_or("select the protractor first")?;
+                    return crate::helpers::set_protractor_object(state, protractor, which as u32, Some(id));
                 }
                 Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB | PickMode::SwiftLoop | PickMode::BridgeEdge1 | PickMode::BridgeEdge2) => {
                     return Err("this pick mode needs a sub-object pick (Pick Sub)".into());
@@ -2984,6 +2990,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. }) => crate::biped::execute(state, c),
         c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
+        c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance) => crate::helpers::execute(state, c),
         // Every remaining variant is an Unwrap UVW group command.
         other => crate::unwrap::execute(state, other),
     }
@@ -3650,6 +3657,8 @@ fn delete(state: &mut AppState, delete_isolated: Option<bool>) -> Result<Value, 
     }
     if state.selection_mode == SelectionMode::Object {
         let ids: Vec<NodeId> = with_group_members(state, state.selection.iter().copied().collect());
+        // Deleting either end of a tape deletes the tape.
+        let ids = crate::helpers::with_tape_partners(state, ids);
         if ids.is_empty() {
             return Ok(json!({}));
         }
