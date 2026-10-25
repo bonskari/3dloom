@@ -787,6 +787,10 @@ impl LoomApp {
             let visibility = n.visibility.as_ref().map(|p| p.get().clamp(0.08, 1.0)).unwrap_or(1.0);
             // Skin > Display > Show Colored Faces (in Edit Envelopes): the faces shade by the current bone's weight.
             let mut vertex_colors = d.vertex_colors;
+            // A Vertex Color map in the material's Diffuse Color shows the mesh's colours.
+            if has_material && matches!(self.state.scene.node_surfaces(id), Some(loom_scene::material::Surfaces::Single(s)) if s.shows_vertex_colors()) {
+                vertex_colors = true;
+            }
             let mut color = color;
             // Vertex Channel Display shows the vertex colours themselves,
             // lit only with Shaded on.

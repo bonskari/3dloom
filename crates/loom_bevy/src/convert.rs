@@ -84,6 +84,13 @@ impl MeshData {
     }
 }
 
+/// The mesh's vertex colours (map channel 0) per triangulated corner, in
+/// `mesh_data`'s vertex order, linear.
+pub fn vertex_colors(mesh: &loom_mesh::Mesh) -> Vec<[f32; 4]> {
+    let (verts, _) = loom_render::triangulate_with_face_normals(mesh, [1.0; 4], true);
+    verts.iter().map(|v| v.color).collect()
+}
+
 /// `mesh` split by face material ID (0-based): one triangulation per ID in use.
 pub fn mesh_data_by_id(mesh: &loom_mesh::Mesh) -> Vec<(u16, MeshData)> {
     let ids: std::collections::BTreeSet<u16> = mesh.faces().iter().filter(|f| !f.hidden).map(|f| f.material_id).collect();

@@ -452,6 +452,14 @@ impl BevyRenderer {
                 };
                 let d = if back { d.flipped() } else { d };
                 let mut mesh = d.to_bevy();
+                if surface.as_ref().is_some_and(|s| s.shows_vertex_colors()) {
+                    // A Vertex Color map: the mesh's colours multiply the (white) base colour.
+                    let mut part = src.clone();
+                    for f in part.faces_mut() {
+                        f.hidden |= id.is_some_and(|id| f.material_id != id);
+                    }
+                    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, convert::vertex_colors(&part));
+                }
                 if mat.normal_map_texture.is_some() || mat.anisotropy_strength > 0.0 {
                     // A normal map and an anisotropic highlight need tangents (from the UVs).
                     let _ = mesh.generate_tangents();

@@ -1402,9 +1402,30 @@ impl Surface {
             unlit: false,
             matte: None,
             toon: None,
-            falloff: None,
+            falloff: on(&m.diffuse_map).filter(|d| d.kind == MapType::Falloff).map(|d| {
+                let e = &d.extra;
+                FalloffLook {
+                    kind: e.falloff_type,
+                    side: d.color(1),
+                    // The world axes; the view for the camera and object axes (the renderer has no object frame).
+                    direction: match e.falloff_direction {
+                        7 => Some(Vec3::X),
+                        8 => Some(Vec3::Y),
+                        9 => Some(Vec3::Z),
+                        _ => None,
+                    },
+                    near: e.near_distance,
+                    far: e.far_distance,
+                    ior: if e.override_ior { e.ior } else { 1.5 },
+                }
+            }),
             split: None,
         }
+    }
+
+    /// A Vertex Color map in Diffuse Color: the mesh's vertex colours show.
+    pub fn shows_vertex_colors(&self) -> bool {
+        self.diffuse_map.as_ref().is_some_and(|d| d.kind == MapType::VertexColor)
     }
 
     /// A surface of a material that draws with its own values: Standard,
@@ -1744,6 +1765,10 @@ fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
                 mix.colors.swap(0, 1);
                 mix.sub_maps.swap(0, 1);
                 mix.sub_maps[2] = Some(Box::new(m.clone()));
+                // The Blend's Mixing curve shapes the mask's transition.
+                mix.extra.use_curve = p.use_curve;
+                mix.extra.upper = p.upper;
+                mix.extra.lower = p.lower;
             }
             None => mix.params.mix_amount = t * 100.0,
         }
@@ -1982,6 +2007,23 @@ mod tests {
         assert_eq!((s.diffuse, s.toon.as_ref().unwrap().paint_levels), (Vec3::X, 4));
         let s = single_of(&lib, 2);
         assert_eq!(s.matte.as_ref().unwrap().shadow_brightness, 0.3);
+    }
+
+    #[test]
+    fn falloff_and_vertex_color_maps_tell_the_renderers() {
+        let mut m = StandardMaterial::new("f");
+        let mut f = Map::new(MapType::Falloff, 100.0);
+        f.set_parameter("Falloff Type", 2.0).unwrap();
+        f.set_parameter("Falloff Direction", 9.0).unwrap();
+        f.set_color("Color #2", [0, 0, 255]).ok();
+        m.diffuse_map = Some(f.clone());
+        let look = Surface::from_standard(&m).falloff.expect("a Falloff look");
+        assert_eq!((look.kind, look.direction), (2, Some(Vec3::Z)));
+        assert_eq!(look.side, f.color(1));
+        m.diffuse_map.as_mut().unwrap().enabled = false;
+        assert!(Surface::from_standard(&m).falloff.is_none(), "an unchecked map shows nothing");
+        m.diffuse_map = Some(Map::new(MapType::VertexColor, 100.0));
+        assert!(Surface::from_standard(&m).shows_vertex_colors());
     }
 
     #[test]
