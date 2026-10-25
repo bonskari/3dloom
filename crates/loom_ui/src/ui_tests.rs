@@ -3048,9 +3048,18 @@ fn texts_in(h: &Harness, within: egui::Rect) -> Vec<(String, egui::Rect)> {
     out
 }
 
-/// Clicks a button of an options window, saying what the window shows if it is not there.
+/// Clicks a control of an options window, scrolling its options down to it
+/// first; says what the window shows if it is not there.
 fn click_option(h: &mut Harness, label: &str, id: &str) {
     let win = options_rect(h, id);
+    for _ in 0..12 {
+        if h.text_rect(label, win).is_some() {
+            break;
+        }
+        let m = h.mods;
+        h.run(vec![egui::Event::PointerMoved(win.center()), egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -120.0), modifiers: m }]);
+        h.frames(2);
+    }
     if h.text_rect(label, win).is_none() {
         panic!("{label:?} is not in {id} {win:?}: {:?}", texts_in(h, win));
     }
@@ -3083,6 +3092,7 @@ fn fbx_export_goes_through_its_options_dialog() {
     assert!(h.text_rect("User defined", SCREEN).is_some(), "the preset shows it was changed");
     click_option(&mut h, "OK", "fbx_export_options");
     assert_eq!(h.app.state.dialog, None);
+    assert!(path.exists(), "OK wrote the file ({})", h.app.state.status_prompt);
     let doc = loom_fbx::read(&std::fs::read(&path).unwrap(), 0.01).unwrap();
     let loom_fbx::FbxKind::Mesh { mesh, .. } = &doc.nodes[0].kind else { panic!("{:?}", doc.nodes[0].kind) };
     assert_eq!(mesh.face_count(), 12, "triangulated");
