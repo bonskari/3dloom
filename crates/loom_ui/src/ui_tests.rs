@@ -3257,14 +3257,17 @@ fn a_second_empty_click_at_polygon_level_releases_the_object_and_the_level() {
 #[test]
 fn a_checker_sub_material_shows_checks_in_the_viewport() {
     let mut h = Harness::new();
-    poly_box(&mut h);
+    // With the editor open, as a person does it.
+    material_editor(&mut h);
     let node = *h.app.state.selection.iter().next().unwrap();
     for c in [
         Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) },
         Command::MultiSubSetNumber { number: 3 },
+        Command::MultiSubSetEntry { index: 0, id: None, name: Some("Red".into()), enabled: None, color: Some([200, 30, 30]) },
         Command::MaterialEditorGoToSub { index: 2 },
         Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() },
         Command::SetMapParameter { name: "Tiling U".into(), value: 3.0 },
+        Command::SetMapParameter { name: "Tiling V".into(), value: 3.0 },
         Command::SetMapColor { which: "Color #2".into(), rgb: [240, 200, 40] },
         Command::MaterialEditorGoToParent,
         Command::SetMaterialParameter { slot: None, name: "Show Map in Viewport".into(), value: 1.0 },
