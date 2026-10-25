@@ -329,7 +329,7 @@ fn vertex_screen(app: &LoomApp, projection: &Projection, node: NodeId, v: u32) -
 pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hover: Option<egui::Pos2>) {
     let stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255));
     draw_branch_path(painter, projection);
-    draw_skin(painter, app, projection);
+    crate::skin_view::draw(painter, app, projection);
     draw_normals(painter, app, projection);
     draw_hsds_cage(painter, app, projection);
     draw_vertex_paint_faces(painter, app, projection);
@@ -756,135 +756,9 @@ fn draw_hsds_cage(painter: &egui::Painter, app: &LoomApp, projection: &Projectio
     }
 }
 
-fn draw_skin(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
-    if !app.state.skin_active() {
-        return;
-    }
-    let Some((_, weights)) = loom_commands::skin::current_bone_weights(&app.state) else { return };
-    let display = loom_commands::skin::entry(&app.state).map(|e| e.data.display).unwrap_or_default();
-    if app.state.skin_filter_envelopes && !display.no_envelopes {
-        for env in loom_commands::skin::shown_envelopes_world(&app.state) {
-            draw_envelope(painter, app, projection, &env);
-        }
-    }
-    let selection: std::collections::BTreeSet<u32> = loom_commands::skin::selection(&app.state).into_iter().collect();
-    if app.state.skin_filter_vertices {
-        let Some((_, positions)) = loom_commands::skin::vertex_world_positions(&app.state) else { return };
-        for (i, (w, q)) in weights.iter().zip(&positions).enumerate() {
-            let Some(p) = projection.screen(*q) else { continue };
-            let selected = selection.contains(&(i as u32));
-            // Show Colored Vertices: the current bone's weight from blue (0) to red (1).
-            let colour = if display.colored_vertices {
-                let c = loom_commands::skin::weight_color(*w);
-                egui::Color32::from_rgb(c[0], c[1], c[2])
-            } else {
-                egui::Color32::from_rgb(40, 40, 40)
-            };
-            if selected {
-                painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(7.0, 7.0)), 0.0, egui::Color32::WHITE);
-            }
-            painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(if selected { 5.0 } else { 4.0 }, if selected { 5.0 } else { 4.0 })), 0.0, colour);
-        }
-    }
-}
-
-/// One envelope capsule (inner red, outer purple); the current bone's with
-/// its cross-section rings and end handles, the others dimmed.
-fn draw_envelope(painter: &egui::Painter, app: &LoomApp, projection: &Projection, env: &loom_commands::skin::EnvelopeWorld) {
-    let (start, end, inner, outer) = (env.start, env.end, env.inner, env.outer);
-    let axis = (end - start).normalize_or_zero();
-    let (u, v) = {
-        let a = if axis.x.abs() < 0.9 { glam::Vec3::X } else { glam::Vec3::Y };
-        let u = axis.cross(a).normalize_or_zero();
-        (u, axis.cross(u))
-    };
-    let ring = |centre: glam::Vec3, r: f32, colour: egui::Color32| {
-        let pts: Vec<Option<egui::Pos2>> = (0..24)
-            .map(|i| {
-                let t = i as f32 / 24.0 * std::f32::consts::TAU;
-                projection.screen(centre + (u * t.cos() + v * t.sin()) * r)
-            })
-            .collect();
-        for i in 0..24 {
-            if let (Some(a), Some(b)) = (pts[i], pts[(i + 1) % 24]) {
-                painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour));
-            }
-        }
-    };
-    let (red, purple) = if env.current { (egui::Color32::from_rgb(230, 60, 60), egui::Color32::from_rgb(170, 80, 220)) } else { (egui::Color32::from_rgb(140, 70, 70), egui::Color32::from_rgb(110, 70, 140)) };
-    ring(start, inner[0], red);
-    ring(end, inner[1], red);
-    ring(start, outer[0], purple);
-    ring(end, outer[1], purple);
-    if env.current && app.state.skin_filter_cross_sections {
-        for (t, i, o) in &env.cross_sections {
-            let c = start.lerp(end, *t);
-            ring(c, *i, red);
-            ring(c, *o, purple);
-        }
-    }
-    // Four lines along the capsule for each radius.
-    for (r0, r1, colour) in [(inner[0], inner[1], red), (outer[0], outer[1], purple)] {
-        for dir in [u, v, -u, -v] {
-            if let (Some(a), Some(b)) = (projection.screen(start + dir * r0), projection.screen(end + dir * r1)) {
-                painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour));
-            }
-        }
-    }
-    if env.current {
-        if let (Some(a), Some(b)) = (projection.screen(start), projection.screen(end)) {
-            let handle = app.state.skin_handle;
-            painter.rect_filled(egui::Rect::from_center_size(a, egui::vec2(7.0, 7.0)), 0.0, if handle == Some(0) { egui::Color32::WHITE } else { red });
-            painter.rect_filled(egui::Rect::from_center_size(b, egui::vec2(7.0, 7.0)), 0.0, if handle == Some(1) { egui::Color32::WHITE } else { red });
-        }
-    }
-}
-
-/// Click / region selection at the Envelope level: vertices (Select
-/// Vertices on, Backface Cull Vertices honoured), else a click on a bone
-/// makes it current; a click on nothing clears the vertex selection.
+/// Click / region selection at the Envelope level (see `skin_view::pick`).
 pub fn skin_pick(app: &mut LoomApp, projection: &Projection, region: Option<&crate::region::Region>, p: egui::Pos2, mods: loom_input::Modifiers) -> bool {
-    if !loom_commands::skin::picks_vertices(&app.state) {
-        return false;
-    }
-    let pts: Vec<Option<egui::Pos2>> = if app.state.skin_filter_vertices {
-        let Some((_, positions)) = loom_commands::skin::vertex_world_positions(&app.state) else { return false };
-        let normals = if app.state.skin_backface_cull { loom_commands::skin::vertex_world_normals(&app.state) } else { None };
-        positions
-            .iter()
-            .enumerate()
-            .map(|(i, q)| {
-                let back = normals.as_ref().is_some_and(|n| n[i].dot(projection.toward_viewer_at(*q)) < 0.0);
-                if back { None } else { projection.screen(*q) }
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let hits: Vec<u32> = match region {
-        Some(r) => pts.iter().enumerate().filter_map(|(i, sp)| sp.filter(|sp| r.contains(*sp)).map(|_| i as u32)).collect(),
-        None => pts
-            .iter()
-            .enumerate()
-            .filter_map(|(i, sp)| sp.map(|sp| (i as u32, sp.distance(p))))
-            .filter(|(_, d)| *d <= 8.0)
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(i, _)| vec![i])
-            .unwrap_or_default(),
-    };
-    if hits.is_empty() && region.is_none() {
-        // A click on a bone makes it the current bone.
-        if let Some(bone) = pick_bone(app, p, projection) {
-            let _ = app.dispatch(Command::SkinSelectBone { id: bone.0 });
-            return true;
-        }
-    }
-    let op = if mods.ctrl { loom_commands::SelectOp::Add } else if mods.alt { loom_commands::SelectOp::Subtract } else { loom_commands::SelectOp::Replace };
-    if hits.is_empty() && op != loom_commands::SelectOp::Replace {
-        return true;
-    }
-    let _ = app.dispatch(Command::SkinSelectVertices { ids: hits, op });
-    true
+    crate::skin_view::pick(app, projection, region, p, mods)
 }
 
 /// Paint Weights: LMB drags dab weight onto the current bone (one undo entry
@@ -922,7 +796,9 @@ pub fn skin_paint(app: &mut LoomApp, ctx: &egui::Context, painter: &egui::Painte
             }
         } else if pointer.delta() != egui::Vec2::ZERO || pointer.button_pressed(egui::PointerButton::Primary) {
             if let Some((_, at, _)) = hit(app, p) {
-                let _ = app.dispatch(Command::SkinPaintStroke { points: vec![at.to_array()], erase: mods.alt, pressure: None });
+                // A pen's pressure (a touch event's force) scales the dab with Enable Pressure Sensitivity.
+                let force = ctx.input(|i| i.events.iter().rev().find_map(|e| if let egui::Event::Touch { force, .. } = e { *force } else { None }));
+                let _ = app.dispatch(Command::SkinPaintStroke { points: vec![at.to_array()], erase: mods.alt, pressure: force.map(|f| vec![f]) });
             }
         }
         ctx.request_repaint();
@@ -953,24 +829,6 @@ pub fn skin_paint(app: &mut LoomApp, ctx: &egui::Context, painter: &egui::Painte
         }
     }
     true
-}
-
-/// The Skin bone whose projected segment is nearest the pointer (within 10 px).
-fn pick_bone(app: &LoomApp, p: egui::Pos2, projection: &Projection) -> Option<NodeId> {
-    let e = loom_commands::skin::entry(&app.state).ok()?;
-    let mut best: Option<(f32, NodeId)> = None;
-    for b in &e.data.bones {
-        let w = app.state.scene.world_matrix(b.node);
-        let len = app.state.scene.node(b.node).and_then(|n| n.object.bone_length()).unwrap_or(1.0);
-        let (Some(a), Some(c)) = (projection.screen(w.transform_point3(glam::Vec3::ZERO)), projection.screen(w.transform_point3(glam::Vec3::X * len))) else { continue };
-        let ab = c - a;
-        let t = if ab.length_sq() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
-        let d = (a + ab * t).distance(p);
-        if d <= 10.0 && best.is_none_or(|(bd, _)| d < bd) {
-            best = Some((d, b.node));
-        }
-    }
-    best.map(|(_, id)| id)
 }
 
 pub fn ffd_points_on_screen(app: &LoomApp, projection: &Projection) -> Option<Vec<Option<egui::Pos2>>> {

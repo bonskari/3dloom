@@ -37,6 +37,7 @@ pub mod exchange_options;
 pub mod scene_dialogs;
 pub mod unwrap_dialogs;
 pub mod rig_dialogs;
+pub mod skin_dialogs;
 pub mod track_view_dialogs;
 pub mod vertex_paint;
 
@@ -176,9 +177,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ObjImportOptions => exchange_options::obj_import(ctx, app, &mut open),
         Dialog::ObjExportOptions => exchange_options::obj_export(ctx, app, &mut open),
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
-        Dialog::WeightTable => rig_dialogs::weight_table(ctx, app, &mut open),
+        Dialog::WeightTable => skin_dialogs::weight_table(ctx, app, &mut open),
         Dialog::WeightTool => rig_dialogs::weight_tool(ctx, app, &mut open),
-        Dialog::PainterOptions => rig_dialogs::painter_options(ctx, app, &mut open),
+        Dialog::PainterOptions => skin_dialogs::painter_options(ctx, app, &mut open),
+        Dialog::SkinSaveEnvelopes | Dialog::SkinLoadEnvelopes => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::PasteToMultipleBones => skin_dialogs::paste_to_multiple_bones(ctx, app, &mut open),
+        Dialog::LoadEnvelopes => skin_dialogs::load_envelopes(ctx, app, &mut open),
+        Dialog::AngleKeysCurves => skin_dialogs::angle_keys_curves(ctx, app, &mut open),
         Dialog::OutOfRangeTypes => track_view_dialogs::out_of_range_types(ctx, app, &mut open),
         Dialog::ReduceKeys => track_view_dialogs::reduce_keys(ctx, app, &mut open),
         Dialog::TrackSets => track_view_dialogs::track_sets(ctx, app, &mut open),

@@ -490,6 +490,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
+                    // Skin > Edit Envelopes: dragging an envelope end point or a cross-section ring.
+                    crate::skin_view::drag(app, &ctx, &pointer, response.hovered(), p, &projection);
                     // Skin > Paint Weights brush.
                     crate::poly_modes::skin_paint(app, &ctx, &painter, &pointer, response.hovered(), p, rect, view, proj, &projection);
                     // Paint Deformation brush: LMB paints on the selected poly (Ctrl inverts, Shift relaxes).
@@ -592,6 +594,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && !app.poly_dragging
                         && app.state.paint_deform.is_none()
                         && !app.state.vertex_paint_brush
+                        // Skin > Edit Envelopes: clicks pick vertices and envelopes, the object stays.
+                        && !loom_commands::skin::picks_vertices(&app.state)
                     {
                         let object_level = app.state.selection_mode == SelectionMode::Object;
                         // Sub-objects (not splines, whose knots have their own drags; no Shift clone).
@@ -2958,7 +2962,7 @@ fn distance_to_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     p.distance(a + ab * t)
 }
 
-fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
+pub(crate) fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
     let eps = 1e-6;
     let edge1 = b - a;
     let edge2 = c - a;

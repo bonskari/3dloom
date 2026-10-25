@@ -394,6 +394,11 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 });
             }
             set_selection(state, ids, op);
+            if op == SelectOp::Replace {
+                // A new vertex pick replaces an end point / cross section pick.
+                state.skin_handle = None;
+                state.skin_ui.cross_section = None;
+            }
             Ok(status(state))
         }
         C::SkinSetVertexWeight { weight, absolute } => weight_edit(state, "Set Weight", move |cur, _| if absolute { weight } else { cur + weight }),
