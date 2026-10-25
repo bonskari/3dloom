@@ -173,6 +173,14 @@ fn wrapped(h: &mut Harness) -> (NodeId, NodeId) {
     h.cmd(Command::SkinWrapModifier);
     h.app.panel_tab = crate::Tab::Modify;
     framed(h);
+    // The tall window frames the slab by its height: step out until its corners show.
+    let rect = h.app.viewport_rects[h.app.state.active_viewport].shrink(30.0);
+    for _ in 0..10 {
+        if rect.contains(h.screen_of(Vec3::new(20.0, -20.0, 0.0))) && rect.contains(h.screen_of(Vec3::new(-20.0, 20.0, 0.0))) {
+            break;
+        }
+        h.cmd(Command::ZoomViewportOut);
+    }
     (control, hi)
 }
 
