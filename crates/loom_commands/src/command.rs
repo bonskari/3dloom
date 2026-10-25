@@ -79,6 +79,9 @@ impl ArgSchema for crate::track_view::KeyArg {
         json!({"type":"object","properties":{"id":{"type":"integer","minimum":0},"track":{"type":"string"},"comp":{"type":"integer","minimum":0},"time":{"type":"number"}},"required":["id","track","time"]})
     }
 }
+impl ArgSchema for loom_scene::loomrig::HumanoidMapping {
+    fn schema() -> Value { json!({"type":"object","properties":{"root":{"type":"integer"},"pelvis":{"type":"integer"},"head":{"type":"integer"},"spine":{"type":"array","items":{"type":"integer"}},"limbs":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"start":{"type":"integer"},"middle":{"type":"integer"},"end":{"type":"integer"}},"required":["name","start","middle","end"]}}},"required":["root","pelvis","spine","head","limbs"]}) }
+}
 impl ArgSchema for Value {
     fn schema() -> Value {
         json!({})
@@ -1566,6 +1569,10 @@ commands! {
     IkChainIkSnap => "IK Chain IK Snap", MainUI, "Moves the goal to the chain's FK end joint (IK matches FK).";
     IkChainSnapAction => "IK Chain Snap Action", MainUI, "FK snap then IK snap on the selected chain.";
     IkTerminatorToggle => "IK Terminator Toggle", MainUI, "The selected bone becomes the start (terminator) of its chain.";
+    CreateLoomRig => "Create LoomRig", Loom, "Characterize existing bones and add non-destructive animator controls." { root:u64, mapping:Option<loom_scene::loomrig::HumanoidMapping> };
+    SetLoomRigMapping => "Set LoomRig Mapping", Loom, "Edit explicit skeleton mappings while preserving existing controls and bone tracks." { rig:u32, mapping:loom_scene::loomrig::HumanoidMapping };
+    SetLoomRigLimb => "Set LoomRig Limb", Loom, "Set HI/Limb solver and IK/FK blend with current pose matching." { rig:u32, limb:String, solver:String, blend:f32 };
+    RemoveLoomRig => "Remove LoomRig", Loom, "Remove animator controls while preserving original skeleton and skin." { rig:u32 };
     CreateIkChain => "Create IK Chain", Loom, "An IK chain from bone `start` to bone `end` with a goal node; solver \"hi\", \"limb\" or \"spline\"." { start: u64, end: u64, solver: String, name: Option<String> };
     SetIkChainParameter => "Set IK Chain Parameter", Loom, "Hierarchy > IK rollouts: Enabled, IK For FK Pose, Swivel Angle, Threshold, Iterations." { chain: u32, name: String, value: f64 };
     PickSplineIkShape => "Pick Spline IK Shape", Loom, "Spline IK Solver > Pick Shape: the shape node the chain follows." { chain: u32, node: u64 };

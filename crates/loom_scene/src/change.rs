@@ -62,6 +62,7 @@ pub enum Change {
         after: (Vec<crate::scene::Layer>, u32),
     },
     /// The IK chain table (Hierarchy > IK edits).
+    SetLoomRigs { before: Vec<crate::loomrig::LoomRig>, after: Vec<crate::loomrig::LoomRig> },
     SetIkChains {
         before: Vec<crate::ik::IkChain>,
         after: Vec<crate::ik::IkChain>,
@@ -247,6 +248,7 @@ impl Change {
                 scene.bump_version();
                 Ok(())
             }
+            Change::SetLoomRigs { after, .. } => { scene.loom_rigs = after.clone(); scene.bump_version(); Ok(()) },
             Change::SetIkChains { after, .. } => {
                 scene.ik_chains = after.clone();
                 scene.bump_version();
@@ -321,6 +323,9 @@ impl Change {
                 if sim.animation_clips != before.animation_clips {
                     steps.push(Change::SetAnimationClips { before: sim.animation_clips.clone(), after: before.animation_clips.clone() });
                 }
+                if sim.loom_rigs != before.loom_rigs {
+                    steps.push(Change::SetLoomRigs { before: sim.loom_rigs.clone(), after: before.loom_rigs.clone() });
+                }
                 Change::Group(steps)
             }
             Change::SetTransform { id, before: b, after: a } => Change::SetTransform {
@@ -365,6 +370,7 @@ impl Change {
             Change::SetLayers { before: b, after: a } => Change::SetLayers { before: a.clone(), after: b.clone() },
             Change::SetXrefs { before: b, after: a } => Change::SetXrefs { before: a.clone(), after: b.clone() },
             Change::SetStack { id, before: b, after: a } => Change::SetStack { id: *id, before: a.clone(), after: b.clone() },
+            Change::SetLoomRigs { before: b, after: a } => Change::SetLoomRigs { before: a.clone(), after: b.clone() },
             Change::SetIkChains { before: b, after: a } => Change::SetIkChains { before: a.clone(), after: b.clone() },
             Change::SetAnimationClips { before: b, after: a } => Change::SetAnimationClips { before: a.clone(), after: b.clone() },
             Change::SetMaterials { before: b, after: a } => Change::SetMaterials { before: a.clone(), after: b.clone() },

@@ -94,6 +94,7 @@ fn new_bone(state: &AppState, name: &str, taken: &mut BTreeSet<String>, length: 
 pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     use Command as C;
     match cmd {
+        c @ (C::CreateLoomRig { .. } | C::SetLoomRigMapping { .. } | C::SetLoomRigLimb { .. } | C::RemoveLoomRig { .. }) => crate::loomrig::execute(state,c),
         C::CreateBoneChain { points, name } => {
             if points.len() < 2 {
                 return Err("a bone chain needs at least two points".into());

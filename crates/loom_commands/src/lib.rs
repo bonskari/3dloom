@@ -71,3 +71,5 @@ pub mod viewport;
 pub use viewport::{default_kinds, HideCategories, LayoutSplits, NavMode, Shading, Viewport, ViewportLayout, BrowserFor, Dialog, NewKeep, PendingFileAction, PolySettingsKind};
 pub use transform::{frame_for, frame_for_system, TransformFrame};
 pub use keymap::{keyboard_chart, write_keyboard_chart, ChartRow};
+
+pub mod loomrig;

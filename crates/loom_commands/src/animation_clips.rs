@@ -4,14 +4,30 @@ use loom_scene::{param::Animatable, tracks::{self, AnyParam}, Change, Controller
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
-fn shift<T: Animatable>(controller: &mut Controller<T>, delta: f32) -> Result<(), String> {
+fn shift<T: Animatable>(controller: &mut Controller<T>, delta: f32, range:Option<(f32,f32)>) -> Result<(), String> {
     match controller {
-        Controller::Keys(k) => for track in &mut k.tracks { for key in &mut track.keys {
-            let time = key.time + delta;
-            if !key.time.is_finite() || !time.is_finite() { return Err("animation key time overflow".into()); }
-            key.time = time;
-        } },
-        Controller::List(items) => for item in items { shift(&mut item.controller, delta)?; },
+        Controller::Keys(k) => for track in &mut k.tracks {
+            if range.is_some() && !track.keys.is_empty() && track.interp!=loom_scene::anim::Interp::Linear {
+                return Err("moving shared clip nodes requires linear native keys".into());
+            }
+            for key in &mut track.keys {
+                if !key.time.is_finite() {return Err("animation key time overflow".into());}
+                if let Some((start,end))=range {
+                    if key.time<start || key.time>end {
+                        if key.time>=start+delta && key.time<=end+delta {return Err("clip destination contains authored keys outside its ownership".into());}
+                        continue;
+                    }
+                }
+                let time = key.time + delta;
+                if !time.is_finite() { return Err("animation key time overflow".into()); }
+                key.time = time;
+            }
+            if range.is_some() {
+                track.keys.sort_by(|a,b|a.time.total_cmp(&b.time));
+                if track.keys.windows(2).any(|keys|keys[0].time>=keys[1].time) {return Err("clip move collides with existing keys".into());}
+            }
+        },
+        Controller::List(items) => for item in items { shift(&mut item.controller, delta,range)?; },
         _ => {},
     }
     Ok(())
@@ -31,27 +47,32 @@ pub(crate) fn move_clip(state: &mut AppState, id: u64, start: f32) -> Result<Val
     }
     let members: BTreeSet<_> = clip.nodes.iter().copied().collect();
     if members.is_empty() || members.len() != clip.nodes.len() { return Err("animation clip must have unique node members".into()); }
-    if clips.iter().enumerate().any(|(i, c)| i != index && c.nodes.iter().any(|n| members.contains(n))) {
-        return Err("animation clip members are shared with another clip".into());
+    for (i,other) in clips.iter().enumerate() {
+        if i==index || !other.nodes.iter().any(|n|members.contains(n)) {continue;}
+        if !other.start.is_finite() || !other.end.is_finite() || other.end<other.start {return Err("invalid shared clip range".into());}
+        if clip.start<=other.end && clip.end>=other.start || start<=other.end && end>=other.start {
+            return Err("shared clip ranges overlap or touch".into());
+        }
     }
     let mut changes = Vec::new();
     for id in &clip.nodes {
         let node = state.scene.node(*id).ok_or_else(|| format!("animation clip member {} is missing", id.0))?;
+        let range=clips.iter().enumerate().any(|(i,c)|i!=index && c.nodes.contains(id)).then_some((clip.start,clip.end));
         let mut after = node.clone();
         let all = tracks::node_tracks(node);
         let mut error = None;
         tracks::edit_node(&mut after, &all, |_, p| {
             let result = match p {
-                AnyParam::F32(p) => shift(&mut p.controller, delta),
-                AnyParam::U32(p) => shift(&mut p.controller, delta),
-                AnyParam::Bool(p) => shift(&mut p.controller, delta),
-                AnyParam::Vec3(p) => shift(&mut p.controller, delta),
+                AnyParam::F32(p) => shift(&mut p.controller, delta,range),
+                AnyParam::U32(p) => shift(&mut p.controller, delta,range),
+                AnyParam::Bool(p) => shift(&mut p.controller, delta,range),
+                AnyParam::Vec3(p) => shift(&mut p.controller, delta,range),
             };
             if let Err(e) = result { error = Some(e); }
         })?;
         if let Some(e) = error { return Err(e); }
         for p in [&mut after.object_offset.position, &mut after.object_offset.rotation, &mut after.object_offset.scale] {
-            shift(&mut p.controller, delta)?;
+            shift(&mut p.controller, delta,range)?;
         }
         if let Some(c) = crate::anim_cmds::node_change(node, &after) { changes.push(c); }
         if node.visibility != after.visibility {
@@ -75,3 +96,4 @@ pub(crate) fn move_clip(state: &mut AppState, id: u64, start: f32) -> Result<Val
     crate::timing_undo::record(state, timing);
     Ok(json!({ "clip": id, "start": start, "end": end }))
 }
+

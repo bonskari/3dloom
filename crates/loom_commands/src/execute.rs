@@ -86,6 +86,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
             if ids.is_empty() {
                 state.scene.animation_clips.clear();
+                state.scene.loom_rigs.clear();
                 state.file = None;
                 state.undo.mark_saved();
                 return Ok(json!({}));
@@ -3310,7 +3311,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. } | C::BipedCreateXtra { .. } | C::BipedDeleteXtra { .. } | C::BipedCreateOppositeXtra { .. } | C::BipedSetXtra { .. } | C::BipedPickXtraParent { .. } | C::BipedSaveFile { .. } | C::BipedLoadFile { .. }) => crate::biped::execute(state, c),
         c @ (C::BipedFootstepMode { .. } | C::BipedFootstepCreation { .. } | C::BipedCreateMultipleFootsteps { .. } | C::BipedAppendFootstep { .. } | C::BipedActivateFootsteps | C::BipedDeactivateFootsteps | C::BipedDeleteFootsteps) => crate::biped_footsteps::execute(state, c),
-        c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
+        c @ (C::CreateLoomRig { .. } | C::SetLoomRigMapping { .. } | C::SetLoomRigLimb { .. } | C::RemoveLoomRig { .. } | C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
         c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. }) => crate::extras::execute(state, c),
         // Every remaining variant is an Unwrap UVW group command.

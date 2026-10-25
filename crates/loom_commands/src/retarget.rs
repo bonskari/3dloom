@@ -200,6 +200,19 @@ fn keyed(rest: Vec3, samples: &[(f32, Vec3)]) -> Param<Vec3> {
         controller: Controller::Keys(k),
     }
 }
+fn append_keys(previous: &Param<Vec3>, mut added: Param<Vec3>) -> Param<Vec3> {
+    if let (Controller::Keys(old), Controller::Keys(new)) =
+        (&previous.controller, &mut added.controller)
+    {
+        let mut merged = old.clone();
+        for (target, extra) in merged.tracks.iter_mut().zip(&new.tracks) {
+            target.keys.extend(extra.keys.iter().cloned());
+            target.keys.sort_by(|a, b| a.time.total_cmp(&b.time));
+        }
+        *new = merged;
+    }
+    added
+}
 fn euler_near(q: Quat, previous: Option<Vec3>) -> Vec3 {
     let (x, y, z) = q.to_euler(glam::EulerRot::XYZ);
     let mut r = Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees());
@@ -220,7 +233,8 @@ fn euler_near(q: Quat, previous: Option<Vec3>) -> Vec3 {
 }
 
 /// Bake corrected source world rotations into original target local controllers.
-/// Existing target animation is rejected rather than silently overwritten.
+/// Disjoint clips share native controllers; unowned keys and overlapping ranges
+/// are rejected rather than overwritten.
 pub fn retarget(
     state: &mut AppState,
     source_clip: u64,
@@ -251,32 +265,89 @@ pub fn retarget(
     if targets.iter().any(|t| clip.nodes.contains(t)) {
         return Err("source and target skeletons must be separate".into());
     }
-    if scene
-        .animation_clips
-        .iter()
-        .any(|c| c.nodes.iter().any(|id| targets.contains(id)))
-    {
-        return Err(
-            "target already belongs to an animation clip; preserve or remove its clip first".into(),
-        );
-    }
+    // Clip intervals own their native keys. Shared target nodes are safe only
+    // when every existing key is covered and no two owners touch or overlap.
     for m in mapping {
         if !clip.nodes.contains(&m.source) || !under(scene, m.target, target_root) {
             return Err("mapping bone is outside source clip or target hierarchy".into());
         }
         let n = scene.node(m.target).ok_or("target bone missing")?;
-        if [
-            &n.transform.position,
-            &n.transform.rotation,
-            &n.transform.scale,
-        ]
-        .iter()
-        .any(|p| !matches!(p.controller, Controller::Constant(_)))
-        {
+        let owners: Vec<_> = scene
+            .animation_clips
+            .iter()
+            .filter(|c| c.nodes.contains(&m.target))
+            .collect();
+        for (i, owner) in owners.iter().enumerate() {
+            if !owner.start.is_finite() || !owner.end.is_finite() || owner.end < owner.start {
+                return Err("invalid existing target clip range".into());
+            }
+            if clip.start <= owner.end && clip.end >= owner.start
+                || owners[..i]
+                    .iter()
+                    .any(|other| other.start <= owner.end && other.end >= owner.start)
+            {
+                return Err("target clip ranges overlap or touch; leave a strict gap".into());
+            }
+        }
+        if !matches!(n.transform.scale.controller, Controller::Constant(_)) {
             return Err(format!(
-                "{} already has animation/controllers; retarget refuses destructive overwrite",
+                "{} has unsupported target scale controller",
                 n.name
             ));
+        }
+        for p in [&n.transform.position, &n.transform.rotation] {
+            match &p.controller {
+                Controller::Constant(_) => {}
+                Controller::Keys(k) => {
+                    for track in &k.tracks {
+                        if !track.keys.is_empty()
+                            && track.interp != loom_scene::anim::Interp::Linear
+                        {
+                            return Err(
+                                "retarget sequencing requires linear native target keys".into()
+                            );
+                        }
+                        if track.keys.iter().any(|key| {
+                            !key.time.is_finite()
+                                || !key.value.is_finite()
+                                || !owners
+                                    .iter()
+                                    .any(|c| key.time >= c.start && key.time <= c.end)
+                        }) {
+                            return Err(format!("{} has unowned target keys; retarget refuses destructive overwrite",n.name));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{} has unsupported target animation controller",
+                        n.name
+                    ))
+                }
+            }
+        }
+    }
+    for id in &clip.nodes {
+        let n = scene.node(*id).ok_or("source clip member missing")?;
+        match &n.transform.scale.controller {
+            Controller::Constant(_) => {}
+            Controller::Keys(k)
+                if k.rest.len() == 3
+                    && k.tracks.len() == 3
+                    && k.tracks.iter().enumerate().all(|(axis, tr)| {
+                        tr.keys.iter().all(|key| {
+                            key.value.is_finite() && (key.value - k.rest[axis]).abs() < 1e-6
+                        })
+                    }) => {}
+            _ => {
+                return Err(format!(
+                "{} has nonconstant source scale; retarget does not support animated bone scaling",
+                n.name
+            ))
+            }
+        }
+        if !n.constraints.is_empty() {
+            return Err(format!("{} has unsupported source constraints", n.name));
         }
     }
     let mut times = vec![clip.start, clip.end];
@@ -410,7 +481,10 @@ pub fn retarget(
                 time,
                 euler_near(
                     parent.inverse() * desired[&m.target],
-                    values.last().map(|(_, v)| *v),
+                    values
+                        .last()
+                        .map(|(_, v)| *v)
+                        .or(Some(n.transform.rotation.get_at(time))),
                 ),
             ));
             if m.target == roots[0] {
@@ -435,9 +509,15 @@ pub fn retarget(
     for m in mapping {
         let n = scene.node(m.target).unwrap();
         let mut after = n.transform.clone();
-        after.rotation = keyed(rest(&n.transform.rotation)?, &rotations[&m.target]);
+        after.rotation = append_keys(
+            &n.transform.rotation,
+            keyed(rest(&n.transform.rotation)?, &rotations[&m.target]),
+        );
         if m.target == roots[0] {
-            after.position = keyed(rest(&n.transform.position)?, &positions);
+            after.position = append_keys(
+                &n.transform.position,
+                keyed(rest(&n.transform.position)?, &positions),
+            );
         }
         changes.push(Change::SetTransform {
             id: m.target,
@@ -641,9 +721,57 @@ mod real_assets {
                 "{side} knee angle diverges: source {source_angle}, target {target_angle}"
             );
         }
+        // Sequence the actual motion a second time on the same native skin.
+        let first_keys: Vec<_> = map
+            .iter()
+            .map(|m| (m.target, s.scene.node(m.target).unwrap().transform.clone()))
+            .collect();
+        let next_start = clip.end + 10.25;
+        crate::execute(
+            &mut s,
+            crate::Command::MoveAnimationClip {
+                id: source,
+                start: next_start,
+            },
+        )
+        .unwrap();
+        let second = retarget(&mut s, source, target, &map).unwrap()["clip"]
+            .as_u64()
+            .unwrap();
+        crate::execute(
+            &mut s,
+            crate::Command::MoveAnimationClip {
+                id: second,
+                start: next_start + clip.end - clip.start + 2.0,
+            },
+        )
+        .unwrap();
+        for (ids, expected) in [(&first, clip.start), (&last, clip.end)] {
+            let actual = s.scene.at_time(expected, || {
+                map.iter()
+                    .map(|m| s.scene.world_matrix(m.target))
+                    .collect::<Vec<_>>()
+            });
+            for (before, after) in ids.iter().zip(actual) {
+                assert!(
+                    before.abs_diff_eq(after, 1e-5),
+                    "sequencing changed earlier evaluated pose"
+                );
+            }
+        }
+        for _ in 0..3 {
+            crate::execute(&mut s, crate::Command::UndoSceneOperation).unwrap();
+        }
+        for (id, keys) in first_keys {
+            assert_eq!(
+                s.scene.node(id).unwrap().transform,
+                keys,
+                "sequence undo did not restore native keys exactly"
+            );
+        }
         assert!(retarget(&mut s, source, target, &map)
             .unwrap_err()
-            .contains("already belongs"));
+            .contains("overlap"));
         crate::execute(&mut s, crate::Command::UndoSceneOperation).unwrap();
         for (id, before) in original {
             assert_eq!(

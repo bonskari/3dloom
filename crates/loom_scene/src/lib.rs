@@ -35,3 +35,5 @@ pub mod change;
 pub mod undo;
 pub use change::Change;
 pub use undo::UndoStack;
+
+pub mod loomrig;

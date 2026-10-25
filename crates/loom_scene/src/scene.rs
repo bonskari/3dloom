@@ -51,6 +51,8 @@ pub struct Scene {
     /// Hierarchy > IK chains.
     #[serde(default)]
     pub ik_chains: Vec<crate::ik::IkChain>,
+    #[serde(default)]
+    pub loom_rigs: Vec<crate::loomrig::LoomRig>,
     /// Timeline source clips, whose members retain native animation keys.
     #[serde(default)]
     pub animation_clips: Vec<crate::AnimationClip>,
@@ -167,6 +169,7 @@ impl Scene {
             eval_count: std::cell::Cell::new(0),
             version_counter: std::cell::Cell::new(1),
             ik_chains: Vec::new(),
+            loom_rigs: Vec::new(),
             animation_clips: Vec::new(),
             track_data: Default::default(),
             materials: Default::default(),
@@ -285,7 +288,7 @@ impl Scene {
                 }
             }
             // IK moves bones without versioning them: any change re-evaluates a skinned mesh.
-            if !self.ik_chains.is_empty() && matches!(slot.modifier, crate::modifier::Modifier::Skin(_)) {
+            if (!self.ik_chains.is_empty() || !self.loom_rigs.is_empty()) && matches!(slot.modifier, crate::modifier::Modifier::Skin(_)) {
                 key = key.wrapping_add(self.version_counter.get().wrapping_mul(29));
             }
         }
@@ -595,6 +598,9 @@ impl Scene {
         }
         for clip in &mut self.animation_clips { clip.nodes.retain(|n| *n != id); }
         self.animation_clips.retain(|clip| !clip.nodes.is_empty());
+        let rigs_before = self.loom_rigs.len();
+        self.loom_rigs.retain(|rig| !rig.node_ids().contains(&id));
+        if self.loom_rigs.len() != rigs_before { self.bump_version(); }
         self.nodes.remove(&id)
     }
 
@@ -667,7 +673,12 @@ impl Scene {
 
     /// The local matrix: the IK solution for a bone of an enabled chain, else FK.
     pub fn local_matrix(&self, id: NodeId) -> Mat4 {
-        if !self.ik_chains.is_empty() && !self.ik_solving.get() {
+        // FK controls display at the resulting bone pivot. Their raw local
+        // transform remains the animatable offset, not a second visual offset.
+        if self.loom_rigs.iter().any(|r| r.bindings.iter().any(|b| b.control==id && id!=r.master)) {
+            return Mat4::IDENTITY;
+        }
+        if !self.ik_solving.get() {
             self.ensure_ik();
         }
         let cache = self.ik_cache.borrow();
@@ -834,7 +845,7 @@ impl Scene {
 
     /// The solved local rotation of a bone, when a chain drives it.
     pub fn ik_rotation(&self, id: NodeId) -> Option<Mat4> {
-        if !self.ik_chains.is_empty() && !self.ik_solving.get() {
+        if !self.ik_solving.get() {
             self.ensure_ik();
         }
         self.ik_cache.borrow().2.get(&id).copied()
@@ -871,6 +882,137 @@ impl Scene {
         let reads = crate::anim::animated_reads();
         self.ik_solving.set(true);
         self.ik_cache.borrow_mut().2.clear();
+        // Offset controls are identity at creation: native animation keeps playing.
+        for rig in &self.loom_rigs {
+            for binding in &rig.bindings {
+                if let (Some(bone), Some(control)) = (
+                    self.nodes.get(&binding.bone),
+                    self.nodes.get(&binding.control),
+                ) {
+                    let local = if binding.control == rig.master {
+                        let parent = self.parent_frame(binding.bone);
+                        parent.inverse()
+                            * control.transform.matrix()
+                            * binding.rest.inverse()
+                            * parent
+                            * bone.transform.matrix()
+                    } else {
+                        bone.transform.matrix() * binding.rest.inverse() * control.transform.matrix()
+                    };
+                    self.ik_cache.borrow_mut().2.insert(binding.bone, local);
+                }
+            }
+            for limb in &rig.limbs {
+                let ids = [limb.mapping.start, limb.mapping.middle, limb.mapping.end];
+                if ids.iter().any(|id| !self.nodes.contains_key(id)) {
+                    continue;
+                }
+                // Matched FK offsets are inputs to IK, so a moved goal
+                // still obeys the chain constraint instead of rotating its result.
+                for (i, id) in ids.iter().enumerate() {
+                    let (scale, q, pos) = self.local_matrix(*id).to_scale_rotation_translation();
+                    self.ik_cache.borrow_mut().2.insert(
+                        *id,
+                        Mat4::from_scale_rotation_translation(
+                            scale,
+                            (q * limb.pose_rotation(i)).normalize(),
+                            pos,
+                        ),
+                    );
+                }
+                let Some(goal_node) = self.nodes.get(&limb.goal) else {
+                    continue;
+                };
+                let Some(pole_node) = self.nodes.get(&limb.pole) else {
+                    continue;
+                };
+                // Solve in the start joint's parent space: bone lengths and
+                // targets must share units even under a scaled scene parent.
+                let solve_frame = self.parent_frame(ids[0]).inverse();
+                let goal = solve_frame
+                    .transform_point3(self.world_matrix(goal_node.id).transform_point3(Vec3::ZERO));
+                let root = solve_frame
+                    .transform_point3(self.world_matrix(ids[0]).transform_point3(Vec3::ZERO));
+                let mid = solve_frame
+                    .transform_point3(self.world_matrix(ids[1]).transform_point3(Vec3::ZERO));
+                let axis = (goal - root).normalize_or_zero();
+                let mut current = mid - root - axis * (mid - root).dot(axis);
+                if current.length_squared() < 1e-8 {
+                    current = (solve_frame * self.world_matrix(ids[0])).transform_vector3(Vec3::Y);
+                    current -= axis * current.dot(axis);
+                    if current.length_squared() < 1e-8 {
+                        current = Vec3::Z - axis * Vec3::Z.dot(axis);
+                    }
+                }
+                let desired = solve_frame
+                    .transform_point3(self.world_matrix(pole_node.id).transform_point3(Vec3::ZERO))
+                    - root;
+                let projected = desired - axis * desired.dot(axis);
+                let swivel = axis
+                    .dot(current.cross(projected))
+                    .atan2(current.dot(projected))
+                    .to_degrees();
+                let chain = crate::ik::IkChain {
+                    id: 0,
+                    name: limb.mapping.name.clone(),
+                    solver: limb.solver,
+                    start: ids[0],
+                    end: ids[2],
+                    goal: limb.goal,
+                    enabled: true,
+                    swivel_deg: swivel,
+                    threshold: 0.0001,
+                    iterations: 100,
+                    spline: None,
+                    ik_for_fk: false,
+                };
+                let bones: Vec<_> = ids[..2]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, id)| {
+                        let local = self.local_matrix(*id);
+                        let (_, q, p) = local.to_scale_rotation_translation();
+                        crate::ik::IkBone {
+                            id: *id,
+                            parent_frame: Mat4::IDENTITY,
+                            position: p,
+                            rotation: q,
+                            tip: self.nodes[&ids[i + 1]].transform.position.get(),
+                        }
+                    })
+                    .collect();
+                let solved = crate::ik::solve(&chain, &bones, goal, None);
+                for (id, q) in solved {
+                    let (scale, fk, pos) = self.local_matrix(id).to_scale_rotation_translation();
+                    self.ik_cache.borrow_mut().2.insert(
+                        id,
+                        Mat4::from_scale_rotation_translation(
+                            scale,
+                            fk.slerp(q, limb.blend.get().clamp(0.0, 1.0)).normalize(),
+                            pos,
+                        ),
+                    );
+                }
+                let (scale, fk, pos) = self.local_matrix(ids[2]).to_scale_rotation_translation();
+                let target = (self
+                    .parent_frame(ids[2])
+                    .to_scale_rotation_translation()
+                    .1
+                    .inverse()
+                    * self
+                        .world_matrix(limb.goal)
+                        .to_scale_rotation_translation()
+                        .1)
+                    .normalize();
+                let q = fk
+                    .slerp(target, limb.blend.get().clamp(0.0, 1.0))
+                    .normalize();
+                self.ik_cache
+                    .borrow_mut()
+                    .2
+                    .insert(ids[2], Mat4::from_scale_rotation_translation(scale, q, pos));
+            }
+        }
         // Parents first: a chain hanging under another chain solves against its solved pose.
         let mut order: Vec<&crate::ik::IkChain> = self.ik_chains.iter().filter(|c| c.enabled).collect();
         order.sort_by_key(|c| self.depth(c.start));
