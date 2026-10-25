@@ -42,7 +42,18 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
         Dialog::ExportFile | Dialog::ExportSelected | Dialog::ArchiveFile => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
         _ => String::new(),
     };
-    let dir = app.state.file.as_ref().and_then(|f| f.parent()).filter(|d| d.is_dir()).map(|d| d.to_path_buf()).unwrap_or_else(|| app.file_dir.clone());
+    // Set Project Folder: each kind of file starts in its project folder.
+    let kind = match dialog {
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::ReplaceFile => "scenes",
+        Dialog::ImportFile => "import",
+        Dialog::ExportFile | Dialog::ExportSelected => "export",
+        Dialog::RenderFile | Dialog::SaveRenderedImage => "renderoutput",
+        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::MaterialMap { .. } | Dialog::MaterialBitmap | Dialog::PickUvTexture | Dialog::BitmapFit => "sceneassets/images",
+        Dialog::ArchiveFile => "archives",
+        _ => "",
+    };
+    let project = (!kind.is_empty()).then(|| loom_commands::assets::project_dir(&app.state, kind)).flatten();
+    let dir = app.state.file.as_ref().and_then(|f| f.parent()).filter(|d| d.is_dir()).map(|d| d.to_path_buf()).or(project).unwrap_or_else(|| app.file_dir.clone());
     (dir, name)
 }
 
@@ -89,15 +100,18 @@ const IMAGES_WRITE: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr";
 /// Title, extension, "Open"/"Save" button text and the command to run.
 fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
     match dialog {
-        Dialog::OpenFile => ("Open File", "loom", "Open"),
+        Dialog::OpenFile => ("Open File", "loom,max", "Open"),
         Dialog::SaveFileAs => ("Save File As", "loom", "Save"),
         Dialog::SaveFileAsCopy => ("Save Copy As", "loom", "Save"),
-        Dialog::ImportFile => ("Import File", "fbx,obj,max", "Open"),
-        Dialog::ExportFile => ("Export File", "fbx,obj", "Save"),
-        Dialog::ExportSelected => ("Export Selected", "fbx,obj", "Save"),
+        Dialog::ImportFile => ("Import File", "fbx,obj,max,3ds,stl,dxf", "Open"),
+        Dialog::ExportFile => ("Export File", "fbx,obj,3ds,stl,dxf", "Save"),
+        Dialog::ExportSelected => ("Export Selected", "fbx,obj,3ds,stl,dxf", "Save"),
         Dialog::SaveSelected => ("Save Selected", "loom", "Save"),
         Dialog::ArchiveFile => ("Archive", "zip,txt", "Save"),
-        Dialog::MergeFile => ("Merge File", "loom", "Open"),
+        Dialog::MergeFile => ("Merge File", "loom,max", "Open"),
+        Dialog::ReplaceFile => ("Replace", "loom", "Open"),
+        Dialog::XrefObjectsFile => ("Open File (XRef Objects)", "loom,max", "Open"),
+        Dialog::XrefSceneFile => ("Open File (XRef Scene)", "loom,max", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", IMAGES_READ, "Open"),
         Dialog::BackgroundFile => ("Select Background Image", IMAGES_READ, "Open"),
         Dialog::MaterialMap { .. } | Dialog::MaterialBitmap => ("Select Bitmap Image File", IMAGES_READ, "Open"),
@@ -134,6 +148,8 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::ExportSelected => Command::ExportSelected { path: Some(p) },
         Dialog::SaveSelected => Command::SaveSelected { path: Some(p) },
         Dialog::ArchiveFile => Command::ArchiveFile { path: Some(p) },
+        Dialog::ReplaceFile => Command::ReplaceFile { path: Some(p), names: None, materials: None },
+        Dialog::XrefSceneFile => Command::XrefScene { path: Some(p), automatic: None },
         Dialog::BitmapFit => Command::UvwMapBitmapFit { path: p },
         Dialog::PickUvTexture => Command::PickTexture { path: p },
         Dialog::MaterialMap { channel } => Command::SetMaterialMap {
@@ -306,6 +322,9 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
             (Dialog::ImportFile, "obj") => Some(Dialog::ObjImportOptions),
             (Dialog::ExportFile | Dialog::ExportSelected, "fbx") => Some(Dialog::FbxExportOptions),
             (Dialog::ExportFile | Dialog::ExportSelected, "obj") => Some(Dialog::ObjExportOptions),
+            (Dialog::ImportFile, "stl") => Some(Dialog::StlImportOptions),
+            (Dialog::ExportFile | Dialog::ExportSelected, "stl") => Some(Dialog::StlExportOptions),
+            (Dialog::ImportFile, "3ds") => Some(Dialog::TdsImportOptions),
             _ => None,
         };
         if let Some(d) = options {
@@ -314,9 +333,10 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
             return false;
         }
     }
-    if dialog == Dialog::MergeFile {
-        return match loom_commands::file::read(&path) {
-            Ok(doc) => {
+    if dialog == Dialog::MergeFile || dialog == Dialog::XrefObjectsFile {
+        app.state.merge_as_xref = dialog == Dialog::XrefObjectsFile;
+        return match loom_commands::file::read_any(&path) {
+            Ok((doc, _)) => {
                 let names: Vec<String> = doc.scene.nodes().map(|n| n.name.clone()).collect();
                 app.state.merge_pending = Some((path, names));
                 app.state.dialog = Some(Dialog::MergeObjects);

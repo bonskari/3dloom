@@ -135,7 +135,7 @@ pub fn orbit_of(scene: &loom_scene::Scene, id: NodeId) -> Option<OrbitCamera> {
     let world = scene.world_matrix(id);
     let eye = world.w_axis.truncate();
     let forward = -world.z_axis.truncate().normalize_or_zero();
-    let distance = target_distance(scene, id)?.max(1e-3);
+    let distance = target_distance(scene, id).or_else(|| loom_scene::light::target_distance(scene, id))?.max(1e-3);
     Some(OrbitCamera::looking(eye, eye + forward * distance, world.y_axis.truncate().normalize_or_zero()))
 }
 
@@ -145,8 +145,11 @@ pub fn orbit_of(scene: &loom_scene::Scene, id: NodeId) -> Option<OrbitCamera> {
 /// `free_distance` writes a Free camera's Target Distance. One undo step.
 fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: Option<f32>, free_distance: bool, label: &str) -> Result<Value, String> {
     let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-    let ObjectKind::Camera { target, .. } = &node.object else {
-        return Err(format!("{} is not a camera", node.name));
+    // A light view moves the light the same way.
+    let target = match &node.object {
+        ObjectKind::Camera { target, .. } => *target,
+        ObjectKind::Light(l) => l.target,
+        _ => return Err(format!("{} is not a camera", node.name)),
     };
     let target = target.filter(|t| state.scene.node(*t).is_some());
     let eye = orbit.eye_position();
@@ -188,6 +191,11 @@ fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: Option<f32>
         }
         if free_distance && target.is_none() {
             target_distance.set(orbit.distance);
+        }
+    }
+    if let ObjectKind::Light(l) = &mut object {
+        if free_distance && target.is_none() {
+            l.target_distance.set(orbit.distance);
         }
     }
     if object != node.object {
@@ -235,8 +243,21 @@ fn navigate(state: &mut AppState, op: &str, x: f32, y: f32) -> Result<Value, Str
     let ViewKind::Camera(id) = state.active().kind else {
         return Err("the active viewport is not a camera view".into());
     };
+    let light = matches!(state.scene.node(id).map(|n| &n.object), Some(ObjectKind::Light(_)));
+    if light && matches!(op, "hotspot" | "falloff") {
+        // Light Hotspot / Light Falloff: x is the new angle (or width).
+        let name = if op == "hotspot" { "Hotspot" } else { "Falloff" };
+        return crate::execute::execute(state, Command::SetParameter { id: id.0, name: name.into(), value: x as f64 });
+    }
+    if light && matches!(op, "perspective" | "fov") {
+        return Err(format!("`{op}` is a camera control; a light view has hotspot and falloff"));
+    }
     let mut o = orbit_of(&state.scene, id).ok_or_else(|| missing(id))?;
-    let has_target = matches!(state.scene.node(id).map(|n| &n.object), Some(ObjectKind::Camera { target: Some(t), .. }) if state.scene.node(*t).is_some());
+    let has_target = match state.scene.node(id).map(|n| &n.object) {
+        Some(ObjectKind::Camera { target: Some(t), .. }) => state.scene.node(*t).is_some(),
+        Some(ObjectKind::Light(l)) => l.target.is_some_and(|t| state.scene.node(t).is_some()),
+        _ => false,
+    };
     let forward = -o.basis().2;
     let d = o.distance;
     let factor = x.max(1e-3);

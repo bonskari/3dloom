@@ -188,6 +188,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             }
                         });
                         icons::named(&region.response, egui::WidgetType::ComboBox, cur.label());
+                        // Right-click Paint Selection Region: Preferences (the brush size lives there).
+                        if cur == SelectionRegion::Paint && region.response.secondary_clicked() {
+                            let _ = app.dispatch(Command::Preferences);
+                        }
                     }
                     "Window/Crossing Selection Toggle" => {
                         let w = app.state.window_selection;

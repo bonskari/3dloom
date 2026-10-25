@@ -138,6 +138,8 @@ pub enum CreateKind {
     Light(loom_commands::light::LightKind),
     /// Geometry > Patch Grids: Quad Patch (`quad`) or Tri Patch, dragged corner to corner.
     PatchGrid { quad: bool },
+    /// Systems > Sunlight / Daylight: drag the compass from its centre.
+    SunSystem { daylight: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,6 +248,10 @@ pub struct LoomApp {
     pub creation_method: [Option<usize>; 10],
     pub create_category: Category,
     pub autogrid: bool,
+    /// Create > Lights: the Photometric (true, the default) or Standard object types.
+    pub photometric_lights: bool,
+    /// A panel control (spinner) is being dragged this frame.
+    pub spinner_drag: bool,
     pub keyboard_entry: KeyboardEntry,
     /// Creation in progress in the viewport.
     pub create: Option<CreateSession>,
@@ -253,6 +259,8 @@ pub struct LoomApp {
     pub camera_create: Option<create_tool::CameraSession>,
     /// Create > Helpers > Grid / Compass being dragged out.
     pub helper_create: Option<create_tool::HelperSession>,
+    /// Systems > Sunlight / Daylight being dragged out.
+    pub sun_create: Option<create_tool::SunSession>,
     /// A biped being dragged out.
     pub biped_create: Option<create_tool::BipedSession>,
     /// Create Biped rollout: the structure the next biped gets.
@@ -383,6 +391,10 @@ impl LoomApp {
         if let Some(path) = loom_commands::settings::settings_path() {
             app.use_settings_file(path);
         }
+        // A session starts from the startup scene when there is one.
+        if let Err(e) = loom_commands::assets::load_startup_scene(&mut app.state) {
+            app.last_error = Some(e);
+        }
         app
     }
 
@@ -472,10 +484,13 @@ impl LoomApp {
             creation_method: [None; 10],
             create_category: Category::Geometry,
             autogrid: false,
+            photometric_lights: true,
+            spinner_drag: false,
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
             camera_create: None,
             helper_create: None,
+            sun_create: None,
             biped_create: None,
             biped_defaults: loom_scene::biped::BipedStructure::new(1.0),
             last_biped: None,
@@ -636,7 +651,9 @@ impl LoomApp {
             self.shown_end_result_key = key;
             self.state.mesh_dirty = true;
         }
-        if self.state.mesh_dirty {
+        // Update During Spinner Drag off: the viewports catch up on release.
+        let hold = !self.state.update_during_spinner_drag && self.spinner_drag;
+        if self.state.mesh_dirty && !hold {
             self.rebuild_world_meshes();
             self.state.mesh_dirty = false;
         }
@@ -1244,6 +1261,18 @@ impl LoomApp {
     }
 }
 
+/// A file dropped on the window: a model file is imported, a scene file
+/// merged (all its objects); other files (images) are handled elsewhere.
+pub fn dropped_scene_command(path: &std::path::Path) -> Option<Command> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    let p = Some(path.to_string_lossy().into_owned());
+    match ext.as_str() {
+        "fbx" | "obj" | "3ds" | "stl" | "dxf" | "max" => Some(Command::ImportFile { path: p }),
+        "loom" => Some(Command::MergeFile { path: p, names: None, duplicates: None }),
+        _ => None,
+    }
+}
+
 impl eframe::App for LoomApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame(ctx);
@@ -1274,6 +1303,15 @@ impl LoomApp {
             Err(e) => self.last_error = Some(e),
             Ok(None) => {}
         }
+        // XRefs set to Update Automatically: re-read a changed file (checked once a second).
+        if !self.state.scene.xrefs.is_empty() && self.state.xref_checked.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
+            self.state.xref_checked = Some(std::time::Instant::now());
+            match loom_commands::xref::tick(&mut self.state) {
+                Ok(paths) if !paths.is_empty() => self.state.status_prompt = format!("XRef updated: {}", paths.join(", ")),
+                Err(e) => self.last_error = Some(e),
+                _ => {}
+            }
+        }
         ctx.request_repaint_after(std::time::Duration::from_secs(1));
         let title = format!("{}  [{}]", self.state.title(), env!("LOOM_VERSION"));
         if title != self.last_title {
@@ -1293,6 +1331,14 @@ impl LoomApp {
             let _ = self.dispatch(Command::CancelRender);
         }
         hotkeys::handle(ctx, self);
+        // A drag that began outside the viewports is a spinner (or other
+        // panel control) drag: Update During Spinner Drag decides whether the
+        // viewports follow it.
+        let was = self.spinner_drag;
+        self.spinner_drag = ctx.dragged_id().is_some() && ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| !self.viewport_rects.iter().any(|r| r.contains(p)));
+        if was && !self.spinner_drag && self.state.mesh_dirty {
+            self.sync_after_command();
+        }
         // An image file dropped on an object: a material with it as the Diffuse map.
         let dropped: Vec<std::path::PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
         if !dropped.is_empty() {
@@ -1301,6 +1347,11 @@ impl LoomApp {
                 let image = path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["png", "jpg", "jpeg", "bmp", "tga", "tif", "tiff"].contains(&e.to_ascii_lowercase().as_str()));
                 if let (true, Some(node)) = (image, at.and_then(|p| viewport_widget::node_at(self, p))) {
                     let _ = self.dispatch(Command::DropBitmap { path: path.to_string_lossy().into_owned(), node: Some(node.0) });
+                }
+                if let Some(cmd) = dropped_scene_command(&path) {
+                    if let Err(e) = self.dispatch(cmd) {
+                        self.last_error = Some(format!("{}: {e}", path.display()));
+                    }
                 }
             }
         }

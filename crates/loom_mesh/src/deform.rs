@@ -272,10 +272,13 @@ pub fn mirror(mesh: &mut Mesh, axis: u8, offset: f32, copy: bool) -> Result<(), 
     Ok(())
 }
 
-/// Symmetry: keep the side of the plane the normal points away from
-/// (`flip` swaps), mirror it, and weld the seam within `threshold`.
+/// Symmetry: keep the positive side of the plane (`flip` keeps the negative
+/// one), mirror it, and weld the seam within `threshold`. The reference's
+/// own files show the sides: a Flip-on Symmetry over the -X half of a model
+/// stores full-width results for the modifiers above it.
 pub fn symmetry(mesh: &mut Mesh, axis: u8, flip: bool, slice: bool, weld: bool, threshold: f32) -> Result<(), String> {
-    let n = match axis { 0 => Vec3::X, 1 => Vec3::Y, _ => Vec3::Z } * if flip { -1.0 } else { 1.0 };
+    // `n` points at the side that is dropped.
+    let n = match axis { 0 => Vec3::X, 1 => Vec3::Y, _ => Vec3::Z } * if flip { 1.0 } else { -1.0 };
     if slice {
         // Cut at the plane and drop the positive side.
         let _ = crate::geom_ops::slice(mesh, Vec3::ZERO, n, None, false)?;
@@ -466,6 +469,25 @@ mod tests {
         assert_eq!(c.face_count(), 12);
         c.check_invariants().unwrap();
         assert!(c.face_normal(FaceId(6)).length() > 0.9);
+    }
+
+    #[test]
+    fn symmetry_keeps_the_positive_side_unless_flipped() {
+        let off_centre = || {
+            let mut m = box_segmented(10.0, 10.0, 10.0, [2, 1, 1]);
+            for v in m.vertices_mut() {
+                v.position.x -= 4.0;
+            }
+            m
+        };
+        let mut m = off_centre();
+        symmetry(&mut m, 0, false, true, true, 0.01).unwrap();
+        let (lo, hi) = m.aabb();
+        assert!((lo.x + 1.0).abs() < 1e-4 && (hi.x - 1.0).abs() < 1e-4, "{lo} {hi}");
+        let mut m = off_centre();
+        symmetry(&mut m, 0, true, true, true, 0.01).unwrap();
+        let (lo, hi) = m.aabb();
+        assert!((lo.x + 9.0).abs() < 1e-4 && (hi.x - 9.0).abs() < 1e-4, "{lo} {hi}");
     }
 
     #[test]

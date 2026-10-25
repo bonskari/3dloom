@@ -142,6 +142,23 @@ pub fn compose_base(diffuse: glam::Vec3, map: Option<(&MapImage, &Map)>, opacity
     MapImage { width: w, height: h, rgba }
 }
 
+/// A Normal Bump map's normal image as Bevy reads normal maps (green
+/// toward the top of the image): the reference's tangent normal maps point
+/// green down, so green is inverted unless Flip Green; Flip Red inverts red.
+pub fn normal_bump(img: &MapImage, flip_red: bool, flip_green: bool) -> MapImage {
+    let mut out = img.clone();
+    for px in out.rgba.as_chunks_mut::<4>().0 {
+        if flip_red {
+            px[0] = 255 - px[0];
+        }
+        if !flip_green {
+            px[1] = 255 - px[1];
+        }
+        px[3] = 255;
+    }
+    out
+}
+
 /// A grey (luminance) texture scaled by `amount` 0–1, alpha = the same value:
 /// Specular Level and Self-Illumination maps. 8-bit, linear.
 pub fn luminance(img: &MapImage, amount: f32) -> MapImage {
@@ -292,6 +309,13 @@ impl bevy::render::camera::CameraProjection for BucketProjection {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_normal_bump_map_turns_green_up_for_bevy() {
+        let img = MapImage { width: 1, height: 1, rgba: vec![200, 60, 255, 10] };
+        assert_eq!(super::normal_bump(&img, false, false).rgba, vec![200, 195, 255, 255]);
+        assert_eq!(super::normal_bump(&img, true, true).rgba, vec![55, 60, 255, 255]);
+    }
+
     use super::*;
     use bevy::color::Alpha;
     use loom_scene::material::Map as BitmapMap;

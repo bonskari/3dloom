@@ -74,6 +74,8 @@ pub struct Settings {
     pub recent_files: Vec<PathBuf>,
     /// The folder the file dialogs opened last (the UI fills it in).
     pub last_folder: Option<PathBuf>,
+    /// File > Set Project Folder.
+    pub project_folder: Option<PathBuf>,
     /// FBX / OBJ import and export options and saved presets.
     pub exchange: crate::exchange::ExchangeOptions,
 }
@@ -94,6 +96,7 @@ impl Settings {
             recent_files: state.recent_files.clone(),
             last_folder: None,
             exchange: state.exchange.clone(),
+            project_folder: state.project_folder.clone(),
         }
     }
 
@@ -114,6 +117,7 @@ impl Settings {
         state.recent_files = self.recent_files.clone();
         state.recent_files.truncate(state.prefs.recent_files_count);
         state.exchange = self.exchange.clone();
+        state.project_folder = self.project_folder.clone();
     }
 
     pub fn to_json(&self) -> String {
