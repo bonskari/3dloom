@@ -1,5 +1,5 @@
 //! The render quality gallery: a few test scenes rendered at 1280x720 the
-//! way Render does (256 px buckets), written as PNGs to `LOOM_GALLERY_DIR`.
+//! way Render does, written as PNGs to `LOOM_GALLERY_DIR`.
 //! Run with `cargo test -p loom_bevy --test gallery -- --ignored`.
 
 use glam::{Mat4, Vec3};
@@ -10,7 +10,6 @@ use loom_scene::StandardMaterial;
 
 const W: u32 = 1280;
 const H: u32 = 720;
-const BUCKET: u32 = 256;
 
 fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
@@ -59,25 +58,12 @@ fn camera(eye: Vec3, target: Vec3, fov: f32) -> ViewCamera {
     ViewCamera { view: Mat4::look_at_rh(eye, target, Vec3::Z), projection: Mat4::perspective_rh(fov.to_radians(), W as f32 / H as f32, 1.0, 5000.0) }
 }
 
-/// Renders the frame in 256 px buckets as the Rendered Frame Window does.
+/// Renders the frame as the Rendered Frame Window does at this size: whole, every pass.
 fn frame(r: &mut BevyRenderer, cam: &ViewCamera, options: RenderOptions) -> image::RgbaImage {
-    r.begin_render(options);
-    let mut out = image::RgbaImage::new(W, H);
-    let mut first = true;
-    for by in (0..H).step_by(BUCKET as usize) {
-        for bx in (0..W).step_by(BUCKET as usize) {
-            let sub = [bx as f32 / W as f32, by as f32 / H as f32, (bx + BUCKET) as f32 / W as f32, (by + BUCKET) as f32 / H as f32];
-            for _ in 0..if first { 4 } else { 1 } {
-                r.set_render_bucket(cam, W as f32 / H as f32, sub, [BUCKET, BUCKET]).unwrap();
-                r.update();
-            }
-            first = false;
-            let tile = r.read_render().unwrap();
-            image::imageops::replace(&mut out, &tile, bx as i64, by as i64);
-        }
-    }
-    r.end_render();
-    out
+    let t = std::time::Instant::now();
+    let img = r.render_with(W, H, cam, options).unwrap();
+    eprintln!("rendered in {:.2} s", t.elapsed().as_secs_f32());
+    img
 }
 
 fn object<'a>(id: u64, mesh: &'a loom_mesh::Mesh, s: Surface) -> SceneObject<'a> {

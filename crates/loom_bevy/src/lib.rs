@@ -894,7 +894,9 @@ impl BevyRenderer {
             None if o.hidden => RenderLayers::from_layers(&[RENDER_LAYER, HIDDEN_LAYER]),
             None => RenderLayers::layer(RENDER_LAYER),
         };
-        let clear = [o.background[0], o.background[1], o.background[2], 0.0];
+        // Cleared to nothing: the background goes under the passes once they
+        // are added up, so tone mapping never touches its colour.
+        let clear = [0.0; 4];
         let camera = camera.scaled(self.scale);
         self.place_view(RENDER_SLOT, internal, Projection::custom(BucketProjection::new(&camera, aspect, sub)), camera.view, clear, o.msaa, layers);
         if self.render.as_ref().is_some_and(|r| !r.camera_ready) {
@@ -911,11 +913,11 @@ impl BevyRenderer {
     pub fn read_render(&mut self) -> Result<image::RgbaImage, String> {
         let img = self.read_back(RENDER_SLOT)?;
         let r = self.render.as_mut().ok_or("no render started")?;
-        let (q, passes) = (r.options.quality.clone(), r.options.passes());
+        let (q, passes, bg) = (r.options.quality.clone(), r.options.passes(), r.options.background);
         let a = r.accum.as_mut().ok_or("no bucket set")?;
         let (j, filter, size) = if q.antialiasing { (quality::jitter(a.pass, passes), q.filter, q.filter_size.clamp(1.0, 10.0)) } else { ([0.0; 2], loom_scene::render::AaFilter::Area, 1.0) };
         a.add(&img, j, filter, size)?;
-        Ok(a.image())
+        Ok(a.image(bg))
     }
 
     /// Whether the bucket has all its passes.

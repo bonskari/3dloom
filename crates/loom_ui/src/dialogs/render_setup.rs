@@ -207,7 +207,7 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
     let b = app.state.scene.render.bevy.clone();
     ui.label(egui::RichText::new("Bevy Renderer").strong());
-    ui.label(egui::RichText::new("Antialiasing").strong());
+    ui.label(egui::RichText::new("Image Quality").strong());
     ui.horizontal(|ui| {
         let mut aa = b.antialiasing;
         if ui.checkbox(&mut aa, "Antialiasing").changed() {
@@ -243,7 +243,7 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
             run(app, Bevy { passes: Some(passes), ..Default::default() }.cmd());
         }
     });
-    ui.label(egui::RichText::new("Shadows").strong());
+    ui.label(egui::RichText::new("Shadow Options").strong());
     ui.horizontal(|ui| {
         let mut sh = b.shadows;
         if ui.checkbox(&mut sh, "Shadows").changed() {

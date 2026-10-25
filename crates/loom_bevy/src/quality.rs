@@ -128,16 +128,17 @@ impl Accum {
         Ok(())
     }
 
-    /// The passes so far as an sRGB image of the bucket.
-    pub fn image(&self) -> image::RgbaImage {
+    /// The passes so far as an sRGB image of the bucket over `background`
+    /// (sRGB; the passes are cleared to nothing, so their colour is premultiplied).
+    pub fn image(&self, background: [f32; 3]) -> image::RgbaImage {
         let [w, h] = self.key.1;
+        let bg = background.map(|c| srgb_to_linear((c.clamp(0.0, 1.0) * 255.0).round() as u8));
         image::RgbaImage::from_fn(w, h, |x, y| {
             let s = self.sum[(y * w + x) as usize];
-            if s[4] <= 1e-6 {
-                return image::Rgba([0, 0, 0, 0]);
-            }
-            let c = |k: usize| s[k] / s[4];
-            image::Rgba([linear_to_srgb(c(0)), linear_to_srgb(c(1)), linear_to_srgb(c(2)), (c(3).clamp(0.0, 1.0) * 255.0).round() as u8])
+            let n = if s[4] > 1e-6 { s[4] } else { 1.0 };
+            let a = (s[3] / n).clamp(0.0, 1.0);
+            let c = |k: usize| s[k] / n + bg[k] * (1.0 - a);
+            image::Rgba([linear_to_srgb(c(0)), linear_to_srgb(c(1)), linear_to_srgb(c(2)), (a * 255.0).round() as u8])
         })
     }
 }
@@ -257,8 +258,8 @@ mod tests {
                 for p in 0..4 {
                     a.add(&flat(w, h, 128), jitter(p, 4), f, 2.5).unwrap();
                 }
-                let img = a.image();
-                assert!(img.pixels().all(|p| (p.0[0] as i32 - 128).abs() <= 1 && p.0[3] == 255), "{f:?} ss {ss}");
+                let img = a.image([1.0, 0.0, 0.0]);
+                assert!(img.pixels().all(|p| (p.0[0] as i32 - 128).abs() <= 1 && p.0[1] == 128 && p.0[3] == 255), "{f:?} ss {ss}");
             }
         }
     }
@@ -268,7 +269,7 @@ mod tests {
         let mut a = Accum::new(([0.0, 0.0, 1.0, 1.0], [4, 4]), 1, 1);
         let img = image::RgbaImage::from_fn(6, 6, |x, y| image::Rgba([(x * 40) as u8, (y * 40) as u8, 7, 255]));
         a.add(&img, [0.0; 2], AaFilter::Area, 1.0).unwrap();
-        let out = a.image();
+        let out = a.image([0.0; 3]);
         for y in 0..4 {
             for x in 0..4 {
                 let (o, i) = (out.get_pixel(x, y).0, img.get_pixel(x + 1, y + 1).0);
