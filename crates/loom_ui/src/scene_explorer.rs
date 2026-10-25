@@ -584,7 +584,7 @@ fn table(ui: &mut egui::Ui, app: &LoomApp, ex: &SceneExplorer, rows: &[explorer:
                 match explorer::cell(&app.state, n, *col) {
                     Cell::Bool(v) => {
                         let b = egui::Rect::from_center_size(cr.center(), egui::vec2(12.0, 12.0));
-                        ui.painter().rect_stroke(b, 2.0, egui::Stroke::new(1.0, fg), egui::StrokeKind::Inside);
+                        ui.painter().rect_stroke(b, 2.0, egui::Stroke::new(1.0_f32, fg), egui::StrokeKind::Inside);
                         if v {
                             ui.painter().text(b.center(), egui::Align2::CENTER_CENTER, icons::CHECKED, egui::FontId::proportional(11.0), fg);
                         }
@@ -654,7 +654,7 @@ fn table(ui: &mut egui::Ui, app: &LoomApp, ex: &SceneExplorer, rows: &[explorer:
         if let (Some(src), Some(p)) = (st.drag, pointer) {
             if let Some((_, r)) = target(p).and_then(|t| row_rects.iter().find(|(id, _)| *id == t && *id != src)) {
                 let y = r.center().y;
-                ui.painter().arrow(egui::pos2(r.left() + 2.0, y), egui::vec2(10.0, 0.0), egui::Stroke::new(2.5, egui::Color32::from_rgb(240, 210, 40)));
+                ui.painter().arrow(egui::pos2(r.left() + 2.0, y), egui::vec2(10.0, 0.0), egui::Stroke::new(2.5_f32, egui::Color32::from_rgb(240, 210, 40)));
             }
             if let Some(n) = app.state.scene.node(loom_scene::NodeId(src)) {
                 ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, ui.id().with("drag_label"))).text(p + egui::vec2(14.0, 0.0), egui::Align2::LEFT_CENTER, &n.name, egui::FontId::proportional(12.0), text_color);

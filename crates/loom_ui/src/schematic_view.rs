@@ -415,12 +415,12 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, v: &SchematicView, all
             let off = egui::vec2((-pan.x * zoom).rem_euclid(step), (-pan.y * zoom).rem_euclid(step));
             let mut x = rect.left() + off.x;
             while x < rect.right() {
-                painter.line_segment([egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())], egui::Stroke::new(1.0, c));
+                painter.line_segment([egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())], egui::Stroke::new(1.0_f32, c));
                 x += step;
             }
             let mut y = rect.top() + off.y;
             while y < rect.bottom() {
-                painter.line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)], egui::Stroke::new(1.0, c));
+                painter.line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)], egui::Stroke::new(1.0_f32, c));
                 y += step;
             }
         }
@@ -432,17 +432,17 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, v: &SchematicView, all
         let (Some(a), Some(b)) = (box_of(&w.from), box_of(&w.to)) else { continue };
         match w.kind {
             WireKind::Shared => {
-                painter.extend(egui::Shape::dashed_line(&[a.center(), b.center()], egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 170, 230)), 5.0, 4.0));
+                painter.extend(egui::Shape::dashed_line(&[a.center(), b.center()], egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(120, 170, 230)), 5.0, 4.0));
             }
             _ => {
                 let start = egui::pos2(a.left() + 8.0 * zoom, a.bottom());
                 let end = b.left_center();
                 if end.x > start.x {
-                    painter.add(egui::Shape::line(vec![start, egui::pos2(start.x, end.y), end], egui::Stroke::new(1.0, wire_c)));
+                    painter.add(egui::Shape::line(vec![start, egui::pos2(start.x, end.y), end], egui::Stroke::new(1.0_f32, wire_c)));
                 } else {
-                    painter.line_segment([a.center_bottom(), b.center_top()], egui::Stroke::new(1.0, wire_c));
+                    painter.line_segment([a.center_bottom(), b.center_top()], egui::Stroke::new(1.0_f32, wire_c));
                 }
-                painter.arrow(end - egui::vec2(6.0 * zoom, 0.0), egui::vec2(5.0 * zoom, 0.0), egui::Stroke::new(1.0, wire_c));
+                painter.arrow(end - egui::vec2(6.0 * zoom, 0.0), egui::vec2(5.0 * zoom, 0.0), egui::Stroke::new(1.0_f32, wire_c));
             }
         }
     }
@@ -461,17 +461,17 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, v: &SchematicView, all
         painter.rect_filled(r, 3.0 * zoom, if selected { egui::Color32::WHITE } else { base });
         // White border: selected in the viewports; red: animated.
         let border = if e.animated {
-            egui::Stroke::new(2.0, egui::Color32::from_rgb(230, 50, 40))
+            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(230, 50, 40))
         } else if viewport_sel.contains(&e.key) {
-            egui::Stroke::new(2.0, egui::Color32::WHITE)
+            egui::Stroke::new(2.0_f32, egui::Color32::WHITE)
         } else {
-            egui::Stroke::new(1.0, egui::Color32::from_gray(30))
+            egui::Stroke::new(1.0_f32, egui::Color32::from_gray(30))
         };
         painter.rect_stroke(r, 3.0 * zoom, border, egui::StrokeKind::Inside);
         // The left end: solid when arranged, open (a hole) when free.
         let end = egui::Rect::from_min_size(r.min, egui::vec2(6.0 * zoom, r.height()));
         if v.free.contains_key(&e.key) && !v.always_arrange {
-            painter.circle_stroke(end.center(), 2.0 * zoom, egui::Stroke::new(1.0, egui::Color32::BLACK));
+            painter.circle_stroke(end.center(), 2.0 * zoom, egui::Stroke::new(1.0_f32, egui::Color32::BLACK));
         } else {
             painter.rect_filled(end.shrink(1.0), 1.0, egui::Color32::from_gray(40));
         }
@@ -570,7 +570,7 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, v: &SchematicView, all
     // The Connect line follows the pointer.
     if let (Some(from), Some(p)) = (st.connect_from.as_ref(), ui.ctx().pointer_latest_pos()) {
         if let Some(a) = box_of(from) {
-            painter.extend(egui::Shape::dashed_line(&[a.center(), p], egui::Stroke::new(1.5, egui::Color32::YELLOW), 4.0, 3.0));
+            painter.extend(egui::Shape::dashed_line(&[a.center(), p], egui::Stroke::new(1.5_f32, egui::Color32::YELLOW), 4.0, 3.0));
         }
     }
     // Empty space: click clears, drag selects by region, middle drag pans, wheel zooms.
@@ -582,7 +582,7 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, v: &SchematicView, all
     }
     if let (Some(a), Some(b)) = (st.region, ui.ctx().pointer_latest_pos()) {
         let r = egui::Rect::from_two_pos(a, b);
-        painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::WHITE), egui::StrokeKind::Middle);
+        painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::WHITE), egui::StrokeKind::Middle);
         if bg.drag_stopped() {
             st.region = None;
             let keys: Vec<String> = boxes.iter().filter(|(_, br)| br.intersects(r)).map(|(k, _)| k.clone()).collect();
