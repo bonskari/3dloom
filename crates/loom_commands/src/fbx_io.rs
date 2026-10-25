@@ -187,6 +187,38 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
     // Materials: each file material once in the library, by name.
     let mut library = state.scene.materials.clone();
     let material_ids = import_materials(&mut library, &doc.materials, path);
+    // FBX face IDs index this mesh's ordered material slots, not the file's
+    // global material table. Bind them through a real native Multi/Sub object.
+    let mut assigned_materials = vec![None; doc.nodes.len()];
+    for (i, n) in doc.nodes.iter().enumerate().filter(|(i, _)| add[*i]) {
+        let FbxKind::Mesh { materials, .. } = &n.kind else { continue };
+        assigned_materials[i] = match materials.as_slice() {
+            [] => None,
+            [only] => material_ids.get(only).copied(),
+            names => {
+                let slots = names.iter().enumerate().map(|(slot, name)| {
+                    Ok(loom_scene::material::SubMaterial {
+                        id: u16::try_from(slot + 1).map_err(|_| "FBX material slot count exceeds native limits")?,
+                        name: name.clone(),
+                        material: Some(*material_ids.get(name).ok_or_else(|| format!("{}: missing FBX material {name}", n.name))?),
+                        enabled: true,
+                    })
+                }).collect::<Result<Vec<_>, String>>()?;
+                let kind = loom_scene::material::MaterialKind::MultiSub(slots);
+                match library.iter().find(|(_, material)| material.kind == kind) {
+                    Some((id, _)) => Some(*id),
+                    None => {
+                        let taken = library.values().map(|material| material.name.clone()).collect();
+                        let mut material = loom_scene::material::StandardMaterial::new(&unique_name(&format!("{} materials", n.name), &taken));
+                        material.kind = kind;
+                        let id = loom_scene::material::next_material_id(&library);
+                        library.insert(id, material);
+                        Some(id)
+                    }
+                }
+            }
+        };
+    }
     if library != state.scene.materials {
         let slots = state.scene.material_editor.clone();
         changes.push(Change::SetMaterials { before: Box::new((state.scene.materials.clone(), slots.clone())), after: Box::new((library, slots)) });
@@ -209,7 +241,12 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
         let name = if let Some(prefix)=&namespace {format!("{prefix}:{base}")} else if taken.contains(base) { unique_name(base, &taken) } else { base.to_owned() };
         taken.insert(name.clone());
         let object = match &n.kind {
-            FbxKind::Mesh { mesh, .. } => ObjectKind::EditablePoly(loom_scene::PolyObject::from_mesh(mesh.clone())),
+            FbxKind::Mesh { mesh, .. } => {
+                // FBX documents use 1-based material IDs; native face IDs are 0-based.
+                let mut mesh = mesh.clone();
+                for face in mesh.faces_mut() { face.material_id = face.material_id.saturating_sub(1); }
+                ObjectKind::EditablePoly(loom_scene::PolyObject::from_mesh(mesh))
+            },
             FbxKind::Camera { fov_deg } => ObjectKind::camera_object(*fov_deg),
             FbxKind::Light(l) => ObjectKind::Light(Box::new(light_from_fbx(l))),
             FbxKind::Bone { length, .. } if o.bones_as_dummies => ObjectKind::dummy(length.max(0.001) * 0.25),
@@ -236,10 +273,7 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
         }
         if let FbxKind::Mesh { materials, .. } = &n.kind {
             node.materials = materials.clone();
-            // One file material: assigned; several stay named per material id, each in the library.
-            if let [only] = materials.as_slice() {
-                node.material = material_ids.get(only).copied();
-            }
+            node.material = assigned_materials[i];
         }
         // Constants: importing at a later frame with Auto Key on does not key.
         node.transform = Transform { position: loom_scene::Param::new(n.translation), rotation: loom_scene::Param::new(n.rotation_deg), scale: loom_scene::Param::new(n.scale) };
@@ -654,6 +688,15 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
                 // An assigned material covers every face, as one FBX material.
                 let assigned = node.material.and_then(|m| state.scene.materials.get(&m));
                 let materials = match assigned {
+                    Some(m) if matches!(m.kind, loom_scene::material::MaterialKind::MultiSub(_)) => {
+                        let loom_scene::material::MaterialKind::MultiSub(slots) = &m.kind else { unreachable!() };
+                        let names = slots.iter().map(|slot| slot.material.and_then(|id| state.scene.materials.get(&id)).map(|material| material.name.clone()).ok_or_else(|| format!("{}: Multi/Sub slot {} has no material to export", m.name, slot.id))).collect::<Result<Vec<_>, _>>()?;
+                        for face in mesh.faces_mut() {
+                            let slot = slots.iter().position(|slot| u32::from(slot.id) == u32::from(face.material_id) + 1).ok_or_else(|| format!("{}: face material ID {} has no Multi/Sub slot", node.name, face.material_id))?;
+                            face.material_id = slot as u16 + 1;
+                        }
+                        names
+                    }
                     Some(m) => {
                         for f in mesh.faces_mut() {
                             f.material_id = 1;
