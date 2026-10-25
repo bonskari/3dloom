@@ -271,7 +271,7 @@ pub fn export_3ds(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value
     let wanted: Vec<&Node> = ids.iter().filter_map(|id| state.scene.node(*id)).collect();
     let names = loom_mesh::tds::short_names(&wanted.iter().map(|n| n.name.clone()).collect::<Vec<_>>());
     let mut materials: BTreeMap<String, TdsMaterial> = BTreeMap::new();
-    let mut add_material = |s: &StandardMaterial, materials: &mut BTreeMap<String, TdsMaterial>| {
+    let add_material = |s: &StandardMaterial, materials: &mut BTreeMap<String, TdsMaterial>| {
         materials.entry(s.name.clone()).or_insert_with(|| material_to_3ds(s));
     };
     for (node, name) in wanted.iter().zip(&names) {

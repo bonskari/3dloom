@@ -313,7 +313,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         if !moved && pointer.interact_pos().is_some_and(|p| p.distance(start) > 3.0) {
                             moved = true;
                             app.view_animation = None;
-                            app.state.record_view();
+                            app.state.record_view_as("Orbit");
                             // Dragging an axis view makes it an Orthographic (User) view.
                             if app.state.viewports[index].kind.angles().is_some() {
                                 let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
@@ -674,7 +674,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             if !mods.ctrl && app.state.viewports[index].kind.angles().is_some() {
                                 let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
                             }
-                            app.state.record_view();
+                            app.state.record_view_as("Orbit");
                             nav_event(app, index, rect, InputEvent::MouseDown { button: MouseButton::Left, pos: Vec2::new(start.x, start.y), mods });
                         }
                     }
@@ -695,7 +695,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && response.hovered()
                     {
                         if app.state.nav_mode != loom_input::NavMode::None {
-                            app.state.record_view();
+                            app.state.record_view_as(nav_change_name(app.state.nav_mode));
                         }
                         // Orbit Selected / SubObject: orbit around the selection,
                         // keeping the eye where it is.
@@ -1093,7 +1093,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         if mods.alt && !mods.ctrl && app.state.viewports[index].kind.angles().is_some() {
                             let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
                         }
-                        app.state.record_view();
+                        app.state.record_view_as(if mods.alt && mods.ctrl { "Zoom" } else if mods.alt { "Orbit" } else { "Pan" });
                         nav_event(app, index, rect, InputEvent::MouseDown {
                                 button: MouseButton::Middle,
                                 pos,
@@ -1399,6 +1399,19 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
             }
             let _ = ui;
+    }
+}
+
+/// The view change a navigation mode makes, as Undo View names it.
+fn nav_change_name(mode: loom_input::NavMode) -> &'static str {
+    use loom_input::NavMode as N;
+    match mode {
+        N::Zoom | N::ZoomAll => "Zoom",
+        N::ZoomRegion => "Zoom Region",
+        N::Pan => "Pan",
+        N::Orbit | N::OrbitSelected | N::OrbitSubObject => "Orbit",
+        N::Fov => "Field-of-View",
+        _ => "Change",
     }
 }
 

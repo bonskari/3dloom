@@ -15,6 +15,7 @@ mod mesh_patch;
 mod widgets;
 mod ribbon;
 mod precision;
+mod lightcam2;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
@@ -2777,6 +2778,11 @@ fn the_lights_category_buttons_start_light_creation() {
     let cp = panel(&h, "command_panel");
     // The category buttons are icons, named for screen readers.
     h.click(h.find(egui::accesskit::Role::Button, "Lights").center());
+    // Photometric is the default class; the standard lights are under Standard.
+    click_text(&mut h, "Photometric", cp, 0.0);
+    let p = *h.text_centers("Standard").last().expect("the Standard entry");
+    h.click(p);
+    h.frames(2);
     click_text(&mut h, "Target Spot", cp, 0.0);
     assert_eq!(h.app.create_kind, Some(crate::CreateKind::Light(loom_commands::light::LightKind::TargetSpot)));
     click_text(&mut h, "Omni", cp, 0.0);

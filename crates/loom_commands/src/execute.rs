@@ -858,6 +858,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(camera_json(state))
         }
+        C::UpdateDuringSpinnerDragToggle => toggle(&mut state.update_during_spinner_drag, "update_during_spinner_drag"),
         C::ShadeSelectedToggle => {
             state.mesh_dirty = true;
             toggle(&mut state.shade_selected, "shade_selected")
@@ -895,7 +896,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({ "start": s0, "end": s1, "fps": state.fps, "frame": state.current_frame }))
         }
         C::SetFov { degrees } => {
-            state.record_view();
+            state.record_view_as("Field-of-View");
             state.active_mut().fov_y_radians = degrees.clamp(1.0, 175.0).to_radians();
             Ok(json!({ "fov": state.active().fov_y_radians.to_degrees() }))
         }
@@ -910,7 +911,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ZoomMode => nav_toggle(state, NavMode::Zoom),
         C::PanViewport { point: Some(p) } => {
             // The view slides (no turn, no zoom) until `p` is at its centre.
-            state.record_view();
+            state.record_view_as("Pan");
             let cam = &mut state.active_mut().camera;
             let to_eye = cam.basis().2;
             let p = Vec3::from(p);
@@ -3196,7 +3197,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::Orbit { yaw, pitch, distance, target, roll } => {
-            state.record_view();
+            state.record_view_as("Orbit");
             let cam = &mut state.active_mut().camera;
             if let Some(r) = roll {
                 cam.roll = loom_input::camera_control::wrap_angle(r.to_radians());
@@ -3757,7 +3758,7 @@ pub(crate) fn frame(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Resul
     let Some((min, max)) = bounds else {
         return Ok(camera_json(state));
     };
-    state.record_view();
+    state.record_view_as("Zoom Extents");
     let fov = state.active().fov_y_radians;
     let radius = (max - min).length().max(0.25) * 0.5;
     let cam = &mut state.active_mut().camera;
@@ -3778,7 +3779,7 @@ fn frame_all(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Result<Value
 }
 
 fn zoom(state: &mut AppState, factor: f32) -> Result<Value, String> {
-    state.record_view();
+    state.record_view_as("Zoom");
     let cam = &mut state.active_mut().camera;
     cam.distance = (cam.distance * factor).max(0.05);
     Ok(camera_json(state))

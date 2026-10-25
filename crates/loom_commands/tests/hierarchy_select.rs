@@ -64,6 +64,31 @@ fn select_by_layer_selects_the_objects_of_several_layers() {
 }
 
 #[test]
+fn view_undo_names_the_change_and_keeps_twenty() {
+    let mut s = AppState::new();
+    boxed(&mut s, 0.0);
+    execute(&mut s, Command::ZoomViewportIn).unwrap();
+    assert_eq!(s.active().view_undo.undo_label(), Some("Zoom"));
+    execute(&mut s, Command::ZoomExtents).unwrap();
+    assert_eq!(s.active().view_undo.undo_label(), Some("Zoom Extents"));
+    execute(&mut s, Command::UndoViewportOperation).unwrap();
+    assert_eq!(s.active().view_undo.redo_label(), Some("Zoom Extents"));
+    for _ in 0..30 {
+        execute(&mut s, Command::ZoomViewportIn).unwrap();
+    }
+    assert_eq!(s.active().view_undo.len(), loom_commands::state::VIEW_UNDO_DEPTH);
+    assert_eq!(loom_commands::state::VIEW_UNDO_DEPTH, 20);
+}
+
+#[test]
+fn update_during_spinner_drag_toggles() {
+    let mut s = AppState::new();
+    assert!(s.update_during_spinner_drag);
+    execute(&mut s, Command::UpdateDuringSpinnerDragToggle).unwrap();
+    assert!(!s.update_during_spinner_drag);
+}
+
+#[test]
 fn paint_selection_size_up_and_down_change_the_brush() {
     let mut s = AppState::new();
     let start = s.prefs.paint_brush_size;

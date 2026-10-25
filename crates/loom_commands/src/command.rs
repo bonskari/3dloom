@@ -879,6 +879,7 @@ commands! {
     SetCurrentViewAsHome => "Set Current View as Home", MainUI, "ViewCube menu: the active view becomes the Home view (saved with the scene).";
     SaveActiveView => "Save Active View", MainUI, "Views > Save Active <View> View: store the active view (one slot per view: Top, Front, Perspective...).";
     RestoreActiveView => "Restore Active View", MainUI, "Views > Restore Active <View> View: bring back the view saved for the active view's kind.";
+    UpdateDuringSpinnerDragToggle => "Update During Spinner Drag", MainUI, "Views > Update During Spinner Drag: viewports follow a spinner while it is dragged (on, the default) or only when it is released.";
     ShadeSelectedToggle => "Shade Selected", MainUI, "Views > Shade Selected: selected objects are shaded in wireframe viewports.";
     CreateCameraFromView => "Create Camera From View", MainUI, "Views > Create Camera From View (Ctrl+C): a Target camera matching the active Perspective view, which then looks through it; with a camera selected, that camera is moved to match the view.";
     DollyCameraMode => "Dolly Camera Mode", MainUI, "Camera viewport: drag to move the camera along its line of sight.";

@@ -217,8 +217,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.add_enabled(false, egui::Button::new("Assembly")).on_disabled_hover_text("Assemblies (luminaires) are out of scope");
             });
             ui.menu_button("Views", |ui| {
-                item(ui, app, "Undo View Change", "Undo Viewport Operation");
-                item(ui, app, "Redo View Change", "Redo Viewport Operation");
+                let (undo_view, redo_view) = (app.state.active().view_undo.undo_label().unwrap_or("Change").to_owned(), app.state.active().view_undo.redo_label().unwrap_or("Change").to_owned());
+                item(ui, app, &format!("Undo View {undo_view}"), "Undo Viewport Operation");
+                item(ui, app, &format!("Redo View {redo_view}"), "Redo Viewport Operation");
                 ui.separator();
                 // The active view's name is part of the item, as in the reference.
                 let view = app.state.active().kind.label();
@@ -234,6 +235,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 let (gizmo, shade) = (app.state.prefs.gizmos.enabled, app.state.shade_selected);
                 check_item(ui, app, "Show Transform Gizmo", "Transform Gizmo Toggle", gizmo);
                 check_item(ui, app, "Shade Selected", "Shade Selected", shade);
+                let spinner = app.state.update_during_spinner_drag;
+                check_item(ui, app, "Update During Spinner Drag", "Update During Spinner Drag", spinner);
                 item(ui, app, "Create Camera From View", "Create Camera From View");
                 item(ui, app, "Add Default Lights to Scene...", "Add Default Lights to Scene");
                 item(ui, app, "Redraw All Views", "Redraw All Views");
