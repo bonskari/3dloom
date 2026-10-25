@@ -77,10 +77,12 @@ fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, prefix: &str, color:
 fn combo(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, choices: &[&str], current: u32) {
     // A long choice (a lamp name) is cut to the room left on the row: a
     // wider box would widen the command panel and shift every viewport.
-    let room = (ui.available_width() - ui.spacing().icon_width - 8.0).max(40.0);
-    let widest = choices.iter().map(|c| c.len()).max().unwrap_or(0) as f32 * 7.0;
-    let mut cb = egui::ComboBox::from_id_salt((name, id.0)).selected_text(choices.get(current as usize).copied().unwrap_or(""));
-    if widest > room {
+    let room = (ui.available_width() - ui.spacing().icon_width - ui.spacing().button_padding.x * 2.0 - ui.spacing().item_spacing.x).max(40.0);
+    let text = choices.get(current as usize).copied().unwrap_or("");
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let width = ui.fonts(|f| f.layout_no_wrap(text.to_owned(), font, egui::Color32::WHITE).size().x);
+    let mut cb = egui::ComboBox::from_id_salt((name, id.0)).selected_text(text);
+    if width > room {
         cb = cb.width(room).truncate();
     }
     cb.show_ui(ui, |ui| {
