@@ -406,6 +406,7 @@ fn body(ui: &mut egui::Ui, app: &LoomApp, ex: &SceneExplorer, rows: &[explorer::
 }
 
 /// The column headings and the rows.
+#[allow(clippy::too_many_arguments)]
 fn table(ui: &mut egui::Ui, app: &LoomApp, ex: &SceneExplorer, rows: &[explorer::Row], hl: &BTreeSet<u64>, all: &BTreeSet<u64>, st: &mut ExUi, acts: &mut Vec<Act>) {
     let widths: Vec<f32> = ex.columns.iter().map(|c| column_width(*c)).collect();
     let total: f32 = widths.iter().sum::<f32>().max(ui.available_width());

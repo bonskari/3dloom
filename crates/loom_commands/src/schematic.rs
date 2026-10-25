@@ -181,6 +181,7 @@ pub fn graph(state: &AppState, v: &SchematicView) -> (Vec<Entity>, Vec<Wire>) {
     }
     let instanced: BTreeSet<NodeId> = s.nodes().filter_map(|n| n.instance_of.map(|src| [n.id, src])).flatten().collect();
     let children = crate::explorer::children_of(s);
+    #[allow(clippy::too_many_arguments)]
     fn visit(state: &AppState, v: &SchematicView, id: NodeId, parent: Option<NodeId>, children: &BTreeMap<Option<NodeId>, Vec<NodeId>>, instanced: &BTreeSet<NodeId>, shared_mats: &BTreeMap<u32, usize>, materials: &mut BTreeMap<u32, String>, ents: &mut Vec<Entity>, wires: &mut Vec<Wire>) {
         let s = &state.scene;
         let Some(n) = s.node(id) else { return };
@@ -231,13 +232,15 @@ pub fn graph(state: &AppState, v: &SchematicView) -> (Vec<Entity>, Vec<Wire>) {
         if v.materials {
             if let Some(m) = n.material {
                 let mk = format!("mat:{}", m.0);
-                if materials.contains_key(&m.0) {
+                if let std::collections::btree_map::Entry::Vacant(slot) = materials.entry(m.0) {
+                    if let Some(mat) = s.materials.get(&m) {
+                        slot.insert(mat.name.clone());
+                        ents.push(Entity { key: mk.clone(), label: mat.name.clone(), kind: EntityKind::Material(m.0), node: id, owner: Some(key.clone()), animated: false, instanced: shared_mats.get(&m.0).is_some_and(|c| *c > 1) });
+                        wires.push(Wire { from: key.clone(), to: mk, kind: WireKind::Uses });
+                    }
+                } else {
                     // A material another object showed first: wired to it.
                     wires.push(Wire { from: key.clone(), to: mk, kind: WireKind::Shared });
-                } else if let Some(mat) = s.materials.get(&m) {
-                    materials.insert(m.0, mat.name.clone());
-                    ents.push(Entity { key: mk.clone(), label: mat.name.clone(), kind: EntityKind::Material(m.0), node: id, owner: Some(key.clone()), animated: false, instanced: shared_mats.get(&m.0).is_some_and(|c| *c > 1) });
-                    wires.push(Wire { from: key.clone(), to: mk, kind: WireKind::Uses });
                 }
             }
         }
