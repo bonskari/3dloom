@@ -907,6 +907,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ShowMainToolbarToggle => toggle(&mut state.show_main_toolbar, "main_toolbar"),
         C::LockUserInterfaceToggle => toggle(&mut state.ui_locked, "ui_locked"),
         C::ExpertModeToggle => toggle(&mut state.expert_mode, "expert_mode"),
+        C::UpdateDuringSpinnerDragToggle => toggle(&mut state.prefs.update_during_spinner_drag, "update_during_spinner_drag"),
         C::DisplayAsSeeThroughToggle => {
             let ids = selected_ids(state);
             if ids.is_empty() {

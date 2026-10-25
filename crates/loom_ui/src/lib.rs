@@ -1376,6 +1376,7 @@ impl LoomApp {
         icons::set_prefs(self.state.prefs.large_toolbar_buttons, self.state.prefs.flyout_time_ms);
         gizmo::set_colors([self.color("X Axis"), self.color("Y Axis"), self.color("Z Axis"), self.color("Active Axis")]);
         spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);
+        spinner::set_update_during_drag(ctx, self.state.prefs.update_during_spinner_drag);
         ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);

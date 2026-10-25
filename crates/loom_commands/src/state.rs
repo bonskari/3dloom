@@ -843,6 +843,8 @@ pub struct Prefs {
     pub increment_on_save: bool,
     /// Preferences > Files: Zoom Extents on Import.
     pub zoom_extents_on_import: bool,
+    /// Views > Update During Spinner Drag (off: a spinner drag applies on release).
+    pub update_during_spinner_drag: bool,
 }
 
 fn default_nudge() -> f32 {
@@ -884,13 +886,14 @@ impl Default for Prefs {
             backup_on_save: false,
             increment_on_save: false,
             zoom_extents_on_import: true,
+            update_during_spinner_drag: true,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 44] = [
+    pub const NAMES: [&'static str; 45] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -899,7 +902,7 @@ impl Prefs {
         "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
         "Grid Nudge Distance", "Display World Axis", "Mask Viewport to Safe Region", "Zoom About Mouse Point Orthographic", "Zoom About Mouse Point Perspective",
         "Right Click Menu over Selected Only", "Wheel Zoom Increment", "Large Toolbar Buttons", "Flyout Time", "Topology Dependence Warning", "Backup on Save",
-        "Increment on Save", "Zoom Extents on Import",
+        "Increment on Save", "Zoom Extents on Import", "Update During Spinner Drag",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -935,6 +938,7 @@ impl Prefs {
             "Backup on Save" => b(self.backup_on_save),
             "Increment on Save" => b(self.increment_on_save),
             "Zoom Extents on Import" => b(self.zoom_extents_on_import),
+            "Update During Spinner Drag" => b(self.update_during_spinner_drag),
             "Transform Gizmos" => b(self.gizmos.enabled),
             "Show Axis Labels" => b(self.gizmos.show_axis_labels),
             "Allow Multiple Gizmos" => b(self.gizmos.allow_multiple),
@@ -988,6 +992,7 @@ impl Prefs {
             "Backup on Save" => self.backup_on_save = on,
             "Increment on Save" => self.increment_on_save = on,
             "Zoom Extents on Import" => self.zoom_extents_on_import = on,
+            "Update During Spinner Drag" => self.update_during_spinner_drag = on,
             "Transform Gizmos" => self.gizmos.enabled = on,
             "Show Axis Labels" => self.gizmos.show_axis_labels = on,
             "Allow Multiple Gizmos" => self.gizmos.allow_multiple = on,

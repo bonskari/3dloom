@@ -510,12 +510,14 @@ fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     item(ui, app, "Create Camera From View", "Create Camera From View");
     item(ui, app, "Redraw All Views", "Redraw All Views");
     ui.separator();
-    for (label, action) in [
-        ("Top", "Top View"), ("Bottom", "Bottom View"), ("Front", "Front View"), ("Back", "Back View"),
-        ("Left", "Left View"), ("Right", "Right View"), ("Perspective", "Perspective User View"), ("Orthographic", "Orthographic User View"),
-    ] {
-        item(ui, app, label, action);
-    }
+    sub(ui, app, "Set Active Viewport", |ui, app| {
+        for (label, action) in [
+            ("Top", "Top View"), ("Bottom", "Bottom View"), ("Front", "Front View"), ("Back", "Back View"),
+            ("Left", "Left View"), ("Right", "Right View"), ("Perspective", "Perspective User View"), ("Orthographic", "Orthographic User View"),
+        ] {
+            item(ui, app, label, action);
+        }
+    });
     ui.separator();
     item(ui, app, "Zoom Extents", "Zoom Extents");
     item(ui, app, "Zoom Extents All", "Zoom Extents All");
@@ -528,6 +530,8 @@ fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     check_item(ui, app, "Edged Faces", "View Edged Faces Toggle", edged);
     item(ui, app, "Wireframe / Smooth+Highlights", "Wireframe / Smooth+Highlights Toggle");
     check_item(ui, app, "Show Safe Frames", "Viewport Safeframes Toggle", safe);
+    let spin = app.state.prefs.update_during_spinner_drag;
+    check_item(ui, app, "Update During Spinner Drag", "Update During Spinner Drag Toggle", spin);
     ui.separator();
     check_item(ui, app, "Expert Mode", "Expert Mode Toggle", app.state.expert_mode);
 }
