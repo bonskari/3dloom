@@ -469,6 +469,10 @@ impl Scene {
     /// A fresh layer id (ids are never reused).
     /// The colour a node shows in the viewports: its layer's when its colour is By Layer.
     pub fn display_color(&self, node: &Node) -> [u8; 3] {
+        // A light that is off shows black.
+        if matches!(&node.object, crate::node::ObjectKind::Light(l) if !l.on.get()) {
+            return [0, 0, 0];
+        }
         match self.layer(node.layer) {
             Some(l) if node.display.color_by_layer => l.color,
             _ => node.wire_color,

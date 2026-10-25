@@ -137,26 +137,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
             });
         });
     });
-    rollout(ui, "Shadow Parameters", false, |ui| {
-        ui.label("Object Shadows:");
-        ui.horizontal(|ui| {
-            ui.label("Color:");
-            swatch(ui, app, id, "Shadow Color", l.shadow_color.get());
-        });
-        number(ui, app, id, "Shadow Density", "Dens.:", l.shadow_density.get(), false);
-    });
-    if l.shadow_type.get() == 0 {
-        rollout(ui, "Shadow Map Params", false, |ui| {
-            number(ui, app, id, "Map Bias", "Bias:", l.map_bias.get(), false);
-            int(ui, app, id, "Map Size", "Size:", l.map_size.get());
-            number(ui, app, id, "Sample Range", "Sample Range:", l.sample_range.get(), false);
-        });
-    } else {
-        rollout(ui, "Ray Traced Shadow Params", false, |ui| {
-            ui.label("The renderer draws ray-traced shadows with shadow maps.");
-            number(ui, app, id, "Map Bias", "Ray Bias:", l.map_bias.get(), false);
-        });
-    }
+    shadow_rollouts(ui, app, id, l);
     rollout(ui, "Bevy Light", false, |ui| {
         number(ui, app, id, "Source Radius", "Source Radius:", l.source_radius.get(), true);
         number(ui, app, id, "Shadow Normal Bias", "Normal Bias:", l.shadow_normal_bias.get(), false);
@@ -423,10 +404,73 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
         }
         check(ui, app, id, "Render Shape", "Light Shape Visible in Rendering", ph.render_shape.get());
     });
-    rollout(ui, "Shadow Map Params", false, |ui| {
-        number(ui, app, id, "Map Bias", "Bias:", l.map_bias.get(), false);
-        int(ui, app, id, "Map Size", "Size:", l.map_size.get());
+    shadow_rollouts(ui, app, id, l);
+}
+
+/// Shadow Parameters and the rollout of the shadow type: Shadow Map Params,
+/// Ray-Traced Shadow Params, Advanced Ray-Traced Params or Area Shadows.
+/// Every type renders with the renderer's shadow maps; Area Shadows' size
+/// softens them, and the ray-tracing controls are kept but disabled.
+fn shadow_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
+    use loom_scene::light::{ADV_RAY_TRACED, ADV_RT_MODES, AREA_MODES, AREA_SHADOWS, RAY_TRACED};
+    rollout(ui, "Shadow Parameters", false, |ui| {
+        ui.label("Object Shadows:");
+        ui.horizontal(|ui| {
+            ui.label("Color:");
+            swatch(ui, app, id, "Shadow Color", l.shadow_color.get());
+        });
+        number(ui, app, id, "Shadow Density", "Dens.:", l.shadow_density.get(), false);
+        check(ui, app, id, "Shadow Map On", "Map", l.shadow_map_on.get());
+        check(ui, app, id, "Light Affects Shadow Color", "Light Affects Shadow Color", l.light_affects_shadow_color.get());
+        ui.separator();
+        ui.label("Atmosphere Shadows:");
+        check(ui, app, id, "Atmosphere Shadows", "On", l.atmosphere_shadows.get());
+        number(ui, app, id, "Atmosphere Opacity", "Opacity:", l.atmosphere_opacity.get(), false);
+        number(ui, app, id, "Atmosphere Color Amount", "Color Amount:", l.atmosphere_color_amount.get(), false);
     });
+    let disabled_int = |ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str, value: u32| {
+        ui.add_enabled_ui(loom_bevy::lights::supports(name), |ui| int(ui, app, id, name, label, value));
+    };
+    match l.shadow_type.get() {
+        RAY_TRACED => rollout(ui, "Ray Traced Shadow Params", false, |ui| {
+            number(ui, app, id, "Map Bias", "Ray Bias:", l.map_bias.get(), false);
+            check(ui, app, id, "2-Sided Shadows", "2-Sided Shadows", l.two_sided_shadows.get());
+            disabled_int(ui, app, "Max Quadtree Depth", "Max Quadtree Depth:", l.max_quadtree_depth.get());
+        }),
+        t @ (ADV_RAY_TRACED | AREA_SHADOWS) => {
+            let title = if t == AREA_SHADOWS { "Area Shadows" } else { "Adv. Ray Traced Params" };
+            rollout(ui, title, false, |ui| {
+                ui.label("Basic Options:");
+                if t == AREA_SHADOWS {
+                    combo(ui, app, id, "Area Mode", &AREA_MODES, l.area_mode.get());
+                } else {
+                    ui.add_enabled_ui(false, |ui| combo(ui, app, id, "Adv RT Mode", &ADV_RT_MODES, l.adv_rt_mode.get()));
+                }
+                check(ui, app, id, "2-Sided Shadows", "2-Sided Shadows", l.two_sided_shadows.get());
+                ui.separator();
+                ui.label("Antialiasing Options:");
+                disabled_int(ui, app, "Shadow Integrity", "Shadow Integrity:", l.shadow_integrity.get());
+                disabled_int(ui, app, "Shadow Quality", "Shadow Quality:", l.shadow_quality.get());
+                number(ui, app, id, "Shadow Spread", "Sample Spread:", l.shadow_spread.get(), false);
+                number(ui, app, id, "Shadow Bias", "Shadow Bias:", l.area_bias.get(), false);
+                number(ui, app, id, "Jitter Amount", "Jitter Amount:", l.jitter.get(), false);
+                if t == AREA_SHADOWS {
+                    ui.separator();
+                    ui.label("Area Light Dimensions:");
+                    number(ui, app, id, "Area Length", "Length:", l.area_length.get(), true);
+                    number(ui, app, id, "Area Width", "Width:", l.area_width.get(), true);
+                    number(ui, app, id, "Area Height", "Height:", l.area_height.get(), true);
+                }
+            });
+        }
+        _ => rollout(ui, "Shadow Map Params", false, |ui| {
+            number(ui, app, id, "Map Bias", "Bias:", l.map_bias.get(), false);
+            int(ui, app, id, "Map Size", "Size:", l.map_size.get());
+            number(ui, app, id, "Sample Range", "Sample Range:", l.sample_range.get(), false);
+            check(ui, app, id, "Absolute Map Bias", "Absolute Map Bias", l.absolute_bias.get());
+            check(ui, app, id, "2-Sided Shadows", "2-Sided Shadows", l.two_sided_shadows.get());
+        }),
+    }
 }
 
 /// A sun's Control Parameters: location (Get Location), time and date,

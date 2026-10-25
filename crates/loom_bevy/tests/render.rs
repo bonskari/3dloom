@@ -325,3 +325,78 @@ fn rendering_control_flags_reach_the_render() {
     let invisible = shot(loom_bevy::ObjectFlags { visibility: 0.0, ..on }, true, on);
     assert_eq!(red(&invisible), 0, "Visibility 0 leaves the cube out");
 }
+
+/// Shadow Parameters and Area Shadows reach the render: a white spot over a
+/// box on a white plane. Density 1 and a black shadow colour leave the
+/// shadow dark; density 0.5 lets about half the light in; a green shadow
+/// colour tints the shadow green; a light with a size (an area light)
+/// widens the penumbra.
+#[test]
+fn shadow_colour_density_and_area_size_change_the_shadow() {
+    let Some((adapter, device, queue)) = gpu() else {
+        eprintln!("shadow_colour_density_and_area_size_change_the_shadow: no GPU adapter, skipped");
+        return;
+    };
+    use loom_bevy::RenderOptions;
+    use loom_scene::light::{default_lights, Emitter};
+    let mut r = BevyRenderer::new(adapter, device, queue);
+    let plane = loom_mesh::plane_segmented(400.0, 400.0, 1, 1);
+    let mut blocker = loom_mesh::box_primitive(Vec3::new(15.0, 15.0, 5.0));
+    let _ = loom_mesh::edit_ops::translate_mesh(&mut blocker, Vec3::new(0.0, 0.0, 30.0));
+    let objects = vec![
+        SceneObject { id: 1, mesh: &plane, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() },
+        SceneObject { id: 2, mesh: &blocker, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() },
+    ];
+    let mut spot = default_lights(1, Mat4::IDENTITY)[0].clone();
+    spot.id = loom_scene::NodeId(10);
+    spot.emitter = Emitter::Spot { hotspot: 60.0, falloff: 70.0 };
+    spot.position = Vec3::new(0.0, 0.0, 120.0);
+    spot.direction = Vec3::NEG_Z;
+    spot.color = Vec3::splat(0.8);
+    spot.shadows = true;
+    spot.target_distance = 120.0;
+    // Straight down from above: the plane fills the image, the shadow in the middle.
+    let size = (160u32, 160u32);
+    let camera = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -1.0, 400.0), Vec3::ZERO, Vec3::Y), projection: Mat4::perspective_rh(30f32.to_radians(), 1.0, 1.0, 2000.0) };
+    let pixel = |p: Vec3| {
+        let c = camera.projection * camera.view * p.extend(1.0);
+        let n = c.truncate() / c.w;
+        (((n.x + 1.0) * 0.5 * size.0 as f32) as u32, ((1.0 - n.y) * 0.5 * size.1 as f32) as u32)
+    };
+    let dark = || RenderOptions { ambient: [0.0; 3], ..Default::default() };
+    let mut render = |s: &loom_scene::light::LightSample| {
+        r.sync(&objects);
+        r.sync_lights(std::slice::from_ref(s));
+        bucketed(&mut r, &camera, size, dark(), 1)
+    };
+    let at = |img: &image::RgbaImage, p: Vec3| {
+        let (x, y) = pixel(p);
+        img.get_pixel(x, y).0
+    };
+    let (under, lit) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(45.0, 0.0, 0.0));
+    spot.shadow_transmission = Vec3::ZERO;
+    let img = render(&spot);
+    let (full, open) = (at(&img, under), at(&img, lit));
+    assert!(open[0] > 80 && full[0] < 25, "a black shadow at density 1: under {full:?}, lit {open:?}");
+    spot.shadow_transmission = Vec3::splat(0.5);
+    let half = at(&render(&spot), under);
+    assert!(half[0] as f32 > open[0] as f32 * 0.3 && (half[0] as f32) < open[0] as f32 * 0.85, "density 0.5 lets light in: under {half:?}, lit {open:?}");
+    spot.shadow_transmission = Vec3::new(0.0, 1.0, 0.0);
+    let green = at(&render(&spot), under);
+    assert!(green[1] > 60 && green[0] < 25, "a green shadow colour: {green:?}");
+    // The penumbra: samples across the shadow's edge between dark and lit.
+    let penumbra = |img: &image::RgbaImage| {
+        (0..80)
+            .filter(|i| {
+                let v = at(img, Vec3::new(*i as f32 * 0.5, 0.0, 0.0))[0] as f32;
+                v > full[0] as f32 + 15.0 && v < open[0] as f32 - 15.0
+            })
+            .count()
+    };
+    spot.shadow_transmission = Vec3::ZERO;
+    spot.source_radius = 0.0;
+    let hard = penumbra(&render(&spot));
+    spot.source_radius = 20.0;
+    let soft = penumbra(&render(&spot));
+    assert!(soft > hard + 2, "an area light softens the shadow edge: {hard} -> {soft} samples in the penumbra");
+}
