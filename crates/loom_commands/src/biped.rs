@@ -505,6 +505,74 @@ pub fn set_xtra(state: &mut AppState, root: NodeId, name: &str, new_name: Option
     Ok(json!({ "name": name }))
 }
 
+/// A figure file: the structure and the figure pose of a biped, without its
+/// animation. The reference's .fig format is binary and undocumented, so
+/// 3dLoom writes its own JSON under the same extension.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FigFile {
+    pub format: String,
+    pub version: u32,
+    pub structure: BipedStructure,
+    /// Each part's transform relative to its parent, by name after the root name.
+    pub pose: Vec<(String, Transform)>,
+}
+
+pub const FIG_FORMAT: &str = "loom-biped-figure";
+
+/// Biped rollout > Save File (Figure Mode): the structure and figure pose to `path`.
+pub fn save_fig(state: &AppState, root: NodeId, path: &std::path::Path) -> Result<Value, String> {
+    let mut s = structure(state, root).ok_or("no biped")?.clone();
+    if !s.figure_mode {
+        return Err("turn on Figure Mode to save a figure file".into());
+    }
+    s.figure_pose.clear();
+    s.anim_pose.clear();
+    let pose: Vec<(String, Transform)> = parts(state, root).into_iter().filter_map(|(suffix, id)| state.scene.node(id).map(|n| (suffix, Transform::from_matrix(n.transform.matrix())))).collect();
+    let n = pose.len();
+    let fig = FigFile { format: FIG_FORMAT.into(), version: 1, structure: s, pose };
+    let text = serde_json::to_string_pretty(&fig).map_err(|e| e.to_string())?;
+    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(json!({ "path": path.to_string_lossy(), "parts": n }))
+}
+
+/// Biped rollout > Load File (Figure Mode): the file's structure and figure
+/// pose replace the biped's; its name, place and animation stay. One undo entry.
+pub fn load_fig(state: &mut AppState, root: NodeId, path: &std::path::Path) -> Result<Value, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let fig: FigFile = serde_json::from_str(&text).map_err(|e| format!("{}: not a figure file ({e})", path.display()))?;
+    if fig.format != FIG_FORMAT {
+        return Err(format!("{}: not a figure file", path.display()));
+    }
+    let cur = structure(state, root).ok_or("no biped")?.clone();
+    if !cur.figure_mode {
+        return Err("turn on Figure Mode to load a figure file".into());
+    }
+    let mut s = fig.structure;
+    s.figure_mode = true;
+    s.figure_pose = cur.figure_pose;
+    s.anim_pose = cur.anim_pose;
+    state.undo.begin("Load Figure");
+    let r = rebuild(state, root, s, "Load Figure").and_then(|_| {
+        let all = parts(state, root);
+        let changes: Vec<Change> = fig
+            .pose
+            .iter()
+            .filter_map(|(suffix, t)| {
+                let n = state.scene.node(*all.get(suffix)?)?;
+                (n.transform != *t).then(|| Change::SetTransform { id: n.id, before: n.transform.clone(), after: t.clone() })
+            })
+            .collect();
+        if changes.is_empty() {
+            Ok(())
+        } else {
+            commit_static(state, "Load Figure", Change::Group(changes))
+        }
+    });
+    state.undo.end();
+    r?;
+    Ok(json!({ "path": path.to_string_lossy(), "parts": parts(state, root).len() }))
+}
+
 fn root_arg(state: &AppState, id: u64) -> Result<NodeId, String> {
     root_of(state, NodeId(id)).ok_or_else(|| format!("node {id} is not part of a biped"))
 }
@@ -556,6 +624,26 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.pick_mode = Some(crate::state::PickMode::BipedXtraParent);
             state.status_prompt = format!("Pick the new parent of {name}");
             Ok(json!({}))
+        }
+        C::BipedSaveFile { path } => {
+            let root = selected_root(state)?;
+            match path {
+                Some(p) => save_fig(state, root, std::path::Path::new(p)),
+                None => {
+                    state.dialog = Some(crate::viewport::Dialog::BipedSaveFig);
+                    Ok(json!({ "dialog": "BipedSaveFig" }))
+                }
+            }
+        }
+        C::BipedLoadFile { path } => {
+            let root = selected_root(state)?;
+            match path {
+                Some(p) => load_fig(state, root, std::path::Path::new(p)),
+                None => {
+                    state.dialog = Some(crate::viewport::Dialog::BipedLoadFig);
+                    Ok(json!({ "dialog": "BipedLoadFig" }))
+                }
+            }
         }
         other => Err(format!("{} is not a biped command", other.name())),
     }

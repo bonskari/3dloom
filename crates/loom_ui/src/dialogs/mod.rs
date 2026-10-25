@@ -168,7 +168,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
-        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
         Dialog::FbxImportOptions => exchange_options::fbx_import(ctx, app, &mut open),

@@ -305,3 +305,48 @@ fn create_biped_takes_every_structure_value() {
     assert!((got.height.get() - 70.0).abs() < 1e-4);
     assert!(tree(&s, root).contains_key("Bip001 L ThighTwist1"));
 }
+
+#[test]
+fn figure_files_save_and_load_the_structure_and_figure_pose() {
+    use loom_commands::{Axis, SelectOp};
+    let dir = std::env::temp_dir().join("loom-biped-fig-tests");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("hero.fig");
+    let mut s = AppState::new();
+    let a = create(&mut s);
+    set(&mut s, a, json!({ "knuckles": true, "tail_links": 2, "body_type": "Male", "height": 80.0 })).unwrap();
+    let fore = id_of(&s, "Bip001 L Forearm");
+    execute(&mut s, Command::SelectNodes { ids: vec![fore.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::RotateSelection { axis: Axis::Z, degrees: 30.0, system: None }).unwrap();
+    let bent = s.scene.node(fore).unwrap().transform.matrix();
+    execute(&mut s, Command::BipedSaveFile { path: Some(path.to_string_lossy().into_owned()) }).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("loom-biped-figure"), "a 3dLoom figure file");
+    // Without a path the Save dialog opens.
+    execute(&mut s, Command::BipedSaveFile { path: None }).unwrap();
+    assert_eq!(s.dialog, Some(loom_commands::Dialog::BipedSaveFig));
+    s.dialog = None;
+    // A second biped somewhere else takes the figure.
+    let r = execute(&mut s, cmd("Create Biped", json!({ "position": [200.0, 0.0, 0.0] }))).unwrap();
+    let b = NodeId(r["root"].as_u64().unwrap());
+    let before = tree(&s, b);
+    execute(&mut s, Command::BipedLoadFile { path: Some(path.to_string_lossy().into_owned()) }).unwrap();
+    let got = structure(&s, b);
+    let want = structure(&s, a);
+    assert_eq!((got.body_type, got.knuckles.get(), got.tail_links.get(), got.height.get()), (want.body_type, want.knuckles.get(), want.tail_links.get(), want.height.get()));
+    let t = tree(&s, b);
+    assert!(t.contains_key("Bip002 Tail1") && t.contains_key("Bip002 L Finger43"), "the root name stays, the parts follow the file");
+    let m = s.scene.node(id_of(&s, "Bip002 L Forearm")).unwrap().transform.matrix();
+    assert!(m.abs_diff_eq(bent, 1e-3), "the figure pose comes with it");
+    assert!((pos(&s, "Bip002").x - 200.0).abs() < 1e-3, "the biped stays where it is");
+    assert!(bounds(&s, "Bip002 L Foot").0.z.abs() < 0.5, "standing on the ground at the new height");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(tree(&s, b), before, "one undo");
+    // Figure Mode off: no loading.
+    execute(&mut s, Command::BipedFigureMode { on: Some(false) }).unwrap();
+    assert!(execute(&mut s, Command::BipedLoadFile { path: Some(path.to_string_lossy().into_owned()) }).is_err());
+    std::fs::write(dir.join("bad.fig"), "{}").unwrap();
+    execute(&mut s, Command::BipedFigureMode { on: Some(true) }).unwrap();
+    assert!(execute(&mut s, Command::BipedLoadFile { path: Some(dir.join("bad.fig").to_string_lossy().into_owned()) }).is_err());
+}
