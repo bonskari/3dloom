@@ -1,5 +1,6 @@
-//! FBX 7.4 binary encoding: a tree of records, each with typed properties
-//! and nested records, 32-bit offsets, arrays uncompressed (encoding 0).
+//! FBX 7.4 / 7.5 binary encoding: a tree of records, each with typed
+//! properties and nested records, 32-bit (7.4) or 64-bit (7.5) offsets,
+//! arrays uncompressed (encoding 0).
 
 #[derive(Debug, Clone)]
 pub enum Prop {
@@ -46,39 +47,58 @@ pub const VERSION: u32 = 7400;
 /// The 13-byte sentinel that closes a record's nested list (7.4: 3 × u32 + u8).
 const NULL_RECORD: [u8; 13] = [0; 13];
 
-/// A whole file: magic, version, top-level records, closing sentinel, footer.
+/// A whole 7.4 file: magic, version, top-level records, closing sentinel, footer.
 pub fn encode(top: &[Record]) -> Vec<u8> {
+    encode_version(top, VERSION)
+}
+
+/// A whole file of `version` (7.5 and later: 64-bit record headers).
+pub fn encode_version(top: &[Record], version: u32) -> Vec<u8> {
+    let wide = version >= 7500;
     let mut out = Vec::with_capacity(1 << 16);
     out.extend_from_slice(MAGIC);
-    out.extend_from_slice(&VERSION.to_le_bytes());
+    out.extend_from_slice(&version.to_le_bytes());
     for r in top {
-        write_record(&mut out, r);
+        write_record(&mut out, r, wide);
     }
-    out.extend_from_slice(&NULL_RECORD);
-    footer(&mut out);
+    out.extend_from_slice(null_record(wide));
+    footer(&mut out, version);
     out
 }
 
-fn write_record(out: &mut Vec<u8>, r: &Record) {
+/// The sentinel closing a nested list: 7.5 headers are 3 × u64 + u8.
+fn null_record(wide: bool) -> &'static [u8] {
+    const WIDE: [u8; 25] = [0; 25];
+    if wide { &WIDE } else { &NULL_RECORD }
+}
+
+fn write_record(out: &mut Vec<u8>, r: &Record, wide: bool) {
     let start = out.len();
-    out.extend_from_slice(&[0u8; 12]); // end_offset, num_props, prop_list_len
+    let hdr = if wide { 24 } else { 12 };
+    out.extend(std::iter::repeat_n(0u8, hdr)); // end_offset, num_props, prop_list_len
     out.push(r.name.len() as u8);
     out.extend_from_slice(r.name.as_bytes());
     let props_start = out.len();
     for p in &r.props {
         write_prop(out, p);
     }
-    let prop_list_len = (out.len() - props_start) as u32;
+    let prop_list_len = out.len() - props_start;
     if !r.children.is_empty() {
         for c in &r.children {
-            write_record(out, c);
+            write_record(out, c, wide);
         }
-        out.extend_from_slice(&NULL_RECORD);
+        out.extend_from_slice(null_record(wide));
     }
-    let end = out.len() as u32;
-    out[start..start + 4].copy_from_slice(&end.to_le_bytes());
-    out[start + 4..start + 8].copy_from_slice(&(r.props.len() as u32).to_le_bytes());
-    out[start + 8..start + 12].copy_from_slice(&prop_list_len.to_le_bytes());
+    let end = out.len();
+    if wide {
+        out[start..start + 8].copy_from_slice(&(end as u64).to_le_bytes());
+        out[start + 8..start + 16].copy_from_slice(&(r.props.len() as u64).to_le_bytes());
+        out[start + 16..start + 24].copy_from_slice(&(prop_list_len as u64).to_le_bytes());
+    } else {
+        out[start..start + 4].copy_from_slice(&(end as u32).to_le_bytes());
+        out[start + 4..start + 8].copy_from_slice(&(r.props.len() as u32).to_le_bytes());
+        out[start + 8..start + 12].copy_from_slice(&(prop_list_len as u32).to_le_bytes());
+    }
 }
 
 fn write_array<T, F: Fn(&T, &mut Vec<u8>)>(out: &mut Vec<u8>, code: u8, items: &[T], put: F) {
@@ -148,14 +168,14 @@ const FOOTER_TAIL: [u8; 16] = [0xf8, 0x5a, 0x8c, 0x6a, 0xde, 0xf5, 0xd9, 0x7e, 0
 
 /// Footer as Blender writes it: id, 1–16 zero bytes to a 16-byte
 /// boundary, the version, 120 zero bytes, the tail.
-fn footer(out: &mut Vec<u8>) {
+fn footer(out: &mut Vec<u8>, version: u32) {
     out.extend_from_slice(&FOOTER_ID);
     let mut pad = (16 - out.len() % 16) % 16;
     if pad == 0 {
         pad = 16;
     }
     out.extend(std::iter::repeat_n(0u8, pad));
-    out.extend_from_slice(&VERSION.to_le_bytes());
+    out.extend_from_slice(&version.to_le_bytes());
     out.extend_from_slice(&[0u8; 120]);
     out.extend_from_slice(&FOOTER_TAIL);
 }

@@ -17,6 +17,7 @@ fn display_layers_round_trip() {
             FbxLayer { name: "Props".into(), color: Vec3::new(1.0, 0.5, 0.0), visible: true, frozen: false, nodes: vec![0, 2] },
             FbxLayer { name: "Walls".into(), color: Vec3::new(0.0, 0.0, 1.0), visible: false, frozen: true, nodes: vec![1] },
         ],
+        ..Default::default()
     };
     let bytes = loom_fbx::write(&doc, &WriteOpts::default());
     let scene = ufbx::load_memory(&bytes, ufbx::LoadOpts { strict: true, ..Default::default() }).expect("ufbx strict load");

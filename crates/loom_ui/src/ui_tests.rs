@@ -3548,6 +3548,140 @@ fn vertex_paint_dialog_face_selection_paint_all_new_layer_and_eyedropper() {
     assert_eq!(h.text_centers("Paint All").len(), 1, "Edit opens it again");
 }
 
+/// A scratch folder for the file-dialog tests.
+fn exchange_dir(name: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join("loom-ui-exchange").join(name);
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// The rect of an FBX / OBJ options window (by its id).
+fn options_rect(h: &Harness, id: &str) -> egui::Rect {
+    h.ctx.memory(|m| m.area_rect(egui::Id::new(id))).unwrap_or_else(|| panic!("the {id} window is shown"))
+}
+
+/// The texts painted inside `within` last frame, with their rects (for failure messages).
+fn texts_in(h: &Harness, within: egui::Rect) -> Vec<(String, egui::Rect)> {
+    fn walk(shape: &egui::Shape, within: egui::Rect, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, within, out)),
+            egui::Shape::Text(t) => {
+                let r = t.galley.rect.translate(t.pos.to_vec2());
+                if within.intersects(r) {
+                    out.push((t.galley.text().to_owned(), r));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for c in &h.shapes {
+        walk(&c.shape, within, &mut out);
+    }
+    out
+}
+
+/// Clicks a control of an options window, scrolling its options down to it
+/// first; says what the window shows if it is not there.
+fn click_option(h: &mut Harness, label: &str, id: &str) {
+    let win = options_rect(h, id);
+    for _ in 0..12 {
+        if h.text_rect(label, win).is_some() {
+            break;
+        }
+        let m = h.mods;
+        h.run(vec![egui::Event::PointerMoved(win.center()), egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -120.0), modifiers: m }]);
+        // Let the scroll settle before looking again.
+        h.frames(20);
+    }
+    if h.text_rect(label, win).is_none() {
+        panic!("{label:?} is not in {id} {win:?}: {:?}", texts_in(h, win));
+    }
+    click_text(h, label, win, 0.0);
+}
+
+/// Types `path` into the in-app file dialog's File name field and clicks `button`.
+fn choose_file(h: &mut Harness, path: &std::path::Path, button: &str) {
+    click_text(h, "File name:", SCREEN, 40.0);
+    // Replace the offered name.
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Text(path.to_string_lossy().into_owned())]);
+    click_text(h, button, SCREEN, 0.0);
+}
+
+/// File > Export to .fbx shows the FBX Export options; a click on Triangulate
+/// and OK write a triangulated file.
+#[test]
+fn fbx_export_goes_through_its_options_dialog() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let path = exchange_dir("fbx_export").join("box.fbx");
+    h.cmd(Command::ExportFile { path: None });
+    choose_file(&mut h, &path, "Save");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxExportOptions), "the options come before the file is written");
+    assert!(!path.exists());
+    assert!(!h.app.state.exchange.fbx_export.triangulate);
+    let win = options_rect(&h, "fbx_export_options");
+    click_text(&mut h, "Triangulate", win, 0.0);
+    assert!(h.app.state.exchange.fbx_export.triangulate, "the check box sets the option");
+    assert!(h.text_rect("User defined", SCREEN).is_some(), "the preset shows it was changed");
+    click_option(&mut h, "OK", "fbx_export_options");
+    assert_eq!(h.app.state.dialog, None);
+    assert!(path.exists(), "OK wrote the file ({})", h.app.state.status_prompt);
+    let doc = loom_fbx::read(&std::fs::read(&path).unwrap(), 0.01).unwrap();
+    let loom_fbx::FbxKind::Mesh { mesh, .. } = &doc.nodes[0].kind else { panic!("{:?}", doc.nodes[0].kind) };
+    assert_eq!(mesh.face_count(), 12, "triangulated");
+}
+
+/// File > Import of an .fbx: Cancel in the FBX Import options imports nothing;
+/// with Cameras off, OK imports the meshes without the camera.
+#[test]
+fn fbx_import_options_cancel_and_cameras_off() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::CreateCamera { target: false });
+    let path = exchange_dir("fbx_import").join("scene.fbx");
+    h.cmd(Command::ExportFile { path: Some(path.to_string_lossy().into_owned()) });
+    h.cmd(Command::NewScene);
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxImportOptions));
+    click_option(&mut h, "Cancel", "fbx_import_options");
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(h.app.state.scene.len(), 0, "Cancel imports nothing");
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    let win = options_rect(&h, "fbx_import_options");
+    click_option(&mut h, "Cameras", "fbx_import_options");
+    assert!(!h.app.state.exchange.fbx_import.cameras);
+    click_option(&mut h, "OK", "fbx_import_options");
+    let kinds: Vec<bool> = h.app.state.scene.nodes().map(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).collect();
+    assert_eq!(kinds, vec![false], "the box only");
+}
+
+/// File > Import of an .obj: the OBJ Import options list the file's objects;
+/// unchecking one leaves it out.
+#[test]
+fn obj_import_options_pick_the_objects() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let path = exchange_dir("obj_import").join("two.obj");
+    std::fs::write(&path, "o Left\nv 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\no Right\nv 5 0 0\nv 6 0 0\nv 6 1 0\nf 4 5 6\n").unwrap();
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ObjImportOptions));
+    let win = options_rect(&h, "obj_import_options");
+    assert!(h.text_rect("Left (1)", win).is_some() && h.text_rect("Right (1)", win).is_some(), "the file's objects are listed");
+    click_text(&mut h, "Right (1)", win, 0.0);
+    click_text(&mut h, "Import", win, 0.0);
+    assert_eq!(h.app.state.dialog, None);
+    let names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    assert_eq!(names, vec!["Left".to_string()]);
+}
+
 /// At a sub-object level the first empty click clears the sub-objects and
 /// keeps the object; a second one lets go of the object and ends the level.
 #[test]

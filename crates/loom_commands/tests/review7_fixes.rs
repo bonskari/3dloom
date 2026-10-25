@@ -153,6 +153,10 @@ fn exported_skin_with_a_pivot_offset_skins_in_place() {
         m.vertices().iter().map(|v| w.transform_point3(v.position)).collect()
     };
     let path = d.join("off.fbx");
+    // The raw file is compared in the scene's frame: Z-up.
+    execute(&mut s, Command::SetExchangeOption { dialog: "fbx_export".into(), name: "up_axis".into(), value: serde_json::json!("Z-up") }).unwrap();
+    // ... in centimetres.
+    execute(&mut s, Command::SetExchangeOption { dialog: "fbx_export".into(), name: "units_automatic".into(), value: serde_json::json!(false) }).unwrap();
     execute(&mut s, Command::ExportSelected { path: Some(path.to_string_lossy().into_owned()) }).unwrap();
     let scene = ufbx::load_memory(&std::fs::read(&path).unwrap(), ufbx::LoadOpts::default()).unwrap();
     let mesh = &scene.meshes[0];
@@ -219,7 +223,7 @@ fn imported_blend_shapes_sit_below_the_skin() {
     m.skin = Some(FbxSkin { bones: vec![(0, Mat4::IDENTITY)], mesh_bind: Mat4::IDENTITY, weights: vec![vec![(0, 1.0)]; n] });
     m.blend_shapes.push(FbxBlendShape { name: "up".into(), offsets: vec![(0, Vec3::Z)], weight: 50.0 });
     let path = d.join("order.fbx");
-    std::fs::write(&path, loom_fbx::write(&FbxDocument { nodes: vec![bone, m], unit_metres: 0.0254, anim: None, layers: Vec::new() }, &WriteOpts::default())).unwrap();
+    std::fs::write(&path, loom_fbx::write(&FbxDocument { nodes: vec![bone, m], unit_metres: 0.0254, anim: None, ..Default::default() }, &WriteOpts::default())).unwrap();
     let mut s = AppState::new();
     execute(&mut s, Command::ImportFile { path: Some(path.to_string_lossy().into_owned()) }).unwrap();
     let head = s.scene.nodes().find(|n| n.name == "Head").unwrap();

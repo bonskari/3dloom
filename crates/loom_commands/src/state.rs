@@ -1560,6 +1560,10 @@ pub struct AppState {
     pub seam_point: Option<u32>,
     /// Merge dialog: the chosen file and its object names.
     pub merge_pending: Option<(std::path::PathBuf, Vec<String>)>,
+    /// FBX / OBJ import and export options (the format dialogs; saved in the settings).
+    pub exchange: crate::exchange::ExchangeOptions,
+    /// The file an FBX / OBJ options dialog is open for, and whether it exports the selection only.
+    pub exchange_pending: Option<(std::path::PathBuf, bool)>,
     /// Customize > Show UI > Show Layers Toolbar.
     pub show_layers_toolbar: bool,
     /// File > File Properties and Summary Info > Description (saved in the scene file).
@@ -1768,6 +1772,8 @@ impl AppState {
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,
+            exchange: Default::default(),
+            exchange_pending: None,
             show_layers_toolbar: false,
             file_properties: Default::default(),
             file: None,

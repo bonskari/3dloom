@@ -79,6 +79,11 @@ impl ArgSchema for crate::track_view::KeyArg {
         json!({"type":"object","properties":{"id":{"type":"integer","minimum":0},"track":{"type":"string"},"comp":{"type":"integer","minimum":0},"time":{"type":"number"}},"required":["id","track","time"]})
     }
 }
+impl ArgSchema for Value {
+    fn schema() -> Value {
+        json!({})
+    }
+}
 impl ArgSchema for crate::file::MergeDuplicate {
     fn schema() -> Value {
         json!({"type":"object","properties":{"name":{"type":"string"},"action":{"type":"string","enum":["merge","skip","delete_old","rename","auto_rename"]},"new_name":{"type":"string"}},"required":["name","action"]})
@@ -641,8 +646,14 @@ commands! {
     UvwMapAlignTo => "UVW Map Align To", Loom, "Normal Align's pick: the gizmo's Z along `normal` at `point` (world), then Fit." { point: [f32; 3], normal: [f32; 3] };
     SetTextureDisplay => "Set Texture Display", Loom, "Display > Show Map in Viewport: `kind` none / checker / bitmap (with `path`)." { id: u64, kind: String, path: Option<String> };
     ImportFile => "Import File", MainUI, "Import an FBX, a Wavefront OBJ (each `o` / `g` block an Editable Poly) or a .max scene file (nodes, hierarchy, transforms, pivots, Editable Poly / Mesh with UVs and material ids, Box / Cylinder / Plane; modifier stacks and render objects are reported, not imported), one undo entry; without `path` the Import dialog shows." { path: Option<String> };
-    ExportFile => "Export File", MainUI, "Export every visible geometry object to a Wavefront OBJ (world space, n-gons, smoothing groups, material ids); without `path` the Export dialog shows." { path: Option<String> };
-    ExportSelected => "Export Selected", MainUI, "Export the selected geometry objects to a Wavefront OBJ; without `path` the dialog shows." { path: Option<String> };
+    ExportFile => "Export File", MainUI, "Export the visible objects by the file's extension: .fbx (hierarchy, meshes, cameras, bones, skin / morph deformers, animation, materials and textures) or .obj (+ .mtl), with the FBX / OBJ export options (`Set Exchange Option`); without `path` the Export dialog shows, then the format's options dialog." { path: Option<String> };
+    ExportSelected => "Export Selected", MainUI, "Export the selected objects to .fbx or .obj as Export File does; without `path` the dialog shows." { path: Option<String> };
+    SetExchangeOption => "Set Exchange Option", Loom, "Set one FBX / OBJ import or export option. `dialog`: fbx_export, fbx_import, obj_export or obj_import; `name`: the option's field as `Exchange Options` lists it (e.g. fbx_export triangulate, up_axis \"Y-up\"/\"Z-up\", version 7400/7500, ascii, units_automatic, units; fbx_import file_content \"Add\"/\"Add and update animation\"/\"Update animation\", take; obj_export faces \"Triangles\"/\"Quads\"/\"Polygons\"; obj_import normals, objects [names]), or `preset` with a preset name; `value` any JSON value of the option's type. A change makes the preset \"User defined\"." { dialog: String, name: String, value: Value };
+    ExchangeOptions => "Exchange Options", Loom, "The current options and presets of an FBX / OBJ import or export dialog (`dialog`: fbx_export, fbx_import, obj_export, obj_import)." { dialog: String };
+    SaveExchangePreset => "Save Exchange Preset", Loom, "Edit/Save preset: save the dialog's current options as a named preset (kept in the settings)." { dialog: String, name: String };
+    DeleteExchangePreset => "Delete Exchange Preset", Loom, "Delete a user preset of an FBX / OBJ options dialog." { dialog: String, name: String };
+    FbxFileInfo => "FBX File Info", Loom, "The FBX Importer's Statistics for a file: name, folder, version, creator, creation time, axis and units of the file and the system, the units scale factor, frame rates, takes and element counts." { path: String };
+    ObjFileInfo => "OBJ File Info", Loom, "The OBJ Importer's file info: the file's objects with their face counts, the total face count and which features it holds (normals, texture coordinates, smoothing groups, materials)." { path: String };
     MergeFile => "Merge File", MainUI, "Merge objects from another .loom file: all of them, or those in `names`; fresh ids, objects keep their layers (by name, created when missing), one undo entry. A name the scene already has follows its Duplicate Name answer in `duplicates` (merge keeps both, skip, delete_old, rename to `new_name`, auto_rename = the default). Without `path` the Merge dialog shows." { path: Option<String>, names: Option<Vec<String>>, duplicates: Option<Vec<crate::file::MergeDuplicate>> };
     SaveChangesReply => "Save Changes Reply", Loom, "Answer the open Save Changes prompt: Yes saves (Save As when untitled) and then runs the pending New / Reset / Open / Exit, No runs it without saving, Cancel keeps the scene." { reply: crate::command::SaveChangesReply };
     AutoBackupNow => "Auto Backup Now", Loom, "Write the next Auto Backup file (autoback/<name>NN.loom) now, regardless of the interval.";

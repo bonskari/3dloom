@@ -1,7 +1,7 @@
 //! FBX (any version, binary or ASCII) → `FbxDocument` through ufbx, with
 //! the scene converted to right-handed Z-up in the requested unit.
 
-use crate::document::{FbxBlendShape, FbxDocument, FbxKind, FbxLayer, FbxNode, FbxSkin};
+use crate::document::{FbxBlendShape, FbxDocument, FbxInfo, FbxKind, FbxLayer, FbxMaterial, FbxNode, FbxSkin, FbxTexture, ReadOpts};
 use glam::{Mat4, Vec3};
 use loom_mesh::indexed::{IndexedFace, IndexedMesh};
 use loom_mesh::Mesh;
@@ -88,8 +88,9 @@ fn m4(m: &ufbx::Matrix) -> Mat4 {
     ])
 }
 
-/// The mesh plus, per built vertex, its ufbx vertex index.
-fn convert_mesh(m: &ufbx::Mesh, smoothing: &std::collections::HashMap<i64, Vec<u32>>) -> Result<(Mesh, Vec<u32>), String> {
+/// The mesh plus, per built vertex, its ufbx vertex index. `use_groups`:
+/// take the file's smoothing-group bits (off: groups from the normals).
+fn convert_mesh(m: &ufbx::Mesh, smoothing: &std::collections::HashMap<i64, Vec<u32>>, use_groups: bool) -> Result<(Mesh, Vec<u32>), String> {
     let mut im = IndexedMesh::default();
     for v in m.vertices.iter() {
         im.add_vertex(v3(*v), None);
@@ -125,7 +126,7 @@ fn convert_mesh(m: &ufbx::Mesh, smoothing: &std::collections::HashMap<i64, Vec<u
     // Real group bits (3ds Max, Blender "Smoothing Groups"). ByPolygon 0/1
     // (Blender "Face", or ufbx's per-face bool) only says which faces are
     // flat: the hard edges between smooth faces come from the normals.
-    let groups = dom_smoothing_groups(m, smoothing).filter(|g| g.iter().any(|x| *x > 1));
+    let groups = dom_smoothing_groups(m, smoothing).filter(|g| use_groups && g.iter().any(|x| *x > 1));
     let from_faces = m.face_smoothing.len() == m.num_faces;
     for (fi, f) in m.faces.iter().enumerate() {
         let mut face = IndexedFace { ids: (f.index_begin..f.index_begin + f.num_indices).map(|c| m.vertex_indices[c as usize]).collect(), ..Default::default() };
@@ -229,11 +230,16 @@ fn euler_near(q: ufbx::Quat, prev: Option<Vec3>) -> Vec3 {
     r
 }
 
-/// The first animation stack, sampled every frame of its span: the local
-/// transform of each node that moves (in the same converted frame as
-/// `local_transform`).
-fn read_take(scene: &ufbx::Scene, index_of: &BTreeMap<u32, usize>) -> Option<crate::document::FbxTake> {
-    let stack = scene.anim_stacks.iter().next()?;
+/// An animation stack (`take` by name, else the first), sampled every frame
+/// of its span: the local transform of each node that moves (in the same
+/// converted frame as `local_transform`). `bake_layers` off evaluates the
+/// base layer only.
+fn read_take(scene: &ufbx::Scene, index_of: &BTreeMap<u32, usize>, take: Option<&str>, bake_layers: bool) -> Option<crate::document::FbxTake> {
+    let stack = match take {
+        Some(name) => scene.anim_stacks.iter().find(|s| s.element.name == name)?,
+        None => scene.anim_stacks.iter().next()?,
+    };
+    let anim: &ufbx::Anim = if bake_layers { &stack.anim } else { stack.layers.iter().next().map(|l| &*l.anim).unwrap_or(&stack.anim) };
     let fps = if scene.settings.frames_per_second > 0.0 { scene.settings.frames_per_second } else { 30.0 };
     let start = (stack.time_begin * fps).round() as i32;
     let end = (stack.time_end * fps).round() as i32;
@@ -246,7 +252,7 @@ fn read_take(scene: &ufbx::Scene, index_of: &BTreeMap<u32, usize>) -> Option<cra
         let mut a = crate::document::FbxAnim::default();
         let mut prev = None;
         for f in start..=end {
-            let t = ufbx::evaluate_transform(&stack.anim, n, f as f64 / fps);
+            let t = ufbx::evaluate_transform(anim, n, f as f64 / fps);
             let r = euler_near(t.rotation, prev);
             prev = Some(r);
             a.frames.push(f as f32);
@@ -260,6 +266,78 @@ fn read_take(scene: &ufbx::Scene, index_of: &BTreeMap<u32, usize>) -> Option<cra
         }
     }
     Some(crate::document::FbxTake { name: stack.element.name.to_string(), fps: fps as f32, start, end, tracks })
+}
+
+/// A material's colours, factors and file textures.
+fn convert_material(m: &ufbx::Material) -> FbxMaterial {
+    let f = &m.fbx;
+    let rgb = |x: &ufbx::MaterialMap| [x.value_vec4.x as f32, x.value_vec4.y as f32, x.value_vec4.z as f32];
+    let num = |x: &ufbx::MaterialMap, d: f32| if x.has_value { x.value_vec4.x as f32 } else { d };
+    let lambert = m.shading_model_name.to_ascii_lowercase().contains("lambert");
+    let opacity = match m.element.props.find_prop("Opacity") {
+        Some(p) => p.value_vec4.x as f32,
+        None => 1.0 - num(&f.transparency_factor, 0.0),
+    };
+    let mut out = FbxMaterial {
+        name: m.element.name.to_string(),
+        shading: if lambert { "lambert".into() } else { "phong".into() },
+        ambient: rgb(&f.ambient_color),
+        diffuse: rgb(&f.diffuse_color),
+        specular: rgb(&f.specular_color),
+        specular_factor: if lambert { 0.0 } else { num(&f.specular_factor, 1.0) },
+        shininess: num(&f.specular_exponent, 20.0),
+        opacity: opacity.clamp(0.0, 1.0),
+        // Self-illumination: the emitted colour's strength relative to the diffuse colour.
+        emissive_factor: {
+            let peak = |c: [f32; 3]| c.iter().fold(0.0f32, |a, b| a.max(*b));
+            let d = peak(rgb(&f.diffuse_color));
+            let e = num(&f.emission_factor, 0.0) * peak(rgb(&f.emission_color));
+            if d > 1e-6 { (e / d).min(1.0) } else { e.min(1.0) }
+        },
+        textures: Vec::new(),
+    };
+    for t in m.textures.iter() {
+        let tex = &t.texture;
+        let path = if !tex.absolute_filename.is_empty() { tex.absolute_filename.to_string() } else { tex.filename.to_string() };
+        let content = (!tex.content.is_empty()).then(|| tex.content.to_vec());
+        let property = t.material_prop.to_string();
+        let amount = if property == "Bump" || property == "NormalMap" { num(&f.bump_factor, 1.0) } else { 1.0 };
+        out.textures.push(FbxTexture { property, path, relative: tex.relative_filename.to_string(), amount, content });
+    }
+    out
+}
+
+/// The file's statistics (Import dialog): version, creator, axes, units, contents.
+pub fn info(bytes: &[u8]) -> Result<FbxInfo, String> {
+    let opts = ufbx::LoadOpts { ignore_geometry: true, ignore_embedded: true, ..Default::default() };
+    let scene = ufbx::load_memory(bytes, opts).map_err(|e| format!("FBX: {}", e.description))?;
+    let axis = match scene.settings.axes.up {
+        ufbx::CoordinateAxis::PositiveY | ufbx::CoordinateAxis::NegativeY => "Y-up",
+        ufbx::CoordinateAxis::PositiveZ | ufbx::CoordinateAxis::NegativeZ => "Z-up",
+        ufbx::CoordinateAxis::PositiveX | ufbx::CoordinateAxis::NegativeX => "X-up",
+        _ => "unknown",
+    };
+    let creation_time = match crate::binary::parse(bytes) {
+        Some(top) => top.iter().find(|r| r.name == "CreationTime").and_then(|r| match r.props.first() { Some(crate::binary::RawProp::Str(s)) => Some(s.clone()), _ => None }).unwrap_or_default(),
+        None => String::from_utf8_lossy(bytes).lines().find_map(|l| l.trim().strip_prefix("CreationTime:").map(|v| v.trim().trim_matches('"').to_owned())).unwrap_or_default(),
+    };
+    Ok(FbxInfo {
+        version: scene.metadata.version,
+        ascii: scene.metadata.ascii,
+        creator: scene.metadata.creator.to_string(),
+        creation_time,
+        up_axis: axis.into(),
+        unit_metres: scene.settings.unit_meters,
+        fps: scene.settings.frames_per_second,
+        takes: scene.anim_stacks.iter().map(|s| s.element.name.to_string()).collect(),
+        nodes: scene.nodes.iter().filter(|n| !n.is_root).count(),
+        meshes: scene.meshes.len(),
+        materials: scene.materials.len(),
+        textures: scene.textures.len(),
+        cameras: scene.cameras.len(),
+        lights: scene.lights.len(),
+        caches: scene.cache_files.len(),
+    })
 }
 
 /// Metres per unit of the file's own distances (UnitScaleFactor is in centimetres).
@@ -293,6 +371,11 @@ fn convert_light(l: &ufbx::Light, unit: f32) -> crate::document::FbxLight {
 }
 
 pub fn read(bytes: &[u8], target_unit_metres: f64) -> Result<FbxDocument, String> {
+    read_with(bytes, &ReadOpts::new(target_unit_metres))
+}
+
+pub fn read_with(bytes: &[u8], ro: &ReadOpts) -> Result<FbxDocument, String> {
+    let target_unit_metres = ro.unit_metres;
     let opts = ufbx::LoadOpts {
         target_axes: ufbx::CoordinateAxes::right_handed_z_up(),
         // Loom cameras look down local -Z with +Y up (FBX: +X forward).
@@ -312,6 +395,10 @@ pub fn read(bytes: &[u8], target_unit_metres: f64) -> Result<FbxDocument, String
     let mut index_of: BTreeMap<u32, usize> = BTreeMap::new();
     // Skins resolve their bone nodes after every node has an index.
     let mut pending_skins: Vec<(usize, Vec<(u32, Mat4)>, Mat4, Vec<Vec<(u32, f32)>>)> = Vec::new();
+    // Mesh element → the first node that shows it (later ones are instances).
+    let mut first_of_mesh: BTreeMap<u32, usize> = BTreeMap::new();
+    let mut instances: Vec<(usize, usize)> = Vec::new();
+    let mut subdivision: Vec<(usize, u32, u32)> = Vec::new();
     for n in scene.nodes.iter() {
         if n.is_root {
             continue;
@@ -320,16 +407,32 @@ pub fn read(bytes: &[u8], target_unit_metres: f64) -> Result<FbxDocument, String
         let mut blend_shapes = Vec::new();
         let kind = if let Some(m) = n.mesh.as_ref() {
             let materials: Vec<String> = m.materials.iter().map(|mat| mat.element.name.to_string()).collect();
-            let (mesh, map) = convert_mesh(m, &smoothing)?;
-            skin = convert_skin(m, &map);
-            blend_shapes = convert_blend_shapes(m, &map);
+            let (mesh, map) = convert_mesh(m, &smoothing, ro.smoothing_groups)?;
+            if ro.skins {
+                skin = convert_skin(m, &map);
+            }
+            if ro.morphs {
+                blend_shapes = convert_blend_shapes(m, &map);
+            }
+            match first_of_mesh.get(&m.element.element_id) {
+                Some(first) => instances.push((nodes.len(), *first)),
+                None => {
+                    first_of_mesh.insert(m.element.element_id, nodes.len());
+                }
+            }
+            if m.subdivision_preview_levels > 0 || m.subdivision_render_levels > 0 {
+                subdivision.push((nodes.len(), m.subdivision_preview_levels, m.subdivision_render_levels));
+            }
             FbxKind::Mesh { mesh, materials }
         } else if let Some(c) = n.camera.as_ref() {
-            FbxKind::Camera { fov_deg: c.field_of_view_deg.y as f32 }
+            // The horizontal angle: 3dLoom's FOV is horizontal (ufbx resolves the aperture mode).
+            FbxKind::Camera { fov_deg: c.field_of_view_deg.x as f32 }
         } else if let Some(l) = n.light.as_ref() {
             FbxKind::Light(convert_light(l, (file_unit_metres(&scene) / target_unit_metres) as f32))
         } else if let Some(b) = n.bone.as_ref() {
-            FbxKind::Bone { length: 0.0, size: (b.radius as f32).max(0.01) }
+            // A file without a bone size gives 0 (the Importer's Bone Creation sizes it).
+            let sized = b.element.props.find_prop("Size").is_some();
+            FbxKind::Bone { length: 0.0, size: if sized { (b.radius as f32).max(0.01) } else { 0.0 } }
         } else {
             FbxKind::Empty
         };
@@ -381,7 +484,16 @@ pub fn read(bytes: &[u8], target_unit_metres: f64) -> Result<FbxDocument, String
             let _ = size;
         }
     }
-    let anim = read_take(&scene, &index_of);
+    let anim = if ro.animation { read_take(&scene, &index_of, ro.take.as_deref(), ro.bake_layers) } else { None };
+    let materials = scene.materials.iter().map(|m| convert_material(m)).collect();
+    let selection_sets = scene
+        .selection_sets
+        .iter()
+        .map(|set| {
+            let members = set.nodes.iter().filter(|sn| sn.include_node).filter_map(|sn| sn.target_node.as_ref().and_then(|t| index_of.get(&t.element.element_id).copied())).collect();
+            (set.element.name.to_string(), members)
+        })
+        .collect();
     // Display layers: name, colour, Show / Freeze and their nodes.
     let layers: Vec<FbxLayer> = scene
         .display_layers
@@ -394,5 +506,5 @@ pub fn read(bytes: &[u8], target_unit_metres: f64) -> Result<FbxDocument, String
             nodes: l.nodes.iter().filter_map(|n| index_of.get(&n.element.element_id).copied()).collect(),
         })
         .collect();
-    Ok(FbxDocument { nodes, unit_metres: target_unit_metres, anim, layers })
+    Ok(FbxDocument { nodes, unit_metres: target_unit_metres, anim, materials, instances, selection_sets, subdivision, layers })
 }

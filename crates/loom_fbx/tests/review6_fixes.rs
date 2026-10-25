@@ -23,7 +23,7 @@ fn node_quat(n: &ufbx::Node) -> Quat {
 #[test]
 fn rotations_on_three_axes_survive() {
     let r = Vec3::new(30.0, 40.0, 50.0);
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![mesh_node("R", r)], unit_metres: 0.01, anim: None, layers: Vec::new() }, &WriteOpts::default());
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![mesh_node("R", r)], unit_metres: 0.01, anim: None, ..Default::default() }, &WriteOpts::default());
     // What any FBX reader computes from Lcl Rotation (RotationOrder XYZ) must be loom's orientation.
     let s = plain(&bytes);
     let n = s.nodes.iter().find(|n| n.mesh.is_some()).unwrap();
@@ -38,7 +38,7 @@ fn rotations_on_three_axes_survive() {
 fn camera_forward_survives() {
     // A loom camera looks down its local -Z; rotated (90, 0, 0) it looks along +Y.
     let cam = FbxNode { name: "Cam".into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::new(90.0, 0.0, 0.0), scale: Vec3::ONE, kind: FbxKind::Camera { fov_deg: 45.0 }, skin: None, blend_shapes: Vec::new() };
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![cam], unit_metres: 0.01, anim: None, layers: Vec::new() }, &WriteOpts::default());
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![cam], unit_metres: 0.01, anim: None, ..Default::default() }, &WriteOpts::default());
     // FBX cameras look along their local +X: that axis must be world +Y in the file.
     let s = plain(&bytes);
     let n = s.nodes.iter().find(|n| n.camera.is_some()).unwrap();
@@ -50,13 +50,18 @@ fn camera_forward_survives() {
 }
 
 #[test]
-fn camera_fov_is_vertical() {
+fn camera_fov_is_horizontal() {
+    // 3dLoom's camera FOV spans the view's width (as the reference's default
+    // Horizontal FOV direction): the file says so, with the matching lens on
+    // a 36 mm film back for readers that go by the lens.
     let cam = FbxNode { name: "Cam".into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind: FbxKind::Camera { fov_deg: 45.0 }, skin: None, blend_shapes: Vec::new() };
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![cam], unit_metres: 0.01, anim: None, layers: Vec::new() }, &WriteOpts::default());
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![cam], unit_metres: 0.01, anim: None, ..Default::default() }, &WriteOpts::default());
     let s = plain(&bytes);
     let c = &s.cameras[0];
-    assert!(c.field_of_view_deg.x > c.field_of_view_deg.y + 1.0, "a 16:9 camera is wider than tall: {:?}", c.field_of_view_deg);
-    assert!((c.field_of_view_deg.y - 45.0).abs() < 1e-2, "{:?}", c.field_of_view_deg);
+    assert!((c.field_of_view_deg.x - 45.0).abs() < 1e-2, "{:?}", c.field_of_view_deg);
+    let vertical = 2.0 * ((22.5f64).to_radians().tan() * 3.0 / 4.0).atan().to_degrees();
+    assert!((c.field_of_view_deg.y - vertical).abs() < 0.05, "4:3 vertical {vertical}: {:?}", c.field_of_view_deg);
+    assert!((c.focal_length_mm - 18.0 / (22.5f64).to_radians().tan()).abs() < 1e-3, "lens {}", c.focal_length_mm);
     let back = loom_fbx::read(&bytes, 0.01).unwrap();
     let FbxKind::Camera { fov_deg } = back.nodes[0].kind else { panic!() };
     assert!((fov_deg - 45.0).abs() < 1e-2, "{fov_deg}");
@@ -64,7 +69,7 @@ fn camera_fov_is_vertical() {
 
 #[test]
 fn file_id_and_creation_time_are_the_known_good_pair() {
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![mesh_node("B", Vec3::ZERO)], unit_metres: 0.01, anim: None, layers: Vec::new() }, &WriteOpts::default());
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![mesh_node("B", Vec3::ZERO)], unit_metres: 0.01, anim: None, ..Default::default() }, &WriteOpts::default());
     let id: [u8; 16] = [0x28, 0xb3, 0x2a, 0xeb, 0xb6, 0x24, 0xcc, 0xc2, 0xbf, 0xc8, 0xb0, 0x2a, 0xa9, 0x2b, 0xfc, 0xf1];
     assert!(bytes.windows(16).any(|w| w == id), "FileId");
     assert!(bytes.windows(23).any(|w| w == b"1970-01-01 10:00:00:000"), "CreationTime");
@@ -80,7 +85,7 @@ fn file_id_and_creation_time_are_the_known_good_pair() {
 #[test]
 fn vertices_are_written_in_centimetres() {
     // A 10-unit box in an inch scene is 25.4 cm in the file, with UnitScaleFactor 1 (Unreal's default import ignores it).
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![mesh_node("B", Vec3::ZERO)], unit_metres: 0.0254, anim: None, layers: Vec::new() }, &WriteOpts::default());
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![mesh_node("B", Vec3::ZERO)], unit_metres: 0.0254, anim: None, ..Default::default() }, &WriteOpts::default());
     let s = plain(&bytes);
     assert!((s.settings.unit_meters - 0.01).abs() < 1e-9, "{}", s.settings.unit_meters);
     let m = &s.meshes[0];
@@ -119,7 +124,7 @@ fn unused_vertex_keeps_hard_edges() {
 
 #[test]
 fn truncated_or_corrupt_binary_does_not_panic() {
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![mesh_node("B", Vec3::ZERO)], unit_metres: 0.01, anim: None, layers: Vec::new() }, &WriteOpts::default());
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![mesh_node("B", Vec3::ZERO)], unit_metres: 0.01, anim: None, ..Default::default() }, &WriteOpts::default());
     for n in (0..bytes.len()).step_by(7) {
         let _ = loom_fbx::binary::parse(&bytes[..n]);
     }

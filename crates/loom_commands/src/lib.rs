@@ -24,6 +24,8 @@ pub use execute::file_action;
 pub mod file;
 pub mod scene_file;
 pub mod fbx_io;
+pub mod exchange;
+pub mod obj_io;
 pub mod max_io;
 pub mod rig;
 pub mod biped;
