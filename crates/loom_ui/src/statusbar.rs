@@ -148,6 +148,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
 /// camera viewport controls, which move the camera itself.
 fn navigation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
     if let loom_commands::ViewKind::Camera(id) = app.state.active().kind {
+        if matches!(app.state.scene.node(id).map(|n| &n.object), Some(loom_scene::ObjectKind::Light(_))) {
+            return light_controls(ui, app, id);
+        }
         return camera_controls(ui, app, id);
     }
     ui.vertical(|ui| {
@@ -264,6 +267,47 @@ pub fn selection_status(s: &loom_commands::AppState) -> String {
     let kinds: std::collections::BTreeSet<&str> = s.selection.iter().map(kind).collect();
     let k = if kinds.len() == 1 { *kinds.iter().next().expect("one kind") } else { "Object" };
     format!("{n} {k}{} Selected", if n == 1 { "" } else { "s" })
+}
+
+/// Light viewport controls: Dolly Light flyout (target lights also Dolly
+/// Target and Dolly Light + Target), Light Hotspot, Roll Light, Zoom
+/// Extents All; Light Falloff, Truck Light, Orbit / Pan Light, Maximize.
+/// The dolly, roll, truck and orbit tools are the camera ones on the light.
+fn light_controls(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
+    let has_target = matches!(app.state.scene.node(id).map(|n| &n.object), Some(loom_scene::ObjectKind::Light(l)) if l.target.is_some_and(|t| app.state.scene.node(t).is_some()));
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            if has_target {
+                let current = match app.state.nav_mode { NavMode::DollyTarget => 1, NavMode::DollyBoth => 2, _ => 0 };
+                flyout(ui, app, "dolly_light", current, [
+                    (icons::DOLLY, None, "Dolly Light", Command::DollyCameraMode),
+                    (icons::DOLLY, Some(icons::SELECTED_VARIANT), "Dolly Target", Command::DollyTargetMode),
+                    (icons::DOLLY, Some(icons::SUB_OBJECT_VARIANT), "Dolly Light + Target", Command::DollyCameraTargetMode),
+                ]);
+            } else {
+                nav(ui, app, icons::DOLLY, "Dolly Light", NavMode::DollyCamera, Command::DollyCameraMode);
+            }
+            nav(ui, app, icons::FIELD_OF_VIEW, "Light Hotspot", NavMode::LightHotspot, Command::LightHotspotMode);
+            nav(ui, app, icons::ROLL, "Roll Light", NavMode::RollCamera, Command::RollCameraMode);
+            flyout(ui, app, "zoom_extents_all", 0, [
+                (icons::ZOOM_EXTENTS_ALL, None, "Zoom Extents All", Command::ZoomExtentsAll),
+                (icons::ZOOM_EXTENTS_ALL, Some(icons::SELECTED_VARIANT), "Zoom Extents All Selected", Command::ZoomExtentsAllSelected),
+            ]);
+        });
+        ui.horizontal(|ui| {
+            nav(ui, app, icons::PERSPECTIVE_MODE, "Light Falloff", NavMode::LightFalloff, Command::LightFalloffMode);
+            nav(ui, app, icons::TRUCK, "Truck Light", NavMode::TruckCamera, Command::TruckCameraMode);
+            let current = usize::from(app.state.nav_mode == NavMode::PanCamera);
+            flyout(ui, app, "orbit_light", current, [
+                (icons::ORBIT, None, "Orbit Light", Command::OrbitCameraMode),
+                (icons::PAN_CAMERA, None, "Pan Light", Command::PanCameraMode),
+            ]);
+            let max = app.state.maximized;
+            if Icon::new(icons::MAXIMIZE, "Maximize Viewport Toggle").on(max).show(ui, &app.state).clicked() {
+                let _ = app.dispatch(Command::MaximizeViewportToggle);
+            }
+        });
+    });
 }
 
 /// X/Y/Z Transform Type-In fields: position, rotation degrees or scale

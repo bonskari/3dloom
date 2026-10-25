@@ -85,7 +85,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
         c if c.group() == crate::Group::Skin => crate::skin::execute(state, c),
         c @ (C::SkinAddBones { .. } | C::SkinRemoveBone { .. } | C::SkinSelectBone { .. } | C::SkinSelectVertices { .. } | C::SkinSetVertexWeight { .. } | C::SkinSetEnvelope { .. } | C::SkinSetCustomWeight { .. } | C::SkinNormalize | C::SkinRigidToggle | C::SkinBakeSelectedVerts | C::MirrorModeSkin | C::PasteGreenToBlue | C::PasteBlueToGreen | C::MirrorPaste | C::SkinAddGizmo { .. } | C::SkinRemoveGizmo | C::SkinSelectGizmo { .. } | C::SkinAddGizmoKey | C::SkinSetGizmoKey { .. } | C::SkinSetGizmoDelta { .. } | C::SkinSetGizmoOption { .. } | C::SkinSetVertexWeights { .. } | C::SkinSetScaleWeight { .. } | C::SkinSetPasteTolerance { .. } | C::SkinSelectBoneByName { .. } | C::SkinEnvelopeVisibility | C::SkinPaintWeightsToggle | C::SkinPaintStroke { .. } | C::SkinSetPainterOption { .. } | C::SkinPainterOptionsDialog) => crate::skin::execute(state, c),
-        c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin) => crate::morph::execute(state, c),
+        c if crate::skin::handles(&c) => crate::skin::execute(state, c),
+        c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin | C::SkinMorphSelect { .. } | C::SkinMorphPickBone | C::SkinMorphSelectPoints { .. } | C::SkinMorphSelectionTool { .. } | C::SkinMorphSetOption { .. } | C::SkinMorphSetCurve { .. } | C::SkinMorphResetGraph | C::SkinMorphEdit { .. } | C::SkinMorphClearVerts { .. } | C::SkinMorphRemoveVerts { .. } | C::SkinMorphSetJointType { .. } | C::SkinMorphSetExternal { .. } | C::SkinMorphPickExternal | C::SkinMorphReloadTarget { .. } | C::SkinMorphPasteMirror { .. } | C::SkinWrapPickControl | C::SkinWrapSelectControlVerts { .. } | C::SkinWrapSetLocal { .. } | C::SkinWrapMirrorSelected | C::SkinWrapBakeControlVerts | C::SkinWrapRetrieveControlVerts | C::SkinWrapPatchPick { .. } | C::SkinWrapPatchSetSampleRate { .. } | C::SkinWrapPatchResample) => crate::morph::execute(state, c),
         C::NewScene => {
             let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
             if ids.is_empty() {
@@ -171,7 +172,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if max {
                 state.import_report = warnings;
             }
-            Ok(json!({ "nodes": state.scene.len() }))
+            // Missing External Files: the files the scene names that are not there.
+            let missing = crate::assets::missing_assets(state);
+            if !missing.is_empty() && state.dialog.is_none() {
+                state.dialog = Some(Dlg::MissingFiles);
+            }
+            Ok(json!({ "nodes": state.scene.len(), "missing": missing }))
         }
         C::UnitsMismatchReply { rescale } => {
             let path = state.units_mismatch.take().ok_or("no Units Mismatch is waiting")?;
@@ -272,7 +278,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = None;
             state.file = None;
             state.mesh_dirty = true;
-            Ok(json!({}))
+            // Reset starts from the startup scene when there is one.
+            let startup = crate::assets::load_startup_scene(state)?;
+            Ok(json!({ "startup_scene": startup }))
         }
         C::SaveChangesReply { reply } => {
             let Some(Dlg::SaveChanges(action)) = state.dialog else {
@@ -336,6 +344,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 crate::max_io::import(state, &path)
             } else if crate::fbx_io::is_fbx(&path) {
                 crate::fbx_io::import(state, &path).map(|ids| json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
+            } else if crate::geom_io::is_3ds(&path) {
+                crate::geom_io::import_3ds(state, &path)
+            } else if crate::geom_io::is_stl(&path) {
+                crate::geom_io::import_stl(state, &path)
+            } else if crate::geom_io::is_dxf(&path) {
+                crate::geom_io::import_dxf(state, &path)
             } else {
                 crate::obj_io::import(state, &path)
             }?;
@@ -360,6 +374,42 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.exchange.describe(&dialog)
         }
         C::ExchangeOptions { dialog } => state.exchange.describe(&dialog),
+        C::ReplaceFile { path, names, materials } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::ReplaceFile);
+                return Ok(json!({ "dialog": "ReplaceFile" }));
+            };
+            let path = std::path::PathBuf::from(path);
+            if names.is_none() && materials.is_none() && state.replace_source.as_ref() != Some(&path) {
+                // From the file dialog: the list of matching objects comes next.
+                let doc = crate::file::read(&path)?;
+                let candidates = crate::assets::replace_candidates(state, &doc);
+                state.replace_source = Some(path);
+                state.dialog = Some(Dlg::ReplaceObjects);
+                return Ok(json!({ "dialog": "ReplaceObjects", "objects": candidates }));
+            }
+            state.replace_source = None;
+            crate::assets::replace(state, &path, names.as_deref(), materials.unwrap_or(false))
+        }
+        C::SetProjectFolder { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::ProjectFolder);
+                return Ok(json!({ "dialog": "ProjectFolder" }));
+            };
+            crate::assets::set_project_folder(state, std::path::Path::new(&path))
+        }
+        C::AssetTracking => {
+            state.dialog = Some(Dlg::AssetTracking);
+            Ok(crate::assets::asset_list(state))
+        }
+        C::RepathAsset { from, to } => {
+            let n = crate::assets::repath(state, &[(from, to)], "Set Path")?;
+            Ok(json!({ "changed": n }))
+        }
+        C::FindMissingFiles { folder } => {
+            let found = crate::assets::find_missing(state, std::path::Path::new(&folder))?;
+            Ok(json!({ "found": found, "missing": crate::assets::missing_assets(state) }))
+        }
         C::SaveExchangePreset { dialog, name } => {
             state.exchange.save_preset(&dialog, &name)?;
             state.exchange.describe(&dialog)
@@ -608,18 +658,52 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
         C::SelectChild => {
-            let ids: Vec<u64> = state.selection.iter().filter_map(|id| state.scene.children(*id).first().copied()).map(|c| c.0).collect();
+            // Page Down: all immediate children.
+            let ids: Vec<u64> = state.selection.iter().flat_map(|id| state.scene.children(*id)).map(|c| c.0).collect();
             if ids.is_empty() {
                 return Ok(selection_json(state));
             }
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
         C::SelectChildren => {
-            let ids: Vec<u64> = state.selection.iter().flat_map(|id| state.scene.children(*id)).map(|c| c.0).collect();
+            let ids: Vec<u64> = state.selection.iter().flat_map(|id| state.scene.descendants(*id)).map(|c| c.0).collect();
             if ids.is_empty() {
                 return Ok(selection_json(state));
             }
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
+        }
+        C::SelectSiblingNext | C::SelectSiblingPrevious => {
+            let next = matches!(cmd, C::SelectSiblingNext);
+            let Some(&current) = state.selection.iter().next() else { return Ok(selection_json(state)) };
+            let sibs = siblings(&state.scene, current);
+            let eligible = |id: &NodeId| *id == current || state.scene.node(*id).is_some_and(|n| state.is_selectable(n));
+            let sibs: Vec<NodeId> = sibs.into_iter().filter(eligible).collect();
+            let Some(i) = sibs.iter().position(|s| *s == current) else { return Ok(selection_json(state)) };
+            if sibs.len() < 2 {
+                return Ok(selection_json(state));
+            }
+            let j = if next { (i + 1) % sibs.len() } else { (i + sibs.len() - 1) % sibs.len() };
+            execute(state, C::SelectNodes { ids: vec![sibs[j].0], op: SelectOp::Replace })
+        }
+        C::LinkInheritanceSelected { move_axes, rotate_axes, scale_axes } => {
+            let ids = selected_ids(state);
+            if ids.is_empty() {
+                return Err("select the objects first".into());
+            }
+            props_change(state, "Link Inheritance", ids, |p, _| {
+                if let Some(m) = move_axes { p.inherit.move_axes = m; }
+                if let Some(r) = rotate_axes { p.inherit.rotate_axes = r; }
+                if let Some(s) = scale_axes { p.inherit.scale_axes = s; }
+            })?;
+            Ok(json!({}))
+        }
+        C::FreezeTransform | C::FreezePosition | C::FreezeRotation => {
+            let (pos, rot) = (!matches!(cmd, C::FreezeRotation), !matches!(cmd, C::FreezePosition));
+            freeze_transform(state, pos, rot, cmd.name())
+        }
+        C::TransformToZero | C::PositionToZero | C::RotationToZero => {
+            let (pos, rot) = (!matches!(cmd, C::RotationToZero), !matches!(cmd, C::PositionToZero));
+            transform_to_zero(state, pos, rot, cmd.name())
         }
         C::SelectInstances => {
             // The instance group: every node sharing the selected node's source.
@@ -644,9 +728,21 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.pick_mode = Some(PickMode::SelectByColor);
             Ok(json!({}))
         }
+        C::SelectByLayer { layers } => {
+            let Some(layers) = layers else {
+                state.dialog = Some(Dlg::SelectByLayer);
+                return Ok(json!({ "dialog": "SelectByLayer" }));
+            };
+            for l in &layers {
+                state.scene.layer(*l).ok_or_else(|| format!("no layer {l}"))?;
+            }
+            let ids: Vec<u64> = state.scene.nodes().filter(|n| layers.contains(&n.layer) && state.is_selectable(n)).map(|n| n.id.0).collect();
+            execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
+        }
         C::SelectSimilar => {
-            let kinds: BTreeSet<&'static str> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.object.base_name()).collect();
-            let ids: Vec<u64> = state.scene.nodes().filter(|n| kinds.contains(n.object.base_name())).map(|n| n.id.0).collect();
+            // Similar: the same object type on the same layer with the same (or no) material.
+            let kinds: BTreeSet<(&'static str, u32, Option<loom_scene::material::MaterialId>)> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| (n.object.base_name(), n.layer, n.material)).collect();
+            let ids: Vec<u64> = state.scene.nodes().filter(|n| kinds.contains(&(n.object.base_name(), n.layer, n.material))).map(|n| n.id.0).collect();
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
         C::Group { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
@@ -766,7 +862,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             frame_all(state, bounds)
         }
         C::ZoomExtentsSelected => {
-            let bounds = state.selection_bounds().or_else(|| state.scene_bounds());
+            // At the Skin's Envelope level: the selected vertices, else the current envelope.
+            let bounds = crate::skin::focus_bounds(state).or_else(|| state.selection_bounds()).or_else(|| state.scene_bounds());
             frame(state, bounds)
         }
         C::ZoomViewportIn => zoom(state, 0.8),
@@ -860,6 +957,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(camera_json(state))
         }
+        C::UpdateDuringSpinnerDragToggle => toggle(&mut state.update_during_spinner_drag, "update_during_spinner_drag"),
         C::ShadeSelectedToggle => {
             state.mesh_dirty = true;
             toggle(&mut state.shade_selected, "shade_selected")
@@ -872,6 +970,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::TruckCameraMode => nav_toggle(state, NavMode::TruckCamera),
         C::OrbitCameraMode => nav_toggle(state, NavMode::OrbitCamera),
         C::PanCameraMode => nav_toggle(state, NavMode::PanCamera),
+        C::LightHotspotMode => nav_toggle(state, NavMode::LightHotspot),
+        C::LightFalloffMode => nav_toggle(state, NavMode::LightFalloff),
         C::TimeConfiguration => {
             state.dialog = Some(Dlg::TimeConfiguration);
             Ok(json!({}))
@@ -895,7 +995,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({ "start": s0, "end": s1, "fps": state.fps, "frame": state.current_frame }))
         }
         C::SetFov { degrees } => {
-            state.record_view();
+            state.record_view_as("Field-of-View");
             state.active_mut().fov_y_radians = degrees.clamp(1.0, 175.0).to_radians();
             Ok(json!({ "fov": state.active().fov_y_radians.to_degrees() }))
         }
@@ -910,7 +1010,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ZoomMode => nav_toggle(state, NavMode::Zoom),
         C::PanViewport { point: Some(p) } => {
             // The view slides (no turn, no zoom) until `p` is at its centre.
-            state.record_view();
+            state.record_view_as("Pan");
             let cam = &mut state.active_mut().camera;
             let to_eye = cam.basis().2;
             let p = Vec3::from(p);
@@ -935,7 +1035,6 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::LockUserInterfaceToggle => toggle(&mut state.ui_locked, "ui_locked"),
         C::ExpertModeToggle => toggle(&mut state.expert_mode, "expert_mode"),
         C::DisplayFloater => toggle(&mut state.display_floater, "display_floater"),
-        C::UpdateDuringSpinnerDragToggle => toggle(&mut state.prefs.update_during_spinner_drag, "update_during_spinner_drag"),
         C::DisplayAsSeeThroughToggle => {
             let ids = selected_ids(state);
             if ids.is_empty() {
@@ -1545,6 +1644,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Some(PickMode::SplineBind) => crate::spline::bind_at(state, Vec3::from(point)),
             Some(PickMode::TrimExtendModifier) => crate::spline::trim_extend_click(state, point),
             Some(PickMode::MeasureDistanceA | PickMode::MeasureDistanceB) => crate::helpers::measure_pick(state, Vec3::from(point)),
+            Some(PickMode::BipedFootstep) => crate::biped_footsteps::execute(state, C::BipedAppendFootstep { position: Some(point), left: None }),
             Some(PickMode::WorkingPivotView) => {
                 state.pick_mode = None;
                 state.working_pivot.origin = Vec3::from(point);
@@ -1629,6 +1729,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::Preferences => {
             state.dialog = Some(Dlg::Preferences);
             Ok(json!({}))
+        }
+        C::PaintSelectionSizeUp | C::PaintSelectionSizeDown => {
+            let step = if matches!(cmd, C::PaintSelectionSizeUp) { 1.0 } else { -1.0 };
+            state.prefs.paint_brush_size = (state.prefs.paint_brush_size + step).clamp(1.0, 500.0);
+            Ok(json!({ "size": state.prefs.paint_brush_size }))
         }
         C::SetPreference { name, value } => {
             state.prefs.set(&name, value)?;
@@ -2148,7 +2253,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. }) => crate::camera::execute(state, c),
-        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister) => crate::light::execute(state, c),
+        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister | C::PhotometricTemplate { .. } | C::CreateSunlight { .. } | C::SunlightParameters { .. } | C::AddDefaultLightsToScene { .. } | C::SelectTarget) => crate::light::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
@@ -2157,6 +2262,24 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 let mut after = (**b).clone();
                 after.set(&name, value)?;
                 return crate::biped::rebuild(state, id, after, &name);
+            }
+            // Target Distance of a target camera or light moves the target
+            // along the line of sight.
+            let live_target = match &node.object {
+                ObjectKind::Camera { target, .. } => *target,
+                ObjectKind::Light(l) => l.target,
+                _ => None,
+            }
+            .filter(|t| state.scene.node(*t).is_some());
+            if let (Some(t), "Target Distance") = (live_target, name.as_str()) {
+                let world = state.scene.world_matrix(id);
+                let at = world.w_axis.truncate() - world.z_axis.truncate().normalize_or_zero() * (value as f32).max(1e-3);
+                let tnode = state.scene.node(t).ok_or_else(|| missing(t))?;
+                let parent = tnode.parent.map(|p| state.scene.world_matrix(p)).unwrap_or(glam::Mat4::IDENTITY);
+                let mut after = tnode.transform.clone();
+                after.position.set(parent.inverse().transform_point3(at));
+                commit(state, "Target Distance", Change::SetTransform { id: t, before: tnode.transform.clone(), after })?;
+                return Ok(json!({}));
             }
             let root = node.instance_of.unwrap_or(id);
             let group: Vec<NodeId> = state
@@ -2676,9 +2799,17 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.pick_mode = None;
                     return crate::stack::execute(state, C::UvwMapAcquire { node: id.0 });
                 }
-                Some(PickMode::UvwMapNormal | PickMode::UvwMapRegionA | PickMode::UvwMapRegionB) => return Err("pick a surface point, not an object".into()),
+                Some(PickMode::UvwMapNormal | PickMode::UvwMapRegionA | PickMode::UvwMapRegionB | PickMode::BipedFootstep) => return Err("pick a surface point, not an object".into()),
                 Some(PickMode::SeamPointA | PickMode::SeamPointB) => return Err("Point To Point Seam picks a vertex, not an object".into()),
                 Some(PickMode::TvTargetWeldSource | PickMode::TvTargetWeldTarget) => return Err("Target Weld picks a texture vertex in the Edit UVWs window".into()),
+                // Pick Bone / Add keep picking until right-click or the button again.
+                Some(PickMode::SkinMorphBone) => return crate::morph::execute(state, C::SkinMorphAddBones { ids: vec![id.0] }),
+                Some(PickMode::SkinWrapControl) => return crate::morph::execute(state, C::SkinWrapAddBase { id: id.0 }),
+                Some(PickMode::SkinMorphExternal) => {
+                    state.pick_mode = None;
+                    let morph = state.skin_morph_current.ok_or("no morph is highlighted")? as u32;
+                    return crate::morph::execute(state, C::SkinMorphSetExternal { morph, node: Some(id.0) });
+                }
                 Some(PickMode::ModifierNode) => {
                     let Some(index) = state.selection.iter().next().and_then(|n| state.scene.node(*n)).and_then(|n| n.active_entry) else { return Err("no active stack entry".into()) };
                     state.pick_mode = None;
@@ -2687,6 +2818,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::Constraint(kind)) => {
                     state.pick_mode = None;
                     return crate::motion::pick_constraint(state, kind, id);
+                }
+                Some(PickMode::BipedXtraParent) => {
+                    state.pick_mode = None;
+                    let (root, name, reorient) = state.biped_xtra_pick.take().ok_or("no Xtra to pick a parent for")?;
+                    return crate::biped::set_xtra(state, root, &name, None, None, Some(id.0), reorient);
                 }
                 Some(PickMode::PickMaterial) => {
                     state.pick_mode = None;
@@ -3160,8 +3296,22 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::Rename { id, name } => {
             let id = NodeId(id);
-            let before = state.scene.node(id).ok_or_else(|| missing(id))?.name.clone();
-            commit(state, "Rename", Change::SetName { id, before, after: name })?;
+            let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+            let before = node.name.clone();
+            // A target camera or light renames its "<name>.Target" with it.
+            let target = match &node.object {
+                ObjectKind::Camera { target, .. } => *target,
+                ObjectKind::Light(l) => l.target,
+                _ => None,
+            };
+            let mut changes = Vec::new();
+            if let Some(t) = target.and_then(|t| state.scene.node(t)) {
+                if t.name.ends_with(".Target") {
+                    changes.push(Change::SetName { id: t.id, before: t.name.clone(), after: format!("{name}.Target") });
+                }
+            }
+            changes.insert(0, Change::SetName { id, before, after: name });
+            commit(state, "Rename", Change::Group(changes))?;
             Ok(json!({}))
         }
         C::SetParent { id, parent } => {
@@ -3188,7 +3338,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::Orbit { yaw, pitch, distance, target, roll } => {
-            state.record_view();
+            state.record_view_as("Orbit");
             let cam = &mut state.active_mut().camera;
             if let Some(r) = roll {
                 cam.roll = loom_input::camera_control::wrap_angle(r.to_radians());
@@ -3225,7 +3375,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({ "edges": state.active().edged_faces, "vertices": state.show_vertices }))
         }
-        c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. }) => crate::biped::execute(state, c),
+        c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. } | C::BipedCreateXtra { .. } | C::BipedDeleteXtra { .. } | C::BipedCreateOppositeXtra { .. } | C::BipedSetXtra { .. } | C::BipedPickXtraParent { .. } | C::BipedSaveFile { .. } | C::BipedLoadFile { .. }) => crate::biped::execute(state, c),
+        c @ (C::BipedFootstepMode { .. } | C::BipedFootstepCreation { .. } | C::BipedCreateMultipleFootsteps { .. } | C::BipedAppendFootstep { .. } | C::BipedActivateFootsteps | C::BipedDeactivateFootsteps | C::BipedDeleteFootsteps) => crate::biped_footsteps::execute(state, c),
         c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
         c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. }) => crate::extras::execute(state, c),
@@ -3558,7 +3709,7 @@ fn missing(id: NodeId) -> String {
 
 /// Replaces the scene and settings with a loaded document (Open / Fetch):
 /// not undoable.
-fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<std::path::PathBuf>) {
+pub(crate) fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<std::path::PathBuf>) {
     state.scene = doc.scene;
     // Node versions restart with a loaded scene: cached track bar keys belong to the old one.
     state.key_time_cache = Default::default();
@@ -3577,6 +3728,12 @@ fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<
 fn export_any(state: &AppState, ids: &[NodeId], path: &std::path::Path) -> Result<Value, String> {
     if crate::fbx_io::is_fbx(path) {
         crate::fbx_io::export(state, ids, path)
+    } else if crate::geom_io::is_3ds(path) {
+        crate::geom_io::export_3ds(state, ids, path)
+    } else if crate::geom_io::is_stl(path) {
+        crate::geom_io::export_stl(state, ids, path)
+    } else if crate::geom_io::is_dxf(path) {
+        crate::geom_io::export_dxf(state, ids, path)
     } else {
         crate::obj_io::export(state, ids, path)
     }
@@ -3758,7 +3915,7 @@ pub(crate) fn frame(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Resul
     let Some((min, max)) = bounds else {
         return Ok(camera_json(state));
     };
-    state.record_view();
+    state.record_view_as("Zoom Extents");
     let fov = state.active().fov_y_radians;
     let radius = (max - min).length().max(0.25) * 0.5;
     let cam = &mut state.active_mut().camera;
@@ -3779,7 +3936,7 @@ fn frame_all(state: &mut AppState, bounds: Option<(Vec3, Vec3)>) -> Result<Value
 }
 
 fn zoom(state: &mut AppState, factor: f32) -> Result<Value, String> {
-    state.record_view();
+    state.record_view_as("Zoom");
     let cam = &mut state.active_mut().camera;
     cam.distance = (cam.distance * factor).max(0.05);
     Ok(camera_json(state))
@@ -4307,11 +4464,27 @@ fn with_system(state: &mut AppState, system: Option<CoordSystem>) -> CoordSystem
 type MatrixFor<'a> = &'a dyn Fn(&AppState, Option<NodeId>) -> (Mat4, Vec3);
 
 fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: MatrixFor) -> Result<Value, String> {
+    // Skin > Edit Envelopes: the transform tools move envelope end points / lattice points only.
+    if state.skin_active() && matches!(label, "Move" | "Rotate" | "Scale") {
+        let (m, _) = matrix_for(state, None);
+        if let Some(r) = crate::skin::transform(state, label, m) {
+            return r;
+        }
+    }
     if let Some((id, _)) = crate::normals::normal_level(state) {
         let (m, _) = matrix_for(state, Some(id));
         if let Some(r) = crate::normals::transform(state, label, m) {
             return r;
         }
+    }
+    // Skin Morph Points: the tools shape the morph (Edit mode, or on the fly
+    // with Beginner Mode off); Skin Wrap Control Vertices: nothing moves.
+    if let Some((id, _)) = crate::morph::points_level(state) {
+        let (m, _) = matrix_for(state, Some(id));
+        return crate::morph::transform_points(state, label, m);
+    }
+    if crate::morph::control_vertex_level(state).is_some() {
+        return Ok(json!({}));
     }
     let mut changes = Vec::new();
     // A modifier gizmo level (XForm Gizmo / Center): the tools move the gizmo.
@@ -4685,6 +4858,102 @@ fn props_change(state: &mut AppState, label: &str, ids: Vec<NodeId>, f: impl Fn(
     commit(state, label, Change::Group(changes))
 }
 
+/// Siblings in the reference's sense: the objects as many generations below
+/// the selected object's nearest branching ancestor (one with several
+/// children, or the scene root) as it is, in creation order. In an uneven
+/// hierarchy A can be B's sibling without B being A's.
+fn siblings(scene: &loom_scene::Scene, id: NodeId) -> Vec<NodeId> {
+    let kids = |p: Option<NodeId>| -> Vec<NodeId> {
+        match p {
+            Some(p) => scene.children(p),
+            None => scene.nodes().filter(|n| n.parent.is_none()).map(|n| n.id).collect(),
+        }
+    };
+    let mut cur = id;
+    let mut depth = 1;
+    let branch = loop {
+        let parent = scene.node(cur).and_then(|n| n.parent);
+        if parent.is_none() || kids(parent).len() > 1 {
+            break parent;
+        }
+        cur = parent.expect("a parent");
+        depth += 1;
+    };
+    let mut level = kids(branch);
+    for _ in 1..depth {
+        level = level.into_iter().flat_map(|n| scene.children(n)).collect();
+    }
+    level.sort_by_key(|n| n.0);
+    level
+}
+
+/// A List controller holding `frozen` under a zero layer that edits go to
+/// (the zero layer is first: a List sets its first weighted entry).
+fn frozen_list(frozen: glam::Vec3, zero_name: &str, frozen_name: &str) -> loom_scene::Param<glam::Vec3> {
+    use loom_scene::param::{Controller, ListItem};
+    loom_scene::Param {
+        controller: Controller::List(vec![
+            ListItem { name: zero_name.into(), weight: 100.0, controller: Controller::Constant(glam::Vec3::ZERO) },
+            ListItem { name: frozen_name.into(), weight: 100.0, controller: Controller::Constant(frozen) },
+        ]),
+    }
+}
+
+/// Freeze Transform / Position / Rotation on the selection: the current
+/// value becomes the frozen layer, the active layer starts at zero.
+fn freeze_transform(state: &mut AppState, pos: bool, rot: bool, label: &str) -> Result<Value, String> {
+    let ids = selected_ids(state);
+    if ids.is_empty() {
+        return Err("select the objects first".into());
+    }
+    let mut changes = Vec::new();
+    for id in ids {
+        let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+        let mut t = node.transform.clone();
+        if pos {
+            t.position = frozen_list(node.transform.position.get(), "Zero Pos XYZ", "Frozen Position");
+        }
+        if rot {
+            t.rotation = frozen_list(node.transform.rotation.get(), "Zero Euler XYZ", "Frozen Rotation");
+        }
+        changes.push(Change::SetTransform { id, before: node.transform.clone(), after: t });
+    }
+    commit_exact(state, label, Change::Group(changes))?;
+    Ok(json!({}))
+}
+
+/// Transform / Position / Rotation To Zero: the active layer back to zero
+/// (the frozen pose); a component never frozen goes to zero itself.
+fn transform_to_zero(state: &mut AppState, pos: bool, rot: bool, label: &str) -> Result<Value, String> {
+    use loom_scene::param::Controller;
+    let ids = selected_ids(state);
+    if ids.is_empty() {
+        return Err("select the objects first".into());
+    }
+    let zero = |p: &loom_scene::Param<glam::Vec3>| -> loom_scene::Param<glam::Vec3> {
+        let mut p = p.clone();
+        match &mut p.controller {
+            Controller::List(items) if !items.is_empty() => items[0].controller = Controller::Constant(glam::Vec3::ZERO),
+            _ => p = loom_scene::Param::new(glam::Vec3::ZERO),
+        }
+        p
+    };
+    let mut changes = Vec::new();
+    for id in ids {
+        let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+        let mut t = node.transform.clone();
+        if pos {
+            t.position = zero(&t.position);
+        }
+        if rot {
+            t.rotation = zero(&t.rotation);
+        }
+        changes.push(Change::SetTransform { id, before: node.transform.clone(), after: t });
+    }
+    commit_exact(state, label, Change::Group(changes))?;
+    Ok(json!({}))
+}
+
 fn selected_ids(state: &AppState) -> Vec<NodeId> {
     state.selection.iter().copied().collect()
 }
@@ -5005,6 +5274,7 @@ fn snapshot(state: &AppState) -> Value {
         "morpher": crate::morph::morpher_status(state),
         "skin_morph": crate::morph::skin_morph_status(state),
         "skin_wrap": crate::morph::skin_wrap_status(state),
+        "skin_wrap_patch": crate::morph::skin_wrap_patch_status(state),
         "file": state.file.as_ref().map(|p| p.to_string_lossy().into_owned()),
         "dirty": state.dirty(),
         "ik_chains": state.scene.ik_chains.iter().map(|c| json!({ "id": c.id, "name": c.name, "solver": c.solver.label(), "start": c.start.0, "end": c.end.0, "goal": c.goal.0, "enabled": c.enabled, "swivel": c.swivel_deg, "spline": c.spline.map(|s| s.0) })).collect::<Vec<_>>(),

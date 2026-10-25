@@ -159,12 +159,12 @@ fn paint_weights_brushes_the_current_bone_near_the_stroke_and_alt_erases() {
     let at = mesh.vertex_position(loom_mesh::VertexId(near[0])).unwrap();
     let w0 = weight(&s, arm, near[0] as usize, 1);
     let far0 = weight(&s, arm, far[0] as usize, 1);
-    let r = execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: false }).unwrap();
+    let r = execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: false, pressure: None }).unwrap();
     assert!(r["painted"].as_u64().unwrap() > 0);
     let w1 = weight(&s, arm, near[0] as usize, 1);
     assert!((w1 - (w0 + 0.5).min(1.0)).abs() < 1e-4, "additive flat brush adds Max Strength: {w0} -> {w1}");
     assert_eq!(weight(&s, arm, far[0] as usize, 1), far0, "outside the brush nothing changes");
-    execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: true }).unwrap();
+    execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: true, pressure: None }).unwrap();
     assert!((weight(&s, arm, near[0] as usize, 1) - (w1 - 0.5).max(0.0)).abs() < 1e-4, "erase takes it away");
     // Each stroke is one undo entry.
     execute(&mut s, Command::UndoSceneOperation).unwrap();
@@ -177,7 +177,7 @@ fn paint_weights_brushes_the_current_bone_near_the_stroke_and_alt_erases() {
     let twin = verts_at_z(&s, arm, 17.5).into_iter().find(|v| { let p = mesh.vertex_position(loom_mesh::VertexId(*v)).unwrap(); (p.x - at.x).abs() < 1e-3 && (p.y - at.y).abs() < 1e-3 }).unwrap();
     let before = weight(&s, arm, twin as usize, 0);
     assert!(before < 0.1, "{before}");
-    execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: false }).unwrap();
+    execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: false, pressure: None }).unwrap();
     assert!((weight(&s, arm, twin as usize, 0) - (before + 0.5)).abs() < 1e-4);
     let state = execute(&mut s, Command::State).unwrap();
     assert_eq!(state["skin"]["painter"]["max_size"], 3.0);
@@ -196,11 +196,11 @@ fn paint_blend_weights_smooths_towards_the_neighbours() {
     let at = mesh.vertex_position(loom_mesh::VertexId(ring[0])).unwrap();
     execute(&mut s, Command::SkinSetPainterOption { name: "Max Size".into(), value: 0.01 }).unwrap();
     execute(&mut s, Command::SkinSetPainterOption { name: "Paint Blend Weights".into(), value: 0.0 }).unwrap();
-    execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: false }).unwrap();
+    execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: false, pressure: None }).unwrap();
     let sharp = weight(&s, arm, ring[0] as usize, 1);
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     execute(&mut s, Command::SkinSetPainterOption { name: "Paint Blend Weights".into(), value: 1.0 }).unwrap();
-    execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: false }).unwrap();
+    execute(&mut s, Command::SkinPaintStroke { points: vec![at.to_array()], erase: false, pressure: None }).unwrap();
     let blended = weight(&s, arm, ring[0] as usize, 1);
     assert!(blended < sharp, "a lone painted vertex blends down towards its unpainted neighbours: {blended} vs {sharp}");
     for name in ["Skin Paint Weights", "Skin Paint Stroke", "Skin Set Painter Option", "Skin Painter Options", "Skin Set Vertex Weights", "Skin Select Bone By Name", "Skin Envelope Visibility", "Skin Set Scale Weight", "Skin Set Paste Tolerance"] {

@@ -21,6 +21,10 @@ mod statusbar;
 mod viewport_config;
 mod prefs_ui;
 mod track_bar;
+mod skin2;
+mod skin_wrap;
+mod biped;
+mod lightcam2;
 mod bake;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
@@ -1433,6 +1437,10 @@ fn skinned_cylinder(h: &mut Harness) -> (loom_scene::NodeId, Vec<u64>) {
     h.app.panel_tab = crate::Tab::Modify;
     framed(h);
     assert!(h.app.state.skin_active());
+    // Select > Vertices starts off, as in the reference: tick it to pick vertices.
+    assert!(!h.app.state.skin_filter_vertices);
+    h.click(panel_text(h, "Vertices"));
+    assert!(h.app.state.skin_filter_vertices);
     (arm, bones)
 }
 
@@ -2784,6 +2792,11 @@ fn the_lights_category_buttons_start_light_creation() {
     let cp = panel(&h, "command_panel");
     // The category buttons are icons, named for screen readers.
     h.click(h.find(egui::accesskit::Role::Button, "Lights").center());
+    // Photometric is the default class; the standard lights are under Standard.
+    click_text(&mut h, "Photometric", cp, 0.0);
+    let p = *h.text_centers("Standard").last().expect("the Standard entry");
+    h.click(p);
+    h.frames(2);
     click_text(&mut h, "Target Spot", cp, 0.0);
     assert_eq!(h.app.create_kind, Some(crate::CreateKind::Light(loom_commands::light::LightKind::TargetSpot)));
     click_text(&mut h, "Omni", cp, 0.0);

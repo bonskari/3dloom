@@ -29,10 +29,12 @@ pub mod time_configuration;
 pub mod viewport_background;
 pub mod viewport_configuration;
 pub mod file_dialog;
+pub mod biped_footsteps;
 pub mod material_editor;
 pub mod render_setup;
 pub mod render_to_texture;
 pub mod lights;
+pub mod assets;
 pub mod save_changes;
 pub mod spline_prompts;
 pub mod topology_warning;
@@ -41,6 +43,7 @@ pub mod exchange_options;
 pub mod scene_dialogs;
 pub mod unwrap_dialogs;
 pub mod rig_dialogs;
+pub mod skin_dialogs;
 pub mod track_view_dialogs;
 pub mod vertex_paint;
 
@@ -144,6 +147,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
         Dialog::LightLister => lights::light_lister(ctx, app, &mut open),
         Dialog::LightExclude { light } => lights::light_exclude(ctx, app, light, &mut open),
+        Dialog::AddDefaultLights => lights::add_default_lights(ctx, app, &mut open),
+        Dialog::GeographicLocation { sun } => lights::geographic_location(ctx, app, sun, &mut open),
         Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),
         Dialog::SelectFromScene => select_from_scene::show(ctx, app, &mut open),
         Dialog::SelectCamera => select_camera(ctx, app, &mut open),
@@ -178,17 +183,30 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
-        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
         Dialog::FbxImportOptions => exchange_options::fbx_import(ctx, app, &mut open),
         Dialog::FbxExportOptions => exchange_options::fbx_export(ctx, app, &mut open),
         Dialog::ObjImportOptions => exchange_options::obj_import(ctx, app, &mut open),
         Dialog::ObjExportOptions => exchange_options::obj_export(ctx, app, &mut open),
+        Dialog::StlImportOptions => exchange_options::stl_import(ctx, app, &mut open),
+        Dialog::StlExportOptions => exchange_options::stl_export(ctx, app, &mut open),
+        Dialog::TdsImportOptions => exchange_options::tds_import(ctx, app, &mut open),
+        Dialog::ReplaceFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::ReplaceObjects => assets::replace_objects(ctx, app, &mut open),
+        Dialog::ProjectFolder => assets::project_folder(ctx, app, &mut open),
+        Dialog::AssetTracking => assets::asset_tracking(ctx, app, &mut open),
+        Dialog::MissingFiles => assets::missing_files(ctx, app, &mut open),
+        Dialog::SelectByLayer => assets::select_by_layer(ctx, app, &mut open),
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
-        Dialog::WeightTable => rig_dialogs::weight_table(ctx, app, &mut open),
+        Dialog::WeightTable => skin_dialogs::weight_table(ctx, app, &mut open),
         Dialog::WeightTool => rig_dialogs::weight_tool(ctx, app, &mut open),
-        Dialog::PainterOptions => rig_dialogs::painter_options(ctx, app, &mut open),
+        Dialog::PainterOptions => skin_dialogs::painter_options(ctx, app, &mut open),
+        Dialog::SkinSaveEnvelopes | Dialog::SkinLoadEnvelopes => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::PasteToMultipleBones => skin_dialogs::paste_to_multiple_bones(ctx, app, &mut open),
+        Dialog::LoadEnvelopes => skin_dialogs::load_envelopes(ctx, app, &mut open),
+        Dialog::AngleKeysCurves => skin_dialogs::angle_keys_curves(ctx, app, &mut open),
         Dialog::OutOfRangeTypes => track_view_dialogs::out_of_range_types(ctx, app, &mut open),
         Dialog::ReduceKeys => track_view_dialogs::reduce_keys(ctx, app, &mut open),
         Dialog::TrackSets => track_view_dialogs::track_sets(ctx, app, &mut open),
@@ -202,6 +220,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::SummaryInfo => scene_dialogs::summary_info(ctx, app, &mut open),
         Dialog::FileProperties => scene_dialogs::file_properties(ctx, app, &mut open),
         Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
+        Dialog::BipedMultipleFootsteps => biped_footsteps::show(ctx, app, &mut open),
         Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.

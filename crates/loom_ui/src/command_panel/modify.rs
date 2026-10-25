@@ -662,6 +662,9 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
     if matches!(modifier, Modifier::SkinWrap(_)) {
         super::morph_rollouts::skin_wrap(ui, app, id, index);
     }
+    if matches!(modifier, Modifier::SkinWrapPatch(_)) {
+        super::morph_rollouts::skin_wrap_patch(ui, app, id, index);
+    }
     if matches!(modifier, Modifier::EditNormals(_)) {
         super::normals_rollout::show(ui, app);
     }
@@ -903,7 +906,7 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
     }
     let params = modifier.parameters();
     // Skin, Morpher and Skin Morph draw their own rollouts.
-    if params.is_empty() || matches!(modifier, Modifier::Skin(_) | Modifier::Morpher(_) | Modifier::SkinMorph(_) | Modifier::SkinWrap(_) | Modifier::EditNormals(_)) {
+    if params.is_empty() || matches!(modifier, Modifier::Skin(_) | Modifier::Morpher(_) | Modifier::SkinMorph(_) | Modifier::SkinWrap(_) | Modifier::SkinWrapPatch(_) | Modifier::EditNormals(_)) {
         return;
     }
     // Smooth: the smoothing groups are 32 buttons under the other parameters.

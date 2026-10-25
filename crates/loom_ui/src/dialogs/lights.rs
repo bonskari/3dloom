@@ -74,6 +74,28 @@ fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &
     if ui.selectable_label(app.state.selection.contains(&id), name).clicked() {
         let _ = app.dispatch(Command::SelectNodes { ids: vec![id.0], op: loom_commands::SelectOp::Replace });
     }
+    if let Some(ph) = &l.photometric {
+        // Photometric lights list their intensity (in the light's unit) and filter colour.
+        let unit = ph.intensity_unit.get();
+        ui.horizontal(|ui| {
+            spinner(ui, app, id, "Intensity", ph.from_candela(ph.candela.get(), unit, l.falloff.get()), 1.0);
+            ui.label(loom_scene::light::INTENSITY_UNITS[unit.min(2) as usize]);
+        });
+        let c = ph.filter_color.get();
+        let mut rgb = [0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+        if ui.color_edit_button_srgb(&mut rgb).changed() {
+            app.state.undo.begin("Filter Color");
+            for (ch, v) in ["R", "G", "B"].iter().zip(rgb) {
+                set(app, id, &format!("Filter Color {ch}"), v as f64 / 255.0);
+            }
+            app.state.undo.end();
+        }
+        let mut sh = l.shadows_on.get();
+        if ui.checkbox(&mut sh, "").changed() {
+            set(app, id, "Shadows On", sh as u32 as f64);
+        }
+        return;
+    }
     spinner(ui, app, id, "Multiplier", l.multiplier.get(), 0.01);
     let c = l.color.get();
     let mut rgb = [0, 1, 2].map(|i| (c[i].clamp(0.0, 1.0) * 255.0).round() as u8);
@@ -239,5 +261,87 @@ pub fn light_exclude(ctx: &egui::Context, app: &mut LoomApp, light: u64, open: &
         }
         None if !*open => ctx.data_mut(|d| d.remove::<ExcludeState>(key)),
         None => ctx.data_mut(|d| d.insert_temp(key, st)),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct DefaultLightsState {
+    key: bool,
+    fill: bool,
+    scale: f32,
+}
+
+/// Views > Add Default Lights to Scene: Add Default Key Light / Fill Light
+/// and Distance Scaling; OK adds them as omni lights.
+pub fn add_default_lights(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let key = egui::Id::new("add_default_lights_state");
+    let mut st: DefaultLightsState = ctx.data(|d| d.get_temp(key)).unwrap_or(DefaultLightsState { key: true, fill: true, scale: 1.0 });
+    let mut done = None;
+    egui::Window::new("Add Default Lights to Scene").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.checkbox(&mut st.key, "Add Default Key Light");
+        ui.checkbox(&mut st.fill, "Add Default Fill Light");
+        ui.horizontal(|ui| {
+            ui.label("Distance Scaling:");
+            ui.add(crate::spinner::spin(ui, &mut st.scale, 0.0..=1000.0).speed(0.01).fixed_decimals(2));
+        });
+        ui.horizontal(|ui| {
+            if ui.add_enabled(st.key || st.fill, egui::Button::new("OK")).clicked() {
+                done = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                done = Some(false);
+            }
+        });
+    });
+    if let Some(apply) = done {
+        if apply {
+            let _ = app.dispatch(Command::AddDefaultLightsToScene { key: Some(st.key), fill: Some(st.fill), distance_scale: Some(st.scale) });
+        }
+        *open = false;
+    }
+    ctx.data_mut(|d| d.insert_temp(key, st));
+}
+
+/// Sunlight > Get Location: the Geographic Location city list; OK (or a
+/// double-click) puts the city's latitude, longitude and time zone on the sun.
+pub fn geographic_location(ctx: &egui::Context, app: &mut LoomApp, sun: u64, open: &mut bool) {
+    let key = egui::Id::new(("geographic_location_pick", sun));
+    let current = app.state.scene.node(NodeId(sun)).and_then(|n| n.object.light()).and_then(|l| l.sun.as_ref()).map(|s| s.location.clone()).unwrap_or_default();
+    let mut pick: String = ctx.data(|d| d.get_temp(key)).unwrap_or(current);
+    let mut chosen = None;
+    let mut cancel = false;
+    egui::Window::new("Geographic Location").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label("City:");
+        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+            for (name, ..) in loom_scene::sun::CITIES {
+                let r = ui.selectable_label(pick == name, name);
+                if r.clicked() {
+                    pick = name.to_owned();
+                }
+                if r.double_clicked() {
+                    chosen = Some(name.to_owned());
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() && !pick.is_empty() {
+                chosen = Some(pick.clone());
+            }
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
+        });
+    });
+    if let Some(city) = chosen {
+        let _ = app.dispatch(Command::SunlightParameters { id: sun, location: Some(city), latitude: None, longitude: None, time_zone: None, year: None, month: None, day: None, hour: None, minute: None, dst: None, north: None, orbital_scale: None });
+        *open = false;
+    }
+    if cancel {
+        *open = false;
+    }
+    if *open {
+        ctx.data_mut(|d| d.insert_temp(key, pick));
+    } else {
+        ctx.data_mut(|d| d.remove::<String>(key));
     }
 }

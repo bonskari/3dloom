@@ -27,6 +27,9 @@ pub mod toolbars;
 pub mod viewport_gizmo;
 mod viewport_widget;
 pub mod poly_modes;
+mod skin_view;
+mod morph_view;
+mod curve_graph;
 pub mod spline_modes;
 pub mod ribbon;
 pub mod shortcuts;
@@ -136,6 +139,8 @@ pub enum CreateKind {
     Light(loom_commands::light::LightKind),
     /// Geometry > Patch Grids: Quad Patch (`quad`) or Tri Patch, dragged corner to corner.
     PatchGrid { quad: bool },
+    /// Systems > Sunlight / Daylight: drag the compass from its centre.
+    SunSystem { daylight: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,6 +249,10 @@ pub struct LoomApp {
     pub creation_method: [Option<usize>; 10],
     pub create_category: Category,
     pub autogrid: bool,
+    /// Create > Lights: the Photometric (true, the default) or Standard object types.
+    pub photometric_lights: bool,
+    /// A panel control (spinner) is being dragged this frame.
+    pub spinner_drag: bool,
     pub keyboard_entry: KeyboardEntry,
     /// Creation in progress in the viewport.
     pub create: Option<CreateSession>,
@@ -251,6 +260,8 @@ pub struct LoomApp {
     pub camera_create: Option<create_tool::CameraSession>,
     /// Create > Helpers > Grid / Compass being dragged out.
     pub helper_create: Option<create_tool::HelperSession>,
+    /// Systems > Sunlight / Daylight being dragged out.
+    pub sun_create: Option<create_tool::SunSession>,
     /// A biped being dragged out.
     pub biped_create: Option<create_tool::BipedSession>,
     /// Create Biped rollout: the structure the next biped gets.
@@ -392,6 +403,10 @@ impl LoomApp {
         // Viewport Configuration > Save as Default: the startup views.
         app.state.use_viewport_defaults = true;
         loom_commands::viewport_config::apply_defaults(&mut app.state);
+        // A session starts from the startup scene when there is one.
+        if let Err(e) = loom_commands::assets::load_startup_scene(&mut app.state) {
+            app.last_error = Some(e);
+        }
         app
     }
 
@@ -481,10 +496,13 @@ impl LoomApp {
             creation_method: [None; 10],
             create_category: Category::Geometry,
             autogrid: false,
+            photometric_lights: true,
+            spinner_drag: false,
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
             camera_create: None,
             helper_create: None,
+            sun_create: None,
             biped_create: None,
             biped_defaults: loom_scene::biped::BipedStructure::new(1.0),
             last_biped: None,
@@ -649,7 +667,9 @@ impl LoomApp {
             self.shown_end_result_key = key;
             self.state.mesh_dirty = true;
         }
-        if self.state.mesh_dirty {
+        // Update During Spinner Drag off: the viewports catch up on release.
+        let hold = !self.state.update_during_spinner_drag && self.spinner_drag;
+        if self.state.mesh_dirty && !hold {
             self.rebuild_world_meshes();
             self.state.mesh_dirty = false;
         }
@@ -697,7 +717,7 @@ impl LoomApp {
         (!self.state.show_end_result && self.panel_tab == command_panel::Tab::Modify).then(|| self.state.selection.iter().copied().collect())
     }
 
-    fn rebuild_world_meshes(&mut self) {
+    pub(crate) fn rebuild_world_meshes(&mut self) {
         if self.bitmap_generation != self.state.bitmap_generation {
             // Bitmap Parameters > Reload: read the image files again.
             self.bitmap_cache.clear();
@@ -806,10 +826,9 @@ impl LoomApp {
             if vertex_colors {
                 color = [1.0; 3];
             }
-            if let (Some(d), Some((skinned, weights))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
-                if skinned == id && d.vertex_count() == weights.len() {
-                    for (v, w) in d.vertices_mut().iter_mut().zip(weights) {
-                        let c = loom_commands::skin::weight_color(w);
+            if let (Some(d), Some((skinned, colors))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
+                if skinned == id && d.vertex_count() == colors.len() {
+                    for (v, c) in d.vertices_mut().iter_mut().zip(colors) {
                         v.color = [srgb(c[0]), srgb(c[1]), srgb(c[2])];
                     }
                     vertex_colors = true;
@@ -1350,6 +1369,18 @@ impl LoomApp {
     }
 }
 
+/// A file dropped on the window: a model file is imported, a scene file
+/// merged (all its objects); other files (images) are handled elsewhere.
+pub fn dropped_scene_command(path: &std::path::Path) -> Option<Command> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    let p = Some(path.to_string_lossy().into_owned());
+    match ext.as_str() {
+        "fbx" | "obj" | "3ds" | "stl" | "dxf" | "max" => Some(Command::ImportFile { path: p }),
+        "loom" => Some(Command::MergeFile { path: p, names: None, duplicates: None }),
+        _ => None,
+    }
+}
+
 impl eframe::App for LoomApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame(ctx);
@@ -1376,7 +1407,6 @@ impl LoomApp {
         icons::set_prefs(self.state.prefs.large_toolbar_buttons, self.state.prefs.flyout_time_ms);
         gizmo::set_colors([self.color("X Axis"), self.color("Y Axis"), self.color("Z Axis"), self.color("Active Axis")]);
         spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);
-        spinner::set_update_during_drag(ctx, self.state.prefs.update_during_spinner_drag);
         ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -1421,6 +1451,14 @@ impl LoomApp {
         // The menu bar's keyboard accelerators take their keys before the shortcuts see them.
         menubar::keyboard(ctx, self);
         hotkeys::handle(ctx, self);
+        // A drag that began outside the viewports is a spinner (or other
+        // panel control) drag: Update During Spinner Drag decides whether the
+        // viewports follow it.
+        let was = self.spinner_drag;
+        self.spinner_drag = ctx.dragged_id().is_some() && ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| !self.viewport_rects.iter().any(|r| r.contains(p)));
+        if was && !self.spinner_drag && self.state.mesh_dirty {
+            self.sync_after_command();
+        }
         // An image file dropped on an object: a material with it as the Diffuse map.
         let dropped: Vec<std::path::PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
         if !dropped.is_empty() {
@@ -1429,6 +1467,11 @@ impl LoomApp {
                 let image = path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["png", "jpg", "jpeg", "bmp", "tga", "tif", "tiff"].contains(&e.to_ascii_lowercase().as_str()));
                 if let (true, Some(node)) = (image, at.and_then(|p| viewport_widget::node_at(self, p))) {
                     let _ = self.dispatch(Command::DropBitmap { path: path.to_string_lossy().into_owned(), node: Some(node.0) });
+                }
+                if let Some(cmd) = dropped_scene_command(&path) {
+                    if let Err(e) = self.dispatch(cmd) {
+                        self.last_error = Some(format!("{}: {e}", path.display()));
+                    }
                 }
             }
         }

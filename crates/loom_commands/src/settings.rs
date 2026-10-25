@@ -74,6 +74,8 @@ pub struct Settings {
     pub recent_files: Vec<PathBuf>,
     /// The folder the file dialogs opened last (the UI fills it in).
     pub last_folder: Option<PathBuf>,
+    /// File > Set Project Folder.
+    pub project_folder: Option<PathBuf>,
     /// FBX / OBJ import and export options and saved presets.
     pub exchange: crate::exchange::ExchangeOptions,
     /// Toolbars, quad menus, menus, colours and the rollout order.
@@ -100,6 +102,7 @@ impl Settings {
             exchange: state.exchange.clone(),
             custom: state.ui_custom.clone(),
             paths: state.paths.clone(),
+            project_folder: state.project_folder.clone(),
         }
     }
 
@@ -123,6 +126,7 @@ impl Settings {
         state.ui_custom = self.custom.clone();
         state.paths = self.paths.clone();
         state.startup_custom = self.custom.clone();
+        state.project_folder = self.project_folder.clone();
     }
 
     pub fn to_json(&self) -> String {

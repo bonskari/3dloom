@@ -295,6 +295,10 @@ pub enum PickMode {
     WorkingPivotSurface,
     /// Protractor > Pick Object 1 / 2: the clicked object.
     ProtractorObject(u8),
+    /// Biped Structure > Xtras > Pick Parent: the clicked part becomes the tail's parent.
+    BipedXtraParent,
+    /// Biped Footstep Creation > Create Footsteps (append): each click places a footstep.
+    BipedFootstep,
     /// Tools > Measure Distance: first and second point.
     MeasureDistanceA,
     MeasureDistanceB,
@@ -304,6 +308,12 @@ pub enum PickMode {
     PlaceHighlight,
     /// Spacing Tool > Pick Path: the clicked shape is the path.
     SpacingPath,
+    /// Skin Morph > Pick Bone: each clicked bone joins the list.
+    SkinMorphBone,
+    /// Skin Morph > External Mesh: the clicked object becomes the current morph's target.
+    SkinMorphExternal,
+    /// Skin Wrap > Add: each clicked object becomes a control object.
+    SkinWrapControl,
 }
 
 /// Paint Deformation brushes.
@@ -843,8 +853,6 @@ pub struct Prefs {
     pub increment_on_save: bool,
     /// Preferences > Files: Zoom Extents on Import.
     pub zoom_extents_on_import: bool,
-    /// Views > Update During Spinner Drag (off: a spinner drag applies on release).
-    pub update_during_spinner_drag: bool,
 }
 
 fn default_nudge() -> f32 {
@@ -886,14 +894,13 @@ impl Default for Prefs {
             backup_on_save: false,
             increment_on_save: false,
             zoom_extents_on_import: true,
-            update_during_spinner_drag: true,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 45] = [
+    pub const NAMES: [&'static str; 44] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -902,7 +909,7 @@ impl Prefs {
         "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
         "Grid Nudge Distance", "Display World Axis", "Mask Viewport to Safe Region", "Zoom About Mouse Point Orthographic", "Zoom About Mouse Point Perspective",
         "Right Click Menu over Selected Only", "Wheel Zoom Increment", "Large Toolbar Buttons", "Flyout Time", "Topology Dependence Warning", "Backup on Save",
-        "Increment on Save", "Zoom Extents on Import", "Update During Spinner Drag",
+        "Increment on Save", "Zoom Extents on Import",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -938,7 +945,6 @@ impl Prefs {
             "Backup on Save" => b(self.backup_on_save),
             "Increment on Save" => b(self.increment_on_save),
             "Zoom Extents on Import" => b(self.zoom_extents_on_import),
-            "Update During Spinner Drag" => b(self.update_during_spinner_drag),
             "Transform Gizmos" => b(self.gizmos.enabled),
             "Show Axis Labels" => b(self.gizmos.show_axis_labels),
             "Allow Multiple Gizmos" => b(self.gizmos.allow_multiple),
@@ -992,7 +998,6 @@ impl Prefs {
             "Backup on Save" => self.backup_on_save = on,
             "Increment on Save" => self.increment_on_save = on,
             "Zoom Extents on Import" => self.zoom_extents_on_import = on,
-            "Update During Spinner Drag" => self.update_during_spinner_drag = on,
             "Transform Gizmos" => self.gizmos.enabled = on,
             "Show Axis Labels" => self.gizmos.show_axis_labels = on,
             "Allow Multiple Gizmos" => self.gizmos.allow_multiple = on,
@@ -1552,27 +1557,48 @@ pub struct ViewState {
 /// Simple snapshot stack for viewport undo (Shift+Z / Shift+Y).
 #[derive(Debug, Default, Clone)]
 pub struct ViewUndo {
-    undo: Vec<ViewState>,
-    redo: Vec<ViewState>,
+    /// Each view before a change, with the change's name ("Zoom", "Pan"...).
+    undo: Vec<(ViewState, String)>,
+    redo: Vec<(ViewState, String)>,
 }
+
+/// View changes kept per viewport (the reference keeps the last 20).
+pub const VIEW_UNDO_DEPTH: usize = 20;
 
 impl ViewUndo {
     pub fn record(&mut self, before: ViewState) {
-        self.undo.push(before);
-        if self.undo.len() > 100 {
+        self.record_as(before, "Change");
+    }
+    /// Records the view before the change named `what` (Undo View `what`).
+    pub fn record_as(&mut self, before: ViewState, what: &str) {
+        self.undo.push((before, what.to_owned()));
+        if self.undo.len() > VIEW_UNDO_DEPTH {
             self.undo.remove(0);
         }
         self.redo.clear();
     }
     pub fn undo(&mut self, current: ViewState) -> Option<ViewState> {
-        let prev = self.undo.pop()?;
-        self.redo.push(current);
+        let (prev, what) = self.undo.pop()?;
+        self.redo.push((current, what));
         Some(prev)
     }
     pub fn redo(&mut self, current: ViewState) -> Option<ViewState> {
-        let next = self.redo.pop()?;
-        self.undo.push(current);
+        let (next, what) = self.redo.pop()?;
+        self.undo.push((current, what));
         Some(next)
+    }
+    /// The name of the change Undo View Change would undo.
+    pub fn undo_label(&self) -> Option<&str> {
+        self.undo.last().map(|u| u.1.as_str())
+    }
+    pub fn redo_label(&self) -> Option<&str> {
+        self.redo.last().map(|u| u.1.as_str())
+    }
+    pub fn len(&self) -> usize {
+        self.undo.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.undo.is_empty()
     }
 }
 
@@ -1742,6 +1768,8 @@ pub struct AppState {
     pub poly_drag: Option<PolyDrag>,
     /// The last geometry operation, for Repeat Last Operation (;).
     pub last_poly_op: Option<crate::command::Command>,
+    /// Biped Xtras > Pick Parent: the biped, the tail and Reorient to Parent.
+    pub biped_xtra_pick: Option<(NodeId, String, bool)>,
     /// Target Weld / Edit Triangulation first pick.
     pub pick_source: Option<(NodeId, u32)>,
     /// Create (polygon level): vertices picked so far.
@@ -1866,9 +1894,13 @@ pub struct AppState {
     pub skin_clipboard_weights: Vec<(Vec3, Vec<(NodeId, f32)>)>,
     /// Skin > Gizmos: the current gizmo index.
     pub skin_gizmo: Option<usize>,
+    /// Skin: cross section and lattice selections, pick modes, buffers, the Load Envelopes file.
+    pub skin_ui: crate::skin::SkinUi,
     /// Morpher > Channel List: the current channel; Skin Morph: the current morph.
     pub morph_channel: usize,
     pub skin_morph_current: Option<usize>,
+    /// Skin Morph list: the highlighted bone (Create Morph acts on it).
+    pub skin_morph_bone: Option<NodeId>,
     /// Systems > Bones > IK Chain Assignment: new chains get an HI solver.
     pub bones_ik_chain: bool,
     pub current_frame: i32,
@@ -1922,6 +1954,12 @@ pub struct AppState {
     pub file_properties: crate::file::FileProperties,
     /// The scene's file (File > Save writes here); None = Untitled.
     pub file: Option<std::path::PathBuf>,
+    /// File > Set Project Folder: the project the file dialogs start in (a settings value).
+    pub project_folder: Option<std::path::PathBuf>,
+    /// Views > Update During Spinner Drag (default on).
+    pub update_during_spinner_drag: bool,
+    /// File > Replace: the scene file chosen, while the object list is open.
+    pub replace_source: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
     pub mesh_dirty: bool,
     /// A Render waiting for the UI's renderer (the command layer has no GPU).
@@ -2064,6 +2102,7 @@ impl AppState {
             full_interactivity: true,
             preserve_uvs: false,
             pick_point_a: None,
+            biped_xtra_pick: None,
             paint_deform: None,
             branches: false,
             soft_cache: Default::default(),
@@ -2118,7 +2157,7 @@ impl AppState {
             skin_paste_tolerance: 0.1,
             skin_paint: false,
             skin_painter: crate::skin::Painter::default(),
-            skin_filter_vertices: true,
+            skin_filter_vertices: false,
             skin_filter_envelopes: true,
             skin_filter_cross_sections: true,
             skin_backface_cull: false,
@@ -2126,8 +2165,10 @@ impl AppState {
             skin_clipboard_envelope: None,
             skin_clipboard_weights: Vec::new(),
             skin_gizmo: None,
+            skin_ui: crate::skin::SkinUi::default(),
             morph_channel: 0,
             skin_morph_current: None,
+            skin_morph_bone: None,
             bones_ik_chain: false,
             time_tags: Vec::new(),
             time_config: Default::default(),
@@ -2160,6 +2201,9 @@ impl AppState {
             show_layers_toolbar: false,
             file_properties: Default::default(),
             file: None,
+            project_folder: None,
+            update_during_spinner_drag: true,
+            replace_source: None,
             mesh_dirty: false,
         }
     }
@@ -2184,8 +2228,13 @@ impl AppState {
 
     /// Records the active viewport's state for Shift+Z.
     pub fn record_view(&mut self) {
+        self.record_view_as("Change");
+    }
+
+    /// Records the active view before the change named `what` ("Zoom", "Pan", "Orbit"...).
+    pub fn record_view_as(&mut self, what: &str) {
         let before = self.view_state();
-        self.active_mut().view_undo.record(before);
+        self.active_mut().view_undo.record_as(before, what);
     }
 
     /// A scene length in the display units (Units Setup), e.g. "2.54m".
@@ -2588,6 +2637,9 @@ impl AppState {
         }
         if self.edit_working_pivot {
             return self.working_pivot.origin;
+        }
+        if let Some(p) = crate::skin::pivot(self) {
+            return p;
         }
         self.selection_bounds()
             .map(|(a, b)| (a + b) * 0.5)

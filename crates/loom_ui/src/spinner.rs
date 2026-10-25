@@ -18,15 +18,6 @@ fn wrap_id() -> egui::Id {
     egui::Id::new("spinner_wrap_cursor")
 }
 
-fn live_id() -> egui::Id {
-    egui::Id::new("spinner_update_during_drag")
-}
-
-/// Views > Update During Spinner Drag; the app sets it each frame.
-pub fn set_update_during_drag(ctx: &egui::Context, on: bool) {
-    ctx.data_mut(|d| d.insert_temp(live_id(), on));
-}
-
 /// Preferences > Spinners > Wrap Cursor Near Spinner; the app sets it each frame.
 pub fn set_wrap_cursor(ctx: &egui::Context, on: bool) {
     ctx.data_mut(|d| d.insert_temp(wrap_id(), on));
@@ -155,14 +146,6 @@ pub fn spin<'a, N: Numeric>(ui: &egui::Ui, value: &'a mut N, range: impl RangeBo
     let dragging = ctx.is_being_dragged(id);
     let track_id = id.with("spin_track");
     let factor = ui.input(|i| if i.modifiers.ctrl { FAST } else if i.modifiers.alt { SLOW } else { 1.0 });
-    // Update During Spinner Drag off: the drag runs on a held value that is
-    // applied when the button is released.
-    let live = ctx.data(|d| d.get_temp::<bool>(live_id())).unwrap_or(true);
-    let held_id = id.with("spin_held");
-    let mut released: Option<f64> = None;
-    if !dragging {
-        released = ctx.data_mut(|d| d.remove_temp::<f64>(held_id));
-    }
     // After a wrap the pointer jumps across the window: that move is not a drag.
     let (screen, pointer, delta) = ui.input(|i| (i.screen_rect(), i.pointer.latest_pos(), i.pointer.delta()));
     let jumped = delta.x.abs() > screen.width() / 2.0 || delta.y.abs() > screen.height() / 2.0;
@@ -188,13 +171,9 @@ pub fn spin<'a, N: Numeric>(ui: &egui::Ui, value: &'a mut N, range: impl RangeBo
     if reset {
         *value = N::from_f64(0.0_f64.max(lo).min(hi));
     }
-    if let Some(v) = released {
-        *value = N::from_f64(v.clamp(lo, hi));
-    }
     // The first read reports the value from before the reset, so the
     // DragValue marks its response changed and the caller applies it.
-    let mut first = reset || released.is_some();
-    let held = if dragging && !live { ctx.data(|d| d.get_temp::<f64>(held_id)) } else { None };
+    let mut first = reset;
 
     let dv = egui::DragValue::from_get_set(move |v| {
         if let Some(mut v) = v {
@@ -205,17 +184,12 @@ pub fn spin<'a, N: Numeric>(ui: &egui::Ui, value: &'a mut N, range: impl RangeBo
                 v = (t.value + moved).clamp(lo, hi);
                 ctx.data_mut(|d| d.insert_temp(track_id, Track { raw, value: v }));
             }
-            if dragging && !live {
-                ctx.data_mut(|d| d.insert_temp(held_id, v));
-                return v;
-            }
             *value = N::from_f64(v);
         }
         if std::mem::take(&mut first) {
             return before;
         }
-        // The field shows the held value while the drag is not applied.
-        held.unwrap_or(value.to_f64())
+        value.to_f64()
     })
     .range(lo..=hi)
     .custom_parser(move |t| typed(t, before, &|s| s.parse().ok()));
@@ -305,24 +279,6 @@ mod tests {
         }
         float_frame(&ctx, &mut v, mods, vec![egui::Event::PointerButton { pos: p + egui::vec2(dx, 0.0), button: egui::PointerButton::Primary, pressed: false, modifiers: mods }]);
         v
-    }
-
-    #[test]
-    fn with_update_during_drag_off_a_drag_applies_on_release() {
-        let none = egui::Modifiers::NONE;
-        let ctx = egui::Context::default();
-        set_update_during_drag(&ctx, false);
-        let mut v = 0.0;
-        let p = float_frame(&ctx, &mut v, none, Vec::new()).0.center();
-        float_frame(&ctx, &mut v, none, vec![egui::Event::PointerMoved(p)]);
-        float_frame(&ctx, &mut v, none, vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: none }]);
-        for i in 1..=10 {
-            float_frame(&ctx, &mut v, none, vec![egui::Event::PointerMoved(p + egui::vec2(4.0 * i as f32, 0.0))]);
-        }
-        assert_eq!(v, 0.0, "nothing changes while dragging");
-        float_frame(&ctx, &mut v, none, vec![egui::Event::PointerButton { pos: p + egui::vec2(40.0, 0.0), button: egui::PointerButton::Primary, pressed: false, modifiers: none }]);
-        float_frame(&ctx, &mut v, none, Vec::new());
-        assert!(v > 20.0, "the release applies the drag: {v}");
     }
 
     #[test]
