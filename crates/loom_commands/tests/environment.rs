@@ -11,7 +11,7 @@ use serde_json::json;
 fn ok(s: &mut AppState, cmd: &str, args: serde_json::Value) -> serde_json::Value {
     let r = execute_json(s, &json!({ "cmd": cmd, "args": args }));
     assert_eq!(r["ok"], true, "{cmd}: {r}");
-    r["result"].clone()
+    r
 }
 
 fn err(s: &mut AppState, cmd: &str, args: serde_json::Value) -> String {
