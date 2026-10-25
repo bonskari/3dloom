@@ -6,7 +6,7 @@ use loom_commands::Tool;
 /// Runs one frame and returns its painted shapes (to find widgets by label).
 fn run_shapes(h: &mut Harness, events: Vec<egui::Event>) -> Vec<egui::epaint::ClippedShape> {
     h.time += 1.0 / 30.0;
-    let input = egui::RawInput { screen_rect: Some(SCREEN), time: Some(h.time), modifiers: h.mods, events, ..Default::default() };
+    let input = egui::RawInput { screen_rect: Some(h.screen), time: Some(h.time), modifiers: h.mods, events, ..Default::default() };
     let app = &mut h.app;
     h.ctx.run(input, |ctx| app.frame(ctx)).shapes
 }
