@@ -49,7 +49,7 @@ fn merge_adds_all_nodes_with_fresh_ids_and_selects_them() {
     let src = source(&path);
     let mut s = AppState::new();
     let mine = boxed(&mut s, 0.0);
-    let r = execute(&mut s, Command::MergeFile { path: p(&path), names: None }).unwrap();
+    let r = execute(&mut s, Command::MergeFile { path: p(&path), names: None, duplicates: None }).unwrap();
     let added = r["nodes"].as_array().unwrap().len();
     assert_eq!(added, src.scene.len());
     assert_eq!(s.scene.len(), src.scene.len() + 1);
@@ -57,7 +57,7 @@ fn merge_adds_all_nodes_with_fresh_ids_and_selects_them() {
     assert!(!s.selection.contains(&mine));
     assert!(s.selection.iter().all(|id| id.0 > mine.0), "fresh ids");
     assert!(s.dirty());
-    execute(&mut s, Command::MergeFile { path: None, names: None }).unwrap();
+    execute(&mut s, Command::MergeFile { path: None, names: None, duplicates: None }).unwrap();
     assert_eq!(s.dialog, Some(Dialog::MergeFile));
 }
 
@@ -70,7 +70,7 @@ fn merge_remaps_all_node_references() {
     let mine = boxed(&mut s, 0.0);
     boxed(&mut s, 1.0);
     boxed(&mut s, 2.0);
-    execute(&mut s, Command::MergeFile { path: p(&path), names: None }).unwrap();
+    execute(&mut s, Command::MergeFile { path: p(&path), names: None, duplicates: None }).unwrap();
     let merged: Vec<NodeId> = s.selection.iter().copied().collect();
     let is_merged = |id: NodeId| merged.contains(&id);
     let mut parents = 0;
@@ -119,7 +119,7 @@ fn merge_renames_colliding_names() {
     let mut s = AppState::new();
     boxed(&mut s, 0.0);
     boxed(&mut s, 1.0);
-    execute(&mut s, Command::MergeFile { path: p(&path), names: Some(vec!["Box001".into(), "Box002".into()]) }).unwrap();
+    execute(&mut s, Command::MergeFile { path: p(&path), names: Some(vec!["Box001".into(), "Box002".into()]), duplicates: None }).unwrap();
     let mut names: Vec<String> = s.scene.nodes().map(|n| n.name.clone()).collect();
     let before = names.len();
     names.sort();
@@ -136,7 +136,7 @@ fn merge_subset_by_name_drops_outside_parent_keeping_world_transform() {
     let child = src.scene.nodes().find(|n| n.name == "Box002").unwrap();
     let world = src.scene.world_matrix(child.id);
     let mut s = AppState::new();
-    let r = execute(&mut s, Command::MergeFile { path: p(&path), names: Some(vec!["Box002".into()]) }).unwrap();
+    let r = execute(&mut s, Command::MergeFile { path: p(&path), names: Some(vec!["Box002".into()]), duplicates: None }).unwrap();
     assert_eq!(r["nodes"].as_array().unwrap().len(), 1);
     let id = *s.selection.iter().next().unwrap();
     let n = s.scene.node(id).unwrap();
@@ -144,7 +144,7 @@ fn merge_subset_by_name_drops_outside_parent_keeping_world_transform() {
     assert!(n.parent.is_none(), "the parent was not merged");
     assert!((s.scene.world_matrix(id) - world).abs_diff_eq(glam::Mat4::ZERO, 1e-3), "world transform kept");
     assert!(n.modifiers[0].modifier.picked_node().is_none(), "a picked node outside the merge is dropped");
-    assert!(execute(&mut s, Command::MergeFile { path: p(&path), names: Some(vec!["Nope".into()]) }).is_err());
+    assert!(execute(&mut s, Command::MergeFile { path: p(&path), names: Some(vec!["Nope".into()]), duplicates: None }).is_err());
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn merge_is_one_undo_entry() {
     let mut s = AppState::new();
     boxed(&mut s, 0.0);
     let before = s.undo.len();
-    execute(&mut s, Command::MergeFile { path: p(&path), names: None }).unwrap();
+    execute(&mut s, Command::MergeFile { path: p(&path), names: None, duplicates: None }).unwrap();
     assert_eq!(s.undo.len(), before + 1);
     assert_eq!(s.undo.labels().last().unwrap(), "Merge src.loom");
     execute(&mut s, Command::UndoSceneOperation).unwrap();

@@ -31,6 +31,7 @@ pub mod save_changes;
 pub mod spline_prompts;
 pub mod topology_warning;
 pub mod merge;
+pub mod scene_dialogs;
 pub mod unwrap_dialogs;
 pub mod rig_dialogs;
 pub mod track_view_dialogs;
@@ -80,6 +81,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             d.remove::<u32>(egui::Id::new("clone_options_copies"));
             file_dialog::clear_state(d);
             merge::clear_state(d);
+            select_from_scene::clear_state(d);
             d.remove::<String>(egui::Id::new("auto_backup_name_edit"));
             for k in ["Weld", "Chamfer", "ConnectEdges", "Bridge", "Extrude", "Inset", "Bevel", "Outline", "Hinge", "MSmooth", "Tessellate", "Relax"] {
                 let id = egui::Id::new("poly_settings").with(k);
@@ -159,6 +161,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::KeyInfo => track_view_dialogs::key_info(ctx, app, &mut open),
         Dialog::TrackViewFilters => track_view_dialogs::filters(ctx, app, &mut open),
         Dialog::TrackViewUtilities => track_view_dialogs::utilities(ctx, app, &mut open),
+        Dialog::SaveSelected | Dialog::ArchiveFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::NewScene => scene_dialogs::new_scene(ctx, app, &mut open),
+        Dialog::ConfirmReset => scene_dialogs::confirm_reset(ctx, app, &mut open),
+        Dialog::SummaryInfo => scene_dialogs::summary_info(ctx, app, &mut open),
+        Dialog::FileProperties => scene_dialogs::file_properties(ctx, app, &mut open),
+        Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
+        Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
     if !open && app.state.dialog == Some(dialog) {

@@ -3345,3 +3345,5 @@ fn a_second_empty_click_at_polygon_level_releases_the_object_and_the_level() {
     assert!(h.app.state.selection.is_empty(), "the second click lets go of the object");
     assert_eq!(h.app.state.selection_mode, SelectionMode::Object, "and ends Polygon level");
 }
+
+mod scene;

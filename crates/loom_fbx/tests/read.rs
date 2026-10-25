@@ -10,7 +10,7 @@ fn node(name: &str, mesh: loom_mesh::Mesh, translation: Vec3) -> FbxNode {
 #[test]
 fn y_up_centimetre_file_converts_to_scene_units_and_z_up() {
     let mesh = loom_mesh::box_segmented(100.0, 100.0, 100.0, [1, 1, 1]); // 100 cm cube in a cm document
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node("Cube", mesh, Vec3::new(0.0, 0.0, 50.0))], unit_metres: 0.01, anim: None }, &WriteOpts { axes: WriteAxes::YUp, ..Default::default() });
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node("Cube", mesh, Vec3::new(0.0, 0.0, 50.0))], unit_metres: 0.01, anim: None, layers: Vec::new() }, &WriteOpts { axes: WriteAxes::YUp, ..Default::default() });
     let back = loom_fbx::read(&bytes, 0.0254).unwrap(); // an inch scene
     let n = &back.nodes[0];
     let FbxKind::Mesh { mesh, .. } = &n.kind else { panic!() };
@@ -26,7 +26,7 @@ fn normals_without_smoothing_become_groups() {
     for f in mesh.faces_mut() {
         f.smoothing_groups = 0;
     }
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node("Box", mesh, Vec3::ZERO)], unit_metres: 0.0254, anim: None }, &WriteOpts { smoothing_layer: false, ..Default::default() });
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node("Box", mesh, Vec3::ZERO)], unit_metres: 0.0254, anim: None, layers: Vec::new() }, &WriteOpts { smoothing_layer: false, ..Default::default() });
     let back = loom_fbx::read(&bytes, 0.0254).unwrap();
     let FbxKind::Mesh { mesh, .. } = &back.nodes[0].kind else { panic!() };
     let groups: Vec<u32> = mesh.faces().iter().map(|f| f.smoothing_groups).collect();
@@ -38,7 +38,7 @@ fn normals_without_smoothing_become_groups() {
     }
     // A smooth sphere written the same way stays one group.
     let sphere = loom_mesh::sphere_segmented(10.0, 12, 1.0);
-    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node("S", sphere, Vec3::ZERO)], unit_metres: 0.0254, anim: None }, &WriteOpts { smoothing_layer: false, ..Default::default() });
+    let bytes = loom_fbx::write(&FbxDocument { nodes: vec![node("S", sphere, Vec3::ZERO)], unit_metres: 0.0254, anim: None, layers: Vec::new() }, &WriteOpts { smoothing_layer: false, ..Default::default() });
     let back = loom_fbx::read(&bytes, 0.0254).unwrap();
     let FbxKind::Mesh { mesh, .. } = &back.nodes[0].kind else { panic!() };
     assert!(mesh.faces().iter().all(|f| f.smoothing_groups == 1), "{:?}", mesh.faces().iter().map(|f| f.smoothing_groups).collect::<Vec<_>>());

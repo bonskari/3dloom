@@ -1,7 +1,7 @@
 //! FBX (any version, binary or ASCII) → `FbxDocument` through ufbx, with
 //! the scene converted to right-handed Z-up in the requested unit.
 
-use crate::document::{FbxBlendShape, FbxDocument, FbxKind, FbxNode, FbxSkin};
+use crate::document::{FbxBlendShape, FbxDocument, FbxKind, FbxLayer, FbxNode, FbxSkin};
 use glam::{Mat4, Vec3};
 use loom_mesh::indexed::{IndexedFace, IndexedMesh};
 use loom_mesh::Mesh;
@@ -382,5 +382,17 @@ pub fn read(bytes: &[u8], target_unit_metres: f64) -> Result<FbxDocument, String
         }
     }
     let anim = read_take(&scene, &index_of);
-    Ok(FbxDocument { nodes, unit_metres: target_unit_metres, anim })
+    // Display layers: name, colour, Show / Freeze and their nodes.
+    let layers: Vec<FbxLayer> = scene
+        .display_layers
+        .iter()
+        .map(|l| FbxLayer {
+            name: l.element.name.to_string(),
+            color: Vec3::new(l.ui_color.x as f32, l.ui_color.y as f32, l.ui_color.z as f32),
+            visible: l.visible,
+            frozen: l.frozen,
+            nodes: l.nodes.iter().filter_map(|n| index_of.get(&n.element.element_id).copied()).collect(),
+        })
+        .collect();
+    Ok(FbxDocument { nodes, unit_metres: target_unit_metres, anim, layers })
 }

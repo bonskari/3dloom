@@ -37,14 +37,15 @@ pub struct UiLayout {
     pub show_ribbon: bool,
     pub show_command_panel: bool,
     pub show_track_bar: bool,
+    pub show_layers_toolbar: bool,
 }
 
 impl UiLayout {
     /// A fresh `AppState`'s toggles.
-    pub const DEFAULT: UiLayout = UiLayout { show_main_toolbar: true, show_ribbon: true, show_command_panel: true, show_track_bar: true };
+    pub const DEFAULT: UiLayout = UiLayout { show_main_toolbar: true, show_ribbon: true, show_command_panel: true, show_track_bar: true, show_layers_toolbar: false };
 
     pub fn of(state: &AppState) -> Self {
-        UiLayout { show_main_toolbar: state.show_main_toolbar, show_ribbon: state.show_ribbon, show_command_panel: state.show_command_panel, show_track_bar: state.show_track_bar }
+        UiLayout { show_main_toolbar: state.show_main_toolbar, show_ribbon: state.show_ribbon, show_command_panel: state.show_command_panel, show_track_bar: state.show_track_bar, show_layers_toolbar: state.show_layers_toolbar }
     }
 
     pub fn apply(&self, state: &mut AppState) {
@@ -52,6 +53,7 @@ impl UiLayout {
         state.show_ribbon = self.show_ribbon;
         state.show_command_panel = self.show_command_panel;
         state.show_track_bar = self.show_track_bar;
+        state.show_layers_toolbar = self.show_layers_toolbar;
     }
 }
 
