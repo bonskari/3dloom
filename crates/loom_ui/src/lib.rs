@@ -255,6 +255,12 @@ pub struct LoomApp {
     pub hierarchy_sub: HierarchySub,
     pub utility: Utility,
     pub rescale_factor: f32,
+    /// Utilities > Measure > Lock Selected: the nodes measured while locked.
+    pub measure_lock: Option<Vec<u64>>,
+    /// Utilities > Measure > New Floater: the modeless Measure window is open.
+    pub measure_floater: bool,
+    /// Place Highlight: a drag over a surface is placing the selection.
+    pub place_highlight_drag: bool,
     pub transform_drag: Option<DragState>,
     /// A Shift+drag clone in progress: the drag moved a Copy of the original;
     /// on release the Clone Options dialog finalises kind and count.
@@ -454,6 +460,9 @@ impl LoomApp {
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
             rescale_factor: 1.0,
+            measure_lock: None,
+            measure_floater: false,
+            place_highlight_drag: false,
             transform_drag: None,
             shift_clone: None,
             preview: None,
@@ -1126,6 +1135,7 @@ impl LoomApp {
             }
         }
         dialogs::show(ctx, self);
+        command_panel::utilities::measure_floater(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
         rendered_frame::show(ctx, self);

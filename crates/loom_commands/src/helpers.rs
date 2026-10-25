@@ -345,6 +345,68 @@ pub fn measure_pick(state: &mut AppState, point: Vec3) -> Result<Value, String> 
     }
 }
 
+/// Utilities > Measure over `ids`: the name (or "Multiple Objects Selected"),
+/// world dimensions, surface area, volume (with `volume_open` when a mesh
+/// has holes), the solid's centre of mass, and the summed shape length.
+pub fn measure(state: &AppState, ids: &[NodeId]) -> Value {
+    use glam::DVec3;
+    let ids: Vec<NodeId> = ids.iter().copied().filter(|id| state.scene.node(*id).is_some()).collect();
+    let name = match ids.as_slice() {
+        [] => Value::Null,
+        [one] => Value::from(state.scene.node(*one).map(|n| n.name.clone()).unwrap_or_default()),
+        _ => Value::from("Multiple Objects Selected"),
+    };
+    let (mut area, mut volume, mut moment) = (0.0f64, 0.0f64, DVec3::ZERO);
+    let (mut vsum, mut n_pts) = (DVec3::ZERO, 0usize);
+    let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+    let (mut open, mut shape_length) = (false, 0.0f64);
+    for id in &ids {
+        let Some(node) = state.scene.node(*id) else { continue };
+        let world = state.scene.object_matrix(*id);
+        if let Some(shape) = node.object.shape() {
+            shape_length += shape.transformed(world).splines.iter().map(|sp| sp.length() as f64).sum::<f64>();
+        }
+        let mesh = node.cage_mesh();
+        for v in mesh.vertices() {
+            let p = world.transform_point3(v.position);
+            min = min.min(p);
+            max = max.max(p);
+            vsum += p.as_dvec3();
+            n_pts += 1;
+        }
+        if mesh.face_count() > 0 && !loom_mesh::select_ops::border_edges(&mesh).is_empty() {
+            open = true;
+        }
+        for f in 0..mesh.face_count() as u32 {
+            let Some(pts) = mesh.face_positions(loom_mesh::FaceId(f)) else { continue };
+            let pts: Vec<DVec3> = pts.iter().map(|p| world.transform_point3(*p).as_dvec3()).collect();
+            for i in 1..pts.len().saturating_sub(1) {
+                let (a, b, c) = (pts[0], pts[i], pts[i + 1]);
+                area += (b - a).cross(c - a).length() * 0.5;
+                // Signed tetrahedron with the origin: its volume and centroid.
+                let v = a.dot(b.cross(c)) / 6.0;
+                volume += v;
+                moment += (a + b + c) * (v / 4.0);
+            }
+        }
+    }
+    if n_pts == 0 {
+        return json!({ "name": name, "dimensions": Value::Null, "surface_area": 0.0, "volume": 0.0, "volume_open": false, "center_of_mass": Value::Null, "shape_length": shape_length });
+    }
+    let d = max - min;
+    // The solid's centroid; open or flat meshes (no volume) use the vertex average.
+    let c = if volume.abs() > 1e-9 && !open { moment / volume } else { vsum / n_pts as f64 };
+    json!({
+        "name": name,
+        "dimensions": [d.x, d.y, d.z],
+        "surface_area": area,
+        "volume": volume.abs(),
+        "volume_open": open,
+        "center_of_mass": [c.x, c.y, c.z],
+        "shape_length": shape_length,
+    })
+}
+
 /// `ids` plus the other end of every tape among them.
 pub fn with_tape_partners(state: &AppState, ids: Vec<NodeId>) -> Vec<NodeId> {
     let mut out = ids.clone();

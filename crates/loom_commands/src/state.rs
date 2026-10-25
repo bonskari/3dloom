@@ -211,6 +211,10 @@ pub enum PickMode {
     /// Tools > Measure Distance: first and second point.
     MeasureDistanceA,
     MeasureDistanceB,
+    /// Clone and Align > Pick: each clicked object joins the destinations.
+    CloneAlignDestination,
+    /// Place Highlight: drag over a surface.
+    PlaceHighlight,
 }
 
 /// Paint Deformation brushes.
@@ -1347,6 +1351,10 @@ pub struct AppState {
     pub active_grid: Option<NodeId>,
     /// Tools > Measure Distance: the first picked point.
     pub measure_from: Option<Vec3>,
+    /// Clone and Align: the destination objects.
+    pub clone_align_destinations: Vec<NodeId>,
+    /// Place Highlight: each moved object's position before it began.
+    pub place_highlight_from: Vec<(NodeId, Vec3)>,
     pub selection_filter: SelectionFilter,
     /// Main Toolbar > Window/Crossing: true = Window (fully enclosed only).
     pub window_selection: bool,
@@ -1641,6 +1649,8 @@ impl AppState {
             spacing_points: [None, None],
             active_grid: None,
             measure_from: None,
+            clone_align_destinations: Vec::new(),
+            place_highlight_from: Vec::new(),
             selection_filter: SelectionFilter::All,
             window_selection: false,
             selection_region: SelectionRegion::Rectangular,

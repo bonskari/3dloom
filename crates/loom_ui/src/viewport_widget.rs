@@ -543,6 +543,26 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             set_constraint_from_handle(app, handle);
                         }
                     }
+                    // Place Highlight: the press and drag place the selection on
+                    // the reflected view ray; the release ends the mode.
+                    if app.state.pick_mode == Some(loom_commands::PickMode::PlaceHighlight) && app.transform_drag.is_none() {
+                        if pointer.button_pressed(egui::PointerButton::Primary) && response.hovered() && !mods.alt && app.state.nav_mode == loom_input::NavMode::None {
+                            app.state.undo.begin("Place Highlight");
+                            app.place_highlight_drag = true;
+                        }
+                        if app.place_highlight_drag && pointer.button_down(egui::PointerButton::Primary) {
+                            if let Some((_, point, normal)) = surface_hit_node(app, p, rect, view, proj) {
+                                let ray = projection.ray(p).1;
+                                let _ = app.dispatch(Command::PlaceHighlightAt { point: point.to_array(), normal: normal.to_array(), ray: ray.to_array() });
+                            }
+                        }
+                        if app.place_highlight_drag && pointer.button_released(egui::PointerButton::Primary) {
+                            app.place_highlight_drag = false;
+                            app.state.undo.end();
+                            app.drag_select_start = None;
+                            let _ = app.dispatch(Command::PlaceHighlight);
+                        }
+                    }
                     if pointer.button_released(egui::PointerButton::Primary) {
                         if let Some(drag) = app.transform_drag {
                             app.end_transform_drag();

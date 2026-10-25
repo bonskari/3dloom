@@ -99,11 +99,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Mirror...", "Mirror");
                 cmd(ui, app, "Array...", Command::Array);
                 item(ui, app, "Spacing Tool...", "Spacing Tool");
+                cmd(ui, app, "Snapshot...", Command::SnapshotDialog);
                 ui.menu_button("Align", |ui| {
                     item(ui, app, "Align...", "Align");
                     item(ui, app, "Quick Align", "Quick Align");
                     item(ui, app, "Normal Align...", "Normal Align ");
                     item(ui, app, "Align Camera", "Align Camera");
+                    cmd(ui, app, "Place Highlight", Command::PlaceHighlight);
+                    cmd(ui, app, "Clone and Align...", Command::CloneAndAlignDialog);
                     item(ui, app, "Align to View...", "Align to View Dialog");
                 });
                 ui.separator();

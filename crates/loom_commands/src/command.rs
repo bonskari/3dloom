@@ -1408,6 +1408,14 @@ commands! {
     SetProtractorObject => "Set Protractor Object", Loom, "Set a protractor's object 1 or 2 (null clears it)." { id: u64, which: u32, object: Option<u64> };
     ActivateGridObject => "Activate Grid Object", Loom, "Tools > Grids and Snaps > Activate Grid Object: the selected grid helper becomes the construction plane in every viewport.";
     ActivateHomeGrid => "Activate Home Grid", Loom, "Tools > Grids and Snaps > Activate Home Grid: the home grid is the construction plane again.";
+    SnapshotDialog => "Snapshot Dialog", Loom, "Tools > Snapshot: open the Snapshot dialog for the selection.";
+    Snapshot => "Snapshot", Loom, "Tools > Snapshot: clone the selection as it is at the current frame (range false) or at `copies` frames spread from `from` to `to`; method 0 Copy, 1 Instance, 2 Reference, 3 Mesh. Returns the created ids." { range: bool, from: i32, to: i32, copies: u32, method: u32 };
+    CloneAndAlignDialog => "Clone and Align Dialog", Loom, "Tools > Align > Clone and Align: open the modeless Clone and Align dialog.";
+    CloneAndAlignPick => "Clone and Align Pick", Loom, "Clone and Align > Pick: toggles picking destination objects in the viewports.";
+    CloneAndAlignSetDestinations => "Clone and Align Set Destinations", Loom, "Clone and Align > Pick List / Clear All: set the destination objects (sources are left out)." { ids: Vec<u64> };
+    CloneAndAlign => "Clone and Align", Loom, "Clone and Align > Apply: clone the selection onto each destination, aligning position / orientation on the chosen world axes with offsets in the destination's local axes; link makes each clone a child of its destination." { destinations: Vec<u64>, kind: crate::state::CloneKind, link: bool, position: [bool; 3], position_offset: [f32; 3], orientation: [bool; 3], orientation_offset: [f32; 3], match_scale: [bool; 3] };
+    PlaceHighlight => "Place Highlight", Loom, "Align flyout > Place Highlight: toggles the mode; dragging over a surface places the selection on the reflected view ray.";
+    PlaceHighlightAt => "Place Highlight At", Loom, "Place Highlight at a surface point with its normal, for a view ray direction: the selection moves onto the reflected ray at its original distance and aims its -Z at the point." { point: [f32; 3], normal: [f32; 3], ray: [f32; 3] };
     MeasureDistance => "Measure Distance", Loom, "Tools > Measure Distance: click two points; the status bar shows the distance and the X / Y / Z deltas.";
     Dummy => "Dummy", MainUI, "Create a Dummy helper at the origin (Dummy create mode).";
     HistoryIndependentIkSolver => "History-Independent IK Solver", MainUI, "Animation > IK Solvers > HI Solver: an IK chain from the first selected bone to the last, with a goal at the end joint.";
@@ -1609,7 +1617,9 @@ commands! {
     UnfreezeByName => "Unfreeze By Name", Loom, "Open the Select From Scene dialog to unfreeze objects by name.";
     ResetXForm => "Reset XForm", Loom, "Utilities > Reset XForm > Reset Selected: the node's rotation and scale (and pivot offset) move into a new XForm modifier on top of the stack, the node keeps only its position; collapse the stack to bake them.";
     RescaleWorldUnits => "Rescale World Units", Loom, "Utilities > Rescale World Units: scale the whole scene by a factor." { factor: f32 };
-    Measure => "Measure", Loom, "Utilities > Measure: dimensions, surface area, volume and centre of mass of the selection.";
+    Measure => "Measure", Loom, "Utilities > Measure: object name (or Multiple Objects Selected), dimensions, surface area, volume (volume_open: the mesh has holes), solid centre of mass and shape length of the selection.";
+    MeasureNodes => "Measure Nodes", Loom, "Utilities > Measure with Lock Selected: the same read-outs for the given nodes." { ids: Vec<u64> };
+    MeasureCreateCenterPoint => "Measure Create Center Point", Loom, "Utilities > Measure > Create Center Point: a Point helper at the selection's centre of mass.";
     SetWireColor => "Set Wire Color", Loom, "Set a node's object colour (Name and Color rollout)." { id: u64, rgb: [u8; 3] };
     SetTransform => "Set Transform", Loom, "Set a node's local position, rotation (degrees, Euler XYZ) and/or scale." { id: u64, position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]>, scale: Option<[f32; 3]> };
     MoveSelection => "Move Selection", Loom, "Translate the selection; the delta is in the reference coordinate system (`system`, default the toolbar's)." { delta: [f32; 3], system: Option<crate::state::CoordSystem> };

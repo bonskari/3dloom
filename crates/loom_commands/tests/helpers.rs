@@ -216,3 +216,47 @@ fn measure_distance_reports_distance_and_deltas() {
     let msg = s.status_prompt.clone();
     assert!(msg.contains("Distance: 5") && msg.contains("Delta X: 3") && msg.contains("Delta Y: 4") && msg.contains("Delta Z: 0"), "{msg}");
 }
+
+#[test]
+fn measure_names_the_object_and_uses_the_solid_centre_of_mass() {
+    let mut s = AppState::new();
+    // A pyramid's vertex average sits higher than its solid centroid (1/4 of the height).
+    execute(&mut s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Pyramid, position: [0.0; 3], size: [20.0, 20.0, 40.0] }).unwrap();
+    let r = execute(&mut s, Command::Measure).unwrap();
+    assert_eq!(r["name"], "Pyramid001");
+    assert!((r["center_of_mass"][2].as_f64().unwrap() - 10.0).abs() < 1e-3, "{r}");
+    assert_eq!(r["volume_open"], false);
+    execute(&mut s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [50.0, 0.0, 0.0], size: [10.0; 3] }).unwrap();
+    execute(&mut s, Command::SelectAll).unwrap();
+    assert_eq!(execute(&mut s, Command::Measure).unwrap()["name"], "Multiple Objects Selected");
+}
+
+#[test]
+fn measure_nodes_measures_a_locked_set_and_reports_open_meshes() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Plane, position: [0.0; 3], size: [10.0, 10.0, 0.0] }).unwrap();
+    let plane = *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::SelectNone).unwrap();
+    let r = execute(&mut s, Command::MeasureNodes { ids: vec![plane.0] }).unwrap();
+    assert_eq!(r["name"], "Plane001");
+    assert_eq!(r["volume_open"], true, "a plane has holes: the volume gets an asterisk");
+    assert!((r["surface_area"].as_f64().unwrap() - 100.0).abs() < 1e-3);
+}
+
+#[test]
+fn measure_sums_shape_lengths() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::CreateShape { kind: loom_commands::ShapeKind::Rectangle, position: [0.0; 3], size: [10.0, 20.0, 0.0] }).unwrap();
+    let r = execute(&mut s, Command::Measure).unwrap();
+    assert!((r["shape_length"].as_f64().unwrap() - 60.0).abs() < 1e-2, "{r}");
+}
+
+#[test]
+fn measure_create_center_point_puts_a_point_at_the_centre_of_mass() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [10.0, 0.0, 0.0], size: [10.0; 3] }).unwrap();
+    let r = execute(&mut s, Command::MeasureCreateCenterPoint).unwrap();
+    let p = NodeId(r["node"].as_u64().unwrap());
+    assert!(matches!(s.scene.node(p).unwrap().object, ObjectKind::Point { .. }));
+    assert!(s.scene.world_matrix(p).w_axis.truncate().distance(Vec3::new(10.0, 0.0, 5.0)) < 1e-3);
+}

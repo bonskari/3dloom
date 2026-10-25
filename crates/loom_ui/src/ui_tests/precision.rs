@@ -164,3 +164,144 @@ fn measure_distance_from_the_tools_menu() {
     assert_eq!(h.app.state.pick_mode, None);
     assert!(h.app.state.status_prompt.starts_with("Distance: 50"), "{}", h.app.state.status_prompt);
 }
+
+#[test]
+fn measure_utility_shows_the_name_lock_selected_and_a_floater() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.frames(2);
+    h.click_widget("Measure");
+    assert_eq!(h.widgets_labelled("Box001").len(), 1, "the object's name");
+    assert_eq!(h.widgets_labelled("Volume: 1000.000").len(), 1);
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Lock Selected").center());
+    h.cmd(Command::SelectNone);
+    assert_eq!(h.widgets_labelled("Box001").len(), 1, "Lock Selected keeps measuring the box");
+    h.click_widget("New Floater");
+    assert!(h.app.measure_floater);
+    assert_eq!(h.text_rects("Volume: 1000.000").len(), 2, "the floater shows the same read-outs");
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Lock Selected").center());
+    assert_eq!(h.widgets_labelled("Box001").len(), 0, "unlocked: nothing selected");
+}
+
+#[test]
+fn snapshot_dialog_from_the_tools_menu_makes_range_copies() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 100 });
+    h.cmd(Command::MoveSelection { delta: [100.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 0 });
+    h.click(h.find(egui::accesskit::Role::Button, "Tools").center());
+    h.click(h.find(egui::accesskit::Role::Button, "Snapshot...").center());
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::Snapshot));
+    h.click_text_anywhere("Range");
+    h.click_text_anywhere("OK");
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(h.app.state.scene.len(), 11, "the box and 10 copies from frame 0 to 100");
+}
+
+#[test]
+fn clone_and_align_dialog_picks_destinations_previews_and_applies() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [10.0; 3] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0, 60.0, 0.0], size: [10.0; 3] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Sphere, position: [0.0; 3], size: [8.0; 3] });
+    wide_view(&mut h);
+    h.cmd(Command::CloneAndAlignDialog);
+    h.click_text_anywhere("Pick");
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::CloneAlignDestination));
+    let (a, b) = (h.screen_of(Vec3::new(60.0, 0.0, 5.0)), h.screen_of(Vec3::new(0.0, 60.0, 5.0)));
+    h.click(a);
+    h.click(b);
+    assert_eq!(h.app.state.clone_align_destinations.len(), 2);
+    assert_eq!(h.app.state.scene.len(), 3, "no preview while picking");
+    h.click_text_anywhere("Pick");
+    h.frames(2);
+    assert_eq!(h.app.state.scene.len(), 5, "a preview clone on each destination");
+    h.click_text_anywhere("Apply");
+    h.frames(2);
+    h.click_text_anywhere("Cancel");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, None);
+    assert_eq!(h.app.state.scene.len(), 5, "the applied clones stay");
+    let spheres: Vec<Vec3> = h.app.state.scene.nodes().filter(|n| matches!(n.object, ObjectKind::Sphere { .. })).map(|n| h.app.state.scene.world_matrix(n.id).w_axis.truncate()).collect();
+    assert!(spheres.iter().any(|p| p.distance(Vec3::new(60.0, 0.0, 0.0)) < 1e-3) && spheres.iter().any(|p| p.distance(Vec3::new(0.0, 60.0, 0.0)) < 1e-3), "{spheres:?}");
+}
+
+#[test]
+fn place_highlight_drag_moves_the_selection_onto_the_reflected_ray() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [300.0, 300.0, 0.0] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0, 0.0, 100.0], size: [2.0; 3] });
+    let lamp = *h.app.state.selection.iter().next().unwrap();
+    wide_view(&mut h);
+    h.cmd(Command::PlaceHighlight);
+    let (a, b) = (h.screen_of(Vec3::new(20.0, 20.0, 0.0)), h.screen_of(Vec3::ZERO));
+    h.drag(a, b);
+    assert_eq!(h.app.state.pick_mode, None, "the release ends Place Highlight");
+    let at = h.app.state.scene.world_matrix(lamp).w_axis.truncate();
+    assert!((at.length() - 100.0).abs() < 1.0, "it keeps its distance from the picked point: {at}");
+    assert!(at.z > 10.0 && at.distance(Vec3::new(0.0, 0.0, 100.0)) > 5.0, "on the reflected ray: {at}");
+    h.cmd(Command::UndoSceneOperation);
+    let back = h.app.state.scene.world_matrix(lamp).w_axis.truncate();
+    assert!(back.distance(Vec3::new(0.0, 0.0, 100.0)) < 1e-3, "one undo step: {back}");
+}
+
+/// Types `text` into the spinner at `at` (click, select all, type, Enter).
+fn type_into(h: &mut Harness, at: egui::Pos2, text: &str) {
+    h.click(at);
+    h.mods = egui::Modifiers::COMMAND;
+    h.key(egui::Key::A);
+    h.mods = egui::Modifiers::NONE;
+    h.run(vec![egui::Event::Text(text.into())]);
+    h.key(egui::Key::Enter);
+}
+
+/// The spinners on the row of the widget `row` (left to right).
+fn row_spinners(h: &Harness, row: egui::Rect) -> Vec<(String, egui::Rect)> {
+    let mut v: Vec<(String, egui::Rect)> = h.widgets.iter().filter(|(r, _, w)| *r == egui::accesskit::Role::SpinButton && (w.center().y - row.center().y).abs() < row.height().max(8.0) && w.min.x > row.min.x).map(|(_, t, w)| (t.clone(), *w)).collect();
+    v.sort_by(|a, b| a.1.min.x.total_cmp(&b.1.min.x));
+    v
+}
+
+#[test]
+fn array_dialog_shows_equivalent_totals_previews_as_boxes_and_keeps_its_settings() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::Array);
+    let move_label = h.find(egui::accesskit::Role::Label, "Move");
+    let inc_x = row_spinners(&h, move_label)[0].1;
+    type_into(&mut h, inc_x.center(), "25");
+    let one_d = h.find(egui::accesskit::Role::RadioButton, "1D");
+    let count = row_spinners(&h, one_d)[0].1;
+    type_into(&mut h, count.center(), "3");
+    let move_label = h.find(egui::accesskit::Role::Label, "Move");
+    let row = row_spinners(&h, move_label);
+    assert_eq!(row.len(), 6, "{row:?}");
+    assert!(row[0].0.starts_with("25"), "{row:?}");
+    assert!(row[3].0.starts_with("75"), "the Totals side shows the equivalent 3 × 25: {row:?}");
+    // Switch Move to Totals: the array stays the same.
+    let arrows = h.text_rects(">");
+    h.click(arrows[0].center());
+    let row = row_spinners(&h, h.find(egui::accesskit::Role::Label, "Move"));
+    assert!(row[3].0.starts_with("75") && row[0].0.starts_with("25"), "{row:?}");
+    // Display as Box, then Preview: the new members show as boxes.
+    h.click(h.find(egui::accesskit::Role::CheckBox, "Display as Box").center());
+    h.click_text_anywhere("Preview");
+    h.frames(2);
+    assert_eq!(h.app.state.scene.len(), 3);
+    assert_eq!(h.app.state.scene.nodes().filter(|n| n.display.display_as_box).count(), 2, "preview members as boxes");
+    h.click_text_anywhere("OK");
+    h.frames(2);
+    assert_eq!(h.app.state.scene.len(), 3, "OK keeps one array");
+    assert_eq!(h.app.state.scene.nodes().filter(|n| n.display.display_as_box).count(), 0, "the real members are not boxes");
+    let xs: std::collections::BTreeSet<i32> = h.app.state.scene.nodes().map(|n| h.app.state.scene.world_matrix(n.id).w_axis.x.round() as i32).collect();
+    assert_eq!(xs, [0, 25, 50].into_iter().collect());
+    // The dialog keeps its settings for the session.
+    h.cmd(Command::Array);
+    let row = row_spinners(&h, h.find(egui::accesskit::Role::Label, "Move"));
+    assert!(row[3].0.starts_with("75"), "{row:?}");
+}

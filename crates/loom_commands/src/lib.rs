@@ -26,6 +26,7 @@ pub mod fbx_io;
 pub mod max_io;
 pub mod rig;
 pub mod helpers;
+pub mod extras;
 pub mod biped;
 pub mod camera;
 pub mod light;

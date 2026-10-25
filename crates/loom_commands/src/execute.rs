@@ -1299,6 +1299,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let step_rot_world = Quat::from_mat3(&(axes * Mat3::from_quat(step_rot) * axes.transpose()));
             state.undo.begin("Array");
             let mut created = Vec::new();
+            let mut last = Vec::new();
             let r: Result<(), String> = (|| {
                 for k in 0..count[2] {
                     for j in 0..count[1] {
@@ -1326,6 +1327,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                                 _ => (full, euler_hint(st, id, rot_vec)),
                             })?;
                             created.extend(state.selection.iter().copied());
+                            last = state.selection.iter().copied().collect::<Vec<_>>();
                         }
                     }
                 }
@@ -1333,7 +1335,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             })();
             state.undo.end();
             r?;
-            state.selection = created.iter().copied().collect();
+            // The selection moves to the last copy set: the same array again continues it.
+            state.selection = last.into_iter().collect();
             state.refresh_center_mode();
             Ok(json!({ "created": created.len() }))
         }
@@ -2510,6 +2513,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex | PickMode::WorkingPivotView | PickMode::MeasureDistanceA | PickMode::MeasureDistanceB) => {
                     return Err("this pick mode needs a point pick (Pick Point)".into());
                 }
+                Some(PickMode::CloneAlignDestination) => return crate::extras::pick_destination(state, id),
+                Some(PickMode::PlaceHighlight) => return Err("Place Highlight drags over a surface".into()),
                 Some(PickMode::ProtractorObject(which)) => {
                     state.pick_mode = None;
                     let protractor = state.selection.iter().copied().find(|p| state.scene.node(*p).is_some_and(|n| matches!(n.object, ObjectKind::Protractor { .. }))).ok_or("select the protractor first")?;
@@ -2601,44 +2606,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::Measure => {
             let ids = selected_ids(state);
-            let mut area = 0.0f64;
-            let mut volume = 0.0f64;
-            let mut centroid = glam::DVec3::ZERO;
-            let mut n_pts = 0usize;
-            let mut min = Vec3::splat(f32::INFINITY);
-            let mut max = Vec3::splat(f32::NEG_INFINITY);
-            for id in &ids {
-                let Some(node) = state.scene.node(*id) else { continue };
-                let world = state.scene.object_matrix(*id);
-                let mesh = node.cage_mesh();
-                for v in mesh.vertices() {
-                    let p = world.transform_point3(v.position);
-                    min = min.min(p);
-                    max = max.max(p);
-                    centroid += p.as_dvec3();
-                    n_pts += 1;
-                }
-                for f in 0..mesh.face_count() as u32 {
-                    let Some(pts) = mesh.face_positions(FaceId(f)) else { continue };
-                    let pts: Vec<glam::DVec3> = pts.iter().map(|p| world.transform_point3(*p).as_dvec3()).collect();
-                    for i in 1..pts.len().saturating_sub(1) {
-                        let (a, b, c) = (pts[0], pts[i], pts[i + 1]);
-                        area += (b - a).cross(c - a).length() * 0.5;
-                        volume += a.dot(b.cross(c)) / 6.0;
-                    }
-                }
-            }
-            if n_pts == 0 {
-                return Ok(json!({ "dimensions": Value::Null, "surface_area": 0.0, "volume": 0.0, "center_of_mass": Value::Null }));
-            }
-            let d = max - min;
-            let c = centroid / n_pts as f64;
-            Ok(json!({
-                "dimensions": [d.x, d.y, d.z],
-                "surface_area": area,
-                "volume": volume.abs(),
-                "center_of_mass": [c.x, c.y, c.z],
-            }))
+            Ok(crate::helpers::measure(state, &ids))
+        }
+        C::MeasureNodes { ids } => {
+            let ids: Vec<NodeId> = ids.into_iter().map(NodeId).collect();
+            Ok(crate::helpers::measure(state, &ids))
+        }
+        C::MeasureCreateCenterPoint => {
+            let ids = selected_ids(state);
+            let r = crate::helpers::measure(state, &ids);
+            let c = r["center_of_mass"].as_array().ok_or("select an object to measure")?;
+            let at = [0, 1, 2].map(|i| c[i].as_f64().unwrap_or(0.0) as f32);
+            execute(state, C::CreateHelper { kind: "point".into(), position: at, size: 20.0 })
         }
         C::SetWireColor { id, rgb } => {
             let id = NodeId(id);
@@ -2991,6 +2970,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. }) => crate::biped::execute(state, c),
         c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance) => crate::helpers::execute(state, c),
+        c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. }) => crate::extras::execute(state, c),
         // Every remaining variant is an Unwrap UVW group command.
         other => crate::unwrap::execute(state, other),
     }

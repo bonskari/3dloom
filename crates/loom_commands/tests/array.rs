@@ -42,7 +42,8 @@ fn array_1d_count_3_move_x_creates_two_copies() {
     assert_eq!(s.scene.nodes().count(), 3);
     assert_eq!(xs(&s), vec![0.0, 25.0, 50.0]);
     assert!(s.scene.node(a).is_some());
-    assert_eq!(s.selection.len(), 2, "the new members are selected");
+    assert_eq!(s.selection.len(), 1, "the selection moves to the last copy");
+    assert_eq!(s.scene.world_matrix(*s.selection.iter().next().unwrap()).w_axis.x, 50.0);
     assert_eq!(s.undo.labels().last().map(String::as_str), Some("Array"));
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(s.scene.nodes().count(), 1, "one undo removes the whole array");
@@ -144,4 +145,16 @@ fn spacing_tool_distributes_evenly() {
     let mut xs: Vec<f32> = s.scene.nodes().filter(|n| n.id != a).map(|n| s.scene.world_matrix(n.id).w_axis.x).collect();
     xs.sort_by(f32::total_cmp);
     assert!(xs.iter().zip([1.0, 3.0, 5.0, 7.0, 9.0]).all(|(a, b)| (a - b).abs() < 1e-4), "{xs:?}");
+}
+
+#[test]
+fn repeating_an_array_continues_it_from_the_last_copy() {
+    let mut s = state();
+    make_box(&mut s, [0.0, 0.0, 0.0]);
+    execute(&mut s, array([3, 1, 1], [25.0, 0.0, 0.0], [0.0; 3])).unwrap();
+    execute(&mut s, array([3, 1, 1], [25.0, 0.0, 0.0], [0.0; 3])).unwrap();
+    assert_eq!(xs(&s), vec![0.0, 25.0, 50.0, 75.0, 100.0]);
+    assert_eq!(s.undo.labels().iter().filter(|l| *l == "Array").count(), 2);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(xs(&s), vec![0.0, 25.0, 50.0], "undo leaves the first array");
 }
