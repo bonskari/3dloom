@@ -531,7 +531,13 @@ pub fn normals_pick(app: &mut LoomApp, projection: &Projection, region: Option<&
         let shown = normals.iter().filter(|n| !(ignore_back && n.back));
         match region {
             // A region takes the normals whose line it touches (sampled along the line).
-            Some(r) => shown.filter(|n| (0..=8).any(|k| r.contains(n.from + (n.to - n.from) * (k as f32 / 8.0)))).map(|n| n.id).collect(),
+            Some(r) => shown
+                .filter(|n| {
+                    let steps = ((n.to - n.from).length() / 3.0).ceil().max(1.0) as usize;
+                    (0..=steps).any(|k| r.contains(n.from + (n.to - n.from) * (k as f32 / steps as f32)))
+                })
+                .map(|n| n.id)
+                .collect(),
             None => shown.map(|n| (n.id, segment_distance(p, n.from, n.to))).filter(|(_, d)| *d <= 8.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(g, _)| vec![g]).unwrap_or_default(),
         }
     } else {
