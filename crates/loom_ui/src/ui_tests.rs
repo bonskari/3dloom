@@ -4019,3 +4019,44 @@ fn a_checker_sub_material_shows_checks_in_the_viewport() {
     }
 }
 mod scene;
+
+/// The user's case: an imported skinned FBX character, a Bitmap on the
+/// Diffuse map of the material assigned to it, Show Map in Viewport on: the
+/// posed mesh in the shaded viewport shows the bitmap with varying UVs.
+#[test]
+fn a_bitmap_on_an_imported_skinned_character_shows_in_the_viewport() {
+    let mut h = Harness::new();
+    let png = std::env::temp_dir().join(format!("loom-shadedtex-{}.png", std::process::id()));
+    image::RgbaImage::from_fn(8, 8, |x, y| if (x + y) % 2 == 0 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) }).save(&png).unwrap();
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loom_fbx/tests/fixtures/sitting_idle.fbx");
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::ImportFile { path: Some(path.into()) });
+    let skinned = h.app.state.scene.nodes().find(|n| !n.modifiers.is_empty()).expect("the skinned mesh").id;
+    h.cmd(Command::SelectNodes { ids: vec![skinned.0], op: loom_commands::SelectOp::Replace });
+    for c in [
+        Command::MaterialEditorToggle,
+        Command::AssignMaterialToSelection,
+        Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() },
+        Command::SetMapBitmap { path: png.to_string_lossy().into() },
+        Command::AssignMaterialToSelection,
+    ] {
+        h.cmd(c);
+    }
+    h.frames(2);
+    let i = h.app.world_meshes().iter().position(|(n, _)| *n == skinned).unwrap();
+    eprintln!("PROBE before show map: {:?} err {:?}", h.app.world_styles[i].texture, h.app.last_error);
+    h.cmd(Command::MaterialEditorGoToParent);
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Show Map in Viewport".into(), value: 1.0 });
+    h.frames(2);
+    let style = h.app.world_styles[i].clone();
+    eprintln!("PROBE after: {:?} sub {:?} err {:?}", style.texture, style.sub.as_ref().map(|s| s.by_id.len()), h.app.last_error);
+    let loom_render::TextureSel::Bitmap(t) = style.texture else { panic!("the bitmap shows: {:?}", style.texture) };
+    let mesh = h.app.world_display()[i].clone();
+    let (verts, _, _) = loom_render::triangulate_styled(&mesh, &style);
+    eprintln!("PROBE verts {} map1 {:?}", verts.len(), mesh.map(1).is_some());
+    assert!(verts.iter().any(|v| v.uv != verts[0].uv), "the posed mesh keeps its UVs");
+    let upload = h.app.pending_upload.lock().unwrap().clone();
+    let bitmaps = upload.map(|u| u.2).unwrap_or_default();
+    let bm = &bitmaps.get(t as usize).expect("the bitmap is uploaded").1;
+    assert_eq!((bm.width, bm.height), (8, 8));
+}
