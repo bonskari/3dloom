@@ -203,7 +203,8 @@ fn volume_light(o: vec3<f32>, d: vec3<f32>, len: f32) -> vec3<f32> {
         if t1 <= t0 {
             continue;
         }
-        let steps = 48;
+        // Fine enough steps for a narrow cone across the scene.
+        let steps = 192;
         let dt = (t1 - t0) / f32(steps);
         var acc = 0.0;
         for (var k = 0; k < steps; k += 1) {

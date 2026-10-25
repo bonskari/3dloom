@@ -466,7 +466,8 @@ impl BevyRenderer {
                 out[0][n] = pos.extend(kind);
                 out[1][n] = Vec3::from(s.direction.to_array()).normalize_or(Vec3::NEG_Z).extend(cos_outer);
                 out[2][n] = Vec4::new(fog.x * c.x * k, fog.y * c.y * k, fog.z * c.z * k, cos_inner.max(cos_outer + 1e-4));
-                out[3][n] = Vec4::new(lights::range(&s, d, radius), 0.0, 0.0, 0.0);
+                // Marched as far as the light reaches, within the scene.
+                out[3][n] = Vec4::new(lights::range(&s, d, radius).min(d + radius), 0.0, 0.0, 0.0);
                 n += 1;
             }
         }

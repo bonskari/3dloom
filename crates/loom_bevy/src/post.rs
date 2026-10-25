@@ -21,7 +21,6 @@ use bevy::ecs::system::lifetimeless::Read;
 use bevy::ecs::system::{Commands, Query, Res, ResMut};
 use bevy::ecs::world::{FromWorld, World};
 use bevy::image::{BevyDefault, Image};
-use bevy::math::Vec4;
 use bevy::pbr::graph::NodePbr;
 use bevy::render::extract_component::{ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin, UniformComponentPlugin};
 use bevy::render::render_asset::RenderAssets;
@@ -29,7 +28,7 @@ use bevy::render::render_graph::{NodeRunError, RenderGraphApp, RenderGraphContex
 use bevy::render::render_resource::binding_types::{sampler, texture_2d, texture_depth_2d, texture_depth_2d_multisampled, uniform_buffer};
 use bevy::render::render_resource::{
     BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries, CachedRenderPipelineId, ColorTargetState, ColorWrites, FilterMode, FragmentState, LoadOp, Operations, PipelineCache, RenderPassColorAttachment, RenderPassDescriptor,
-    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, Shader, ShaderStages, ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines, StoreOp, TextureFormat, TextureSampleType,
+    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, Shader, ShaderStages, SpecializedRenderPipeline, SpecializedRenderPipelines, StoreOp, TextureFormat, TextureSampleType,
 };
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::texture::{FallbackImage, GpuImage};

@@ -2863,7 +2863,8 @@ fn render_setup_dialog_sets_the_output_size_and_renderer() {
     assert!(h.app.state.scene.render.force_two_sided);
     click_text(&mut h, "Renderer", win, 0.0);
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
-    for label in ["Antialiasing (4x MSAA)", "Supersampling:", "Shadows", "Map Size:", "Background:", "Ambient:"] {
+    // The background and ambient colours are the Environment's (8), not the renderer's.
+    for label in ["Antialiasing (4x MSAA)", "Supersampling:", "Shadows", "Map Size:"] {
         assert!(h.text_rect(label, win).is_some(), "{label:?} in the Renderer panel");
     }
     click_text(&mut h, "Shadows", win, 0.0);

@@ -25,6 +25,7 @@ fn eight_opens_the_dialog_and_its_controls_edit_the_environment() {
     click_text(&mut h, "Add...", win, 0.0);
     let add = window(&h, "Add Atmospheric Effect");
     click_text(&mut h, "Fog", add, 0.0);
+    let add = window(&h, "Add Atmospheric Effect");
     click_text(&mut h, "OK", add, 0.0);
     let e = &h.app.state.scene.environment;
     assert_eq!(e.atmospheres.len(), 1);
@@ -50,6 +51,7 @@ fn eight_opens_the_dialog_and_its_controls_edit_the_environment() {
     click_text(&mut h, "Add...", win, 0.0);
     let add = window(&h, "Add Effect");
     click_text(&mut h, "Film Grain", add, 0.0);
+    let add = window(&h, "Add Effect");
     click_text(&mut h, "OK", add, 0.0);
     let fx = &h.app.state.scene.environment.effects;
     assert!(fx.len() == 1 && matches!(fx[0].kind, EffectKind::FilmGrain(_)) && fx[0].active);
