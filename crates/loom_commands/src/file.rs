@@ -403,6 +403,11 @@ pub(crate) fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::
                 *c = c.and_then(|c| carry_material(src, c, library, done, depth + 1));
             }
         }
+        MaterialKind::Shell(s) => {
+            for c in s.materials.iter_mut() {
+                *c = c.and_then(|c| carry_material(src, c, library, done, depth + 1));
+            }
+        }
     }
     let to = match library.iter().find(|(_, x)| **x == m) {
         Some((k, _)) => *k,
