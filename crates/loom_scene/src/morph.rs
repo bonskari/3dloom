@@ -386,7 +386,7 @@ impl SkinMorphData {
     pub fn local_rotation(&self, bone: usize, world: &dyn Fn(NodeId) -> Option<Mat4>) -> Option<Quat> {
         let b = self.bones.get(bone)?;
         let bw = world(b.node)?;
-        let pw = b.parent.and_then(|p| world(p)).unwrap_or(Mat4::IDENTITY);
+        let pw = b.parent.and_then(world).unwrap_or(Mat4::IDENTITY);
         Some((rotation_of(pw).inverse() * rotation_of(bw)).normalize())
     }
 

@@ -61,6 +61,7 @@ fn tripod(painter: &egui::Painter, pr: &Projection, origin: Vec3, rot: Quat, siz
 }
 
 /// A circle (or an arc from 0 to `sweep` radians, closed to the centre as a wedge).
+#[allow(clippy::too_many_arguments)]
 fn arc(painter: &egui::Painter, pr: &Projection, centre: Vec3, u: Vec3, v: Vec3, radius: f32, sweep: f32, wedge: bool, stroke: egui::Stroke) {
     let n = 32;
     let mut pts: Vec<egui::Pos2> = (0..=n).filter_map(|k| {

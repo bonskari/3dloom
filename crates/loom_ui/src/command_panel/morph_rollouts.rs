@@ -401,6 +401,9 @@ pub fn skin_morph(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize
     });
 }
 
+/// A local parameter row: label, command name, getter.
+type LocalField = (&'static str, &'static str, fn(&loom_scene::morph::CvLocal) -> f32);
+
 pub fn skin_wrap(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize) {
     let Some(node) = app.state.scene.node(id) else { return };
     let Some(slot) = node.modifiers.get(index) else { return };
@@ -478,7 +481,7 @@ pub fn skin_wrap(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, index: usize)
         let locals: Vec<loom_scene::morph::CvLocal> = d.selection.iter().map(|(b, v)| d.local(*b, *v)).collect();
         let enabled = cv_level && !locals.is_empty();
         egui::Grid::new("skin_wrap_locals").num_columns(2).show(ui, |ui| {
-            let fields: [(&str, &str, fn(&loom_scene::morph::CvLocal) -> f32); 5] = [("Local Str:", "Local Strength", |l| l.strength), ("Local Scale Mult:", "Local Scale Mult", |l| l.scale), ("Local X:", "Local X", |l| l.x), ("Local Y:", "Local Y", |l| l.y), ("Local Z:", "Local Z", |l| l.z)];
+            let fields: [LocalField; 5] = [("Local Str:", "Local Strength", |l| l.strength), ("Local Scale Mult:", "Local Scale Mult", |l| l.scale), ("Local X:", "Local X", |l| l.x), ("Local Y:", "Local Y", |l| l.y), ("Local Z:", "Local Z", |l| l.z)];
             for (label, name, get) in fields {
                 let first = locals.first().map(get).unwrap_or(1.0);
                 let same = locals.iter().all(|l| (get(l) - first).abs() < 1e-6);

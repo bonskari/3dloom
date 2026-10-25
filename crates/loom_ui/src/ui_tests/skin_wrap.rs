@@ -183,7 +183,7 @@ fn skin_wrap_add_by_picking_control_vertices_locals_display_and_bake() {
     h.click_widget("Add");
     assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::SkinWrapControl));
     h.click(h.screen_of(Vec3::new(9.5, -9.5, 0.0)));
-    assert_eq!(wrap_data(&h, hi).bases, vec![control], "the clicked plane is the control object");
+    assert_eq!(wrap_data(&h, hi).bases, vec![control], "the clicked plane is the control object ({:?}, picked {:?})", h.app.last_error, h.app.state.selection);
     let away = h.screen_of(Vec3::new(40.0, 40.0, 0.0));
     right_click(&mut h, away);
     assert_eq!(h.app.state.pick_mode, None);
