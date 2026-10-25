@@ -402,6 +402,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
                 cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
                 ui.separator();
+                cmd(ui, app, "Render To Texture...", Command::RenderToTexture);
+                ui.separator();
                 cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
             });
             ui.menu_button("Customize", |ui| {
@@ -518,7 +520,7 @@ pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
         ("Skin", "Skin"), ("Skin Morph", "Skin Morph"), ("Skin Wrap", "Skin Wrap"), ("Spline IK Control", "Spline IK Control"),
     ]),
     ("UV Coordinates", &[
-        ("Camera Map", "Camera Map"), ("Camera Map (WSM)", "Camera Map (WSM)"), ("MapScaler", "MapScaler"), ("MapScaler (WSM)", "MapScaler (WSM)"), ("Unwrap UVW", "Unwrap UVW"),
+        ("Camera Map", "Camera Map"), ("Camera Map (WSM)", "Camera Map (WSM)"), ("MapScaler", "MapScaler"), ("MapScaler (WSM)", "MapScaler (WSM)"), ("Projection", "Projection"), ("Unwrap UVW", "Unwrap UVW"),
         ("UVW Map", "UVW Map"), ("UVW Mapping Add", "UVW Mapping Add"), ("UVW Mapping Clear", "UVW Mapping Clear"), ("UVW XForm", "UVW XForm"),
     ]),
     ("Cache Tools", &[("Point Cache", "Point Cache"), ("Point Cache (WSM)", "Point Cache (WSM)")]),
