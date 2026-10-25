@@ -195,3 +195,85 @@ fn varying_source_scale_rejects_without_mutation() {
         .contains("scale"));
     assert_eq!(serde_json::to_value(&s.scene).unwrap(), before);
 }
+
+#[test]
+fn master_rotation_and_scale_do_not_change_baked_motion_when_applied_before_retarget() {
+    use loom_scene::loomrig::HumanoidMapping;
+    let (mut s, pelvis, map) = setup();
+    let mut wrapper = Node::new("character", ObjectKind::bone(1.));
+    wrapper.transform.position = Param::new(Vec3::new(6., -4., 0.));
+    wrapper.transform.rotation = Param::new(Vec3::new(0., 0., 37.));
+    wrapper.transform.scale = Param::new(Vec3::splat(1.3));
+    let root = s.scene.add_node(wrapper);
+    s.scene.node_mut(pelvis).unwrap().parent = Some(root);
+    let source = s.scene.node_mut(map[0].source).unwrap();
+    let p = source.transform.position.get();
+    for (axis, tr) in source
+        .transform
+        .position
+        .ensure_keys()
+        .unwrap()
+        .tracks
+        .iter_mut()
+        .enumerate()
+    {
+        tr.interp = loom_scene::anim::Interp::Linear;
+        for (time, value) in [
+            (0., p[axis]),
+            (1., p[axis] + if axis == 0 { 1. } else { 0. }),
+        ] {
+            tr.set_key(
+                time,
+                value,
+                (
+                    loom_scene::anim::TangentType::Linear,
+                    loom_scene::anim::TangentType::Linear,
+                ),
+            );
+        }
+    }
+    let mut earlier = AppState::new();
+    earlier.scene = s.scene.clone();
+    let mapping = HumanoidMapping {
+        root,
+        pelvis,
+        spine: vec![],
+        head: map[1].target,
+        limbs: vec![],
+    };
+    for state in [&mut s, &mut earlier] {
+        execute(
+            state,
+            Command::CreateLoomRig {
+                root: root.0,
+                mapping: Some(mapping.clone()),
+            },
+        )
+        .unwrap();
+    }
+    fn master_offset(s: &mut AppState) {
+        let master = s.scene.loom_rigs[0].master;
+        let n = s.scene.node_mut(master).unwrap();
+        let mut r = n.transform.rotation.get();
+        r.z += 90.;
+        n.transform.rotation = Param::new(r);
+        let scale = n.transform.scale.get() * 1.5;
+        n.transform.scale = Param::new(scale);
+    }
+    retarget(&mut s, 1, root, &map).unwrap();
+    master_offset(&mut s);
+    master_offset(&mut earlier);
+    retarget(&mut earlier, 1, root, &map).unwrap();
+    for time in [0., 0.25, 1.] {
+        for pair in &map {
+            let expected = s.scene.at_time(time, || s.scene.world_matrix(pair.target));
+            let actual = earlier
+                .scene
+                .at_time(time, || earlier.scene.world_matrix(pair.target));
+            assert!(
+                expected.abs_diff_eq(actual, 1e-4),
+                "frame {time}: master changed the baked source trajectory"
+            );
+        }
+    }
+}

@@ -1,6 +1,6 @@
 //! Reference-pose corrected humanoid motion transfer onto native bones.
 use crate::AppState;
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 use loom_scene::{Change, Controller, NodeId, Param};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -27,6 +27,18 @@ mod tests {
             .abs_diff_eq(aligned * motion * aligned.inverse() * bind, 1e-6));
     }
     #[test]
+    fn palm_reference_preserves_source_axial_twist() {
+        let correction = reference_axes(Vec3::X, Vec3::Z, Some((Vec3::Y, Vec3::Y)));
+        let twist = Quat::from_rotation_x(0.7);
+        let posed = correct_rotation(twist, Quat::IDENTITY, correction);
+        assert!((posed * Vec3::Z).abs_diff_eq(Vec3::X, 1e-6));
+        assert!((posed * Vec3::Y).abs_diff_eq(twist * Vec3::Y, 1e-6));
+        assert!(
+            (posed * Vec3::Y).distance(correction * Vec3::Y) > 0.5,
+            "palm roll was collapsed"
+        );
+    }
+    #[test]
     fn continuous_euler_keys_reconstruct_quaternion_across_wrap() {
         let mut previous = None;
         for angle in [170.0_f32, 179.0, 181.0, 190.0] {
@@ -49,6 +61,26 @@ mod tests {
 
 fn correct_rotation(sample: Quat, source_bind: Quat, target_bind: Quat) -> Quat {
     (sample * source_bind.inverse() * target_bind).normalize()
+}
+
+/// Align anatomical reference axes while retaining all animated quaternion
+/// degrees of freedom. A palm's second axis determines roll as well as swing.
+fn reference_axes(source: Vec3, target: Vec3, secondary: Option<(Vec3, Vec3)>) -> Quat {
+    let source = source.normalize_or_zero();
+    let target = target.normalize_or_zero();
+    if source.length_squared() < 0.5 || target.length_squared() < 0.5 {
+        return Quat::IDENTITY;
+    }
+    if let Some((source_side, target_side)) = secondary {
+        let a = (source_side - source * source_side.dot(source)).normalize_or_zero();
+        let b = (target_side - target * target_side.dot(target)).normalize_or_zero();
+        if a.length_squared() > 0.5 && b.length_squared() > 0.5 {
+            let from = Quat::from_mat3(&Mat3::from_cols(target, b, target.cross(b)));
+            let to = Quat::from_mat3(&Mat3::from_cols(source, a, source.cross(a)));
+            return (to * from.inverse()).normalize();
+        }
+    }
+    Quat::from_rotation_arc(target, source)
 }
 
 fn rest(p: &Param<Vec3>) -> Result<Vec3, String> {
@@ -144,8 +176,22 @@ pub fn auto_mapping(
             ("Ring", "ring"),
             ("Pinky", "pinky"),
         ] {
+            // Kimodo's non-thumb joint 1 is the metacarpal, followed by
+            // three phalanges. MetaHuman names those four bones explicitly.
+            let offset = if s == "Thumb" {
+                0
+            } else {
+                names.push((
+                    format!("{side}Hand{s}1"),
+                    format!("{t}_metacarpal_{suffix}"),
+                ));
+                1
+            };
             for i in 1..=3 {
-                names.push((format!("{side}Hand{s}{i}"), format!("{t}_{i:02}_{suffix}")));
+                names.push((
+                    format!("{side}Hand{s}{}", i + offset),
+                    format!("{t}_{i:02}_{suffix}"),
+                ));
             }
         }
     }
@@ -383,6 +429,7 @@ pub fn retarget(
     let mut source_length = 0.0;
     let mut target_length = 0.0;
     let mut roots = Vec::new();
+    let mut children: BTreeMap<NodeId, Vec<(NodeId, NodeId)>> = BTreeMap::new();
     for m in mapping {
         let mut p = scene.node(m.target).and_then(|n| n.parent);
         let mut ancestor = None;
@@ -394,6 +441,7 @@ pub fn retarget(
             p = scene.node(id).and_then(|n| n.parent);
         }
         if let Some((t, s)) = ancestor {
+            children.entry(t).or_default().push((m.target, m.source));
             source_length +=
                 (binds[&m.source].w_axis.truncate() - binds[&s].w_axis.truncate()).length();
             target_length +=
@@ -426,6 +474,99 @@ pub fn retarget(
             .to_scale_rotation_translation()
             .1
             .inverse();
+    let mut corrections = BTreeMap::new();
+    for m in mapping {
+        let source_position = binds[&m.source].w_axis.truncate();
+        let target_position = binds[&m.target].w_axis.truncate();
+        let incoming = scene
+            .node(m.source)
+            .and_then(|n| n.parent)
+            .map(|p| reference(scene, p, 0).map(|b| source_position - b.w_axis.truncate()))
+            .transpose()?
+            .unwrap_or(Vec3::ZERO);
+        let candidates: Vec<_> = children
+            .get(&m.target)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|(_, s)| under(scene, *s, m.source))
+            .collect();
+        let middle = if candidates.len() >= 4 {
+            candidates.iter().find(|(_, s)| {
+                scene
+                    .node(*s)
+                    .is_some_and(|n| n.name.to_ascii_lowercase().contains("middle"))
+            })
+        } else {
+            None
+        };
+        let primary = middle.or_else(|| {
+            candidates.iter().max_by(|(_, a), (_, b)| {
+                let score = |s: &NodeId| {
+                    (binds[s].w_axis.truncate() - source_position)
+                        .normalize_or_zero()
+                        .dot(incoming.normalize_or_zero())
+                };
+                score(a).total_cmp(&score(b))
+            })
+        });
+        let (source_axis, target_axis) = if let Some((target_child, source_child)) = primary {
+            (
+                binds[source_child].w_axis.truncate() - source_position,
+                binds[target_child].w_axis.truncate() - target_position,
+            )
+        } else {
+            let target_incoming = scene
+                .node(m.target)
+                .and_then(|n| n.parent)
+                .map(|p| reference(scene, p, 0).map(|b| target_position - b.w_axis.truncate()))
+                .transpose()?
+                .unwrap_or(Vec3::ZERO);
+            (incoming, target_incoming)
+        };
+        // A hand supplies a complete palm frame: middle metacarpal axis
+        // and index-to-pinky span. Unknown names fall back to the widest pair.
+        // Torso branches retain reference roll instead of deriving it from
+        // differing clavicle or hip attachment positions.
+        let mut secondary = None;
+        if candidates.len() >= 4 {
+            let find = |part: &str| {
+                candidates.iter().find(|(_, s)| {
+                    scene
+                        .node(*s)
+                        .is_some_and(|n| n.name.to_ascii_lowercase().contains(part))
+                })
+            };
+            if let (Some((ta, sa)), Some((tb, sb))) =
+                (find("index"), find("pinky").or_else(|| find("little")))
+            {
+                secondary = Some((
+                    alignment * (binds[sa].w_axis.truncate() - binds[sb].w_axis.truncate()),
+                    binds[ta].w_axis.truncate() - binds[tb].w_axis.truncate(),
+                ));
+            } else {
+                let axis = source_axis.normalize_or_zero();
+                let mut widest = 0.0;
+                for (i, (ta, sa)) in candidates.iter().enumerate() {
+                    for (tb, sb) in &candidates[..i] {
+                        let span = binds[sa].w_axis.truncate() - binds[sb].w_axis.truncate();
+                        let width = (span - axis * span.dot(axis)).length_squared();
+                        if width > widest {
+                            widest = width;
+                            secondary = Some((
+                                alignment * span,
+                                binds[ta].w_axis.truncate() - binds[tb].w_axis.truncate(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        corrections.insert(
+            m.target,
+            reference_axes(alignment * source_axis, target_axis, secondary),
+        );
+    }
     let mut rotations: BTreeMap<NodeId, Vec<(f32, Vec3)>> = BTreeMap::new();
     let mut positions = Vec::new();
     for time in times {
@@ -442,7 +583,8 @@ pub fn retarget(
                                     .to_scale_rotation_translation()
                                     .1,
                             alignment * binds[&m.source].to_scale_rotation_translation().1,
-                            binds[&m.target].to_scale_rotation_translation().1,
+                            corrections[&m.target]
+                                * binds[&m.target].to_scale_rotation_translation().1,
                         ),
                     )
                 })
@@ -491,11 +633,14 @@ pub fn retarget(
                 let source_pos =
                     scene.at_time(time, || scene.world_matrix(m.source).w_axis.truncate());
                 let delta = alignment * (source_pos - binds[&m.source].w_axis.truncate()) * ratio;
-                let parent_matrix = scene.at_time(time, || {
-                    n.parent
-                        .map(|p| scene.world_matrix(p))
-                        .unwrap_or(Mat4::IDENTITY)
-                });
+                // Bake in the target reference frame. Live animator offsets
+                // (Master rotation/scale, for example) must remain an overlay:
+                // using their current world matrix would cancel them here.
+                let parent_matrix = n
+                    .parent
+                    .map(|p| reference(scene, p, 0))
+                    .transpose()?
+                    .unwrap_or(Mat4::IDENTITY);
                 let position =
                     rest(&n.transform.position)? + parent_matrix.inverse().transform_vector3(delta);
                 if !position.is_finite() {
@@ -589,6 +734,20 @@ mod real_assets {
         assert!(map
             .iter()
             .all(|m| !s.scene.node(m.target).unwrap().name.contains("FACIAL")));
+        for (source_name, target_name) in [
+            ("LeftHandIndex1", "index_metacarpal_l"),
+            ("LeftHandIndex2", "index_01_l"),
+            ("LeftHandIndex4", "index_03_l"),
+            ("RightHandMiddle4", "middle_03_r"),
+        ] {
+            assert!(
+                map.iter().any(
+                    |m| short(&s.scene.node(m.source).unwrap().name) == source_name
+                        && short(&s.scene.node(m.target).unwrap().name) == target_name
+                ),
+                "wrong finger correspondence {source_name}→{target_name}"
+            );
+        }
         let result = retarget(&mut s, source, target, &map).unwrap();
         let clip = s
             .scene
@@ -605,6 +764,29 @@ mod real_assets {
             let now = serde_json::to_value(s.scene.node(*id).unwrap()).unwrap();
             for key in ["name", "parent", "object", "modifiers"] {
                 assert_eq!(before[key], now[key], "changed {key} on {}", id.0);
+            }
+            assert_eq!(
+                before["transform"]["scale"], now["transform"]["scale"],
+                "changed native bone scale"
+            );
+            let pelvis = map
+                .iter()
+                .find(|m| short(&s.scene.node(m.source).unwrap().name) == "Hips")
+                .unwrap()
+                .target;
+            if *id != pelvis {
+                assert_eq!(
+                    before["transform"]["position"], now["transform"]["position"],
+                    "changed native bone offset/length on {}",
+                    id.0
+                );
+            }
+            if !map.iter().any(|m| m.target == *id) {
+                assert_eq!(
+                    before["transform"], now["transform"],
+                    "changed unmapped/twist bone transform on {}",
+                    id.0
+                );
             }
         }
         let mesh = ids
@@ -720,6 +902,113 @@ mod real_assets {
                 (source_angle - target_angle).abs() < 0.25,
                 "{side} knee angle diverges: source {source_angle}, target {target_angle}"
             );
+        }
+        let alignment = reference(&s.scene, target, 0)
+            .unwrap()
+            .to_scale_rotation_translation()
+            .1
+            * reference(
+                &s.scene,
+                s.scene
+                    .animation_clips
+                    .iter()
+                    .find(|c| c.id == source)
+                    .unwrap()
+                    .nodes[0],
+                0,
+            )
+            .unwrap()
+            .to_scale_rotation_translation()
+            .1
+            .inverse();
+        for time in [clip.start, (clip.start + clip.end) * 0.5, clip.end] {
+            for side in ["Left", "Right"] {
+                for (a, b) in [
+                    ("Arm", "ForeArm"),
+                    ("ForeArm", "Hand"),
+                    ("Leg", "Shin"),
+                    ("Shin", "Foot"),
+                    ("Foot", "ToeBase"),
+                    ("Hand", "HandMiddle1"),
+                    ("HandIndex1", "HandIndex2"),
+                    ("HandMiddle1", "HandMiddle2"),
+                    ("HandRing1", "HandRing2"),
+                    ("HandPinky1", "HandPinky2"),
+                ] {
+                    let find = |part: &str| {
+                        map.iter()
+                            .find(|m| {
+                                short(&s.scene.node(m.source).unwrap().name)
+                                    == format!("{side}{part}")
+                            })
+                            .unwrap()
+                    };
+                    let a = find(a);
+                    let b = find(b);
+                    let (expected, actual) = s.scene.at_time(time, || {
+                        let source = (s.scene.world_matrix(b.source).w_axis.truncate()
+                            - s.scene.world_matrix(a.source).w_axis.truncate())
+                        .normalize();
+                        let actual = (s.scene.world_matrix(b.target).w_axis.truncate()
+                            - s.scene.world_matrix(a.target).w_axis.truncate())
+                        .normalize();
+                        (alignment * source, actual)
+                    });
+                    assert!(
+                        expected.dot(actual) > 0.999,
+                        "frame{time} {}→{} expected aligned source {expected:?}, target {actual:?}",
+                        s.scene.node(a.source).unwrap().name,
+                        s.scene.node(b.source).unwrap().name
+                    );
+                }
+            }
+        }
+        for side in ["Left", "Right"] {
+            let find = |part: &str| {
+                map.iter()
+                    .find(|m| {
+                        short(&s.scene.node(m.source).unwrap().name) == format!("{side}{part}")
+                    })
+                    .unwrap()
+            };
+            let [hand, middle, index, pinky] =
+                ["Hand", "HandMiddle1", "HandIndex1", "HandPinky1"].map(find);
+            for time in [clip.start, (clip.start + clip.end) * 0.5, clip.end] {
+                let (expected, actual) = s.scene.at_time(time, || {
+                    let position = |id| s.scene.world_matrix(id).w_axis.truncate();
+                    let source_normal = (position(middle.source) - position(hand.source))
+                        .cross(position(index.source) - position(pinky.source))
+                        .normalize();
+                    let target_normal = (position(middle.target) - position(hand.target))
+                        .cross(position(index.target) - position(pinky.target))
+                        .normalize();
+                    (alignment * source_normal, target_normal)
+                });
+                assert!(expected.dot(actual)>0.999,"{side} palm roll differs from aligned source at frame{time}: expected{expected:?}, actual{actual:?}");
+            }
+        }
+        // Rotation deltas include axial twist, even when the primary bone
+        // direction itself does not change. Check every mapped joint.
+        for pair in &map {
+            let rotation = |id, time| {
+                s.scene.at_time(time, || {
+                    s.scene.world_matrix(id).to_scale_rotation_translation().1
+                })
+            };
+            let source_start = rotation(pair.source, clip.start);
+            let target_start = rotation(pair.target, clip.start);
+            for time in [(clip.start + clip.end) * 0.5, clip.end] {
+                let expected = alignment
+                    * rotation(pair.source, time)
+                    * source_start.inverse()
+                    * alignment.inverse();
+                let actual = rotation(pair.target, time) * target_start.inverse();
+                assert!(
+                    expected.dot(actual).abs() > 0.9999,
+                    "source quaternion/twist not preserved on {} at frame{time}",
+                    s.scene.node(pair.target).unwrap().name
+                );
+            }
         }
         // Sequence the actual motion a second time on the same native skin.
         let first_keys: Vec<_> = map
