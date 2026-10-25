@@ -920,7 +920,7 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let g = st.skin_gizmo.ok_or("select a gizmo first")?;
             let (bone, parent) = { let gz = data.gizmos.get(g).ok_or("no such gizmo")?; (gz.bone, gz.parent_bone) };
             let angle = loom_scene::skin::bone_angle(data, &|id| Some(st.scene.world_matrix(id)), bone, parent).unwrap_or(0.0);
-            data.gizmos[g].keys.push(loom_scene::skin::GizmoKey { angle_deg: angle, deltas: Vec::new(), bulge: 0.0 });
+            data.gizmos[g].keys.push(loom_scene::skin::GizmoKey { angle_deg: angle, deltas: Vec::new(), bulge: 0.0, ..Default::default() });
             Ok(())
         }),
         C::SkinSetGizmoKey { key, bulge, angle } => edit(state, "Gizmo Key", |data, _, st| {

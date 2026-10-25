@@ -175,7 +175,7 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection) {
                 // Mirror Mode: the side colours; the partner of a selected vertex brighter.
                 Some(side) => {
                     let base = match side { -1 => GREEN_SIDE, 1 => BLUE_SIDE, _ => RED_SIDE };
-                    if partners.contains(&(i as u32)) { base.gamma_multiply(1.6) } else { base }
+                    if partners.contains(&(i as u32)) { egui::Color32::from_rgb(base.r().saturating_add(90), base.g().saturating_add(90), base.b().saturating_add(90)) } else { base }
                 }
                 None if display.colored_vertices => colors.get(i).map(|c| egui::Color32::from_rgb(c[0], c[1], c[2])).unwrap_or(egui::Color32::from_gray(40)),
                 None => egui::Color32::from_rgb(40, 40, 40),
@@ -263,17 +263,49 @@ fn axis_u_at(env: &EnvelopeWorld, projection: &Projection, p: egui::Pos2) -> Opt
     (0..=100).map(|i| i as f32 / 100.0).filter_map(|u| projection.screen(env.point(u)).map(|sp| (u, sp.distance(p)))).filter(|(_, d)| *d <= 10.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(u, _)| u)
 }
 
-/// The current envelope's end point (0 start, 1 end) under the pointer.
-fn end_point_at(app: &LoomApp, projection: &Projection, p: egui::Pos2) -> Option<u8> {
+/// The current envelope's end point (0 start, 1 end) under the pointer, with its distance in pixels.
+fn end_point_at(app: &LoomApp, projection: &Projection, p: egui::Pos2) -> Option<(u8, f32)> {
     if !app.state.skin_filter_envelopes {
         return None;
     }
     let env = current_envelope(app)?;
-    [env.start, env.end].iter().enumerate().filter_map(|(k, q)| projection.screen(*q).map(|sp| (k as u8, sp.distance(p)))).filter(|(_, d)| *d <= 7.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(k, _)| k)
+    [env.start, env.end].iter().enumerate().filter_map(|(k, q)| projection.screen(*q).map(|sp| (k as u8, sp.distance(p)))).filter(|(_, d)| *d <= 7.0).min_by(|a, b| a.1.total_cmp(&b.1))
 }
 
-/// The current envelope's cross-section control point under the pointer: (section, outer ring).
-fn section_at(app: &LoomApp, projection: &Projection, p: egui::Pos2) -> Option<(usize, bool, Vec3, Vec3)> {
+/// The nearest pickable vertex to the pointer within 8 px (Select Vertices on): (vertex, distance).
+fn vertex_at(app: &LoomApp, projection: &Projection, p: egui::Pos2) -> Option<(u32, f32)> {
+    if !app.state.skin_filter_vertices {
+        return None;
+    }
+    let pts = point_screens(app, projection, app.state.skin_backface_cull)?;
+    pts.iter().enumerate().filter_map(|(i, sp)| sp.map(|sp| (i as u32, sp.distance(p)))).filter(|(_, d)| *d <= 8.0).min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// What a click at `p` lands on: the nearest of a vertex, an end point and a cross-section point.
+enum Hit {
+    Vertex(u32),
+    End(u8),
+    Section(usize, bool, Vec3, Vec3),
+}
+
+fn hit_at(app: &LoomApp, projection: &Projection, p: egui::Pos2) -> Option<Hit> {
+    let mut best: Option<(f32, Hit)> = vertex_at(app, projection, p).map(|(v, d)| (d, Hit::Vertex(v)));
+    if let Some((k, d)) = end_point_at(app, projection, p) {
+        if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+            best = Some((d, Hit::End(k)));
+        }
+    }
+    if let Some((k, outer, c, a, d)) = section_at(app, projection, p) {
+        if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+            best = Some((d, Hit::Section(k, outer, c, a)));
+        }
+    }
+    best.map(|(_, h)| h)
+}
+
+/// The current envelope's cross-section control point under the pointer:
+/// (section, outer ring, its centre, the axis there, distance in pixels).
+fn section_at(app: &LoomApp, projection: &Projection, p: egui::Pos2) -> Option<(usize, bool, Vec3, Vec3, f32)> {
     if !app.state.skin_filter_cross_sections {
         return None;
     }
@@ -291,9 +323,9 @@ fn section_at(app: &LoomApp, projection: &Projection, p: egui::Pos2) -> Option<(
             }
         }
     }
-    let (_, k, outer) = best?;
+    let (d, k, outer) = best?;
     let u = env.sections()[k].0;
-    Some((k, outer, env.point(u), env.direction(u)))
+    Some((k, outer, env.point(u), env.direction(u), d))
 }
 
 /// Click / region selection at the Envelope level: Add cross section on
@@ -326,13 +358,16 @@ pub fn pick(app: &mut LoomApp, projection: &Projection, region: Option<&crate::r
         return true;
     }
     if region.is_none() {
-        if let Some(k) = end_point_at(app, projection, p) {
-            let _ = app.dispatch(if k == 0 { Command::SelectStartPointSkin } else { Command::SelectEndPointSkin });
-            return true;
-        }
-        if let Some((k, outer, _, _)) = section_at(app, projection, p) {
-            let _ = app.dispatch(Command::SkinSelectCrossSection { index: k as u32, outer });
-            return true;
+        match hit_at(app, projection, p) {
+            Some(Hit::End(k)) => {
+                let _ = app.dispatch(if k == 0 { Command::SelectStartPointSkin } else { Command::SelectEndPointSkin });
+                return true;
+            }
+            Some(Hit::Section(k, outer, _, _)) => {
+                let _ = app.dispatch(Command::SkinSelectCrossSection { index: k as u32, outer });
+                return true;
+            }
+            _ => {}
         }
     }
     let pts: Vec<Option<egui::Pos2>> = if app.state.skin_filter_vertices { point_screens(app, projection, app.state.skin_backface_cull).unwrap_or_default() } else { Vec::new() };
@@ -392,16 +427,19 @@ pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState
         if loom_commands::skin::painting(&app.state) || app.state.skin_ui.adding_cross_section || app.state.skin_ui.edit_lattice || app.transform_drag.is_some() || app.state.nav_mode != loom_input::NavMode::None {
             return false;
         }
-        if let Some(end) = end_point_at(app, projection, p) {
-            let _ = app.dispatch(if end == 0 { Command::SelectStartPointSkin } else { Command::SelectEndPointSkin });
-            app.state.undo.begin("Move Envelope");
-            state = Some(SkinDrag::End { end, pending: None });
-        } else if let Some((k, outer, centre, axis)) = section_at(app, projection, p) {
-            let _ = app.dispatch(Command::SkinSelectCrossSection { index: k as u32, outer });
-            app.state.undo.begin("Cross Section Radius");
-            state = Some(SkinDrag::Section { centre, axis, pending: None });
-        } else {
-            return false;
+        match hit_at(app, projection, p) {
+            Some(Hit::End(end)) => {
+                let _ = app.dispatch(if end == 0 { Command::SelectStartPointSkin } else { Command::SelectEndPointSkin });
+                app.state.undo.begin("Move Envelope");
+                state = Some(SkinDrag::End { end, pending: None });
+            }
+            Some(Hit::Section(k, outer, centre, axis)) => {
+                let _ = app.dispatch(Command::SkinSelectCrossSection { index: k as u32, outer });
+                app.state.undo.begin("Cross Section Radius");
+                state = Some(SkinDrag::Section { centre, axis, pending: None });
+            }
+            // A vertex (or nothing) under the pointer: the click picks it.
+            _ => return false,
         }
         app.poly_dragging = true;
         app.drag_select_start = None;

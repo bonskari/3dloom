@@ -451,3 +451,17 @@ fn zoom_extents_selected_frames_the_skin_selection_and_the_highlight() {
     execute(&mut s, Command::SkinHighlightVertex { vertex: Some(3) }).unwrap();
     assert_eq!(s.skin_ui.highlight, Some(3));
 }
+
+#[test]
+fn skin_goes_onto_every_selected_object_at_once() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Cylinder, position: [0.0; 3], size: [2.0, 2.0, 10.0] }).unwrap();
+    let a = *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Cylinder, position: [10.0, 0.0, 0.0], size: [2.0, 2.0, 10.0] }).unwrap();
+    let b = *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::SelectNodes { ids: vec![a.0, b.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::SkinModifier).unwrap();
+    for id in [a, b] {
+        assert!(matches!(s.scene.node(id).unwrap().modifiers.last().map(|m| &m.modifier), Some(Modifier::Skin(_))), "node {} has a Skin", id.0);
+    }
+}

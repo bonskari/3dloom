@@ -84,6 +84,7 @@ fn modifiers_menu_adds_modifiers_from_its_categories() {
         (["Modifiers", "Mesh Editing", "Vertex Weld"], "Vertex Weld"),
         (["Modifiers", "Subdivision Surfaces", "HSDS Modifier"], "HSDS"),
         (["Modifiers", "Parametric Deformers", "Taper"], "Taper"),
+        (["Modifiers", "Animation Modifiers", "Skin"], "Skin"),
     ] {
         menu_path(&mut h, &path);
         let top = h.app.state.scene.node(id).unwrap().modifiers.last().map(|m| m.name.clone());

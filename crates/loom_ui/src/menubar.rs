@@ -513,7 +513,7 @@ pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
         ("Vertex Weld", "Vertex Weld"),
     ]),
     ("Conversion", &[("Turn To Mesh", "Turn To Mesh"), ("Turn To Poly", "Turn To Poly")]),
-    ("Animation", &[
+    ("Animation Modifiers", &[
         ("Flex", "Flex"), ("Linked XForm", "Linked XForm"), ("Melt", "Melt"), ("Morpher", "Morpher"), ("PathDeform", "PathDeform"), ("PathDeform (WSM)", "PathDeform (WSM)"),
         ("Skin", "Skin"), ("Skin Morph", "Skin Morph"), ("Skin Wrap", "Skin Wrap"), ("Spline IK Control", "Spline IK Control"),
     ]),
