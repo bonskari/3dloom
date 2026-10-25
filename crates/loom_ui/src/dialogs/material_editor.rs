@@ -687,7 +687,7 @@ fn side_toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
 
 /// The toolbar below the slots.
 fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
-    let (_, m, maps) = current_level(app);
+    let (_, m, _) = current_level(app);
     let below_top = !app.state.scene.material_editor.path.is_empty();
     ui.horizontal_wrapped(|ui| {
         if ui.button("Get Material").on_hover_text("Get Material: the Material/Map Browser").clicked() {
