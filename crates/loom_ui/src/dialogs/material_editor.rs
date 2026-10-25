@@ -182,7 +182,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         if ui.button(label).on_hover_text("Choose a bitmap").clicked() {
                             app.state.dialog = Some(Dialog::MaterialMap { channel: i as u8 });
                         }
-                        if map.is_some() && ui.small_button("✕").on_hover_text("Clear the map").clicked() {
+                        if map.is_some() && crate::icons::small(ui, crate::icons::CLEAR, "Clear the map").clicked() {
                             let _ = app.dispatch(Command::SetMaterialMap { slot: None, map: (*channel).into(), path: None, amount: None });
                         }
                     });

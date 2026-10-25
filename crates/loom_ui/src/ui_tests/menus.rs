@@ -17,11 +17,17 @@ fn type_text(h: &mut Harness, text: &str) {
 /// Opens a menu bar menu and its submenus, then clicks the item.
 fn menu_path(h: &mut Harness, path: &[&str]) {
     h.click(h.find(Role::Button, path[0]).center());
+    // The entry in the open menu, not a Command Panel icon of the same name (Shapes).
+    let in_menu = |h: &Harness, label: &str| {
+        let cp = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).map(|p| p.rect);
+        let all = h.find_all(Role::Button, label);
+        all.iter().copied().find(|r| !cp.is_some_and(|c| c.contains(r.center()))).unwrap_or_else(|| panic!("no menu entry {label:?}: {all:?}")).center()
+    };
     for sub in &path[1..path.len() - 1] {
-        let p = h.find(Role::Button, sub).center();
+        let p = in_menu(h, sub);
         point_at(h, p);
     }
-    let p = h.find(Role::Button, path[path.len() - 1]).center();
+    let p = in_menu(h, path[path.len() - 1]);
     h.click(p);
 }
 
@@ -104,11 +110,11 @@ fn create_menu_shapes_and_compound_start_their_tools() {
 #[test]
 fn scale_flyout_chooses_uniform_non_uniform_or_squash() {
     let mut h = Harness::new();
-    // The Scale button names the current type; the flyout list is right of it.
+    // The Scale button is named after the current type; the flyout list is right of it.
     for (button, item, kind) in [
-        ("Scale", "Select and Non-uniform Scale", loom_commands::ScaleKind::NonUniform),
-        ("Scale NU", "Select and Squash", loom_commands::ScaleKind::Squash),
-        ("Squash", "Select and Uniform Scale", loom_commands::ScaleKind::Uniform),
+        ("Select and Uniform Scale", "Select and Non-uniform Scale", loom_commands::ScaleKind::NonUniform),
+        ("Select and Non-uniform Scale", "Select and Squash", loom_commands::ScaleKind::Squash),
+        ("Select and Squash", "Select and Uniform Scale", loom_commands::ScaleKind::Uniform),
     ] {
         let flyout = right_of(&h, Role::ComboBox, h.find(Role::Button, button));
         h.click(flyout.center());
@@ -144,8 +150,10 @@ fn the_scale_type_decides_what_an_axis_handle_drag_scales() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
     framed(&mut h);
     h.key(egui::Key::R);
+    // The reference: axis and plane handles scale non-uniformly without
+    // changing the flyout (its tutorial scales one local axis with Uniform Scale).
     let s = drag_scale_x_handle(&mut h);
-    assert!(s.x > 1.01 && (s.x - s.y).abs() < 1e-4 && (s.x - s.z).abs() < 1e-4, "Uniform: all axes alike {s}");
+    assert!(s.x > 1.01 && s.y == 1.0 && s.z == 1.0, "Uniform Scale tool, X handle: X only {s}");
     h.cmd(Command::ScaleType { kind: loom_commands::ScaleKind::NonUniform });
     let s = drag_scale_x_handle(&mut h);
     assert!(s.x > 1.01 && s.y == 1.0 && s.z == 1.0, "Non-Uniform: X only {s}");
@@ -159,7 +167,7 @@ fn typing_a_name_in_the_named_selection_sets_field_makes_a_set() {
     let mut h = Harness::new();
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     let a = selected(&h);
-    let field = right_of(&h, Role::TextInput, h.find(Role::Button, "{}"));
+    let field = right_of(&h, Role::TextInput, h.find(Role::Button, "Edit Named Selection Sets"));
     h.click(field.center());
     type_text(&mut h, "lit lamp");
     assert_eq!(h.app.state.named_sets.get("lit lamp"), Some(&vec![a]));
@@ -180,7 +188,7 @@ fn at_sub_object_level_the_named_sets_field_names_and_lists_the_objects_sets() {
     let p = h.screen_of(Vec3::new(15.0, -15.0, 30.0));
     h.click(p);
     assert_eq!(h.sub_count(), 1);
-    let field = right_of(&h, Role::TextInput, h.find(Role::Button, "{}"));
+    let field = right_of(&h, Role::TextInput, h.find(Role::Button, "Edit Named Selection Sets"));
     h.click(field.center());
     type_text(&mut h, "Vertex Lighting");
     assert!(h.app.state.named_sub_selections.contains_key("Vertex Lighting"), "a sub-object set, not an object set");
@@ -198,14 +206,15 @@ fn at_sub_object_level_the_named_sets_field_names_and_lists_the_objects_sets() {
 fn quick_access_toolbar_runs_new_undo_and_redo() {
     let mut h = Harness::new();
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
-    let undo = h.find(Role::Button, "Undo");
+    // Icon buttons: found by their names (the topmost Undo is the Quick Access one).
+    let undo = h.find(Role::Button, "Undo Scene Operation");
     assert!(undo.max.y <= h.find(Role::Button, "File").max.y + 1.0, "in the menu bar row");
     h.click(undo.center());
     assert_eq!(h.app.state.scene.len(), 0);
-    h.click(h.find(Role::Button, "Redo").center());
+    h.click(h.find(Role::Button, "Redo Scene Operation").center());
     assert_eq!(h.app.state.scene.len(), 1);
-    assert!(h.has(Role::Button, "🗁") && h.has(Role::Button, "💾"), "Open File and Save File");
-    h.click(h.find(Role::Button, "🗋").center());
+    assert!(h.has(Role::Button, "Open File") && h.has(Role::Button, "Save File"));
+    h.click(h.find(Role::Button, "New Scene").center());
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::SaveChanges(loom_commands::PendingFileAction::New)), "New asks to save the changed scene first");
 }
 
@@ -236,7 +245,7 @@ fn modifier_list_t_then_enter_adds_taper() {
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(2);
     // The Modifier List is left of the modifier-set button.
-    let set_button = h.find(Role::Button, "▼");
+    let set_button = h.find(Role::Button, "Show / hide the modifier button set");
     let list = h.widgets.iter().filter(|(r, _, w)| *r == Role::ComboBox && w.max.x <= set_button.min.x + 1.0 && (w.center().y - set_button.center().y).abs() < set_button.height()).max_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x)).map(|w| w.2).expect("the Modifier List");
     h.click(list.center());
     type_text(&mut h, "T");

@@ -115,6 +115,26 @@ fn apply_picks(app: &mut LoomApp, picks: Vec<Pick>, mods: Modifiers) {
     }
 }
 
+/// A click's picks: Ctrl toggles what it hits (the reference before its
+/// 2011 change) — selected items leave the selection, the others join it.
+/// Without Ctrl (or with Alt) it is `apply_picks`.
+fn apply_click_picks(app: &mut LoomApp, picks: Vec<Pick>, mods: Modifiers) {
+    if !mods.ctrl || mods.alt || picks.is_empty() {
+        return apply_picks(app, picks, mods);
+    }
+    let world: Vec<NodeId> = app.world_meshes().iter().map(|(id, _)| *id).collect();
+    let (on, off): (Vec<Pick>, Vec<Pick>) = picks.into_iter().partition(|p| match *p {
+        Pick::Object(i) => app.state.selection.contains(&world[i]),
+        Pick::SubObject { mesh, id } => app.state.sub_selection.contains(world[mesh], id),
+    });
+    if !on.is_empty() {
+        apply_picks(app, on, Modifiers { ctrl: false, alt: true, ..mods });
+    }
+    if !off.is_empty() {
+        apply_picks(app, off, mods);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Per-frame paint callback
 // ---------------------------------------------------------------------------
@@ -685,6 +705,18 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         crate::create_tool::CameraSession::place_free(app, anchor, basis.2);
                                     }
                                 }
+                            } else if let Some(crate::CreateKind::Light(kind)) = app.create_kind {
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                    if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
+                                        anchor = hit.point;
+                                        app.consume_snap_override();
+                                    }
+                                    if kind.targeted() {
+                                        app.camera_create = crate::create_tool::CameraSession::begin_light(app, kind, anchor, basis.2);
+                                    } else {
+                                        crate::create_tool::CameraSession::place_light(app, kind, anchor, basis.2);
+                                    }
+                                }
                             } else if app.create_kind == Some(crate::CreateKind::Line) {
                                 // Line tool: every click is a knot on the construction plane
                                 // (none while "Close spline?" waits for its answer).
@@ -793,6 +825,19 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                             let node = app.world_meshes()[mesh].0;
                                             let _ = app.dispatch(Command::ToggleSeamEdge { node: node.0, edge: e.0 });
                                         }
+                                    } else if app.state.pick_mode == Some(loom_commands::PickMode::WorkingPivotView) {
+                                        if let Some(pt) = working_pivot_view_point(app, index, p, rect, view, proj) {
+                                            let _ = app.dispatch(Command::PickPoint { point: pt.to_array() });
+                                        }
+                                    } else if app.state.pick_mode == Some(loom_commands::PickMode::WorkingPivotSurface) {
+                                        // A surface under the pointer, else the construction plane (like AutoGrid).
+                                        if let Some((id, point, normal)) = surface_hit_node(app, p, rect, view, proj) {
+                                            let _ = app.dispatch(Command::PickSurface { id: id.0, point: point.to_array(), normal: normal.to_array() });
+                                        } else if let Some((point, (_, _, n))) = creation_anchor(app, index, p, rect, view, proj) {
+                                            let (x, y, z) = glam::Quat::from_rotation_arc(Vec3::Z, n).to_euler(glam::EulerRot::XYZ);
+                                            let _ = app.dispatch(Command::SetWorkingPivot { position: Some(point.to_array()), rotation_deg: Some([x.to_degrees(), y.to_degrees(), z.to_degrees()]) });
+                                            let _ = app.dispatch(Command::ExitPickMode);
+                                        }
                                     } else if matches!(app.state.pick_mode, Some(loom_commands::PickMode::NormalAlignSource | loom_commands::PickMode::NormalAlignTarget | loom_commands::PickMode::AlignCamera | loom_commands::PickMode::UvwMapNormal | loom_commands::PickMode::UvwMapRegionA | loom_commands::PickMode::UvwMapRegionB)) {
                                         if let Some((id, point, normal)) = surface_hit_node(app, p, rect, view, proj) {
                                             let _ = app.dispatch(Command::PickSurface { id: id.0, point: point.to_array(), normal: normal.to_array() });
@@ -813,7 +858,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         if !(double && double_click(app, p, rect, view, proj, view_proj, mods)) {
                                             let mut picked = picks_at(app, p, rect, view, proj, view_proj);
                                             cycle_object_pick(app, p, rect, view, proj, &mut picked, double);
-                                            apply_picks(app, picked, mods);
+                                            apply_click_picks(app, picked, mods);
                                         }
                                     }
                                 } else {
@@ -925,8 +970,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             });
                     }
                     // MouseMove fires every frame the pointer moves; the controller's internal
-                    // `dragging` state decides whether to act on it.
-                    if pointer.is_moving() {
+                    // `dragging` state decides whether to act on it. `delta`, not the smoothed
+                    // `is_moving`: that stays false below ~20 frames a second.
+                    if pointer.delta() != egui::Vec2::ZERO {
                         let before = app.state.active().camera.distance;
                         nav_event(app, index, rect, InputEvent::MouseMove { pos, mods });
                         let after = app.state.active().camera.distance;
@@ -984,12 +1030,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 };
                 let lighting = match vp.shading {
                     loom_commands::Shading::Flat => 1,
-                    _ if vp.scene_lights => 2,
                     _ => 0,
                 };
                 // Hidden Line: faces in the viewport colour hide the lines behind them.
                 let override_color = (vp.shading == loom_commands::Shading::HiddenLine).then_some([0.0806, 0.0806, 0.0806]);
-                let view_shading = loom_render::ViewShading { lighting, override_color };
+                let mut view_shading = loom_render::ViewShading { lighting, override_color, ..Default::default() };
+                if lighting == 0 && override_color.is_none() {
+                    view_shading = crate::light_overlay::view_lighting(app, vp, view, view_shading);
+                }
                 let edges = vp.edged_faces || vp.shading == loom_commands::Shading::HiddenLine;
                 (vp.shading == loom_commands::Shading::Wireframe, grid_plane, edges, vp.show_grid, view_shading)
             };
@@ -1044,6 +1092,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             let hover_pos = ctx.input(|i| i.pointer.hover_pos());
             draw_shapes(&painter, app, view_proj, rect);
             crate::camera_overlay::draw(&painter, app, index, view_proj, rect);
+            crate::light_overlay::draw(&painter, app, index, view_proj, rect, realistic);
             crate::spline_modes::draw(&painter, app, &projection);
             draw_mode_overlays(&painter, app, view_proj, rect);
             draw_soft_selection(&painter, app, view_proj, rect);
@@ -1457,9 +1506,32 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         x += size.x + 10.0;
     }
     if disabled {
-        painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font, egui::Color32::from_gray(225));
+        painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font.clone(), egui::Color32::from_gray(225));
+    }
+    // Working Pivot modes show under the viewport name.
+    let wp = match (app.state.edit_working_pivot, app.state.use_working_pivot) {
+        (true, _) => Some("EDIT WP"),
+        (false, true) => Some("USE WP"),
+        _ => None,
+    };
+    if let Some(t) = wp {
+        painter.text(egui::pos2(rect.min.x + 6.0, y + 18.0), egui::Align2::LEFT_TOP, t, font, egui::Color32::from_gray(225));
     }
     over
+}
+
+/// Place Pivot To View: the pointer on the screen-parallel plane through the
+/// working pivot.
+fn working_pivot_view_point(app: &LoomApp, index: usize, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Option<Vec3> {
+    let local = Vec2::new(p.x - rect.left(), p.y - rect.top());
+    let (origin, dir) = loom_render::pick::screen_to_world_ray(local, Vec2::new(rect.width(), rect.height()), view, proj);
+    let n = loom_commands::transform::view_axes(&app.state, index).z_axis;
+    let denom = dir.dot(n);
+    if denom.abs() <= 1e-6 {
+        return None;
+    }
+    let t = (app.state.working_pivot.origin - origin).dot(n) / denom;
+    (t >= 0.0).then_some(origin + dir * t)
 }
 
 /// World units per screen pixel at the view's focus distance.
