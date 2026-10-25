@@ -196,7 +196,7 @@ impl BevyRenderer {
         // An orthographic camera from above that holds the whole scene, so
         // every light that reaches it is in its (single) light cluster.
         let (lo, hi) = object.mesh.aabb();
-        let (mut centre, mut radius) = (Vec3::from((lo + hi) * 0.5), ((hi - lo) * 0.5).length().max(1e-3));
+        let (mut centre, mut radius) = ((lo + hi) * 0.5, ((hi - lo) * 0.5).length().max(1e-3));
         if let Some((c, r)) = self.bounds {
             let d = (c - centre).length();
             if d + r > radius {
