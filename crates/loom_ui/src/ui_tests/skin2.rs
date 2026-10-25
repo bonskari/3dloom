@@ -143,14 +143,13 @@ fn weight_table_exclusions_flip_ui_vertex_sets_and_highlight() {
     h.click(id2);
     h.click(id2);
     assert_eq!(h.app.state.skin_ui.highlight, Some(2));
-    // Vertex Sets > Create Set from the selected vertex.
-    h.click(window_text(&h, "Weight Table", "Vertex Sets"));
-    let field = h.widgets.iter().find(|w| w.0 == egui::accesskit::Role::TextInput && w.2.min.y > area.min.y).map(|w| w.2).expect("the set name field");
-    h.click(field.center());
-    h.run(vec![egui::Event::Text("joint".into())]);
-    h.frames(1);
-    h.click_text_anywhere("Create Set");
-    assert_eq!(skin(&h).vertex_sets, vec![("joint".to_owned(), vec![2])]);
+    // A vertex set picked from the drop-down at the lower left selects its vertices.
+    h.cmd(Command::SkinSelectVertices { ids: vec![5, 6], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::SkinAddVertexSet { name: "joint".into() });
+    h.cmd(Command::SkinSelectVertices { ids: vec![], op: loom_commands::SelectOp::Replace });
+    h.click(window_text(&h, "Weight Table", "Vertex Set"));
+    h.click_text_anywhere("joint");
+    assert_eq!(loom_commands::skin::selection(&h.app.state), vec![5, 6]);
     // Options > Flip UI: the bones run down the left.
     h.click(window_text(&h, "Weight Table", "Options"));
     h.click_text_anywhere("Flip UI");
