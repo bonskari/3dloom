@@ -6,6 +6,7 @@
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::Command;
+use loom_scene::render::{AaFilter, AoQuality, Tonemapper};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Panel {
@@ -41,17 +42,31 @@ impl Setup {
 #[derive(Default)]
 struct Bevy {
     antialiasing: Option<bool>,
+    filter: Option<AaFilter>,
+    filter_size: Option<f32>,
     supersampling: Option<u32>,
+    passes: Option<u32>,
     shadows: Option<bool>,
     shadow_map_size: Option<u32>,
+    area_shadows: Option<bool>,
     background: Option<[f32; 3]>,
     ambient: Option<[f32; 3]>,
+    ambient_occlusion: Option<bool>,
+    ao_quality: Option<AoQuality>,
+    ao_radius: Option<f32>,
+    reflections: Option<bool>,
+    sky_lighting: Option<bool>,
+    sky_intensity: Option<f32>,
+    ground: Option<f32>,
+    tonemapper: Option<Tonemapper>,
+    exposure: Option<f32>,
+    dither: Option<bool>,
 }
 
 impl Bevy {
     fn cmd(self) -> Command {
-        let Bevy { antialiasing, supersampling, shadows, shadow_map_size, background, ambient } = self;
-        Command::BevyRendererSettings { antialiasing, supersampling, shadows, shadow_map_size, background, ambient }
+        let Bevy { antialiasing, filter, filter_size, supersampling, passes, shadows, shadow_map_size, area_shadows, background, ambient, ambient_occlusion, ao_quality, ao_radius, reflections, sky_lighting, sky_intensity, ground, tonemapper, exposure, dither } = self;
+        Command::BevyRendererSettings { antialiasing, filter, filter_size, supersampling, passes, shadows, shadow_map_size, area_shadows, background, ambient, ambient_occlusion, ao_quality, ao_radius, reflections, sky_lighting, sky_intensity, ground, tonemapper, exposure, dither }
     }
 }
 
@@ -67,6 +82,16 @@ fn merge_drag(app: &mut LoomApp, r: &egui::Response) {
 
 fn run(app: &mut LoomApp, c: Command) {
     let _ = app.dispatch(c);
+}
+
+/// A renderer spinner: a drag is one undo step.
+fn spin_f32(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::RangeInclusive<f32>, args: impl FnOnce(f32) -> Bevy) {
+    let mut v = value;
+    let r = ui.add(crate::spinner::spin(ui, &mut v, range).speed(0.01).max_decimals(3));
+    merge_drag(app, &r);
+    if r.changed() {
+        run(app, args(v).cmd());
+    }
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
@@ -182,12 +207,26 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
     let b = app.state.scene.render.bevy.clone();
     ui.label(egui::RichText::new("Bevy Renderer").strong());
-    ui.label(egui::RichText::new("Image Quality").strong());
+    ui.label(egui::RichText::new("Antialiasing").strong());
     ui.horizontal(|ui| {
         let mut aa = b.antialiasing;
-        if ui.checkbox(&mut aa, "Antialiasing (4x MSAA)").changed() {
+        if ui.checkbox(&mut aa, "Antialiasing").changed() {
             run(app, Bevy { antialiasing: Some(aa), ..Default::default() }.cmd());
         }
+        ui.add_enabled_ui(b.antialiasing, |ui| {
+            ui.label("Filter:");
+            egui::ComboBox::from_id_salt("render_aa_filter").selected_text(b.filter.label()).show_ui(ui, |ui| {
+                for f in AaFilter::ALL {
+                    if ui.selectable_label(f == b.filter, f.label()).clicked() {
+                        run(app, Bevy { filter: Some(f), ..Default::default() }.cmd());
+                    }
+                }
+            });
+            ui.label("Filter Size:");
+            spin_f32(ui, app, b.filter_size, 1.0..=10.0, |v| Bevy { filter_size: Some(v), ..Default::default() });
+        });
+    });
+    ui.horizontal(|ui| {
         ui.label("Supersampling:");
         egui::ComboBox::from_id_salt("render_supersampling").selected_text(format!("{}x{}", b.supersampling, b.supersampling)).show_ui(ui, |ui| {
             for n in 1..=4u32 {
@@ -196,15 +235,22 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
         });
+        ui.label("Passes:");
+        let mut passes = b.passes;
+        let r = ui.add(crate::spinner::spin(ui, &mut passes, 1..=64u32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Bevy { passes: Some(passes), ..Default::default() }.cmd());
+        }
     });
-    ui.label(egui::RichText::new("Key Light").strong());
+    ui.label(egui::RichText::new("Shadows").strong());
     ui.horizontal(|ui| {
         let mut sh = b.shadows;
         if ui.checkbox(&mut sh, "Shadows").changed() {
             run(app, Bevy { shadows: Some(sh), ..Default::default() }.cmd());
         }
-        ui.label("Map Size:");
         ui.add_enabled_ui(b.shadows, |ui| {
+            ui.label("Map Size:");
             egui::ComboBox::from_id_salt("render_shadow_map").selected_text(b.shadow_map_size.to_string()).show_ui(ui, |ui| {
                 for n in [512u32, 1024, 2048, 4096, 8192] {
                     if ui.selectable_label(n == b.shadow_map_size, n.to_string()).clicked() {
@@ -212,7 +258,63 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
                     }
                 }
             });
+            let mut area = b.area_shadows;
+            if ui.checkbox(&mut area, "Area Shadows").on_hover_text("Soft shadows from each light's Source Radius, over the passes").changed() {
+                run(app, Bevy { area_shadows: Some(area), ..Default::default() }.cmd());
+            }
         });
+    });
+    ui.label(egui::RichText::new("Global Illumination").strong());
+    ui.horizontal(|ui| {
+        let mut ao = b.ambient_occlusion;
+        if ui.checkbox(&mut ao, "Ambient Occlusion").changed() {
+            run(app, Bevy { ambient_occlusion: Some(ao), ..Default::default() }.cmd());
+        }
+        ui.add_enabled_ui(b.ambient_occlusion, |ui| {
+            ui.label("Quality:");
+            egui::ComboBox::from_id_salt("render_ao_quality").selected_text(b.ao_quality.label()).show_ui(ui, |ui| {
+                for q in AoQuality::ALL {
+                    if ui.selectable_label(q == b.ao_quality, q.label()).clicked() {
+                        run(app, Bevy { ao_quality: Some(q), ..Default::default() }.cmd());
+                    }
+                }
+            });
+            ui.label("Radius:");
+            spin_f32(ui, app, b.ao_radius, 0.001..=1.0e6, |v| Bevy { ao_radius: Some(v), ..Default::default() });
+        });
+    });
+    ui.horizontal(|ui| {
+        let mut refl = b.reflections;
+        if ui.checkbox(&mut refl, "Reflections").changed() {
+            run(app, Bevy { reflections: Some(refl), ..Default::default() }.cmd());
+        }
+        let mut sky = b.sky_lighting;
+        if ui.checkbox(&mut sky, "Sky Lighting").on_hover_text("The ambient light comes from a sky dome that glossy surfaces reflect").changed() {
+            run(app, Bevy { sky_lighting: Some(sky), ..Default::default() }.cmd());
+        }
+        ui.add_enabled_ui(b.sky_lighting, |ui| {
+            ui.label("Intensity:");
+            spin_f32(ui, app, b.sky_intensity, 0.0..=10.0, |v| Bevy { sky_intensity: Some(v), ..Default::default() });
+            ui.label("Ground:");
+            spin_f32(ui, app, b.ground, 0.0..=1.0, |v| Bevy { ground: Some(v), ..Default::default() });
+        });
+    });
+    ui.label(egui::RichText::new("Exposure Control").strong());
+    ui.horizontal(|ui| {
+        ui.label("Tone Mapping:");
+        egui::ComboBox::from_id_salt("render_tonemapper").selected_text(b.tonemapper.label()).show_ui(ui, |ui| {
+            for t in Tonemapper::ALL {
+                if ui.selectable_label(t == b.tonemapper, t.label()).clicked() {
+                    run(app, Bevy { tonemapper: Some(t), ..Default::default() }.cmd());
+                }
+            }
+        });
+        ui.label("Exposure:");
+        spin_f32(ui, app, b.exposure, -10.0..=10.0, |v| Bevy { exposure: Some(v), ..Default::default() });
+        let mut dither = b.dither;
+        if ui.checkbox(&mut dither, "Dither").changed() {
+            run(app, Bevy { dither: Some(dither), ..Default::default() }.cmd());
+        }
     });
     ui.label(egui::RichText::new("Environment").strong());
     ui.horizontal(|ui| {

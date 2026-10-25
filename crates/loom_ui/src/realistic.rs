@@ -39,8 +39,22 @@ fn render_flags(scene: &loom_scene::Scene, id: loom_scene::NodeId) -> loom_bevy:
     loom_bevy::ObjectFlags { cast_shadows: r.cast_shadows, receive_shadows: r.receive_shadows, visible_to_camera: r.visible_to_camera, visibility: scene.render_visibility(id) }
 }
 
-/// Output pixels per bucket side.
+/// Output pixels per bucket side, for areas too large to render whole.
 pub const BUCKET: u32 = 256;
+/// Largest rendered pass side: an area whose supersampled size fits renders
+/// as one bucket, so the screen-space effects see the whole frame.
+const WHOLE: u32 = 4096;
+
+/// Bucket side for `area` at `ss` samples per pixel side: the whole area when it fits.
+pub fn bucket_size(area: [u32; 4], ss: u32) -> u32 {
+    let side = (area[2] - area[0]).max(area[3] - area[1]);
+    // Room for the pass's margin (filter reach and screen-space view).
+    if (side + 48) * ss.max(1) <= WHOLE {
+        side.max(1)
+    } else {
+        BUCKET
+    }
+}
 /// Frames the first bucket renders before it is kept (new pipelines, the
 /// target image and the shadow map settle).
 const WARMUP: u32 = 3;
@@ -55,9 +69,13 @@ pub struct RenderJob {
     /// Where the output image starts in that frame.
     origin: [f32; 2],
     out: [u32; 2],
-    /// Bucket corners in output pixels, in render order.
+    /// Bucket corners in output pixels, in render order, and their side.
     buckets: Vec<[u32; 2]>,
+    bucket: u32,
     next: usize,
+    /// Passes per bucket, and those of the current bucket so far.
+    passes: u32,
+    pass: u32,
     warmup: u32,
     /// Frames whose bucket could not be read back yet.
     misses: u32,
@@ -98,39 +116,18 @@ pub fn render_geometry(s: &loom_scene::render::RenderSettings) -> ([f32; 2], [f3
 }
 
 /// Bucket corners covering `area` (x0, y0, x1, y1), top row first.
-pub fn buckets(area: [u32; 4]) -> Vec<[u32; 2]> {
+pub fn buckets(area: [u32; 4], side: u32) -> Vec<[u32; 2]> {
     let mut v = Vec::new();
     let mut y = area[1];
     while y < area[3] {
         let mut x = area[0];
         while x < area[2] {
             v.push([x, y]);
-            x += BUCKET;
+            x += side;
         }
-        y += BUCKET;
+        y += side;
     }
     v
-}
-
-/// Averages `s` x `s` blocks (supersampling).
-fn downsample(img: &image::RgbaImage, s: u32) -> image::RgbaImage {
-    if s <= 1 {
-        return img.clone();
-    }
-    let (w, h) = (img.width() / s, img.height() / s);
-    image::RgbaImage::from_fn(w, h, |x, y| {
-        let mut sum = [0u32; 4];
-        for dy in 0..s {
-            for dx in 0..s {
-                let p = img.get_pixel(x * s + dx, y * s + dy).0;
-                for i in 0..4 {
-                    sum[i] += p[i] as u32;
-                }
-            }
-        }
-        let n = s * s;
-        image::Rgba(sum.map(|v| ((v + n / 2) / n) as u8))
-    })
 }
 
 /// A cleared frame: the background colour with alpha 0.
@@ -319,6 +316,7 @@ impl LoomApp {
             force_two_sided: s.force_two_sided,
             selected_only,
             hidden: s.render_hidden,
+            quality: s.bevy.clone(),
         };
         let aspect = s.image_aspect();
         let cam = self.camera_for(req.viewport);
@@ -337,12 +335,14 @@ impl LoomApp {
         };
         self.state.rendered.set_image(Some(Arc::new(base)));
         let area = mask.unwrap_or([0, 0, out[0], out[1]]);
-        let list = buckets(area);
-        self.state.rendered.progress = Some(loom_commands::render::RenderProgress { done: 0, total: list.len() as u32, paused: false });
+        let bucket = bucket_size(area, s.bevy.supersampling.clamp(1, 4));
+        let list = buckets(area, bucket);
+        let passes = s.bevy.passes.clamp(1, 64);
+        self.state.rendered.progress = Some(loom_commands::render::RenderProgress { done: 0, total: list.len() as u32 * passes, paused: false });
         self.state.rendered.cancel = false;
         self.state.rendered.open = true;
         self.state.status_prompt = format!("Rendering {}x{}...", out[0], out[1]);
-        self.render_job = Some(RenderJob { req, camera, aspect, full, origin, out, buckets: list, next: 0, warmup: WARMUP, misses: 0, mask, started: std::time::Instant::now(), queued: false });
+        self.render_job = Some(RenderJob { req, camera, aspect, full, origin, out, buckets: list, bucket, next: 0, passes, pass: 0, warmup: WARMUP, misses: 0, mask, started: std::time::Instant::now(), queued: false });
         Ok(())
     }
 
@@ -358,16 +358,16 @@ impl LoomApp {
             return;
         }
         let Some(&[bx, by]) = job.buckets.get(job.next) else { return };
-        let ss = job.req.settings.bevy.supersampling.clamp(1, 4);
+        let side = job.bucket;
         let sub = [
             (job.origin[0] + bx as f32) / job.full[0],
             (job.origin[1] + by as f32) / job.full[1],
-            (job.origin[0] + (bx + BUCKET) as f32) / job.full[0],
-            (job.origin[1] + (by + BUCKET) as f32) / job.full[1],
+            (job.origin[0] + (bx + side) as f32) / job.full[0],
+            (job.origin[1] + (by + side) as f32) / job.full[1],
         ];
         let (camera, aspect) = (job.camera, job.aspect);
         let Gpu::Running(b) = &mut self.gpu else { return };
-        if b.renderer.set_render_bucket(&camera, aspect, sub, [BUCKET * ss; 2]).is_ok() {
+        if b.renderer.set_render_bucket(&camera, aspect, sub, [side; 2]).is_ok() {
             if let Some(job) = self.render_job.as_mut() {
                 job.queued = true;
             }
@@ -395,9 +395,10 @@ impl LoomApp {
                 return;
             }
         };
-        let ss = job.req.settings.bevy.supersampling.clamp(1, 4);
-        let tile = downsample(&tile, ss);
+        // Every pass shows; the bucket is done once all its passes are in.
+        let done = b.renderer.bucket_done();
         let [bx, by] = job.buckets[job.next];
+        let side = job.bucket;
         let (out, mask) = (job.out, job.mask);
         let composite = job.req.settings.area == RenderArea::Selected;
         let bg = job.req.settings.bevy.background;
@@ -408,7 +409,7 @@ impl LoomApp {
         }
         let img = Arc::make_mut(img);
         let [x0, y0, x1, y1] = mask.unwrap_or([0, 0, out[0], out[1]]);
-        let (w, h) = ((bx + BUCKET).min(x1) - bx, (by + BUCKET).min(y1) - by);
+        let (w, h) = ((bx + side).min(x1) - bx, (by + side).min(y1) - by);
         for y in 0..h {
             for x in 0..w {
                 let (px, py) = (bx + x, by + y);
@@ -438,9 +439,13 @@ impl LoomApp {
             let (ax1, ay1) = ((d[0] + d[2]).max(r[0] + r[2]), (d[1] + d[3]).max(r[1] + r[3]));
             [ax0, ay0, ax1 - ax0, ay1 - ay0]
         });
-        job.next += 1;
+        job.pass += 1;
+        if done {
+            job.next += 1;
+            job.pass = 0;
+        }
         if let Some(p) = frame.progress.as_mut() {
-            p.done = job.next as u32;
+            p.done = job.next as u32 * job.passes + job.pass;
         }
         if job.next >= job.buckets.len() {
             self.finish_render(Ok(()));
@@ -555,16 +560,19 @@ mod tests {
 
     #[test]
     fn buckets_cover_the_area_row_by_row() {
-        let b = buckets([0, 0, 600, 300]);
+        let b = buckets([0, 0, 600, 300], 256);
         assert_eq!(b, vec![[0, 0], [256, 0], [512, 0], [0, 256], [256, 256], [512, 256]]);
-        assert_eq!(buckets([100, 100, 110, 120]), vec![[100, 100]]);
+        assert_eq!(buckets([100, 100, 110, 120], 256), vec![[100, 100]]);
     }
 
+    /// An area that fits renders whole (the screen-space effects then see
+    /// all of it); a large or heavily supersampled one in 256 px buckets.
     #[test]
-    fn supersampled_buckets_average_their_samples() {
-        let img = image::RgbaImage::from_fn(4, 2, |x, _| if x % 2 == 0 { image::Rgba([200, 0, 0, 255]) } else { image::Rgba([0, 0, 100, 255]) });
-        let d = downsample(&img, 2);
-        assert_eq!(d.dimensions(), (2, 1));
-        assert_eq!(d.get_pixel(0, 0).0, [100, 0, 50, 255]);
+    fn small_enough_areas_render_as_one_bucket() {
+        assert_eq!(bucket_size([0, 0, 1280, 720], 1), 1280);
+        assert_eq!(buckets([0, 0, 1280, 720], 1280), vec![[0, 0]]);
+        assert_eq!(bucket_size([0, 0, 1280, 720], 4), BUCKET);
+        assert_eq!(bucket_size([0, 0, 8000, 100], 1), BUCKET);
+        assert_eq!(bucket_size([100, 50, 300, 450], 2), 400);
     }
 }

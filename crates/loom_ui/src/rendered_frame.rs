@@ -247,7 +247,7 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         if let Some(p) = app.state.rendered.progress {
             ui.horizontal(|ui| {
                 let secs = app.render_job.as_ref().map(|j| j.elapsed().as_secs_f32()).unwrap_or(0.0);
-                let label = format!("Rendering bucket {} of {}  {secs:.1} s", (p.done + 1).min(p.total), p.total);
+                let label = format!("Rendering pass {} of {}  {secs:.1} s", (p.done + 1).min(p.total), p.total);
                 ui.add(egui::ProgressBar::new(p.done as f32 / p.total.max(1) as f32).text(label).desired_width(320.0));
                 if ui.button(if p.paused { "Resume" } else { "Pause" }).clicked() {
                     let _ = app.dispatch(Command::PauseRender);

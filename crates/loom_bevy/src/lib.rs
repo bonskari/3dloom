@@ -6,6 +6,7 @@
 pub mod bake;
 pub mod convert;
 pub mod lights;
+pub mod quality;
 
 use std::collections::{HashMap, HashSet};
 
@@ -70,11 +71,40 @@ pub struct RenderOptions {
     pub selected_only: Option<Vec<u64>>,
     /// Render Hidden Geometry: the objects given to `sync_hidden` render too.
     pub hidden: bool,
+    /// The panel's quality controls: antialiasing filter, supersampling,
+    /// passes, area shadows, ambient occlusion, reflections, sky lighting
+    /// and exposure control (its shadows, map size and colours are the fields above).
+    pub quality: loom_scene::render::BevyRenderSettings,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        Self { msaa: true, shadows: true, shadow_map_size: 4096, background: [0.0; 3], ambient: [1.0; 3], force_two_sided: false, selected_only: None, hidden: false }
+        Self { msaa: true, shadows: true, shadow_map_size: 4096, background: [0.0; 3], ambient: [1.0; 3], force_two_sided: false, selected_only: None, hidden: false, quality: Default::default() }
+    }
+}
+
+/// The world scale a render with ambient occlusion uses: Bevy's ambient
+/// occlusion reaches a fixed 0.73 world units, so the world shrinks until
+/// that is the AO Radius.
+const AO_REACH: f32 = 0.5 * 1.457;
+
+impl RenderOptions {
+    /// Whether the render camera needs the screen-space passes (and so no MSAA).
+    fn screen_space(&self) -> bool {
+        self.quality.ambient_occlusion || self.quality.reflections
+    }
+
+    fn world_scale(&self) -> f32 {
+        if self.quality.ambient_occlusion {
+            AO_REACH / self.quality.ao_radius.max(1e-3)
+        } else {
+            1.0
+        }
+    }
+
+    /// Passes per bucket.
+    fn passes(&self) -> u32 {
+        self.quality.passes.clamp(1, 64)
     }
 }
 
@@ -176,12 +206,22 @@ pub struct BevyRenderer {
     hidden: HashMap<u64, Object>,
     /// The render in progress: its options and what it changed, to restore.
     render: Option<ActiveRender>,
+    /// World units per scene unit (see `AO_REACH`); 1 outside renders.
+    scale: f32,
+    /// The pass the lights are placed for (their Source Radius jitter).
+    light_pass: u32,
 }
 
 struct ActiveRender {
     options: RenderOptions,
     /// Materials made 2-sided by Force 2-Sided, with their own setting.
     two_sided: Vec<(Handle<StandardMaterial>, bool, Option<bevy::render::render_resource::Face>)>,
+    /// Materials drawn deferred for the reflections, with their own method.
+    deferred: Vec<(Handle<StandardMaterial>, bevy::pbr::OpaqueRendererMethod)>,
+    /// The render camera has its quality components.
+    camera_ready: bool,
+    /// The bucket's passes so far.
+    accum: Option<quality::Accum>,
 }
 
 impl BevyRenderer {
@@ -214,7 +254,7 @@ impl BevyRenderer {
         app.insert_resource(AmbientLight { color: Color::WHITE, brightness: AMBIENT_BRIGHTNESS, affects_lightmapped_meshes: true });
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         let light = Some(Self::spawn_key_light(&mut app));
-        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, samples: Vec::new(), scene_lights: HashMap::new(), bounds: None, settle: 3, hidden: HashMap::new(), render: None }
+        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, samples: Vec::new(), scene_lights: HashMap::new(), bounds: None, settle: 3, hidden: HashMap::new(), render: None, scale: 1.0, light_pass: 0 }
     }
 
     /// Default lighting: a key light with shadows.
@@ -262,17 +302,15 @@ impl BevyRenderer {
                 l.shadows_enabled = shadows;
             }
         }
-        // The Render Setup ambient colour (sRGB tint), plus the skylights and Ambient Only lights.
-        let t = Color::srgb(tint[0], tint[1], tint[2]).to_linear();
-        let (sky_color, sky) = lights::ambient(&self.samples);
-        let sky_color = sky_color.to_linear();
-        let sum = Vec3::new(t.red, t.green, t.blue) * AMBIENT_BRIGHTNESS + Vec3::new(sky_color.red, sky_color.green, sky_color.blue) * sky;
-        let b = sum.max_element();
-        let color = if b > 0.0 { Color::linear_rgb(sum.x / b, sum.y / b, sum.z / b) } else { Color::BLACK };
-        self.app.insert_resource(AmbientLight { color, brightness: b.max(0.0), affects_lightmapped_meshes: true });
+        let (color, b) = self.ambient_light(tint);
+        self.app.insert_resource(AmbientLight { color, brightness: b, affects_lightmapped_meshes: true });
         let mut seen = HashSet::new();
         let mut map_size = 0usize;
         let samples = self.samples.clone();
+        let scale = self.scale;
+        // Area Shadows: each pass moves the lights over their Source Radius
+        // (a point light then has no radius of its own: the passes are its size).
+        let area = options.as_ref().filter(|o| o.quality.area_shadows && o.passes() > 1).map(|o| quality::disk(self.light_pass, o.passes()));
         for (i, s) in samples.iter().enumerate() {
             let Some(kind) = lights::kind(s) else { continue };
             seen.insert(s.id.0);
@@ -291,14 +329,20 @@ impl BevyRenderer {
             };
             let mut s = s.clone();
             s.shadows &= shadows;
+            if let (Some(d), true) = (area, s.source_radius > 0.0) {
+                lights::move_over_source(&mut s, d, centre);
+                s.source_radius = 0.0;
+            }
+            let mut transform = lights::transform(&s);
+            transform.translation *= scale;
             let mut e = world.entity_mut(entity);
-            e.insert((lights::transform(&s), RenderLayers::from_layers(&[LIGHT_LAYER, LIGHT_LAYER + 1 + i])));
+            e.insert((transform, RenderLayers::from_layers(&[LIGHT_LAYER, LIGHT_LAYER + 1 + i])));
             match kind {
                 lights::Kind::Point => {
-                    e.insert(lights::point(&s, centre_distance, radius));
+                    e.insert(lights::scaled_point(lights::point(&s, centre_distance, radius), scale));
                 }
                 lights::Kind::Spot => {
-                    e.insert(lights::spot(&s, centre_distance, radius));
+                    e.insert(lights::scaled_spot(lights::spot(&s, centre_distance, radius), scale));
                 }
                 lights::Kind::Directional => {
                     e.insert(lights::directional(&s));
@@ -314,9 +358,25 @@ impl BevyRenderer {
                 self.app.world_mut().despawn(l.entity);
             }
         }
+        if let Some(o) = options.as_ref() {
+            // Renders give no light a smaller map than Render Setup's.
+            map_size = map_size.max(o.shadow_map_size as usize);
+        }
         if map_size > 0 {
             self.app.insert_resource(PointLightShadowMap { size: map_size.clamp(128, 8192) });
         }
+    }
+
+    /// The ambient light's colour (largest channel 1) and brightness: the
+    /// Render Setup ambient colour (sRGB `tint`), plus the skylights and Ambient Only lights.
+    fn ambient_light(&self, tint: [f32; 3]) -> (Color, f32) {
+        let t = Color::srgb(tint[0], tint[1], tint[2]).to_linear();
+        let (sky_color, sky) = lights::ambient(&self.samples);
+        let sky_color = sky_color.to_linear();
+        let sum = Vec3::new(t.red, t.green, t.blue) * AMBIENT_BRIGHTNESS + Vec3::new(sky_color.red, sky_color.green, sky_color.blue) * sky;
+        let b = sum.max_element();
+        let color = if b > 0.0 { Color::linear_rgb(sum.x / b, sum.y / b, sum.z / b) } else { Color::BLACK };
+        (color, b.max(0.0))
     }
 
     /// The Bevy light entity of scene light `id` (tests and debugging).
@@ -434,20 +494,26 @@ impl BevyRenderer {
                 let world = self.app.world_mut();
                 let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
                 let material_handle = world.resource_mut::<Assets<StandardMaterial>>().add(mat);
-                let e = world.spawn((Transform::IDENTITY, Mesh3d(mesh), MeshMaterial3d(material_handle.clone()), layers.clone()));
+                let e = world.spawn((Transform::from_scale(Vec3::splat(self.scale)), Mesh3d(mesh), MeshMaterial3d(material_handle.clone()), layers.clone()));
                 let mut e = Self::shadow_flags(e, Self::cast_flags(o));
                 // Bevy computes bounds only once per entity: keep them current.
                 if let Some(b) = d.aabb() {
                     e.insert(b);
                 }
                 let entity = e.id();
-                if let Some(r) = self.render.as_mut().filter(|r| r.options.force_two_sided) {
-                    // A render in progress with Force 2-Sided: new materials too.
+                if let Some(r) = self.render.as_mut() {
+                    // A render in progress: new materials get its changes too.
                     let mut mats = self.app.world_mut().resource_mut::<Assets<StandardMaterial>>();
                     if let Some(m) = mats.get_mut(&material_handle) {
-                        r.two_sided.push((material_handle.clone(), m.double_sided, m.cull_mode));
-                        m.double_sided = true;
-                        m.cull_mode = None;
+                        if r.options.force_two_sided {
+                            r.two_sided.push((material_handle.clone(), m.double_sided, m.cull_mode));
+                            m.double_sided = true;
+                            m.cull_mode = None;
+                        }
+                        if r.options.quality.reflections {
+                            r.deferred.push((material_handle.clone(), m.opaque_render_method));
+                            m.opaque_render_method = bevy::pbr::OpaqueRendererMethod::Deferred;
+                        }
                     }
                 }
                 entities.push((entity, material_handle));
@@ -517,8 +583,15 @@ impl BevyRenderer {
         let mut m = self.surface_material(surface, wire_color);
         let v = visibility.clamp(0.0, 1.0);
         if v < 1.0 {
-            // Visibility fades the object like its material's opacity.
-            m.base_color = m.base_color.with_alpha(m.base_color.alpha() * v);
+            // Visibility fades the whole object, highlights too.
+            if m.alpha_mode == bevy::render::alpha::AlphaMode::Premultiplied {
+                // Back to a straight colour: blending fades all of it.
+                let c = m.base_color.to_linear();
+                let a = c.alpha.max(1e-6);
+                m.base_color = Color::linear_rgba(c.red / a, c.green / a, c.blue / a, c.alpha * v);
+            } else {
+                m.base_color = m.base_color.with_alpha(m.base_color.alpha() * v);
+            }
             m.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
         }
         m
@@ -539,6 +612,10 @@ impl BevyRenderer {
                 m.base_color = Color::srgba(k, k, k, 1.0);
                 if opacity.is_some() {
                     m.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
+                } else if m.alpha_mode == bevy::render::alpha::AlphaMode::Premultiplied {
+                    // The texture's alpha is the Opacity: premultiply its colour by it.
+                    let k = Color::srgb(k, k, k).to_linear().red * s.opacity;
+                    m.base_color = Color::linear_rgba(k, k, k, 1.0);
                 }
             }
             let coords = diffuse.as_ref().or(opacity.as_ref()).map(|(_, m)| m);
@@ -560,8 +637,9 @@ impl BevyRenderer {
             if let Some(img) = self.baked(map) {
                 let key = format!("spec:{}:{}", loom_scene::maps::texture_key(map), map.amount);
                 m.specular_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::luminance(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
-                // The texture's alpha 0–1 maps to reflectance 0–0.5 times this.
-                m.reflectance = (s.specular_level / 100.0).clamp(0.0, 2.0);
+                // The texture's alpha 0–1 maps to reflectance 0–0.5 times
+                // this: white in the map gives the Specular Level's own.
+                m.reflectance *= 2.0;
             }
         }
         if let Some(map) = s.self_illum_map.as_ref() {
@@ -622,6 +700,7 @@ impl BevyRenderer {
     /// the background behind the image show). Views not set before an update stop rendering.
     pub fn set_view(&mut self, slot: u32, size: [u32; 2], camera: &ViewCamera, clear: [f32; 4], msaa: bool) {
         let aspect = size[0].max(1) as f32 / size[1].max(1) as f32;
+        let camera = camera.scaled(self.scale);
         self.place_view(slot, size, camera.bevy_projection(aspect), camera.view, clear, msaa, RenderLayers::layer(VIEWPORT_LAYER));
     }
 
@@ -643,18 +722,24 @@ impl BevyRenderer {
                     v.generation += 1;
                 }
                 None => {
+                    // The render camera works in HDR: its exposure control tone maps.
                     let entity = self
                         .app
                         .world_mut()
-                        .spawn((Camera3d::default(), Tonemapping::AcesFitted, Camera { order: slot.min(1 << 20) as isize, ..Default::default() }))
+                        .spawn((Camera3d::default(), Tonemapping::AcesFitted, Camera { order: slot.min(1 << 20) as isize, hdr: slot == RENDER_SLOT, ..Default::default() }))
                         .id();
                     self.views.insert(slot, View { camera: entity, image: image.clone(), size, msaa, used: false, generation: 0 });
                 }
             }
             self.settle = self.settle.max(3);
         }
+        // A render drawing deferred (for its reflections) holds the
+        // viewports: they draw forward and would miss the deferred objects.
+        let held = slot != RENDER_SLOT && self.render.as_ref().is_some_and(|r| r.options.quality.reflections);
+        // The screen-space passes need the camera without MSAA.
+        let msaa = msaa && !(slot == RENDER_SLOT && self.render.as_ref().is_some_and(|r| r.options.screen_space()));
         let v = self.views.get_mut(&slot).expect("inserted above");
-        v.used = true;
+        v.used = !held;
         let (entity, image) = (v.camera, v.image.clone());
         let mut e = self.app.world_mut().entity_mut(entity);
         // Camera is changed in place: inserting it anew would drop the
@@ -664,10 +749,66 @@ impl BevyRenderer {
                 cam.target = RenderTarget::Image(image.into());
             }
             cam.clear_color = ClearColorConfig::Custom(clear);
-            cam.is_active = true;
+            cam.is_active = !held;
         }
         // Every view sees the scene lights' layer.
         e.insert((projection, Transform::from_matrix(view.inverse()), if msaa { Msaa::Sample4 } else { Msaa::Off }, layers.with(LIGHT_LAYER)));
+    }
+
+    /// Gives the render camera the render's quality settings: exposure
+    /// control, ambient occlusion, reflections and the sky dome.
+    fn setup_render_camera(&mut self) {
+        use bevy::core_pipeline::tonemapping::DebandDither;
+        use bevy::pbr::{EnvironmentMapLight, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceReflections, ShadowFilteringMethod};
+        use bevy::render::camera::Exposure;
+        use loom_scene::render::{AoQuality, Tonemapper};
+        let Some(r) = self.render.as_ref() else { return };
+        let Some(v) = self.views.get(&RENDER_SLOT) else { return };
+        let o = r.options.clone();
+        let q = &o.quality;
+        let entity = v.camera;
+        let tonemapping = match q.tonemapper {
+            Tonemapper::None => Tonemapping::None,
+            Tonemapper::Reinhard => Tonemapping::Reinhard,
+            Tonemapper::Aces => Tonemapping::AcesFitted,
+            Tonemapper::AgX => Tonemapping::AgX,
+            Tonemapper::TonyMcMapface => Tonemapping::TonyMcMapface,
+            Tonemapper::BlenderFilmic => Tonemapping::BlenderFilmic,
+        };
+        // The sky dome: the ambient light's colour and brightness, from a dome.
+        let sky = q.sky_lighting.then(|| {
+            let (color, brightness) = self.ambient_light(o.ambient);
+            let c = color.to_linear();
+            let (d, s) = quality::sky_maps([c.red, c.green, c.blue], q.ground);
+            let mut images = self.app.world_mut().resource_mut::<Assets<Image>>();
+            (images.add(d), images.add(s), brightness * q.sky_intensity * quality::SKY_MAP_SCALE)
+        });
+        let world = self.app.world_mut();
+        let mut e = world.entity_mut(entity);
+        e.insert((
+            tonemapping,
+            if q.dither { DebandDither::Enabled } else { DebandDither::Disabled },
+            Exposure { ev100: Exposure::default().ev100 - q.exposure },
+            // A filter that changes with every frame adds up over the passes.
+            if o.passes() > 1 { ShadowFilteringMethod::Temporal } else { ShadowFilteringMethod::Gaussian },
+        ));
+        if q.ambient_occlusion {
+            let quality_level = match q.ao_quality {
+                AoQuality::Low => ScreenSpaceAmbientOcclusionQualityLevel::Low,
+                AoQuality::Medium => ScreenSpaceAmbientOcclusionQualityLevel::Medium,
+                AoQuality::High => ScreenSpaceAmbientOcclusionQualityLevel::High,
+                AoQuality::Ultra => ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
+            };
+            e.insert(ScreenSpaceAmbientOcclusion { quality_level, ..Default::default() });
+        }
+        if q.reflections {
+            // Glossier than this reflects the view (rougher: only the sky dome).
+            e.insert(ScreenSpaceReflections { perceptual_roughness_threshold: 0.35, ..Default::default() });
+        }
+        if let Some((diffuse_map, specular_map, intensity)) = sky {
+            // The dome replaces the flat ambient light for this camera.
+            e.insert((EnvironmentMapLight { diffuse_map, specular_map, intensity, ..Default::default() }, AmbientLight { color: Color::BLACK, brightness: 0.0, affects_lightmapped_meshes: true }));
+        }
     }
 
     /// Starts a render with `options`: shadows, shadow map size, ambient
@@ -675,24 +816,40 @@ impl BevyRenderer {
     /// (the Realistic viewports see them meanwhile too).
     pub fn begin_render(&mut self, options: RenderOptions) {
         self.end_render();
+        let handles: Vec<Handle<StandardMaterial>> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
         let world = self.app.world_mut();
         world.insert_resource(DirectionalLightShadowMap { size: options.shadow_map_size.clamp(512, 8192) as usize });
-        let mut two_sided = Vec::new();
-        if options.force_two_sided {
-            let handles: Vec<Handle<StandardMaterial>> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
-            let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
-            for h in handles {
-                if let Some(m) = mats.get_mut(&h) {
-                    two_sided.push((h, m.double_sided, m.cull_mode));
-                    m.double_sided = true;
-                    m.cull_mode = None;
-                }
+        let (mut two_sided, mut deferred) = (Vec::new(), Vec::new());
+        let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
+        for h in handles {
+            let Some(m) = mats.get_mut(&h) else { continue };
+            if options.force_two_sided {
+                two_sided.push((h.clone(), m.double_sided, m.cull_mode));
+                m.double_sided = true;
+                m.cull_mode = None;
+            }
+            if options.quality.reflections {
+                // The reflections read the deferred G-buffer.
+                deferred.push((h, m.opaque_render_method));
+                m.opaque_render_method = bevy::pbr::OpaqueRendererMethod::Deferred;
             }
         }
-        self.render = Some(ActiveRender { options, two_sided });
+        self.scale = options.world_scale();
+        self.light_pass = 0;
+        self.render = Some(ActiveRender { options, two_sided, deferred, camera_ready: false, accum: None });
+        self.rescale();
         self.apply_lights();
         self.relayer();
         self.settle = self.settle.max(3);
+    }
+
+    /// Puts every object at the current world scale.
+    fn rescale(&mut self) {
+        let t = Transform::from_scale(Vec3::splat(self.scale));
+        let parts: Vec<Entity> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(e, _)| *e)).collect();
+        for e in parts {
+            self.app.world_mut().entity_mut(e).insert(t);
+        }
     }
 
     /// Puts every object on its layers again (the Selected layer or a light's exclusions changed).
@@ -705,26 +862,65 @@ impl BevyRenderer {
         }
     }
 
-    /// Renders bucket `sub` = [u0, v0, u1, v1] (fractions of the frame, v
-    /// down) of `camera` at image aspect `aspect` into a `size` image on the
-    /// next `update`; read it back with `read_render`. Needs `begin_render`.
+    /// Renders the next pass of bucket `sub` = [u0, v0, u1, v1] (fractions
+    /// of the frame, v down) of `camera` at image aspect `aspect`, `size`
+    /// output pixels, on the next `update`; add it with `read_render`. The
+    /// pass covers a margin around the bucket (the filter's reach, the
+    /// screen-space effects' view), at the supersampling's size, its samples
+    /// and lights moved for the pass. Needs `begin_render`.
     pub fn set_render_bucket(&mut self, camera: &ViewCamera, aspect: f32, sub: [f32; 4], size: [u32; 2]) -> Result<(), String> {
-        let Some(r) = self.render.as_ref() else { return Err("no render started".into()) };
-        let o = &r.options;
+        let Some(r) = self.render.as_mut() else { return Err("no render started".into()) };
+        let o = r.options.clone();
+        let q = &o.quality;
+        let size = [size[0].max(1), size[1].max(1)];
+        let radius = if q.antialiasing { q.filter_size.clamp(1.0, 10.0) * 0.5 } else { 0.5 };
+        let margin = radius.ceil() as u32 + 1 + if o.screen_space() { 16 } else { 0 };
+        if r.accum.as_ref().is_none_or(|a| a.key != (sub, size)) {
+            r.accum = Some(quality::Accum::new((sub, size), margin, q.supersampling.clamp(1, 4)));
+        }
+        let a = r.accum.as_ref().expect("set above");
+        let (pass, ss, internal) = (a.pass, a.ss as f32, a.internal_size());
+        let j = if q.antialiasing { quality::jitter(pass, o.passes()) } else { [0.0; 2] };
+        // Frame fractions per output pixel.
+        let (fx, fy) = ((sub[2] - sub[0]) / size[0] as f32, (sub[3] - sub[1]) / size[1] as f32);
+        let (m, dx, dy) = (margin as f32, j[0] / ss * fx, j[1] / ss * fy);
+        let sub = [sub[0] - m * fx + dx, sub[1] - m * fy + dy, sub[2] + m * fx + dx, sub[3] + m * fy + dy];
+        if o.quality.area_shadows && pass != self.light_pass {
+            self.light_pass = pass;
+            self.apply_lights();
+        }
         let layers = match &o.selected_only {
             Some(_) => RenderLayers::layer(SELECTED_LAYER),
             None if o.hidden => RenderLayers::from_layers(&[RENDER_LAYER, HIDDEN_LAYER]),
             None => RenderLayers::layer(RENDER_LAYER),
         };
         let clear = [o.background[0], o.background[1], o.background[2], 0.0];
-        let msaa = o.msaa;
-        self.place_view(RENDER_SLOT, size, Projection::custom(BucketProjection::new(camera, aspect, sub)), camera.view, clear, msaa, layers);
+        let camera = camera.scaled(self.scale);
+        self.place_view(RENDER_SLOT, internal, Projection::custom(BucketProjection::new(&camera, aspect, sub)), camera.view, clear, o.msaa, layers);
+        if self.render.as_ref().is_some_and(|r| !r.camera_ready) {
+            self.setup_render_camera();
+            if let Some(r) = self.render.as_mut() {
+                r.camera_ready = true;
+            }
+        }
         Ok(())
     }
 
-    /// The last bucket rendered (sRGB RGBA, background alpha 0).
-    pub fn read_render(&self) -> Result<image::RgbaImage, String> {
-        self.read_back(RENDER_SLOT)
+    /// Adds the pass rendered last to its bucket and returns the bucket so
+    /// far (sRGB RGBA, background alpha 0); `bucket_done` once all passes are in.
+    pub fn read_render(&mut self) -> Result<image::RgbaImage, String> {
+        let img = self.read_back(RENDER_SLOT)?;
+        let r = self.render.as_mut().ok_or("no render started")?;
+        let (q, passes) = (r.options.quality.clone(), r.options.passes());
+        let a = r.accum.as_mut().ok_or("no bucket set")?;
+        let (j, filter, size) = if q.antialiasing { (quality::jitter(a.pass, passes), q.filter, q.filter_size.clamp(1.0, 10.0)) } else { ([0.0; 2], loom_scene::render::AaFilter::Area, 1.0) };
+        a.add(&img, j, filter, size)?;
+        Ok(a.image())
+    }
+
+    /// Whether the bucket has all its passes.
+    pub fn bucket_done(&self) -> bool {
+        self.render.as_ref().is_some_and(|r| r.accum.as_ref().is_some_and(|a| a.pass >= r.options.passes()))
     }
 
     /// Ends the render: its camera goes, the scene's own settings return.
@@ -733,6 +929,9 @@ impl BevyRenderer {
             self.app.world_mut().despawn(v.camera);
         }
         let Some(r) = self.render.take() else { return };
+        self.scale = 1.0;
+        self.light_pass = 0;
+        self.rescale();
         self.apply_lights();
         let world = self.app.world_mut();
         world.insert_resource(DirectionalLightShadowMap { size: 2048 });
@@ -741,6 +940,11 @@ impl BevyRenderer {
             if let Some(m) = mats.get_mut(&h) {
                 m.double_sided = double_sided;
                 m.cull_mode = cull;
+            }
+        }
+        for (h, method) in r.deferred {
+            if let Some(m) = mats.get_mut(&h) {
+                m.opaque_render_method = method;
             }
         }
         if r.options.selected_only.is_some() {
@@ -752,6 +956,7 @@ impl BevyRenderer {
     /// Fits the key light's shadow range around the scene as seen from the active views.
     fn fit_shadows(&mut self) {
         let Some((centre, radius)) = self.bounds else { return };
+        let (centre, radius) = (centre * self.scale, radius * self.scale);
         let mut range: Option<(f32, f32)> = None;
         for v in self.views.values().filter(|v| v.used) {
             let Some(t) = self.app.world().get::<Transform>(v.camera) else { continue };
@@ -761,7 +966,13 @@ impl BevyRenderer {
             range = Some(range.map_or((a, b), |(lo, hi)| (lo.min(a), hi.max(b))));
         }
         let Some((min, max)) = range else { return };
-        let config = CascadeShadowConfigBuilder { num_cascades: 1, minimum_distance: min, maximum_distance: max.max(min + 1e-3), first_cascade_far_bound: max.max(min + 1e-3), overlap_proportion: 0.2 }.build();
+        let max = max.max(min + 1e-3);
+        // A render splits the range into cascades: sharper shadows near the camera.
+        let config = if self.render.is_some() {
+            CascadeShadowConfigBuilder { num_cascades: 4, minimum_distance: min, maximum_distance: max, first_cascade_far_bound: min + (max - min) * 0.1, overlap_proportion: 0.2 }.build()
+        } else {
+            CascadeShadowConfigBuilder { num_cascades: 1, minimum_distance: min, maximum_distance: max, first_cascade_far_bound: max, overlap_proportion: 0.2 }.build()
+        };
         let directional = self.scene_lights.values().filter(|l| l.kind == lights::Kind::Directional).map(|l| l.entity);
         let entities: Vec<Entity> = self.light.into_iter().chain(directional).collect();
         for e in entities {
@@ -805,20 +1016,34 @@ impl BevyRenderer {
     }
 
     /// Renders `camera` at `width` x `height` in one go with the default
-    /// render options (4x MSAA, 4096 px shadows) and reads the pixels back
-    /// (sRGB RGBA, black background with alpha 0).
+    /// render options and reads the pixels back (sRGB RGBA, black
+    /// background with alpha 0).
     pub fn render_image(&mut self, width: u32, height: u32, camera: &ViewCamera) -> Result<image::RgbaImage, String> {
+        self.render_with(width, height, camera, RenderOptions::default())
+    }
+
+    /// Renders `camera` at `width` x `height` with `options`, every pass.
+    pub fn render_with(&mut self, width: u32, height: u32, camera: &ViewCamera, options: RenderOptions) -> Result<image::RgbaImage, String> {
         if width == 0 || height == 0 {
             return Err(format!("render size {width}x{height}"));
         }
-        self.begin_render(RenderOptions::default());
-        // A few frames: new pipelines, the target image and the shadow map settle first.
+        self.begin_render(options);
         let aspect = width as f32 / height as f32;
-        for _ in 0..4 {
-            self.set_render_bucket(camera, aspect, [0.0, 0.0, 1.0, 1.0], [width, height])?;
+        let whole = [0.0, 0.0, 1.0, 1.0];
+        // A few frames: new pipelines, the target image and the shadow map settle first.
+        for _ in 0..3 {
+            self.set_render_bucket(camera, aspect, whole, [width, height])?;
             self.update();
         }
-        let result = self.read_render();
+        let result = loop {
+            self.set_render_bucket(camera, aspect, whole, [width, height])?;
+            self.update();
+            match self.read_render() {
+                Ok(img) if self.bucket_done() => break Ok(img),
+                Ok(_) => {}
+                Err(e) => break Err(e),
+            }
+        };
         self.end_render();
         result
     }

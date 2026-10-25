@@ -69,6 +69,21 @@ impl ArgSchema for loom_scene::render::RenderArea {
         json!({"type":"string","enum":["View","Selected","Region","Crop","Blowup"]})
     }
 }
+impl ArgSchema for loom_scene::render::AaFilter {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Area","Blackman","CatmullRom","Cubic","MitchellNetravali","Quadratic","Soften"]})
+    }
+}
+impl ArgSchema for loom_scene::render::AoQuality {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Low","Medium","High","Ultra"]})
+    }
+}
+impl ArgSchema for loom_scene::render::Tonemapper {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["None","Reinhard","Aces","AgX","TonyMcMapface","BlenderFilmic"]})
+    }
+}
 impl ArgSchema for loom_scene::anim::Ort {
     fn schema() -> Value {
         json!({"type":"string","enum":["Constant","Cycle","Loop","PingPong","Linear","RelativeRepeat"]})
@@ -1135,7 +1150,7 @@ commands! {
     RenderIterative => "Render Iterative", MainUI, "Render Iterative: render into the Rendered Frame Window without saving a file; Region and Selected keep the rest of the window's image.";
     RenderLast => "Render Last", MainUI, "Render Last (F9): repeat the last render (same viewport and area), without saving a file.";
     RenderSetup => "Render SetUp...", MainUI, "Render Setup > Common: output size (`width`, `height`, 1-8192; with Image Aspect locked one changes the other), `image_aspect` (sets Height), `pixel_aspect`, the two aspect locks, Options `render_hidden` / `force_two_sided`, Render Output `output` file (empty clears) and `save_file`; with no argument the dialog shows (F10)." { width: Option<u32>, height: Option<u32>, image_aspect: Option<f32>, pixel_aspect: Option<f32>, lock_image_aspect: Option<bool>, lock_pixel_aspect: Option<bool>, render_hidden: Option<bool>, force_two_sided: Option<bool>, save_file: Option<bool>, output: Option<String> };
-    BevyRendererSettings => "Bevy Renderer Settings", Loom, "Render Setup > Renderer (Bevy): 4x MSAA `antialiasing`, `supersampling` 1-4 (samples per pixel side), key light `shadows`, `shadow_map_size` 512-8192, `background` and `ambient` colours (sRGB 0-1); omitted fields keep their value." { antialiasing: Option<bool>, supersampling: Option<u32>, shadows: Option<bool>, shadow_map_size: Option<u32>, background: Option<[f32; 3]>, ambient: Option<[f32; 3]> };
+    BevyRendererSettings => "Bevy Renderer Settings", Loom, "Render Setup > Renderer (Bevy). Antialiasing: `antialiasing` on/off, `filter` (Area, Blackman, CatmullRom, Cubic, MitchellNetravali, Quadratic, Soften), `filter_size` 1-10 px, `supersampling` 1-4 (samples per pixel side per pass), `passes` 1-64 (jittered passes added up per bucket). Shadows: `shadows`, `shadow_map_size` 512-8192 (the least any light's map gets in renders), `area_shadows` (soft shadows from the lights' Source Radius). Global illumination: `ambient_occlusion`, `ao_quality` (Low, Medium, High, Ultra), `ao_radius` (scene units, how far occluders reach), `reflections` (screen-space), `sky_lighting` (the ambient light from a sky dome glossy surfaces reflect), `sky_intensity` 0-10, `ground` 0-1 (brightness below the horizon). Exposure Control: `tonemapper` (None, Reinhard, Aces, AgX, TonyMcMapface, BlenderFilmic), `exposure` -10 to 10 stops, `dither`. `background` and `ambient` colours (sRGB 0-1). Omitted fields keep their value." { antialiasing: Option<bool>, filter: Option<loom_scene::render::AaFilter>, filter_size: Option<f32>, supersampling: Option<u32>, passes: Option<u32>, shadows: Option<bool>, shadow_map_size: Option<u32>, area_shadows: Option<bool>, background: Option<[f32; 3]>, ambient: Option<[f32; 3]>, ambient_occlusion: Option<bool>, ao_quality: Option<loom_scene::render::AoQuality>, ao_radius: Option<f32>, reflections: Option<bool>, sky_lighting: Option<bool>, sky_intensity: Option<f32>, ground: Option<f32>, tonemapper: Option<loom_scene::render::Tonemapper>, exposure: Option<f32>, dither: Option<bool> };
     AreaToRender => "Area to Render", Loom, "Rendered Frame Window > Area to Render: View, Selected, Region, Crop or Blowup, and the `region` rectangle [x0, y0, x1, y1] as fractions of the frame (y down) for Region / Crop, or the Blowup one (kept at the output's shape)." { area: Option<loom_scene::render::RenderArea>, region: Option<[f32; 4]> };
     EditRegion => "Edit Region", MainUI, "Rendered Frame Window > Edit Region: toggle editing the render region in the viewport (View and Selected switch to Region).";
     RenderViewport => "Render Viewport", Loom, "Rendered Frame Window / Render Setup: the `viewport` to render (index), Lock to Viewport (`lock`) and Production or Iterative (`iterative`)." { viewport: Option<u32>, lock: Option<bool>, iterative: Option<bool> };
