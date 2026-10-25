@@ -212,6 +212,11 @@ impl LoomApp {
         b.synced = Some((version, for_render));
     }
 
+    /// Some Skin has Fast Updates on.
+    fn fast_skins(&self) -> bool {
+        self.state.scene.nodes().any(|n| n.modifiers.iter().any(|s| matches!(&s.modifier, loom_scene::Modifier::Skin(d) if d.fast_updates)))
+    }
+
     /// A light node or a light's target.
     pub(crate) fn is_light_proxy(&self, id: loom_scene::NodeId) -> bool {
         let scene = &self.state.scene;
@@ -292,6 +297,10 @@ impl LoomApp {
     fn start_render(&mut self, req: loom_commands::RenderRequest) -> Result<(), String> {
         if self.bevy().is_none() {
             return Err("no GPU renderer".into());
+        }
+        if self.fast_skins() {
+            // Skin > Fast Updates previews rigidly in the viewports only: the render gets the full deformation.
+            loom_scene::anim::with_rendering(|| self.rebuild_world_meshes());
         }
         self.sync_bevy_for(true);
         let s = req.settings.clone();
@@ -505,6 +514,10 @@ impl LoomApp {
         }
         self.state.rendered.progress = None;
         self.state.rendered.cancel = false;
+        if self.fast_skins() {
+            // The viewports go back to the Fast Updates preview.
+            self.rebuild_world_meshes();
+        }
         let secs = job.elapsed().as_secs_f32();
         match result {
             Ok(()) => {

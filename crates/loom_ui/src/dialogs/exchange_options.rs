@@ -472,6 +472,63 @@ pub fn obj_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     finish(app, done, open);
 }
 
+/// Import STL File: vertex weld and threshold, auto-smooth and its angle,
+/// remove double faces, unify normals.
+pub fn stl_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    const D: &str = "stl_import";
+    let o = app.state.exchange.stl_import.clone();
+    let mut done = false;
+    egui::Window::new(file_title(app, "Import STL File")).id(egui::Id::new("stl_import_options")).open(open).default_pos(window_pos(ctx)).resizable(false).show(ctx, |ui| {
+        ui.label(egui::RichText::new("Vertex Welding").strong());
+        check(ui, app, D, "weld", "Weld Vertices", o.weld);
+        ui.add_enabled_ui(o.weld, |ui| number(ui, app, D, "weld_threshold", "Weld Threshold:", (o.weld_threshold, 0.0..=1e6, 0.001)));
+        ui.separator();
+        ui.label(egui::RichText::new("Normals").strong());
+        check(ui, app, D, "auto_smooth", "Auto-Smooth", o.auto_smooth);
+        ui.add_enabled_ui(o.auto_smooth, |ui| number(ui, app, D, "smooth_angle", "Smooth Angle:", (o.smooth_angle, 0.0..=180.0, 0.5)));
+        check(ui, app, D, "remove_double_faces", "Remove Double Faces", o.remove_double_faces);
+        check(ui, app, D, "unify_normals", "Unify Normals", o.unify_normals);
+        buttons(ui, app, "OK", &mut done, false);
+    });
+    finish(app, done, open);
+}
+
+/// Export STL File: Binary or ASCII.
+pub fn stl_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    const D: &str = "stl_export";
+    let o = app.state.exchange.stl_export.clone();
+    let mut done = false;
+    egui::Window::new(file_title(app, "Export STL File")).id(egui::Id::new("stl_export_options")).open(open).default_pos(window_pos(ctx)).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.radio(o.binary, "Binary").clicked() && !o.binary {
+                set(app, D, "binary", json!(true));
+            }
+            if ui.radio(!o.binary, "ASCII").clicked() && o.binary {
+                set(app, D, "binary", json!(false));
+            }
+        });
+        buttons(ui, app, "OK", &mut done, true);
+    });
+    finish(app, done, open);
+}
+
+/// 3DS Import: merge the objects into the scene or replace it.
+pub fn tds_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    const D: &str = "3ds_import";
+    let o = app.state.exchange.tds_import.clone();
+    let mut done = false;
+    egui::Window::new(file_title(app, "3DS Import")).id(egui::Id::new("tds_import_options")).open(open).default_pos(window_pos(ctx)).resizable(false).show(ctx, |ui| {
+        if ui.radio(!o.replace_scene, "Merge objects with current scene").clicked() && o.replace_scene {
+            set(app, D, "replace_scene", json!(false));
+        }
+        if ui.radio(o.replace_scene, "Completely replace current scene").clicked() && !o.replace_scene {
+            set(app, D, "replace_scene", json!(true));
+        }
+        buttons(ui, app, "OK", &mut done, false);
+    });
+    finish(app, done, open);
+}
+
 /// `*` any run, `?` one character, case-insensitive.
 fn wildcard(pattern: &str, name: &str) -> bool {
     fn go(p: &[char], n: &[char]) -> bool {

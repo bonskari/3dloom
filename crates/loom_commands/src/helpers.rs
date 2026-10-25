@@ -176,6 +176,8 @@ pub enum LineKind {
     /// An active grid's lines and its main axes.
     GridMinor,
     GridMajor,
+    /// A fixed sRGB colour (biped footsteps: left blue, right green).
+    Rgb([u8; 3]),
 }
 
 /// The lines a helper draws in the viewports (world space). `units_per_px`
@@ -265,20 +267,22 @@ pub fn helper_lines(state: &AppState, id: NodeId, units_per_px: &dyn Fn(Vec3) ->
                 }
             }
         }
+        ObjectKind::Biped(b) => out.extend(crate::biped_footsteps::footprint_lines(b)),
         _ => {}
     }
     out
 }
 
-/// Text labels a helper draws: the compass rose's N / E / S / W.
-pub fn helper_labels(state: &AppState, id: NodeId) -> Vec<(Vec3, &'static str)> {
+/// Text labels a helper draws: the compass rose's N / E / S / W, a biped's footstep numbers.
+pub fn helper_labels(state: &AppState, id: NodeId) -> Vec<(Vec3, String)> {
     let Some(node) = state.scene.node(id) else { return Vec::new() };
     match &node.object {
         ObjectKind::Compass { show_rose, radius } if show_rose.get() => {
             let world = state.scene.world_matrix(id);
             let r = radius.get() * 1.15;
-            [(Vec3::Y, "N"), (Vec3::X, "E"), (-Vec3::Y, "S"), (-Vec3::X, "W")].map(|(d, l)| (world.transform_point3(d * r), l)).to_vec()
+            [(Vec3::Y, "N"), (Vec3::X, "E"), (-Vec3::Y, "S"), (-Vec3::X, "W")].map(|(d, l)| (world.transform_point3(d * r), l.to_owned())).to_vec()
         }
+        ObjectKind::Biped(b) => crate::biped_footsteps::footstep_labels(b),
         _ => Vec::new(),
     }
 }

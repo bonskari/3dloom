@@ -156,7 +156,8 @@ fn select_ancestor_child_children_similar() {
     assert_eq!(s.selection.len(), 2);
     execute(&mut s, Command::SelectNodes { ids: vec![ids[0].0], op: SelectOp::Replace }).unwrap();
     execute(&mut s, Command::SelectChild).unwrap();
-    assert_eq!(s.selection.len(), 1);
+    assert_eq!(s.selection.len(), 2, "Page Down selects all immediate children");
+    execute(&mut s, Command::SelectNodes { ids: vec![ids[1].0], op: SelectOp::Replace }).unwrap();
     execute(&mut s, Command::SelectSimilar).unwrap();
     let kinds: std::collections::BTreeSet<&str> = s.selection.iter().map(|i| s.scene.node(*i).unwrap().object.base_name()).collect();
     assert_eq!(kinds.len(), 1, "only one kind selected: {kinds:?}");

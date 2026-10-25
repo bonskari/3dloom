@@ -148,6 +148,15 @@ pub struct LightObject {
     /// Size of the emitting sphere: highlight size and shadow softness.
     pub source_radius: Param<f32>,
     pub shadow_normal_bias: Param<f32>,
+    /// Create > Lights > Photometric (Target / Free Light): physical intensity,
+    /// colour temperature and distribution. `light_type` then follows the
+    /// distribution (Spot for Spotlight, Omni otherwise).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photometric: Option<Photometric>,
+    /// The sun of a Sunlight / Daylight system: placed around its parent
+    /// compass by date, time and location.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sun: Option<crate::sun::Sunlight>,
 }
 
 impl Default for LightObject {
@@ -203,11 +212,37 @@ impl LightObject {
             ray_bias: p(0.005),
             source_radius: p(0.0),
             shadow_normal_bias: p(1.8),
+            photometric: None,
+            sun: None,
         }
+    }
+
+    /// A photometric light (Target Light / Free Light) with the reference's
+    /// defaults: Uniform Spherical, D65 white, 1500 cd, shadows off;
+    /// `unit_metres` is the scene's system unit in metres.
+    pub fn photometric(unit_metres: f32) -> Self {
+        let mut l = Self::new(LightType::Omni);
+        l.shadows_on.set(false);
+        l.hotspot.set(30.0);
+        l.falloff.set(60.0);
+        l.photometric = Some(Photometric::new(unit_metres));
+        l
+    }
+
+    /// Spot and directional lights, and every photometric light, aim at a
+    /// target (a photometric light's distribution can change later).
+    pub fn aims(&self) -> bool {
+        self.light_type.aims() || self.photometric.is_some()
     }
 
     /// Base name of a new light ("Omni001", "Spot001", "FSpot001", ...).
     pub fn base_name(&self) -> &'static str {
+        if self.photometric.is_some() {
+            return if self.target.is_some() { "TPhotometricLight" } else { "PhotometricLight" };
+        }
+        if self.sun.is_some() {
+            return "Sun";
+        }
         match (self.light_type, self.target.is_some()) {
             (LightType::Omni, _) => "Omni",
             (LightType::Spot, true) => "Spot",
@@ -220,6 +255,9 @@ impl LightObject {
 
     /// The Modify panel's stack name ("Target Spotlight", "Omni", ...).
     pub fn stack_name(&self) -> &'static str {
+        if self.photometric.is_some() {
+            return if self.target.is_some() { "Target Light" } else { "Free Light" };
+        }
         match (self.light_type, self.target.is_some()) {
             (LightType::Omni, _) => "Omni",
             (LightType::Spot, true) => "Target Spotlight",
@@ -244,6 +282,9 @@ impl LightObject {
                 ("Use Scene Environment", b(&self.use_scene_environment)),
                 ("Cast Shadows", b(&self.shadows_on)), ("Rays per Sample", i(&self.rays_per_sample)), ("Ray Bias", f(&self.ray_bias)),
             ];
+        }
+        if let Some(ph) = &self.photometric {
+            return self.photometric_parameters(ph);
         }
         let s = self.shadow_color.get();
         let mut v = vec![
@@ -283,6 +324,9 @@ impl LightObject {
             c.set(x);
         };
         let cone_max = if self.light_type == LightType::Spot { MAX_SPOT_ANGLE } else { 1e6 };
+        if self.photometric.is_some() && self.set_photometric(name, value) {
+            return Ok(());
+        }
         match name {
             "On" => self.on.set(b),
             "Shadows On" | "Cast Shadows" => self.shadows_on.set(b),
@@ -347,12 +391,23 @@ impl LightObject {
         match name {
             "Shadow Type" => Some(&SHADOW_TYPES),
             "Decay Type" => Some(&DECAY_TYPES),
+            "Distribution" => Some(&DISTRIBUTIONS),
+            "Lamp" => Some(&LAMP_NAMES),
+            "Intensity Unit" => Some(&INTENSITY_UNITS),
+            "Light Shape" => Some(&LIGHT_SHAPES),
             _ => None,
         }
     }
 
     /// The viewport icon in the light's frame (it shines down local -Z).
     pub fn icon_mesh(&self) -> Mesh {
+        if let Some(ph) = &self.photometric {
+            return match ph.distribution.get() {
+                DIST_DIFFUSE => diffuse_icon(),
+                DIST_SPOT => spot_icon(),
+                _ => bulb_icon(),
+            };
+        }
         match self.light_type {
             LightType::Omni => omni_icon(),
             LightType::Spot => spot_icon(),
@@ -360,6 +415,356 @@ impl LightObject {
             LightType::Skylight => sky_icon(),
         }
     }
+}
+
+/// Distribution list of a photometric light's General Parameters.
+pub const DISTRIBUTIONS: [&str; 4] = ["Uniform Spherical", "Uniform Diffuse", "Spotlight", "Photometric Web"];
+pub const DIST_SPHERICAL: u32 = 0;
+pub const DIST_DIFFUSE: u32 = 1;
+pub const DIST_SPOT: u32 = 2;
+pub const DIST_WEB: u32 = 3;
+/// Uniform Diffuse lights the hemisphere in front of the light, fading
+/// towards its edge: drawn as a spot this wide with no hotspot.
+pub const DIFFUSE_FALLOFF: f32 = 178.0;
+/// Intensity units: lumen, candela, lux at a distance.
+pub const INTENSITY_UNITS: [&str; 3] = ["lm", "cd", "lx"];
+/// Shape/Area Shadows emitter shapes.
+pub const LIGHT_SHAPES: [&str; 6] = ["Point", "Line", "Rectangle", "Disc", "Sphere", "Cylinder"];
+/// The Color group's lamp list, each with the correlated colour temperature
+/// (kelvin) it is drawn with here: the CIE illuminants' own temperatures and
+/// typical catalogue temperatures of the lamp types.
+pub const LAMPS: [(&str, f32); 21] = [
+    ("D50 Illuminant (Reference White)", 5003.0),
+    ("D65 Illuminant (Reference White)", 6504.0),
+    ("Fluorescent (Cool White)", 4100.0),
+    ("Fluorescent (Daylight)", 6500.0),
+    ("Fluorescent (Lite White)", 4100.0),
+    ("Fluorescent (Warm White)", 3000.0),
+    ("Fluorescent (White)", 3500.0),
+    ("Halogen", 3000.0),
+    ("Halogen (Cool)", 3200.0),
+    ("Halogen (Warm)", 2800.0),
+    ("HID Ceramic Metal Halide (Cool)", 4200.0),
+    ("HID Ceramic Metal Halide (Warm)", 3000.0),
+    ("HID High Pressure Sodium", 2100.0),
+    ("HID Low Pressure Sodium", 1800.0),
+    ("HID Mercury", 5700.0),
+    ("HID Phosphor Mercury", 4000.0),
+    ("HID Quartz Metal Halide", 4000.0),
+    ("HID Quartz Metal Halide (Cool)", 4300.0),
+    ("HID Quartz Metal Halide (Warm)", 3200.0),
+    ("HID Xenon", 6000.0),
+    ("Incandescent filament lamp", 2800.0),
+];
+pub const LAMP_NAMES: [&str; 21] = {
+    let mut n = [""; 21];
+    let mut i = 0;
+    while i < 21 {
+        n[i] = LAMPS[i].0;
+        i += 1;
+    }
+    n
+};
+/// Index of D65 in [`LAMPS`], the default.
+pub const LAMP_D65: u32 = 1;
+/// Illuminance (lux) a photometric light must give to light a white surface
+/// it faces as a standard light of multiplier 1 does: the default 1500 cd
+/// lamp seen from 2 m (the viewports and the Bevy view have no exposure
+/// control for photometric light, so this fixes the brightness scale).
+pub const PHOTOMETRIC_LUX_PER_MULTIPLIER: f32 = 375.0;
+
+/// Templates rollout: (name, distribution, candela, lamp, beam, field).
+/// Bulbs are Uniform Spherical at the luminous intensity of common
+/// incandescent A-19 lamps; the halogen spot is the reference's M16 50 W
+/// medium beam. Web templates need their IES files and are not listed.
+pub const TEMPLATES: [(&str, u32, f32, u32, f32, f32); 5] = [
+    ("40W Bulb", DIST_SPHERICAL, 36.0, 20, 30.0, 60.0),
+    ("60W Bulb", DIST_SPHERICAL, 70.0, 20, 30.0, 60.0),
+    ("75W Bulb", DIST_SPHERICAL, 95.0, 20, 30.0, 60.0),
+    ("100W Bulb", DIST_SPHERICAL, 139.0, 20, 30.0, 60.0),
+    ("Halogen Spotlight", DIST_SPOT, 3000.0, 7, 25.0, 50.0),
+];
+
+/// sRGB colour (0..1, brightest channel 1) of black-body light at `kelvin`
+/// (a fit of the Planckian locus valid from 1000 K to 40000 K).
+pub fn kelvin_to_srgb(kelvin: f32) -> Vec3 {
+    let t = kelvin.clamp(1000.0, 40000.0) / 100.0;
+    let r = if t <= 66.0 { 255.0 } else { 329.698_73 * (t - 60.0).powf(-0.133_204_76) };
+    let g = if t <= 66.0 { 99.470_8 * t.ln() - 161.119_57 } else { 288.122_17 * (t - 60.0).powf(-0.075_514_85) };
+    let b = if t >= 66.0 {
+        255.0
+    } else if t <= 19.0 {
+        0.0
+    } else {
+        138.517_73 * (t - 10.0).ln() - 305.044_8
+    };
+    let c = Vec3::new(r, g, b).clamp(Vec3::ZERO, Vec3::splat(255.0)) / 255.0;
+    c / c.max_element().max(1e-6)
+}
+
+/// A photometric light's own parameters (Intensity/Color/Attenuation,
+/// distribution, Shape/Area Shadows). Intensity is kept in candela.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Photometric {
+    /// Index into [`DISTRIBUTIONS`].
+    pub distribution: Param<u32>,
+    /// Photometric Web: the IES file (drawn as Uniform Spherical).
+    pub web_file: Option<String>,
+    /// Kelvin (true) or the lamp list (false).
+    pub use_kelvin: Param<bool>,
+    /// Index into [`LAMPS`].
+    pub lamp: Param<u32>,
+    pub kelvin: Param<f32>,
+    pub filter_color: Param<Vec3>,
+    pub candela: Param<f32>,
+    /// Index into [`INTENSITY_UNITS`]: the unit the rollout shows.
+    pub intensity_unit: Param<u32>,
+    /// "lx at": the distance (scene units) the illuminance is given for.
+    pub lux_distance: Param<f32>,
+    pub dimming_on: Param<bool>,
+    /// Percent of the full intensity.
+    pub dimming: Param<f32>,
+    pub incandescent_shift: Param<bool>,
+    /// Index into [`LIGHT_SHAPES`].
+    pub shape: Param<u32>,
+    pub shape_length: Param<f32>,
+    pub shape_width: Param<f32>,
+    pub shape_radius: Param<f32>,
+    pub render_shape: Param<bool>,
+    /// The scene's system unit in metres when the light was made (intensity
+    /// falls off with the square of the distance in metres).
+    pub unit_metres: f32,
+}
+
+impl Default for Photometric {
+    fn default() -> Self {
+        Self::new(0.0254)
+    }
+}
+
+impl Photometric {
+    pub fn new(unit_metres: f32) -> Self {
+        let m = 1.0 / unit_metres.max(1e-9);
+        Self {
+            distribution: p(DIST_SPHERICAL),
+            web_file: None,
+            use_kelvin: p(false),
+            lamp: p(LAMP_D65),
+            kelvin: p(3600.0),
+            filter_color: p(Vec3::ONE),
+            candela: p(1500.0),
+            intensity_unit: p(1),
+            lux_distance: p(m),
+            dimming_on: p(false),
+            dimming: p(100.0),
+            incandescent_shift: p(false),
+            shape: p(0),
+            shape_length: p(1.2 * m),
+            shape_width: p(0.6 * m),
+            shape_radius: p(0.1 * m),
+            render_shape: p(false),
+            unit_metres: unit_metres.max(1e-9),
+        }
+    }
+
+    /// Solid angle (sr) the light fills: lumens = candela × this.
+    pub fn solid_angle(&self, falloff_deg: f32) -> f32 {
+        use std::f32::consts::PI;
+        match self.distribution.get() {
+            DIST_DIFFUSE => PI,
+            DIST_SPOT => 2.0 * PI * (1.0 - (falloff_deg.min(MAX_SPOT_ANGLE) * 0.5).to_radians().cos()),
+            _ => 4.0 * PI,
+        }
+    }
+
+    /// `cd` in `unit` (0 lm, 1 cd, 2 lx at Lux Distance).
+    pub fn from_candela(&self, cd: f32, unit: u32, falloff_deg: f32) -> f32 {
+        match unit {
+            0 => cd * self.solid_angle(falloff_deg),
+            2 => {
+                let d = self.lux_distance.get() * self.unit_metres;
+                cd / (d * d).max(1e-9)
+            }
+            _ => cd,
+        }
+    }
+
+    /// A value in `unit` as candela.
+    pub fn to_candela(&self, v: f32, unit: u32, falloff_deg: f32) -> f32 {
+        let one = self.from_candela(1.0, unit, falloff_deg);
+        v / one.max(1e-9)
+    }
+
+    /// Dimming's fraction of the full intensity.
+    pub fn dim(&self) -> f32 {
+        if self.dimming_on.get() { (self.dimming.get() / 100.0).max(0.0) } else { 1.0 }
+    }
+
+    /// The colour temperature drawn: Kelvin or the lamp's, lowered as an
+    /// incandescent lamp's is when Incandescent Lamp Color Shift dims it
+    /// (temperature ∝ light output^⅛).
+    pub fn temperature(&self) -> f32 {
+        let k = if self.use_kelvin.get() { self.kelvin.get() } else { LAMPS[(self.lamp.get() as usize).min(LAMPS.len() - 1)].1 };
+        if self.incandescent_shift.get() && self.dimming_on.get() {
+            k * self.dim().clamp(1e-4, 1.0).powf(0.125)
+        } else {
+            k
+        }
+    }
+
+    /// Linear colour: the temperature's colour through the filter.
+    pub fn linear_color(&self) -> Vec3 {
+        srgb_to_linear(kelvin_to_srgb(self.temperature())) * srgb_to_linear(self.filter_color.get())
+    }
+
+    /// Radius of a sphere with the emitter's size (the renderers' soft
+    /// shadow source): half a line's length, the radius of a rectangle's
+    /// equal-area disc, a disc / sphere / cylinder's radius.
+    pub fn source_radius(&self) -> f32 {
+        match self.shape.get() {
+            1 => self.shape_length.get() * 0.5,
+            2 => (self.shape_length.get() * self.shape_width.get() / std::f32::consts::PI).sqrt(),
+            3..=5 => self.shape_radius.get(),
+            _ => 0.0,
+        }
+    }
+}
+
+impl LightObject {
+    fn photometric_parameters(&self, ph: &Photometric) -> Vec<(&'static str, ParamValue)> {
+        use ParamValue::*;
+        let f = |x: &Param<f32>| Float(x.get());
+        let i = |x: &Param<u32>| Int(x.get());
+        let b = |x: &Param<bool>| Bool(x.get());
+        let c = ph.filter_color.get();
+        let mut v = vec![
+            ("On", b(&self.on)), ("Shadows On", b(&self.shadows_on)), ("Shadow Type", i(&self.shadow_type)),
+            ("Distribution", i(&ph.distribution)),
+            ("Use Kelvin", b(&ph.use_kelvin)), ("Lamp", i(&ph.lamp)), ("Kelvin", f(&ph.kelvin)),
+            ("Filter Color R", Float(c.x)), ("Filter Color G", Float(c.y)), ("Filter Color B", Float(c.z)),
+            ("Intensity Unit", i(&ph.intensity_unit)),
+            ("Intensity", Float(ph.from_candela(ph.candela.get(), ph.intensity_unit.get(), self.falloff.get()))),
+            ("Lux Distance", f(&ph.lux_distance)),
+            ("Dimming On", b(&ph.dimming_on)), ("Dimming", f(&ph.dimming)), ("Incandescent Shift", b(&ph.incandescent_shift)),
+            ("Far Use", b(&self.far_use)), ("Far Show", b(&self.far_show)), ("Far Start", f(&self.far_start)), ("Far End", f(&self.far_end)),
+        ];
+        if ph.distribution.get() == DIST_SPOT {
+            v.extend([("Hotspot", f(&self.hotspot)), ("Falloff", f(&self.falloff))]);
+        }
+        v.extend([
+            ("Light Shape", i(&ph.shape)), ("Shape Length", f(&ph.shape_length)), ("Shape Width", f(&ph.shape_width)), ("Shape Radius", f(&ph.shape_radius)),
+            ("Render Shape", b(&ph.render_shape)),
+            ("Map Bias", f(&self.map_bias)), ("Map Size", i(&self.map_size)), ("Sample Range", f(&self.sample_range)),
+            ("Shadow Normal Bias", f(&self.shadow_normal_bias)), ("Target Distance", f(&self.target_distance)),
+        ]);
+        v
+    }
+
+    /// A photometric parameter by name; false when `name` is a parameter
+    /// photometric and standard lights share (On, Far Use, Hotspot...).
+    fn set_photometric(&mut self, name: &str, value: f64) -> bool {
+        let falloff = self.falloff.get();
+        let Some(ph) = self.photometric.as_mut() else { return false };
+        let v = value as f32;
+        let b = value != 0.0;
+        let u = value.round().max(0.0) as u32;
+        let channel = |c: &mut Param<Vec3>, i: usize| {
+            let mut x = c.get();
+            x[i] = v.clamp(0.0, 1.0);
+            c.set(x);
+        };
+        match name {
+            "Distribution" => {
+                let d = u.min(DIST_WEB);
+                ph.distribution.set(d);
+                self.light_type = if d == DIST_SPOT { LightType::Spot } else { LightType::Omni };
+            }
+            "Use Kelvin" => ph.use_kelvin.set(b),
+            "Lamp" => ph.lamp.set(u.min(LAMPS.len() as u32 - 1)),
+            "Kelvin" => ph.kelvin.set(v.clamp(1000.0, 20000.0)),
+            "Filter Color R" => channel(&mut ph.filter_color, 0),
+            "Filter Color G" => channel(&mut ph.filter_color, 1),
+            "Filter Color B" => channel(&mut ph.filter_color, 2),
+            // Switching the unit keeps the light as bright as it was.
+            "Intensity Unit" => ph.intensity_unit.set(u.min(2)),
+            "Intensity" => {
+                let cd = ph.to_candela(v.max(0.0), ph.intensity_unit.get(), falloff);
+                ph.candela.set(cd);
+            }
+            "Candela" => ph.candela.set(v.max(0.0)),
+            // The lux value stays as typed: the light at the new distance is that bright.
+            "Lux Distance" => {
+                let lx = ph.from_candela(ph.candela.get(), 2, falloff);
+                ph.lux_distance.set(v.max(1e-4));
+                if ph.intensity_unit.get() == 2 {
+                    let cd = ph.to_candela(lx, 2, falloff);
+                    ph.candela.set(cd);
+                }
+            }
+            "Dimming On" => ph.dimming_on.set(b),
+            "Dimming" => ph.dimming.set(v.max(0.0)),
+            "Incandescent Shift" => ph.incandescent_shift.set(b),
+            "Light Shape" => ph.shape.set(u.min(LIGHT_SHAPES.len() as u32 - 1)),
+            "Shape Length" => ph.shape_length.set(v.max(0.0)),
+            "Shape Width" => ph.shape_width.set(v.max(0.0)),
+            "Shape Radius" => ph.shape_radius.set(v.max(0.0)),
+            "Render Shape" => ph.render_shape.set(b),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Templates rollout: the template's distribution, intensity, lamp and beam.
+    pub fn apply_template(&mut self, index: usize) -> Result<(), String> {
+        let (name, dist, cd, lamp, beam, field) = *TEMPLATES.get(index).ok_or_else(|| format!("no template {index}"))?;
+        if self.photometric.is_none() {
+            return Err(format!("{name}: only photometric lights take a template"));
+        }
+        self.set_photometric("Distribution", dist as f64);
+        let ph = self.photometric.as_mut().expect("photometric");
+        ph.candela.set(cd);
+        ph.use_kelvin.set(false);
+        ph.lamp.set(lamp);
+        self.hotspot.set(beam);
+        self.falloff.set(field);
+        Ok(())
+    }
+}
+
+/// Photometric Uniform Spherical / Web: a small sphere around the pivot.
+pub fn bulb_icon() -> Mesh {
+    let rings: Vec<Vec<Vec3>> = (1..6).map(|k| {
+        let a = k as f32 / 6.0 * std::f32::consts::PI;
+        ring(4.0 * a.sin(), 4.0 * a.cos(), 8)
+    }).collect();
+    let mut polys = Vec::new();
+    for k in 0..rings.len() - 1 {
+        band(&mut polys, &rings[k], &rings[k + 1]);
+    }
+    let (top, bottom) = (Vec3::new(0.0, 0.0, 4.0), Vec3::new(0.0, 0.0, -4.0));
+    let (first, last) = (&rings[0], &rings[rings.len() - 1]);
+    for i in 0..8 {
+        polys.push(vec![top, first[i], first[(i + 1) % 8]]);
+        polys.push(vec![bottom, last[(i + 1) % 8], last[i]]);
+    }
+    loom_mesh::build_merged(&wind_outward(polys, Vec3::ZERO))
+}
+
+/// Photometric Uniform Diffuse: a hemisphere behind the pivot (the light
+/// leaves down -Z), so its own view does not look into it.
+pub fn diffuse_icon() -> Mesh {
+    let rings: Vec<Vec<Vec3>> = (0..3).map(|k| {
+        let a = k as f32 / 3.0 * std::f32::consts::FRAC_PI_2;
+        ring(4.0 * a.cos(), 4.0 * a.sin(), 8)
+    }).collect();
+    let mut polys = Vec::new();
+    for k in 0..2 {
+        band(&mut polys, &rings[k], &rings[k + 1]);
+    }
+    polys.push(rings[2].clone());
+    polys.push(rings[0].clone());
+    loom_mesh::build_merged(&wind_outward(polys, Vec3::new(0.0, 0.0, 1.0)))
 }
 
 fn ring(r: f32, z: f32, n: usize) -> Vec<Vec3> {
@@ -569,6 +974,36 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             }
         };
         let near = l.near_use.get().then(|| (l.near_start.get(), l.near_end.get()));
+        if let Some(ph) = &l.photometric {
+            // Physical light: inverse square from 1 m on, the distribution's
+            // cone, the emitter's size as the source radius.
+            let emitter = match ph.distribution.get() {
+                DIST_SPOT => Emitter::Spot { hotspot: l.hotspot.get(), falloff: l.falloff.get() },
+                DIST_DIFFUSE => Emitter::Spot { hotspot: 0.0, falloff: DIFFUSE_FALLOFF },
+                _ => Emitter::Point,
+            };
+            let shape_radius = ph.source_radius();
+            out.push(LightSample {
+                id: n.id,
+                emitter,
+                position,
+                direction,
+                color: ph.linear_color() * ph.candela.get() * ph.dim() / PHOTOMETRIC_LUX_PER_MULTIPLIER,
+                decay: 2,
+                decay_start: 1.0 / ph.unit_metres,
+                near: None,
+                far: l.far_use.get().then(|| (l.far_start.get(), l.far_end.get())),
+                shadows: l.shadows_on.get(),
+                map_size: l.map_size.get(),
+                map_bias: l.map_bias.get(),
+                sample_range: l.sample_range.get(),
+                source_radius: if shape_radius > 0.0 { shape_radius } else { l.source_radius.get() },
+                shadow_normal_bias: l.shadow_normal_bias.get(),
+                target_distance: target_distance(scene, n.id).unwrap_or(DEFAULT_TARGET_DISTANCE),
+                exclusion: l.exclusion.clone(),
+            });
+            continue;
+        }
         out.push(LightSample {
             id: n.id,
             emitter,
@@ -662,6 +1097,34 @@ mod tests {
         assert_eq!(s.falloff(10.0, 35f32.to_radians().cos()), 0.0);
         let mid = s.falloff(10.0, 25f32.to_radians().cos());
         assert!(mid > 0.0 && mid < 1.0);
+    }
+
+    #[test]
+    fn kelvin_colours_run_from_warm_to_white() {
+        let d65 = kelvin_to_srgb(6504.0);
+        assert!(d65.min_element() > 0.95, "D65 is white: {d65}");
+        let warm = kelvin_to_srgb(2800.0);
+        assert!(warm.x == 1.0 && warm.z < 0.6, "incandescent is warm: {warm}");
+    }
+
+    #[test]
+    fn photometric_intensity_units_convert_through_candela() {
+        let mut l = LightObject::photometric(1.0);
+        assert_eq!(l.stack_name(), "Free Light");
+        l.set_parameter("Intensity Unit", 0.0).unwrap();
+        let lm = 1500.0 * 4.0 * std::f32::consts::PI;
+        let ParamValue::Float(v) = l.parameters().into_iter().find(|p| p.0 == "Intensity").unwrap().1 else { panic!() };
+        assert!((v - lm).abs() < 0.5, "{v}");
+        l.set_parameter("Intensity", 1000.0).unwrap();
+        assert!((l.photometric.as_ref().unwrap().candela.get() - 1000.0 / (4.0 * std::f32::consts::PI)).abs() < 1e-3);
+        // lx at 2 m: cd / 4.
+        l.set_parameter("Candela", 1500.0).unwrap();
+        l.set_parameter("Intensity Unit", 2.0).unwrap();
+        l.set_parameter("Lux Distance", 2.0).unwrap();
+        let ParamValue::Float(v) = l.parameters().into_iter().find(|p| p.0 == "Intensity").unwrap().1 else { panic!() };
+        assert!((v - 1500.0).abs() < 1e-2, "the lux value is kept when the distance changes: {v}");
+        l.set_parameter("Distribution", 2.0).unwrap();
+        assert_eq!(l.light_type, LightType::Spot);
     }
 
     #[test]

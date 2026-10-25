@@ -66,12 +66,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Save Copy As...", "Save File As Copy");
                 item(ui, app, "Save Incremental", "Save Incremental (+)");
                 cmd(ui, app, "Save Selected...", Command::SaveSelected { path: None });
+                cmd(ui, app, "Set Project Folder...", Command::SetProjectFolder { path: None });
                 cmd(ui, app, "Archive...", Command::ArchiveFile { path: None });
                 ui.separator();
                 item(ui, app, "Merge...", "Merge File");
+                cmd(ui, app, "Replace...", Command::ReplaceFile { path: None, names: None, materials: None });
+                ui.menu_button("References", |ui| {
+                    cmd(ui, app, "XRef Objects...", Command::XrefObjects { path: None, names: None, automatic: None });
+                    cmd(ui, app, "XRef Scene...", Command::XrefScene { path: None, automatic: None });
+                    cmd(ui, app, "Update XRefs", Command::UpdateXrefs { path: None });
+                });
                 item(ui, app, "Import...", "Import File");
                 item(ui, app, "Export...", "Export File");
                 item(ui, app, "Export Selected...", "Export Selected");
+                ui.separator();
+                cmd(ui, app, "Asset Tracking...", Command::AssetTracking);
                 ui.separator();
                 cmd(ui, app, "Summary Info...", Command::SummaryInfo);
                 cmd(ui, app, "File Properties...", Command::FileProperties);
@@ -108,6 +117,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.menu_button("Select By", |ui| {
                     item(ui, app, "Color", "Select By Color Pick");
                     item(ui, app, "Name...", "Select By Name");
+                    cmd(ui, app, "Layer...", Command::SelectByLayer { layers: None });
                 });
                 ui.menu_button("Region", |ui| {
                     let window = app.state.window_selection;
@@ -212,8 +222,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.add_enabled(false, egui::Button::new("Assembly")).on_disabled_hover_text("Assemblies (luminaires) are out of scope");
             });
             ui.menu_button("Views", |ui| {
-                item(ui, app, "Undo View Change", "Undo Viewport Operation");
-                item(ui, app, "Redo View Change", "Redo Viewport Operation");
+                let (undo_view, redo_view) = (app.state.active().view_undo.undo_label().unwrap_or("Change").to_owned(), app.state.active().view_undo.redo_label().unwrap_or("Change").to_owned());
+                item(ui, app, &format!("Undo View {undo_view}"), "Undo Viewport Operation");
+                item(ui, app, &format!("Redo View {redo_view}"), "Redo Viewport Operation");
                 ui.separator();
                 // The active view's name is part of the item, as in the reference.
                 let view = app.state.active().kind.label();
@@ -229,7 +240,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 let (gizmo, shade) = (app.state.prefs.gizmos.enabled, app.state.shade_selected);
                 check_item(ui, app, "Show Transform Gizmo", "Transform Gizmo Toggle", gizmo);
                 check_item(ui, app, "Shade Selected", "Shade Selected", shade);
+                let spinner = app.state.update_during_spinner_drag;
+                check_item(ui, app, "Update During Spinner Drag", "Update During Spinner Drag", spinner);
                 item(ui, app, "Create Camera From View", "Create Camera From View");
+                item(ui, app, "Add Default Lights to Scene...", "Add Default Lights to Scene");
                 item(ui, app, "Redraw All Views", "Redraw All Views");
                 ui.separator();
                 for (label, action) in [
@@ -265,6 +279,18 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                 });
                 ui.menu_button("Lights", |ui| {
+                    ui.menu_button("Photometric Lights", |ui| {
+                        for kind in loom_commands::light::LightKind::PHOTOMETRIC {
+                            if ui.button(kind.label()).clicked() {
+                                let _ = app.dispatch(Command::SelectObject);
+                                app.photometric_lights = true;
+                                app.create_kind = Some(crate::CreateKind::Light(kind));
+                                app.create_category = crate::Category::Lights;
+                                app.panel_tab = crate::Tab::Create;
+                                ui.close_menu();
+                            }
+                        }
+                    });
                     ui.menu_button("Standard Lights", |ui| {
                         for (kind, label) in [
                             (loom_commands::light::LightKind::TargetSpot, "Target Spotlight"), (loom_commands::light::LightKind::FreeSpot, "Free Spotlight"),
@@ -273,6 +299,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         ] {
                             if ui.button(label).clicked() {
                                 let _ = app.dispatch(Command::SelectObject);
+                                app.photometric_lights = false;
                                 app.create_kind = Some(crate::CreateKind::Light(kind));
                                 app.create_category = crate::Category::Lights;
                                 app.panel_tab = crate::Tab::Create;
@@ -280,6 +307,15 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             }
                         }
                     });
+                    ui.separator();
+                    for (label, daylight) in [("Daylight System", true), ("Sunlight System", false)] {
+                        if ui.button(label).clicked() {
+                            app.create_category = crate::Category::Systems;
+                            app.panel_tab = crate::Tab::Create;
+                            app.start_create(Some(crate::CreateKind::SunSystem { daylight }));
+                            ui.close_menu();
+                        }
+                    }
                 });
                 ui.menu_button("Helpers", |ui| {
                     for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass")] {
@@ -515,9 +551,9 @@ pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
         ("Vertex Weld", "Vertex Weld"),
     ]),
     ("Conversion", &[("Turn To Mesh", "Turn To Mesh"), ("Turn To Poly", "Turn To Poly")]),
-    ("Animation", &[
+    ("Animation Modifiers", &[
         ("Flex", "Flex"), ("Linked XForm", "Linked XForm"), ("Melt", "Melt"), ("Morpher", "Morpher"), ("PathDeform", "PathDeform"), ("PathDeform (WSM)", "PathDeform (WSM)"),
-        ("Skin", "Skin"), ("Skin Morph", "Skin Morph"), ("Skin Wrap", "Skin Wrap"), ("Spline IK Control", "Spline IK Control"),
+        ("Skin", "Skin"), ("Skin Morph", "Skin Morph"), ("Skin Wrap", "Skin Wrap"), ("Skin Wrap Patch", "Skin Wrap Patch"), ("Spline IK Control", "Spline IK Control"),
     ]),
     ("UV Coordinates", &[
         ("Camera Map", "Camera Map"), ("Camera Map (WSM)", "Camera Map (WSM)"), ("MapScaler", "MapScaler"), ("MapScaler (WSM)", "MapScaler (WSM)"), ("Projection", "Projection"), ("Unwrap UVW", "Unwrap UVW"),

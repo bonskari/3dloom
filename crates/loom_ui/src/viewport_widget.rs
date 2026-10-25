@@ -313,7 +313,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         if !moved && pointer.interact_pos().is_some_and(|p| p.distance(start) > 3.0) {
                             moved = true;
                             app.view_animation = None;
-                            app.state.record_view();
+                            app.state.record_view_as("Orbit");
                             // Dragging an axis view makes it an Orthographic (User) view.
                             if app.state.viewports[index].kind.angles().is_some() {
                                 let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
@@ -490,6 +490,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
+                    // Skin > Edit Envelopes: dragging an envelope end point or a cross-section ring.
+                    crate::skin_view::drag(app, &ctx, &pointer, response.hovered(), p, &projection);
                     // Skin > Paint Weights brush.
                     crate::poly_modes::skin_paint(app, &ctx, &painter, &pointer, response.hovered(), p, rect, view, proj, &projection);
                     // Paint Deformation brush: LMB paints on the selected poly (Ctrl inverts, Shift relaxes).
@@ -592,6 +594,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && !app.poly_dragging
                         && app.state.paint_deform.is_none()
                         && !app.state.vertex_paint_brush
+                        // Skin > Edit Envelopes: clicks pick vertices and envelopes, the object stays.
+                        && !loom_commands::skin::picks_vertices(&app.state)
                     {
                         let object_level = app.state.selection_mode == SelectionMode::Object;
                         // Sub-objects (not splines, whose knots have their own drags; no Shift clone).
@@ -674,7 +678,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             if !mods.ctrl && app.state.viewports[index].kind.angles().is_some() {
                                 let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
                             }
-                            app.state.record_view();
+                            app.state.record_view_as("Orbit");
                             nav_event(app, index, rect, InputEvent::MouseDown { button: MouseButton::Left, pos: Vec2::new(start.x, start.y), mods });
                         }
                     }
@@ -695,7 +699,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && response.hovered()
                     {
                         if app.state.nav_mode != loom_input::NavMode::None {
-                            app.state.record_view();
+                            app.state.record_view_as(nav_change_name(app.state.nav_mode));
                         }
                         // Orbit Selected / SubObject: orbit around the selection,
                         // keeping the eye where it is.
@@ -781,6 +785,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         app.creation_finished();
                                     }
                                 }
+                            } else if let Some(crate::CreateKind::SunSystem { daylight }) = app.create_kind {
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                    if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
+                                        anchor = hit.point;
+                                        app.consume_snap_override();
+                                    }
+                                    app.sun_create = crate::create_tool::SunSession::begin(app, daylight, anchor, basis.2);
+                                }
                             } else if let Some(crate::CreateKind::Light(kind)) = app.create_kind {
                                 if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
                                     if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
@@ -859,6 +871,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             session.finish(app);
                             app.creation_finished();
                         }
+                        if let Some(session) = app.sun_create.take() {
+                            session.finish(app);
+                            app.creation_finished();
+                        }
                         if let Some(session) = app.biped_create.take() {
                             let hit = plane_hit_at(p, rect, view, proj, session.feet, session.normal);
                             session.finish(app, hit, p);
@@ -870,7 +886,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             let special = app.state.pick_mode.is_none()
                                 && (crate::poly_modes::normals_pick(app, &projection, None, p, mods)
                                     || crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods)
-                                    || crate::poly_modes::skin_pick(app, &projection, None, p, mods));
+                                    || crate::poly_modes::skin_pick(app, &projection, None, p, mods)
+                                    || crate::morph_view::pick(app, &projection, None, p, mods));
                             if !special {
                                 let picked = picks_at(app, p, rect, view, proj, view_proj);
                                 apply_picks(app, picked, mods);
@@ -897,7 +914,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             } else if let Some(start) = app.drag_select_start.take() {
                                 let drag_px = (start - p).length();
                                 if drag_px < 4.0 {
-                                    if matches!(app.state.pick_mode, Some(loom_commands::PickMode::SpacingPointA | loom_commands::PickMode::SpacingPointB | loom_commands::PickMode::MeasureDistanceA | loom_commands::PickMode::MeasureDistanceB)) {
+                                    if matches!(app.state.pick_mode, Some(loom_commands::PickMode::SpacingPointA | loom_commands::PickMode::SpacingPointB | loom_commands::PickMode::MeasureDistanceA | loom_commands::PickMode::MeasureDistanceB | loom_commands::PickMode::BipedFootstep)) {
                                         // Spacing Tool > Pick Points, Measure Distance: the snap point, else the construction plane.
                                         let point = snap_at(app, index, &projection, p, None, false).map(|h| h.point).or_else(|| creation_anchor(app, index, p, rect, view, proj).map(|(a, _)| a));
                                         if let Some(pt) = point {
@@ -940,6 +957,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::ffd_pick(app, &projection, None, p, mods) {
+                                    } else if app.state.pick_mode.is_none() && crate::morph_view::pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_some() && !matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)) {
                                         if let Some(Pick::Object(i)) = pick_object(app, p, rect, view, proj) {
                                             let id = app.world_meshes()[i].0;
@@ -968,7 +986,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     }
                                 } else {
                                     let region = drag_region(app, start, p);
-                                    if !crate::poly_modes::normals_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::vertex_paint_face_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::skin_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::ffd_pick(app, &projection, Some(&region), p, mods) {
+                                    if !crate::poly_modes::normals_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::vertex_paint_face_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::skin_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::ffd_pick(app, &projection, Some(&region), p, mods) && !crate::morph_view::pick(app, &projection, Some(&region), p, mods) {
                                         // Auto Window/Crossing by Direction: left-to-right = Window, right-to-left = Crossing.
                                         let window = if app.state.prefs.auto_window_crossing { p.x >= start.x } else { app.state.window_selection };
                                         let items = region_select_mode(app, &region, rect, view_proj, window);
@@ -1003,6 +1021,16 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                         if let Some(session) = app.helper_create.clone() {
                             let mut hit = plane_hit_at(p, rect, view, proj, session.anchor, session.basis.2);
+                            if let Some(snap) = snap_at(app, index, &projection, p, Some(session.anchor), false) {
+                                hit = Some(snap.point);
+                            }
+                            if let Some(at) = hit {
+                                session.on_drag(app, at);
+                            }
+                            ctx.request_repaint();
+                        }
+                        if let Some(session) = app.sun_create.clone() {
+                            let mut hit = plane_hit_at(p, rect, view, proj, session.anchor, session.normal);
                             if let Some(snap) = snap_at(app, index, &projection, p, Some(session.anchor), false) {
                                 hit = Some(snap.point);
                             }
@@ -1071,7 +1099,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         if mods.alt && !mods.ctrl && app.state.viewports[index].kind.angles().is_some() {
                             let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
                         }
-                        app.state.record_view();
+                        app.state.record_view_as(if mods.alt && mods.ctrl { "Zoom" } else if mods.alt { "Orbit" } else { "Pan" });
                         nav_event(app, index, rect, InputEvent::MouseDown {
                                 button: MouseButton::Middle,
                                 pos,
@@ -1380,6 +1408,19 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
     }
 }
 
+/// The view change a navigation mode makes, as Undo View names it.
+fn nav_change_name(mode: loom_input::NavMode) -> &'static str {
+    use loom_input::NavMode as N;
+    match mode {
+        N::Zoom | N::ZoomAll => "Zoom",
+        N::ZoomRegion => "Zoom Region",
+        N::Pan => "Pan",
+        N::Orbit | N::OrbitSelected | N::OrbitSubObject => "Orbit",
+        N::Fov => "Field-of-View",
+        _ => "Change",
+    }
+}
+
 /// One navigation event for viewport `index`. Views move their own orbit;
 /// through a camera the camera viewport controls move the camera node
 /// instead (Truck for a pan, Orbit / Pan Camera, Dolly, Perspective, Roll,
@@ -1426,6 +1467,13 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
                         _ => 45.0,
                     };
                     ("fov", (fov * factor).clamp(1.0, 175.0), None)
+                }
+                N::LightHotspot | N::LightFalloff => {
+                    let (hot, fall) = match app.state.scene.node(camera.unwrap()).map(|n| &n.object) {
+                        Some(loom_scene::ObjectKind::Light(l)) => (l.hotspot.get(), l.falloff.get()),
+                        _ => (43.0, 45.0),
+                    };
+                    if mode == N::LightHotspot { ("hotspot", hot * factor, None) } else { ("falloff", fall * factor, None) }
                 }
                 N::DollyTarget => ("dolly_target", 1.0 / factor, None),
                 N::DollyBoth => ("dolly_both", factor, None),
@@ -2958,7 +3006,7 @@ fn distance_to_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     p.distance(a + ab * t)
 }
 
-fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
+pub(crate) fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
     let eps = 1e-6;
     let edge1 = b - a;
     let edge2 = c - a;

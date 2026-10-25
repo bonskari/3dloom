@@ -9,10 +9,106 @@ use crate::{Command, SelectOp};
 use glam::Vec3;
 use loom_mesh::select_ops::{self, SubLevel};
 use loom_mesh::{HalfEdgeId, Mesh, VertexId};
-use loom_scene::skin::{normalize, Envelope, SkinData};
+use loom_scene::skin::{normalize, Envelope, SkinData, SkinGizmo};
 use loom_scene::{Change, Modifier, NodeId, Transform};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+
+/// Skin state beyond the modifier's own data: selections, pick modes and buffers.
+#[derive(Debug, Clone, Default)]
+pub struct SkinUi {
+    /// The selected cross section ring of the current envelope: (index in `SkinBone::sections`, outer ring).
+    pub cross_section: Option<(usize, bool)>,
+    /// Cross Sections > Add: the next click on the current bone places a cross section.
+    pub adding_cross_section: bool,
+    /// Select > Select Element: a picked vertex selects its whole element.
+    pub select_element: bool,
+    /// Gizmo Parameters > Edit Lattice, and the picked lattice points.
+    pub edit_lattice: bool,
+    pub lattice_selection: BTreeSet<u32>,
+    /// Gizmos > Copy buffer.
+    pub clipboard_gizmo: Option<SkinGizmo>,
+    /// Mirror Parameters > Manual Update: the side colours as of the last Update.
+    pub mirror_sides: Option<((NodeId, usize), Vec<i8>)>,
+    /// Load Envelopes: the file whose bones are being matched.
+    pub load: Option<EnvFile>,
+    /// Weight Table: the vertex a double-click shows in pink.
+    pub highlight: Option<u32>,
+}
+
+/// An envelope file (.env): 3dLoom's own JSON (the reference's binary
+/// format is not documented): the bones' envelopes in their own frames,
+/// cross sections and exclusions, and the vertices with their weights.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvFile {
+    pub format: String,
+    pub bones: Vec<EnvBone>,
+    pub vertices: Vec<EnvVertex>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvBone {
+    pub name: String,
+    pub envelope: Envelope,
+    pub cross_sections: Vec<(f32, f32, f32)>,
+    pub excluded: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvVertex {
+    /// Position in the skinned object's space (Load Vertices By Index off matches by it).
+    pub position: [f32; 3],
+    /// (index into `EnvFile::bones`, weight).
+    pub weights: Vec<(u32, f32)>,
+    pub explicit: bool,
+    pub rigid: bool,
+}
+
+pub const ENV_FORMAT: &str = "3dloom-skin-envelopes-1";
+
+/// The Skin commands outside the reference's Skin action group.
+pub fn handles(c: &Command) -> bool {
+    use Command as C;
+    matches!(
+        c,
+        C::SkinSetEnvelopeMode { .. }
+            | C::PasteToMultipleBonesSkin
+            | C::SkinPasteToBones { .. }
+            | C::SkinSetPainterCurve { .. }
+            | C::SkinSetExclusion { .. }
+            | C::SkinAddVertexSet { .. }
+            | C::SkinSelectVertexSet { .. }
+            | C::SkinRemoveVertexSet { .. }
+            | C::SkinRigidHandlesToggle
+            | C::SkinResetSelectedVerts
+            | C::SkinResetSelectedBone
+            | C::SkinResetAllBones
+            | C::SkinSaveEnvelopes { .. }
+            | C::SkinLoadEnvelopes { .. }
+            | C::SkinApplyLoadedEnvelopes { .. }
+            | C::SkinSelectCrossSection { .. }
+            | C::SkinSetCrossSectionRadius { .. }
+            | C::SkinAddCrossSectionAt { .. }
+            | C::SkinMoveEnvelopePoint { .. }
+            | C::SkinSelectElementToggle
+            | C::PasteGreenToBlueBones
+            | C::PasteBlueToGreenBones
+            | C::SkinMirrorUpdate
+            | C::SkinCopyGizmo
+            | C::SkinPasteGizmo
+            | C::SkinRenameGizmo { .. }
+            | C::SkinGizmoAddFromStack
+            | C::SkinGizmoAddFromNode { .. }
+            | C::SkinGizmoDeleteTarget { .. }
+            | C::SkinGizmoRenameTarget { .. }
+            | C::SkinEditLatticeToggle
+            | C::SkinSelectLatticePoints { .. }
+            | C::SkinSetLatticeOffset { .. }
+            | C::SkinAngleKeysCurvesDialog
+            | C::SkinHighlightVertex { .. }
+    )
+}
 
 pub struct Entry {
     pub id: NodeId,
@@ -27,10 +123,28 @@ pub fn entry(state: &AppState) -> Result<Entry, String> {
     let node = state.scene.node(id).ok_or("missing node")?;
     let Modifier::Skin(data) = &node.modifiers[index].modifier else { return Err("not a Skin entry".into()) };
     let input = match index.checked_sub(1) {
-        Some(prev) => state.scene.evaluated(id, Some(prev)).value.mesh.clone(),
-        None => node.object.display_output(),
+        Some(prev) => {
+            let ev = state.scene.evaluated(id, Some(prev));
+            match &ev.value.patch {
+                Some(p) => p.cage(),
+                None => ev.value.mesh.clone(),
+            }
+        }
+        None => match node.object.patch_mesh() {
+            Some(p) => p.cage(),
+            None => node.object.display_output(),
+        },
     };
     Ok(Entry { id, index, data: (**data).clone(), input })
+}
+
+/// The patch lattice flowing into the Skin, when it deforms a patch.
+pub fn input_patch(state: &AppState) -> Option<loom_mesh::patch::PatchMesh> {
+    let (id, index) = state.skin_entry()?;
+    match index.checked_sub(1) {
+        Some(prev) => state.scene.evaluated(id, Some(prev)).value.patch.clone(),
+        None => state.scene.node(id)?.object.patch_mesh(),
+    }
 }
 
 /// With a bone selected: the Skin that lists it (Set / Assume Skin Pose from a bone).
@@ -202,6 +316,7 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SkinModifier => crate::execute(state, C::AddModifier { name: "Skin".into() }),
         C::SkinMorphModifier => crate::execute(state, C::AddModifier { name: "Skin Morph".into() }),
         C::SkinWrapModifier => crate::execute(state, C::AddModifier { name: "Skin Wrap".into() }),
+        C::SkinWrapPatchModifier => crate::execute(state, C::AddModifier { name: "Skin Wrap Patch".into() }),
         C::AddBonesSkin => {
             entry(state)?;
             state.dialog_purpose = DialogPurpose::SkinAddBones;
@@ -264,7 +379,27 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if let Some(bad) = ids.iter().find(|v| **v >= n) {
                 return Err(format!("no vertex {bad} (the mesh has {n})"));
             }
+            let mut ids = ids;
+            if state.skin_ui.select_element {
+                // Select Element: a picked vertex brings its whole element.
+                ids = element_vertices(&e.input, &ids);
+            }
+            let m = &e.data.mirror;
+            if m.mode && (m.projection == 1 || m.projection == 2) {
+                // Display Projection Positive / Negative: only that side's vertices select.
+                let a = m.plane.min(2) as usize;
+                let positive = m.projection == 1;
+                ids.retain(|v| {
+                    let d = e.input.vertices()[*v as usize].position[a] - m.offset;
+                    if positive { d > 0.0 } else { d < 0.0 }
+                });
+            }
             set_selection(state, ids, op);
+            if op == SelectOp::Replace {
+                // A new vertex pick replaces an end point / cross section pick.
+                state.skin_handle = None;
+                state.skin_ui.cross_section = None;
+            }
             Ok(status(state))
         }
         C::SkinSetVertexWeight { weight, absolute } => weight_edit(state, "Set Weight", move |cur, _| if absolute { weight } else { cur + weight }),
@@ -314,15 +449,23 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.skin_paint = !state.skin_paint;
             Ok(status(state))
         }
-        C::SkinPaintStroke { points, erase } => paint(state, &points, erase),
+        C::SkinPaintStroke { points, erase, pressure } => paint(state, &points, erase, pressure.as_deref()),
         C::SkinSetPainterOption { name, value } => {
             let p = &mut state.skin_painter;
             let on = value != 0.0;
             match name.as_str() {
                 "Max Strength" => p.strength = (value as f32).clamp(0.0, 1.0),
                 "Max Size" => p.size = (value as f32).max(1e-3),
+                "Min Strength" => p.min_strength = (value as f32).clamp(0.0, 1.0),
+                "Min Size" => p.min_size = (value as f32).max(0.0),
+                "Enable Pressure Sensitivity" => p.pressure_on = on,
+                "Pressure Affects" => p.pressure_affects = (value.max(0.0) as u32).min(3),
                 "Additive" => p.additive = on,
-                "Falloff" => p.falloff = (value.max(0.0) as u32).min(4),
+                "Falloff" => {
+                    // A falloff button sets the graph to its curve.
+                    p.falloff = (value.max(0.0) as u32).min(4);
+                    p.curve = Painter::preset_curve(p.falloff);
+                }
                 "Draw Ring" => p.draw_ring = on,
                 "Mirror" => p.mirror = on,
                 "Mirror Axis" => p.mirror_axis = (value.max(0.0) as u32).min(2),
@@ -405,31 +548,48 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }),
         C::SkinSetEnvelope { inner_start, inner_end, outer_start, outer_end, falloff, abs_effect, squash } => edit(state, "Envelope", |data, mesh, st| {
             let i = current_bone_index(st, data)?;
+            let animatable = data.animatable_envelopes;
             let e = &mut data.bones[i].envelope;
-            if let Some(v) = inner_start { e.inner[0] = v.max(0.0); }
-            if let Some(v) = inner_end { e.inner[1] = v.max(0.0); }
-            if let Some(v) = outer_start { e.outer[0] = v.max(0.0); }
-            if let Some(v) = outer_end { e.outer[1] = v.max(0.0); }
+            if animatable && loom_scene::anim::animate() && e.keys.is_none() {
+                // Animatable Envelopes under Auto Key: the radii become keyable and key at this frame.
+                let p = |x: f32| loom_scene::Param::new(x);
+                e.keys = Some(Box::new(loom_scene::skin::EnvelopeKeys { inner: [p(e.inner[0]), p(e.inner[1])], outer: [p(e.outer[0]), p(e.outer[1])] }));
+            }
+            if let Some(v) = inner_start { e.set_radius(0, false, v); }
+            if let Some(v) = inner_end { e.set_radius(1, false, v); }
+            if let Some(v) = outer_start { e.set_radius(0, true, v); }
+            if let Some(v) = outer_end { e.set_radius(1, true, v); }
             if let Some(v) = falloff { e.falloff = v.min(3); }
             if let Some(v) = abs_effect { e.abs_effect = v.clamp(0.0, 1.0); }
             if let Some(v) = squash { e.squash = v.max(0.0); }
             data.refresh_envelope_weights(mesh);
             Ok(())
         }),
-        C::AddCrossSectionSkin => edit(state, "Add Cross Section", |data, mesh, st| {
-            let i = current_bone_index(st, data)?;
-            let b = &mut data.bones[i];
-            let (inner, outer) = ((b.envelope.inner[0] + b.envelope.inner[1]) * 0.5, (b.envelope.outer[0] + b.envelope.outer[1]) * 0.5);
-            b.cross_sections.push((0.5, inner, outer));
-            data.refresh_envelope_weights(mesh);
-            Ok(())
-        }),
-        C::RemoveCrossSectionSkin => edit(state, "Remove Cross Section", |data, mesh, st| {
-            let i = current_bone_index(st, data)?;
-            data.bones[i].cross_sections.pop().ok_or("the bone has no cross sections")?;
-            data.refresh_envelope_weights(mesh);
-            Ok(())
-        }),
+        C::AddCrossSectionSkin => {
+            // Add, then a click on the bone in a viewport places the cross section.
+            let e = entry(state)?;
+            current_bone_index(state, &e.data)?;
+            state.skin_ui.adding_cross_section = !state.skin_ui.adding_cross_section;
+            if state.skin_ui.adding_cross_section {
+                state.status_prompt = "Click on the bone to add a cross section".into();
+            }
+            Ok(status(state))
+        }
+        C::RemoveCrossSectionSkin => {
+            let (k, _) = state.skin_ui.cross_section.ok_or("select a cross section first (Cross Sections filter on)")?;
+            let r = edit(state, "Remove Cross Section", |data, mesh, st| {
+                let i = current_bone_index(st, data)?;
+                let n = data.bones[i].cross_sections.len() + 2;
+                if k == 0 || k + 1 >= n {
+                    return Err("only cross sections you added can be removed, not the envelope's ends".into());
+                }
+                data.bones[i].cross_sections.remove(k - 1);
+                data.refresh_envelope_weights(mesh);
+                Ok(())
+            })?;
+            state.skin_ui.cross_section = None;
+            Ok(r)
+        }
         C::SetSkinPose => edit(state, "Set Skin Pose", |data, _, st| {
             data.skin_pose = Some(data.bones.iter().filter_map(|b| st.scene.node(b.node).map(|n| (b.node, n.transform.clone()))).collect());
             Ok(())
@@ -539,11 +699,13 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SelectStartPointSkin => {
             entry(state)?;
             state.skin_handle = Some(0);
+            state.skin_ui.cross_section = None;
             Ok(status(state))
         }
         C::SelectEndPointSkin => {
             entry(state)?;
             state.skin_handle = Some(1);
+            state.skin_ui.cross_section = None;
             Ok(status(state))
         }
         C::CopyEnvelopeSkin => {
@@ -615,10 +777,15 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             })
         }
         C::RemoveZeroWeightsSkin => edit(state, "Remove Zero Weights", |data, mesh, _| {
+            // Every vertex loses its weights below the Remove Zero Limit (they become hand-set).
+            let limit = data.remove_zero_limit;
             for v in 0..mesh.vertex_count() {
-                if data.explicit[v] {
-                    data.weights[v].retain(|(_, x)| *x > 0.0005);
-                    normalize(&mut data.weights[v]);
+                let w = current_weights(data, mesh, v);
+                if w.iter().any(|(_, x)| *x < limit || *x <= 0.0) {
+                    let mut kept: Vec<(u32, f32)> = w.into_iter().filter(|(_, x)| *x >= limit && *x > 0.0).collect();
+                    normalize(&mut kept);
+                    data.weights[v] = kept;
+                    data.explicit[v] = true;
                 }
             }
             Ok(())
@@ -693,14 +860,38 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let kind = match kind.to_ascii_lowercase().as_str() {
                 "joint" | "joint angle" | "joint angle deformer" => loom_scene::skin::GizmoKind::JointAngle,
                 "bulge" | "bulge angle" | "bulge angle deformer" => loom_scene::skin::GizmoKind::BulgeAngle,
-                other => return Err(format!("unknown gizmo kind {other:?} (joint, bulge)")),
+                "morph" | "morph angle" | "morph angle deformer" => loom_scene::skin::GizmoKind::MorphAngle,
+                other => return Err(format!("unknown gizmo kind {other:?} (joint, bulge, morph)")),
             };
-            let r = edit(state, "Add Gizmo", |data, _, st| {
+            let r = edit(state, "Add Gizmo", |data, mesh, st| {
                 let bone = current_bone_index(st, data)?;
                 let parent_node = st.scene.node(data.bones[bone].node).and_then(|n| n.parent).ok_or("the current bone has no parent bone in the Skin")?;
                 let parent = data.bones.iter().position(|b| b.node == parent_node).ok_or("the current bone's parent is not in the Skin's list")?;
                 let angle = loom_scene::skin::bone_angle(data, &|id| Some(st.scene.world_matrix(id)), bone, parent).unwrap_or(0.0);
-                data.gizmos.push(loom_scene::skin::SkinGizmo { kind, bone, parent_bone: parent, keys: vec![loom_scene::skin::GizmoKey { angle_deg: angle, deltas: Vec::new(), bulge: 0.0 }], influence: 1.0, enabled: true });
+                // The gizmo works on the selected vertices (with none selected, on its bones' vertices).
+                let mut vertices: Vec<u32> = selected_verts(st, mesh.vertex_count()).into_iter().map(|v| v as u32).collect();
+                vertices.sort_unstable();
+                let morph = kind == loom_scene::skin::GizmoKind::MorphAngle;
+                let mut g = SkinGizmo { kind, bone, parent_bone: parent, keys: vec![loom_scene::skin::GizmoKey { angle_deg: angle, name: if morph { "Base".into() } else { String::new() }, ..Default::default() }], vertices, ..Default::default() };
+                g.name = format!("{} {:02}", kind.label(), data.gizmos.iter().filter(|x| x.kind == kind).count() + 1);
+                if !morph {
+                    // The lattice boxes the gizmo's vertices in its bone's bind frame.
+                    let lb = g.lattice_bone();
+                    let inv = data.bones[lb].bind_inverse;
+                    let pts: Vec<Vec3> = (0..mesh.vertex_count())
+                        .filter(|v| {
+                            if !g.vertices.is_empty() {
+                                return g.vertices.contains(&(*v as u32));
+                            }
+                            let w = current_weights(data, mesh, *v);
+                            let on = |b: usize| w.iter().any(|(x, y)| *x as usize == b && *y > 0.0);
+                            if kind == loom_scene::skin::GizmoKind::BulgeAngle { on(parent) } else { on(bone) || on(parent) }
+                        })
+                        .map(|v| inv.transform_point3(data.mesh_bind.transform_point3(mesh.vertices()[v].position)))
+                        .collect();
+                    g.lattice = loom_scene::skin::GizmoLattice::around(&pts);
+                }
+                data.gizmos.push(g);
                 Ok(())
             })?;
             state.skin_gizmo = entry(state).ok().and_then(|e| e.data.gizmos.len().checked_sub(1));
@@ -730,7 +921,7 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let g = st.skin_gizmo.ok_or("select a gizmo first")?;
             let (bone, parent) = { let gz = data.gizmos.get(g).ok_or("no such gizmo")?; (gz.bone, gz.parent_bone) };
             let angle = loom_scene::skin::bone_angle(data, &|id| Some(st.scene.world_matrix(id)), bone, parent).unwrap_or(0.0);
-            data.gizmos[g].keys.push(loom_scene::skin::GizmoKey { angle_deg: angle, deltas: Vec::new(), bulge: 0.0 });
+            data.gizmos[g].keys.push(loom_scene::skin::GizmoKey { angle_deg: angle, deltas: Vec::new(), bulge: 0.0, ..Default::default() });
             Ok(())
         }),
         C::SkinSetGizmoKey { key, bulge, angle } => edit(state, "Gizmo Key", |data, _, st| {
@@ -756,12 +947,540 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             match name.as_str() {
                 "Influence" => gz.influence = value as f32,
                 "Enabled" => gz.enabled = value != 0.0,
+                "Twist" => gz.twist = value as f32,
+                "Use Bounding Volume" => gz.bounding_volume = value != 0.0,
                 other => return Err(format!("gizmo has no option {other:?}")),
             }
             Ok(())
         }),
+        C::SkinSetEnvelopeMode { relative } => edit(state, if relative { "Envelope Relative" } else { "Envelope Absolute" }, |data, mesh, st| {
+            let i = current_bone_index(st, data)?;
+            data.bones[i].envelope.relative = relative;
+            data.refresh_envelope_weights(mesh);
+            Ok(())
+        }),
+        C::PasteToMultipleBonesSkin => {
+            entry(state)?;
+            state.skin_clipboard_envelope.as_ref().ok_or("no envelope copied (Copy first)")?;
+            state.dialog = Some(Dialog::PasteToMultipleBones);
+            Ok(json!({ "dialog": "PasteToMultipleBones" }))
+        }
+        C::SkinPasteToBones { ids } => {
+            let env = state.skin_clipboard_envelope.clone().ok_or("no envelope copied (Copy first)")?;
+            edit(state, "Paste To Multiple Bones", |data, mesh, _| {
+                for id in &ids {
+                    let i = data.bones.iter().position(|b| b.node == NodeId(*id)).ok_or_else(|| format!("node {id} is not in the Skin's list"))?;
+                    paste_envelope(&mut data.bones[i].envelope, &env);
+                }
+                data.refresh_envelope_weights(mesh);
+                Ok(())
+            })
+        }
+        C::SkinSetPainterCurve { points } => {
+            if points.len() < 2 {
+                return Err("the falloff graph needs at least two points".into());
+            }
+            let mut pts: Vec<[f32; 2]> = points.iter().map(|p| [p[0].clamp(0.0, 1.0), p[1].clamp(0.0, 1.0)]).collect();
+            pts.sort_by(|a, b| a[0].total_cmp(&b[0]));
+            state.skin_painter.curve = pts;
+            state.skin_painter.falloff = Painter::CUSTOM;
+            Ok(status(state))
+        }
+        C::SkinSetExclusion { vertex, bone, excluded } => edit(state, if excluded { "Exclude Vertex" } else { "Include Vertex" }, |data, mesh, _| {
+            let b = data.bones.iter().position(|x| x.node == NodeId(bone)).ok_or("the bone is not in the Skin's list")?;
+            let v = vertex as usize;
+            if v >= mesh.vertex_count() {
+                return Err(format!("no vertex {vertex} (the mesh has {})", mesh.vertex_count()));
+            }
+            if excluded {
+                data.excluded[b].insert(vertex);
+                if data.explicit[v] {
+                    data.weights[v].retain(|(x, _)| *x as usize != b);
+                    normalize(&mut data.weights[v]);
+                }
+            } else {
+                data.excluded[b].remove(&vertex);
+            }
+            data.refresh_envelope_weights(mesh);
+            Ok(())
+        }),
+        C::SkinAddVertexSet { name } => {
+            let name = name.trim().to_owned();
+            if name.is_empty() {
+                return Err("the vertex set needs a name".into());
+            }
+            let sel = selection(state);
+            if sel.is_empty() {
+                return Err("select vertices first".into());
+            }
+            edit(state, "Create Vertex Set", |data, _, _| {
+                data.vertex_sets.retain(|(n, _)| *n != name);
+                data.vertex_sets.push((name.clone(), sel.clone()));
+                Ok(())
+            })
+        }
+        C::SkinSelectVertexSet { name } => {
+            let e = entry(state)?;
+            let ids = e.data.vertex_sets.iter().find(|(n, _)| *n == name).map(|(_, v)| v.clone()).ok_or_else(|| format!("no vertex set {name:?}"))?;
+            let n = e.input.vertex_count() as u32;
+            set_selection(state, ids.into_iter().filter(|v| *v < n), SelectOp::Replace);
+            Ok(status(state))
+        }
+        C::SkinRemoveVertexSet { name } => edit(state, "Delete Vertex Set", |data, _, _| {
+            let before = data.vertex_sets.len();
+            data.vertex_sets.retain(|(n, _)| *n != name);
+            if data.vertex_sets.len() == before {
+                return Err(format!("no vertex set {name:?}"));
+            }
+            Ok(())
+        }),
+        C::SkinRigidHandlesToggle => {
+            let patch = input_patch(state).ok_or("Rigid Handles works on patch objects (the Skin's input has no patches)")?;
+            let nv = patch.verts.len();
+            edit(state, "Rigid Handles", |data, mesh, st| {
+                let verts: Vec<usize> = selected_verts(st, mesh.vertex_count()).into_iter().filter(|v| *v < nv).collect();
+                if verts.is_empty() {
+                    return Err("select patch vertices first".into());
+                }
+                let on = !verts.iter().all(|v| data.rigid_handles[*v]);
+                for v in verts {
+                    data.rigid_handles[v] = on;
+                }
+                Ok(())
+            })
+        }
+        C::SkinResetSelectedVerts => edit(state, "Reset Selected Verts", |data, mesh, st| {
+            let verts = selected_verts(st, mesh.vertex_count());
+            if verts.is_empty() {
+                return Err("select vertices first".into());
+            }
+            for v in verts {
+                data.explicit[v] = false;
+            }
+            data.refresh_envelope_weights(mesh);
+            Ok(())
+        }),
+        C::SkinResetSelectedBone => edit(state, "Reset Selected Bone", |data, mesh, st| {
+            let b = current_bone_index(st, data)? as u32;
+            for v in 0..mesh.vertex_count() {
+                if data.explicit[v] && weight_of(&current_weights(data, mesh, v), b) > 0.0 {
+                    data.explicit[v] = false;
+                }
+            }
+            data.refresh_envelope_weights(mesh);
+            Ok(())
+        }),
+        C::SkinResetAllBones => edit(state, "Reset All Bones", |data, mesh, _| {
+            data.explicit.iter_mut().for_each(|x| *x = false);
+            data.refresh_envelope_weights(mesh);
+            Ok(())
+        }),
+        C::SkinSaveEnvelopes { path } => {
+            let Some(path) = path else {
+                entry(state)?;
+                state.dialog = Some(Dialog::SkinSaveEnvelopes);
+                return Ok(json!({ "dialog": "SkinSaveEnvelopes" }));
+            };
+            let e = entry(state)?;
+            let file = env_file(state, &e);
+            let text = serde_json::to_string_pretty(&file).map_err(|x| x.to_string())?;
+            std::fs::write(&path, text).map_err(|x| format!("{path}: {x}"))?;
+            Ok(json!({ "path": path, "bones": file.bones.len(), "vertices": file.vertices.len() }))
+        }
+        C::SkinLoadEnvelopes { path } => {
+            let Some(path) = path else {
+                entry(state)?;
+                state.dialog = Some(Dialog::SkinLoadEnvelopes);
+                return Ok(json!({ "dialog": "SkinLoadEnvelopes" }));
+            };
+            entry(state)?;
+            let text = std::fs::read_to_string(&path).map_err(|x| format!("{path}: {x}"))?;
+            let file: EnvFile = serde_json::from_str(&text).map_err(|x| format!("{path}: not an envelope file ({x})"))?;
+            let names: Vec<String> = file.bones.iter().map(|b| b.name.clone()).collect();
+            state.skin_ui.load = Some(file);
+            state.dialog = Some(Dialog::LoadEnvelopes);
+            Ok(json!({ "dialog": "LoadEnvelopes", "incoming": names }))
+        }
+        C::SkinApplyLoadedEnvelopes { incoming, end_points, cross_sections, vertex_data, exclusions, by_index } => {
+            let file = state.skin_ui.load.clone().ok_or("no envelope file loaded (Load first)")?;
+            let r = edit(state, "Load Envelopes", |data, mesh, _| {
+                apply_env(data, mesh, &file, &incoming, end_points, cross_sections, vertex_data, exclusions, by_index)?;
+                Ok(())
+            })?;
+            state.skin_ui.load = None;
+            Ok(r)
+        }
+        C::SkinSelectCrossSection { index, outer } => {
+            let e = entry(state)?;
+            let i = current_bone_index(state, &e.data)?;
+            let n = e.data.bones[i].cross_sections.len() + 2;
+            if index as usize >= n {
+                return Err(format!("the envelope has {n} cross sections"));
+            }
+            state.skin_ui.cross_section = Some((index as usize, outer));
+            state.skin_handle = None;
+            Ok(status(state))
+        }
+        C::SkinSetCrossSectionRadius { radius } => {
+            let (k, outer) = state.skin_ui.cross_section.ok_or("select a cross section first")?;
+            edit(state, "Cross Section Radius", |data, mesh, st| {
+                let i = current_bone_index(st, data)?;
+                let b = &mut data.bones[i];
+                let n = b.cross_sections.len() + 2;
+                if k == 0 || k + 1 == n {
+                    b.envelope.set_radius(if k == 0 { 0 } else { 1 }, outer, radius);
+                } else if let Some(cs) = b.cross_sections.get_mut(k - 1) {
+                    if outer { cs.2 = radius.max(0.0) } else { cs.1 = radius.max(0.0) }
+                } else {
+                    return Err("no such cross section".into());
+                }
+                data.refresh_envelope_weights(mesh);
+                Ok(())
+            })
+        }
+        C::SkinAddCrossSectionAt { u } => {
+            let mut index = 0;
+            let r = edit(state, "Add Cross Section", |data, mesh, st| {
+                let i = current_bone_index(st, data)?;
+                let b = &mut data.bones[i];
+                let u = u.clamp(0.001, 0.999);
+                let (inner, outer) = loom_scene::skin::radius_profile(&b.envelope, &b.cross_sections, u);
+                let at = b.cross_sections.iter().position(|c| c.0 > u).unwrap_or(b.cross_sections.len());
+                b.cross_sections.insert(at, (u, inner, outer));
+                index = at + 1;
+                data.refresh_envelope_weights(mesh);
+                Ok(())
+            })?;
+            state.skin_ui.adding_cross_section = false;
+            state.skin_ui.cross_section = Some((index, false));
+            Ok(r)
+        }
+        C::SkinMoveEnvelopePoint { end, position } => edit(state, "Move Envelope", |data, mesh, st| {
+            let i = current_bone_index(st, data)?;
+            // The envelope is shown on the bone as it is now: back through the bone's current matrix.
+            let now = st.scene.world_matrix(data.bones[i].node).inverse();
+            let b = &mut data.bones[i];
+            let local = now.transform_point3(Vec3::from(position));
+            move_envelope_point(&mut b.envelope, end.min(1) as usize, local);
+            data.refresh_envelope_weights(mesh);
+            Ok(())
+        }),
+        C::SkinSelectElementToggle => {
+            state.skin_ui.select_element = !state.skin_ui.select_element;
+            Ok(status(state))
+        }
+        C::PasteGreenToBlueBones | C::PasteBlueToGreenBones => {
+            let green_to_blue = matches!(cmd, C::PasteGreenToBlueBones);
+            edit(state, "Mirror Paste Bones", |data, mesh, st| {
+                let names = bone_names(st, data);
+                if loom_scene::skin::mirror_envelopes(data, &names, green_to_blue) == 0 {
+                    return Err("no bone on that side has a partner across the mirror plane".into());
+                }
+                data.refresh_envelope_weights(mesh);
+                Ok(())
+            })
+        }
+        C::SkinMirrorUpdate => {
+            let e = entry(state)?;
+            let sides = compute_mirror_sides(&e);
+            state.skin_ui.mirror_sides = Some(((e.id, e.index), sides));
+            state.mesh_dirty = true;
+            Ok(status(state))
+        }
+        C::SkinCopyGizmo => {
+            let e = entry(state)?;
+            let g = state.skin_gizmo.and_then(|g| e.data.gizmos.get(g).cloned()).ok_or("select a gizmo first")?;
+            state.skin_ui.clipboard_gizmo = Some(g);
+            Ok(status(state))
+        }
+        C::SkinPasteGizmo => {
+            let src = state.skin_ui.clipboard_gizmo.clone().ok_or("no gizmo copied")?;
+            let g = state.skin_gizmo.ok_or("select a gizmo first")?;
+            edit(state, "Paste Gizmo", |data, _, _| {
+                let dst = data.gizmos.get_mut(g).ok_or("no such gizmo")?;
+                if dst.kind != src.kind {
+                    return Err(format!("a {} pastes only onto a {}", src.kind.label(), src.kind.label()));
+                }
+                dst.keys = src.keys.clone();
+                dst.influence = src.influence;
+                dst.twist = src.twist;
+                dst.bounding_volume = src.bounding_volume;
+                if dst.lattice.as_ref().map(|l| l.dims) != src.lattice.as_ref().map(|l| l.dims) {
+                    // Lattice offsets belong to a lattice of the same size.
+                    dst.lattice = src.lattice.clone();
+                }
+                Ok(())
+            })
+        }
+        C::SkinRenameGizmo { name } => {
+            let g = state.skin_gizmo.ok_or("select a gizmo first")?;
+            edit(state, "Rename Gizmo", |data, _, _| {
+                data.gizmos.get_mut(g).ok_or("no such gizmo")?.name = name.clone();
+                Ok(())
+            })
+        }
+        C::SkinGizmoAddFromStack | C::SkinGizmoAddFromNode { .. } => {
+            let g = state.skin_gizmo.ok_or("select a Morph Angle gizmo first")?;
+            let e = entry(state)?;
+            let gizmo = e.data.gizmos.get(g).cloned().ok_or("no such gizmo")?;
+            if gizmo.kind != loom_scene::skin::GizmoKind::MorphAngle {
+                return Err("Add From Stack / Node works on a Morph Angle Deformer".into());
+            }
+            let world = state.scene.object_matrix(e.id);
+            // The target in world space: the stack's top or another object.
+            let target: Vec<Vec3> = match &cmd {
+                C::SkinGizmoAddFromNode { id } => {
+                    let id = NodeId(*id);
+                    state.scene.node(id).ok_or_else(|| format!("no node {}", id.0))?;
+                    let m = state.scene.object_matrix(id);
+                    state.scene.eval_mesh(id).value.mesh.vertices().iter().map(|v| m.transform_point3(v.position)).collect()
+                }
+                _ => state.scene.eval_mesh(e.id).value.mesh.vertices().iter().map(|v| world.transform_point3(v.position)).collect(),
+            };
+            let skinned: Vec<Vec3> = loom_scene::skin::weighted_points(&state.scene.evaluated(e.id, Some(e.index)).value).into_iter().map(|p| world.transform_point3(p)).collect();
+            if target.len() != skinned.len() {
+                return Err(format!("the target has {} vertices, the skinned mesh {}", target.len(), skinned.len()));
+            }
+            let scene = &state.scene;
+            let wm = |id: NodeId| Some(scene.world_matrix(id));
+            let angle = loom_scene::skin::bone_angle(&e.data, &wm, gizmo.bone, gizmo.parent_bone).unwrap_or(0.0);
+            let bone_world = scene.world_matrix(e.data.bones[gizmo.bone].node);
+            // The gizmo's own share at this angle is in the skinned result: take it out first.
+            let blend = loom_scene::skin::gizmos::key_blend(&gizmo.keys, angle);
+            let mut own = vec![Vec3::ZERO; skinned.len()];
+            for (w, k) in &blend {
+                for (v, d) in &gizmo.keys[*k].deltas {
+                    if let Some(o) = own.get_mut(*v as usize) {
+                        *o += bone_world.transform_vector3(*d) * *w * gizmo.influence;
+                    }
+                }
+            }
+            let to_bone = bone_world.inverse();
+            let members: Vec<usize> = if gizmo.vertices.is_empty() { (0..skinned.len()).collect() } else { gizmo.vertices.iter().map(|v| *v as usize).filter(|v| *v < skinned.len()).collect() };
+            let influence = gizmo.influence.max(1e-6);
+            let deltas: Vec<(u32, Vec3)> = members
+                .into_iter()
+                .filter_map(|v| {
+                    let d = target[v] - (skinned[v] - own[v]);
+                    (d.length_squared() > 1e-12).then(|| (v as u32, to_bone.transform_vector3(d) / influence))
+                })
+                .collect();
+            let count = deltas.len();
+            edit(state, "Add Morph Target", |data, _, _| {
+                let gz = data.gizmos.get_mut(g).ok_or("no such gizmo")?;
+                let n = gz.keys.len();
+                match gz.keys.iter_mut().find(|k| (k.angle_deg - angle).abs() < 0.5) {
+                    Some(k) => k.deltas = deltas.clone(),
+                    None => gz.keys.push(loom_scene::skin::GizmoKey { angle_deg: angle, deltas: deltas.clone(), name: format!("Target {n:02}"), ..Default::default() }),
+                }
+                Ok(())
+            })?;
+            Ok(json!({ "angle": angle, "vertices": count }))
+        }
+        C::SkinGizmoDeleteTarget { key } => {
+            let g = state.skin_gizmo.ok_or("select a gizmo first")?;
+            edit(state, "Delete Morph Target", |data, _, _| {
+                let gz = data.gizmos.get_mut(g).ok_or("no such gizmo")?;
+                if key as usize >= gz.keys.len() {
+                    return Err(format!("no target {key}"));
+                }
+                if gz.keys.len() == 1 {
+                    return Err("the gizmo keeps at least one target".into());
+                }
+                gz.keys.remove(key as usize);
+                Ok(())
+            })
+        }
+        C::SkinGizmoRenameTarget { key, name } => {
+            let g = state.skin_gizmo.ok_or("select a gizmo first")?;
+            edit(state, "Rename Morph Target", |data, _, _| {
+                let k = data.gizmos.get_mut(g).and_then(|gz| gz.keys.get_mut(key as usize)).ok_or_else(|| format!("no target {key}"))?;
+                k.name = name.clone();
+                Ok(())
+            })
+        }
+        C::SkinEditLatticeToggle => {
+            let e = entry(state)?;
+            let g = state.skin_gizmo.and_then(|g| e.data.gizmos.get(g)).ok_or("select a gizmo first")?;
+            if g.lattice.is_none() {
+                return Err("this gizmo has no lattice (Joint Angle and Bulge Angle deformers do)".into());
+            }
+            state.skin_ui.edit_lattice = !state.skin_ui.edit_lattice;
+            state.skin_ui.lattice_selection.clear();
+            state.skin_handle = None;
+            state.skin_ui.cross_section = None;
+            Ok(status(state))
+        }
+        C::SkinSelectLatticePoints { indices, op } => {
+            let e = entry(state)?;
+            let lat = state.skin_gizmo.and_then(|g| e.data.gizmos.get(g)).and_then(|g| g.lattice.clone()).ok_or("the current gizmo has no lattice")?;
+            let n = lat.count() as u32;
+            if let Some(bad) = indices.iter().find(|i| **i >= n) {
+                return Err(format!("no lattice point {bad} (the lattice has {n})"));
+            }
+            let sel = &mut state.skin_ui.lattice_selection;
+            match op {
+                SelectOp::Replace => *sel = indices.into_iter().collect(),
+                SelectOp::Add => sel.extend(indices),
+                SelectOp::Subtract => sel.retain(|i| !indices.contains(i)),
+            }
+            Ok(status(state))
+        }
+        C::SkinSetLatticeOffset { key, point, offset } => {
+            let g = state.skin_gizmo.ok_or("select a gizmo first")?;
+            edit(state, "Edit Lattice", |data, _, _| {
+                let gz = data.gizmos.get_mut(g).ok_or("no such gizmo")?;
+                let n = gz.lattice.as_ref().ok_or("the gizmo has no lattice")?.count();
+                if point as usize >= n {
+                    return Err(format!("no lattice point {point}"));
+                }
+                let k = gz.keys.get_mut(key as usize).ok_or_else(|| format!("no key {key}"))?;
+                k.lattice.resize(n, Vec3::ZERO);
+                k.lattice[point as usize] = Vec3::from(offset);
+                Ok(())
+            })
+        }
+        C::SkinAngleKeysCurvesDialog => {
+            let e = entry(state)?;
+            state.skin_gizmo.and_then(|g| e.data.gizmos.get(g)).and_then(|g| g.lattice.as_ref()).ok_or("the current gizmo has no lattice")?;
+            state.dialog = Some(Dialog::AngleKeysCurves);
+            Ok(json!({ "dialog": "AngleKeysCurves" }))
+        }
+        C::SkinHighlightVertex { vertex } => {
+            state.skin_ui.highlight = vertex;
+            Ok(status(state))
+        }
         other => Err(format!("{} is not a Skin command", other.name())),
     }
+}
+
+/// The vertices of every element the given vertices belong to.
+fn element_vertices(m: &Mesh, ids: &[u32]) -> Vec<u32> {
+    let faces: Vec<u32> = ids.iter().flat_map(|v| select_ops::vertex_edges(m, VertexId(*v)).into_iter().filter_map(|he| m.half_edges()[he.0 as usize].face.map(|f| f.0))).collect();
+    let mut out: BTreeSet<u32> = ids.iter().copied().collect();
+    for f in faces {
+        for ef in select_ops::element_of(m, loom_mesh::FaceId(f)) {
+            out.extend(m.face_vertex_ids(ef).unwrap_or_default().into_iter().map(|v| v.0));
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// Moves an envelope's start (0) or end (1) point; a curved envelope's path end goes along.
+fn move_envelope_point(e: &mut Envelope, end: usize, local: Vec3) {
+    if end == 0 {
+        e.start = local;
+        if let Some(p) = e.path.first_mut() {
+            *p = local;
+        }
+    } else {
+        e.end = local;
+        if let Some(p) = e.path.last_mut() {
+            *p = local;
+        }
+    }
+}
+
+/// The current Skin as an envelope file.
+fn env_file(state: &AppState, e: &Entry) -> EnvFile {
+    let names = bone_names(state, &e.data);
+    let bones = e.data.bones.iter().enumerate().map(|(i, b)| EnvBone { name: names[i].clone(), envelope: b.envelope.clone(), cross_sections: b.cross_sections.clone(), excluded: e.data.excluded.get(i).map(|x| x.iter().copied().collect()).unwrap_or_default() }).collect();
+    let vertices = (0..e.input.vertex_count())
+        .map(|v| EnvVertex { position: e.input.vertices()[v].position.to_array(), weights: current_weights(&e.data, &e.input, v), explicit: e.data.explicit.get(v).copied().unwrap_or(false), rigid: e.data.rigid.get(v).copied().unwrap_or(false) })
+        .collect();
+    EnvFile { format: ENV_FORMAT.into(), bones, vertices }
+}
+
+/// Load Envelopes > OK: `incoming[i]` is the file bone loaded onto current bone `i` (-1 none).
+#[allow(clippy::too_many_arguments)]
+pub fn apply_env(data: &mut SkinData, mesh: &Mesh, file: &EnvFile, incoming: &[i32], end_points: bool, cross_sections: bool, vertex_data: bool, exclusions: bool, by_index: bool) -> Result<(), String> {
+    let mut to_current: Vec<Option<usize>> = vec![None; file.bones.len()];
+    for (ci, inc) in incoming.iter().enumerate() {
+        if *inc < 0 || ci >= data.bones.len() {
+            continue;
+        }
+        let fb = file.bones.get(*inc as usize).ok_or_else(|| format!("the file has no bone {inc}"))?;
+        to_current[*inc as usize] = Some(ci);
+        let b = &mut data.bones[ci];
+        let (start, end, path) = (b.envelope.start, b.envelope.end, b.envelope.path.clone());
+        b.envelope = fb.envelope.clone();
+        if !end_points {
+            // The envelope's shape loads; its end points stay where they are.
+            b.envelope.start = start;
+            b.envelope.end = end;
+            b.envelope.path = path;
+        }
+        if cross_sections {
+            b.cross_sections = fb.cross_sections.clone();
+        }
+        if exclusions {
+            data.excluded[ci] = fb.excluded.iter().copied().collect();
+        }
+    }
+    if vertex_data {
+        let n = mesh.vertex_count();
+        data.resize(n);
+        let nearest = |p: Vec3| file.vertices.iter().enumerate().min_by(|a, b| Vec3::from(a.1.position).distance(p).total_cmp(&Vec3::from(b.1.position).distance(p))).map(|(i, _)| i);
+        for v in 0..n {
+            let src = if by_index { (v < file.vertices.len()).then_some(v) } else { nearest(mesh.vertices()[v].position) };
+            let Some(fv) = src.and_then(|i| file.vertices.get(i)) else { continue };
+            if !fv.explicit {
+                continue;
+            }
+            let mut w: Vec<(u32, f32)> = fv.weights.iter().filter_map(|(b, x)| to_current.get(*b as usize).copied().flatten().map(|c| (c as u32, *x))).collect();
+            normalize(&mut w);
+            if !w.is_empty() {
+                data.weights[v] = w;
+                data.explicit[v] = true;
+                data.rigid[v] = fv.rigid;
+            }
+        }
+    }
+    data.refresh_envelope_weights(mesh);
+    Ok(())
+}
+
+/// Mirror Mode side of every weighted vertex (of the mesh below the Skin, in its own space).
+fn compute_mirror_sides(e: &Entry) -> Vec<i8> {
+    let m = &e.data.mirror;
+    let pts: Vec<Vec3> = e.input.vertices().iter().map(|v| v.position).collect();
+    loom_scene::skin::mirror_sides(&pts, m.plane, m.offset, m.threshold)
+}
+
+/// Mirror Mode on: each vertex's side (-1 green, 1 blue, 0 red); with Manual
+/// Update the sides as of the last Update.
+pub fn mirror_sides(state: &AppState) -> Option<Vec<i8>> {
+    let e = entry(state).ok()?;
+    if !e.data.mirror.mode {
+        return None;
+    }
+    if e.data.mirror.manual_update {
+        if let Some((owner, sides)) = &state.skin_ui.mirror_sides {
+            if *owner == (e.id, e.index) && sides.len() == e.input.vertex_count() {
+                return Some(sides.clone());
+            }
+        }
+    }
+    Some(compute_mirror_sides(&e))
+}
+
+/// Mirror Mode: the vertex across the plane from each selected vertex (Display Projection Default).
+pub fn mirror_partners(state: &AppState) -> BTreeSet<u32> {
+    let Ok(e) = entry(state) else { return BTreeSet::new() };
+    let m = &e.data.mirror;
+    if !m.mode || m.projection != 0 {
+        return BTreeSet::new();
+    }
+    let a = m.plane.min(2) as usize;
+    let pts: Vec<Vec3> = e.input.vertices().iter().map(|v| v.position).collect();
+    selection(state)
+        .into_iter()
+        .filter_map(|v| {
+            let mut q = pts[v as usize];
+            q[a] = 2.0 * m.offset - q[a];
+            pts.iter().enumerate().filter(|(i, _)| *i != v as usize).map(|(i, p)| (i, p.distance(q))).filter(|(_, d)| *d <= m.threshold).min_by(|x, y| x.1.total_cmp(&y.1)).map(|(i, _)| i as u32)
+        })
+        .collect()
 }
 
 fn bone_names(state: &AppState, data: &SkinData) -> Vec<String> {
@@ -814,7 +1533,14 @@ pub fn status(state: &AppState) -> Value {
         Ok(e) => json!({
             "node": e.id.0,
             "index": e.index,
-            "bones": e.data.bones.iter().map(|b| json!({ "node": b.node.0, "name": state.scene.node(b.node).map(|n| n.name.clone()).unwrap_or_default(), "inner": b.envelope.inner, "outer": b.envelope.outer, "falloff": b.envelope.falloff, "cross_sections": b.cross_sections.len() })).collect::<Vec<_>>(),
+            "bones": e.data.bones.iter().map(|b| json!({ "node": b.node.0, "name": state.scene.node(b.node).map(|n| n.name.clone()).unwrap_or_default(), "inner": b.envelope.radii().0, "outer": b.envelope.radii().1, "falloff": b.envelope.falloff, "relative": b.envelope.relative, "cross_sections": b.cross_sections.len() })).collect::<Vec<_>>(),
+            "cross_section": state.skin_ui.cross_section.map(|(k, outer)| json!({ "index": k, "outer": outer })),
+            "adding_cross_section": state.skin_ui.adding_cross_section,
+            "select_element": state.skin_ui.select_element,
+            "edit_lattice": state.skin_ui.edit_lattice,
+            "lattice_selection": state.skin_ui.lattice_selection.iter().collect::<Vec<_>>(),
+            "vertex_sets": e.data.vertex_sets.iter().map(|(n, v)| json!({ "name": n, "count": v.len() })).collect::<Vec<_>>(),
+            "highlight": state.skin_ui.highlight,
             "bone": state.skin_bone.map(|b| b.0),
             "selection": selection(state),
             "edit_envelopes": state.skin_active(),
@@ -822,12 +1548,12 @@ pub fn status(state: &AppState) -> Value {
             "explicit": e.data.explicit.iter().filter(|x| **x).count(),
             "skin_pose": e.data.skin_pose.is_some(),
             "skin_pose_mode": state.skin_pose_live.is_some(),
-            "gizmos": e.data.gizmos.iter().map(|g| json!({ "kind": format!("{:?}", g.kind), "bone": g.bone, "parent": g.parent_bone, "keys": g.keys.len() })).collect::<Vec<_>>(),
+            "gizmos": e.data.gizmos.iter().map(|g| json!({ "kind": format!("{:?}", g.kind), "name": g.name, "bone": g.bone, "parent": g.parent_bone, "keys": g.keys.len(), "vertices": g.vertices.len(), "twist": g.twist, "bounding_volume": g.bounding_volume, "lattice": g.lattice.as_ref().map(|l| l.count()) })).collect::<Vec<_>>(),
             "custom_weight": state.skin_custom_weight,
             "scale_weight": state.skin_scale_weight,
             "paste_tolerance": state.skin_paste_tolerance,
             "paint_weights": state.skin_paint,
-            "painter": { "max_strength": state.skin_painter.strength, "max_size": state.skin_painter.size, "additive": state.skin_painter.additive, "falloff": state.skin_painter.falloff, "draw_ring": state.skin_painter.draw_ring, "mirror": state.skin_painter.mirror, "mirror_axis": state.skin_painter.mirror_axis, "mirror_offset": state.skin_painter.mirror_offset, "paint_blend_weights": state.skin_painter.blend },
+            "painter": { "max_strength": state.skin_painter.strength, "max_size": state.skin_painter.size, "min_strength": state.skin_painter.min_strength, "min_size": state.skin_painter.min_size, "pressure": state.skin_painter.pressure_on, "pressure_affects": state.skin_painter.pressure_affects, "curve": state.skin_painter.curve, "additive": state.skin_painter.additive, "falloff": state.skin_painter.falloff, "draw_ring": state.skin_painter.draw_ring, "mirror": state.skin_painter.mirror, "mirror_axis": state.skin_painter.mirror_axis, "mirror_offset": state.skin_painter.mirror_offset, "paint_blend_weights": state.skin_painter.blend },
         }),
         Err(_) => Value::Null,
     }
@@ -859,33 +1585,45 @@ pub fn painting(state: &AppState) -> bool {
     state.skin_paint && state.skin_active()
 }
 
-/// Painter Options (Max Strength / Max Size, falloff, mirror) and Paint Blend Weights.
+/// Painter Options (Min / Max Strength and Size, the falloff graph,
+/// pressure, mirror) and Paint Blend Weights.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Painter {
+    /// Max. Strength.
     pub strength: f32,
-    /// Brush radius in world units.
+    /// Max. Size: brush radius in world units.
     pub size: f32,
     pub additive: bool,
-    /// 0 Linear, 1 Smooth, 2 Slow, 3 Fast, 4 Flat.
+    /// 0 Linear, 1 Smooth, 2 Slow, 3 Fast, 4 Flat, 5 the graph edited by hand (`curve`).
     pub falloff: u32,
     pub draw_ring: bool,
     pub mirror: bool,
     pub mirror_axis: u32,
     pub mirror_offset: f32,
     pub blend: bool,
+    /// Min. Strength / Min. Size: what a light pen pressure gives.
+    pub min_strength: f32,
+    pub min_size: f32,
+    /// Enable Pressure Sensitivity and Pressure Affects: 0 None, 1 Strength, 2 Size, 3 Size and Strength.
+    pub pressure_on: bool,
+    pub pressure_affects: u32,
+    /// The falloff graph: (distance from the centre 0..1, strength 0..1), sorted.
+    pub curve: Vec<[f32; 2]>,
 }
 
 impl Default for Painter {
     fn default() -> Self {
-        Self { strength: 1.0, size: 10.0, additive: true, falloff: 1, draw_ring: true, mirror: false, mirror_axis: 0, mirror_offset: 0.0, blend: true }
+        Self { strength: 1.0, size: 10.0, additive: true, falloff: 1, draw_ring: true, mirror: false, mirror_axis: 0, mirror_offset: 0.0, blend: true, min_strength: 0.0, min_size: 0.0, pressure_on: false, pressure_affects: 1, curve: Self::preset_curve(1) }
     }
 }
 
 impl Painter {
-    /// Brush weight at `t` = distance / radius (0 centre, 1 rim).
-    pub fn falloff_at(&self, t: f32) -> f32 {
-        let t = t.clamp(0.0, 1.0);
-        match self.falloff {
+    /// The falloff graph edited by hand.
+    pub const CUSTOM: u32 = 5;
+
+    /// A falloff button's curve formula at `t` = distance / radius.
+    fn preset_at(falloff: u32, t: f32) -> f32 {
+        match falloff {
             0 => 1.0 - t,
             2 => 1.0 - t * t * t,
             3 => (1.0 - t) * (1.0 - t),
@@ -893,13 +1631,50 @@ impl Painter {
             _ => 1.0 - t * t * (3.0 - 2.0 * t),
         }
     }
+
+    /// The graph a falloff button sets: its curve sampled at nine points.
+    pub fn preset_curve(falloff: u32) -> Vec<[f32; 2]> {
+        (0..=8).map(|i| i as f32 / 8.0).map(|t| [t, Self::preset_at(falloff, t)]).collect()
+    }
+
+    /// Brush weight at `t` = distance / radius (0 centre, 1 rim).
+    pub fn falloff_at(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        if self.falloff != Self::CUSTOM || self.curve.len() < 2 {
+            return Self::preset_at(self.falloff, t);
+        }
+        let c = &self.curve;
+        if t <= c[0][0] {
+            return c[0][1];
+        }
+        for w in c.windows(2) {
+            if t <= w[1][0] {
+                let k = if w[1][0] - w[0][0] < 1e-6 { 0.0 } else { (t - w[0][0]) / (w[1][0] - w[0][0]) };
+                return w[0][1] + (w[1][1] - w[0][1]) * k;
+            }
+        }
+        c[c.len() - 1][1]
+    }
+
+    /// Strength and radius of a dab at pen `pressure` (0..1): with Enable
+    /// Pressure Sensitivity the affected values run from Min to Max.
+    pub fn dab(&self, pressure: f32) -> (f32, f32) {
+        let p = pressure.clamp(0.0, 1.0);
+        if !self.pressure_on {
+            return (self.strength, self.size);
+        }
+        let s = if matches!(self.pressure_affects, 1 | 3) { self.min_strength + (self.strength - self.min_strength) * p } else { self.strength };
+        let r = if matches!(self.pressure_affects, 2 | 3) { self.min_size + (self.size - self.min_size) * p } else { self.size };
+        (s, r)
+    }
 }
 
-/// World positions of the Skin's output vertices (what the viewport shows).
+/// World positions of the Skin's output vertices (what the viewport shows;
+/// on a patch its vertices then handles).
 pub fn vertex_world_positions(state: &AppState) -> Option<(NodeId, Vec<Vec3>)> {
     let (id, index) = state.skin_entry()?;
     let world = state.scene.object_matrix(id);
-    Some((id, state.scene.evaluated(id, Some(index)).value.mesh.vertices().iter().map(|v| world.transform_point3(v.position)).collect()))
+    Some((id, loom_scene::skin::weighted_points(&state.scene.evaluated(id, Some(index)).value).into_iter().map(|p| world.transform_point3(p)).collect()))
 }
 
 /// Area-weighted vertex normals of the Skin's output in world space (Backface Cull Vertices).
@@ -907,7 +1682,8 @@ pub fn vertex_world_normals(state: &AppState) -> Option<Vec<Vec3>> {
     let (id, index) = state.skin_entry()?;
     let world = state.scene.object_matrix(id);
     let ev = state.scene.evaluated(id, Some(index));
-    let mesh = &ev.value.mesh;
+    let cage = ev.value.patch.as_ref().map(|p| p.cage());
+    let mesh = cage.as_ref().unwrap_or(&ev.value.mesh);
     let pos: Vec<Vec3> = mesh.vertices().iter().map(|v| world.transform_point3(v.position)).collect();
     let mut n = vec![Vec3::ZERO; pos.len()];
     for f in 0..mesh.face_count() {
@@ -923,32 +1699,46 @@ pub fn vertex_world_normals(state: &AppState) -> Option<Vec<Vec3>> {
     Some(n.into_iter().map(|x| x.normalize_or_zero()).collect())
 }
 
-/// Paint Weights: a dab at each world point (and its mirror with Painter Options > Mirror).
-fn paint(state: &mut AppState, points: &[[f32; 3]], erase: bool) -> Result<Value, String> {
+/// Paint Weights: a dab at each world point (and its mirror with Painter
+/// Options > Mirror), its strength and size from the pen pressure.
+fn paint(state: &mut AppState, points: &[[f32; 3]], erase: bool, pressure: Option<&[f32]>) -> Result<Value, String> {
     let (_, world) = vertex_world_positions(state).ok_or("no Skin on the selection (add the modifier first)")?;
     let p = state.skin_painter.clone();
-    let mut centres: Vec<Vec3> = points.iter().map(|x| Vec3::from(*x)).collect();
+    // (centre, strength, radius) per dab.
+    let mut dabs: Vec<(Vec3, f32, f32)> = points
+        .iter()
+        .enumerate()
+        .map(|(i, x)| {
+            let (s, r) = p.dab(pressure.and_then(|pr| pr.get(i)).copied().unwrap_or(1.0));
+            (Vec3::from(*x), s, r)
+        })
+        .collect();
     if p.mirror {
         let a = p.mirror_axis.min(2) as usize;
-        let mirrored: Vec<Vec3> = centres
+        let mirrored: Vec<(Vec3, f32, f32)> = dabs
             .iter()
-            .map(|c| {
+            .map(|(c, s, r)| {
                 let mut m = *c;
                 m[a] = 2.0 * p.mirror_offset - m[a];
-                m
+                (m, *s, *r)
             })
             .collect();
-        centres.extend(mirrored);
+        dabs.extend(mirrored);
     }
-    // Per vertex the strongest brush weight of the dabs.
-    let mut hit: std::collections::BTreeMap<usize, f32> = std::collections::BTreeMap::new();
-    for c in &centres {
+    // Per vertex the strongest dab: (strength × brush weight, brush weight, dab strength).
+    let mut hit: std::collections::BTreeMap<usize, (f32, f32, f32)> = std::collections::BTreeMap::new();
+    for (c, s, r) in &dabs {
+        if *r <= 0.0 {
+            continue;
+        }
         for (v, q) in world.iter().enumerate() {
             let d = q.distance(*c);
-            if d <= p.size {
-                let f = p.falloff_at(d / p.size);
-                let e = hit.entry(v).or_insert(0.0);
-                *e = e.max(f);
+            if d <= *r {
+                let f = p.falloff_at(d / r);
+                let e = hit.entry(v).or_insert((0.0, 0.0, 0.0));
+                if s * f > e.0 {
+                    *e = (s * f, f, *s);
+                }
             }
         }
     }
@@ -963,14 +1753,13 @@ fn paint(state: &mut AppState, points: &[[f32; 3]], erase: bool) -> Result<Value
         let before: Vec<f32> = (0..n).map(|v| weight_of(&current_weights(data, mesh, v), b)).collect();
         let mut after = before.clone();
         let paintable = |v: usize| v < n && !data.excluded[bone].contains(&(v as u32));
-        for (v, f) in hit.iter().filter(|(v, _)| paintable(**v)) {
-            let amount = p.strength * f;
+        for (v, (amount, f, s)) in hit.iter().filter(|(v, _)| paintable(**v)) {
             let cur = before[*v];
             let w = if p.additive {
                 if erase { cur - amount } else { cur + amount }
             } else {
-                // Not additive: the stroke moves the weight towards Max Strength (or 0).
-                let target = if erase { 0.0 } else { p.strength };
+                // Not additive: the stroke moves the weight towards the dab's strength (or 0).
+                let target = if erase { 0.0 } else { *s };
                 cur + (target - cur) * f
             };
             after[*v] = w.clamp(0.0, 1.0);
@@ -978,7 +1767,7 @@ fn paint(state: &mut AppState, points: &[[f32; 3]], erase: bool) -> Result<Value
         if p.blend {
             // Paint Blend Weights: each painted vertex moves towards its neighbourhood's average, by the brush weight.
             let painted = after.clone();
-            for (v, f) in hit.iter().filter(|(v, _)| paintable(**v)) {
+            for (v, (_, f, _)) in hit.iter().filter(|(v, _)| paintable(**v)) {
                 let ring: Vec<usize> = select_ops::vertex_neighbours(mesh, VertexId(*v as u32)).into_iter().map(|x| x.0 as usize).chain(std::iter::once(*v)).collect();
                 let avg = ring.iter().map(|i| painted[*i]).sum::<f32>() / ring.len() as f32;
                 after[*v] = painted[*v] + (avg - painted[*v]) * f * 0.5;
@@ -1029,14 +1818,219 @@ pub struct EnvelopeWorld {
     pub inner: [f32; 2],
     pub outer: [f32; 2],
     pub cross_sections: Vec<(f32, f32, f32)>,
+    /// A curved (spline) envelope's axis in world space; empty = straight.
+    pub path: Vec<Vec3>,
+    /// The bone's index in the Skin's list.
+    pub bone: usize,
 }
 
-/// Display > Show Colored Faces at the Envelope level: the skinned node and its per-vertex weights of the current bone.
-pub fn colored_faces(state: &AppState) -> Option<(NodeId, Vec<f32>)> {
+impl EnvelopeWorld {
+    /// The axis point at `u` (0 start … 1 end, by length).
+    pub fn point(&self, u: f32) -> Vec3 {
+        if self.path.len() < 2 {
+            return self.start.lerp(self.end, u);
+        }
+        let e = Envelope { path: self.path.clone(), start: self.start, end: self.end, ..Envelope::default() };
+        e.axis_point(u)
+    }
+
+    /// The axis direction at `u`.
+    pub fn direction(&self, u: f32) -> Vec3 {
+        let e = Envelope { path: self.path.clone(), start: self.start, end: self.end, ..Envelope::default() };
+        e.axis_direction(u)
+    }
+
+    /// Inner and outer radius at `u` (cross sections between the ends).
+    pub fn radii_at(&self, u: f32) -> (f32, f32) {
+        let e = Envelope { inner: self.inner, outer: self.outer, ..Envelope::default() };
+        loom_scene::skin::radius_profile(&e, &self.cross_sections, u)
+    }
+
+    /// The cross sections with the ends: (u, inner, outer).
+    pub fn sections(&self) -> Vec<(f32, f32, f32)> {
+        let mut out = vec![(0.0, self.inner[0], self.outer[0])];
+        out.extend(self.cross_sections.iter().copied());
+        out.push((1.0, self.inner[1], self.outer[1]));
+        out
+    }
+}
+
+/// Color All Weights: a colour per bone (golden-angle hues).
+pub fn bone_color(i: usize) -> [u8; 3] {
+    let h = (i as f32 * 0.618_034).fract() * 6.0;
+    let x = 1.0 - (h % 2.0 - 1.0).abs();
+    let (r, g, b) = match h as u32 {
+        0 => (1.0, x, 0.0),
+        1 => (x, 1.0, 0.0),
+        2 => (0.0, 1.0, x),
+        3 => (0.0, x, 1.0),
+        4 => (x, 0.0, 1.0),
+        _ => (1.0, 0.0, x),
+    };
+    [(r * 230.0 + 20.0) as u8, (g * 230.0 + 20.0) as u8, (b * 230.0 + 20.0) as u8]
+}
+
+/// The colour of each weighted point at the Envelope level: the current
+/// bone's weight (blue 0 → red 1), or with Color All Weights every bone's
+/// colour blended by its weight.
+pub fn point_colors(state: &AppState) -> Option<(NodeId, Vec<[u8; 3]>)> {
+    let e = entry(state).ok()?;
+    if e.data.display.color_all_weights {
+        let colors = (0..e.input.vertex_count())
+            .map(|v| {
+                let mut c = [0.0f32; 3];
+                for (b, w) in current_weights(&e.data, &e.input, v) {
+                    let bc = bone_color(b as usize);
+                    for k in 0..3 {
+                        c[k] += bc[k] as f32 * w;
+                    }
+                }
+                [c[0].min(255.0) as u8, c[1].min(255.0) as u8, c[2].min(255.0) as u8]
+            })
+            .collect();
+        return Some((e.id, colors));
+    }
+    let (id, w) = current_bone_weights(state)?;
+    Some((id, w.into_iter().map(weight_color).collect()))
+}
+
+/// Display > Show Colored Faces at the Envelope level: the skinned node and
+/// a colour per vertex of the mesh the Skin puts out (a patch's
+/// tessellation takes its lattice's colours across the surface).
+pub fn colored_faces(state: &AppState) -> Option<(NodeId, Vec<[u8; 3]>)> {
     if !state.skin_active() || !entry(state).ok()?.data.display.colored_faces {
         return None;
     }
-    current_bone_weights(state)
+    let (id, colors) = point_colors(state)?;
+    let (_, index) = state.skin_entry()?;
+    let ev = state.scene.evaluated(id, Some(index));
+    match (&ev.value.patch, ev.value.patch_steps) {
+        (Some(p), steps) => {
+            // Tessellation is linear in the lattice points: tessellate the colours.
+            let nv = p.verts.len();
+            let mut q = p.clone();
+            for (i, c) in colors.iter().enumerate() {
+                let x = Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32);
+                if i < nv {
+                    q.verts[i] = x;
+                } else if let Some(h) = q.vecs.get_mut(i - nv) {
+                    *h = x;
+                }
+            }
+            let (steps, interior) = steps.unwrap_or((5, false));
+            let t = q.tessellate(steps, interior);
+            Some((id, t.vertices().iter().map(|v| [v.position.x.clamp(0.0, 255.0) as u8, v.position.y.clamp(0.0, 255.0) as u8, v.position.z.clamp(0.0, 255.0) as u8]).collect()))
+        }
+        (None, _) => Some((id, colors)),
+    }
+}
+
+/// Zoom Extents Selected / Orbit SubObject at the Envelope level: the
+/// selected vertices, else the current envelope.
+pub fn focus_bounds(state: &AppState) -> Option<(Vec3, Vec3)> {
+    if !state.skin_active() {
+        return None;
+    }
+    let sel = selection(state);
+    let grow = |(lo, hi): (Vec3, Vec3), p: Vec3| (lo.min(p), hi.max(p));
+    let empty = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+    if !sel.is_empty() {
+        let (_, world) = vertex_world_positions(state)?;
+        let b = sel.iter().filter_map(|v| world.get(*v as usize)).fold(empty, |acc, p| grow(acc, *p));
+        return b.0.is_finite().then_some(b);
+    }
+    let env = shown_envelopes_world(state).into_iter().find(|e| e.current)?;
+    let r = env.outer[0].max(env.outer[1]);
+    let b = [env.start, env.end].into_iter().fold(empty, |acc, p| grow(grow(acc, p - Vec3::splat(r)), p + Vec3::splat(r)));
+    Some(b)
+}
+
+/// The world position of the current gizmo's lattice points now (rest + the offsets at the bones' angle).
+pub fn lattice_world_points(state: &AppState) -> Option<Vec<Vec3>> {
+    let e = entry(state).ok()?;
+    let g = e.data.gizmos.get(state.skin_gizmo?)?;
+    lattice_points_of(state, &e.data, g)
+}
+
+/// A gizmo's lattice points in world space now.
+pub fn lattice_points_of(state: &AppState, data: &SkinData, g: &SkinGizmo) -> Option<Vec<Vec3>> {
+    let lat = g.lattice.as_ref()?;
+    let scene = &state.scene;
+    let wm = |id: NodeId| Some(scene.world_matrix(id));
+    let angle = loom_scene::skin::bone_angle(data, &wm, g.bone, g.parent_bone).unwrap_or(0.0);
+    let blend = loom_scene::skin::gizmos::key_blend(&g.keys, angle);
+    let offsets = loom_scene::skin::gizmos::lattice_offsets(g, &blend).unwrap_or_else(|| vec![Vec3::ZERO; lat.count()]);
+    let frame = lat.frame(g.twist);
+    let bw = scene.world_matrix(data.bones.get(g.lattice_bone())?.node);
+    Some(lat.rest_points(g.twist).into_iter().zip(offsets).map(|(r, o)| bw.transform_point3(r + frame.transform_vector3(o))).collect())
+}
+
+/// Where the transform gizmo sits at the Envelope level: the selected
+/// envelope end point, the selected lattice points, else the focus.
+pub fn pivot(state: &AppState) -> Option<Vec3> {
+    if !state.skin_active() {
+        return None;
+    }
+    if let Some(h) = state.skin_handle {
+        let env = shown_envelopes_world(state).into_iter().find(|e| e.current)?;
+        return Some(if h == 0 { env.start } else { env.end });
+    }
+    if state.skin_ui.edit_lattice && !state.skin_ui.lattice_selection.is_empty() {
+        let pts = lattice_world_points(state)?;
+        let sel: Vec<Vec3> = state.skin_ui.lattice_selection.iter().filter_map(|i| pts.get(*i as usize).copied()).collect();
+        return (!sel.is_empty()).then(|| sel.iter().copied().sum::<Vec3>() / sel.len() as f32);
+    }
+    focus_bounds(state).map(|(a, b)| (a + b) * 0.5)
+}
+
+/// The transform tools at the Envelope level: they move the selected
+/// envelope end point or the selected lattice points (offsets keyed at
+/// the bones' current angle), never the skinned object. `m` maps world to world.
+pub fn transform(state: &mut AppState, label: &str, m: glam::Mat4) -> Option<Result<Value, String>> {
+    if !state.skin_active() {
+        return None;
+    }
+    if let Some(h) = state.skin_handle {
+        let p = pivot(state)?;
+        let to = m.transform_point3(p);
+        return Some(execute(state, Command::SkinMoveEnvelopePoint { end: h as u32, position: to.to_array() }));
+    }
+    if state.skin_ui.edit_lattice && !state.skin_ui.lattice_selection.is_empty() {
+        let g = state.skin_gizmo?;
+        let sel: Vec<usize> = state.skin_ui.lattice_selection.iter().map(|i| *i as usize).collect();
+        let pts = lattice_world_points(state)?;
+        return Some(edit(state, label, |data, _, st| {
+            let wm = |id: NodeId| Some(st.scene.world_matrix(id));
+            let gz = data.gizmos.get(g).ok_or("no such gizmo")?.clone();
+            let lat = gz.lattice.clone().ok_or("the gizmo has no lattice")?;
+            let angle = loom_scene::skin::bone_angle(data, &wm, gz.bone, gz.parent_bone).unwrap_or(0.0);
+            let blend = loom_scene::skin::gizmos::key_blend(&gz.keys, angle);
+            let now = loom_scene::skin::gizmos::lattice_offsets(&gz, &blend).unwrap_or_else(|| vec![Vec3::ZERO; lat.count()]);
+            let bw = st.scene.world_matrix(data.bones[gz.lattice_bone()].node);
+            let to_box = lat.frame(gz.twist).inverse();
+            let gzm = data.gizmos.get_mut(g).ok_or("no such gizmo")?;
+            // Offsets key at the bones' current angle: the key there, or a new one holding the blend.
+            let k = match gzm.keys.iter().position(|k| (k.angle_deg - angle).abs() < 0.5) {
+                Some(k) => k,
+                None => {
+                    let bulge = blend.iter().map(|(w, k)| w * gzm.keys[*k].bulge).sum();
+                    gzm.keys.push(loom_scene::skin::GizmoKey { angle_deg: angle, bulge, ..Default::default() });
+                    gzm.keys.len() - 1
+                }
+            };
+            let key = &mut gzm.keys[k];
+            if key.lattice.len() != now.len() {
+                key.lattice = now.clone();
+            }
+            for i in sel.iter().copied().filter(|i| *i < pts.len()) {
+                let moved = m.transform_point3(pts[i]);
+                key.lattice[i] += to_box.transform_vector3(bw.inverse().transform_vector3(moved - pts[i]));
+            }
+            Ok(())
+        }));
+    }
+    // Nothing of the Skin's picked: the object stays where it is at this level.
+    Some(Ok(json!({})))
 }
 
 /// The envelopes the viewport shows: the current bone's, the ones with
@@ -1050,8 +2044,19 @@ pub fn shown_envelopes_world(state: &AppState) -> Vec<EnvelopeWorld> {
         .enumerate()
         .filter(|(i, b)| Some(*i) == cur || b.envelope_visible || e.data.display.all_envelopes)
         .map(|(i, b)| {
-            let world = b.bind_inverse.inverse();
-            EnvelopeWorld { current: Some(i) == cur, start: world.transform_point3(b.envelope.start), end: world.transform_point3(b.envelope.end), inner: b.envelope.inner, outer: b.envelope.outer, cross_sections: b.cross_sections.clone() }
+            // The envelope moves with its bone (the bind-pose envelope carried by the bone's current matrix).
+            let world = state.scene.world_matrix(b.node);
+            let (inner, outer) = b.envelope.radii();
+            EnvelopeWorld {
+                current: Some(i) == cur,
+                start: world.transform_point3(b.envelope.start),
+                end: world.transform_point3(b.envelope.end),
+                inner,
+                outer,
+                cross_sections: b.cross_sections.clone(),
+                path: b.envelope.path.iter().map(|p| world.transform_point3(*p)).collect(),
+                bone: i,
+            }
         })
         .collect()
 }

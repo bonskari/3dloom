@@ -22,7 +22,7 @@ fn bulge_angle_gizmo_scales_the_joint_at_its_key_angle() {
     let mut s = Scene::new();
     let (arm, b0, b1) = arm(&mut s);
     let mut data = SkinData::bind(&s, arm, &[b0, b1]);
-    data.gizmos.push(SkinGizmo { kind: GizmoKind::BulgeAngle, bone: 1, parent_bone: 0, keys: vec![GizmoKey { angle_deg: 0.0, deltas: vec![], bulge: 0.0 }, GizmoKey { angle_deg: 90.0, deltas: vec![], bulge: 1.0 }], influence: 1.0, enabled: true });
+    data.gizmos.push(SkinGizmo { kind: GizmoKind::BulgeAngle, bone: 1, parent_bone: 0, keys: vec![GizmoKey { angle_deg: 0.0, deltas: vec![], bulge: 0.0, ..Default::default() }, GizmoKey { angle_deg: 90.0, deltas: vec![], bulge: 1.0, ..Default::default() }], influence: 1.0, enabled: true, ..Default::default() });
     s.node_mut(arm).unwrap().modifiers.push(ModifierSlot::new(Modifier::Skin(Box::new(data))));
     let w = s.object_matrix(arm);
     let straight = s.eval_mesh(arm).value.mesh.clone();
@@ -48,7 +48,7 @@ fn joint_angle_gizmo_adds_its_deltas_at_the_key() {
     let mut s = Scene::new();
     let (arm, b0, b1) = arm(&mut s);
     let mut data = SkinData::bind(&s, arm, &[b0, b1]);
-    data.gizmos.push(SkinGizmo { kind: GizmoKind::JointAngle, bone: 1, parent_bone: 0, keys: vec![GizmoKey { angle_deg: 0.0, deltas: vec![], bulge: 0.0 }, GizmoKey { angle_deg: 90.0, deltas: vec![(0, Vec3::Y * 3.0)], bulge: 0.0 }], influence: 1.0, enabled: true });
+    data.gizmos.push(SkinGizmo { kind: GizmoKind::JointAngle, bone: 1, parent_bone: 0, keys: vec![GizmoKey { angle_deg: 0.0, deltas: vec![], bulge: 0.0, ..Default::default() }, GizmoKey { angle_deg: 90.0, deltas: vec![(0, Vec3::Y * 3.0)], bulge: 0.0, ..Default::default() }], influence: 1.0, enabled: true, ..Default::default() });
     s.node_mut(arm).unwrap().modifiers.push(ModifierSlot::new(Modifier::Skin(Box::new(data))));
     let before = s.eval_mesh(arm).value.mesh.vertices()[0].position;
     s.node_mut(b1).unwrap().transform.rotation.set(Vec3::new(0.0, 0.0, 45.0));

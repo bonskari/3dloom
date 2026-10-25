@@ -14,6 +14,7 @@ pub enum Utility {
     Collapse,
     ResetXForm,
     AssignVertexColors,
+    LinkInheritance,
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -25,6 +26,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ("Collapse", Utility::Collapse),
             ("Reset XForm", Utility::ResetXForm),
             ("Assign Vertex Colors", Utility::AssignVertexColors),
+            ("Link Inheritance (Selected)", Utility::LinkInheritance),
         ] {
             if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.utility == u, label)).clicked() {
                 app.utility = if app.utility == u { Utility::None } else { u };
@@ -73,6 +75,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             });
         }),
         Utility::AssignVertexColors => rollout(ui, "Assign Vertex Colors", true, |ui| assign_vertex_colors(ui, app, false)),
+        Utility::LinkInheritance => rollout(ui, "Link Inheritance (Selected)", true, |ui| link_inheritance(ui, app)),
         Utility::ResetXForm => rollout(ui, "Reset Transform", true, |ui| {
             ui.add_enabled_ui(has, |ui| {
                 if ui.button("Reset Selected").clicked() {
@@ -147,6 +150,35 @@ pub fn assign_vertex_colors(ui: &mut egui::Ui, app: &mut LoomApp, update: bool) 
     let label = if update { "Assign" } else { "Assign To Selected" };
     if ui.add_enabled(!app.state.selection.is_empty(), egui::Button::new(label)).clicked() {
         if let Err(e) = app.dispatch(Command::AssignVertexColors { light_model: model, by_vertex, shadows, update }) {
+            app.state.status_prompt = e;
+        }
+    }
+}
+
+/// Link Inheritance (Selected): the Inherit checkboxes of the Hierarchy
+/// panel for every selected object at once (showing the first one's).
+fn link_inheritance(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let Some(first) = app.state.selection.iter().next().and_then(|id| app.state.scene.node(*id)).map(|n| n.inherit) else {
+        ui.label("Select the objects to change.");
+        return;
+    };
+    let mut change = None;
+    for (group, current) in [("Move", first.move_axes), ("Rotate", first.rotate_axes), ("Scale", first.scale_axes)] {
+        ui.label(format!("{group}:"));
+        ui.horizontal(|ui| {
+            let mut axes = current;
+            for (i, axis) in ["X", "Y", "Z"].iter().enumerate() {
+                ui.checkbox(&mut axes[i], *axis);
+            }
+            if axes != current {
+                change = Some((group, axes));
+            }
+        });
+    }
+    if let Some((group, axes)) = change {
+        let pick = |g: &str| (g == group).then_some(axes);
+        let cmd = Command::LinkInheritanceSelected { move_axes: pick("Move"), rotate_axes: pick("Rotate"), scale_axes: pick("Scale") };
+        if let Err(e) = app.dispatch(cmd) {
             app.state.status_prompt = e;
         }
     }
