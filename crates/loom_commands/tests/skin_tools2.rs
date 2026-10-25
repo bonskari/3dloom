@@ -333,7 +333,8 @@ fn joint_gizmo_lattice_points_move_and_key_at_the_angle_copy_paste_and_options()
     let mut s = AppState::new();
     let (arm, bones) = skinned_arm(&mut s);
     execute(&mut s, Command::SkinSelectBone { id: bones[1] }).unwrap();
-    execute(&mut s, Command::SkinSelectVertices { ids: verts_at_z(&s, arm, 10.0), op: SelectOp::Replace }).unwrap();
+    let joint = verts_at_z(&s, arm, 10.0);
+    execute(&mut s, Command::SkinSelectVertices { ids: joint, op: SelectOp::Replace }).unwrap();
     execute(&mut s, Command::SkinAddGizmo { kind: "joint".into() }).unwrap();
     let g = skin_data(&s, arm).gizmos[0].clone();
     assert_eq!(g.lattice.as_ref().map(|l| l.count()), Some(27));

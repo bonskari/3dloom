@@ -283,13 +283,13 @@ fn vertex_at(app: &LoomApp, projection: &Projection, p: egui::Pos2) -> Option<(u
 
 /// What a click at `p` lands on: the nearest of a vertex, an end point and a cross-section point.
 enum Hit {
-    Vertex(u32),
+    Vertex,
     End(u8),
     Section(usize, bool, Vec3, Vec3),
 }
 
 fn hit_at(app: &LoomApp, projection: &Projection, p: egui::Pos2) -> Option<Hit> {
-    let mut best: Option<(f32, Hit)> = vertex_at(app, projection, p).map(|(v, d)| (d, Hit::Vertex(v)));
+    let mut best: Option<(f32, Hit)> = vertex_at(app, projection, p).map(|(_, d)| (d, Hit::Vertex));
     if let Some((k, d)) = end_point_at(app, projection, p) {
         if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
             best = Some((d, Hit::End(k)));

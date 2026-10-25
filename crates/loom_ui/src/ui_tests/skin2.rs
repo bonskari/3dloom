@@ -137,6 +137,8 @@ fn weight_table_exclusions_flip_ui_vertex_sets_and_highlight() {
     assert!(skin(&h).excluded[1].contains(&1), "vertex 1 excluded from the second bone");
     assert_eq!(skin_weight(&h, 1, 1), 0.0);
     // Double-click a vertex ID: it shows pink in the viewports.
+    // Apart from the last click, so the two clicks make a double-click.
+    h.frames(12);
     let id2 = window_text(&h, "Weight Table", "#2");
     h.click(id2);
     h.click(id2);
