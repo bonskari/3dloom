@@ -69,6 +69,7 @@ fn a_lighting_map_is_brighter_under_the_spot_light() {
     let shadows = r.bake(&object, &BakeOptions { look: BakeLook::Shadows, ..options }).expect("bake");
     let (shadowed, lit, unlit) = (shadows.get_pixel(48, 32).0[0], shadows.get_pixel(54, 32).0[0], shadows.get_pixel(10, 32).0[0]);
     assert!(shadowed < 80, "under the box: {shadowed}");
-    assert!(lit > 200, "lit beside the box's shadow: {lit}");
+    let row: Vec<u8> = (0..64).map(|x| shadows.get_pixel(x, 32).0[0]).collect();
+    assert!(lit > 200, "lit beside the box's shadow: {lit}; row 32: {row:?}");
     assert_eq!(unlit, 255, "outside the light there is no shadow");
 }
