@@ -2366,7 +2366,8 @@ mod tests {
         m.ambient.set(glam::Vec3::new(0.8, 0.0, 0.0));
         m.specular_level.set(150.0);
         m.glossiness.set(40.0);
-        let brightest_g = |p: &[egui::Color32]| p.iter().map(|c| c.g()).max().unwrap();
+        // Over the sphere only (red, or a highlight), not the grey background.
+        let brightest_g = |p: &[egui::Color32]| p.iter().filter(|c| c.r() as i32 > c.g() as i32 + 40 || c.g() > 200).map(|c| c.g()).max().unwrap_or(0);
         assert!(brightest_g(&px(&m)) > 200, "Blinn: a white highlight on red");
         m.shading.shader = Shader::Metal;
         assert!(brightest_g(&px(&m)) < 40, "Metal: the highlight is the diffuse colour");

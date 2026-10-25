@@ -6,6 +6,7 @@
 pub mod bake;
 pub mod convert;
 pub mod lights;
+pub mod look;
 
 use std::collections::{HashMap, HashSet};
 
@@ -113,7 +114,7 @@ impl Default for ObjectFlags {
 
 struct Object {
     /// One entity (and material) per face material ID drawn; one for a single material.
-    parts: Vec<(Entity, Handle<StandardMaterial>)>,
+    parts: Vec<(Entity, Handle<look::LoomMaterial>)>,
     mesh_hash: u64,
     surfaces: Option<Surfaces>,
     wire_color: [u8; 3],
@@ -183,7 +184,7 @@ pub struct BevyRenderer {
 struct ActiveRender {
     options: RenderOptions,
     /// Materials made 2-sided by Force 2-Sided, with their own setting.
-    two_sided: Vec<(Handle<StandardMaterial>, bool, Option<bevy::render::render_resource::Face>)>,
+    two_sided: Vec<(Handle<look::LoomMaterial>, bool, Option<bevy::render::render_resource::Face>)>,
 }
 
 impl BevyRenderer {
@@ -208,6 +209,7 @@ impl BevyRenderer {
                 .set(RenderPlugin { render_creation: RenderCreation::Manual(resources), synchronous_pipeline_compilation: true, ..Default::default() }),
         );
         app.add_plugins(bake::BakePlugin);
+        app.add_plugins(look::LookPlugin);
         while app.plugins_state() == PluginsState::Adding {
             bevy::tasks::tick_global_task_pools_on_main_thread();
         }
@@ -456,7 +458,7 @@ impl BevyRenderer {
                 }
                 let world = self.app.world_mut();
                 let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
-                let material_handle = world.resource_mut::<Assets<StandardMaterial>>().add(mat);
+                let material_handle = world.resource_mut::<Assets<look::LoomMaterial>>().add(look::LoomMaterial { base: mat, extension: look::Look { params: look::params(surface.as_ref()) } });
                 let e = world.spawn((Transform::IDENTITY, Mesh3d(mesh), MeshMaterial3d(material_handle.clone()), layers.clone()));
                 let mut e = Self::shadow_flags(e, Self::cast_flags(o));
                 // Bevy computes bounds only once per entity: keep them current.
@@ -466,11 +468,11 @@ impl BevyRenderer {
                 let entity = e.id();
                 if let Some(r) = self.render.as_mut().filter(|r| r.options.force_two_sided) {
                     // A render in progress with Force 2-Sided: new materials too.
-                    let mut mats = self.app.world_mut().resource_mut::<Assets<StandardMaterial>>();
+                    let mut mats = self.app.world_mut().resource_mut::<Assets<look::LoomMaterial>>();
                     if let Some(m) = mats.get_mut(&material_handle) {
-                        r.two_sided.push((material_handle.clone(), m.double_sided, m.cull_mode));
-                        m.double_sided = true;
-                        m.cull_mode = None;
+                        r.two_sided.push((material_handle.clone(), m.base.double_sided, m.base.cull_mode));
+                        m.base.double_sided = true;
+                        m.base.cull_mode = None;
                     }
                 }
                 entities.push((entity, material_handle));
@@ -702,13 +704,13 @@ impl BevyRenderer {
         world.insert_resource(DirectionalLightShadowMap { size: options.shadow_map_size.clamp(512, 8192) as usize });
         let mut two_sided = Vec::new();
         if options.force_two_sided {
-            let handles: Vec<Handle<StandardMaterial>> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
-            let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
+            let handles: Vec<Handle<look::LoomMaterial>> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
+            let mut mats = world.resource_mut::<Assets<look::LoomMaterial>>();
             for h in handles {
                 if let Some(m) = mats.get_mut(&h) {
-                    two_sided.push((h, m.double_sided, m.cull_mode));
-                    m.double_sided = true;
-                    m.cull_mode = None;
+                    two_sided.push((h, m.base.double_sided, m.base.cull_mode));
+                    m.base.double_sided = true;
+                    m.base.cull_mode = None;
                 }
             }
         }
@@ -759,11 +761,11 @@ impl BevyRenderer {
         self.apply_lights();
         let world = self.app.world_mut();
         world.insert_resource(DirectionalLightShadowMap { size: 2048 });
-        let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
+        let mut mats = world.resource_mut::<Assets<look::LoomMaterial>>();
         for (h, double_sided, cull) in r.two_sided {
             if let Some(m) = mats.get_mut(&h) {
-                m.double_sided = double_sided;
-                m.cull_mode = cull;
+                m.base.double_sided = double_sided;
+                m.base.cull_mode = cull;
             }
         }
         if r.options.selected_only.is_some() {

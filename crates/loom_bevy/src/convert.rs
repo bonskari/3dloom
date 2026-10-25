@@ -320,16 +320,14 @@ fn apply_surface_hints(out: &mut StandardMaterial, m: &Surface, lit: glam::Vec3)
         out.unlit = true;
     }
     if m.toon.is_some() {
-        // Ink 'n Paint: a flat, matte fill (the paint bands and the ink need a toon shader).
+        // Ink 'n Paint: the look shader paints the bands and the ink; matte underneath.
         out.perceptual_roughness = 1.0;
         out.reflectance = 0.0;
     }
-    if let Some(ms) = &m.matte {
-        // Matte/Shadow: the background shows through (multiplied by white).
-        let _ = ms;
+    if m.matte.is_some() {
+        // Matte/Shadow: the look shader shows only its shadows over what is behind.
         out.base_color = Color::WHITE;
-        out.unlit = true;
-        out.alpha_mode = AlphaMode::Multiply;
+        out.alpha_mode = AlphaMode::Blend;
     }
 }
 
@@ -578,10 +576,19 @@ mod tests {
         assert!(pbr(&arch).unlit);
         arch.set_parameter("Template", 11.0).unwrap();
         assert_eq!(pbr(&arch).metallic, 1.0);
-        // Matte/Shadow lets the background through.
+        // Matte/Shadow blends its shadows over what is behind (the look shader).
         let mut matte = LoomMaterial::new("matte");
         matte.kind = MaterialKind::MatteShadow(Box::default());
-        assert_eq!(pbr(&matte).alpha_mode, AlphaMode::Multiply);
+        assert_eq!(pbr(&matte).alpha_mode, AlphaMode::Blend);
+        let p = crate::look::params(Some(&Surface::from_material(&matte)));
+        assert_eq!(p.flags, crate::look::MATTE);
+        assert_eq!(p.matte_flags.x, 1.0, "Receive Shadows on");
+        let mut ink = LoomMaterial::new("ink");
+        ink.kind = MaterialKind::InkPaint(Box::default());
+        let p = crate::look::params(Some(&Surface::from_material(&ink)));
+        assert_eq!((p.flags, p.levels), (crate::look::TOON, 2));
+        assert_eq!(p.ink.w, 2.0, "Ink Width 2 with the outline on");
+        assert_eq!(crate::look::params(Some(&Surface::from_material(&LoomMaterial::new("plain")))).flags, 0);
     }
 
     #[test]

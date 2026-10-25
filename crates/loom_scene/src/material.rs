@@ -1201,8 +1201,26 @@ pub struct Surface {
     pub unlit: bool,
     pub matte: Option<MatteShadow>,
     pub toon: Option<InkPaint>,
+    /// A Falloff map in Diffuse Color: the renderer mixes the diffuse (its
+    /// Front) toward the Side colour by the view or light direction.
+    pub falloff: Option<FalloffLook>,
     /// Faces of this surface split further (Top/Bottom, Double Sided).
     pub split: Option<Box<Split>>,
+}
+
+/// A Falloff map as the renderer draws it per pixel.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FalloffLook {
+    /// 0 Towards/Away, 1 Perpendicular/Parallel, 2 Fresnel, 3 Shadow/Light, 4 Distance Blend.
+    pub kind: u8,
+    /// The Side colour (sRGB 0–1).
+    pub side: Vec3,
+    /// A fixed world direction (None: the viewing direction).
+    pub direction: Option<Vec3>,
+    /// Distance Blend Near / Far, Fresnel IOR.
+    pub near: f32,
+    pub far: f32,
+    pub ior: f32,
 }
 
 /// How a surface's faces divide: by their normal (Top/Bottom) or into the
@@ -1258,6 +1276,7 @@ impl Surface {
             unlit: false,
             matte: None,
             toon: None,
+            falloff: None,
             split: None,
         }
     }
@@ -1640,6 +1659,7 @@ fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
         unlit: if t < 0.5 { a.unlit } else { b.unlit },
         matte: if t < 0.5 { a.matte.clone() } else { b.matte.clone() },
         toon: if t < 0.5 { a.toon.clone() } else { b.toon.clone() },
+        falloff: if t < 0.5 { a.falloff.clone() } else { b.falloff.clone() },
         split: if t < 0.5 { a.split.clone() } else { b.split.clone() },
     }
 }
