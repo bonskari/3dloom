@@ -3050,7 +3050,8 @@ fn fbx_export_goes_through_its_options_dialog() {
     let win = options_rect(&h, "fbx_export_options");
     click_text(&mut h, "Triangulate", win, 0.0);
     assert!(h.app.state.exchange.fbx_export.triangulate, "the check box sets the option");
-    assert!(h.text_rect("User defined", win).is_some(), "the preset shows it was changed");
+    let win = options_rect(&h, "fbx_export_options");
+    assert!(h.text_rect("User defined", SCREEN).is_some(), "the preset shows it was changed");
     click_text(&mut h, "OK", win, 0.0);
     assert_eq!(h.app.state.dialog, None);
     let doc = loom_fbx::read(&std::fs::read(&path).unwrap(), 0.01).unwrap();

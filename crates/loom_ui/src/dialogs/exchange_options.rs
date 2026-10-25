@@ -92,7 +92,7 @@ fn presets(ui: &mut egui::Ui, ctx: &egui::Context, app: &mut LoomApp, dialog: &s
 
 /// The options' scroll height: OK / Cancel stay on screen.
 fn scroll_height(ctx: &egui::Context) -> f32 {
-    (ctx.screen_rect().height() - 220.0).clamp(200.0, 620.0)
+    (ctx.screen_rect().height() - 260.0).clamp(200.0, 620.0)
 }
 
 fn section(ui: &mut egui::Ui, title: &str, open: bool, body: impl FnOnce(&mut egui::Ui)) {
@@ -140,7 +140,7 @@ pub fn fbx_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let o = app.state.exchange.fbx_export.clone();
     let mut done = false;
     let range = app.state.frame_range;
-    egui::Window::new(file_title(app, "FBX Export")).id(egui::Id::new("fbx_export_options")).open(open).resizable(true).default_width(360.0).show(ctx, |ui| {
+    egui::Window::new(file_title(app, "FBX Export")).id(egui::Id::new("fbx_export_options")).open(open).default_pos(egui::pos2(60.0, 30.0)).resizable(true).default_width(360.0).show(ctx, |ui| {
         egui::ScrollArea::vertical().max_height(scroll_height(ctx)).show(ui, |ui| {
             presets(ui, ctx, app, D, &o.preset);
             section(ui, "Include", true, |ui| {
@@ -273,7 +273,7 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             v
         }
     };
-    egui::Window::new(file_title(app, "FBX Import")).id(egui::Id::new("fbx_import_options")).open(open).resizable(true).default_width(360.0).show(ctx, |ui| {
+    egui::Window::new(file_title(app, "FBX Import")).id(egui::Id::new("fbx_import_options")).open(open).default_pos(egui::pos2(60.0, 30.0)).resizable(true).default_width(360.0).show(ctx, |ui| {
         egui::ScrollArea::vertical().max_height(scroll_height(ctx)).show(ui, |ui| {
             presets(ui, ctx, app, D, &o.preset);
             section(ui, "Statistics", false, |ui| {
@@ -402,7 +402,7 @@ pub fn obj_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     const D: &str = "obj_export";
     let o = app.state.exchange.obj_export.clone();
     let mut done = false;
-    egui::Window::new(file_title(app, "OBJ Export Options")).id(egui::Id::new("obj_export_options")).open(open).resizable(false).show(ctx, |ui| {
+    egui::Window::new(file_title(app, "OBJ Export Options")).id(egui::Id::new("obj_export_options")).open(open).default_pos(egui::pos2(60.0, 30.0)).resizable(false).show(ctx, |ui| {
         ui.horizontal_top(|ui| {
             ui.group(|ui| {
                 ui.vertical(|ui| {
@@ -501,7 +501,7 @@ pub fn obj_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let checked: Vec<String> = o.objects.clone().unwrap_or_else(|| names.iter().map(|n| n.0.clone()).collect());
     let filter_id = egui::Id::new("exchange_obj_filter");
     let mut filter: String = ctx.data(|d| d.get_temp(filter_id)).unwrap_or_default();
-    egui::Window::new(file_title(app, "OBJ Import Options")).id(egui::Id::new("obj_import_options")).open(open).resizable(true).default_width(520.0).show(ctx, |ui| {
+    egui::Window::new(file_title(app, "OBJ Import Options")).id(egui::Id::new("obj_import_options")).open(open).default_pos(egui::pos2(60.0, 30.0)).resizable(true).default_width(520.0).show(ctx, |ui| {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.group(|ui| {
