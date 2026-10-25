@@ -19,6 +19,8 @@ pub const TOON: u32 = 2;
 pub const MATTE: u32 = 4;
 
 /// The shader's uniform.
+// The derive's generated layout checks are never called.
+#[allow(dead_code)]
 #[derive(ShaderType, Reflect, Debug, Clone, Copy, Default, PartialEq)]
 pub struct LookParams {
     pub flags: u32,
