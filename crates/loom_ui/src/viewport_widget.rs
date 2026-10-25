@@ -349,7 +349,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             if pointer.button_pressed(egui::PointerButton::Primary) && response.hovered() {
                                 app.soft_painting = true;
                             }
-                            if down && app.soft_painting && (pointer.is_moving() || pointer.button_pressed(egui::PointerButton::Primary)) {
+                            if down && app.soft_painting && (pointer.delta() != egui::Vec2::ZERO || pointer.button_pressed(egui::PointerButton::Primary)) {
                                 if let Some((_, point, _)) = surface_hit_node(app, p, rect, view, proj) {
                                     let b = app.soft_brush;
                                     let _ = app.dispatch(Command::PaintSoftSelectionStroke { node: target.0, points: vec![point.to_array()], value: b.value, size: b.size, strength: b.strength });
@@ -424,7 +424,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 app.poly_dragging = true;
                                 app.state.undo.begin("Vertex Paint");
                             }
-                            if down && app.deform_painting && (pointer.is_moving() || pointer.button_pressed(egui::PointerButton::Primary)) {
+                            if down && app.deform_painting && (pointer.delta() != egui::Vec2::ZERO || pointer.button_pressed(egui::PointerButton::Primary)) {
                                 if let Some((_, point, _)) = surface_hit_node(app, p, rect, view, proj) {
                                     let local = app.state.scene.object_matrix(target).inverse().transform_point3(point);
                                     let rgb = [(brush.2[0] * 255.0) as u8, (brush.2[1] * 255.0) as u8, (brush.2[2] * 255.0) as u8];
@@ -460,7 +460,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 // One stroke = one undo entry.
                                 app.state.undo.begin("Paint Deform");
                             }
-                            if down && app.deform_painting && (pointer.is_moving() || pointer.button_pressed(egui::PointerButton::Primary)) {
+                            if down && app.deform_painting && (pointer.delta() != egui::Vec2::ZERO || pointer.button_pressed(egui::PointerButton::Primary)) {
                                 if let Some((_, point, _)) = surface_hit_node(app, p, rect, view, proj) {
                                     let mods = ctx.input(|i| i.modifiers);
                                     let mode = if mods.shift { loom_commands::PaintMode::Relax } else { mode };
@@ -497,7 +497,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         app.state.undo.end();
                     }
                     if let Some(md) = app.manip_drag.clone() {
-                        if pointer.is_moving() {
+                        if pointer.delta() != egui::Vec2::ZERO {
                             // Change by the pointer movement along the handle direction, in world units.
                             if let (Some(a), Some(b)) = (projection.hit_plane(md.last, md.origin, projection.toward_viewer()), projection.hit_plane(p, md.origin, projection.toward_viewer())) {
                                 let delta = (b - a).dot(md.dir);
@@ -544,7 +544,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                     }
                     if let Some(mut drag) = app.transform_drag {
-                        if pointer.is_moving() {
+                        if pointer.delta() != egui::Vec2::ZERO {
                             let layout = gizmo::layout_for(app, index, rect.height());
                             if drag.snap_start.is_none() {
                                 drag.snap_start = Some(layout.origin);
@@ -828,14 +828,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
-                    if pointer.is_moving()
+                    if pointer.delta() != egui::Vec2::ZERO
                         && app.drag_select_start.is_some()
                         && matches!(app.state.selection_region, loom_commands::SelectionRegion::Lasso | loom_commands::SelectionRegion::Paint)
                         && app.region_points.last().is_none_or(|l| l.distance(p) > 3.0)
                     {
                         app.region_points.push(p);
                     }
-                    if pointer.is_moving() && pointer.button_down(egui::PointerButton::Primary) {
+                    if pointer.delta() != egui::Vec2::ZERO && pointer.button_down(egui::PointerButton::Primary) {
                         if let Some(mut line) = app.line.take() {
                             let hit = plane_hit(p, rect, view, proj, line.normal);
                             line.on_drag(app, hit, p);
@@ -843,7 +843,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             ctx.request_repaint();
                         }
                     }
-                    if pointer.is_moving() {
+                    if pointer.delta() != egui::Vec2::ZERO {
                         if let Some(mut session) = app.biped_create.take() {
                             let hit = plane_hit(p, rect, view, proj, session.normal);
                             session.on_drag(app, hit, p);

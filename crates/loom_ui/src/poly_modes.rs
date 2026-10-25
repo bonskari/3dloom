@@ -185,7 +185,7 @@ pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState
         // Half a degree per pixel.
         PolyDrag::Hinge => Command::HingeFromEdge { angle: delta.y * 0.5, segments: ps.hinge_segments, edge: None },
     };
-    if pointer.is_moving() && s.sel > 0 {
+    if pointer.delta() != egui::Vec2::ZERO && s.sel > 0 {
         app.preview_undo();
         app.preview_apply(dialog, |app| {
             app.state.sub_selection.clear();
@@ -651,7 +651,7 @@ pub fn skin_paint(app: &mut LoomApp, ctx: &egui::Context, painter: &egui::Painte
                 };
                 let _ = app.dispatch(Command::SkinSetPainterOption { name: name.into(), value });
             }
-        } else if pointer.is_moving() || pointer.button_pressed(egui::PointerButton::Primary) {
+        } else if pointer.delta() != egui::Vec2::ZERO || pointer.button_pressed(egui::PointerButton::Primary) {
             if let Some((_, at, _)) = hit(app, p) {
                 let _ = app.dispatch(Command::SkinPaintStroke { points: vec![at.to_array()], erase: mods.alt });
             }
