@@ -55,7 +55,7 @@ fn points_level_selects_and_the_selection_tools_grow_shrink_loop_and_ring() {
     execute(&mut s, Command::SkinMorphSelectPoints { ids: vec![side, next], op: SelectOp::Replace }).unwrap();
     execute(&mut s, Command::SkinMorphSelectionTool { tool: "Loop".into() }).unwrap();
     let ring_z: Vec<f32> = data(&s, id).selection.iter().map(|v| mesh.vertices()[*v as usize].position.z).collect();
-    assert_eq!(ring_z.len(), 18, "Loop: the whole circle of 18 sides");
+    assert_eq!(ring_z.len(), 18, "Loop: the whole circle of 18 sides: {:?}", data(&s, id).selection.iter().map(|v| mesh.vertices()[*v as usize].position).collect::<Vec<_>>());
     assert!(ring_z.iter().all(|z| (z - 10.0).abs() < 1e-3));
     execute(&mut s, Command::SkinMorphSelectPoints { ids: vec![side, next], op: SelectOp::Replace }).unwrap();
     execute(&mut s, Command::SkinMorphSelectionTool { tool: "Ring".into() }).unwrap();
