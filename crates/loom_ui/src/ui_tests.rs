@@ -3072,7 +3072,8 @@ fn fbx_import_options_cancel_and_cameras_off() {
     h.cmd(Command::ImportFile { path: None });
     choose_file(&mut h, &path, "Open");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FbxImportOptions));
-    click_text(&mut h, "Cancel", options_rect(&h, "fbx_import_options"), 0.0);
+    let win = options_rect(&h, "fbx_import_options");
+    click_text(&mut h, "Cancel", win, 0.0);
     assert_eq!(h.app.state.dialog, None);
     assert_eq!(h.app.state.scene.len(), 0, "Cancel imports nothing");
     h.cmd(Command::ImportFile { path: None });

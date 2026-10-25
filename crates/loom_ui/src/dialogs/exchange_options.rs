@@ -31,7 +31,9 @@ fn check(ui: &mut egui::Ui, app: &mut LoomApp, dialog: &str, name: &str, label: 
     }
 }
 
-fn number(ui: &mut egui::Ui, app: &mut LoomApp, dialog: &str, name: &str, label: &str, value: f32, range: std::ops::RangeInclusive<f32>, speed: f64) {
+/// A labelled spinner: (value, range, drag speed).
+fn number(ui: &mut egui::Ui, app: &mut LoomApp, dialog: &str, name: &str, label: &str, spin: (f32, std::ops::RangeInclusive<f32>, f64)) {
+    let (value, range, speed) = spin;
     ui.horizontal(|ui| {
         ui.label(label);
         let mut v = value;
@@ -184,14 +186,14 @@ pub fn fbx_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         section(ui, "Curve Filters", false, |ui| {
                             check(ui, app, D, "constant_key_reducer", "Constant Key Reducer", o.constant_key_reducer);
                             ui.add_enabled_ui(o.constant_key_reducer, |ui| {
-                                number(ui, app, D, "translation_precision", "Translation Precision", o.translation_precision, 0.0..=100.0, 0.0001);
-                                number(ui, app, D, "rotation_precision", "Rotation Precision", o.rotation_precision, 0.0..=100.0, 0.001);
-                                number(ui, app, D, "scaling_precision", "Scaling Precision", o.scaling_precision, 0.0..=100.0, 0.001);
-                                number(ui, app, D, "other_precision", "Other Precision", o.other_precision, 0.0..=100.0, 0.001);
+                                number(ui, app, D, "translation_precision", "Translation Precision", (o.translation_precision, 0.0..=100.0, 0.0001));
+                                number(ui, app, D, "rotation_precision", "Rotation Precision", (o.rotation_precision, 0.0..=100.0, 0.001));
+                                number(ui, app, D, "scaling_precision", "Scaling Precision", (o.scaling_precision, 0.0..=100.0, 0.001));
+                                number(ui, app, D, "other_precision", "Other Precision", (o.other_precision, 0.0..=100.0, 0.001));
                             });
                             check(ui, app, D, "key_reducer", "Key Reducer", o.key_reducer);
                             ui.add_enabled_ui(o.key_reducer, |ui| {
-                                number(ui, app, D, "key_reducer_precision", "Filter Intensity", o.key_reducer_precision, 0.0..=100.0, 0.01);
+                                number(ui, app, D, "key_reducer_precision", "Filter Intensity", (o.key_reducer_precision, 0.0..=100.0, 0.01));
                                 check(ui, app, D, "xyz_curve_sync", "XYZ Curve Synchronization", o.xyz_curve_sync);
                             });
                         });
@@ -333,14 +335,14 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         section(ui, "Curve Filters", false, |ui| {
                             check(ui, app, D, "constant_key_reducer", "Constant Key Reducer", o.constant_key_reducer);
                             ui.add_enabled_ui(o.constant_key_reducer, |ui| {
-                                number(ui, app, D, "translation_precision", "Translation Filter Intensity", o.translation_precision, 0.0..=100.0, 0.0001);
-                                number(ui, app, D, "rotation_precision", "Rotation Filter Intensity", o.rotation_precision, 0.0..=100.0, 0.001);
-                                number(ui, app, D, "scaling_precision", "Scaling Filter Intensity", o.scaling_precision, 0.0..=100.0, 0.001);
-                                number(ui, app, D, "other_precision", "Other Filter Intensity", o.other_precision, 0.0..=100.0, 0.001);
+                                number(ui, app, D, "translation_precision", "Translation Filter Intensity", (o.translation_precision, 0.0..=100.0, 0.0001));
+                                number(ui, app, D, "rotation_precision", "Rotation Filter Intensity", (o.rotation_precision, 0.0..=100.0, 0.001));
+                                number(ui, app, D, "scaling_precision", "Scaling Filter Intensity", (o.scaling_precision, 0.0..=100.0, 0.001));
+                                number(ui, app, D, "other_precision", "Other Filter Intensity", (o.other_precision, 0.0..=100.0, 0.001));
                             });
                             check(ui, app, D, "key_reducer", "Key Reducer", o.key_reducer);
                             ui.add_enabled_ui(o.key_reducer, |ui| {
-                                number(ui, app, D, "key_reducer_precision", "Filter Intensity", o.key_reducer_precision, 0.0..=100.0, 0.01);
+                                number(ui, app, D, "key_reducer_precision", "Filter Intensity", (o.key_reducer_precision, 0.0..=100.0, 0.01));
                                 check(ui, app, D, "xyz_curve_sync", "XYZ Curve Synchronization", o.xyz_curve_sync);
                             });
                         });
@@ -355,9 +357,9 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                             });
                             ui.add_enabled_ui(!o.bones_as_dummies, |ui| {
                                 check(ui, app, D, "lock_width_height", "Lock Width and Height", o.lock_width_height);
-                                number(ui, app, D, "bone_width", "Width", o.bone_width, 0.001..=1e6, 0.1);
-                                ui.add_enabled_ui(!o.lock_width_height, |ui| number(ui, app, D, "bone_height", "Height", o.bone_height, 0.001..=1e6, 0.1));
-                                number(ui, app, D, "bone_taper", "Taper (%)", o.bone_taper, 0.0..=100.0, 1.0);
+                                number(ui, app, D, "bone_width", "Width", (o.bone_width, 0.001..=1e6, 0.1));
+                                ui.add_enabled_ui(!o.lock_width_height, |ui| number(ui, app, D, "bone_height", "Height", (o.bone_height, 0.001..=1e6, 0.1)));
+                                number(ui, app, D, "bone_taper", "Taper (%)", (o.bone_taper, 0.0..=100.0, 1.0));
                             });
                         });
                     });
@@ -415,7 +417,7 @@ pub fn obj_export(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     check(ui, app, D, "texture_coordinates", "Texture coordinates", o.texture_coordinates);
                     check(ui, app, D, "normals", "Normals", o.normals);
                     check(ui, app, D, "smoothing_groups", "Smoothing groups", o.smoothing_groups);
-                    number(ui, app, D, "scale", "Scale:", o.scale, 0.0001..=1e6, 0.01);
+                    number(ui, app, D, "scale", "Scale:", (o.scale, 0.0001..=1e6, 0.01));
                 });
             });
             ui.vertical(|ui| {
@@ -587,7 +589,7 @@ pub fn obj_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                             ui.label("Model Units:");
                             units_combo(ui, app, D, "model_units", "obj_import_units", o.model_units, o.convert_units);
                         });
-                        ui.add_enabled_ui(!o.convert_units, |ui| number(ui, app, D, "object_scale", "Object Scale:", o.object_scale, 0.0001..=1e6, 0.01));
+                        ui.add_enabled_ui(!o.convert_units, |ui| number(ui, app, D, "object_scale", "Object Scale:", (o.object_scale, 0.0001..=1e6, 0.01)));
                     });
                 });
                 ui.group(|ui| {
@@ -603,7 +605,7 @@ pub fn obj_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                                     set(app, D, "material_prefix", json!(p));
                                 }
                             });
-                            number(ui, app, D, "default_bump", "Default bump:", o.default_bump, -999.0..=999.0, 1.0);
+                            number(ui, app, D, "default_bump", "Default bump:", (o.default_bump, -999.0..=999.0, 1.0));
                             check(ui, app, D, "force_black_ambient", "Force black ambient", o.force_black_ambient);
                             check(ui, app, D, "import_into_mat_editor", "Import into Mat-Editor", o.import_into_mat_editor);
                             check(ui, app, D, "show_maps_in_viewport", "Show maps in viewport", o.show_maps_in_viewport);
