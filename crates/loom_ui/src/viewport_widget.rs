@@ -2331,7 +2331,12 @@ fn draw_subobject_overlay(
                             painter.add(egui::Shape::convex_polygon(pts, egui::Color32::from_rgba_unmultiplied(255, 0, 0, 90), egui::Stroke::NONE));
                         }
                     }
+                    // An Editable Mesh polygon's invisible edges stay undrawn.
+                    let corners = mesh.face_corners(face_id).unwrap_or_default();
                     for i in 0..ids.len() {
+                        if corners.get(i).is_some_and(|he| !mesh.edge_visible(*he)) {
+                            continue;
+                        }
                         let a = ids[i];
                         let b = ids[(i + 1) % ids.len()];
                         draw_segment_overlay(painter, mesh, a, b, view_proj, viewport_rect, stroke);

@@ -140,3 +140,19 @@ fn quad_patch_drags_out_and_patch_level_extrudes() {
     let pm = &h.app.state.scene.node(id).unwrap().object.patch().unwrap().patch;
     assert_eq!(pm.patches.len(), 5, "the patch and four sides");
 }
+
+#[test]
+fn an_editable_patch_draws_its_surface_and_picks_on_its_lattice() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePatchGrid { quad: true, position: [0.0; 3], length: 30.0, width: 30.0 });
+    h.cmd(Command::ConvertToEditablePatch);
+    let id = selected(&h);
+    h.frames(2);
+    let i = h.app.world_meshes().iter().position(|(n, _)| *n == id).unwrap();
+    assert_eq!(h.app.drawn_mesh(i).face_count(), 36, "the tessellated surface is drawn");
+    assert_eq!(h.app.drawn_mesh(i).unique_edges().len(), 24, "with only the patch outline in the wireframe");
+    assert_eq!(h.app.world_meshes()[i].1.face_count(), 1, "the lattice is what sub-objects pick on");
+    h.cmd(Command::SetParameter { id: id.0, name: "Show Interior Edges".into(), value: 1.0 });
+    let i = h.app.world_meshes().iter().position(|(n, _)| *n == id).unwrap();
+    assert_eq!(h.app.drawn_mesh(i).unique_edges().len(), 84, "Show Interior Edges");
+}

@@ -724,7 +724,9 @@ impl LoomApp {
             // the Modify panel edits; the cage stays the base mesh for
             // sub-object picking.
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
-            let mut shown = if n.modifiers.is_empty() && !nurms {
+            // An Editable Patch's cage is its lattice: the surface is drawn.
+            let patch = n.object.patch().is_some();
+            let mut shown = if n.modifiers.is_empty() && !nurms && !patch {
                 None
             } else if self.below_end_result(id) {
                 match n.active_entry {
