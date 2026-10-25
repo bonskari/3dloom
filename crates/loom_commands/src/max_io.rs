@@ -169,7 +169,15 @@ fn modifier(m: &loom_max::MaxModifier, node: &str, w: &mut Vec<String>) -> Optio
         d.center.set(c);
     }
     if let Some(l) = &m.lattice {
-        md.fit_ffd(l.lo, l.hi);
+        // Loom keeps the lattice volume in object space and the control points in
+        // gizmo space; the file keeps both in gizmo space. They agree while the
+        // gizmo only moves.
+        let g = m.gizmo.unwrap_or(glam::Mat4::IDENTITY);
+        if (glam::Mat3::from_mat4(g) - glam::Mat3::IDENTITY).to_cols_array().iter().any(|x| x.abs() > 1e-5) {
+            w.push(format!("{node}: {} lattice is turned or scaled against the object; not imported", m.class));
+            return None;
+        }
+        md.fit_ffd(g.transform_point3(l.lo), g.transform_point3(l.hi));
         if let Modifier::FFD { points, dims, .. } = &mut md {
             if *dims == l.dims && points.len() == l.points.len() {
                 let size = l.hi - l.lo;

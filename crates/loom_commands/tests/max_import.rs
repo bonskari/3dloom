@@ -97,11 +97,8 @@ fn imported_stacks_evaluate_to_the_bounds_the_file_stored() {
     for k in (0..3).filter(|k| *k != direction.get() as usize) {
         assert!((lo[k] + hi[k]).abs() < 0.02, "axis {}: {lo} {hi}", direction.get());
     }
-    let doc = loom_max::read(&std::fs::read(&p).unwrap()).unwrap();
-    let file_node = doc.nodes.iter().find(|n| n.name == s.scene.node(id).unwrap().name).unwrap();
-    let axis_world = s.scene.object_matrix(id).transform_point3(glam::Vec3::ZERO);
-    let want = file_node.local * file_node.offset;
-    assert!(near(axis_world, want.transform_point3(glam::Vec3::ZERO), 1e-3));
+    // (World placement of every node, the moved pivot included, is checked in
+    // import_max_keeps_world_placement_and_undoes.)
     // Layers by name: the file's "0" is the scene's layer 0.
     assert!(s.scene.nodes().all(|n| n.layer == 0));
 }
