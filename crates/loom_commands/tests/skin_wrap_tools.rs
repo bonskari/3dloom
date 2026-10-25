@@ -146,7 +146,7 @@ fn bake_and_retrieve_control_verts_round_trip_through_the_control_object() {
 #[test]
 fn unassigned_points_are_counted_for_the_display() {
     let mut s = AppState::new();
-    let (control, hi) = wrapped(&mut s);
+    let (control, _) = wrapped(&mut s);
     execute(&mut s, Command::SkinWrapAddBase { id: control.0 }).unwrap();
     execute(&mut s, Command::SkinWrapSetOption { name: "Threshold".into(), value: 0.1 }).unwrap();
     let st = execute(&mut s, Command::State).unwrap();
