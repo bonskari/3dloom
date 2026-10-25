@@ -141,7 +141,8 @@ fn window(ctx: &egui::Context, app: &mut LoomApp, uid: u32) {
     let resp = egui::Window::new(ex.name.clone())
         .id(window_id(uid))
         .open(&mut open)
-        .default_size([560.0, 380.0])
+        // Wide enough for its columns at first (the table scrolls beyond that).
+        .default_size([(ex.columns.iter().map(|c| column_width(*c)).sum::<f32>() + 90.0).clamp(420.0, 1000.0), 380.0])
         .default_pos([180.0 + offset, 120.0 + offset])
         .resizable(true)
         .show(ctx, |ui| body(ui, app, &ex, &rows, &hl, &mut st, &mut acts));
