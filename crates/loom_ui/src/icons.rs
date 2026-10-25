@@ -95,6 +95,8 @@ pub const CAMERAS: &str = ph::VIDEO_CAMERA;
 pub const HELPERS: &str = ph::RULER;
 pub const SPACE_WARPS: &str = ph::WAVES;
 pub const SYSTEMS: &str = ph::GEAR_SIX;
+/// The Object Type rollout's Pin (Keep Creating).
+pub const KEEP_CREATING: &str = ph::PUSH_PIN;
 
 // Scene tab object kinds.
 pub const KIND_GEOMETRY: &str = ph::CUBE;

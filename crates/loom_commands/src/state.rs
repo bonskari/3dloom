@@ -667,6 +667,10 @@ impl Default for GizmoPrefs {
     }
 }
 
+/// Keep Creating's default (the reference keeps the create tool on; this
+/// build makes one object, then returns to Select).
+pub const KEEP_CREATING_DEFAULT: bool = false;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
@@ -692,6 +696,9 @@ pub struct Prefs {
     /// Preferences > General: Space toggles Selection Lock (off by default).
     #[serde(default)]
     pub space_selection_lock: bool,
+    /// Preferences > General / Create menu / the Object Type Pin: the create
+    /// tool stays on after an object is made (off: one object, then Select).
+    pub keep_creating: bool,
     /// Preferences > Files > Auto Backup: Enable (default on).
     pub auto_backup_enable: bool,
     /// Number of Autobak files (default 3).
@@ -723,6 +730,7 @@ impl Default for Prefs {
             viewport_tooltips: true,
             show_cross_hair: false,
             space_selection_lock: false,
+            keep_creating: KEEP_CREATING_DEFAULT,
             auto_backup_enable: true,
             auto_backup_count: 3,
             auto_backup_interval_min: 5.0,
@@ -735,13 +743,13 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 30] = [
+    pub const NAMES: [&'static str; 31] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
-        "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu",
+        "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -757,6 +765,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => b(self.spinner_wrap_cursor),
             "Viewport Tooltips" => b(self.viewport_tooltips),
             "Space Locks Selection" => b(self.space_selection_lock),
+            "Keep Creating" => b(self.keep_creating),
             "Local Center During Animate" => b(self.local_center_during_animate),
             "Show Cross Hair Cursor" => b(self.show_cross_hair),
             "Auto Backup Enable" => b(self.auto_backup_enable),
@@ -796,6 +805,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => self.spinner_wrap_cursor = on,
             "Viewport Tooltips" => self.viewport_tooltips = on,
             "Space Locks Selection" => self.space_selection_lock = on,
+            "Keep Creating" => self.keep_creating = on,
             "Local Center During Animate" => self.local_center_during_animate = on,
             "Auto Backup Enable" => self.auto_backup_enable = on,
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
