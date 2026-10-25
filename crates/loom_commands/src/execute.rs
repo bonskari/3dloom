@@ -62,6 +62,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::State => Ok(snapshot(state)),
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
+        c if crate::ui_custom::handles(&c) => crate::ui_custom::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
         c if crate::display::handles(&c) => crate::display::execute(state, c),
         c if crate::render::handles(&c) => crate::render::execute(state, c),
@@ -1616,13 +1617,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             back_to_keyboard_panel(state);
             Ok(json!({ "path": path, "groups": rows.len() }))
         }
-        C::SaveCustomUiScheme { path } => {
+        C::SaveCustomUiScheme { path, parts } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::SaveCustomUiScheme);
                 return Ok(json!({ "dialog": "SaveCustomUiScheme" }));
             };
-            write_text(&path, &crate::settings::scheme_to_text(state))?;
-            Ok(json!({ "path": path }))
+            let parts: Vec<String> = parts.unwrap_or_else(|| crate::settings::SCHEME_PARTS.iter().map(|p| (*p).to_owned()).collect());
+            if let Some(bad) = parts.iter().find(|p| !crate::settings::SCHEME_PARTS.contains(&p.as_str())) {
+                return Err(format!("unknown scheme part {bad:?} ({})", crate::settings::SCHEME_PARTS.join(", ")));
+            }
+            let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+            write_text(&path, &crate::settings::scheme_parts_to_text(state, &parts))?;
+            Ok(json!({ "path": path, "parts": parts }))
         }
         C::LoadCustomUiScheme { path } => {
             let Some(path) = path else {
@@ -1636,6 +1642,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::RevertToStartupUi => {
             let ui = state.startup_ui;
             ui.apply(state);
+            let start = state.startup_custom.clone();
+            let c = &mut state.ui_custom;
+            (c.toolbars, c.docks, c.float_pos, c.shown, c.looks, c.colors) = (start.toolbars, start.docks, start.float_pos, start.shown, start.looks, start.colors);
+            state.grid_dirty = true;
+            state.mesh_dirty = true;
             Ok(json!({}))
         }
         C::ShowCommandPanelToggle => toggle(&mut state.show_command_panel, "show_command_panel"),
@@ -3567,7 +3578,7 @@ fn back_to_keyboard_panel(state: &mut AppState) {
 }
 
 /// Writes a settings-style text file, making its folder first.
-fn write_text(path: &str, text: &str) -> Result<(), String> {
+pub(crate) fn write_text(path: &str, text: &str) -> Result<(), String> {
     let path = std::path::Path::new(path);
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;

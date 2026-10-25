@@ -200,7 +200,7 @@ fn ui_schemes_save_load_and_revert_to_the_startup_layout() {
     execute(&mut s, Command::ShowMainToolbarToggle).unwrap();
     execute(&mut s, Command::ShowCommandPanelToggle).unwrap();
     assign(&mut s, "Main UI", "Select and Move", "Alt+Shift+M");
-    execute(&mut s, Command::SaveCustomUiScheme { path: p(&path) }).unwrap();
+    execute(&mut s, Command::SaveCustomUiScheme { path: p(&path), parts: None }).unwrap();
     execute(&mut s, Command::RevertToStartupUi).unwrap();
     assert_eq!(UiLayout::of(&s), startup);
     assert!(s.show_main_toolbar && s.show_command_panel);

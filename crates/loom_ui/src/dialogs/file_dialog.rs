@@ -110,6 +110,19 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::SaveShortcuts => ("Save Shortcut File As", "kbd", "Save"),
         Dialog::LoadShortcuts => ("Load Shortcut File", "kbd", "Open"),
         Dialog::SaveCustomUiScheme => ("Save Custom UI Scheme", "ui", "Save"),
+        Dialog::UiFile { kind, save } => {
+            use loom_commands::UiFileKind as K;
+            match (kind, save) {
+                (K::Toolbars, true) => ("Save UI File As", "cui", "Save"),
+                (K::Toolbars, false) => ("Load UI File", "cui", "Open"),
+                (K::Menus, true) => ("Save Menu File As", "mnu", "Save"),
+                (K::Menus, false) => ("Load Menu File", "mnu", "Open"),
+                (K::Colors, true) => ("Save Color File As", "clr", "Save"),
+                (K::Colors, false) => ("Load Color File", "clr", "Open"),
+                (K::QuadOptions, true) => ("Save Quad Options File As", "qop", "Save"),
+                (K::QuadOptions, false) => ("Load Quad Options File", "qop", "Open"),
+            }
+        }
         Dialog::LoadCustomUiScheme => ("Load Custom UI Scheme", "ui", "Open"),
         Dialog::SaveAnimation => ("Save Animation", "lxaf", "Save"),
         Dialog::LoadAnimation => ("Load Animation", "lxaf", "Open"),
@@ -145,8 +158,22 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::LoadUvw => Command::LoadUvw { path: Some(p) },
         Dialog::SaveShortcuts => Command::SaveShortcuts { path: Some(p) },
         Dialog::LoadShortcuts => Command::LoadShortcuts { path: Some(p) },
-        Dialog::SaveCustomUiScheme => Command::SaveCustomUiScheme { path: Some(p) },
+        Dialog::SaveCustomUiScheme => Command::SaveCustomUiScheme { path: Some(p), parts: None },
         Dialog::LoadCustomUiScheme => Command::LoadCustomUiScheme { path: Some(p) },
+        Dialog::UiFile { kind, save } => {
+            use loom_commands::UiFileKind as K;
+            let path = Some(p);
+            match (kind, save) {
+                (K::Toolbars, true) => Command::SaveToolbars { path },
+                (K::Toolbars, false) => Command::LoadToolbars { path },
+                (K::Menus, true) => Command::SaveMenus { path },
+                (K::Menus, false) => Command::LoadMenus { path },
+                (K::Colors, true) => Command::SaveUiColors { path },
+                (K::Colors, false) => Command::LoadUiColors { path },
+                (K::QuadOptions, true) => Command::SaveQuadOptions { path },
+                (K::QuadOptions, false) => Command::LoadQuadOptions { path },
+            }
+        }
         Dialog::SaveAnimation => Command::SaveAnimation { path: Some(p) },
         Dialog::LoadAnimation => Command::LoadAnimation { path: Some(p), offset: None },
         Dialog::PointCacheRecord { index, start, end } => Command::PointCacheRecord { index, path: p, start, end },

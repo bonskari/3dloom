@@ -303,6 +303,39 @@ pub struct HideCategories {
     pub helpers: bool,
 }
 
+/// Which Customize User Interface file a Save / Load dialog is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UiFileKind {
+    /// .cui: the user's toolbars, docking and button looks.
+    Toolbars,
+    /// .mnu: menus and quad menus.
+    Menus,
+    /// .clr: colours.
+    Colors,
+    /// .qop: Advanced Quad Menu Options.
+    QuadOptions,
+}
+
+impl UiFileKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            UiFileKind::Toolbars => "Toolbars",
+            UiFileKind::Menus => "Menus",
+            UiFileKind::Colors => "Colors",
+            UiFileKind::QuadOptions => "Quad Options",
+        }
+    }
+    /// The file extension.
+    pub fn ext(self) -> &'static str {
+        match self {
+            UiFileKind::Toolbars => "cui",
+            UiFileKind::Menus => "mnu",
+            UiFileKind::Colors => "clr",
+            UiFileKind::QuadOptions => "qop",
+        }
+    }
+}
+
 /// Modeless dialogs the UI shows; commands open them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dialog {
@@ -361,6 +394,8 @@ pub enum Dialog {
     /// Customize User Interface > Keyboard > Save / Load (.kbd).
     SaveShortcuts,
     LoadShortcuts,
+    /// Customize User Interface > Toolbars / Menus / Quads / Colors: Save or Load a file.
+    UiFile { kind: UiFileKind, save: bool },
     /// Customize > Save / Load Custom UI Scheme (.ui).
     SaveCustomUiScheme,
     LoadCustomUiScheme,

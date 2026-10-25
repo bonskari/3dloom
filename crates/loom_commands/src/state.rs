@@ -1500,6 +1500,12 @@ pub struct AppState {
     pub default_units: UnitsSetup,
     /// Customize User Interface > Keyboard: the user's shortcut edits.
     pub custom_keys: crate::keymap::CustomKeys,
+    /// Customize User Interface > Toolbars, Quads, Menus, Colors and the rollout order.
+    pub ui_custom: crate::ui_custom::UiCustom,
+    /// `ui_custom` as loaded at startup (Revert to Startup Layout).
+    pub startup_custom: crate::ui_custom::UiCustom,
+    /// Show Quad Menu asked the UI to open this quad set at the pointer.
+    pub quad_request: Option<String>,
     /// File > Recent: opened and saved scenes, newest first.
     pub recent_files: Vec<std::path::PathBuf>,
     /// Set when the selection region shape changes so the UI drops a
@@ -1803,6 +1809,9 @@ impl AppState {
             units: UnitsSetup::default(),
             default_units: UnitsSetup::default(),
             custom_keys: Default::default(),
+            ui_custom: Default::default(),
+            startup_custom: Default::default(),
+            quad_request: None,
             recent_files: Vec::new(),
             region_points_reset: false,
             manipulate: false,

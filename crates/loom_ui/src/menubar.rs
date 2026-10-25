@@ -408,7 +408,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 cmd(ui, app, "Customize User Interface...", Command::CustomizeUserInterface);
                 ui.separator();
                 cmd(ui, app, "Load Custom UI Scheme...", Command::LoadCustomUiScheme { path: None });
-                cmd(ui, app, "Save Custom UI Scheme...", Command::SaveCustomUiScheme { path: None });
+                cmd(ui, app, "Save Custom UI Scheme...", Command::SaveCustomUiScheme { path: None, parts: None });
                 item(ui, app, "Revert to Startup Layout", "Revert to Startup UI");
                 ui.separator();
                 ui.menu_button("Show UI", |ui| {
