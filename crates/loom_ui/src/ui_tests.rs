@@ -1183,6 +1183,8 @@ fn slow_frames_extrude_drag_extrudes() {
     let p = h.screen_of(top_face_point());
     h.click(p);
     assert_eq!(h.sub_count(), 1);
+    // The drag's press on the same face must not make a double-click.
+    pause(&mut h);
     h.cmd(Command::ExtrudeMode);
     h.frame_time = SLOW;
     let before = h.app.world_meshes()[0].1.vertices().len();
