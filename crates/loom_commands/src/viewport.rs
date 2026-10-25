@@ -432,10 +432,6 @@ pub enum Dialog {
     FileProperties,
     /// Group > Group: the group name.
     GroupName,
-    /// File > Export (Selected) to .fbx: the FBX Export options, then the file is written.
-    FbxExport { selected: bool },
-    /// File > Import of an .fbx: the FBX Import options, then the file is read.
-    FbxImport,
 }
 
 /// What runs after the Save Changes prompt is answered.

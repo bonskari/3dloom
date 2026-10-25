@@ -1594,7 +1594,6 @@ commands! {
     SetPivot => "Set Pivot", Loom, "Set a node's pivot (node transform) without moving the mesh." { id: u64, position: Option<[f32; 3]>, rotation_deg: Option<[f32; 3]> };
     SetNodeLocks => "Set Node Locks", Loom, "Hierarchy > Link Info > Locks: per-axis move/rotate/scale locks (true = locked)." { id: u64, move_axes: Option<[bool; 3]>, rotate_axes: Option<[bool; 3]>, scale_axes: Option<[bool; 3]> };
     SetNodeInherit => "Set Node Inherit", Loom, "Hierarchy > Link Info > Inherit: which parent transform components the node inherits (true = inherit)." { id: u64, move_axes: Option<[bool; 3]>, rotate_axes: Option<[bool; 3]>, scale_axes: Option<[bool; 3]> };
-    SetFbxOption => "Set FBX Option", Loom, "FBX Export / Import dialog options: Y-Up (else Z-up), Smoothing Groups, Animation, Cameras (export) and Import Animation." { name: String, value: bool };
     SetSelectionDisplayProperty => "Set Selection Display Property", Loom, "Display > Display Properties checkbox by name on every selected object, one undo step." { name: String, value: bool };
     SetDisplayProperty => "Set Display Property", Loom, "Display > Display Properties checkbox by name: See-Through, Display as Box, Backface Cull, Vertex Ticks, Ignore Extents, Show Frozen in Gray." { id: u64, name: String, value: bool };
     HideByHit => "Hide By Hit", Loom, "Display > Hide > Hide by Hit: the next clicked object is hidden (right-click ends the mode).";

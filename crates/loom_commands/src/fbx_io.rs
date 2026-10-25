@@ -10,54 +10,6 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// The FBX Export / Import dialogs' options (kept for the session).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct FbxOptions {
-    /// Export > Axis Conversion > Up Axis: Y-up (else Z-up, the scene's own).
-    pub y_up: bool,
-    /// Export > Smoothing Groups.
-    pub smoothing_groups: bool,
-    /// Export > Animation (the baked take).
-    pub animation: bool,
-    /// Export > Cameras.
-    pub cameras: bool,
-    /// Import > Animation (the file's take).
-    pub import_animation: bool,
-}
-
-impl Default for FbxOptions {
-    fn default() -> Self {
-        Self { y_up: false, smoothing_groups: true, animation: true, cameras: true, import_animation: true }
-    }
-}
-
-impl FbxOptions {
-    pub const NAMES: [&'static str; 5] = ["Y-Up", "Smoothing Groups", "Animation", "Cameras", "Import Animation"];
-
-    pub fn get(&self, name: &str) -> Option<bool> {
-        Some(match name {
-            "Y-Up" => self.y_up,
-            "Smoothing Groups" => self.smoothing_groups,
-            "Animation" => self.animation,
-            "Cameras" => self.cameras,
-            "Import Animation" => self.import_animation,
-            _ => return None,
-        })
-    }
-
-    pub fn set(&mut self, name: &str, on: bool) -> Result<(), String> {
-        *match name {
-            "Y-Up" => &mut self.y_up,
-            "Smoothing Groups" => &mut self.smoothing_groups,
-            "Animation" => &mut self.animation,
-            "Cameras" => &mut self.cameras,
-            "Import Animation" => &mut self.import_animation,
-            _ => return Err(format!("no FBX option {name:?} ({})", Self::NAMES.join(", "))),
-        } = on;
-        Ok(())
-    }
-}
-
 pub fn is_fbx(path: &Path) -> bool {
     path.extension().is_some_and(|e| e.eq_ignore_ascii_case("fbx"))
 }
@@ -69,10 +21,7 @@ fn unit_metres(state: &AppState) -> f64 {
 
 pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut doc = loom_fbx::read(&bytes, unit_metres(state)).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !state.fbx_options.import_animation {
-        doc.anim = None;
-    }
+    let doc = loom_fbx::read(&bytes, unit_metres(state)).map_err(|e| format!("{}: {e}", path.display()))?;
     // Empties without children are dropped; their children go to the grandparent.
     let has_children: Vec<bool> = (0..doc.nodes.len()).map(|i| doc.nodes.iter().any(|n| n.parent == Some(i))).collect();
     // Bones always stay (a skeleton's leaf joints have no children).
@@ -273,8 +222,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         .copied()
         .filter(|id| {
             state.scene.node(*id).is_some_and(|n| match &n.object {
-                ObjectKind::Camera { .. } => state.fbx_options.cameras,
-                ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_) => true,
+                ObjectKind::Camera { .. } | ObjectKind::Light(_) | ObjectKind::Group { .. } | ObjectKind::Bone { .. } | ObjectKind::Dummy { .. } | ObjectKind::Point { .. } | ObjectKind::IkGoal { .. } | ObjectKind::Biped(_) => true,
                 _ => state.scene.eval_mesh(*id).value.mesh.face_count() > 0 || n.object.display_output().face_count() > 0,
             })
         })
@@ -369,7 +317,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         return Err("nothing to export: no geometry objects".into());
     }
     let count = nodes.len();
-    let anim = if state.fbx_options.animation { bake_take(state, &exported_ids, &nodes) } else { None };
+    let anim = bake_take(state, &exported_ids, &nodes);
     // The exported objects' layers, as display layers.
     let mut layers: Vec<loom_fbx::FbxLayer> = Vec::new();
     for (i, id) in exported_ids.iter().enumerate() {
@@ -385,9 +333,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         layers[at].nodes.push(i);
     }
     let doc = FbxDocument { nodes, unit_metres: unit_metres(state), anim, layers };
-    let o = state.fbx_options;
-    let axes = if o.y_up { loom_fbx::WriteAxes::YUp } else { loom_fbx::WriteAxes::ZUp };
-    let bytes = loom_fbx::write(&doc, &WriteOpts { creator: format!("3dloom {}", env!("CARGO_PKG_VERSION")), axes, smoothing_layer: o.smoothing_groups });
+    let bytes = loom_fbx::write(&doc, &WriteOpts { creator: format!("3dloom {}", env!("CARGO_PKG_VERSION")), ..Default::default() });
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(json!({ "path": path, "objects": count }))
 }

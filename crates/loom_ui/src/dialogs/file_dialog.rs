@@ -287,16 +287,6 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
             }
         };
     }
-    // An .fbx shows the FBX Export / Import options first.
-    let fbx = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("fbx"));
-    if fbx && matches!(dialog, Dialog::ExportFile | Dialog::ExportSelected | Dialog::ImportFile) {
-        app.state.fbx_pending = Some(path);
-        app.state.dialog = Some(match dialog {
-            Dialog::ImportFile => Dialog::FbxImport,
-            d => Dialog::FbxExport { selected: d == Dialog::ExportSelected },
-        });
-        return false;
-    }
     if dialog == Dialog::MergeFile {
         return match loom_commands::file::read(&path) {
             Ok(doc) => {

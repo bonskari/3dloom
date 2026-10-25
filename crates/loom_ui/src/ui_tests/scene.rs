@@ -413,24 +413,3 @@ fn summary_info_shows_totals_and_keeps_the_description() {
     assert_eq!(open_dialog(&h), None);
 }
 
-#[test]
-fn fbx_export_dialog_sets_the_options_and_ok_writes_the_file() {
-    let dir = std::env::temp_dir().join("loom-ui-fbx-export");
-    let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join("out.fbx");
-    let _ = std::fs::remove_file(&path);
-    let mut h = Harness::new();
-    named_box(&mut h, "A", 0.0);
-    h.app.state.fbx_pending = Some(path.clone());
-    h.app.state.dialog = Some(loom_commands::Dialog::FbxExport { selected: false });
-    h.frames(2);
-    let p = window_text(&h, "FBX Export", "Y-up");
-    h.click(p);
-    let p = window_text(&h, "FBX Export", "Animation");
-    h.click(p);
-    assert!(h.app.state.fbx_options.y_up && !h.app.state.fbx_options.animation);
-    let p = window_text(&h, "FBX Export", "OK");
-    h.click(p);
-    assert!(path.is_file(), "OK wrote the file");
-    assert_eq!(open_dialog(&h), None);
-}

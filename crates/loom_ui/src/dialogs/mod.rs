@@ -157,8 +157,6 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::SummaryInfo => scene_dialogs::summary_info(ctx, app, &mut open),
         Dialog::FileProperties => scene_dialogs::file_properties(ctx, app, &mut open),
         Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
-        Dialog::FbxExport { selected } => scene_dialogs::fbx_options(ctx, app, Some(selected), &mut open),
-        Dialog::FbxImport => scene_dialogs::fbx_options(ctx, app, None, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
     if !open && app.state.dialog == Some(dialog) {
