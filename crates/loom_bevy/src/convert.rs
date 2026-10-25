@@ -9,7 +9,8 @@ use bevy::render::alpha::AlphaMode;
 use bevy::render::camera::{OrthographicProjection, PerspectiveProjection, Projection, ScalingMode};
 use bevy::render::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::render::primitives::Aabb;
-use loom_scene::material::StandardMaterial as LoomMaterial;
+use loom_scene::maps::Image as MapImage;
+use loom_scene::material::{Map, StandardMaterial as LoomMaterial, Surface};
 
 /// A loom mesh triangulated for Bevy: one vertex per face corner.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +72,92 @@ impl MeshData {
     }
 }
 
+/// `mesh` split by face material ID (0-based): one triangulation per ID in use.
+pub fn mesh_data_by_id(mesh: &loom_mesh::Mesh) -> Vec<(u16, MeshData)> {
+    let ids: std::collections::BTreeSet<u16> = mesh.faces().iter().filter(|f| !f.hidden).map(|f| f.material_id).collect();
+    ids.into_iter()
+        .map(|id| {
+            let mut part = mesh.clone();
+            for f in part.faces_mut() {
+                f.hidden |= f.material_id != id;
+            }
+            (id, mesh_data(&part))
+        })
+        .collect()
+}
+
+/// A hash of the faces' material IDs (the per-ID split depends on them).
+pub fn material_ids_hash(mesh: &loom_mesh::Mesh) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for f in mesh.faces() {
+        f.material_id.hash(&mut h);
+    }
+    h.finish()
+}
+
+/// The map's Offset / Tiling / Angle as Bevy's `uv_transform` (Bevy's V runs
+/// down, the map's up; textures are stored from the top row).
+pub fn uv_transform(map: &Map) -> bevy::math::Affine2 {
+    let m = map.coords.matrix();
+    let f = |p: [f32; 2]| [p[0], 1.0 - p[1]];
+    let a = |p: [f32; 2]| {
+        let q = f(p);
+        f([m[0] * q[0] + m[1] * q[1] + m[2], m[3] * q[0] + m[4] * q[1] + m[5]])
+    };
+    let (o, x, y) = (a([0.0, 0.0]), a([1.0, 0.0]), a([0.0, 1.0]));
+    bevy::math::Affine2::from_cols(bevy::math::Vec2::new(x[0] - o[0], x[1] - o[1]), bevy::math::Vec2::new(y[0] - o[0], y[1] - o[1]), bevy::math::Vec2::new(o[0], o[1]))
+}
+
+/// The base colour texture: the diffuse map over the Diffuse colour by its
+/// Amount (a decal leaves the colour around it: the edge texels carry it, the
+/// sampler clamps), alpha from Opacity and the Opacity map. 8-bit sRGB.
+pub fn compose_base(diffuse: glam::Vec3, map: Option<(&MapImage, &Map)>, opacity: f32, opacity_map: Option<(&MapImage, &Map)>) -> MapImage {
+    let (w, h) = map.map(|(i, _)| (i.width, i.height)).or(opacity_map.map(|(i, _)| (i.width, i.height))).unwrap_or((1, 1));
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    let decal = map.map(|(_, m)| m.coords.decal()).unwrap_or([false; 2]);
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+            let mut c = [diffuse.x, diffuse.y, diffuse.z];
+            let edge = (decal[0] && (x == 0 || x + 1 == w)) || (decal[1] && (y == 0 || y + 1 == h));
+            if let Some((img, m)) = map.filter(|_| !edge) {
+                let t = img.sample(u, v);
+                let a = t[3] * (m.amount / 100.0).clamp(0.0, 1.0);
+                for k in 0..3 {
+                    c[k] += (t[k] - c[k]) * a;
+                }
+            }
+            let alpha = match opacity_map {
+                Some((img, m)) => {
+                    let t = img.sample(u, v);
+                    let lum = (t[0] + t[1] + t[2]) / 3.0 * t[3];
+                    opacity + (lum - opacity) * (m.amount / 100.0).clamp(0.0, 1.0)
+                }
+                None => opacity,
+            };
+            rgba.extend([c[0], c[1], c[2], alpha].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
+        }
+    }
+    MapImage { width: w, height: h, rgba }
+}
+
+/// A grey (luminance) texture scaled by `amount` 0–1, alpha = the same value:
+/// Specular Level and Self-Illumination maps. 8-bit, linear.
+pub fn luminance(img: &MapImage, amount: f32) -> MapImage {
+    let rgba = img
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let l = ((p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0 * amount).round().clamp(0.0, 255.0) as u8;
+            [l, l, l, l]
+        })
+        .collect();
+    MapImage { width: img.width, height: img.height, rgba }
+}
+
 /// The diffuse bitmap a material shows, if any (an enabled Diffuse Color map).
 pub fn diffuse_map_path(material: Option<&LoomMaterial>) -> Option<&str> {
     material.and_then(|m| m.diffuse_map.as_ref()).filter(|b| b.enabled && !b.path.is_empty()).map(|b| b.path.as_str())
@@ -82,7 +169,14 @@ pub fn diffuse_map_path(material: Option<&LoomMaterial>) -> Option<&str> {
 /// Opacity below 100 blends, 2-Sided draws both sides. Without a material
 /// the object's wire colour is the base colour.
 pub fn material_from_loom(material: Option<&LoomMaterial>, wire_color: [u8; 3]) -> StandardMaterial {
-    match material {
+    material_from_surface(material.map(Surface::from_standard).as_ref(), wire_color)
+}
+
+/// As `material_from_loom` for a resolved surface (a Multi/Sub-Object
+/// sub-material, a Blend). Self-Illumination shows the Diffuse colour unlit:
+/// that share moves from the lit base colour to the emissive colour.
+pub fn material_from_surface(surface: Option<&Surface>, wire_color: [u8; 3]) -> StandardMaterial {
+    match surface {
         None => StandardMaterial {
             base_color: Color::srgb_u8(wire_color[0], wire_color[1], wire_color[2]),
             perceptual_roughness: 0.6,
@@ -90,12 +184,16 @@ pub fn material_from_loom(material: Option<&LoomMaterial>, wire_color: [u8; 3]) 
             ..Default::default()
         },
         Some(m) => {
-            let d = m.diffuse.get();
-            let alpha = (m.opacity.get() / 100.0).clamp(0.0, 1.0);
+            let d = m.diffuse;
+            let alpha = m.opacity;
+            let s = m.self_illum;
+            let lit = d * (1.0 - s);
+            let glow = Color::srgb(d.x, d.y, d.z).to_linear() * s;
             StandardMaterial {
-                base_color: Color::srgba(d.x, d.y, d.z, alpha),
-                perceptual_roughness: (1.0 - m.glossiness.get() / 100.0).clamp(0.0, 1.0),
-                reflectance: (m.specular_level.get() / 100.0 * 0.5).clamp(0.0, 1.0),
+                base_color: Color::srgba(lit.x, lit.y, lit.z, alpha),
+                emissive: bevy::color::LinearRgba::rgb(glow.red, glow.green, glow.blue),
+                perceptual_roughness: (1.0 - m.glossiness / 100.0).clamp(0.0, 1.0),
+                reflectance: (m.specular_level / 100.0 * 0.5).clamp(0.0, 1.0),
                 alpha_mode: if alpha < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque },
                 double_sided: m.two_sided,
                 cull_mode: if m.two_sided { None } else { Some(bevy::render::render_resource::Face::Back) },
@@ -196,7 +294,7 @@ impl bevy::render::camera::CameraProjection for BucketProjection {
 mod tests {
     use super::*;
     use bevy::color::Alpha;
-    use loom_scene::material::BitmapMap;
+    use loom_scene::material::Map as BitmapMap;
 
     #[test]
     fn a_box_becomes_twelve_triangles_with_one_vertex_per_corner() {
@@ -275,7 +373,7 @@ mod tests {
     fn diffuse_map_needs_an_enabled_bitmap() {
         let mut lm = LoomMaterial::new("m");
         assert_eq!(diffuse_map_path(Some(&lm)), None);
-        lm.diffuse_map = Some(BitmapMap { path: "/x/wood.png".into(), amount: 100.0, enabled: true });
+        lm.diffuse_map = Some(BitmapMap::bitmap("/x/wood.png", 100.0));
         assert_eq!(diffuse_map_path(Some(&lm)), Some("/x/wood.png"));
         lm.diffuse_map.as_mut().unwrap().enabled = false;
         assert_eq!(diffuse_map_path(Some(&lm)), None);
@@ -304,6 +402,58 @@ mod tests {
         match o.scaling_mode {
             ScalingMode::Fixed { width, height } => assert!((width - 60.0).abs() < 1e-3 && (height - 40.0).abs() < 1e-3),
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn self_illumination_moves_to_emissive() {
+        let mut lm = LoomMaterial::new("m");
+        lm.diffuse.set(glam::Vec3::new(1.0, 0.5, 0.0));
+        lm.self_illum.set(100.0);
+        let m = material_from_loom(Some(&lm), [0, 0, 0]);
+        assert_eq!(m.base_color.to_srgba().red, 0.0, "fully self-lit: nothing left to light");
+        assert!((m.emissive.red - 1.0).abs() < 1e-5 && m.emissive.green > 0.1 && m.emissive.blue == 0.0, "{:?}", m.emissive);
+        lm.self_illum.set(0.0);
+        assert_eq!(material_from_loom(Some(&lm), [0, 0, 0]).emissive, bevy::color::LinearRgba::rgb(0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn faces_split_by_material_id() {
+        let mut mesh = loom_mesh::box_primitive(Vec3::splat(1.0));
+        for (i, f) in mesh.faces_mut().iter_mut().enumerate() {
+            f.material_id = (i % 2) as u16;
+        }
+        let parts = mesh_data_by_id(&mesh);
+        assert_eq!(parts.iter().map(|(id, d)| (*id, d.indices.len())).collect::<Vec<_>>(), vec![(0, 18), (1, 18)]);
+        let before = material_ids_hash(&mesh);
+        mesh.faces_mut()[0].material_id = 5;
+        assert_ne!(material_ids_hash(&mesh), before);
+    }
+
+    #[test]
+    fn diffuse_map_composes_over_the_colour_and_opacity_map_gives_alpha() {
+        let img = MapImage { width: 2, height: 1, rgba: vec![255, 255, 255, 255, 255, 255, 255, 0] };
+        let map = BitmapMap::bitmap("x", 50.0);
+        let c = compose_base(glam::Vec3::new(0.0, 0.0, 1.0), Some((&img, &map)), 1.0, None);
+        assert_eq!(&c.rgba[0..4], &[128, 128, 255, 255], "Amount 50 mixes half the map over blue");
+        assert_eq!(&c.rgba[4..8], &[0, 0, 255, 255], "where the map is clear the colour shows");
+        let mask = MapImage { width: 2, height: 1, rgba: vec![0, 0, 0, 255, 255, 255, 255, 255] };
+        let om = BitmapMap::bitmap("o", 100.0);
+        let c = compose_base(glam::Vec3::ONE, None, 1.0, Some((&mask, &om)));
+        assert_eq!((c.rgba[3], c.rgba[7]), (0, 255));
+    }
+
+    #[test]
+    fn uv_transform_matches_the_map_coordinates() {
+        let mut map = BitmapMap::bitmap("x", 100.0);
+        map.coords.tiling = [2.0, 3.0];
+        map.coords.offset = [0.25, 0.0];
+        let t = uv_transform(&map);
+        // A loom UV (u, v) is (u, 1 - v) on the Bevy mesh; the texture row index runs down.
+        for (u, v) in [(0.1f32, 0.2f32), (0.7, 0.9)] {
+            let m = map.coords.apply([u, v]);
+            let b = t.transform_point2(bevy::math::Vec2::new(u, 1.0 - v));
+            assert!((b.x - m[0]).abs() < 1e-5 && (b.y - (1.0 - m[1])).abs() < 1e-5, "{b} vs {m:?}");
         }
     }
 

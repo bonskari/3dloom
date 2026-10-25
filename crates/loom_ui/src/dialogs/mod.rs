@@ -108,6 +108,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     }
     // The VertexPaint dialog floats while a VertexPaint entry is active in the Modify panel.
     vertex_paint::show(ctx, app);
+    if app.state.material_navigator_open {
+        let mut open = true;
+        material_editor::navigator(ctx, app, &mut open);
+        if !open {
+            app.state.material_navigator_open = false;
+        }
+    }
     // Object Color opens over the Object Properties dialog and leaves it open.
     if app.state.display.object_color_open {
         let mut open = true;
@@ -119,7 +126,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let Some(dialog) = app.state.dialog else { return };
     let mut open = true;
     match dialog {
-        Dialog::MaterialMap { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::MaterialMap { .. } | Dialog::MaterialBitmap => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::MaterialBrowser(for_) => material_editor::browser(ctx, app, for_, &mut open),
+        Dialog::ReplaceMaterial { kind, map } => material_editor::replace_material(ctx, app, kind, map, &mut open),
+        Dialog::MaterialEditorOptions => material_editor::options(ctx, app, &mut open),
+        Dialog::SpecifyCropping => material_editor::specify_cropping(ctx, app, &mut open),
+        Dialog::CopyMap { from, to } => material_editor::copy_map(ctx, app, from, to, &mut open),
         Dialog::RenderFile | Dialog::SaveRenderedImage => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
         Dialog::LightLister => lights::light_lister(ctx, app, &mut open),

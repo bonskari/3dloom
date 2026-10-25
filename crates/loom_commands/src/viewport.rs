@@ -321,6 +321,20 @@ pub enum Dialog {
     SaveRenderedImage,
     /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).
     MaterialMap { channel: u8 },
+    /// Material Editor, Bitmap level > Bitmap: choose the image of the map being edited.
+    MaterialBitmap,
+    /// Material/Map Browser, choosing what `for_` asks for.
+    MaterialBrowser(BrowserFor),
+    /// Replace Material / Replace Map dialog before the Type button turns the
+    /// current level into the compound type at `MaterialKind::TYPES[kind]`
+    /// (a map: `MapType::ALL[kind]`).
+    ReplaceMaterial { kind: u8, map: bool },
+    /// Material Editor Options.
+    MaterialEditorOptions,
+    /// Bitmap Parameters > View Image: Specify Cropping/Placement.
+    SpecifyCropping,
+    /// Copy (Instance) Map: dragging map button `from` onto `to` (indexes into MAP_SLOTS).
+    CopyMap { from: u8, to: u8 },
     ViewportConfiguration,
     TimeConfiguration,
     ViewportBackground,
@@ -440,6 +454,19 @@ pub enum Dialog {
     GroupName,
     /// Layer Manager > Layer Properties of `layer`.
     LayerProperties { layer: u32 },
+}
+
+/// What the Material/Map Browser is choosing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BrowserFor {
+    /// The Type button at a material level: a material type.
+    MaterialType,
+    /// The Type button at a map level: a map type.
+    MapType,
+    /// An empty map button at the current level: index into `MAP_SLOTS`.
+    Map(u8),
+    /// Get Material: a material from the scene or the editor's slots.
+    GetMaterial,
 }
 
 /// What runs after the Save Changes prompt is answered.
