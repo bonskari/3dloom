@@ -3299,4 +3299,25 @@ fn a_checker_sub_material_shows_checks_in_the_viewport() {
     let bm = &bitmaps.get(i as usize).expect("the baked checker is uploaded").1;
     let px: std::collections::BTreeSet<[u8; 3]> = bm.rgba.chunks(4).map(|p| [p[0], p[1], p[2]]).collect();
     assert!(px.contains(&[0, 0, 0]) && px.contains(&[240, 200, 40]), "both checker colours: {} colours", px.len());
+    // Each checker face shows both colours: sample the texture as the shader
+    // does (repeat, V flipped) over the face's UV quad.
+    let at = |u: f32, v: f32| {
+        let (w, hh) = (bm.width as f32, bm.height as f32);
+        let x = ((u.rem_euclid(1.0) * w) as u32).min(bm.width - 1);
+        let y = (((1.0 - v).rem_euclid(1.0) * hh) as u32).min(bm.height - 1);
+        let i = ((y * bm.width + x) * 4) as usize;
+        [bm.rgba[i], bm.rgba[i + 1], bm.rgba[i + 2]]
+    };
+    for quad in uvs.chunks(4) {
+        let mut seen = std::collections::BTreeSet::new();
+        for a in 0..=8 {
+            for b in 0..=8 {
+                let (s, t) = (a as f32 / 8.0, b as f32 / 8.0);
+                let lerp = |p: [f32; 2], q: [f32; 2], k: f32| [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
+                let uv = lerp(lerp(quad[0], quad[1], s), lerp(quad[3], quad[2], s), t);
+                seen.insert(at(uv[0], uv[1]));
+            }
+        }
+        assert!(seen.len() > 1, "a checker face shows one colour; its UVs: {quad:?}");
+    }
 }
