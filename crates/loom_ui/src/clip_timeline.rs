@@ -21,6 +21,8 @@ pub(crate) fn preview_import(app: &mut LoomApp, imported: &serde_json::Value) ->
     let id = imported["clip"].as_u64().ok_or("Imported animation has no clip.")?;
     let clip = app.state.scene.animation_clips.iter().find(|c| c.id == id).ok_or("Imported clip is missing.")?;
     let frame = clip.start.floor() as i32;
+    let ids=clip.nodes.iter().map(|id|id.0).collect();
+    app.dispatch(Command::SelectNodes { ids, op: SelectOp::Replace })?;
     app.clip_timeline.selected = Some(id);
     app.dispatch(Command::SetFrame {frame})?;
     if app.state.display.hide_bones { app.dispatch(Command::HideBoneObjectsToggle)?; }
@@ -30,6 +32,7 @@ pub(crate) fn preview_import(app: &mut LoomApp, imported: &serde_json::Value) ->
 }
 
 pub(crate) fn show(ctx: &egui::Context, app: &mut LoomApp) {
+    crate::rig_timeline::show(ctx,app);
     if app.state.scene.animation_clips.is_empty() {
         app.clip_timeline.drag = None;
         return;
@@ -85,6 +88,15 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         action=Some(Command::MoveAnimationClip {id:clip.id,start:drag.start+drag.delta});
                     }
                 }
+                resp.context_menu(|ui| {
+                    let frame=app.state.current_frame as f32;
+                    if ui.add_enabled(frame>clip.start && frame<clip.end,egui::Button::new("Set In at Current Frame")).clicked() {
+                        action=Some(Command::TrimAnimationClip{id:clip.id,start:frame,end:clip.end});ui.close_menu();
+                    }
+                    if ui.add_enabled(frame>clip.start && frame<clip.end,egui::Button::new("Set Out at Current Frame")).clicked() {
+                        action=Some(Command::TrimAnimationClip{id:clip.id,start:clip.start,end:frame});ui.close_menu();
+                    }
+                });
                 resp.on_hover_text(format!("{}\nFrames {:.2}–{:.2}\nDrag the block to move this animation.",clip.name,clip.start+delta,clip.end+delta));
                 ui.add_space(2.0);
             }

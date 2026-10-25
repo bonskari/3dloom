@@ -73,3 +73,4 @@ pub use transform::{frame_for, frame_for_system, TransformFrame};
 pub use keymap::{keyboard_chart, write_keyboard_chart, ChartRow};
 
 pub mod loomrig;
+mod loomrig_keys;

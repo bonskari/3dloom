@@ -61,6 +61,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     match cmd {
         C::State => Ok(snapshot(state)),
         C::MoveAnimationClip { id, start } => crate::animation_clips::move_clip(state, id, start),
+        C::TrimAnimationClip { id, start, end } => crate::animation_clips::trim_clip(state, id, start, end),
+        c @ (C::SetLoomRigBlendKey { .. } | C::MoveLoomRigBlendKey { .. }) => crate::loomrig_keys::execute(state,c),
+        C::RetargetAnimationClip { source_clip, target_root, mapping } => crate::retarget::retarget(state, source_clip, NodeId(target_root), mapping.as_deref().unwrap_or(&[])),
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),

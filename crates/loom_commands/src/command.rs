@@ -82,6 +82,9 @@ impl ArgSchema for crate::track_view::KeyArg {
 impl ArgSchema for loom_scene::loomrig::HumanoidMapping {
     fn schema() -> Value { json!({"type":"object","properties":{"root":{"type":"integer"},"pelvis":{"type":"integer"},"head":{"type":"integer"},"spine":{"type":"array","items":{"type":"integer"}},"limbs":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"start":{"type":"integer"},"middle":{"type":"integer"},"end":{"type":"integer"}},"required":["name","start","middle","end"]}}},"required":["root","pelvis","spine","head","limbs"]}) }
 }
+impl ArgSchema for crate::retarget::BoneMapping {
+    fn schema() -> Value { json!({"type":"object","properties":{"source":{"type":"integer","minimum":0},"target":{"type":"integer","minimum":0}},"required":["source","target"]}) }
+}
 impl ArgSchema for Value {
     fn schema() -> Value {
         json!({})
@@ -908,6 +911,8 @@ commands! {
     SelectionBracketToggle => "Viewport Selection Show Selection Bracket Toggle", MainUI, "Show or hide selection brackets (J).";
     TimeConfiguration => "Time Configuration", Loom, "Open the Time Configuration dialog.";
     MoveAnimationClip => "Move Animation Clip", Loom, "Move a source animation clip to frame `start`, shifting all its members' native keys together." { id: u64, start: f32 };
+    TrimAnimationClip => "Trim Animation Clip", Loom, "Trim imported linear source keys to an interior range in one undo step; original source file stays unchanged." { id: u64, start: f32, end: f32 };
+    RetargetAnimationClip => "Retarget Animation Clip", Loom, "Transfer a source clip onto existing body bones using reference-pose correction; original skeleton and skin remain intact." { source_clip: u64, target_root: u64, mapping: Option<Vec<crate::retarget::BoneMapping>> };
     SetFrame => "Set Frame", Loom, "Jump the time slider to a frame (clamped to the active time segment)." { frame: i32 };
     SetTimeConfiguration => "Set Time Configuration", Loom, "Time Configuration dialog: active time segment start/end and frame rate." { start: Option<i32>, end: Option<i32>, fps: Option<f32> };
     SetFov => "Set FOV", Loom, "Set the perspective field of view in degrees (Field-of-View button)." { degrees: f32 };
@@ -1572,6 +1577,8 @@ commands! {
     CreateLoomRig => "Create LoomRig", Loom, "Characterize existing bones and add non-destructive animator controls." { root:u64, mapping:Option<loom_scene::loomrig::HumanoidMapping> };
     SetLoomRigMapping => "Set LoomRig Mapping", Loom, "Edit explicit skeleton mappings while preserving existing controls and bone tracks." { rig:u32, mapping:loom_scene::loomrig::HumanoidMapping };
     SetLoomRigLimb => "Set LoomRig Limb", Loom, "Set HI/Limb solver and IK/FK blend with current pose matching." { rig:u32, limb:String, solver:String, blend:f32 };
+    SetLoomRigBlendKey => "Set LoomRig Blend Key", Loom, "Set a native IK/FK key; omit value to delete. Independent of source motion." { rig:u32, limb:String, time:f32, value:Option<f32> };
+    MoveLoomRigBlendKey => "Move LoomRig Blend Key", Loom, "Move one IK/FK blend key without overwriting neighboring keys." { rig:u32, limb:String, from:f32, to:f32 };
     RemoveLoomRig => "Remove LoomRig", Loom, "Remove animator controls while preserving original skeleton and skin." { rig:u32 };
     CreateIkChain => "Create IK Chain", Loom, "An IK chain from bone `start` to bone `end` with a goal node; solver \"hi\", \"limb\" or \"spline\"." { start: u64, end: u64, solver: String, name: Option<String> };
     SetIkChainParameter => "Set IK Chain Parameter", Loom, "Hierarchy > IK rollouts: Enabled, IK For FK Pose, Swivel Angle, Threshold, Iterations." { chain: u32, name: String, value: f64 };

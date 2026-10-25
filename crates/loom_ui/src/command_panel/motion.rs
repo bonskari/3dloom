@@ -35,6 +35,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     }
     ui.separator();
     crate::kimodo::show(ui, app);
+    crate::loomrig_panel::show(ui, app);
     let Some(id) = app.state.selection.iter().next().copied() else {
         ui.label("Select an object.");
         return;

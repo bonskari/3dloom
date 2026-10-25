@@ -2,7 +2,9 @@
 //! All scene mutations go through `loom_commands::execute` via `dispatch`.
 
 mod kimodo;
+mod loomrig_panel;
 mod clip_timeline;
+mod rig_timeline;
 mod camera_overlay;
 mod command_panel;
 pub mod create_tool;

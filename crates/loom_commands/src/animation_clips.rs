@@ -97,3 +97,54 @@ pub(crate) fn move_clip(state: &mut AppState, id: u64, start: f32) -> Result<Val
     Ok(json!({ "clip": id, "start": start, "end": end }))
 }
 
+fn trim<T: Animatable>(controller: &mut Controller<T>, start: f32, end: f32) -> Result<(), String> {
+    use loom_scene::anim::{Interp, Ort, TangentType};
+    match controller {
+        Controller::Constant(_) => {},
+        Controller::Keys(k) => for track in &mut k.tracks {
+            if track.keys.is_empty() { continue; }
+            if track.interp != Interp::Linear { return Err("Trim requires linear source keys; keep authored curve tracks separate from the source clip.".into()); }
+            if track.keys.iter().any(|key| !key.time.is_finite() || !key.value.is_finite()) { return Err("source clip has invalid keys".into()); }
+            let first = track.eval(start).ok_or("missing source boundary")?;
+            let last = track.eval(end).ok_or("missing source boundary")?;
+            track.keys.retain(|key| key.time >= start && key.time <= end);
+            track.set_key(start, first, (TangentType::Linear, TangentType::Linear));
+            track.set_key(end, last, (TangentType::Linear, TangentType::Linear));
+            track.before = Ort::Constant;
+            track.after = Ort::Constant;
+        },
+        Controller::List(items) => for item in items { trim(&mut item.controller, start, end)?; },
+        _ => return Err("Trim requires an imported keyed source clip.".into()),
+    }
+    Ok(())
+}
+
+pub(crate) fn trim_clip(state: &mut AppState, id: u64, start: f32, end: f32) -> Result<Value, String> {
+    let index=state.scene.animation_clips.iter().position(|c|c.id==id).ok_or("animation clip not found")?;
+    let clip=&state.scene.animation_clips[index];
+    if !start.is_finite() || !end.is_finite() || start>=end || start<clip.start || end>clip.end { return Err("trim range must lie inside the source clip and have positive duration".into()); }
+    let members:BTreeSet<_>=clip.nodes.iter().copied().collect();
+    if members.is_empty() || members.len()!=clip.nodes.len() || state.scene.animation_clips.iter().enumerate().any(|(i,c)|i!=index && (c.id==id || c.nodes.iter().any(|n|members.contains(n)))) { return Err("source clip must have unique nodes and ownership".into()); }
+    if start==clip.start && end==clip.end {return Ok(json!({"clip":id,"start":start,"end":end}));}
+    let mut changes=Vec::new();
+    for id in &clip.nodes {
+        let node=state.scene.node(*id).ok_or("source clip member is missing")?;
+        let mut after=node.clone();
+        let all=tracks::node_tracks(node);
+        let mut error=None;
+        tracks::edit_node(&mut after,&all,|_,p| {
+            let r=match p {AnyParam::F32(p)=>trim(&mut p.controller,start,end),AnyParam::U32(p)=>trim(&mut p.controller,start,end),AnyParam::Bool(p)=>trim(&mut p.controller,start,end),AnyParam::Vec3(p)=>trim(&mut p.controller,start,end)};
+            if let Err(e)=r {error=Some(e);}
+        })?;
+        if let Some(e)=error {return Err(e);}
+        for p in [&mut after.object_offset.position,&mut after.object_offset.rotation,&mut after.object_offset.scale] {trim(&mut p.controller,start,end)?;}
+        if let Some(c)=crate::anim_cmds::node_change(node,&after){changes.push(c);}
+        if node.visibility!=after.visibility {changes.push(Change::SetVisibility{id:*id,before:node.visibility.clone(),after:after.visibility.clone()});}
+        if node.object_offset!=after.object_offset {changes.push(Change::SetNodeProps{id:*id,before:Box::new(node.props()),after:Box::new(after.props())});}
+    }
+    let before=state.scene.animation_clips.clone();let mut after=before.clone();after[index].start=start;after[index].end=end;
+    changes.push(Change::SetAnimationClips{before,after});
+    while state.undo.in_transaction(){state.undo.end();}
+    crate::execute::commit_exact(state,"Trim Animation Clip",Change::Group(changes))?;
+    Ok(json!({"clip":id,"start":start,"end":end}))
+}

@@ -20,6 +20,7 @@ mod skin_wrap;
 mod biped;
 mod kimodo;
 mod clips;
+mod loomrig;
 mod lightcam2;
 mod bake;
 
