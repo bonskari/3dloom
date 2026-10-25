@@ -26,6 +26,7 @@ fn eight_opens_the_dialog_and_its_controls_edit_the_environment() {
     let add = window(&h, "Add Atmospheric Effect");
     click_text(&mut h, "Fog", add, 0.0);
     let add = window(&h, "Add Atmospheric Effect");
+    eprintln!("DEBUG add {add:?} oks {:?} fogs {:?} cancel {:?}", h.text_rects("OK"), h.text_rects("Fog"), h.text_rects("Cancel"));
     click_text(&mut h, "OK", add, 0.0);
     let e = &h.app.state.scene.environment;
     assert_eq!(e.atmospheres.len(), 1);
