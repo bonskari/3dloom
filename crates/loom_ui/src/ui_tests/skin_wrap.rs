@@ -160,11 +160,11 @@ fn skin_morph_pick_bone_custom_falloff_graph_and_soft_selection_graph() {
     assert!(morph_data(&h, arm).bones.iter().find(|b| b.node == NodeId(bones[1])).unwrap().planar);
 }
 
-/// A 20×20 control plane and a finer 16×16 plane half a unit above it, wrapped.
+/// A 40×40 control plane and a finer 16×16 plane half a unit above it, wrapped.
 fn wrapped(h: &mut Harness) -> (NodeId, NodeId) {
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
     h.frames(2);
-    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [20.0, 20.0, 0.0] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [40.0, 40.0, 0.0] });
     let control = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0, 0.0, 0.5], size: [16.0, 16.0, 0.0] });
     let hi = *h.app.state.selection.iter().next().unwrap();
@@ -182,16 +182,16 @@ fn skin_wrap_add_by_picking_control_vertices_locals_display_and_bake() {
     let (control, hi) = wrapped(&mut h);
     h.click_widget("Add");
     assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::SkinWrapControl));
-    h.click(h.screen_of(Vec3::new(9.5, -9.5, 0.0)));
+    h.click(h.screen_of(Vec3::new(15.0, -15.0, 0.0)));
     assert_eq!(wrap_data(&h, hi).bases, vec![control], "the clicked plane is the control object ({:?}, picked {:?})", h.app.last_error, h.app.state.selection);
     let away = h.screen_of(Vec3::new(40.0, 40.0, 0.0));
     right_click(&mut h, away);
     assert_eq!(h.app.state.pick_mode, None);
     h.cmd(Command::ModifierSubobjectLevel { index: 0, level: 1 });
-    // Click the control vertex at the corner (10, -10).
+    // Click the control vertex at the corner (20, -20).
     let cvs = loom_commands::morph::control_vertices(&h.app.state);
-    let corner = cvs.iter().find(|(_, p)| (*p - Vec3::new(10.0, -10.0, 0.0)).length() < 1e-3).unwrap().0;
-    h.click(h.screen_of(Vec3::new(10.0, -10.0, 0.0)));
+    let corner = cvs.iter().find(|(_, p)| (*p - Vec3::new(20.0, -20.0, 0.0)).length() < 1e-3).unwrap().0;
+    h.click(h.screen_of(Vec3::new(20.0, -20.0, 0.0)));
     assert_eq!(wrap_data(&h, hi).selection, vec![corner], "a click selects the control vertex");
     // Local Str: drag its spinner.
     let s = h.spinner_after("Local Str:");
