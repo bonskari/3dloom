@@ -193,8 +193,8 @@ pub struct BevyRenderer {
     env: EnvSettings,
     view_envs: HashMap<u32, ViewEnv>,
     env_map: Option<Handle<Image>>,
-    /// The fog volume Volume Light scatters in.
-    volume: Option<Entity>,
+    /// The fog volumes Volume Light scatters in.
+    volumes: Vec<Entity>,
     /// Automatic / Linear exposure: stops each view's metering found.
     metered: HashMap<u32, f32>,
     /// The view the metering camera looks through this frame.
@@ -258,7 +258,7 @@ impl BevyRenderer {
             env: EnvSettings::default(),
             view_envs: HashMap::new(),
             env_map: None,
-            volume: None,
+            volumes: Vec::new(),
             metered: HashMap::new(),
             meter: None,
             meter_next: 0,
@@ -377,11 +377,46 @@ impl BevyRenderer {
         self.apply_volume_lights();
     }
 
-    /// Volume Light: the picked lights scatter in a fog volume around the scene.
+    /// Volume Light: each picked light scatters in a fog volume fitted
+    /// around what it lights (a spot's cone, an omni's reach, the scene for
+    /// a directional light). Bevy finds a spot or omni light for the fog by
+    /// where the ray enters the volume, so a tight volume also keeps the
+    /// light found.
     fn apply_volume_lights(&mut self) {
         let atmospherics = self.render.as_ref().is_none_or(|r| r.options.atmospherics);
-        let lights: Vec<&environment::VolumeLight> = if atmospherics { self.env.volume_lights.iter().collect() } else { Vec::new() };
-        let lit: HashSet<u64> = lights.iter().flat_map(|l| l.lights.iter().copied()).collect();
+        let lights: Vec<environment::VolumeLight> = if atmospherics { self.env.volume_lights.clone() } else { Vec::new() };
+        let (centre, radius) = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
+        let mut volumes = Vec::new();
+        let mut lit = HashSet::new();
+        for l in &lights {
+            for id in &l.lights {
+                let Some(s) = self.samples.iter().find(|s| s.id.0 == *id) else { continue };
+                let Some(kind) = lights::kind(s) else { continue };
+                lit.insert(*id);
+                let pos = Vec3::from(s.position.to_array());
+                let dir = Vec3::from(s.direction.to_array()).normalize_or(Vec3::NEG_Z);
+                let reach = ((pos - centre).length() + radius).min(lights::range(s, (pos - centre).length(), radius));
+                let (t, length) = match (kind, s.emitter) {
+                    (lights::Kind::Spot, loom_scene::light::Emitter::Spot { falloff, .. }) => {
+                        let w = 2.0 * reach * (falloff * 0.5).to_radians().tan().min(20.0) + 1.0;
+                        let up = if dir.z.abs() > 0.99 { Vec3::Y } else { Vec3::Z };
+                        (Transform::from_translation(pos + dir * reach * 0.5).looking_to(dir, up).with_scale(Vec3::new(w, w, reach)), reach)
+                    }
+                    (lights::Kind::Directional, _) => (Transform::from_translation(centre).with_scale(Vec3::splat(radius * 2.2)), radius * 2.0),
+                    _ => (Transform::from_translation(pos).with_scale(Vec3::splat(reach * 2.0)), reach),
+                };
+                let directional = kind == lights::Kind::Directional;
+                let fog = FogVolume {
+                    fog_color: Color::srgb(l.color[0], l.color[1], l.color[2]),
+                    density_factor: environment::volume_light_density(l.density, length, directional),
+                    absorption: 0.0,
+                    scattering: 0.5,
+                    scattering_asymmetry: 0.0,
+                    ..Default::default()
+                };
+                volumes.push((fog, t));
+            }
+        }
         let entities: Vec<(u64, Entity)> = self.scene_lights.iter().map(|(id, l)| (*id, l.entity)).collect();
         for (id, e) in entities {
             let mut e = self.app.world_mut().entity_mut(e);
@@ -391,24 +426,14 @@ impl BevyRenderer {
                 e.remove::<VolumetricLight>();
             }
         }
-        let (centre, radius) = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
-        match lights.first() {
-            Some(l) if !lit.is_empty() => {
-                let c = Color::srgb(l.color[0], l.color[1], l.color[2]);
-                let fog = FogVolume { fog_color: c, density_factor: environment::volume_light_density(l.density, radius), absorption: 0.1, scattering: 0.5, ..Default::default() };
-                let t = Transform::from_translation(centre).with_scale(Vec3::splat(radius * 2.5));
-                match self.volume {
-                    Some(e) => {
-                        self.app.world_mut().entity_mut(e).insert((fog, t));
-                    }
-                    None => self.volume = Some(self.app.world_mut().spawn((fog, t)).id()),
-                }
-            }
-            _ => {
-                if let Some(e) = self.volume.take() {
-                    self.app.world_mut().despawn(e);
-                }
-            }
+        for e in self.volumes.drain(..) {
+            self.app.world_mut().despawn(e);
+        }
+        // Every camera's layers see the fog.
+        let layers = RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, LIGHT_LAYER]);
+        for (fog, t) in volumes {
+            let e = self.app.world_mut().spawn((fog, t, layers.clone())).id();
+            self.volumes.push(e);
         }
     }
 
@@ -477,14 +502,21 @@ impl BevyRenderer {
         let world = self.app.world();
         let Some(t) = world.get::<Transform>(entity).copied() else { return };
         let bounds = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
-        let uniform = env_uniform(&env, view, &t, bounds, render, frame);
+        let mut uniform = env_uniform(&env, view, &t, bounds, render, frame);
+        let metered = self.metered.get(&slot).copied().unwrap_or(0.0);
         let (tonemapping, grading, hdr) = if slot == METER_SLOT {
             (Tonemapping::None, ColorGrading { global: ColorGradingGlobal { exposure: -METER_STOPS, ..Default::default() }, ..Default::default() }, false)
         } else {
-            exposure_components(env.exposure.as_ref(), self.metered.get(&slot).copied().unwrap_or(0.0))
+            exposure_components(env.exposure.as_ref(), metered)
         };
+        // HDR with no tonemapping curve (Linear, Process Background): Bevy
+        // skips tonemapping and its grading, so the pass applies the exposure.
+        if let (true, Tonemapping::None, Some(x)) = (hdr, tonemapping, env.exposure.as_ref()) {
+            let stops = x.stops() + if x.meters() { metered } else { 0.0 };
+            uniform.grade = bevy::math::Vec4::new(2f32.powf(stops), x.contrast / 50.0, 1.0, 0.0);
+        }
         let map = (render && env.map.is_some()).then(|| self.env_map.clone()).flatten();
-        let volumetric = !env.volume_lights.is_empty() && self.volume.is_some();
+        let volumetric = !env.volume_lights.is_empty() && !self.volumes.is_empty();
         let mut e = self.app.world_mut().entity_mut(entity);
         e.insert((tonemapping, grading, post::EnvPass { uniform, map }));
         if volumetric {

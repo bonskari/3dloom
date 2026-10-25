@@ -245,7 +245,7 @@ fn blur(img: &mut RgbaImage, b: &Blur) {
             continue;
         }
         let o = src[i];
-        let mut c = [0, 1, 2, 3].map(|k| (blurred[i][k] * (1.0 - blend) + o[k] * blend));
+        let mut c = [0, 1, 2, 3].map(|k| blurred[i][k] * (1.0 - blend) + o[k] * blend);
         for v in c.iter_mut().take(3) {
             *v *= brighten;
         }

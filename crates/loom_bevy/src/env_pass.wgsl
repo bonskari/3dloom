@@ -29,6 +29,8 @@ struct EnvPass {
     dof: vec4<f32>,
     // x: horizontal, y: vertical focal loss in pixels.
     dof_loss: vec4<f32>,
+    // x: exposure multiplier, y: contrast, z: 1 = grade here.
+    grade: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -193,6 +195,14 @@ fn environment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
             }
         }
         c = vec4(c.rgb + (1.0 - c.a) * bg, c.a);
+    }
+    if env.grade.z > 0.5 {
+        // Contrast around mid grey on the unpremultiplied colour, then exposure.
+        let cover = select(c.a, 1.0, env.background.w > 0.5);
+        if cover > 0.0 {
+            let u = c.rgb / cover;
+            c = vec4(max(0.5 + (u - 0.5) * env.grade.y, vec3(0.0)) * cover * env.grade.x, c.a);
+        }
     }
     return c;
 }

@@ -98,7 +98,9 @@ fn fog_darkens_distant_objects() {
     let fogged = render(&mut r, &cam, size, RenderOptions { view, ..Default::default() }, 2);
     let (n, f) = (at(&fogged, pn) / at(&plain, pn), at(&fogged, pf) / at(&plain, pf));
     assert!(n > 0.65, "the near box keeps most of its light: {n}");
-    assert!(f < 0.55 && f < n - 0.2, "the far box fades into the fog: near {n}, far {f}");
+    // The fog mixes in linear light, so a density of about 0.75 leaves about
+    // half the sRGB value.
+    assert!(f < 0.65 && f < n - 0.25, "the far box fades into the fog: near {n}, far {f}");
 
     let off = render(&mut r, &cam, size, RenderOptions { view, atmospherics: false, ..Default::default() }, 1);
     assert!((at(&off, pf) - at(&plain, pf)).abs() < 6.0, "Atmospherics off: no fog");
@@ -153,7 +155,7 @@ fn background_colour_and_map_in_render() {
     r.set_environment(&env(|e| e.background = [0.0, 0.5, 1.0]));
     let img = render(&mut r, &cam, size, RenderOptions::default(), 2);
     let bg = img.get_pixel(150, 5).0;
-    assert!(bg[3] == 0 && bg[0] < 3 && (bg[1] as i32 - 188).abs() < 4 && bg[2] > 250, "sRGB (0, 0.5, 1), alpha 0: {bg:?}");
+    assert!(bg[3] == 0 && bg[0] < 3 && (bg[1] as i32 - 128).abs() < 3 && bg[2] > 250, "sRGB (0, 0.5, 1), alpha 0: {bg:?}");
     let (cx, cy) = pixel(&cam, size, Vec3::new(0.0, -5.0, 5.0));
     assert_eq!(img.get_pixel(cx, cy).0[3], 255, "the box covers the background");
 
