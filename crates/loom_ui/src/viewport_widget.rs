@@ -23,6 +23,8 @@ pub struct ViewportResources {
     /// GPU bitmaps by path: uploaded once, reused across scene rebuilds.
     pub bitmap_cache: std::collections::HashMap<String, std::sync::Arc<wgpu::BindGroup>>,
     pub base_textures: Option<(std::sync::Arc<wgpu::BindGroup>, std::sync::Arc<wgpu::BindGroup>)>,
+    /// Each viewport's helper lines (they depend on the view: Constant Screen Size).
+    pub helper_lines: Vec<Option<loom_render::LineBuffer>>,
 }
 
 /// Called once during `LoomApp::new` to install `ViewportResources` into the
@@ -38,6 +40,7 @@ pub fn init_render_resources(wgpu: &egui_wgpu::RenderState) {
             textures: None,
             bitmap_cache: std::collections::HashMap::new(),
             base_textures: None,
+            helper_lines: Vec::new(),
         });
 }
 
@@ -154,6 +157,8 @@ struct ViewportCallback {
     grid: Option<loom_render::GridPlane>,
     orthographic: bool,
     grid_params: loom_render::GridParams,
+    /// Helper line art drawn with depth (see `helper_overlay`).
+    helper_lines: Vec<(Vec3, Vec3, [f32; 3])>,
 }
 
 impl CallbackTrait for ViewportCallback {
@@ -191,6 +196,10 @@ impl CallbackTrait for ViewportCallback {
         }
         res.renderer
             .update_view(queue, self.slot, self.view_proj, self.camera_pos, self.shading);
+        if res.helper_lines.len() <= self.slot {
+            res.helper_lines.resize_with(self.slot + 1, || None);
+        }
+        res.helper_lines[self.slot] = loom_render::LineBuffer::new(device, &self.helper_lines);
 
         Vec::new()
     }
@@ -215,6 +224,7 @@ impl CallbackTrait for ViewportCallback {
                 self.grid,
                 self.orthographic,
                 textures,
+                res.helper_lines.get(self.slot).and_then(|l| l.as_ref()),
             );
         }
     }
@@ -566,6 +576,26 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             set_constraint_from_handle(app, handle);
                         }
                     }
+                    // Place Highlight: the press and drag place the selection on
+                    // the reflected view ray; the release ends the mode.
+                    if app.state.pick_mode == Some(loom_commands::PickMode::PlaceHighlight) && app.transform_drag.is_none() {
+                        if pointer.button_pressed(egui::PointerButton::Primary) && response.hovered() && !mods.alt && app.state.nav_mode == loom_input::NavMode::None {
+                            app.state.undo.begin("Place Highlight");
+                            app.place_highlight_drag = true;
+                        }
+                        if app.place_highlight_drag && pointer.button_down(egui::PointerButton::Primary) {
+                            if let Some((_, point, normal)) = surface_hit_node(app, p, rect, view, proj) {
+                                let ray = projection.ray(p).1;
+                                let _ = app.dispatch(Command::PlaceHighlightAt { point: point.to_array(), normal: normal.to_array(), ray: ray.to_array() });
+                            }
+                        }
+                        if app.place_highlight_drag && pointer.button_released(egui::PointerButton::Primary) {
+                            app.place_highlight_drag = false;
+                            app.state.undo.end();
+                            app.drag_select_start = None;
+                            let _ = app.dispatch(Command::PlaceHighlight);
+                        }
+                    }
                     if pointer.button_released(egui::PointerButton::Primary) {
                         if let Some(drag) = app.transform_drag {
                             app.end_transform_drag();
@@ -609,6 +639,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && mods.alt
                         && app.state.nav_mode == loom_input::NavMode::None
                         && app.create.is_none()
+                        // AutoGrid + Alt: the click creates on a kept grid instead.
+                        && !(app.autogrid && app.create_kind.is_some())
                     {
                         app.alt_click = Some(p);
                     } else if app.transform_drag.is_none()
@@ -644,7 +676,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         } else if nav == loom_input::NavMode::ZoomRegion {
                             app.drag_select_start = Some(p);
                             app.region_points.clear();
-                        } else if !mods.alt {
+                        } else if !mods.alt || (app.autogrid && app.create_kind.is_some()) {
+                            if mods.alt && app.create.is_none() {
+                                autogrid_keep(app, index, p, rect, view, proj);
+                            }
                             if let Some(session) = app.create.as_mut() {
                                 // Click during a height/radius step confirms it.
                                 let mut session = session.clone();
@@ -664,12 +699,16 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     app.bone_points.push(anchor);
                                 }
                             } else if let Some(crate::CreateKind::Helper(kind)) = app.create_kind {
-                                if let Some((mut anchor, _basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
                                     if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
                                         anchor = hit.point;
                                         app.consume_snap_override();
                                     }
-                                    if app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() }).is_ok() {
+                                    if kind == crate::HelperKind::Tape {
+                                        app.camera_create = crate::create_tool::CameraSession::begin_tape(app, anchor, basis.2);
+                                    } else if kind.dragged() {
+                                        app.helper_create = crate::create_tool::HelperSession::begin(app, kind, anchor, basis);
+                                    } else if app.dispatch(Command::CreateHelper { kind: kind.api_name().into(), position: anchor.to_array(), size: kind.default_size() }).is_ok() {
                                         app.creation_finished();
                                     }
                                 }
@@ -770,8 +809,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             session.finish(app);
                             app.creation_finished();
                         }
+                        if let Some(session) = app.helper_create.take() {
+                            session.finish(app);
+                            app.creation_finished();
+                        }
                         if let Some(session) = app.biped_create.take() {
-                            let hit = plane_hit(p, rect, view, proj, session.normal);
+                            let hit = plane_hit_at(p, rect, view, proj, session.feet, session.normal);
                             session.finish(app, hit, p);
                             app.creation_finished();
                         }
@@ -808,8 +851,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             } else if let Some(start) = app.drag_select_start.take() {
                                 let drag_px = (start - p).length();
                                 if drag_px < 4.0 {
-                                    if matches!(app.state.pick_mode, Some(loom_commands::PickMode::SpacingPointA | loom_commands::PickMode::SpacingPointB)) {
-                                        // Spacing Tool > Pick Points: the snap point, else the construction plane.
+                                    if matches!(app.state.pick_mode, Some(loom_commands::PickMode::SpacingPointA | loom_commands::PickMode::SpacingPointB | loom_commands::PickMode::MeasureDistanceA | loom_commands::PickMode::MeasureDistanceB)) {
+                                        // Spacing Tool > Pick Points, Measure Distance: the snap point, else the construction plane.
                                         let point = snap_at(app, index, &projection, p, None, false).map(|h| h.point).or_else(|| creation_anchor(app, index, p, rect, view, proj).map(|(a, _)| a));
                                         if let Some(pt) = point {
                                             let _ = app.dispatch(Command::PickPoint { point: pt.to_array() });
@@ -899,7 +942,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                     if pointer.delta() != egui::Vec2::ZERO && pointer.button_down(egui::PointerButton::Primary) {
                         if let Some(mut line) = app.line.take() {
-                            let hit = plane_hit(p, rect, view, proj, line.normal);
+                            let hit = plane_hit_at(p, rect, view, proj, line.origin, line.normal);
                             line.on_drag(app, hit, p);
                             app.line = Some(line);
                             ctx.request_repaint();
@@ -907,13 +950,23 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                     if pointer.delta() != egui::Vec2::ZERO {
                         if let Some(mut session) = app.biped_create.take() {
-                            let hit = plane_hit(p, rect, view, proj, session.normal);
+                            let hit = plane_hit_at(p, rect, view, proj, session.feet, session.normal);
                             session.on_drag(app, hit, p);
                             app.biped_create = Some(session);
                             ctx.request_repaint();
                         }
+                        if let Some(session) = app.helper_create.clone() {
+                            let mut hit = plane_hit_at(p, rect, view, proj, session.anchor, session.basis.2);
+                            if let Some(snap) = snap_at(app, index, &projection, p, Some(session.anchor), false) {
+                                hit = Some(snap.point);
+                            }
+                            if let Some(at) = hit {
+                                session.on_drag(app, at);
+                            }
+                            ctx.request_repaint();
+                        }
                         if let Some(session) = app.camera_create.clone() {
-                            let mut hit = plane_hit(p, rect, view, proj, session.normal);
+                            let mut hit = plane_hit_at(p, rect, view, proj, session.origin, session.normal);
                             if let Some(snap) = snap_at(app, index, &projection, p, None, false) {
                                 hit = Some(snap.point);
                             }
@@ -923,7 +976,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             ctx.request_repaint();
                         }
                         if let Some(mut session) = app.create.take() {
-                            let mut hit = plane_hit(p, rect, view, proj, session.normal());
+                            let mut hit = plane_hit_at(p, rect, view, proj, session.anchor, session.normal());
                             if let Some(snap) = snap_at(app, index, &projection, p, Some(session.anchor), false) {
                                 hit = Some(snap.point);
                             }
@@ -1082,6 +1135,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             // Shaded views without Edged Faces outline the selection only
             // with Display Selected with Edged Faces (the brackets show it otherwise).
             let selected = if wire || edged_faces || app.state.display.display_selected_edged || app.state.selection_mode != SelectionMode::Object { selected } else { Vec::new() };
+            // Helper line art: depth-tested on the GPU, drawn over everything
+            // with Draw On Top (and in Realistic views, which have no line pass).
+            let (helper_depth_lines, helper_top_lines) = crate::helper_overlay::lines(app, view_proj, rect, realistic);
             let cb = (!realistic).then(|| egui_wgpu::Callback::new_paint_callback(
                 rect,
                 ViewportCallback {
@@ -1094,13 +1150,15 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     show_edges: edged_faces || wire || app.state.selection_mode.is_edge_level(),
                     shaded: !wire,
                     shade_only,
-                    grid: show_grid.then_some(grid_plane),
+                    // An active grid object replaces the home grid.
+                    grid: (show_grid && app.state.active_grid().is_none()).then_some(grid_plane),
                     orthographic: app.state.viewports[index].is_orthographic(),
                     grid_params: {
                         let g = &app.state.home_grid;
                         let cells = (g.perspective_extent.max(1) * g.major_every.max(1)) as i32;
                         loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10 }
                     },
+                    helper_lines: helper_depth_lines.clone(),
                 },
             ));
             if let Some(cb) = cb {
@@ -1110,6 +1168,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             let hover_pos = ctx.input(|i| i.pointer.hover_pos());
             draw_shapes(&painter, app, view_proj, rect);
             crate::camera_overlay::draw(&painter, app, index, view_proj, rect);
+            crate::helper_overlay::draw(&painter, app, view_proj, rect, &helper_top_lines);
             crate::light_overlay::draw(&painter, app, index, view_proj, rect, realistic);
             crate::spline_modes::draw(&painter, app, &projection);
             draw_mode_overlays(&painter, app, view_proj, rect);
@@ -1573,6 +1632,11 @@ fn ground_hit(p: egui::Pos2, viewport_rect: egui::Rect, view: Mat4, proj: Mat4) 
 }
 
 fn plane_hit(p: egui::Pos2, viewport_rect: egui::Rect, view: Mat4, proj: Mat4, normal: Vec3) -> Option<Vec3> {
+    plane_hit_at(p, viewport_rect, view, proj, Vec3::ZERO, normal)
+}
+
+/// The pointer ray's hit on the plane through `at` with `normal`.
+fn plane_hit_at(p: egui::Pos2, viewport_rect: egui::Rect, view: Mat4, proj: Mat4, at: Vec3, normal: Vec3) -> Option<Vec3> {
     let local = Vec2::new(p.x - viewport_rect.left(), p.y - viewport_rect.top());
     let size = Vec2::new(viewport_rect.width(), viewport_rect.height());
     let (origin, dir) = loom_render::pick::screen_to_world_ray(local, size, view, proj);
@@ -1580,25 +1644,49 @@ fn plane_hit(p: egui::Pos2, viewport_rect: egui::Rect, view: Mat4, proj: Mat4, n
     if denom.abs() <= 1e-6 {
         return None;
     }
-    let t = -origin.dot(normal) / denom;
+    let t = (at - origin).dot(normal) / denom;
     (t >= 0.0).then_some(origin + dir * t)
 }
 
 /// Where a creation starts: the view's construction plane, or with AutoGrid
 /// the surface under the cursor (point and face normal).
 pub(crate) fn creation_anchor(app: &LoomApp, index: usize, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Option<(Vec3, (Vec3, Vec3, Vec3))> {
-    let kind = app.state.viewports[index].kind;
-    let (u, v, n) = kind.construction_plane();
+    // The active grid's plane in every view, else the view's home grid plane.
+    let (o, u, v, n) = app.state.construction_plane(index);
     if app.autogrid {
-        if let Some((point, normal)) = surface_hit(app, p, rect, view, proj) {
+        if let Some((node, point, normal)) = surface_hit_node(app, p, rect, view, proj) {
             let n = normal.normalize_or_zero();
             let helper = if n.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
-            let u = helper.cross(n).normalize_or_zero();
+            let mut u = helper.cross(n).normalize_or_zero();
+            // User Grids > AutoGrid Object space: X follows the hit object's X.
+            if app.state.user_grids.autogrid_object_space {
+                let ox = app.state.scene.world_matrix(node).x_axis.truncate();
+                let along = (ox - n * ox.dot(n)).normalize_or_zero();
+                if along != Vec3::ZERO {
+                    u = along;
+                }
+            }
             let v = n.cross(u);
             return Some((point, (u, v, n)));
         }
     }
-    plane_hit(p, rect, view, proj, n).map(|pt| (pt, (u, v, n)))
+    plane_hit_at(p, rect, view, proj, o, n).map(|pt| (pt, (u, v, n)))
+}
+
+/// AutoGrid with Alt held: a grid object is made on the surface under the
+/// pointer and activated (it stays as the construction plane), and AutoGrid
+/// turns off; the creation then builds on that grid.
+fn autogrid_keep(app: &mut LoomApp, index: usize, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) {
+    let Some((point, (_, _, n))) = surface_hit(app, p, rect, view, proj).and_then(|_| creation_anchor(app, index, p, rect, view, proj)) else { return };
+    let size = app.state.grid_spacing() * 10.0;
+    let selection = app.state.selection.clone();
+    let Ok(r) = app.dispatch(Command::CreateHelper { kind: "grid".into(), position: point.to_array(), size }) else { return };
+    let Some(grid) = r["node"].as_u64() else { return };
+    let (x, y, z) = glam::Quat::from_rotation_arc(Vec3::Z, n).to_euler(glam::EulerRot::XYZ);
+    let _ = app.dispatch(Command::SetTransform { id: grid, position: None, rotation_deg: Some([x.to_degrees(), y.to_degrees(), z.to_degrees()]), scale: None });
+    let _ = app.dispatch(Command::ActivateGridObject);
+    app.state.selection = selection;
+    app.autogrid = false;
 }
 
 /// Nearest mesh surface under the pointer, as (point, face normal).
@@ -2240,7 +2328,7 @@ fn snap_within(app: &LoomApp, index: usize, projection: &Projection, pointer: eg
     if !app.state.snaps_on {
         return None;
     }
-    let (u, v, n) = app.state.viewports[index].kind.construction_plane();
+    let plane = app.state.construction_plane(index);
     // Moving objects: skip them and their descendants. Moving sub-objects:
     // skip only the vertices that move, so a vertex can snap to its own mesh.
     let sub_object = app.state.selection_mode != SelectionMode::Object;
@@ -2259,7 +2347,7 @@ fn snap_within(app: &LoomApp, index: usize, projection: &Projection, pointer: eg
         pointer: Vec2::new(pointer.x, pointer.y),
         ray: projection.ray(pointer),
         project: &project,
-        plane: (Vec3::ZERO, u, v, n),
+        plane,
         start,
         exclude: &exclude,
         exclude_vertices: &exclude_vertices,
@@ -2277,7 +2365,7 @@ fn draw_snap_marker(painter: &egui::Painter, app: &LoomApp, hit: &loom_commands:
     }
     let c = egui::pos2(hit.screen.x, hit.screen.y);
     let r = (s.marker_size * 0.5).max(3.0);
-    let color = egui::Color32::from_rgb(0, 220, 255);
+    let color = egui::Color32::from_rgb(s.marker_color[0], s.marker_color[1], s.marker_color[2]);
     let stroke = egui::Stroke::new(1.5, color);
     match hit.kind {
         K::GridPoint => {

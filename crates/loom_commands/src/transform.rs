@@ -16,7 +16,7 @@ pub struct TransformFrame {
 }
 
 /// Screen axes (right, up, toward the viewer) of a viewport camera.
-fn screen_axes(state: &AppState, viewport: usize) -> Mat3 {
+pub(crate) fn screen_axes(state: &AppState, viewport: usize) -> Mat3 {
     let vp = &state.viewports[viewport.min(state.viewports.len() - 1)];
     let cam = &vp.camera;
     let toward_viewer = (cam.eye_position() - cam.target).normalize_or_zero();

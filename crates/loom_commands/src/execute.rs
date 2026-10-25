@@ -1308,6 +1308,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let step_rot_world = Quat::from_mat3(&(axes * Mat3::from_quat(step_rot) * axes.transpose()));
             state.undo.begin("Array");
             let mut created = Vec::new();
+            let mut last = Vec::new();
             let r: Result<(), String> = (|| {
                 for k in 0..count[2] {
                     for j in 0..count[1] {
@@ -1335,6 +1336,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                                 _ => (full, euler_hint(st, id, rot_vec)),
                             })?;
                             created.extend(state.selection.iter().copied());
+                            last = state.selection.iter().copied().collect::<Vec<_>>();
                         }
                     }
                 }
@@ -1342,7 +1344,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             })();
             state.undo.end();
             r?;
-            state.selection = created.iter().copied().collect();
+            // The selection moves to the last copy set: the same array again continues it.
+            state.selection = last.into_iter().collect();
             state.refresh_center_mode();
             Ok(json!({ "created": created.len() }))
         }
@@ -1353,7 +1356,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(Dlg::SpacingTool);
             Ok(json!({}))
         }
+        C::SpacingPickPath => {
+            state.pick_mode = if state.pick_mode == Some(PickMode::SpacingPath) { None } else { Some(PickMode::SpacingPath) };
+            Ok(json!({}))
+        }
+        C::SpaceAlongPath { path, start, end, distribution, count, spacing, start_offset, end_offset, context, follow, kind } => {
+            space_along_path(state, path.map(NodeId), Vec3::from(start), Vec3::from(end), distribution, count, spacing, start_offset, end_offset, context, follow, kind)
+        }
         C::SpacingPickPoints => {
+            state.spacing_path = None;
             state.spacing_points = [None, None];
             state.pick_mode = Some(PickMode::SpacingPointA);
             Ok(json!({}))
@@ -1377,6 +1388,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Some(PickMode::SplineBind) => crate::spline::bind_at(state, Vec3::from(point)),
             Some(PickMode::TrimExtendModifier) => crate::spline::trim_extend_click(state, point),
+            Some(PickMode::MeasureDistanceA | PickMode::MeasureDistanceB) => crate::helpers::measure_pick(state, Vec3::from(point)),
             Some(PickMode::WorkingPivotView) => {
                 state.pick_mode = None;
                 state.working_pivot.origin = Vec3::from(point);
@@ -1657,18 +1669,39 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if let Some(v) = mode { s.mode = v; }
             if let Some(v) = marker_display { s.marker_display = v; }
             if let Some(v) = marker_size { s.marker_size = v.max(1.0); }
-            if let Some(v) = preview_radius_px { s.preview_radius_px = v.max(1.0); }
-            if let Some(v) = radius_px { s.radius_px = v.max(1.0); }
+            // Each radius pushes the other: preview below snap lowers the snap
+            // radius, snap above preview raises the preview radius.
+            if let Some(v) = preview_radius_px {
+                s.preview_radius_px = v.max(1.0);
+                s.radius_px = s.radius_px.min(s.preview_radius_px);
+            }
+            if let Some(v) = radius_px {
+                s.radius_px = v.max(1.0);
+                s.preview_radius_px = s.preview_radius_px.max(s.radius_px);
+            }
             if let Some(v) = angle_deg { s.angle_deg = v.max(0.0); }
             if let Some(v) = percent { s.percent = v.max(0.0); }
             if let Some(v) = use_axis_constraints { s.use_axis_constraints = v; }
             if let Some(v) = show_rubber_band { s.show_rubber_band = v; }
             Ok(json!({}))
         }
+        C::SnapMarkerColor { rgb } => {
+            state.snaps.marker_color = rgb;
+            Ok(json!({}))
+        }
+        C::UserGridSettings { activate_when_created, autogrid_object_space } => {
+            if let Some(v) = activate_when_created {
+                state.user_grids.activate_when_created = v;
+            }
+            if let Some(v) = autogrid_object_space {
+                state.user_grids.autogrid_object_space = v;
+            }
+            Ok(json!({}))
+        }
         C::HomeGrid { spacing, major_every, perspective_extent, inhibit_subdivision, inhibit_resize, dynamic_update_all } => {
             let g = &mut state.home_grid;
             if let Some(v) = spacing { g.spacing = v.max(0.001); }
-            if let Some(v) = major_every { g.major_every = v.max(1); }
+            if let Some(v) = major_every { g.major_every = v.max(2); }
             if let Some(v) = perspective_extent { g.perspective_extent = v.max(1); }
             if let Some(v) = inhibit_subdivision { g.inhibit_subdivision = v; }
             if let Some(v) = inhibit_resize { g.inhibit_resize = v; }
@@ -2529,8 +2562,22 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::NormalAlignSource | PickMode::NormalAlignTarget | PickMode::AlignCamera | PickMode::WorkingPivotSurface) => {
                     return Err("this pick mode needs a surface pick (Pick Surface)".into());
                 }
-                Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex | PickMode::WorkingPivotView) => {
+                Some(PickMode::SpacingPointA | PickMode::SpacingPointB | PickMode::CreateVertex | PickMode::WorkingPivotView | PickMode::MeasureDistanceA | PickMode::MeasureDistanceB) => {
                     return Err("this pick mode needs a point pick (Pick Point)".into());
+                }
+                Some(PickMode::CloneAlignDestination) => return crate::extras::pick_destination(state, id),
+                Some(PickMode::SpacingPath) => {
+                    state.scene.node(id).and_then(|n| n.object.shape()).ok_or("pick a shape for the path")?;
+                    state.pick_mode = None;
+                    state.spacing_path = Some(id);
+                    state.spacing_points = [None, None];
+                    return Ok(json!({ "path": id.0 }));
+                }
+                Some(PickMode::PlaceHighlight) => return Err("Place Highlight drags over a surface".into()),
+                Some(PickMode::ProtractorObject(which)) => {
+                    state.pick_mode = None;
+                    let protractor = state.selection.iter().copied().find(|p| state.scene.node(*p).is_some_and(|n| matches!(n.object, ObjectKind::Protractor { .. }))).ok_or("select the protractor first")?;
+                    return crate::helpers::set_protractor_object(state, protractor, which as u32, Some(id));
                 }
                 Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::InsertVertex | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon | PickMode::HingeEdge | PickMode::QuickSliceA | PickMode::QuickSliceB | PickMode::CutA | PickMode::CutB | PickMode::SwiftLoop | PickMode::BridgeEdge1 | PickMode::BridgeEdge2) => {
                     return Err("this pick mode needs a sub-object pick (Pick Sub)".into());
@@ -2618,44 +2665,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::Measure => {
             let ids = selected_ids(state);
-            let mut area = 0.0f64;
-            let mut volume = 0.0f64;
-            let mut centroid = glam::DVec3::ZERO;
-            let mut n_pts = 0usize;
-            let mut min = Vec3::splat(f32::INFINITY);
-            let mut max = Vec3::splat(f32::NEG_INFINITY);
-            for id in &ids {
-                let Some(node) = state.scene.node(*id) else { continue };
-                let world = state.scene.object_matrix(*id);
-                let mesh = node.cage_mesh();
-                for v in mesh.vertices() {
-                    let p = world.transform_point3(v.position);
-                    min = min.min(p);
-                    max = max.max(p);
-                    centroid += p.as_dvec3();
-                    n_pts += 1;
-                }
-                for f in 0..mesh.face_count() as u32 {
-                    let Some(pts) = mesh.face_positions(FaceId(f)) else { continue };
-                    let pts: Vec<glam::DVec3> = pts.iter().map(|p| world.transform_point3(*p).as_dvec3()).collect();
-                    for i in 1..pts.len().saturating_sub(1) {
-                        let (a, b, c) = (pts[0], pts[i], pts[i + 1]);
-                        area += (b - a).cross(c - a).length() * 0.5;
-                        volume += a.dot(b.cross(c)) / 6.0;
-                    }
-                }
-            }
-            if n_pts == 0 {
-                return Ok(json!({ "dimensions": Value::Null, "surface_area": 0.0, "volume": 0.0, "center_of_mass": Value::Null }));
-            }
-            let d = max - min;
-            let c = centroid / n_pts as f64;
-            Ok(json!({
-                "dimensions": [d.x, d.y, d.z],
-                "surface_area": area,
-                "volume": volume.abs(),
-                "center_of_mass": [c.x, c.y, c.z],
-            }))
+            Ok(crate::helpers::measure(state, &ids))
+        }
+        C::MeasureNodes { ids } => {
+            let ids: Vec<NodeId> = ids.into_iter().map(NodeId).collect();
+            Ok(crate::helpers::measure(state, &ids))
+        }
+        C::MeasureCreateCenterPoint => {
+            let ids = selected_ids(state);
+            let r = crate::helpers::measure(state, &ids);
+            let c = r["center_of_mass"].as_array().ok_or("select an object to measure")?;
+            let at = [0, 1, 2].map(|i| c[i].as_f64().unwrap_or(0.0) as f32);
+            execute(state, C::CreateHelper { kind: "point".into(), position: at, size: 20.0 })
         }
         C::SetWireColor { id, rgb } => {
             let id = NodeId(id);
@@ -3007,6 +3028,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. }) => crate::biped::execute(state, c),
         c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
+        c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
+        c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. }) => crate::extras::execute(state, c),
         // Every remaining variant is an Unwrap UVW group command.
         other => crate::unwrap::execute(state, other),
     }
@@ -3596,6 +3619,86 @@ fn with_group_members(state: &AppState, ids: Vec<NodeId>) -> Vec<NodeId> {
     out
 }
 
+/// Spacing Tool > Apply along a picked shape (every spline) or the line
+/// between two picked points, by Distribution mode.
+#[allow(clippy::too_many_arguments)]
+fn space_along_path(state: &mut AppState, path: Option<NodeId>, start: Vec3, end: Vec3, mode: u32, count: u32, spacing: f32, start_offset: f32, end_offset: f32, context: SpacingContext, follow: bool, kind: CloneKind) -> Result<Value, String> {
+    use crate::spacing::{distances, straight, PathWalk, DISTRIBUTIONS};
+    if mode as usize >= DISTRIBUTIONS.len() {
+        return Err(format!("distribution is 0..{}", DISTRIBUTIONS.len() - 1));
+    }
+    let ids: Vec<NodeId> = state.selection.iter().copied().filter(|id| Some(*id) != path).collect();
+    if ids.is_empty() {
+        return Err("select the object(s) to space first".into());
+    }
+    let walks: Vec<PathWalk> = match path {
+        Some(p) => {
+            let node = state.scene.node(p).ok_or_else(|| missing(p))?;
+            let shape = node.object.shape().ok_or("the path is not a shape")?.transformed(state.scene.object_matrix(p));
+            shape
+                .splines
+                .iter()
+                .map(|sp| {
+                    // Fine steps: the tangents (Follow) come from the polyline.
+                    let mut pts = sp.polyline(shape.steps.max(16), false, false);
+                    if sp.closed {
+                        if let Some(f) = pts.first().copied() {
+                            pts.push(f);
+                        }
+                    }
+                    PathWalk::new(pts)
+                })
+                .collect()
+        }
+        None => vec![PathWalk::new(vec![start, end])],
+    };
+    // Edges: the selection's size along the path's overall direction.
+    let extent_along = |dir: Vec3| -> f32 {
+        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+        for id in &ids {
+            if let Some((mn, mx)) = state.object_bounds(*id) {
+                for i in 0..8 {
+                    let p = Vec3::new(if i & 1 == 0 { mn.x } else { mx.x }, if i & 2 == 0 { mn.y } else { mx.y }, if i & 4 == 0 { mn.z } else { mx.z });
+                    lo = lo.min(p.dot(dir));
+                    hi = hi.max(p.dot(dir));
+                }
+            }
+        }
+        if lo.is_finite() { hi - lo } else { 0.0 }
+    };
+    let mut targets: Vec<(Vec3, Vec3)> = Vec::new();
+    for w in &walks {
+        let (a, _) = w.sample(0.0);
+        let (b, _) = w.sample(w.length());
+        let dir = (b - a).normalize_or(Vec3::X);
+        let extent = if context == SpacingContext::Edges { extent_along(dir) } else { 0.0 };
+        for d in distances(mode, w.length(), count, spacing, start_offset, end_offset, extent) {
+            targets.push(if straight(mode) { (a + dir * d, dir) } else { w.sample(d) });
+        }
+    }
+    let pivot0 = if ids.len() == 1 { state.scene.world_matrix(ids[0]).w_axis.truncate() } else { state.selection_pivot() };
+    let (_, q0, _) = state.scene.world_matrix(ids[0]).to_scale_rotation_translation();
+    state.undo.begin("Spacing Tool");
+    let mut created = Vec::new();
+    let r: Result<(), String> = (|| {
+        for (target, tangent) in &targets {
+            execute(state, Command::SelectNodes { ids: ids.iter().map(|n| n.0).collect(), op: SelectOp::Replace })?;
+            execute(state, Command::CloneOptions { kind, copies: 1, name: None, offset: None, rotate_deg: None, scale: None })?;
+            let rot = if follow { Quat::from_rotation_arc((q0 * Vec3::X).normalize_or(Vec3::X), *tangent) } else { Quat::IDENTITY };
+            let m = Mat4::from_translation(*target) * Mat4::from_quat(rot) * Mat4::from_translation(-pivot0);
+            let hint = rot.to_axis_angle();
+            transform_selection_each(state, "Spacing Tool", &|st, id| (m, euler_hint(st, id, hint.0 * hint.1.to_degrees())))?;
+            created.extend(state.selection.iter().copied());
+        }
+        Ok(())
+    })();
+    state.undo.end();
+    r?;
+    state.selection = created.iter().copied().collect();
+    state.refresh_center_mode();
+    Ok(json!({ "created": created.len() }))
+}
+
 fn base_of(name: &str) -> &str {
     name.trim_end_matches(|c: char| c.is_ascii_digit())
 }
@@ -3655,6 +3758,8 @@ fn delete(state: &mut AppState, delete_isolated: Option<bool>) -> Result<Value, 
     }
     if state.selection_mode == SelectionMode::Object {
         let ids: Vec<NodeId> = with_group_members(state, state.selection.iter().copied().collect());
+        // Deleting either end of a tape deletes the tape.
+        let ids = crate::helpers::with_tape_partners(state, ids);
         if ids.is_empty() {
             return Ok(json!({}));
         }

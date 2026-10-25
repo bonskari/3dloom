@@ -286,6 +286,26 @@ pub fn dashed(segments: &[(Vec3, Vec3)], dashes: usize) -> Vec<(Vec3, Vec3)> {
     out
 }
 
+/// World line segments with their own colours (helper line art: tapes,
+/// protractors, grid objects, point tripods), depth-tested like edges.
+pub struct LineBuffer {
+    pub buffer: Buffer,
+    pub count: u32,
+}
+
+impl LineBuffer {
+    /// None when there are no lines.
+    pub fn new(device: &Device, lines: &[(Vec3, Vec3, [f32; 3])]) -> Option<Self> {
+        use crate::grid::LineVertex;
+        if lines.is_empty() {
+            return None;
+        }
+        let verts: Vec<LineVertex> = lines.iter().flat_map(|(a, b, color)| [LineVertex { position: (*a).into(), color: *color }, LineVertex { position: (*b).into(), color: *color }]).collect();
+        let buffer = device.create_buffer_init(&BufferInitDescriptor { label: Some("loom_helper_lines"), contents: bytemuck::cast_slice(&verts), usage: BufferUsages::VERTEX });
+        Some(Self { buffer, count: verts.len() as u32 })
+    }
+}
+
 fn edge_buffer(device: &Device, edges: &[(Vec3, Vec3)], color: [f32; 3], label: &str) -> Buffer {
     use crate::grid::LineVertex;
     let mut edge_verts: Vec<LineVertex> = Vec::with_capacity(edges.len() * 2);

@@ -9,6 +9,7 @@ pub mod gizmo;
 mod hotkeys;
 pub mod icons;
 pub mod label_menus;
+mod helper_overlay;
 mod layers_toolbar;
 mod light_overlay;
 pub mod live;
@@ -138,6 +139,13 @@ pub enum CreateKind {
 pub enum HelperKind {
     Dummy,
     Point,
+    /// Dragged corner to corner.
+    Grid,
+    /// Dragged from the tape to its target.
+    Tape,
+    Protractor,
+    /// Dragged out to its radius.
+    Compass,
 }
 
 impl HelperKind {
@@ -145,13 +153,32 @@ impl HelperKind {
         match self {
             HelperKind::Dummy => "dummy",
             HelperKind::Point => "point",
+            HelperKind::Grid => "grid",
+            HelperKind::Tape => "tape",
+            HelperKind::Protractor => "protractor",
+            HelperKind::Compass => "compass",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            HelperKind::Dummy => "Dummy",
+            HelperKind::Point => "Point",
+            HelperKind::Grid => "Grid",
+            HelperKind::Tape => "Tape",
+            HelperKind::Protractor => "Protractor",
+            HelperKind::Compass => "Compass",
         }
     }
     pub fn default_size(self) -> f32 {
         match self {
             HelperKind::Dummy => 10.0,
             HelperKind::Point => 20.0,
+            HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass => 0.0,
         }
+    }
+    /// Created by a drag (a session) rather than a click.
+    pub fn dragged(self) -> bool {
+        matches!(self, HelperKind::Grid | HelperKind::Tape | HelperKind::Compass)
     }
 }
 
@@ -217,6 +244,8 @@ pub struct LoomApp {
     pub create: Option<CreateSession>,
     /// A Target camera being dragged out.
     pub camera_create: Option<create_tool::CameraSession>,
+    /// Create > Helpers > Grid / Compass being dragged out.
+    pub helper_create: Option<create_tool::HelperSession>,
     /// A biped being dragged out.
     pub biped_create: Option<create_tool::BipedSession>,
     /// Create Biped rollout: the structure the next biped gets.
@@ -227,6 +256,12 @@ pub struct LoomApp {
     pub hierarchy_sub: HierarchySub,
     pub utility: Utility,
     pub rescale_factor: f32,
+    /// Utilities > Measure > Lock Selected: the nodes measured while locked.
+    pub measure_lock: Option<Vec<u64>>,
+    /// Utilities > Measure > New Floater: the modeless Measure window is open.
+    pub measure_floater: bool,
+    /// Place Highlight: a drag over a surface is placing the selection.
+    pub place_highlight_drag: bool,
     pub transform_drag: Option<DragState>,
     /// A Shift+drag clone in progress: the drag moved a Copy of the original;
     /// on release the Clone Options dialog finalises kind and count.
@@ -430,6 +465,7 @@ impl LoomApp {
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
             camera_create: None,
+            helper_create: None,
             biped_create: None,
             biped_defaults: loom_scene::biped::BipedStructure::new(1.0),
             last_biped: None,
@@ -437,6 +473,9 @@ impl LoomApp {
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
             rescale_factor: 1.0,
+            measure_lock: None,
+            measure_floater: false,
+            place_highlight_drag: false,
             transform_drag: None,
             shift_clone: None,
             preview: None,
@@ -1277,6 +1316,7 @@ impl LoomApp {
             }
         }
         dialogs::show(ctx, self);
+        command_panel::utilities::measure_floater(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
         rendered_frame::show(ctx, self);

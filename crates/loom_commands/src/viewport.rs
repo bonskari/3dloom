@@ -350,6 +350,10 @@ pub enum Dialog {
     Mirror,
     Array,
     SpacingTool,
+    /// Tools > Snapshot.
+    Snapshot,
+    /// Tools > Align > Clone and Align (modeless).
+    CloneAndAlign,
     ObjectProperties,
     Preferences,
     UnitsSetup,

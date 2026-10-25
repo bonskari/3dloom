@@ -150,6 +150,23 @@ pub struct SnapSettings {
     pub last_override: Option<String>,
     /// Alt+Shift+S: which of the candidates inside the radius is used.
     pub hit_index: usize,
+    /// Options > Marker > Color (sRGB).
+    #[serde(default = "marker_color")]
+    pub marker_color: [u8; 3],
+}
+
+fn marker_color() -> [u8; 3] {
+    [0, 220, 255]
+}
+
+/// User Grids tab: grid object automation and the AutoGrid space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct UserGrids {
+    /// Activate grids when creating.
+    pub activate_when_created: bool,
+    /// AutoGrid: Object space (the tangent plane's X follows the hit
+    /// object's X) instead of World space.
+    pub autogrid_object_space: bool,
 }
 
 impl Default for SnapSettings {
@@ -169,6 +186,7 @@ impl Default for SnapSettings {
             override_target: None,
             last_override: None,
             hit_index: 0,
+            marker_color: marker_color(),
         }
     }
 }
@@ -362,7 +380,7 @@ pub fn resolve_within(state: &AppState, q: &SnapQuery, radius_px: f32) -> Option
     let mut cands: Vec<(Vec3, SnapKind)> = Vec::new();
     // Face: only the nearest surface along the ray, across every node.
     let mut face_hit: Option<(f32, Vec3)> = None;
-    let spacing = state.home_grid.spacing;
+    let spacing = state.grid_spacing();
     if let Some(on_plane) = plane_hit(q.ray, q.plane) {
         if targets.grid_points {
             cands.push((grid_point(on_plane, q.plane, spacing), SnapKind::GridPoint));

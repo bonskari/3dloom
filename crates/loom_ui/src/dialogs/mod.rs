@@ -3,6 +3,8 @@
 pub mod align;
 pub mod array;
 pub mod spacing_tool;
+pub mod snapshot;
+pub mod clone_and_align;
 pub mod align_to_view;
 pub mod clone_options;
 pub mod customize_ui;
@@ -151,6 +153,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::Mirror => mirror::show(ctx, app, &mut open),
         Dialog::Array => array::show(ctx, app, &mut open),
         Dialog::SpacingTool => spacing_tool::show(ctx, app, &mut open),
+        Dialog::Snapshot => snapshot::show(ctx, app, &mut open),
+        Dialog::CloneAndAlign => clone_and_align::show(ctx, app, &mut open),
         Dialog::ObjectProperties => object_properties::show(ctx, app, &mut open),
         Dialog::Preferences => preferences::show(ctx, app, &mut open),
         Dialog::UnitsSetup => units_setup::show(ctx, app, &mut open),

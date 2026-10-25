@@ -315,6 +315,7 @@ impl ViewportRenderer {
         grid: Option<GridPlane>,
         orthographic: bool,
         textures: &TextureSet,
+        lines: Option<&crate::mesh_buffer::LineBuffer>,
     ) {
         let bind_group = &self.slots[slot.min(MAX_VIEWPORTS - 1)].1;
         if let Some(plane) = grid {
@@ -366,6 +367,12 @@ impl ViewportRenderer {
                     pass.draw(0..mb.edge_vertex_count, 0..1);
                 }
             }
+        }
+        if let Some(lines) = lines {
+            pass.set_pipeline(self.grid.line_pipeline());
+            pass.set_bind_group(0, bind_group, &[]);
+            pass.set_vertex_buffer(0, lines.buffer.slice(..));
+            pass.draw(0..lines.count, 0..1);
         }
     }
 }
