@@ -387,14 +387,20 @@ const SETTINGS_W: f32 = 22.0;
 /// Full-width, left-aligned rows so every entry of a quadrant lines up.
 fn row(ui: &mut egui::Ui, label: &str, enabled: bool, last: bool) -> egui::Response {
     let w = ui.available_width() - SETTINGS_W;
-    ui.add_enabled(enabled, egui::Button::new(label).min_size(egui::vec2(w, 20.0)).frame(false).selected(last))
+    left(ui, w, |ui| ui.add_enabled(enabled, egui::Button::new(label).min_size(egui::vec2(w, 20.0)).frame(false).selected(last)))
+}
+
+/// A button `width` wide whose label sits at its left (a top-down child
+/// layout: buttons place their text by the layout's horizontal alignment).
+fn left(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> egui::Response) -> egui::Response {
+    ui.allocate_ui_with_layout(egui::vec2(width, 20.0), egui::Layout::top_down(egui::Align::Min), add).inner
 }
 
 /// A command row: its chord right-aligned and in the hover text; `last`
 /// highlights the quad's last command.
 fn cmd_row(ui: &mut egui::Ui, state: &loom_commands::AppState, label: &str, cmd: &Command, width: f32, last: bool) -> egui::Response {
     let action = crate::shortcuts::action_of(cmd);
-    let r = ui.add(crate::shortcuts::menu_widget(state, label, action).min_size(egui::vec2(width, 20.0)).frame(false).selected(last));
+    let r = left(ui, width, |ui| ui.add(crate::shortcuts::menu_widget(state, label, action).min_size(egui::vec2(width, 20.0)).frame(false).selected(last)));
     match crate::shortcuts::chord(state, action) {
         Some(c) => r.on_hover_text(format!("{label} ({c})")),
         None => r,
