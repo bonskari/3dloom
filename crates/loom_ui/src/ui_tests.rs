@@ -11,6 +11,7 @@ mod icons;
 mod transforms;
 mod menus;
 mod display;
+mod mesh_patch;
 mod widgets;
 mod ribbon;
 mod precision;

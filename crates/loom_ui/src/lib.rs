@@ -133,6 +133,8 @@ pub enum CreateKind {
     Camera { target: bool },
     /// Lights > Standard: target lights drag from the light to its target, the others are placed by a click.
     Light(loom_commands::light::LightKind),
+    /// Geometry > Patch Grids: Quad Patch (`quad`) or Tri Patch, dragged corner to corner.
+    PatchGrid { quad: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,6 +223,8 @@ pub struct LoomApp {
     pub create_kind: Option<CreateKind>,
     /// Create > Geometry class: Standard Primitives or Compound Objects.
     pub create_compound: bool,
+    /// Create > Geometry shows the Patch Grids object types.
+    pub create_patch_grids: bool,
     /// Compound Objects > Object Type button pressed.
     pub compound_kind: Option<command_panel::compound::CompoundKind>,
     /// A Line being drawn in the viewport.
@@ -454,6 +458,7 @@ impl LoomApp {
             bitmap_generation: 0,
             create_kind: None,
             create_compound: false,
+            create_patch_grids: false,
             compound_kind: None,
             line: None,
             bone_points: Vec::new(),
@@ -722,7 +727,9 @@ impl LoomApp {
             // the Modify panel edits; the cage stays the base mesh for
             // sub-object picking.
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
-            let mut shown = if n.modifiers.is_empty() && !nurms {
+            // An Editable Patch's cage is its lattice: the surface is drawn.
+            let patch = n.object.patch().is_some();
+            let mut shown = if n.modifiers.is_empty() && !nurms && !patch {
                 None
             } else if self.below_end_result(id) {
                 match n.active_entry {

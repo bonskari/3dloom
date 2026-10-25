@@ -1011,11 +1011,16 @@ fn attach_node(state: &mut AppState, other: NodeId) -> Result<Value, String> {
     let omesh = onode.cage_mesh().into_owned();
     let other_to_this = state.scene.object_matrix(target).inverse() * state.scene.object_matrix(other);
     let tnode = state.scene.node(target).ok_or("missing node")?;
-    let before = tnode.object.clone();
     let mut mesh = tnode.cage_mesh().into_owned();
-    go::attach(&mut mesh, &omesh, other_to_this)?;
+    if tnode.edits_tri_mesh() {
+        // An Editable Mesh takes the other object as triangles, its edge flags kept.
+        let omesh = state.scene.node(other).map(|n| n.object.display_output()).unwrap_or(omesh);
+        mesh = loom_mesh::tri_mesh::attach(&mesh, &omesh, other_to_this)?;
+    } else {
+        go::attach(&mut mesh, &omesh, other_to_this)?;
+    }
     let changes = vec![
-        loom_scene::Change::ReplaceObject { id: target, before: Box::new(before.clone()), after: Box::new(before.with_mesh(mesh)) },
+        crate::execute::cage_change(tnode, mesh),
         loom_scene::Change::RemoveNode(other),
     ];
     crate::execute::commit_change(state, "Attach", loom_scene::Change::Group(changes))?;
@@ -1030,6 +1035,31 @@ fn detach_selection(state: &mut AppState, name: Option<String>, to_element: bool
     let before = src.object.clone();
     let mut mesh = src.cage_mesh().into_owned();
     let mut changes = Vec::new();
+    if src.edits_tri_mesh() {
+        // Editable Mesh: the faces keep their edge flags and leave as an Editable Mesh.
+        let (rest, part) = loom_mesh::tri_mesh::split(&mesh, &ids)?;
+        if to_element {
+            let m = if as_clone { loom_mesh::tri_mesh::attach(&mesh, &part, glam::Mat4::IDENTITY)? } else { loom_mesh::tri_mesh::explode_to_elements(&mesh, &ids, 360.0)? };
+            changes.push(crate::execute::cage_change(src, m));
+        } else {
+            let name = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| state.scene.next_name("Object"));
+            let mut new_node = loom_scene::Node::new(&name, loom_scene::ObjectKind::EditableMesh(loom_scene::PolyObject::from_mesh(part)));
+            new_node.transform = src.transform.clone();
+            new_node.object_offset = src.object_offset.clone();
+            new_node.inherit = src.inherit;
+            new_node.layer = src.layer;
+            new_node.parent = src.parent;
+            new_node.wire_color = src.wire_color;
+            if !as_clone {
+                changes.push(crate::execute::cage_change(src, rest));
+            }
+            changes.push(loom_scene::Change::AddNode(new_node));
+        }
+        crate::execute::commit_change(state, "Detach", loom_scene::Change::Group(changes))?;
+        state.sub_selection.clear();
+        state.dialog = None;
+        return Ok(selection_json(state));
+    }
     if to_element {
         if as_clone {
             // Clone to element: duplicate the polygons in place.

@@ -256,8 +256,12 @@ impl MeshBuffer {
 pub const DIAGONAL_DASHES: usize = 6;
 
 /// The diagonals the fan triangulation adds inside each visible polygon
-/// (corner 0 to corners 2 .. n-2), as `triangulate_with_face_normals` cuts it.
+/// (corner 0 to corners 2 .. n-2), as `triangulate_with_face_normals` cuts it;
+/// an Editable Mesh shows its invisible edges instead.
 pub fn fan_diagonals(mesh: &Mesh) -> Vec<(Vec3, Vec3)> {
+    if mesh.has_invisible_edges() {
+        return mesh.invisible_edges();
+    }
     let mut out = Vec::new();
     for (i, face) in mesh.faces().iter().enumerate() {
         if face.hidden {

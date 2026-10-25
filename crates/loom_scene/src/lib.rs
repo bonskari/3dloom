@@ -22,7 +22,7 @@ pub mod material;
 pub mod maps;
 pub mod render;
 
-pub use node::{Axes3, DisplayProps, RenderProps, TextureDisplay, Node, NodeId, NodeProps, ObjectKind, PaintDeform, PaintDirection, ParamValue, PolyObject, ShapeCommon, ShapeObject, SoftSelection, SubdivSurface, Transform, OBJECT_COLORS};
+pub use node::{Axes3, DisplayProps, RenderProps, TextureDisplay, Node, NodeId, NodeProps, ObjectKind, PaintDeform, PaintDirection, ParamValue, PatchObject, PolyObject, ShapeCommon, ShapeObject, SoftSelection, SubdivSurface, Transform, OBJECT_COLORS};
 pub use param::{Controller, Param};
 pub use scene::{Layer, Scene, XrefRecord};
 pub use material::{Map, MaterialEditorSlots, MaterialId, MaterialLibrary, StandardMaterial};

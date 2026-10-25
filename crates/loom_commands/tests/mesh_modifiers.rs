@@ -158,11 +158,11 @@ fn edit_poly_above_a_box_edits_the_input_and_warns_on_topology_change() {
     let e = s.scene.eval_mesh(a);
     assert_eq!(e.value.mesh.face_count(), 6 + 4 * 2, "the input passes through");
     assert!(e.warnings.iter().any(|w| w.contains("Edit Poly")), "{:?}", e.warnings);
-    // Edit Mesh is edited as an Edit Poly.
+    // Edit Mesh is its own modifier (triangles with edge visibility).
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     add(&mut s, "Edit Mesh");
     let slot = &s.scene.node(a).unwrap().modifiers[1];
-    assert!(matches!(slot.modifier, Modifier::EditPoly { .. }));
+    assert!(matches!(slot.modifier, Modifier::EditMesh { .. }));
     assert_eq!(slot.name, "Edit Mesh");
     // The chart's Edit Poly table is live on the entry: Break is Shift+B there.
     assert_eq!(Keymap::edit_poly().lookup(parse_chord("Shift+B").unwrap()), Some("Break"));

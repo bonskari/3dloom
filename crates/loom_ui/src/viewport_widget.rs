@@ -1221,6 +1221,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             crate::spline_modes::draw(&painter, app, &projection);
             draw_mode_overlays(&painter, app, view_proj, rect);
             draw_soft_selection(&painter, app, view_proj, rect);
+            draw_patch_lattice(&painter, app, view_proj, rect);
             draw_subobject_overlay(&painter, app, view_proj, rect);
             // Preview Selection: the sub-object under the cursor glows yellow.
             if is_active && app.state.preview_selection != loom_commands::PreviewSelect::Off && app.state.selection_mode != SelectionMode::Object && app.transform_drag.is_none() {
@@ -2308,6 +2309,35 @@ fn draw_mode_overlays(
     }
 }
 
+/// Editable Patch at a sub-object level: the lattice, each vertex joined to
+/// its handles and the handles of an edge to each other.
+fn draw_patch_lattice(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, viewport_rect: egui::Rect) {
+    if app.state.selection_mode == SelectionMode::Object {
+        return;
+    }
+    let handle = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(230, 200, 60));
+    let lattice = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(200, 160, 40));
+    for id in &app.state.selection {
+        let Some(node) = app.state.scene.node(*id) else { continue };
+        let Some(p) = node.edit_patch() else { continue };
+        let world = app.state.scene.world_matrix(*id);
+        let at = |v: glam::Vec3| project_world_to_screen(world.transform_point3(v), view_proj, viewport_rect);
+        let pm = &p.patch;
+        for e in &pm.edges {
+            let pts = [pm.verts[e.v[0] as usize], pm.vecs[e.vec[0] as usize], pm.vecs[e.vec[1] as usize], pm.verts[e.v[1] as usize]];
+            let s: Vec<Option<egui::Pos2>> = pts.iter().map(|q| at(*q)).collect();
+            for (k, stroke) in [(0, handle), (1, lattice), (2, handle)] {
+                if let (Some(a), Some(b)) = (s[k], s[k + 1]) {
+                    painter.line_segment([a, b], stroke);
+                }
+            }
+            for q in [s[1], s[2]].into_iter().flatten() {
+                painter.rect_filled(egui::Rect::from_center_size(q, egui::vec2(4.0, 4.0)), 0.0, handle.color);
+            }
+        }
+    }
+}
+
 fn draw_subobject_overlay(
     painter: &egui::Painter,
     app: &LoomApp,
@@ -2349,7 +2379,12 @@ fn draw_subobject_overlay(
                             painter.add(egui::Shape::convex_polygon(pts, egui::Color32::from_rgba_unmultiplied(255, 0, 0, 90), egui::Stroke::NONE));
                         }
                     }
+                    // An Editable Mesh polygon's invisible edges stay undrawn.
+                    let corners = mesh.face_corners(face_id).unwrap_or_default();
                     for i in 0..ids.len() {
+                        if corners.get(i).is_some_and(|he| !mesh.edge_visible(*he)) {
+                            continue;
+                        }
                         let a = ids[i];
                         let b = ids[(i + 1) % ids.len()];
                         draw_segment_overlay(painter, mesh, a, b, view_proj, viewport_rect, stroke);

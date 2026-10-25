@@ -56,6 +56,9 @@ pub struct StackValue {
     /// Warnings a modifier raises while still producing a result (the
     /// stack collects them next to its own).
     pub warnings: Vec<String>,
+    /// The patch lattice flowing up from a patch object or Surface
+    /// (edited by Edit Patch, dropped by anything else).
+    pub patch: Option<loom_mesh::patch::PatchMesh>,
 }
 
 /// The Unwrap UVW modifier's data: the edited copy of its channel, the
@@ -521,6 +524,12 @@ pub enum Modifier {
     /// edits are kept as the edited mesh plus the input they were made on;
     /// position changes below carry through, topology changes drop them.
     EditPoly { poly: PolyObject, input_vertices: usize, input_faces: usize, snapshot: Vec<Vec3> },
+    /// Edit Mesh: Editable Mesh editing (triangles with edge visibility)
+    /// applied to the stack input, kept like Edit Poly's.
+    EditMesh { poly: PolyObject, input_vertices: usize, input_faces: usize, snapshot: Vec<Vec3> },
+    /// Edit Patch: Editable Patch editing applied to the patches below (a
+    /// mesh below becomes patches); topology changes below drop the edits.
+    EditPatch { patch: crate::node::PatchObject, input_vertices: usize, input_faces: usize },
     /// Shape modifiers (they need a spline below them).
     Extrude { amount: Param<f32>, segments: Param<u32>, cap_start: Param<bool>, cap_end: Param<bool> },
     Lathe { degrees: Param<f32>, segments: Param<u32>, cap_start: Param<bool>, cap_end: Param<bool>, weld_core: Param<bool>, flip_normals: Param<bool>, direction: Param<u32>, align: Param<u32> },
@@ -587,7 +596,7 @@ impl Modifier {
     /// The Modifier List (object-space modifiers), in list order; grows
     /// with every task of phase 3.
     pub const LIST: &'static [&'static str] = &[
-        "Bend", "Bevel", "Bevel Profile", "Cap Holes", "CrossSection", "Delete Spline", "DeleteMesh", "Displace", "Edit Mesh", "Edit Normals", "Edit Poly", "Edit Spline", "Extrude", "Face Extrude", "Fillet/Chamfer", "FFD 2x2x2", "FFD 3x3x3", "FFD 4x4x4", "FFD(box)", "FFD(cyl)", "Lathe", "Lattice", "Linked XForm",
+        "Bend", "Bevel", "Bevel Profile", "Cap Holes", "CrossSection", "Delete Spline", "DeleteMesh", "Displace", "Edit Mesh", "Edit Normals", "Edit Patch", "Edit Poly", "Edit Spline", "Extrude", "Face Extrude", "Fillet/Chamfer", "FFD 2x2x2", "FFD 3x3x3", "FFD 4x4x4", "FFD(box)", "FFD(cyl)", "Lathe", "Lattice", "Linked XForm",
         "Material", "Material By Element", "Melt", "Mesh Select", "MeshSmooth", "Mirror", "Morpher", "MultiRes", "Noise", "Normal", "Normalize Spline", "Optimize", "Poly Select", "Preserve", "ProOptimizer", "Push", "Relax", "Renderable Spline", "Ripple",
         "Shell", "Skew", "Skin", "Skin Morph", "Skin Wrap", "Slice", "Smooth", "Spherify", "Spline Select", "Squeeze", "STL Check", "Stretch", "Subdivide", "Surface", "Sweep", "Symmetry", "Taper", "Tessellate", "Trim/Extend", "TurboSmooth", "Turn To Mesh", "Turn To Poly",
         "Twist", "Unwrap UVW", "UVW Map", "UVW XForm", "VertexPaint", "Vol. Select", "Wave", "XForm",
@@ -709,8 +718,9 @@ impl Modifier {
             "Material" => Modifier::Material { id: Param::new(1) },
             "Material By Element" => Modifier::MaterialByElement { random: Param::new(true), id_count: Param::new(2), seed: Param::new(0) },
             "VertexPaint" => Modifier::VertexPaint { channel: Param::new(0), brush_size: f(20.0), opacity: f(1.0), color: [f(1.0), f(1.0), f(1.0)], paint: BTreeMap::new(), coverage: BTreeMap::new(), layer_opacity: f(1.0), mode: Param::new(0), faces: Default::default() },
-            // Edit Mesh is edited as an Edit Poly (spec §6.3).
-            "Edit Poly" | "Edit Mesh" => Modifier::EditPoly { poly: PolyObject::from_mesh(Mesh::default()), input_vertices: 0, input_faces: 0, snapshot: Vec::new() },
+            "Edit Poly" => Modifier::EditPoly { poly: PolyObject::from_mesh(Mesh::default()), input_vertices: 0, input_faces: 0, snapshot: Vec::new() },
+            "Edit Mesh" => Modifier::EditMesh { poly: PolyObject::from_mesh(Mesh::default()), input_vertices: 0, input_faces: 0, snapshot: Vec::new() },
+            "Edit Patch" => Modifier::EditPatch { patch: crate::node::PatchObject::from_patch(Default::default()), input_vertices: 0, input_faces: 0 },
             "Extrude" => Modifier::Extrude { amount: f(0.0), segments: Param::new(1), cap_start: Param::new(true), cap_end: Param::new(true) },
             "Lathe" => Modifier::Lathe { degrees: f(360.0), segments: Param::new(16), cap_start: Param::new(true), cap_end: Param::new(true), weld_core: Param::new(false), flip_normals: Param::new(false), direction: Param::new(1), align: Param::new(3) },
             "Bevel" => Modifier::Bevel { start_outline: f(0.0), level1: [f(0.0), f(0.0)], level2_on: Param::new(false), level2: [f(0.0), f(0.0)], level3_on: Param::new(false), level3: [f(0.0), f(0.0)], cap_start: Param::new(true), cap_end: Param::new(true) },
@@ -796,6 +806,8 @@ impl Modifier {
             Modifier::MaterialByElement { .. } => "Material By Element",
             Modifier::VertexPaint { .. } => "VertexPaint",
             Modifier::EditPoly { .. } => "Edit Poly",
+            Modifier::EditMesh { .. } => "Edit Mesh",
+            Modifier::EditPatch { .. } => "Edit Patch",
             Modifier::Extrude { .. } => "Extrude",
             Modifier::Lathe { .. } => "Lathe",
             Modifier::Bevel { .. } => "Bevel",
@@ -817,7 +829,7 @@ impl Modifier {
     /// Modifiers holding sub-object data by index (edits, selections, maps),
     /// which a topology change below breaks.
     pub fn topology_dependent(&self) -> bool {
-        matches!(self, Modifier::EditPoly { .. } | Modifier::EditSpline { .. } | Modifier::PolySelect { .. } | Modifier::MeshSelect { .. } | Modifier::SplineSelect { .. } | Modifier::UnwrapUVW(_) | Modifier::EditNormals(_) | Modifier::Hsds(_) | Modifier::VertexPaint { .. } | Modifier::FilletChamfer(_))
+        matches!(self, Modifier::EditPoly { .. } | Modifier::EditMesh { .. } | Modifier::EditPatch { .. } | Modifier::EditSpline { .. } | Modifier::PolySelect { .. } | Modifier::MeshSelect { .. } | Modifier::SplineSelect { .. } | Modifier::UnwrapUVW(_) | Modifier::EditNormals(_) | Modifier::Hsds(_) | Modifier::VertexPaint { .. } | Modifier::FilletChamfer(_))
     }
 
     /// Edit Spline: the shape data the entry edits.
@@ -844,28 +856,78 @@ impl Modifier {
         }
     }
 
-    /// Edit Poly: the Editable Poly data the entry edits.
+    /// Edit Poly / Edit Mesh: the Editable Poly / Mesh data the entry edits.
     pub fn edit_poly(&self) -> Option<&PolyObject> {
         match self {
-            Modifier::EditPoly { poly, .. } => Some(poly),
+            Modifier::EditPoly { poly, .. } | Modifier::EditMesh { poly, .. } => Some(poly),
             _ => None,
         }
     }
 
     pub fn edit_poly_mut(&mut self) -> Option<&mut PolyObject> {
         match self {
-            Modifier::EditPoly { poly, .. } => Some(poly),
+            Modifier::EditPoly { poly, .. } | Modifier::EditMesh { poly, .. } => Some(poly),
             _ => None,
         }
     }
 
-    /// Edit Poly: starts editing from the stack input below the entry.
+    /// Stores edited Editable Poly / Mesh data in the entry; an Edit Mesh
+    /// keeps its mesh triangles (cut again, edges keep their visibility).
+    pub fn set_edit_poly(&mut self, new: PolyObject) {
+        match self {
+            Modifier::EditPoly { poly, .. } => *poly = new,
+            Modifier::EditMesh { poly, .. } => {
+                let mesh = loom_mesh::tri_mesh::retriangulate_like(&poly.mesh, new.mesh.clone()).unwrap_or_else(|_| new.mesh.clone());
+                *poly = new.with_mesh(mesh);
+            }
+            _ => {}
+        }
+    }
+
+    /// Edit Patch: the Editable Patch data the entry edits.
+    pub fn edit_patch(&self) -> Option<&crate::node::PatchObject> {
+        match self {
+            Modifier::EditPatch { patch, .. } => Some(patch),
+            _ => None,
+        }
+    }
+
+    pub fn edit_patch_mut(&mut self) -> Option<&mut crate::node::PatchObject> {
+        match self {
+            Modifier::EditPatch { patch, .. } => Some(patch),
+            _ => None,
+        }
+    }
+
+    /// Edit Patch: starts editing from the stack input (its patches, else
+    /// the mesh made patches).
+    pub fn init_edit_patch(&mut self, input: &Mesh, input_patch: Option<&loom_mesh::patch::PatchMesh>) {
+        if let Modifier::EditPatch { patch, input_vertices, input_faces } = self {
+            let lattice = input_patch.cloned().unwrap_or_else(|| loom_mesh::patch::PatchMesh::from_mesh(input));
+            *patch = crate::node::PatchObject::from_patch(lattice);
+            *input_vertices = input.vertex_count();
+            *input_faces = input.face_count();
+        }
+    }
+
+    /// Edit Poly / Edit Mesh: starts editing from the stack input below the
+    /// entry. An Edit Mesh takes the input as triangles (polygons cut, cuts
+    /// invisible); an Edit Poly takes an Editable Mesh's triangles merged
+    /// into its polygons when the vertices stay the same.
     pub fn init_edit_poly(&mut self, input: &Mesh) {
-        if let Modifier::EditPoly { poly, input_vertices, input_faces, snapshot } = self {
+        if let Modifier::EditPoly { poly, input_vertices, input_faces, snapshot } | Modifier::EditMesh { poly, input_vertices, input_faces, snapshot } = self {
             *poly = PolyObject::from_mesh(input.clone());
             *input_vertices = input.vertex_count();
             *input_faces = input.face_count();
             *snapshot = input.vertices().iter().map(|v| v.position).collect();
+        }
+        let edited = match self {
+            Modifier::EditMesh { poly, .. } => loom_mesh::tri_mesh::from_poly(&poly.mesh).ok(),
+            Modifier::EditPoly { poly, .. } if poly.mesh.has_invisible_edges() => loom_mesh::tri_mesh::to_poly(&poly.mesh).ok().filter(|m| m.vertex_count() == poly.mesh.vertex_count()),
+            _ => None,
+        };
+        if let (Some(m), Some(p)) = (edited, self.edit_poly_mut()) {
+            p.mesh = m;
         }
     }
 
@@ -947,7 +1009,8 @@ impl Modifier {
     pub fn sub_levels(&self) -> &'static [&'static str] {
         match self {
             Modifier::PolySelect { .. } | Modifier::EditPoly { .. } => &["Vertex", "Edge", "Border", "Polygon", "Element"],
-            Modifier::MeshSelect { .. } => &["Vertex", "Edge", "Face", "Polygon", "Element"],
+            Modifier::MeshSelect { .. } | Modifier::EditMesh { .. } => &["Vertex", "Edge", "Face", "Polygon", "Element"],
+            Modifier::EditPatch { .. } => &["Vertex", "Handle", "Edge", "Patch", "Element"],
             Modifier::SplineSelect { .. } => &["Vertex", "Segment", "Spline"],
             Modifier::FilletChamfer(_) => &["Vertex"],
             Modifier::EditSpline { .. } => &["Vertex", "Segment", "Spline"],
@@ -1247,7 +1310,8 @@ impl Modifier {
                 ("Channel", Int(channel.get())), ("Brush Size", Float(brush_size.get())), ("Opacity", Float(opacity.get())), ("Color R", Float(color[0].get())), ("Color G", Float(color[1].get())), ("Color B", Float(color[2].get())),
                 ("Layer Opacity", Float(layer_opacity.get())), ("Mode", Int(mode.get())),
             ],
-            Modifier::EditPoly { .. } | Modifier::EditSpline { .. } => Vec::new(),
+            Modifier::EditPoly { .. } | Modifier::EditMesh { .. } | Modifier::EditSpline { .. } => Vec::new(),
+            Modifier::EditPatch { patch, .. } => vec![("View Steps", Int(patch.steps.get())), ("Show Interior Edges", Bool(patch.show_interior))],
             Modifier::Extrude { amount, segments, cap_start, cap_end } => vec![
                 ("Amount", Float(amount.get())), ("Segments", Int(segments.get())), ("Cap Start", Bool(cap_start.get())), ("Cap End", Bool(cap_end.get())),
             ],
@@ -1371,6 +1435,8 @@ impl Modifier {
             (Modifier::Surface { flip, .. }, "Flip Normals") => *flip = b,
             (Modifier::Surface { remove_interior, .. }, "Remove Interior Patches") => *remove_interior = b,
             (Modifier::Surface { steps, .. }, "Steps") => *steps = u.min(100),
+            (Modifier::EditPatch { patch, .. }, "View Steps") => patch.steps.set(u.min(100)),
+            (Modifier::EditPatch { patch, .. }, "Show Interior Edges") => patch.show_interior = b,
             (Modifier::BevelProfile { cap_start, .. }, "Cap Start") => *cap_start = b,
             (Modifier::BevelProfile { cap_end, .. }, "Cap End") => *cap_end = b,
             (Modifier::AffectRegion(d), "Falloff") => d.falloff.set(v.max(0.0)),
@@ -1572,7 +1638,7 @@ impl Modifier {
             Modifier::Mirror { .. } | Modifier::Symmetry { .. } | Modifier::Slice { .. } | Modifier::Lattice { .. } | Modifier::TurboSmooth { .. } | Modifier::MeshSmooth { .. } | Modifier::Shell { .. }
                 | Modifier::Optimize { .. } | Modifier::ProOptimizer { .. } | Modifier::MultiRes { .. } | Modifier::Tessellate { .. } | Modifier::Subdivide { .. } | Modifier::CapHoles | Modifier::DeleteMesh
                 | Modifier::Hsds(_) | Modifier::VertexWeld { .. } | Modifier::Substitute { .. }
-                | Modifier::FaceExtrude { .. } | Modifier::TurnToPoly { .. } | Modifier::TurnToMesh | Modifier::EditPoly { .. }
+                | Modifier::FaceExtrude { .. } | Modifier::TurnToPoly { .. } | Modifier::TurnToMesh | Modifier::EditPoly { .. } | Modifier::EditMesh { .. } | Modifier::EditPatch { .. }
                 | Modifier::Extrude { .. } | Modifier::Lathe { .. } | Modifier::Bevel { .. } | Modifier::Sweep { .. } | Modifier::EditSpline { .. }
         )
     }
@@ -1890,6 +1956,7 @@ impl Modifier {
             Modifier::Surface { threshold, flip, remove_interior, steps } => {
                 let sh = v.shape.take().ok_or("Surface needs a spline cage below it")?;
                 v.mesh = loom_shape::trim::surface(&sh, *threshold, *steps, *flip, *remove_interior);
+                v.patch = Some(loom_shape::trim::surface_patches(&sh, *threshold, *flip, *remove_interior));
                 v.selection = None;
                 Ok(v)
             }
@@ -2142,7 +2209,27 @@ impl Modifier {
                         vertex.position += delta;
                     }
                 }
-                Ok(StackValue { mesh: out, selection: poly.passes_up.clone(), shape: None, shape_selection: None, warnings: Vec::new() })
+                Ok(StackValue { mesh: out, selection: poly.passes_up.clone(), shape: None, shape_selection: None, warnings: Vec::new(), patch: None })
+            }
+            Modifier::EditMesh { poly, input_vertices, input_faces, snapshot } => {
+                if v.mesh.vertex_count() != *input_vertices || v.mesh.face_count() != *input_faces {
+                    return Err("topology changed below: its edits were dropped".into());
+                }
+                let mut out = poly.mesh.clone();
+                let map = vertex_map(&out, snapshot);
+                for (i, vertex) in out.vertices_mut().iter_mut().enumerate() {
+                    if let Some(src) = map[i] {
+                        let delta = v.mesh.vertex_position(VertexId(src as u32)).unwrap_or_default() - snapshot[src];
+                        vertex.position += delta;
+                    }
+                }
+                Ok(StackValue { mesh: out, selection: poly.passes_up.clone(), shape: None, shape_selection: None, warnings: Vec::new(), patch: None })
+            }
+            Modifier::EditPatch { patch, input_vertices, input_faces } => {
+                if v.mesh.vertex_count() != *input_vertices || v.mesh.face_count() != *input_faces {
+                    return Err("topology changed below: its edits were dropped".into());
+                }
+                Ok(StackValue { mesh: patch.surface(), selection: None, shape: None, shape_selection: None, warnings: Vec::new(), patch: Some(patch.patch.clone()) })
             }
             Modifier::Extrude { amount, segments, cap_start, cap_end } => {
                 let shape = v.shape.take().ok_or("Extrude needs a shape (a spline) below it")?;

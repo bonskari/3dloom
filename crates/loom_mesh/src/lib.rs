@@ -19,6 +19,8 @@ pub mod select_ops;
 pub mod soft_select;
 pub mod poly_ops;
 pub mod topo_ops;
+pub mod tri_mesh;
+pub mod patch;
 pub mod standard_primitives;
 mod teapot_data;
 
