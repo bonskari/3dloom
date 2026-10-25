@@ -330,6 +330,7 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hov
     let stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255));
     draw_branch_path(painter, projection);
     crate::skin_view::draw(painter, app, projection);
+    crate::morph_view::draw(painter, app, projection);
     draw_normals(painter, app, projection);
     draw_hsds_cage(painter, app, projection);
     draw_vertex_paint_faces(painter, app, projection);

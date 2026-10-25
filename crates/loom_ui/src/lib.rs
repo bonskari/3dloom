@@ -27,6 +27,8 @@ pub mod viewport_gizmo;
 mod viewport_widget;
 pub mod poly_modes;
 mod skin_view;
+mod morph_view;
+mod curve_graph;
 pub mod spline_modes;
 pub mod ribbon;
 pub mod shortcuts;

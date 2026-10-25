@@ -464,6 +464,11 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                         *control_inverse_at_pick = Some(world.inverse().to_cols_array_2d());
                     }
                     Modifier::Preserve { original, .. } => *original = Some(picked),
+                    Modifier::SkinWrapPatch(d) => {
+                        crate::morph::check_patch(state, picked)?;
+                        d.patch = Some(picked);
+                        d.resample(&state.scene, id, index as usize);
+                    }
                     // Vol. Select > Mesh Object: the picked mesh is the volume.
                     Modifier::VolSelect(d) => {
                         d.node = Some(picked);

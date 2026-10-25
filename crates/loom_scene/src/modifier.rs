@@ -372,6 +372,7 @@ pub enum Modifier {
     EditNormals(Box<crate::edit_normals::EditNormalsData>),
     SkinMorph(Box<crate::morph::SkinMorphData>),
     SkinWrap(Box<crate::morph::SkinWrapData>),
+    SkinWrapPatch(Box<crate::morph::SkinWrapPatchData>),
     /// UVW Map: a projection of `channel` from the gizmo. `length`/`width`/
     /// `height` are the gizmo extents (Y, X, Z); `alignment` 0 X, 1 Y, 2 Z.
     UVWMap {
@@ -565,6 +566,9 @@ pub struct EvalCtx<'a> {
     pub camera_fov: Option<&'a dyn Fn(NodeId) -> Option<f32>>,
     /// A bone that stretches with Stretch = Squash (Skin's Squash multiplier).
     pub bone_squashes: Option<&'a dyn Fn(NodeId) -> bool>,
+    /// Another node's evaluated patch lattice and object matrix (Skin Wrap
+    /// Patch); `None` for a node already being evaluated or without a patch.
+    pub eval_patch_lookup: Option<&'a dyn Fn(NodeId) -> Option<(Mat4, loom_mesh::patch::PatchMesh)>>,
 }
 
 impl EvalCtx<'_> {
@@ -574,6 +578,10 @@ impl EvalCtx<'_> {
             return l(id);
         }
         self.node_world(id)
+    }
+    /// Another node's evaluated patch lattice with its object matrix.
+    pub fn node_patch(&self, id: NodeId) -> Option<(Mat4, loom_mesh::patch::PatchMesh)> {
+        self.eval_patch_lookup.and_then(|l| l(id))
     }
     /// Another node's evaluated world-space mesh.
     pub fn node_evaluated(&self, id: NodeId) -> Option<(Mat4, Mesh)> {
@@ -603,7 +611,7 @@ impl Modifier {
     pub const LIST: &'static [&'static str] = &[
         "Bend", "Bevel", "Bevel Profile", "Cap Holes", "CrossSection", "Delete Spline", "DeleteMesh", "Displace", "Edit Mesh", "Edit Normals", "Edit Patch", "Edit Poly", "Edit Spline", "Extrude", "Face Extrude", "Fillet/Chamfer", "FFD 2x2x2", "FFD 3x3x3", "FFD 4x4x4", "FFD(box)", "FFD(cyl)", "Lathe", "Lattice", "Linked XForm",
         "Material", "Material By Element", "Melt", "Mesh Select", "MeshSmooth", "Mirror", "Morpher", "MultiRes", "Noise", "Normal", "Normalize Spline", "Optimize", "Poly Select", "Preserve", "ProOptimizer", "Push", "Relax", "Renderable Spline", "Ripple",
-        "Shell", "Skew", "Skin", "Skin Morph", "Skin Wrap", "Slice", "Smooth", "Spherify", "Spline Select", "Squeeze", "STL Check", "Stretch", "Subdivide", "Surface", "Sweep", "Symmetry", "Taper", "Tessellate", "Trim/Extend", "TurboSmooth", "Turn To Mesh", "Turn To Poly",
+        "Shell", "Skew", "Skin", "Skin Morph", "Skin Wrap", "Skin Wrap Patch", "Slice", "Smooth", "Spherify", "Spline Select", "Squeeze", "STL Check", "Stretch", "Subdivide", "Surface", "Sweep", "Symmetry", "Taper", "Tessellate", "Trim/Extend", "TurboSmooth", "Turn To Mesh", "Turn To Poly",
         "Twist", "Unwrap UVW", "UVW Map", "UVW XForm", "VertexPaint", "Vol. Select", "Wave", "XForm",
         "Affect Region", "Flex", "PathDeform", "Spline IK Control", "Substitute", "Vertex Weld",
         "Camera Map", "MapScaler", "UVW Mapping Add", "UVW Mapping Clear", "HSDS", "Point Cache",
@@ -641,6 +649,7 @@ impl Modifier {
             "Edit Normals" => Modifier::EditNormals(Box::default()),
             "Skin Morph" => Modifier::SkinMorph(Box::default()),
             "Skin Wrap" => Modifier::SkinWrap(Box::default()),
+            "Skin Wrap Patch" => Modifier::SkinWrapPatch(Box::default()),
             "UVW Map" => Modifier::UVWMap {
                 projection: Param::new(0), cap: Param::new(true), length: f(1.0), width: f(1.0), height: f(1.0),
                 u_tile: f(1.0), v_tile: f(1.0), w_tile: f(1.0), u_flip: Param::new(false), v_flip: Param::new(false), w_flip: Param::new(false),
@@ -744,6 +753,7 @@ impl Modifier {
             Modifier::EditNormals(_) => "Edit Normals",
             Modifier::SkinMorph(_) => "Skin Morph",
             Modifier::SkinWrap(_) => "Skin Wrap",
+            Modifier::SkinWrapPatch(_) => "Skin Wrap Patch",
             Modifier::UVWMap { .. } => "UVW Map",
             Modifier::UVWXForm { .. } => "UVW XForm",
             Modifier::Bend { .. } => "Bend",
@@ -1028,6 +1038,8 @@ impl Modifier {
             Modifier::Skin(_) => &["Envelope"],
             Modifier::EditNormals(_) => &["Normal"],
             Modifier::AffectRegion(_) => &["Points"],
+            Modifier::SkinMorph(_) => &["Points"],
+            Modifier::SkinWrap(_) => &["Control Vertices"],
             Modifier::Hsds(_) => &["Vertex", "Edge", "Polygon", "Element"],
             m if m.gizmo().is_some() => &["Gizmo", "Center"],
             _ => &[],
@@ -1103,6 +1115,7 @@ impl Modifier {
             Modifier::Morpher(d) => d.channels.iter().flat_map(|c| c.targets.iter().filter_map(|t| t.node)).collect(),
             Modifier::SkinMorph(d) => d.bones.iter().flat_map(|b| std::iter::once(b.node).chain(b.parent)).collect(),
             Modifier::SkinWrap(d) => d.bases.clone(),
+            Modifier::SkinWrapPatch(d) => d.patch.into_iter().collect(),
             Modifier::SplineIkControl(d) => d.helpers.iter().flatten().copied().collect(),
             _ => self.picked_node().into_iter().collect(),
         }
@@ -1145,6 +1158,13 @@ impl Modifier {
                     *b = f(*b).unwrap();
                 }
             }
+            Modifier::SkinWrapPatch(d) => {
+                d.patch = d.patch.and_then(f);
+                if d.patch.is_none() {
+                    d.binds.clear();
+                    d.rest.clear();
+                }
+            }
             Modifier::SkinMorph(d) => {
                 d.bones.retain(|b| f(b.node).is_some());
                 for b in &mut d.bones {
@@ -1153,6 +1173,10 @@ impl Modifier {
                 }
                 let n = d.bones.len();
                 d.morphs.retain(|m| m.bone < n);
+                for m in &mut d.morphs {
+                    m.external = m.external.and_then(f);
+                }
+                d.edit_restore = d.edit_restore.take().and_then(|(b, t)| f(b).map(|b| (b, t)));
             }
             Modifier::Skin(d) => {
                 let keep: Vec<bool> = d.bones.iter().map(|b| f(b.node).is_some()).collect();
@@ -1222,7 +1246,8 @@ impl Modifier {
             Modifier::Morpher(d) => vec![("Use Vertex Selection", Bool(d.use_vertex_selection)), ("Spinner Min", Float(d.spinner_min)), ("Spinner Max", Float(d.spinner_max))],
             Modifier::EditNormals(d) => vec![("Display Length", Float(d.display_length)), ("Ignore Backfacing", Bool(d.ignore_backfacing)), ("Use Threshold", Bool(d.use_threshold)), ("Threshold", Float(d.threshold))],
             Modifier::SkinMorph(_) => Vec::new(),
-            Modifier::SkinWrap(d) => vec![("Deformation Engine", Int(d.engine)), ("Falloff", Float(d.falloff)), ("Distance Influence", Float(d.distance_influence)), ("Face Limit", Int(d.face_limit)), ("Threshold", Float(d.threshold)), ("Weight All Points", Bool(d.weight_all_points))],
+            Modifier::SkinWrap(d) => vec![("Deformation Engine", Int(d.engine)), ("Falloff", Float(d.falloff)), ("Distance Influence", Float(d.distance_influence)), ("Face Limit", Int(d.face_limit)), ("Threshold", Float(d.threshold)), ("Weight All Points", Bool(d.weight_all_points)), ("Blend To Base Mesh", Bool(d.blend_to_base)), ("Blend Distance", Float(d.blend_distance))],
+            Modifier::SkinWrapPatch(d) => vec![("Sample Rate", Int(d.sample_rate))],
             Modifier::Skin(d) => vec![
                 ("Bone Affect Limit", Int(d.bone_affect_limit)), ("Always Deform", Bool(d.always_deform)), ("Weight All Vertices", Bool(d.weight_all_vertices)),
                 ("Show Colored Vertices", Bool(d.display.colored_vertices)), ("Show Colored Faces", Bool(d.display.colored_faces)), ("Color All Weights", Bool(d.display.color_all_weights)),
@@ -1420,9 +1445,12 @@ impl Modifier {
                 }
             }
             (Modifier::SkinWrap(d), "Deformation Engine") => d.engine = u.min(1),
-            (Modifier::SkinWrap(d), "Falloff") => d.falloff = v.max(0.0),
-            (Modifier::SkinWrap(d), "Distance Influence") => d.distance_influence = v.max(0.001),
-            (Modifier::SkinWrap(d), "Face Limit") => d.face_limit = u.max(1),
+            (Modifier::SkinWrap(d), "Falloff") => d.falloff = v.clamp(0.001, 10.0),
+            (Modifier::SkinWrap(d), "Distance Influence") => d.distance_influence = v.clamp(0.001, 10.0),
+            (Modifier::SkinWrap(d), "Face Limit") => d.face_limit = u.min(30),
+            (Modifier::SkinWrap(d), "Blend To Base Mesh") => d.blend_to_base = b,
+            (Modifier::SkinWrap(d), "Blend Distance") => d.blend_distance = v.max(0.001),
+            (Modifier::SkinWrapPatch(d), "Sample Rate") => d.sample_rate = u.clamp(1, 100),
             (Modifier::SkinWrap(d), "Threshold") => d.threshold = v.max(0.0),
             (Modifier::SkinWrap(d), "Weight All Points") => d.weight_all_points = b,
             (Modifier::Morpher(d), "Use Vertex Selection") => d.use_vertex_selection = b,
@@ -1767,6 +1795,7 @@ impl Modifier {
             }
             Modifier::SkinMorph(d) => crate::morph::apply_skin_morph(d, v, ctx),
             Modifier::SkinWrap(d) => crate::morph::apply_skin_wrap(d, v, ctx),
+            Modifier::SkinWrapPatch(d) => crate::morph::apply_skin_wrap_patch(d, v, ctx),
             Modifier::UnwrapUVW(u) => {
                 let ch = u.channel.get();
                 if u.edits.is_none() {

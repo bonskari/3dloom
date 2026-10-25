@@ -316,6 +316,7 @@ fn run(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SkinModifier => crate::execute(state, C::AddModifier { name: "Skin".into() }),
         C::SkinMorphModifier => crate::execute(state, C::AddModifier { name: "Skin Morph".into() }),
         C::SkinWrapModifier => crate::execute(state, C::AddModifier { name: "Skin Wrap".into() }),
+        C::SkinWrapPatchModifier => crate::execute(state, C::AddModifier { name: "Skin Wrap Patch".into() }),
         C::AddBonesSkin => {
             entry(state)?;
             state.dialog_purpose = DialogPurpose::SkinAddBones;
