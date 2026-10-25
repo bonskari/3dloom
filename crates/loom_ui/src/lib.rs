@@ -135,6 +135,8 @@ pub enum CreateKind {
     Light(loom_commands::light::LightKind),
     /// Geometry > Patch Grids: Quad Patch (`quad`) or Tri Patch, dragged corner to corner.
     PatchGrid { quad: bool },
+    /// Systems > Sunlight / Daylight: drag the compass from its centre.
+    SunSystem { daylight: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,6 +254,8 @@ pub struct LoomApp {
     pub camera_create: Option<create_tool::CameraSession>,
     /// Create > Helpers > Grid / Compass being dragged out.
     pub helper_create: Option<create_tool::HelperSession>,
+    /// Systems > Sunlight / Daylight being dragged out.
+    pub sun_create: Option<create_tool::SunSession>,
     /// A biped being dragged out.
     pub biped_create: Option<create_tool::BipedSession>,
     /// Create Biped rollout: the structure the next biped gets.
@@ -382,6 +386,10 @@ impl LoomApp {
         if let Some(path) = loom_commands::settings::settings_path() {
             app.use_settings_file(path);
         }
+        // A session starts from the startup scene when there is one.
+        if let Err(e) = loom_commands::assets::load_startup_scene(&mut app.state) {
+            app.last_error = Some(e);
+        }
         app
     }
 
@@ -476,6 +484,7 @@ impl LoomApp {
             create: None,
             camera_create: None,
             helper_create: None,
+            sun_create: None,
             biped_create: None,
             biped_defaults: loom_scene::biped::BipedStructure::new(1.0),
             last_biped: None,

@@ -781,6 +781,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                         app.creation_finished();
                                     }
                                 }
+                            } else if let Some(crate::CreateKind::SunSystem { daylight }) = app.create_kind {
+                                if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
+                                    if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
+                                        anchor = hit.point;
+                                        app.consume_snap_override();
+                                    }
+                                    app.sun_create = crate::create_tool::SunSession::begin(app, daylight, anchor, basis.2);
+                                }
                             } else if let Some(crate::CreateKind::Light(kind)) = app.create_kind {
                                 if let Some((mut anchor, basis)) = creation_anchor(app, index, p, rect, view, proj) {
                                     if let Some(hit) = snap_at(app, index, &projection, p, None, false) {
@@ -856,6 +864,10 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.creation_finished();
                         }
                         if let Some(session) = app.helper_create.take() {
+                            session.finish(app);
+                            app.creation_finished();
+                        }
+                        if let Some(session) = app.sun_create.take() {
                             session.finish(app);
                             app.creation_finished();
                         }
@@ -1003,6 +1015,16 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                         if let Some(session) = app.helper_create.clone() {
                             let mut hit = plane_hit_at(p, rect, view, proj, session.anchor, session.basis.2);
+                            if let Some(snap) = snap_at(app, index, &projection, p, Some(session.anchor), false) {
+                                hit = Some(snap.point);
+                            }
+                            if let Some(at) = hit {
+                                session.on_drag(app, at);
+                            }
+                            ctx.request_repaint();
+                        }
+                        if let Some(session) = app.sun_create.clone() {
+                            let mut hit = plane_hit_at(p, rect, view, proj, session.anchor, session.normal);
                             if let Some(snap) = snap_at(app, index, &projection, p, Some(session.anchor), false) {
                                 hit = Some(snap.point);
                             }
@@ -1426,6 +1448,13 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
                         _ => 45.0,
                     };
                     ("fov", (fov * factor).clamp(1.0, 175.0), None)
+                }
+                N::LightHotspot | N::LightFalloff => {
+                    let (hot, fall) = match app.state.scene.node(camera.unwrap()).map(|n| &n.object) {
+                        Some(loom_scene::ObjectKind::Light(l)) => (l.hotspot.get(), l.falloff.get()),
+                        _ => (43.0, 45.0),
+                    };
+                    if mode == N::LightHotspot { ("hotspot", hot * factor, None) } else { ("falloff", fall * factor, None) }
                 }
                 N::DollyTarget => ("dolly_target", 1.0 / factor, None),
                 N::DollyBoth => ("dolly_both", factor, None),

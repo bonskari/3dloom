@@ -66,12 +66,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Save Copy As...", "Save File As Copy");
                 item(ui, app, "Save Incremental", "Save Incremental (+)");
                 cmd(ui, app, "Save Selected...", Command::SaveSelected { path: None });
+                cmd(ui, app, "Set Project Folder...", Command::SetProjectFolder { path: None });
                 cmd(ui, app, "Archive...", Command::ArchiveFile { path: None });
                 ui.separator();
                 item(ui, app, "Merge...", "Merge File");
+                cmd(ui, app, "Replace...", Command::ReplaceFile { path: None, names: None, materials: None });
                 item(ui, app, "Import...", "Import File");
                 item(ui, app, "Export...", "Export File");
                 item(ui, app, "Export Selected...", "Export Selected");
+                ui.separator();
+                cmd(ui, app, "Asset Tracking...", Command::AssetTracking);
                 ui.separator();
                 cmd(ui, app, "Summary Info...", Command::SummaryInfo);
                 cmd(ui, app, "File Properties...", Command::FileProperties);
@@ -108,6 +112,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.menu_button("Select By", |ui| {
                     item(ui, app, "Color", "Select By Color Pick");
                     item(ui, app, "Name...", "Select By Name");
+                    cmd(ui, app, "Layer...", Command::SelectByLayer { layers: None });
                 });
                 ui.menu_button("Region", |ui| {
                     let window = app.state.window_selection;
@@ -230,6 +235,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 check_item(ui, app, "Show Transform Gizmo", "Transform Gizmo Toggle", gizmo);
                 check_item(ui, app, "Shade Selected", "Shade Selected", shade);
                 item(ui, app, "Create Camera From View", "Create Camera From View");
+                item(ui, app, "Add Default Lights to Scene...", "Add Default Lights to Scene");
                 item(ui, app, "Redraw All Views", "Redraw All Views");
                 ui.separator();
                 for (label, action) in [
@@ -265,6 +271,18 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                 });
                 ui.menu_button("Lights", |ui| {
+                    ui.menu_button("Photometric Lights", |ui| {
+                        for kind in loom_commands::light::LightKind::PHOTOMETRIC {
+                            if ui.button(kind.label()).clicked() {
+                                let _ = app.dispatch(Command::SelectObject);
+                                app.photometric_lights = true;
+                                app.create_kind = Some(crate::CreateKind::Light(kind));
+                                app.create_category = crate::Category::Lights;
+                                app.panel_tab = crate::Tab::Create;
+                                ui.close_menu();
+                            }
+                        }
+                    });
                     ui.menu_button("Standard Lights", |ui| {
                         for (kind, label) in [
                             (loom_commands::light::LightKind::TargetSpot, "Target Spotlight"), (loom_commands::light::LightKind::FreeSpot, "Free Spotlight"),
@@ -273,6 +291,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                         ] {
                             if ui.button(label).clicked() {
                                 let _ = app.dispatch(Command::SelectObject);
+                                app.photometric_lights = false;
                                 app.create_kind = Some(crate::CreateKind::Light(kind));
                                 app.create_category = crate::Category::Lights;
                                 app.panel_tab = crate::Tab::Create;
@@ -280,6 +299,15 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             }
                         }
                     });
+                    ui.separator();
+                    for (label, daylight) in [("Daylight System", true), ("Sunlight System", false)] {
+                        if ui.button(label).clicked() {
+                            app.create_category = crate::Category::Systems;
+                            app.panel_tab = crate::Tab::Create;
+                            app.start_create(Some(crate::CreateKind::SunSystem { daylight }));
+                            ui.close_menu();
+                        }
+                    }
                 });
                 ui.menu_button("Helpers", |ui| {
                     for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass")] {

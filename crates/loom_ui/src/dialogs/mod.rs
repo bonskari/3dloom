@@ -29,6 +29,7 @@ pub mod file_dialog;
 pub mod material_editor;
 pub mod render_setup;
 pub mod lights;
+pub mod assets;
 pub mod save_changes;
 pub mod spline_prompts;
 pub mod topology_warning;
@@ -138,6 +139,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
         Dialog::LightLister => lights::light_lister(ctx, app, &mut open),
         Dialog::LightExclude { light } => lights::light_exclude(ctx, app, light, &mut open),
+        Dialog::AddDefaultLights => lights::add_default_lights(ctx, app, &mut open),
+        Dialog::GeographicLocation { sun } => lights::geographic_location(ctx, app, sun, &mut open),
         Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),
         Dialog::SelectFromScene => select_from_scene::show(ctx, app, &mut open),
         Dialog::SelectCamera => select_camera(ctx, app, &mut open),
@@ -175,6 +178,15 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::FbxExportOptions => exchange_options::fbx_export(ctx, app, &mut open),
         Dialog::ObjImportOptions => exchange_options::obj_import(ctx, app, &mut open),
         Dialog::ObjExportOptions => exchange_options::obj_export(ctx, app, &mut open),
+        Dialog::StlImportOptions => exchange_options::stl_import(ctx, app, &mut open),
+        Dialog::StlExportOptions => exchange_options::stl_export(ctx, app, &mut open),
+        Dialog::TdsImportOptions => exchange_options::tds_import(ctx, app, &mut open),
+        Dialog::ReplaceFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::ReplaceObjects => assets::replace_objects(ctx, app, &mut open),
+        Dialog::ProjectFolder => assets::project_folder(ctx, app, &mut open),
+        Dialog::AssetTracking => assets::asset_tracking(ctx, app, &mut open),
+        Dialog::MissingFiles => assets::missing_files(ctx, app, &mut open),
+        Dialog::SelectByLayer => assets::select_by_layer(ctx, app, &mut open),
         Dialog::BoneTools => rig_dialogs::bone_tools(ctx, app, &mut open),
         Dialog::WeightTable => rig_dialogs::weight_table(ctx, app, &mut open),
         Dialog::WeightTool => rig_dialogs::weight_tool(ctx, app, &mut open),

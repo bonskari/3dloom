@@ -301,6 +301,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         app.start_create((!on).then_some(CreateKind::Biped));
                     }
                 });
+                ui.horizontal(|ui| {
+                    for (label, daylight) in [("Sunlight", false), ("Daylight", true)] {
+                        let kind = CreateKind::SunSystem { daylight };
+                        let on = app.create_kind == Some(kind);
+                        if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, label)).clicked() {
+                            app.start_create((!on).then_some(kind));
+                        }
+                    }
+                });
             });
             name_and_color(ui, app);
             if app.create_kind == Some(CreateKind::Biped) {
@@ -668,13 +677,8 @@ fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         ui.separator();
         ui.horizontal(|ui| {
             ui.label("Target Distance:");
-            if has_target {
-                // A Target camera shows the distance to its target.
-                let (factor, suffix) = app.unit_display();
-                ui.label(format!("{:.*}{}", app.state.prefs.spinner_precision, distance as f64 * factor, suffix));
-            } else {
-                length(ui, app, "Target Distance", distance);
-            }
+            // A Target camera's spinner moves its target along the line of sight.
+            length(ui, app, "Target Distance", distance);
         });
     });
 }

@@ -140,7 +140,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let doc = crate::file::read(&path)?;
             crate::settings::note_recent(state, &path);
             load_document(state, doc, Some(path));
-            Ok(json!({ "nodes": state.scene.len() }))
+            // Missing External Files: the files the scene names that are not there.
+            let missing = crate::assets::missing_assets(state);
+            if !missing.is_empty() && state.dialog.is_none() {
+                state.dialog = Some(Dlg::MissingFiles);
+            }
+            Ok(json!({ "nodes": state.scene.len(), "missing": missing }))
         }
         C::SaveFile { path } => {
             let target = match (path, state.file.clone()) {
@@ -213,7 +218,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = None;
             state.file = None;
             state.mesh_dirty = true;
-            Ok(json!({}))
+            // Reset starts from the startup scene when there is one.
+            let startup = crate::assets::load_startup_scene(state)?;
+            Ok(json!({ "startup_scene": startup }))
         }
         C::SaveChangesReply { reply } => {
             let Some(Dlg::SaveChanges(action)) = state.dialog else {
@@ -305,6 +312,42 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.exchange.describe(&dialog)
         }
         C::ExchangeOptions { dialog } => state.exchange.describe(&dialog),
+        C::ReplaceFile { path, names, materials } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::ReplaceFile);
+                return Ok(json!({ "dialog": "ReplaceFile" }));
+            };
+            let path = std::path::PathBuf::from(path);
+            if names.is_none() && materials.is_none() && state.replace_source.as_ref() != Some(&path) {
+                // From the file dialog: the list of matching objects comes next.
+                let doc = crate::file::read(&path)?;
+                let candidates = crate::assets::replace_candidates(state, &doc);
+                state.replace_source = Some(path);
+                state.dialog = Some(Dlg::ReplaceObjects);
+                return Ok(json!({ "dialog": "ReplaceObjects", "objects": candidates }));
+            }
+            state.replace_source = None;
+            crate::assets::replace(state, &path, names.as_deref(), materials.unwrap_or(false))
+        }
+        C::SetProjectFolder { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::ProjectFolder);
+                return Ok(json!({ "dialog": "ProjectFolder" }));
+            };
+            crate::assets::set_project_folder(state, std::path::Path::new(&path))
+        }
+        C::AssetTracking => {
+            state.dialog = Some(Dlg::AssetTracking);
+            Ok(crate::assets::asset_list(state))
+        }
+        C::RepathAsset { from, to } => {
+            let n = crate::assets::repath(state, &[(from, to)], "Set Path")?;
+            Ok(json!({ "changed": n }))
+        }
+        C::FindMissingFiles { folder } => {
+            let found = crate::assets::find_missing(state, std::path::Path::new(&folder))?;
+            Ok(json!({ "found": found, "missing": crate::assets::missing_assets(state) }))
+        }
         C::SaveExchangePreset { dialog, name } => {
             state.exchange.save_preset(&dialog, &name)?;
             state.exchange.describe(&dialog)
@@ -533,18 +576,52 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
         C::SelectChild => {
-            let ids: Vec<u64> = state.selection.iter().filter_map(|id| state.scene.children(*id).first().copied()).map(|c| c.0).collect();
+            // Page Down: all immediate children.
+            let ids: Vec<u64> = state.selection.iter().flat_map(|id| state.scene.children(*id)).map(|c| c.0).collect();
             if ids.is_empty() {
                 return Ok(selection_json(state));
             }
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
         C::SelectChildren => {
-            let ids: Vec<u64> = state.selection.iter().flat_map(|id| state.scene.children(*id)).map(|c| c.0).collect();
+            let ids: Vec<u64> = state.selection.iter().flat_map(|id| state.scene.descendants(*id)).map(|c| c.0).collect();
             if ids.is_empty() {
                 return Ok(selection_json(state));
             }
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
+        }
+        C::SelectSiblingNext | C::SelectSiblingPrevious => {
+            let next = matches!(cmd, C::SelectSiblingNext);
+            let Some(&current) = state.selection.iter().next() else { return Ok(selection_json(state)) };
+            let sibs = siblings(&state.scene, current);
+            let eligible = |id: &NodeId| *id == current || state.scene.node(*id).is_some_and(|n| state.is_selectable(n));
+            let sibs: Vec<NodeId> = sibs.into_iter().filter(eligible).collect();
+            let Some(i) = sibs.iter().position(|s| *s == current) else { return Ok(selection_json(state)) };
+            if sibs.len() < 2 {
+                return Ok(selection_json(state));
+            }
+            let j = if next { (i + 1) % sibs.len() } else { (i + sibs.len() - 1) % sibs.len() };
+            execute(state, C::SelectNodes { ids: vec![sibs[j].0], op: SelectOp::Replace })
+        }
+        C::LinkInheritanceSelected { move_axes, rotate_axes, scale_axes } => {
+            let ids = selected_ids(state);
+            if ids.is_empty() {
+                return Err("select the objects first".into());
+            }
+            props_change(state, "Link Inheritance", ids, |p, _| {
+                if let Some(m) = move_axes { p.inherit.move_axes = m; }
+                if let Some(r) = rotate_axes { p.inherit.rotate_axes = r; }
+                if let Some(s) = scale_axes { p.inherit.scale_axes = s; }
+            })?;
+            Ok(json!({}))
+        }
+        C::FreezeTransform | C::FreezePosition | C::FreezeRotation => {
+            let (pos, rot) = (!matches!(cmd, C::FreezeRotation), !matches!(cmd, C::FreezePosition));
+            freeze_transform(state, pos, rot, cmd.name())
+        }
+        C::TransformToZero | C::PositionToZero | C::RotationToZero => {
+            let (pos, rot) = (!matches!(cmd, C::RotationToZero), !matches!(cmd, C::PositionToZero));
+            transform_to_zero(state, pos, rot, cmd.name())
         }
         C::SelectInstances => {
             // The instance group: every node sharing the selected node's source.
@@ -569,9 +646,21 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.pick_mode = Some(PickMode::SelectByColor);
             Ok(json!({}))
         }
+        C::SelectByLayer { layers } => {
+            let Some(layers) = layers else {
+                state.dialog = Some(Dlg::SelectByLayer);
+                return Ok(json!({ "dialog": "SelectByLayer" }));
+            };
+            for l in &layers {
+                state.scene.layer(*l).ok_or_else(|| format!("no layer {l}"))?;
+            }
+            let ids: Vec<u64> = state.scene.nodes().filter(|n| layers.contains(&n.layer) && state.is_selectable(n)).map(|n| n.id.0).collect();
+            execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
+        }
         C::SelectSimilar => {
-            let kinds: BTreeSet<&'static str> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.object.base_name()).collect();
-            let ids: Vec<u64> = state.scene.nodes().filter(|n| kinds.contains(n.object.base_name())).map(|n| n.id.0).collect();
+            // Similar: the same object type on the same layer with the same (or no) material.
+            let kinds: BTreeSet<(&'static str, u32, Option<loom_scene::material::MaterialId>)> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| (n.object.base_name(), n.layer, n.material)).collect();
+            let ids: Vec<u64> = state.scene.nodes().filter(|n| kinds.contains(&(n.object.base_name(), n.layer, n.material))).map(|n| n.id.0).collect();
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
         C::Group { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
@@ -1538,6 +1627,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::Preferences => {
             state.dialog = Some(Dlg::Preferences);
             Ok(json!({}))
+        }
+        C::PaintSelectionSizeUp | C::PaintSelectionSizeDown => {
+            let step = if matches!(cmd, C::PaintSelectionSizeUp) { 1.0 } else { -1.0 };
+            state.prefs.paint_brush_size = (state.prefs.paint_brush_size + step).clamp(1.0, 500.0);
+            Ok(json!({ "size": state.prefs.paint_brush_size }))
         }
         C::SetPreference { name, value } => {
             state.prefs.set(&name, value)?;
@@ -3471,7 +3565,7 @@ fn missing(id: NodeId) -> String {
 
 /// Replaces the scene and settings with a loaded document (Open / Fetch):
 /// not undoable.
-fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<std::path::PathBuf>) {
+pub(crate) fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<std::path::PathBuf>) {
     state.scene = doc.scene;
     // Node versions restart with a loaded scene: cached track bar keys belong to the old one.
     state.key_time_cache = Default::default();
@@ -4588,6 +4682,102 @@ fn props_change(state: &mut AppState, label: &str, ids: Vec<NodeId>, f: impl Fn(
         return Ok(());
     }
     commit(state, label, Change::Group(changes))
+}
+
+/// Siblings in the reference's sense: the objects as many generations below
+/// the selected object's nearest branching ancestor (one with several
+/// children, or the scene root) as it is, in creation order. In an uneven
+/// hierarchy A can be B's sibling without B being A's.
+fn siblings(scene: &loom_scene::Scene, id: NodeId) -> Vec<NodeId> {
+    let kids = |p: Option<NodeId>| -> Vec<NodeId> {
+        match p {
+            Some(p) => scene.children(p),
+            None => scene.nodes().filter(|n| n.parent.is_none()).map(|n| n.id).collect(),
+        }
+    };
+    let mut cur = id;
+    let mut depth = 1;
+    let branch = loop {
+        let parent = scene.node(cur).and_then(|n| n.parent);
+        if parent.is_none() || kids(parent).len() > 1 {
+            break parent;
+        }
+        cur = parent.expect("a parent");
+        depth += 1;
+    };
+    let mut level = kids(branch);
+    for _ in 1..depth {
+        level = level.into_iter().flat_map(|n| scene.children(n)).collect();
+    }
+    level.sort_by_key(|n| n.0);
+    level
+}
+
+/// A List controller holding `frozen` under a zero layer that edits go to
+/// (the zero layer is first: a List sets its first weighted entry).
+fn frozen_list(frozen: glam::Vec3, zero_name: &str, frozen_name: &str) -> loom_scene::Param<glam::Vec3> {
+    use loom_scene::param::{Controller, ListItem};
+    loom_scene::Param {
+        controller: Controller::List(vec![
+            ListItem { name: zero_name.into(), weight: 100.0, controller: Controller::Constant(glam::Vec3::ZERO) },
+            ListItem { name: frozen_name.into(), weight: 100.0, controller: Controller::Constant(frozen) },
+        ]),
+    }
+}
+
+/// Freeze Transform / Position / Rotation on the selection: the current
+/// value becomes the frozen layer, the active layer starts at zero.
+fn freeze_transform(state: &mut AppState, pos: bool, rot: bool, label: &str) -> Result<Value, String> {
+    let ids = selected_ids(state);
+    if ids.is_empty() {
+        return Err("select the objects first".into());
+    }
+    let mut changes = Vec::new();
+    for id in ids {
+        let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+        let mut t = node.transform.clone();
+        if pos {
+            t.position = frozen_list(node.transform.position.get(), "Zero Pos XYZ", "Frozen Position");
+        }
+        if rot {
+            t.rotation = frozen_list(node.transform.rotation.get(), "Zero Euler XYZ", "Frozen Rotation");
+        }
+        changes.push(Change::SetTransform { id, before: node.transform.clone(), after: t });
+    }
+    commit_exact(state, label, Change::Group(changes))?;
+    Ok(json!({}))
+}
+
+/// Transform / Position / Rotation To Zero: the active layer back to zero
+/// (the frozen pose); a component never frozen goes to zero itself.
+fn transform_to_zero(state: &mut AppState, pos: bool, rot: bool, label: &str) -> Result<Value, String> {
+    use loom_scene::param::Controller;
+    let ids = selected_ids(state);
+    if ids.is_empty() {
+        return Err("select the objects first".into());
+    }
+    let zero = |p: &loom_scene::Param<glam::Vec3>| -> loom_scene::Param<glam::Vec3> {
+        let mut p = p.clone();
+        match &mut p.controller {
+            Controller::List(items) if !items.is_empty() => items[0].controller = Controller::Constant(glam::Vec3::ZERO),
+            _ => p = loom_scene::Param::new(glam::Vec3::ZERO),
+        }
+        p
+    };
+    let mut changes = Vec::new();
+    for id in ids {
+        let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+        let mut t = node.transform.clone();
+        if pos {
+            t.position = zero(&t.position);
+        }
+        if rot {
+            t.rotation = zero(&t.rotation);
+        }
+        changes.push(Change::SetTransform { id, before: node.transform.clone(), after: t });
+    }
+    commit_exact(state, label, Change::Group(changes))?;
+    Ok(json!({}))
 }
 
 fn selected_ids(state: &AppState) -> Vec<NodeId> {

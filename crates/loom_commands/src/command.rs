@@ -808,8 +808,17 @@ commands! {
     CompoundSettings => "Compound Settings", Loom, "Compound rollout settings: Boolean Operation, Move Operand, ProBoolean Operation, Loft Path (percent)." { name: String, value: f64 };
     SetNumberOfPoints => "Set Number of Points", Loom, "FFD(box) / FFD(cyl): rebuild the lattice with this many points per dimension (cyl: side, radial, height)." { length: u32, width: u32, height: u32 };
     SelectAncestor => "Select Ancestor", MainUI, "Select the parents of the selected objects (PageUp).";
-    SelectChild => "Select Child", MainUI, "Select the first child of each selected object (PageDown).";
-    SelectChildren => "Select Children", MainUI, "Select every child of the selected objects (Ctrl+PageDown).";
+    SelectChild => "Select Child", MainUI, "Select the immediate children of the selected objects (PageDown).";
+    SelectChildren => "Select Children", MainUI, "Select every descendant of the selected objects (Ctrl+PageDown).";
+    SelectSiblingNext => "Select Sibling - Next", MainUI, "Replace the selection with the next sibling: the next object as far below the nearest branching ancestor as the selected one (hidden, frozen and filtered-out siblings are skipped).";
+    SelectSiblingPrevious => "Select Sibling - Previous", MainUI, "Replace the selection with the previous sibling (see Select Sibling - Next).";
+    LinkInheritanceSelected => "Link Inheritance (Selected)", Loom, "Utilities > Link Inheritance (Selected): which parent transform components every selected object inherits (true = inherit), one undo step." { move_axes: Option<[bool; 3]>, rotate_axes: Option<[bool; 3]>, scale_axes: Option<[bool; 3]> };
+    FreezeTransform => "Freeze Transform", MainUI, "Animation quad > Freeze Transform: the current position and rotation become the objects' rest pose (a List controller: a frozen layer under a zero layer that edits go to).";
+    FreezePosition => "Freeze Position", MainUI, "Freeze the selected objects' position only (see Freeze Transform).";
+    FreezeRotation => "Freeze Rotation", MainUI, "Freeze the selected objects' rotation only (see Freeze Transform).";
+    TransformToZero => "Transform To Zero", MainUI, "Animation quad > Transform To Zero: back to the frozen pose (an object never frozen goes to its parent's origin, unrotated).";
+    PositionToZero => "Position To Zero", MainUI, "The selected objects' position back to the frozen one (see Transform To Zero).";
+    RotationToZero => "Rotation To Zero", MainUI, "The selected objects' rotation back to the frozen one (see Transform To Zero).";
     SelectSimilar => "Select Similar", MainUI, "Select every object of the same kind as the selection (Ctrl+Q).";
     SelectInstances => "Select Instances", MainUI, "Edit > Select Instances: select every instance of the one selected object.";
     SelectByColorPick => "Select By Color Pick", MainUI, "Edit > Select By > Color: the next clicked object selects every visible, unfrozen object of its object colour.";
@@ -830,6 +839,7 @@ commands! {
     MoveToLayer => "Move To Layer", Loom, "Move the selected objects onto a layer." { layer: u32 };
     AddSelectionToCurrentLayer => "Add Selection To Current Layer", Loom, "Layer Manager > Add Selection to Current Layer.";
     SelectLayerObjects => "Select Layer Objects", Loom, "Select every selectable object on a layer." { layer: u32 };
+    SelectByLayer => "Select By Layer", Loom, "Edit > Select By > Layer: select the objects on the given layers (several at once); without `layers` the Select By Layer dialog shows." { layers: Option<Vec<u32>> };
     SetCurrentLayerToSelection => "Set Current Layer to Selection's Layer", Loom, "Layers toolbar: the layer of the selected objects becomes current (refused when they are on different layers).";
     SetLayerColor => "Set Layer Color", Loom, "Layer Manager > Color: the layer colour (0-255 RGB); objects whose colour is By Layer show it." { layer: u32, rgb: [u8; 3] };
     SetLayerRenderable => "Set Layer Renderable", Loom, "Layer Manager > Render: the layer's Renderable; off, renders leave out its objects whose Rendering Control is By Layer." { layer: u32, on: bool };
@@ -933,6 +943,8 @@ commands! {
     // --- Properties, preferences, units, customize ---
     ObjectProperties => "Object Properties", MainUI, "Open the Object Properties dialog for the selection (Edit menu, quad menu).";
     Preferences => "Preferences", Loom, "Open Customize > Preferences.";
+    PaintSelectionSizeUp => "Paint Selection Size Up", MainUI, "Paint Selection Region: a larger brush (Preferences > Paint Selection Brush Size).";
+    PaintSelectionSizeDown => "Paint Selection Size Down", MainUI, "Paint Selection Region: a smaller brush.";
     SetPreference => "Set Preference", Loom, "Set a Preferences value by name (booleans as 0/1): Auto Backup Enable, Auto Backup Count, Auto Backup Interval (minutes), Scene Undo Levels, Reference Coordinate System Constant, Auto Window/Crossing by Direction, Paint Selection Brush Size, Spinner Precision, Spinner Snap, Spinner Use Snap, Spinner Wrap Cursor, Viewport Tooltips, Show Cross Hair Cursor, Transform Gizmos, Show Axis Labels, Allow Multiple Gizmos, Gizmo Size, Move Plane Handle Size, Move Plane Handle Offset, Center Box Handle, Rotate Free Rotation, Rotate Show Tripod, Rotate Screen Handle, Rotate Show Pie Slice, Rotate Angle Data, Scale Size, Rotation Increment, Viewport Orbit Snap Angle, Space Locks Selection, Recent Files in File Menu, Keep Creating." { name: String, value: f64 };
     UnitsSetup => "Units Setup", Loom, "Open Customize > Units Setup.";
     SetUnits => "Set Units", Loom, "Units Setup: `system_unit` Inches/Feet/Millimeters/Centimeters/Meters/Kilometers, `system_scale` units per system unit, `display` Generic / Millimeters / Centimeters / Meters / Kilometers / Decimal Inches / Decimal Feet / Feet w/ Decimal Inches / Custom (with custom_name, custom_value, custom_unit)." { system_unit: Option<String>, system_scale: Option<f32>, display: Option<String>, custom_name: Option<String>, custom_value: Option<f32>, custom_unit: Option<String> };
@@ -1470,6 +1482,11 @@ commands! {
     AddDefaultLightsToScene => "Add Default Lights to Scene", MainUI, "Views > Add Default Lights to Scene: the active viewport's default key and fill lights become omni lights (DefaultKeyLight, DefaultFillLight) out from the scene's centre by its size × `distance_scale`; the viewport then uses scene lights. Without arguments the dialog shows." { key: Option<bool>, fill: Option<bool>, distance_scale: Option<f32> };
     LightHotspotMode => "Light Hotspot Mode", MainUI, "Light viewport: drag to widen or narrow the light's hotspot.";
     LightFalloffMode => "Light Falloff Mode", MainUI, "Light viewport: drag to widen or narrow the light's falloff.";
+    ReplaceFile => "Replace", Loom, "File > Replace: objects of the scene named like objects in the .loom file `path` take that object's geometry and modifier stack (their instances follow; transforms and hierarchy stay); `names` limits it to some of them; with `materials` they also take its material. One undo step. Without `path` the file dialog shows; with only `path` the list of matching objects shows (pass `materials` to replace them all at once)." { path: Option<String>, names: Option<Vec<String>>, materials: Option<bool> };
+    SetProjectFolder => "Set Project Folder", Loom, "File > Set Project Folder: make the project folders (scenes, import, export, renderoutput, sceneassets/images, autoback...) under `path`; the file dialogs start there (kept in the settings), and `scenes/startup.loom` there is the scene a new session and Reset start from. Without `path` the folder dialog shows." { path: Option<String> };
+    AssetTracking => "Asset Tracking", Loom, "File > Asset Tracking: every file the scene names (bitmaps, photometric webs, point caches, referenced scenes) with its status OK / Missing; opens the Asset Tracking dialog.";
+    RepathAsset => "Repath Asset", Loom, "Asset Tracking > Set Path: every reference to the file `from` names `to` instead (one undo step)." { from: String, to: String };
+    FindMissingFiles => "Find Missing Files", Loom, "Missing External Files > Browse: every missing file the scene names that is in `folder` (by file name) is repathed there." { folder: String };
     SelectTarget => "Select Target", MainUI, "Quad menu > Select Target: select the target of the selected target camera or light.";
     ViewportDefaultLights => "Viewport Default Lights", Loom, "Viewport Configuration > Lighting: the active viewport's default lighting uses `count` 1 or 2 lights." { count: u32 };
     CreateBiped => "Create Biped", Loom, "Systems > Biped: a biped standing with its feet at `position`, `height` tall (default 1.8 m in scene units), root named `name` (default Bip001, Bip002, ...), with optional Structure values. Only the centre of mass is selected; Figure Mode is on." { position: [f32; 3], height: Option<f32>, name: Option<String>, arms: Option<bool>, neck_links: Option<u32>, spine_links: Option<u32>, leg_links: Option<u32>, tail_links: Option<u32>, fingers: Option<u32>, finger_links: Option<u32>, toes: Option<u32>, toe_links: Option<u32> };

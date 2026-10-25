@@ -30,6 +30,7 @@ pub mod fbx_io;
 pub mod exchange;
 pub mod obj_io;
 pub mod geom_io;
+pub mod assets;
 pub mod max_io;
 pub mod rig;
 pub mod helpers;

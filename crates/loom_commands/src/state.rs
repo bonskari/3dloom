@@ -1704,6 +1704,10 @@ pub struct AppState {
     pub file_properties: crate::file::FileProperties,
     /// The scene's file (File > Save writes here); None = Untitled.
     pub file: Option<std::path::PathBuf>,
+    /// File > Set Project Folder: the project the file dialogs start in (a settings value).
+    pub project_folder: Option<std::path::PathBuf>,
+    /// File > Replace: the scene file chosen, while the object list is open.
+    pub replace_source: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
     pub mesh_dirty: bool,
     /// A Render waiting for the UI's renderer (the command layer has no GPU).
@@ -1922,6 +1926,8 @@ impl AppState {
             show_layers_toolbar: false,
             file_properties: Default::default(),
             file: None,
+            project_folder: None,
+            replace_source: None,
             mesh_dirty: false,
         }
     }

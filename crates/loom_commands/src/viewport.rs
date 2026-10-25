@@ -319,6 +319,18 @@ pub enum Dialog {
     AddDefaultLights,
     /// Sunlight Control Parameters > Get Location: the city list.
     GeographicLocation { sun: u64 },
+    /// File > Replace: the scene file to take objects from.
+    ReplaceFile,
+    /// File > Replace: the objects of `AppState::replace_source` to replace.
+    ReplaceObjects,
+    /// File > Set Project Folder: the folder chooser.
+    ProjectFolder,
+    /// File > Asset Tracking.
+    AssetTracking,
+    /// File > Open found files the scene names missing.
+    MissingFiles,
+    /// Edit > Select By > Layer.
+    SelectByLayer,
     /// General Parameters > Exclude...: the Exclude/Include dialog of a light.
     LightExclude { light: u64 },
     /// Rendered Frame Window > Save Image.
@@ -414,6 +426,10 @@ pub enum Dialog {
     FbxExportOptions,
     ObjImportOptions,
     ObjExportOptions,
+    /// Import / Export STL File and 3DS Import options (same pending file).
+    StlImportOptions,
+    StlExportOptions,
+    TdsImportOptions,
     /// Animation > Bone Tools...
     BoneTools,
     /// Skin > Weight Table.
