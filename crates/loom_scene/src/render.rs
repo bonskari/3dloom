@@ -90,6 +90,8 @@ pub struct RenderSettings {
     /// Blowup rectangle (kept apart from Region/Crop, as the reference does).
     pub blowup: [f32; 4],
     pub bevy: BevyRenderSettings,
+    /// Render To Texture.
+    pub bake: crate::bake::BakeSettings,
 }
 
 impl Default for RenderSettings {
@@ -110,6 +112,7 @@ impl Default for RenderSettings {
             region: [0.25, 0.25, 0.75, 0.75],
             blowup: [0.25, 0.25, 0.75, 0.75],
             bevy: BevyRenderSettings::default(),
+            bake: crate::bake::BakeSettings::default(),
         }
     }
 }

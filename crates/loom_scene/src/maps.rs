@@ -159,6 +159,7 @@ fn eval_at(map: &Map, m: [f32; 2], uv: [f32; 2], images: &Images) -> [f32; 4] {
             };
             rgb(component(0).lerp(component(1), t.clamp(0.0, 1.0)))
         }
+        MapType::NormalBump => rgb(component(0)),
     }
 }
 

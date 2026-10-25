@@ -23,7 +23,7 @@ fn rig(s: &mut Scene) -> (NodeId, NodeId, NodeId) {
 
 #[test]
 fn envelope_weights_fall_off_between_inner_and_outer() {
-    let e = Envelope { start: Vec3::ZERO, end: Vec3::X * 10.0, inner: [1.0, 1.0], outer: [3.0, 3.0], falloff: 0, abs_effect: 1.0, squash: 1.0 };
+    let e = Envelope { start: Vec3::ZERO, end: Vec3::X * 10.0, inner: [1.0, 1.0], outer: [3.0, 3.0], falloff: 0, abs_effect: 1.0, squash: 1.0, ..Default::default() };
     assert!((envelope_weight(&e, Vec3::new(5.0, 0.5, 0.0)) - 1.0).abs() < 1e-5);
     assert!((envelope_weight(&e, Vec3::new(5.0, 2.0, 0.0)) - 0.5).abs() < 1e-5);
     assert!(envelope_weight(&e, Vec3::new(5.0, 4.0, 0.0)).abs() < 1e-5);

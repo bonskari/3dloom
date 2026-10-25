@@ -93,7 +93,7 @@ impl CreateSession {
             CreateKind::Primitive(k) => (k, None),
             CreateKind::PatchGrid { .. } => (PrimitiveKind::Plane, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
-            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) => return None,
+            CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) | CreateKind::SunSystem { .. } => return None,
         };
         let label = match patch {
             Some(q) => format!("Create {}", if q { "Quad Patch" } else { "Tri Patch" }),
@@ -603,6 +603,41 @@ impl HelperSession {
     }
 }
 
+/// Systems > Sunlight / Daylight: the press puts the compass on the
+/// construction plane, the drag sets its radius (the sun's orbital scale
+/// follows at four radii), the release finishes. One undo entry.
+#[derive(Debug, Clone)]
+pub struct SunSession {
+    pub compass: NodeId,
+    pub sun: NodeId,
+    pub anchor: Vec3,
+    pub normal: Vec3,
+}
+
+impl SunSession {
+    pub fn begin(app: &mut LoomApp, daylight: bool, anchor: Vec3, normal: Vec3) -> Option<Self> {
+        app.state.undo.begin(if daylight { "Create Daylight" } else { "Create Sunlight" });
+        let r = app.dispatch(Command::CreateSunlight { daylight, position: anchor.to_array(), radius: 1.0, orbital_scale: None });
+        let ids = r.ok().and_then(|v| Some((NodeId(v["compass"].as_u64()?), NodeId(v["sun"].as_u64()?))));
+        let Some((compass, sun)) = ids else {
+            app.state.undo.end();
+            return None;
+        };
+        Some(Self { compass, sun, anchor, normal })
+    }
+
+    /// `at`: the pointer on the construction plane.
+    pub fn on_drag(&self, app: &mut LoomApp, at: Vec3) {
+        let r = (at - self.anchor).length().max(1e-3);
+        let _ = app.dispatch(Command::SetParameter { id: self.compass.0, name: "Radius".into(), value: r as f64 });
+        let _ = app.dispatch(Command::SunlightParameters { id: self.sun.0, location: None, latitude: None, longitude: None, time_zone: None, year: None, month: None, day: None, hour: None, minute: None, dst: None, north: None, orbital_scale: Some(r * 4.0) });
+    }
+
+    pub fn finish(self, app: &mut LoomApp) {
+        app.state.undo.end();
+    }
+}
+
 /// Systems > Biped, Drag Height: the press puts the feet on the construction
 /// plane and the drag sets the height; the whole creation is one undo entry.
 #[derive(Debug, Clone)]
@@ -620,20 +655,7 @@ impl BipedSession {
     pub fn begin(app: &mut LoomApp, feet: Vec3, normal: Vec3, pointer: egui::Pos2, units_per_px: f32) -> Option<Self> {
         app.state.undo.begin("Create Biped");
         let d = app.biped_defaults.clone();
-        let r = app.dispatch(Command::CreateBiped {
-            position: feet.to_array(),
-            height: Some(units_per_px.max(loom_scene::biped::MIN_HEIGHT)),
-            name: None,
-            arms: Some(d.arms.get()),
-            neck_links: Some(d.neck_links.get()),
-            spine_links: Some(d.spine_links.get()),
-            leg_links: Some(d.leg_links.get()),
-            tail_links: Some(d.tail_links.get()),
-            fingers: Some(d.fingers.get()),
-            finger_links: Some(d.finger_links.get()),
-            toes: Some(d.toes.get()),
-            toe_links: Some(d.toe_links.get()),
-        });
+        let r = app.dispatch(loom_commands::biped::create_command(feet, Some(units_per_px.max(loom_scene::biped::MIN_HEIGHT)), None, &d));
         let root = r.ok().and_then(|v| v["root"].as_u64()).map(NodeId);
         let Some(root) = root else {
             app.state.undo.end();
@@ -657,7 +679,7 @@ impl BipedSession {
         let h = self.height_at(hit, pointer).abs();
         if h > self.units_per_px && (h - self.height).abs() > 1e-4 {
             self.height = h;
-            let _ = app.dispatch(Command::SetBipedStructure { id: self.root.0, height: Some(h), arms: None, neck_links: None, spine_links: None, leg_links: None, tail_links: None, fingers: None, finger_links: None, toes: None, toe_links: None });
+            let _ = app.dispatch(loom_commands::biped::structure_command(self.root, serde_json::json!({ "height": h })));
         }
     }
 
@@ -666,7 +688,7 @@ impl BipedSession {
         self.on_drag(app, hit, pointer);
         if self.height <= self.units_per_px * 2.0 {
             let h = loom_commands::biped::default_height(&app.state);
-            let _ = app.dispatch(Command::SetBipedStructure { id: self.root.0, height: Some(h), arms: None, neck_links: None, spine_links: None, leg_links: None, tail_links: None, fingers: None, finger_links: None, toes: None, toe_links: None });
+            let _ = app.dispatch(loom_commands::biped::structure_command(self.root, serde_json::json!({ "height": h })));
         }
         app.state.undo.end();
     }

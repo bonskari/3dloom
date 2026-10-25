@@ -204,6 +204,7 @@ impl LoomApp {
                 "create": dbg(&self.create),
                 "camera_create": dbg(&self.camera_create),
                 "helper_create": dbg(&self.helper_create),
+                "sun_create": dbg(&self.sun_create),
                 "line": self.line.is_some(),
                 "bone_points": self.bone_points.len(),
                 "drag_select_start": self.drag_select_start.map(|q| [q.x, q.y]),
@@ -289,7 +290,7 @@ impl LoomApp {
                 }
             )*};
         }
-        clear!(manip_drag, shift_clone, camera_create, helper_create, line, alt_click, drag_select_start, quad_menu, view_animation, uv_drag, tv_drag);
+        clear!(manip_drag, shift_clone, camera_create, helper_create, sun_create, line, alt_click, drag_select_start, quad_menu, view_animation, uv_drag, tv_drag);
         if !self.region_points.is_empty() {
             self.region_points.clear();
             cleared.push("region_points");

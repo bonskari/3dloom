@@ -103,7 +103,7 @@ Edit Patch	OSM	in
 Patch Select	OSM	out	not in Loom yet (patches: Editable Patch, Edit Patch, Patch Grids only)
 PatchDeform	OSM	out	not in Loom yet (patches: Editable Patch, Edit Patch, Patch Grids only)
 Turn To Patch	OSM	out	not in Loom yet (patches: Editable Patch, Edit Patch, Patch Grids only)
-Skin Wrap Patch	OSM	out	not in Loom yet (patches: Editable Patch, Edit Patch, Patch Grids only)
+Skin Wrap Patch	OSM	in	
 Disp Approx	OSM	out	render-time displacement approximation (spec: never render)
 FFD Select	OSM	out	selects control points of FFD space warps (Loom has no space warps; its FFD modifiers select points at their own Control Points level)
 LS Mesh	OSM	out	lighting analysis (render; spec: never)
@@ -111,7 +111,7 @@ NSurf Sel	OSM	out	NURBS surfaces (no NURBS objects)
 SurfDeform	OSM	out	NURBS surfaces (no NURBS objects)
 Particle Face Creator	OSM	out	particles (spec: never)
 Particle Skinner	OSM	out	particles (spec: never)
-Projection	OSM	out	normal-map baking cages (render; spec: out)
+Projection	OSM	in	
 Projection Holder	OSM	out	holds Projection results (render; spec: out)
 Quadify Mesh	OSM	out	quad remeshing to a target size: not in the spec's modelling list
 Select By Channel	OSM	out	reads selections stored by the Channel Info utility, which is not in the spec

@@ -13,6 +13,21 @@ thread_local! {
     static ANIMATE: Cell<bool> = const { Cell::new(false) };
     static READS: Cell<u64> = const { Cell::new(0) };
     static TANGENTS: Cell<(TangentType, TangentType)> = const { Cell::new((TangentType::Auto, TangentType::Auto)) };
+    static RENDERING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether the scene evaluates for a render (Skin's Fast Updates shows a
+/// rigid preview in the viewports only).
+pub fn rendering() -> bool {
+    RENDERING.with(|c| c.get())
+}
+
+/// Runs `f` evaluating for a render.
+pub fn with_rendering<R>(f: impl FnOnce() -> R) -> R {
+    let was = RENDERING.with(|c| c.replace(true));
+    let r = f();
+    RENDERING.with(|c| c.set(was));
+    r
 }
 
 /// The frame parameters evaluate at.

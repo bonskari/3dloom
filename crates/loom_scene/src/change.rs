@@ -104,6 +104,11 @@ pub enum Change {
         before: Box<crate::environment::Environment>,
         after: Box<crate::environment::Environment>,
     },
+    /// The XRef records (File > XRef Scene / XRef Objects).
+    SetXrefs {
+        before: Vec<crate::scene::XrefRecord>,
+        after: Vec<crate::scene::XrefRecord>,
+    },
     Group(Vec<Change>),
 }
 
@@ -211,6 +216,10 @@ impl Change {
             Change::SetLayers { after, .. } => {
                 scene.layers = after.0.clone();
                 scene.current_layer = after.1;
+                Ok(())
+            }
+            Change::SetXrefs { after, .. } => {
+                scene.xrefs = after.clone();
                 Ok(())
             }
             Change::SetMaterials { after, .. } => {
@@ -350,6 +359,7 @@ impl Change {
             Change::SetTrackData { before: b, after: a } => Change::SetTrackData { before: a.clone(), after: b.clone() },
             Change::SetVisibility { id, before: b, after: a } => Change::SetVisibility { id: *id, before: a.clone(), after: b.clone() },
             Change::SetLayers { before: b, after: a } => Change::SetLayers { before: a.clone(), after: b.clone() },
+            Change::SetXrefs { before: b, after: a } => Change::SetXrefs { before: a.clone(), after: b.clone() },
             Change::SetStack { id, before: b, after: a } => Change::SetStack { id: *id, before: a.clone(), after: b.clone() },
             Change::SetIkChains { before: b, after: a } => Change::SetIkChains { before: a.clone(), after: b.clone() },
             Change::SetMaterials { before: b, after: a } => Change::SetMaterials { before: a.clone(), after: b.clone() },

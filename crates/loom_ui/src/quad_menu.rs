@@ -312,6 +312,13 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
     } else if s.selection.iter().any(|id| s.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Grid { .. }))) {
         // A selected grid object: tools 1 activates it or the home grid.
         (Some(Quadrant { title: "tools 1", items: vec![e("Activate Grid", Command::ActivateGridObject), e("Activate Home Grid", Command::ActivateHomeGrid), e("Align Grid to View", Command::AlignGridToView)] }), None)
+    } else if s.selection.iter().any(|id| match s.scene.node(*id).map(|n| &n.object) {
+        Some(loom_scene::ObjectKind::Camera { target, .. }) => target.is_some_and(|t| s.scene.node(t).is_some()),
+        Some(loom_scene::ObjectKind::Light(l)) => l.target.is_some_and(|t| s.scene.node(t).is_some()),
+        _ => false,
+    }) {
+        // A target camera or light: tools 1 selects its target.
+        (Some(Quadrant { title: "tools 1", items: vec![e("Select Target", Command::SelectTarget)] }), None)
     } else {
         (None, None)
     };
@@ -343,7 +350,17 @@ pub fn animation_quadrants(app: &LoomApp) -> Quadrants {
         e("Delete Selected Animation", Command::DeleteSelectedAnimation),
     ];
     let coordinates = loom_commands::CoordSystem::ALL.iter().map(|c| check(c.label(), s.coord_system == *c, Command::ReferenceCoordinateSystem { system: *c })).collect();
-    Quadrants { display: Quadrant { title: "set", items: set }, transform: Quadrant { title: "coordinates", items: coordinates }, tools1: None, tools2: None }
+    // Pose (upper left): freeze the current pose and return to it.
+    let pose = vec![
+        e("Transform to Zero", Command::TransformToZero),
+        e("Freeze Transform", Command::FreezeTransform),
+        e("Freeze Rotation", Command::FreezeRotation),
+        e("Rotation to Zero", Command::RotationToZero),
+        e("Freeze Position", Command::FreezePosition),
+        e("Position to Zero", Command::PositionToZero),
+    ];
+    let pose = if s.selection.is_empty() { None } else { Some(Quadrant { title: "pose", items: pose }) };
+    Quadrants { display: Quadrant { title: "set", items: set }, transform: Quadrant { title: "coordinates", items: coordinates }, tools1: pose, tools2: None }
 }
 
 /// Ctrl+Alt+right-click: the lighting and render quad. Render (upper

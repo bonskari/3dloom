@@ -5,6 +5,7 @@
 //! The scene's Environment (background, global lighting, exposure control,
 //! atmospheres, Depth of Field) applies to both; see [`environment`].
 
+pub mod bake;
 pub mod convert;
 pub mod effects;
 pub mod environment;
@@ -142,7 +143,7 @@ struct View {
 /// Slot of the offline Render camera.
 const RENDER_SLOT: u32 = u32::MAX;
 /// Slot of the camera that meters a view for Automatic / Linear exposure.
-const METER_SLOT: u32 = u32::MAX - 1;
+const METER_SLOT: u32 = u32::MAX - 2;
 /// Metering image size, and the stops it renders under so highlights do not clip.
 const METER_SIZE: u32 = 64;
 const METER_STOPS: f32 = 4.0;
@@ -265,6 +266,7 @@ impl BevyRenderer {
                 .set(RenderPlugin { render_creation: RenderCreation::Manual(resources), synchronous_pipeline_compilation: true, ..Default::default() }),
         );
         app.add_plugins(post::EnvPassPlugin);
+        app.add_plugins(bake::BakePlugin);
         while app.plugins_state() == PluginsState::Adding {
             bevy::tasks::tick_global_task_pools_on_main_thread();
         }
@@ -308,7 +310,7 @@ impl BevyRenderer {
                 DirectionalLight { illuminance: KEY_LIGHT_LUX, shadows_enabled: true, ..Default::default() },
                 Transform::from_translation(KEY_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
                 // The key light lights (and shadows) every layer.
-                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER]),
+                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER, bake::BAKE_KEY_LAYER]),
             ))
             .id()
     }
@@ -319,7 +321,7 @@ impl BevyRenderer {
             .spawn((
                 DirectionalLight { illuminance: FILL_LIGHT_LUX, shadows_enabled: false, ..Default::default() },
                 Transform::from_translation(FILL_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
-                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER]),
+                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER, bake::BAKE_KEY_LAYER]),
             ))
             .id()
     }
@@ -579,6 +581,10 @@ impl BevyRenderer {
 
     /// Exposure, the environment pass and volumetric fog on view `slot`'s camera.
     fn apply_view_env(&mut self, slot: u32) {
+        // Render To Texture bakes in texture space: no environment there.
+        if slot == bake::BAKE_SLOT {
+            return;
+        }
         let Some(v) = self.views.get(&slot) else { return };
         let entity = v.camera;
         let env = self.env_for(slot);
@@ -852,8 +858,12 @@ impl BevyRenderer {
         }
         if let Some(map) = s.bump_map.as_ref() {
             if let Some(img) = self.baked(map) {
-                let key = format!("bump:{}:{}", loom_scene::maps::texture_key(map), map.amount);
-                m.normal_map_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || loom_scene::maps::bump_to_normal(&img, map.amount / 100.0));
+                let key = format!("bump:{}:{}:{}{}", loom_scene::maps::texture_key(map), map.amount, map.params.flip_red, map.params.flip_green);
+                m.normal_map_texture = if map.kind == loom_scene::material::MapType::NormalBump {
+                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::normal_bump(&img, map.params.flip_red, map.params.flip_green))
+                } else {
+                    self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || loom_scene::maps::bump_to_normal(&img, map.amount / 100.0))
+                };
             }
         }
         if let Some(map) = s.specular_level_map.as_ref() {

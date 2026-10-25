@@ -59,6 +59,9 @@ pub struct Scene {
     /// Rendering > Environment and Effects (saved with the scene).
     #[serde(default)]
     pub environment: crate::environment::Environment,
+    /// File > XRef Scene / XRef Objects: the referenced files and the nodes they put here.
+    #[serde(default)]
+    pub xrefs: Vec<XrefRecord>,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -85,6 +88,20 @@ pub struct Scene {
     /// Nodes whose Link Constraint frame is being solved (cycle guard).
     #[serde(skip)]
     link_busy: std::cell::RefCell<std::collections::HashSet<NodeId>>,
+}
+
+/// One referenced file (File > XRef Scene / XRef Objects): its nodes here
+/// are copies of the file's objects that Update re-reads; they cannot be
+/// edited in this scene (an XRef Scene's cannot be selected either).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct XrefRecord {
+    pub path: String,
+    /// The whole scene (XRef Scene) rather than chosen objects.
+    pub scene: bool,
+    /// Update Automatically: re-read when the file changes on disk.
+    pub automatic: bool,
+    /// Each referenced object's name in the file and its node here.
+    pub nodes: Vec<(String, NodeId)>,
 }
 
 fn default_layers() -> Vec<Layer> {
@@ -121,6 +138,11 @@ impl Scene {
         self.node(id).and_then(|n| n.material).and_then(|m| crate::material::surfaces(&self.materials, m))
     }
 
+    /// As `node_surfaces`, a Shell material resolving to the material `view` picks.
+    pub fn node_surfaces_for(&self, id: NodeId, view: crate::material::ShellView) -> Option<crate::material::Surfaces> {
+        self.node(id).and_then(|n| n.material).and_then(|m| crate::material::surfaces_for(&self.materials, m, view))
+    }
+
     pub fn new() -> Self {
         Self {
             nodes: BTreeMap::new(),
@@ -136,6 +158,7 @@ impl Scene {
             material_editor: Default::default(),
             render: Default::default(),
             environment: Default::default(),
+            xrefs: Vec::new(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             eval_in_progress: Default::default(),
@@ -196,7 +219,8 @@ impl Scene {
     /// The cache key of a node: its version plus the versions of the nodes
     /// its instanced modifiers point at.
     fn eval_key(&self, id: NodeId) -> u64 {
-        self.eval_key_depth(id, 0)
+        // A render evaluates apart from the viewports (Skin's Fast Updates).
+        self.eval_key_depth(id, 0) ^ if crate::anim::rendering() { 0x9e37_79b9_7f4a_7c15 } else { 0 }
     }
 
     /// A referenced node's whole evaluation key folds in (a Skin Wrap base
@@ -364,8 +388,15 @@ impl Scene {
             }
         };
         let self_world_at = |t: f32| -> glam::Mat4 { self.at_time(t, || self.object_matrix(id)) };
-        let ctx = EvalCtx { object_world, object_inverse: object_world.inverse(), lookup: Some(&lookup), shape_lookup: Some(&shape_lookup), eval_shape_lookup: Some(&eval_shape_lookup), world_lookup: Some(&world_lookup), eval_lookup: Some(&eval_lookup), self_world_at: Some(&self_world_at), camera_fov: Some(&camera_fov) };
-        let mut value = StackValue { mesh: node.map(|n| n.object.display_output()).unwrap_or_default(), selection: None, shape: node.and_then(|n| n.object.shape()), shape_selection: None, warnings: Vec::new(), patch: node.and_then(|n| n.object.patch_mesh()) };
+        let bone_squashes = |other: NodeId| -> bool { matches!(self.nodes.get(&other).map(|n| &n.object), Some(crate::node::ObjectKind::Bone { stretch, .. }) if stretch.get() == 2) };
+        let eval_patch_lookup = |other: NodeId| -> Option<(glam::Mat4, loom_mesh::patch::PatchMesh)> {
+            if !self.nodes.contains_key(&other) || self.eval_in_progress.borrow().contains(&other) {
+                return None;
+            }
+            Some((self.object_matrix(other), self.evaluated(other, None).value.patch.clone()?))
+        };
+        let ctx = EvalCtx { object_world, object_inverse: object_world.inverse(), lookup: Some(&lookup), shape_lookup: Some(&shape_lookup), eval_shape_lookup: Some(&eval_shape_lookup), world_lookup: Some(&world_lookup), eval_lookup: Some(&eval_lookup), self_world_at: Some(&self_world_at), camera_fov: Some(&camera_fov), bone_squashes: Some(&bone_squashes), eval_patch_lookup: Some(&eval_patch_lookup) };
+        let mut value = StackValue { mesh: node.map(|n| n.object.display_output()).unwrap_or_default(), selection: None, shape: node.and_then(|n| n.object.shape()), shape_selection: None, warnings: Vec::new(), patch: node.and_then(|n| n.object.patch_mesh()), patch_steps: node.and_then(|n| n.object.patch_steps()) };
         let mut warnings = Vec::new();
         if let Some(n) = node {
             // An Editable Poly at a sub-object level passes its selection up.
@@ -412,9 +443,10 @@ impl Scene {
                     value.shape = None;
                     value.shape_selection = None;
                 }
-                // Patches flow up from Surface and Edit Patch only.
-                if !matches!(modifier, crate::modifier::Modifier::Surface { .. } | crate::modifier::Modifier::EditPatch { .. }) {
+                // Patches flow up from Surface, Edit Patch and Skin (which moves the lattice) only.
+                if !matches!(modifier, crate::modifier::Modifier::Surface { .. } | crate::modifier::Modifier::EditPatch { .. } | crate::modifier::Modifier::Skin(_)) {
                     value.patch = None;
+                    value.patch_steps = None;
                 }
             }
         }

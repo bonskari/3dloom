@@ -295,6 +295,10 @@ pub enum PickMode {
     WorkingPivotSurface,
     /// Protractor > Pick Object 1 / 2: the clicked object.
     ProtractorObject(u8),
+    /// Biped Structure > Xtras > Pick Parent: the clicked part becomes the tail's parent.
+    BipedXtraParent,
+    /// Biped Footstep Creation > Create Footsteps (append): each click places a footstep.
+    BipedFootstep,
     /// Tools > Measure Distance: first and second point.
     MeasureDistanceA,
     MeasureDistanceB,
@@ -304,6 +308,12 @@ pub enum PickMode {
     PlaceHighlight,
     /// Spacing Tool > Pick Path: the clicked shape is the path.
     SpacingPath,
+    /// Skin Morph > Pick Bone: each clicked bone joins the list.
+    SkinMorphBone,
+    /// Skin Morph > External Mesh: the clicked object becomes the current morph's target.
+    SkinMorphExternal,
+    /// Skin Wrap > Add: each clicked object becomes a control object.
+    SkinWrapControl,
 }
 
 /// Paint Deformation brushes.
@@ -1362,27 +1372,48 @@ pub struct ViewState {
 /// Simple snapshot stack for viewport undo (Shift+Z / Shift+Y).
 #[derive(Debug, Default, Clone)]
 pub struct ViewUndo {
-    undo: Vec<ViewState>,
-    redo: Vec<ViewState>,
+    /// Each view before a change, with the change's name ("Zoom", "Pan"...).
+    undo: Vec<(ViewState, String)>,
+    redo: Vec<(ViewState, String)>,
 }
+
+/// View changes kept per viewport (the reference keeps the last 20).
+pub const VIEW_UNDO_DEPTH: usize = 20;
 
 impl ViewUndo {
     pub fn record(&mut self, before: ViewState) {
-        self.undo.push(before);
-        if self.undo.len() > 100 {
+        self.record_as(before, "Change");
+    }
+    /// Records the view before the change named `what` (Undo View `what`).
+    pub fn record_as(&mut self, before: ViewState, what: &str) {
+        self.undo.push((before, what.to_owned()));
+        if self.undo.len() > VIEW_UNDO_DEPTH {
             self.undo.remove(0);
         }
         self.redo.clear();
     }
     pub fn undo(&mut self, current: ViewState) -> Option<ViewState> {
-        let prev = self.undo.pop()?;
-        self.redo.push(current);
+        let (prev, what) = self.undo.pop()?;
+        self.redo.push((current, what));
         Some(prev)
     }
     pub fn redo(&mut self, current: ViewState) -> Option<ViewState> {
-        let next = self.redo.pop()?;
-        self.undo.push(current);
+        let (next, what) = self.redo.pop()?;
+        self.undo.push((current, what));
         Some(next)
+    }
+    /// The name of the change Undo View Change would undo.
+    pub fn undo_label(&self) -> Option<&str> {
+        self.undo.last().map(|u| u.1.as_str())
+    }
+    pub fn redo_label(&self) -> Option<&str> {
+        self.redo.last().map(|u| u.1.as_str())
+    }
+    pub fn len(&self) -> usize {
+        self.undo.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.undo.is_empty()
     }
 }
 
@@ -1544,6 +1575,8 @@ pub struct AppState {
     pub poly_drag: Option<PolyDrag>,
     /// The last geometry operation, for Repeat Last Operation (;).
     pub last_poly_op: Option<crate::command::Command>,
+    /// Biped Xtras > Pick Parent: the biped, the tail and Reorient to Parent.
+    pub biped_xtra_pick: Option<(NodeId, String, bool)>,
     /// Target Weld / Edit Triangulation first pick.
     pub pick_source: Option<(NodeId, u32)>,
     /// Create (polygon level): vertices picked so far.
@@ -1668,9 +1701,13 @@ pub struct AppState {
     pub skin_clipboard_weights: Vec<(Vec3, Vec<(NodeId, f32)>)>,
     /// Skin > Gizmos: the current gizmo index.
     pub skin_gizmo: Option<usize>,
+    /// Skin: cross section and lattice selections, pick modes, buffers, the Load Envelopes file.
+    pub skin_ui: crate::skin::SkinUi,
     /// Morpher > Channel List: the current channel; Skin Morph: the current morph.
     pub morph_channel: usize,
     pub skin_morph_current: Option<usize>,
+    /// Skin Morph list: the highlighted bone (Create Morph acts on it).
+    pub skin_morph_bone: Option<NodeId>,
     /// Systems > Bones > IK Chain Assignment: new chains get an HI solver.
     pub bones_ik_chain: bool,
     pub current_frame: i32,
@@ -1694,6 +1731,12 @@ pub struct AppState {
     pub seam_point: Option<u32>,
     /// Merge dialog: the chosen file and its object names.
     pub merge_pending: Option<(std::path::PathBuf, Vec<String>)>,
+    /// The Merge list is choosing objects for File > XRef Objects, not Merge.
+    pub merge_as_xref: bool,
+    /// When each referenced (XRef) file was last read: its modification time.
+    pub xref_seen: std::collections::BTreeMap<String, std::time::SystemTime>,
+    /// When the XRef files were last checked for changes (`xref::tick`).
+    pub xref_checked: Option<std::time::Instant>,
     /// FBX / OBJ import and export options (the format dialogs; saved in the settings).
     pub exchange: crate::exchange::ExchangeOptions,
     /// The file an FBX / OBJ options dialog is open for, and whether it exports the selection only.
@@ -1704,10 +1747,20 @@ pub struct AppState {
     pub file_properties: crate::file::FileProperties,
     /// The scene's file (File > Save writes here); None = Untitled.
     pub file: Option<std::path::PathBuf>,
+    /// File > Set Project Folder: the project the file dialogs start in (a settings value).
+    pub project_folder: Option<std::path::PathBuf>,
+    /// Views > Update During Spinner Drag (default on).
+    pub update_during_spinner_drag: bool,
+    /// File > Replace: the scene file chosen, while the object list is open.
+    pub replace_source: Option<std::path::PathBuf>,
     /// Set by commands that changed geometry; the renderer clears it.
     pub mesh_dirty: bool,
     /// A Render waiting for the UI's renderer (the command layer has no GPU).
     pub pending_render: Option<RenderRequest>,
+    /// Render To Texture's lit elements, waiting for the UI's renderer.
+    pub pending_bake: Option<crate::bake::BakeRequest>,
+    /// The Render To Texture dialog is open (modeless, beside other dialogs).
+    pub render_to_texture_open: bool,
     /// The Rendered Frame Window, its image and the render in progress.
     pub rendered: crate::render::RenderedFrame,
     /// The Environment and Effects dialog (open panel, exposure preview).
@@ -1843,6 +1896,7 @@ impl AppState {
             full_interactivity: true,
             preserve_uvs: false,
             pick_point_a: None,
+            biped_xtra_pick: None,
             paint_deform: None,
             branches: false,
             soft_cache: Default::default(),
@@ -1897,7 +1951,7 @@ impl AppState {
             skin_paste_tolerance: 0.1,
             skin_paint: false,
             skin_painter: crate::skin::Painter::default(),
-            skin_filter_vertices: true,
+            skin_filter_vertices: false,
             skin_filter_envelopes: true,
             skin_filter_cross_sections: true,
             skin_backface_cull: false,
@@ -1905,8 +1959,10 @@ impl AppState {
             skin_clipboard_envelope: None,
             skin_clipboard_weights: Vec::new(),
             skin_gizmo: None,
+            skin_ui: crate::skin::SkinUi::default(),
             morph_channel: 0,
             skin_morph_current: None,
+            skin_morph_bone: None,
             bones_ik_chain: false,
             current_frame: 0,
             frame_range: (0, 100),
@@ -1918,16 +1974,24 @@ impl AppState {
             exit_requested: false,
             uv_editor: UvEditor::default(),
             pending_render: None,
+            pending_bake: None,
+            render_to_texture_open: false,
             rendered: Default::default(),
             environment_ui: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,
+            merge_as_xref: false,
+            xref_seen: Default::default(),
+            xref_checked: None,
             exchange: Default::default(),
             exchange_pending: None,
             show_layers_toolbar: false,
             file_properties: Default::default(),
             file: None,
+            project_folder: None,
+            update_during_spinner_drag: true,
+            replace_source: None,
             mesh_dirty: false,
         }
     }
@@ -1952,8 +2016,13 @@ impl AppState {
 
     /// Records the active viewport's state for Shift+Z.
     pub fn record_view(&mut self) {
+        self.record_view_as("Change");
+    }
+
+    /// Records the active view before the change named `what` ("Zoom", "Pan", "Orbit"...).
+    pub fn record_view_as(&mut self, what: &str) {
         let before = self.view_state();
-        self.active_mut().view_undo.record(before);
+        self.active_mut().view_undo.record_as(before, what);
     }
 
     /// A scene length in the display units (Units Setup), e.g. "2.54m".
@@ -2356,6 +2425,9 @@ impl AppState {
         }
         if self.edit_working_pivot {
             return self.working_pivot.origin;
+        }
+        if let Some(p) = crate::skin::pivot(self) {
+            return p;
         }
         self.selection_bounds()
             .map(|(a, b)| (a + b) * 0.5)

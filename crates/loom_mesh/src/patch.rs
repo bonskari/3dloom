@@ -150,6 +150,20 @@ impl PatchMesh {
         bez(rows, v)
     }
 
+    /// A point of patch `p` at (u, v): a quad's tensor-product point, a tri's
+    /// point with weights (u, v, 1 − u − v) towards its corners 0, 1, 2.
+    pub fn surface_point(&self, p: usize, u: f32, v: f32) -> Option<Vec3> {
+        let pa = self.patches.get(p)?;
+        if pa.v.iter().any(|i| *i as usize >= self.verts.len()) {
+            return None;
+        }
+        match pa.v.len() {
+            4 => Some(self.quad_point(pa, u, v)),
+            3 => Some(self.tri_net(pa).point(u, v, (1.0 - u - v).max(0.0))),
+            _ => None,
+        }
+    }
+
     /// The normal at a patch's first corner direction (flat estimate from the corners).
     pub fn patch_normal(&self, p: usize) -> Vec3 {
         let Some(pa) = self.patches.get(p) else { return Vec3::Z };

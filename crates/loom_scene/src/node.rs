@@ -1034,6 +1034,15 @@ impl ObjectKind {
         }
     }
 
+    /// The tessellation of a patch object: (View Steps, Show Interior Edges).
+    pub fn patch_steps(&self) -> Option<(u32, bool)> {
+        match self {
+            Self::EditablePatch(p) => Some((p.steps.get(), p.show_interior)),
+            Self::QuadPatch { .. } | Self::TriPatch { .. } => Some((Self::PATCH_GRID_STEPS, false)),
+            _ => None,
+        }
+    }
+
     pub fn patch(&self) -> Option<&PatchObject> {
         match self {
             Self::EditablePatch(p) => Some(p),
@@ -1366,8 +1375,11 @@ impl ObjectKind {
             Self::Grid { length, width, spacing, color, plane } => vec![("Length", f(length)), ("Width", f(width)), ("Grid", f(spacing)), ("Active Color", i(color)), ("Display", i(plane))],
             Self::IkGoal { .. } => Vec::new(),
             Self::Biped(bs) => {
-                let mut v = vec![("Arms", b(&bs.arms))];
-                v.extend(crate::biped::BipedStructure::LINKS.iter().map(|(n, _, _)| (*n, Int(bs.count(n).unwrap_or(0)))));
+                use crate::biped::BipedStructure as S;
+                let mut v = vec![("Body Type", Int(bs.body_type.index()))];
+                v.extend(S::FLAGS.iter().map(|n| (*n, ParamValue::Bool(bs.flag(n).unwrap_or(false)))));
+                v.extend(S::LINKS.iter().chain(S::TWISTS.iter()).map(|(n, _, _)| (*n, Int(bs.count(n).unwrap_or(0)))));
+                v.push(("Ankle Attach", f(&bs.ankle_attach)));
                 v.push(("Height", f(&bs.height)));
                 v
             }
@@ -1893,6 +1905,9 @@ pub struct NodeProps {
     pub render: RenderProps,
     /// Object Properties > User Defined: free text kept with the scene.
     pub user_props: String,
+    /// Skin Wrap > Bake Control Verts: control-vertex settings kept on a control object.
+    #[serde(default)]
+    pub skin_wrap_bake: Option<Box<crate::morph::SkinWrapBake>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1956,6 +1971,9 @@ pub struct Node {
     /// Object Properties > User Defined.
     #[serde(default)]
     pub user_props: String,
+    /// Skin Wrap > Bake Control Verts.
+    #[serde(default)]
+    pub skin_wrap_bake: Option<Box<crate::morph::SkinWrapBake>>,
 }
 
 impl Node {
@@ -2011,6 +2029,7 @@ impl PartialEq for Node {
             && self.visibility == o.visibility
             && self.render == o.render
             && self.user_props == o.user_props
+            && self.skin_wrap_bake == o.skin_wrap_bake
     }
 }
 
@@ -2142,7 +2161,7 @@ impl Node {
     }
 
     pub fn props(&self) -> NodeProps {
-        NodeProps { object_offset: self.object_offset.clone(), locks: self.locks, inherit: self.inherit, display: self.display.clone(), instance_of: self.instance_of, render: self.render.clone(), user_props: self.user_props.clone() }
+        NodeProps { object_offset: self.object_offset.clone(), locks: self.locks, inherit: self.inherit, display: self.display.clone(), instance_of: self.instance_of, render: self.render.clone(), user_props: self.user_props.clone(), skin_wrap_bake: self.skin_wrap_bake.clone() }
     }
 
     pub fn set_props(&mut self, p: NodeProps) {
@@ -2153,6 +2172,7 @@ impl Node {
         self.instance_of = p.instance_of;
         self.render = p.render;
         self.user_props = p.user_props;
+        self.skin_wrap_bake = p.skin_wrap_bake;
     }
 }
 
@@ -2185,6 +2205,7 @@ impl Node {
             visibility: None,
             render: RenderProps::default(),
             user_props: String::new(),
+            skin_wrap_bake: None,
             version: 0,
             geom_version: 0,
             instance_of: None,

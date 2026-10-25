@@ -240,13 +240,20 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             parameters(ui, app);
         }
         Category::Lights => {
-            egui::ComboBox::from_id_salt("create_light_class").selected_text("Standard").show_ui(ui, |ui| {
-                let _ = ui.selectable_label(true, "Standard");
+            let photometric = app.photometric_lights;
+            egui::ComboBox::from_id_salt("create_light_class").selected_text(if photometric { "Photometric" } else { "Standard" }).show_ui(ui, |ui| {
+                for (label, p) in [("Photometric", true), ("Standard", false)] {
+                    if ui.selectable_label(photometric == p, label).clicked() && photometric != p {
+                        app.photometric_lights = p;
+                        app.start_create(None);
+                    }
+                }
             });
+            let kinds: &[loom_commands::light::LightKind] = if photometric { &loom_commands::light::LightKind::PHOTOMETRIC } else { &loom_commands::light::LightKind::ALL };
             rollout(ui, "Object Type", true, |ui| {
                 autogrid_and_pin(ui, app);
                 egui::Grid::new("light_type").num_columns(2).show(ui, |ui| {
-                    for (i, kind) in loom_commands::light::LightKind::ALL.iter().enumerate() {
+                    for (i, kind) in kinds.iter().enumerate() {
                         let on = app.create_kind == Some(CreateKind::Light(*kind));
                         if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, kind.label())).clicked() {
                             // Select Object first: it ends any create mode, then this one starts.
@@ -292,6 +299,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     let on = app.create_kind == Some(CreateKind::Biped);
                     if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, "Biped")).clicked() {
                         app.start_create((!on).then_some(CreateKind::Biped));
+                    }
+                });
+                ui.horizontal(|ui| {
+                    for (label, daylight) in [("Sunlight", false), ("Daylight", true)] {
+                        let kind = CreateKind::SunSystem { daylight };
+                        let on = app.create_kind == Some(kind);
+                        if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, label)).clicked() {
+                            app.start_create((!on).then_some(kind));
+                        }
                     }
                 });
             });
@@ -661,13 +677,8 @@ fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         ui.separator();
         ui.horizontal(|ui| {
             ui.label("Target Distance:");
-            if has_target {
-                // A Target camera shows the distance to its target.
-                let (factor, suffix) = app.unit_display();
-                ui.label(format!("{:.*}{}", app.state.prefs.spinner_precision, distance as f64 * factor, suffix));
-            } else {
-                length(ui, app, "Target Distance", distance);
-            }
+            // A Target camera's spinner moves its target along the line of sight.
+            length(ui, app, "Target Distance", distance);
         });
     });
 }

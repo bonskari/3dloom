@@ -319,6 +319,22 @@ pub enum Dialog {
     RenderSetup,
     /// Tools > Light Lister.
     LightLister,
+    /// Views > Add Default Lights to Scene.
+    AddDefaultLights,
+    /// Sunlight Control Parameters > Get Location: the city list.
+    GeographicLocation { sun: u64 },
+    /// File > Replace: the scene file to take objects from.
+    ReplaceFile,
+    /// File > Replace: the objects of `AppState::replace_source` to replace.
+    ReplaceObjects,
+    /// File > Set Project Folder: the folder chooser.
+    ProjectFolder,
+    /// File > Asset Tracking.
+    AssetTracking,
+    /// File > Open found files the scene names missing.
+    MissingFiles,
+    /// Edit > Select By > Layer.
+    SelectByLayer,
     /// General Parameters > Exclude...: the Exclude/Include dialog of a light.
     LightExclude { light: u64 },
     /// Rendered Frame Window > Save Image.
@@ -410,12 +426,20 @@ pub enum Dialog {
     MergeFile,
     /// File > Merge: the file's object list (`AppState::merge_pending`).
     MergeObjects,
+    /// File > XRef Objects: pick the file; then the object list.
+    XrefObjectsFile,
+    /// File > XRef Scene: pick the file.
+    XrefSceneFile,
     /// FBX Importer / Exporter and OBJ Importer / Exporter options for the
     /// file in `AppState::exchange_pending` (after Import / Export picks it).
     FbxImportOptions,
     FbxExportOptions,
     ObjImportOptions,
     ObjExportOptions,
+    /// Import / Export STL File and 3DS Import options (same pending file).
+    StlImportOptions,
+    StlExportOptions,
+    TdsImportOptions,
     /// Animation > Bone Tools...
     BoneTools,
     /// Skin > Weight Table.
@@ -424,6 +448,15 @@ pub enum Dialog {
     WeightTool,
     /// Skin > Weight Properties > Painter Options.
     PainterOptions,
+    /// Skin > Envelope Properties > Paste to Multiple Bones: pick the bones.
+    PasteToMultipleBones,
+    /// Skin > Advanced Parameters > Save / Load: the envelope file (.env).
+    SkinSaveEnvelopes,
+    SkinLoadEnvelopes,
+    /// Skin > Load Envelopes: match the file's bones to the current ones.
+    LoadEnvelopes,
+    /// Skin > Gizmo Parameters > Edit Angle Keys Curves.
+    AngleKeysCurves,
     /// Display > Show Map in Viewport > Bitmap: pick the image file.
     PickTexture,
     /// UVW Map > Bitmap Fit: pick the image whose aspect the gizmo takes.
@@ -438,6 +471,11 @@ pub enum Dialog {
     NormalMapping,
     UnfoldMapping,
     PeltMap,
+    /// Biped > Footstep Creation > Create Multiple Footsteps.
+    BipedMultipleFootsteps,
+    /// Biped rollout > Save File / Load File of a figure (.fig) in Figure Mode.
+    BipedSaveFig,
+    BipedLoadFig,
     /// Unwrap UVW > Save / Load (.uvw) file pickers.
     SaveUvw,
     LoadUvw,
