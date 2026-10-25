@@ -23,10 +23,12 @@ fn eight_opens_the_dialog_and_its_controls_edit_the_environment() {
 
     // Atmosphere > Add... > Fog > OK.
     click_text(&mut h, "Add...", win, 0.0);
+    // Apart in time, so the clicks are not a double click (which adds at once).
+    h.frames(12);
     let add = window(&h, "Add Atmospheric Effect");
     click_text(&mut h, "Fog", add, 0.0);
+    h.frames(12);
     let add = window(&h, "Add Atmospheric Effect");
-    eprintln!("DEBUG add {add:?} oks {:?} fogs {:?} cancel {:?}", h.text_rects("OK"), h.text_rects("Fog"), h.text_rects("Cancel"));
     click_text(&mut h, "OK", add, 0.0);
     let e = &h.app.state.scene.environment;
     assert_eq!(e.atmospheres.len(), 1);
@@ -50,8 +52,10 @@ fn eight_opens_the_dialog_and_its_controls_edit_the_environment() {
     assert_eq!(h.app.state.environment_ui.open, Some(EnvironmentTab::Effects));
     let win = window(&h, TITLE);
     click_text(&mut h, "Add...", win, 0.0);
+    h.frames(12);
     let add = window(&h, "Add Effect");
     click_text(&mut h, "Film Grain", add, 0.0);
+    h.frames(12);
     let add = window(&h, "Add Effect");
     click_text(&mut h, "OK", add, 0.0);
     let fx = &h.app.state.scene.environment.effects;
