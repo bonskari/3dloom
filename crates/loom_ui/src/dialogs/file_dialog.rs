@@ -350,6 +350,9 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
             }
         };
     }
+    if dialog==Dialog::ImportAnimationClip&&path.extension().is_some_and(|e|e.eq_ignore_ascii_case("fbx")) {
+        return match crate::async_import::start_animation(app,path){Ok(())=>true,Err(e)=>{app.state.status_prompt=e;false}};
+    }
     match command(dialog, &path).map(|cmd| app.dispatch(cmd)) {
         Some(Ok(result)) => {
             if dialog == Dialog::ImportAnimationClip {

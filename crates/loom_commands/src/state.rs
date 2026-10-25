@@ -790,6 +790,9 @@ pub const KEEP_CREATING_DEFAULT: bool = false;
 pub struct Prefs {
     /// Motion > Kimodo > Settings; local user configuration, never scene data.
     pub kimodo_api_url: String,
+    /// Local viewport preview limits; source textures remain unchanged.
+    pub viewport_texture_max_size:u32,
+    pub viewport_texture_budget_mb:u32,
     pub gizmos: GizmoPrefs,
     /// Preferences > General > Spinners > Use Snap (Spinner Snap Toggle).
     pub spinner_snap: bool,
@@ -842,6 +845,8 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             kimodo_api_url: String::new(),
+            viewport_texture_max_size:2048,
+            viewport_texture_budget_mb:256,
             gizmos: GizmoPrefs::default(),
             spinner_snap: false,
             spinner_snap_value: 1.0,
@@ -868,19 +873,21 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 32] = [
+    pub const NAMES: [&'static str; 34] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
         "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
-        "Grid Nudge Distance",
+        "Grid Nudge Distance", "Viewport Texture Max Size", "Viewport Texture Budget MB",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
         let b = |v: bool| if v { 1.0 } else { 0.0 };
         Some(match name {
+            "Viewport Texture Max Size" => self.viewport_texture_max_size as f64,
+            "Viewport Texture Budget MB" => self.viewport_texture_budget_mb as f64,
             "Scene Undo Levels" => self.undo_levels as f64,
             "Reference Coordinate System Constant" => b(self.ref_coord_constant),
             "Auto Window/Crossing by Direction" => b(self.auto_window_crossing),
@@ -919,9 +926,12 @@ impl Prefs {
     }
 
     pub fn set(&mut self, name: &str, v: f64) -> Result<(), String> {
+        if matches!(name,"Viewport Texture Max Size"|"Viewport Texture Budget MB") && !v.is_finite(){return Err("viewport texture limits must be finite".into());}
         let on = v != 0.0;
         let f = v as f32;
         match name {
+            "Viewport Texture Max Size" => self.viewport_texture_max_size=v.clamp(128.,8192.) as u32,
+            "Viewport Texture Budget MB" => self.viewport_texture_budget_mb=v.clamp(16.,2048.) as u32,
             "Scene Undo Levels" => self.undo_levels = (v.max(1.0)) as usize,
             "Reference Coordinate System Constant" => self.ref_coord_constant = on,
             "Auto Window/Crossing by Direction" => self.auto_window_crossing = on,
@@ -1745,6 +1755,7 @@ pub struct AppState {
     pub exchange: crate::exchange::ExchangeOptions,
     /// The file an FBX / OBJ options dialog is open for, and whether it exports the selection only.
     pub exchange_pending: Option<(std::path::PathBuf, bool)>,
+    pub prepared_fbx_import: Option<crate::fbx_io::PreparedFbxImport>,
     /// Customize > Show UI > Show Layers Toolbar.
     pub show_layers_toolbar: bool,
     /// File > File Properties and Summary Info > Description (saved in the scene file).
@@ -1985,6 +1996,7 @@ impl AppState {
             xref_checked: None,
             exchange: Default::default(),
             exchange_pending: None,
+            prepared_fbx_import: None,
             show_layers_toolbar: false,
             file_properties: Default::default(),
             file: None,

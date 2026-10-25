@@ -122,3 +122,21 @@ fn rig_timeline_moves_one_ik_fk_key_with_one_undo() {
         20.
     );
 }
+
+#[test]
+fn second_character_can_be_rigged_and_chain_rows_are_editable() {
+    let mut h=Harness::new();h.screen.max.y=3000.;let first=character(&mut h);
+    h.cmd(Command::CreateLoomRig{root:first.0,mapping:None});
+    let second=character(&mut h);h.app.panel_tab=crate::Tab::Motion;h.frames(3);
+    h.click_text_anywhere("Create Character Rig");h.frames(2);
+    assert!(h.has(egui::accesskit::Role::Button,"Create LoomRig"));
+    h.click_text_anywhere("Characterization");h.frames(2);
+    assert!(h.has(egui::accesskit::Role::Button,"Add limb chain"));
+    h.click_text_anywhere("Add limb chain");h.frames(2);
+    assert_eq!(h.widgets.iter().filter(|(role,text,_)|*role==egui::accesskit::Role::Button&&text=="Remove chain").count(),5);
+    let remove=h.widgets.iter().filter(|(role,text,_)|*role==egui::accesskit::Role::Button&&text=="Remove chain").last().unwrap().2;
+    h.click(remove.center());h.frames(2);
+    h.click_text_anywhere("Create LoomRig");h.frames(2);
+    assert_eq!(h.app.state.scene.loom_rigs.len(),2);
+    assert_eq!(h.app.state.scene.loom_rigs[1].mapping.root,second);
+}

@@ -21,6 +21,8 @@ mod biped;
 mod kimodo;
 mod clips;
 mod loomrig;
+mod preview_budget;
+mod material_previews;
 mod lightcam2;
 mod bake;
 
@@ -3871,6 +3873,12 @@ fn fbx_import_options_cancel_and_cameras_off() {
     click_option(&mut h, "Cameras", "fbx_import_options");
     assert!(!h.app.state.exchange.fbx_import.cameras);
     click_option(&mut h, "OK", "fbx_import_options");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.async_fbx.is_pending() {
+        assert!(std::time::Instant::now() < deadline, "{}", h.app.state.status_prompt);
+        h.run(Vec::new());
+        std::thread::yield_now();
+    }
     let kinds: Vec<bool> = h.app.state.scene.nodes().map(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).collect();
     assert_eq!(kinds, vec![false], "the box only");
 }

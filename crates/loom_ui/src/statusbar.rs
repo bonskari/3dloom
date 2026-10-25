@@ -90,6 +90,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     coordinate_fields(ui, app);
                     ui.separator();
                     ui.label(format!("Grid = {}", app.state.home_grid.spacing));
+                    let pending=app.texture_previews.pending_count();
+                    if pending>0{ui.spinner();ui.small(format!("Loading {pending} texture previews"));}
                 });
                 ui.horizontal(|ui| {
                     let s = &app.state;

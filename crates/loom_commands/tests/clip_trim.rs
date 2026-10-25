@@ -121,3 +121,18 @@ fn invalid_and_unsupported_trims_leave_scene_and_history_unchanged() {
     .is_err());
     assert_eq!(serde_json::to_value(&s.scene).unwrap(), before);
 }
+
+#[test]
+fn trim_one_character_clip_preserves_neighbor_motion_on_shared_bones() {
+    let mut s=scene();let node=s.scene.animation_clips[0].nodes[0];
+    let keys=s.scene.node_mut(node).unwrap().transform.position.keys_mut().unwrap();
+    for (time,value) in [(20.,100.),(30.,200.)]{keys.tracks[0].set_key(time,value,(TangentType::Linear,TangentType::Linear));}
+    s.scene.animation_clips.push(AnimationClip{id:2,name:"Next motion".into(),nodes:vec![node],start:20.,end:30.});
+    let before=serde_json::to_value(&s.scene).unwrap();
+    let poses:Vec<_>=[2.,5.,8.,20.,25.,30.].into_iter().map(|t|s.scene.at_time(t,||s.scene.world_matrix(node))).collect();
+    execute(&mut s,Command::TrimAnimationClip{id:1,start:2.,end:8.}).unwrap();
+    for (t,expected) in [2.,5.,8.,20.,25.,30.].into_iter().zip(poses){assert!(s.scene.at_time(t,||s.scene.world_matrix(node)).abs_diff_eq(expected,1e-5));}
+    assert_eq!(s.scene.node(node).unwrap().transform.position.keys().unwrap().tracks[0].keys.iter().map(|k|k.time).collect::<Vec<_>>(),vec![2.,5.,8.,20.,30.]);
+    assert_eq!((s.scene.animation_clips[1].start,s.scene.animation_clips[1].end),(20.,30.));
+    execute(&mut s,Command::UndoSceneOperation).unwrap();assert_eq!(serde_json::to_value(&s.scene).unwrap(),before);
+}

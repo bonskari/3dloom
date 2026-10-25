@@ -33,6 +33,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     if ui.button("Import Animation…").clicked() {
         run(app, Command::ImportAnimationClip { path: None });
     }
+    crate::async_import::show_status(ui,app);
     ui.separator();
     crate::kimodo::show(ui, app);
     crate::loomrig_panel::show(ui, app);

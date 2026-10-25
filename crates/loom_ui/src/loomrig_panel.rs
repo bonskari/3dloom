@@ -7,6 +7,10 @@ use loom_scene::{
     NodeId,
 };
 
+struct BoneCache {scene:u64,revision:u64,bones:Vec<(NodeId,String)>,roots:Vec<(NodeId,String)>}
+#[derive(Clone)]
+struct Detection {scene:u64,revision:u64,root:NodeId,mapping:Result<HumanoidMapping,String>}
+
 #[derive(Clone, Default)]
 struct Draft {
     root: Option<NodeId>,
@@ -124,40 +128,58 @@ fn mapping_editor(ui: &mut egui::Ui, draft: &mut Draft, bones: &[(NodeId, String
             draft.spine.pop();
         }
     });
-    for (name, joints) in &mut draft.limbs {
-        ui.push_id(&*name, |ui| {
-            ui.strong(&*name);
+    let mut remove=None;
+    for (index,(name, joints)) in draft.limbs.iter_mut().enumerate() {
+        ui.push_id(index, |ui| {
+            ui.text_edit_singleline(name);
+            if ui.small_button("Remove chain").clicked(){remove=Some(index);}
             for (label, joint) in ["Start", "Middle", "End"].into_iter().zip(joints) {
                 bone_picker(ui, label, joint, bones);
             }
         });
     }
+    if let Some(index)=remove{draft.limbs.remove(index);}
+    if ui.button("Add limb chain").clicked(){draft.limbs.push((format!("Chain {}",draft.limbs.len()+1),[None;3]));}
 }
 
 pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let scene_id = app.state.scene.instance_id();
-    let mut bones: Vec<_> = app
-        .state
-        .scene
-        .nodes()
-        .filter(|n| n.object.is_bone())
-        .map(|n| (n.id, n.name.clone()))
-        .collect();
-    if bones.is_empty() {
-        return;
-    }
-    bones.sort_by(|a, b| a.1.cmp(&b.1));
+    let revision=app.state.scene.revision();
+    let key=egui::Id::new("loomrig_bone_cache");
+    let cached=ui.ctx().data(|d|d.get_temp::<std::sync::Arc<BoneCache>>(key));
+    let cache=match cached.filter(|c|c.scene==scene_id&&c.revision==revision) {
+        Some(cache)=>cache,
+        None=>{
+            let mut bones:Vec<_>=app.state.scene.nodes().filter(|n|n.object.is_bone()).map(|n|(n.id,n.name.clone())).collect();
+            bones.sort_by(|a,b|a.1.cmp(&b.1));
+            let roots=bones.iter().filter(|(id,_)|app.state.scene.node(*id).and_then(|n|n.parent).and_then(|p|app.state.scene.node(p)).is_none_or(|p|!p.object.is_bone())).cloned().collect();
+            let cache=std::sync::Arc::new(BoneCache{scene:scene_id,revision,bones,roots});
+            ui.ctx().data_mut(|d|d.insert_temp(key,cache.clone()));cache
+        }
+    };
+    let bones=&cache.bones;
+    if bones.is_empty(){return;}
     let rigs = app.state.scene.loom_rigs.clone();
     egui::CollapsingHeader::new("LoomRig").default_open(true).show(ui,|ui| {
-        if rigs.is_empty() {
-            let candidates:Vec<_>=bones.iter().filter(|(id,_)|app.state.scene.node(*id).and_then(|n|n.parent).and_then(|p|app.state.scene.node(p)).is_none_or(|p|!p.object.is_bone())).cloned().collect();
+        egui::CollapsingHeader::new("Create Character Rig").default_open(rigs.is_empty()).show(ui,|ui| {
+            let candidates=&cache.roots;
             let key=egui::Id::new(("loomrig_root",scene_id));
             let selected=app.state.selection.iter().find_map(|id|candidates.iter().find(|(root,_)|*root==*id||app.state.scene.ancestors(*id).contains(root)).map(|(root,_)|*root));
             let mut root=ui.ctx().data_mut(|d|*d.get_temp_mut_or_insert_with(key,||selected.or_else(||candidates.first().map(|c|c.0))));
+            let selection_key=egui::Id::new(("loomrig_root_selection",scene_id));
+            let previous=ui.ctx().data(|d|d.get_temp::<Option<NodeId>>(selection_key)).flatten();
+            if selected!=previous&&selected.is_some(){root=selected;}
+            if root.is_some_and(|id|!candidates.iter().any(|c|c.0==id)){root=candidates.first().map(|c|c.0);}
+            ui.ctx().data_mut(|d|d.insert_temp(selection_key,selected));
             bone_picker(ui,"Character root",&mut root,&candidates);
             ui.ctx().data_mut(|d|d.insert_temp(key,root));
             if let Some(root)=root {
-                let detected=HumanoidMapping::metahuman(&app.state.scene,root);
+                let key=egui::Id::new("loomrig_detection");
+                let memo=ui.ctx().data(|d|d.get_temp::<Detection>(key));
+                let detected=match memo.filter(|m|m.scene==scene_id&&m.revision==revision&&m.root==root) {
+                    Some(m)=>m.mapping,
+                    None=>{let mapping=HumanoidMapping::metahuman(&app.state.scene,root);ui.ctx().data_mut(|d|d.insert_temp(key,Detection{scene:scene_id,revision,root,mapping:mapping.clone()}));mapping}
+                };
                 if ui.add_enabled(detected.is_ok(),egui::Button::new("Create LoomRig")).clicked(){run(app,Command::CreateLoomRig{root:root.0,mapping:None});}
                 if detected.is_err(){ui.small("Map this skeleton's joints below.");}
                 egui::CollapsingHeader::new("Characterization").show(ui,|ui| {
@@ -166,12 +188,12 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     let members:Vec<_>=bones.iter().filter(|(id,_)|*id==root||app.state.scene.ancestors(*id).contains(&root)).cloned().collect();
                     mapping_editor(ui,&mut draft,&members);
                     let mapping=draft.mapping().and_then(|m|{m.validate(&app.state.scene)?;Ok(m)});
-                    if ui.add_enabled(mapping.is_ok(),egui::Button::new("Create Mapped LoomRig")).clicked(){run(app,Command::CreateLoomRig{root:root.0,mapping:mapping.ok()});}
+                    if ui.add_enabled(mapping.is_ok(),egui::Button::new("Create Mapped LoomRig")).clicked(){let mapping=mapping.unwrap();run(app,Command::CreateLoomRig{root:mapping.root.0,mapping:Some(mapping)});}
                     ui.ctx().data_mut(|d|d.insert_temp(key,draft));
                 });
             }
-            return;
-        }
+        });
+        if rigs.is_empty(){return;}
         let key=egui::Id::new(("loomrig_active",scene_id));
         let mut active=ui.ctx().data_mut(|d|*d.get_temp_mut_or_insert_with(key,||rigs[0].id));
         if !rigs.iter().any(|r|r.id==active){active=rigs[0].id;}
@@ -197,7 +219,7 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.label("IK / FK");
             let mut blend=limb.blend.get();
             let mut solver=limb.solver;
-            let changed=ui.add(egui::Slider::new(&mut blend,0.0..=1.0).text("FK → IK")).changed();
+            let changed=ui.add(egui::Slider::new(&mut blend,0.0..=1.0).text("IK weight")).changed();
             egui::ComboBox::from_id_salt("loomrig_solver").selected_text(solver.label()).show_ui(ui,|ui|{for s in [loom_scene::ik::IkSolver::Limb,loom_scene::ik::IkSolver::HI]{ui.selectable_value(&mut solver,s,s.label());}});
             if changed||solver!=limb.solver {run(app,Command::SetLoomRigLimb{rig:rig.id,limb:limb.mapping.name.clone(),solver:match solver{loom_scene::ik::IkSolver::HI=>"hi",_=>"limb"}.into(),blend});}
             if ui.button("Key IK / FK").clicked(){run(app,Command::SetLoomRigBlendKey{rig:rig.id,limb:limb.mapping.name.clone(),time:app.state.current_frame as f32,value:Some(limb.blend.get())});}

@@ -1,51 +1,96 @@
-# Kimodo motion in 3D Loom
+# Kimodo and LoomRig motion authoring
 
-Motion > Kimodo generates editable source-skeleton animation through the user's
-Kimodo API. Enter the API base URL under Settings and use Test Connection. The
-URL is stored only in local user preferences, never in a scene or source code.
-A service exposing the gpu-arbiter durable queue and Kimodo `artifacts-v1`
-downloads is required.
+Motion > Kimodo generates editable animation through the configured API. Set the
+API URL under Kimodo > Settings and use Test Connection. The address is a local
+user preference; it is never stored in a scene. Generate submits a durable GPU
+queue job, downloads its real BVH, imports a source clip, frames it and starts
+playback. A completed job for a different scene waits for Import Result rather
+than changing the new scene. Original BVH files are retained in `kimodo-motions/`
+beside a saved scene, or under local configuration for an unsaved scene.
 
-Enter a prompt and duration, then Generate. The app submits a queued Kimodo job,
-shows its state without blocking the UI, downloads the actual BVH and imports
-bones and linear animation keys. The result is selected, framed and played on
-the timeline. The source BVH is kept in `kimodo-motions/` beside a saved scene;
-an unsaved scene uses the local configuration directory. Save the scene to
-preserve the editable animation itself.
+Motion > Import Animation accepts BVH and animated FBX. It preserves project FPS
+and existing character animation, retiming incoming keys to the same time in
+seconds. FBX reading and body-profile preparation run off the UI thread for the
+file-picker workflow. Cancel or a changed scene invalidates the result before
+commit. The synchronous command API retains its original response semantics.
 
-Motion > Import Animation accepts BVH and FBX as separate source clips. It preserves the project FPS and existing character keys, retiming incoming keys to the same time in seconds. A source clip is framed and played after import. FBX imports use the first animated take.
+## Importing an existing MetaHuman
 
-Animation Clips above the key bar shows each source as a block. Dragging the block moves all its native keys in one undo step, extending the playback range as needed. Clips survive save/reload; deleting source bones updates membership, and deleting the complete source removes its block.
+In the FBX import options, enable MetaHuman Body Only to import the original
+Body skeleton and skin, without the separate face rig or facial animation. Head
+geometry and its body/neck influences remain. The profile remaps duplicate
+component skeletons and facial influences with reference-frame compensation;
+it does not generate new skin weights. Unsupported active facial morphs fail
+before scene changes. Source FBX files are untouched. This profile is never
+applied to an animation-source import.
 
-File > Import also supports Kimodo BVH directly. Import preserves channel order,
-root motion, skeleton hierarchy, frame rate and frame count, converting Y-up
-centimeters once into the scene's Z-up system units. The import is undoable.
+Materials and actual texture references in the FBX import with the meshes.
+Unreal procedural materials need export-side material baking; an FBX with names
+but no texture references cannot reproduce them. Groom strands and Unreal-only
+shader behavior are not represented by an ordinary skeletal FBX.
 
-## Current scope
+## Character controls
 
-This is source-motion generation and import. It does not yet retarget motion
-automatically onto a selected MetaHuman or create a complete character-control
-rig. No alternate skeleton, new skin weights or facial controls are generated.
+Under Motion > LoomRig > Create Character Rig, choose the existing skeleton
+root. Create LoomRig automatically characterizes MetaHuman body names. For
+other names, expand Characterization and map root, pelvis, spine, head and
+contiguous three-joint limbs. Limb chains can be added, removed and named. More
+than one character can have its own rig in the same scene.
 
-## LoomRig direction
+Select Master positions the whole character. FK Controls selects ordinary
+animatable correction helpers for the original bones. Select Goal and Select
+Pole expose limb endpoints and elbow/knee directions; goal rotation controls
+the hand or foot orientation. Neutral controls follow original animation.
+Auto Key records corrections without replacing imported bone tracks.
 
-LoomRig will be a Biped-style control system layered over existing skeletons,
-retaining original bone controllers, hierarchy and skin bindings. A MetaHuman
-body-only characterization is the first profile, with editable mappings/chains
-for other skeletons. Controls, IK/FK, pole directions and solver settings must
-remain editable; changing the system must match the visible pose atomically
-and retain the original motion. Matching one frame does not promise identical
-motion throughout a clip when the solver changes.
+IK/FK blends between source/FK and goal control. HI and IK Limb solvers are
+editable; switching matches the current visible pose. At full IK, world-space
+goals provide planted feet. Key IK/FK creates an explicit transition key. The
+LoomRig IK/FK Tracks lane shows blend curves and draggable keys; right-click a
+key to delete it. Goal, pole and FK correction transforms use native keys and
+the existing track tools.
 
-The basic source clip timeline is implemented. The dedicated LoomRig timeline will add trimming, correction/control tracks and visible IK/FK and foot-contact transitions. Retargeting, blending and those character controls remain pending; current clips are movable groups of editable native keys.
+Edit Characterization changes mapped joints while retaining matching control
+nodes and their animation. A change that would discard authored controls or
+replace the character root is rejected before mutation. Rig creation, mapping,
+solver edits and keys are undoable and saved with the scene.
+
+## Transferring and arranging motion
+
+Choose a source under Source Motion, inspect or edit Retarget Mapping, then
+Apply Motion to Character. Automatic Kimodo/MetaHuman mappings account for
+reference-pose arm directions, palm frames, metacarpals, body proportions and
+character placement. Original hierarchy, bone lengths and skin bindings stay
+intact. Repeated imports use collision namespaces that preserve original joint
+names, including numbered fingers and spine joints.
+
+Animation Clips above the key bar are movable blocks backed by editable native
+keys. Dragging a block moves its owned keys in one undo step. Right-click it to
+set its In or Out at the current frame. Moving or trimming one character clip
+preserves neighboring clips on the same bones. Source and character clips
+remain separate. Rig correction and IK/FK tracks are independent of source-clip
+placement.
+
+Multiple character clips can be arranged on the same skeleton when their ranges
+are disjoint. Move a new source clip to its desired time before applying it.
+Overlapping/touching target ranges and unowned target keys are rejected rather
+than overwritten. Gaps use native curve interpolation; this is not an
+independent overlapping NLA/crossfade mixer.
+
+## Preview performance
+
+Preferences > Viewports exposes Texture Preview Size and Texture Preview Budget
+(MiB), defaulting to 2048 pixels and 256 MiB. A bounded worker decodes previews;
+aggregate visible texture variants determine the effective limit. Hidden and
+obsolete previews are evicted. Cropped/procedural outputs respect the same cap.
+Material Editor and Crop use a separate small preview budget and background
+loader. Source images and crop coordinates are unchanged.
 
 ## Verification
 
-Focused tests cover BVH hierarchy/channel order/units/FPS, real Kimodo motion,
-Euler continuity, invalid-import atomicity, undo, save/reload, local-only API
-settings and Motion-panel availability without an object selection. An opt-in
-live test exercises generation, download, import and playback through the real
-configured GPU queue using `LOOM_KIMODO_API_URL`. Real source files and service
-addresses are supplied locally, not included as project defaults.
-
-Background jobs keep their original project identity and output folder. If a project changes while a job runs, its result is saved and waits for explicit Import Result instead of modifying the new scene. New, Reset and Open invalidate the previous project identity.
+Focused tests cover source units/FPS/Euler continuity, actual queued generation,
+project changes during jobs, repeat imports, native clip sequencing/trim,
+reference-pose retargeting, control evaluation, solver/pose matching, keyed
+blends, deletion/merge/save/undo, and preview budgets/async loading. Opt-in tests
+use actual MetaHuman FBX and Kimodo BVH paths from environment variables; private
+assets and service addresses are not included as repository defaults.

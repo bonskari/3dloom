@@ -681,7 +681,7 @@ pub fn retarget(
         .ok_or("animation clip IDs exhausted")?;
     after.push(loom_scene::AnimationClip {
         id,
-        name: format!("{} → {}", clip.name, scene.node(target_root).unwrap().name),
+        name: format!("{} on {}", clip.name, scene.node(target_root).unwrap().name),
         nodes: targets.into_iter().collect(),
         start: clip.start,
         end: clip.end,

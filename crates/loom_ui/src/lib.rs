@@ -2,6 +2,8 @@
 //! All scene mutations go through `loom_commands::execute` via `dispatch`.
 
 mod kimodo;
+mod async_import;
+mod preview_cache;
 mod loomrig_panel;
 mod clip_timeline;
 mod rig_timeline;
@@ -369,7 +371,12 @@ pub struct LoomApp {
     /// Loaded viewport background images, keyed by (path, version).
     pub background_textures: std::collections::HashMap<(String, u32), Option<egui::TextureHandle>>,
     /// Show Map in Viewport bitmaps decoded once per path.
-    pub bitmap_cache: std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>,
+    pub(crate) texture_previews:preview_cache::PreviewCache,
+    pub(crate) material_previews:preview_cache::PreviewCache,
+    pub(crate) material_preview_generation:u64,
+    pub(crate) material_preview_side:u32,
+    pub(crate) async_fbx:async_import::AsyncFbxImport,
+    preview_max_side:u32,
     /// Maps baked to textures (cropped / placed / mirrored bitmaps, procedural maps), by texture key.
     pub baked_cache: std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>,
     /// `state.bitmap_generation` the caches were filled at (Reload clears them).
@@ -474,7 +481,12 @@ impl LoomApp {
             render_job: None,
             rfw: Default::default(),
             pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(Vec::new()), Vec::new(), Vec::new())))),
-            bitmap_cache: std::collections::HashMap::new(),
+            texture_previews:preview_cache::PreviewCache::default(),
+            material_previews:preview_cache::PreviewCache::default(),
+            material_preview_generation:0,
+            material_preview_side:512,
+            async_fbx:async_import::AsyncFbxImport::default(),
+            preview_max_side:preview_cache::DEFAULT_MAX_SIDE,
             baked_cache: std::collections::HashMap::new(),
             bitmap_generation: 0,
             create_kind: None,
@@ -712,7 +724,9 @@ impl LoomApp {
     pub(crate) fn rebuild_world_meshes(&mut self) {
         if self.bitmap_generation != self.state.bitmap_generation {
             // Bitmap Parameters > Reload: read the image files again.
-            self.bitmap_cache.clear();
+            self.texture_previews.clear();
+            self.material_previews.clear();
+            self.material_preview_generation=self.material_preview_generation.wrapping_add(1);
             self.baked_cache.clear();
             self.bitmap_generation = self.state.bitmap_generation;
         }
@@ -740,6 +754,21 @@ impl LoomApp {
                 (self.state.scene.node_surfaces(*id).filter(|_| !gray && display_color.1 == ColorSource::Material), d.texture)
             })
             .collect();
+        let mut paths=std::collections::BTreeSet::new();
+        let mut variants=std::collections::BTreeSet::new();
+        let mut plain_paths=std::collections::BTreeSet::new();
+        for (surfaces,texture) in &wanted {
+            if let loom_scene::TextureDisplay::Bitmap(path)=texture {paths.insert(path.clone());plain_paths.insert(path.clone());}
+            if let Some(surfaces)=surfaces {
+                let surfaces:Vec<_>=match surfaces {loom_scene::material::Surfaces::Single(s)=>vec![s.as_ref()],loom_scene::material::Surfaces::PerId(list)=>list.values().collect()};
+                for surface in surfaces {if let Some(map)=surface.viewport_map(){collect_preview_paths(map,&mut paths);if plain_preview_map(map){plain_paths.insert(map.path.clone());}else{variants.insert(loom_scene::maps::texture_key(map));}}}
+            }
+        }
+        let side=preview_cache::preview_side(self.state.prefs.viewport_texture_max_size,self.state.prefs.viewport_texture_budget_mb as u64*1024*1024,paths.len().max(plain_paths.len()+variants.len()));
+        if side!=self.preview_max_side {self.preview_max_side=side;self.baked_cache.clear();}
+        self.texture_previews.retain_paths(&paths);
+        let active_bakes:std::collections::BTreeSet<_>=variants.into_iter().map(|key|format!("{}:{}:{key}",self.state.bitmap_generation,self.preview_max_side)).collect();
+        self.baked_cache.retain(|key,_|active_bakes.contains(key));
         let mut looks = Vec::with_capacity(wanted.len());
         for (surfaces, texture) in wanted {
             looks.push(self.material_look(surfaces, texture, &mut bitmaps, &mut bitmap_index));
@@ -909,18 +938,18 @@ impl LoomApp {
     /// A bitmap file as a viewport texture (loaded once per path).
     fn bitmap_texture(&mut self, path: &str, bitmaps: &mut Vec<(String, std::sync::Arc<loom_render::Bitmap>)>, index: &mut std::collections::HashMap<String, u32>) -> loom_render::TextureSel {
         // The GPU keeps textures by this key: a Reload makes new ones.
-        let key = format!("{}|{path}", self.state.bitmap_generation);
+        let key = format!("{}:{}|{path}", self.state.bitmap_generation,self.preview_max_side);
         if let Some(i) = index.get(&key) {
             return loom_render::TextureSel::Bitmap(*i);
         }
-        match load_bitmap(&mut self.bitmap_cache, path) {
+        match self.texture_previews.request(path,self.preview_max_side,self.state.bitmap_generation) {
             Some(bm) => {
                 bitmaps.push((key.clone(), bm));
                 index.insert(key, bitmaps.len() as u32 - 1);
                 loom_render::TextureSel::Bitmap(bitmaps.len() as u32 - 1)
             }
             None => {
-                self.last_error = Some(format!("could not load map {path}"));
+                if let Some(error)=self.texture_previews.error(path){self.last_error=Some(format!("could not load map {path}: {error}"));}
                 loom_render::TextureSel::None
             }
         }
@@ -929,19 +958,28 @@ impl LoomApp {
     /// A map baked to a viewport texture (cropping, mirror, procedural maps),
     /// cached by what changes its pixels.
     fn map_texture(&mut self, map: &loom_scene::Map, bitmaps: &mut Vec<(String, std::sync::Arc<loom_render::Bitmap>)>, index: &mut std::collections::HashMap<String, u32>) -> loom_render::TextureSel {
-        let plain = map.kind == loom_scene::material::MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1];
+        let plain = plain_preview_map(map);
         if plain {
             return self.bitmap_texture(&map.path, bitmaps, index);
         }
-        let key = format!("{}:{}", self.state.bitmap_generation, loom_scene::maps::texture_key(map));
+        let key = format!("{}:{}:{}", self.state.bitmap_generation,self.preview_max_side, loom_scene::maps::texture_key(map));
         if let Some(i) = index.get(&key) {
             return loom_render::TextureSel::Bitmap(*i);
         }
         let baked = match self.baked_cache.get(&key) {
             Some(b) => b.clone(),
             None => {
-                let images = self.map_images(map);
-                let b = loom_scene::maps::bake(map, &images).map(|i| std::sync::Arc::new(loom_render::Bitmap { width: i.width, height: i.height, rgba: i.rgba }));
+                let mut paths=std::collections::BTreeSet::new();collect_preview_paths(map,&mut paths);
+                let mut images=loom_scene::maps::Images::new();
+                let mut ready=true;
+                for path in paths {
+                    let bitmap=self.texture_previews.request(&path,self.preview_max_side,self.state.bitmap_generation);
+                    if bitmap.is_none(){ready=false;if let Some(error)=self.texture_previews.error(&path){self.last_error=Some(format!("could not load map {path}: {error}"));}}
+                    images.insert(path,bitmap.map(|b|std::sync::Arc::new(loom_scene::maps::Image{width:b.width,height:b.height,rgba:b.rgba.clone()})));
+                }
+                if !ready{return loom_render::TextureSel::None;}
+
+                let b = loom_scene::maps::bake_with_limit(map, &images,self.preview_max_side).map(|i| std::sync::Arc::new(loom_render::Bitmap { width: i.width, height: i.height, rgba: i.rgba }));
                 self.baked_cache.insert(key.clone(), b.clone());
                 b
             }
@@ -959,11 +997,12 @@ impl LoomApp {
         }
     }
 
-    /// The images a map tree reads, from the bitmap cache.
-    pub fn map_images(&mut self, map: &loom_scene::Map) -> loom_scene::maps::Images {
-        let mut images = loom_scene::maps::Images::new();
-        let cache = &mut self.bitmap_cache;
-        loom_scene::maps::load_images(map, &mut images, &mut |path| load_bitmap(cache, path).map(|b| std::sync::Arc::new(loom_scene::maps::Image { width: b.width, height: b.height, rgba: b.rgba.clone() })));
+    /// Source previews for the material UI, decoded asynchronously within its own small budget.
+    pub(crate) fn editor_map_images(&mut self,map:&loom_scene::Map)->loom_scene::maps::Images {
+        let mut images=loom_scene::maps::Images::new();
+        let cache=&mut self.material_previews;
+        let side=self.material_preview_side;let generation=self.state.bitmap_generation;
+        loom_scene::maps::load_images(map,&mut images,&mut |path|cache.request(path,side,generation).map(|b|std::sync::Arc::new(loom_scene::maps::Image{width:b.width,height:b.height,rgba:b.rgba.clone()})));
         images
     }
 
@@ -1295,7 +1334,13 @@ impl LoomApp {
     /// One frame of the whole UI (what eframe calls each repaint; the UI
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
+        if self.material_previews.poll(){self.material_preview_generation=self.material_preview_generation.wrapping_add(1);ctx.request_repaint();}
+        if self.material_previews.pending_count()>0{ctx.request_repaint_after(std::time::Duration::from_millis(16));}
+        async_import::poll(self,ctx);
         kimodo::poll(self, ctx);
+        if self.texture_previews.poll(){self.baked_cache.clear();self.state.mesh_dirty=true;self.sync_after_command();ctx.request_repaint();}
+        if self.texture_previews.pending_count()>0{ctx.request_repaint_after(std::time::Duration::from_millis(16));}
+
         icons::install(ctx);
         spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);
         ctx.input(|i| self.input_log.record(&i.raw, i.time));
@@ -1435,20 +1480,7 @@ pub(crate) fn draws_see_through(n: &loom_scene::Node) -> bool {
     n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }))
 }
 
-fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>, path: &str) -> Option<std::sync::Arc<loom_render::Bitmap>> {
-    cache
-        .entry(path.to_owned())
-        .or_insert_with(|| {
-            image::open(path).ok().map(|img| {
-                // GPU textures are capped at 8192 px a side (the common wgpu limit): larger maps shrink.
-                let max = 8192u32;
-                let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
-                let rgba = img.to_rgba8();
-                std::sync::Arc::new(loom_render::Bitmap { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
-            })
-        })
-        .clone()
-}
+
 
 /// The user's 3dLoom config file for Modifier List use counts (in
 /// `loom_commands::settings::config_dir`).
@@ -1466,4 +1498,13 @@ pub fn length_drag_value<'a>(ui: &egui::Ui, units: &loom_commands::UnitsSetup, d
         .speed(speed)
         .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
         .custom_parser(move |text| units.parse(text))
+}
+
+fn collect_preview_paths(map:&loom_scene::Map,paths:&mut std::collections::BTreeSet<String>){
+    let mut images=loom_scene::maps::Images::new();
+    loom_scene::maps::load_images(map,&mut images,&mut |path|{paths.insert(path.to_owned());None});
+}
+
+fn plain_preview_map(map:&loom_scene::Map)->bool {
+    map.kind==loom_scene::material::MapType::Bitmap&&!map.crop.apply&&!map.coords.mirror[0]&&!map.coords.mirror[1]
 }

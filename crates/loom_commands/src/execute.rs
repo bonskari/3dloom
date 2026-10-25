@@ -1701,6 +1701,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SetPreference { name, value } => {
             state.prefs.set(&name, value)?;
+            if name.starts_with("Viewport Texture "){state.mesh_dirty=true;}
             state.undo.set_limit(state.prefs.undo_levels);
             if name == "Reference Coordinate System Constant" && state.prefs.ref_coord_constant {
                 state.coord_by_tool = [state.coord_system; 4];
@@ -4212,7 +4213,7 @@ fn transform_type_in(state: &mut AppState, absolute: bool, values: Vec3) -> Resu
                     let ids: Vec<NodeId> = state.selection.iter().copied().collect();
                     let target = Quat::from_euler(glam::EulerRot::XYZ, values.x.to_radians(), values.y.to_radians(), values.z.to_radians());
                     for id in ids {
-                        let (_, pq, _) = state.scene.parent_frame(id).to_scale_rotation_translation();
+                        let (_, pq, _) = state.scene.edit_parent_frame(id).to_scale_rotation_translation();
                         let local = pq.inverse() * target;
                         let rot = if state.scene.node(id).is_some_and(|n| n.parent.is_none()) {
                             values
@@ -4325,7 +4326,7 @@ fn euler_hint(state: &AppState, id: Option<NodeId>, world_rot_deg: Vec3) -> Vec3
         return Vec3::ZERO;
     }
     let axis = world_rot_deg / deg;
-    let (_, pq, _) = state.scene.parent_frame(i).to_scale_rotation_translation();
+    let (_, pq, _) = state.scene.edit_parent_frame(i).to_scale_rotation_translation();
     let (_, wq, _) = state.scene.world_matrix(i).to_scale_rotation_translation();
     let in_parent = pq.inverse() * axis;
     let in_local = wq.inverse() * axis;
@@ -4565,7 +4566,7 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
         for id in state.selection.iter().copied().filter(|id| !has_selected_ancestor(*id)) {
             let (m, hint) = matrix_for(state, Some(id));
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-            let parent_world = state.scene.parent_frame(id);
+            let parent_world = state.scene.edit_parent_frame(id);
             let world = state.scene.world_matrix(id);
             if state.affect_pivot_only && label == "Scale" {
                 // A Scale transform has no effect on the pivot.

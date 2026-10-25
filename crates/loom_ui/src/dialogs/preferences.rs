@@ -110,6 +110,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("Viewport Parameters").strong());
                     check(ui, app, "Viewport Tooltips", "Viewport tooltips");
+                    ui.horizontal(|ui|number(ui,app,"Viewport Texture Max Size","Texture preview size:",128.0..=8192.0,0));
+                    ui.horizontal(|ui|number(ui,app,"Viewport Texture Budget MB","Texture preview budget (MiB):",16.0..=2048.0,0));
+                    ui.small("Preview limits preserve the original images and render textures.");
                     check(ui, app, "Show Cross Hair Cursor", "Show cross hair cursor");
                     ui.horizontal(|ui| number(ui, app, "Grid Nudge Distance", "Grid Nudge Distance:", 0.0..=10_000.0, 3));
                 });

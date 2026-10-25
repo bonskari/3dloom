@@ -8,7 +8,6 @@ use std::sync::{
 };
 
 pub const DEFAULT_MAX_SIDE: u32 = 2048;
-pub const DEFAULT_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Worst-case square RGBA8 previews share this total visible-texture budget.
 /// Zero means the budget cannot hold even one pixel per visible image.
