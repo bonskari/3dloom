@@ -88,8 +88,15 @@ fn light_and_sun_rollouts_keep_the_command_panel_width() {
         h.app.panel_tab = crate::Tab::Modify;
         h.frames(3);
         let w = panel_width(&h);
-        let wide = if (w - start).abs() > 1.0 { widest_texts(&mut h) } else { Vec::new() };
-        assert!((w - start).abs() <= 1.0, "{label}: the panel grew from {start} to {w}; rightmost texts {wide:?}");
+        let wide = if (w - start).abs() > 1.0 {
+            let mut v: Vec<(String, f32, f32)> = h.widgets.iter().filter(|w| w.2.min.x > 1000.0).map(|w| (format!("{:?} {}", w.0, w.1), w.2.min.x, w.2.max.x)).collect();
+            v.sort_by(|a, b| b.2.total_cmp(&a.2));
+            v.truncate(12);
+            format!("{v:?} {:?}", widest_texts(&mut h))
+        } else {
+            String::new()
+        };
+        assert!((w - start).abs() <= 1.0, "{label}: the panel grew from {start} to {w}; rightmost widgets {wide}");
     }
 }
 
