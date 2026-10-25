@@ -417,6 +417,7 @@ fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     item(ui, app, "Isolate Selection", "Isolate Selection");
     cmd(ui, app, "Manage Layers...", Command::LayerManager);
     ui.separator();
+    cmd(ui, app, "Display Floater...", Command::DisplayFloater);
     cmd(ui, app, "Light Lister...", Command::LightLister);
     ui.separator();
     item(ui, app, "Mirror...", "Mirror");

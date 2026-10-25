@@ -853,6 +853,7 @@ commands! {
     ShowRibbonToggle => "Show Ribbon Toggle", Loom, "Show or hide the Graphite Modeling Tools ribbon (Main Toolbar button, Customize > Show UI > Show Ribbon).";
     LockUserInterfaceToggle => "Lock User Interface Toggle", MainUI, "Lock or unlock the UI layout (Alt+0).";
     UpdateDuringSpinnerDragToggle => "Update During Spinner Drag Toggle", MainUI, "Views > Update During Spinner Drag: off, a spinner drag changes its value only when the mouse button is released.";
+    DisplayFloater => "Display Floater", MainUI, "Open or close Tools > Display Floater (Hide/Freeze and Object Level tabs).";
     ExpertModeToggle => "Expert Mode Toggle", MainUI, "Toggle Expert Mode: only the viewports are shown (Ctrl+X).";
     DisplayAsSeeThroughToggle => "Display as See-Through Toggle", MainUI, "Toggle see-through display of the selected objects (Alt+X).";
     HideCamerasToggle => "Hide Cameras Toggle", MainUI, "Hide or show all cameras (Shift+C).";

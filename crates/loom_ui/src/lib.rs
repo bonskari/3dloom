@@ -1465,6 +1465,7 @@ impl LoomApp {
             }
         }
         dialogs::show(ctx, self);
+        dialogs::display_floater::show(ctx, self);
         self.grab_viewport(ctx);
         menubar::help_windows(ctx, self);
         toolbars::button_appearance(ctx, self);

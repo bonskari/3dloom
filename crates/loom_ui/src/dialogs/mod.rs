@@ -1,6 +1,7 @@
 //! Modeless dialogs opened by commands (`AppState::dialog`).
 
 pub mod rename_objects;
+pub mod display_floater;
 pub mod configure_paths;
 pub mod align;
 pub mod array;

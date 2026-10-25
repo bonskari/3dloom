@@ -1606,6 +1606,8 @@ pub struct AppState {
     /// Nodes hidden by Isolate Selection (restored on exit).
     pub isolation: Option<Vec<NodeId>>,
     pub expert_mode: bool,
+    /// Tools > Display Floater is open.
+    pub display_floater: bool,
     pub show_main_toolbar: bool,
     pub show_ribbon: bool,
     /// Customize > Show UI > Show Command Panel.
@@ -1963,6 +1965,7 @@ impl AppState {
             show_statistics: false,
             isolation: None,
             expert_mode: false,
+            display_floater: false,
             show_main_toolbar: true,
             show_ribbon: true,
             show_command_panel: true,

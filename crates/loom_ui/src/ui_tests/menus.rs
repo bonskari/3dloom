@@ -272,3 +272,22 @@ fn tools_rename_objects_renames_the_selection() {
     names.sort();
     assert_eq!(names, ["Pillar0", "Pillar1"], "Base Number 0, Step 1");
 }
+
+#[test]
+fn the_display_floater_freezes_and_hides_beside_any_panel() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    menu_path(&mut h, &["Tools", "Display Floater..."]);
+    assert!(h.app.state.display_floater);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Display Floater"))).expect("the Display Floater window");
+    // The Create panel stays on; the floater has its own Freeze Selected.
+    let freeze = h.find_all(Role::Button, "Freeze Selected").into_iter().find(|r| win.contains_rect(*r)).expect("Freeze Selected on the floater");
+    h.click(freeze.center());
+    assert!(h.app.state.scene.node(id).unwrap().frozen, "frozen from the floater");
+    // Object Level tab: Hide by Category.
+    h.click(h.text_rect("Object Level", win).expect("the Object Level tab").center());
+    let geometry = h.find_all(Role::CheckBox, "Geometry").into_iter().find(|r| win.contains_rect(*r) || r.min.x >= win.min.x).expect("Geometry category");
+    h.click(geometry.center());
+    assert!(h.app.state.hide_category.geometry);
+}
