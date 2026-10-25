@@ -188,3 +188,27 @@ fn extended_parameters_rollout_sets_ior_and_the_transparency_type() {
     click_in_editor(&mut h, "Out", 0.0);
     assert!(editor_material(&h).extended.falloff_out);
 }
+
+#[test]
+fn put_to_library_then_get_it_from_the_mtl_library_in_the_browser() {
+    let mut h = editor();
+    h.cmd(Command::RenameMaterial { slot: None, name: "Shiny".into() });
+    scroll_top(&mut h);
+    click_in_editor(&mut h, "Put to Library", 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::PutToLibrary));
+    h.click_text_anywhere("OK");
+    h.frames(2);
+    assert_eq!(h.app.state.material_library.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["Shiny"]);
+    // Another slot gets it through Get Material > Browse From Mtl Library.
+    h.cmd(Command::MaterialEditorSlot { slot: 3 });
+    click_in_editor(&mut h, "Get Material", 0.0);
+    h.frames(12);
+    let p = window_text(&h, "Material/Map Browser", "Mtl Library");
+    h.click(p);
+    h.frames(12);
+    let row = window_text(&h, "Material/Map Browser", "Shiny [Standard]");
+    h.click(row);
+    h.click(row);
+    h.frames(3);
+    assert_eq!(h.app.state.scene.slot_material(3).name, "Shiny");
+}
