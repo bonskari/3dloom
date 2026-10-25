@@ -404,6 +404,8 @@ fn poly_scene(h: &mut Harness) -> loom_scene::NodeId {
 #[test]
 fn extrude_button_then_drag_on_the_face_extrudes_it() {
     let mut h = Harness::new();
+    // Tall enough that the Edit Polygons rollout's Extrude is on screen under a two-row Main Toolbar.
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1000.0));
     let id = poly_scene(&mut h);
     h.key(egui::Key::Num4);
     let p = h.screen_of(top_face_point());
@@ -422,6 +424,8 @@ fn extrude_button_then_drag_on_the_face_extrudes_it() {
 #[test]
 fn extrude_drag_starting_on_the_move_gizmo_makes_one_extrusion() {
     let mut h = Harness::new();
+    // Tall enough that the Edit Polygons rollout's Extrude is on screen under a two-row Main Toolbar.
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 1000.0));
     let id = poly_scene(&mut h);
     h.key(egui::Key::W);
     h.key(egui::Key::Num4);
