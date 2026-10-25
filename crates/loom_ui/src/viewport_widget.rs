@@ -744,8 +744,13 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             session.finish(app, hit, p);
                         }
                         if app.alt_click.take().is_some() {
-                            // Alt+click removes: Skin vertices at Edit Envelopes, else the picked items.
-                            if !(app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods)) {
+                            // Alt+click removes: normals at the Edit Normals Normal level, VertexPaint
+                            // faces with Face Selection on, Skin vertices at Edit Envelopes, else the picked items.
+                            let special = app.state.pick_mode.is_none()
+                                && (crate::poly_modes::normals_pick(app, &projection, None, p, mods)
+                                    || crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods)
+                                    || crate::poly_modes::skin_pick(app, &projection, None, p, mods));
+                            if !special {
                                 let picked = picks_at(app, p, rect, view, proj, view_proj);
                                 apply_picks(app, picked, mods);
                             }
