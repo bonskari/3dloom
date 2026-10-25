@@ -1,5 +1,5 @@
 //! Viewport Configuration dialog: Rendering Method (shading and the
-//! rendering options), Layout, Safe Frames and ViewCube.
+//! rendering options), Layout, Safe Frames, Statistics and ViewCube.
 
 use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
@@ -12,6 +12,7 @@ enum Tab {
     Layout,
     SafeFrames,
     RenderingMethod,
+    Statistics,
     ViewCube,
 }
 
@@ -23,6 +24,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         tab = match panel.as_str() {
             "Rendering Method" => Tab::RenderingMethod,
             "Safe Frames" => Tab::SafeFrames,
+            "Statistics" => Tab::Statistics,
             "ViewCube" => Tab::ViewCube,
             _ => Tab::Layout,
         };
@@ -36,17 +38,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.selectable_value(&mut tab, Tab::RenderingMethod, "Rendering Method");
                 ui.selectable_value(&mut tab, Tab::Layout, "Layout");
                 ui.selectable_value(&mut tab, Tab::SafeFrames, "Safe Frames");
+                ui.selectable_value(&mut tab, Tab::Statistics, "Statistics");
                 ui.selectable_value(&mut tab, Tab::ViewCube, "ViewCube");
             });
             ui.separator();
             match tab {
                 Tab::Layout => layout_tab(ui, app),
-                Tab::SafeFrames => {
-                    let mut on = app.state.active().safe_frames;
-                    if ui.checkbox(&mut on, "Show Safe Frames in Active View").with_shortcut(&app.state, Command::ViewportSafeframesToggle.name()).changed() {
-                        let _ = app.dispatch(Command::ViewportSafeframesToggle);
-                    }
-                }
+                Tab::SafeFrames => safe_frames_tab(ui, app),
+                Tab::Statistics => statistics_tab(ui, app),
                 Tab::RenderingMethod => {
                     ui.label("Rendering Level (active viewport)");
                     let cur = app.state.active().shading;
@@ -73,6 +72,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     if ui.checkbox(&mut brackets, "Use Selection Brackets").with_shortcut(&app.state, Command::SelectionBracketToggle.name()).changed() {
                         let _ = app.dispatch(Command::SelectionBracketToggle);
                     }
+                    let mut sel_edged = app.state.display.display_selected_edged;
+                    if ui.checkbox(&mut sel_edged, "Display Selected with Edged Faces").changed() {
+                        let _ = app.dispatch(Command::DisplaySelectedEdgedFacesToggle);
+                    }
                     let mut clipping = app.state.active().clipping;
                     if ui.checkbox(&mut clipping, "Viewport Clipping").changed() {
                         let _ = app.dispatch(Command::ViewportClipping);
@@ -91,6 +94,96 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
         });
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
+}
+
+/// Safe Frames panel: which frames show, their sizes (percent smaller than
+/// the live area, horizontal / vertical), the 12-Field Grid, and Show Safe
+/// Frames in Active View.
+fn safe_frames_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let s = app.state.display.safe_frames;
+    let none = Command::SetSafeFrames { live_area: None, action_safe: None, title_safe: None, user_safe: None, grid: None, action: None, title: None, user: None, grid_4x3: None };
+    let with = |f: &dyn Fn(&mut Command)| {
+        let mut c = none.clone();
+        f(&mut c);
+        c
+    };
+    egui::Grid::new("safe_frames").num_columns(3).show(ui, |ui| {
+        let mut live = s.live_area;
+        if ui.checkbox(&mut live, "Live Area").changed() {
+            let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { live_area, .. } = c { *live_area = Some(live) }));
+        }
+        ui.label("Horizontal");
+        ui.label("Vertical");
+        ui.end_row();
+        for (label, on, pct, which) in [("Action Safe", s.action_safe, s.action, 0), ("Title Safe", s.title_safe, s.title, 1), ("User Safe", s.user_safe, s.user, 2)] {
+            let mut v = on;
+            if ui.checkbox(&mut v, label).changed() {
+                let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { action_safe, title_safe, user_safe, .. } = c { *[action_safe, title_safe, user_safe][which] = Some(v) }));
+            }
+            let mut p = pct;
+            let h = ui.add(egui::DragValue::new(&mut p[0]).range(0.0..=99.0).speed(0.5).suffix("%")).changed();
+            let w = ui.add(egui::DragValue::new(&mut p[1]).range(0.0..=99.0).speed(0.5).suffix("%")).changed();
+            if h || w {
+                let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { action, title, user, .. } = c { *[action, title, user][which] = Some(p) }));
+            }
+            ui.end_row();
+        }
+    });
+    ui.horizontal(|ui| {
+        let mut grid = s.grid;
+        if ui.checkbox(&mut grid, "12-Field Grid").changed() {
+            let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { grid: g, .. } = c { *g = Some(grid) }));
+        }
+        if ui.radio(s.grid_4x3, "4x3").clicked() {
+            let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { grid_4x3, .. } = c { *grid_4x3 = Some(true) }));
+        }
+        if ui.radio(!s.grid_4x3, "12x9").clicked() {
+            let _ = app.dispatch(with(&|c| if let Command::SetSafeFrames { grid_4x3, .. } = c { *grid_4x3 = Some(false) }));
+        }
+    });
+    ui.label(egui::RichText::new(format!("Live area aspect from the render output: {:.3}", app.state.scene.render.image_aspect())).small().weak());
+    ui.separator();
+    let mut on = app.state.active().safe_frames;
+    if ui.checkbox(&mut on, "Show Safe Frames in Active View").with_shortcut(&app.state, Command::ViewportSafeframesToggle.name()).changed() {
+        let _ = app.dispatch(Command::ViewportSafeframesToggle);
+    }
+}
+
+/// Statistics panel: Setup (the counts, FPS, Total / Selection / Total +
+/// Selection), Show Statistics In Active View, Default Settings.
+fn statistics_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
+    use loom_commands::display::StatisticsScope;
+    let s = app.state.display.statistics;
+    let set = |polygons, triangles, edges, vertices, fps, scope: Option<&str>| Command::SetStatistics { polygons, triangles, edges, vertices, fps, scope: scope.map(str::to_owned), default_settings: None };
+    ui.label(egui::RichText::new("Setup").strong());
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            for (label, on, i) in [("Polygon Count", s.polygons, 0), ("Triangle Count", s.triangles, 1), ("Edge Count", s.edges, 2), ("Vertex Count", s.vertices, 3), ("Frames Per Second", s.fps, 4)] {
+                let mut v = on;
+                if ui.checkbox(&mut v, label).changed() {
+                    let mut f = [None; 5];
+                    f[i] = Some(v);
+                    let _ = app.dispatch(set(f[0], f[1], f[2], f[3], f[4], None));
+                }
+            }
+        });
+        ui.vertical(|ui| {
+            for (label, scope) in [("Total", StatisticsScope::Total), ("Selection", StatisticsScope::Selection), ("Total + Selection", StatisticsScope::TotalAndSelection)] {
+                if ui.radio(s.scope == scope, label).clicked() {
+                    let _ = app.dispatch(set(None, None, None, None, None, Some(label)));
+                }
+            }
+        });
+    });
+    ui.separator();
+    ui.label(egui::RichText::new("Application").strong());
+    let mut on = app.state.show_statistics;
+    if ui.checkbox(&mut on, "Show Statistics In Active View").with_shortcut(&app.state, Command::ShowStatisticsToggle.name()).changed() {
+        let _ = app.dispatch(Command::ShowStatisticsToggle);
+    }
+    if ui.button("Default Settings").clicked() {
+        let _ = app.dispatch(Command::SetStatistics { polygons: None, triangles: None, edges: None, vertices: None, fps: None, scope: None, default_settings: Some(true) });
+    }
 }
 
 /// ViewCube panel: Show the ViewCube, in all views or the active one, size,

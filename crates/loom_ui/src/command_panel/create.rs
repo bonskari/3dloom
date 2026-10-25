@@ -33,12 +33,25 @@ impl Category {
             Category::Systems => "Systems",
         }
     }
+    /// The category's icon; its label is the tooltip.
+    pub fn icon(self) -> &'static str {
+        use crate::icons as i;
+        match self {
+            Category::Geometry => i::GEOMETRY,
+            Category::Shapes => i::SHAPES,
+            Category::Lights => i::LIGHTS,
+            Category::Cameras => i::CAMERAS,
+            Category::Helpers => i::HELPERS,
+            Category::SpaceWarps => i::SPACE_WARPS,
+            Category::Systems => i::SYSTEMS,
+        }
+    }
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.horizontal_wrapped(|ui| {
         for c in Category::ALL {
-            if ui.selectable_label(app.create_category == c, c.label()).clicked() {
+            if crate::icons::Icon::new(c.icon(), c.label()).on(app.create_category == c).show(ui, &app.state).clicked() {
                 app.create_category = c;
                 app.create_kind = None;
             }
@@ -54,7 +67,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = ui.selectable_label(true, "Compound Objects");
             });
             rollout(ui, "Object Type", true, |ui| {
-                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                autogrid_and_pin(ui, app);
                 egui::Grid::new("compound_type").num_columns(2).show(ui, |ui| {
                     for (i, kind) in super::compound::CompoundKind::ALL.iter().enumerate() {
                         let on = app.compound_kind == Some(*kind);
@@ -82,7 +95,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             });
             rollout(ui, "Object Type", true, |ui| {
-                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                autogrid_and_pin(ui, app);
                 egui::Grid::new("object_type").num_columns(2).show(ui, |ui| {
                     for (i, kind) in PrimitiveKind::ALL.iter().enumerate() {
                         let on = app.create_kind == Some(CreateKind::Primitive(*kind));
@@ -114,7 +127,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = ui.selectable_label(true, "Splines");
             });
             rollout(ui, "Object Type", true, |ui| {
-                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                autogrid_and_pin(ui, app);
                 egui::Grid::new("shape_type").num_columns(2).show(ui, |ui| {
                     let kinds: Vec<(CreateKind, &str)> = std::iter::once((CreateKind::Line, "Line")).chain(ShapeKind::ALL.iter().map(|k| (CreateKind::Shape(*k), k.label()))).collect();
                     for (i, (kind, label)) in kinds.iter().enumerate() {
@@ -164,8 +177,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         }
                     });
                     let (position, size) = (ke.position, ke.size);
-                    if ui.button("Create").clicked() {
-                        let _ = app.dispatch(Command::CreateShape { kind, position, size });
+                    if ui.button("Create").clicked() && app.dispatch(Command::CreateShape { kind, position, size }).is_ok() {
+                        app.creation_finished();
                     }
                 });
             }
@@ -173,7 +186,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         Category::Cameras => {
             rollout(ui, "Object Type", true, |ui| {
-                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                autogrid_and_pin(ui, app);
                 ui.horizontal(|ui| {
                     for (label, target) in [("Target", true), ("Free", false)] {
                         let kind = CreateKind::Camera { target };
@@ -194,7 +207,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 let _ = ui.selectable_label(true, "Standard");
             });
             rollout(ui, "Object Type", true, |ui| {
-                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                autogrid_and_pin(ui, app);
                 egui::Grid::new("light_type").num_columns(2).show(ui, |ui| {
                     for (i, kind) in loom_commands::light::LightKind::ALL.iter().enumerate() {
                         let on = app.create_kind == Some(CreateKind::Light(*kind));
@@ -214,7 +227,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         Category::Helpers => {
             rollout(ui, "Object Type", true, |ui| {
-                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                autogrid_and_pin(ui, app);
                 egui::Grid::new("helper_type").num_columns(2).show(ui, |ui| {
                     for (i, (kind, label)) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point")].iter().enumerate() {
                         let on = app.create_kind == Some(CreateKind::Helper(*kind));
@@ -232,7 +245,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         Category::Systems => {
             rollout(ui, "Object Type", true, |ui| {
-                ui.checkbox(&mut app.autogrid, "AutoGrid");
+                autogrid_and_pin(ui, app);
                 ui.horizontal(|ui| {
                     let on = app.create_kind == Some(CreateKind::Bones);
                     if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, "Bones")).clicked() {
@@ -262,8 +275,27 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         // Space Warps have no object types (out of scope); they show an empty Object Type rollout.
         _ => {
-            rollout(ui, "Object Type", true, |_ui| {});
+            rollout(ui, "Object Type", true, |ui| pin(ui, app));
         }
+    }
+}
+
+/// The Object Type rollout's top row: AutoGrid and the Pin.
+fn autogrid_and_pin(ui: &mut egui::Ui, app: &mut LoomApp) {
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut app.autogrid, "AutoGrid");
+        pin(ui, app);
+    });
+}
+
+/// The Pin's tooltip (and its name for screen readers).
+pub const PIN_TIP: &str = "Keep Creating (pin): the create tool stays on after each object";
+
+/// The Pin (Keep Creating): on, the create tool stays on after each object.
+fn pin(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let pin = crate::icons::Icon::new(crate::icons::KEEP_CREATING, Command::KeepCreatingToggle.name()).tip(PIN_TIP).on(app.state.prefs.keep_creating);
+    if pin.show(ui, &app.state).clicked() {
+        let _ = app.dispatch(Command::KeepCreatingToggle);
     }
 }
 
@@ -275,14 +307,14 @@ pub fn name_and_color(ui: &mut egui::Ui, app: &mut LoomApp) {
         };
         let Some(node) = app.state.scene.node(id) else { return };
         let mut name = node.name.clone();
-        let mut rgb = node.wire_color;
+        let rgb = node.wire_color;
         ui.horizontal(|ui| {
             let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(170.0));
             if r.lost_focus() && name != app.state.scene.node(id).map(|n| n.name.clone()).unwrap_or_default() {
                 let _ = app.dispatch(Command::Rename { id: id.0, name: name.clone() });
             }
-            if ui.color_edit_button_srgb(&mut rgb).changed() {
-                let _ = app.dispatch(Command::SetWireColor { id: id.0, rgb });
+            if crate::dialogs::object_color::swatch(ui, rgb).clicked() {
+                let _ = app.dispatch(Command::ObjectColorDialog);
             }
         });
     });
@@ -316,8 +348,8 @@ fn keyboard_entry(ui: &mut egui::Ui, app: &mut LoomApp, kind: PrimitiveKind) {
             });
         }
         let (position, size) = (ke.position, ke.size);
-        if ui.button("Create").clicked() {
-            let _ = app.dispatch(Command::CreatePrimitive { kind, position, size });
+        if ui.button("Create").clicked() && app.dispatch(Command::CreatePrimitive { kind, position, size }).is_ok() {
+            app.creation_finished();
         }
     });
 }

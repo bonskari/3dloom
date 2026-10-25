@@ -10,7 +10,11 @@ use std::time::{Duration, Instant};
 struct App {
     child: Child,
     stream: TcpStream,
+    /// The X display the window is on (xdotool drives it there).
+    display: String,
     _serial: std::sync::MutexGuard<'static, ()>,
+    /// This test's own Xvfb, stopped after loom (fields drop after `drop`).
+    _xvfb: Option<KillGuard>,
 }
 
 /// `xvfb-run -a` races when two instances start at once (both pick the
@@ -45,16 +49,26 @@ fn private_dir(name: &str) -> std::path::PathBuf {
 }
 
 impl App {
-    /// Launches on the persistent Xvnc display `:90` (where xdotool can drive
-    /// the window), or returns None when that display or xdotool is missing.
-    fn launch_on_xvnc() -> Option<App> {
-        let alive = Command::new("xdpyinfo").arg("-display").arg(":90").output().is_ok_and(|o| o.status.success());
+    /// Launches on an Xvfb of its own, on a display number no one else
+    /// uses (Xvfb picks it and reports it through `-displayfd`), so xdotool
+    /// can drive the window without touching other runs' displays. None
+    /// when Xvfb or xdotool is missing.
+    fn launch_with_xdotool() -> Option<App> {
         let xdotool = Command::new("xdotool").arg("version").output().is_ok();
-        if !alive || !xdotool {
-            eprintln!("Xvnc :90 or xdotool not available; skipping input e2e");
+        if !xdotool {
+            eprintln!("xdotool not available; skipping input e2e");
             return None;
         }
         let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(mut xvfb) = Command::new("Xvfb").args(["-displayfd", "1", "-screen", "0", "1600x1000x24", "-nolisten", "tcp"]).stdout(Stdio::piped()).stderr(Stdio::null()).process_group(0).spawn() else {
+            eprintln!("Xvfb not available; skipping input e2e");
+            return None;
+        };
+        let mut number = String::new();
+        BufReader::new(xvfb.stdout.take().unwrap()).read_line(&mut number).unwrap();
+        let xvfb = KillGuard(Some(xvfb));
+        let display = format!(":{}", number.trim());
+        assert!(display.len() > 1, "Xvfb reported no display number");
         let port = free_port();
         let dir = private_dir(&port.to_string());
         let bin = env!("CARGO_BIN_EXE_loom");
@@ -63,7 +77,7 @@ impl App {
             .env("XDG_RUNTIME_DIR", &dir)
             .env("XDG_STATE_HOME", &dir)
             .env("LOOM_CONFIG_DIR", &dir)
-            .env("DISPLAY", ":90")
+            .env("DISPLAY", &display)
             .env_remove("WAYLAND_DISPLAY")
             .env("XDG_SESSION_TYPE", "x11")
             .env("WINIT_UNIX_BACKEND", "x11")
@@ -71,7 +85,7 @@ impl App {
             .stderr(Stdio::inherit())
             .process_group(0)
             .spawn()
-            .expect("spawn loom on :90");
+            .expect("spawn loom on its Xvfb");
         let mut guard = KillGuard(Some(child));
         let deadline = Instant::now() + Duration::from_secs(60);
         let stream = loop {
@@ -83,7 +97,7 @@ impl App {
         };
         stream.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
         let child = guard.0.take().expect("child still owned");
-        Some(App { child, stream, _serial: serial })
+        Some(App { child, stream, display, _serial: serial, _xvfb: Some(xvfb) })
     }
 
     fn launch() -> Option<App> {
@@ -123,7 +137,7 @@ impl App {
         };
         stream.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
         let child = guard.0.take().expect("child still owned");
-        Some(App { child, stream, _serial: serial })
+        Some(App { child, stream, display: String::new(), _serial: serial, _xvfb: None })
     }
 
     fn send(&mut self, body: Value) -> Value {
@@ -242,15 +256,15 @@ fn all_fourteen_layouts_render_differently() {
     }
 }
 
-/// xdotool on :90: focuses the 3dLoom window once, then clicks.
-fn xdo(args: &[&str]) {
-    let st = Command::new("xdotool").env("DISPLAY", ":90").args(args).status().expect("xdotool");
+/// xdotool on the app's display: focuses the 3dLoom window once, then clicks.
+fn xdo(app: &App, args: &[&str]) {
+    let st = Command::new("xdotool").env("DISPLAY", &app.display).args(args).status().expect("xdotool");
     assert!(st.success(), "xdotool {args:?}");
 }
 
 #[test]
 fn clicking_an_object_in_a_viewport_selects_it() {
-    let Some(mut app) = App::launch_on_xvnc() else { return };
+    let Some(mut app) = App::launch_with_xdotool() else { return };
     std::thread::sleep(Duration::from_millis(1500));
     let r = app.send(json!({ "cmd": "Create Primitive", "args": { "kind": "box", "position": [0, 0, 0], "size": [30, 30, 30] } }));
     assert_eq!(r["ok"], true, "{r}");
@@ -260,21 +274,21 @@ fn clicking_an_object_in_a_viewport_selects_it() {
     app.send(json!({ "cmd": "Zoom Extents All" }));
     std::thread::sleep(Duration::from_millis(400));
     // The box fills the middle of the maximized Top view; the window is at the display origin.
-    let geo = Command::new("xdotool").env("DISPLAY", ":90").args(["search", "--name", "3dLoom"]).output().expect("xdotool search");
+    let geo = Command::new("xdotool").env("DISPLAY", &app.display).args(["search", "--name", "3dLoom"]).output().expect("xdotool search");
     let wid = String::from_utf8_lossy(&geo.stdout).split_whitespace().last().expect("window id").to_owned();
-    xdo(&["windowfocus", "--sync", &wid]);
-    let out = Command::new("xdotool").env("DISPLAY", ":90").args(["getwindowgeometry", "--shell", &wid]).output().unwrap();
+    xdo(&app, &["windowfocus", "--sync", &wid]);
+    let out = Command::new("xdotool").env("DISPLAY", &app.display).args(["getwindowgeometry", "--shell", &wid]).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     let get = |k: &str| text.lines().find_map(|l| l.strip_prefix(k).and_then(|v| v.trim_start_matches('=').parse::<i32>().ok())).unwrap();
     let (x, y, w, h) = (get("X"), get("Y"), get("WIDTH"), get("HEIGHT"));
     // Viewport area is roughly the left 72 % under the toolbars; its centre holds the box.
     let (cx, cy) = (x + (w as f32 * 0.36) as i32, y + (h as f32 * 0.48) as i32);
-    xdo(&["mousemove", &cx.to_string(), &cy.to_string(), "click", "1"]);
+    xdo(&app, &["mousemove", &cx.to_string(), &cy.to_string(), "click", "1"]);
     std::thread::sleep(Duration::from_millis(500));
     let st = app.send(json!({ "cmd": "State" }));
     assert_eq!(st["selection"]["selected"], json!([1]), "click at ({cx},{cy}) should select Box001: {st}");
     // Clicking empty space clears it.
-    xdo(&["mousemove", &(x + 40).to_string(), &(y + h - 120).to_string(), "click", "1"]);
+    xdo(&app, &["mousemove", &(x + 40).to_string(), &(y + h - 120).to_string(), "click", "1"]);
     std::thread::sleep(Duration::from_millis(500));
     let st = app.send(json!({ "cmd": "State" }));
     assert_eq!(st["selection"]["selected"], json!([]), "{st}");
@@ -514,7 +528,7 @@ fn every_run_answers_on_its_private_unix_socket_with_diagnostics_input_and_logs(
     let r = ask(&mut s, json!({ "cmd": "input", "args": { "events": [{ "type": "drag", "button": "middle", "from": [cx, cy], "to": [cx + 80.0, cy + 40.0] }] } }));
     assert_eq!(r["ok"], true, "{r}");
     let d = ask(&mut s, json!({ "cmd": "diagnostics" }));
-    assert_ne!(d["viewports"]["active_view"]["camera"]["target"], before["target"], "the injected drag panned: {}", d["viewports"]);
+    assert_ne!(d["viewports"]["active_view"]["camera"]["target"], before["target"], "the injected drag panned: {} {}", d["viewports"], d["input_events"]);
     assert!(d["input_events"].as_array().unwrap().iter().any(|e| e["event"].as_str().unwrap().contains("Middle")), "{}", d["input_events"]);
     let hit = ask(&mut s, json!({ "cmd": "ui_hit", "x": cx, "y": cy }));
     assert_eq!(hit["viewport"], active, "{hit}");

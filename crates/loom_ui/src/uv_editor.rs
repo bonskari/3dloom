@@ -2,6 +2,7 @@
 //! toolbar, the texture-coordinate canvas and the bottom bar. Every action
 //! is a command; the window only draws and turns mouse input into them.
 
+use crate::icons::{self, Icon};
 use crate::shortcuts::HoverShortcut;
 use crate::LoomApp;
 use eframe::egui;
@@ -240,27 +241,28 @@ fn menus(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
     let e = app.state.uv_editor.clone();
     ui.horizontal_wrapped(|ui| {
-        let mode = |ui: &mut egui::Ui, app: &mut LoomApp, label: &str, m: TvMode, cmd: Command| {
-            if ui.selectable_label(e.mode == m, label).with_shortcut(&app.state, cmd.name()).clicked() {
+        let mode = |ui: &mut egui::Ui, app: &mut LoomApp, glyph: &str, tip: &str, m: TvMode, cmd: Command| {
+            if Icon::new(glyph, cmd.name()).tip(tip).on(e.mode == m).show(ui, &app.state).clicked() {
                 let _ = app.dispatch(cmd);
             }
         };
-        mode(ui, app, "Move", TvMode::Move, Command::TextureVertexMoveMode);
-        mode(ui, app, "Move H", TvMode::MoveHorizontal, Command::MoveHorizontal);
-        mode(ui, app, "Move V", TvMode::MoveVertical, Command::MoveVertical);
-        mode(ui, app, "Rotate", TvMode::Rotate, Command::TextureVertexRotateMode);
-        mode(ui, app, "Scale", TvMode::Scale, Command::TextureVertexScaleMode);
-        mode(ui, app, "Scale H", TvMode::ScaleHorizontal, Command::ScaleHorizontal);
-        mode(ui, app, "Scale V", TvMode::ScaleVertical, Command::ScaleVertical);
-        mode(ui, app, "Freeform", TvMode::Freeform, Command::FreeformMode);
-        mode(ui, app, "Pan", TvMode::Pan, Command::Pan);
+        mode(ui, app, icons::MOVE, "Move", TvMode::Move, Command::TextureVertexMoveMode);
+        mode(ui, app, icons::MOVE_KEYS_HORIZONTAL, "Move Horizontal", TvMode::MoveHorizontal, Command::MoveHorizontal);
+        mode(ui, app, icons::MOVE_KEYS_VERTICAL, "Move Vertical", TvMode::MoveVertical, Command::MoveVertical);
+        mode(ui, app, icons::ROTATE, "Rotate", TvMode::Rotate, Command::TextureVertexRotateMode);
+        mode(ui, app, icons::SCALE, "Scale", TvMode::Scale, Command::TextureVertexScaleMode);
+        mode(ui, app, icons::UV_SCALE_HORIZONTAL, "Scale Horizontal", TvMode::ScaleHorizontal, Command::ScaleHorizontal);
+        mode(ui, app, icons::UV_SCALE_VERTICAL, "Scale Vertical", TvMode::ScaleVertical, Command::ScaleVertical);
+        mode(ui, app, icons::UV_FREEFORM, "Freeform Mode", TvMode::Freeform, Command::FreeformMode);
+        mode(ui, app, icons::PAN, "Pan", TvMode::Pan, Command::Pan);
         ui.separator();
-        ui.menu_button("Mirror", |ui| {
+        let mirror = ui.menu_button(egui::RichText::new(icons::MIRROR).size(icons::SIZE), |ui| {
             item(ui, app, "Mirror Horizontal", Command::MirrorHorizontal);
             item(ui, app, "Mirror Vertical", Command::MirrorVertical);
             item(ui, app, "Flip Horizontal", Command::FlipHorizontal);
             item(ui, app, "Flip Vertical", Command::FlipVertical);
         });
+        icons::named(&mirror.response, egui::WidgetType::Button, "Mirror");
         ui.separator();
         if ui.selectable_label(e.show_map, "Show Map").clicked() {
             let _ = app.dispatch(Command::ShowMap);
@@ -810,46 +812,46 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp, mesh: &Mesh, ch: u32, data: 
             }
         }
         ui.separator();
-        if ui.selectable_label(e.lock_selected, "Lock").on_hover_cmd(&app.state, "Lock Selected Vertices", Command::LockSelectedVertices.name()).clicked() {
+        if Icon::new(icons::LOCKED, Command::LockSelectedVertices.name()).tip("Lock Selected Vertices").on(e.lock_selected).show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::LockSelectedVertices);
         }
-        if ui.selectable_label(e.filter_selected_polygons, "Filter Sel.").with_shortcut(&app.state, Command::FilterSelectedPolygons.name()).clicked() {
+        if Icon::new(icons::FILTER_SELECTED, Command::FilterSelectedPolygons.name()).tip("Filter Selected Faces").on(e.filter_selected_polygons).show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::FilterSelectedPolygons);
         }
-        if ui.button("Hide").with_shortcut(&app.state, Command::HideSelectedUnwrap.name()).clicked() {
+        if Icon::new(icons::HIDE, Command::HideSelectedUnwrap.name()).tip("Hide Selected").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::HideSelectedUnwrap);
         }
-        if ui.button("Unhide All").clicked() {
+        if Icon::new(icons::UNHIDE_ALL, Command::UnhideAllUnwrap.name()).tip("Unhide All").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::UnhideAllUnwrap);
         }
-        if ui.button("Freeze").with_shortcut(&app.state, Command::FreezeSelected.name()).clicked() {
+        if Icon::new(icons::FREEZE, Command::FreezeSelected.name()).tip("Freeze Selected").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::FreezeSelected);
         }
-        if ui.button("Unfreeze All").clicked() {
+        if Icon::new(icons::UNFREEZE_ALL, Command::UnfreezeAllUnwrap.name()).tip("Unfreeze All").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::UnfreezeAllUnwrap);
         }
         ui.separator();
-        if ui.button("Zoom Extents").clicked() {
+        if Icon::new(icons::ZOOM_EXTENTS, Command::ZoomExtentsUv.name()).tip("Zoom Extents").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ZoomExtentsUv);
         }
-        if ui.button("Zoom Sel.").clicked() {
+        if Icon::new(icons::ZOOM_SELECTED, Command::ZoomExtentsSelectedUv.name()).tip("Zoom Extents Selected").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ZoomExtentsSelectedUv);
         }
-        if ui.selectable_label(e.snap, "Snap").with_shortcut(&app.state, Command::Snap.name()).clicked() {
+        if Icon::new(icons::SNAP, Command::Snap.name()).tip("Snap").on(e.snap).show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::Snap);
         }
     });
     ui.horizontal_wrapped(|ui| {
-        for (label, level, cmd) in [("Vertex", TvLevel::Vertex, Command::TvVertexSubobjectMode), ("Edge", TvLevel::Edge, Command::TvEdgeSubobjectMode), ("Face", TvLevel::Face, Command::TvPolygonSubobjectMode)] {
-            if ui.selectable_label(e.level == level, label).clicked() {
+        for (glyph, label, level, cmd) in [(icons::LEVEL_VERTEX, "Vertex Sub-object Mode", TvLevel::Vertex, Command::TvVertexSubobjectMode), (icons::LEVEL_EDGE, "Edge Sub-object Mode", TvLevel::Edge, Command::TvEdgeSubobjectMode), (icons::LEVEL_FACE, "Face Sub-object Mode", TvLevel::Face, Command::TvPolygonSubobjectMode)] {
+            if Icon::new(glyph, cmd.name()).tip(label).on(e.level == level).show(ui, &app.state).clicked() {
                 let _ = app.dispatch(cmd);
             }
         }
         ui.separator();
-        if ui.button("+").on_hover_cmd(&app.state, "Expand Selection", Command::TextureVertexExpandSelection.name()).clicked() {
+        if Icon::new(icons::EXPAND_SELECTION, Command::TextureVertexExpandSelection.name()).tip("Expand Selection").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::TextureVertexExpandSelection);
         }
-        if ui.button("-").on_hover_cmd(&app.state, "Contract Selection", Command::TextureVertexContractSelection.name()).clicked() {
+        if Icon::new(icons::CONTRACT_SELECTION, Command::TextureVertexContractSelection.name()).tip("Contract Selection").show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::TextureVertexContractSelection);
         }
         if ui.selectable_label(e.select_element, "Select Element").clicked() {

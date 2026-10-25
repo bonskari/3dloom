@@ -43,11 +43,15 @@ pub struct MeshStyle {
     pub specular: [f32; 4],
     /// Edges and wireframe: the object (wire) colour even when a material colours the faces.
     pub wire_color: Option<[f32; 3]>,
+    /// Edges Only off: the triangulation diagonals show as dashed edges.
+    pub diagonals: bool,
+    /// The faces show their colour unlit (vertex colours without Shaded).
+    pub unlit: bool,
 }
 
 impl Default for MeshStyle {
     fn default() -> Self {
-        Self { color: [0.7, 0.7, 0.7], alpha: 1.0, backface_cull: false, vertex_colors: false, texture: TextureSel::None, specular: [0.0; 4], wire_color: None }
+        Self { color: [0.7, 0.7, 0.7], alpha: 1.0, backface_cull: false, vertex_colors: false, texture: TextureSel::None, specular: [0.0; 4], wire_color: None, diagonals: false, unlit: false }
     }
 }
 
@@ -94,7 +98,8 @@ impl MeshBuffer {
     pub fn from_mesh(device: &Device, mesh: &Mesh, style: MeshStyle) -> Self {
         let (mut verts, indices) = triangulate_with_face_normals(mesh, [style.color[0], style.color[1], style.color[2], style.alpha], style.vertex_colors);
         for v in &mut verts {
-            v.spec = style.specular;
+            // A negative exponent tells the shader to leave the colour unlit.
+            v.spec = if style.unlit { [0.0, 0.0, 0.0, -1.0] } else { style.specular };
         }
         let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("loom_mesh_vertex_buffer"),
@@ -107,7 +112,10 @@ impl MeshBuffer {
             usage: BufferUsages::INDEX,
         });
 
-        let edges = mesh.unique_edges();
+        let mut edges = mesh.unique_edges();
+        if style.diagonals {
+            edges.extend(dashed(&fan_diagonals(mesh), DIAGONAL_DASHES));
+        }
         let edge_vertex_count = (edges.len() * 2) as u32;
         let edge_vertex_buffer = edge_buffer(device, &edges, style.wire_color.unwrap_or(style.color), "loom_mesh_edge_buffer");
         let selected_edge_vertex_buffer = edge_buffer(
@@ -131,6 +139,40 @@ impl MeshBuffer {
             style,
         }
     }
+}
+
+/// Dashes per diagonal when Edges Only is off.
+pub const DIAGONAL_DASHES: usize = 6;
+
+/// The diagonals the fan triangulation adds inside each visible polygon
+/// (corner 0 to corners 2 .. n-2), as `triangulate_with_face_normals` cuts it.
+pub fn fan_diagonals(mesh: &Mesh) -> Vec<(Vec3, Vec3)> {
+    let mut out = Vec::new();
+    for (i, face) in mesh.faces().iter().enumerate() {
+        if face.hidden {
+            continue;
+        }
+        let Some(ids) = mesh.face_vertex_ids(loom_mesh::FaceId(i as u32)) else { continue };
+        let pts: Vec<Vec3> = ids.iter().filter_map(|v| mesh.vertex_position(*v)).collect();
+        for p in pts.iter().take(pts.len().saturating_sub(1)).skip(2) {
+            out.push((pts[0], *p));
+        }
+    }
+    out
+}
+
+/// Each segment cut into `dashes` dashes with gaps of the same length.
+pub fn dashed(segments: &[(Vec3, Vec3)], dashes: usize) -> Vec<(Vec3, Vec3)> {
+    let parts = (dashes * 2).saturating_sub(1).max(1) as f32;
+    let mut out = Vec::with_capacity(segments.len() * dashes);
+    for (a, b) in segments {
+        for k in 0..dashes {
+            let t0 = (2 * k) as f32 / parts;
+            let t1 = (2 * k + 1) as f32 / parts;
+            out.push((a.lerp(*b, t0), a.lerp(*b, t1)));
+        }
+    }
+    out
 }
 
 fn edge_buffer(device: &Device, edges: &[(Vec3, Vec3)], color: [f32; 3], label: &str) -> Buffer {
@@ -260,6 +302,32 @@ mod tests {
         // 6 quads × 4 dup verts = 24 verts, 6 × 2 triangles × 3 idx = 36 idx
         assert_eq!(verts.len(), 24);
         assert_eq!(indices.len(), 36);
+    }
+
+    #[test]
+    fn edges_only_off_adds_one_dashed_diagonal_per_quad() {
+        let mut m = box_primitive(Vec3::splat(0.5));
+        let d = fan_diagonals(&m);
+        assert_eq!(d.len(), 6, "one diagonal per quad");
+        let (_, indices) = triangulate_with_face_normals(&m, [1.0; 4], false);
+        // Each diagonal is an edge of the fan triangles drawn for its face.
+        let (verts, _) = triangulate_with_face_normals(&m, [1.0; 4], false);
+        for (a, b) in &d {
+            let shared = indices.chunks(3).any(|t| {
+                let p: Vec<Vec3> = t.iter().map(|i| Vec3::from(verts[*i as usize].position)).collect();
+                p.iter().any(|q| q.distance(*a) < 1e-6) && p.iter().any(|q| q.distance(*b) < 1e-6)
+            });
+            assert!(shared, "diagonal {a:?}-{b:?} is a triangle edge");
+            assert!((*a - *b).length() > 1.0, "a diagonal crosses the face");
+        }
+        let dashes = dashed(&d, DIAGONAL_DASHES);
+        assert_eq!(dashes.len(), 6 * DIAGONAL_DASHES);
+        let (a, b) = d[0];
+        assert!(dashes[0].0.distance(a) < 1e-6 && dashes[DIAGONAL_DASHES - 1].1.distance(b) < 1e-6, "the dashes start and end at the corners");
+        let drawn: f32 = dashes[..DIAGONAL_DASHES].iter().map(|(p, q)| p.distance(*q)).sum();
+        assert!((drawn / a.distance(b) - DIAGONAL_DASHES as f32 / (2 * DIAGONAL_DASHES - 1) as f32).abs() < 1e-4, "gaps as long as the dashes");
+        m.faces_mut()[0].hidden = true;
+        assert_eq!(fan_diagonals(&m).len(), 5, "hidden faces add none");
     }
 
     #[test]

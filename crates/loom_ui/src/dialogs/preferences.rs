@@ -12,6 +12,7 @@ enum Tab {
     Viewports,
     Gizmos,
     Files,
+    Animation,
 }
 
 fn set(app: &mut LoomApp, name: &str, value: f64) {
@@ -42,6 +43,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.selectable_value(&mut tab, Tab::Viewports, "Viewports");
             ui.selectable_value(&mut tab, Tab::Gizmos, "Gizmos");
             ui.selectable_value(&mut tab, Tab::Files, "Files");
+            ui.selectable_value(&mut tab, Tab::Animation, "Animation");
         });
         ui.separator();
         match tab {
@@ -56,6 +58,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         check(ui, app, "Auto Window/Crossing by Direction", "Auto Window/Crossing by Direction");
                         ui.horizontal(|ui| number(ui, app, "Paint Selection Brush Size", "Paint Selection Brush Size:", 1.0..=200.0, 0));
                         check(ui, app, "Space Locks Selection", "Space locks the selection");
+                        ui.label(egui::RichText::new("Create Objects").strong());
+                        check(ui, app, "Keep Creating", "Keep Creating");
                     });
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("Spinners").strong());
@@ -89,6 +93,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         }
                     });
                     ui.label(format!("Folder: {}", loom_commands::autosave::autoback_dir().display()));
+                });
+            }
+            Tab::Animation => {
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Animate").strong());
+                    check(ui, app, "Local Center During Animate", "Local Center During Animate");
                 });
             }
             Tab::Viewports => {

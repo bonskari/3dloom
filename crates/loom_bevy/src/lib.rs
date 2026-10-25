@@ -46,6 +46,10 @@ const HIDDEN_LAYER: usize = 3;
 /// on, plus `LIGHT_LAYER + 1 + i` for light i: an object is on a light's own
 /// layer unless the light excludes it from shadow casting.
 const LIGHT_LAYER: usize = 4;
+/// Objects that renders do not see but whose shadows still render (Visible
+/// to Camera off) with the default key light: only that light is on this
+/// layer. Kept far above the per-light layers.
+const SHADOW_ONLY_LAYER: usize = 1023;
 /// Brightness of the ambient light that the Render Setup colour tints.
 const AMBIENT_BRIGHTNESS: f32 = 250.0;
 
@@ -80,6 +84,26 @@ pub struct SceneObject<'a> {
     pub material: Option<&'a loom_scene::material::StandardMaterial>,
     /// Shows in renders (geometry, not helpers or camera icons).
     pub renderable: bool,
+    /// Object Properties > Rendering Control values.
+    pub flags: ObjectFlags,
+}
+
+/// Object Properties > Rendering Control as the renderer applies it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjectFlags {
+    pub cast_shadows: bool,
+    pub receive_shadows: bool,
+    /// Off: renders leave the object out but keep its shadows.
+    pub visible_to_camera: bool,
+    /// Rendered visibility 0–1 (multiplies the material's opacity; 0 leaves
+    /// the object and its shadows out of renders).
+    pub visibility: f32,
+}
+
+impl Default for ObjectFlags {
+    fn default() -> Self {
+        Self { cast_shadows: true, receive_shadows: true, visible_to_camera: true, visibility: 1.0 }
+    }
 }
 
 struct Object {
@@ -89,6 +113,7 @@ struct Object {
     wire_color: [u8; 3],
     material_handle: Handle<StandardMaterial>,
     renderable: bool,
+    flags: ObjectFlags,
 }
 
 struct View {
@@ -193,7 +218,7 @@ impl BevyRenderer {
                 DirectionalLight { illuminance: 3000.0, shadows_enabled: true, ..Default::default() },
                 Transform::from_translation(KEY_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
                 // The key light lights (and shadows) every layer.
-                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER]),
+                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER]),
             ))
             .id()
     }
@@ -299,10 +324,19 @@ impl BevyRenderer {
     }
 
     /// The layers an object is on: viewports, renders, and the selection's
-    /// layer while a Selected render runs.
-    fn object_layers(&self, id: u64, renderable: bool, hidden: bool) -> RenderLayers {
-        let mut l = if hidden { vec![HIDDEN_LAYER] } else { vec![VIEWPORT_LAYER] };
-        if renderable && !hidden {
+    /// layer while a Selected render runs. Visible to Camera off puts the
+    /// render part on the shadow-only layer instead (scene lights keep
+    /// shadowing it through their own layers).
+    fn object_layers(&self, id: u64, renderable: bool, flags: ObjectFlags, hidden: bool) -> RenderLayers {
+        let renderable = renderable && flags.visibility > 0.0;
+        let mut l = match (hidden, flags.visible_to_camera) {
+            (true, true) => vec![HIDDEN_LAYER],
+            (true, false) => vec![SHADOW_ONLY_LAYER],
+            (false, _) => vec![VIEWPORT_LAYER],
+        };
+        if renderable && !hidden && !flags.visible_to_camera {
+            l.push(SHADOW_ONLY_LAYER);
+        } else if renderable && !hidden {
             l.push(RENDER_LAYER);
             if self.render.as_ref().and_then(|r| r.options.selected_only.as_ref()).is_some_and(|s| s.contains(&id)) {
                 l.push(SELECTED_LAYER);
@@ -346,14 +380,16 @@ impl BevyRenderer {
                 hi = hi.max(Vec3::from(b.max()));
             }
             let hash = data.content_hash();
-            let material_changed = |obj: &Object| obj.material.as_ref() != o.material || obj.wire_color != o.wire_color;
-            let layers = self.object_layers(o.id, o.renderable, hidden);
+            let material_changed = |obj: &Object| obj.material.as_ref() != o.material || obj.wire_color != o.wire_color || obj.flags.visibility != o.flags.visibility;
+            let layers = self.object_layers(o.id, o.renderable, o.flags, hidden);
             match set.get(&o.id) {
-                Some(obj) if obj.mesh_hash == hash && !material_changed(obj) && obj.renderable == o.renderable => continue,
+                Some(obj) if obj.mesh_hash == hash && !material_changed(obj) && obj.renderable == o.renderable && obj.flags == o.flags => continue,
                 Some(obj) if obj.mesh_hash == hash && !material_changed(obj) => {
                     let entity = obj.entity;
-                    self.app.world_mut().entity_mut(entity).insert(layers);
-                    set.get_mut(&o.id).expect("present").renderable = o.renderable;
+                    Self::shadow_flags(self.app.world_mut().entity_mut(entity), Self::cast_flags(o)).insert(layers);
+                    let obj = set.get_mut(&o.id).expect("present");
+                    obj.renderable = o.renderable;
+                    obj.flags = o.flags;
                 }
                 Some(obj) if obj.mesh_hash == hash => {
                     let handle = obj.material_handle.clone();
@@ -363,8 +399,9 @@ impl BevyRenderer {
                     obj.material = o.material.cloned();
                     obj.wire_color = o.wire_color;
                     obj.renderable = o.renderable;
+                    obj.flags = o.flags;
                     let entity = obj.entity;
-                    self.app.world_mut().entity_mut(entity).insert(layers);
+                    Self::shadow_flags(self.app.world_mut().entity_mut(entity), Self::cast_flags(o)).insert(layers);
                 }
                 _ => {
                     let mat = self.material(o);
@@ -376,6 +413,7 @@ impl BevyRenderer {
                         None => world.spawn(Transform::IDENTITY),
                     };
                     e.insert((Mesh3d(mesh), MeshMaterial3d(material_handle.clone()), layers));
+                    let mut e = Self::shadow_flags(e, Self::cast_flags(o));
                     // Bevy computes bounds only once per entity: keep them current.
                     match data.aabb() {
                         Some(b) => {
@@ -395,7 +433,7 @@ impl BevyRenderer {
                             m.cull_mode = None;
                         }
                     }
-                    set.insert(o.id, Object { entity, mesh_hash: hash, material: o.material.cloned(), wire_color: o.wire_color, material_handle, renderable: o.renderable });
+                    set.insert(o.id, Object { entity, mesh_hash: hash, material: o.material.cloned(), wire_color: o.wire_color, material_handle, renderable: o.renderable, flags: o.flags });
                 }
             }
             self.settle = self.settle.max(3);
@@ -410,8 +448,47 @@ impl BevyRenderer {
         (lo.x <= hi.x).then(|| ((lo + hi) * 0.5, ((hi - lo) * 0.5).length().max(1e-3)))
     }
 
+    /// The flags whose shadows apply: shadow maps belong to the lights, not
+    /// to a camera, so objects renders leave out (not renderable, visibility
+    /// 0) cast no shadows at all.
+    fn cast_flags(o: &SceneObject) -> ObjectFlags {
+        let mut f = o.flags;
+        f.cast_shadows &= o.renderable && f.visibility > 0.0;
+        f
+    }
+
+    /// Cast Shadows / Receive Shadows off: Bevy's shadow opt-out markers.
+    fn shadow_flags(mut e: bevy::ecs::world::EntityWorldMut<'_>, flags: ObjectFlags) -> bevy::ecs::world::EntityWorldMut<'_> {
+        use bevy::pbr::{NotShadowCaster, NotShadowReceiver};
+        let removed = (flags.cast_shadows && e.contains::<NotShadowCaster>()) || (flags.receive_shadows && e.contains::<NotShadowReceiver>());
+        if flags.cast_shadows {
+            e.remove::<NotShadowCaster>();
+        } else {
+            e.insert(NotShadowCaster);
+        }
+        if flags.receive_shadows {
+            e.remove::<NotShadowReceiver>();
+        } else {
+            e.insert(NotShadowReceiver);
+        }
+        if removed {
+            // Bevy re-extracts a mesh's shadow flags when a marker is added,
+            // not when one is removed: mark the mesh changed so it is.
+            if let Some(mut m) = e.get_mut::<Mesh3d>() {
+                bevy::ecs::change_detection::DetectChangesMut::set_changed(&mut m);
+            }
+        }
+        e
+    }
+
     fn material(&mut self, o: &SceneObject) -> StandardMaterial {
         let mut m = material_from_loom(o.material, o.wire_color);
+        let v = o.flags.visibility.clamp(0.0, 1.0);
+        if v < 1.0 {
+            // Visibility fades the object like its material's opacity.
+            m.base_color = m.base_color.with_alpha(m.base_color.alpha() * v);
+            m.alpha_mode = bevy::render::alpha::AlphaMode::Blend;
+        }
         if let Some(path) = diffuse_map_path(o.material) {
             m.base_color_texture = self.texture(path);
             if m.base_color_texture.is_some() && o.material.is_some() {
@@ -535,8 +612,8 @@ impl BevyRenderer {
 
     /// Puts every object on its layers again (the Selected layer or a light's exclusions changed).
     fn relayer(&mut self) {
-        let shown = self.objects.iter().map(|(id, o)| (o.entity, self.object_layers(*id, o.renderable, false)));
-        let hidden = self.hidden.iter().map(|(id, o)| (o.entity, self.object_layers(*id, o.renderable, true)));
+        let shown = self.objects.iter().map(|(id, o)| (o.entity, self.object_layers(*id, o.renderable, o.flags, false)));
+        let hidden = self.hidden.iter().map(|(id, o)| (o.entity, self.object_layers(*id, o.renderable, o.flags, true)));
         let list: Vec<(Entity, RenderLayers)> = shown.chain(hidden).collect();
         for (e, l) in list {
             self.app.world_mut().entity_mut(e).insert(l);
