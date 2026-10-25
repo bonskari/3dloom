@@ -78,7 +78,9 @@ fn dragging_a_target_light_puts_the_light_at_the_press_and_its_target_at_the_rel
     assert!(l.photometric.is_some());
     assert_eq!(h.app.state.scene.node(id).unwrap().name, "TPhotometricLight001");
     let t = l.target.expect("a target light");
-    assert!(h.app.state.scene.world_matrix(t).w_axis.truncate().distance(to) < 0.5);
+    let at = h.app.state.scene.world_matrix(t).w_axis.truncate();
+    let eye = h.app.state.scene.world_matrix(id).w_axis.truncate();
+    assert!(at.distance(to) < 0.5, "target at the release: {at}, light at {eye}");
 }
 
 #[test]
@@ -126,7 +128,8 @@ fn dragging_a_sunlight_sizes_its_compass_and_places_the_sun() {
         loom_scene::ObjectKind::Compass { radius, .. } => radius.get(),
         _ => 0.0,
     };
-    assert!((radius - 40.0).abs() < 1.0, "the drag sets the compass radius: {radius}");
+    let at = h.app.state.scene.world_matrix(compass).w_axis.truncate();
+    assert!((radius - 40.0).abs() < 1.0, "the drag sets the compass radius: {radius}, compass at {at}");
     let sun = h.app.state.scene.nodes().find(|n| matches!(&n.object, loom_scene::ObjectKind::Light(l) if l.sun.is_some())).expect("a sun").id;
     assert_eq!(h.app.state.scene.node(sun).unwrap().parent, Some(compass));
     let d = h.app.state.scene.world_matrix(sun).w_axis.truncate().length();
@@ -138,18 +141,21 @@ fn dragging_a_sunlight_sizes_its_compass_and_places_the_sun() {
 #[test]
 fn a_light_view_shows_the_light_controls() {
     let mut h = Harness::new();
-    maximized(&mut h);
-    h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::TargetSpot, position: [0.0, -100.0, 50.0], target: [0.0; 3] });
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::TargetSpot, position: [0.0, -100.0, 50.0], target: [0.0; 3] }).unwrap();
+    let spot = NodeId(r["id"].as_u64().unwrap());
     h.cmd(Command::SpotDirectionalLightView);
-    assert!(h.has(Role::Button, "Light Hotspot Mode") && h.has(Role::Button, "Light Falloff Mode"));
+    maximized(&mut h);
+    h.cmd(Command::SelectNone);
+    assert_eq!(h.app.state.active().kind, loom_commands::ViewKind::Camera(spot), "the light view");
+    let names: Vec<&str> = h.widgets.iter().filter(|w| w.0 == Role::Button).map(|w| w.1.as_str()).collect();
+    assert!(h.has(Role::Button, "Light Hotspot Mode") && h.has(Role::Button, "Light Falloff Mode"), "{names:?}");
     assert!(!h.has(Role::Button, "Perspective Mode"), "camera controls are swapped out");
     h.click(h.find(Role::Button, "Light Falloff Mode").center());
     assert_eq!(h.app.state.nav_mode, loom_input::NavMode::LightFalloff);
     // A drag in the view widens or narrows the falloff.
-    let before = light(&h, *h.app.state.selection.iter().next().unwrap()).falloff.get();
-    let rect = h.app.viewport_rects[h.app.state.active_viewport];
-    h.drag(rect.center(), rect.center() + egui::vec2(0.0, -80.0));
-    let spot = h.app.state.scene.nodes().find(|n| matches!(n.object, loom_scene::ObjectKind::Light(_))).unwrap().id;
+    let before = light(&h, spot).falloff.get();
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center() + egui::vec2(0.0, 80.0);
+    h.drag(c, c + egui::vec2(0.0, -80.0));
     assert!((light(&h, spot).falloff.get() - before).abs() > 0.5, "the falloff changed");
 }
 
@@ -271,7 +277,7 @@ fn views_update_during_spinner_drag_holds_the_viewports_until_release() {
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(3);
     let before = h.app.world_meshes()[0].1.aabb();
-    let length = h.spinner_after("Length:");
+    let length = h.spinner_after("Length");
     let m = h.mods;
     let start = length.center();
     h.run(vec![egui::Event::PointerMoved(start)]);
