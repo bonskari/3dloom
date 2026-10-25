@@ -45,6 +45,24 @@ pub fn record(ctx: &egui::Context, key: &str, rect: [f32; 4]) {
     });
 }
 
+fn keys_id() -> egui::Id {
+    egui::Id::new("os_window_keys")
+}
+
+/// Keys pressed in an OS window that it didn't use go to the main window's
+/// next frame: its shortcuts work there as they do over an in-app window.
+pub fn forward_keys(ctx: &egui::Context, keys: Vec<egui::Event>) {
+    if !keys.is_empty() {
+        ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<egui::Event>>(keys_id()).extend(keys));
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    }
+}
+
+/// The forwarded keys, which the app adds to the main window's input.
+pub fn take_forwarded_keys(ctx: &egui::Context) -> Vec<egui::Event> {
+    ctx.data_mut(|d| d.remove_temp::<Vec<egui::Event>>(keys_id())).unwrap_or_default()
+}
+
 /// A point `p` of the window being drawn, in the main window's coordinates
 /// (the same point when it is an in-app window).
 pub fn to_main(ctx: &egui::Context, p: egui::Pos2) -> egui::Pos2 {
@@ -135,6 +153,10 @@ impl OsWindow {
                 if now.is_some_and(|n| (n.width() - want.x).abs() > 1.0 || (n.height() - want.y).abs() > 1.0) {
                     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(want));
                 }
+            }
+            if !ctx.wants_keyboard_input() {
+                let keys: Vec<egui::Event> = ctx.input(|i| i.events.iter().filter(|e| matches!(e, egui::Event::Key { .. })).cloned().collect());
+                forward_keys(ctx, keys);
             }
             if let (Some(o), Some(n)) = (outer, now) {
                 record(ctx, &self.key, [o.min.x, o.min.y, n.width(), n.height()]);

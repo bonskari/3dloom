@@ -35,7 +35,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let i = index as u32;
     let set = |app: &mut LoomApp, name: &str, value: f64| run(app, Command::SetModifierParameter { index: i, name: name.into(), value });
     let mut open = true;
-    egui::Window::new("VertexPaint").id(egui::Id::new("VertexPaint")).open(&mut open).resizable(false).collapsible(false).default_pos(egui::pos2(300.0, 120.0)).show(ctx, |ui| {
+    let window = egui::Window::new("VertexPaint").id(egui::Id::new("VertexPaint")).resizable(false).collapsible(false).default_pos(egui::pos2(300.0, 120.0));
+    crate::os_window::OsWindow::new("VertexPaint", "VertexPaint", [240.0, 300.0]).fixed().show(ctx, &mut open, window, |ui| {
         ui.horizontal(|ui| {
             if ui.selectable_label(app.state.vertex_paint_brush, "Paint").on_hover_text("Paint vertex colours in the viewports").clicked() {
                 run(app, Command::VertexPaintBrushToggle);

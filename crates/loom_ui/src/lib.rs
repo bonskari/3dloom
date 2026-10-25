@@ -1094,6 +1094,9 @@ impl LoomApp {
     /// the pointer afterwards went on orbiting or panning. Every press-held
     /// interaction ends here and egui gets the releases it missed.
     pub fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if raw.viewport_id == egui::ViewportId::ROOT {
+            raw.events.extend(os_window::take_forwarded_keys(ctx));
+        }
         if !raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))) {
             return;
         }

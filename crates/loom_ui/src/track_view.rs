@@ -141,12 +141,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let title = format!("Track View - {}", if mode == TvMode::CurveEditor { "Curve Editor" } else { "Dope Sheet" });
     let mut open = true;
     let max_h = (ctx.screen_rect().height() - 60.0).max(240.0);
-    let resp = egui::Window::new(title).id(egui::Id::new("track_view")).open(&mut open).default_size([900.0, 420.0]).default_pos([60.0, 300.0]).max_height(max_h).resizable(true).show(ctx, |ui| body(ui, app, false, 140.0));
+    let window = egui::Window::new(title.clone()).id(egui::Id::new("track_view")).default_size([900.0, 420.0]).default_pos([60.0, 300.0]).max_height(max_h).resizable(true);
+    let resp = crate::os_window::OsWindow::new("Track View", title, [900.0, 420.0]).show(ctx, &mut open, window, |ui| {
+        let own_window = ui.ctx().viewport_id() != egui::ViewportId::ROOT;
+        if own_window && ui.input(|i| i.pointer.any_pressed()) {
+            app.state.track_view.focused = true;
+        }
+        body(ui, app, false, 140.0);
+        own_window
+    });
     // Keyboard focus follows the last click: inside the window its shortcuts apply.
     if let Some(r) = resp.as_ref() {
         let pressed = ctx.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten());
         if let Some(p) = pressed {
-            app.state.track_view.focused = r.response.rect.contains(p);
+            app.state.track_view.focused = r.inner != Some(true) && r.rect.contains(p);
         }
     }
     if !open {

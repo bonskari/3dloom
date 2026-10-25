@@ -108,7 +108,8 @@ pub fn weight_table(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         .map(|(i, b)| (i, app.state.scene.node(b.node).map(|n| n.name.clone()).unwrap_or_default()))
         .collect();
     let patch_nv = loom_commands::skin::input_patch(&app.state).map(|p| p.verts.len());
-    egui::Window::new("Weight Table").open(open).resizable(true).default_width(560.0).show(ctx, |ui| {
+    let window = egui::Window::new("Weight Table").resizable(true).default_width(560.0);
+    crate::os_window::OsWindow::new("Weight Table", "Weight Table", [580.0, 420.0]).show(ctx, open, window, |ui| {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("Edit", |ui| {
                 for (label, cmd) in [("Copy", Command::CopyWeightsSkin), ("Paste", Command::PasteWeightsSkin), ("Remove Zero Weights", Command::RemoveZeroWeightsSkin)] {

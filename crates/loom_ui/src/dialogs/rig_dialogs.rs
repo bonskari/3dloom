@@ -151,7 +151,8 @@ pub fn weight_tool(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         *open = false;
         return;
     }
-    egui::Window::new("Weight Tool").open(open).resizable(false).show(ctx, |ui| {
+    let window = egui::Window::new("Weight Tool").resizable(false);
+    crate::os_window::OsWindow::new("Weight Tool", "Weight Tool", [260.0, 320.0]).fixed().show(ctx, open, window, |ui| {
         ui.horizontal(|ui| {
             for (label, cmd) in [("Shrink", Command::SkinShrink), ("Grow", Command::SkinGrow), ("Ring", Command::SkinRing), ("Loop", Command::SkinLoop)] {
                 if ui.button(label).clicked() {

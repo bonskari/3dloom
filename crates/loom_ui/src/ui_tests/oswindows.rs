@@ -46,3 +46,14 @@ fn where_the_os_windows_were_left_is_saved_and_read_at_the_next_start() {
     assert_eq!(next.app.os_window_rects.get("Material Editor"), Some(&[1500.0, 120.0, 420.0, 760.0]));
     assert_eq!(crate::os_window::rects(&next.ctx).get("Material Editor"), Some(&[1500.0, 120.0, 420.0, 760.0]), "the windows open where they were");
 }
+
+/// A shortcut pressed while an OS window has the keyboard works as over an in-app window.
+#[test]
+fn keys_an_os_window_forwards_reach_the_main_shortcuts() {
+    let mut h = Harness::new();
+    material_editor(&mut h);
+    let m = egui::Event::Key { key: egui::Key::M, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    crate::os_window::forward_keys(&h.ctx, vec![m]);
+    h.frames(1);
+    assert!(!h.app.state.material_editor_open, "M from the editor's own window closes it");
+}

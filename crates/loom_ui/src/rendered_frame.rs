@@ -199,7 +199,8 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let screen = ctx.screen_rect().size();
     let (iw, ih) = app.state.rendered.image.as_ref().map_or((app.state.scene.render.width as f32, app.state.scene.render.height as f32), |i| (i.width() as f32, i.height() as f32));
     let size = egui::vec2((iw + 24.0).clamp(760.0, (screen.x - 40.0).max(760.0)), (ih + 170.0).clamp(320.0, (screen.y - 40.0).max(320.0)));
-    egui::Window::new(title).id(egui::Id::new("Rendered Frame Window")).open(open).resizable(true).default_size(size).show(ctx, |ui| {
+    let window = egui::Window::new(title.clone()).id(egui::Id::new("Rendered Frame Window")).resizable(true).default_size(size);
+    crate::os_window::OsWindow::new("Rendered Frame Window", title, size).show(ctx, open, window, |ui| {
         // Rendering controls.
         ui.horizontal(|ui| {
             ui.label("Area to Render:");
@@ -321,7 +322,8 @@ fn clone_windows(ctx: &egui::Context, app: &mut LoomApp) {
     let mut closed = Vec::new();
     for (id, title) in clones {
         let mut open = true;
-        egui::Window::new(title).id(egui::Id::new(("Rendered Frame Window clone", id))).open(&mut open).resizable(true).default_size(egui::vec2(520.0, 420.0)).show(ctx, |ui| {
+        let window = egui::Window::new(title.clone()).id(egui::Id::new(("Rendered Frame Window clone", id))).resizable(true).default_size(egui::vec2(520.0, 420.0));
+        crate::os_window::OsWindow::new(format!("Rendered Frame Window clone {id}"), title, [520.0, 420.0]).show(ctx, &mut open, window, |ui| {
             let Some(c) = app.state.rendered.clones.iter().find(|c| c.id == id) else { return };
             let (img, channels) = (c.image.clone(), c.channels);
             let zoom = app.rfw.main.zoom;
