@@ -1391,6 +1391,15 @@ impl LoomApp {
             Err(e) => self.last_error = Some(e),
             Ok(None) => {}
         }
+        // XRefs set to Update Automatically: re-read a changed file (checked once a second).
+        if !self.state.scene.xrefs.is_empty() && self.state.xref_checked.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
+            self.state.xref_checked = Some(std::time::Instant::now());
+            match loom_commands::xref::tick(&mut self.state) {
+                Ok(paths) if !paths.is_empty() => self.state.status_prompt = format!("XRef updated: {}", paths.join(", ")),
+                Err(e) => self.last_error = Some(e),
+                _ => {}
+            }
+        }
         ctx.request_repaint_after(std::time::Duration::from_secs(1));
         let title = format!("{}  [{}]", self.state.title(), env!("LOOM_VERSION"));
         if title != self.last_title {

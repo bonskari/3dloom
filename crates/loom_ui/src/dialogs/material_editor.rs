@@ -424,6 +424,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 MaterialKind::Standard => standard_rollouts(ui, app, &m),
                 MaterialKind::MultiSub(_) => multi_sub_rollout(ui, app, &m),
                 MaterialKind::Blend(_) => blend_rollout(ui, app, &m),
+                MaterialKind::Shell(_) => shell_rollout(ui, app, &m),
             }
         } else if let Some(map) = map_at(&m, &maps).cloned() {
             map_rollouts(ui, app, &map);
@@ -912,6 +913,35 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
     }
 }
 
+/// Shell Material Parameters: Original / Baked Material buttons and which
+/// of them viewports and renders show.
+fn shell_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    let MaterialKind::Shell(sh) = &m.kind else { return };
+    let sh = (**sh).clone();
+    crate::command_panel::rollout(ui, "Shell Material Parameters", true, |ui| {
+        egui::Grid::new("shell_rows").num_columns(4).show(ui, |ui| {
+            ui.label("");
+            ui.label("");
+            ui.label("Viewport");
+            ui.label("Render");
+            ui.end_row();
+            for (i, label) in ["Original Material:", "Baked Material:"].into_iter().enumerate() {
+                ui.label(label);
+                if ui.add(egui::Button::new(material_label(app, sh.materials[i])).min_size(egui::vec2(150.0, 0.0))).clicked() {
+                    let _ = app.dispatch(Command::MaterialEditorGoToSub { index: i as u32 });
+                }
+                if ui.radio(sh.viewport == i as u8, "").on_hover_text(format!("Viewport: the {} material", if i == 0 { "original" } else { "baked" })).clicked() {
+                    let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Viewport".into(), value: i as f64 });
+                }
+                if ui.radio(sh.render == i as u8, "").on_hover_text(format!("Render: the {} material", if i == 0 { "original" } else { "baked" })).clicked() {
+                    let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Render".into(), value: i as f64 });
+                }
+                ui.end_row();
+            }
+        });
+    });
+}
+
 fn blend_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
     let MaterialKind::Blend(b) = &m.kind else { return };
     let b = (**b).clone();
@@ -1101,6 +1131,21 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             });
             let masked = map.sub_maps[2].as_ref().is_some_and(|m| m.enabled);
             ui.add_enabled_ui(!masked, |ui| map_spinner(ui, app, "Mix Amount:", "Mix Amount", map.params.mix_amount, 0.0..=100.0, 1));
+        }),
+        MapType::NormalBump => crate::command_panel::rollout(ui, "Parameters", true, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Normal:");
+                map_button(ui, app, "Normal", map.sub_maps[0].as_deref(), false);
+                let mut on = map.sub_maps[0].as_ref().is_some_and(|s| s.enabled);
+                if ui.add_enabled(map.sub_maps[0].is_some(), egui::Checkbox::new(&mut on, "")).changed() {
+                    let _ = app.dispatch(Command::SetMapParameter { name: "Normal Map On".into(), value: if on { 1.0 } else { 0.0 } });
+                }
+            });
+            ui.label(egui::RichText::new("Channel Direction").strong());
+            ui.horizontal(|ui| {
+                map_check(ui, app, "Flip Red (X)", "Flip Red (X)", map.params.flip_red);
+                map_check(ui, app, "Flip Green (Y)", "Flip Green (Y)", map.params.flip_green);
+            });
         }),
     }
 }

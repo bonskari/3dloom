@@ -1906,6 +1906,12 @@ pub struct AppState {
     pub seam_point: Option<u32>,
     /// Merge dialog: the chosen file and its object names.
     pub merge_pending: Option<(std::path::PathBuf, Vec<String>)>,
+    /// The Merge list is choosing objects for File > XRef Objects, not Merge.
+    pub merge_as_xref: bool,
+    /// When each referenced (XRef) file was last read: its modification time.
+    pub xref_seen: std::collections::BTreeMap<String, std::time::SystemTime>,
+    /// When the XRef files were last checked for changes (`xref::tick`).
+    pub xref_checked: Option<std::time::Instant>,
     /// FBX / OBJ import and export options (the format dialogs; saved in the settings).
     pub exchange: crate::exchange::ExchangeOptions,
     /// The file an FBX / OBJ options dialog is open for, and whether it exports the selection only.
@@ -1920,6 +1926,10 @@ pub struct AppState {
     pub mesh_dirty: bool,
     /// A Render waiting for the UI's renderer (the command layer has no GPU).
     pub pending_render: Option<RenderRequest>,
+    /// Render To Texture's lit elements, waiting for the UI's renderer.
+    pub pending_bake: Option<crate::bake::BakeRequest>,
+    /// The Render To Texture dialog is open (modeless, beside other dialogs).
+    pub render_to_texture_open: bool,
     /// The Rendered Frame Window, its image and the render in progress.
     pub rendered: crate::render::RenderedFrame,
 }
@@ -2136,10 +2146,15 @@ impl AppState {
             exit_requested: false,
             uv_editor: UvEditor::default(),
             pending_render: None,
+            pending_bake: None,
+            render_to_texture_open: false,
             rendered: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,
+            merge_as_xref: false,
+            xref_seen: Default::default(),
+            xref_checked: None,
             exchange: Default::default(),
             exchange_pending: None,
             show_layers_toolbar: false,

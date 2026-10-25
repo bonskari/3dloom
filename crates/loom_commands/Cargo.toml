@@ -15,6 +15,7 @@ serde_json = { workspace = true }
 image = { workspace = true }
 loom_fbx   = { workspace = true }
 loom_max   = { workspace = true }
+loom_bake  = { workspace = true }
 crc32fast  = "1.5"
 flate2     = "1"
 

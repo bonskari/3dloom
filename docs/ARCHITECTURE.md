@@ -7,10 +7,10 @@ about higher ones.
 loom_app       →  loom_ui, loom_commands, loom_mesh
 loom_mcp       →  loom_commands
 loom_ui        →  loom_commands, loom_render, loom_scene, loom_shape, loom_input, loom_mesh
-loom_commands  →  loom_scene, loom_render, loom_fbx, loom_max, loom_shape, loom_input, loom_mesh
+loom_commands  →  loom_scene, loom_render, loom_fbx, loom_max, loom_shape, loom_input, loom_mesh, loom_bake
 loom_render    →  loom_input, loom_mesh
 loom_scene     →  loom_shape, loom_mesh
-loom_fbx, loom_max, loom_shape  →  loom_mesh
+loom_fbx, loom_max, loom_shape, loom_bake  →  loom_mesh
 loom_input, loom_mesh           →  no loom dependencies
 ```
 
@@ -24,6 +24,7 @@ loom_input, loom_mesh           →  no loom dependencies
 | `loom_render` | wgpu pipelines for meshes, edges and the grid; picking helpers. |
 | `loom_ui` | The eframe / egui application: viewports, panels, dialogs, menus. |
 | `loom_fbx` | FBX import (via ufbx) and a binary FBX 7.4 writer. |
+| `loom_bake` | Render To Texture on the CPU: texture-space rasteriser, normal / height / alpha maps, projection from high-resolution objects, edge padding. |
 | `loom_max` | A reader for `.max` scene files (compound file, chunk tree, geometry). |
 | `loom_app` | The `loom` binary and the control socket. |
 | `loom_mcp` | The `loom-mcp` stdio MCP server, generated from the registry. |
