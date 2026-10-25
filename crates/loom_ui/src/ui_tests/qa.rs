@@ -1091,7 +1091,7 @@ fn preferences_and_other_dialogs_open_and_close() {
         (Command::GridAndSnapSettings, loom_commands::Dialog::GridAndSnapSettings),
         (Command::TimeConfiguration, loom_commands::Dialog::TimeConfiguration),
         (Command::ObjectProperties, loom_commands::Dialog::ObjectProperties),
-        (Command::ConfigureViewports, loom_commands::Dialog::ViewportConfiguration),
+        (Command::ConfigureViewports { panel: None },loom_commands::Dialog::ViewportConfiguration),
     ] {
         h.cmd(c.clone());
         assert_eq!(h.app.state.dialog, Some(d), "{c:?} opens");
@@ -1117,6 +1117,21 @@ fn slash_plays_and_stops_the_animation() {
     let f2 = h.app.state.current_frame;
     h.frames(30);
     assert_eq!(h.app.state.current_frame, f2, "/ again stops");
+}
+
+/// Ctrl+Z after a click that changed the selection brings the previous one back.
+#[test]
+fn ctrl_z_after_a_click_restores_the_previous_selection() {
+    let mut h = Harness::new();
+    let a = box_scene(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    h.click(r.min + egui::vec2(20.0, 20.0));
+    assert!(h.app.state.selection.is_empty(), "an empty click deselects");
+    h.mods = egui::Modifiers::CTRL;
+    h.key(egui::Key::Z);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![a], "Ctrl+Z gives the box back");
+    assert_eq!(h.app.state.scene.len(), 1);
 }
 
 #[test]
