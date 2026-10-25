@@ -133,6 +133,13 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
     let add: Vec<bool> = (0..doc.nodes.len()).map(|i| keep[i] && existing[i].is_none() && o.file_content != FileContent::UpdateAnimation).collect();
     let first = state.scene.next_id();
     let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().map(|n| n.name.clone()).collect();
+    // Character/source imports must retain canonical numeric joint names for
+    // characterization. Ordinary FBX import keeps its existing naming policy.
+    let base_name=|n:&FbxNode|if n.name.trim().is_empty(){"Object".to_owned()}else{n.name.clone()};
+    let namespace=if (o.metahuman_body_only || require_animation) && doc.nodes.iter().enumerate().any(|(i,n)|add[i] && matches!(n.kind,FbxKind::Bone{..}) && taken.contains(&base_name(n))) {
+        let stem=path.file_stem().map(|s|s.to_string_lossy().into_owned()).unwrap_or_else(||"FBX".into());
+        Some((0u64..).map(|i|if i==0{stem.clone()}else{format!("{stem}{i:03}")}).find(|prefix|!taken.iter().any(|name|name.starts_with(&format!("{prefix}:")))).expect("finite scene has a free import namespace"))
+    }else{None};
     // Ids are known up front (a skin may name bones that come later in the file).
     let mut id_of: BTreeMap<usize, NodeId> = (0..doc.nodes.len()).filter(|i| add[*i]).enumerate().map(|(k, i)| (i, NodeId(first + k as u64))).collect();
     for (i, e) in existing.iter().enumerate() {
@@ -199,7 +206,7 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
             continue;
         }
         let base = if n.name.trim().is_empty() { "Object" } else { n.name.as_str() };
-        let name = if taken.contains(base) { unique_name(base, &taken) } else { base.to_owned() };
+        let name = if let Some(prefix)=&namespace {format!("{prefix}:{base}")} else if taken.contains(base) { unique_name(base, &taken) } else { base.to_owned() };
         taken.insert(name.clone());
         let object = match &n.kind {
             FbxKind::Mesh { mesh, .. } => ObjectKind::EditablePoly(loom_scene::PolyObject::from_mesh(mesh.clone())),

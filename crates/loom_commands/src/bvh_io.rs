@@ -166,6 +166,12 @@ fn import_with(state: &mut AppState, path: &Path, preserve_timing: bool) -> Resu
     let first = state.scene.next_id();
     let ids: Vec<_> = (0..joints.len()).map(|i| NodeId(first + i as u64)).collect();
     let mut names: BTreeSet<_> = state.scene.nodes().map(|n| n.name.clone()).collect();
+    // A repeated skeleton needs an import namespace, not renamed joints:
+    // Spine1/Finger1 are semantic identities, not disposable display counters.
+    let namespace=if joints.iter().any(|j|names.contains(&j.name)) {
+        let stem=path.file_stem().map(|s|s.to_string_lossy().into_owned()).unwrap_or_else(||"BVH".into());
+        Some((0u64..).map(|i|if i==0{stem.clone()}else{format!("{stem}{i:03}")}).find(|prefix|!names.iter().any(|name|name.starts_with(&format!("{prefix}:")))).expect("finite scene has a free import namespace"))
+    }else{None};
     let mut changes = Vec::new();
     for (i, j) in joints.iter().enumerate() {
         let direction = joints.iter().find(|c| c.parent == Some(i) && c.offset.length_squared() > 1e-8).map(|c| c.offset).or(j.end).unwrap_or(Vec3::ZERO);
@@ -177,7 +183,7 @@ fn import_with(state: &mut AppState, path: &Path, preserve_timing: bool) -> Resu
         let _ = bone.set_parameter("Width", width as f64);
         let _ = bone.set_parameter("Height", width as f64);
         let _ = bone.set_parameter("Bone Axis", loom_scene::node::bone_axis_of(direction) as f64);
-        let name = if names.contains(&j.name) { unique_name(&j.name, &names) } else { j.name.clone() };
+        let name = if let Some(prefix)=&namespace {format!("{prefix}:{}",j.name)} else if names.contains(&j.name) { unique_name(&j.name, &names) } else { j.name.clone() };
         names.insert(name.clone());
         let mut node = Node::new(&name, bone);
         node.id = ids[i];
