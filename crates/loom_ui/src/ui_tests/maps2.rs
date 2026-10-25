@@ -53,8 +53,23 @@ fn diffuse(h: &Harness) -> loom_scene::material::Map {
     editor_material(h).diffuse_map.expect("a diffuse map")
 }
 
+/// Scrolls the editor's rollouts down until `label` shows.
+fn reveal(h: &mut Harness, label: &str) {
+    for _ in 0..30 {
+        let win = material_editor_rect(h);
+        if h.text_rect(label, win).is_some_and(|r| r.bottom() < win.bottom() - 20.0) {
+            return;
+        }
+        h.run(vec![egui::Event::PointerMoved(win.center_bottom() - egui::vec2(0.0, 60.0))]);
+        h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -80.0), modifiers: egui::Modifiers::NONE }]);
+        h.frames(30);
+    }
+    panic!("{label:?} never shows in the editor");
+}
+
 /// Clicks the spinner after `label` and types `value`.
 fn type_into(h: &mut Harness, label: &str, value: &str) {
+    reveal(h, label);
     let s = h.spinner_after(label);
     h.click(s.center());
     h.run(vec![egui::Event::Text(value.to_owned())]);
@@ -64,6 +79,7 @@ fn type_into(h: &mut Harness, label: &str, value: &str) {
 
 /// Opens the drop-down list showing `current` on the row `row` and picks `item`.
 fn pick_in_list(h: &mut Harness, row: &str, current: &str, item: &str) {
+    reveal(h, row);
     h.click(row_text(h, row, current, material_editor_rect(h)));
     h.frames(2);
     h.click_text_anywhere(item);
