@@ -19,6 +19,13 @@ fn pick_diffuse_map(h: &mut Harness, kind: &str) {
     h.frames(12);
     double_click_in_browser(h, kind);
     assert_eq!(h.app.state.dialog, None, "a double-click picks {kind}");
+    // The editor's rollouts from their top (the Browser's wheel may have reached them).
+    let win = material_editor_rect(h);
+    h.run(vec![egui::Event::PointerMoved(win.center())]);
+    for _ in 0..5 {
+        h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 2000.0), modifiers: egui::Modifiers::NONE }]);
+    }
+    h.frames(3);
 }
 
 /// Scrolls the Material/Map Browser's list until `kind` shows, then double-clicks it.
