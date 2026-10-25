@@ -115,9 +115,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Ok(json!({ "dialog": "OpenFile" }));
             };
             let path = std::path::PathBuf::from(path);
-            let doc = crate::file::read(&path)?;
+            let (doc, warnings) = crate::file::read_any(&path)?;
             crate::settings::note_recent(state, &path);
-            load_document(state, doc, Some(path));
+            // A .max scene opens untitled: Save asks for a .loom file (there is no .max writer).
+            let max = crate::max_io::is_max(&path);
+            load_document(state, doc, (!max).then_some(path));
+            if max {
+                state.import_report = warnings;
+            }
             Ok(json!({ "nodes": state.scene.len() }))
         }
         C::SaveFile { path } => {

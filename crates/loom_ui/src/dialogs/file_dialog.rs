@@ -89,7 +89,7 @@ const IMAGES_WRITE: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr";
 /// Title, extension, "Open"/"Save" button text and the command to run.
 fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
     match dialog {
-        Dialog::OpenFile => ("Open File", "loom", "Open"),
+        Dialog::OpenFile => ("Open File", "loom,max", "Open"),
         Dialog::SaveFileAs => ("Save File As", "loom", "Save"),
         Dialog::SaveFileAsCopy => ("Save Copy As", "loom", "Save"),
         Dialog::ImportFile => ("Import File", "fbx,obj,max", "Open"),

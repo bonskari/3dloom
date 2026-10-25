@@ -398,7 +398,7 @@ commands! {
     RedoSceneOperation => "Redo Scene Operation", MainUI, "Redo the last undone scene change (Ctrl+Y).";
     UndoViewportOperation => "Undo Viewport Operation", MainUI, "Undo the last viewport change (Shift+Z).";
     RedoViewportOperation => "Redo Viewport Operation", MainUI, "Redo the last undone viewport change (Shift+Y).";
-    OpenFile => "Open File", MainUI, "Open a .loom scene (Ctrl+O); without `path` the Open dialog shows. Replaces the scene and clears undo." { path: Option<String> };
+    OpenFile => "Open File", MainUI, "Open a .loom scene, or a .max scene read as Import reads it (opened untitled; what it leaves out goes to the Import Summary) (Ctrl+O); without `path` the Open dialog shows. Replaces the scene and clears undo." { path: Option<String> };
     SaveFile => "Save File", MainUI, "Save the scene to its file (Ctrl+S), to `path`, or through the Save As dialog when it has none." { path: Option<String> };
     SaveFileAs => "Save File As", MainUI, "Save the scene to `path` and make that the current file; without `path` the Save As dialog shows." { path: Option<String> };
     SaveFileAsCopy => "Save File As Copy", MainUI, "Write a copy of the scene to `path` without changing the current file; without `path` the dialog shows." { path: Option<String> };

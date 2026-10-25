@@ -188,3 +188,14 @@ fn merge_reads_max_files() {
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(s.scene.nodes().count(), 0);
 }
+
+#[test]
+fn open_reads_a_max_scene_untitled() {
+    let Some(p) = asset("Monster/Monster_HEad.max") else { return };
+    let mut s = AppState::new();
+    execute(&mut s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
+    execute(&mut s, Command::OpenFile { path: Some(p.to_string_lossy().into_owned()) }).unwrap();
+    assert!(s.scene.nodes().all(|n| n.name != "Box001"), "the scene was replaced");
+    assert!(s.scene.nodes().any(|n| n.name == "Group01"));
+    assert_eq!(s.file, None, "Save must not write over the .max file");
+}
