@@ -3,14 +3,14 @@
 //! options in `AppState::exchange`.
 
 use crate::execute::unique_name;
-use crate::exchange::{FileContent, UpAxis};
+use crate::exchange::{FbxImportOptions, FileContent, UpAxis};
 use crate::state::{AppState, SelectionMode};
 use glam::Mat4;
 use loom_fbx::{FbxBlendShape, FbxDocument, FbxKind, FbxNode, FbxSkin, WriteOpts};
 use loom_scene::{Change, Modifier, ModifierSlot, Node, NodeId, ObjectKind, Transform, OBJECT_COLORS};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn is_fbx(path: &Path) -> bool {
     path.extension().is_some_and(|e| e.eq_ignore_ascii_case("fbx"))
@@ -25,30 +25,36 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
     import_with(state, path, false).map(|(ids, _)| ids)
 }
 
-/// Animation sources always add independent nodes, even when the user's
-/// ordinary FBX importer is set to update an existing character by name.
-pub fn import_animation(state: &mut AppState, path: &Path) -> Result<(Vec<NodeId>, Option<String>), String> {
-    let original = state.exchange.fbx_import.clone();
-    state.exchange.fbx_import.metahuman_body_only = false;
-    state.exchange.fbx_import.file_content = FileContent::Add;
-    state.exchange.fbx_import.animation = true;
-    state.exchange.fbx_import.take = None;
-    state.exchange.fbx_import.fill_timeline = true;
-    state.exchange.fbx_import.bones_as_dummies = false;
-    state.exchange.fbx_import.deformations = true;
-    state.exchange.fbx_import.skins = true;
-    state.exchange.fbx_import.morphs = true;
-    let result = import_with(state, path, true);
-    state.exchange.fbx_import = original;
-    result
+/// A parsed, validated source ready for the ordinary atomic native import.
+/// The options and conversion unit belong to this preparation, even if dialog
+/// preferences change before its worker completes.
+#[derive(Debug, Clone)]
+pub struct PreparedFbxImport {
+    path: PathBuf,
+    options: FbxImportOptions,
+    doc: FbxDocument,
+    require_animation: bool,
+    system_unit_metres: f64,
 }
 
-fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Result<(Vec<NodeId>, Option<String>), String> {
+/// Reads and reduces the source without accessing or mutating an app/scene.
+/// Safe to run on the UI's dedicated FBX worker.
+pub fn prepare(path: &Path, options: &FbxImportOptions, system_unit_metres: f64, require_animation: bool) -> Result<PreparedFbxImport, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut o = state.exchange.fbx_import.clone();
+    let mut o = options.clone();
+    if require_animation {
+        o.metahuman_body_only = false;
+        o.file_content = FileContent::Add;
+        o.animation = true;
+        o.take = None;
+        o.fill_timeline = true;
+        o.bones_as_dummies = false;
+        o.deformations = true;
+        o.skins = true;
+        o.morphs = true;
+    }
     if o.metahuman_body_only {
-        // Validate the complete source deformers before reducing it. These
-        // overrides affect this import only; the user's options stay intact.
+        // Validate complete source deformers before reducing it.
         o.file_content = FileContent::Add;
         o.animation = false;
         o.take = None;
@@ -58,7 +64,7 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
         o.morphs = true;
     }
     // Automatic: into the system unit; else the file's numbers are taken as `units`.
-    let mut ro = loom_fbx::ReadOpts::new(if o.units_automatic { unit_metres(state) } else { o.units.metres() });
+    let mut ro = loom_fbx::ReadOpts::new(if o.units_automatic { system_unit_metres } else { o.units.metres() });
     ro.smoothing_groups = o.smoothing_groups;
     ro.animation = o.animation;
     ro.take = o.take.clone();
@@ -72,6 +78,28 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
     if require_animation && !doc.anim.as_ref().is_some_and(|t| t.end > t.start && !t.tracks.is_empty() && t.fps.is_finite() && t.fps > 0.0) {
         return Err(format!("{}: no animated take to import", path.display()));
     }
+    Ok(PreparedFbxImport { path: path.to_owned(), options: o, doc, require_animation, system_unit_metres })
+}
+
+/// Animation sources always add independent nodes, bypassing body-rest import.
+pub fn import_animation(state: &mut AppState, path: &Path) -> Result<(Vec<NodeId>, Option<String>), String> {
+    import_with(state, path, true)
+}
+
+fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Result<(Vec<NodeId>, Option<String>), String> {
+    let prepared = match state.prepared_fbx_import.take() {
+        Some(prepared) => {
+            if prepared.path != path || prepared.require_animation != require_animation {
+                return Err("prepared FBX does not match this import command".into());
+            }
+            if prepared.system_unit_metres != unit_metres(state) {
+                return Err("scene units changed while preparing the FBX; import it again".into());
+            }
+            prepared
+        }
+        None => prepare(path, &state.exchange.fbx_import, unit_metres(state), require_animation)?,
+    };
+    let PreparedFbxImport { options: o, mut doc, .. } = prepared;
     if require_animation && (!state.fps.is_finite() || state.fps <= 0.0) {
         return Err("project frame rate must be finite and positive".into());
     }
@@ -431,10 +459,15 @@ fn import_materials(library: &mut loom_scene::material::MaterialLibrary, materia
 
 /// What the FBX Importer's Statistics show, plus the Units scale factor.
 pub fn file_info(state: &AppState, path: &Path) -> Result<Value, String> {
+    file_info_with(path, &state.exchange.fbx_import, unit_metres(state), state.fps)
+}
+
+/// Statistics use the same background reader as import preparation in the UI.
+pub fn file_info_with(path: &Path, options: &FbxImportOptions, system_unit_metres: f64, system_fps: f32) -> Result<Value, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let i = loom_fbx::info(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-    let o = &state.exchange.fbx_import;
-    let target = if o.units_automatic { unit_metres(state) } else { o.units.metres() };
+    let o = options;
+    let target = if o.units_automatic { system_unit_metres } else { o.units.metres() };
     let unit_name = |m: f64| crate::state::SystemUnit::ALL.into_iter().find(|u| (u.metres() - m).abs() < m * 1e-6).map(|u| u.label().to_owned()).unwrap_or_else(|| format!("{m} m"));
     Ok(json!({
         "file_name": path.file_name().map(|n| n.to_string_lossy().into_owned()),
@@ -446,10 +479,10 @@ pub fn file_info(state: &AppState, path: &Path) -> Result<Value, String> {
         "file_axis_direction": i.up_axis,
         "file_units": unit_name(i.unit_metres),
         "system_axis_direction": "Z-up",
-        "system_units": unit_name(unit_metres(state)),
+        "system_units": unit_name(system_unit_metres),
         "scale_factor": i.unit_metres / target,
         "file_fps": i.fps,
-        "system_fps": state.fps,
+        "system_fps": system_fps,
         "takes": i.takes,
         "elements": i.nodes,
         "meshes": i.meshes,

@@ -117,9 +117,10 @@ fn buttons(ui: &mut egui::Ui, app: &mut LoomApp, ok: &str, done: &mut bool, expo
                     (true, false) => Command::ExportFile { path: p },
                     (true, true) => Command::ExportSelected { path: p },
                 };
-                if let Err(e) = app.dispatch(cmd) {
-                    app.state.status_prompt = e;
-                }
+                let result = if !export && loom_commands::fbx_io::is_fbx(&path) {
+                    crate::async_import::start(app, path).map(|_| Value::Null)
+                } else { app.dispatch(cmd) };
+                if let Err(e) = result { app.state.status_prompt = e; }
             }
             *done = true;
         }
@@ -269,22 +270,18 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     const D: &str = "fbx_import";
     let o = app.state.exchange.fbx_import.clone();
     let mut done = false;
-    // The file's statistics, read once per dialog.
-    let info_id = egui::Id::new("exchange_info");
-    let info: Value = match ctx.data(|d| d.get_temp::<Value>(info_id)) {
-        Some(v) => v,
-        None => {
-            let v = app.state.exchange_pending.clone().map(|(p, _)| app.dispatch(Command::FbxFileInfo { path: p.to_string_lossy().into_owned() }).unwrap_or_else(|e| json!({ "error": e }))).unwrap_or(Value::Null);
-            ctx.data_mut(|d| d.insert_temp(info_id, v.clone()));
-            v
-        }
-    };
+    // Statistics share the background reader; opening a large FBX dialog does not parse on the UI thread.
+    let info = app.state.exchange_pending.as_ref().map(|(path, _)| path.clone()).and_then(|path| app.async_fbx.file_info(&app.state, &path));
+    let info_loading = info.is_none();
+    let info = match info { Some(Ok(info)) => info, Some(Err(error)) => json!({ "error": error }), None => Value::Null };
     egui::Window::new(file_title(app, "FBX Import")).id(egui::Id::new("fbx_import_options")).open(open).default_pos(window_pos(ctx)).resizable(false).default_width(360.0).show(ctx, |ui| {
         egui::ScrollArea::vertical().max_height((ui.available_height() - 40.0).min(scroll_height(ctx))).show(ui, |ui| {
             presets(ui, ctx, app, D, &o.preset);
             section(ui, "Statistics", false, |ui| {
+                if info_loading { ui.spinner(); ui.label("Reading FBX statistics…"); return; }
                 if let Some(e) = info["error"].as_str() {
                     ui.label(e);
+                    return;
                 }
                 for (label, key) in [
                     ("File name", "file_name"),
@@ -328,7 +325,7 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                             let takes: Vec<String> = serde_json::from_value(info["takes"].clone()).unwrap_or_default();
                             ui.horizontal(|ui| {
                                 ui.label("Take:");
-                                let current = o.take.clone().or_else(|| takes.first().cloned()).unwrap_or_else(|| "No animation".into());
+                                let current = o.take.clone().or_else(|| takes.first().cloned()).unwrap_or_else(|| if info_loading { "Reading takes…".into() } else { "No animation".into() });
                                 egui::ComboBox::from_id_salt("fbx_import_take").selected_text(&current).show_ui(ui, |ui| {
                                     for t in &takes {
                                         if ui.selectable_label(*t == current, t).clicked() {
@@ -401,10 +398,7 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         });
         buttons(ui, app, "OK", &mut done, false);
     });
-    // The scale factor depends on the unit options: read it again after a change.
-    if app.state.exchange.fbx_import.units != o.units || app.state.exchange.fbx_import.units_automatic != o.units_automatic {
-        ctx.data_mut(|d| d.remove::<Value>(info_id));
-    }
+    if done || !*open { app.async_fbx.clear_info(); }
     finish(app, done, open);
 }
 
