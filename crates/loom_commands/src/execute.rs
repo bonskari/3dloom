@@ -25,13 +25,21 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     // (creating, deleting, modifiers…) becomes the buffer's new start.
     let rebases_pose = state.set_key_mode && !crate::anim_cmds::is_pose_edit(&cmd);
     let position = state.undo.position();
+    // Selection undo: the outermost command records what it did to the selection.
+    let outer = crate::sel_undo::enter(state);
+    let undo_cmd = matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation);
+    let sel_before = (outer && !undo_cmd).then(|| crate::sel_undo::snap(state));
     let r = execute_inner(state, cmd);
+    crate::sel_undo::leave(state);
     if rebases_pose && state.set_key_mode && state.undo.position() != position {
         crate::anim_cmds::start_pose(state);
     }
     loom_scene::anim::set_animate(animate);
     state.scene.set_time(state.current_frame as f32);
     crate::stack::sync_selection(state);
+    if let Some(before) = sel_before {
+        crate::sel_undo::record(state, before, position);
+    }
     r
 }
 
@@ -68,13 +76,20 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::UndoSceneOperation => {
             let label = state.undo.undo(&mut state.scene);
-            prune_selection(state);
+            // The step undone sat at the position just above the new top.
+            let pos = state.undo.position() + 1;
+            if label.is_none() || !crate::sel_undo::undone(state, pos) {
+                prune_selection(state);
+            }
             state.mesh_dirty = true;
             Ok(json!({ "undone": label }))
         }
         C::RedoSceneOperation => {
             let label = state.undo.redo(&mut state.scene);
-            prune_selection(state);
+            let pos = state.undo.position();
+            if label.is_none() || !crate::sel_undo::redone(state, pos) {
+                prune_selection(state);
+            }
             state.mesh_dirty = true;
             Ok(json!({ "redone": label }))
         }
@@ -3076,9 +3091,9 @@ fn clear_selection(state: &mut AppState) {
 fn prune_selection(state: &mut AppState) {
     let scene = &state.scene;
     state.selection.retain(|id| scene.node(*id).is_some());
-    // Sub-object ids are indices into a mesh that may just have changed
-    // topology; they would silently point at other faces.
-    state.sub_selection.clear();
+    // A step without a recorded selection (an interactive drag) keeps the
+    // sub-object ids that still name an element of their mesh.
+    crate::sel_undo::keep_valid(state);
     prune_camera_views(state);
 }
 
