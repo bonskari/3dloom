@@ -224,9 +224,8 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
     px
 }
 
-/// The images every map of `sample` reads.
-fn sample_images(app: &mut LoomApp, sample: &Sample) -> loom_scene::maps::Images {
-    let mut maps: Vec<Map> = Vec::new();
+fn sample_maps(sample: &Sample) -> Vec<Map> {
+    let mut maps = Vec::new();
     let mut add = |s: &Surface| {
         maps.extend(s.diffuse_map.iter().cloned());
         maps.extend(s.opacity_map.iter().cloned());
@@ -236,11 +235,58 @@ fn sample_images(app: &mut LoomApp, sample: &Sample) -> loom_scene::maps::Images
         Sample::Surfaces(Surfaces::Single(s)) => add(s),
         Sample::Surfaces(Surfaces::PerId(l)) => l.values().for_each(add),
     }
-    let mut images = loom_scene::maps::Images::new();
-    for m in maps {
-        images.extend(app.map_images(&m));
+    maps
+}
+
+fn map_paths(map: &Map, paths: &mut std::collections::BTreeSet<String>) {
+    loom_scene::maps::load_images(map, &mut loom_scene::maps::Images::new(), &mut |path| { paths.insert(path.to_owned()); None });
+}
+
+/// The editor's requested samples, current map and sub-material row previews
+/// share a small source-image tier. Unused library materials do not load.
+pub(crate) fn prepare_previews(app: &mut LoomApp) {
+    let mut paths = std::collections::BTreeSet::new();
+    for slot in 0..SLOT_COUNT {
+        for map in sample_maps(&slot_sample(app, slot)) { map_paths(&map, &mut paths); }
     }
-    images
+    let (_, material, maps) = current_level(app);
+    if let Some(map) = map_at(&material, &maps) { map_paths(map, &mut paths); }
+    if maps.is_empty() {
+        if let MaterialKind::MultiSub(list) = &material.kind {
+            for sub in list {
+                let fallback = StandardMaterial::new("");
+                for map in sample_maps(&material_sample(app, sub.material, &fallback)) { map_paths(&map, &mut paths); }
+            }
+        }
+    }
+    let budget = (u64::from(app.state.prefs.viewport_texture_budget_mb) * 1024 * 1024 / 4).min(64 * 1024 * 1024);
+    let side = crate::preview_cache::preview_side(app.state.prefs.viewport_texture_max_size.min(512), budget, paths.len());
+    if side != app.material_preview_side {
+        app.material_preview_side = side;
+        app.material_preview_generation = app.material_preview_generation.wrapping_add(1);
+    }
+    app.material_previews.retain_paths(&paths);
+}
+
+/// Pending or failed bitmap inputs never become a cached substitute map.
+fn sample_images(app: &mut LoomApp, sample: &Sample) -> Option<loom_scene::maps::Images> {
+    let mut images = loom_scene::maps::Images::new();
+    for map in sample_maps(sample) { images.extend(app.editor_map_images(&map)); }
+    images.values().all(Option::is_some).then_some(images)
+}
+
+fn preview_error(app: &LoomApp, sample: &Sample) -> Option<String> {
+    let mut paths = std::collections::BTreeSet::new();
+    for map in sample_maps(sample) { map_paths(&map, &mut paths); }
+    paths.iter().find_map(|path| app.material_previews.error(path).map(str::to_owned))
+}
+
+fn paint_pending_preview(ui: &mut egui::Ui, app: &LoomApp, sample: &Sample, rect: egui::Rect) {
+    let error = preview_error(app, sample);
+    let text = if error.is_some() { "Image error" } else { "Loading…" };
+    let color = if error.is_some() { ui.visuals().error_fg_color } else { ui.visuals().text_color() };
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(10.0), color);
+    if let Some(error) = error { ui.interact(rect, ui.id().with(("preview_error", rect.min.x.to_bits(), rect.min.y.to_bits())), egui::Sense::hover()).on_hover_text(error); }
 }
 
 /// The sample a material shows (resolved through the library when it has an id).
@@ -250,18 +296,19 @@ fn material_sample(app: &LoomApp, id: Option<MaterialId>, fallback: &StandardMat
 }
 
 /// A preview texture, rebuilt only when what it shows changes.
-fn preview_texture(ctx: &egui::Context, app: &mut LoomApp, key_id: egui::Id, sample: &Sample, size: usize, setup: &PreviewSetup) -> egui::TextureHandle {
-    let key = format!("{sample:?}|{size}|{setup:?}|{}", app.state.bitmap_generation);
+fn preview_texture(ctx: &egui::Context, app: &mut LoomApp, key_id: egui::Id, sample: &Sample, size: usize, setup: &PreviewSetup) -> Option<egui::TextureHandle> {
+    let key = format!("{sample:?}|{size}|{setup:?}|{}|{}|{}", app.state.bitmap_generation, app.material_preview_generation, app.material_preview_side);
     if let Some((k, tex)) = ctx.data(|d| d.get_temp::<(String, egui::TextureHandle)>(key_id)) {
         if k == key {
-            return tex;
+            return Some(tex);
         }
     }
-    let images = sample_images(app, sample);
+    ctx.data_mut(|d| d.remove::<(String, egui::TextureHandle)>(key_id));
+    let images = sample_images(app, sample)?;
     let image = egui::ColorImage { size: [size, size], pixels: preview_pixels(sample, size, setup, &images) };
     let tex = ctx.load_texture(format!("{key_id:?}"), image, egui::TextureOptions::LINEAR);
     ctx.data_mut(|d| d.insert_temp(key_id, (key, tex.clone())));
-    tex
+    Some(tex)
 }
 
 fn rotation(ctx: &egui::Context, slot: usize) -> (f32, f32) {
@@ -411,6 +458,7 @@ fn material_label(app: &LoomApp, id: Option<MaterialId>) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    prepare_previews(app);
     let window = egui::Window::new("Material Editor").id(egui::Id::new("Material Editor")).open(open).resizable(true).default_pos([16.0, 40.0]).default_width(400.0).default_height(740.0).vscroll(true);
     let r = window.show(ctx, |ui| {
         menu(ui, app);
@@ -546,7 +594,9 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
     let sample = slot_sample(app, slot);
     let tex = preview_texture(ctx, app, egui::Id::new(("material_preview", slot)), &sample, size, &setup);
     let (rect, r) = ui.allocate_exact_size(egui::vec2(size as f32, size as f32), egui::Sense::click_and_drag());
-    ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+    if let Some(tex) = tex {
+        ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+    } else { paint_pending_preview(ui, app, &sample, rect); }
     // Hot material (used in the scene): white corner triangles; the active slot a white border.
     let in_scene = app.state.scene.material_editor.slots[slot].is_some_and(|id| app.state.scene.nodes().any(|n| n.material == Some(id)));
     if in_scene {
@@ -637,11 +687,12 @@ fn magnify(ctx: &egui::Context, app: &mut LoomApp) {
         let ed = &app.state.scene.material_editor;
         let setup = PreviewSetup::from_options(&ed.options, ed.sample_type(slot), rotation(ctx, slot));
         let sample = slot_sample(app, slot);
-        let tex = preview_texture(ctx, app, egui::Id::new(("material_magnified", slot)), &sample, side, &setup);
-        ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(side as f32, side as f32)));
+        let tex = preview_texture(ctx, app, egui::Id::new("material_magnified"), &sample, side, &setup);
+        if let Some(tex) = tex { ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(side as f32, side as f32))); }
+        else { let (rect, _) = ui.allocate_exact_size(egui::vec2(side as f32, side as f32), egui::Sense::hover()); paint_pending_preview(ui, app, &sample, rect); }
     });
     if !open {
-        ctx.data_mut(|d| d.insert_temp(id, None::<usize>));
+        ctx.data_mut(|d| { d.insert_temp(id, None::<usize>); d.remove::<(String, egui::TextureHandle)>(egui::Id::new("material_magnified")); });
     }
 }
 
@@ -855,7 +906,8 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                     let sample = material_sample(app, s.material, &sub);
                     let setup = PreviewSetup::from_options(&app.state.scene.material_editor.options, SampleType::Sphere, (0.0, 0.0));
                     let tex = preview_texture(&ctx, app, egui::Id::new(("multi_sub_preview", i)), &sample, 20, &setup);
-                    let r = ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(20.0, 20.0))).selected(i == selected));
+                    let r = if let Some(tex) = tex { ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(20.0, 20.0))).selected(i == selected)) }
+                    else { ui.add_sized([20.0, 20.0], egui::Button::new("…")).on_hover_text(preview_error(app, &sample).unwrap_or_else(|| "Loading image…".into())) };
                     if r.clicked() {
                         ctx.data_mut(|d| d.insert_temp(sel_id, i));
                     }
@@ -1418,14 +1470,18 @@ pub fn specify_cropping(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
         *open = false;
         return;
     };
-    let tex_id = egui::Id::new(("cropping_image", map.path.clone(), app.state.bitmap_generation));
-    let tex: Option<egui::TextureHandle> = match ctx.data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id)) {
-        Some(t) => t,
-        None => {
-            let images = app.map_images(&map);
-            let t = images.get(&map.path).cloned().flatten().map(|img| ctx.load_texture(format!("crop {}", map.path), egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.rgba), egui::TextureOptions::LINEAR));
-            ctx.data_mut(|d| d.insert_temp(tex_id, t.clone()));
-            t
+    prepare_previews(app);
+    let tex_id = egui::Id::new("cropping_image");
+    let key = format!("{}:{}:{}:{}", map.path, app.state.bitmap_generation, app.material_preview_generation, app.material_preview_side);
+    let cached = ctx.data(|d| d.get_temp::<(String, egui::TextureHandle)>(tex_id));
+    let tex = match cached {
+        Some((cached_key, texture)) if cached_key == key => Some(texture),
+        _ => {
+            ctx.data_mut(|d| d.remove::<(String, egui::TextureHandle)>(tex_id));
+            let images = app.editor_map_images(&map);
+            let texture = images.get(&map.path).cloned().flatten().map(|image| ctx.load_texture("crop preview", egui::ColorImage::from_rgba_unmultiplied([image.width as usize, image.height as usize], &image.rgba), egui::TextureOptions::LINEAR));
+            if let Some(texture) = &texture { ctx.data_mut(|d| d.insert_temp(tex_id, (key, texture.clone()))); }
+            texture
         }
     };
     egui::Window::new("Specify Cropping/Placement").open(open).resizable(true).default_size([420.0, 380.0]).show(ctx, |ui| {
@@ -1437,7 +1493,8 @@ pub fn specify_cropping(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
             map_spinner(ui, app, "H:", "H", k.h, 0.0..=1.0, 3);
         });
         let Some(tex) = tex else {
-            ui.label(format!("could not load {}", map.path));
+            if let Some(error) = app.material_previews.error(&map.path) { ui.colored_label(ui.visuals().error_fg_color, error); }
+            else { ui.spinner(); ui.label("Loading image…"); }
             return;
         };
         let avail = ui.available_size();
