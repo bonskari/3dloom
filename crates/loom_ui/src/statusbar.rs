@@ -49,6 +49,7 @@ fn flyout<const N: usize>(ui: &mut egui::Ui, app: &mut LoomApp, id: &str, curren
         for (g, color, t, c) in &items {
             let e = flyout_icon(g, *color, t, c).show(ui, &app.state);
             if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
+                ui.memory_mut(|m| m.close_popup());
                 let _ = app.dispatch(c.clone());
             }
         }

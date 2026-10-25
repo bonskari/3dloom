@@ -332,6 +332,7 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                     for (g, l, a) in [(icons::ALIGN, "Align", "Align"), (icons::QUICK_ALIGN, "Quick Align", "Quick Align"), (icons::NORMAL_ALIGN, "Normal Align", "Normal Align "), (icons::ALIGN_CAMERA, "Align Camera", "Align Camera"), (icons::ALIGN_TO_VIEW, "Align to View", "Align to View Dialog")] {
                         let e = ui.add(menu_widget(&app.state, &icons::labeled(g, l), a)).on_hover_name(&app.state, a);
                         if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
+                            ui.memory_mut(|m| m.close_popup());
                             app.dispatch_named(a);
                         }
                     }
@@ -378,6 +379,7 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                     for (l, it) in [("Render Production", false), ("Render Iterative", true)] {
                         let e = ui.add(menu_widget(&app.state, &icons::labeled(icons::RENDER, l), if it { "Render Iterative" } else { "Render" }));
                         if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
+                            ui.memory_mut(|m| m.close_popup());
                             let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
                             app.dispatch_named(if it { "Render Iterative" } else { "Render" });
                         }

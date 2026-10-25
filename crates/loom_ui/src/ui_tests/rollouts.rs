@@ -79,8 +79,8 @@ fn dragging_the_panel_pans_it_when_it_is_taller_than_the_window() {
     let mut h = Harness::new();
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 520.0));
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
-    h.cmd(Command::ConvertToEditablePoly);
-    h.app.panel_tab = crate::Tab::Modify;
+    // The Display panel is taller than this window.
+    h.app.panel_tab = crate::Tab::Display;
     h.frames(4);
     // A checkbox senses clicks only: a drag over it pans the panel.
     let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).unwrap().rect;

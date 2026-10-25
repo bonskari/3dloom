@@ -76,8 +76,9 @@ fn the_toolbar_right_click_menu_docks_the_main_toolbar_left_and_floats_it() {
     let r = panel_rect(&h, "main_toolbar");
     assert!(r.min.x < 1.0 && r.height() > r.width() * 3.0, "a column at the window's left edge: {r:?}");
     assert!(h.has(Role::Button, "Select and Move"), "its buttons are still there");
-    // Right-click its empty foot: Float.
-    right_click(&mut h, egui::pos2(r.center().x, r.max.y - 6.0));
+    // Right-click the empty space beside a narrow button: Float.
+    let mv = h.find(Role::Button, "Select and Move");
+    right_click(&mut h, egui::pos2(r.max.x - 4.0, mv.center().y));
     h.click(menu_entry(&h, "Float"));
     h.frames(2);
     assert_eq!(h.app.state.ui_custom.dock("Main Toolbar"), loom_commands::ui_custom::Dock::Float);
@@ -149,8 +150,12 @@ fn drag_carrying(h: &mut Harness, a: egui::Pos2, b: egui::Pos2) -> bool {
         h.run(vec![egui::Event::PointerMoved(a + (b - a) * (i as f32 / 8.0))]);
     }
     let carried = egui::DragAndDrop::has_any_payload(&h.ctx);
+    let dragging = h.ctx.dragged_id().is_some();
     h.run(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
     h.frames(1);
+    if !carried {
+        eprintln!("drag {a:?} -> {b:?} with {m:?}: a widget dragged: {dragging}, prompt: {:?}", h.app.state.status_prompt);
+    }
     carried
 }
 
@@ -188,7 +193,8 @@ fn actions_dragged_onto_a_new_toolbar_become_its_buttons() {
     drag_action(&mut h, "Select All", bar.center());
     assert_eq!(h.app.state.ui_custom.toolbar("Mine").unwrap().items, ["Select All"]);
     drag_action(&mut h, "Select None", bar.center() + egui::vec2(bar.width() / 2.0 - 4.0, 0.0));
-    assert_eq!(h.app.state.ui_custom.toolbar("Mine").unwrap().items, ["Select All", "Select None"], "dropped after the first button");
+    let now = window_rect(&h, crate::toolbars::window_id("Mine"));
+    assert_eq!(h.app.state.ui_custom.toolbar("Mine").unwrap().items, ["Select All", "Select None"], "dropped after the first button at {:?} (toolbar now {now:?}, dialog {:?}, prompt {:?})", bar.center() + egui::vec2(bar.width() / 2.0 - 4.0, 0.0), customize_ui_rect(&h), h.app.state.status_prompt);
     h.cmd(Command::CloseDialog);
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     let bar = window_rect(&h, crate::toolbars::window_id("Mine")).unwrap();
