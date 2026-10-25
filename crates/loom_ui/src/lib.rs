@@ -597,7 +597,7 @@ impl LoomApp {
                 }
             }
             let dependent = self.state.scene.node(id).is_some_and(|n| n.modifiers.iter().any(|s| s.modifier.topology_dependent()));
-            if dependent && self.topology_ack != Some(id) {
+            if dependent && self.state.prefs.topology_warning && self.topology_ack != Some(id) {
                 self.pending_topology = Some(cmd);
                 self.state.dialog = Some(loom_commands::Dialog::TopologyWarning);
                 return Ok(serde_json::json!({ "asked": "topology warning" }));
@@ -1324,6 +1324,7 @@ impl LoomApp {
             ctx.data_mut(|d| d.remove::<String>(egui::Id::new("prompt_line_tooltip_last")));
         }
         self.apply_ui_scheme(ctx);
+        icons::set_prefs(self.state.prefs.large_toolbar_buttons, self.state.prefs.flyout_time_ms);
         gizmo::set_colors([self.color("X Axis"), self.color("Y Axis"), self.color("Z Axis"), self.color("Active Axis")]);
         spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);
         ctx.input(|i| self.input_log.record(&i.raw, i.time));

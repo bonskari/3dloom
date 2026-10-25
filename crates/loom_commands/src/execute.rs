@@ -188,12 +188,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SaveFile { path } => {
             let target = match (path, state.file.clone()) {
                 (Some(p), _) => std::path::PathBuf::from(p),
+                // Preferences > Files > Increment on Save: the next numbered name.
+                (None, Some(_)) if state.prefs.increment_on_save => return execute(state, C::SaveIncremental),
                 (None, Some(f)) => f,
                 (None, None) => {
                     state.dialog = Some(Dlg::SaveFileAs);
                     return Ok(json!({ "dialog": "SaveFileAs" }));
                 }
             };
+            backup_previous(state, &target)?;
             save_to(state, &target)?;
             crate::settings::note_recent(state, &target);
             state.file = Some(target.clone());
@@ -319,14 +322,19 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Ok(json!({ "dialog": "ImportFile" }));
             };
             let path = std::path::PathBuf::from(path);
-            if crate::max_io::is_max(&path) {
-                return crate::max_io::import(state, &path);
+            let before = state.scene.len();
+            let r = if crate::max_io::is_max(&path) {
+                crate::max_io::import(state, &path)
+            } else if crate::fbx_io::is_fbx(&path) {
+                crate::fbx_io::import(state, &path).map(|ids| json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
+            } else {
+                crate::obj_io::import(state, &path)
+            }?;
+            // Preferences > Files > Zoom Extents on Import.
+            if state.prefs.zoom_extents_on_import && state.scene.len() > before {
+                execute(state, C::ZoomExtentsAll)?;
             }
-            if crate::fbx_io::is_fbx(&path) {
-                let ids = crate::fbx_io::import(state, &path)?;
-                return Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }));
-            }
-            crate::obj_io::import(state, &path)
+            Ok(r)
         }
         C::ExportFile { path } => {
             let Some(path) = path else {
@@ -3531,6 +3539,20 @@ pub(crate) fn unique_name(name: &str, taken: &std::collections::BTreeSet<String>
     let base = name.trim_end_matches(|c: char| c.is_ascii_digit());
     let base = if base.is_empty() { name } else { base };
     (1..).map(|n| format!("{base}{n:03}")).find(|c| !taken.contains(c)).expect("a free name exists")
+}
+
+/// Preferences > Files > Backup on Save: the file about to be overwritten is
+/// kept as `<name>.bak.loom` in the autoback folder.
+fn backup_previous(state: &AppState, path: &std::path::Path) -> Result<(), String> {
+    if !state.prefs.backup_on_save || !path.is_file() {
+        return Ok(());
+    }
+    let dir = crate::autosave::autoback_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "scene".into());
+    let bak = dir.join(format!("{stem}.bak.loom"));
+    std::fs::copy(path, &bak).map_err(|e| format!("{}: {e}", bak.display()))?;
+    Ok(())
 }
 
 fn save_to(state: &AppState, path: &std::path::Path) -> Result<(), String> {

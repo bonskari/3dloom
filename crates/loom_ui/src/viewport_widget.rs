@@ -1059,6 +1059,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.state.nav_mode = loom_input::NavMode::None;
                         } else if !app.region_points.is_empty() && app.drag_select_start.is_none() {
                             app.region_points.clear();
+                        } else if app.state.prefs.right_click_selected_only && !node_at(app, p).is_some_and(|n| app.state.selection.contains(&n)) {
+                            // Right Click Menu over Selected Only: elsewhere a right-click opens nothing.
+                            app.quad_menu = None;
                         } else {
                             // A right-click elsewhere while one is open reopens it there.
                             let mut open = crate::quad_menu::Open::new(p, index);
@@ -1120,12 +1123,24 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             }
             let scroll = ctx.input(|i| i.raw_scroll_delta.y);
             if scroll.abs() > 0.0 && response.hovered() && !disabled {
-                let delta = scroll / 50.0;
+                // Preferences > Viewports > Mouse Control: Wheel Zoom Increment, Zoom About Mouse Point.
+                let delta = scroll / 50.0 * app.state.prefs.wheel_zoom_increment;
+                let vp = &app.state.viewports[index];
+                let about = if vp.is_orthographic() { app.state.prefs.zoom_about_mouse_ortho } else { app.state.prefs.zoom_about_mouse_persp };
+                let not_camera = !matches!(vp.kind, loom_commands::ViewKind::Camera(_));
+                let (target, to_eye, d0) = (vp.camera.target, vp.camera.basis().2, vp.camera.distance);
+                let anchor = ctx.input(|i| i.pointer.hover_pos()).filter(|_| about && not_camera).and_then(|p| plane_hit_at(p, rect, view, proj, target, to_eye));
                 nav_event(app, index, rect, InputEvent::Scroll {
                         delta_y: delta,
                         pos: Vec2::ZERO,
                         mods,
                     });
+                if let Some(p) = anchor {
+                    // The point under the pointer stays there: the target moves toward it as much as the view zoomed.
+                    let cam = &mut app.state.viewports[index].camera;
+                    let f = cam.distance / d0.max(1e-6);
+                    cam.target = p + (cam.target - p) * f;
+                }
             }
 
             // --- Build callback and enqueue ---
@@ -1283,6 +1298,18 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             }
             if level == loom_commands::Shading::BoundingBox {
                 draw_bounding_boxes(&painter, app, view_proj, rect, keep_selected);
+            }
+            if app.state.prefs.display_world_axis {
+                draw_world_axis(&painter, app, view, rect);
+            }
+            // Preferences > Viewport Tooltips: the name of the object under a resting pointer.
+            if app.state.prefs.viewport_tooltips && response.hovered() && app.quad_menu.is_none() && app.create.is_none() && app.transform_drag.is_none() {
+                let (rest, still) = ctx.input(|i| (!i.pointer.any_down() && i.pointer.time_since_last_movement() > 0.5, i.pointer.time_since_last_movement()));
+                if !rest {
+                    ctx.request_repaint_after(std::time::Duration::from_secs_f32((0.55 - still).max(0.05)));
+                } else if let Some(name) = ctx.input(|i| i.pointer.hover_pos()).and_then(|p| node_at(app, p)).and_then(|n| app.state.scene.node(n)).map(|n| n.name.clone()) {
+                    egui::show_tooltip_at_pointer(&ctx, ui.layer_id(), egui::Id::new(("viewport_tooltip", index)), |ui| ui.label(name));
+                }
             }
             if app.state.selection_brackets && app.state.selection_mode == SelectionMode::Object {
                 draw_selection_brackets(&painter, app, view_proj, rect);
@@ -1728,6 +1755,21 @@ pub(crate) fn shown_shading(app: &LoomApp, index: usize) -> loom_commands::Shadi
     // Never more detailed than the view's own level.
     let rank = |s: loom_commands::Shading| loom_commands::Shading::LEVELS.iter().position(|l| *l == s).unwrap_or(0);
     if rank(to) > rank(own) { to } else { own }
+}
+
+/// The world axis tripod in the view's lower-left corner: X, Y and Z as the
+/// view sees them, in the gizmo axis colours.
+fn draw_world_axis(painter: &egui::Painter, app: &LoomApp, view: Mat4, rect: egui::Rect) {
+    let origin = egui::pos2(rect.left() + 30.0, rect.bottom() - 30.0);
+    let len = 18.0;
+    let font = egui::FontId::proportional(11.0);
+    for (axis, label, color) in [(Vec3::X, "X", app.color("X Axis")), (Vec3::Y, "Y", app.color("Y Axis")), (Vec3::Z, "Z", app.color("Z Axis"))] {
+        // The axis turned into view space: its screen direction (y down) and how much it faces the eye.
+        let v = view.transform_vector3(axis);
+        let tip = origin + egui::vec2(v.x, -v.y) * len;
+        painter.line_segment([origin, tip], egui::Stroke::new(1.5_f32, color));
+        painter.text(origin + egui::vec2(v.x, -v.y) * (len + 7.0), egui::Align2::CENTER_CENTER, label, font.clone(), color);
+    }
 }
 
 /// Bounding Box: each visible object as its local bounding box, in its
@@ -2889,6 +2931,20 @@ fn draw_safe_frames(painter: &egui::Painter, app: &LoomApp, rect: egui::Rect) {
     let (w, h) = (live.width(), live.height());
     let frame = |pct: [f32; 2]| live.shrink2(egui::vec2(w * pct[0] / 200.0, h * pct[1] / 200.0));
     let stroke = |c: [u8; 3]| egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(c[0], c[1], c[2]));
+    // Preferences > Mask Viewport to Safe Region: what lies outside the live area is masked.
+    if app.state.prefs.mask_to_safe_region {
+        let mask = egui::Color32::from_black_alpha(200);
+        for r in [
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, live.min.y)),
+            egui::Rect::from_min_max(egui::pos2(rect.min.x, live.max.y), rect.max),
+            egui::Rect::from_min_max(egui::pos2(rect.min.x, live.min.y), egui::pos2(live.min.x, live.max.y)),
+            egui::Rect::from_min_max(egui::pos2(live.max.x, live.min.y), egui::pos2(rect.max.x, live.max.y)),
+        ] {
+            if r.width() > 0.0 && r.height() > 0.0 {
+                painter.rect_filled(r, 0.0, mask);
+            }
+        }
+    }
     if s.live_area {
         painter.rect_stroke(live, 0.0, stroke([255, 230, 0]), egui::StrokeKind::Middle);
     }

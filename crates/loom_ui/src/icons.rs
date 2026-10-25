@@ -10,6 +10,53 @@ use loom_commands::AppState;
 /// The icon font's name in the font definitions.
 pub const FONT: &str = "phosphor";
 
+thread_local! {
+    /// Icon button glyph size (Preferences > Large Toolbar Buttons), set each frame.
+    static ICON_SIZE: std::cell::Cell<f32> = const { std::cell::Cell::new(SIZE) };
+    /// Flyout Time in seconds (Preferences), set each frame.
+    static FLYOUT_TIME: std::cell::Cell<f64> = const { std::cell::Cell::new(0.3) };
+}
+
+/// The icon button glyph size this frame.
+pub fn size() -> f32 {
+    ICON_SIZE.with(|s| s.get())
+}
+
+/// Preferences > General > UI Display: Large Toolbar Buttons and Flyout Time.
+pub fn set_prefs(large: bool, flyout_ms: f32) {
+    ICON_SIZE.with(|s| s.set(if large { 24.0 } else { SIZE }));
+    FLYOUT_TIME.with(|t| t.set(flyout_ms as f64 / 1000.0));
+}
+
+/// A flyout button's click-and-hold: true on the frame the press has lasted
+/// the Flyout Time (the flyout opens then); `took` tells whether that press
+/// opened it, so its release does not also run the button.
+pub fn hold_opens(ui: &egui::Ui, r: &egui::Response) -> (bool, bool) {
+    let start_id = r.id.with("hold_start");
+    let took_id = r.id.with("hold_took");
+    let now = ui.input(|i| i.time);
+    let took: bool = ui.ctx().data(|d| d.get_temp(took_id)).unwrap_or(false);
+    if r.is_pointer_button_down_on() && !r.dragged() {
+        let start: f64 = ui.ctx().data_mut(|d| *d.get_temp_mut_or_insert_with(start_id, || now));
+        if took {
+            return (false, true);
+        }
+        if now - start >= FLYOUT_TIME.with(|t| t.get()) {
+            ui.ctx().data_mut(|d| d.insert_temp(took_id, true));
+            return (true, true);
+        }
+        ui.ctx().request_repaint();
+        (false, false)
+    } else {
+        // The release frame still reports the hold, so its click is ignored.
+        ui.ctx().data_mut(|d| {
+            d.remove::<f64>(start_id);
+            d.remove::<bool>(took_id);
+        });
+        (false, took)
+    }
+}
+
 /// egui memory: the tooltip of the button under the pointer, which the prompt line shows.
 pub const PROMPT_TIP: &str = "prompt_line_tooltip";
 
@@ -351,7 +398,7 @@ impl<'a> Icon<'a> {
     pub fn show(self, ui: &mut egui::Ui, state: &AppState) -> egui::Response {
         let mut text = match self.label {
             Some(l) => egui::RichText::new(format!("{}  {l}", self.glyph)),
-            None => egui::RichText::new(self.glyph).size(SIZE),
+            None => egui::RichText::new(self.glyph).size(size()),
         };
         if let Some(c) = self.color {
             text = text.color(c);

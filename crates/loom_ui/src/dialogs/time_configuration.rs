@@ -5,9 +5,21 @@ use crate::LoomApp;
 use eframe::egui;
 use loom_commands::Command;
 
+/// The settings when the dialog opened (Cancel puts them back).
+#[derive(Clone)]
+struct Snapshot {
+    range: (i32, i32),
+    fps: f32,
+    frame: i32,
+    playback: loom_commands::anim_cmds::Playback,
+}
+
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let (start, end) = app.state.frame_range;
     let fps = app.state.fps;
+    let snap_id = egui::Id::new("time_configuration_snapshot");
+    let snap: Snapshot = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(snap_id, || Snapshot { range: app.state.frame_range, fps: app.state.fps, frame: app.state.current_frame, playback: app.state.playback.clone() }).clone());
+    let mut done = false;
     egui::Window::new("Time Configuration").open(open).resizable(false).show(ctx, |ui| {
         ui.group(|ui| {
             ui.label(egui::RichText::new("Frame Rate").strong());
@@ -100,5 +112,23 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             });
             ui.ctx().data_mut(|d| d.insert_temp(id, (ns, ne)));
         });
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                let p = &snap.playback;
+                let _ = app.dispatch(Command::SetTimeConfiguration { start: Some(snap.range.0), end: Some(snap.range.1), fps: Some(snap.fps) });
+                let _ = app.dispatch(Command::SetPlayback { real_time: Some(p.real_time), loop_playback: Some(p.loop_playback), speed: Some(p.speed), direction: Some(p.direction) });
+                let _ = app.dispatch(Command::SetFrame { frame: snap.frame });
+                done = true;
+            }
+        });
     });
+    if done || !*open {
+        ctx.data_mut(|d| d.remove::<Snapshot>(snap_id));
+    }
+    if done {
+        let _ = app.dispatch(Command::CloseDialog);
+    }
 }

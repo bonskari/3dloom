@@ -313,18 +313,25 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             "Align" => {
                 // Align flyout: Align, Quick Align, Normal Align, Align Camera, Align to View.
-                let r = Icon::new(icons::ALIGN, "Align").hint("right-click: Align flyout").show(ui, &app.state);
-                if r.clicked() {
+                let r = Icon::new(icons::ALIGN, "Align").hint("hold or right-click: Align flyout").show(ui, &app.state);
+                let (open_now, held) = icons::hold_opens(ui, &r);
+                if r.clicked() && !held {
                     app.dispatch_named("Align");
                 }
                 let popup = ui.id().with("align_flyout");
                 if r.secondary_clicked() {
                     ui.memory_mut(|m| m.toggle_popup(popup));
                 }
+                if open_now {
+                    ui.memory_mut(|m| m.open_popup(popup));
+                }
                 egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
                     ui.set_min_width(140.0);
+                    // A held press released over an entry picks it.
+                    let release = held && ui.input(|i| i.pointer.any_released());
                     for (g, l, a) in [(icons::ALIGN, "Align", "Align"), (icons::QUICK_ALIGN, "Quick Align", "Quick Align"), (icons::NORMAL_ALIGN, "Normal Align", "Normal Align "), (icons::ALIGN_CAMERA, "Align Camera", "Align Camera"), (icons::ALIGN_TO_VIEW, "Align to View", "Align to View Dialog")] {
-                        if ui.add(menu_widget(&app.state, &icons::labeled(g, l), a)).on_hover_name(&app.state, a).clicked() {
+                        let e = ui.add(menu_widget(&app.state, &icons::labeled(g, l), a)).on_hover_name(&app.state, a);
+                        if e.clicked() || (release && e.contains_pointer()) {
                             app.dispatch_named(a);
                         }
                     }
@@ -352,19 +359,25 @@ fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
                 // Render flyout: Production / Iterative (right-click).
                 let iterative = app.state.rendered.iterative;
                 let action = if iterative { "Render Iterative" } else { "Render" };
-                let icon = Icon::new(icons::RENDER, action).tip(if iterative { "Render Iterative" } else { "Render Production" }).hint("right-click: Render flyout");
+                let icon = Icon::new(icons::RENDER, action).tip(if iterative { "Render Iterative" } else { "Render Production" }).hint("hold or right-click: Render flyout");
                 let r = if iterative { icon.color(icons::SUB_OBJECT_VARIANT) } else { icon }.show(ui, &app.state);
-                if r.clicked() {
+                let (open_now, held) = icons::hold_opens(ui, &r);
+                if r.clicked() && !held {
                     app.dispatch_named(action);
                 }
                 let popup = ui.id().with("render_flyout");
                 if r.secondary_clicked() {
                     ui.memory_mut(|m| m.toggle_popup(popup));
                 }
+                if open_now {
+                    ui.memory_mut(|m| m.open_popup(popup));
+                }
                 egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
                     ui.set_min_width(140.0);
+                    let release = held && ui.input(|i| i.pointer.any_released());
                     for (l, it) in [("Render Production", false), ("Render Iterative", true)] {
-                        if ui.add(menu_widget(&app.state, &icons::labeled(icons::RENDER, l), if it { "Render Iterative" } else { "Render" })).clicked() {
+                        let e = ui.add(menu_widget(&app.state, &icons::labeled(icons::RENDER, l), if it { "Render Iterative" } else { "Render" }));
+                        if e.clicked() || (release && e.contains_pointer()) {
                             let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
                             app.dispatch_named(if it { "Render Iterative" } else { "Render" });
                         }

@@ -289,6 +289,19 @@ impl ViewportNavigator {
                     }
                 }
                 match mode {
+                    // Ctrl in an Orbit mode: horizontal drags turn about the world Z
+                    // axis, vertical ones about the world X axis (through the target).
+                    DragMode::Orbit if mods.ctrl && !mods.alt && self.mode != NavMode::None && self.orbit_snap.is_none() => {
+                        cam.orbit(delta.x * self.orbit_speed, 0.0);
+                        let a = delta.y * self.orbit_speed;
+                        if a != 0.0 {
+                            let q = glam::Quat::from_rotation_x(-a);
+                            let (_, up, to_eye) = cam.basis();
+                            let eye = cam.target + q * (to_eye * cam.distance);
+                            *cam = OrbitCamera::looking(eye, cam.target, q * up);
+                        }
+                        true
+                    }
                     DragMode::Orbit => {
                         match self.orbit_snap {
                             Some(step) => {
@@ -332,7 +345,15 @@ impl ViewportNavigator {
                             _ => 0.01,
                         };
                         let factor = (1.0 + delta.y * rate).max(0.1);
-                        cam.distance = (cam.distance * factor).clamp(0.05, 10_000.0);
+                        let to = (cam.distance * factor).clamp(0.05, 10_000.0);
+                        if mods.shift {
+                            // Shift moves the virtual target with the view: it flies on
+                            // instead of slowing down near the target.
+                            let (_, _, to_eye) = cam.basis();
+                            cam.target -= to_eye * (cam.distance - to);
+                        } else {
+                            cam.distance = to;
+                        }
                         true
                     }
                 }
@@ -420,6 +441,35 @@ mod tests {
         let yaw = cam.yaw;
         drag(&mut c, &mut cam, MouseButton::Left, mods(false, false));
         assert_ne!(cam.yaw, yaw);
+        c.set_mode(NavMode::None);
+    }
+
+    #[test]
+    fn shift_zoom_moves_the_virtual_target_and_keeps_the_distance() {
+        let (mut cam, mut c) = (OrbitCamera::default(), ViewportNavigator::new());
+        c.set_mode(NavMode::Zoom);
+        let (d, t, eye) = (cam.distance, cam.target, cam.eye_position());
+        let m = Modifiers { alt: false, ctrl: false, shift: true };
+        drag_path(&mut c, &mut cam, MouseButton::Left, m, &[(100.0, 100.0), (100.0, 60.0)]);
+        assert_eq!(cam.distance, d, "the distance to the target stays");
+        assert_ne!(cam.target, t, "the target moved");
+        assert!(cam.eye_position().distance(t) < eye.distance(t), "the eye moved toward the old target");
+        c.set_mode(NavMode::None);
+    }
+
+    #[test]
+    fn ctrl_orbit_turns_vertical_drags_about_the_world_x_axis() {
+        let (mut cam, mut c) = (OrbitCamera::default(), ViewportNavigator::new());
+        c.set_mode(NavMode::Orbit);
+        cam.yaw = 0.0;
+        cam.pitch = 0.3;
+        let eye = cam.eye_position();
+        let m = Modifiers { alt: false, ctrl: true, shift: false };
+        drag_path(&mut c, &mut cam, MouseButton::Left, m, &[(100.0, 100.0), (100.0, 140.0)]);
+        let e = cam.eye_position();
+        assert!((e.x - eye.x).abs() < 1e-3, "a turn about X keeps the eye's X: {eye:?} -> {e:?}");
+        assert!((e.length() - eye.length()).abs() < 1e-3, "and its distance");
+        assert!((e - eye).length() > 1e-2);
         c.set_mode(NavMode::None);
     }
 

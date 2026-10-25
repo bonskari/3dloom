@@ -30,17 +30,25 @@ fn flyout_icon<'a>(glyph: &'a str, color: Option<egui::Color32>, hover: &'a str,
 
 fn flyout<const N: usize>(ui: &mut egui::Ui, app: &mut LoomApp, id: &str, current: usize, items: [FlyoutItem; N]) {
     let (glyph, color, hover, cmd) = &items[current];
-    let resp = flyout_icon(glyph, *color, hover, cmd).hint("right-click: flyout").show(ui, &app.state);
-    if resp.clicked() {
+    let resp = flyout_icon(glyph, *color, hover, cmd).hint("hold or right-click: flyout").show(ui, &app.state);
+    // Click-and-hold for the Flyout Time opens the strip (its release runs nothing).
+    let (open_now, held) = icons::hold_opens(ui, &resp);
+    if resp.clicked() && !held {
         let _ = app.dispatch(cmd.clone());
     }
     let popup = ui.id().with(id);
     if resp.secondary_clicked() || resp.long_touched() {
         ui.memory_mut(|m| m.toggle_popup(popup));
     }
+    if open_now {
+        ui.memory_mut(|m| m.open_popup(popup));
+    }
     egui::popup::popup_above_or_below_widget(ui, popup, &resp, egui::AboveOrBelow::Above, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+        // A held press released over an entry picks it.
+        let release = held && ui.input(|i| i.pointer.any_released());
         for (g, color, t, c) in &items {
-            if flyout_icon(g, *color, t, c).show(ui, &app.state).clicked() {
+            let e = flyout_icon(g, *color, t, c).show(ui, &app.state);
+            if e.clicked() || (release && e.contains_pointer()) {
                 let _ = app.dispatch(c.clone());
             }
         }
@@ -206,7 +214,15 @@ fn camera_controls(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId)
             ]);
         });
         ui.horizontal(|ui| {
-            nav(ui, app, icons::FIELD_OF_VIEW, "Field-of-View", NavMode::Fov, Command::FieldOfViewMode);
+            // Right-click: Viewport Configuration (its Field Of View spinner).
+            let on = app.state.nav_mode == NavMode::Fov;
+            let r = Icon::new(icons::FIELD_OF_VIEW, Command::FieldOfViewMode.name()).tip("Field-of-View").on(on).hint("right-click: Viewport Configuration").show(ui, &app.state);
+            if r.clicked() {
+                let _ = app.dispatch(Command::FieldOfViewMode);
+            }
+            if r.secondary_clicked() {
+                let _ = app.dispatch(Command::ConfigureViewports { panel: Some("Rendering Method".into()) });
+            }
             nav(ui, app, icons::TRUCK, "Truck Camera Mode", NavMode::TruckCamera, Command::TruckCameraMode);
             let current = usize::from(app.state.nav_mode == NavMode::PanCamera);
             flyout(ui, app, "orbit_camera", current, [

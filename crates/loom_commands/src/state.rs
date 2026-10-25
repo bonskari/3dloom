@@ -820,6 +820,29 @@ pub struct Prefs {
     /// Preferences > Viewports > Grid Nudge Distance (Nudge Grid Up / Down, default 1.0).
     #[serde(default = "default_nudge")]
     pub grid_nudge_distance: f32,
+    /// Preferences > Viewports > Display World Axis (the tripod in each view's corner).
+    pub display_world_axis: bool,
+    /// Preferences > Viewports > Mask Viewport to Safe Region.
+    pub mask_to_safe_region: bool,
+    /// Preferences > Viewports > Mouse Control: Zoom About Mouse Point (orthographic, perspective views).
+    pub zoom_about_mouse_ortho: bool,
+    pub zoom_about_mouse_persp: bool,
+    /// Preferences > Viewports > Mouse Control: Right Click Menu over Selected Only.
+    pub right_click_selected_only: bool,
+    /// Preferences > Viewports > Mouse Control: Wheel Zoom Increment (a multiple of the program's step).
+    pub wheel_zoom_increment: f32,
+    /// Preferences > General > UI Display: Large Toolbar Buttons.
+    pub large_toolbar_buttons: bool,
+    /// Preferences > General > UI Display: Flyout Time (ms a button is held before its flyout opens).
+    pub flyout_time_ms: f32,
+    /// Preferences > General > UI Display: Topology Dependence Warning.
+    pub topology_warning: bool,
+    /// Preferences > Files: Backup on Save (the previous file is kept in the autoback folder).
+    pub backup_on_save: bool,
+    /// Preferences > Files: Increment on Save (Save writes the next numbered name).
+    pub increment_on_save: bool,
+    /// Preferences > Files: Zoom Extents on Import.
+    pub zoom_extents_on_import: bool,
 }
 
 fn default_nudge() -> f32 {
@@ -849,20 +872,34 @@ impl Default for Prefs {
             local_center_during_animate: true,
             recent_files_count: 10,
             grid_nudge_distance: 1.0,
+            display_world_axis: true,
+            mask_to_safe_region: false,
+            zoom_about_mouse_ortho: true,
+            zoom_about_mouse_persp: false,
+            right_click_selected_only: false,
+            wheel_zoom_increment: 1.0,
+            large_toolbar_buttons: false,
+            flyout_time_ms: 300.0,
+            topology_warning: true,
+            backup_on_save: false,
+            increment_on_save: false,
+            zoom_extents_on_import: true,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 32] = [
+    pub const NAMES: [&'static str; 44] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
         "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
-        "Grid Nudge Distance",
+        "Grid Nudge Distance", "Display World Axis", "Mask Viewport to Safe Region", "Zoom About Mouse Point Orthographic", "Zoom About Mouse Point Perspective",
+        "Right Click Menu over Selected Only", "Wheel Zoom Increment", "Large Toolbar Buttons", "Flyout Time", "Topology Dependence Warning", "Backup on Save",
+        "Increment on Save", "Zoom Extents on Import",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -886,6 +923,18 @@ impl Prefs {
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
             "Recent Files in File Menu" => self.recent_files_count as f64,
             "Grid Nudge Distance" => self.grid_nudge_distance as f64,
+            "Display World Axis" => b(self.display_world_axis),
+            "Mask Viewport to Safe Region" => b(self.mask_to_safe_region),
+            "Zoom About Mouse Point Orthographic" => b(self.zoom_about_mouse_ortho),
+            "Zoom About Mouse Point Perspective" => b(self.zoom_about_mouse_persp),
+            "Right Click Menu over Selected Only" => b(self.right_click_selected_only),
+            "Wheel Zoom Increment" => self.wheel_zoom_increment as f64,
+            "Large Toolbar Buttons" => b(self.large_toolbar_buttons),
+            "Flyout Time" => self.flyout_time_ms as f64,
+            "Topology Dependence Warning" => b(self.topology_warning),
+            "Backup on Save" => b(self.backup_on_save),
+            "Increment on Save" => b(self.increment_on_save),
+            "Zoom Extents on Import" => b(self.zoom_extents_on_import),
             "Transform Gizmos" => b(self.gizmos.enabled),
             "Show Axis Labels" => b(self.gizmos.show_axis_labels),
             "Allow Multiple Gizmos" => b(self.gizmos.allow_multiple),
@@ -927,6 +976,18 @@ impl Prefs {
             "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
             "Grid Nudge Distance" => self.grid_nudge_distance = f.max(0.0),
+            "Display World Axis" => self.display_world_axis = on,
+            "Mask Viewport to Safe Region" => self.mask_to_safe_region = on,
+            "Zoom About Mouse Point Orthographic" => self.zoom_about_mouse_ortho = on,
+            "Zoom About Mouse Point Perspective" => self.zoom_about_mouse_persp = on,
+            "Right Click Menu over Selected Only" => self.right_click_selected_only = on,
+            "Wheel Zoom Increment" => self.wheel_zoom_increment = f.clamp(0.1, 10.0),
+            "Large Toolbar Buttons" => self.large_toolbar_buttons = on,
+            "Flyout Time" => self.flyout_time_ms = f.clamp(0.0, 2000.0),
+            "Topology Dependence Warning" => self.topology_warning = on,
+            "Backup on Save" => self.backup_on_save = on,
+            "Increment on Save" => self.increment_on_save = on,
+            "Zoom Extents on Import" => self.zoom_extents_on_import = on,
             "Transform Gizmos" => self.gizmos.enabled = on,
             "Show Axis Labels" => self.gizmos.show_axis_labels = on,
             "Allow Multiple Gizmos" => self.gizmos.allow_multiple = on,
