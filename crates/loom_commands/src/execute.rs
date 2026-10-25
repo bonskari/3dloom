@@ -279,6 +279,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 let ids = crate::fbx_io::import(state, &path)?;
                 return Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }));
             }
+            if crate::geom_io::is_3ds(&path) {
+                return crate::geom_io::import_3ds(state, &path);
+            }
+            if crate::geom_io::is_stl(&path) {
+                return crate::geom_io::import_stl(state, &path);
+            }
+            if crate::geom_io::is_dxf(&path) {
+                return crate::geom_io::import_dxf(state, &path);
+            }
             crate::obj_io::import(state, &path)
         }
         C::ExportFile { path } => {
@@ -772,6 +781,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::TruckCameraMode => nav_toggle(state, NavMode::TruckCamera),
         C::OrbitCameraMode => nav_toggle(state, NavMode::OrbitCamera),
         C::PanCameraMode => nav_toggle(state, NavMode::PanCamera),
+        C::LightHotspotMode => nav_toggle(state, NavMode::LightHotspot),
+        C::LightFalloffMode => nav_toggle(state, NavMode::LightFalloff),
         C::TimeConfiguration => {
             state.dialog = Some(Dlg::TimeConfiguration);
             Ok(json!({}))
@@ -2031,7 +2042,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. }) => crate::camera::execute(state, c),
-        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister) => crate::light::execute(state, c),
+        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister | C::PhotometricTemplate { .. } | C::CreateSunlight { .. } | C::SunlightParameters { .. } | C::AddDefaultLightsToScene { .. } | C::SelectTarget) => crate::light::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
@@ -2040,6 +2051,24 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 let mut after = (**b).clone();
                 after.set(&name, value)?;
                 return crate::biped::rebuild(state, id, after, &name);
+            }
+            // Target Distance of a target camera or light moves the target
+            // along the line of sight.
+            let live_target = match &node.object {
+                ObjectKind::Camera { target, .. } => *target,
+                ObjectKind::Light(l) => l.target,
+                _ => None,
+            }
+            .filter(|t| state.scene.node(*t).is_some());
+            if let (Some(t), "Target Distance") = (live_target, name.as_str()) {
+                let world = state.scene.world_matrix(id);
+                let at = world.w_axis.truncate() - world.z_axis.truncate().normalize_or_zero() * (value as f32).max(1e-3);
+                let tnode = state.scene.node(t).ok_or_else(|| missing(t))?;
+                let parent = tnode.parent.map(|p| state.scene.world_matrix(p)).unwrap_or(glam::Mat4::IDENTITY);
+                let mut after = tnode.transform.clone();
+                after.position.set(parent.inverse().transform_point3(at));
+                commit(state, "Target Distance", Change::SetTransform { id: t, before: tnode.transform.clone(), after })?;
+                return Ok(json!({}));
             }
             let root = node.instance_of.unwrap_or(id);
             let group: Vec<NodeId> = state
@@ -3031,8 +3060,22 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::Rename { id, name } => {
             let id = NodeId(id);
-            let before = state.scene.node(id).ok_or_else(|| missing(id))?.name.clone();
-            commit(state, "Rename", Change::SetName { id, before, after: name })?;
+            let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+            let before = node.name.clone();
+            // A target camera or light renames its "<name>.Target" with it.
+            let target = match &node.object {
+                ObjectKind::Camera { target, .. } => *target,
+                ObjectKind::Light(l) => l.target,
+                _ => None,
+            };
+            let mut changes = Vec::new();
+            if let Some(t) = target.and_then(|t| state.scene.node(t)) {
+                if t.name.ends_with(".Target") {
+                    changes.push(Change::SetName { id: t.id, before: t.name.clone(), after: format!("{name}.Target") });
+                }
+            }
+            changes.insert(0, Change::SetName { id, before, after: name });
+            commit(state, "Rename", Change::Group(changes))?;
             Ok(json!({}))
         }
         C::SetParent { id, parent } => {
@@ -3447,6 +3490,12 @@ fn load_document(state: &mut AppState, doc: crate::file::Document, file: Option<
 fn export_any(state: &AppState, ids: &[NodeId], path: &std::path::Path) -> Result<Value, String> {
     if crate::fbx_io::is_fbx(path) {
         crate::fbx_io::export(state, ids, path)
+    } else if crate::geom_io::is_3ds(path) {
+        crate::geom_io::export_3ds(state, ids, path)
+    } else if crate::geom_io::is_stl(path) {
+        crate::geom_io::export_stl(state, ids, path)
+    } else if crate::geom_io::is_dxf(path) {
+        crate::geom_io::export_dxf(state, ids, path)
     } else {
         crate::obj_io::export(state, ids, path)
     }

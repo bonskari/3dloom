@@ -115,12 +115,15 @@ pub enum NavMode {
     TruckCamera,
     OrbitCamera,
     PanCamera,
+    /// Light viewport controls: drag to widen or narrow the hotspot / falloff.
+    LightHotspot,
+    LightFalloff,
 }
 
 impl NavMode {
     /// The camera viewport controls (they edit the camera node).
     pub fn is_camera(self) -> bool {
-        matches!(self, NavMode::DollyCamera | NavMode::DollyTarget | NavMode::DollyBoth | NavMode::Perspective | NavMode::RollCamera | NavMode::TruckCamera | NavMode::OrbitCamera | NavMode::PanCamera)
+        matches!(self, NavMode::DollyCamera | NavMode::DollyTarget | NavMode::DollyBoth | NavMode::Perspective | NavMode::RollCamera | NavMode::TruckCamera | NavMode::OrbitCamera | NavMode::PanCamera | NavMode::LightHotspot | NavMode::LightFalloff)
     }
 }
 
@@ -226,7 +229,7 @@ impl ViewportNavigator {
             MouseButton::Left => match self.mode {
                 NavMode::Orbit | NavMode::OrbitSelected | NavMode::OrbitSubObject | NavMode::OrbitCamera | NavMode::PanCamera => Some(DragMode::Orbit),
                 NavMode::Pan | NavMode::TruckCamera => Some(DragMode::Pan),
-                NavMode::Zoom | NavMode::Fov | NavMode::ZoomAll | NavMode::DollyCamera | NavMode::DollyTarget | NavMode::DollyBoth | NavMode::Perspective => Some(DragMode::Zoom),
+                NavMode::Zoom | NavMode::Fov | NavMode::ZoomAll | NavMode::DollyCamera | NavMode::DollyTarget | NavMode::DollyBoth | NavMode::Perspective | NavMode::LightHotspot | NavMode::LightFalloff => Some(DragMode::Zoom),
                 NavMode::RollCamera => Some(DragMode::Roll),
                 NavMode::None | NavMode::ZoomRegion => None,
             },

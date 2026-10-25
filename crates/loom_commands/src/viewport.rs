@@ -315,6 +315,10 @@ pub enum Dialog {
     RenderSetup,
     /// Tools > Light Lister.
     LightLister,
+    /// Views > Add Default Lights to Scene.
+    AddDefaultLights,
+    /// Sunlight Control Parameters > Get Location: the city list.
+    GeographicLocation { sun: u64 },
     /// General Parameters > Exclude...: the Exclude/Include dialog of a light.
     LightExclude { light: u64 },
     /// Rendered Frame Window > Save Image.

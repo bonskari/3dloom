@@ -243,6 +243,8 @@ pub struct LoomApp {
     pub creation_method: [Option<usize>; 10],
     pub create_category: Category,
     pub autogrid: bool,
+    /// Create > Lights: the Photometric (true, the default) or Standard object types.
+    pub photometric_lights: bool,
     pub keyboard_entry: KeyboardEntry,
     /// Creation in progress in the viewport.
     pub create: Option<CreateSession>,
@@ -469,6 +471,7 @@ impl LoomApp {
             creation_method: [None; 10],
             create_category: Category::Geometry,
             autogrid: false,
+            photometric_lights: true,
             keyboard_entry: KeyboardEntry { position: [0.0; 3], size: [10.0, 10.0, 10.0] },
             create: None,
             camera_create: None,
