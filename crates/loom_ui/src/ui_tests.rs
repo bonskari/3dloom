@@ -3858,6 +3858,38 @@ fn fbx_import_options_cancel_and_cameras_off() {
     assert_eq!(kinds, vec![false], "the box only");
 }
 
+/// File > Merge of a .max file: the file dialog takes it, the Merge list
+/// shows its objects and the highlighted one comes in with its material.
+/// Needs the sample .max files of `$LOOM_TEST_ASSETS`; skips without them.
+#[test]
+fn merge_lists_and_brings_in_max_objects() {
+    let Some(assets) = std::env::var_os("LOOM_TEST_ASSETS") else {
+        eprintln!("skipped: LOOM_TEST_ASSETS is not set");
+        return;
+    };
+    let path = std::path::Path::new(&assets).join("Models/Cone/TrafficCone.max");
+    if !path.exists() {
+        eprintln!("skipped: {} is not available", path.display());
+        return;
+    }
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::MergeFile { path: None, names: None, duplicates: None });
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeObjects), "{}", h.app.state.status_prompt);
+    h.frames(2);
+    let title = "Merge - TrafficCone.max";
+    let p = window_text(&h, title, "Box001");
+    h.click(p);
+    let ok = window_text(&h, title, "OK");
+    h.click(ok);
+    let names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    assert_eq!(names, ["Box001"]);
+    let n = h.app.state.scene.nodes().next().unwrap();
+    let m = &h.app.state.scene.materials[&n.material.expect("its Multi/Sub-Object came along")];
+    assert_eq!(m.kind.label(), "Multi/Sub-Object");
+}
+
 /// File > Import of an .obj: the OBJ Import options list the file's objects;
 /// unchecking one leaves it out.
 #[test]
