@@ -126,6 +126,106 @@ fn extended_parameters() {
     assert_eq!(top_surface(&s).extended, s.scene.slot_material(0).extended);
 }
 
+fn kind(s: &AppState) -> loom_scene::material::MaterialKind {
+    let id = s.scene.material_editor.slots[s.scene.material_editor.active].unwrap();
+    s.scene.materials[&id].kind.clone()
+}
+
+#[test]
+fn every_material_type_can_be_chosen_with_its_sub_materials() {
+    use loom_scene::material::MaterialKind as K;
+    let mut s = AppState::new();
+    for t in loom_scene::material::MaterialKind::TYPES {
+        execute(&mut s, Command::SetMaterialType { kind: t.into(), keep_old: Some(false) }).unwrap_or_else(|e| panic!("{t}: {e}"));
+        assert_eq!(kind(&s).label(), t);
+        // Back to Standard before the next one (Shell keeps its own children).
+        execute(&mut s, Command::SetMaterialType { kind: "Standard".into(), keep_old: None }).unwrap();
+    }
+    execute(&mut s, Command::SetMaterialType { kind: "Raytrace".into(), keep_old: None }).unwrap();
+    let m = s.scene.slot_material(0);
+    assert_eq!((m.shading.shader, m.specular_level.get(), m.glossiness.get()), (Shader::Phong, 50.0, 40.0), "a new Raytrace material: Phong, 50, 40");
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Reflect".into(), rgb: [255, 255, 255] }).unwrap();
+    set(&mut s, "Index of Refr.", 2.0);
+    let K::Raytrace(r) = kind(&s) else { panic!() };
+    assert_eq!((r.reflect, r.ior), (glam::Vec3::ONE, 2.0));
+    assert!(execute(&mut s, Command::SetShader { shader: "Strauss".into() }).is_err(), "Raytrace has no Strauss shading");
+    execute(&mut s, Command::SetShader { shader: "Metal".into() }).unwrap();
+
+    // Double Sided keeps the old material as the facing one.
+    execute(&mut s, Command::SetMaterialType { kind: "Standard".into(), keep_old: None }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] }).unwrap();
+    execute(&mut s, Command::SetMaterialType { kind: "Double Sided".into(), keep_old: Some(true) }).unwrap();
+    let K::DoubleSided(d) = kind(&s) else { panic!() };
+    assert_eq!(s.scene.materials[&d.materials[0].unwrap()].diffuse.get(), glam::Vec3::X);
+    set(&mut s, "Translucency", 30.0);
+    set(&mut s, "Back Material On", 0.0);
+    let K::DoubleSided(d) = kind(&s) else { panic!() };
+    assert_eq!((d.translucency, d.enabled), (30.0, [true, false]));
+
+    // Top/Bottom: Swap, Local, Blend, Position.
+    execute(&mut s, Command::SetMaterialType { kind: "Top/Bottom".into(), keep_old: Some(false) }).unwrap();
+    let K::TopBottom(t0) = kind(&s) else { panic!() };
+    set(&mut s, "Swap", 1.0);
+    set(&mut s, "Local", 1.0);
+    set(&mut s, "Blend", 20.0);
+    set(&mut s, "Position", 70.0);
+    let K::TopBottom(t) = kind(&s) else { panic!() };
+    assert_eq!(t.materials, [t0.materials[1], t0.materials[0]]);
+    assert!(t.local && t.blend == 20.0 && t.position == 70.0);
+
+    // Composite: Base + 9; an empty Mat button makes a new material.
+    execute(&mut s, Command::SetMaterialType { kind: "Composite".into(), keep_old: Some(false) }).unwrap();
+    let K::Composite(c) = kind(&s) else { panic!() };
+    assert_eq!((c.layers.len(), c.layers[2].material), (9, None));
+    execute(&mut s, Command::MaterialEditorGoToSub { index: 3 }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    set(&mut s, "Mat 3 Mode", 2.0);
+    set(&mut s, "Mat 3 Amount", 40.0);
+    let K::Composite(c) = kind(&s) else { panic!() };
+    assert!(c.layers[2].material.is_some());
+    assert_eq!((c.layers[2].mode, c.layers[2].amount), (2, 40.0));
+
+    // Shellac, Matte/Shadow, Ink 'n Paint, Architectural.
+    execute(&mut s, Command::SetMaterialType { kind: "Shellac".into(), keep_old: Some(false) }).unwrap();
+    set(&mut s, "Shellac Color Blend", 60.0);
+    let K::Shellac(sh) = kind(&s) else { panic!() };
+    assert_eq!(sh.blend, 60.0);
+    execute(&mut s, Command::SetMaterialType { kind: "Matte/Shadow".into(), keep_old: None }).unwrap();
+    set(&mut s, "Receive Shadows", 0.0);
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Color".into(), rgb: [0, 0, 255] }).unwrap();
+    let K::MatteShadow(ms) = kind(&s) else { panic!() };
+    assert!(!ms.receive_shadows && ms.color == glam::Vec3::Z);
+    execute(&mut s, Command::SetMaterialType { kind: "Ink 'n Paint".into(), keep_old: None }).unwrap();
+    set(&mut s, "Paint Levels", 5.0);
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Ink Color".into(), rgb: [255, 0, 0] }).unwrap();
+    let K::InkPaint(ink) = kind(&s) else { panic!() };
+    assert_eq!((ink.paint_levels, ink.ink_color), (5, glam::Vec3::X));
+    execute(&mut s, Command::SetMaterialType { kind: "Architectural".into(), keep_old: None }).unwrap();
+    set(&mut s, "Template", 3.0);
+    let K::Architectural(a) = kind(&s) else { panic!() };
+    assert_eq!((a.template, a.transparency), (3, 95.0), "Glass - Clear sets its values");
+    set(&mut s, "Shininess", 20.0);
+    let K::Architectural(a) = kind(&s) else { panic!() };
+    assert_eq!(a.shininess, 20.0);
+    // One undo step per change.
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    let K::Architectural(a) = kind(&s) else { panic!() };
+    assert_eq!(a.shininess, 100.0);
+}
+
+#[test]
+fn a_dragged_copy_of_a_composite_copies_its_layers() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialType { kind: "Composite".into(), keep_old: Some(false) }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToSub { index: 1 }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    execute(&mut s, Command::CopyMaterialToSlot { from: 0, to: 1 }).unwrap();
+    let a = s.scene.slot_material(0);
+    let b = s.scene.slot_material(1);
+    assert_ne!(a.children()[1], b.children()[1], "the copy's layer is a material of its own");
+    assert!(b.children()[1].is_some());
+}
+
 #[test]
 fn shader_and_extended_values_survive_a_loom_file() {
     use loom_commands::file::{read, write, Document, SceneSettings, FORMAT};

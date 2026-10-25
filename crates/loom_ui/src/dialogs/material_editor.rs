@@ -496,6 +496,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 MaterialKind::MultiSub(_) => multi_sub_rollout(ui, app, &m),
                 MaterialKind::Blend(_) => blend_rollout(ui, app, &m),
                 MaterialKind::Shell(_) => shell_rollout(ui, app, &m),
+                MaterialKind::Raytrace(_) => raytrace_rollouts(ui, app, &m),
+                MaterialKind::Architectural(_) => architectural_rollouts(ui, app, &m),
+                MaterialKind::DoubleSided(_) | MaterialKind::TopBottom(_) | MaterialKind::Shellac(_) => two_material_rollout(ui, app, &m),
+                MaterialKind::Composite(_) => composite_rollout(ui, app, &m),
+                MaterialKind::MatteShadow(_) => matte_shadow_rollout(ui, app, &m),
+                MaterialKind::InkPaint(_) => ink_paint_rollouts(ui, app, &m),
             }
         } else if let Some(map) = map_at(&m, &maps).cloned() {
             map_rollouts(ui, app, &map);
@@ -991,6 +997,11 @@ fn standard_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
         }
     });
     extended_rollout(ui, app, m);
+    maps_rollout(ui, app, m);
+}
+
+/// The Maps rollout: each channel's check box, Amount and map button.
+fn maps_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
     crate::command_panel::rollout(ui, "Maps", false, |ui| {
         egui::Grid::new("material_maps").num_columns(4).show(ui, |ui| {
             ui.label("");
@@ -1081,6 +1092,306 @@ fn extended_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) 
                 spinner(ui, app, "Refl. Level", e.refl_level, 0.1..=10.0, 2);
             });
         }
+    });
+}
+
+/// A sub-material button (list position `index`) with its on/off check box (`on` = None: no check box).
+fn sub_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, index: usize, id: Option<MaterialId>, on: Option<(bool, &str)>) {
+    ui.label(label);
+    if ui.add(egui::Button::new(material_label(app, id)).min_size(egui::vec2(150.0, 0.0))).clicked() {
+        let _ = app.dispatch(Command::MaterialEditorGoToSub { index: index as u32 });
+    }
+    if let Some((enabled, name)) = on {
+        let mut v = enabled;
+        if ui.checkbox(&mut v, "").changed() {
+            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: name.into(), value: if v { 1.0 } else { 0.0 } });
+        }
+    }
+    ui.end_row();
+}
+
+/// A colour row: label, swatch, and the map button of `channel` if any.
+fn color_line(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, label: &str, which: &str, c: glam::Vec3, channel: Option<&str>) {
+    ui.label(label);
+    swatch(ui, app, which, c);
+    match channel {
+        Some(ch) => map_button(ui, app, ch, m.map(ch), true),
+        None => {
+            ui.label("");
+        }
+    }
+    ui.end_row();
+}
+
+/// Raytrace Basic Parameters (with the shader's highlight), Extended Parameters and Maps.
+fn raytrace_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    use loom_scene::material::Shader;
+    let MaterialKind::Raytrace(r) = &m.kind else { return };
+    let r = (**r).clone();
+    let sh = m.shading.shader;
+    crate::command_panel::rollout(ui, "Raytrace Basic Parameters", true, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Shading:");
+            egui::ComboBox::from_id_salt("raytrace_shader").width(120.0).selected_text(sh.label()).show_ui(ui, |ui| {
+                for s in [Shader::Anisotropic, Shader::Blinn, Shader::Metal, Shader::OrenNayarBlinn, Shader::Phong] {
+                    if ui.selectable_label(sh == s, s.label()).clicked() {
+                        let _ = app.dispatch(Command::SetShader { shader: s.label().into() });
+                    }
+                }
+            });
+            check(ui, app, "2-Sided", "2-Sided", m.two_sided);
+            check(ui, app, "Wire", "Wire", m.wire);
+            check(ui, app, "Faceted", "Faceted", m.faceted);
+        });
+        egui::Grid::new("raytrace_colours").num_columns(3).show(ui, |ui| {
+            color_line(ui, app, m, "Ambient:", "Ambient", r.ambient, Some("Ambient Color"));
+            color_line(ui, app, m, "Diffuse:", "Diffuse", m.diffuse.get(), Some("Diffuse Color"));
+            color_line(ui, app, m, "Reflect:", "Reflect", r.reflect, Some("Reflection"));
+            color_line(ui, app, m, "Luminosity:", "Luminosity", r.luminosity, Some("Self-Illumination"));
+            color_line(ui, app, m, "Transparency:", "Transparency", r.transparency, Some("Refraction"));
+        });
+        check(ui, app, "Fresnel", "Fresnel", r.fresnel);
+        spinner(ui, app, "Index of Refr.", r.ior, 0.001..=10.0, 2);
+        ui.label(egui::RichText::new("Specular Highlight").strong());
+        egui::Grid::new("raytrace_spec").num_columns(3).show(ui, |ui| {
+            color_line(ui, app, m, "Specular Color:", "Specular", m.specular.get(), Some("Specular Color"));
+        });
+        spinner(ui, app, "Specular Level", m.specular_level.get(), 0.0..=999.0, 0);
+        spinner(ui, app, "Glossiness", m.glossiness.get(), 0.0..=100.0, 0);
+        match sh {
+            Shader::Anisotropic => {
+                spinner(ui, app, "Anisotropy", m.shading.anisotropy, 0.0..=100.0, 0);
+                spinner(ui, app, "Orientation", m.shading.orientation, 0.0..=9999.0, 0);
+            }
+            Shader::OrenNayarBlinn => {
+                spinner(ui, app, "Diffuse Level", m.shading.diffuse_level, 0.0..=400.0, 0);
+                spinner(ui, app, "Roughness", m.shading.roughness, 0.0..=100.0, 0);
+            }
+            _ => spinner(ui, app, "Soften", m.soften.get(), 0.0..=1.0, 2),
+        }
+    });
+    crate::command_panel::rollout(ui, "Extended Parameters", false, |ui| {
+        egui::Grid::new("raytrace_ext").num_columns(3).show(ui, |ui| {
+            color_line(ui, app, m, "Extra Lighting:", "Extra Lighting", r.extra_lighting, None);
+            color_line(ui, app, m, "Translucency:", "Translucency", r.translucency, None);
+            color_line(ui, app, m, "Fluorescence:", "Fluorescence", r.fluorescence, None);
+        });
+        spinner(ui, app, "Fluorescence Bias", r.fluorescence_bias, 0.0..=1.0, 2);
+    });
+    maps_rollout(ui, app, m);
+}
+
+/// Architectural: Templates, Physical Qualities, Special Effects.
+fn architectural_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    use loom_scene::material_types::ARCH_TEMPLATES;
+    let MaterialKind::Architectural(a) = &m.kind else { return };
+    let a = (**a).clone();
+    crate::command_panel::rollout(ui, "Templates", true, |ui| {
+        let current = ARCH_TEMPLATES.get(a.template as usize).map_or("User Defined", |t| t.0);
+        egui::ComboBox::from_id_salt("arch_template").width(200.0).selected_text(current).show_ui(ui, |ui| {
+            for (i, t) in ARCH_TEMPLATES.iter().enumerate() {
+                if ui.selectable_label(a.template as usize == i, t.0).clicked() {
+                    let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Template".into(), value: i as f64 });
+                }
+            }
+        });
+    });
+    crate::command_panel::rollout(ui, "Physical Qualities", true, |ui| {
+        egui::Grid::new("arch_physical").num_columns(3).show(ui, |ui| {
+            color_line(ui, app, m, "Diffuse Color:", "Diffuse", m.diffuse.get(), Some("Diffuse Color"));
+        });
+        for (label, value, max, channel) in [("Shininess", a.shininess, 100.0, "Glossiness"), ("Transparency", a.transparency, 100.0, "Opacity"), ("Translucency", a.translucency, 100.0, "Filter Color")] {
+            ui.horizontal(|ui| {
+                spinner(ui, app, label, value, 0.0..=max, 1);
+                map_button(ui, app, channel, m.map(channel), true);
+            });
+        }
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Index of Refraction", a.ior, 1.0..=2.5, 2);
+            map_button(ui, app, "Refraction", m.map("Refraction"), true);
+        });
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Luminance cd/m2", a.luminance, 0.0..=1.0e7, 1);
+            map_button(ui, app, "Self-Illumination", m.map("Self-Illumination"), true);
+        });
+        ui.horizontal(|ui| {
+            check(ui, app, "2-Sided", "2-Sided", m.two_sided);
+            check(ui, app, "Raw Diffuse Texture", "Raw Diffuse Texture", a.raw_diffuse);
+        });
+    });
+    crate::command_panel::rollout(ui, "Special Effects", false, |ui| {
+        egui::Grid::new("arch_effects").num_columns(2).show(ui, |ui| {
+            for ch in ["Bump", "Displacement"] {
+                ui.label(format!("{ch}:"));
+                map_button(ui, app, ch, m.map(ch), false);
+                ui.end_row();
+            }
+        });
+    });
+}
+
+/// Double Sided, Top/Bottom and Shellac: two sub-materials and their values.
+fn two_material_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    match &m.kind {
+        MaterialKind::DoubleSided(d) => {
+            let d = (**d).clone();
+            crate::command_panel::rollout(ui, "Double Sided Basic Parameters", true, |ui| {
+                spinner(ui, app, "Translucency", d.translucency, 0.0..=100.0, 1);
+                egui::Grid::new("double_sided_rows").num_columns(3).show(ui, |ui| {
+                    sub_button(ui, app, "Facing Material:", 0, d.materials[0], Some((d.enabled[0], "Facing Material On")));
+                    sub_button(ui, app, "Back Material:", 1, d.materials[1], Some((d.enabled[1], "Back Material On")));
+                });
+            });
+        }
+        MaterialKind::TopBottom(t) => {
+            let t = (**t).clone();
+            crate::command_panel::rollout(ui, "Top/Bottom Basic Parameters", true, |ui| {
+                egui::Grid::new("top_bottom_rows").num_columns(3).show(ui, |ui| {
+                    sub_button(ui, app, "Top Material:", 0, t.materials[0], Some((t.enabled[0], "Top Material On")));
+                    sub_button(ui, app, "Bottom Material:", 1, t.materials[1], Some((t.enabled[1], "Bottom Material On")));
+                });
+                if ui.button("Swap").clicked() {
+                    let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Swap".into(), value: 1.0 });
+                }
+                ui.horizontal(|ui| {
+                    ui.label("Coordinates:");
+                    if ui.radio(!t.local, "World").clicked() {
+                        let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Local".into(), value: 0.0 });
+                    }
+                    if ui.radio(t.local, "Local").clicked() {
+                        let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Local".into(), value: 1.0 });
+                    }
+                });
+                spinner(ui, app, "Blend", t.blend, 0.0..=100.0, 0);
+                spinner(ui, app, "Position", t.position, 0.0..=100.0, 0);
+            });
+        }
+        MaterialKind::Shellac(sh) => {
+            let sh = (**sh).clone();
+            crate::command_panel::rollout(ui, "Shellac Basic Parameters", true, |ui| {
+                egui::Grid::new("shellac_rows").num_columns(2).show(ui, |ui| {
+                    sub_button(ui, app, "Base Material:", 0, sh.materials[0], None);
+                    sub_button(ui, app, "Shellac Material:", 1, sh.materials[1], None);
+                });
+                spinner(ui, app, "Shellac Color Blend", sh.blend, 0.0..=1000.0, 1);
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Composite Basic Parameters: Base Material and Mat 1–9 with their A/S/M mode and Amount.
+fn composite_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    let MaterialKind::Composite(c) = &m.kind else { return };
+    let c = (**c).clone();
+    crate::command_panel::rollout(ui, "Composite Basic Parameters", true, |ui| {
+        egui::Grid::new("composite_base").num_columns(2).show(ui, |ui| {
+            sub_button(ui, app, "Base Material:", 0, c.base, None);
+        });
+        egui::Grid::new("composite_rows").num_columns(5).show(ui, |ui| {
+            for (i, l) in c.layers.iter().enumerate() {
+                let n = i + 1;
+                let mut on = l.enabled;
+                if ui.checkbox(&mut on, format!("Mat.{n}:")).changed() {
+                    let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: format!("Mat {n} On"), value: if on { 1.0 } else { 0.0 } });
+                }
+                if ui.add(egui::Button::new(material_label(app, l.material)).min_size(egui::vec2(130.0, 0.0))).clicked() {
+                    let _ = app.dispatch(Command::MaterialEditorGoToSub { index: n as u32 });
+                }
+                ui.horizontal(|ui| {
+                    for (k, label) in ["A", "S", "M"].iter().enumerate() {
+                        if ui.selectable_label(l.mode == k as u8, *label).on_hover_text(["Additive", "Subtractive", "Mix"][k]).clicked() {
+                            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: format!("Mat {n} Mode"), value: k as f64 });
+                        }
+                    }
+                });
+                let max = if l.mode == 2 { 100.0 } else { 200.0 };
+                let name = format!("Mat {n} Amount");
+                spinner_with(ui, app, "", l.amount, 0.0..=max, 1, move |v| Command::SetMaterialParameter { slot: None, name: name.clone(), value: v });
+                ui.end_row();
+            }
+        });
+    });
+}
+
+/// Matte/Shadow Basic Parameters.
+fn matte_shadow_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    let MaterialKind::MatteShadow(ms) = &m.kind else { return };
+    let ms = (**ms).clone();
+    crate::command_panel::rollout(ui, "Matte/Shadow Basic Parameters", true, |ui| {
+        ui.label(egui::RichText::new("Matte").strong());
+        check(ui, app, "Opaque Alpha", "Opaque Alpha", ms.opaque_alpha);
+        ui.label(egui::RichText::new("Atmosphere").strong());
+        check(ui, app, "Apply Atmosphere", "Apply Atmosphere", ms.apply_atmosphere);
+        ui.label(egui::RichText::new("Shadow").strong());
+        ui.horizontal(|ui| {
+            check(ui, app, "Receive Shadows", "Receive Shadows", ms.receive_shadows);
+            check(ui, app, "Affect Alpha", "Affect Alpha", ms.affect_alpha);
+        });
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Shadow Brightness", ms.shadow_brightness, 0.0..=1.0, 2);
+            ui.label("Color:");
+            swatch(ui, app, "Color", ms.color);
+        });
+        ui.label(egui::RichText::new("Reflection").strong());
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Amount", ms.reflection_amount, 0.0..=100.0, 1);
+            ui.label("Map:");
+            map_button(ui, app, "Reflection", m.map("Reflection"), false);
+        });
+    });
+}
+
+/// Ink 'n Paint: Paint Controls and Ink Controls.
+fn ink_paint_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    let MaterialKind::InkPaint(ink) = &m.kind else { return };
+    let ink = (**ink).clone();
+    crate::command_panel::rollout(ui, "Paint Controls", true, |ui| {
+        ui.horizontal(|ui| {
+            check(ui, app, "Lighted", "Lighted On", ink.lighted_on);
+            swatch(ui, app, "Lighted", ink.lighted);
+            map_button(ui, app, "Diffuse Color", m.map("Diffuse Color"), true);
+        });
+        let levels = ink.paint_levels as f32;
+        spinner_with(ui, app, "Paint Levels", levels, 1.0..=255.0, 0, |v| Command::SetMaterialParameter { slot: None, name: "Paint Levels".into(), value: v });
+        ui.horizontal(|ui| {
+            check(ui, app, "Shaded", "Shaded On", ink.shaded_on);
+            if ink.shaded_on {
+                spinner_with(ui, app, "", ink.shaded_percent, 0.0..=100.0, 1, |v| Command::SetMaterialParameter { slot: None, name: "Shaded Percent".into(), value: v });
+            } else {
+                swatch(ui, app, "Shaded", ink.shaded);
+            }
+        });
+        ui.horizontal(|ui| {
+            check(ui, app, "Highlight", "Highlight On", ink.highlight_on);
+            swatch(ui, app, "Highlight", ink.highlight);
+        });
+        spinner(ui, app, "Glossiness", ink.glossiness, 0.0..=100.0, 1);
+    });
+    crate::command_panel::rollout(ui, "Ink Controls", true, |ui| {
+        ui.horizontal(|ui| {
+            check(ui, app, "Ink", "Ink", ink.ink);
+            let q = ink.ink_quality as f32;
+            spinner_with(ui, app, "Ink Quality", q, 1.0..=3.0, 0, |v| Command::SetMaterialParameter { slot: None, name: "Ink Quality".into(), value: v });
+        });
+        ui.horizontal(|ui| {
+            check(ui, app, "Variable Width", "Variable Width", ink.variable_width);
+            if ink.variable_width {
+                spinner(ui, app, "Ink Min", ink.ink_min, 0.0..=1000.0, 1);
+                spinner(ui, app, "Ink Max", ink.ink_max, 0.0..=1000.0, 1);
+            } else {
+                spinner(ui, app, "Ink Width", ink.ink_width, 0.0..=1000.0, 1);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Ink Color:");
+            swatch(ui, app, "Ink Color", ink.ink_color);
+        });
+        ui.horizontal_wrapped(|ui| {
+            for (label, on) in [("Outline", ink.outline), ("Overlap", ink.overlap), ("Underlap", ink.underlap), ("SmGroup", ink.smgroup), ("Mat ID", ink.mat_id)] {
+                check(ui, app, label, label, on);
+            }
+        });
     });
 }
 
@@ -1493,8 +1804,9 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
     *open = false;
     match for_ {
         BrowserFor::MaterialType => {
-            let kind = MaterialKind::TYPES.iter().position(|t| *t == choice).unwrap_or(2) as u8;
-            if choice == "Standard" {
+            let kind = MaterialKind::TYPES.iter().position(|t| *t == choice).unwrap_or(0) as u8;
+            // Only a compound type can keep the old material as a sub-material.
+            if matches!(choice.as_str(), "Standard" | "Raytrace" | "Architectural" | "Matte/Shadow" | "Ink 'n Paint") {
                 let _ = app.dispatch(Command::SetMaterialType { kind: choice, keep_old: None });
                 app.state.dialog = None;
             } else {

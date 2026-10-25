@@ -713,9 +713,17 @@ impl LoomApp {
             })
             .collect();
         let mut looks = Vec::with_capacity(wanted.len());
+        // Top/Bottom: per-ID surfaces for its bands; the faces get their IDs below.
+        let mut splits = Vec::with_capacity(wanted.len());
         for (surfaces, texture) in wanted {
+            let (surfaces, split) = match surfaces.as_ref().and_then(loom_scene::material::split_surfaces) {
+                Some((s, split)) => (Some(s), Some(split)),
+                None => (surfaces, None),
+            };
+            splits.push(split);
             looks.push(self.material_look(surfaces, texture, &mut bitmaps, &mut bitmap_index));
         }
+        let mut splits = splits.into_iter();
         let mut looks = looks.into_iter();
         for id in visible {
             let n = self.state.scene.node(id).expect("collected above");
@@ -818,7 +826,12 @@ impl LoomApp {
                 sub: sub.map(std::sync::Arc::new),
                 ..base
             });
-            display.push(shown.unwrap_or_else(|| mesh.clone()));
+            let mut shown = shown.unwrap_or_else(|| mesh.clone());
+            if let Some(split) = splits.next().flatten() {
+                // World Z, or the object's own Z for Local.
+                loom_scene::material::apply_split(&mut shown, &split, glam::Vec3::Z, world.transform_vector3(glam::Vec3::Z));
+            }
+            display.push(shown);
             meshes.push((n.id, mesh));
         }
         self.world_meshes = meshes;
@@ -957,7 +970,7 @@ impl LoomApp {
             Some(m) => (self.map_texture(m, bitmaps, index), m.coords.matrix(), m.coords.decal(), (m.amount / 100.0).clamp(0.0, 1.0)),
             None => (loom_render::TextureSel::None, loom_render::UV_IDENTITY, [false; 2], 1.0),
         };
-        loom_render::SurfaceStyle { color: lin(look.color), alpha: s.opacity, specular: spec, self_illum: look.self_illum, texture, uv, decal, texture_amount: amount, faceted: s.faceted, two_sided: look.two_sided, wire: s.wire }
+        loom_render::SurfaceStyle { color: lin(look.color), alpha: look.alpha, specular: spec, self_illum: look.self_illum, texture, uv, decal, texture_amount: amount, faceted: s.faceted, two_sided: look.two_sided, wire: s.wire }
     }
 
     pub fn world_styles(&self) -> &[loom_render::MeshStyle] {

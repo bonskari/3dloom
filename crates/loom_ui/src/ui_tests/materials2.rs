@@ -78,6 +78,69 @@ fn the_shader_drop_down_changes_the_basic_parameters() {
     assert_eq!(editor_material(&h).shading.level2, 30.0);
 }
 
+/// The Type button, then `kind` double-clicked in the Material/Map Browser
+/// (and OK in Replace Material for a compound type).
+fn choose_type(h: &mut Harness, current: &str, kind: &str) {
+    click_in_editor(h, current, 0.0);
+    h.frames(4);
+    let p = window_text(h, "Material/Map Browser", kind);
+    h.click(p);
+    h.click(p);
+    h.frames(3);
+    if h.text_rects("Replace Material").len() == 1 {
+        h.click_text_anywhere("OK");
+        h.frames(2);
+    }
+}
+
+#[test]
+fn top_bottom_and_composite_are_chosen_and_set_in_their_rollouts() {
+    let mut h = editor();
+    choose_type(&mut h, "Standard", "Top/Bottom");
+    assert_eq!(editor_material(&h).kind.label(), "Top/Bottom");
+    let win = material_editor_rect(&h);
+    assert!(h.text_rect("Top/Bottom Basic Parameters", win).is_some());
+    let p = editor_spinner(&h, "Position");
+    type_into(&mut h, p, "80");
+    click_in_editor(&mut h, "Local", 0.0);
+    let loom_scene::material::MaterialKind::TopBottom(t) = editor_material(&h).kind else { panic!("Top/Bottom") };
+    assert!(t.local && t.position == 80.0);
+    choose_type(&mut h, "Top/Bottom", "Composite");
+    assert_eq!(editor_material(&h).kind.label(), "Composite");
+    // Mat 1's S button.
+    let win = material_editor_rect(&h);
+    let s_buttons: Vec<egui::Pos2> = h.text_centers("S").into_iter().filter(|p| win.contains(*p)).collect();
+    assert_eq!(s_buttons.len(), 9, "an A / S / M row per Mat 1-9");
+    let top = *s_buttons.iter().min_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+    h.click(top);
+    h.frames(2);
+    let loom_scene::material::MaterialKind::Composite(c) = editor_material(&h).kind else { panic!("Composite") };
+    assert_eq!(c.layers[0].mode, 1, "Mat 1 is subtractive");
+}
+
+#[test]
+fn raytrace_and_architectural_rollouts() {
+    let mut h = editor();
+    choose_type(&mut h, "Standard", "Raytrace");
+    let win = material_editor_rect(&h);
+    assert!(h.text_rect("Raytrace Basic Parameters", win).is_some());
+    let p = editor_spinner(&h, "Index of Refr.");
+    type_into(&mut h, p, "1.8");
+    let loom_scene::material::MaterialKind::Raytrace(r) = editor_material(&h).kind else { panic!("Raytrace") };
+    assert!((r.ior - 1.8).abs() < 1e-4);
+    choose_type(&mut h, "Raytrace", "Architectural");
+    let win = material_editor_rect(&h);
+    assert!(h.text_rect("Physical Qualities", win).is_some());
+    // Templates drop-down: Mirror.
+    click_in_editor(&mut h, "User Defined", 0.0);
+    h.frames(2);
+    let mirror = *h.text_centers("Mirror").last().expect("Mirror in the list");
+    h.click(mirror);
+    h.frames(2);
+    let loom_scene::material::MaterialKind::Architectural(a) = editor_material(&h).kind else { panic!("Architectural") };
+    assert_eq!(loom_scene::material_types::ARCH_TEMPLATES[a.template as usize].0, "Mirror");
+}
+
 #[test]
 fn extended_parameters_rollout_sets_ior_and_the_transparency_type() {
     let mut h = editor();

@@ -101,11 +101,13 @@ pub struct ObjectFlags {
     /// Rendered visibility 0–1 (multiplies the material's opacity; 0 leaves
     /// the object and its shadows out of renders).
     pub visibility: f32,
+    /// The object's own Z axis in world space (a Top/Bottom material's Local coordinates).
+    pub local_up: [f32; 3],
 }
 
 impl Default for ObjectFlags {
     fn default() -> Self {
-        Self { cast_shadows: true, receive_shadows: true, visible_to_camera: true, visibility: 1.0 }
+        Self { cast_shadows: true, receive_shadows: true, visible_to_camera: true, visibility: 1.0, local_up: [0.0, 0.0, 1.0] }
     }
 }
 
@@ -400,23 +402,43 @@ impl BevyRenderer {
                     continue;
                 }
             }
-            // (material ID drawn or all faces, its surface)
-            let parts: Vec<(Option<u16>, Option<Surface>)> = match &o.surfaces {
-                Some(Surfaces::PerId(_)) => mesh_data_by_id(o.mesh).into_iter().map(|(id, _)| (Some(id), o.surfaces.as_ref().map(|s| s.for_face(id).into_owned()))).collect(),
-                Some(Surfaces::Single(s)) => vec![(None, Some((**s).clone()))],
-                None => vec![(None, None)],
+            // Top/Bottom: its bands become per-ID surfaces, the faces get their IDs by their normals.
+            let split_mesh;
+            let (src, surfaces) = match o.surfaces.as_ref().and_then(loom_scene::material::split_surfaces) {
+                Some((s, split)) => {
+                    let mut m = o.mesh.clone();
+                    loom_scene::material::apply_split(&mut m, &split, Vec3::Z, Vec3::from_array(o.flags.local_up));
+                    split_mesh = m;
+                    (&split_mesh, Some(s))
+                }
+                None => (o.mesh, o.surfaces.clone()),
             };
+            // (material ID drawn or all faces, its surface, drawn as the back faces)
+            let mut parts: Vec<(Option<u16>, Option<Surface>, bool)> = match &surfaces {
+                Some(Surfaces::PerId(_)) => mesh_data_by_id(src).into_iter().map(|(id, _)| (Some(id), surfaces.as_ref().map(|s| s.for_face(id).into_owned()), false)).collect(),
+                Some(Surfaces::Single(s)) => vec![(None, Some((**s).clone()), false)],
+                None => vec![(None, None, false)],
+            };
+            // Double Sided: the back material on the faces turned around.
+            let backs: Vec<(Option<u16>, Option<Surface>, bool)> = parts
+                .iter()
+                .filter_map(|(id, s, _)| match s.as_ref().and_then(|s| s.split.as_deref()) {
+                    Some(loom_scene::material::Split::DoubleSided { back }) => Some((*id, Some(back.clone()), true)),
+                    _ => None,
+                })
+                .collect();
+            parts.extend(backs);
             for (e, _) in set.remove(&o.id).map(|obj| obj.parts).unwrap_or_default() {
                 self.app.world_mut().despawn(e);
             }
             let mut entities = Vec::new();
-            for (id, surface) in parts {
+            for (id, surface, back) in parts {
                 let mat = self.material(surface.as_ref(), o.wire_color, o.flags.visibility);
                 let faceted = surface.as_ref().is_some_and(|s| s.faceted);
                 let d = if id.is_none() && !faceted {
                     data.clone()
                 } else {
-                    let mut part = o.mesh.clone();
+                    let mut part = src.clone();
                     for f in part.faces_mut() {
                         f.hidden |= id.is_some_and(|id| f.material_id != id);
                         // Faceted: flat normals whatever the smoothing groups.
@@ -426,6 +448,7 @@ impl BevyRenderer {
                     }
                     mesh_data(&part)
                 };
+                let d = if back { d.flipped() } else { d };
                 let mut mesh = d.to_bevy();
                 if mat.normal_map_texture.is_some() || mat.anisotropy_strength > 0.0 {
                     // A normal map and an anisotropic highlight need tangents (from the UVs).

@@ -6,6 +6,7 @@
 use crate::command::Command as C;
 use crate::execute::{commit, edit_meshes, selected_faces};
 use crate::AppState;
+use loom_scene::material_types;
 use loom_scene::material::{
     default_amount, map_at, map_at_mut, map_slot_at_mut, next_material_id, resolve_level, Blend, Level, Map, MapType, MaterialEditorSlots, MaterialKind, MaterialLibrary, NavStep, SampleType, StandardMaterial,
     SubMaterial, SLOT_COUNT,
@@ -190,7 +191,8 @@ fn set_type(lib: &mut MaterialLibrary, id: MaterialId, kind: &str, keep_old: boo
         return Ok(());
     }
     let mut first = None;
-    if keep_old && kind != "Standard" {
+    // Only a compound type has a sub-material to keep the old material in.
+    if keep_old && !matches!(kind, "Standard" | "Raytrace" | "Architectural" | "Matte/Shadow" | "Ink 'n Paint") {
         let sub = next_material_id(lib);
         lib.insert(sub, old.clone());
         first = Some(sub);
@@ -220,6 +222,41 @@ fn set_type(lib: &mut MaterialLibrary, id: MaterialId, kind: &str, keep_old: boo
             let a = first.unwrap_or_else(|| new_material(lib));
             let b = new_material(lib);
             MaterialKind::Shell(Box::new(loom_scene::material::Shell { materials: [Some(a), Some(b)], viewport: 1, render: 1 }))
+        }
+        "Raytrace" => {
+            // Phong, Specular Level 50, Glossiness 40, as a new Raytrace material has them.
+            new.shading.shader = loom_scene::material::Shader::Phong;
+            new.specular_level.set(50.0);
+            new.glossiness.set(40.0);
+            MaterialKind::Raytrace(Box::default())
+        }
+        "Architectural" => {
+            new.diffuse.set(glam::Vec3::splat(178.0 / 255.0));
+            new.ambient.set(glam::Vec3::splat(178.0 / 255.0));
+            MaterialKind::Architectural(Box::default())
+        }
+        "Matte/Shadow" => MaterialKind::MatteShadow(Box::default()),
+        "Ink 'n Paint" => MaterialKind::InkPaint(Box::default()),
+        "Double Sided" => {
+            let a = first.unwrap_or_else(|| new_material(lib));
+            let b = new_material(lib);
+            MaterialKind::DoubleSided(Box::new(material_types::DoubleSided { materials: [Some(a), Some(b)], enabled: [true; 2], translucency: 0.0 }))
+        }
+        "Top/Bottom" => {
+            let a = first.unwrap_or_else(|| new_material(lib));
+            let b = new_material(lib);
+            MaterialKind::TopBottom(Box::new(material_types::TopBottom { materials: [Some(a), Some(b)], enabled: [true; 2], local: false, blend: 0.0, position: 50.0 }))
+        }
+        "Shellac" => {
+            let a = first.unwrap_or_else(|| new_material(lib));
+            let b = new_material(lib);
+            MaterialKind::Shellac(Box::new(material_types::Shellac { materials: [Some(a), Some(b)], blend: 0.0 }))
+        }
+        "Composite" => {
+            // The Base material and nine empty, enabled slots (A, 100).
+            let base = first.unwrap_or_else(|| new_material(lib));
+            let layers = (0..9).map(|_| material_types::CompositeLayer { material: None, enabled: true, mode: 0, amount: 100.0 }).collect();
+            MaterialKind::Composite(Box::new(material_types::Composite { base: Some(base), layers }))
         }
         other => return Err(format!("no material type \"{other}\" ({})", MaterialKind::TYPES.join(", "))),
     };
@@ -334,8 +371,12 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         C::SetShader { shader } => {
             let sh = loom_scene::material::Shader::from_label(&shader).ok_or_else(|| format!("no shader \"{shader}\" ({})", loom_scene::material::Shader::ALL.map(|s| s.label()).join(", ")))?;
             edit(state, None, "Shader", |m| {
-                if !matches!(m.kind, MaterialKind::Standard) {
-                    return Err(format!("a {} material has no shader", m.kind.label()));
+                use loom_scene::material::Shader;
+                match m.kind {
+                    MaterialKind::Standard => {}
+                    // The Raytrace material's Shading list.
+                    MaterialKind::Raytrace(_) if matches!(sh, Shader::Anisotropic | Shader::Blinn | Shader::Metal | Shader::OrenNayarBlinn | Shader::Phong) => {}
+                    _ => return Err(format!("a {} material has no {} shader", m.kind.label(), sh.label())),
                 }
                 m.shading.shader = sh;
                 Ok(())
@@ -460,12 +501,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             if children[index as usize].is_none() {
                 let sub = new_material(lib);
-                match &mut lib.get_mut(&id).ok_or("missing material")?.kind {
-                    MaterialKind::MultiSub(list) => list[index as usize].material = Some(sub),
-                    MaterialKind::Blend(b) => b.materials[index as usize] = Some(sub),
-                    MaterialKind::Shell(sh) => sh.materials[index as usize] = Some(sub),
-                    MaterialKind::Standard => unreachable!("a Standard material has no children"),
-                }
+                *lib.get_mut(&id).ok_or("missing material")?.children_mut().swap_remove(index as usize) = Some(sub);
             }
             slots.path.push(NavStep::Sub(index));
             Ok(json!({ "path": slots.path.len() }))
@@ -618,23 +654,8 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                         *c = Some(id);
                     }
                 };
-                match &mut m.kind {
-                    MaterialKind::Standard => {}
-                    MaterialKind::MultiSub(list) => {
-                        for s in list.iter_mut() {
-                            copy_child(lib, &mut s.material);
-                        }
-                    }
-                    MaterialKind::Blend(b) => {
-                        for c in b.materials.iter_mut() {
-                            copy_child(lib, c);
-                        }
-                    }
-                    MaterialKind::Shell(sh) => {
-                        for c in sh.materials.iter_mut() {
-                            copy_child(lib, c);
-                        }
-                    }
+                for c in m.children_mut() {
+                    copy_child(lib, c);
                 }
             }
             deep_copy(&mut after.0, &mut m);

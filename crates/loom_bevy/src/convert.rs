@@ -63,6 +63,18 @@ impl MeshData {
         Some(Aabb::from_min_max(min, max))
     }
 
+    /// The same triangles facing the other way (a Double Sided material's back).
+    pub fn flipped(&self) -> Self {
+        let mut out = self.clone();
+        for n in out.normals.iter_mut() {
+            *n = [-n[0], -n[1], -n[2]];
+        }
+        for t in out.indices.chunks_exact_mut(3) {
+            t.swap(1, 2);
+        }
+        out
+    }
+
     pub fn to_bevy(&self) -> Mesh {
         Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.positions.clone())
@@ -258,8 +270,66 @@ pub fn material_from_surface(surface: Option<&Surface>, wire_color: [u8; 3]) -> 
                     out.thickness = 0.0;
                 }
             }
+            apply_surface_hints(&mut out, m, lit);
             out
         }
+    }
+}
+
+/// The other material types' values on the PBR material: metalness, the
+/// Raytrace Reflect colour, refraction (transmission), translucency, a
+/// Shellac clear coat, Raw Diffuse Texture, Ink 'n Paint and Matte/Shadow.
+fn apply_surface_hints(out: &mut StandardMaterial, m: &Surface, lit: glam::Vec3) {
+    let alpha = out.base_color.alpha();
+    let mut base = lit;
+    out.metallic = out.metallic.max(m.metallic.clamp(0.0, 1.0));
+    let reflect = m.reflect.max_element().clamp(0.0, 1.0);
+    if reflect > 0.0 {
+        if m.fresnel {
+            // Fresnel reflections are a dielectric's: brighter at grazing angles, not a metal.
+            out.reflectance = out.reflectance.max(reflect);
+        } else {
+            // Reflect over a dark diffuse is coloured chrome.
+            out.metallic = out.metallic.max(reflect);
+            base = base.lerp(m.reflect / reflect, reflect);
+        }
+    }
+    if m.transmission > 0.0 {
+        // The renderer refracts what is behind (tinted by the filter colour)
+        // instead of blending it as the viewports do.
+        let t = m.transmission.clamp(0.0, 1.0);
+        out.specular_transmission = t;
+        out.thickness = 0.0;
+        base = base.lerp(m.extended.filter_color, t);
+        let a = m.opacity;
+        out.base_color = Color::srgba(base.x, base.y, base.z, a);
+        out.alpha_mode = if a < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque };
+    } else {
+        out.base_color = Color::srgba(base.x, base.y, base.z, alpha);
+    }
+    if m.translucency > 0.0 {
+        out.diffuse_transmission = out.diffuse_transmission.max(m.translucency.clamp(0.0, 1.0));
+        out.double_sided = true;
+        out.cull_mode = None;
+    }
+    if m.coat > 0.0 {
+        out.clearcoat = out.clearcoat.max(m.coat);
+        out.clearcoat_perceptual_roughness = (1.0 - m.coat_glossiness / 100.0).clamp(0.0, 1.0);
+    }
+    if m.unlit {
+        out.unlit = true;
+    }
+    if m.toon.is_some() {
+        // Ink 'n Paint: a flat, matte fill (the paint bands and the ink need a toon shader).
+        out.perceptual_roughness = 1.0;
+        out.reflectance = 0.0;
+    }
+    if let Some(ms) = &m.matte {
+        // Matte/Shadow: the background shows through (multiplied by white).
+        let _ = ms;
+        out.base_color = Color::WHITE;
+        out.unlit = true;
+        out.alpha_mode = AlphaMode::Multiply;
     }
 }
 
@@ -480,6 +550,38 @@ mod tests {
         lm.shading.self_illum_color = Vec3::new(0.0, 0.0, 1.0);
         let g = pbr(&lm);
         assert!(g.emissive.blue > 0.99 && g.emissive.red == 0.0, "{:?}", g.emissive);
+    }
+
+    #[test]
+    fn other_material_types_map_to_pbr() {
+        use loom_scene::material::{MaterialKind, Surface};
+        let pbr = |m: &LoomMaterial| material_from_surface(Some(&Surface::from_material(m)), [0, 0, 0]);
+        // Raytrace: Reflect over black diffuse is coloured chrome; Transparency refracts.
+        let mut rt = LoomMaterial::new("rt");
+        rt.kind = MaterialKind::Raytrace(Box::default());
+        rt.set_color("Diffuse", [0, 0, 0]).unwrap();
+        rt.set_color("Reflect", [255, 0, 0]).unwrap();
+        let chrome = pbr(&rt);
+        assert_eq!(chrome.metallic, 1.0);
+        assert!(chrome.base_color.to_srgba().red > 0.99 && chrome.base_color.to_srgba().green < 0.01);
+        rt.set_color("Reflect", [0, 0, 0]).unwrap();
+        rt.set_color("Transparency", [255, 255, 255]).unwrap();
+        rt.set_parameter("Index of Refr.", 1.5).unwrap();
+        let glass = pbr(&rt);
+        assert!(glass.specular_transmission > 0.99 && (glass.ior - 1.5).abs() < 1e-6);
+        assert_eq!(glass.alpha_mode, AlphaMode::Opaque, "refraction, not blending");
+        assert!(glass.base_color.to_srgba().red > 0.99, "tinted by the (white) transparency colour");
+        // Architectural Raw Diffuse Texture is unlit; Mirror is a metal.
+        let mut arch = LoomMaterial::new("arch");
+        arch.kind = MaterialKind::Architectural(Box::default());
+        arch.set_parameter("Raw Diffuse Texture", 1.0).unwrap();
+        assert!(pbr(&arch).unlit);
+        arch.set_parameter("Template", 11.0).unwrap();
+        assert_eq!(pbr(&arch).metallic, 1.0);
+        // Matte/Shadow lets the background through.
+        let mut matte = LoomMaterial::new("matte");
+        matte.kind = MaterialKind::MatteShadow(Box::default());
+        assert_eq!(pbr(&matte).alpha_mode, AlphaMode::Multiply);
     }
 
     #[test]
