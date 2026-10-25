@@ -197,3 +197,100 @@ fn preview_undo_only_removes_its_own_entry() {
     app.preview_undo();
     assert_eq!(app.state.undo.len(), 4, "the user's later move stays");
 }
+
+#[test]
+fn fk_control_gizmo_drag_accumulates_pointer_steps_without_changing_source() {
+    use loom_commands::{Command, CoordSystem, Tool};
+    use loom_scene::{loomrig::HumanoidMapping, Node, ObjectKind};
+    let mut app = crate::LoomApp::headless();
+    let root = app
+        .state
+        .scene
+        .add_node(Node::new("root", ObjectKind::bone(1.)));
+    let mut pelvis = Node::new("pelvis", ObjectKind::bone(10.));
+    pelvis.parent = Some(root);
+    let bone = app.state.scene.add_node(pelvis);
+    let mut head = Node::new("head", ObjectKind::bone(1.));
+    head.parent = Some(bone);
+    head.transform.position.set(Vec3::X * 10.);
+    let head = app.state.scene.add_node(head);
+    app.dispatch(Command::CreateLoomRig {
+        root: root.0,
+        mapping: Some(HumanoidMapping {
+            root,
+            pelvis: bone,
+            head,
+            spine: vec![],
+            limbs: vec![],
+        }),
+    })
+    .unwrap();
+    let control = app.state.scene.loom_rigs[0]
+        .bindings
+        .iter()
+        .find(|b| b.bone == bone)
+        .unwrap()
+        .control;
+    app.state.selection = [control].into();
+    app.state.active_tool = Tool::Move;
+    app.state.coord_system = CoordSystem::World;
+    let original = app.state.scene.node(bone).unwrap().transform.clone();
+    let projection = top_projection();
+    let gizmo = layout();
+    let mut state = DragState::new(Handle::Axis(Axis::X), egui::pos2(400., 300.));
+    for i in 1..=3 {
+        drag(
+            &mut app,
+            &mut state,
+            &gizmo,
+            &projection,
+            egui::pos2(400. + 100. * i as f32, 300.),
+            0,
+        );
+        let expected = Vec3::X * (10. * i as f32);
+        let actual = app.state.scene.world_matrix(bone).w_axis.truncate();
+        assert!(
+            actual.distance(expected) < 0.001,
+            "drag step {i}: {actual:?} != {expected:?}"
+        );
+        assert!(app
+            .state
+            .scene
+            .world_matrix(control)
+            .abs_diff_eq(app.state.scene.world_matrix(bone), 0.001));
+    }
+    app.state.active_tool = Tool::Rotate;
+    let mut rotate_layout = layout();
+    rotate_layout.origin = app.state.scene.world_matrix(bone).w_axis.truncate();
+    let center = projection.screen(rotate_layout.origin).unwrap();
+    let at = |degrees: f32| {
+        center
+            + egui::vec2(
+                40. * degrees.to_radians().cos(),
+                -40. * degrees.to_radians().sin(),
+            )
+    };
+    let mut rotating = DragState::new(Handle::Axis(Axis::Z), at(0.));
+    for i in 1..=3 {
+        drag(
+            &mut app,
+            &mut rotating,
+            &rotate_layout,
+            &projection,
+            at(15. * i as f32),
+            0,
+        );
+        let actual = app
+            .state
+            .scene
+            .world_matrix(bone)
+            .to_scale_rotation_translation()
+            .1;
+        let expected = glam::Quat::from_rotation_z((15. * i as f32).to_radians());
+        assert!(
+            actual.abs_diff_eq(expected, 0.001),
+            "rotate drag step {i}: {actual:?} != {expected:?}"
+        );
+    }
+    assert_eq!(app.state.scene.node(bone).unwrap().transform, original);
+}

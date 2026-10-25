@@ -1059,6 +1059,21 @@ impl Scene {
         self.ik_solving.set(false);
     }
 
+    /// Frame for editing a stored transform. FK helpers display at their
+    /// corrected bone pivot, while their stored transform is an input offset.
+    /// Remove that offset from the solved display frame before converting an
+    /// additional world-space edit back to stored coordinates.
+    pub fn edit_parent_frame(&self, id: NodeId) -> Mat4 {
+        if let Some(binding) = self.loom_rigs.iter().find_map(|rig| {
+            rig.bindings.iter().find(|b| b.control == id && id != rig.master)
+        }) {
+            if let Some(control) = self.nodes.get(&id) {
+                return self.world_matrix(binding.bone) * control.transform.matrix().inverse();
+            }
+        }
+        self.parent_frame(id)
+    }
+
     /// The frame a node's local transform is relative to: its parent's world
     /// matrix with the components it does not inherit (Link Info > Inherit)
     /// dropped. Identity for root nodes.

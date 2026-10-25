@@ -70,7 +70,7 @@ pub fn frame_for(state: &AppState, viewport: usize, id: Option<NodeId>) -> Trans
 /// parent's X, Y turned by X, Z turned by X and Y), so a rotation about one
 /// of them changes only that Euler track.
 fn gimbal_axes(state: &AppState, id: NodeId) -> Mat3 {
-    let parent = rotation_only(state.scene.parent_frame(id));
+    let parent = rotation_only(state.scene.edit_parent_frame(id));
     let r = state.scene.node(id).map(|n| n.euler_deg()).unwrap_or_default();
     let qx = glam::Quat::from_rotation_x(r.x.to_radians());
     let qy = glam::Quat::from_rotation_y(r.y.to_radians());
@@ -129,7 +129,7 @@ pub fn frame_for_system(state: &AppState, viewport: usize, id: Option<NodeId>, s
         CoordSystem::Screen => screen_axes(state, viewport),
         CoordSystem::World => Mat3::IDENTITY,
         CoordSystem::Parent => match id.and_then(|i| state.scene.node(i)) {
-            Some(_) => rotation_only(state.scene.parent_frame(id.unwrap())),
+            Some(_) => rotation_only(state.scene.edit_parent_frame(id.unwrap())),
             None => Mat3::IDENTITY,
         },
         CoordSystem::Working => Mat3::from_quat(state.working_pivot.rotation),
