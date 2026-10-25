@@ -293,6 +293,30 @@ fn depth_of_field_blurs_out_of_focus_edges() {
     assert!(soft(&off, fy, fx.saturating_sub(12), fx + 12) <= far_sharp + 1, "Effects off: no blur");
 }
 
+/// Volume Fog without gizmos fills the scene (not the space between the
+/// camera and it): a box behind another is fogged about the same seen from
+/// near or far away.
+#[test]
+fn volume_fog_fills_the_scene() {
+    let mut r = renderer!("volume_fog_fills_the_scene");
+    let front = moved(loom_mesh::box_primitive(Vec3::splat(10.0)), Vec3::new(-20.0, -40.0, 0.0));
+    let back = moved(loom_mesh::box_primitive(Vec3::splat(10.0)), Vec3::new(20.0, 40.0, 0.0));
+    r.sync(&[object(1, &front), object(2, &back)]);
+    let size = (160, 100);
+    let at_distance = |d: f32| ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -d, 5.0), Vec3::new(0.0, 0.0, 5.0), Vec3::Z), projection: Mat4::perspective_rh((40f32 * 100.0 / d).to_radians(), 1.6, 0.5, 50000.0) };
+    let ratio = |r: &mut BevyRenderer, d: f32| {
+        let cam = at_distance(d);
+        let p = pixel(&cam, size, Vec3::new(20.0, 35.0, 5.0));
+        r.set_environment(&EnvSettings::default());
+        let plain = luma(render(r, &cam, size, RenderOptions::default(), 1).get_pixel(p.0, p.1).0);
+        r.set_environment(&env(|e| e.fogs = vec![Fog::Volume { color: [0.0; 3], density: 10.0, fog_background: true }]));
+        luma(render(r, &cam, size, RenderOptions::default(), 1).get_pixel(p.0, p.1).0) / plain.max(1.0)
+    };
+    let (near, far) = (ratio(&mut r, 100.0), ratio(&mut r, 1000.0));
+    assert!(near < 0.8, "the back box is fogged: {near}");
+    assert!((near - far).abs() < 0.1, "the same from ten times as far: {near} vs {far}");
+}
+
 /// Volume Light: a spot light's cone glows in the air.
 #[test]
 fn volume_light_glows_in_the_air() {

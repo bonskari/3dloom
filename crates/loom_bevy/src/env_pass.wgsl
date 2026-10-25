@@ -21,9 +21,9 @@ struct EnvPass {
     fog_color: array<vec4<f32>, 4>,
     // Standard: near distance, far distance, near density, far density.
     // Layered: bottom, top, extinction, falloff (0 none, 1 top, 2 bottom).
-    // Volume: extinction.
+    // Volume: extinction, the centre of the sphere it fills.
     fog_a: array<vec4<f32>, 4>,
-    // x: fog background, y: exponential (standard).
+    // x: fog background, y: exponential (standard), z: the volume's radius.
     fog_b: array<vec4<f32>, 4>,
     // x: 1 = depth of field; y: focal distance; z: focal range; w: focal limit.
     dof: vec4<f32>,
@@ -133,10 +133,21 @@ fn fog_amount(i: i32, o: vec3<f32>, d: vec3<f32>, len: f32, depth: f32) -> f32 {
         return mix(a.z, a.w, t);
     }
     if kind == 3 {
-        if background {
-            return 1.0;
+        // The fog fills the scene: the part of the ray inside its sphere
+        // (centre a.yzw, radius b.z).
+        let oc = o - a.yzw;
+        let h = dot(oc, d);
+        let disc = h * h - (dot(oc, oc) - b.z * b.z);
+        if disc <= 0.0 {
+            return 0.0;
         }
-        return 1.0 - exp(-a.x * len);
+        let s = sqrt(disc);
+        let t0 = max(-h - s, 0.0);
+        var t1 = -h + s;
+        if !background {
+            t1 = min(t1, len);
+        }
+        return 1.0 - exp(-a.x * max(t1 - t0, 0.0));
     }
     if kind == 2 {
         // The part of the ray inside the layer.

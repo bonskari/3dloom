@@ -1153,8 +1153,9 @@ fn env_uniform(env: &EnvSettings, view: ViewEnv, cam: &Transform, (centre, radiu
             }
             Fog::Volume { color, density, fog_background } => {
                 u.fog_color[i] = linear(color).with_w(3.0);
-                u.fog_a[i] = Vec4::new(environment::volume_extinction(density, radius), 0.0, 0.0, 0.0);
-                u.fog_b[i] = Vec4::new(flag(fog_background), 0.0, 0.0, 0.0);
+                // The fog fills a sphere a little larger than the scene's bounds.
+                u.fog_a[i] = Vec4::new(environment::volume_extinction(density, radius), centre.x, centre.y, centre.z);
+                u.fog_b[i] = Vec4::new(flag(fog_background), 0.0, radius * 1.1, 0.0);
             }
         }
     }
