@@ -1143,8 +1143,9 @@ fn slow_frames_lasso_region_selects() {
     let rect = h.app.viewport_rects[i];
     let vp = h.app.camera_for(i).view_projection(rect.width() / rect.height());
     let pts: Vec<egui::Pos2> = h.app.world_meshes()[0].1.vertices().iter().filter_map(|v| crate::viewport_widget::project_world_to_screen(v.position, vp, rect)).collect();
-    let b = egui::Rect::from_points(&pts).expand(12.0);
-    let corners = [b.left_top(), b.right_top(), b.right_bottom(), b.left_bottom(), b.left_top()];
+    let b = egui::Rect::from_points(&pts).expand(6.0);
+    // Ends short of the start: the region closes itself, and a release on the press point would be a click.
+    let corners = [b.left_top(), b.right_top(), b.right_bottom(), b.left_bottom(), b.left_top() + egui::vec2(0.0, 30.0)];
     h.run(vec![egui::Event::PointerMoved(corners[0])]);
     h.run(vec![egui::Event::PointerButton { pos: corners[0], button: egui::PointerButton::Primary, pressed: true, modifiers: h.mods }]);
     for w in corners.windows(2) {
@@ -1154,7 +1155,7 @@ fn slow_frames_lasso_region_selects() {
     }
     h.run(vec![egui::Event::PointerButton { pos: corners[4], button: egui::PointerButton::Primary, pressed: false, modifiers: h.mods }]);
     h.frames(1);
-    assert_eq!(selected(&h), vec![id], "a slow lasso around the box selects it");
+    assert_eq!(selected(&h), vec![id], "a slow lasso around the box selects it ({} lasso points, viewport {rect:?}, lasso {b:?})", h.app.region_points.len());
 }
 
 #[test]
@@ -1165,10 +1166,13 @@ fn slow_frames_line_drag_shapes_the_knot() {
     h.frames(1);
     h.frame_time = SLOW;
     let a = ground_point(&h, Vec3::ZERO);
-    h.drag(a, a + egui::vec2(60.0, 0.0));
+    h.click(a);
     let id = h.app.line.as_ref().expect("the line started").node;
-    let knot = h.app.state.scene.node(id).unwrap().edit_spline().unwrap().shape.splines[0].knots[0].clone();
-    assert_ne!(knot.out_vec, Vec3::ZERO, "the slow drag gives the first knot a Bezier handle: {knot:?}");
+    let b = ground_point(&h, Vec3::new(40.0, 0.0, 0.0));
+    h.drag(b, b + egui::vec2(0.0, 60.0));
+    let knots = h.app.state.scene.node(id).unwrap().edit_spline().unwrap().shape.splines[0].knots.clone();
+    assert_eq!(knots.len(), 2, "{knots:?}");
+    assert_ne!(knots[1].out_vec, Vec3::ZERO, "the slow drag gives the second knot a Bezier handle: {knots:?}");
 }
 
 #[test]
@@ -1183,7 +1187,7 @@ fn slow_frames_extrude_drag_extrudes() {
     h.frame_time = SLOW;
     let before = h.app.world_meshes()[0].1.vertices().len();
     h.drag(p, p + egui::vec2(0.0, -60.0));
-    assert!(h.app.world_meshes()[0].1.vertices().len() > before, "the slow Extrude drag extrudes the face");
+    assert!(h.app.world_meshes()[0].1.vertices().len() > before, "the slow Extrude drag extrudes the face: drag {:?}, {} sub-objects, undo {:?}, error {:?}", h.app.state.poly_drag, h.sub_count(), h.app.state.undo.len(), h.app.last_error);
 }
 
 #[test]
