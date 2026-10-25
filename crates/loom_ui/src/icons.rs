@@ -286,6 +286,18 @@ impl<'a> Icon<'a> {
     }
 }
 
+/// Gives a glyph-only widget its name for screen readers (and the UI tests).
+pub fn named(r: &egui::Response, typ: egui::WidgetType, name: &str) {
+    r.widget_info(|| egui::WidgetInfo::labeled(typ, r.enabled(), name));
+}
+
+/// A small glyph button (a rollout's settings box, a step arrow) named and tooltipped `name`.
+pub fn small(ui: &mut egui::Ui, glyph: &str, name: &str) -> egui::Response {
+    let r = ui.small_button(glyph);
+    named(&r, egui::WidgetType::Button, name);
+    r.on_hover_text(name)
+}
+
 /// A menu or list row: the icon, then its name.
 pub fn labeled(glyph: &str, label: &str) -> String {
     format!("{glyph}  {label}")

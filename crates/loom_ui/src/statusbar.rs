@@ -255,7 +255,9 @@ fn red(on: bool) -> egui::Color32 {
 fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
     // The big key: Set Keys (K), red while Set Key mode waits for a pose.
     let big = egui::Button::new(egui::RichText::new(icons::SET_KEYS).size(26.0)).min_size(egui::vec2(44.0, 44.0)).fill(if app.state.set_key_mode { red(true) } else { egui::Color32::from_gray(70) });
-    if ui.add(big).on_hover_name(&app.state, "Set Keys").clicked() {
+    let r = ui.add(big);
+    icons::named(&r, egui::WidgetType::Button, "Set Keys");
+    if r.on_hover_name(&app.state, "Set Keys").clicked() {
         let _ = app.dispatch(Command::SetKeys);
     }
     ui.vertical(|ui| {
