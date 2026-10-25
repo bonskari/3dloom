@@ -197,6 +197,10 @@ struct CutPlan {
     /// Closed fans with ≥ 3 cuts: the cut edges in fan order and the
     /// sector copies (sector j lies after cut j).
     corners: BTreeMap<u32, (Vec<HalfEdgeId>, Vec<u32>)>,
+    /// Kept vertices with only three faces (a box corner): the face away
+    /// from the cut, which still holds `v` between the two copies. Chamfer
+    /// takes `v` out of it (the end is a cut, not a point).
+    tips: BTreeMap<u32, u32>,
 }
 
 fn cut_plan(mesh: &Mesh, selected: &BTreeSet<HalfEdgeId>, amount: f32) -> CutPlan {
@@ -205,6 +209,7 @@ fn cut_plan(mesh: &Mesh, selected: &BTreeSet<HalfEdgeId>, amount: f32) -> CutPla
     let mut own: BTreeMap<(u32, u32), u32> = BTreeMap::new();
     let mut kept: BTreeMap<u32, (u32, u32)> = BTreeMap::new();
     let mut corners = BTreeMap::new();
+    let mut tips = BTreeMap::new();
     let mut touched: BTreeSet<VertexId> = BTreeSet::new();
     for e in selected {
         if let Some((a, b)) = mesh.edge_vertices(*e) {
@@ -258,6 +263,7 @@ fn cut_plan(mesh: &Mesh, selected: &BTreeSet<HalfEdgeId>, amount: f32) -> CutPla
             };
             if before == after {
                 splice(&mut im, fan[before].0, vec![c_r, v.0, c_l]);
+                tips.insert(v.0, fan[before].0 .0);
             } else {
                 splice(&mut im, fan[before].0, vec![v.0, c_l]);
                 splice(&mut im, fan[after].0, vec![c_r, v.0]);
@@ -297,7 +303,8 @@ fn cut_plan(mesh: &Mesh, selected: &BTreeSet<HalfEdgeId>, amount: f32) -> CutPla
                 let other = if a == v { b } else { a };
                 (mesh.vertex_position(other).unwrap_or(p) - p).normalize_or_zero()
             }).sum();
-            bis.normalize_or_zero()
+            // Sum of unit edges: `amount` along each cut, so both neighbouring strips keep their width.
+            bis
         };
         if closed {
             for j in 0..m {
@@ -348,7 +355,7 @@ fn cut_plan(mesh: &Mesh, selected: &BTreeSet<HalfEdgeId>, amount: f32) -> CutPla
             corners.insert(v.0, (cuts.iter().map(|i| fan[*i].1).collect(), copies.clone()));
         }
     }
-    CutPlan { im, own, kept, corners }
+    CutPlan { im, own, kept, corners, tips }
 }
 
 /// The interior of a chamfer strip's end ring at `v`, oriented from the
@@ -370,7 +377,9 @@ pub fn chamfer_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], amount: f32, segment
     if selected.is_empty() {
         return Err("select edges with a face on both sides".into());
     }
-    let CutPlan { mut im, own, kept, corners } = cut_plan(mesh, &selected, amount);
+    let CutPlan { mut im, own, mut kept, corners, tips } = cut_plan(mesh, &selected, amount);
+    // A box corner's end is cut straight across: no point vertex.
+    kept.retain(|v, _| !tips.contains_key(v));
     let first_new = im.faces.len();
     let segs = segments.max(1) as usize;
     let mut chains: BTreeMap<(u32, HalfEdgeId), Vec<u32>> = BTreeMap::new();
@@ -394,6 +403,17 @@ pub fn chamfer_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], amount: f32, segment
         };
         let ring_a = ring(&mut im, a, a1, a2);
         let ring_b = ring(&mut im, b, b1, b2);
+        // The face across a box corner takes the end ring in place of the corner.
+        for (v, r) in [(a, &ring_a), (b, &ring_b)] {
+            if let Some(&tf) = tips.get(&v.0) {
+                let face = &mut im.faces[tf as usize];
+                if let Some(pos) = face.ids.iter().position(|x| *x == v.0) {
+                    let n = face.ids.len();
+                    let inner: Vec<u32> = if face.ids[(pos + n - 1) % n] == r[0] { r[1..r.len() - 1].to_vec() } else { r[1..r.len() - 1].iter().rev().copied().collect() };
+                    face.ids.splice(pos..=pos, inner);
+                }
+            }
+        }
         chains.insert((a.0, *e), end_chain(mesh, a, *e, &ring_a));
         chains.insert((b.0, *e), end_chain(mesh, b, *e, &ring_b));
         if open {
@@ -560,7 +580,7 @@ pub fn extrude_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], height: f32, width: 
     if selected.is_empty() {
         return Err("select edges with a face on both sides".into());
     }
-    let CutPlan { mut im, own, kept, corners } = cut_plan(mesh, &selected, width.max(1e-4));
+    let CutPlan { mut im, own, kept, corners, .. } = cut_plan(mesh, &selected, width.max(1e-4));
     let first_new = im.faces.len();
     // Ridge vertex per touched vertex: lifted along the mean normal of the cut faces there.
     let mut ridge: BTreeMap<u32, u32> = BTreeMap::new();
