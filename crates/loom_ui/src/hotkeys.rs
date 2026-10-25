@@ -88,6 +88,13 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
             let _ = app.dispatch(Command::Remove);
             continue;
         }
+        // Delete over the track bar removes its selected keys.
+        if key == egui::Key::Delete && plain && app.track_bar.hovered && !app.track_bar.selected.is_empty() {
+            for f in std::mem::take(&mut app.track_bar.selected) {
+                let _ = app.dispatch(Command::DeleteKeys { from: f, to: f });
+            }
+            continue;
+        }
         let Some(chord) = chord_of(key, mods) else { continue };
         // A Quad Shortcut (Customize User Interface > Quads) opens its quad set at the pointer.
         if let Some(set) = app.state.ui_custom.quad_for_shortcut(&chord.chart_text()).map(str::to_owned) {
