@@ -955,7 +955,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         } else {
                             // A right-click elsewhere while one is open reopens it there.
                             let mut open = crate::quad_menu::Open::new(p, index);
-                            open.kind = if mods.shift { crate::quad_menu::QuadKind::Snaps } else if mods.ctrl { crate::quad_menu::QuadKind::Create } else if mods.alt { crate::quad_menu::QuadKind::Animation } else { crate::quad_menu::QuadKind::Default };
+                            open.kind = crate::quad_menu::QuadKind::for_modifiers(mods);
                             app.quad_menu = Some(open);
                         }
                     }

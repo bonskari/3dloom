@@ -98,13 +98,13 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
     egui::Grid::new("render_setup_size").num_columns(4).show(ui, |ui| {
         let (mut w, mut h) = (s.width, s.height);
         ui.label("Width:");
-        let a = ui.add(egui::DragValue::new(&mut w).range(1..=loom_commands::render::MAX_RENDER_SIZE));
+        let a = ui.add(crate::spinner::spin(ui, &mut w, 1..=loom_commands::render::MAX_RENDER_SIZE));
         merge_drag(app, &a);
         if a.changed() {
             run(app, Setup { width: Some(w), ..Default::default() }.cmd());
         }
         ui.label("Height:");
-        let b = ui.add(egui::DragValue::new(&mut h).range(1..=loom_commands::render::MAX_RENDER_SIZE));
+        let b = ui.add(crate::spinner::spin(ui, &mut h, 1..=loom_commands::render::MAX_RENDER_SIZE));
         merge_drag(app, &b);
         if b.changed() {
             run(app, Setup { height: Some(h), ..Default::default() }.cmd());
@@ -119,7 +119,7 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.label(format!("{:.3}", s.image_aspect()));
         } else {
             let mut aspect = s.image_aspect();
-            let r = ui.add(egui::DragValue::new(&mut aspect).range(0.01..=100.0).speed(0.01).max_decimals(3));
+            let r = ui.add(crate::spinner::spin(ui, &mut aspect, 0.01..=100.0).speed(0.01).max_decimals(3));
             merge_drag(app, &r);
             if r.changed() {
                 run(app, Setup { image_aspect: Some(aspect), ..Default::default() }.cmd());
@@ -135,7 +135,7 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.label(format!("{:.3}", s.pixel_aspect));
         } else {
             let mut pa = s.pixel_aspect;
-            let r = ui.add(egui::DragValue::new(&mut pa).range(0.01..=100.0).speed(0.01).max_decimals(3));
+            let r = ui.add(crate::spinner::spin(ui, &mut pa, 0.01..=100.0).speed(0.01).max_decimals(3));
             merge_drag(app, &r);
             if r.changed() {
                 run(app, Setup { pixel_aspect: Some(pa), ..Default::default() }.cmd());
