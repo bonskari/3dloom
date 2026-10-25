@@ -524,12 +524,17 @@ pub fn obj_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         check(ui, app, D, "single_mesh", "Import as single mesh", o.single_mesh);
                         check(ui, app, D, "retriangulate", "Retriangulate Polygons", o.retriangulate);
                         ui.label(format!("{}: {} faces", info["file_name"].as_str().unwrap_or(""), info["faces"]));
-                        let led = |on: bool, label: &str| egui::RichText::new(format!("{} {label}", if on { "●" } else { "○" })).color(if on { egui::Color32::from_rgb(60, 200, 60) } else { egui::Color32::from_rgb(200, 60, 60) });
+                        // The "LED" icons: green when the file has the feature, red when not.
+                        let led = |ui: &mut egui::Ui, on: bool, label: &str| {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                            ui.painter().circle_filled(r.center(), 4.0, if on { egui::Color32::from_rgb(60, 200, 60) } else { egui::Color32::from_rgb(200, 60, 60) });
+                            ui.label(label);
+                        };
                         ui.horizontal(|ui| {
-                            ui.label(led(info["normals"] == true, "Normals"));
-                            ui.label(led(info["texture_coordinates"] == true, "UVs"));
-                            ui.label(led(info["smoothing_groups"] == true, "Smoothing"));
-                            ui.label(led(info["materials"] == true, "Materials"));
+                            led(ui, info["normals"] == true, "Normals");
+                            led(ui, info["texture_coordinates"] == true, "UVs");
+                            led(ui, info["smoothing_groups"] == true, "Smoothing");
+                            led(ui, info["materials"] == true, "Materials");
                         });
                         egui::ScrollArea::vertical().max_height(180.0).id_salt("obj_import_objects").show(ui, |ui| {
                             for (name, faces) in &names {
