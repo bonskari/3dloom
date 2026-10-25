@@ -90,8 +90,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         let axes = ["X", "Y", "Z"];
         ui.label("Align Position (World):");
         egui::Grid::new("clone_align_position").num_columns(3).spacing([6.0, 4.0]).show(ui, |ui| {
-            for i in 0..3 {
-                ui.checkbox(&mut st.position[i], format!("{} Position", axes[i]));
+            for (i, axis) in axes.iter().enumerate() {
+                ui.checkbox(&mut st.position[i], format!("{axis} Position"));
                 ui.label("Offset:");
                 ui.add(app.length_drag(ui, &mut st.position_offset[i], speed));
                 ui.end_row();
@@ -99,8 +99,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         });
         ui.label("Align Orientation (World):");
         egui::Grid::new("clone_align_orientation").num_columns(3).spacing([6.0, 4.0]).show(ui, |ui| {
-            for i in 0..3 {
-                ui.checkbox(&mut st.orientation[i], format!("{} Orientation", axes[i]));
+            for (i, axis) in axes.iter().enumerate() {
+                ui.checkbox(&mut st.orientation[i], format!("{axis} Orientation"));
                 ui.label("Offset:");
                 ui.add(crate::spinner::spin(ui, &mut st.orientation_offset[i], ..).speed(speed).fixed_decimals(app.state.prefs.spinner_precision).suffix("°"));
                 ui.end_row();
@@ -108,8 +108,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         });
         ui.label("Match Scale:");
         ui.horizontal(|ui| {
-            for i in 0..3 {
-                ui.checkbox(&mut st.match_scale[i], format!("{} Axis", axes[i]));
+            for (i, axis) in axes.iter().enumerate() {
+                ui.checkbox(&mut st.match_scale[i], format!("{axis} Axis"));
             }
         });
         if ui.button("Reset All Parameters").clicked() {

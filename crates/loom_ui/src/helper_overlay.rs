@@ -51,9 +51,14 @@ fn color(app: &LoomApp, n: &loom_scene::Node, kind: LineKind) -> [u8; 3] {
     }
 }
 
+/// World segments with a linear (GPU) colour.
+pub type DepthLines = Vec<(Vec3, Vec3, [f32; 3])>;
+/// World segments with an sRGB (painter) colour.
+pub type TopLines = Vec<(Vec3, Vec3, [u8; 3])>;
+
 /// Every visible helper's lines for one viewport: (depth-tested lines in
 /// linear colour for the GPU, on-top lines in sRGB for the painter).
-pub fn lines(app: &LoomApp, view_proj: Mat4, rect: egui::Rect, realistic: bool) -> (Vec<(Vec3, Vec3, [f32; 3])>, Vec<(Vec3, Vec3, [u8; 3])>) {
+pub fn lines(app: &LoomApp, view_proj: Mat4, rect: egui::Rect, realistic: bool) -> (DepthLines, TopLines) {
     let mut depth = Vec::new();
     let mut top = Vec::new();
     let up = |p: Vec3| {

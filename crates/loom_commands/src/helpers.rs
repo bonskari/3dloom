@@ -124,7 +124,7 @@ pub fn set_protractor_object(state: &mut AppState, id: NodeId, which: u32, objec
     }
     let before = Box::new(node.object.clone());
     commit(state, &format!("Pick Object {which}"), Change::ReplaceObject { id, before, after: Box::new(after) })?;
-    Ok(readout(state, id)?)
+    readout(state, id)
 }
 
 impl AppState {
