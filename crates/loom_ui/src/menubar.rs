@@ -87,43 +87,89 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Delete", "Delete Objects");
                 item(ui, app, "Clone", "Clone");
                 ui.separator();
+                item(ui, app, "Move", "Select and Move");
+                item(ui, app, "Rotate", "Select and Rotate");
+                item(ui, app, "Scale", "Select and Scale");
                 item(ui, app, "Transform Type-In...", "Transform Type-In Dialog Toggle");
-                ui.separator();
-                item(ui, app, "Object Properties...", "Object Properties");
                 ui.separator();
                 item(ui, app, "Select All", "Select All");
                 item(ui, app, "Select None", "Select None");
                 item(ui, app, "Select Invert", "Select Invert");
-                item(ui, app, "Select By Name...", "Select By Name");
+                ui.separator();
+                item(ui, app, "Select Similar", "Select Similar");
+                // Unavailable unless one object with instances is selected, as in the reference.
+                let instances = has_instances(&app.state);
+                ui.add_enabled_ui(instances, |ui| item(ui, app, "Select Instances", "Select Instances"));
+                ui.menu_button("Select By", |ui| {
+                    item(ui, app, "Color", "Select By Color Pick");
+                    item(ui, app, "Name...", "Select By Name");
+                });
+                ui.menu_button("Region", |ui| {
+                    let window = app.state.window_selection;
+                    for (label, on) in [("Window", window), ("Crossing", !window)] {
+                        let label = if on { format!("✔ {label}") } else { format!("    {label}") };
+                        if ui.button(label).clicked() {
+                            if !on {
+                                let _ = app.dispatch(Command::WindowCrossingSelectionToggle);
+                            }
+                            ui.close_menu();
+                        }
+                    }
+                    ui.separator();
+                    for shape in loom_commands::SelectionRegion::ALL {
+                        // "Rectangular Region" … "Paint Selection Region", as the reference's menu names them.
+                        let name = match shape {
+                            loom_commands::SelectionRegion::Paint => shape.label().to_owned(),
+                            _ => shape.label().replace(" Selection Region", " Region"),
+                        };
+                        let label = if app.state.selection_region == shape { format!("✔ {name}") } else { format!("    {name}") };
+                        if ui.button(label).clicked() {
+                            let _ = app.dispatch(Command::SelectionRegion { shape });
+                            ui.close_menu();
+                        }
+                    }
+                });
                 ui.separator();
                 cmd(ui, app, "Edit Named Selection Sets...", Command::EditNamedSelectionSets);
+                ui.separator();
+                item(ui, app, "Object Properties...", "Object Properties");
             });
             ui.menu_button("Tools", |ui| {
+                // The reference's order; its items Loom has no tool for are left out.
                 item(ui, app, "Isolate Selection", "Isolate Selection");
-                cmd(ui, app, "Layer Manager...", Command::LayerManager);
+                cmd(ui, app, "Manage Layers...", Command::LayerManager);
+                ui.separator();
+                cmd(ui, app, "Light Lister...", Command::LightLister);
                 ui.separator();
                 item(ui, app, "Mirror...", "Mirror");
                 cmd(ui, app, "Array...", Command::Array);
-                item(ui, app, "Spacing Tool...", "Spacing Tool");
                 ui.menu_button("Align", |ui| {
                     item(ui, app, "Align...", "Align");
                     item(ui, app, "Quick Align", "Quick Align");
+                    item(ui, app, "Spacing Tool...", "Spacing Tool");
+                    ui.separator();
+                    item(ui, app, "Align to View...", "Align to View Dialog");
                     item(ui, app, "Normal Align...", "Normal Align ");
                     item(ui, app, "Align Camera", "Align Camera");
-                    item(ui, app, "Align to View...", "Align to View Dialog");
                 });
                 ui.separator();
                 ui.menu_button("Grids and Snaps", |ui| {
                     cmd(ui, app, "Grid and Snap Settings...", Command::GridAndSnapSettings);
+                    ui.separator();
+                    let grid = app.state.active().show_grid;
+                    check_item(ui, app, "Show Home Grid", "Hide Grids Toggle", grid);
+                    ui.separator();
                     check_item(ui, app, "Snaps Toggle", "Snaps Toggle", app.state.snaps_on);
                     check_item(ui, app, "Angle Snap Toggle", "Angle Snap Toggle", app.state.angle_snap_on);
                     check_item(ui, app, "Percent Snap Toggle", "Percent Snap Toggle", app.state.percent_snap_on);
                     check_item(ui, app, "Spinner Snap Toggle", "Spinner Snap Toggle", app.state.prefs.spinner_snap);
+                    let axis = app.state.snaps.use_axis_constraints;
+                    check_item(ui, app, "Snaps Use Axis Constraints", Command::EnableAxisConstraintsInSnapsToggle.name(), axis);
                 });
+                cmd(ui, app, "Measure Distance", Command::Measure);
                 ui.separator();
-                cmd(ui, app, "Light Lister...", Command::LightLister);
-                ui.separator();
-                cmd(ui, app, "Measure", Command::Measure);
+                let ribbon = app.state.show_ribbon;
+                check_item(ui, app, "Graphite Modeling Tools", "Show Ribbon Toggle", ribbon);
             });
             ui.menu_button("Group", |ui| {
                 cmd(ui, app, "Group", Command::Group { name: None });
@@ -138,48 +184,6 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 cmd(ui, app, "Explode", Command::GroupExplode);
                 ui.separator();
                 ui.add_enabled(false, egui::Button::new("Assembly")).on_disabled_hover_text("Assemblies (luminaires) are out of scope");
-            });
-            ui.menu_button("Animation", |ui| {
-                cmd(ui, app, "Load Animation...", Command::LoadAnimation { path: None, offset: None });
-                cmd(ui, app, "Save Animation...", Command::SaveAnimation { path: None });
-                ui.separator();
-                ui.menu_button("Constraints", |ui| {
-                    for (label, kind) in [("Attachment Constraint", "Attachment Constraint"), ("Path Constraint", "Path Constraint"), ("Position Constraint", "Position Constraint"), ("Link Constraint", "Link Constraint"), ("LookAt Constraint", "LookAt Constraint"), ("Orientation Constraint", "Orientation Constraint")] {
-                        cmd(ui, app, label, Command::StartConstraintPick { kind: kind.into() });
-                    }
-                });
-                ui.menu_button("Position Controllers", |ui| {
-                    for c in ["Position XYZ", "Bezier Position", "TCB Position", "Linear Position", "Noise Position", "Position List"] {
-                        controller_item(ui, app, "Position", c);
-                    }
-                });
-                ui.menu_button("Rotation Controllers", |ui| {
-                    for c in ["Euler XYZ", "Bezier Rotation", "TCB Rotation", "Linear Rotation", "Noise Rotation", "Rotation List"] {
-                        controller_item(ui, app, "Rotation", c);
-                    }
-                });
-                ui.menu_button("Scale Controllers", |ui| {
-                    for c in ["ScaleXYZ", "Bezier Scale", "TCB Scale", "Linear Scale", "Noise Scale", "Scale List"] {
-                        controller_item(ui, app, "Scale", c);
-                    }
-                });
-                ui.separator();
-                cmd(ui, app, "Delete Selected Animation", Command::DeleteSelectedAnimation);
-                ui.separator();
-                ui.menu_button("IK Solvers", |ui| {
-                    item(ui, app, "HI Solver", "History-Independent IK Solver");
-                    item(ui, app, "IK Limb Solver", "IK Limb Solver");
-                    item(ui, app, "Spline IK Solver", "Spline IK Solver");
-                });
-                ui.separator();
-                item(ui, app, "Bone Tools...", "Bone Tools...");
-                ui.separator();
-                item(ui, app, "Display Bones", "Display Bones");
-                item(ui, app, "Display Bones and Objects", "Display Bones and Objects");
-            });
-            ui.menu_button("Graph Editors", |ui| {
-                cmd(ui, app, "Track View - Curve Editor...", Command::OpenCurveEditor);
-                cmd(ui, app, "Track View - Dope Sheet...", Command::OpenDopeSheet);
             });
             ui.menu_button("Views", |ui| {
                 item(ui, app, "Undo View Change", "Undo Viewport Operation");
@@ -196,8 +200,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 item(ui, app, "Reset Background Transform", "Reset Background Transform");
                 item(ui, app, "Show Floating Dialogs", "Show Floating Dialogs");
                 ui.separator();
-                item(ui, app, "Shade Selected", "Shade Selected");
+                let (gizmo, shade) = (app.state.prefs.gizmos.enabled, app.state.shade_selected);
+                check_item(ui, app, "Show Transform Gizmo", "Transform Gizmo Toggle", gizmo);
+                check_item(ui, app, "Shade Selected", "Shade Selected", shade);
                 item(ui, app, "Create Camera From View", "Create Camera From View");
+                item(ui, app, "Redraw All Views", "Redraw All Views");
                 ui.separator();
                 for (label, action) in [
                     ("Top", "Top View"), ("Bottom", "Bottom View"), ("Front", "Front View"), ("Back", "Back View"),
@@ -312,6 +319,48 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     });
                 }
             });
+            ui.menu_button("Animation", |ui| {
+                cmd(ui, app, "Load Animation...", Command::LoadAnimation { path: None, offset: None });
+                cmd(ui, app, "Save Animation...", Command::SaveAnimation { path: None });
+                ui.separator();
+                ui.menu_button("Constraints", |ui| {
+                    for (label, kind) in [("Attachment Constraint", "Attachment Constraint"), ("Path Constraint", "Path Constraint"), ("Position Constraint", "Position Constraint"), ("Link Constraint", "Link Constraint"), ("LookAt Constraint", "LookAt Constraint"), ("Orientation Constraint", "Orientation Constraint")] {
+                        cmd(ui, app, label, Command::StartConstraintPick { kind: kind.into() });
+                    }
+                });
+                ui.menu_button("Position Controllers", |ui| {
+                    for c in ["Position XYZ", "Bezier Position", "TCB Position", "Linear Position", "Noise Position", "Position List"] {
+                        controller_item(ui, app, "Position", c);
+                    }
+                });
+                ui.menu_button("Rotation Controllers", |ui| {
+                    for c in ["Euler XYZ", "Bezier Rotation", "TCB Rotation", "Linear Rotation", "Noise Rotation", "Rotation List"] {
+                        controller_item(ui, app, "Rotation", c);
+                    }
+                });
+                ui.menu_button("Scale Controllers", |ui| {
+                    for c in ["ScaleXYZ", "Bezier Scale", "TCB Scale", "Linear Scale", "Noise Scale", "Scale List"] {
+                        controller_item(ui, app, "Scale", c);
+                    }
+                });
+                ui.separator();
+                cmd(ui, app, "Delete Selected Animation", Command::DeleteSelectedAnimation);
+                ui.separator();
+                ui.menu_button("IK Solvers", |ui| {
+                    item(ui, app, "HI Solver", "History-Independent IK Solver");
+                    item(ui, app, "IK Limb Solver", "IK Limb Solver");
+                    item(ui, app, "Spline IK Solver", "Spline IK Solver");
+                });
+                ui.separator();
+                item(ui, app, "Bone Tools...", "Bone Tools...");
+                ui.separator();
+                item(ui, app, "Display Bones", "Display Bones");
+                item(ui, app, "Display Bones and Objects", "Display Bones and Objects");
+            });
+            ui.menu_button("Graph Editors", |ui| {
+                cmd(ui, app, "Track View - Curve Editor...", Command::OpenCurveEditor);
+                cmd(ui, app, "Track View - Dope Sheet...", Command::OpenDopeSheet);
+            });
             ui.menu_button("Rendering", |ui| {
                 cmd(ui, app, "Render", Command::Render { path: None, width: None, height: None });
                 cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
@@ -349,7 +398,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     ui.close_menu();
                 }
                 ui.separator();
-                ui.label("3dLoom — a 3D modelling application");
+                ui.label(format!("3dLoom {} — a 3D modelling application", env!("LOOM_VERSION")));
             });
             if let Some(handle) = app.update.clone() {
                 crate::update_menu::show(ui, &handle);
@@ -377,6 +426,22 @@ fn quick_access(ui: &mut egui::Ui, app: &mut LoomApp) {
     if Icon::new(icons::REDO, "Redo Scene Operation").enabled(app.state.undo.can_redo()).show(ui, &app.state).clicked() {
         app.dispatch_named("Redo Scene Operation");
     }
+}
+
+/// One object is selected and it has instances (Edit > Select Instances).
+fn has_instances(s: &loom_commands::AppState) -> bool {
+    let ids: Vec<loom_scene::NodeId> = s.selection.iter().copied().collect();
+    if ids.len() != 1 {
+        return false;
+    }
+    let root = |mut n: loom_scene::NodeId| {
+        while let Some(src) = s.scene.node(n).and_then(|x| x.instance_of) {
+            n = src;
+        }
+        n
+    };
+    let r = root(ids[0]);
+    s.scene.nodes().filter(|n| root(n.id) == r).count() > 1
 }
 
 /// Animation > Position / Rotation / Scale Controllers: assign to every selected object.

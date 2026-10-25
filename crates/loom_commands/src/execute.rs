@@ -538,6 +538,29 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
+        C::SelectInstances => {
+            // The instance group: every node sharing the selected node's source.
+            let ids: Vec<NodeId> = state.selection.iter().copied().collect();
+            if ids.len() != 1 {
+                return Err("Select Instances needs exactly one selected object".into());
+            }
+            let root = |mut n: NodeId| {
+                while let Some(src) = state.scene.node(n).and_then(|x| x.instance_of) {
+                    n = src;
+                }
+                n
+            };
+            let group = root(ids[0]);
+            let ids: Vec<u64> = state.scene.nodes().filter(|n| root(n.id) == group).map(|n| n.id.0).collect();
+            if ids.len() < 2 {
+                return Err("the selected object has no instances".into());
+            }
+            execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
+        }
+        C::SelectByColorPick => {
+            state.pick_mode = Some(PickMode::SelectByColor);
+            Ok(json!({}))
+        }
         C::SelectSimilar => {
             let kinds: BTreeSet<&'static str> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.object.base_name()).collect();
             let ids: Vec<u64> = state.scene.nodes().filter(|n| kinds.contains(n.object.base_name())).map(|n| n.id.0).collect();
@@ -2502,6 +2525,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         commit_static(state, "Link", Change::Group(changes))?;
                     }
                     return Ok(json!({ "parent": id.0 }));
+                }
+                Some(PickMode::SelectByColor) => {
+                    state.pick_mode = None;
+                    let rgb = state.scene.node(id).ok_or_else(|| missing(id))?.wire_color;
+                    return execute(state, C::SelectByColor { rgb });
                 }
                 Some(PickMode::CoordSystem) => {
                     state.pick_mode = None;

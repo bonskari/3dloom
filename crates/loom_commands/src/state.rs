@@ -132,6 +132,8 @@ pub enum PickMode {
     HideByHit,
     FreezeByHit,
     UnfreezeByHit,
+    /// Edit > Select By > Color: the next clicked object gives the colour.
+    SelectByColor,
     /// Select and Link: the next clicked object becomes the selection's parent.
     Link,
     /// Align (Alt+A): pick the target object, then the Align dialog opens.
