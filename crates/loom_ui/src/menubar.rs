@@ -447,7 +447,7 @@ pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
         ("Skin", "Skin"), ("Skin Morph", "Skin Morph"), ("Skin Wrap", "Skin Wrap"), ("Spline IK Control", "Spline IK Control"),
     ]),
     ("UV Coordinates", &[
-        ("Camera Map", "Camera Map"), ("Camera Map (WSM)", "Camera Map (WSM)"), ("MapScaler", "MapScaler"), ("MapScaler (WSM)", "MapScaler (WSM)"), ("Unwrap UVW", "Unwrap UVW"),
+        ("Camera Map", "Camera Map"), ("Camera Map (WSM)", "Camera Map (WSM)"), ("MapScaler", "MapScaler"), ("MapScaler (WSM)", "MapScaler (WSM)"), ("Projection", "Projection"), ("Unwrap UVW", "Unwrap UVW"),
         ("UVW Map", "UVW Map"), ("UVW Mapping Add", "UVW Mapping Add"), ("UVW Mapping Clear", "UVW Mapping Clear"), ("UVW XForm", "UVW XForm"),
     ]),
     ("Cache Tools", &[("Point Cache", "Point Cache"), ("Point Cache (WSM)", "Point Cache (WSM)")]),

@@ -111,7 +111,7 @@ NSurf Sel	OSM	out	NURBS surfaces (no NURBS objects)
 SurfDeform	OSM	out	NURBS surfaces (no NURBS objects)
 Particle Face Creator	OSM	out	particles (spec: never)
 Particle Skinner	OSM	out	particles (spec: never)
-Projection	OSM	out	normal-map baking cages (render; spec: out)
+Projection	OSM	in	
 Projection Holder	OSM	out	holds Projection results (render; spec: out)
 Quadify Mesh	OSM	out	quad remeshing to a target size: not in the spec's modelling list
 Select By Channel	OSM	out	reads selections stored by the Channel Info utility, which is not in the spec

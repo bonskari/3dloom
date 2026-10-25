@@ -21,6 +21,7 @@ pub mod scene;
 pub mod material;
 pub mod maps;
 pub mod render;
+pub mod bake;
 
 pub use node::{Axes3, DisplayProps, RenderProps, TextureDisplay, Node, NodeId, NodeProps, ObjectKind, PaintDeform, PaintDirection, ParamValue, PolyObject, ShapeCommon, ShapeObject, SoftSelection, SubdivSurface, Transform, OBJECT_COLORS};
 pub use param::{Controller, Param};

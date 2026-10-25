@@ -3,6 +3,7 @@
 //! and renders each Realistic viewport into an image the UI draws as the
 //! viewport background, and renders the active view to a PNG for Render.
 
+pub mod bake;
 pub mod convert;
 pub mod lights;
 
@@ -204,6 +205,7 @@ impl BevyRenderer {
                 .set(WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, close_when_requested: false })
                 .set(RenderPlugin { render_creation: RenderCreation::Manual(resources), synchronous_pipeline_compilation: true, ..Default::default() }),
         );
+        app.add_plugins(bake::BakePlugin);
         while app.plugins_state() == PluginsState::Adding {
             bevy::tasks::tick_global_task_pools_on_main_thread();
         }
@@ -222,7 +224,7 @@ impl BevyRenderer {
                 DirectionalLight { illuminance: 3000.0, shadows_enabled: true, ..Default::default() },
                 Transform::from_translation(KEY_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
                 // The key light lights (and shadows) every layer.
-                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER]),
+                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER, bake::BAKE_KEY_LAYER]),
             ))
             .id()
     }

@@ -314,6 +314,26 @@ pub struct Blend {
     pub lower: f32,
 }
 
+/// Shell Material Parameters: the original material and the baked one
+/// (Render To Texture), and which of them viewports and renders show.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Shell {
+    /// Original Material, Baked Material.
+    pub materials: [Option<MaterialId>; 2],
+    /// Viewport / Render: 0 the original, 1 the baked material.
+    pub viewport: u8,
+    pub render: u8,
+}
+
+/// Which material of a Shell resolves: the viewport's, the render's, or
+/// the original (what Render To Texture bakes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellView {
+    Viewport,
+    Render,
+    Original,
+}
+
 /// Material type (the Type button).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum MaterialKind {
@@ -321,16 +341,18 @@ pub enum MaterialKind {
     Standard,
     MultiSub(Vec<SubMaterial>),
     Blend(Box<Blend>),
+    Shell(Box<Shell>),
 }
 
 impl MaterialKind {
-    pub const TYPES: [&'static str; 3] = ["Blend", "Multi/Sub-Object", "Standard"];
+    pub const TYPES: [&'static str; 4] = ["Blend", "Multi/Sub-Object", "Shell", "Standard"];
 
     pub fn label(&self) -> &'static str {
         match self {
             MaterialKind::Standard => "Standard",
             MaterialKind::MultiSub(_) => "Multi/Sub-Object",
             MaterialKind::Blend(_) => "Blend",
+            MaterialKind::Shell(_) => "Shell",
         }
     }
 }
@@ -509,7 +531,7 @@ impl StandardMaterial {
         match &self.kind {
             MaterialKind::Standard => MAP_CHANNELS.iter().map(|c| c.0).collect(),
             MaterialKind::Blend(_) => vec!["Mask"],
-            MaterialKind::MultiSub(_) => Vec::new(),
+            MaterialKind::MultiSub(_) | MaterialKind::Shell(_) => Vec::new(),
         }
     }
 
@@ -519,6 +541,7 @@ impl StandardMaterial {
             MaterialKind::Standard => Vec::new(),
             MaterialKind::MultiSub(list) => list.iter().map(|s| s.material).collect(),
             MaterialKind::Blend(b) => b.materials.to_vec(),
+            MaterialKind::Shell(sh) => sh.materials.to_vec(),
         }
     }
 
@@ -528,6 +551,15 @@ impl StandardMaterial {
     /// Mask On) apply to a Blend material.
     pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
         let v = value as f32;
+        if let MaterialKind::Shell(sh) = &mut self.kind {
+            let which = (value.round() as u8).min(1);
+            match name {
+                "Viewport" => sh.viewport = which,
+                "Render" => sh.render = which,
+                other => return Err(format!("no Shell parameter \"{other}\" (Viewport, Render)")),
+            }
+            return Ok(());
+        }
         if let MaterialKind::Blend(b) = &mut self.kind {
             let on = value != 0.0;
             match name {
@@ -871,25 +903,51 @@ impl Surfaces {
 /// ID; a Blend mixes its two materials by Mix Amount, its maps through a Mix
 /// map with the Blend's mask.
 pub fn surfaces(lib: &MaterialLibrary, id: MaterialId) -> Option<Surfaces> {
-    fn single(lib: &MaterialLibrary, id: Option<MaterialId>, face: Option<u16>, depth: u32) -> Surface {
+    surfaces_for(lib, id, ShellView::Viewport)
+}
+
+/// As `surfaces`, a Shell material resolving to the material `view` picks.
+pub fn surfaces_for(lib: &MaterialLibrary, id: MaterialId, view: ShellView) -> Option<Surfaces> {
+    // The material a Shell shows, followed through nested Shells.
+    let pick = |sh: &Shell| match view {
+        ShellView::Viewport => sh.materials[sh.viewport.min(1) as usize],
+        ShellView::Render => sh.materials[sh.render.min(1) as usize],
+        ShellView::Original => sh.materials[0],
+    };
+    let mut id = id;
+    for _ in 0..16 {
+        match &lib.get(&id)?.kind {
+            MaterialKind::Shell(sh) => id = pick(sh)?,
+            _ => break,
+        }
+    }
+    fn single(lib: &MaterialLibrary, id: Option<MaterialId>, face: Option<u16>, depth: u32, view: ShellView) -> Surface {
         let Some(m) = id.and_then(|i| lib.get(&i)).filter(|_| depth < 16) else { return Surface::black() };
         match &m.kind {
             MaterialKind::Standard => Surface::from_standard(m),
             MaterialKind::MultiSub(list) => match list.iter().find(|s| Some(s.id) == face.map(|f| f + 1)) {
-                Some(s) if s.enabled => single(lib, s.material, face, depth + 1),
+                Some(s) if s.enabled => single(lib, s.material, face, depth + 1, view),
                 _ => Surface::black(),
             },
             MaterialKind::Blend(b) => {
-                let a = if b.enabled[0] { single(lib, b.materials[0], face, depth + 1) } else { Surface::black() };
-                let c = if b.enabled[1] { single(lib, b.materials[1], face, depth + 1) } else { Surface::black() };
+                let a = if b.enabled[0] { single(lib, b.materials[0], face, depth + 1, view) } else { Surface::black() };
+                let c = if b.enabled[1] { single(lib, b.materials[1], face, depth + 1, view) } else { Surface::black() };
                 blend(&a, &c, b)
+            }
+            MaterialKind::Shell(sh) => {
+                let i = match view {
+                    ShellView::Viewport => sh.viewport,
+                    ShellView::Render => sh.render,
+                    ShellView::Original => 0,
+                };
+                single(lib, sh.materials[i.min(1) as usize], face, depth + 1, view)
             }
         }
     }
     let m = lib.get(&id)?;
     Some(match &m.kind {
-        MaterialKind::MultiSub(list) => Surfaces::PerId(list.iter().map(|s| (s.id.saturating_sub(1), single(lib, Some(id), Some(s.id.saturating_sub(1)), 0))).collect()),
-        _ => Surfaces::Single(Box::new(single(lib, Some(id), None, 0))),
+        MaterialKind::MultiSub(list) => Surfaces::PerId(list.iter().map(|s| (s.id.saturating_sub(1), single(lib, Some(id), Some(s.id.saturating_sub(1)), 0, view))).collect()),
+        _ => Surfaces::Single(Box::new(single(lib, Some(id), None, 0, view))),
     })
 }
 
@@ -993,6 +1051,27 @@ mod tests {
         let mix = s.diffuse_map.unwrap();
         assert_eq!(mix.sub_maps[2].as_ref().unwrap().path, "/x/mask.png");
         assert_eq!(mix.colors[1], Vec3::X, "white in the mask shows Material 1");
+    }
+
+    #[test]
+    fn a_shell_shows_its_viewport_or_render_choice() {
+        let mut orig = StandardMaterial::new("orig");
+        orig.diffuse.set(Vec3::X);
+        let mut baked = StandardMaterial::new("baked");
+        baked.diffuse.set(Vec3::Y);
+        let mut shell = StandardMaterial::new("shell");
+        shell.kind = MaterialKind::Shell(Box::new(Shell { materials: [Some(MaterialId(1)), Some(MaterialId(2))], viewport: 1, render: 0 }));
+        let mut lib = lib_with(vec![orig, baked, shell]);
+        let diffuse = |lib: &MaterialLibrary, v: ShellView| match surfaces_for(lib, MaterialId(3), v).unwrap() {
+            Surfaces::Single(s) => s.diffuse,
+            Surfaces::PerId(_) => panic!("single"),
+        };
+        assert_eq!(diffuse(&lib, ShellView::Viewport), Vec3::Y, "viewports show the baked material");
+        assert_eq!(diffuse(&lib, ShellView::Render), Vec3::X, "renders the original");
+        assert_eq!(diffuse(&lib, ShellView::Original), Vec3::X);
+        lib.get_mut(&MaterialId(3)).unwrap().set_parameter("Viewport", 0.0).unwrap();
+        assert_eq!(diffuse(&lib, ShellView::Viewport), Vec3::X);
+        assert_eq!(lib[&MaterialId(3)].children(), vec![Some(MaterialId(1)), Some(MaterialId(2))]);
     }
 
     #[test]
