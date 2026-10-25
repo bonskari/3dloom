@@ -486,8 +486,13 @@ impl LoomApp {
                 Err(err) => self.last_error = Some(format!("Render To Texture: {name} {}: {err}", e.name)),
             }
         }
-        // The files changed on disk: maps and viewports read them again.
+        // The files changed on disk: maps and viewports read them again. The
+        // baked material was assigned before its file existed: a viewport's
+        // failed load of one of these files is no longer an error.
         self.state.bitmap_generation += 1;
+        if self.last_error.as_deref().is_some_and(|e| req.jobs.iter().any(|j| e.contains(&j.path) && std::path::Path::new(&j.path).exists())) {
+            self.last_error = None;
+        }
         self.state.status_prompt = format!("Render To Texture: {done} map(s) rendered in {:.1} s", started.elapsed().as_secs_f32());
     }
 
