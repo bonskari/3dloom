@@ -8,7 +8,7 @@ fn quat(deg: Vec3) -> Quat {
 }
 
 fn mesh_node(name: &str, rotation_deg: Vec3) -> FbxNode {
-    FbxNode { name: name.into(), parent: None, translation: Vec3::ZERO, rotation_deg, scale: Vec3::ONE, kind: FbxKind::Mesh { mesh: loom_mesh::box_segmented(10.0, 10.0, 10.0, [1, 1, 1]), materials: vec![] }, skin: None, blend_shapes: Vec::new() }
+    FbxNode { name: name.into(), parent: None, translation: Vec3::ZERO, rotation_deg, scale: Vec3::ONE, kind: FbxKind::Mesh { mesh: loom_mesh::box_segmented(10.0, 10.0, 10.0, [1, 1, 1]), materials: vec![] }, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() }
 }
 
 fn plain(bytes: &[u8]) -> ufbx::SceneRoot {
@@ -37,7 +37,7 @@ fn rotations_on_three_axes_survive() {
 #[test]
 fn camera_forward_survives() {
     // A loom camera looks down its local -Z; rotated (90, 0, 0) it looks along +Y.
-    let cam = FbxNode { name: "Cam".into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::new(90.0, 0.0, 0.0), scale: Vec3::ONE, kind: FbxKind::Camera { fov_deg: 45.0 }, skin: None, blend_shapes: Vec::new() };
+    let cam = FbxNode { name: "Cam".into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::new(90.0, 0.0, 0.0), scale: Vec3::ONE, kind: FbxKind::Camera { fov_deg: 45.0 }, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() };
     let bytes = loom_fbx::write(&FbxDocument { nodes: vec![cam], unit_metres: 0.01, anim: None, ..Default::default() }, &WriteOpts::default());
     // FBX cameras look along their local +X: that axis must be world +Y in the file.
     let s = plain(&bytes);
@@ -54,7 +54,7 @@ fn camera_fov_is_horizontal() {
     // 3dLoom's camera FOV spans the view's width (as the reference's default
     // Horizontal FOV direction): the file says so, with the matching lens on
     // a 36 mm film back for readers that go by the lens.
-    let cam = FbxNode { name: "Cam".into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind: FbxKind::Camera { fov_deg: 45.0 }, skin: None, blend_shapes: Vec::new() };
+    let cam = FbxNode { name: "Cam".into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind: FbxKind::Camera { fov_deg: 45.0 }, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() };
     let bytes = loom_fbx::write(&FbxDocument { nodes: vec![cam], unit_metres: 0.01, anim: None, ..Default::default() }, &WriteOpts::default());
     let s = plain(&bytes);
     let c = &s.cameras[0];

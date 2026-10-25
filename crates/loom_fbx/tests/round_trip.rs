@@ -12,9 +12,9 @@ fn sample() -> FbxDocument {
         f.material_id = (i % 2) as u16 + 1;
     }
     mesh.vertices_mut()[0].color = [1.0, 0.0, 0.0];
-    let parent = FbxNode { name: "Root".into(), parent: None, translation: Vec3::new(1.0, 2.0, 3.0), rotation_deg: Vec3::new(0.0, 0.0, 90.0), scale: Vec3::ONE, kind: FbxKind::Mesh { mesh: mesh.clone(), materials: vec!["Wood".into(), "Steel".into()] }, skin: None, blend_shapes: Vec::new() };
-    let child = FbxNode { name: "Child".into(), parent: Some(0), translation: Vec3::new(5.0, 0.0, 0.0), rotation_deg: Vec3::ZERO, scale: Vec3::new(2.0, 2.0, 2.0), kind: FbxKind::Mesh { mesh, materials: vec![] }, skin: None, blend_shapes: Vec::new() };
-    let cam = FbxNode { name: "Cam".into(), parent: None, translation: Vec3::new(0.0, -50.0, 10.0), rotation_deg: Vec3::new(90.0, 0.0, 0.0), scale: Vec3::ONE, kind: FbxKind::Camera { fov_deg: 45.0 }, skin: None, blend_shapes: Vec::new() };
+    let parent = FbxNode { name: "Root".into(), parent: None, translation: Vec3::new(1.0, 2.0, 3.0), rotation_deg: Vec3::new(0.0, 0.0, 90.0), scale: Vec3::ONE, kind: FbxKind::Mesh { mesh: mesh.clone(), materials: vec!["Wood".into(), "Steel".into()] }, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() };
+    let child = FbxNode { name: "Child".into(), parent: Some(0), translation: Vec3::new(5.0, 0.0, 0.0), rotation_deg: Vec3::ZERO, scale: Vec3::new(2.0, 2.0, 2.0), kind: FbxKind::Mesh { mesh, materials: vec![] }, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() };
+    let cam = FbxNode { name: "Cam".into(), parent: None, translation: Vec3::new(0.0, -50.0, 10.0), rotation_deg: Vec3::new(90.0, 0.0, 0.0), scale: Vec3::ONE, kind: FbxKind::Camera { fov_deg: 45.0 }, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() };
     FbxDocument { nodes: vec![parent, child, cam], unit_metres: 0.0254, anim: None, ..Default::default() }
 }
 

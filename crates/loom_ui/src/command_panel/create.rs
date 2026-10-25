@@ -481,6 +481,14 @@ fn param_grid(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, salt
                             }
                         });
                     }
+                    // Dummy > Color: a swatch (stored as 0xRRGGBB).
+                    loom_scene::ParamValue::Int(c) if name == "Color" && app.state.scene.node(id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Dummy { .. })) => {
+                        let mut rgb = [(c >> 16) as u8, (c >> 8) as u8, c as u8];
+                        if ui.color_edit_button_srgb(&mut rgb).changed() {
+                            let v = ((rgb[0] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[2] as u32;
+                            let _ = app.dispatch(Command::SetParameter { id: id.0, name: name.into(), value: v as f64 });
+                        }
+                    }
                     loom_scene::ParamValue::Int(i) => {
                         let mut v = i;
                         let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.1)));

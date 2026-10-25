@@ -505,6 +505,14 @@ impl Scene {
         self.render_of(node).renderable
     }
 
+    /// Whether renders (Render, bake, the Realistic shading's lit surfaces)
+    /// show the node: geometry with Renderable on. Helpers, cameras, lights,
+    /// light/camera targets and a biped's centre of mass never render;
+    /// bones only when their Renderable is turned on.
+    pub fn renders(&self, node: &Node) -> bool {
+        node.object.has_render_geometry() && self.is_renderable(node)
+    }
+
     pub fn next_layer_id(&self) -> u32 {
         self.layers.iter().map(|l| l.id + 1).max().unwrap_or(1)
     }

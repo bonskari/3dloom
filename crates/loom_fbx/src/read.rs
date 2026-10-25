@@ -450,6 +450,7 @@ pub fn read_with(bytes: &[u8], ro: &ReadOpts) -> Result<FbxDocument, String> {
             kind,
             skin: None,
             blend_shapes,
+            user_props: Vec::new(),
         });
     }
     for (node, bones, mesh_bind, weights) in pending_skins {

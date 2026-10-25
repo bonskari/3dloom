@@ -470,7 +470,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
                     // A target light's aim comes from its LookAt constraint: write the evaluated rotation.
                     let parent = node.parent.map(|p| state.scene.world_matrix(p)).unwrap_or(Mat4::IDENTITY);
                     let local = Transform::from_matrix(parent.inverse() * state.scene.world_matrix(id));
-                    nodes.push(FbxNode { name: node.name.clone(), parent: node.parent.filter(|p| set.contains(p)).and_then(|p| index_of.get(&p).copied()), translation: node.transform.position.get(), rotation_deg: local.rotation.get(), scale: node.transform.scale.get(), kind: FbxKind::Light(light), skin: None, blend_shapes: Vec::new() });
+                    nodes.push(FbxNode { name: node.name.clone(), parent: node.parent.filter(|p| set.contains(p)).and_then(|p| index_of.get(&p).copied()), translation: node.transform.position.get(), rotation_deg: local.rotation.get(), scale: node.transform.scale.get(), kind: FbxKind::Light(light), skin: None, blend_shapes: Vec::new(), user_props: Vec::new() });
                     continue;
                 }
                 None => FbxKind::Empty,
@@ -498,7 +498,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
                     None => state.scene.eval_mesh(id).value.mesh.clone(),
                 };
                 if mesh.face_count() == 0 {
-                    nodes.push(FbxNode { name: node.name.clone(), parent: node.parent.filter(|p| set.contains(p)).and_then(|p| index_of.get(&p).copied()), translation: node.transform.position.get(), rotation_deg: node.transform.rotation.get(), scale: node.transform.scale.get(), kind: FbxKind::Empty, skin: None, blend_shapes: Vec::new() });
+                    nodes.push(FbxNode { name: node.name.clone(), parent: node.parent.filter(|p| set.contains(p)).and_then(|p| index_of.get(&p).copied()), translation: node.transform.position.get(), rotation_deg: node.transform.rotation.get(), scale: node.transform.scale.get(), kind: FbxKind::Empty, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() });
                     continue;
                 }
                 if let Some(si) = skin_index {
@@ -554,7 +554,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
         // A helper or object a skin deforms with is written as a bone.
         let kind = if o.convert_deforming_dummies_to_bones && deforming.contains(&id) && !matches!(kind, FbxKind::Bone { .. }) {
             let size = match &node.object {
-                ObjectKind::Dummy { size } => size.get(),
+                ObjectKind::Dummy { size, .. } => size.get(),
                 _ => {
                     let (lo, hi) = state.scene.eval_mesh(id).value.mesh.aabb();
                     (hi - lo).max_element().max(1.0)
@@ -573,7 +573,16 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
             let t = Transform::from_matrix(state.scene.world_matrix(id));
             (t.position.get(), t.rotation.get(), t.scale.get())
         };
-        nodes.push(FbxNode { name: node.name.clone(), parent, translation, rotation_deg, scale, kind, skin, blend_shapes });
+        // A Dummy is a null carrying its display settings as user properties.
+        let user_props = match &node.object {
+            ObjectKind::Dummy { display, .. } => {
+                let ext = node.object.dummy_extents().unwrap_or(glam::Vec3::ONE);
+                let name = loom_scene::node::DUMMY_DISPLAY_TYPES.get(display.get() as usize).copied().unwrap_or("Box");
+                vec![("DummyDisplayType".to_owned(), name.to_owned()), ("DummySize".to_owned(), format!("{} {} {}", ext.x, ext.y, ext.z))]
+            }
+            _ => Vec::new(),
+        };
+        nodes.push(FbxNode { name: node.name.clone(), parent, translation, rotation_deg, scale, kind, skin, blend_shapes, user_props });
     }
     if nodes.is_empty() {
         return Err("nothing to export: no geometry objects".into());

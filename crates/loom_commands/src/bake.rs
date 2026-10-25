@@ -71,8 +71,7 @@ pub fn output_dir(s: &BakeSettings) -> PathBuf {
 
 /// Objects that bake: geometry, not helpers, cameras, lights or bones.
 pub fn is_geometry(n: &Node) -> bool {
-    use ObjectKind as K;
-    !matches!(n.object, K::Dummy { .. } | K::Point { .. } | K::Tape { .. } | K::Protractor { .. } | K::Compass { .. } | K::Grid { .. } | K::IkGoal { .. } | K::Group { .. } | K::Camera { .. } | K::Light(_)) && !n.object.is_bone()
+    n.object.has_render_geometry() && !n.object.is_bone()
 }
 
 fn frozen(state: &AppState, n: &Node) -> bool {
