@@ -65,6 +65,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::material::handles(&c) => crate::material::execute(state, c),
         c if crate::display::handles(&c) => crate::display::execute(state, c),
         c if crate::render::handles(&c) => crate::render::execute(state, c),
+        c if crate::bake::handles(&c) => crate::bake::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),

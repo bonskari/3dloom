@@ -28,6 +28,7 @@ pub mod viewport_configuration;
 pub mod file_dialog;
 pub mod material_editor;
 pub mod render_setup;
+pub mod render_to_texture;
 pub mod lights;
 pub mod save_changes;
 pub mod spline_prompts;
@@ -110,6 +111,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     }
     // The VertexPaint dialog floats while a VertexPaint entry is active in the Modify panel.
     vertex_paint::show(ctx, app);
+    // Render To Texture is modeless: it stays open beside the other dialogs.
+    render_to_texture::show(ctx, app);
     if app.state.material_navigator_open {
         let mut open = true;
         material_editor::navigator(ctx, app, &mut open);
