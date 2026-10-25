@@ -99,6 +99,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::MergeFile => ("Merge File", "loom", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", "png", "Open"),
         Dialog::BackgroundFile => ("Select Background Image", "png", "Open"),
+        Dialog::EnvironmentMap => ("Select Environment Map", "png,jpg,jpeg,bmp,tga", "Open"),
         Dialog::MaterialMap { .. } => ("Select Bitmap Image File", "png", "Open"),
         Dialog::PickUvTexture => ("Pick Texture", "png", "Open"),
         Dialog::SaveUvw => ("Save UVW", "uvw", "Save"),
@@ -130,6 +131,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::SaveSelected => Command::SaveSelected { path: Some(p) },
         Dialog::ArchiveFile => Command::ArchiveFile { path: Some(p) },
         Dialog::BitmapFit => Command::UvwMapBitmapFit { path: p },
+        Dialog::EnvironmentMap => Command::EnvironmentSettings { background: None, map: Some(p), use_map: None, mapping: None, tint: None, level: None, ambient: None },
         Dialog::PickUvTexture => Command::PickTexture { path: p },
         Dialog::MaterialMap { channel } => Command::SetMaterialMap {
             slot: None,

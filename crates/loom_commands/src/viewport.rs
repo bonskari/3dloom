@@ -330,6 +330,8 @@ pub enum Dialog {
     ViewportBackground,
     /// Viewport Background > Files...: pick the image; then back to the dialog.
     BackgroundFile,
+    /// Environment > Environment Map: pick the background bitmap.
+    EnvironmentMap,
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,

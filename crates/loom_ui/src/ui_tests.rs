@@ -11,6 +11,7 @@ mod icons;
 mod transforms;
 mod menus;
 mod display;
+mod environment;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
@@ -2953,10 +2954,10 @@ fn an_iterative_region_render_keeps_the_rest_of_the_window() {
     // An empty scene: every pixel is background, so the region shows exactly.
     maximized(&mut h);
     h.app.dispatch_json(&serde_json::json!({ "cmd": "Render SetUp...", "args": { "width": 320, "height": 240 } }));
-    h.app.dispatch_json(&serde_json::json!({ "cmd": "Bevy Renderer Settings", "args": { "background": [0.0, 0.0, 1.0] } }));
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Environment Settings", "args": { "background": [0.0, 0.0, 1.0] } }));
     h.cmd(Command::Render { path: None, width: None, height: None });
     finish_render(&mut h, 60);
-    h.app.dispatch_json(&serde_json::json!({ "cmd": "Bevy Renderer Settings", "args": { "background": [0.0, 1.0, 0.0] } }));
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Environment Settings", "args": { "background": [0.0, 1.0, 0.0] } }));
     h.app.dispatch_json(&serde_json::json!({ "cmd": "Area to Render", "args": { "area": "Region", "region": [0.0, 0.0, 0.25, 0.25] } }));
     h.cmd(Command::RenderIterative);
     finish_render(&mut h, 60);

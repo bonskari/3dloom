@@ -9,7 +9,7 @@ pub mod convert;
 pub mod effects;
 pub mod environment;
 pub mod lights;
-mod post;
+pub mod post;
 
 use std::collections::{HashMap, HashSet};
 

@@ -27,13 +27,15 @@ struct Setup {
     lock_pixel_aspect: Option<bool>,
     render_hidden: Option<bool>,
     force_two_sided: Option<bool>,
+    atmospherics: Option<bool>,
+    effects: Option<bool>,
     save_file: Option<bool>,
 }
 
 impl Setup {
     fn cmd(self) -> Command {
-        let Setup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, save_file } = self;
-        Command::RenderSetup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, save_file, output: None }
+        let Setup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, atmospherics, effects, save_file } = self;
+        Command::RenderSetup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, atmospherics, effects, save_file, output: None }
     }
 }
 
@@ -44,14 +46,12 @@ struct Bevy {
     supersampling: Option<u32>,
     shadows: Option<bool>,
     shadow_map_size: Option<u32>,
-    background: Option<[f32; 3]>,
-    ambient: Option<[f32; 3]>,
 }
 
 impl Bevy {
     fn cmd(self) -> Command {
-        let Bevy { antialiasing, supersampling, shadows, shadow_map_size, background, ambient } = self;
-        Command::BevyRendererSettings { antialiasing, supersampling, shadows, shadow_map_size, background, ambient }
+        let Bevy { antialiasing, supersampling, shadows, shadow_map_size } = self;
+        Command::BevyRendererSettings { antialiasing, supersampling, shadows, shadow_map_size }
     }
 }
 
@@ -153,6 +153,16 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Options").strong());
     ui.horizontal(|ui| {
+        let mut atmospherics = s.atmospherics;
+        if ui.checkbox(&mut atmospherics, "Atmospherics").on_hover_text("Render the Environment's atmospheric effects").changed() {
+            run(app, Setup { atmospherics: Some(atmospherics), ..Default::default() }.cmd());
+        }
+        let mut effects = s.effects;
+        if ui.checkbox(&mut effects, "Effects").on_hover_text("Apply the rendering effects").changed() {
+            run(app, Setup { effects: Some(effects), ..Default::default() }.cmd());
+        }
+    });
+    ui.horizontal(|ui| {
         let mut hidden = s.render_hidden;
         if ui.checkbox(&mut hidden, "Render Hidden Geometry").changed() {
             run(app, Setup { render_hidden: Some(hidden), ..Default::default() }.cmd());
@@ -213,21 +223,5 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             });
         });
-    });
-    ui.label(egui::RichText::new("Environment").strong());
-    ui.horizontal(|ui| {
-        // The settings hold sRGB 0-1, as the swatches show them.
-        let to_u8 = |c: [f32; 3]| c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
-        let to_f = |c: [u8; 3]| c.map(|v| v as f32 / 255.0);
-        let mut bg = to_u8(b.background);
-        ui.label("Background:");
-        if ui.color_edit_button_srgb(&mut bg).changed() {
-            run(app, Bevy { background: Some(to_f(bg)), ..Default::default() }.cmd());
-        }
-        let mut amb = to_u8(b.ambient);
-        ui.label("Ambient:");
-        if ui.color_edit_button_srgb(&mut amb).changed() {
-            run(app, Bevy { ambient: Some(to_f(amb)), ..Default::default() }.cmd());
-        }
     });
 }

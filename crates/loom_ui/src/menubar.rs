@@ -322,6 +322,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
                 cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
                 ui.separator();
+                cmd(ui, app, "Environment...", Command::EnvironmentDialogToggle);
+                cmd(ui, app, "Effects...", Command::RenderingEffects);
+                ui.separator();
                 cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
             });
             ui.menu_button("Customize", |ui| {
