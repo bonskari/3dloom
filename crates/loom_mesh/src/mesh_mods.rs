@@ -202,7 +202,7 @@ pub fn shell(mesh: &Mesh, inner: f32, outer: f32, segments: u32) -> Result<(Mesh
 }
 
 /// Ear-clipping triangulation of one polygon (indices into `pts`).
-fn clip_ears(pts: &[Vec3], ids: &[u32]) -> Vec<[u32; 3]> {
+pub(crate) fn clip_ears(pts: &[Vec3], ids: &[u32]) -> Vec<[u32; 3]> {
     if ids.len() == 3 {
         return vec![[ids[0], ids[1], ids[2]]];
     }
