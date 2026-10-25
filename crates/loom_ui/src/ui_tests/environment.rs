@@ -21,6 +21,18 @@ fn eight_opens_the_dialog_and_its_controls_edit_the_environment() {
     h.frames(2);
     let win = window(&h, TITLE);
 
+    // Exposure Control drop-down.
+    click_text(&mut h, ExposureKind::None.label(), win, 0.0);
+    let full = h.screen;
+    click_text(&mut h, ExposureKind::Linear.label(), full, 0.0);
+    assert_eq!(h.app.state.scene.environment.exposure.kind, ExposureKind::Linear);
+    // Room for the atmosphere rollouts: fold the two rollouts above them.
+    h.frames(12);
+    click_text(&mut h, "Common Parameters", win, 0.0);
+    h.frames(12);
+    click_text(&mut h, "Exposure Control", win, 0.0);
+    let win = window(&h, TITLE);
+
     // Atmosphere > Add... > Fog > OK.
     click_text(&mut h, "Add...", win, 0.0);
     // Apart in time, so the clicks are not a double click (which adds at once).
@@ -38,13 +50,6 @@ fn eight_opens_the_dialog_and_its_controls_edit_the_environment() {
     click_text(&mut h, "Layered", win, 0.0);
     let AtmosphereKind::Fog(f) = &h.app.state.scene.environment.atmospheres[0].kind else { panic!() };
     assert!(f.layered, "Type: Layered");
-
-    // Exposure Control drop-down.
-    let win = window(&h, TITLE);
-    click_text(&mut h, ExposureKind::None.label(), win, 0.0);
-    let full = h.screen;
-    click_text(&mut h, ExposureKind::Linear.label(), full, 0.0);
-    assert_eq!(h.app.state.scene.environment.exposure.kind, ExposureKind::Linear);
 
     // The Effects panel: Add... > Film Grain > OK, then Active off.
     let win = window(&h, TITLE);
