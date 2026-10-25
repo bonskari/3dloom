@@ -119,8 +119,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         }
     });
     if mini {
-        // Above the time slider, where the track bar was.
-        egui::TopBottomPanel::bottom("mini_curve_editor").resizable(true).default_height(260.0).show(ctx, |ui| {
+        // Above the time slider, where the track bar was; a fixed height so the content never grows the panel (and moves its rows) frame to frame.
+        egui::TopBottomPanel::bottom("mini_curve_editor").exact_height(280.0).show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if crate::icons::Icon::new(crate::icons::CURVE_EDITOR, "Close Mini Curve Editor").on(true).show(ui, &app.state).clicked() {
                     app.track_bar.mini_curve_editor = false;
