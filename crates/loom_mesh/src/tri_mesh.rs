@@ -60,7 +60,8 @@ fn set_flags(m: &mut Mesh, vis: &[Vec<bool>]) {
         }
     }
     let inv: Vec<bool> = (0..n).map(|i| seen_hidden[i] && !seen_visible[i]).collect();
-    m.invisible = if inv.iter().any(|x| *x) { inv } else { Vec::new() };
+    // Full length even when all are visible: the mesh's flags are exact.
+    m.invisible = inv;
 }
 
 /// Every face is a triangle.
@@ -415,14 +416,20 @@ pub fn divide_face(mesh: &Mesh, f: FaceId) -> Result<Mesh, String> {
     build(&im, &vis)
 }
 
+/// The mesh with a flag per half-edge (all visible when it had none).
+fn with_flags(mesh: &Mesh) -> Mesh {
+    let mut m = mesh.clone();
+    if m.invisible.len() != m.half_edges.len() {
+        m.invisible = vec![false; m.half_edges.len()];
+    }
+    m
+}
+
 /// Visible / Invisible on the given edges.
 pub fn set_visibility(mesh: &Mesh, edges: &[HalfEdgeId], visible: bool) -> Mesh {
-    let mut m = mesh.clone();
+    let mut m = with_flags(mesh);
     for e in edges {
         m.set_edge_visible(*e, visible);
-    }
-    if !m.invisible.iter().any(|x| *x) {
-        m.invisible.clear();
     }
     m
 }
@@ -443,7 +450,7 @@ pub enum AutoEdgeMode {
 /// degrees is visible, one at or under it invisible (by `mode`). Open edges
 /// stay visible.
 pub fn auto_edge(mesh: &Mesh, edges: &[HalfEdgeId], threshold: f32, mode: AutoEdgeMode) -> Mesh {
-    let mut m = mesh.clone();
+    let mut m = with_flags(mesh);
     for e in edges {
         let Some(h) = mesh.half_edges.get(e.0 as usize) else { continue };
         let t = &mesh.half_edges[h.twin.0 as usize];
@@ -459,9 +466,6 @@ pub fn auto_edge(mesh: &Mesh, edges: &[HalfEdgeId], threshold: f32, mode: AutoEd
         } else if mode != AutoEdgeMode::Set {
             m.set_edge_visible(*e, false);
         }
-    }
-    if !m.invisible.iter().any(|x| *x) {
-        m.invisible.clear();
     }
     m
 }
