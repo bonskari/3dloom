@@ -384,13 +384,16 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, v: &SchematicView, all
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, egui::Color32::from_gray(if ui.visuals().dark_mode { 52 } else { 170 }));
     let (pan, zoom) = (egui::vec2(v.pan[0], v.pan[1]), v.zoom.max(0.05));
+    // Boxes are as wide as their labels.
+    let widths: BTreeMap<&str, f32> = all.iter().map(|e| (e.key.as_str(), schematic::box_width(&e.label))).collect();
+    let width_of = |k: &str| widths.get(k).copied().unwrap_or(schematic::BOX_W);
     // Pending zoom / pan from the menus and buttons.
     if let Some(op) = st.pending.take() {
         let keys: Vec<&String> = match op {
             ViewOp::ZoomExtents => pos.keys().collect(),
             _ => pos.keys().filter(|k| sel.contains(*k)).collect(),
         };
-        let pts: Vec<egui::Rect> = keys.iter().filter_map(|k| pos.get(*k)).map(|p| egui::Rect::from_min_size(egui::pos2(p[0], p[1]), egui::vec2(schematic::BOX_W, schematic::BOX_H))).collect();
+        let pts: Vec<egui::Rect> = keys.iter().filter_map(|k| pos.get(*k).map(|p| (k.as_str(), p))).map(|(k, p)| egui::Rect::from_min_size(egui::pos2(p[0], p[1]), egui::vec2(width_of(k), schematic::BOX_H))).collect();
         if let Some(b) = pts.iter().copied().reduce(|a, b| a.union(b)) {
             let b = b.expand(20.0);
             let vs = &mut app.state.schematics.list[i];
@@ -425,7 +428,7 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, v: &SchematicView, all
             }
         }
     }
-    let box_of = |k: &str| pos.get(k).map(|p| egui::Rect::from_min_size(to_screen(egui::pos2(p[0], p[1])), egui::vec2(schematic::BOX_W, schematic::BOX_H) * zoom));
+    let box_of = |k: &str| pos.get(k).map(|p| egui::Rect::from_min_size(to_screen(egui::pos2(p[0], p[1])), egui::vec2(width_of(k), schematic::BOX_H) * zoom));
     // Wires under the boxes.
     let wire_c = egui::Color32::from_gray(if ui.visuals().dark_mode { 190 } else { 40 });
     for w in wires {
@@ -551,7 +554,7 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, v: &SchematicView, all
             st.moving.clear();
             if let Some(from) = st.connect_from.take() {
                 let at = ui.ctx().pointer_latest_pos();
-                let to = at.and_then(|p| boxes_hit(ents, &pos_screen(pos, &to_screen, zoom), p)).filter(|k| *k != from);
+                let to = at.and_then(|p| boxes_hit(ents, &pos.keys().filter_map(|k| box_of(k).map(|r| (k.clone(), r))).collect(), p)).filter(|k| *k != from);
                 if let Some(to) = to {
                     acts.push(Act::Cmd(Command::SchematicConnect { from, to }));
                 }
@@ -608,11 +611,6 @@ fn canvas(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, v: &SchematicView, all
             }
         }
     }
-}
-
-/// Screen rects of the boxes.
-fn pos_screen(pos: &BTreeMap<String, [f32; 2]>, to_screen: &dyn Fn(egui::Pos2) -> egui::Pos2, zoom: f32) -> BTreeMap<String, egui::Rect> {
-    pos.iter().map(|(k, p)| (k.clone(), egui::Rect::from_min_size(to_screen(egui::pos2(p[0], p[1])), egui::vec2(schematic::BOX_W, schematic::BOX_H) * zoom))).collect()
 }
 
 /// The topmost box under `p`.

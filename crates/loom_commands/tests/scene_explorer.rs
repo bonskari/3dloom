@@ -252,6 +252,12 @@ fn schematic_graph_shows_hierarchy_modifiers_and_shared_materials() {
     let (ents, _) = schematic::graph(&s, &v);
     assert!(!ents.iter().any(|e| matches!(e.kind, EntityKind::Modifier(_))));
     assert!(ents.iter().any(|e| e.key == format!("ctl:{}:Position", a.0) && e.label.contains("Position")));
+    // Boxes are as wide as their labels, and References Mode columns leave room for them.
+    let pos = schematic::positions(&v, &ents);
+    let ctl = ents.iter().find(|e| e.key == format!("ctl:{}:Position", a.0)).unwrap();
+    assert!(schematic::box_width(&ctl.label) > schematic::BOX_W, "{:?} is longer than a plain box", ctl.label);
+    let right_a = ents.iter().filter(|e| e.node == a).map(|e| pos[&e.key][0] + schematic::box_width(&e.label)).fold(0.0f32, f32::max);
+    assert!(pos[&kb][0] > right_a, "B's column starts right of A's widest box");
 }
 
 #[test]

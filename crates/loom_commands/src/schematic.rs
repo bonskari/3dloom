@@ -279,6 +279,11 @@ const ROW: f32 = 28.0;
 const INDENT: f32 = 24.0;
 const COL: f32 = 130.0;
 
+/// A box's width: wide enough for its label (at least `BOX_W`).
+pub fn box_width(label: &str) -> f32 {
+    (label.chars().count() as f32 * 7.0 + 20.0).max(BOX_W)
+}
+
 /// The arranged positions (top-left corners) of the visible entities.
 pub fn arrange(v: &SchematicView, ents: &[Entity]) -> BTreeMap<String, [f32; 2]> {
     let depth = |e: &Entity| -> usize {
@@ -300,17 +305,23 @@ pub fn arrange(v: &SchematicView, ents: &[Entity]) -> BTreeMap<String, [f32; 2]>
             }
         }
         SchMode::References => {
-            // Each top-level object a column, what it uses stacked below.
-            let mut col = -1.0f32;
+            // Each top-level object a column as wide as its widest box, what it uses stacked below.
+            let mut x = 0.0f32;
+            let mut width = 0.0f32;
             let mut row = 0.0f32;
-            for e in ents {
+            for (k, e) in ents.iter().enumerate() {
                 if e.owner.is_none() {
-                    col += 1.0;
+                    if k > 0 {
+                        x += width + COL - BOX_W;
+                    }
+                    width = 0.0;
                     row = 0.0;
                 } else {
                     row += 1.0;
                 }
-                out.insert(e.key.clone(), [col * COL + (depth(e).min(3) as f32) * 6.0, row * ROW]);
+                let indent = (depth(e).min(3) as f32) * 6.0;
+                width = width.max(indent + box_width(&e.label));
+                out.insert(e.key.clone(), [x + indent, row * ROW]);
             }
         }
     }
