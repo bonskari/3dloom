@@ -100,7 +100,8 @@ fn imported_stacks_evaluate_to_the_bounds_the_file_stored() {
     // (World placement of every node, the moved pivot included, is checked in
     // import_max_keeps_world_placement_and_undoes.)
     // Layers by name: the file's "0" is the scene's layer 0.
-    assert!(s.scene.nodes().all(|n| n.layer == 0));
+    let off: Vec<(String, u32)> = s.scene.nodes().filter(|n| n.layer != 0).map(|n| (n.name.clone(), n.layer)).take(5).collect();
+    assert!(off.is_empty(), "{off:?} {:?}", s.scene.layers.iter().map(|l| &l.name).collect::<Vec<_>>());
 }
 
 #[test]
