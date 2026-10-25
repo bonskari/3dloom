@@ -1187,9 +1187,19 @@ fn slow_frames_extrude_drag_extrudes() {
     pause(&mut h);
     h.cmd(Command::ExtrudeMode);
     h.frame_time = SLOW;
+    assert_eq!(h.sub_count(), 1, "Extrude Mode keeps the picked face");
     let before = h.app.world_meshes()[0].1.vertices().len();
-    h.drag(p, p + egui::vec2(0.0, -60.0));
-    assert!(h.app.world_meshes()[0].1.vertices().len() > before, "the slow Extrude drag extrudes the face: drag {:?}, {} sub-objects, undo {:?}, error {:?}", h.app.state.poly_drag, h.sub_count(), h.app.state.undo.len(), h.app.last_error);
+    let q = p + egui::vec2(0.0, -60.0);
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: h.mods }]);
+    assert!(h.app.poly_dragging, "the press starts the Extrude drag ({} sub-objects)", h.sub_count());
+    for i in 1..=8 {
+        h.run(vec![egui::Event::PointerMoved(p + (q - p) * (i as f32 / 8.0))]);
+    }
+    let during = (h.app.world_meshes()[0].1.vertices().len(), h.sub_count(), h.app.state.undo.len(), h.app.last_error.clone());
+    h.run(vec![egui::Event::PointerButton { pos: q, button: egui::PointerButton::Primary, pressed: false, modifiers: h.mods }]);
+    h.frames(1);
+    assert!(h.app.world_meshes()[0].1.vertices().len() > before, "the slow Extrude drag extrudes the face: during (vertices, subs, undo, error) {during:?}, after {} sub-objects, undo {}", h.sub_count(), h.app.state.undo.len());
 }
 
 #[test]
