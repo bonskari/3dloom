@@ -361,6 +361,8 @@ pub struct LoomApp {
     pub last_error: Option<String>,
     /// Edit Button Appearance is open for this action.
     pub button_look: Option<String>,
+    /// The Add / Edit Time Tag dialog.
+    pub tag_dialog: Option<statusbar::TagDialog>,
     /// The last raw input events (live diagnostics).
     pub input_log: live::InputLog,
 }
@@ -532,6 +534,7 @@ impl LoomApp {
             background_textures: std::collections::HashMap::new(),
             last_error: None,
             button_look: None,
+            tag_dialog: None,
             input_log: Default::default(),
         }
     }
@@ -1305,6 +1308,13 @@ impl LoomApp {
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
         icons::install(ctx);
+        let tip = ctx.data_mut(|d| d.remove_temp::<String>(egui::Id::new(icons::PROMPT_TIP)));
+        if let Some(t) = tip.filter(|_| ctx.input(|i| i.pointer.hover_pos().is_some())) {
+            // Last frame's hovered button; the status bar draws before the toolbars that set it.
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("prompt_line_tooltip_last"), t));
+        } else {
+            ctx.data_mut(|d| d.remove::<String>(egui::Id::new("prompt_line_tooltip_last")));
+        }
         self.apply_ui_scheme(ctx);
         gizmo::set_colors([self.color("X Axis"), self.color("Y Axis"), self.color("Z Axis"), self.color("Active Axis")]);
         spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);

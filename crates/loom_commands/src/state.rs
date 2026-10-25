@@ -1681,6 +1681,8 @@ pub struct AppState {
     pub bones_ik_chain: bool,
     pub current_frame: i32,
     pub frame_range: (i32, i32),
+    /// The status bar's time tags (saved with the scene).
+    pub time_tags: Vec<crate::time_tags::TimeTag>,
     pub fps: f32,
     /// Status bar coordinate display: Offset mode (vs Absolute).
     pub offset_mode: bool,
@@ -1912,6 +1914,7 @@ impl AppState {
             morph_channel: 0,
             skin_morph_current: None,
             bones_ik_chain: false,
+            time_tags: Vec::new(),
             current_frame: 0,
             frame_range: (0, 100),
             fps: 30.0,

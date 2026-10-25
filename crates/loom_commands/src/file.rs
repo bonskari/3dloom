@@ -143,6 +143,8 @@ pub struct SceneSettings {
     pub saved_views: BTreeMap<String, crate::state::SavedView>,
     /// File > File Properties and the Summary Info description.
     pub file_properties: FileProperties,
+    /// The status bar's time tags.
+    pub time_tags: Vec<crate::time_tags::TimeTag>,
 }
 
 /// File > File Properties: the Summary fields, the Summary Info
@@ -226,6 +228,7 @@ impl SceneSettings {
             home_view: s.home_view,
             saved_views: s.saved_views.clone(),
             file_properties: s.file_properties.clone(),
+            time_tags: s.time_tags.clone(),
         }
     }
 
@@ -256,6 +259,7 @@ impl SceneSettings {
         s.home_view = self.home_view;
         s.saved_views = self.saved_views.clone();
         s.file_properties = self.file_properties.clone();
+        s.time_tags = self.time_tags.clone();
         s.scene.set_time(s.current_frame as f32);
     }
 }

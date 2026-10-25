@@ -888,6 +888,10 @@ commands! {
     ShadeSelectedFacesToggle => "Viewport Selection Shade Selected Faces Toggle", MainUI, "Shade selected faces red in the viewports (F2).";
     SelectionBracketToggle => "Viewport Selection Show Selection Bracket Toggle", MainUI, "Show or hide selection brackets (J).";
     TimeConfiguration => "Time Configuration", Loom, "Open the Time Configuration dialog.";
+    AddTimeTag => "Add Time Tag", Loom, "Time Tag box > Add Tag: tag frame `time` (the current frame when omitted) as `name`; `lock` keeps its frame; `relative_to` makes it follow another tag at the present offset." { name: String, time: Option<i32>, lock: Option<bool>, relative_to: Option<String> };
+    EditTimeTag => "Edit Time Tag", Loom, "Edit Time Tag dialog: rename, move (`time`, unless locked), Lock Time, Relative To another tag (empty: none)." { name: String, new_name: Option<String>, time: Option<i32>, lock: Option<bool>, relative_to: Option<String> };
+    DeleteTimeTag => "Delete Time Tag", Loom, "Edit Time Tag > Delete; tags relative to it keep their frames." { name: String };
+    GoToTimeTag => "Go To Time Tag", Loom, "Time Tag box: jump the time slider to the tag's frame." { name: String };
     SetFrame => "Set Frame", Loom, "Jump the time slider to a frame (clamped to the active time segment)." { frame: i32 };
     SetTimeConfiguration => "Set Time Configuration", Loom, "Time Configuration dialog: active time segment start/end and frame rate." { start: Option<i32>, end: Option<i32>, fps: Option<f32> };
     SetFov => "Set FOV", Loom, "Set the perspective field of view in degrees (Field-of-View button)." { degrees: f32 };

@@ -10,6 +10,9 @@ use loom_commands::AppState;
 /// The icon font's name in the font definitions.
 pub const FONT: &str = "phosphor";
 
+/// egui memory: the tooltip of the button under the pointer, which the prompt line shows.
+pub const PROMPT_TIP: &str = "prompt_line_tooltip";
+
 /// Glyph size of an icon button (the reference toolbars use about 16 px icons).
 pub const SIZE: f32 = 16.0;
 
@@ -355,6 +358,9 @@ impl<'a> Icon<'a> {
         }
         let hover = self.hover_text(state);
         let r = ui.add_enabled(self.enabled, egui::Button::new(text).selected(self.on));
+        if r.hovered() {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(PROMPT_TIP), hover.clone()));
+        }
         // Screen readers (and the UI tests) know the button by its name, not its glyph.
         let name = self.text.unwrap_or(self.action);
         r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, self.enabled, self.on, name));

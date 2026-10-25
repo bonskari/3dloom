@@ -1675,6 +1675,20 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
     (height / rect.height().max(1.0)).max(1e-4)
 }
 
+/// The pointer's world position on the active viewport's construction plane
+/// (the status bar's coordinate display); None when it is not over that viewport.
+pub(crate) fn cursor_world(app: &LoomApp, p: egui::Pos2) -> Option<Vec3> {
+    let i = app.state.active_viewport;
+    let rect = *app.viewport_rects.get(i)?;
+    if !rect.contains(p) {
+        return None;
+    }
+    let camera = app.camera_for(i);
+    let (view, proj) = (camera.view_matrix(), camera.projection_matrix(rect.width() / rect.height().max(1.0)));
+    let (o, _, _, n) = app.state.construction_plane(i);
+    plane_hit_at(p, rect, view, proj, o, n)
+}
+
 /// Pointer on the construction plane: the z = 0 plane in Top/Perspective
 /// views, the view's own plane (through the origin) in the axis views.
 fn ground_hit(p: egui::Pos2, viewport_rect: egui::Rect, view: Mat4, proj: Mat4) -> Option<Vec3> {

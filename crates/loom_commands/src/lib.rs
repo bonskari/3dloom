@@ -58,6 +58,7 @@ pub use poly::named_sub_sets;
 pub mod keymap;
 pub mod settings;
 pub mod ui_custom;
+pub mod time_tags;
 pub use keymap::{parse_chord, Chord, Key, Keymap};
 pub mod viewport;
 pub use viewport::{default_kinds, HideCategories, LayoutSplits, NavMode, Shading, Viewport, ViewportLayout, BrowserFor, Dialog, UiFileKind, NewKeep, PendingFileAction, PolySettingsKind};
