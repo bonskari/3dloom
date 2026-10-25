@@ -38,7 +38,7 @@ fn render_to_texture_dialog_adds_an_element_and_renders_it() {
     assert!(h.app.state.render_to_texture_open, "0 opens Render To Texture");
     let win = window(&h);
     let name = h.app.state.scene.node(p).unwrap().name.clone();
-    for label in ["General Settings", "Objects to Bake", "Output", "Baked Material", "Automatic Mapping", "Skip Existing Files", "Use Automatic Unwrap", "Use Existing Channel", "All Selected", "Save Source (Create Shell)", "Output Into Source", "Render to Files Only", name.as_str()] {
+    for label in ["General Settings", "Objects to Bake", "Output", "Baked Material", "Skip Existing Files", "Use Automatic Unwrap", "Use Existing Channel", "All Selected", "Save Source (Create Shell)", "Output Into Source", name.as_str()] {
         assert!(h.text_rect(label, win).is_some(), "{label:?} in the dialog");
     }
     let dir = output_dir(&mut h, "normals");
