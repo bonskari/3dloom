@@ -43,9 +43,10 @@ use loom_commands::{Command, Dialog};
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     import_summary(ctx, app);
     // A previewing dialog that went away without OK (Close Dialog, Escape,
-    // another dialog) leaves the scene as it was.
+    // another dialog) leaves the scene as it was. An Extrude-mode drag
+    // previews with no window open; its release keeps the result.
     if let Some(p) = app.preview {
-        if app.state.dialog != Some(p.dialog) {
+        if app.state.dialog != Some(p.dialog) && !app.poly_dragging {
             app.preview_undo();
             app.state.align_target = None;
             app.state.normal_align = None;
