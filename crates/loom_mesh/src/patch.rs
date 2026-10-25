@@ -199,7 +199,7 @@ impl PatchMesh {
             let Some(ids) = mesh.face_vertex_ids(FaceId(f as u32)) else { continue };
             let ids: Vec<u32> = ids.iter().map(|v| v.0).collect();
             let face = &mesh.faces()[f];
-            let mut push = |pm: &mut PatchMesh, v: Vec<u32>| {
+            let push = |pm: &mut PatchMesh, v: Vec<u32>| {
                 let i = pm.add_patch(v);
                 pm.patches[i].smoothing_groups = face.smoothing_groups;
                 pm.patches[i].material_id = face.material_id;
