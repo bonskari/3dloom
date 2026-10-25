@@ -54,6 +54,11 @@ fn render_to_texture_dialog_adds_an_element_and_renders_it() {
     let preset = h.text_rect("128x128", win).expect("the 128x128 preset");
     h.click(preset.center());
     assert_eq!((h.app.state.scene.render.bake.elements[0].width, h.app.state.scene.render.bake.elements[0].height), (128, 128));
+    // Target Map Slot: Bump.
+    let combo = h.text_rect("(none)", win).expect("the Target Map Slot list");
+    h.click(combo.center());
+    h.click_text_anywhere("Bump");
+    assert_eq!(h.app.state.scene.render.bake.elements[0].target_slot, "Bump");
     h.click(button(&h, "Render"));
     let path = dir.join(format!("{name}NormalsMap.tga"));
     let img = image::open(&path).expect("Render writes the map").to_rgba8();
