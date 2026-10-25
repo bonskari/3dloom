@@ -33,7 +33,7 @@ fn a_lighting_map_is_brighter_under_the_spot_light() {
     let mut r = BevyRenderer::new(adapter, device, queue);
     let mut plane = loom_mesh::plane_segmented(200.0, 200.0, 4, 4);
     loom_mesh::uvmap::auto_map(&mut plane, loom_mesh::uvmap::AutoMap::Planar, 3);
-    let mut blocker = loom_mesh::box_primitive(Vec3::splat(10.0));
+    let mut blocker = loom_mesh::box_primitive(Vec3::splat(4.0));
     let _ = loom_mesh::edit_ops::translate_mesh(&mut blocker, Vec3::new(50.0, 0.0, 50.0));
     let objects = |with_box: bool| {
         let mut v = vec![SceneObject { id: 1, mesh: &plane, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() }];
@@ -57,6 +57,8 @@ fn a_lighting_map_is_brighter_under_the_spot_light() {
     // Texel x 48 is world x 51.6 (under the spot), texel 16 world x -48.4.
     let (under, away) = (luminance(&img, 48, 32), luminance(&img, 16, 32));
     assert!(under > away + 120, "under the spot {under}, away {away}");
+    // Texel 54 (world x 70.3) is still in the light pool.
+    assert!(luminance(&img, 54, 32) > away + 60, "texel 54 lit: {}", luminance(&img, 54, 32));
     assert!(img.pixels().all(|p| p.0[3] == 255), "the plane fills its map");
     // Without the spot (the default key light lights everything evenly), no difference.
     r.sync_lights(&[]);
@@ -69,7 +71,6 @@ fn a_lighting_map_is_brighter_under_the_spot_light() {
     let shadows = r.bake(&object, &BakeOptions { look: BakeLook::Shadows, ..options }).expect("bake");
     let (shadowed, lit, unlit) = (shadows.get_pixel(48, 32).0[0], shadows.get_pixel(54, 32).0[0], shadows.get_pixel(10, 32).0[0]);
     assert!(shadowed < 80, "under the box: {shadowed}");
-    let row: Vec<u8> = (0..64).map(|x| shadows.get_pixel(x, 32).0[0]).collect();
-    assert!(lit > 200, "lit beside the box's shadow: {lit}; row 32: {row:?}");
+    assert!(lit > 200, "lit beside the box's shadow: {lit}");
     assert_eq!(unlit, 255, "outside the light there is no shadow");
 }

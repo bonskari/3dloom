@@ -53,7 +53,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         return;
     }
     let mut open = true;
-    egui::Window::new("Render To Texture").open(&mut open).resizable(true).default_width(440.0).default_height(620.0).show(ctx, |ui| {
+    egui::Window::new("Render To Texture").open(&mut open).resizable(false).default_width(440.0).show(ctx, |ui| {
         egui::ScrollArea::vertical().id_salt("rtt_scroll").max_height(ui.ctx().screen_rect().height() - 160.0).show(ui, |ui| {
             general(ui, app);
             objects(ui, app);

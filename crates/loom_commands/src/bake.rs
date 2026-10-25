@@ -214,7 +214,7 @@ fn bake_geometry(e: &BakeElement, low: &[Triangle], high: Option<(&Bvh, f32)>, s
             let opts = NormalOptions { space, red_flip: o.red_flip, green_flip: o.green_flip, basis };
             loom_bake::bake_normals(low, &raster, proj.as_ref(), &opts, e.height_in_alpha.then_some((o.min_height, o.max_height)), bg)
         }
-        ElementKind::Height => (loom_bake::bake_height(low, &raster, proj.as_ref(), o.min_height, o.max_height, bg), None),
+        ElementKind::Height => loom_bake::bake_height(low, &raster, proj.as_ref(), o.min_height, o.max_height, bg),
         _ => (loom_bake::bake_alpha(low, &raster, opacity, bg), None),
     };
     let mut covered = raster.coverage();

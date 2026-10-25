@@ -454,21 +454,28 @@ fn grey(h: f32, lo: f32, hi: f32) -> u8 {
 }
 
 /// A HeightMap: the height of the projected surface above the working
-/// model, `min_height` black to `max_height` white (0 without projection).
-pub fn bake_height(low: &[Triangle], raster: &Raster, proj: Option<&Projection>, min_height: f32, max_height: f32, bg: [u8; 3]) -> RgbaImage {
+/// model, `min_height` black to `max_height` white (0 without projection),
+/// and the range of heights the rays found.
+pub fn bake_height(low: &[Triangle], raster: &Raster, proj: Option<&Projection>, min_height: f32, max_height: f32, bg: [u8; 3]) -> (RgbaImage, Option<(f32, f32)>) {
     let mut img = RgbaImage::new(raster.width, raster.height);
     background(&mut img, bg);
+    let mut range: Option<(f32, f32)> = None;
     for y in 0..raster.height {
         for x in 0..raster.width {
             let Some((ti, b)) = raster.get(x, y) else { continue };
             let g = match probe(&low[ti as usize], b, proj) {
-                Ok((_, h)) => grey(h, min_height, max_height),
+                Ok((_, h)) => {
+                    if proj.is_some() {
+                        range = Some(range.map_or((h, h), |(a, c)| (a.min(h), c.max(h))));
+                    }
+                    grey(h, min_height, max_height)
+                }
                 Err(()) => 0,
             };
             img.put_pixel(x, y, Rgba([g, g, g, 255]));
         }
     }
-    img
+    (img, range)
 }
 
 /// An AlphaMap: the opacity (0–1) of each texel's material, as grey and alpha.
@@ -529,7 +536,7 @@ mod tests {
         let (lo, hi) = range.expect("rays hit");
         assert!((lo - 0.5).abs() < 1e-3 && (hi - 0.5).abs() < 1e-3, "{lo} {hi}");
         assert_eq!(img.get_pixel(8, 8).0, [128, 128, 255, 255]);
-        let h = bake_height(&low, &raster, Some(&proj), 0.0, 1.0, [0; 3]);
+        let (h, _) = bake_height(&low, &raster, Some(&proj), 0.0, 1.0, [0; 3]);
         assert!((h.get_pixel(8, 8).0[0] as i32 - 128).abs() <= 1, "{:?}", h.get_pixel(8, 8));
         // Tilted 30 degrees about Y: the normal leans along U.
         let mut tilted = loom_mesh::plane_segmented(12.0, 12.0, 1, 1);
