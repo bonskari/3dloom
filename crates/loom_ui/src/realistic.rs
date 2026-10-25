@@ -14,8 +14,9 @@ use std::sync::Arc;
 pub struct BevyView {
     renderer: loom_bevy::BevyRenderer,
     render_state: egui_wgpu::RenderState,
-    /// `LoomApp::world_version` last synced into Bevy.
-    synced: Option<u64>,
+    /// `LoomApp::world_version` last synced into Bevy, and whether the
+    /// objects show their render materials (Shell: Render) or viewport ones.
+    synced: Option<(u64, bool)>,
     /// `AppState::bitmap_generation` Bevy last read its image files at.
     bitmap_generation: u64,
     /// Egui texture per viewport, with the Bevy view generation it shows.
@@ -168,7 +169,15 @@ impl LoomApp {
     }
 
     fn sync_bevy(&mut self) {
+        let for_render = self.render_job.is_some();
+        self.sync_bevy_for(for_render);
+    }
+
+    /// Syncs the scene into Bevy; `for_render`: Shell materials show their
+    /// Render choice (a render in progress), else their Viewport one.
+    fn sync_bevy_for(&mut self, for_render: bool) {
         let version = self.world_version;
+        let view = if for_render { loom_scene::material::ShellView::Render } else { loom_scene::material::ShellView::Viewport };
         // Light icons and their targets are viewport proxies: not in Bevy at
         // all (they would block their own light), drawn as overlay lines.
         let objects: Vec<(u64, usize, [u8; 3], bool)> = self
@@ -183,7 +192,7 @@ impl LoomApp {
         let scene = &self.state.scene;
         let generation = self.state.bitmap_generation;
         let Gpu::Running(b) = &mut self.gpu else { return };
-        if b.synced == Some(version) {
+        if b.synced == Some((version, for_render)) {
             return;
         }
         if b.bitmap_generation != generation {
@@ -194,12 +203,12 @@ impl LoomApp {
         let list: Vec<loom_bevy::SceneObject> = objects
             .iter()
             .filter_map(|(id, i, wire, renderable)| {
-                Some(loom_bevy::SceneObject { id: *id, mesh: display.get(*i)?, wire_color: *wire, surfaces: scene.node_surfaces(loom_scene::NodeId(*id)), renderable: *renderable, flags: render_flags(scene, loom_scene::NodeId(*id)) })
+                Some(loom_bevy::SceneObject { id: *id, mesh: display.get(*i)?, wire_color: *wire, surfaces: scene.node_surfaces_for(loom_scene::NodeId(*id), view), renderable: *renderable, flags: render_flags(scene, loom_scene::NodeId(*id)) })
             })
             .collect();
         b.renderer.sync(&list);
         b.renderer.sync_lights(&lights);
-        b.synced = Some(version);
+        b.synced = Some((version, for_render));
     }
 
     /// A light node or a light's target.
@@ -237,6 +246,10 @@ impl LoomApp {
     /// Realistic views requested this frame (before egui paints them) and
     /// the next bucket of the render in progress.
     pub(crate) fn finish_realistic_frame(&mut self, ctx: &egui::Context) {
+        if let Some(req) = self.state.pending_bake.take() {
+            self.run_bake(req);
+            ctx.request_repaint();
+        }
         if let Some(req) = self.state.pending_render.take() {
             if let Err(e) = self.start_render(req) {
                 self.last_error = Some(format!("Render: {e}"));
@@ -279,13 +292,13 @@ impl LoomApp {
         if self.bevy().is_none() {
             return Err("no GPU renderer".into());
         }
-        self.sync_bevy();
+        self.sync_bevy_for(true);
         let s = req.settings.clone();
         let hidden = if s.render_hidden { self.hidden_meshes() } else { Vec::new() };
         let scene = &self.state.scene;
         let hidden_objects: Vec<loom_bevy::SceneObject> = hidden
             .iter()
-            .filter_map(|(id, mesh)| scene.node(*id).map(|n| loom_bevy::SceneObject { id: id.0, mesh, wire_color: n.wire_color, surfaces: scene.node_surfaces(*id), renderable: scene.is_renderable(n), flags: render_flags(scene, *id) }))
+            .filter_map(|(id, mesh)| scene.node(*id).map(|n| loom_bevy::SceneObject { id: id.0, mesh, wire_color: n.wire_color, surfaces: scene.node_surfaces_for(*id, loom_scene::material::ShellView::Render), renderable: scene.is_renderable(n), flags: render_flags(scene, *id) }))
             .collect();
         let selected_only = (s.area == RenderArea::Selected).then(|| req.selection.iter().map(|n| n.0).collect());
         let options = loom_bevy::RenderOptions {
@@ -423,6 +436,59 @@ impl LoomApp {
         if job.next >= job.buckets.len() {
             self.finish_render(Ok(()));
         }
+    }
+
+    /// Render To Texture's lit elements: each baked by Bevy in the object's
+    /// texture space, padded and written to its file (blocks for a few
+    /// frames per map); the maps then load again.
+    fn run_bake(&mut self, req: loom_commands::bake::BakeRequest) {
+        use loom_bevy::bake::{BakeLook, BakeObject, BakeOptions};
+        use loom_scene::bake::ElementKind;
+        if self.bevy().is_none() {
+            self.last_error = Some("Render To Texture: the lit elements need a GPU renderer".into());
+            return;
+        }
+        self.sync_bevy_for(false);
+        let started = std::time::Instant::now();
+        let mut done = 0;
+        for job in &req.jobs {
+            let Some(node) = self.state.scene.node(job.node) else { continue };
+            let (name, wire) = (node.name.clone(), self.state.scene.display_color(node));
+            let mesh = loom_commands::bake::world_mesh(&self.state, job.node);
+            let surfaces = self.state.scene.node_surfaces_for(job.node, loom_scene::material::ShellView::Original);
+            let e = &job.element;
+            let look = match e.kind {
+                ElementKind::Complete => BakeLook::Complete,
+                ElementKind::Diffuse => BakeLook::Diffuse { lighting: e.lighting },
+                ElementKind::Specular => BakeLook::Specular { lighting: e.lighting },
+                ElementKind::Lighting => BakeLook::Lighting,
+                ElementKind::Shadows => BakeLook::Shadows,
+                ElementKind::Normals | ElementKind::Alpha | ElementKind::Height => continue,
+            };
+            let object = BakeObject { mesh: &mesh, channel: job.channel, surfaces, wire_color: wire };
+            let options = BakeOptions { look, shadows: e.shadows, direct: e.direct, indirect: e.indirect, size: [e.width, e.height], background: e.background };
+            let Gpu::Running(b) = &mut self.gpu else { return };
+            match b.renderer.bake(&object, &options) {
+                Ok(mut img) => {
+                    let mut covered = loom_bake::alpha_coverage(&img);
+                    loom_bake::dilate(&mut img, &mut covered, job.padding);
+                    if let Err(err) = loom_commands::render::save_image(&img, &job.path) {
+                        self.last_error = Some(format!("Render To Texture: {err}"));
+                        continue;
+                    }
+                    if req.rendered_frame_window {
+                        self.state.rendered.title = format!("{name} {}", e.name);
+                        self.state.rendered.set_image(Some(Arc::new(img)));
+                        self.state.rendered.open = true;
+                    }
+                    done += 1;
+                }
+                Err(err) => self.last_error = Some(format!("Render To Texture: {name} {}: {err}", e.name)),
+            }
+        }
+        // The files changed on disk: maps and viewports read them again.
+        self.state.bitmap_generation += 1;
+        self.state.status_prompt = format!("Render To Texture: {done} map(s) rendered in {:.1} s", started.elapsed().as_secs_f32());
     }
 
     fn finish_render(&mut self, result: Result<(), String>) {

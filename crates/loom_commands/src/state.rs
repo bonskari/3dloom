@@ -1625,6 +1625,8 @@ pub struct AppState {
     pub pending_render: Option<RenderRequest>,
     /// Render To Texture's lit elements, waiting for the UI's renderer.
     pub pending_bake: Option<crate::bake::BakeRequest>,
+    /// The Render To Texture dialog is open (modeless, beside other dialogs).
+    pub render_to_texture_open: bool,
     /// The Rendered Frame Window, its image and the render in progress.
     pub rendered: crate::render::RenderedFrame,
 }
@@ -1829,6 +1831,7 @@ impl AppState {
             uv_editor: UvEditor::default(),
             pending_render: None,
             pending_bake: None,
+            render_to_texture_open: false,
             rendered: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,

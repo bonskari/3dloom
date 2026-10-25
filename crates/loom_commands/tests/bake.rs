@@ -2,7 +2,7 @@
 //! files, the lit ones handed to the renderer, Automatic Flatten UVs,
 //! Projection Mapping and the baked (Shell) materials.
 
-use loom_commands::{execute, execute_json, AppState, Command, Dialog, PrimitiveKind};
+use loom_commands::{execute, execute_json, AppState, Command, PrimitiveKind};
 use loom_scene::bake::ElementKind;
 use loom_scene::material::{MaterialKind, ShellView, Surfaces};
 use loom_scene::{Modifier, NodeId};
@@ -37,9 +37,9 @@ fn element(s: &mut AppState, kind: &str, args: serde_json::Value) {
 fn render_to_texture_opens_its_dialog_with_0() {
     let mut s = AppState::new();
     execute(&mut s, Command::Hotkey { chord: "0".into() }).unwrap();
-    assert_eq!(s.dialog, Some(Dialog::RenderToTexture));
+    assert!(s.render_to_texture_open);
     execute(&mut s, Command::RenderToTexture).unwrap();
-    assert_eq!(s.dialog, None, "the command toggles the dialog");
+    assert!(!s.render_to_texture_open, "the command toggles the dialog");
 }
 
 /// The NormalsMap of a flat plane is (0.5, 0.5, 1) everywhere on it, in the

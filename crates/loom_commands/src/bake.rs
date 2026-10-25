@@ -6,7 +6,7 @@
 
 use crate::command::Command as C;
 use crate::execute::commit_change;
-use crate::{AppState, Dialog};
+use crate::AppState;
 use glam::Mat3;
 use loom_bake::{Bvh, NormalOptions, Projection, Triangle};
 use loom_scene::bake::{BakeElement, BakeObjects, BakeSettings, ElementKind, NormalSpace, ProjectionData, AUTO_UNWRAP_NAME};
@@ -41,8 +41,6 @@ pub struct BakeRequest {
 pub const MAX_MAP_SIZE: u32 = 8192;
 /// Output > preset resolution buttons.
 pub const SIZE_PRESETS: [u32; 5] = [128, 256, 512, 768, 1024];
-/// Output > the larger preset buttons.
-pub const SIZE_PRESETS_LARGE: [u32; 2] = [1024, 2048];
 
 pub fn handles(c: &C) -> bool {
     matches!(
@@ -471,8 +469,8 @@ fn bake(state: &mut AppState) -> Result<Value, String> {
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
     match cmd {
         C::RenderToTexture => {
-            state.dialog = if state.dialog == Some(Dialog::RenderToTexture) { None } else { Some(Dialog::RenderToTexture) };
-            Ok(json!({ "open": state.dialog == Some(Dialog::RenderToTexture) }))
+            state.render_to_texture_open = !state.render_to_texture_open;
+            Ok(json!({ "open": state.render_to_texture_open }))
         }
         C::RenderToTextureSettings { output_dir, skip_existing, rendered_frame_window, objects, enable, padding, projection, auto_unwrap, channel, output_into_source, create_new_baked, render_to_files_only, keep_baked, views_baked, render_baked, rotate_clusters, threshold_angle, fill_holes, spacing } => {
             let objects = match objects {
