@@ -73,12 +73,24 @@ fn new_keep(state: &mut AppState, keep: &str) -> Result<Value, String> {
         other => return Err(format!("unknown New Scene option {other:?} (objects_and_hierarchy / objects / all)")),
     };
     let all: Vec<u64> = state.scene.nodes().map(|n| n.id.0).collect();
+    let rig_worlds: Vec<_> = if unlink && !state.scene.loom_rigs.is_empty() {
+        state.scene.nodes().map(|n| (n.id, state.scene.world_matrix(n.id))).collect()
+    } else { Vec::new() };
     if !all.is_empty() {
         state.selection_mode = crate::state::SelectionMode::Object;
         state.selection = all.iter().map(|i| NodeId(*i)).collect();
         // The animation keys go; each object keeps its pose at the current frame.
         crate::execute(state, C::DeleteSelectedAnimation)?;
-        if unlink {
+        if unlink && !rig_worlds.is_empty() {
+            // Flatten the visible solved pose before discarding its hierarchy-dependent rig.
+            state.scene.loom_rigs.clear();
+            for (id, world) in rig_worlds {
+                if let Some(node) = state.scene.node_mut(id) {
+                    node.parent = None;
+                    node.transform = loom_scene::Transform::from_matrix(world);
+                }
+            }
+        } else if unlink {
             let linked: Vec<u64> = state.scene.nodes().filter(|n| n.parent.is_some()).map(|n| n.id.0).collect();
             for id in linked {
                 crate::execute(state, C::SetParent { id, parent: None })?;
@@ -86,6 +98,16 @@ fn new_keep(state: &mut AppState, keep: &str) -> Result<Value, String> {
         }
     }
     state.scene.animation_clips.clear();
+    if unlink { state.scene.loom_rigs.clear(); }
+    for rig in &mut state.scene.loom_rigs {
+        for limb in &mut rig.limbs {
+            limb.blend = loom_scene::Param::new(limb.blend.get());
+            for offset in &mut limb.pose_offsets { *offset = loom_scene::Param::new(offset.get()); }
+        }
+    }
+    state.scene.bump_version();
+    let valid_rigs: Vec<_> = state.scene.loom_rigs.iter().filter(|r| r.mapping.validate(&state.scene).is_ok() && r.node_ids().iter().all(|id| state.scene.node(*id).is_some())).cloned().collect();
+    state.scene.loom_rigs = valid_rigs;
     state.scene.renew_instance();
     state.selection.clear();
     state.sub_selection.clear();

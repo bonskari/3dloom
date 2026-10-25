@@ -568,5 +568,24 @@ pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[St
         taken.insert(node.name.clone());
         changes.push(Change::AddNode(node));
     }
+    // Carry only complete characterizations; references are never attached to
+    // an existing character that happens to have matching names.
+    let before: Vec<_> = state.scene.loom_rigs.iter().filter(|r| r.node_ids().iter().all(|id| !old.contains(id))).cloned().collect();
+    let mut after = before.clone();
+    let mut next_rig = state.scene.loom_rigs.iter().map(|r| r.id).max().unwrap_or(0);
+    for rig in &src.loom_rigs {
+        rig.mapping.validate(src)?;
+        // An omitted intermediate parent would detach a mapped bone from its
+        // root: merge's partial-node behavior cannot carry that rig.
+        let complete_hierarchy = rig.node_ids().iter().filter(|id| src.node(**id).is_some_and(|n| n.object.is_bone())).all(|id| {
+            *id == rig.mapping.root || src.ancestors(*id).into_iter().take_while(|p| *p != rig.mapping.root).all(|p| map.contains_key(&p))
+        });
+        if !complete_hierarchy { continue; }
+        let Some(mut rig) = rig.remapped(&map) else { continue };
+        next_rig = next_rig.checked_add(1).ok_or("LoomRig IDs exhausted")?;
+        rig.id = next_rig;
+        after.push(rig);
+    }
+    if after != before { changes.push(Change::SetLoomRigs { before, after }); }
     Ok((changes, map))
 }
