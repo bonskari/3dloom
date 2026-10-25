@@ -31,6 +31,13 @@ struct EnvPass {
     dof_loss: vec4<f32>,
     // x: exposure multiplier, y: contrast, z: 1 = grade here.
     grade: vec4<f32>,
+    // Volume Light (omni / spot): position + kind (0 none, 1 omni, 2 spot),
+    // direction + cos(falloff / 2), in-scattering colour + cos(hotspot / 2),
+    // x: range.
+    vlight_pos: array<vec4<f32>, 4>,
+    vlight_dir: array<vec4<f32>, 4>,
+    vlight_color: array<vec4<f32>, 4>,
+    vlight_range: array<vec4<f32>, 4>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -167,6 +174,57 @@ fn fog_amount(i: i32, o: vec3<f32>, d: vec3<f32>, len: f32, depth: f32) -> f32 {
     return 0.0;
 }
 
+// Light a Volume Light scatters towards the eye along o + t d, t in
+// [0, len] (len < 0: the background, as far as the light reaches). Single
+// scattering without shadows: inverse-square light, the spot's cone, Bevy's
+// range fade.
+fn volume_light(o: vec3<f32>, d: vec3<f32>, len: f32) -> vec3<f32> {
+    var sum = vec3(0.0);
+    for (var i = 0; i < 4; i += 1) {
+        let kind = i32(env.vlight_pos[i].w + 0.5);
+        if kind == 0 {
+            continue;
+        }
+        let pos = env.vlight_pos[i].xyz;
+        let range = env.vlight_range[i].x;
+        // The part of the ray within the light's range.
+        let oc = o - pos;
+        let b = dot(oc, d);
+        let disc = b * b - (dot(oc, oc) - range * range);
+        if disc <= 0.0 {
+            continue;
+        }
+        let s = sqrt(disc);
+        var t0 = max(-b - s, 0.0);
+        var t1 = -b + s;
+        if len >= 0.0 {
+            t1 = min(t1, len);
+        }
+        if t1 <= t0 {
+            continue;
+        }
+        let steps = 48;
+        let dt = (t1 - t0) / f32(steps);
+        var acc = 0.0;
+        for (var k = 0; k < steps; k += 1) {
+            let p = o + d * (t0 + (f32(k) + 0.5) * dt);
+            let v = p - pos;
+            let dist2 = max(dot(v, v), 0.25);
+            var att = 1.0 / dist2;
+            let fade = clamp(1.0 - pow(dist2 / (range * range), 2.0), 0.0, 1.0);
+            att *= fade * fade;
+            if kind == 2 {
+                let c = dot(v * inverseSqrt(dist2), env.vlight_dir[i].xyz);
+                let cone = smoothstep(env.vlight_dir[i].w, env.vlight_color[i].w, c);
+                att *= cone * cone;
+            }
+            acc += att * dt;
+        }
+        sum += env.vlight_color[i].rgb * acc;
+    }
+    return sum;
+}
+
 @fragment
 fn environment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let p = vec2<i32>(in.position.xy);
@@ -195,6 +253,13 @@ fn environment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
             }
         }
         c = vec4(c.rgb + (1.0 - c.a) * bg, c.a);
+    }
+    if env.vlight_pos[0].w > 0.5 {
+        var len = -1.0;
+        if geometry {
+            len = length(world_at(in.uv, depth) - near);
+        }
+        c = vec4(c.rgb + volume_light(near, dir, len), c.a);
     }
     if env.grade.z > 0.5 {
         // Contrast around mid grey on the unpremultiplied colour, then exposure.

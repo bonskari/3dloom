@@ -87,19 +87,28 @@ field name, enums as tagged objects or strings as serde derives them.
 - `layers`, `current_layer`: the Layer Manager.
 - `render`: Render Setup — `width`, `height`, `pixel_aspect`,
   `lock_image_aspect`, `lock_pixel_aspect`, `render_hidden`,
-  `force_two_sided`, `save_file`, `output_path`, Area to Render `area`
-  (View / Selected / Region / Crop / Blowup) with the `region` and `blowup`
-  rectangles (x0, y0, x1, y1 as fractions of the frame), and `bevy` (the
-  renderer panel: `antialiasing`, `supersampling`, `shadows`,
-  `shadow_map_size`, `background` and `ambient` sRGB colours). The rendered
-  image itself is not stored.
+  `force_two_sided`, `atmospherics`, `effects`, `save_file`, `output_path`,
+  Area to Render `area` (View / Selected / Region / Crop / Blowup) with the
+  `region` and `blowup` rectangles (x0, y0, x1, y1 as fractions of the
+  frame), and `bevy` (the renderer panel: `antialiasing`, `supersampling`,
+  `shadows`, `shadow_map_size`). The rendered image itself is not stored.
+  Older files kept `background` and `ambient` colours in `bevy`; they load
+  into `environment`.
+- `environment`: Rendering > Environment and Effects — `background`,
+  `tint`, `level`, `ambient` (Params; colours sRGB 0–1), `background_map`,
+  `use_map`, `map_mapping` (Screen / Spherical / Cylindrical / ShrinkWrap),
+  `exposure` (`kind` None / Automatic / Linear / Logarithmic, `active`,
+  `process_background`, `brightness`, `contrast`, `exposure_value`,
+  `mid_tones`), `atmospheres` and `effects` (lists of `name`, `active` and
+  a `kind`: Fog, VolumeFog, VolumeLight; Glow, Blur, BrightnessContrast,
+  ColorBalance, FilmGrain, DepthOfField, each with its parameters).
 
 ## `settings`
 
 `layout` (one of the 14 viewport layouts), `viewports` (view kind, orbit
 camera target / distance / yaw / pitch, shading, edged faces, grid,
 disabled, safe frames, FOV, scene or default lights and the default light
-count, background image path and lock),
+count, background image path, lock and Use Environment Background),
 `active_viewport`, `units` (Units Setup), `named_sets` and
 `named_sub_selections` (named selection sets), `selection`, `frame_range`,
 `fps`, `current_frame`, `real_time`, `loop_playback`, `play_speed`,

@@ -61,12 +61,20 @@ mod uniform {
         /// x: exposure multiplier, y: contrast, z: 1 = applied here (HDR views
         /// without a tonemapping curve, which Bevy leaves ungraded).
         pub grade: Vec4,
+        /// Volume Light of omni and spot lights, marched here: position and
+        /// kind (w: 0 none, 1 omni, 2 spot), direction and the cosine of
+        /// half the falloff, in-scattering colour and the cosine of half the
+        /// hotspot, and x: the light's range.
+        pub vlight_pos: [Vec4; 4],
+        pub vlight_dir: [Vec4; 4],
+        pub vlight_color: [Vec4; 4],
+        pub vlight_range: [Vec4; 4],
     }
 }
 
 impl EnvUniform {
     fn environment(&self) -> bool {
-        self.background.w > 0.5 || self.fog_color.iter().any(|c| c.w > 0.5) || self.grade.z > 0.5
+        self.background.w > 0.5 || self.fog_color.iter().any(|c| c.w > 0.5) || self.grade.z > 0.5 || self.vlight_pos.iter().any(|p| p.w > 0.5)
     }
 
     fn depth_of_field(&self) -> bool {

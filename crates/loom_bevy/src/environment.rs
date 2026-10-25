@@ -259,16 +259,13 @@ pub fn volume_extinction(density: f32, radius: f32) -> f32 {
     density.max(0.0) * 0.15 / radius.max(1e-3)
 }
 
-/// Volume Light density (percent) as the density of a fog volume `length`
-/// deep: at 100% the glow seen through the whole volume is about as bright
-/// as a white surface lit by the light there. Bevy scatters omni and spot
-/// light without the view's exposure (Bevy's default EV100 9.7 makes that
-/// 1.2 · 2^9.7 brighter) and with a factor 0.1; directional light with
-/// both and an isotropic phase of 1 / 4π. The fog scatters (0.5) and
-/// absorbs nothing.
-pub fn volume_light_density(density: f32, length: f32, directional: bool) -> f32 {
-    let per_length = if directional { 4.0 * std::f32::consts::PI / (std::f32::consts::PI * 0.5) } else { 1.0 / (1.2 * 831.746_5 * std::f32::consts::PI * 0.1 * 0.5) };
-    density.max(0.0) / 100.0 * per_length / length.max(1e-3)
+/// Volume Light density (percent) as the density of the fog volume a
+/// directional light scatters in, `length` deep: at 100% the glow seen
+/// through the whole volume is about as bright as a white surface the
+/// light lights (Bevy scatters directional light with an isotropic phase
+/// of 1 / 4π; the fog scatters 0.5 and absorbs nothing).
+pub fn volume_light_density(density: f32, length: f32) -> f32 {
+    density.max(0.0) / 100.0 * 4.0 * std::f32::consts::PI / (std::f32::consts::PI * 0.5) / length.max(1e-3)
 }
 
 /// Layered fog density (0–1) as extinction per world unit: looking straight

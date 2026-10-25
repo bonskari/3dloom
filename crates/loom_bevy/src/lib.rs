@@ -377,11 +377,11 @@ impl BevyRenderer {
         self.apply_volume_lights();
     }
 
-    /// Volume Light: each picked light scatters in a fog volume fitted
-    /// around what it lights (a spot's cone, an omni's reach, the scene for
-    /// a directional light). Bevy finds a spot or omni light for the fog by
-    /// where the ray enters the volume, so a tight volume also keeps the
-    /// light found.
+    /// Volume Light of directional lights: Bevy's volumetric fog in a fog
+    /// volume around the scene (it follows their shadow maps). Omni and spot
+    /// lights are marched by the environment pass ([`volume_light_uniform`]):
+    /// Bevy looks those up by where a ray enters the fog, which misses a
+    /// cone seen from the side.
     fn apply_volume_lights(&mut self) {
         let atmospherics = self.render.as_ref().is_none_or(|r| r.options.atmospherics);
         let lights: Vec<environment::VolumeLight> = if atmospherics { self.env.volume_lights.clone() } else { Vec::new() };
@@ -391,30 +391,19 @@ impl BevyRenderer {
         for l in &lights {
             for id in &l.lights {
                 let Some(s) = self.samples.iter().find(|s| s.id.0 == *id) else { continue };
-                let Some(kind) = lights::kind(s) else { continue };
+                if lights::kind(s) != Some(lights::Kind::Directional) {
+                    continue;
+                }
                 lit.insert(*id);
-                let pos = Vec3::from(s.position.to_array());
-                let dir = Vec3::from(s.direction.to_array()).normalize_or(Vec3::NEG_Z);
-                let reach = ((pos - centre).length() + radius).min(lights::range(s, (pos - centre).length(), radius));
-                let (t, length) = match (kind, s.emitter) {
-                    (lights::Kind::Spot, loom_scene::light::Emitter::Spot { falloff, .. }) => {
-                        let w = 2.0 * reach * (falloff * 0.5).to_radians().tan().min(20.0) + 1.0;
-                        let up = if dir.z.abs() > 0.99 { Vec3::Y } else { Vec3::Z };
-                        (Transform::from_translation(pos + dir * reach * 0.5).looking_to(dir, up).with_scale(Vec3::new(w, w, reach)), reach)
-                    }
-                    (lights::Kind::Directional, _) => (Transform::from_translation(centre).with_scale(Vec3::splat(radius * 2.2)), radius * 2.0),
-                    _ => (Transform::from_translation(pos).with_scale(Vec3::splat(reach * 2.0)), reach),
-                };
-                let directional = kind == lights::Kind::Directional;
                 let fog = FogVolume {
                     fog_color: Color::srgb(l.color[0], l.color[1], l.color[2]),
-                    density_factor: environment::volume_light_density(l.density, length, directional),
+                    density_factor: environment::volume_light_density(l.density, radius * 2.0),
                     absorption: 0.0,
                     scattering: 0.5,
                     scattering_asymmetry: 0.0,
                     ..Default::default()
                 };
-                volumes.push((fog, t));
+                volumes.push((fog, Transform::from_translation(centre).with_scale(Vec3::splat(radius * 2.2))));
             }
         }
         let entities: Vec<(u64, Entity)> = self.scene_lights.iter().map(|(id, l)| (*id, l.entity)).collect();
@@ -435,6 +424,53 @@ impl BevyRenderer {
             let e = self.app.world_mut().spawn((fog, t, layers.clone())).id();
             self.volumes.push(e);
         }
+    }
+
+    /// The environment pass's Volume Light entries for `env`: up to four
+    /// omni / spot lights, their in-scattering colour in the units the
+    /// main pass lights surfaces with (Bevy's exposure and 1/π), so a
+    /// density of 100% seen through a tenth of the scene's diameter glows
+    /// about as bright as a white surface the light lights there.
+    fn volume_light_uniform(&self, env: &EnvSettings) -> [[bevy::math::Vec4; 4]; 4] {
+        use bevy::math::Vec4;
+        let mut out = [[Vec4::ZERO; 4]; 4];
+        let (centre, radius) = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
+        let tint = Color::srgb(env.tint[0], env.tint[1], env.tint[2]).to_linear();
+        let tint = glam::Vec3::new(tint.red, tint.green, tint.blue) * env.level.max(0.0);
+        let mut n = 0;
+        for l in &env.volume_lights {
+            let fog = linear(l.color);
+            let sigma = l.density.max(0.0) / 100.0 * 5.0 / radius.max(1e-3);
+            for id in &l.lights {
+                let Some(s) = self.samples.iter().find(|s| s.id.0 == *id) else { continue };
+                let kind = match lights::kind(s) {
+                    Some(lights::Kind::Point) => 1.0,
+                    Some(lights::Kind::Spot) => 2.0,
+                    _ => continue,
+                };
+                if n == 4 {
+                    return out;
+                }
+                let mut s = s.clone();
+                s.color *= tint;
+                let pos = Vec3::from(s.position.to_array());
+                let d = (pos - centre).length();
+                let c = s.color.max(glam::Vec3::ZERO);
+                let b = c.max_element();
+                let intensity = lights::lumens(&s, d) / (4.0 * std::f32::consts::PI);
+                let k = if b > 0.0 { sigma * intensity / std::f32::consts::PI * lights::EXPOSURE / b } else { 0.0 };
+                let (cos_outer, cos_inner) = match s.emitter {
+                    loom_scene::light::Emitter::Spot { hotspot, falloff } if kind == 2.0 => ((falloff * 0.5).to_radians().cos(), (hotspot.min(falloff) * 0.5).to_radians().cos()),
+                    _ => (-1.0, -1.0),
+                };
+                out[0][n] = pos.extend(kind);
+                out[1][n] = Vec3::from(s.direction.to_array()).normalize_or(Vec3::NEG_Z).extend(cos_outer);
+                out[2][n] = Vec4::new(fog.x * c.x * k, fog.y * c.y * k, fog.z * c.z * k, cos_inner.max(cos_outer + 1e-4));
+                out[3][n] = Vec4::new(lights::range(&s, d, radius), 0.0, 0.0, 0.0);
+                n += 1;
+            }
+        }
+        out
     }
 
     /// Applies the scene's environment (Environment and Effects at the
@@ -503,6 +539,7 @@ impl BevyRenderer {
         let Some(t) = world.get::<Transform>(entity).copied() else { return };
         let bounds = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
         let mut uniform = env_uniform(&env, view, &t, bounds, render, frame);
+        [uniform.vlight_pos, uniform.vlight_dir, uniform.vlight_color, uniform.vlight_range] = self.volume_light_uniform(&env);
         let metered = self.metered.get(&slot).copied().unwrap_or(0.0);
         let (tonemapping, grading, hdr) = if slot == METER_SLOT {
             (Tonemapping::None, ColorGrading { global: ColorGradingGlobal { exposure: -METER_STOPS, ..Default::default() }, ..Default::default() }, false)
