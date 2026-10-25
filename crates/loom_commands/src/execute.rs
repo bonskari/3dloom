@@ -138,9 +138,14 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Ok(json!({ "dialog": "OpenFile" }));
             };
             let path = std::path::PathBuf::from(path);
-            let doc = crate::file::read(&path)?;
+            let (doc, warnings) = crate::file::read_any(&path)?;
             crate::settings::note_recent(state, &path);
-            load_document(state, doc, Some(path));
+            // A .max scene opens untitled: Save asks for a .loom file (there is no .max writer).
+            let max = crate::max_io::is_max(&path);
+            load_document(state, doc, (!max).then_some(path));
+            if max {
+                state.import_report = warnings;
+            }
             Ok(json!({ "nodes": state.scene.len() }))
         }
         C::SaveFile { path } => {
@@ -321,12 +326,32 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Ok(json!({ "dialog": "MergeFile" }));
             };
             let path = std::path::PathBuf::from(path);
-            let doc = crate::file::read(&path)?;
+            let (doc, warnings) = crate::file::read_any(&path)?;
             let label = format!("Merge {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
             let ids = crate::file::merge(state, &doc, names.as_deref(), duplicates.as_deref().unwrap_or_default(), &label)?;
+            if crate::max_io::is_max(&path) {
+                state.import_report = warnings;
+            }
             state.selection_mode = SelectionMode::Object;
             Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
         }
+        C::XrefObjects { path, names, automatic } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::XrefObjectsFile);
+                return Ok(json!({ "dialog": "XrefObjectsFile" }));
+            };
+            state.selection_mode = SelectionMode::Object;
+            crate::xref::add(state, std::path::Path::new(&path), names.as_deref(), false, automatic.unwrap_or(true))
+        }
+        C::XrefScene { path, automatic } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::XrefSceneFile);
+                return Ok(json!({ "dialog": "XrefSceneFile" }));
+            };
+            crate::xref::add(state, std::path::Path::new(&path), None, true, automatic.unwrap_or(true))
+        }
+        C::UpdateXrefs { path } => crate::xref::update(state, path.as_deref()),
+        C::RemoveXref { path } => crate::xref::remove(state, &path),
         C::AutoBackupNow => {
             let path = crate::autosave::backup_now(state)?;
             Ok(json!({ "path": path }))
@@ -3283,6 +3308,7 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 }
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
+    crate::xref::guard(&state.scene, &change)?;
     let change = share_with_instances(&state.scene, change);
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;

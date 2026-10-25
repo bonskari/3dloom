@@ -69,6 +69,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 cmd(ui, app, "Archive...", Command::ArchiveFile { path: None });
                 ui.separator();
                 item(ui, app, "Merge...", "Merge File");
+                ui.menu_button("References", |ui| {
+                    cmd(ui, app, "XRef Objects...", Command::XrefObjects { path: None, names: None, automatic: None });
+                    cmd(ui, app, "XRef Scene...", Command::XrefScene { path: None, automatic: None });
+                    cmd(ui, app, "Update XRefs", Command::UpdateXrefs { path: None });
+                });
                 item(ui, app, "Import...", "Import File");
                 item(ui, app, "Export...", "Export File");
                 item(ui, app, "Export Selected...", "Export Selected");

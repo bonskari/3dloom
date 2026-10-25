@@ -89,7 +89,7 @@ const IMAGES_WRITE: &str = "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr";
 /// Title, extension, "Open"/"Save" button text and the command to run.
 fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
     match dialog {
-        Dialog::OpenFile => ("Open File", "loom", "Open"),
+        Dialog::OpenFile => ("Open File", "loom,max", "Open"),
         Dialog::SaveFileAs => ("Save File As", "loom", "Save"),
         Dialog::SaveFileAsCopy => ("Save Copy As", "loom", "Save"),
         Dialog::ImportFile => ("Import File", "fbx,obj,max", "Open"),
@@ -97,7 +97,9 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::ExportSelected => ("Export Selected", "fbx,obj", "Save"),
         Dialog::SaveSelected => ("Save Selected", "loom", "Save"),
         Dialog::ArchiveFile => ("Archive", "zip,txt", "Save"),
-        Dialog::MergeFile => ("Merge File", "loom", "Open"),
+        Dialog::MergeFile => ("Merge File", "loom,max", "Open"),
+        Dialog::XrefObjectsFile => ("Open File (XRef Objects)", "loom,max", "Open"),
+        Dialog::XrefSceneFile => ("Open File (XRef Scene)", "loom,max", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", IMAGES_READ, "Open"),
         Dialog::BackgroundFile => ("Select Background Image", IMAGES_READ, "Open"),
         Dialog::MaterialMap { .. } | Dialog::MaterialBitmap => ("Select Bitmap Image File", IMAGES_READ, "Open"),
@@ -130,6 +132,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::ExportSelected => Command::ExportSelected { path: Some(p) },
         Dialog::SaveSelected => Command::SaveSelected { path: Some(p) },
         Dialog::ArchiveFile => Command::ArchiveFile { path: Some(p) },
+        Dialog::XrefSceneFile => Command::XrefScene { path: Some(p), automatic: None },
         Dialog::BitmapFit => Command::UvwMapBitmapFit { path: p },
         Dialog::PickUvTexture => Command::PickTexture { path: p },
         Dialog::MaterialMap { channel } => Command::SetMaterialMap {
@@ -306,9 +309,10 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
             return false;
         }
     }
-    if dialog == Dialog::MergeFile {
-        return match loom_commands::file::read(&path) {
-            Ok(doc) => {
+    if dialog == Dialog::MergeFile || dialog == Dialog::XrefObjectsFile {
+        app.state.merge_as_xref = dialog == Dialog::XrefObjectsFile;
+        return match loom_commands::file::read_any(&path) {
+            Ok((doc, _)) => {
                 let names: Vec<String> = doc.scene.nodes().map(|n| n.name.clone()).collect();
                 app.state.merge_pending = Some((path, names));
                 app.state.dialog = Some(Dialog::MergeObjects);

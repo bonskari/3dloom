@@ -166,7 +166,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::Detach => detach::show(ctx, app, &mut open),
         Dialog::DeleteIsolatedVertices => delete_isolated::show(ctx, app, &mut open),
         Dialog::LayerManager => manage_layers::show(ctx, app, &mut open),
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::SaveCustomUiScheme | Dialog::LoadCustomUiScheme | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::SaveCustomUiScheme | Dialog::LoadCustomUiScheme | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile | Dialog::XrefObjectsFile | Dialog::XrefSceneFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::SaveChanges(action) => save_changes::show(ctx, app, action, &mut open),
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),

@@ -56,6 +56,9 @@ pub struct Scene {
     /// Render Setup (saved with the scene, as the reference does).
     #[serde(default)]
     pub render: crate::render::RenderSettings,
+    /// File > XRef Scene / XRef Objects: the referenced files and the nodes they put here.
+    #[serde(default)]
+    pub xrefs: Vec<XrefRecord>,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -82,6 +85,20 @@ pub struct Scene {
     /// Nodes whose Link Constraint frame is being solved (cycle guard).
     #[serde(skip)]
     link_busy: std::cell::RefCell<std::collections::HashSet<NodeId>>,
+}
+
+/// One referenced file (File > XRef Scene / XRef Objects): its nodes here
+/// are copies of the file's objects that Update re-reads; they cannot be
+/// edited in this scene (an XRef Scene's cannot be selected either).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct XrefRecord {
+    pub path: String,
+    /// The whole scene (XRef Scene) rather than chosen objects.
+    pub scene: bool,
+    /// Update Automatically: re-read when the file changes on disk.
+    pub automatic: bool,
+    /// Each referenced object's name in the file and its node here.
+    pub nodes: Vec<(String, NodeId)>,
 }
 
 fn default_layers() -> Vec<Layer> {
@@ -137,6 +154,7 @@ impl Scene {
             materials: Default::default(),
             material_editor: Default::default(),
             render: Default::default(),
+            xrefs: Vec::new(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             eval_in_progress: Default::default(),

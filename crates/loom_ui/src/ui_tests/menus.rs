@@ -252,3 +252,36 @@ fn modifier_list_t_then_enter_adds_taper() {
     let top = h.app.state.scene.node(id).unwrap().modifiers.last().map(|m| m.name.clone());
     assert_eq!(top.as_deref(), Some("Taper"));
 }
+
+/// File > References > XRef Objects...: the file dialog, then the file's
+/// object list; the highlighted object comes in as a reference.
+#[test]
+fn file_references_xref_objects_picks_from_the_list() {
+    let dir = std::env::temp_dir().join("loom-ui-xref");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("props.loom");
+    {
+        let mut src = Harness::new();
+        src.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+        let id = *src.app.state.selection.iter().next().unwrap();
+        src.cmd(Command::Rename { id: id.0, name: "Crate".into() });
+        src.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
+        src.cmd(Command::SaveFileAsCopy { path: Some(path.to_string_lossy().into_owned()) });
+    }
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    menu_path(&mut h, &["File", "References", "XRef Objects..."]);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::XrefObjectsFile));
+    choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeObjects), "{}", h.app.state.status_prompt);
+    h.frames(2);
+    let title = "XRef Merge - props.loom";
+    let p = window_text(&h, title, "Crate");
+    h.click(p);
+    let ok = window_text(&h, title, "OK");
+    h.click(ok);
+    let names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    assert_eq!(names, ["Crate"]);
+    assert_eq!(h.app.state.scene.xrefs.len(), 1);
+    assert!(!h.app.state.merge_as_xref, "the next Merge is a plain merge again");
+}
