@@ -79,6 +79,9 @@ fn mesh_node(name: &str, mesh: loom_mesh::Mesh) -> Node {
     Node::new(name, ObjectKind::EditableMesh(PolyObject::from_mesh(mesh)))
 }
 
+/// A position by its bits (exact-match key).
+type PosKey = (u32, u32, u32);
+
 // ---- 3DS -------------------------------------------------------------------
 
 fn material_from_3ds(m: &TdsMaterial, dir: &Path) -> StandardMaterial {
@@ -139,7 +142,7 @@ fn mesh_from_3ds(m: &loom_mesh::tds::TdsMesh, names: &[String]) -> Result<loom_m
         }
     }
     let key = |p: Vec3| (p.x.to_bits(), p.y.to_bits(), p.z.to_bits());
-    let mut hidden: HashSet<((u32, u32, u32), (u32, u32, u32))> = HashSet::new();
+    let mut hidden: HashSet<(PosKey, PosKey)> = HashSet::new();
     for (i, f) in m.faces.iter().enumerate() {
         let mut uv = BTreeMap::new();
         if m.uvs.len() == m.positions.len() {
