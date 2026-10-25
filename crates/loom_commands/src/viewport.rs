@@ -313,6 +313,8 @@ pub enum Dialog {
     RenderFile,
     /// Rendering > Render Setup (F10).
     RenderSetup,
+    /// Rendering > Render To Texture.
+    RenderToTexture,
     /// Tools > Light Lister.
     LightLister,
     /// General Parameters > Exclude...: the Exclude/Include dialog of a light.

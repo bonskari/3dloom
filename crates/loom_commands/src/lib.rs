@@ -6,6 +6,7 @@ pub mod modifier_list;
 mod material;
 pub mod display;
 pub mod render;
+pub mod bake;
 pub mod execute;
 pub mod poly;
 mod poly_edit;

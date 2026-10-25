@@ -1623,6 +1623,8 @@ pub struct AppState {
     pub mesh_dirty: bool,
     /// A Render waiting for the UI's renderer (the command layer has no GPU).
     pub pending_render: Option<RenderRequest>,
+    /// Render To Texture's lit elements, waiting for the UI's renderer.
+    pub pending_bake: Option<crate::bake::BakeRequest>,
     /// The Rendered Frame Window, its image and the render in progress.
     pub rendered: crate::render::RenderedFrame,
 }
@@ -1826,6 +1828,7 @@ impl AppState {
             exit_requested: false,
             uv_editor: UvEditor::default(),
             pending_render: None,
+            pending_bake: None,
             rendered: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,

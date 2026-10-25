@@ -187,7 +187,7 @@ impl BevyRenderer {
             let world = self.app.world_mut();
             let m = world.resource_mut::<Assets<Mesh>>().add(m);
             let mat = world.resource_mut::<Assets<BakeMaterial>>().add(BakeMaterial { base: mat, extension: UvBake {} });
-            let mut e = world.spawn((Transform::IDENTITY, Mesh3d(m), MeshMaterial3d(mat), RenderLayers::layer(BAKE_LAYER), NotShadowCaster, NoFrustumCulling));
+            let mut e = world.spawn((Transform::IDENTITY, Mesh3d(m), MeshMaterial3d(mat), RenderLayers::from_layers(&[BAKE_LAYER]), NotShadowCaster, NoFrustumCulling));
             if !options.shadows {
                 e.insert(NotShadowReceiver);
             }
@@ -214,11 +214,11 @@ impl BevyRenderer {
             v.used = false;
         }
         let bg = options.background;
-        self.place_view(BAKE_SLOT, options.size, projection, view, [bg[0], bg[1], bg[2], 0.0], false, RenderLayers::layer(BAKE_LAYER));
+        self.place_view(BAKE_SLOT, options.size, projection, view, [bg[0], bg[1], bg[2], 0.0], false, RenderLayers::from_layers(&[BAKE_LAYER]));
         let camera = self.views[&BAKE_SLOT].camera;
         {
             let mut e = self.app.world_mut().entity_mut(camera);
-            let layers = if options.direct { RenderLayers::from_layers(&[BAKE_LAYER, BAKE_KEY_LAYER, LIGHT_LAYER]) } else { RenderLayers::layer(BAKE_LAYER) };
+            let layers = if options.direct { RenderLayers::from_layers(&[BAKE_LAYER, BAKE_KEY_LAYER, LIGHT_LAYER]) } else { RenderLayers::from_layers(&[BAKE_LAYER]) };
             e.insert((layers, ClusterConfig::Single, if tonemap { Tonemapping::AcesFitted } else { Tonemapping::None }));
             if options.indirect {
                 e.remove::<AmbientLight>();

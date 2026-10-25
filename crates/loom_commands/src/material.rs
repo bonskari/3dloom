@@ -214,6 +214,12 @@ fn set_type(lib: &mut MaterialLibrary, id: MaterialId, kind: &str, keep_old: boo
             let b = new_material(lib);
             MaterialKind::Blend(Box::new(Blend { materials: [Some(a), Some(b)], enabled: [true; 2], mask: None, mix_amount: Param::new(0.0), interactive: 0, use_curve: false, upper: 0.75, lower: 0.25 }))
         }
+        "Shell" => {
+            // Original Material (the old one when kept), Baked Material; viewports show the baked one.
+            let a = first.unwrap_or_else(|| new_material(lib));
+            let b = new_material(lib);
+            MaterialKind::Shell(Box::new(loom_scene::material::Shell { materials: [Some(a), Some(b)], viewport: 1, render: 1 }))
+        }
         other => return Err(format!("no material type \"{other}\" ({})", MaterialKind::TYPES.join(", "))),
     };
     lib.insert(id, new);
@@ -446,6 +452,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 match &mut lib.get_mut(&id).ok_or("missing material")?.kind {
                     MaterialKind::MultiSub(list) => list[index as usize].material = Some(sub),
                     MaterialKind::Blend(b) => b.materials[index as usize] = Some(sub),
+                    MaterialKind::Shell(sh) => sh.materials[index as usize] = Some(sub),
                     MaterialKind::Standard => unreachable!("a Standard material has no children"),
                 }
             }
@@ -609,6 +616,11 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     }
                     MaterialKind::Blend(b) => {
                         for c in b.materials.iter_mut() {
+                            copy_child(lib, c);
+                        }
+                    }
+                    MaterialKind::Shell(sh) => {
+                        for c in sh.materials.iter_mut() {
                             copy_child(lib, c);
                         }
                     }
