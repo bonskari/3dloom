@@ -671,6 +671,10 @@ impl Default for GizmoPrefs {
     }
 }
 
+/// Keep Creating's default (the reference keeps the create tool on; this
+/// build makes one object, then returns to Select).
+pub const KEEP_CREATING_DEFAULT: bool = false;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
@@ -696,6 +700,9 @@ pub struct Prefs {
     /// Preferences > General: Space toggles Selection Lock (off by default).
     #[serde(default)]
     pub space_selection_lock: bool,
+    /// Preferences > General / Create menu / the Object Type Pin: the create
+    /// tool stays on after an object is made (off: one object, then Select).
+    pub keep_creating: bool,
     /// Preferences > Files > Auto Backup: Enable (default on).
     pub auto_backup_enable: bool,
     /// Number of Autobak files (default 3).
@@ -727,6 +734,7 @@ impl Default for Prefs {
             viewport_tooltips: true,
             show_cross_hair: false,
             space_selection_lock: false,
+            keep_creating: KEEP_CREATING_DEFAULT,
             auto_backup_enable: true,
             auto_backup_count: 3,
             auto_backup_interval_min: 5.0,
@@ -739,13 +747,13 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 30] = [
+    pub const NAMES: [&'static str; 31] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
-        "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu",
+        "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -761,6 +769,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => b(self.spinner_wrap_cursor),
             "Viewport Tooltips" => b(self.viewport_tooltips),
             "Space Locks Selection" => b(self.space_selection_lock),
+            "Keep Creating" => b(self.keep_creating),
             "Local Center During Animate" => b(self.local_center_during_animate),
             "Show Cross Hair Cursor" => b(self.show_cross_hair),
             "Auto Backup Enable" => b(self.auto_backup_enable),
@@ -800,6 +809,7 @@ impl Prefs {
             "Spinner Wrap Cursor" => self.spinner_wrap_cursor = on,
             "Viewport Tooltips" => self.viewport_tooltips = on,
             "Space Locks Selection" => self.space_selection_lock = on,
+            "Keep Creating" => self.keep_creating = on,
             "Local Center During Animate" => self.local_center_during_animate = on,
             "Auto Backup Enable" => self.auto_backup_enable = on,
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
@@ -1319,6 +1329,8 @@ pub struct AppState {
     /// Rendering > Material Editor (M): its own modeless window, open beside
     /// `dialog` so the bitmap chooser its Maps buttons open does not close it.
     pub material_editor_open: bool,
+    /// Display panel and viewport display settings (Display Color, statistics, Object Color dialog...).
+    pub display: crate::display::DisplaySettings,
     /// What a Select From Scene style dialog is for (Hide/Freeze by Name...).
     pub dialog_purpose: DialogPurpose,
     pub pick_mode: Option<PickMode>,
@@ -1618,6 +1630,7 @@ impl AppState {
             hide_category: HideCategories::default(),
             dialog: None,
             material_editor_open: false,
+            display: Default::default(),
             dialog_purpose: DialogPurpose::Select,
             pick_mode: None,
             align_target: None,
@@ -1816,6 +1829,10 @@ impl AppState {
         if node.hidden || self.scene.layer(node.layer).is_some_and(|l| l.hidden) {
             return false;
         }
+        // Display > Hide Frozen Objects, Hide by Category > Bone Objects.
+        if (self.display.hide_frozen && (node.frozen || self.scene.layer(node.layer).is_some_and(|l| l.frozen))) || (self.display.hide_bones && node.object.is_bone()) {
+            return false;
+        }
         // A hidden group head hides its members.
         let mut cur = node.parent;
         while let Some(p) = cur {
@@ -1841,7 +1858,7 @@ impl AppState {
         let mut any = false;
         for id in ids {
             let Some(node) = self.scene.node(id) else { continue };
-            if !self.is_visible(node) || node.display.ignore_extents {
+            if !self.is_visible(node) || self.scene.display_of(node).ignore_extents {
                 continue;
             }
             let world = self.scene.object_matrix(id);

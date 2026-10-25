@@ -218,3 +218,60 @@ pub fn group_name(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ctx.data_mut(|d| d.insert_temp(id, name));
     }
 }
+
+/// Layer Properties: the layer's name, Hide / Freeze, and the Display
+/// Properties and Rendering Control its objects set By Layer take.
+pub fn layer_properties(ctx: &egui::Context, app: &mut LoomApp, layer: u32, open: &mut bool) {
+    let Some(l) = app.state.scene.layer(layer).cloned() else {
+        *open = false;
+        return;
+    };
+    let mut ok = false;
+    egui::Window::new("Layer Properties").open(open).resizable(false).show(ctx, |ui| {
+        ui.label(format!("Name: {}", l.name));
+        let objects = app.state.scene.nodes().filter(|n| n.layer == layer).count();
+        ui.label(format!("Objects: {objects}"));
+        ui.horizontal(|ui| {
+            let mut hidden = l.hidden;
+            if ui.checkbox(&mut hidden, "Hide").changed() {
+                let _ = app.dispatch(Command::SetLayerHidden { layer, on: hidden });
+            }
+            let mut frozen = l.frozen;
+            if ui.checkbox(&mut frozen, "Freeze").changed() {
+                let _ = app.dispatch(Command::SetLayerFrozen { layer, on: frozen });
+            }
+        });
+        ui.horizontal_top(|ui| {
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Display Properties").strong());
+                    for name in loom_scene::DisplayProps::NAMES {
+                        if matches!(name, "Display Links" | "Link Replaces Object") {
+                            continue;
+                        }
+                        let mut v = l.display.get(name).unwrap_or(false);
+                        if ui.checkbox(&mut v, name).changed() {
+                            let _ = app.dispatch(Command::SetLayerDisplayProperty { layer, name: name.into(), value: v });
+                        }
+                    }
+                });
+            });
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Rendering Control").strong());
+                    for name in loom_scene::RenderProps::NAMES {
+                        let mut v = l.render.get(name).unwrap_or(false);
+                        if ui.checkbox(&mut v, name).changed() {
+                            let _ = app.dispatch(Command::SetLayerRenderProperty { layer, name: name.into(), value: v });
+                        }
+                    }
+                });
+            });
+        });
+        ui.label(egui::RichText::new("Objects whose Display Properties or Rendering Control are By Layer use these.").small());
+        ok = ui.button("OK").clicked();
+    });
+    if ok {
+        *open = false;
+    }
+}

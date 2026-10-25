@@ -121,11 +121,11 @@ fn key_info(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, track: &str) {
         }
         index = index.min(times.len() - 1);
         ui.horizontal(|ui| {
-            if ui.small_button(crate::icons::PREVIOUS_FRAME).on_hover_text("Previous Key").clicked() {
+            if crate::icons::small(ui, crate::icons::PREVIOUS_FRAME, "Previous Key").clicked() {
                 index = index.saturating_sub(1);
             }
             ui.label(format!("{}", index + 1));
-            if ui.small_button(crate::icons::NEXT_FRAME).on_hover_text("Next Key").clicked() {
+            if crate::icons::small(ui, crate::icons::NEXT_FRAME, "Next Key").clicked() {
                 index = (index + 1).min(times.len() - 1);
             }
         });

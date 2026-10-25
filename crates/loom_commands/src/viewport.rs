@@ -432,6 +432,8 @@ pub enum Dialog {
     FileProperties,
     /// Group > Group: the group name.
     GroupName,
+    /// Layer Manager > Layer Properties of `layer`.
+    LayerProperties { layer: u32 },
 }
 
 /// What runs after the Save Changes prompt is answered.

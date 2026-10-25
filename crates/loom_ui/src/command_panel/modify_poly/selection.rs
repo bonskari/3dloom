@@ -61,22 +61,22 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     if ui.button("Ring").on_hover_text(crate::shortcuts::name_tip(&app.state, "Select Edge Ring")).clicked() {
                         let _ = app.dispatch(Command::SelectEdgeRing);
                     }
-                    if ui.small_button(crate::icons::UP).on_hover_text("Ring Up (Ctrl: add, Alt: subtract)").clicked() {
+                    if crate::icons::small(ui, crate::icons::UP, "Ring Up (Ctrl: add, Alt: subtract)").clicked() {
                         let m = ui.input(|i| i.modifiers);
                         let _ = app.dispatch(if m.ctrl { Command::SelectEdgeRingUpAdd } else if m.alt { Command::SelectEdgeRingUpSubtract } else { Command::SelectEdgeRingUp });
                     }
-                    if ui.small_button(crate::icons::DOWN).on_hover_text("Ring Down (Ctrl: add, Alt: subtract)").clicked() {
+                    if crate::icons::small(ui, crate::icons::DOWN, "Ring Down (Ctrl: add, Alt: subtract)").clicked() {
                         let m = ui.input(|i| i.modifiers);
                         let _ = app.dispatch(if m.ctrl { Command::SelectEdgeRingDownAdd } else if m.alt { Command::SelectEdgeRingDownSubtract } else { Command::SelectEdgeRingDown });
                     }
                     if ui.button("Loop").on_hover_text(crate::shortcuts::name_tip(&app.state, "Select Edge Loop")).clicked() {
                         let _ = app.dispatch(Command::SelectEdgeLoop);
                     }
-                    if ui.small_button(crate::icons::UP).on_hover_text("Loop Up (Ctrl: add, Alt: subtract)").clicked() {
+                    if crate::icons::small(ui, crate::icons::UP, "Loop Up (Ctrl: add, Alt: subtract)").clicked() {
                         let m = ui.input(|i| i.modifiers);
                         let _ = app.dispatch(if m.ctrl { Command::SelectEdgeLoopUpAdd } else if m.alt { Command::SelectEdgeLoopUpSubtract } else { Command::SelectEdgeLoopUp });
                     }
-                    if ui.small_button(crate::icons::DOWN).on_hover_text("Loop Down (Ctrl: add, Alt: subtract)").clicked() {
+                    if crate::icons::small(ui, crate::icons::DOWN, "Loop Down (Ctrl: add, Alt: subtract)").clicked() {
                         let m = ui.input(|i| i.modifiers);
                         let _ = app.dispatch(if m.ctrl { Command::SelectEdgeLoopDownAdd } else if m.alt { Command::SelectEdgeLoopDownSubtract } else { Command::SelectEdgeLoopDown });
                     }

@@ -7,6 +7,7 @@ pub mod align_to_view;
 pub mod clone_options;
 pub mod customize_ui;
 pub mod object_properties;
+pub mod object_color;
 pub mod preferences;
 pub mod units_setup;
 pub mod mirror;
@@ -101,6 +102,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             app.state.material_editor_open = false;
         }
     }
+    // Object Color opens over the Object Properties dialog and leaves it open.
+    if app.state.display.object_color_open {
+        let mut open = true;
+        object_color::show(ctx, app, &mut open);
+        if !open {
+            app.state.display.object_color_open = false;
+        }
+    }
     let Some(dialog) = app.state.dialog else { return };
     let mut open = true;
     match dialog {
@@ -157,6 +166,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::SummaryInfo => scene_dialogs::summary_info(ctx, app, &mut open),
         Dialog::FileProperties => scene_dialogs::file_properties(ctx, app, &mut open),
         Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
+        Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
     if !open && app.state.dialog == Some(dialog) {

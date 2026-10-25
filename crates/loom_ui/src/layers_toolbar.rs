@@ -35,8 +35,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                             if ui.selectable_label(l.frozen, "Freeze").on_hover_text("Freeze / unfreeze the layer").clicked() {
                                 let _ = app.dispatch(Command::SetLayerFrozen { layer: l.id, on: !l.frozen });
                             }
-                            if ui.selectable_label(!l.renderable, "No Render").on_hover_text("Render on / off").clicked() {
-                                let _ = app.dispatch(Command::SetLayerRenderable { layer: l.id, on: !l.renderable });
+                            if ui.selectable_label(!l.render.renderable, "No Render").on_hover_text("Render on / off").clicked() {
+                                let _ = app.dispatch(Command::SetLayerRenderable { layer: l.id, on: !l.render.renderable });
                             }
                             let mut rgb = l.color;
                             if ui.color_edit_button_srgb(&mut rgb).changed() {

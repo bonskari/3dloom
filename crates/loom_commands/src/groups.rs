@@ -96,25 +96,33 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
         }
         C::SetLayerColor { layer, rgb } => layer_flag(state, layer, |l| l.color = rgb, "Layer Color"),
-        C::SetLayerRenderable { layer, on } => layer_flag(state, layer, |l| l.renderable = on, "Layer Render"),
+        C::SetLayerRenderable { layer, on } => layer_flag(state, layer, |l| l.render.renderable = on, "Layer Render"),
+        C::LayerProperties { layer } => {
+            state.scene.layer(layer).ok_or_else(|| format!("no layer {layer}"))?;
+            state.dialog = Some(Dialog::LayerProperties { layer });
+            Ok(json!({ "open": true }))
+        }
+        C::SetLayerDisplayProperty { layer, name, value } => {
+            if loom_scene::DisplayProps::default().get(&name).is_none() {
+                return Err(format!("no display property `{name}`"));
+            }
+            layer_flag(state, layer, |l| {
+                l.display.set(&name, value);
+            }, "Layer Display Property")
+        }
+        C::SetLayerRenderProperty { layer, name, value } => {
+            if loom_scene::RenderProps::default().get(&name).is_none() {
+                return Err(format!("no rendering control `{name}`"));
+            }
+            layer_flag(state, layer, |l| {
+                l.render.set(&name, value);
+            }, "Layer Rendering Control")
+        }
+        C::SetDisplayByLayer { on } => by_layer(state, |p| &mut p.display.by_layer, on, "Display By Layer"),
+        C::SetRenderByLayer { on } => by_layer(state, |p| &mut p.render.by_layer, on, "Rendering Control By Layer"),
         C::SetAllLayersHidden { on } => all_layers(state, |l| l.hidden = on, if on { "Hide All Layers" } else { "Unhide All Layers" }),
         C::SetAllLayersFrozen { on } => all_layers(state, |l| l.frozen = on, if on { "Freeze All Layers" } else { "Unfreeze All Layers" }),
-        C::SetColorByLayer { on } => {
-            let mut changes = Vec::new();
-            for id in &state.selection {
-                let Some(n) = state.scene.node(*id) else { continue };
-                let before = n.props();
-                let mut after = before.clone();
-                after.display.color_by_layer = on;
-                if after != before {
-                    changes.push(Change::SetNodeProps { id: *id, before: Box::new(before), after: Box::new(after) });
-                }
-            }
-            if !changes.is_empty() {
-                commit_change(state, if on { "Color By Layer" } else { "Color By Object" }, Change::Group(changes))?;
-            }
-            Ok(json!({}))
-        }
+        C::SetColorByLayer { on } => by_layer(state, |p| &mut p.display.color_by_layer, on, if on { "Color By Layer" } else { "Color By Object" }),
         other => Err(format!("not a group / layer command: {other:?}")),
     }
 }
@@ -131,6 +139,24 @@ fn layer_flag(state: &mut AppState, layer: u32, f: impl Fn(&mut Layer), label: &
     commit_change(state, label, layers_change(state, layers, cur))?;
     let keep: BTreeSet<NodeId> = state.selection.iter().copied().filter(|id| state.scene.node(*id).is_some_and(|n| state.is_selectable(n))).collect();
     state.selection = keep;
+    Ok(json!({}))
+}
+
+/// Sets a By Layer flag of the selected objects (one undo step).
+fn by_layer(state: &mut AppState, flag: impl Fn(&mut loom_scene::NodeProps) -> &mut bool, on: bool, label: &str) -> Result<Value, String> {
+    let mut changes = Vec::new();
+    for id in &state.selection {
+        let Some(n) = state.scene.node(*id) else { continue };
+        let before = n.props();
+        let mut after = before.clone();
+        *flag(&mut after) = on;
+        if after != before {
+            changes.push(Change::SetNodeProps { id: *id, before: Box::new(before), after: Box::new(after) });
+        }
+    }
+    if !changes.is_empty() {
+        commit_change(state, label, Change::Group(changes))?;
+    }
     Ok(json!({}))
 }
 

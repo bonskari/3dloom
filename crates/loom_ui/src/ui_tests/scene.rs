@@ -297,7 +297,7 @@ fn layer_manager_render_colour_hide_all_and_the_object_list() {
     h.click(p);
     assert!(h.app.state.scene.layers.iter().all(|l| !l.hidden));
     h.cmd(Command::SetLayerRenderable { layer: props, on: false });
-    assert!(!h.app.state.scene.layer(props).unwrap().renderable);
+    assert!(!h.app.state.scene.layer(props).unwrap().render.renderable);
 }
 
 #[test]
@@ -413,3 +413,31 @@ fn summary_info_shows_totals_and_keeps_the_description() {
     assert_eq!(open_dialog(&h), None);
 }
 
+
+#[test]
+fn object_properties_by_layer_buttons_and_layer_properties() {
+    let mut h = Harness::new();
+    let a = named_box(&mut h, "Crate", 0.0);
+    h.cmd(Command::CreateLayer { name: Some("Props".into()) });
+    let props = h.app.state.scene.current_layer;
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::ObjectProperties);
+    // Object colour (top), then Display Properties left of Rendering Control.
+    let mut b = in_window(&h, "Object Properties", "By Object");
+    assert_eq!(b.len(), 3, "colour, Display Properties and Rendering Control each have By Object");
+    b.sort_by(|p, q| p.y.total_cmp(&q.y));
+    let mut lower = b[1..].to_vec();
+    lower.sort_by(|p, q| p.x.total_cmp(&q.x));
+    h.click(lower[0]);
+    assert!(h.app.state.scene.node(a).unwrap().display.by_layer);
+    let mut again = in_window(&h, "Object Properties", "By Object");
+    again.sort_by(|p, q| p.y.total_cmp(&q.y));
+    h.click(again[1]);
+    assert!(h.app.state.scene.node(a).unwrap().render.by_layer);
+    h.cmd(Command::CloseDialog);
+    h.cmd(Command::LayerProperties { layer: props });
+    let p = window_text(&h, "Layer Properties", "See-Through");
+    h.click(p);
+    assert!(h.app.state.scene.layer(props).unwrap().display.see_through);
+    assert!(h.app.state.scene.display_of(h.app.state.scene.node(a).unwrap()).see_through, "the By Layer object draws see-through");
+}

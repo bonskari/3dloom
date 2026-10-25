@@ -43,6 +43,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 let ids: Vec<u64> = layers.iter().zip(&objects).filter(|(l, _)| highlighted.contains(&l.id)).flat_map(|(_, o)| o.iter().map(|(i, _)| *i)).collect();
                 let _ = app.dispatch(Command::SelectNodes { ids, op: SelectOp::Replace });
             }
+            if ui.add_enabled(target.is_some(), egui::Button::new("Layer Properties")).on_hover_text("Display properties and rendering control of the highlighted layer").clicked() {
+                if let Some(t) = target {
+                    let _ = app.dispatch(Command::LayerProperties { layer: t });
+                }
+            }
             if ui.add_enabled(!app.state.selection.is_empty(), egui::Button::new("Highlight Selected")).on_hover_text("Highlight Selected Objects' Layers").clicked() {
                 highlighted = app.state.selection.iter().filter_map(|n| app.state.scene.node(*n)).map(|n| n.layer).collect();
             }
@@ -110,7 +115,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     if ui.checkbox(&mut frozen, "").on_hover_text("Freeze").changed() {
                         let _ = app.dispatch(Command::SetLayerFrozen { layer: l.id, on: frozen });
                     }
-                    let mut render = l.renderable;
+                    let mut render = l.render.renderable;
                     if ui.checkbox(&mut render, "").on_hover_text("Render").changed() {
                         let _ = app.dispatch(Command::SetLayerRenderable { layer: l.id, on: render });
                     }

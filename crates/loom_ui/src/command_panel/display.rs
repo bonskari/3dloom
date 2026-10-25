@@ -1,5 +1,5 @@
 //! Display tab: Display Color, Hide by Category, Hide, Freeze, Display
-//! Properties rollouts.
+//! Properties and Link Display rollouts.
 
 use super::rollout;
 use crate::shortcuts::HoverShortcut;
@@ -27,6 +27,22 @@ fn mode_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, mode: PickMode
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let has = !app.state.selection.is_empty();
+    rollout(ui, "Display Color", false, |ui| {
+        use loom_commands::display::ColorSource;
+        let d = &app.state.display;
+        let (wire, shaded) = (d.wireframe_color, d.shaded_color);
+        for (group, current, is_wire) in [("Wireframe:", wire, true), ("Shaded:", shaded, false)] {
+            ui.label(group);
+            ui.horizontal(|ui| {
+                for src in [ColorSource::Object, ColorSource::Material] {
+                    if ui.radio(current == src, src.label()).clicked() && current != src {
+                        let v = Some(src.label().to_owned());
+                        let _ = app.dispatch(if is_wire { Command::SetDisplayColor { wireframe: v, shaded: None } } else { Command::SetDisplayColor { wireframe: None, shaded: v } });
+                    }
+                }
+            });
+        }
+    });
     rollout(ui, "Hide by Category", true, |ui| {
         let c = app.state.hide_category;
         for (label, on, cmd) in [
@@ -40,6 +56,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.checkbox(&mut v, label).with_shortcut(&app.state, cmd.name()).changed() {
                 let _ = app.dispatch(cmd);
             }
+        }
+        let mut bones = app.state.display.hide_bones;
+        if ui.checkbox(&mut bones, "Bone Objects").changed() {
+            let _ = app.dispatch(Command::HideBoneObjectsToggle);
         }
         ui.horizontal(|ui| {
             if ui.button("All").clicked() {
@@ -70,6 +90,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         mode_button(ui, app, "Hide by Hit", PickMode::HideByHit, Command::HideByHit);
         wide(ui, app, "Unhide All", true, Command::UnhideAll);
         wide(ui, app, "Unhide by Name...", true, Command::UnhideByName);
+        let mut hide_frozen = app.state.display.hide_frozen;
+        if ui.checkbox(&mut hide_frozen, "Hide Frozen Objects").changed() {
+            let _ = app.dispatch(Command::HideFrozenObjectsToggle);
+        }
     });
     rollout(ui, "Freeze", true, |ui| {
         wide(ui, app, "Freeze Selected", has, Command::FreezeSelection);
@@ -90,12 +114,23 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         // Every selected object: a box shows mixed when they differ.
         let all: Vec<DisplayProps> = app.state.selection.iter().filter_map(|n| app.state.scene.node(*n)).map(|n| n.display.clone()).collect();
         for name in DisplayProps::NAMES {
+            if name == "Vertex Color Shaded" {
+                continue;
+            }
             let on = all.iter().filter(|p| p.get(name) == Some(true)).count();
             let mut v = on == all.len();
-            if ui.add(egui::Checkbox::new(&mut v, name).indeterminate(on > 0 && on < all.len())).changed() {
+            let label = if name == "Vertex Color" { "Vertex Colors" } else { name };
+            if ui.add(egui::Checkbox::new(&mut v, label).indeterminate(on > 0 && on < all.len())).changed() {
                 let _ = app.dispatch(Command::SetSelectionDisplayProperty { name: name.into(), value: v });
             }
         }
+        ui.horizontal(|ui| {
+            ui.add_space(18.0);
+            let on = props.vertex_colors_shaded;
+            if ui.selectable_label(on, "Shaded").on_hover_text("Shaded viewports light the vertex colours").clicked() {
+                let _ = app.dispatch(Command::SetDisplayProperty { id: id.0, name: "Vertex Color Shaded".into(), value: !on });
+            }
+        });
         ui.separator();
         ui.label("Show Map in Viewport:");
         ui.horizontal_wrapped(|ui| {
@@ -120,5 +155,20 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         if let loom_scene::TextureDisplay::Bitmap(path) = &props.texture {
             ui.label(egui::RichText::new(path).small());
         }
+    });
+    rollout(ui, "Link Display", false, |ui| {
+        let ids: Vec<u64> = app.state.selection.iter().map(|n| n.0).collect();
+        let nodes: Vec<loom_scene::DisplayProps> = app.state.selection.iter().filter_map(|n| app.state.scene.node(*n)).map(|n| n.display.clone()).collect();
+        ui.add_enabled_ui(!nodes.is_empty(), |ui| {
+            for name in DisplayProps::LINK_NAMES {
+                let on = nodes.iter().filter(|p| p.get(name) == Some(true)).count();
+                let mut v = !nodes.is_empty() && on == nodes.len();
+                if ui.add(egui::Checkbox::new(&mut v, name).indeterminate(on > 0 && on < nodes.len())).changed() {
+                    for id in &ids {
+                        let _ = app.dispatch(Command::SetDisplayProperty { id: *id, name: name.into(), value: v });
+                    }
+                }
+            }
+        });
     });
 }

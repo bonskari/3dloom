@@ -294,6 +294,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                 });
                 ui.separator();
+                let mut keep = app.state.prefs.keep_creating;
+                if ui.checkbox(&mut keep, "Keep Creating").changed() {
+                    let _ = app.dispatch(Command::KeepCreatingToggle);
+                    ui.close_menu();
+                }
+                ui.separator();
                 item(ui, app, "Test Room", "Test Room");
             });
             ui.menu_button("Modifiers", |ui| {

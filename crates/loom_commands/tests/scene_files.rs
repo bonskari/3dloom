@@ -153,7 +153,9 @@ fn layer_color_render_and_objects_by_layer() {
     assert_eq!(s.scene.display_color(s.scene.node(a).unwrap()), own);
     assert!(s.scene.is_renderable(s.scene.node(a).unwrap()));
     execute(&mut s, Command::SetLayerRenderable { layer: props, on: false }).unwrap();
-    assert!(!s.scene.is_renderable(s.scene.node(a).unwrap()));
+    assert!(s.scene.is_renderable(s.scene.node(a).unwrap()), "By Object: the object's own Renderable");
+    execute(&mut s, Command::SetRenderByLayer { on: true }).unwrap();
+    assert!(!s.scene.is_renderable(s.scene.node(a).unwrap()), "By Layer: the layer's Render");
     // New layers get different colours.
     execute(&mut s, Command::CreateLayer { name: Some("Walls".into()) }).unwrap();
     assert_ne!(s.scene.layer(s.scene.current_layer).unwrap().color, s.scene.layer(0).unwrap().color);
@@ -193,7 +195,7 @@ fn layer_colors_and_file_properties_are_saved_in_the_scene_file() {
     let mut t = AppState::new();
     execute(&mut t, Command::OpenFile { path: p(&path) }).unwrap();
     let l = t.scene.layer(props).unwrap();
-    assert_eq!((l.color, l.renderable), ([1, 2, 3], false));
+    assert_eq!((l.color, l.render.renderable), ([1, 2, 3], false));
     assert_eq!(t.file_properties.author, "Johannes");
     assert_eq!(t.file_properties.description, "A test scene");
     assert_eq!(t.file_properties.custom.get("Level").map(String::as_str), Some("3"));
@@ -354,3 +356,26 @@ fn fbx_export_and_import_keep_the_layers() {
     assert_eq!(s.scene.layers.len(), 1, "one undo removes the imported layer too");
 }
 
+
+#[test]
+fn display_properties_and_rendering_control_by_layer() {
+    let mut s = AppState::new();
+    let a = named_box(&mut s, "A", 0.0);
+    execute(&mut s, Command::CreateLayer { name: Some("Ghosts".into()) }).unwrap();
+    let ghosts = s.scene.current_layer;
+    execute(&mut s, Command::SetLayerDisplayProperty { layer: ghosts, name: "See-Through".into(), value: true }).unwrap();
+    execute(&mut s, Command::SetLayerRenderProperty { layer: ghosts, name: "Cast Shadows".into(), value: false }).unwrap();
+    assert!(execute(&mut s, Command::SetLayerDisplayProperty { layer: ghosts, name: "Nope".into(), value: true }).is_err());
+    assert!(execute(&mut s, Command::SetLayerRenderProperty { layer: ghosts, name: "Nope".into(), value: true }).is_err());
+    let n = |s: &AppState| s.scene.node(a).unwrap().clone();
+    assert!(!s.scene.display_of(&n(&s)).see_through, "By Object: the object's own");
+    assert!(s.scene.render_of(&n(&s)).cast_shadows);
+    execute(&mut s, Command::SetDisplayByLayer { on: true }).unwrap();
+    execute(&mut s, Command::SetRenderByLayer { on: true }).unwrap();
+    assert!(s.scene.display_of(&n(&s)).see_through, "By Layer: the layer's");
+    assert!(!s.scene.render_of(&n(&s)).cast_shadows);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert!(s.scene.render_of(&n(&s)).cast_shadows, "undo puts Rendering Control back By Object");
+    execute(&mut s, Command::LayerProperties { layer: ghosts }).unwrap();
+    assert_eq!(s.dialog, Some(loom_commands::Dialog::LayerProperties { layer: ghosts }));
+}

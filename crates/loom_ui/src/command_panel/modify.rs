@@ -138,7 +138,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 open = ui.ctx().data(|d| d.get_temp::<bool>(id.with("was_in_level"))) == Some(false);
             }
             let mut leave = false;
-            if ui.add(egui::Button::new(if open { icons::COLLAPSE } else { icons::EXPAND }).frame(false).min_size(egui::vec2(10.0, 0.0))).clicked() {
+            let r = ui.add(egui::Button::new(if open { icons::COLLAPSE } else { icons::EXPAND }).frame(false).min_size(egui::vec2(10.0, 0.0)));
+            icons::named(&r, egui::WidgetType::Button, if open { "Collapse" } else { "Expand" });
+            if r.clicked() {
                 open = !open;
                 leave = !open && in_level;
             }
@@ -170,7 +172,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
                 // The bulb is lit while the modifier is on.
                 let bulb = egui::RichText::new(icons::MODIFIER_ON).color(if *enabled { egui::Color32::from_rgb(250, 235, 160) } else { egui::Color32::from_gray(90) });
-                if ui.add(egui::Button::new(bulb).frame(false)).on_hover_text("Modifier on / off").clicked() {
+                let r = ui.add(egui::Button::new(bulb).frame(false));
+                icons::named(&r, egui::WidgetType::Button, "Modifier on / off");
+                if r.on_hover_text("Modifier on / off").clicked() {
                     toggle = Some((i, !*enabled));
                 }
                 let label = if instance.is_some() { format!("{name}  (instanced)") } else { name.clone() };

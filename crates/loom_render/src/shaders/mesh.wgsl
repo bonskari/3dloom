@@ -92,6 +92,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     var base = mix(in.color.rgb, t.rgb, t.a);
     if (view.override_color.a > 0.0) {
         base = view.override_color.rgb;
+    } else if (in.spec.a < 0.0) {
+        // Unlit colours (vertex colours without Shaded).
+        return vec4<f32>(base, in.color.a);
     }
 
     let n = normalize(in.world_normal);

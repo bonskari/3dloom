@@ -4,6 +4,7 @@
 pub mod command;
 pub mod modifier_list;
 mod material;
+pub mod display;
 pub mod render;
 pub mod execute;
 pub mod poly;

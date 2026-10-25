@@ -256,12 +256,13 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         mode(ui, app, icons::UV_FREEFORM, "Freeform Mode", TvMode::Freeform, Command::FreeformMode);
         mode(ui, app, icons::PAN, "Pan", TvMode::Pan, Command::Pan);
         ui.separator();
-        ui.menu_button(egui::RichText::new(icons::MIRROR).size(icons::SIZE), |ui| {
+        let mirror = ui.menu_button(egui::RichText::new(icons::MIRROR).size(icons::SIZE), |ui| {
             item(ui, app, "Mirror Horizontal", Command::MirrorHorizontal);
             item(ui, app, "Mirror Vertical", Command::MirrorVertical);
             item(ui, app, "Flip Horizontal", Command::FlipHorizontal);
             item(ui, app, "Flip Vertical", Command::FlipVertical);
         });
+        icons::named(&mirror.response, egui::WidgetType::Button, "Mirror");
         ui.separator();
         if ui.selectable_label(e.show_map, "Show Map").clicked() {
             let _ = app.dispatch(Command::ShowMap);
