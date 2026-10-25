@@ -132,6 +132,8 @@ pub enum CreateKind {
     Camera { target: bool },
     /// Lights > Standard: target lights drag from the light to its target, the others are placed by a click.
     Light(loom_commands::light::LightKind),
+    /// Geometry > Patch Grids: Quad Patch (`quad`) or Tri Patch, dragged corner to corner.
+    PatchGrid { quad: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +196,8 @@ pub struct LoomApp {
     pub create_kind: Option<CreateKind>,
     /// Create > Geometry class: Standard Primitives or Compound Objects.
     pub create_compound: bool,
+    /// Create > Geometry shows the Patch Grids object types.
+    pub create_patch_grids: bool,
     /// Compound Objects > Object Type button pressed.
     pub compound_kind: Option<command_panel::compound::CompoundKind>,
     /// A Line being drawn in the viewport.
@@ -405,6 +409,7 @@ impl LoomApp {
             bitmap_cache: std::collections::HashMap::new(),
             create_kind: None,
             create_compound: false,
+            create_patch_grids: false,
             compound_kind: None,
             line: None,
             bone_points: Vec::new(),

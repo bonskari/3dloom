@@ -76,7 +76,12 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             e("Select", Command::SelectObject),
             e("Clone", Command::Clone),
             e("Object Properties...", Command::ObjectProperties),
-            Entry { label: "Convert To".into(), action: Action::Submenu(vec![e("Convert to Editable Poly", Command::ConvertToEditablePoly), e("Convert to Editable Spline", Command::ConvertToEditableSpline)]) },
+            Entry { label: "Convert To".into(), action: Action::Submenu(vec![
+                e("Convert to Editable Mesh", Command::ConvertToEditableMesh),
+                e("Convert to Editable Poly", Command::ConvertToEditablePoly),
+                e("Convert to Editable Patch", Command::ConvertToEditablePatch),
+                e("Convert to Editable Spline", Command::ConvertToEditableSpline),
+            ]) },
         ],
     };
     let poly_selected = s
@@ -90,7 +95,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
         let a = n.active_entry?;
         let slot = n.modifiers.get(a)?;
         let levels = slot.modifier.sub_levels();
-        (!levels.is_empty() && n.edit_poly().filter(|_| n.editing_entry().is_some()).is_none() && n.editing_spline_entry().is_none()).then(|| (a, slot.sub_level, levels, slot.name.clone()))
+        (!levels.is_empty() && n.edit_poly().filter(|_| n.editing_entry().is_some()).is_none() && n.editing_spline_entry().is_none() && n.editing_patch_entry().is_none()).then(|| (a, slot.sub_level, levels, slot.name.clone()))
     });
     let (tools1, tools2) = if let Some((index, current, levels, name)) = modifier_levels {
         let mut t1: Vec<Entry> = vec![e(if current == 0 { "> Top-level" } else { "Top-level" }, Command::ModifierSubobjectLevel { index: index as u32, level: 0 })];
@@ -138,6 +143,41 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             SelectionMode::Object => Vec::new(),
         };
         t2.extend(ops);
+        (Some(Quadrant { title: "tools 1", items: t1 }), Some(Quadrant { title: "tools 2", items: t2 }))
+    } else if s.patch_selected() || s.tri_mesh_selected() {
+        // Editable Mesh / Patch: their own five levels (two share a selection mode) and tools.
+        let patch = s.patch_selected();
+        let current = loom_commands::mesh_edit::current_level(s);
+        let names: [&str; 5] = if patch { ["Vertex", "Handle", "Edge", "Patch", "Element"] } else { ["Vertex", "Edge", "Face", "Polygon", "Element"] };
+        let mut t2: Vec<Entry> = vec![e(if current == 0 { "> Top-level" } else { "Top-level" }, Command::SubObjectLevel { level: 0 })];
+        for (i, l) in names.iter().enumerate() {
+            let lvl = i as u32 + 1;
+            let label = if current == lvl { format!("> {l}") } else { (*l).to_owned() };
+            t2.push(e(&label, Command::SubObjectLevel { level: lvl }));
+        }
+        let mp = &s.mesh_patch;
+        let ops: Vec<Entry> = match (patch, current) {
+            (true, 1) => vec![e("Weld", Command::PatchWeld), e("Delete", Command::PatchDelete)],
+            (true, 3) => vec![e("Add Tri", Command::PatchAddTri), e("Add Quad", Command::PatchAddQuad), e("Delete", Command::PatchDelete)],
+            (true, 4 | 5) => vec![e("Extrude", Command::PatchExtrude { amount: mp.patch_extrude, outline: mp.patch_outline }), e("Flip", Command::PatchFlipNormals), e("Delete", Command::PatchDelete)],
+            (false, 1) => vec![e("Weld", Command::Weld { threshold: s.poly_settings.weld_threshold }), e("Collapse", Command::Collapse)],
+            (false, 2) => vec![e("Turn", Command::MeshTurnEdge { edges: Vec::new() }), e("Divide", Command::MeshDivide), e("Visible", Command::MeshEdgeVisibility { visible: true }), e("Invisible", Command::MeshEdgeVisibility { visible: false })],
+            (false, 3..=5) => vec![
+                e("Extrude", Command::MeshExtrude { amount: mp.extrude }),
+                e("Bevel", Command::MeshBevel { height: mp.extrude, outline: mp.outline }),
+                e("Tessellate", Command::MeshTessellate),
+                e("Divide", Command::MeshDivide),
+                e("Flip Normals", Command::MeshFlipNormals),
+            ],
+            _ => Vec::new(),
+        };
+        t2.extend(ops);
+        let t1 = if patch {
+            vec![e("Relax", Command::PatchRelax)]
+        } else {
+            let sub = current > 0;
+            vec![e("Attach", Command::Attach), if sub { e("Detach", Command::Detach) } else { off("Detach", "needs a sub-object selection") }, e("Explode", Command::MeshExplode { name: None })]
+        };
         (Some(Quadrant { title: "tools 1", items: t1 }), Some(Quadrant { title: "tools 2", items: t2 }))
     } else if poly_selected {
         let level = s.selection_mode;

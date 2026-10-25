@@ -2251,7 +2251,8 @@ impl AppState {
             if self.edit_poly_active() {
                 groups.push("Edit Poly");
             }
-            if self.poly_selected() {
+            // An Editable Patch takes the level keys 1-5 of the group too.
+            if self.poly_selected() || self.patch_selected() {
                 groups.push("Editable Poly");
             }
         }

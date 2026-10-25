@@ -84,23 +84,33 @@ impl CreateSession {
     /// Starts creation at a construction-plane point. Returns None when the
     /// node could not be created.
     pub fn begin(app: &mut LoomApp, what: CreateKind, anchor: Vec3, basis: (Vec3, Vec3, Vec3), pointer: egui::Pos2, units_per_px: f32) -> Option<Self> {
+        // A patch grid is dragged out like a Plane (Rectangle): Width × Length.
+        let patch = match what {
+            CreateKind::PatchGrid { quad } => Some(quad),
+            _ => None,
+        };
         let (kind, shape) = match what {
             CreateKind::Primitive(k) => (k, None),
+            CreateKind::PatchGrid { .. } => (PrimitiveKind::Plane, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
             CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) => return None,
         };
-        let label = format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label()));
+        let label = match patch {
+            Some(q) => format!("Create {}", if q { "Quad Patch" } else { "Tri Patch" }),
+            None => format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label())),
+        };
         app.state.undo.begin(&label);
-        let created = match shape {
-            Some(sk) => app.dispatch(Command::CreateShape { kind: sk, position: anchor.to_array(), size: [0.0, 0.0, 0.0] }).ok(),
-            None => app.dispatch(Command::CreatePrimitive { kind, position: anchor.to_array(), size: [0.0, 0.0, 0.0] }).ok(),
+        let created = match (shape, patch) {
+            (_, Some(quad)) => app.dispatch(Command::CreatePatchGrid { quad, position: anchor.to_array(), length: 0.0, width: 0.0 }).ok(),
+            (Some(sk), None) => app.dispatch(Command::CreateShape { kind: sk, position: anchor.to_array(), size: [0.0, 0.0, 0.0] }).ok(),
+            (None, None) => app.dispatch(Command::CreatePrimitive { kind, position: anchor.to_array(), size: [0.0, 0.0, 0.0] }).ok(),
         };
         let node = created.and_then(|_| app.state.selection.iter().next().copied());
         let Some(node) = node else {
             app.state.undo.end();
             return None;
         };
-        let method = if shape.is_some() { "" } else { app.creation_method(kind) };
+        let method = if shape.is_some() { "" } else if patch.is_some() { "Rectangle" } else { app.creation_method(kind) };
         let session = Self { kind, shape, node, label, step: Step::Dragging, anchor, basis, step_origin: pointer, units_per_px, radius1: 0.0, height: 0.0, method };
         // Orient the object to the construction plane (local Z = plane normal).
         let rot = glam::Quat::from_rotation_arc(Vec3::Z, basis.2);

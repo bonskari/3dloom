@@ -10,7 +10,7 @@ pub mod execute;
 pub mod poly;
 mod poly_edit;
 mod poly_props;
-mod mesh_edit;
+pub mod mesh_edit;
 pub(crate) mod patch_edit;
 mod groups;
 mod stack;
