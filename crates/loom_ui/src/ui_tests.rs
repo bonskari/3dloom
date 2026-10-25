@@ -1091,6 +1091,117 @@ fn middle_drag_pans_even_when_frames_come_slowly() {
     assert_ne!(h.app.state.active().camera.target, target, "so does a slow injected drag");
 }
 
+/// Eight frames a second: egui's smoothed pointer velocity stays zero, so
+/// a drag must follow each frame's pointer move.
+const SLOW: f64 = 1.0 / 8.0;
+
+#[test]
+fn slow_frames_drag_create_a_box() {
+    let mut h = Harness::new();
+    maximized(&mut h);
+    h.frame_time = SLOW;
+    h.app.create_kind = Some(crate::CreateKind::Primitive(PrimitiveKind::Box));
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let (a, b) = (r.center() + egui::vec2(-80.0, 60.0), r.center() + egui::vec2(80.0, 140.0));
+    h.drag(a, b);
+    let c = b + egui::vec2(0.0, -60.0);
+    for i in 1..=6 {
+        h.run(vec![egui::Event::PointerMoved(b + (c - b) * (i as f32 / 6.0))]);
+    }
+    h.click(c);
+    assert_eq!(h.app.state.scene.len(), 1, "one box");
+    let id = *h.app.state.selection.iter().next().unwrap();
+    let params = h.app.state.scene.node(id).unwrap().object.parameters();
+    for name in ["Length", "Width", "Height"] {
+        let v = params.iter().find(|(n, _)| *n == name).map(|(_, v)| format!("{v:?}")).unwrap_or_default();
+        assert!(!v.contains("(0.0)"), "{name} was set by the slow drag: {v}");
+    }
+}
+
+#[test]
+fn slow_frames_move_gizmo_drag_moves_the_object() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    h.key(egui::Key::W);
+    h.frame_time = SLOW;
+    let id = *h.app.state.selection.iter().next().unwrap();
+    let before = h.app.state.scene.node(id).unwrap().transform.position.get();
+    let p = h.screen_of(Vec3::ZERO);
+    h.drag(p, p + egui::vec2(60.0, 0.0));
+    assert_ne!(h.app.state.scene.node(id).unwrap().transform.position.get(), before, "the slow gizmo drag moves the box");
+}
+
+#[test]
+fn slow_frames_lasso_region_selects() {
+    let mut h = Harness::new();
+    let id = created(&mut h, PrimitiveKind::Box, [0.0; 3], 30.0);
+    h.cmd(Command::SelectNone);
+    framed(&mut h);
+    h.cmd(Command::SelectionRegion { shape: loom_commands::SelectionRegion::Lasso });
+    h.frame_time = SLOW;
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let vp = h.app.camera_for(i).view_projection(rect.width() / rect.height());
+    let pts: Vec<egui::Pos2> = h.app.world_meshes()[0].1.vertices().iter().filter_map(|v| crate::viewport_widget::project_world_to_screen(v.position, vp, rect)).collect();
+    let b = egui::Rect::from_points(&pts).expand(12.0);
+    let corners = [b.left_top(), b.right_top(), b.right_bottom(), b.left_bottom(), b.left_top()];
+    h.run(vec![egui::Event::PointerMoved(corners[0])]);
+    h.run(vec![egui::Event::PointerButton { pos: corners[0], button: egui::PointerButton::Primary, pressed: true, modifiers: h.mods }]);
+    for w in corners.windows(2) {
+        for k in 1..=4 {
+            h.run(vec![egui::Event::PointerMoved(w[0] + (w[1] - w[0]) * (k as f32 / 4.0))]);
+        }
+    }
+    h.run(vec![egui::Event::PointerButton { pos: corners[4], button: egui::PointerButton::Primary, pressed: false, modifiers: h.mods }]);
+    h.frames(1);
+    assert_eq!(selected(&h), vec![id], "a slow lasso around the box selects it");
+}
+
+#[test]
+fn slow_frames_line_drag_shapes_the_knot() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.start_create(Some(crate::CreateKind::Line));
+    h.frames(1);
+    h.frame_time = SLOW;
+    let a = ground_point(&h, Vec3::ZERO);
+    h.drag(a, a + egui::vec2(60.0, 0.0));
+    let id = h.app.line.as_ref().expect("the line started").node;
+    let knot = h.app.state.scene.node(id).unwrap().edit_spline().unwrap().shape.splines[0].knots[0].clone();
+    assert_ne!(knot.out_vec, Vec3::ZERO, "the slow drag gives the first knot a Bezier handle: {knot:?}");
+}
+
+#[test]
+fn slow_frames_extrude_drag_extrudes() {
+    let mut h = Harness::new();
+    poly_box(&mut h);
+    h.key(egui::Key::Num4);
+    let p = h.screen_of(top_face_point());
+    h.click(p);
+    assert_eq!(h.sub_count(), 1);
+    h.cmd(Command::ExtrudeMode);
+    h.frame_time = SLOW;
+    let before = h.app.world_meshes()[0].1.vertices().len();
+    h.drag(p, p + egui::vec2(0.0, -60.0));
+    assert!(h.app.world_meshes()[0].1.vertices().len() > before, "the slow Extrude drag extrudes the face");
+}
+
+#[test]
+fn slow_frames_paint_stroke_paints_along_the_drag() {
+    let mut h = Harness::new();
+    let (_, bones) = skinned_cylinder(&mut h);
+    h.cmd(Command::SkinSelectBone { id: bones[1] });
+    h.cmd(Command::SkinSetPainterOption { name: "Max Size".into(), value: 8.0 });
+    h.click(panel_text(&h, "Paint Weights"));
+    let (_, world) = loom_commands::skin::vertex_world_positions(&h.app.state).unwrap();
+    let low: Vec<(u32, egui::Pos2)> = clear_front_vertices(&h).into_iter().filter(|(v, _)| (world[*v as usize].z - 5.0).abs() < 0.1).collect();
+    assert!(low.len() >= 2, "two front vertices on the z = 5 ring");
+    let before = skin_weight(&h, low[1].0 as usize, 1);
+    h.frame_time = SLOW;
+    h.drag(low[0].1, low[1].1);
+    assert!(skin_weight(&h, low[1].0 as usize, 1) > before, "the slow stroke reaches the far vertex");
+}
+
 #[test]
 fn injected_input_rejects_bad_events() {
     use crate::live::parse_input;
