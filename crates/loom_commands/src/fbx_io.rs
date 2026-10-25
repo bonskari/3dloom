@@ -29,6 +29,7 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
 /// ordinary FBX importer is set to update an existing character by name.
 pub fn import_animation(state: &mut AppState, path: &Path) -> Result<(Vec<NodeId>, Option<String>), String> {
     let original = state.exchange.fbx_import.clone();
+    state.exchange.fbx_import.metahuman_body_only = false;
     state.exchange.fbx_import.file_content = FileContent::Add;
     state.exchange.fbx_import.animation = true;
     state.exchange.fbx_import.take = None;
@@ -44,7 +45,18 @@ pub fn import_animation(state: &mut AppState, path: &Path) -> Result<(Vec<NodeId
 
 fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Result<(Vec<NodeId>, Option<String>), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let o = state.exchange.fbx_import.clone();
+    let mut o = state.exchange.fbx_import.clone();
+    if o.metahuman_body_only {
+        // Validate the complete source deformers before reducing it. These
+        // overrides affect this import only; the user's options stay intact.
+        o.file_content = FileContent::Add;
+        o.animation = false;
+        o.take = None;
+        o.bones_as_dummies = false;
+        o.deformations = true;
+        o.skins = true;
+        o.morphs = true;
+    }
     // Automatic: into the system unit; else the file's numbers are taken as `units`.
     let mut ro = loom_fbx::ReadOpts::new(if o.units_automatic { unit_metres(state) } else { o.units.metres() });
     ro.smoothing_groups = o.smoothing_groups;
@@ -54,6 +66,9 @@ fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Re
     ro.skins = o.deformations && o.skins;
     ro.morphs = o.deformations && o.morphs;
     let mut doc = loom_fbx::read_with(&bytes, &ro).map_err(|e| format!("{}: {e}", path.display()))?;
+    if o.metahuman_body_only {
+        doc = loom_fbx::body_only_profile(&doc).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
     if require_animation && !doc.anim.as_ref().is_some_and(|t| t.end > t.start && !t.tracks.is_empty() && t.fps.is_finite() && t.fps > 0.0) {
         return Err(format!("{}: no animated take to import", path.display()));
     }

@@ -303,6 +303,10 @@ pub fn fbx_import(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.label(format!("File content: {} elements, {} materials, {} textures, {} caches", info["elements"], info["materials"], info["textures"], info["caches"]));
                 ui.label(format!("FPS: file {}, system {}", info["file_fps"], info["system_fps"]));
             });
+            check(ui, app, D, "metahuman_body_only", "MetaHuman body-only (rest pose)", o.metahuman_body_only);
+            if o.metahuman_body_only {
+                ui.label("Adds a new character with native Body bones and skins. No animation or facial rig; validates source skins and morphs.");
+            }
             section(ui, "Include", true, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("File content:");

@@ -183,6 +183,8 @@ pub const FBX_VERSIONS: [(u32, &str); 2] = [(7400, "FBX 2014/2015 (7.4)"), (7500
 #[serde(default)]
 pub struct FbxImportOptions {
     pub preset: String,
+    /// Import a MetaHuman composite at rest using only its canonical Body skeleton.
+    pub metahuman_body_only: bool,
     pub file_content: FileContent,
     pub smoothing_groups: bool,
     pub animation: bool,
@@ -220,6 +222,7 @@ impl Default for FbxImportOptions {
     fn default() -> Self {
         Self {
             preset: "Media & Entertainment".into(),
+            metahuman_body_only: false,
             file_content: FileContent::AddAndUpdateAnimation,
             smoothing_groups: true,
             animation: true,
