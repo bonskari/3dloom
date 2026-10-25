@@ -68,6 +68,8 @@ fn skin_morph_creates_a_morph_at_the_bone_angle() {
     execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::X, degrees: -90.0, system: None }).unwrap();
     let straight = s.scene.eval_mesh(arm).value.mesh.vertices()[0].position;
     assert!((bent - straight).length() > 2.9, "the morph only fires at its angle: {:?}", bent - straight);
+    // Undo: the rotation, the bone selection, then the delta.
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     let Modifier::SkinMorph(d) = &s.scene.node(arm).unwrap().modifiers[0].modifier else { panic!() };

@@ -27,7 +27,12 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     let position = state.undo.position();
     // Selection undo: the outermost command records what it did to the selection.
     let outer = crate::sel_undo::enter(state);
+    // Undo / Redo restore selections themselves; Open, Reset and Fetch start the history over.
     let undo_cmd = matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation);
+    if outer && matches!(cmd, Command::OpenFile { .. } | Command::ResetFile | Command::Fetch) {
+        crate::sel_undo::forget(state);
+    }
+    let undo_cmd = undo_cmd || matches!(cmd, Command::OpenFile { .. } | Command::ResetFile | Command::Fetch);
     let sel_before = (outer && !undo_cmd).then(|| crate::sel_undo::snap(state));
     let r = execute_inner(state, cmd);
     crate::sel_undo::leave(state);

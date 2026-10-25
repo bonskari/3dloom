@@ -40,6 +40,11 @@ pub fn snap(state: &AppState) -> SelSnap {
     SelSnap { nodes: state.selection.clone(), sub: state.sub_selection.iter().collect(), mode: state.selection_mode }
 }
 
+/// The history starts over (Open, Reset, Fetch).
+pub fn forget(state: &mut AppState) {
+    state.sel_history.entries.clear();
+}
+
 /// Called around every command: true when this is the outermost call.
 pub fn enter(state: &mut AppState) -> bool {
     state.sel_history.depth += 1;
