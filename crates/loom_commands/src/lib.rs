@@ -49,6 +49,7 @@ pub mod morph;
 pub mod autosave;
 pub mod live;
 pub mod anim_cmds;
+mod animation_clips;
 pub mod controllers;
 pub mod track_view;
 pub mod motion;

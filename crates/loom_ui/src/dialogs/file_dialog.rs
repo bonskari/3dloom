@@ -45,7 +45,7 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     // Set Project Folder: each kind of file starts in its project folder.
     let kind = match dialog {
         Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::ReplaceFile => "scenes",
-        Dialog::ImportFile => "import",
+        Dialog::ImportFile | Dialog::ImportAnimationClip => "import",
         Dialog::ExportFile | Dialog::ExportSelected => "export",
         Dialog::RenderFile | Dialog::SaveRenderedImage => "renderoutput",
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::MaterialMap { .. } | Dialog::MaterialBitmap | Dialog::PickUvTexture | Dialog::BitmapFit => "sceneassets/images",
@@ -103,6 +103,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::OpenFile => ("Open File", "loom,max", "Open"),
         Dialog::SaveFileAs => ("Save File As", "loom", "Save"),
         Dialog::SaveFileAsCopy => ("Save Copy As", "loom", "Save"),
+        Dialog::ImportAnimationClip => ("Import Animation Clip", "bvh,fbx", "Open"),
         Dialog::ImportFile => ("Import File", "fbx,bvh,obj,max,3ds,stl,dxf", "Open"),
         Dialog::ExportFile => ("Export File", "fbx,obj,3ds,stl,dxf", "Save"),
         Dialog::ExportSelected => ("Export Selected", "fbx,obj,3ds,stl,dxf", "Save"),
@@ -144,6 +145,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::SaveFileAs => Command::SaveFileAs { path: Some(p) },
         Dialog::SaveFileAsCopy => Command::SaveFileAsCopy { path: Some(p) },
         Dialog::ImportFile => Command::ImportFile { path: Some(p) },
+        Dialog::ImportAnimationClip => Command::ImportAnimationClip { path: Some(p) },
         Dialog::ExportFile => Command::ExportFile { path: Some(p) },
         Dialog::ExportSelected => Command::ExportSelected { path: Some(p) },
         Dialog::SaveSelected => Command::SaveSelected { path: Some(p) },
@@ -349,7 +351,13 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
         };
     }
     match command(dialog, &path).map(|cmd| app.dispatch(cmd)) {
-        Some(Ok(_)) | None => true,
+        Some(Ok(result)) => {
+            if dialog == Dialog::ImportAnimationClip {
+                if let Err(e) = crate::clip_timeline::preview_import(app, &result) { app.state.status_prompt=e; }
+            }
+            true
+        }
+        None => true,
         Some(Err(e)) => {
             app.state.status_prompt = e;
             false
@@ -360,6 +368,13 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
 #[cfg(test)]
 mod tests {
     use super::use_native;
+
+    #[test]
+    fn animation_picker_filters_source_formats_and_uses_dedicated_command() {
+        let dialog = loom_commands::Dialog::ImportAnimationClip;
+        assert_eq!(super::purpose(dialog), ("Import Animation Clip", "bvh,fbx", "Open"));
+        assert!(matches!(super::command(dialog, std::path::Path::new("source.fbx")), Some(loom_commands::Command::ImportAnimationClip { path: Some(p) }) if p == "source.fbx"));
+    }
 
     #[test]
     fn system_dialogs_unless_remote_controlled() {

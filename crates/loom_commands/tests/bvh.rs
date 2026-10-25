@@ -95,6 +95,22 @@ fn external_kimodo_motion() {
     assert!((rest_z - 100.0 * scale).abs() < 1e-4);
     assert!((s.fps - 30.0).abs() < 1e-4);
     assert_eq!(s.frame_range, (0, 149));
+    let clip = s.scene.animation_clips[0].clone();
+    let before: Vec<_> = [0.0, 50.0, 149.0].iter().map(|f| {
+        s.scene.at_time(*f, || clip.nodes.iter().map(|id| s.scene.world_matrix(*id)).collect::<Vec<_>>())
+    }).collect();
+    execute(&mut s, Command::MoveAnimationClip { id: clip.id, start: 20.25 }).unwrap();
+    assert_eq!(s.frame_range, (0, 170));
+    for (i, f) in [20.25, 70.25, 169.25].iter().enumerate() {
+        for (j, id) in clip.nodes.iter().enumerate() {
+            assert!(before[i][j].abs_diff_eq(s.scene.at_time(*f, || s.scene.world_matrix(*id)), 1e-4));
+        }
+    }
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.animation_clips[0], clip);
+    assert_eq!(s.frame_range, (0, 149));
+    execute(&mut s, Command::RedoSceneOperation).unwrap();
+    assert_eq!(s.scene.animation_clips[0].start, 20.25);
 }
 
 #[test]

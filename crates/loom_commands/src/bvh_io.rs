@@ -84,18 +84,27 @@ fn euler_near(q: Quat, previous: Option<Vec3>) -> Vec3 {
     }
     r
 }
-fn keyed(rest: Vec3, samples: &[Vec3]) -> Param<Vec3> {
+fn keyed(rest: Vec3, samples: &[Vec3], frame_scale: f32) -> Param<Vec3> {
     use loom_scene::{anim::{Interp, TangentType}, param::{Controller, KeyedTracks, ParamType}};
     let mut tracks = KeyedTracks::from_rest(ParamType::Vec3, rest.to_array().to_vec());
     for (c, track) in tracks.tracks.iter_mut().enumerate() {
         track.interp = Interp::Linear;
         for (frame, v) in samples.iter().enumerate() {
-            track.set_key(frame as f32, v[c], (TangentType::Linear, TangentType::Linear));
+            track.set_key(frame as f32 * frame_scale, v[c], (TangentType::Linear, TangentType::Linear));
         }
     }
     Param { controller: Controller::Keys(tracks) }
 }
 pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> {
+    import_with(state, path, false)
+}
+
+/// Add source motion in the project's existing timebase.
+pub fn import_animation(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> {
+    import_with(state, path, true)
+}
+
+fn import_with(state: &mut AppState, path: &Path, preserve_timing: bool) -> Result<Vec<NodeId>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     // Braces need not have surrounding whitespace.
     let text = text.replace('{', " { ").replace('}', " } ");
@@ -112,6 +121,14 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
     r.expect("Time:")?;
     let dt = r.number()?;
     if dt <= 0.0 || !(1.0 / dt).is_finite() { return Err("invalid BVH frame time".into()); }
+    if preserve_timing && (!state.fps.is_finite() || state.fps <= 0.0) {
+        return Err("project frame rate must be finite and positive".into());
+    }
+    let frame_scale = if preserve_timing { state.fps / (1.0 / dt) } else { 1.0 };
+    let clip_end = (frames - 1) as f32 * frame_scale;
+    if !frame_scale.is_finite() || frame_scale <= 0.0 || !clip_end.is_finite() || clip_end.ceil() as f64 > i32::MAX as f64 {
+        return Err("BVH animation exceeds timeline frame limits".into());
+    }
     let channels: usize = joints.iter().map(|j| j.channels.len()).sum();
     if channels == 0 || frames.checked_mul(channels) != Some(r.tokens.len() - r.at) {
         return Err("BVH motion sample count does not match frames and channels".into());
@@ -167,17 +184,31 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
         node.parent = j.parent.map(|p| ids[p]);
         node.layer = state.scene.current_layer;
         node.wire_color = [180, 180, 100];
-        node.transform.position = keyed(converted(j.offset, scale), &positions[i]);
-        node.transform.rotation = keyed(Vec3::ZERO, &rotations[i]);
+        node.transform.position = keyed(converted(j.offset, scale), &positions[i], frame_scale);
+        node.transform.rotation = keyed(Vec3::ZERO, &rotations[i], frame_scale);
         changes.push(Change::AddNode(node));
     }
+    let before_clips = state.scene.animation_clips.clone();
+    let mut after_clips = before_clips.clone();
+    let clip_id = after_clips.iter().map(|c| c.id).max().unwrap_or(0).checked_add(1).ok_or("animation clip IDs exhausted")?;
+    after_clips.push(loom_scene::AnimationClip {
+        id: clip_id,
+        name: path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "BVH".into()),
+        nodes: ids.clone(), start: 0.0, end: clip_end,
+    });
+    changes.push(Change::SetAnimationClips { before: before_clips, after: after_clips });
     // Import owns one history step even if a drag release was lost.
     while state.undo.in_transaction() { state.undo.end(); }
     let timing_before = crate::timing_undo::snap(state);
     crate::execute::commit_exact(state, "Import BVH", Change::Group(changes))?;
-    state.fps = 1.0 / dt;
-    state.frame_range = (0, frames as i32 - 1);
-    crate::execute::set_frame(state, 0)?;
+    if preserve_timing {
+        state.frame_range.0 = state.frame_range.0.min(0);
+        state.frame_range.1 = state.frame_range.1.max(clip_end.ceil() as i32);
+    } else {
+        state.fps = 1.0 / dt;
+        state.frame_range = (0, frames as i32 - 1);
+        crate::execute::set_frame(state, 0)?;
+    }
     crate::timing_undo::record(state, timing_before);
     state.selection = ids.iter().copied().collect();
     state.sub_selection.clear();

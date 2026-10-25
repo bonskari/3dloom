@@ -645,6 +645,7 @@ commands! {
     UvwMapAcquire => "UVW Map Acquire", Loom, "UVW Map > Acquire: copy another object's UVW Map gizmo and parameters (absolute: same world placement)." { node: u64 };
     UvwMapAlignTo => "UVW Map Align To", Loom, "Normal Align's pick: the gizmo's Z along `normal` at `point` (world), then Fit." { point: [f32; 3], normal: [f32; 3] };
     SetTextureDisplay => "Set Texture Display", Loom, "Display > Show Map in Viewport: `kind` none / checker / bitmap (with `path`)." { id: u64, kind: String, path: Option<String> };
+    ImportAnimationClip => "Import Animation Clip", MainUI, "Import a BVH or animated FBX as a separate editable source skeleton and timeline clip; without `path` opens the animation picker." { path: Option<String> };
     ImportFile => "Import File", MainUI, "Import an FBX, a Wavefront OBJ (each `o` / `g` block an Editable Poly) or a .max scene file (nodes, hierarchy, transforms, pivots, layers, Editable Poly / Mesh with UVs and material ids, Box / Cylinder / Plane, editable splines, Free cameras, Omni / Target Direct lights, Standard and Multi/Sub-Object materials, and the modifiers Loom has with their parameters; what it cannot read goes to the Import Summary), one undo entry; without `path` the Import dialog shows." { path: Option<String> };
     ExportFile => "Export File", MainUI, "Export the visible objects by the file's extension: .fbx (hierarchy, meshes, cameras, bones, skin / morph deformers, animation, materials and textures) or .obj (+ .mtl), with the FBX / OBJ export options (`Set Exchange Option`); without `path` the Export dialog shows, then the format's options dialog." { path: Option<String> };
     ExportSelected => "Export Selected", MainUI, "Export the selected objects to .fbx or .obj as Export File does; without `path` the dialog shows." { path: Option<String> };
@@ -903,6 +904,7 @@ commands! {
     ShadeSelectedFacesToggle => "Viewport Selection Shade Selected Faces Toggle", MainUI, "Shade selected faces red in the viewports (F2).";
     SelectionBracketToggle => "Viewport Selection Show Selection Bracket Toggle", MainUI, "Show or hide selection brackets (J).";
     TimeConfiguration => "Time Configuration", Loom, "Open the Time Configuration dialog.";
+    MoveAnimationClip => "Move Animation Clip", Loom, "Move a source animation clip to frame `start`, shifting all its members' native keys together." { id: u64, start: f32 };
     SetFrame => "Set Frame", Loom, "Jump the time slider to a frame (clamped to the active time segment)." { frame: i32 };
     SetTimeConfiguration => "Set Time Configuration", Loom, "Time Configuration dialog: active time segment start/end and frame rate." { start: Option<i32>, end: Option<i32>, fps: Option<f32> };
     SetFov => "Set FOV", Loom, "Set the perspective field of view in degrees (Field-of-View button)." { degrees: f32 };

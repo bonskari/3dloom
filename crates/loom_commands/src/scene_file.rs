@@ -85,6 +85,8 @@ fn new_keep(state: &mut AppState, keep: &str) -> Result<Value, String> {
             }
         }
     }
+    state.scene.animation_clips.clear();
+    state.scene.renew_instance();
     state.selection.clear();
     state.sub_selection.clear();
     state.undo = loom_scene::UndoStack::new(state.undo.limit());

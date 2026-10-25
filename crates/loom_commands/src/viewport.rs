@@ -403,6 +403,7 @@ pub enum Dialog {
     TopologyWarning,
     /// File > Import (FBX, OBJ, .max).
     ImportFile,
+    ImportAnimationClip,
     SaveAnimation,
     LoadAnimation,
     OutOfRangeTypes,

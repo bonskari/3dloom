@@ -22,6 +22,27 @@ fn unit_metres(state: &AppState) -> f64 {
 }
 
 pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> {
+    import_with(state, path, false).map(|(ids, _)| ids)
+}
+
+/// Animation sources always add independent nodes, even when the user's
+/// ordinary FBX importer is set to update an existing character by name.
+pub fn import_animation(state: &mut AppState, path: &Path) -> Result<(Vec<NodeId>, Option<String>), String> {
+    let original = state.exchange.fbx_import.clone();
+    state.exchange.fbx_import.file_content = FileContent::Add;
+    state.exchange.fbx_import.animation = true;
+    state.exchange.fbx_import.take = None;
+    state.exchange.fbx_import.fill_timeline = true;
+    state.exchange.fbx_import.bones_as_dummies = false;
+    state.exchange.fbx_import.deformations = true;
+    state.exchange.fbx_import.skins = true;
+    state.exchange.fbx_import.morphs = true;
+    let result = import_with(state, path, true);
+    state.exchange.fbx_import = original;
+    result
+}
+
+fn import_with(state: &mut AppState, path: &Path, require_animation: bool) -> Result<(Vec<NodeId>, Option<String>), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let o = state.exchange.fbx_import.clone();
     // Automatic: into the system unit; else the file's numbers are taken as `units`.
@@ -33,6 +54,23 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
     ro.skins = o.deformations && o.skins;
     ro.morphs = o.deformations && o.morphs;
     let mut doc = loom_fbx::read_with(&bytes, &ro).map_err(|e| format!("{}: {e}", path.display()))?;
+    if require_animation && !doc.anim.as_ref().is_some_and(|t| t.end > t.start && !t.tracks.is_empty() && t.fps.is_finite() && t.fps > 0.0) {
+        return Err(format!("{}: no animated take to import", path.display()));
+    }
+    if require_animation && (!state.fps.is_finite() || state.fps <= 0.0) {
+        return Err("project frame rate must be finite and positive".into());
+    }
+    let frame_scale = if require_animation { state.fps / doc.anim.as_ref().expect("animated take checked above").fps } else { 1.0 };
+    let clip_range = doc.anim.as_ref().map(|t| (t.start as f32 * frame_scale, t.end as f32 * frame_scale));
+    if require_animation {
+        let (a, b) = clip_range.expect("animated take checked above");
+        if !frame_scale.is_finite() || frame_scale <= 0.0 || !a.is_finite() || !b.is_finite() || (a.floor() as f64) < i32::MIN as f64 || (b.ceil() as f64) > i32::MAX as f64 {
+            return Err("FBX animation exceeds timeline frame limits".into());
+        }
+        for (_, anim) in &mut doc.anim.as_mut().expect("animated take checked above").tracks {
+            for f in &mut anim.frames { *f *= frame_scale; }
+        }
+    }
     // Cameras / Lights off: those nodes come in as plain empties (dropped unless they hold children).
     for n in &mut doc.nodes {
         if (!o.cameras && matches!(n.kind, FbxKind::Camera { .. })) || (!o.lights && matches!(n.kind, FbxKind::Light(_))) {
@@ -228,7 +266,21 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
     if changes.is_empty() {
         return Err(format!("{}: no objects matched the scene to update", path.display()));
     }
+    // A new source owns its imported nodes. Updating existing controllers
+    // keeps their current clip ownership and does not manufacture another clip.
+    if let Some(t) = doc.anim.as_ref().filter(|t| !t.tracks.is_empty() && !ids.is_empty() && existing.iter().all(Option::is_none)) {
+        let before = state.scene.animation_clips.clone();
+        let mut after = before.clone();
+        let id = after.iter().map(|c| c.id).max().unwrap_or(0).checked_add(1).ok_or("animation clip IDs exhausted")?;
+        after.push(loom_scene::AnimationClip {
+            id, name: path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| t.name.clone()),
+            nodes: ids.clone(), start: t.start as f32 * frame_scale, end: t.end as f32 * frame_scale,
+        });
+        changes.push(Change::SetAnimationClips { before, after });
+    }
     let label = format!("Import {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+    while state.undo.in_transaction() { state.undo.end(); }
+    let timing = crate::timing_undo::snap(state);
     crate::execute::commit_exact(state, &label, Change::Group(changes))?;
     // Selection sets become named selection sets.
     for (name, members) in &doc.selection_sets {
@@ -237,21 +289,28 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
             state.named_sets.insert(name.clone(), set);
         }
     }
-    // Fill timeline: a file with a take sets the active time segment and frame rate to it.
-    if let Some(t) = doc.anim.as_ref().filter(|t| !t.tracks.is_empty() && o.fill_timeline) {
+    // Dedicated source clips retain the project timebase and playhead.
+    if require_animation {
+        let (a, b) = clip_range.expect("animated take checked above");
+        state.frame_range.0 = state.frame_range.0.min(a.floor() as i32);
+        state.frame_range.1 = state.frame_range.1.max(b.ceil() as i32);
+        crate::timing_undo::record(state, timing);
+    // Legacy Import File keeps the FBX importer's Fill Timeline behavior.
+    } else if let Some(t) = doc.anim.as_ref().filter(|t| !t.tracks.is_empty() && o.fill_timeline) {
         state.frame_range = (t.start, t.end.max(t.start + 1));
         if t.fps > 0.0 {
             state.fps = t.fps;
         }
         let f = state.current_frame.clamp(state.frame_range.0, state.frame_range.1);
         crate::execute::set_frame(state, f)?;
+        crate::timing_undo::record(state, timing);
     }
     if !ids.is_empty() {
         state.selection = ids.iter().copied().collect();
         state.sub_selection.clear();
         state.selection_mode = SelectionMode::Object;
     }
-    Ok(ids)
+    Ok((ids, doc.anim.as_ref().map(|t| t.name.clone())))
 }
 
 /// The dialog's curve filter settings as the FBX module takes them.

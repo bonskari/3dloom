@@ -51,6 +51,9 @@ pub struct Scene {
     /// Hierarchy > IK chains.
     #[serde(default)]
     pub ik_chains: Vec<crate::ik::IkChain>,
+    /// Timeline source clips, whose members retain native animation keys.
+    #[serde(default)]
+    pub animation_clips: Vec<crate::AnimationClip>,
     /// Track View note tracks, track sets and per-track flags.
     #[serde(default)]
     pub track_data: crate::tracks::TrackData,
@@ -122,6 +125,9 @@ impl Scene {
     /// Runtime project identity: survives clones, changes for new/opened scenes.
     pub fn instance_id(&self) -> u64 { self.instance_id }
 
+    /// A New operation changes ownership even when some nodes are retained.
+    pub fn renew_instance(&mut self) { self.instance_id = fresh_scene_instance(); }
+
     /// The material Material Editor slot `slot` shows: its library material,
     /// or the slot's untouched default.
     pub fn slot_material(&self, slot: usize) -> crate::material::StandardMaterial {
@@ -161,6 +167,7 @@ impl Scene {
             eval_count: std::cell::Cell::new(0),
             version_counter: std::cell::Cell::new(1),
             ik_chains: Vec::new(),
+            animation_clips: Vec::new(),
             track_data: Default::default(),
             materials: Default::default(),
             material_editor: Default::default(),
@@ -586,6 +593,8 @@ impl Scene {
         for child in self.children(id) {
             self.set_parent(child, grandparent);
         }
+        for clip in &mut self.animation_clips { clip.nodes.retain(|n| *n != id); }
+        self.animation_clips.retain(|clip| !clip.nodes.is_empty());
         self.nodes.remove(&id)
     }
 

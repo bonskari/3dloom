@@ -10,6 +10,8 @@ pub mod skin;
 pub mod morph;
 pub mod node;
 pub mod anim;
+pub mod clip;
+pub use clip::AnimationClip;
 pub mod constraint;
 pub mod edit_normals;
 pub mod select_mods;

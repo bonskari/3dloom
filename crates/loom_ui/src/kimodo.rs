@@ -172,10 +172,8 @@ pub(crate) fn poll(app: &mut LoomApp, ctx: &egui::Context) {
 
 fn import_result(app: &mut LoomApp, path: std::path::PathBuf) {
     let imported = (|| -> Result<(), String> {
-        app.dispatch(Command::ImportFile { path: Some(path.to_string_lossy().into_owned()) })?;
-        if app.state.display.hide_bones { app.dispatch(Command::HideBoneObjectsToggle)?; }
-        app.dispatch(Command::ZoomExtentsSelected)?;
-        if !app.state.playing { app.dispatch(Command::PlayAnimation)?; }
+        let imported = app.dispatch(Command::ImportAnimationClip { path: Some(path.to_string_lossy().into_owned()) })?;
+        crate::clip_timeline::preview_import(app, &imported)?;
         Ok(())
     })();
     match imported {
@@ -230,6 +228,8 @@ mod tests {
         app.state.prefs.kimodo_api_url = api;
         app.kimodo.prompt = "A man sits quietly in a chair, breathing gently, hands resting on his thighs.".into();
         app.kimodo.duration = 5.;
+        app.state.fps = 24.;
+        app.state.current_frame = 200;
         let folder = std::env::temp_dir().join(format!("loom-kimodo-live-{}",std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         app.state.file = Some(folder.join("test.loom"));
@@ -242,9 +242,10 @@ mod tests {
         }
         assert!(app.kimodo.status.starts_with("Animation imported."),"{}",app.kimodo.status);
         assert!(app.state.playing);
-        assert_eq!(app.state.frame_range,(0,149));
+        assert_eq!(app.state.frame_range,(0,120));
+        assert_eq!(app.state.current_frame,0);
         assert!(app.state.scene.nodes().count() >= 77);
-        assert!((app.state.fps-30.).abs()<0.01);
+        assert!((app.state.fps-24.).abs()<0.01);
         std::fs::remove_dir_all(folder).unwrap();
     }
 
@@ -252,7 +253,7 @@ mod tests {
     fn result_from_another_scene_is_preserved_without_modifying_current_scene() {
         let mut app = LoomApp::headless();
         let previous = app.state.scene.instance_id();
-        app.state.scene = loom_scene::Scene::new();
+        loom_commands::file_action(&mut app.state,loom_commands::PendingFileAction::New).unwrap();
         assert_ne!(previous,app.state.scene.instance_id());
         let folder=std::env::temp_dir().join(format!("loom-kimodo-context-{}",std::process::id()));
         let (tx,rx)=mpsc::channel();

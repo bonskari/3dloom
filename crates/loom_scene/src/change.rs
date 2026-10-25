@@ -66,6 +66,11 @@ pub enum Change {
         before: Vec<crate::ik::IkChain>,
         after: Vec<crate::ik::IkChain>,
     },
+    /// Timeline source clip metadata.
+    SetAnimationClips {
+        before: Vec<crate::AnimationClip>,
+        after: Vec<crate::AnimationClip>,
+    },
     /// A node's constraints (Animation > Constraints, Motion panel).
     SetConstraints {
         id: NodeId,
@@ -237,6 +242,11 @@ impl Change {
                 scene.render = (**after).clone();
                 Ok(())
             }
+            Change::SetAnimationClips { after, .. } => {
+                scene.animation_clips = after.clone();
+                scene.bump_version();
+                Ok(())
+            }
             Change::SetIkChains { after, .. } => {
                 scene.ik_chains = after.clone();
                 scene.bump_version();
@@ -308,6 +318,9 @@ impl Change {
                         after: old.transform.clone(),
                     });
                 }
+                if sim.animation_clips != before.animation_clips {
+                    steps.push(Change::SetAnimationClips { before: sim.animation_clips.clone(), after: before.animation_clips.clone() });
+                }
                 Change::Group(steps)
             }
             Change::SetTransform { id, before: b, after: a } => Change::SetTransform {
@@ -353,6 +366,7 @@ impl Change {
             Change::SetXrefs { before: b, after: a } => Change::SetXrefs { before: a.clone(), after: b.clone() },
             Change::SetStack { id, before: b, after: a } => Change::SetStack { id: *id, before: a.clone(), after: b.clone() },
             Change::SetIkChains { before: b, after: a } => Change::SetIkChains { before: a.clone(), after: b.clone() },
+            Change::SetAnimationClips { before: b, after: a } => Change::SetAnimationClips { before: a.clone(), after: b.clone() },
             Change::SetMaterials { before: b, after: a } => Change::SetMaterials { before: a.clone(), after: b.clone() },
             Change::SetMaterial { id, before: b, after: a } => Change::SetMaterial { id: *id, before: *a, after: *b },
             Change::SetRenderSettings { before: b, after: a } => Change::SetRenderSettings { before: a.clone(), after: b.clone() },

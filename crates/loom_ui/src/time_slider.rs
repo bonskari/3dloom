@@ -13,6 +13,7 @@ use loom_commands::Command;
 /// Track bar key selection and drag, kept between frames.
 #[derive(Debug, Clone, Default)]
 pub struct TrackBarState {
+    pub key_rect: Option<egui::Rect>,
     pub selected: Vec<i32>,
     pub drag_from: Option<f32>,
     pub menu_frame: Option<i32>,
@@ -67,6 +68,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     if app.state.expert_mode {
         return;
     }
+    app.track_bar.key_rect = None;
     let mini = app.state.show_track_bar && app.track_bar.mini_curve_editor;
     let h = if app.state.show_track_bar && !mini { 44.0 } else { 24.0 };
     egui::TopBottomPanel::bottom("time_slider").exact_height(h).show(ctx, |ui| {
@@ -118,6 +120,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             });
         }
     });
+    crate::clip_timeline::show(ctx, app);
     if mini {
         // Above the time slider, where the track bar was; a fixed height so the content never grows the panel (and moves its rows) frame to frame.
         egui::TopBottomPanel::bottom("mini_curve_editor").exact_height(280.0).show(ctx, |ui| {
@@ -166,6 +169,7 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
     let (start, end) = app.state.frame_range;
     let frame = app.state.current_frame;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), egui::Sense::click_and_drag());
+    app.track_bar.key_rect = Some(rect);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, egui::Color32::from_gray(45));
     let frames = (end - start).max(1) as f32;

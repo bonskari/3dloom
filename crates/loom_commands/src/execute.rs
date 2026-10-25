@@ -60,6 +60,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     use Command as C;
     match cmd {
         C::State => Ok(snapshot(state)),
+        C::MoveAnimationClip { id, start } => crate::animation_clips::move_clip(state, id, start),
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
@@ -81,8 +82,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::skin::handles(&c) => crate::skin::execute(state, c),
         c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin | C::SkinMorphSelect { .. } | C::SkinMorphPickBone | C::SkinMorphSelectPoints { .. } | C::SkinMorphSelectionTool { .. } | C::SkinMorphSetOption { .. } | C::SkinMorphSetCurve { .. } | C::SkinMorphResetGraph | C::SkinMorphEdit { .. } | C::SkinMorphClearVerts { .. } | C::SkinMorphRemoveVerts { .. } | C::SkinMorphSetJointType { .. } | C::SkinMorphSetExternal { .. } | C::SkinMorphPickExternal | C::SkinMorphReloadTarget { .. } | C::SkinMorphPasteMirror { .. } | C::SkinWrapPickControl | C::SkinWrapSelectControlVerts { .. } | C::SkinWrapSetLocal { .. } | C::SkinWrapMirrorSelected | C::SkinWrapBakeControlVerts | C::SkinWrapRetrieveControlVerts | C::SkinWrapPatchPick { .. } | C::SkinWrapPatchSetSampleRate { .. } | C::SkinWrapPatchResample) => crate::morph::execute(state, c),
         C::NewScene => {
+            state.scene.renew_instance();
             let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
             if ids.is_empty() {
+                state.scene.animation_clips.clear();
+                state.file = None;
+                state.undo.mark_saved();
                 return Ok(json!({}));
             }
             let change = Change::Group(ids.into_iter().map(Change::RemoveNode).collect());
@@ -288,6 +293,21 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::UvwMapFit | C::UvwMapCenter | C::UvwMapBitmapFit { .. } | C::UvwMapNormalAlign | C::UvwMapViewAlign | C::UvwMapRegionFit { .. } | C::UvwMapReset | C::UvwMapAcquire { .. } | C::UvwMapAlignTo { .. } => {
             crate::stack::execute(state, cmd)
         }
+        C::ImportAnimationClip { path } => {
+            let Some(path) = path else {
+                state.dialog = Some(Dlg::ImportAnimationClip);
+                return Ok(json!({ "dialog": "ImportAnimationClip" }));
+            };
+            let path = std::path::PathBuf::from(path);
+            let (ids, take) = if crate::fbx_io::is_fbx(&path) {
+                crate::fbx_io::import_animation(state, &path)?
+            } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("bvh")) {
+                (crate::bvh_io::import_animation(state, &path)?, None)
+            } else {
+                return Err("animation clips support .bvh and animated .fbx files".into());
+            };
+            Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>(), "clip": state.scene.animation_clips.last().map(|c| c.id), "take": take }))
+        }
         C::ImportFile { path } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::ImportFile);
@@ -299,7 +319,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("bvh")) {
                 let ids = crate::bvh_io::import(state, &path)?;
-                return Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }));
+                return Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>(), "clip": state.scene.animation_clips.last().map(|c| c.id) }));
             }
             if crate::fbx_io::is_fbx(&path) {
                 let ids = crate::fbx_io::import(state, &path)?;
@@ -5176,6 +5196,7 @@ fn snapshot(state: &AppState) -> Value {
         "skin_wrap_patch": crate::morph::skin_wrap_patch_status(state),
         "file": state.file.as_ref().map(|p| p.to_string_lossy().into_owned()),
         "dirty": state.dirty(),
+        "animation_clips": state.scene.animation_clips,
         "ik_chains": state.scene.ik_chains.iter().map(|c| json!({ "id": c.id, "name": c.name, "solver": c.solver.label(), "start": c.start.0, "end": c.end.0, "goal": c.goal.0, "enabled": c.enabled, "swivel": c.swivel_deg, "spline": c.spline.map(|s| s.0) })).collect::<Vec<_>>(),
         "title": state.title(),
         "selection": selection_json(state),

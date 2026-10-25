@@ -2,6 +2,7 @@
 //! All scene mutations go through `loom_commands::execute` via `dispatch`.
 
 mod kimodo;
+mod clip_timeline;
 mod camera_overlay;
 mod command_panel;
 pub mod create_tool;
@@ -317,6 +318,7 @@ pub struct LoomApp {
     /// The Motion panel shows Trajectories (the viewports draw the paths).
     pub motion_trajectories: bool,
     pub(crate) kimodo: kimodo::Panel,
+    pub(crate) clip_timeline: clip_timeline::State,
     /// A manipulator drag in progress (Select and Manipulate).
     pub manip_drag: Option<ManipDrag>,
     /// Selection rollout > By Angle: clicking a polygon also selects
@@ -523,6 +525,7 @@ impl LoomApp {
             track_bar: Default::default(),
             motion_trajectories: false,
             kimodo: Default::default(),
+            clip_timeline: Default::default(),
             manip_drag: None,
             by_angle: None,
             soft_brush: SoftBrush { value: 1.0, size: 20.0, strength: 1.0 },
