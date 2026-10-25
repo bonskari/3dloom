@@ -110,7 +110,7 @@ fn tiles_preset_and_gaps_from_its_rollouts() {
             fn all(shape: &egui::Shape, out: &mut Vec<String>) {
                 match shape {
                     egui::Shape::Vec(v) => v.iter().for_each(|s| all(s, out)),
-                    egui::Shape::Text(t) => out.push(format!("{}@{:?}", t.galley.text(), t.pos)),
+                    egui::Shape::Text(t) if t.pos.x < 440.0 && t.pos.y > 40.0 && t.pos.y < 900.0 => out.push(format!("{}@{:?}", t.galley.text(), t.pos)),
                     _ => {}
                 }
             }
