@@ -23,8 +23,11 @@ field name, enums as tagged objects or strings as serde derives them.
   `Param`), `object_offset`, `object` (the base object: every
   `ObjectKind` — primitives with their parameters, `EditablePoly` with the
   full half-edge mesh, smoothing groups, material ids, vertex colours,
-  soft-selection and paint settings, `EditableSpline` with its knots and
-  tangents, the parametric shapes, `Boolean` / `ProBoolean` / `Loft` with
+  soft-selection and paint settings, `EditableMesh` (the same, all
+  triangles, with the mesh's `invisible` edge flags), `EditablePatch` (the
+  patch lattice: vertices, handles, edges, tri / quad patches, View Steps,
+  Show Interior Edges), `QuadPatch` / `TriPatch`, `EditableSpline` with its
+  knots and tangents, the parametric shapes, `Boolean` / `ProBoolean` / `Loft` with
   their operand copies and parameters, `Camera`, `Light` (a standard light:
   type, target node, every rollout parameter, exclusion list), `Group`, `Bone` with its
   length / width / height / taper / fins / Bone Tools properties, `Dummy`,
@@ -32,7 +35,8 @@ field name, enums as tagged objects or strings as serde derives them.
   `frozen`, `wire_color`, `locks`, `inherit`, `display` properties,
   `layer`, `modifiers` (the modifier stack, bottom first: each slot has
   the modifier with all its parameters and sub-object data — FFD control
-  points, Edit Poly / Edit Spline edits and snapshots, gizmo transforms —
+  points, Edit Poly / Edit Mesh / Edit Patch / Edit Spline edits and
+  snapshots, gizmo transforms —
   plus `enabled`, `enabled_in_viewport`, `name`, `sub_level`,
   `instance_of`), `active_entry`, `instance_of` and `materials` (material
   names by material id, `materials[i]` is id i+1; FBX import fills it,

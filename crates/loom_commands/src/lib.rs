@@ -11,12 +11,15 @@ pub mod execute;
 pub mod poly;
 mod poly_edit;
 mod poly_props;
+pub mod mesh_edit;
+pub(crate) mod patch_edit;
 mod groups;
 mod stack;
 pub mod spline;
 pub mod snap;
 pub mod state;
 pub mod transform;
+pub mod sel_undo;
 
 pub use command::{registry, Axis, Command, CommandInfo, Group, PrimitiveKind, SaveChangesReply, SelectOp, DEFERRED, DEFERRED_UNWRAP, OUT_OF_SCOPE, ShapeKind, UNWRAP_ALIASES};
 pub mod unwrap;

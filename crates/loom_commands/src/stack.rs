@@ -297,6 +297,15 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 if let Modifier::SplineSelect { level: l, .. } = &mut n.modifiers[index as usize].modifier {
                     *l = level;
                 }
+                if let Some((mode, polygon, handle)) = crate::mesh_edit::modifier_level(&n.modifiers[index as usize].modifier, level) {
+                    // Edit Mesh: Face and Polygon both select faces; Edit Patch: Vertex and Handle both pick lattice points.
+                    state.selection_mode = mode;
+                    state.mesh_patch.polygon_level = polygon;
+                    state.mesh_patch.handle_level = handle;
+                    state.sub_selection.clear();
+                    state.mesh_dirty = true;
+                    continue;
+                }
                 if matches!(n.modifiers[index as usize].modifier, Modifier::Hsds(_)) {
                     // HSDS: the finest level is the cage the sub-object levels pick on.
                     refresh_hsds_cage(state, id, index as usize);
@@ -691,10 +700,17 @@ fn collapse(state: &mut AppState, upto: Option<usize>) -> Result<Value, String> 
         };
         // NURMS was baked into the result.
         poly.subdiv.use_nurms.set(false);
+        // An Editable Mesh collapses to an Editable Mesh, an Editable Patch
+        // to an Editable Patch while patches reach the top.
+        let collapsed = match (&node.object, &evaluated.value.patch) {
+            (ObjectKind::EditableMesh(_), _) => ObjectKind::EditableMesh(poly.with_mesh(loom_mesh::tri_mesh::from_poly(&poly.mesh)?)),
+            (ObjectKind::EditablePatch(_), Some(p)) => node.object.with_patch(p.clone()),
+            _ => ObjectKind::EditablePoly(poly),
+        };
         let keep_from = upto.map(|u| u + 1).unwrap_or(node.modifiers.len());
         let mut rest: Vec<ModifierSlot> = node.modifiers.iter().skip(keep_from).cloned().collect();
         repoint_own(&mut rest, &node.modifiers, *id, &|i| if i < keep_from { None } else { Some(i - keep_from) });
-        changes.push(Change::ReplaceObject { id: *id, before: Box::new(node.object.clone()), after: Box::new(ObjectKind::EditablePoly(poly)) });
+        changes.push(Change::ReplaceObject { id: *id, before: Box::new(node.object.clone()), after: Box::new(collapsed) });
         changes.push(Change::SetStack { id: *id, before: node.modifiers.clone(), after: rest });
         changes.extend(repoint_instances(state, *id, &|i| if i < keep_from { None } else { Some(i - keep_from) }));
     }
@@ -1109,7 +1125,24 @@ fn add_modifier(state: &mut AppState, name: &str) -> Result<Value, String> {
                     };
                     modifier.fit_uvw_map(&input);
                 }
-                if matches!(modifier, Modifier::FFD { .. } | Modifier::EditPoly { .. }) {
+                if matches!(modifier, Modifier::EditPatch { .. }) {
+                    // Edit Patch edits the patches flowing in (a mesh becomes patches).
+                    let (input, patch) = match at.checked_sub(1) {
+                        Some(prev) => {
+                            let e = state.scene.evaluated(*id, Some(prev));
+                            (e.value.mesh.clone(), e.value.patch.clone())
+                        }
+                        None => (node.object.display_output(), node.object.patch_mesh()),
+                    };
+                    let input_poly = if input.has_invisible_edges() && patch.is_none() { loom_mesh::tri_mesh::to_poly(&input).unwrap_or_else(|_| input.clone()) } else { input.clone() };
+                    modifier.init_edit_patch(&input, patch.as_ref());
+                    if patch.is_none() {
+                        if let Modifier::EditPatch { patch: p, .. } = &mut modifier {
+                            p.patch = loom_mesh::patch::PatchMesh::from_mesh(&input_poly);
+                        }
+                    }
+                }
+                if matches!(modifier, Modifier::FFD { .. } | Modifier::EditPoly { .. } | Modifier::EditMesh { .. }) {
                     // An FFD lattice is fitted to what flows into it; an Edit Poly starts from it.
                     let input = match at.checked_sub(1) {
                         Some(prev) => state.scene.evaluated(*id, Some(prev)).value.mesh.clone(),

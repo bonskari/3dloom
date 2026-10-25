@@ -365,11 +365,11 @@ impl Scene {
         };
         let self_world_at = |t: f32| -> glam::Mat4 { self.at_time(t, || self.object_matrix(id)) };
         let ctx = EvalCtx { object_world, object_inverse: object_world.inverse(), lookup: Some(&lookup), shape_lookup: Some(&shape_lookup), eval_shape_lookup: Some(&eval_shape_lookup), world_lookup: Some(&world_lookup), eval_lookup: Some(&eval_lookup), self_world_at: Some(&self_world_at), camera_fov: Some(&camera_fov) };
-        let mut value = StackValue { mesh: node.map(|n| n.object.display_output()).unwrap_or_default(), selection: None, shape: node.and_then(|n| n.object.shape()), shape_selection: None, warnings: Vec::new() };
+        let mut value = StackValue { mesh: node.map(|n| n.object.display_output()).unwrap_or_default(), selection: None, shape: node.and_then(|n| n.object.shape()), shape_selection: None, warnings: Vec::new(), patch: node.and_then(|n| n.object.patch_mesh()) };
         let mut warnings = Vec::new();
         if let Some(n) = node {
             // An Editable Poly at a sub-object level passes its selection up.
-            if let crate::node::ObjectKind::EditablePoly(p) = &n.object {
+            if let crate::node::ObjectKind::EditablePoly(p) | crate::node::ObjectKind::EditableMesh(p) = &n.object {
                 if let Some(sel) = &p.passes_up {
                     value.selection = Some(sel.clone());
                 }
@@ -411,6 +411,10 @@ impl Scene {
                 if !keeps_shape {
                     value.shape = None;
                     value.shape_selection = None;
+                }
+                // Patches flow up from Surface and Edit Patch only.
+                if !matches!(modifier, crate::modifier::Modifier::Surface { .. } | crate::modifier::Modifier::EditPatch { .. }) {
+                    value.patch = None;
                 }
             }
         }

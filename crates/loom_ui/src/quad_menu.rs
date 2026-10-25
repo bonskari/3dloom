@@ -1,5 +1,7 @@
 //! The default quad menu: display (upper right), transform (lower
 //! right), tools 1 (upper left) and tools 2 (lower left) for Editable Poly.
+//! A quadrant's title repeats the last command picked from it, which stays
+//! highlighted; the small icon right of an item opens its settings.
 
 use crate::LoomApp;
 use eframe::egui;
@@ -7,6 +9,17 @@ use loom_commands::{Command, SelectionMode};
 
 #[derive(Debug, Clone)]
 pub struct Entry {
+    pub label: String,
+    pub action: Action,
+    /// The settings icon right of the item (Move → Transform Type-In, Extrude → Extrude Settings).
+    pub settings: Option<Command>,
+}
+
+/// The last command picked from a quad menu: its quadrant's title repeats it.
+#[derive(Debug, Clone)]
+pub struct Last {
+    pub kind: QuadKind,
+    pub quadrant: &'static str,
     pub label: String,
     pub action: Action,
 }
@@ -22,7 +35,7 @@ pub enum Action {
 }
 
 /// Which quad menu a right-click opens: plain, Shift (snaps), Ctrl
-/// (creation), Alt (animation).
+/// (modeling), Alt (animation), Ctrl+Alt (lighting and rendering).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum QuadKind {
     #[default]
@@ -30,6 +43,24 @@ pub enum QuadKind {
     Snaps,
     Create,
     Animation,
+    Render,
+}
+
+impl QuadKind {
+    /// The quad a right-click with these modifiers opens.
+    pub fn for_modifiers(m: loom_input::Modifiers) -> Self {
+        if m.shift {
+            QuadKind::Snaps
+        } else if m.ctrl && m.alt {
+            QuadKind::Render
+        } else if m.ctrl {
+            QuadKind::Create
+        } else if m.alt {
+            QuadKind::Animation
+        } else {
+            QuadKind::Default
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -46,11 +77,21 @@ pub struct Quadrants {
 }
 
 fn e(label: &str, cmd: Command) -> Entry {
-    Entry { label: label.to_owned(), action: Action::Command(cmd) }
+    Entry { label: label.to_owned(), action: Action::Command(cmd), settings: None }
+}
+
+/// An item with a settings icon.
+fn es(label: &str, cmd: Command, settings: Command) -> Entry {
+    Entry { settings: Some(settings), ..e(label, cmd) }
 }
 
 fn off(label: &str, why: &str) -> Entry {
-    Entry { label: label.to_owned(), action: Action::Disabled(why.to_owned()) }
+    Entry { label: label.to_owned(), action: Action::Disabled(why.to_owned()), settings: None }
+}
+
+/// A toggle item: a check mark shows its state, as in the menu bar.
+fn check(label: &str, on: bool, cmd: Command) -> Entry {
+    e(&if on { format!("✔ {label}") } else { format!("    {label}") }, cmd)
 }
 
 pub fn quadrants(app: &LoomApp) -> Quadrants {
@@ -67,18 +108,37 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             e("Hide Selection", Command::HideSelection),
         ],
     };
-    let transform = Quadrant {
-        title: "transform",
-        items: vec![
-            e("Move", Command::SelectAndMove),
-            e("Rotate", Command::SelectAndRotate),
-            e("Scale", Command::SelectAndScale),
-            e("Select", Command::SelectObject),
-            e("Clone", Command::Clone),
+    let type_in = Command::TransformTypeInDialogToggle;
+    let mut transform_items = vec![
+        es("Move", Command::SelectAndMove, type_in.clone()),
+        es("Rotate", Command::SelectAndRotate, type_in.clone()),
+        es("Scale", Command::SelectAndScale, type_in),
+        e("Select", Command::SelectObject),
+    ];
+    // Items that act on a selected object show only when one is selected, as in the reference.
+    let any = !s.selection.is_empty();
+    if any {
+        transform_items.push(e("Select Similar", Command::SelectSimilar));
+    }
+    transform_items.push(e("Clone", Command::Clone));
+    if any {
+        transform_items.extend([
             e("Object Properties...", Command::ObjectProperties),
-            Entry { label: "Convert To".into(), action: Action::Submenu(vec![e("Convert to Editable Poly", Command::ConvertToEditablePoly), e("Convert to Editable Spline", Command::ConvertToEditableSpline)]) },
-        ],
-    };
+            e("Curve Editor...", Command::OpenCurveEditor),
+            e("Dope Sheet...", Command::OpenDopeSheet),
+            Entry {
+                label: "Convert To".into(),
+                action: Action::Submenu(vec![
+                    e("Convert to Editable Mesh", Command::ConvertToEditableMesh),
+                    e("Convert to Editable Poly", Command::ConvertToEditablePoly),
+                    e("Convert to Editable Patch", Command::ConvertToEditablePatch),
+                    e("Convert to Editable Spline", Command::ConvertToEditableSpline),
+                ]),
+                settings: None,
+            },
+        ]);
+    }
+    let transform = Quadrant { title: "transform", items: transform_items };
     let poly_selected = s
         .selection
         .iter()
@@ -90,7 +150,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
         let a = n.active_entry?;
         let slot = n.modifiers.get(a)?;
         let levels = slot.modifier.sub_levels();
-        (!levels.is_empty() && n.edit_poly().filter(|_| n.editing_entry().is_some()).is_none() && n.editing_spline_entry().is_none()).then(|| (a, slot.sub_level, levels, slot.name.clone()))
+        (!levels.is_empty() && n.edit_poly().filter(|_| n.editing_entry().is_some()).is_none() && n.editing_spline_entry().is_none() && n.editing_patch_entry().is_none()).then(|| (a, slot.sub_level, levels, slot.name.clone()))
     });
     let (tools1, tools2) = if let Some((index, current, levels, name)) = modifier_levels {
         let mut t1: Vec<Entry> = vec![e(if current == 0 { "> Top-level" } else { "Top-level" }, Command::ModifierSubobjectLevel { index: index as u32, level: 0 })];
@@ -139,6 +199,41 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
         };
         t2.extend(ops);
         (Some(Quadrant { title: "tools 1", items: t1 }), Some(Quadrant { title: "tools 2", items: t2 }))
+    } else if s.patch_selected() || s.tri_mesh_selected() {
+        // Editable Mesh / Patch: their own five levels (two share a selection mode) and tools.
+        let patch = s.patch_selected();
+        let current = loom_commands::mesh_edit::current_level(s);
+        let names: [&str; 5] = if patch { ["Vertex", "Handle", "Edge", "Patch", "Element"] } else { ["Vertex", "Edge", "Face", "Polygon", "Element"] };
+        let mut t2: Vec<Entry> = vec![e(if current == 0 { "> Top-level" } else { "Top-level" }, Command::SubObjectLevel { level: 0 })];
+        for (i, l) in names.iter().enumerate() {
+            let lvl = i as u32 + 1;
+            let label = if current == lvl { format!("> {l}") } else { (*l).to_owned() };
+            t2.push(e(&label, Command::SubObjectLevel { level: lvl }));
+        }
+        let mp = &s.mesh_patch;
+        let ops: Vec<Entry> = match (patch, current) {
+            (true, 1) => vec![e("Weld", Command::PatchWeld), e("Delete", Command::PatchDelete)],
+            (true, 3) => vec![e("Add Tri", Command::PatchAddTri), e("Add Quad", Command::PatchAddQuad), e("Delete", Command::PatchDelete)],
+            (true, 4 | 5) => vec![e("Extrude", Command::PatchExtrude { amount: mp.patch_extrude, outline: mp.patch_outline }), e("Flip", Command::PatchFlipNormals), e("Delete", Command::PatchDelete)],
+            (false, 1) => vec![es("Weld", Command::Weld { threshold: s.poly_settings.weld_threshold }, Command::WeldSettings), e("Collapse", Command::Collapse)],
+            (false, 2) => vec![e("Turn", Command::MeshTurnEdge { edges: Vec::new() }), e("Divide", Command::MeshDivide), e("Visible", Command::MeshEdgeVisibility { visible: true }), e("Invisible", Command::MeshEdgeVisibility { visible: false })],
+            (false, 3..=5) => vec![
+                e("Extrude", Command::MeshExtrude { amount: mp.extrude }),
+                e("Bevel", Command::MeshBevel { height: mp.extrude, outline: mp.outline }),
+                e("Tessellate", Command::MeshTessellate),
+                e("Divide", Command::MeshDivide),
+                e("Flip Normals", Command::MeshFlipNormals),
+            ],
+            _ => Vec::new(),
+        };
+        t2.extend(ops);
+        let t1 = if patch {
+            vec![e("Relax", Command::PatchRelax)]
+        } else {
+            let sub = current > 0;
+            vec![e("Attach", Command::Attach), if sub { e("Detach", Command::Detach) } else { off("Detach", "needs a sub-object selection") }, e("Explode", Command::MeshExplode { name: None })]
+        };
+        (Some(Quadrant { title: "tools 1", items: t1 }), Some(Quadrant { title: "tools 2", items: t2 }))
     } else if poly_selected {
         let level = s.selection_mode;
         let sub = level != SelectionMode::Object;
@@ -176,37 +271,37 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             SelectionMode::Vertex => vec![
                 e("Remove", Command::Remove),
                 e("Break", Command::Break),
-                e("Weld", Command::Weld { threshold: ps.weld_threshold }),
+                es("Weld", Command::Weld { threshold: ps.weld_threshold }, Command::WeldSettings),
                 e("Target Weld", Command::TargetWeldMode),
-                e("Chamfer", Command::ChamferMode),
+                es("Chamfer", Command::ChamferMode, Command::ChamferSettings),
                 e("Connect", Command::ConnectVertices),
-                e("Extrude", Command::ExtrudeMode),
+                es("Extrude", Command::ExtrudeMode, Command::ExtrudeSettings),
             ],
             SelectionMode::Edge => vec![
                 e("Loop", Command::SelectEdgeLoop),
                 e("Ring", Command::SelectEdgeRing),
                 e("Remove", Command::Remove),
                 e("Split", Command::SplitEdges),
-                e("Chamfer", Command::ChamferMode),
-                e("Connect", Command::Connect),
-                e("Extrude", Command::ExtrudeMode),
+                es("Chamfer", Command::ChamferMode, Command::ChamferSettings),
+                es("Connect", Command::Connect, Command::ConnectEdgeSettings),
+                es("Extrude", Command::ExtrudeMode, Command::ExtrudeSettings),
                 e("Create Shape", Command::CreateShapeFromEdges { name: None, smooth: s.spline_settings.create_shape_smooth }),
             ],
             SelectionMode::Border => vec![
                 e("Cap", Command::Cap),
-                e("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }),
-                e("Extrude", Command::ExtrudeMode),
-                e("Chamfer", Command::ChamferMode),
-                e("Connect", Command::Connect),
+                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }, Command::BridgeSettings),
+                es("Extrude", Command::ExtrudeMode, Command::ExtrudeSettings),
+                es("Chamfer", Command::ChamferMode, Command::ChamferSettings),
+                es("Connect", Command::Connect, Command::ConnectEdgeSettings),
             ],
             SelectionMode::Face => vec![
-                e("Extrude", Command::ExtrudeMode),
-                e("Bevel", Command::BevelMode),
-                e("Inset", Command::InsetMode),
-                e("Outline", Command::OutlineMode),
-                e("Hinge From Edge", Command::HingeFromEdgeMode),
+                es("Extrude", Command::ExtrudeMode, Command::ExtrudeSettings),
+                es("Bevel", Command::BevelMode, Command::BevelSettings),
+                es("Inset", Command::InsetMode, Command::InsetSettings),
+                es("Outline", Command::OutlineMode, Command::OutlineSettings),
+                es("Hinge From Edge", Command::HingeFromEdgeMode, Command::HingeFromEdgeSettings),
                 e("Flip Normals", Command::FlipNormals),
-                e("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }),
+                es("Bridge", Command::Bridge { segments: ps.bridge_segments, smooth: ps.bridge_smooth, bridge_adjacent: ps.bridge_adjacent, twist1: ps.bridge_twist1, twist2: ps.bridge_twist2 }, Command::BridgeSettings),
                 e("Retriangulate", Command::Retriangulate),
             ],
             SelectionMode::Element => vec![e("Flip Normals", Command::FlipNormals)],
@@ -223,22 +318,58 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
     Quadrants { display, transform, tools1, tools2 }
 }
 
-/// Ctrl+right-click: the creation quad (Standard Primitives).
-pub fn create_quadrants() -> Quadrants {
-    let prims: Vec<Entry> = loom_commands::PrimitiveKind::ALL.iter().map(|k| Entry { label: k.label().to_owned(), action: Action::Primitive(*k) }).collect();
+/// Ctrl+right-click: the modeling quad. Standard Primitives and cameras on
+/// the right; with an editable object selected, its tools on the left, as in
+/// the default quad.
+pub fn create_quadrants(app: &LoomApp) -> Quadrants {
+    let prims: Vec<Entry> = loom_commands::PrimitiveKind::ALL.iter().map(|k| Entry { label: k.label().to_owned(), action: Action::Primitive(*k), settings: None }).collect();
+    let tools = quadrants(app);
     Quadrants {
         display: Quadrant { title: "standard primitives", items: prims },
         transform: Quadrant { title: "cameras", items: vec![e("Target Camera", Command::CreateCamera { target: true }), e("Free Camera", Command::CreateCamera { target: false })] },
-        tools1: None,
-        tools2: None,
+        tools1: tools.tools1,
+        tools2: tools.tools2,
     }
 }
 
-/// Alt+right-click: the animation quad (default); keys arrive in phase 8.
-pub fn animation_quadrants() -> Quadrants {
+/// Alt+right-click: the animation quad. Set (upper right): Keyframe, Show
+/// Trajectories, Delete Selected Animation; Coordinates (lower right): the
+/// reference coordinate systems.
+pub fn animation_quadrants(app: &LoomApp) -> Quadrants {
+    let s = &app.state;
+    let set = vec![
+        e("Keyframe", Command::SetKeys),
+        check("Show Trajectories Toggle", s.show_trajectories, Command::ShowTrajectoriesToggle),
+        e("Delete Selected Animation", Command::DeleteSelectedAnimation),
+    ];
+    let coordinates = loom_commands::CoordSystem::ALL.iter().map(|c| check(c.label(), s.coord_system == *c, Command::ReferenceCoordinateSystem { system: *c })).collect();
+    Quadrants { display: Quadrant { title: "set", items: set }, transform: Quadrant { title: "coordinates", items: coordinates }, tools1: None, tools2: None }
+}
+
+/// Ctrl+Alt+right-click: the lighting and render quad. Render (upper
+/// right) and the selection's rendering controls (lower right).
+pub fn render_quadrants(app: &LoomApp) -> Quadrants {
+    let s = &app.state;
+    let render = vec![
+        e("Render", Command::Render { path: None, width: None, height: None }),
+        e("Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None }),
+        e("Rendered Frame Window...", Command::RenderedFrameWindow),
+        e("Material Editor...", Command::MaterialEditorToggle),
+    ];
+    // The first selected object's state: a click sets every selected object to the opposite.
+    let first = s.selection.iter().next().and_then(|id| s.scene.node(*id));
+    let properties = first.map(|n| {
+        ["Renderable", "Visible to Camera", "Receive Shadows", "Cast Shadows"]
+            .iter()
+            .map(|name| {
+                let on = n.render.get(name).unwrap_or(true);
+                check(name, on, Command::SetRenderProperty { name: (*name).to_owned(), value: !on })
+            })
+            .collect()
+    });
     Quadrants {
-        display: Quadrant { title: "animation", items: vec![off("Set Key Mode", "animation keys arrive in phase 8"), off("Set Keys", "animation keys arrive in phase 8"), off("Add Key", "animation keys arrive in phase 8")] },
-        transform: Quadrant { title: "time", items: vec![e("Time Configuration...", Command::TimeConfiguration)] },
+        display: Quadrant { title: "render", items: render },
+        transform: Quadrant { title: "object properties", items: properties.unwrap_or_default() },
         tools1: None,
         tools2: None,
     }
@@ -250,7 +381,7 @@ pub fn snap_quadrants(app: &LoomApp) -> Quadrants {
     use loom_commands::snap::SnapTargets;
     let s = &app.state.snaps;
     let standard: Vec<Entry> = SnapTargets::NAMES.iter().map(|n| e(n, Command::SnapOverride { name: Some((*n).to_owned()) })).collect();
-    let mut override_items = vec![Entry { label: "Standard".into(), action: Action::Submenu(standard) }];
+    let mut override_items = vec![Entry { label: "Standard".into(), action: Action::Submenu(standard), settings: None }];
     if s.override_target.is_some() || s.last_override.is_some() {
         override_items.push(e("None", Command::SnapOverride { name: Some("None".into()) }));
     }
@@ -261,13 +392,13 @@ pub fn snap_quadrants(app: &LoomApp) -> Quadrants {
         .iter()
         .map(|n| {
             let on = s.targets.get(n).unwrap_or(false);
-            e(&format!("{} {n}", if on { "[x]" } else { "[  ]" }), Command::SnapTarget { name: (*n).to_owned(), on: !on })
+            check(n, on, Command::SnapTarget { name: (*n).to_owned(), on: !on })
         })
         .collect();
     let options = vec![
         e("Grid and Snap Settings", Command::GridAndSnapSettings),
-        e(&format!("{} Snaps To Frozen Objects", if s.snap_to_frozen { "[x]" } else { "[  ]" }), Command::SnapToFrozenObjectsToggle),
-        e(&format!("{} Snaps Use Axis Constraints", if s.use_axis_constraints { "[x]" } else { "[  ]" }), Command::EnableAxisConstraintsInSnapsToggle),
+        check("Snaps To Frozen Objects", s.snap_to_frozen, Command::SnapToFrozenObjectsToggle),
+        check("Snaps Use Axis Constraints", s.use_axis_constraints, Command::EnableAxisConstraintsInSnapsToggle),
     ];
     Quadrants {
         display: Quadrant { title: "snap override", items: override_items },
@@ -284,7 +415,7 @@ pub struct Open {
     pub viewport: usize,
     /// The press that opened the menu must not also close it.
     pub armed: bool,
-    /// Which quad: plain, Shift = snaps, Ctrl = creation, Alt = animation.
+    /// Which quad: plain, Shift = snaps, Ctrl = modeling, Alt = animation, Ctrl+Alt = render.
     pub kind: QuadKind,
 }
 
@@ -294,62 +425,122 @@ impl Open {
     }
 }
 
+/// Room right of an item for its settings icon.
+const SETTINGS_W: f32 = 22.0;
+
 /// Full-width, left-aligned rows so every entry of a quadrant lines up.
-fn row(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
-    let w = ui.available_width();
-    ui.add_enabled(enabled, egui::Button::new(label).min_size(egui::vec2(w, 20.0)).frame(false))
+fn row(ui: &mut egui::Ui, label: &str, enabled: bool, last: bool) -> egui::Response {
+    let w = ui.available_width() - SETTINGS_W;
+    left(ui, w, |ui| ui.add_enabled(enabled, egui::Button::new(label).min_size(egui::vec2(w, 20.0)).frame(false).selected(last)))
 }
 
-/// A command row: its chord right-aligned and in the hover text.
-fn cmd_row(ui: &mut egui::Ui, state: &loom_commands::AppState, label: &str, cmd: &Command) -> egui::Response {
-    let w = ui.available_width();
+/// A button `width` wide whose label sits at its left (a top-down child
+/// layout: buttons place their text by the layout's horizontal alignment).
+fn left(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> egui::Response) -> egui::Response {
+    ui.allocate_ui_with_layout(egui::vec2(width, 20.0), egui::Layout::top_down(egui::Align::Min), add).inner
+}
+
+/// A command row: its chord right-aligned and in the hover text; `last`
+/// highlights the quad's last command.
+fn cmd_row(ui: &mut egui::Ui, state: &loom_commands::AppState, label: &str, cmd: &Command, width: f32, last: bool) -> egui::Response {
     let action = crate::shortcuts::action_of(cmd);
-    let r = ui.add(crate::shortcuts::menu_widget(state, label, action).min_size(egui::vec2(w, 20.0)).frame(false));
+    let r = left(ui, width, |ui| ui.add(crate::shortcuts::menu_widget(state, label, action).min_size(egui::vec2(width, 20.0)).frame(false).selected(last)));
     match crate::shortcuts::chord(state, action) {
         Some(c) => r.on_hover_text(format!("{label} ({c})")),
         None => r,
     }
 }
 
-fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, q: &Quadrant, close: &mut bool) {
+/// Runs an item; false for items that run nothing (submenus, disabled).
+fn run(app: &mut LoomApp, action: &Action) -> bool {
+    match action {
+        Action::Command(cmd) => {
+            let _ = app.dispatch(cmd.clone());
+            true
+        }
+        Action::Primitive(kind) => {
+            app.create_kind = Some(crate::CreateKind::Primitive(*kind));
+            app.create_category = crate::Category::Geometry;
+            app.panel_tab = crate::Tab::Create;
+            true
+        }
+        Action::Submenu(_) | Action::Disabled(_) => false,
+    }
+}
+
+/// The settings icon of `item`: Transform Type-In picks the item's tool and
+/// opens the dialog (never closes it); the others open their settings window.
+fn run_settings(app: &mut LoomApp, item: &Entry, settings: &Command) {
+    if matches!(settings, Command::TransformTypeInDialogToggle) {
+        run(app, &item.action);
+        if app.state.dialog != Some(loom_commands::Dialog::TransformTypeIn) {
+            let _ = app.dispatch(Command::TransformTypeInDialogToggle);
+        }
+    } else {
+        let _ = app.dispatch(settings.clone());
+    }
+}
+
+fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadrant, close: &mut bool) {
     ui.spacing_mut().item_spacing.y = 1.0;
     ui.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
     ui.style_mut().visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-    ui.label(egui::RichText::new(q.title).small().color(egui::Color32::from_rgb(255, 200, 80)));
+    // The last command picked from this quadrant: the title repeats it.
+    let last = app.quad_last.clone().filter(|l| l.kind == kind && l.quadrant == q.title);
+    let title = egui::Button::new(egui::RichText::new(q.title).small().color(egui::Color32::from_rgb(255, 200, 80))).frame(false);
+    let title = ui.add(title);
+    if let Some(l) = &last {
+        if title.on_hover_text(format!("Repeat {}", l.label.trim_start_matches(['✔', ' ']))).clicked() && run(app, &l.action) {
+            *close = true;
+        }
+    }
     ui.separator();
+    let picked = |label: &str| last.as_ref().is_some_and(|l| l.label == label);
     for item in &q.items {
-        match &item.action {
-            Action::Command(cmd) => {
-                if cmd_row(ui, &app.state, &item.label, cmd).clicked() {
-                    let _ = app.dispatch(cmd.clone());
-                    *close = true;
+        let width = ui.available_width() - SETTINGS_W;
+        // Cross-aligned to the left (not ui.horizontal's centre): button labels stay left-aligned.
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            match &item.action {
+                Action::Command(cmd) => {
+                    if cmd_row(ui, &app.state, &item.label, cmd, width, picked(&item.label)).clicked() {
+                        run(app, &item.action);
+                        app.quad_last = Some(Last { kind, quadrant: q.title, label: item.label.clone(), action: item.action.clone() });
+                        *close = true;
+                    }
                 }
-            }
-            Action::Submenu(children) => {
-                ui.menu_button(format!("{}  {}", item.label, crate::icons::SUBMENU), |ui| {
-                    ui.set_min_width(170.0);
-                    for c in children {
-                        if let Action::Command(cmd) = &c.action {
-                            if cmd_row(ui, &app.state, &c.label, cmd).clicked() {
-                                let _ = app.dispatch(cmd.clone());
-                                ui.close_menu();
+                Action::Submenu(children) => {
+                    ui.menu_button(format!("{}  {}", item.label, crate::icons::SUBMENU), |ui| {
+                        ui.set_min_width(170.0);
+                        for c in children {
+                            if let Action::Command(cmd) = &c.action {
+                                if cmd_row(ui, &app.state, &c.label, cmd, ui.available_width(), false).clicked() {
+                                    run(app, &c.action);
+                                    app.quad_last = Some(Last { kind, quadrant: q.title, label: c.label.clone(), action: c.action.clone() });
+                                    ui.close_menu();
+                                }
                             }
                         }
+                    });
+                }
+                Action::Disabled(why) => {
+                    row(ui, &item.label, false, false).on_disabled_hover_text(why);
+                }
+                Action::Primitive(_) => {
+                    if row(ui, &item.label, true, picked(&item.label)).clicked() {
+                        run(app, &item.action);
+                        app.quad_last = Some(Last { kind, quadrant: q.title, label: item.label.clone(), action: item.action.clone() });
+                        *close = true;
                     }
-                });
+                }
             }
-            Action::Disabled(why) => {
-                row(ui, &item.label, false).on_disabled_hover_text(why);
-            }
-            Action::Primitive(kind) => {
-                if row(ui, &item.label, true).clicked() {
-                    app.create_kind = Some(crate::CreateKind::Primitive(*kind));
-                    app.create_category = crate::Category::Geometry;
-                    app.panel_tab = crate::Tab::Create;
+            if let Some(settings) = &item.settings {
+                if crate::icons::small(ui, crate::icons::SETTINGS, &format!("{} Settings", item.label)).clicked() {
+                    run_settings(app, item, settings);
                     *close = true;
                 }
             }
-        }
+        });
     }
 }
 
@@ -357,14 +548,18 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, q: &Quadrant, close: &mut b
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: Open) -> bool {
     let q = match open.kind {
         QuadKind::Snaps => snap_quadrants(app),
-        QuadKind::Create => create_quadrants(),
-        QuadKind::Animation => animation_quadrants(),
+        QuadKind::Create => create_quadrants(app),
+        QuadKind::Animation => animation_quadrants(app),
+        QuadKind::Render => render_quadrants(app),
         QuadKind::Default => quadrants(app),
     };
     let mut close = false;
     let gap = 4.0;
     let mut any_hover = false;
     let mut place = |ctx: &egui::Context, app: &mut LoomApp, id: &str, quad: &Quadrant, pivot: egui::Align2| {
+        if quad.items.is_empty() {
+            return; // a quadrant with nothing to show is hidden
+        }
         let area = egui::Area::new(egui::Id::new(("quad", id)))
             .order(egui::Order::Foreground)
             .pivot(pivot)
@@ -376,9 +571,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: Open) -> bool {
             });
         let r = area.show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_min_width(170.0);
-                ui.set_max_width(170.0);
-                quadrant_ui(ui, app, quad, &mut close);
+                ui.set_min_width(170.0 + SETTINGS_W);
+                ui.set_max_width(170.0 + SETTINGS_W);
+                quadrant_ui(ui, app, open.kind, quad, &mut close);
             });
         });
         any_hover |= r.response.contains_pointer();
@@ -419,9 +614,11 @@ mod tests {
         let display: Vec<&str> = q.display.items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(display, vec!["Isolate Selection", "Unfreeze All", "Freeze Selection", "Unhide by Name", "Unhide All", "Hide Unselected", "Hide Selection"]);
         let transform: Vec<&str> = q.transform.items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(transform, vec!["Move", "Rotate", "Scale", "Select", "Clone", "Object Properties...", "Convert To"]);
+        assert_eq!(transform, vec!["Move", "Rotate", "Scale", "Select", "Clone"], "nothing selected: no object items");
         assert!(q.tools1.is_none() && q.tools2.is_none(), "no Editable Poly selected: left quadrants hidden");
         let _ = loom_commands::execute(&mut app.state, loom_commands::Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [1.0; 3] });
+        let transform: Vec<String> = quadrants(&app).transform.items.iter().map(|i| i.label.clone()).collect();
+        assert_eq!(transform, ["Move", "Rotate", "Scale", "Select", "Select Similar", "Clone", "Object Properties...", "Curve Editor...", "Dope Sheet...", "Convert To"]);
         let _ = loom_commands::execute(&mut app.state, loom_commands::Command::ConvertToEditablePoly);
         let q = quadrants(&app);
         let tools2: Vec<&str> = q.tools2.as_ref().unwrap().items.iter().map(|i| i.label.as_str()).collect();
@@ -452,7 +649,51 @@ mod tests {
             assert_eq!(t1[0], "Ignore Backfacing");
             assert!(t1.contains(&"Hide Unselected") && t1.contains(&"Collapse"));
         }
-        assert_eq!(create_quadrants().display.items.len(), loom_commands::PrimitiveKind::ALL.len());
-        assert!(matches!(animation_quadrants().display.items[0].action, Action::Disabled(_)));
+        let create = create_quadrants(&app);
+        assert_eq!(create.display.items.len(), loom_commands::PrimitiveKind::ALL.len());
+        assert!(create.tools1.is_some() && create.tools2.is_some(), "the modeling quad has the Editable Poly tools");
+    }
+
+    fn labels(q: &Quadrant) -> Vec<String> {
+        q.items.iter().map(|i| i.label.trim_start_matches(['✔', ' ']).to_owned()).collect()
+    }
+
+    #[test]
+    fn modifiers_pick_the_quad() {
+        let m = |shift, ctrl, alt| loom_input::Modifiers { alt, ctrl, shift };
+        let cases = [(m(false, false, false), QuadKind::Default), (m(true, false, false), QuadKind::Snaps), (m(false, true, false), QuadKind::Create), (m(false, false, true), QuadKind::Animation), (m(false, true, true), QuadKind::Render)];
+        for (m, kind) in cases {
+            assert_eq!(QuadKind::for_modifiers(m), kind, "{m:?}");
+        }
+    }
+
+    #[test]
+    fn animation_quad_has_set_and_coordinates() {
+        let mut app = LoomApp::headless();
+        let q = animation_quadrants(&app);
+        assert_eq!((q.display.title, q.transform.title), ("set", "coordinates"));
+        assert_eq!(labels(&q.display), ["Keyframe", "Show Trajectories Toggle", "Delete Selected Animation"]);
+        assert_eq!(labels(&q.transform), loom_commands::CoordSystem::ALL.map(|c| c.label().to_owned()));
+        assert!(q.transform.items[0].label.starts_with('✔'), "View, the current system, is checked");
+        let _ = loom_commands::execute(&mut app.state, Command::ReferenceCoordinateSystem { system: loom_commands::CoordSystem::Local });
+        let q = animation_quadrants(&app);
+        let checked: Vec<String> = q.transform.items.iter().filter(|i| i.label.starts_with('✔')).map(|i| i.label.clone()).collect();
+        assert_eq!(checked, ["✔ Local"]);
+    }
+
+    #[test]
+    fn render_quad_renders_and_toggles_the_selections_rendering_controls() {
+        let mut app = LoomApp::headless();
+        let q = render_quadrants(&app);
+        assert_eq!(labels(&q.display), ["Render", "Render Setup...", "Rendered Frame Window...", "Material Editor..."]);
+        assert!(q.transform.items.is_empty(), "nothing selected: no object properties");
+        let _ = loom_commands::execute(&mut app.state, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [1.0; 3] });
+        let q = render_quadrants(&app);
+        assert_eq!(labels(&q.transform), ["Renderable", "Visible to Camera", "Receive Shadows", "Cast Shadows"]);
+        let Action::Command(c) = q.transform.items[3].action.clone() else { panic!("a command") };
+        let _ = loom_commands::execute(&mut app.state, c);
+        let id = *app.state.selection.iter().next().unwrap();
+        assert!(!app.state.scene.node(id).unwrap().render.cast_shadows, "Cast Shadows turned off");
+        assert!(!render_quadrants(&app).transform.items[3].label.starts_with('✔'));
     }
 }

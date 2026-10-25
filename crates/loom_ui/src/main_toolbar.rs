@@ -282,7 +282,15 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     "Angle Snap Toggle" => snap_button(ui, app, icons::ANGLE_SNAP, app.state.angle_snap_on, "Angle Snap Toggle"),
                     "Percent Snap Toggle" => snap_button(ui, app, icons::PERCENT_SNAP, app.state.percent_snap_on, "Percent Snap Toggle"),
                     "Spinner Snap Toggle" => {
-                        tool_button(ui, app, icons::SPINNER_SNAP, app.state.prefs.spinner_snap, "Spinner Snap Toggle");
+                        // Right-click opens Preferences > General (the Spinners group), as in the reference.
+                        let r = Icon::new(icons::SPINNER_SNAP, "Spinner Snap Toggle").on(app.state.prefs.spinner_snap).hint("right-click: Preferences").show(ui, &app.state);
+                        if r.clicked() {
+                            app.dispatch_named("Spinner Snap Toggle");
+                        }
+                        if r.secondary_clicked() {
+                            crate::dialogs::preferences::open_on_general(ui.ctx());
+                            let _ = app.dispatch(Command::Preferences);
+                        }
                         ui.separator();
                     }
                     "Manage Layers" => {

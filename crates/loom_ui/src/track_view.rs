@@ -86,11 +86,8 @@ fn check(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, cmd: Comma
     }
 }
 
-pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
-    if !app.state.track_view.open {
-        return;
-    }
-    // Opening on an empty highlight shows the selection's animated tracks (Auto Select).
+/// Opening on an empty highlight shows the selection's animated tracks (Auto Select).
+fn auto_highlight(app: &mut LoomApp) {
     if app.state.track_view.highlighted.is_empty() {
         let sel: Vec<loom_scene::NodeId> = app.state.selection.iter().copied().collect();
         let items: Vec<String> = sel.iter().flat_map(|id| tracks::list_tracks(&app.state.scene, *id)).filter(|t| tracks::read(&app.state.scene, t).is_some_and(|p| p.is_animated())).map(|t| track_id(&t)).collect();
@@ -98,35 +95,53 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             app.state.track_view.highlighted = items;
         }
     }
+}
+
+/// Menus, toolbar, track list and the graph (`curve`: always the Curve
+/// Editor, as the track bar's Mini Curve Editor is), then the bottom bar.
+fn body(ui: &mut egui::Ui, app: &mut LoomApp, curve: bool, min_body_h: f32) {
+    menus(ui, app);
+    toolbar(ui, app);
+    ui.separator();
+    let avail = ui.available_size();
+    // Room for the bottom bar and the spacing around it, so the window does not grow each frame.
+    let bottom_h = 44.0;
+    let body_h = (avail.y - bottom_h).max(min_body_h);
+    ui.horizontal_top(|ui| {
+        let list_w = 230.0f32.min(avail.x * 0.35);
+        ui.allocate_ui_with_layout(egui::vec2(list_w, body_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.set_width(list_w);
+            hierarchy(ui, app, body_h)
+        });
+        ui.separator();
+        let w = ui.available_width();
+        let (response, painter) = ui.allocate_painter(egui::vec2(w, body_h), egui::Sense::click_and_drag());
+        if curve || app.state.track_view.mode == TvMode::CurveEditor {
+            curve_editor(ui, app, &response, &painter);
+        } else {
+            dope_sheet(ui, app, &response, &painter);
+        }
+    });
+    bottom_bar(ui, app);
+}
+
+/// The track bar's Mini Curve Editor: the Curve Editor docked above the time
+/// slider in place of the track bar.
+pub fn mini_curve_editor(ui: &mut egui::Ui, app: &mut LoomApp) {
+    auto_highlight(app);
+    body(ui, app, true, 60.0);
+}
+
+pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
+    if !app.state.track_view.open {
+        return;
+    }
+    auto_highlight(app);
     let mode = app.state.track_view.mode;
     let title = format!("Track View - {}", if mode == TvMode::CurveEditor { "Curve Editor" } else { "Dope Sheet" });
     let mut open = true;
     let max_h = (ctx.screen_rect().height() - 60.0).max(240.0);
-    let resp = egui::Window::new(title).id(egui::Id::new("track_view")).open(&mut open).default_size([900.0, 420.0]).default_pos([60.0, 300.0]).max_height(max_h).resizable(true).show(ctx, |ui| {
-        menus(ui, app);
-        toolbar(ui, app);
-        ui.separator();
-        let avail = ui.available_size();
-        // Room for the bottom bar and the spacing around it, so the window does not grow each frame.
-        let bottom_h = 44.0;
-        let body_h = (avail.y - bottom_h).max(140.0);
-        ui.horizontal_top(|ui| {
-            let list_w = 230.0f32.min(avail.x * 0.35);
-            ui.allocate_ui_with_layout(egui::vec2(list_w, body_h), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.set_width(list_w);
-                hierarchy(ui, app, body_h)
-            });
-            ui.separator();
-            let w = ui.available_width();
-            let (response, painter) = ui.allocate_painter(egui::vec2(w, body_h), egui::Sense::click_and_drag());
-            if app.state.track_view.mode == TvMode::CurveEditor {
-                curve_editor(ui, app, &response, &painter);
-            } else {
-                dope_sheet(ui, app, &response, &painter);
-            }
-        });
-        bottom_bar(ui, app);
-    });
+    let resp = egui::Window::new(title).id(egui::Id::new("track_view")).open(&mut open).default_size([900.0, 420.0]).default_pos([60.0, 300.0]).max_height(max_h).resizable(true).show(ctx, |ui| body(ui, app, false, 140.0));
     // Keyboard focus follows the last click: inside the window its shortcuts apply.
     if let Some(r) = resp.as_ref() {
         let pressed = ctx.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten());

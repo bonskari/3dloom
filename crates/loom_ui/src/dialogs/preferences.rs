@@ -34,6 +34,11 @@ fn number(ui: &mut egui::Ui, app: &mut LoomApp, name: &str, label: &str, range: 
     }
 }
 
+/// The next time the dialog shows, it is on the General tab (Spinner Snap right-click).
+pub fn open_on_general(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("preferences_tab"), Tab::General));
+}
+
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let tab_id = egui::Id::new("preferences_tab");
     let mut tab: Tab = ctx.data(|d| d.get_temp(tab_id)).unwrap_or_default();

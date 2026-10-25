@@ -215,18 +215,20 @@ fn edit_poly_entry_level_follows_every_level_change() {
     assert_eq!((s.selection_mode, lvl(&s)), (SelectionMode::Vertex, 1));
 }
 
-/// Undoing a clone made at Polygon level removes the selected clone; with no
-/// object left selected the sub-object level ends, so a click selects objects again.
+/// Undoing a clone made at Polygon level removes the selected clone and, as
+/// every undo, gives back the selection from before it: the original, at the
+/// same level.
 #[test]
-fn sub_object_level_ends_when_no_object_is_left_selected() {
+fn undoing_a_clone_at_polygon_level_selects_the_original_again() {
     let mut s = state();
-    plane(&mut s);
+    let original = plane(&mut s);
     execute(&mut s, Command::SelectionMode { mode: SelectionMode::Face }).unwrap();
     execute(&mut s, Command::CloneOptions { kind: loom_commands::CloneKind::Copy, copies: 1, name: None, offset: None, rotate_deg: None, scale: None }).unwrap();
     assert_eq!(s.selection_mode, SelectionMode::Face);
     execute(&mut s, Command::UndoSceneOperation).unwrap();
-    assert!(s.selection.is_empty(), "the clone is gone");
-    assert_eq!(s.selection_mode, SelectionMode::Object);
+    assert_eq!(s.scene.len(), 1, "the clone is gone");
+    assert_eq!(s.selection.iter().copied().collect::<Vec<_>>(), vec![original], "the original is selected again");
+    assert_eq!(s.selection_mode, SelectionMode::Face);
     // Select None at sub-object level with nothing selected also lands at object level.
     let id = *s.scene.nodes().map(|n| &n.id).next().unwrap();
     execute(&mut s, Command::SelectNodes { ids: vec![id.0], op: SelectOp::Replace }).unwrap();

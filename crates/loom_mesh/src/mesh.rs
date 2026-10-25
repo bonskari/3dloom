@@ -40,6 +40,11 @@ pub struct Mesh {
     /// the vertex colour, lives on `Vertex.color`.
     #[serde(default)]
     pub(crate) maps: std::collections::BTreeMap<u32, MapChannel>,
+    /// Editable Mesh: per half-edge, the edge is invisible (both halves set).
+    /// Empty, or of another length than `half_edges` after an edit that did
+    /// not carry it, means every edge is visible.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) invisible: Vec<bool>,
 }
 
 impl Mesh {
@@ -421,13 +426,53 @@ impl Mesh {
         (min, max)
     }
 
-    /// Returns each unique edge as a pair of vertex positions.
+    /// The edge is drawn (Editable Mesh edges can be invisible).
+    pub fn edge_visible(&self, he: HalfEdgeId) -> bool {
+        self.invisible.len() != self.half_edges.len() || !self.invisible.get(he.0 as usize).copied().unwrap_or(false)
+    }
+
+    /// Sets an edge's visibility (both half-edges).
+    pub fn set_edge_visible(&mut self, he: HalfEdgeId, visible: bool) {
+        let n = self.half_edges.len();
+        let Some(twin) = self.half_edges.get(he.0 as usize).map(|h| h.twin) else { return };
+        if self.invisible.len() != n {
+            if visible {
+                return;
+            }
+            self.invisible = vec![false; n];
+        }
+        self.invisible[he.0 as usize] = !visible;
+        self.invisible[twin.0 as usize] = !visible;
+    }
+
+    /// Some edge is invisible (an Editable Mesh with hidden polygon diagonals).
+    pub fn has_invisible_edges(&self) -> bool {
+        self.invisible.len() == self.half_edges.len() && self.invisible.iter().any(|i| *i)
+    }
+
+    /// The invisible edges as position pairs, each once.
+    pub fn invisible_edges(&self) -> Vec<(glam::Vec3, glam::Vec3)> {
+        if !self.has_invisible_edges() {
+            return Vec::new();
+        }
+        let mut edges = Vec::new();
+        for (i, he) in self.half_edges.iter().enumerate() {
+            if (i as u32) < he.twin.0 && self.invisible[i] {
+                let twin = &self.half_edges[he.twin.0 as usize];
+                edges.push((self.vertices[he.origin.0 as usize].position, self.vertices[twin.origin.0 as usize].position));
+            }
+        }
+        edges
+    }
+
+    /// Returns each unique visible edge as a pair of vertex positions.
     /// Each undirected edge is emitted exactly once. Useful for wireframe overlays.
     pub fn unique_edges(&self) -> Vec<(glam::Vec3, glam::Vec3)> {
         let mut edges = Vec::new();
+        let flags = self.invisible.len() == self.half_edges.len();
         for (i, he) in self.half_edges.iter().enumerate() {
             // Emit only the half-edge with the lower id of the twin pair.
-            if (i as u32) < he.twin.0 {
+            if (i as u32) < he.twin.0 && !(flags && self.invisible[i]) {
                 let a = self.vertices[he.origin.0 as usize].position;
                 let twin = &self.half_edges[he.twin.0 as usize];
                 let b = self.vertices[twin.origin.0 as usize].position;

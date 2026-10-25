@@ -25,7 +25,17 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     // (creating, deleting, modifiers…) becomes the buffer's new start.
     let rebases_pose = state.set_key_mode && !crate::anim_cmds::is_pose_edit(&cmd);
     let position = state.undo.position();
+    // Selection undo: the outermost command records what it did to the selection.
+    let outer = crate::sel_undo::enter(state);
+    // Undo / Redo restore selections themselves; Open, Reset and Fetch start the history over.
+    let undo_cmd = matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation);
+    if outer && matches!(cmd, Command::OpenFile { .. } | Command::ResetFile | Command::Fetch) {
+        crate::sel_undo::forget(state);
+    }
+    let undo_cmd = undo_cmd || matches!(cmd, Command::OpenFile { .. } | Command::ResetFile | Command::Fetch);
+    let sel_before = (outer && !undo_cmd).then(|| crate::sel_undo::snap(state));
     let r = execute_inner(state, cmd);
+    crate::sel_undo::leave(state);
     // Axis constraints are kept separately at object and sub-object level.
     let sub = state.selection_mode != SelectionMode::Object;
     if sub != state.constraint_level_sub && !state.prefs.ref_coord_constant {
@@ -40,6 +50,9 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     loom_scene::anim::set_animate(animate);
     state.scene.set_time(state.current_frame as f32);
     crate::stack::sync_selection(state);
+    if let Some(before) = sel_before {
+        crate::sel_undo::record(state, before, position);
+    }
     r
 }
 
@@ -57,6 +70,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
         c if c.group() == crate::Group::EditNormals || crate::normals::handles(&c) => crate::normals::execute(state, c),
         c if crate::vertex_paint::handles(&c) => crate::vertex_paint::execute(state, c),
+        c if crate::mesh_edit::handles(&c) => crate::mesh_edit::execute(state, c),
+        c if crate::patch_edit::handles(&c) => crate::patch_edit::execute(state, c),
         C::AssignVertexColors { light_model, by_vertex, shadows, update } => crate::assign_vertex_colors::assign(state, light_model, by_vertex, shadows, update),
         c if c.group() == crate::Group::TrackView || crate::track_view::handles(&c) => crate::track_view::execute(state, c),
         C::UnwrapUvwModifier => crate::unwrap::execute(state, cmd),
@@ -80,13 +95,20 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::UndoSceneOperation => {
             let label = state.undo.undo(&mut state.scene);
-            prune_selection(state);
+            // The step undone sat at the position just above the new top.
+            let pos = state.undo.position() + 1;
+            if label.is_none() || !crate::sel_undo::undone(state, pos) {
+                prune_selection(state);
+            }
             state.mesh_dirty = true;
             Ok(json!({ "undone": label }))
         }
         C::RedoSceneOperation => {
             let label = state.undo.redo(&mut state.scene);
-            prune_selection(state);
+            let pos = state.undo.position();
+            if label.is_none() || !crate::sel_undo::redone(state, pos) {
+                prune_selection(state);
+            }
             state.mesh_dirty = true;
             Ok(json!({ "redone": label }))
         }
@@ -516,6 +538,29 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
+        C::SelectInstances => {
+            // The instance group: every node sharing the selected node's source.
+            let ids: Vec<NodeId> = state.selection.iter().copied().collect();
+            if ids.len() != 1 {
+                return Err("Select Instances needs exactly one selected object".into());
+            }
+            let root = |mut n: NodeId| {
+                while let Some(src) = state.scene.node(n).and_then(|x| x.instance_of) {
+                    n = src;
+                }
+                n
+            };
+            let group = root(ids[0]);
+            let ids: Vec<u64> = state.scene.nodes().filter(|n| root(n.id) == group).map(|n| n.id.0).collect();
+            if ids.len() < 2 {
+                return Err("the selected object has no instances".into());
+            }
+            execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
+        }
+        C::SelectByColorPick => {
+            state.pick_mode = Some(PickMode::SelectByColor);
+            Ok(json!({}))
+        }
         C::SelectSimilar => {
             let kinds: BTreeSet<&'static str> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.object.base_name()).collect();
             let ids: Vec<u64> = state.scene.nodes().filter(|n| kinds.contains(n.object.base_name())).map(|n| n.id.0).collect();
@@ -581,6 +626,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SelectionMode { mode } => {
             state.selection_mode = mode;
             state.sub_selection.clear();
+            state.mesh_patch.polygon_level = false;
+            state.mesh_patch.handle_level = false;
             // The level lives in one place for the user: an active Edit Poly /
             // Poly Select / Mesh Select entry shows the same level in the stack.
             let ids: Vec<NodeId> = state.selection.iter().copied().collect();
@@ -597,8 +644,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         SelectionMode::Face => 4,
                         _ => 5,
                     },
+                    // Edit Patch: Vertex, Handle, Edge, Patch, Element.
+                    (loom_scene::Modifier::EditPatch { .. }, m) => match m {
+                        SelectionMode::Vertex => 1,
+                        SelectionMode::Edge | SelectionMode::Border => 3,
+                        SelectionMode::Face => 4,
+                        _ => 5,
+                    },
                     // Mesh Select: Vertex, Edge, Face, Polygon, Element; polygons keep Face or Polygon.
-                    (loom_scene::Modifier::MeshSelect { .. }, m) => match m {
+                    (loom_scene::Modifier::MeshSelect { .. } | loom_scene::Modifier::EditMesh { .. }, m) => match m {
                         SelectionMode::Vertex => 1,
                         SelectionMode::Edge | SelectionMode::Border => 2,
                         SelectionMode::Face if slot.sub_level == 3 => 3,
@@ -2025,7 +2079,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 }
                 // With a stack the whole stack collapses into the result (Convert To).
                 let mesh = if node.modifiers.is_empty() { node.object.mesh().into_owned() } else { state.scene.eval_mesh(id).value.mesh.clone() };
-                let mut poly = node.object.with_mesh(mesh);
+                // An Editable Mesh's triangles merge back into their polygons.
+                let mesh = if mesh.has_invisible_edges() { loom_mesh::tri_mesh::to_poly(&mesh)? } else { mesh };
+                let mut poly = match &node.object {
+                    ObjectKind::EditablePoly(_) => node.object.with_mesh(mesh),
+                    _ => ObjectKind::EditablePoly(loom_scene::PolyObject::from_mesh(mesh)),
+                };
                 if let ObjectKind::EditablePoly(p) = &mut poly {
                     if !node.modifiers.is_empty() {
                         p.subdiv.use_nurms.set(false);
@@ -2543,6 +2602,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     }
                     return Ok(json!({ "parent": id.0 }));
                 }
+                Some(PickMode::SelectByColor) => {
+                    state.pick_mode = None;
+                    let rgb = state.scene.node(id).ok_or_else(|| missing(id))?.wire_color;
+                    return execute(state, C::SelectByColor { rgb });
+                }
                 Some(PickMode::CoordSystem) => {
                     state.pick_mode = None;
                     return execute(state, C::PickCoordinateSystem { id: id.0 });
@@ -2835,6 +2899,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if state.scene.node(node).is_some_and(|n| n.edit_spline().is_some()) {
                 return crate::spline::select_sub(state, node, &ids, op);
             }
+            if state.scene.node(node).is_some_and(|n| n.edit_patch().is_some()) {
+                return crate::patch_edit::select_sub(state, node, &ids, op);
+            }
             if op == SelectOp::Replace {
                 state.sub_selection.clear();
             }
@@ -2842,7 +2909,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let loop_mode = state.loop_mode;
             let clicked = ids.clone();
             for raw in ids {
+                let polygon = state.scene.node(node).and_then(|n| crate::mesh_edit::polygon_pick(state, n, &mesh, FaceId(raw)));
                 let expanded: Vec<SubObjectId> = match mode {
+                    // Editable Mesh > Polygon: the triangles of the clicked polygon.
+                    SelectionMode::Face if polygon.is_some() => polygon.unwrap_or_default().into_iter().map(SubObjectId::Face).collect(),
                     SelectionMode::Element => element_of(&mesh, FaceId(raw)).into_iter().map(SubObjectId::Face).collect(),
                     // Loop Mode: an edge brings its whole loop (Alt takes the loop away).
                     SelectionMode::Edge if loop_mode => loom_mesh::select_ops::edge_loop(&mesh, &[HalfEdgeId(raw)]).into_iter().map(SubObjectId::Edge).collect(),
@@ -3082,12 +3152,20 @@ pub(crate) fn replace_poly_change(node: &Node, poly: loom_scene::PolyObject) -> 
     match node.editing_entry() {
         Some(a) => {
             let mut after = node.modifiers.clone();
-            if let Some(p) = after[a].modifier.edit_poly_mut() {
-                *p = poly;
-            }
+            after[a].modifier.set_edit_poly(poly);
             Change::SetStack { id: node.id, before: node.modifiers.clone(), after }
         }
-        None => Change::ReplaceObject { id: node.id, before: Box::new(node.object.clone()), after: Box::new(ObjectKind::EditablePoly(poly)) },
+        None => {
+            let after = match &node.object {
+                // An Editable Mesh stays triangles (cut again, edges keep their visibility).
+                ObjectKind::EditableMesh(old) => {
+                    let mesh = loom_mesh::tri_mesh::retriangulate_like(&old.mesh, poly.mesh.clone()).unwrap_or_else(|_| poly.mesh.clone());
+                    ObjectKind::EditableMesh(poly.with_mesh(mesh))
+                }
+                _ => ObjectKind::EditablePoly(poly),
+            };
+            Change::ReplaceObject { id: node.id, before: Box::new(node.object.clone()), after: Box::new(after) }
+        }
     }
 }
 
@@ -3108,6 +3186,9 @@ pub(crate) fn object_with_cage(before: &ObjectKind, mesh: Mesh) -> ObjectKind {
 /// The change for an edited cage mesh of `node`: Edit Spline / Edit Poly
 /// entries take it in place, else the object is replaced.
 pub(crate) fn cage_change(node: &Node, mesh: Mesh) -> Change {
+    if let Some(p) = node.edit_patch() {
+        return crate::patch_edit::replace_patch_change(node, p.with_patch(p.patch.with_cage(&mesh)));
+    }
     if let Some(so) = node.edit_spline().filter(|_| node.editing_spline_entry().is_some()) {
         let mut shape = so.shape.clone();
         let pts: Vec<Vec3> = mesh.vertices().iter().map(|v| v.position).collect();
@@ -3448,9 +3529,9 @@ fn clear_selection(state: &mut AppState) {
 fn prune_selection(state: &mut AppState) {
     let scene = &state.scene;
     state.selection.retain(|id| scene.node(*id).is_some());
-    // Sub-object ids are indices into a mesh that may just have changed
-    // topology; they would silently point at other faces.
-    state.sub_selection.clear();
+    // A step without a recorded selection (an interactive drag) keeps the
+    // sub-object ids that still name an element of their mesh.
+    crate::sel_undo::keep_valid(state);
     prune_camera_views(state);
 }
 
@@ -3782,6 +3863,9 @@ fn delete(state: &mut AppState, delete_isolated: Option<bool>) -> Result<Value, 
     if state.spline_selected() {
         return crate::spline::delete_selection(state);
     }
+    if state.patch_selected() {
+        return crate::patch_edit::delete_selection(state);
+    }
     let mut faces: BTreeMap<NodeId, Vec<FaceId>> = BTreeMap::new();
     let mut edges: BTreeMap<NodeId, Vec<HalfEdgeId>> = BTreeMap::new();
     let mut verts: BTreeMap<NodeId, Vec<VertexId>> = BTreeMap::new();
@@ -3823,10 +3907,14 @@ fn delete(state: &mut AppState, delete_isolated: Option<bool>) -> Result<Value, 
         if let Some(v) = verts.get(&n) {
             edit_ops::delete_vertices(&mut mesh, v)?;
         }
-        changes.push(Change::ReplaceObject {
-            id: n,
-            before: Box::new(before.clone()),
-            after: Box::new(before.with_mesh(mesh)),
+        changes.push(if node.edits_tri_mesh() {
+            cage_change(node, mesh)
+        } else {
+            Change::ReplaceObject {
+                id: n,
+                before: Box::new(before.clone()),
+                after: Box::new(before.with_mesh(mesh)),
+            }
         });
     }
     commit(state, "Delete", Change::Group(changes))?;
@@ -4661,6 +4749,9 @@ pub(crate) fn edit_meshes<T>(
     let mut changes = Vec::new();
     for (n, ids) in targets {
         let node = state.scene.node(n).ok_or_else(|| missing(n))?;
+        if node.edit_patch().is_some() {
+            return Err(format!("{label}: an Editable Patch is edited with its own Geometry tools"));
+        }
         let before = node.object.clone();
         let mut mesh = node.cage_mesh().into_owned();
         op(&mut mesh, n, ids)?;

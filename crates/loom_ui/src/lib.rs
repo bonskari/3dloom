@@ -133,6 +133,8 @@ pub enum CreateKind {
     Camera { target: bool },
     /// Lights > Standard: target lights drag from the light to its target, the others are placed by a click.
     Light(loom_commands::light::LightKind),
+    /// Geometry > Patch Grids: Quad Patch (`quad`) or Tri Patch, dragged corner to corner.
+    PatchGrid { quad: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,6 +223,8 @@ pub struct LoomApp {
     pub create_kind: Option<CreateKind>,
     /// Create > Geometry class: Standard Primitives or Compound Objects.
     pub create_compound: bool,
+    /// Create > Geometry shows the Patch Grids object types.
+    pub create_patch_grids: bool,
     /// Compound Objects > Object Type button pressed.
     pub compound_kind: Option<command_panel::compound::CompoundKind>,
     /// A Line being drawn in the viewport.
@@ -343,6 +347,8 @@ pub struct LoomApp {
     /// Lasso/Paint path or Fence corners being collected.
     pub region_points: Vec<egui::Pos2>,
     pub quad_menu: Option<quad_menu::Open>,
+    /// The last command picked from a quad menu (its quadrant title repeats it).
+    pub quad_last: Option<quad_menu::Last>,
     /// Loaded viewport background images, keyed by (path, version).
     pub background_textures: std::collections::HashMap<(String, u32), Option<egui::TextureHandle>>,
     /// Show Map in Viewport bitmaps decoded once per path.
@@ -452,6 +458,7 @@ impl LoomApp {
             bitmap_generation: 0,
             create_kind: None,
             create_compound: false,
+            create_patch_grids: false,
             compound_kind: None,
             line: None,
             bone_points: Vec::new(),
@@ -518,6 +525,7 @@ impl LoomApp {
             pick_cycle: None,
             region_points: Vec::new(),
             quad_menu: None,
+            quad_last: None,
             background_textures: std::collections::HashMap::new(),
             last_error: None,
             input_log: Default::default(),
@@ -719,7 +727,9 @@ impl LoomApp {
             // the Modify panel edits; the cage stays the base mesh for
             // sub-object picking.
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
-            let mut shown = if n.modifiers.is_empty() && !nurms {
+            // An Editable Patch's cage is its lattice: the surface is drawn.
+            let patch = n.object.patch().is_some();
+            let mut shown = if n.modifiers.is_empty() && !nurms && !patch {
                 None
             } else if self.below_end_result(id) {
                 match n.active_entry {
@@ -1036,7 +1046,8 @@ impl LoomApp {
 
     // ---- gizmo drags: one undo step per drag ------------------------------
 
-    pub fn begin_transform_drag(&mut self, drag: DragState) {
+    pub fn begin_transform_drag(&mut self, mut drag: DragState) {
+        drag.undo_len = self.state.undo.len();
         self.transform_drag = Some(drag);
         let label = match self.state.active_tool {
             Tool::Rotate => "Rotate",
@@ -1093,6 +1104,17 @@ impl LoomApp {
         }
         for button in down {
             raw.events.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: raw.modifiers });
+        }
+    }
+
+    /// Right-click during a drag: the selection goes back where the drag
+    /// began (a Shift+drag clone goes too).
+    pub fn cancel_transform_drag(&mut self) {
+        let Some(drag) = self.transform_drag else { return };
+        self.end_transform_drag();
+        self.shift_sources.clear();
+        if self.state.undo.len() > drag.undo_len {
+            let _ = self.dispatch(Command::UndoSceneOperation);
         }
     }
 
@@ -1235,6 +1257,7 @@ impl LoomApp {
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
         icons::install(ctx);
+        spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);
         ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
