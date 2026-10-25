@@ -40,6 +40,8 @@ struct Harness {
 
 impl Harness {
     fn new() -> Self {
+        // A test stuck (e.g. in the GPU driver) fails the binary instead of hanging it.
+        loom_bevy::test_watchdog(std::time::Duration::from_secs(1800));
         let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0 };
         h.ctx.enable_accesskit();
         h.frames(3);

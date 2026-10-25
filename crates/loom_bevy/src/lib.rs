@@ -171,6 +171,26 @@ pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'sta
     wgpu::DeviceDescriptor { label: Some("3dLoom device"), required_features: features, required_limits: adapter.limits(), memory_hints: wgpu::MemoryHints::default() }
 }
 
+/// For test binaries: ends the process with a failure (exit 101), naming
+/// its threads, once it has run `limit` (`LOOM_TEST_WATCHDOG_SECS`
+/// overrides it), so a test stuck in the GPU driver fails instead of
+/// holding its build slot. Armed once per process; later calls do nothing.
+#[doc(hidden)]
+pub fn test_watchdog(limit: std::time::Duration) {
+    static ARMED: std::sync::Once = std::sync::Once::new();
+    ARMED.call_once(|| {
+        let limit = std::env::var("LOOM_TEST_WATCHDOG_SECS").ok().and_then(|s| s.parse().ok()).map(std::time::Duration::from_secs).unwrap_or(limit);
+        let _ = std::thread::Builder::new().name("test watchdog".into()).spawn(move || {
+            std::thread::sleep(limit);
+            let threads = std::fs::read_dir("/proc/self/task")
+                .map(|d| d.filter_map(|e| e.ok()).filter_map(|e| std::fs::read_to_string(e.path().join("comm")).ok()).map(|s| s.trim().to_owned()).collect::<Vec<_>>().join(", "))
+                .unwrap_or_default();
+            eprintln!("test watchdog: the test binary still runs after {limit:?}; threads: {threads}");
+            std::process::exit(101);
+        });
+    });
+}
+
 /// Whether Bevy can run on `adapter` (not on the GL fallback).
 pub fn supported(adapter: &wgpu::Adapter) -> bool {
     adapter.get_info().backend != wgpu::Backend::Gl

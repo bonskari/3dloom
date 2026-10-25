@@ -11,6 +11,7 @@ fn gpu() -> Option<BevyRenderer> {
     // No GL backend: an EGL context torn down while another test thread uses or
     // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
     // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
+    loom_bevy::test_watchdog(std::time::Duration::from_secs(600));
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
     if !loom_bevy::supported(&adapter) {
