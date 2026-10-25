@@ -3058,6 +3058,7 @@ fn clear_normal_points(h: &Harness) -> Vec<(u32, egui::Pos2)> {
         .filter(|(_, p, d)| d.dot(eye - *p) > 0.0)
         .map(|(g, p, d)| (*g, h.screen_of(*p + *d * 6.0)))
         .filter(|(g, s)| seg.iter().all(|(o, a, b)| o == g || dist(*s, *a, *b) > 12.0))
+        .filter(|(_, s)| h.app.viewport_rects[h.app.state.active_viewport].shrink(20.0).contains(*s))
         .collect()
 }
 
@@ -3094,7 +3095,6 @@ fn edit_normals_click_ctrl_alt_and_empty_click_select_normals() {
     h.mods = egui::Modifiers::CTRL;
     h.click(b.1);
     h.mods = egui::Modifiers::NONE;
-    eprintln!("DBG a={a:?} b={b:?} sel={:?} log={:?}", normal_selection(&h), h.app.state.undo.labels());
     let mut both = vec![a.0, b.0];
     both.sort();
     assert_eq!(normal_selection(&h), both, "Ctrl adds");
