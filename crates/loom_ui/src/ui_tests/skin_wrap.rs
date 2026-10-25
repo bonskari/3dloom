@@ -160,11 +160,11 @@ fn skin_morph_pick_bone_custom_falloff_graph_and_soft_selection_graph() {
     assert!(morph_data(&h, arm).bones.iter().find(|b| b.node == NodeId(bones[1])).unwrap().planar);
 }
 
-/// A 40×40 control plane and a finer 16×16 plane half a unit above it, wrapped.
+/// A 40×40 control slab (top at z 0) and a finer 16×16 plane half a unit above it, wrapped.
 fn wrapped(h: &mut Harness) -> (NodeId, NodeId) {
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
     h.frames(2);
-    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [40.0, 40.0, 0.0] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0, 0.0, -2.0], size: [40.0, 40.0, 2.0] });
     let control = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0, 0.0, 0.5], size: [16.0, 16.0, 0.0] });
     let hi = *h.app.state.selection.iter().next().unwrap();
@@ -182,12 +182,12 @@ fn skin_wrap_add_by_picking_control_vertices_locals_display_and_bake() {
     let (control, hi) = wrapped(&mut h);
     let spot = h.screen_of(Vec3::new(15.0, -15.0, 0.0));
     h.click(spot);
-    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![control], "a plain click there picks the control plane");
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![control], "a plain click there picks the control slab");
     h.cmd(Command::SelectNodes { ids: vec![hi.0], op: loom_commands::SelectOp::Replace });
     h.click_widget("Add");
     assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::SkinWrapControl));
     h.click(h.screen_of(Vec3::new(15.0, -15.0, 0.0)));
-    assert_eq!(wrap_data(&h, hi).bases, vec![control], "the clicked plane is the control object ({:?}, picked {:?})", h.app.last_error, h.app.state.selection);
+    assert_eq!(wrap_data(&h, hi).bases, vec![control], "the clicked slab is the control object");
     let away = h.screen_of(Vec3::new(40.0, 40.0, 0.0));
     right_click(&mut h, away);
     assert_eq!(h.app.state.pick_mode, None);
