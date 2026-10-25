@@ -1674,13 +1674,15 @@ pub fn surfaces_for(lib: &MaterialLibrary, id: MaterialId, view: ShellView) -> O
 /// Top/Bottom bands a blended boundary is drawn with, bottom to top.
 pub const TOP_BOTTOM_BANDS: usize = 4;
 
+/// (original face material ID, Local, Blend, Position, the virtual IDs of the bands).
+type SplitEntry = (Option<u16>, bool, f32, f32, [u16; TOP_BOTTOM_BANDS]);
+
 /// Top/Bottom surfaces turned into per-face-ID ones: what `split_surfaces`
 /// returns with them, for `apply_split` to give each face its virtual ID.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaceSplit {
-    /// Per original face material ID (None: one surface for every face):
-    /// (Local, Blend, Position, the virtual IDs of the bands).
-    entries: Vec<(Option<u16>, bool, f32, f32, [u16; TOP_BOTTOM_BANDS])>,
+    /// Per original face material ID (None: one surface for every face).
+    entries: Vec<SplitEntry>,
 }
 
 /// The ID faces get when their original ID has no surface: drawn black.

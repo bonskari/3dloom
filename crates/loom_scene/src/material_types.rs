@@ -86,9 +86,11 @@ impl Raytrace {
     }
 }
 
-/// Architectural material templates: (name, diffuse, Shininess,
-/// Transparency, Translucency, IOR, metal).
-pub const ARCH_TEMPLATES: [(&str, [u8; 3], f32, f32, f32, f32, bool); 24] = [
+/// An Architectural template: (name, diffuse, Shininess, Transparency, Translucency, IOR, metal).
+pub type ArchTemplate = (&'static str, [u8; 3], f32, f32, f32, f32, bool);
+
+/// Architectural material templates.
+pub const ARCH_TEMPLATES: [ArchTemplate; 24] = [
     ("User Defined", [178, 178, 178], 0.0, 0.0, 0.0, 1.5, false),
     ("Ceramic Tile, Glazed", [230, 230, 220], 80.0, 0.0, 0.0, 2.0, false),
     ("Fabric", [160, 130, 110], 0.0, 0.0, 0.0, 1.0, false),

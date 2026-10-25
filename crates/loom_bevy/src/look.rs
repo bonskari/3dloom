@@ -18,9 +18,14 @@ pub const FALLOFF: u32 = 1;
 pub const TOON: u32 = 2;
 pub const MATTE: u32 = 4;
 
-/// The shader's uniform.
-// The derive's generated layout checks are never called.
+pub use uniform::LookParams;
+
+// The ShaderType derive's generated layout checks are never called.
 #[allow(dead_code)]
+mod uniform {
+use super::*;
+
+/// The shader's uniform.
 #[derive(ShaderType, Reflect, Debug, Clone, Copy, Default, PartialEq)]
 pub struct LookParams {
     pub flags: u32,
@@ -43,6 +48,7 @@ pub struct LookParams {
     /// Matte/Shadow: shadow colour (w = Shadow Brightness); x of `matte_flags` Receive Shadows.
     pub matte: Vec4,
     pub matte_flags: Vec4,
+}
 }
 
 /// The extension over Bevy's standard material.
