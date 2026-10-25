@@ -912,7 +912,11 @@ impl StandardMaterial {
     pub fn set_color(&mut self, which: &str, rgb: [u8; 3]) -> Result<(), String> {
         let c = Vec3::new(rgb[0] as f32, rgb[1] as f32, rgb[2] as f32) / 255.0;
         match &mut self.kind {
-            MaterialKind::Raytrace(r) if r.set_color(which, rgb) => return Ok(()),
+            MaterialKind::Raytrace(r) => {
+                if r.set_color(which, rgb) {
+                    return Ok(());
+                }
+            }
             MaterialKind::InkPaint(ink) => return if ink.set_color(which, rgb) { Ok(()) } else { Err(format!("no Ink 'n Paint colour \"{which}\" (Lighted, Shaded, Highlight, Ink Color)")) },
             MaterialKind::MatteShadow(m) if which == "Color" => {
                 m.color = c;
