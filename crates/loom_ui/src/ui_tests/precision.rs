@@ -326,14 +326,14 @@ fn spacing_tool_picks_a_path_and_uses_the_distribution_list() {
     assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![b]);
     assert_eq!(h.text_rects("Arc001").len(), 1, "the path's name shows");
     h.click_text_anywhere("Divide Evenly, Objects at Ends");
-    h.click_text_anywhere("Divide Evenly, No Objects at Ends");
+    h.click_text_anywhere("Centered, Specify Spacing");
     h.click_text_anywhere("Apply");
-    // Count 3 with no objects at the ends: a quarter, half and three quarters along.
+    // Spacing 10 along the half circle (30π ≈ 94.2 long): ten objects, centred on the path.
     let mut at: Vec<Vec3> = h.app.state.selection.iter().map(|id| h.app.state.scene.world_matrix(*id).w_axis.truncate()).collect();
     at.sort_by(|a, b| b.x.total_cmp(&a.x));
-    assert_eq!(at.len(), 3, "{at:?}");
-    let r = 30.0 * std::f32::consts::FRAC_1_SQRT_2;
-    assert!(at[0].distance(Vec3::new(r, r, 0.0)) < 0.5 && at[1].distance(Vec3::new(0.0, 30.0, 0.0)) < 0.5 && at[2].distance(Vec3::new(-r, r, 0.0)) < 0.5, "{at:?}");
+    assert_eq!(at.len(), 10, "{at:?}");
+    assert!((at[0].x + at[9].x).abs() < 0.2 && (at[0].y - at[9].y).abs() < 0.2, "centred: {at:?}");
+    assert!(at.iter().all(|p| (p.length() - 30.0).abs() < 0.2), "on the arc: {at:?}");
 }
 
 #[test]
