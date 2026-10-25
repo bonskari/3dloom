@@ -422,17 +422,16 @@ fn object_properties_by_layer_buttons_and_layer_properties() {
     let props = h.app.state.scene.current_layer;
     h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
     h.cmd(Command::ObjectProperties);
-    // Object colour (top), then Display Properties left of Rendering Control.
-    let mut b = in_window(&h, "Object Properties", "By Object");
-    assert_eq!(b.len(), 3, "colour, Display Properties and Rendering Control each have By Object");
-    b.sort_by(|p, q| p.y.total_cmp(&q.y));
-    let mut lower = b[1..].to_vec();
-    lower.sort_by(|p, q| p.x.total_cmp(&q.x));
-    h.click(lower[0]);
+    // The By Object button beside each group's heading.
+    let beside = |h: &Harness, heading: &str| {
+        let head = window_text(h, "Object Properties", heading);
+        *in_window(h, "Object Properties", "By Object").iter().filter(|p| (p.y - head.y).abs() < 6.0 && p.x > head.x).min_by(|p, q| p.x.total_cmp(&q.x)).unwrap_or_else(|| panic!("no By Object beside {heading}"))
+    };
+    let p = beside(&h, "Display Properties");
+    h.click(p);
     assert!(h.app.state.scene.node(a).unwrap().display.by_layer);
-    let mut again = in_window(&h, "Object Properties", "By Object");
-    again.sort_by(|p, q| p.y.total_cmp(&q.y));
-    h.click(again[1]);
+    let p = beside(&h, "Rendering Control");
+    h.click(p);
     assert!(h.app.state.scene.node(a).unwrap().render.by_layer);
     h.cmd(Command::CloseDialog);
     h.cmd(Command::LayerProperties { layer: props });
