@@ -389,7 +389,8 @@ fn gradient_ramp(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
         let x = rect.left() + rect.width() * f.position / 100.0;
         ui.painter().line_segment([egui::pos2(x, rect.bottom() - 6.0), egui::pos2(x, rect.bottom())], egui::Stroke::new(2.0, egui::Color32::WHITE));
     }
-    if r.on_hover_text("Click to add a flag").clicked() {
+    let r = r.on_hover_text("Click to add a flag");
+    if r.clicked() {
         if let Some(pos) = r.interact_pointer_pos() {
             let t = ((pos.x - rect.left()) / rect.width() * 100.0).clamp(0.0, 100.0);
             set(app, "Add Flag", t as f64);
