@@ -126,7 +126,7 @@ pub fn mesh_data_by_id(mesh: &loom_mesh::Mesh) -> Vec<(u16, MeshData)> {
 
 /// Independent material meshes use the renderer's existing bounded worker
 /// pool. Each mesh still runs the same MikkTSpace tangent calculation.
-pub(crate) fn material_meshes(pool: &bevy::tasks::TaskPool, parts: &[(MeshData, bool)]) -> Vec<Mesh> {
+pub(crate) fn material_meshes(pool: &bevy_tasks::TaskPool, parts: &[(MeshData, bool)]) -> Vec<Mesh> {
     let _scope = loom_render::profile::Scope::new("bevy.material_meshes");
     let build = |(data, tangents): &(MeshData, bool)| {
         let mut mesh = data.to_bevy();
@@ -530,7 +530,7 @@ mod tests {
         loom_mesh::uvmap::auto_map(&mut mesh, loom_mesh::uvmap::AutoMap::Spherical, 1);
         let data = mesh_data(&mesh);
         let parts = vec![(data.clone(), true), (data.clone(), false), (data, true)];
-        let pool = bevy::tasks::TaskPoolBuilder::new().num_threads(2).build();
+        let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(2).build();
         assert_eq!(pool.thread_num(), 2, "the renderer requires Bevy multithreading");
         let parallel = material_meshes(&pool, &parts);
         assert_eq!(parallel.len(), parts.len());

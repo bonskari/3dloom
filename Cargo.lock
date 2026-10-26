@@ -3179,6 +3179,7 @@ name = "loom_bevy"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_tasks",
  "glam",
  "image",
  "loom_mesh",

@@ -205,8 +205,6 @@ impl BevyRenderer {
                 .build()
                 // The host program owns Ctrl+C.
                 .disable::<TerminalCtrlCHandlerPlugin>()
-                // The host reads RenderApp's textures in this frame.
-                .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>()
                 .set(WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, close_when_requested: false })
                 .set(RenderPlugin { render_creation: RenderCreation::Manual(resources), synchronous_pipeline_compilation: true, ..Default::default() }),
         );
@@ -384,6 +382,9 @@ impl BevyRenderer {
         let mut seen = HashSet::new();
         let mut lo = Vec3::splat(f32::MAX);
         let mut hi = Vec3::splat(f32::MIN);
+        let mut batches = Vec::new();
+        let mut materials = Vec::new();
+        let mut material_data = Vec::new();
         for o in objects {
             seen.insert(o.id);
             let data = mesh_data(o.mesh);
@@ -429,8 +430,7 @@ impl BevyRenderer {
             for (e, _) in set.remove(&o.id).map(|obj| obj.parts).unwrap_or_default() {
                 self.app.world_mut().despawn(e);
             }
-            let mut materials = Vec::with_capacity(parts.len());
-            let mut material_data = Vec::with_capacity(parts.len());
+            let count = parts.len();
             for (id, surface) in parts {
                 let mat = self.material(surface.as_ref(), o.wire_color, o.flags.visibility);
                 let faceted = surface.as_ref().is_some_and(|s| s.faceted);
@@ -444,9 +444,15 @@ impl BevyRenderer {
                 material_data.push((d, mat.normal_map_texture.is_some()));
                 materials.push(mat);
             }
-            let meshes = convert::material_meshes(bevy::tasks::ComputeTaskPool::get(), &material_data);
-            let mut entities = Vec::new();
-            for ((mat, (d, _)), mesh) in materials.into_iter().zip(material_data).zip(meshes) {
+            batches.push((o, hash, layers, count));
+        }
+        // Mesh/tangent work is independent across objects as well as material
+        // IDs. Submit one batch so Body, Face and clothing can overlap.
+        let meshes = convert::material_meshes(bevy_tasks::ComputeTaskPool::get(), &material_data);
+        let mut prepared = materials.into_iter().zip(material_data).zip(meshes);
+        for (o, hash, layers, count) in batches {
+            let mut entities = Vec::with_capacity(count);
+            for ((mat, (d, _)), mesh) in prepared.by_ref().take(count) {
                 let world = self.app.world_mut();
                 let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
                 let material_handle = world.resource_mut::<Assets<StandardMaterial>>().add(mat);

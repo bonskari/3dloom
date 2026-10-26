@@ -12,7 +12,10 @@ glam        = { workspace = true }
 wgpu        = { workspace = true }
 image       = { workspace = true }
 # Headless: no window, no audio, no winit. Runs on the UI's wgpu device.
-bevy = { version = "0.16", default-features = false, features = ["std", "async_executor", "multi_threaded", "bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_window", "pbr_specular_textures"] }
+bevy = { version = "0.16", default-features = false, features = ["std", "async_executor", "bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_window", "pbr_specular_textures"] }
+
+# Tangent workers are parallel; Bevy retains the host-controlled ECS/render schedule.
+bevy_tasks = { version = "0.16", features = ["multi_threaded"] }
 
 [dev-dependencies]
 pollster = { workspace = true }
