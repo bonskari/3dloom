@@ -118,11 +118,15 @@ pub fn mesh_data_by_id(mesh: &loom_mesh::Mesh) -> Vec<(u16, MeshData)> {
 /// Independent material meshes use the renderer's existing bounded worker
 /// pool. Each mesh still runs the same MikkTSpace tangent calculation.
 pub(crate) fn material_meshes(pool: &bevy::tasks::TaskPool, parts: &[(MeshData, bool)]) -> Vec<Mesh> {
+    let _scope = loom_render::profile::Scope::new("bevy.material_meshes");
     pool.scope(|scope| {
         for (data, tangents) in parts {
             scope.spawn(async move {
                 let mut mesh = data.to_bevy();
-                if *tangents { let _ = mesh.generate_tangents(); }
+                if *tangents {
+                    let _scope = loom_render::profile::Scope::new("bevy.tangents");
+                    let _ = mesh.generate_tangents();
+                }
                 mesh
             });
         }

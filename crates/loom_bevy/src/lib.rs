@@ -362,6 +362,7 @@ impl BevyRenderer {
     /// Brings the Bevy scene in line with `objects`: new nodes are spawned,
     /// changed meshes or materials rebuilt, removed nodes despawned.
     pub fn sync(&mut self, objects: &[SceneObject]) {
+        let _scope = loom_render::profile::Scope::new("bevy.sync");
         let mut set = std::mem::take(&mut self.objects);
         self.bounds = self.sync_set(&mut set, objects, false);
         self.objects = set;
@@ -770,6 +771,7 @@ impl BevyRenderer {
 
     /// Renders every view set since the last update.
     pub fn update(&mut self) {
+        let _scope = loom_render::profile::Scope::new("bevy.update");
         let world = self.app.world_mut();
         for v in self.views.values_mut() {
             if !v.used {

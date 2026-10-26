@@ -206,6 +206,7 @@ pub struct MeshBuffer {
 
 impl MeshBuffer {
     pub fn from_mesh(device: &Device, mesh: &Mesh, style: MeshStyle) -> Self {
+        let _scope = crate::profile::Scope::new("render.upload");
         let (verts, indices, ranges) = triangulate_styled(mesh, &style);
         let wire = wire_lines(mesh, &style);
         let wire_vertex_count = wire.len() as u32;
@@ -369,6 +370,7 @@ pub fn wire_lines(mesh: &Mesh, style: &MeshStyle) -> Vec<crate::grid::LineVertex
 /// transform; the indices come grouped into one draw range per texture,
 /// transparency and culling.
 pub fn triangulate_styled(mesh: &Mesh, style: &MeshStyle) -> (Vec<GpuVertex>, Vec<u32>, Vec<DrawRange>) {
+    let _scope = crate::profile::Scope::new("render.triangulate");
     let vertex_colors = style.vertex_colors;
     // Smoothing visits the same neighbouring faces at every corner. Compute
     // their normals once per triangulation, including hidden neighbours.

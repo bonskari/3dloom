@@ -4,6 +4,7 @@ pub mod camera;
 pub mod grid;
 pub mod mesh_buffer;
 pub mod pick;
+pub mod profile;
 pub mod viewport;
 
 pub use camera::Camera;
