@@ -22,6 +22,7 @@ mod kimodo;
 mod clips;
 mod loomrig;
 mod preview_budget;
+mod playback_cache;
 mod material_previews;
 mod lightcam2;
 mod bake;

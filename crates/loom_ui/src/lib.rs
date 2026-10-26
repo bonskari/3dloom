@@ -47,7 +47,7 @@ pub mod update_menu;
 mod ui_tests;
 
 use eframe::egui;
-use glam::Vec3;
+use glam::{Mat4,Vec3};
 use loom_commands::{AppState, Command, PrimitiveKind, ShapeKind, Tool};
 pub use command_panel::create::Category;
 pub use command_panel::Tab;
@@ -209,6 +209,7 @@ pub struct LoomApp {
     pub camera_controller: ViewportNavigator,
     /// World-space meshes of visible nodes, rebuilt when `state.mesh_dirty`.
     world_meshes: Vec<(NodeId, Mesh)>,
+    cage_cache_keys: std::collections::HashMap<NodeId,(u64,u64,u64,Mat4)>,
     /// Draw styles parallel to `world_meshes`.
     world_styles: Vec<loom_render::MeshStyle>,
     /// What the viewports draw (the stack result), parallel to `world_meshes`.
@@ -472,6 +473,7 @@ impl LoomApp {
             state: AppState::new(),
             camera_controller: ViewportNavigator::new(),
             world_meshes: Vec::new(),
+            cage_cache_keys: Default::default(),
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
             world_version: 0,
@@ -734,6 +736,8 @@ impl LoomApp {
         }
         let srgb_f = |x: f32| if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) };
         let srgb = |c: u8| srgb_f(c as f32 / 255.0);
+        let mut old_meshes:std::collections::HashMap<_,_>=std::mem::take(&mut self.world_meshes).into_iter().collect();
+        let old_cage_keys=std::mem::take(&mut self.cage_cache_keys);
         let mut meshes = Vec::new();
         let mut display = Vec::new();
         let mut styles = Vec::new();
@@ -785,7 +789,12 @@ impl LoomApp {
             let n = self.state.scene.node(id).expect("collected above");
             // Display Properties By Layer come from the layer.
             let d = self.state.scene.display_of(n);
-            let mut mesh = n.cage_mesh().into_owned();
+            let world=self.state.scene.object_matrix(n.id);
+            let cage_key=(self.state.scene.instance_id(),n.version,n.geom_version,world);
+            let cacheable=matches!(&n.object,loom_scene::ObjectKind::EditablePoly(_)|loom_scene::ObjectKind::EditableMesh(_)) && n.active_entry.is_none() && n.instance_of.is_none() && !d.display_as_box;
+            let cached_world=cacheable && old_cage_keys.get(&id)==Some(&cage_key) && old_meshes.contains_key(&id);
+            let mut mesh=if cached_world{old_meshes.remove(&id).unwrap()}else{n.cage_mesh().into_owned()};
+            if cacheable{self.cage_cache_keys.insert(id,cage_key);}
             // What the GPU draws: the stack result (NURMS included), or with
             // Show End Result off only up to the active entry of the object
             // the Modify panel edits; the cage stays the base mesh for
@@ -810,8 +819,7 @@ impl LoomApp {
                 let _ = loom_mesh::edit_ops::translate_mesh(&mut mesh, (min + max) * 0.5);
                 shown = None;
             }
-            let world = self.state.scene.object_matrix(n.id);
-            let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, world);
+            if !cached_world{let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, world);}
             if let Some(d) = shown.as_mut() {
                 let _ = loom_mesh::edit_ops::transform_mesh(d, world);
             }
