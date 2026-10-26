@@ -61,3 +61,22 @@ Wireframe 180 updates / 12.018994 s = 14.976 fps; Realistic 57 / 12.150285 s =
 4.691 fps. Both measured during actual Play using the diagnostics frame counter.
 These are not final release numbers or an apples-to-apples comparison with the
 user's earlier 1 fps report. Further corrections/full optimized build pending.
+
+Latest actual Play measurement after lazy face buffers, persistent GPU streams,
+frame-wide tangent workers and static editing-cage reuse: Wireframe 1441 updates
+/12.008134 s = 120.002 fps; Realistic 119/12.031813 s = 9.890 fps. Camera and
+geometry were unchanged between these two samples. No decimation or influence
+truncation. Realistic still misses the 60 fps target; user preference requested
+on whether to continue that before Biped interaction work.
+
+Broad Bevy multi_threaded caused a reproduced bake-shadow regression (5/6
+failures). Narrow direct bevy_tasks/multi_threaded preserves workers without
+changing ECS/render scheduling; bake passed six consecutive process runs with
+that configuration. Do not re-enable broad Bevy parallel scheduling casually.
+
+Final verification of the committed production path: full workspace 1664 passed,
+zero failed, eight ignored. Geometry, skin data, skeleton, materials, rig mappings
+and clips compare unchanged against SVN r1319. One pole controller now has an
+additional constant-equivalent pose key at frame 133; that key is preserved.
+Rejected halo tangent research is retained in docs/research/tangent-halo and is
+not compiled into the application. Wireframe Play is left active for review.
