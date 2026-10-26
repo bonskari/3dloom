@@ -38,3 +38,26 @@ Source clip moves/trims operate on clip-member node controllers; rig blend and F
 Actual command regressions reproduced self-frame feedback: the second world-space Move(+10) and Rotate(+15°) stayed at the first offset, and repeated absolute world type-in missed its target. The displayed FK helper follows the already corrected bone, so using that display parent as the stored offset's edit frame removed the existing correction during each edit.
 
 `Scene::edit_parent_frame` removes the stored helper offset from the evaluated display frame for world-to-stored conversions. Native world move/rotation, absolute type-in and Parent/Gimbal reference axes use that edit frame; display parenting and native skeletal animation remain unchanged. Five interaction tests pass, covering rotated/scaled parent, animated source, Auto Key, original keys unchanged, direct local offsets, absolute world movement/rotation and undo/redo. Existing LoomRig13/13 and transform/frame29/29 pass. The actual gizmo pointer-step path passes accumulating three move steps and three rotation steps. UI test build retains existing compiler warnings; no new interaction-test warning was emitted.
+
+## Playback priority and next interaction work (26 October)
+
+User priority: at least 60 fps during actual Play on the current Ray scene,
+preferably higher. Measure presented UI updates over wall time, not idle view
+speed or a CPU-only microbenchmark. Preserve character geometry, materials and
+all skin influences.
+
+All added animation extras now open separately through Animation > Animation
+Editor (Clips & IK/FK, Kimodo, LoomRig). The original Motion panel and main time
+slider remain. Explicit Display Bones modes clear the conflicting Hide Bones
+filter; a regression reproduces the formerly invisible skeleton.
+
+After performance: selectable limb-shaped controls with Biped-style direct
+manipulation and pose keys; planted, sliding and free contact keys. Planted keys
+were explicitly confirmed as important. This interaction work is deferred while
+the playback target remains unmet.
+
+First measured intermediate build (UI/commands opt0, optimized scene/render):
+Wireframe 180 updates / 12.018994 s = 14.976 fps; Realistic 57 / 12.150285 s =
+4.691 fps. Both measured during actual Play using the diagnostics frame counter.
+These are not final release numbers or an apples-to-apples comparison with the
+user's earlier 1 fps report. Further corrections/full optimized build pending.

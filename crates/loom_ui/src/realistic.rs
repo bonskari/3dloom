@@ -190,6 +190,13 @@ impl LoomApp {
         let lights = loom_scene::light::scene_lights(&self.state.scene, |n| self.state.scene.is_renderable(n));
         let display = self.world_display.clone();
         let scene = &self.state.scene;
+        // Rigid bone proxies keep local geometry; pose changes update their
+        // renderer transform instead of rebuilding meshes and materials.
+        let local_bones: HashMap<_,_> = objects.iter().filter_map(|(id,_,_,_)| {
+            let node=scene.node(loom_scene::NodeId(*id))?;
+            (node.object.is_bone() && node.modifiers.is_empty() && node.instance_of.is_none() && !scene.display_of(node).display_as_box)
+                .then(||(*id,(scene.eval_mesh(node.id),scene.object_matrix(node.id))))
+        }).collect();
         let generation = self.state.bitmap_generation;
         let Gpu::Running(b) = &mut self.gpu else { return };
         if b.synced == Some((version, for_render)) {
@@ -203,7 +210,8 @@ impl LoomApp {
         let list: Vec<loom_bevy::SceneObject> = objects
             .iter()
             .filter_map(|(id, i, wire, renderable)| {
-                Some(loom_bevy::SceneObject { id: *id, mesh: display.get(*i)?, wire_color: *wire, surfaces: scene.node_surfaces_for(loom_scene::NodeId(*id), view), renderable: *renderable, flags: render_flags(scene, loom_scene::NodeId(*id)) })
+                let (mesh,transform)=match local_bones.get(id){Some((evaluated,transform))=>(&evaluated.value.mesh,*transform),None=>(display.get(*i)?,Mat4::IDENTITY)};
+                Some(loom_bevy::SceneObject { id: *id, mesh, transform, wire_color: *wire, surfaces: scene.node_surfaces_for(loom_scene::NodeId(*id), view), renderable: *renderable, flags: render_flags(scene, loom_scene::NodeId(*id)) })
             })
             .collect();
         b.renderer.sync(&list);
@@ -307,7 +315,7 @@ impl LoomApp {
         let scene = &self.state.scene;
         let hidden_objects: Vec<loom_bevy::SceneObject> = hidden
             .iter()
-            .filter_map(|(id, mesh)| scene.node(*id).map(|n| loom_bevy::SceneObject { id: id.0, mesh, wire_color: n.wire_color, surfaces: scene.node_surfaces_for(*id, loom_scene::material::ShellView::Render), renderable: scene.is_renderable(n), flags: render_flags(scene, *id) }))
+            .filter_map(|(id, mesh)| scene.node(*id).map(|n| loom_bevy::SceneObject { id: id.0, mesh, transform: Mat4::IDENTITY, wire_color: n.wire_color, surfaces: scene.node_surfaces_for(*id, loom_scene::material::ShellView::Render), renderable: scene.is_renderable(n), flags: render_flags(scene, *id) }))
             .collect();
         let selected_only = (s.area == RenderArea::Selected).then(|| req.selection.iter().map(|n| n.0).collect());
         let options = loom_bevy::RenderOptions {

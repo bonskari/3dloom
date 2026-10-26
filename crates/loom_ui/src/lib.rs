@@ -723,6 +723,7 @@ impl LoomApp {
     }
 
     pub(crate) fn rebuild_world_meshes(&mut self) {
+        let _profile=loom_render::profile::Scope::new("ui.rebuild_world_meshes");
         if self.bitmap_generation != self.state.bitmap_generation {
             // Bitmap Parameters > Reload: read the image files again.
             self.texture_previews.clear();
@@ -1359,6 +1360,7 @@ pub fn dropped_scene_command(path: &std::path::Path) -> Option<Command> {
 impl eframe::App for LoomApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame(ctx);
+        loom_render::profile::report_if_due();
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
@@ -1370,6 +1372,7 @@ impl LoomApp {
     /// One frame of the whole UI (what eframe calls each repaint; the UI
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
+        let _profile=loom_render::profile::Scope::new("ui.frame");
         let time=ctx.input(|i|i.time);
         ctx.data_mut(|d|{let counter=d.get_temp_mut_or_insert_with(egui::Id::new("live_frame_counter"),||(0u64,f64::NEG_INFINITY));if counter.1!=time{counter.0+=1;counter.1=time;}});
         if self.material_previews.poll(){self.material_preview_generation=self.material_preview_generation.wrapping_add(1);ctx.request_repaint();}
@@ -1477,7 +1480,7 @@ impl LoomApp {
             // A tab switch changes what Show End Result off shows.
             self.sync_after_command();
         }
-        viewports::show(ctx, self);
+        {let _profile=loom_render::profile::Scope::new("ui.viewports");viewports::show(ctx, self);}
         if let Some(open) = self.quad_menu {
             if quad_menu::show(ctx, self, open) {
                 self.quad_menu = None;
