@@ -26,7 +26,7 @@ use bevy::render::settings::{RenderCreation, RenderResources};
 use bevy::render::texture::GpuImage;
 use bevy::render::view::Msaa;
 use bevy::render::{RenderApp, RenderPlugin};
-use bevy::transform::components::Transform;
+use bevy::transform::components::{GlobalTransform, Transform};
 use bevy::window::{ExitCondition, WindowPlugin};
 use bevy::DefaultPlugins;
 use bevy::app::PluginGroup;
@@ -78,10 +78,12 @@ impl Default for RenderOptions {
     }
 }
 
-/// One visible object: its world-space mesh and how it is coloured.
+/// One visible object: its mesh, affine transform and how it is coloured.
 pub struct SceneObject<'a> {
     pub id: u64,
     pub mesh: &'a loom_mesh::Mesh,
+    /// Local-to-world matrix; identity when mesh positions are already in world space.
+    pub transform: glam::Mat4,
     pub wire_color: [u8; 3],
     /// Its material resolved per face material ID (`Scene::node_surfaces`).
     pub surfaces: Option<Surfaces>,
@@ -113,6 +115,7 @@ struct Object {
     /// One entity (and material) per face material ID drawn; one for a single material.
     parts: Vec<(Entity, Handle<StandardMaterial>)>,
     mesh_hash: u64,
+    transform: glam::Mat4,
     surfaces: Option<Surfaces>,
     wire_color: [u8; 3],
     renderable: bool,
@@ -384,14 +387,25 @@ impl BevyRenderer {
         for o in objects {
             seen.insert(o.id);
             let data = mesh_data(o.mesh);
-            if let Some(b) = data.aabb() {
+            let mirrored = o.transform.determinant() < 0.0;
+            if let Some(b) = data.aabb_transformed(o.transform) {
                 lo = lo.min(Vec3::from(b.min()));
                 hi = hi.max(Vec3::from(b.max()));
             }
-            let hash = data.content_hash() ^ convert::material_ids_hash(o.mesh).rotate_left(1);
+            let hash = data.content_hash() ^ convert::material_ids_hash(o.mesh).rotate_left(1) ^ (mirrored as u64).rotate_left(2);
             let layers = self.object_layers(o.id, o.renderable, o.flags, hidden);
             if let Some(obj) = set.get_mut(&o.id) {
                 if obj.mesh_hash == hash && obj.surfaces == o.surfaces && obj.wire_color == o.wire_color && obj.flags.visibility == o.flags.visibility {
+                    if obj.transform != o.transform {
+                        obj.transform = o.transform;
+                        for (e, _) in &obj.parts {
+                            let mut entity = self.app.world_mut().entity_mut(*e);
+                            entity.insert(GlobalTransform::from(o.transform));
+                            if o.transform == glam::Mat4::IDENTITY { entity.insert(Transform::IDENTITY); }
+                            else { entity.remove::<Transform>(); }
+                        }
+                        self.settle = self.settle.max(3);
+                    }
                     if obj.renderable != o.renderable || obj.flags != o.flags {
                         obj.renderable = o.renderable;
                         obj.flags = o.flags;
@@ -420,11 +434,13 @@ impl BevyRenderer {
             for (id, surface) in parts {
                 let mat = self.material(surface.as_ref(), o.wire_color, o.flags.visibility);
                 let faceted = surface.as_ref().is_some_and(|s| s.faceted);
-                let d = if id.is_none() && !faceted {
+                let mut d = if id.is_none() && !faceted {
                     data.clone()
                 } else {
                     convert::mesh_data_part(o.mesh, &data, id, faceted)
                 };
+                // Match world-baked polygon normals when reflection reverses winding.
+                if mirrored { for n in &mut d.normals { for c in n { *c = -*c; } } }
                 material_data.push((d, mat.normal_map_texture.is_some()));
                 materials.push(mat);
             }
@@ -434,7 +450,10 @@ impl BevyRenderer {
                 let world = self.app.world_mut();
                 let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
                 let material_handle = world.resource_mut::<Assets<StandardMaterial>>().add(mat);
-                let e = world.spawn((Transform::IDENTITY, Mesh3d(mesh), MeshMaterial3d(material_handle.clone()), layers.clone()));
+                let mut e = world.spawn((Transform::IDENTITY, GlobalTransform::from(o.transform), Mesh3d(mesh), MeshMaterial3d(material_handle.clone()), layers.clone()));
+                // Preserve the full affine matrix, including shear. These
+                // meshes have no Bevy parent; the host supplies their world transform.
+                if o.transform != glam::Mat4::IDENTITY { e.remove::<Transform>(); }
                 let mut e = Self::shadow_flags(e, Self::cast_flags(o));
                 // Bevy computes bounds only once per entity: keep them current.
                 if let Some(b) = d.aabb() {
@@ -452,7 +471,7 @@ impl BevyRenderer {
                 }
                 entities.push((entity, material_handle));
             }
-            set.insert(o.id, Object { parts: entities, mesh_hash: hash, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags });
+            set.insert(o.id, Object { parts: entities, mesh_hash: hash, transform: o.transform, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags });
             self.settle = self.settle.max(3);
         }
         let gone: Vec<u64> = set.keys().filter(|id| !seen.contains(id)).copied().collect();
@@ -859,5 +878,32 @@ impl BevyRenderer {
         drop(data);
         buffer.unmap();
         image::RgbaImage::from_raw(w, h, pixels).ok_or_else(|| "readback size mismatch".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod affine_tests {
+    use super::*;
+
+    #[test]
+    fn rigid_pose_changes_keep_entities_meshes_and_materials() {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else { return };
+        if !supported(&adapter) { return; }
+        let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter), None)).unwrap();
+        let mut renderer = BevyRenderer::new(adapter, device, queue);
+        let mesh = loom_mesh::box_primitive(Vec3::ONE);
+        let shear = glam::Mat4::from_cols(glam::Vec4::new(1.2, 0.1, 0.0, 0.0), glam::Vec4::new(0.4, 0.8, 0.2, 0.0), glam::Vec4::new(0.0, 0.3, 1.1, 0.0), glam::Vec4::new(1.0, -1.0, 0.5, 1.0));
+        let mut previous = None;
+        for transform in [glam::Mat4::IDENTITY, glam::Mat4::from_rotation_z(0.4), shear, glam::Mat4::IDENTITY] {
+            renderer.sync(&[SceneObject { id: 1, mesh: &mesh, transform, wire_color: [220, 30, 30], surfaces: None, renderable: true, flags: ObjectFlags::default() }]);
+            let (entity, material) = &renderer.objects[&1].parts[0];
+            let handles = (*entity, renderer.app.world().get::<Mesh3d>(*entity).unwrap().0.id(), material.id());
+            if let Some(previous) = previous { assert_eq!(handles, previous); }
+            previous = Some(handles);
+            renderer.update();
+            let matrix = renderer.app.world().get::<GlobalTransform>(handles.0).unwrap().compute_matrix();
+            assert!(matrix.abs_diff_eq(transform, 1e-6), "the full affine transform survives Bevy propagation");
+        }
     }
 }

@@ -63,6 +63,15 @@ impl MeshData {
         Some(Aabb::from_min_max(min, max))
     }
 
+    /// Bounds after an affine transform, for scene-wide lights and shadows.
+    pub(crate) fn aabb_transformed(&self, transform: Mat4) -> Option<Aabb> {
+        if transform == Mat4::IDENTITY { return self.aabb(); }
+        let mut positions = self.positions.iter().map(|p| transform.transform_point3(Vec3::from_array(*p)));
+        let first = positions.next()?;
+        let (min, max) = positions.fold((first, first), |(min, max), p| (min.min(p), max.max(p)));
+        Some(Aabb::from_min_max(min, max))
+    }
+
     pub fn to_bevy(&self) -> Mesh {
         Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.positions.clone())

@@ -36,9 +36,9 @@ fn a_lighting_map_is_brighter_under_the_spot_light() {
     let mut blocker = loom_mesh::box_primitive(Vec3::splat(4.0));
     let _ = loom_mesh::edit_ops::translate_mesh(&mut blocker, Vec3::new(50.0, 0.0, 50.0));
     let objects = |with_box: bool| {
-        let mut v = vec![SceneObject { id: 1, mesh: &plane, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() }];
+        let mut v = vec![SceneObject { transform: Mat4::IDENTITY, id: 1, mesh: &plane, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() }];
         if with_box {
-            v.push(SceneObject { id: 2, mesh: &blocker, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() });
+            v.push(SceneObject { transform: Mat4::IDENTITY, id: 2, mesh: &blocker, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() });
         }
         v
     };
