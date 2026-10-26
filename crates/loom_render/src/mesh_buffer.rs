@@ -185,6 +185,7 @@ impl Bitmap {
 }
 
 pub struct MeshBuffer {
+    pub faces_ready: bool,
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
     pub index_count: u32,
@@ -205,9 +206,11 @@ pub struct MeshBuffer {
 }
 
 impl MeshBuffer {
-    pub fn from_mesh(device: &Device, mesh: &Mesh, style: MeshStyle) -> Self {
+    pub fn from_mesh(device:&Device,mesh:&Mesh,style:MeshStyle)->Self{Self::from_mesh_with_faces(device,mesh,style,true)}
+    pub fn update_from_mesh(&mut self,device:&Device,queue:&wgpu::Queue,mesh:&Mesh,style:MeshStyle){self.update_from_mesh_with_faces(device,queue,mesh,style,true);}
+    pub fn from_mesh_with_faces(device: &Device, mesh: &Mesh, style: MeshStyle, faces: bool) -> Self {
         let _scope = crate::profile::Scope::new("render.upload");
-        let (verts, indices, ranges) = triangulate_styled(mesh, &style);
+        let (verts, indices, ranges) = if faces {triangulate_styled(mesh, &style)} else {(Vec::new(),Vec::new(),Vec::new())};
         let wire = wire_lines(mesh, &style);
         let wire_vertex_count = wire.len() as u32;
         let wire_vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
@@ -243,6 +246,7 @@ impl MeshBuffer {
         let (aabb_min, aabb_max) = mesh.aabb();
 
         Self {
+            faces_ready: faces,
             vertex_buffer,
             index_buffer,
             index_count: indices.len() as u32,
@@ -259,9 +263,9 @@ impl MeshBuffer {
     }
 
     /// Updates every geometry stream while keeping GPU allocations that fit.
-    pub fn update_from_mesh(&mut self, device: &Device, queue: &wgpu::Queue, mesh: &Mesh, style: MeshStyle) {
+    pub fn update_from_mesh_with_faces(&mut self, device: &Device, queue: &wgpu::Queue, mesh: &Mesh, style: MeshStyle, faces: bool) {
         let _scope = crate::profile::Scope::new("render.upload");
-        let (verts, indices, ranges) = triangulate_styled(mesh, &style);
+        let (verts, indices, ranges) = if faces {triangulate_styled(mesh, &style)} else {(Vec::new(),Vec::new(),Vec::new())};
         let wire = wire_lines(mesh, &style);
         let mut edges = mesh.unique_edges();
         if style.diagonals { edges.extend(dashed(&fan_diagonals(mesh), DIAGONAL_DASHES)); }
@@ -273,6 +277,7 @@ impl MeshBuffer {
         update_buffer(device, queue, &mut self.selected_edge_vertex_buffer, bytemuck::cast_slice(&edge_verts), BufferUsages::VERTEX, "loom_mesh_selected_edge_buffer");
         let empty = [crate::grid::LineVertex { position: [0.0; 3], color: [0.0; 3] }];
         update_buffer(device, queue, &mut self.wire_vertex_buffer, bytemuck::cast_slice(if wire.is_empty() { &empty[..] } else { &wire[..] }), BufferUsages::VERTEX, "loom_mesh_wire_buffer");
+        self.faces_ready = faces;
         self.index_count = indices.len() as u32;
         self.edge_vertex_count = (edges.len() * 2) as u32;
         self.wire_vertex_count = wire.len() as u32;
@@ -588,6 +593,14 @@ mod tests {
         let plain = MeshStyle::default();
         let colored = MeshStyle { color: [0.2, 0.4, 0.8], wire_color: Some([0.8, 0.1, 0.3]), alpha: 0.4, diagonals: true, ..Default::default() };
         let wire = MeshStyle { color: [0.0, 0.8, 0.2], wire: true, ..Default::default() };
+        let mut lazy=MeshBuffer::from_mesh_with_faces(&device,&small,plain.clone(),false);
+        assert_eq!(lazy.index_count,0,"wire-only views must not build unused shaded faces");
+        let full=MeshBuffer::from_mesh(&device,&small,plain.clone());
+        assert_eq!(read(&lazy.edge_vertex_buffer,full.edge_vertex_buffer.size()),read(&full.edge_vertex_buffer,full.edge_vertex_buffer.size()));
+        lazy.update_from_mesh_with_faces(&device,&queue,&small,plain.clone(),true);
+        assert_eq!(lazy.index_count,full.index_count);
+        assert_eq!(read(&lazy.vertex_buffer,full.vertex_buffer.size()),read(&full.vertex_buffer,full.vertex_buffer.size()));
+        assert_eq!(read(&lazy.index_buffer,full.index_buffer.size()),read(&full.index_buffer,full.index_buffer.size()));
         let mut reused = MeshBuffer::from_mesh(&device, &small, plain.clone());
         for (mesh, style) in [(&large, &colored), (&moved, &plain), (&small, &wire), (&empty, &plain), (&small, &colored)] {
             let old = [reused.vertex_buffer.clone(), reused.index_buffer.clone(), reused.edge_vertex_buffer.clone(), reused.selected_edge_vertex_buffer.clone(), reused.wire_vertex_buffer.clone()];

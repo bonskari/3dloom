@@ -18,6 +18,7 @@ use crate::LoomApp;
 pub struct ViewportResources {
     pub renderer: ViewportRenderer,
     pub mesh_buffers: Vec<MeshBuffer>,
+    mesh_source: Option<(std::sync::Arc<Vec<Mesh>>,Vec<loom_render::MeshStyle>)>,
     /// Built on the first frame (needs the queue) and whenever bitmaps change.
     pub textures: Option<loom_render::TextureSet>,
     /// GPU bitmaps by path: uploaded once, reused across scene rebuilds.
@@ -37,6 +38,7 @@ pub fn init_render_resources(wgpu: &egui_wgpu::RenderState) {
         .insert(ViewportResources {
             renderer,
             mesh_buffers: Vec::new(),
+            mesh_source: None,
             textures: None,
             bitmap_cache: std::collections::HashMap::new(),
             base_textures: None,
@@ -152,6 +154,7 @@ struct ViewportCallback {
     selected: Vec<usize>,
     show_edges: bool,
     shaded: bool,
+    faces_needed: bool,
     /// Views > Shade Selected in a wireframe view: these meshes are shaded.
     shade_only: Vec<usize>,
     grid: Option<loom_render::GridPlane>,
@@ -159,6 +162,14 @@ struct ViewportCallback {
     grid_params: loom_render::GridParams,
     /// Helper line art drawn with depth (see `helper_overlay`).
     helper_lines: Vec<(Vec3, Vec3, [f32; 3])>,
+}
+
+fn viewport_faces_needed(app:&LoomApp)->bool{
+    app.state.viewports.iter().enumerate().any(|(i,view)|{
+        let visible=app.viewport_rects.get(i).is_some_and(|rect|rect.width()>=1. && rect.height()>=1.);
+        let realistic=view.shading==loom_commands::Shading::Realistic && app.realistic_available();
+        visible && !realistic && (view.shading!=loom_commands::Shading::Wireframe || (app.state.shade_selected && !app.state.selection.is_empty()))
+    })
 }
 
 impl CallbackTrait for ViewportCallback {
@@ -174,16 +185,19 @@ impl CallbackTrait for ViewportCallback {
         res.renderer.set_grid_params(device, self.grid_params);
 
         let pending = self.upload.lock().ok().and_then(|mut slot| slot.take());
-        if let Some((meshes, styles, bitmaps)) = pending {
+        let geometry=if let Some((meshes,styles,_))=&pending {Some((meshes.clone(),styles.clone()))}
+            else if res.mesh_buffers.iter().any(|buffer|buffer.faces_ready!=self.faces_needed){res.mesh_source.clone()}
+            else{None};
+        if let Some((meshes,styles))=geometry{
             res.mesh_buffers.truncate(meshes.len());
-            for (i, mesh) in meshes.iter().enumerate() {
-                let style = styles.get(i).cloned().unwrap_or_default();
-                if let Some(buffer) = res.mesh_buffers.get_mut(i) {
-                    buffer.update_from_mesh(device, queue, mesh, style);
-                } else {
-                    res.mesh_buffers.push(MeshBuffer::from_mesh(device, mesh, style));
-                }
+            for (i,mesh) in meshes.iter().enumerate(){
+                let style=styles.get(i).cloned().unwrap_or_default();
+                if let Some(buffer)=res.mesh_buffers.get_mut(i){buffer.update_from_mesh_with_faces(device,queue,mesh,style,self.faces_needed);}
+                else{res.mesh_buffers.push(MeshBuffer::from_mesh_with_faces(device,mesh,style,self.faces_needed));}
             }
+            res.mesh_source=Some((meshes,styles));
+        }
+        if let Some((_,_,bitmaps))=pending{
             // The clear and checker textures are made once; bitmaps once per path.
             let (none, checker) = res.base_textures.get_or_insert_with(|| res.renderer.base_textures(device, queue)).clone();
             let mut groups = Vec::with_capacity(bitmaps.len());
@@ -1226,6 +1240,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     selected,
                     show_edges: edged_faces || wire || app.state.selection_mode.is_edge_level(),
                     shaded: !wire,
+                    faces_needed: viewport_faces_needed(app),
                     shade_only,
                     // An active grid object replaces the home grid.
                     grid: (show_grid && app.state.active_grid().is_none()).then_some(grid_plane),
@@ -3034,6 +3049,40 @@ pub(crate) fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switching_to_shaded_without_scene_changes_restores_gpu_faces(){
+        let instance=wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let Some(adapter)=pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))else{return};
+        let(device,queue)=pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(),None)).unwrap();
+        let mut resources=CallbackResources::default();
+        resources.insert(ViewportResources{renderer:ViewportRenderer::new(&device,wgpu::TextureFormat::Rgba8UnormSrgb),mesh_buffers:vec![],mesh_source:None,textures:None,bitmap_cache:Default::default(),base_textures:None,helper_lines:vec![]});
+        let upload:crate::PendingUpload=std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(vec![loom_mesh::box_primitive(Vec3::ONE)]),vec![loom_render::MeshStyle::default()],vec![]))));
+        let mut callback=ViewportCallback{slot:0,view_proj:Mat4::IDENTITY,camera_pos:Vec3::Z,upload:upload.clone(),shading:Default::default(),selected:vec![],show_edges:true,shaded:false,faces_needed:false,shade_only:vec![],grid:None,orthographic:false,grid_params:loom_render::GridParams{spacing:1.,major_every:5,cells:10,ortho_cells:100},helper_lines:vec![]};
+        let screen=ScreenDescriptor{size_in_pixels:[100,100],pixels_per_point:1.};let mut encoder=device.create_command_encoder(&Default::default());
+        callback.prepare(&device,&queue,&screen,&mut encoder,&mut resources);
+        assert_eq!(resources.get::<ViewportResources>().unwrap().mesh_buffers[0].index_count,0);
+        assert!(upload.lock().unwrap().is_none(),"the scene upload has already been consumed");
+        callback.faces_needed=true;callback.shaded=true;
+        callback.prepare(&device,&queue,&screen,&mut encoder,&mut resources);
+        assert_eq!(resources.get::<ViewportResources>().unwrap().mesh_buffers[0].index_count,36,"changing viewport shading must restore faces without another scene edit");
+    }
+
+    #[test]
+    fn face_buffers_follow_all_visible_viewports_and_shaded_selection(){
+        let mut app=LoomApp::headless();
+        app.viewport_rects=vec![egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(100.,100.));4];
+        for view in &mut app.state.viewports{view.shading=loom_commands::Shading::Wireframe;}
+        assert!(!viewport_faces_needed(&app));
+        app.state.viewports[3].shading=loom_commands::Shading::SmoothHighlights;
+        assert!(viewport_faces_needed(&app),"one shaded view needs complete geometry for all callbacks");
+        app.viewport_rects[3]=egui::Rect::NOTHING;
+        assert!(!viewport_faces_needed(&app),"a hidden view must not force unused shading work");
+        app.state.shade_selected=true;
+        let id=app.state.scene.add_node(loom_scene::Node::new("pick",loom_scene::ObjectKind::box_object(1.,1.,1.)));
+        app.state.selection.insert(id);
+        assert!(viewport_faces_needed(&app),"wireframe Shade Selected requires shaded faces");
+    }
 
     #[test]
     fn point_segment_distance_hits_segment_body() {
