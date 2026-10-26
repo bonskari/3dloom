@@ -115,6 +115,20 @@ pub fn mesh_data_by_id(mesh: &loom_mesh::Mesh) -> Vec<(u16, MeshData)> {
     ids.into_iter().map(|id| (id, mesh_data_part(mesh, &data, Some(id), false))).collect()
 }
 
+/// Independent material meshes use the renderer's existing bounded worker
+/// pool. Each mesh still runs the same MikkTSpace tangent calculation.
+pub(crate) fn material_meshes(pool: &bevy::tasks::TaskPool, parts: &[(MeshData, bool)]) -> Vec<Mesh> {
+    pool.scope(|scope| {
+        for (data, tangents) in parts {
+            scope.spawn(async move {
+                let mut mesh = data.to_bevy();
+                if *tangents { let _ = mesh.generate_tangents(); }
+                mesh
+            });
+        }
+    })
+}
+
 /// A hash of the faces' material IDs (the per-ID split depends on them).
 pub fn material_ids_hash(mesh: &loom_mesh::Mesh) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -487,6 +501,25 @@ mod tests {
                     if faceted { face.smoothing_groups = 0; }
                 }
                 assert_eq!(mesh_data_part(&mesh, &data, id, faceted), mesh_data(&legacy));
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_material_meshes_match_serial_tangent_calculation() {
+        let mut mesh = loom_mesh::sphere_segmented(1.25, 24, 0.0);
+        loom_mesh::uvmap::auto_map(&mut mesh, loom_mesh::uvmap::AutoMap::Spherical, 1);
+        let data = mesh_data(&mesh);
+        let parts = vec![(data.clone(), true), (data.clone(), false), (data, true)];
+        let pool = bevy::tasks::TaskPoolBuilder::new().num_threads(2).build();
+        assert_eq!(pool.thread_num(), 2, "the renderer requires Bevy multithreading");
+        let parallel = material_meshes(&pool, &parts);
+        assert_eq!(parallel.len(), parts.len());
+        for ((data, tangents), actual) in parts.iter().zip(parallel) {
+            let mut serial = data.to_bevy();
+            if *tangents { serial.generate_tangents().unwrap(); }
+            for attribute in [Mesh::ATTRIBUTE_POSITION, Mesh::ATTRIBUTE_NORMAL, Mesh::ATTRIBUTE_UV_0, Mesh::ATTRIBUTE_TANGENT] {
+                assert_eq!(actual.attribute(attribute).map(|a| a.get_bytes()), serial.attribute(attribute).map(|a| a.get_bytes()));
             }
         }
     }

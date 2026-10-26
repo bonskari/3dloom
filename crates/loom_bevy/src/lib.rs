@@ -202,6 +202,8 @@ impl BevyRenderer {
                 .build()
                 // The host program owns Ctrl+C.
                 .disable::<TerminalCtrlCHandlerPlugin>()
+                // The host reads RenderApp's textures in this frame.
+                .disable::<bevy::render::pipelined_rendering::PipelinedRenderingPlugin>()
                 .set(WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, close_when_requested: false })
                 .set(RenderPlugin { render_creation: RenderCreation::Manual(resources), synchronous_pipeline_compilation: true, ..Default::default() }),
         );
@@ -412,7 +414,8 @@ impl BevyRenderer {
             for (e, _) in set.remove(&o.id).map(|obj| obj.parts).unwrap_or_default() {
                 self.app.world_mut().despawn(e);
             }
-            let mut entities = Vec::new();
+            let mut materials = Vec::with_capacity(parts.len());
+            let mut material_data = Vec::with_capacity(parts.len());
             for (id, surface) in parts {
                 let mat = self.material(surface.as_ref(), o.wire_color, o.flags.visibility);
                 let faceted = surface.as_ref().is_some_and(|s| s.faceted);
@@ -421,11 +424,12 @@ impl BevyRenderer {
                 } else {
                     convert::mesh_data_part(o.mesh, &data, id, faceted)
                 };
-                let mut mesh = d.to_bevy();
-                if mat.normal_map_texture.is_some() {
-                    // A normal map needs tangents (from the UVs).
-                    let _ = mesh.generate_tangents();
-                }
+                material_data.push((d, mat.normal_map_texture.is_some()));
+                materials.push(mat);
+            }
+            let meshes = convert::material_meshes(bevy::tasks::ComputeTaskPool::get(), &material_data);
+            let mut entities = Vec::new();
+            for ((mat, (d, _)), mesh) in materials.into_iter().zip(material_data).zip(meshes) {
                 let world = self.app.world_mut();
                 let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
                 let material_handle = world.resource_mut::<Assets<StandardMaterial>>().add(mat);
