@@ -175,11 +175,15 @@ impl CallbackTrait for ViewportCallback {
 
         let pending = self.upload.lock().ok().and_then(|mut slot| slot.take());
         if let Some((meshes, styles, bitmaps)) = pending {
-            res.mesh_buffers = meshes
-                .iter()
-                .enumerate()
-                .map(|(i, m)| MeshBuffer::from_mesh(device, m, styles.get(i).cloned().unwrap_or_default()))
-                .collect();
+            res.mesh_buffers.truncate(meshes.len());
+            for (i, mesh) in meshes.iter().enumerate() {
+                let style = styles.get(i).cloned().unwrap_or_default();
+                if let Some(buffer) = res.mesh_buffers.get_mut(i) {
+                    buffer.update_from_mesh(device, queue, mesh, style);
+                } else {
+                    res.mesh_buffers.push(MeshBuffer::from_mesh(device, mesh, style));
+                }
+            }
             // The clear and checker textures are made once; bitmaps once per path.
             let (none, checker) = res.base_textures.get_or_insert_with(|| res.renderer.base_textures(device, queue)).clone();
             let mut groups = Vec::with_capacity(bitmaps.len());

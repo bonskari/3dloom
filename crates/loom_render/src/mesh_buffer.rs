@@ -214,17 +214,17 @@ impl MeshBuffer {
             label: Some("loom_mesh_wire_buffer"),
             // wgpu rejects an empty vertex buffer: one unused vertex.
             contents: bytemuck::cast_slice(if wire.is_empty() { &[crate::grid::LineVertex { position: [0.0; 3], color: [0.0; 3] }][..] } else { &wire[..] }),
-            usage: BufferUsages::VERTEX,
+            usage: mesh_usage(BufferUsages::VERTEX),
         });
         let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("loom_mesh_vertex_buffer"),
             contents: bytemuck::cast_slice(&verts),
-            usage: BufferUsages::VERTEX,
+            usage: mesh_usage(BufferUsages::VERTEX),
         });
         let index_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("loom_mesh_index_buffer"),
             contents: bytemuck::cast_slice(&indices),
-            usage: BufferUsages::INDEX,
+            usage: mesh_usage(BufferUsages::INDEX),
         });
 
         let mut edges = mesh.unique_edges();
@@ -257,6 +257,30 @@ impl MeshBuffer {
             wire_vertex_count,
         }
     }
+
+    /// Updates every geometry stream while keeping GPU allocations that fit.
+    pub fn update_from_mesh(&mut self, device: &Device, queue: &wgpu::Queue, mesh: &Mesh, style: MeshStyle) {
+        let _scope = crate::profile::Scope::new("render.upload");
+        let (verts, indices, ranges) = triangulate_styled(mesh, &style);
+        let wire = wire_lines(mesh, &style);
+        let mut edges = mesh.unique_edges();
+        if style.diagonals { edges.extend(dashed(&fan_diagonals(mesh), DIAGONAL_DASHES)); }
+        let mut edge_verts = edge_vertices(&edges, style.wire_color.unwrap_or(style.color));
+        update_buffer(device, queue, &mut self.vertex_buffer, bytemuck::cast_slice(&verts), BufferUsages::VERTEX, "loom_mesh_vertex_buffer");
+        update_buffer(device, queue, &mut self.index_buffer, bytemuck::cast_slice(&indices), BufferUsages::INDEX, "loom_mesh_index_buffer");
+        update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&edge_verts), BufferUsages::VERTEX, "loom_mesh_edge_buffer");
+        for vertex in &mut edge_verts { vertex.color = [1.0; 3]; }
+        update_buffer(device, queue, &mut self.selected_edge_vertex_buffer, bytemuck::cast_slice(&edge_verts), BufferUsages::VERTEX, "loom_mesh_selected_edge_buffer");
+        let empty = [crate::grid::LineVertex { position: [0.0; 3], color: [0.0; 3] }];
+        update_buffer(device, queue, &mut self.wire_vertex_buffer, bytemuck::cast_slice(if wire.is_empty() { &empty[..] } else { &wire[..] }), BufferUsages::VERTEX, "loom_mesh_wire_buffer");
+        self.index_count = indices.len() as u32;
+        self.edge_vertex_count = (edges.len() * 2) as u32;
+        self.wire_vertex_count = wire.len() as u32;
+        (self.aabb_min, self.aabb_max) = mesh.aabb();
+        self.style = style;
+        self.ranges = ranges;
+    }
+
 }
 
 /// Dashes per diagonal when Edges Only is off.
@@ -317,24 +341,28 @@ impl LineBuffer {
     }
 }
 
-fn edge_buffer(device: &Device, edges: &[(Vec3, Vec3)], color: [f32; 3], label: &str) -> Buffer {
-    use crate::grid::LineVertex;
-    let mut edge_verts: Vec<LineVertex> = Vec::with_capacity(edges.len() * 2);
-    for (a, b) in edges {
-        edge_verts.push(LineVertex {
-            position: (*a).into(),
-            color,
-        });
-        edge_verts.push(LineVertex {
-            position: (*b).into(),
-            color,
-        });
+fn mesh_usage(usage: BufferUsages) -> BufferUsages {
+    let usage = usage | BufferUsages::COPY_DST;
+    // GPU byte-for-byte regression readback; production buffers only need writes.
+    #[cfg(test)]
+    let usage = usage | BufferUsages::COPY_SRC;
+    usage
+}
+
+fn update_buffer(device: &Device, queue: &wgpu::Queue, buffer: &mut Buffer, contents: &[u8], usage: BufferUsages, label: &str) {
+    if contents.len() as u64 > buffer.size() {
+        *buffer = device.create_buffer_init(&BufferInitDescriptor { label: Some(label), contents, usage: mesh_usage(usage) });
+    } else if !contents.is_empty() {
+        queue.write_buffer(buffer, 0, contents);
     }
-    device.create_buffer_init(&BufferInitDescriptor {
-        label: Some(label),
-        contents: bytemuck::cast_slice(&edge_verts),
-        usage: BufferUsages::VERTEX,
-    })
+}
+
+fn edge_vertices(edges: &[(Vec3, Vec3)], color: [f32; 3]) -> Vec<crate::grid::LineVertex> {
+    edges.iter().flat_map(|(a, b)| [crate::grid::LineVertex { position: (*a).into(), color }, crate::grid::LineVertex { position: (*b).into(), color }]).collect()
+}
+
+fn edge_buffer(device: &Device, edges: &[(Vec3, Vec3)], color: [f32; 3], label: &str) -> Buffer {
+    device.create_buffer_init(&BufferInitDescriptor { label: Some(label), contents: bytemuck::cast_slice(&edge_vertices(edges, color)), usage: mesh_usage(BufferUsages::VERTEX) })
 }
 
 /// Triangulate every face fan-style. Each vertex is duplicated per face;
@@ -530,6 +558,53 @@ mod tests {
             }
         }
         assert_eq!(corner, verts.len());
+    }
+
+    #[test]
+    fn reused_gpu_buffers_match_fresh_geometry_after_growth_shrink_and_style_changes() {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else { return };
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None)).unwrap();
+        let read = |buffer: &wgpu::Buffer, size: u64| {
+            if size == 0 { return Vec::new(); }
+            let output = device.create_buffer(&wgpu::BufferDescriptor { label: None, size, usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ, mapped_at_creation: false });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(buffer, 0, &output, 0, size);
+            queue.submit([encoder.finish()]);
+            let slice = output.slice(..);
+            let (tx, rx) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |result| { tx.send(result).unwrap(); });
+            device.poll(wgpu::Maintain::Wait);
+            rx.recv().unwrap().unwrap();
+            let bytes = slice.get_mapped_range().to_vec();
+            output.unmap();
+            bytes
+        };
+        let small = box_primitive(Vec3::ONE);
+        let mut moved = box_primitive(Vec3::splat(0.5));
+        loom_mesh::edit_ops::translate_mesh(&mut moved, Vec3::new(3.0, -2.0, 1.0)).unwrap();
+        let large = loom_mesh::sphere_segmented(1.25, 32, 0.0);
+        let empty = Mesh::new();
+        let plain = MeshStyle::default();
+        let colored = MeshStyle { color: [0.2, 0.4, 0.8], wire_color: Some([0.8, 0.1, 0.3]), alpha: 0.4, diagonals: true, ..Default::default() };
+        let wire = MeshStyle { color: [0.0, 0.8, 0.2], wire: true, ..Default::default() };
+        let mut reused = MeshBuffer::from_mesh(&device, &small, plain.clone());
+        for (mesh, style) in [(&large, &colored), (&moved, &plain), (&small, &wire), (&empty, &plain), (&small, &colored)] {
+            let old = [reused.vertex_buffer.clone(), reused.index_buffer.clone(), reused.edge_vertex_buffer.clone(), reused.selected_edge_vertex_buffer.clone(), reused.wire_vertex_buffer.clone()];
+            reused.update_from_mesh(&device, &queue, mesh, style.clone());
+            let fresh = MeshBuffer::from_mesh(&device, mesh, style.clone());
+            assert_eq!((reused.index_count, reused.edge_vertex_count, reused.wire_vertex_count), (fresh.index_count, fresh.edge_vertex_count, fresh.wire_vertex_count));
+            assert_eq!(reused.style, fresh.style);
+            assert_eq!(reused.ranges, fresh.ranges);
+            assert_eq!((reused.aabb_min, reused.aabb_max), (fresh.aabb_min, fresh.aabb_max));
+            let current = [&reused.vertex_buffer, &reused.index_buffer, &reused.edge_vertex_buffer, &reused.selected_edge_vertex_buffer, &reused.wire_vertex_buffer];
+            let expected = [&fresh.vertex_buffer, &fresh.index_buffer, &fresh.edge_vertex_buffer, &fresh.selected_edge_vertex_buffer, &fresh.wire_vertex_buffer];
+            for ((current, expected), old) in current.into_iter().zip(expected).zip(old) {
+                assert_eq!(read(current, expected.size()), read(expected, expected.size()));
+                if expected.size() <= old.size() { assert_eq!(current, &old, "an allocation that fits must be reused"); }
+                else { assert_ne!(current, &old, "larger geometry needs a new allocation"); }
+            }
+        }
     }
 
     #[test]
