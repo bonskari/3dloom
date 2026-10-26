@@ -119,16 +119,22 @@ pub fn mesh_data_by_id(mesh: &loom_mesh::Mesh) -> Vec<(u16, MeshData)> {
 /// pool. Each mesh still runs the same MikkTSpace tangent calculation.
 pub(crate) fn material_meshes(pool: &bevy::tasks::TaskPool, parts: &[(MeshData, bool)]) -> Vec<Mesh> {
     let _scope = loom_render::profile::Scope::new("bevy.material_meshes");
+    let build = |(data, tangents): &(MeshData, bool)| {
+        let mut mesh = data.to_bevy();
+        if *tangents {
+            let _scope = loom_render::profile::Scope::new("bevy.tangents");
+            let _ = mesh.generate_tangents();
+        }
+        mesh
+    };
+    // Bones and other single-material objects have no independent jobs to
+    // overlap. Avoid a worker-pool round trip for every small rigid mesh.
+    if parts.len() < 2 || !parts.iter().any(|(_, tangents)| *tangents) {
+        return parts.iter().map(build).collect();
+    }
     pool.scope(|scope| {
-        for (data, tangents) in parts {
-            scope.spawn(async move {
-                let mut mesh = data.to_bevy();
-                if *tangents {
-                    let _scope = loom_render::profile::Scope::new("bevy.tangents");
-                    let _ = mesh.generate_tangents();
-                }
-                mesh
-            });
+        for part in parts {
+            scope.spawn(async move { build(part) });
         }
     })
 }

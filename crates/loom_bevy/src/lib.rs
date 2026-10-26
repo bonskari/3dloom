@@ -785,7 +785,7 @@ impl BevyRenderer {
         for v in self.views.values_mut() {
             v.used = false;
         }
-        // Pipelines compile synchronously (no `multi_threaded`), so a change
+        // Pipelines compile synchronously, so a change
         // shows within a frame or two; a pipeline cache "waiting" list is no
         // signal (pipelines whose shaders never load stay in it).
         self.settle = self.settle.saturating_sub(1);
