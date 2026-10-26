@@ -1,0 +1,12 @@
+Test-only prototype, never wired into the production renderer.
+Actual source: /mnt/2tb/hollowreach-ue/Hollowreach/SourceArt/RayLoom20261025/RayAnimationTest_LoomRig.loom
+Complete current position/normal/UV weld fans; degenerates extend closure across all three vertex fans.
+Body frame 0: 23560 triangles, 0 tangent-bit mismatches, debug serial 145.856 ms / halo 89.122 ms.
+Face frame 0: 47218 triangles, 0 mismatches, debug serial 305.087 ms / halo 180.302 ms.
+Body frame 39.25: 0 mismatches, debug serial 142.665 ms / halo 85.070 ms.
+Face frame 39.25: 14 mismatches, meaningful direction differences (not rounding), candidate rejected.
+Example actual [-0.7827831,-0.6220602,-0.017081054,1] vs serial [-0.69970423,-0.7101737,-0.07789307,1].
+Face frame 0 contains 7 zero-UV-area triangles, no duplicate-position or collinear triangles.
+Exact reason for remaining dependency/ordering mismatch is unverified. Do not ship or relax the parity gate.
+Reenable by copying source to crates/loom_bevy/src/convert/tangent_halo.rs, appending #[cfg(test)] mod tangent_halo to convert.rs, and adding serde_json workspace dev-dependency.
+Run with LOOM_PERF_SCENE set to the actual source path: cargo test -p loom_bevy --lib actual_ray_pose_tangents -- --ignored --nocapture.
