@@ -30,13 +30,6 @@ fn store<T: Clone + Send + Sync + 'static>(ui: &egui::Ui, key: &str, v: T) {
 const TRACKS: [&str; 3] = ["Position", "Rotation", "Scale"];
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
-    if ui.button("Import Animation…").clicked() {
-        run(app, Command::ImportAnimationClip { path: None });
-    }
-    crate::async_import::show_status(ui,app);
-    ui.separator();
-    crate::kimodo::show(ui, app);
-    crate::loomrig_panel::show(ui, app);
     let Some(id) = app.state.selection.iter().next().copied() else {
         ui.label("Select an object.");
         return;

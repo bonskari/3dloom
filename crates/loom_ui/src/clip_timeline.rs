@@ -5,6 +5,8 @@ use loom_commands::{Command, SelectOp};
 
 #[derive(Default)]
 pub(crate) struct State {
+    pub(crate) open: bool,
+    pub(crate) tab: u8,
     selected: Option<u64>,
     drag: Option<Drag>,
 }
@@ -32,7 +34,39 @@ pub(crate) fn preview_import(app: &mut LoomApp, imported: &serde_json::Value) ->
 }
 
 pub(crate) fn show(ctx: &egui::Context, app: &mut LoomApp) {
-    crate::rig_timeline::show(ctx,app);
+    if !app.clip_timeline.open { app.clip_timeline.drag=None; return; }
+    let mut open=true;
+    egui::Window::new("Animation Editor").open(&mut open).default_size(egui::vec2(850.,(ctx.screen_rect().height()*0.7).max(340.))).resizable(true).show(ctx,|ui|{
+        ui.horizontal(|ui|{
+            ui.selectable_value(&mut app.clip_timeline.tab,0,"Clips & IK/FK");
+            ui.selectable_value(&mut app.clip_timeline.tab,1,"Kimodo");
+            ui.selectable_value(&mut app.clip_timeline.tab,2,"LoomRig");
+        });
+        ui.separator();
+        if ui.button("Import Animation…").clicked(){let _=app.dispatch(Command::ImportAnimationClip{path:None});}
+        crate::async_import::show_status(ui,app);
+        match app.clip_timeline.tab {
+        1 => {egui::ScrollArea::vertical().id_salt("kimodo_editor").show(ui,|ui|crate::kimodo::show(ui,app));},
+        2 => {egui::ScrollArea::vertical().id_salt("loomrig_editor").show(ui,|ui|crate::loomrig_panel::show(ui,app));},
+        _ => {
+        ui.horizontal(|ui|{
+            ui.label(format!("Frames {}–{}",app.state.frame_range.0,app.state.frame_range.1));
+            let mut frame=app.state.current_frame;
+            if ui.add(egui::DragValue::new(&mut frame).prefix("Frame ")).changed(){let _=app.dispatch(Command::SetFrame{frame});}
+            if ui.button(if app.state.playing {"Pause"} else {"Play"}).clicked(){let _=app.dispatch(Command::PlayAnimation);}
+        });
+        clips(ui,app);
+        ui.separator();
+        crate::rig_timeline::show(ui,app);
+        }
+        }
+    });
+    app.clip_timeline.open=open;
+    if !open {app.clip_timeline.drag=None;}
+}
+
+fn clips(ui:&mut egui::Ui,app:&mut LoomApp){
+    let ctx=ui.ctx().clone();
     if app.state.scene.animation_clips.is_empty() {
         app.clip_timeline.drag = None;
         return;
@@ -44,18 +78,17 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let clips = app.state.scene.animation_clips.clone();
     let first = app.state.frame_range.0 as f32;
     let span = (app.state.frame_range.1 as f32 - first).max(1.0);
-    let height = 24.0 + clips.len().min(4) as f32 * 28.0;
     let mut action = None;
     let mut selection = None;
-    egui::TopBottomPanel::bottom("animation_clips").exact_height(height).show(ctx, |ui| {
+    ui.scope(|ui| {
         ui.horizontal(|ui| {
             ui.strong("Animation Clips");
             ui.small("Drag to move · Esc to cancel");
         });
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("animation_clips").max_height(160.).show(ui, |ui| {
             for clip in &clips {
                 let (row, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
-                let axis = app.track_bar.key_rect.unwrap_or(row);
+                let axis = row;
                 let pixels_per_frame = axis.width() / span;
                 let delta = app.clip_timeline.drag.as_ref().filter(|d| d.scene == scene && d.id == clip.id).map(|d| d.delta).unwrap_or(0.0);
                 let a = axis.left() + (clip.start + delta - first) * pixels_per_frame;

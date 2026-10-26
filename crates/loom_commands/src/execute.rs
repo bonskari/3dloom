@@ -1019,11 +1019,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             r
         }
         C::DisplayBones => {
+            state.display.hide_bones = false;
             state.display_bones_only = true;
             state.mesh_dirty = true;
             Ok(json!({ "display_bones_only": true }))
         }
         C::DisplayBonesAndObjects => {
+            state.display.hide_bones = false;
             state.display_bones_only = false;
             state.mesh_dirty = true;
             Ok(json!({ "display_bones_only": false }))

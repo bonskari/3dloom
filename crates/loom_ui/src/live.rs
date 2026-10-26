@@ -138,6 +138,7 @@ impl LoomApp {
     /// and the modes and preferences that change input handling.
     pub fn diagnostics(&self, ctx: &egui::Context) -> Value {
         let s = &self.state;
+        let frame_nr=ctx.data(|d|d.get_temp::<(u64,f64)>(egui::Id::new("live_frame_counter")).map_or(0,|v|v.0));
         let egui_state = ctx.input(|i| {
             let p = &i.pointer;
             let buttons: Vec<&str> = [(egui::PointerButton::Primary, "primary"), (egui::PointerButton::Secondary, "secondary"), (egui::PointerButton::Middle, "middle"), (egui::PointerButton::Extra1, "extra1"), (egui::PointerButton::Extra2, "extra2")]
@@ -158,6 +159,8 @@ impl LoomApp {
                 "window_focused": i.focused,
                 "screen_rect": rect_json(i.screen_rect),
                 "time": i.time,
+                "frame_nr": frame_nr,
+                "stable_dt": i.stable_dt,
             })
         });
         let pointer = ctx.input(|i| i.pointer.latest_pos());

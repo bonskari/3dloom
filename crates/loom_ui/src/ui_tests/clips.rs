@@ -9,6 +9,9 @@ fn imported_animation_can_be_dragged_as_one_clip_and_undone_once() {
     h.app.state.frame_range=(0,100);
     h.frames(3);
     let clip=h.app.state.scene.animation_clips[0].clone();
+    assert!(!h.has(egui::accesskit::Role::Button,&clip.name),"clip tools must stay outside the main UI until opened");
+    h.click_text_anywhere("Animation");
+    h.click_text_anywhere("Animation Editor...");h.frames(3);
     let rect=h.find(egui::accesskit::Role::Button,&clip.name);
     h.drag(rect.center(),rect.center()+egui::vec2(80.0,0.0));
     assert!(h.app.state.scene.animation_clips[0].start>0.0,"whole clip moves on the timeline");

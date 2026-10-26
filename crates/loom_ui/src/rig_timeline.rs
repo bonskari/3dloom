@@ -8,7 +8,8 @@ struct Drag {
     to: f32,
     origin: f32,
 }
-pub(crate) fn show(ctx: &egui::Context, app: &mut LoomApp) {
+pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let ctx=ui.ctx().clone();
     if app.state.scene.loom_rigs.is_empty() {
         return;
     }
@@ -17,7 +18,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let first = app.state.frame_range.0 as f32;
     let span = (app.state.frame_range.1 as f32 - first).max(1.);
     let mut command = None;
-    egui::TopBottomPanel::bottom("loomrig_tracks").show(ctx, |ui| {
+    ui.scope(|ui| {
         egui::CollapsingHeader::new("LoomRig IK / FK Tracks")
             .default_open(true)
             .show(ui, |ui| {
@@ -30,7 +31,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut LoomApp) {
                                     egui::vec2(ui.available_width(), 23.),
                                     egui::Sense::hover(),
                                 );
-                                let axis = app.track_bar.key_rect.unwrap_or(row);
+                                let axis = row;
                                 let ppf = axis.width() / span;
                                 ui.painter().text(
                                     row.left_center(),

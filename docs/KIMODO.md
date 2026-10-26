@@ -1,6 +1,6 @@
 # Kimodo and LoomRig motion authoring
 
-Motion > Kimodo generates editable animation through the configured API. Set the
+Animation > Animation Editor > Kimodo generates editable animation through the configured API. Set the
 API URL under Kimodo > Settings and use Test Connection. The address is a local
 user preference; it is never stored in a scene. Generate submits a durable GPU
 queue job, downloads its real BVH, imports a source clip, frames it and starts
@@ -8,7 +8,7 @@ playback. A completed job for a different scene waits for Import Result rather
 than changing the new scene. Original BVH files are retained in `kimodo-motions/`
 beside a saved scene, or under local configuration for an unsaved scene.
 
-Motion > Import Animation accepts BVH and animated FBX. It preserves project FPS
+Animation > Animation Editor > Import Animation accepts BVH and animated FBX. It preserves project FPS
 and existing character animation, retiming incoming keys to the same time in
 seconds. FBX reading and body-profile preparation run off the UI thread for the
 file-picker workflow. Cancel or a changed scene invalidates the result before
@@ -31,7 +31,7 @@ shader behavior are not represented by an ordinary skeletal FBX.
 
 ## Character controls
 
-Under Motion > LoomRig > Create Character Rig, choose the existing skeleton
+Under Animation > Animation Editor > LoomRig > Create Character Rig, choose the existing skeleton
 root. Create LoomRig automatically characterizes MetaHuman body names. For
 other names, expand Characterization and map root, pelvis, spine, head and
 contiguous three-joint limbs. Limb chains can be added, removed and named. More
@@ -64,7 +64,10 @@ character placement. Original hierarchy, bone lengths and skin bindings stay
 intact. Repeated imports use collision namespaces that preserve original joint
 names, including numbered fingers and spine joints.
 
-Animation Clips above the key bar are movable blocks backed by editable native
+Open Animation > Animation Editor for movable Animation Clips and LoomRig
+IK/FK tracks in a separate resizable window. Its Kimodo and LoomRig tabs contain
+the extra generation and rig controls; the main Motion panel is unchanged. These tools are closed by default
+and take no space from the main viewport. Clips are backed by editable native
 keys. Dragging a block moves its owned keys in one undo step. Right-click it to
 set its In or Out at the current frame. Moving or trimming one character clip
 preserves neighboring clips on the same bones. Source and character clips

@@ -390,6 +390,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 }
             });
             ui.menu_button("Animation", |ui| {
+                if ui.button("Animation Editor...").clicked(){app.clip_timeline.open=true;ui.close_menu();}
+                ui.separator();
                 cmd(ui, app, "Load Animation...", Command::LoadAnimation { path: None, offset: None });
                 cmd(ui, app, "Save Animation...", Command::SaveAnimation { path: None });
                 ui.separator();

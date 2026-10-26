@@ -1370,6 +1370,8 @@ impl LoomApp {
     /// One frame of the whole UI (what eframe calls each repaint; the UI
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
+        let time=ctx.input(|i|i.time);
+        ctx.data_mut(|d|{let counter=d.get_temp_mut_or_insert_with(egui::Id::new("live_frame_counter"),||(0u64,f64::NEG_INFINITY));if counter.1!=time{counter.0+=1;counter.1=time;}});
         if self.material_previews.poll(){self.material_preview_generation=self.material_preview_generation.wrapping_add(1);ctx.request_repaint();}
         if self.material_previews.pending_count()>0{ctx.request_repaint_after(std::time::Duration::from_millis(16));}
         async_import::poll(self,ctx);

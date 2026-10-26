@@ -32,7 +32,7 @@ fn motion_panel_builds_real_loomrig_and_selects_animatable_controls() {
     let mut h = Harness::new();
     h.screen.max.y = 1800.;
     let root = character(&mut h);
-    h.app.panel_tab = crate::Tab::Motion;
+    h.app.clip_timeline.open=true;h.app.clip_timeline.tab=2;
     h.frames(3);
     assert!(h.has(egui::accesskit::Role::Button, "Create LoomRig"));
     h.click_text_anywhere("Create LoomRig");
@@ -64,7 +64,7 @@ fn motion_panel_applies_source_clip_to_existing_character() {
         root: root.0,
         mapping: None,
     });
-    h.app.panel_tab = crate::Tab::Motion;
+    h.app.clip_timeline.open=true;h.app.clip_timeline.tab=2;
     h.frames(3);
     assert!(h.has(egui::accesskit::Role::Button, "Apply Motion to Character"));
     h.click_text_anywhere("Apply Motion to Character");
@@ -100,6 +100,8 @@ fn rig_timeline_moves_one_ik_fk_key_with_one_undo() {
     }
     h.app.state.frame_range = (0, 100);
     h.frames(3);
+    assert!(!h.has(egui::accesskit::Role::Button,"Left Arm IK/FK @ 20"));
+    h.click_text_anywhere("Animation");h.click_text_anywhere("Animation Editor...");h.frames(3);
     let rect = h.find(egui::accesskit::Role::Button, "Left Arm IK/FK @ 20");
     h.drag(rect.center(), rect.center() + egui::vec2(75., 0.));
     let time = h.app.state.scene.loom_rigs[0].limbs[0]
@@ -127,7 +129,7 @@ fn rig_timeline_moves_one_ik_fk_key_with_one_undo() {
 fn second_character_can_be_rigged_and_chain_rows_are_editable() {
     let mut h=Harness::new();h.screen.max.y=3000.;let first=character(&mut h);
     h.cmd(Command::CreateLoomRig{root:first.0,mapping:None});
-    let second=character(&mut h);h.app.panel_tab=crate::Tab::Motion;h.frames(3);
+    let second=character(&mut h);h.app.clip_timeline.open=true;h.app.clip_timeline.tab=2;h.frames(3);
     h.click_text_anywhere("Create Character Rig");h.frames(2);
     assert!(h.has(egui::accesskit::Role::Button,"Create LoomRig"));
     h.click_text_anywhere("Characterization");h.frames(2);
