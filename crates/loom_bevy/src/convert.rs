@@ -72,18 +72,47 @@ impl MeshData {
     }
 }
 
+/// Selects material faces from an existing triangulation. Normals retain the
+/// full mesh's smoothing neighbours even across material boundaries.
+pub(crate) fn mesh_data_part(mesh: &loom_mesh::Mesh, data: &MeshData, id: Option<u16>, faceted: bool) -> MeshData {
+    let mut out = MeshData { positions: Vec::new(), normals: Vec::new(), uvs: Vec::new(), indices: Vec::new() };
+    let mut cursor = 0;
+    for (i, face) in mesh.faces().iter().enumerate().filter(|(_, f)| !f.hidden) {
+        let mut he = face.he;
+        let mut count = 0;
+        loop {
+            count += 1;
+            he = mesh.half_edges()[he.0 as usize].next;
+            if he == face.he { break; }
+            assert!(count <= 1024, "face loop did not close — mesh invariants violated");
+        }
+        if count < 3 { continue; }
+        if id.map_or(true, |id| face.material_id == id) {
+            let base = out.positions.len() as u32;
+            out.positions.extend_from_slice(&data.positions[cursor..cursor + count]);
+            out.uvs.extend_from_slice(&data.uvs[cursor..cursor + count]);
+            if faceted {
+                let normal = mesh.face_normal(loom_mesh::FaceId(i as u32));
+                let mut he = face.he;
+                for _ in 0..count {
+                    out.normals.push(mesh.explicit_normal(he).unwrap_or(normal).to_array());
+                    he = mesh.half_edges()[he.0 as usize].next;
+                }
+            } else {
+                out.normals.extend_from_slice(&data.normals[cursor..cursor + count]);
+            }
+            for j in 1..count as u32 - 1 { out.indices.extend([base, base + j, base + j + 1]); }
+        }
+        cursor += count;
+    }
+    out
+}
+
 /// `mesh` split by face material ID (0-based): one triangulation per ID in use.
 pub fn mesh_data_by_id(mesh: &loom_mesh::Mesh) -> Vec<(u16, MeshData)> {
     let ids: std::collections::BTreeSet<u16> = mesh.faces().iter().filter(|f| !f.hidden).map(|f| f.material_id).collect();
-    ids.into_iter()
-        .map(|id| {
-            let mut part = mesh.clone();
-            for f in part.faces_mut() {
-                f.hidden |= f.material_id != id;
-            }
-            (id, mesh_data(&part))
-        })
-        .collect()
+    let data = mesh_data(mesh);
+    ids.into_iter().map(|id| (id, mesh_data_part(mesh, &data, Some(id), false))).collect()
 }
 
 /// A hash of the faces' material IDs (the per-ID split depends on them).
@@ -439,6 +468,27 @@ mod tests {
         assert!((m.emissive.red - 1.0).abs() < 1e-5 && m.emissive.green > 0.1 && m.emissive.blue == 0.0, "{:?}", m.emissive);
         lm.self_illum.set(0.0);
         assert_eq!(material_from_loom(Some(&lm), [0, 0, 0]).emissive, bevy::color::LinearRgba::rgb(0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn material_parts_match_full_mesh_triangulation_with_hidden_smoothing_neighbours() {
+        let mut mesh = loom_mesh::sphere_segmented(1.25, 24, 0.0);
+        for (i, face) in mesh.faces_mut().iter_mut().enumerate() {
+            face.material_id = (i % 3) as u16;
+            face.smoothing_groups = [1, 3, 2][i % 3];
+            face.hidden = i % 7 == 0;
+        }
+        let data = mesh_data(&mesh);
+        for id in [None, Some(0), Some(1), Some(2)] {
+            for faceted in [false, true] {
+                let mut legacy = mesh.clone();
+                for face in legacy.faces_mut() {
+                    face.hidden |= id.is_some_and(|id| face.material_id != id);
+                    if faceted { face.smoothing_groups = 0; }
+                }
+                assert_eq!(mesh_data_part(&mesh, &data, id, faceted), mesh_data(&legacy));
+            }
+        }
     }
 
     #[test]

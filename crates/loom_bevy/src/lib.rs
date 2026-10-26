@@ -402,7 +402,10 @@ impl BevyRenderer {
             }
             // (material ID drawn or all faces, its surface)
             let parts: Vec<(Option<u16>, Option<Surface>)> = match &o.surfaces {
-                Some(Surfaces::PerId(_)) => mesh_data_by_id(o.mesh).into_iter().map(|(id, _)| (Some(id), o.surfaces.as_ref().map(|s| s.for_face(id).into_owned()))).collect(),
+                Some(Surfaces::PerId(_)) => {
+                    let ids: std::collections::BTreeSet<_> = o.mesh.faces().iter().filter(|f| !f.hidden).map(|f| f.material_id).collect();
+                    ids.into_iter().map(|id| (Some(id), o.surfaces.as_ref().map(|s| s.for_face(id).into_owned()))).collect()
+                },
                 Some(Surfaces::Single(s)) => vec![(None, Some((**s).clone()))],
                 None => vec![(None, None)],
             };
@@ -416,15 +419,7 @@ impl BevyRenderer {
                 let d = if id.is_none() && !faceted {
                     data.clone()
                 } else {
-                    let mut part = o.mesh.clone();
-                    for f in part.faces_mut() {
-                        f.hidden |= id.is_some_and(|id| f.material_id != id);
-                        // Faceted: flat normals whatever the smoothing groups.
-                        if faceted {
-                            f.smoothing_groups = 0;
-                        }
-                    }
-                    mesh_data(&part)
+                    convert::mesh_data_part(o.mesh, &data, id, faceted)
                 };
                 let mut mesh = d.to_bevy();
                 if mat.normal_map_texture.is_some() {

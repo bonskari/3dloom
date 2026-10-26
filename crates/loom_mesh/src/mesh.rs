@@ -183,13 +183,26 @@ impl Mesh {
     /// Unit normal of a face (Newell's method, so n-gons and slightly
     /// non-planar faces work).
     pub fn face_normal(&self, id: FaceId) -> glam::Vec3 {
-        let Some(pts) = self.face_positions(id) else { return glam::Vec3::Z };
+        let Some(face) = self.faces.get(id.0 as usize) else { return glam::Vec3::Z };
+        let term = |a: glam::Vec3, b: glam::Vec3| glam::Vec3::new((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y));
         let mut n = glam::Vec3::ZERO;
-        for i in 0..pts.len() {
-            let a = pts[i];
-            let b = pts[(i + 1) % pts.len()];
-            n += glam::Vec3::new((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y));
+        let mut first = None;
+        let mut previous = None;
+        let mut current = face.he;
+        let mut count = 0;
+        loop {
+            let Some(he) = self.half_edges.get(current.0 as usize) else { return glam::Vec3::Z };
+            if let Some(p) = self.vertex_position(he.origin) {
+                if let Some(prev) = previous { n += term(prev, p); }
+                first.get_or_insert(p);
+                previous = Some(p);
+            }
+            current = he.next;
+            count += 1;
+            if current == face.he { break; }
+            if count > 1024 { return glam::Vec3::Z; }
         }
+        if let (Some(last), Some(first)) = (previous, first) { n += term(last, first); }
         n.normalize_or_zero()
     }
 
@@ -524,6 +537,24 @@ impl Mesh {
 mod tests {
     use super::*;
     use glam::Vec3;
+
+    #[test]
+    fn streamed_face_normals_match_newell_positions() {
+        let meshes = [crate::sphere_segmented(1.25, 24, 0.0), crate::box_primitive(Vec3::ONE)];
+        for mesh in meshes {
+            for i in 0..mesh.face_count() {
+                let face = FaceId(i as u32);
+                let pts = mesh.face_positions(face).unwrap();
+                let mut n = Vec3::ZERO;
+                for i in 0..pts.len() {
+                    let a = pts[i];
+                    let b = pts[(i + 1) % pts.len()];
+                    n += Vec3::new((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y));
+                }
+                assert_eq!(mesh.face_normal(face), n.normalize_or_zero());
+            }
+        }
+    }
 
     #[test]
     fn empty_mesh_has_no_elements() {

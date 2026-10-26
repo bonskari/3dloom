@@ -370,18 +370,25 @@ pub fn wire_lines(mesh: &Mesh, style: &MeshStyle) -> Vec<crate::grid::LineVertex
 /// transparency and culling.
 pub fn triangulate_styled(mesh: &Mesh, style: &MeshStyle) -> (Vec<GpuVertex>, Vec<u32>, Vec<DrawRange>) {
     let vertex_colors = style.vertex_colors;
+    // Smoothing visits the same neighbouring faces at every corner. Compute
+    // their normals once per triangulation, including hidden neighbours.
+    let face_normals: Vec<Vec3> = (0..mesh.face_count()).map(|i| mesh.face_normal(loom_mesh::FaceId(i as u32))).collect();
+    let mut vertex_faces: Vec<Option<Vec<loom_mesh::FaceId>>> = vec![None; mesh.vertex_count()];
+    let mut vertex_normals = vec![(0, Vec3::ZERO); mesh.vertex_count()];
     let mut verts = Vec::new();
     // Triangles per draw group, in first-seen order.
     let mut groups: Vec<(DrawRange, Vec<u32>)> = Vec::new();
+    let mut loop_verts: Vec<Vec3> = Vec::new();
+    let mut loop_ids: Vec<loom_mesh::VertexId> = Vec::new();
+    let mut loop_hes: Vec<loom_mesh::HalfEdgeId> = Vec::new();
 
     for (face_i, face) in mesh.faces().iter().enumerate() {
         if face.hidden {
             continue;
         }
-        let face_id = loom_mesh::FaceId(face_i as u32);
-        let mut loop_verts: Vec<Vec3> = Vec::new();
-        let mut loop_ids: Vec<loom_mesh::VertexId> = Vec::new();
-        let mut loop_hes: Vec<loom_mesh::HalfEdgeId> = Vec::new();
+        loop_verts.clear();
+        loop_ids.clear();
+        loop_hes.clear();
         let start = face.he;
         let mut he_id = start;
         loop {
@@ -410,7 +417,7 @@ pub fn triangulate_styled(mesh: &Mesh, style: &MeshStyle) -> (Vec<GpuVertex>, Ve
         let m = look.uv;
         let extra = [look.self_illum, if look.texture_alpha { -1.0 } else { look.texture_amount }, if look.decal[0] { 1.0 } else { 0.0 }, if look.decal[1] { 1.0 } else { 0.0 }];
         let flat = face.smoothing_groups == 0 || look.faceted;
-        let n = mesh.face_normal(face_id);
+        let n = face_normals[face_i];
 
         let base = verts.len() as u32;
         for (i, p) in loop_verts.iter().enumerate() {
@@ -418,7 +425,25 @@ pub fn triangulate_styled(mesh: &Mesh, style: &MeshStyle) -> (Vec<GpuVertex>, Ve
             let normal = match mesh.explicit_normal(loop_hes[i]) {
                 Some(e) => e,
                 None if flat => n,
-                None => mesh.vertex_normal(loop_ids[i], face_id),
+                None => {
+                    let cached = &mut vertex_normals[loop_ids[i].0 as usize];
+                    if cached.0 == face.smoothing_groups {
+                        cached.1
+                    } else {
+                        let around = vertex_faces[loop_ids[i].0 as usize].get_or_insert_with(|| mesh.faces_around_vertex(loop_ids[i]));
+                        let mut sum = Vec3::ZERO;
+                        for f in around {
+                            if mesh.faces()[f.0 as usize].smoothing_groups & face.smoothing_groups != 0 {
+                                sum += face_normals[f.0 as usize];
+                            }
+                        }
+                        let normal = if sum.length_squared() < 1e-12 { n } else { sum.normalize() };
+                        // Degenerate sums fall back to this face's normal, so they
+                        // cannot be shared with a different face at the vertex.
+                        if sum.length_squared() >= 1e-12 { *cached = (face.smoothing_groups, normal); }
+                        normal
+                    }
+                },
             };
             let vc = mesh.vertices()[loop_ids[i].0 as usize].color;
             let color = if vertex_colors { [color[0] * vc[0], color[1] * vc[1], color[2] * vc[2], color[3]] } else { color };
@@ -480,6 +505,30 @@ mod tests {
 
     use super::*;
     use loom_mesh::box_primitive;
+
+    #[test]
+    fn triangulated_smoothing_matches_corner_normals() {
+        let mut mesh = loom_mesh::sphere_segmented(1.25, 24, 0.0);
+        for (i, face) in mesh.faces_mut().iter_mut().enumerate() {
+            face.smoothing_groups = [0, 1, 3, 2][i % 4];
+            face.hidden = i % 7 == 0;
+        }
+        let (verts, _) = triangulate_with_face_normals(&mesh, [1.0; 4], false);
+        let mut corner = 0;
+        for (i, face) in mesh.faces().iter().enumerate().filter(|(_, f)| !f.hidden) {
+            let start = face.he;
+            let mut he_id = start;
+            loop {
+                let he = &mesh.half_edges()[he_id.0 as usize];
+                let expected = mesh.explicit_normal(he_id).unwrap_or_else(|| mesh.vertex_normal(he.origin, loom_mesh::FaceId(i as u32)));
+                assert_eq!(verts[corner].normal, expected.to_array());
+                corner += 1;
+                he_id = he.next;
+                if he_id == start { break; }
+            }
+        }
+        assert_eq!(corner, verts.len());
+    }
 
     #[test]
     fn sphere_triangulates_within_index_range() {
