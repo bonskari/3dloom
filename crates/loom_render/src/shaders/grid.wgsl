@@ -13,12 +13,23 @@ struct VsOut {
     @location(0) color: vec3<f32>,
 };
 
-@vertex
-fn vs(in: VsIn) -> VsOut {
+fn line_vertex(in: VsIn) -> VsOut {
     var o: VsOut;
     o.clip = view.view_proj * vec4<f32>(in.position, 1.0);
     o.color = in.color;
     return o;
+}
+
+@vertex
+fn vs(in: VsIn) -> VsOut {
+    return line_vertex(in);
+}
+
+@vertex
+fn vs_selected(in: VsIn) -> VsOut {
+    var out = line_vertex(in);
+    out.color = vec3<f32>(1.0);
+    return out;
 }
 
 @fragment

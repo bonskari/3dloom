@@ -361,9 +361,12 @@ impl ViewportRenderer {
                     pass.draw(0..mb.edge_vertex_count, 0..1);
                 }
             }
+            if !selected.is_empty() {
+                pass.set_pipeline(self.grid.selected_line_pipeline());
+            }
             for &idx in selected {
                 if let Some(mb) = meshes.get(idx).filter(|mb| mb.edge_vertex_count > 0) {
-                    pass.set_vertex_buffer(0, mb.selected_edge_vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(0, mb.edge_vertex_buffer.slice(..));
                     pass.draw(0..mb.edge_vertex_count, 0..1);
                 }
             }
@@ -446,5 +449,234 @@ mod shade_tests {
         assert_eq!(shaded_meshes(3, true, &[]), vec![0, 1, 2]);
         assert_eq!(shaded_meshes(3, false, &[]), Vec::<usize>::new());
         assert_eq!(shaded_meshes(3, false, &[2, 7]), vec![2]);
+    }
+}
+
+#[cfg(test)]
+mod selected_line_tests {
+    use super::*;
+    use wgpu::util::{BufferInitDescriptor, DeviceExt};
+
+    #[test]
+    fn selected_viewport_matches_legacy_white_edges_with_default_and_subobject_lines() {
+        let instance = Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
+            .expect("real GPU required");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&DeviceDescriptor::default(), None)).unwrap();
+        for format in [TextureFormat::Rgba8Unorm, TextureFormat::Rgba8UnormSrgb] {
+            let renderer = ViewportRenderer::new(&device, format);
+            renderer.update_view(
+                &queue,
+                0,
+                Mat4::from_rotation_z(0.13),
+                Vec3::Z * 2.0,
+                ViewShading::default(),
+            );
+            let textures = renderer.make_texture_set(&device, &queue, &[]);
+            let meshes = [
+                loom_mesh::quad_primitive(Vec3::new(-0.9, -0.8, 0.3), Vec3::X * 1.4, Vec3::Y * 1.3),
+                loom_mesh::quad_primitive(Vec3::new(-0.2, -0.4, 0.6), Vec3::X * 1.0, Vec3::Y * 1.1),
+            ];
+            let styles = [
+                crate::MeshStyle {
+                    color: [0.2, 0.6, 0.8],
+                    wire_color: Some([0.8, 0.2, 0.1]),
+                    diagonals: true,
+                    ..Default::default()
+                },
+                crate::MeshStyle {
+                    color: [0.3, 0.8, 0.2],
+                    wire: true,
+                    ..Default::default()
+                },
+            ];
+            let buffers: Vec<_> = meshes
+                .iter()
+                .zip(&styles)
+                .map(|(m, s)| MeshBuffer::from_mesh(&device, m, s.clone()))
+                .collect();
+            let mut white = Vec::new();
+            for (mesh, style) in meshes.iter().zip(&styles) {
+                let mut edges = mesh.unique_edges();
+                if style.diagonals {
+                    edges.extend(crate::mesh_buffer::dashed(
+                        &crate::mesh_buffer::fan_diagonals(mesh),
+                        crate::mesh_buffer::DIAGONAL_DASHES,
+                    ));
+                }
+                let vertices: Vec<_> = edges
+                    .iter()
+                    .flat_map(|(a, b)| {
+                        [
+                            crate::grid::LineVertex {
+                                position: a.to_array(),
+                                color: [1.0; 3],
+                            },
+                            crate::grid::LineVertex {
+                                position: b.to_array(),
+                                color: [1.0; 3],
+                            },
+                        ]
+                    })
+                    .collect();
+                assert_eq!(
+                    vertices.len() as u32,
+                    buffers[white.len()].edge_vertex_count
+                );
+                white.push(device.create_buffer_init(&BufferInitDescriptor {
+                    label: Some("legacy selected white edge reference"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: BufferUsages::VERTEX,
+                }));
+            }
+            let lines = crate::mesh_buffer::LineBuffer::new(
+                &device,
+                &[(
+                    Vec3::new(-0.8, 0.1, 0.1),
+                    Vec3::new(0.8, 0.1, 0.1),
+                    [0.0, 0.0, 1.0],
+                )],
+            )
+            .unwrap();
+            let references: Vec<_> = buffers.iter().collect();
+            let render = |selected: &[usize], show_edges: bool, shaded: bool, legacy: bool| {
+                let texture = device.create_texture(&TextureDescriptor {
+                    label: None,
+                    size: Extent3d {
+                        width: 64,
+                        height: 64,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format,
+                    usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let depth = device.create_texture(&TextureDescriptor {
+                    label: None,
+                    size: texture.size(),
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::Depth24Plus,
+                    usage: TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&Default::default());
+                let depth = depth.create_view(&Default::default());
+                let staging = device.create_buffer(&BufferDescriptor {
+                    label: None,
+                    size: 64 * 256,
+                    usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let mut encoder = device.create_command_encoder(&Default::default());
+                {
+                    let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[Some(RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: Operations {
+                                load: LoadOp::Clear(Color {
+                                    r: 0.03,
+                                    g: 0.07,
+                                    b: 0.11,
+                                    a: 1.0,
+                                }),
+                                store: StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                            view: &depth,
+                            depth_ops: Some(Operations {
+                                load: LoadOp::Clear(1.0),
+                                store: StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    renderer.record_into_pass(
+                        &mut pass,
+                        0,
+                        &references,
+                        if legacy { &[] } else { selected },
+                        show_edges,
+                        shaded,
+                        &[1],
+                        Some(GridPlane::XY),
+                        false,
+                        &textures,
+                        if legacy { None } else { Some(&lines) },
+                    );
+                    if legacy {
+                        pass.set_pipeline(renderer.grid.line_pipeline());
+                        pass.set_bind_group(0, &renderer.slots[0].1, &[]);
+                        for &i in selected {
+                            pass.set_vertex_buffer(0, white[i].slice(..));
+                            pass.draw(0..buffers[i].edge_vertex_count, 0..1);
+                        }
+                        pass.set_vertex_buffer(0, lines.buffer.slice(..));
+                        pass.draw(0..lines.count, 0..1);
+                    }
+                }
+                encoder.copy_texture_to_buffer(
+                    TexelCopyTextureInfo {
+                        texture: &texture,
+                        mip_level: 0,
+                        origin: Origin3d::ZERO,
+                        aspect: TextureAspect::All,
+                    },
+                    TexelCopyBufferInfo {
+                        buffer: &staging,
+                        layout: TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(256),
+                            rows_per_image: Some(64),
+                        },
+                    },
+                    texture.size(),
+                );
+                queue.submit([encoder.finish()]);
+                let slice = staging.slice(..);
+                let (tx, rx) = std::sync::mpsc::channel();
+                slice.map_async(MapMode::Read, move |r| tx.send(r).unwrap());
+                device.poll(Maintain::Wait);
+                rx.recv().unwrap().unwrap();
+                let bytes = slice.get_mapped_range().to_vec();
+                staging.unmap();
+                bytes
+            };
+            for selected in [&[][..], &[0][..], &[0, 1][..]] {
+                for show_edges in [false, true] {
+                    for shaded in [false, true] {
+                        assert_eq!(
+                            render(selected, show_edges, shaded, false),
+                            render(selected, show_edges, shaded, true),
+                            "selected={selected:?} edges={show_edges} shaded={shaded}"
+                        );
+                    }
+                }
+            }
+            let pixels = render(&[0], false, false, false);
+            assert!(
+                pixels.chunks_exact(4).any(|p| p == [0, 0, 255, 255]),
+                "subobject lines must retain blue"
+            );
+            assert!(
+                pixels.chunks_exact(4).any(|p| p == [255; 4]),
+                "selection must be visible white"
+            );
+            assert_ne!(
+                pixels,
+                render(&[], false, false, false),
+                "selection positive control must change pixels"
+            );
+        }
     }
 }

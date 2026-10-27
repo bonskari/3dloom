@@ -14,6 +14,7 @@ pub struct LineVertex {
 
 pub struct GridPipeline {
     pipeline: RenderPipeline,
+    selected_pipeline: RenderPipeline,
     /// Grids for the XY, XZ and YZ construction planes (perspective extent).
     planes: [(Buffer, u32); 3],
     /// The same planes at the larger axis-view extent.
@@ -39,12 +40,12 @@ impl GridPipeline {
             bind_group_layouts: &[layout],
             push_constant_ranges: &[],
         });
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+        let make_pipeline = |entry| device.create_render_pipeline(&RenderPipelineDescriptor {
             label: Some("grid_pipeline"),
             layout: Some(&pipeline_layout),
             vertex: VertexState {
                 module: &shader,
-                entry_point: Some("vs"),
+                entry_point: Some(entry),
                 compilation_options: PipelineCompilationOptions::default(),
                 buffers: &[VertexBufferLayout {
                     array_stride: std::mem::size_of::<LineVertex>() as u64,
@@ -78,9 +79,12 @@ impl GridPipeline {
             cache: None,
         });
 
+        let pipeline = make_pipeline("vs");
+        let selected_pipeline = make_pipeline("vs_selected");
+
         let params = GridParams { spacing: 1.0, major_every: 10, cells: n, ortho_cells: n };
         let (planes, ortho_planes) = build_planes(device, params);
-        Self { pipeline, planes, ortho_planes, params }
+        Self { pipeline, selected_pipeline, planes, ortho_planes, params }
     }
 
     /// Rebuilds the line buffers when the Home Grid settings change.
@@ -103,8 +107,12 @@ impl GridPipeline {
         pass.draw(0..*count, 0..1);
     }
 
-    /// Exposes the line render pipeline so other line-list vertex buffers
-    /// (such as selection-overlay edges) can be drawn with the same shader.
+    /// Selection reuses the ordinary edge positions with constant white colour.
+    pub fn selected_line_pipeline(&self) -> &RenderPipeline {
+        &self.selected_pipeline
+    }
+
+    /// The normal line pipeline preserves each vertex colour.
     pub fn line_pipeline(&self) -> &RenderPipeline {
         &self.pipeline
     }

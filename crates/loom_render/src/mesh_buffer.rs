@@ -189,10 +189,9 @@ pub struct MeshBuffer {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
     pub index_count: u32,
-    /// Pre-built line buffer of every unique edge, colored white — used to draw
-    /// the selection wireframe overlay when this mesh is selected.
+    /// Every unique edge, using the object wire colour. Selection reuses its
+    /// positions through the constant-white line pipeline.
     pub edge_vertex_buffer: Buffer,
-    pub selected_edge_vertex_buffer: Buffer,
     pub edge_vertex_count: u32,
     /// Cached AABB so picking doesn't have to recompute it every frame.
     pub aabb_min: Vec3,
@@ -239,12 +238,6 @@ impl MeshBuffer {
             contents: bytemuck::cast_slice(&edge_staging),
             usage: mesh_usage(BufferUsages::VERTEX),
         });
-        for vertex in &mut edge_staging { vertex.color = [1.0; 3]; }
-        let selected_edge_vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("loom_mesh_selected_edge_buffer"),
-            contents: bytemuck::cast_slice(&edge_staging),
-            usage: mesh_usage(BufferUsages::VERTEX),
-        });
 
         let (aabb_min, aabb_max) = mesh.aabb();
 
@@ -254,7 +247,6 @@ impl MeshBuffer {
             index_buffer,
             index_count: indices.len() as u32,
             edge_vertex_buffer,
-            selected_edge_vertex_buffer,
             edge_vertex_count,
             aabb_min,
             aabb_max,
@@ -275,8 +267,6 @@ impl MeshBuffer {
         update_buffer(device, queue, &mut self.vertex_buffer, bytemuck::cast_slice(&verts), BufferUsages::VERTEX, "loom_mesh_vertex_buffer");
         update_buffer(device, queue, &mut self.index_buffer, bytemuck::cast_slice(&indices), BufferUsages::INDEX, "loom_mesh_index_buffer");
         update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_edge_buffer");
-        for vertex in &mut self.edge_staging { vertex.color = [1.0; 3]; }
-        update_buffer(device, queue, &mut self.selected_edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_selected_edge_buffer");
         let empty = [crate::grid::LineVertex { position: [0.0; 3], color: [0.0; 3] }];
         update_buffer(device, queue, &mut self.wire_vertex_buffer, bytemuck::cast_slice(if wire.is_empty() { &empty[..] } else { &wire[..] }), BufferUsages::VERTEX, "loom_mesh_wire_buffer");
         self.faces_ready = faces;
@@ -692,15 +682,15 @@ mod tests {
         assert_eq!(read(&lazy.index_buffer,full.index_buffer.size()),read(&full.index_buffer,full.index_buffer.size()));
         let mut reused = MeshBuffer::from_mesh(&device, &small, plain.clone());
         for (mesh, style) in [(&large, &colored), (&moved, &plain), (&small, &wire), (&edited, &colored), (&flipped, &colored), (&empty, &plain), (&small, &colored)] {
-            let old = [reused.vertex_buffer.clone(), reused.index_buffer.clone(), reused.edge_vertex_buffer.clone(), reused.selected_edge_vertex_buffer.clone(), reused.wire_vertex_buffer.clone()];
+            let old = [reused.vertex_buffer.clone(), reused.index_buffer.clone(), reused.edge_vertex_buffer.clone(), reused.wire_vertex_buffer.clone()];
             reused.update_from_mesh(&device, &queue, mesh, style.clone());
             let fresh = MeshBuffer::from_mesh(&device, mesh, style.clone());
             assert_eq!((reused.index_count, reused.edge_vertex_count, reused.wire_vertex_count), (fresh.index_count, fresh.edge_vertex_count, fresh.wire_vertex_count));
             assert_eq!(reused.style, fresh.style);
             assert_eq!(reused.ranges, fresh.ranges);
             assert_eq!((reused.aabb_min, reused.aabb_max), (fresh.aabb_min, fresh.aabb_max));
-            let current = [&reused.vertex_buffer, &reused.index_buffer, &reused.edge_vertex_buffer, &reused.selected_edge_vertex_buffer, &reused.wire_vertex_buffer];
-            let expected = [&fresh.vertex_buffer, &fresh.index_buffer, &fresh.edge_vertex_buffer, &fresh.selected_edge_vertex_buffer, &fresh.wire_vertex_buffer];
+            let current = [&reused.vertex_buffer, &reused.index_buffer, &reused.edge_vertex_buffer, &reused.wire_vertex_buffer];
+            let expected = [&fresh.vertex_buffer, &fresh.index_buffer, &fresh.edge_vertex_buffer, &fresh.wire_vertex_buffer];
             for ((current, expected), old) in current.into_iter().zip(expected).zip(old) {
                 assert_eq!(read(current, expected.size()), read(expected, expected.size()));
                 if expected.size() <= old.size() { assert_eq!(current, &old, "an allocation that fits must be reused"); }
