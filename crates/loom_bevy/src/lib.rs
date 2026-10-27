@@ -124,6 +124,7 @@ struct Object {
     material_dirty: bool,
     buffers: Vec<DynamicGeometryBuffer>,
     part_ids: Vec<Option<u16>>,
+    tangent_caches: Vec<mikktspace::NeighborCache>,
     mesh_hash: u64,
     transform: glam::Mat4,
     surfaces: Option<Surfaces>,
@@ -452,6 +453,7 @@ impl BevyRenderer {
         let mut batches = Vec::new();
         let mut materials = Vec::new();
         let mut material_data = Vec::new();
+        let mut tangent_caches = Vec::new();
         let geometry = {
             let _scope = loom_render::profile::Scope::new("bevy.geometry_data");
             let jobs = objects.iter().map(|o| {
@@ -506,7 +508,10 @@ impl BevyRenderer {
                 Some(Surfaces::Single(s)) => vec![(None, Some((**s).clone()))],
                 None => vec![(None, None)],
             };
-            let old = set.remove(&o.id);
+            let mut old = set.remove(&o.id);
+            let mut previous_caches: HashMap<_, _> = old.as_mut().map(|obj| {
+                obj.part_ids.iter().copied().zip(std::mem::take(&mut obj.tangent_caches)).collect()
+            }).unwrap_or_default();
             let part_ids = parts.iter().map(|(id, _)| *id).collect::<Vec<_>>();
             let count = parts.len();
             for (id, surface) in parts {
@@ -520,6 +525,7 @@ impl BevyRenderer {
                 };
                 // Match world-baked polygon normals when reflection reverses winding.
                 if mirrored { for n in &mut d.normals { for c in n { *c = -*c; } } }
+                tangent_caches.push(previous_caches.remove(&id).unwrap_or_default());
                 material_data.push((d, mat.normal_map_texture.is_some()));
                 materials.push(mat);
             }
@@ -527,10 +533,11 @@ impl BevyRenderer {
         }
         // Mesh/tangent work is independent across objects as well as material
         // IDs. Submit one batch so Body, Face and clothing can overlap.
-        let meshes = convert::material_meshes(bevy_tasks::ComputeTaskPool::get(), &material_data);
-        let mut prepared = materials.into_iter().zip(material_data).zip(meshes);
+        let meshes = convert::material_meshes_cached(bevy_tasks::ComputeTaskPool::get(), &material_data, &mut tangent_caches);
+        let mut prepared = materials.into_iter().zip(material_data).zip(meshes).zip(tangent_caches);
         for (o, hash, layers, count, dynamic, part_ids, mut old) in batches {
-            let prepared: Vec<_> = prepared.by_ref().take(count).collect();
+            let mut caches = Vec::with_capacity(count);
+            let prepared: Vec<_> = prepared.by_ref().take(count).map(|(part, cache)| { caches.push(cache); part }).collect();
             let can_reuse = old.as_ref().is_some_and(|obj| dynamic && obj.dynamic
                 && !obj.material_dirty && obj.surfaces == o.surfaces && obj.wire_color == o.wire_color
                 && obj.flags.visibility == o.flags.visibility && obj.part_ids == part_ids
@@ -551,6 +558,7 @@ impl BevyRenderer {
                         if o.transform == glam::Mat4::IDENTITY { e.insert(Transform::IDENTITY); } else { e.remove::<Transform>(); }
                         Self::shadow_flags(e, Self::cast_flags(o));
                     }
+                    obj.tangent_caches = caches;
                     obj.mesh_hash = hash;
                     obj.transform = o.transform;
                     obj.renderable = o.renderable;
@@ -595,7 +603,7 @@ impl BevyRenderer {
                 }
                 entities.push((entity, material_handle));
             }
-            set.insert(o.id, Object { parts: entities, dynamic, material_dirty: false, buffers, part_ids, mesh_hash: hash, transform: o.transform, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags });
+            set.insert(o.id, Object { parts: entities, dynamic, material_dirty: false, buffers, part_ids, tangent_caches: caches, mesh_hash: hash, transform: o.transform, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags });
             self.settle = self.settle.max(3);
         }
         let gone: Vec<u64> = set.keys().filter(|id| !seen.contains(id)).copied().collect();
@@ -1030,6 +1038,42 @@ mod affine_tests {
         assert!(renderer.has_requested_views(), "an existing view must request rendering again");
         renderer.update();
         assert!(!renderer.has_requested_views());
+    }
+
+    #[test]
+    #[ignore = "actual renderer cache integration requires LOOM_PERF_SCENE"]
+    fn actual_ray_renderer_preserves_tangent_neighbor_caches() {
+        let path = std::env::var("LOOM_PERF_SCENE").expect("real saved scene path");
+        let mut value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let scene: loom_scene::Scene = serde_json::from_value(value["scene"].take()).unwrap();
+        let ids: Vec<_> = scene.nodes().filter(|n| n.modifiers.iter().any(|m| matches!(m.modifier, loom_scene::Modifier::Skin(_)))).map(|n| n.id).collect();
+        let dynamic: HashSet<_> = ids.iter().map(|id| id.0).collect();
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("real GPU required");
+        let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter), None)).unwrap();
+        let mut renderer = BevyRenderer::new(adapter, device, queue);
+        for time in [0.0, 39.25, 149.0] {
+            scene.set_time(time);
+            let meshes: Vec<_> = ids.iter().map(|id| {
+                let mut mesh = scene.eval_mesh(*id).value.mesh.clone();
+                loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(*id)).unwrap();
+                mesh
+            }).collect();
+            let objects: Vec<_> = ids.iter().zip(&meshes).map(|(id,mesh)| SceneObject {
+                id:id.0, mesh, transform:glam::Mat4::IDENTITY, wire_color:[200,200,200],
+                surfaces:scene.node_surfaces_for(*id,loom_scene::material::ShellView::Viewport),
+                renderable:true,flags:ObjectFlags::default(),
+            }).collect();
+            renderer.sync_deforming(&objects,&dynamic);
+            renderer.update();
+        }
+        let hits: usize = renderer.objects.values().flat_map(|o|&o.tangent_caches).map(|c|c.hits).sum();
+        let misses: usize = renderer.objects.values().flat_map(|o|&o.tangent_caches).map(|c|c.misses).sum();
+        eprintln!("ACTUAL_RAY_RENDERER tangent_neighbor_hits={hits} misses={misses}");
+        assert!(hits > 0, "production sync must retain prepared neighbors between poses");
+        assert!(misses > 0, "first pose must prepare from current geometry");
+        renderer.sync_deforming(&[],&dynamic);
+        assert!(renderer.objects.is_empty(), "removing objects releases their tangent caches");
     }
 
     #[test]
