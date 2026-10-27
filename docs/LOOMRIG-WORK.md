@@ -66,8 +66,8 @@ Latest actual Play measurement after lazy face buffers, persistent GPU streams,
 frame-wide tangent workers and static editing-cage reuse: Wireframe 1441 updates
 /12.008134 s = 120.002 fps; Realistic 119/12.031813 s = 9.890 fps. Camera and
 geometry were unchanged between these two samples. No decimation or influence
-truncation. Realistic still misses the 60 fps target; user preference requested
-on whether to continue that before Biped interaction work.
+truncation. Realistic still misses the 60 fps target. User confirmed both modes must meet
+the target before Biped interaction work.
 
 Broad Bevy multi_threaded caused a reproduced bake-shadow regression (5/6
 failures). Narrow direct bevy_tasks/multi_threaded preserves workers without
@@ -80,3 +80,13 @@ and clips compare unchanged against SVN r1319. One pole controller now has an
 additional constant-equivalent pose key at frame 133; that key is preserved.
 Rejected halo tangent research is retained in docs/research/tangent-halo and is
 not compiled into the application. Wireframe Play is left active for review.
+
+2026-10-27 follow-up actual Play, installed build stamped 8e51788 (full opt3):
+Realistic → Wireframe → Realistic → Wireframe, same camera and four-view layout.
+Measured 196/12.002119 = 16.330 fps, 1431/12.006973 = 119.181 fps,
+189/12.011321 = 15.735 fps, 1441/12.012696 = 119.956 fps. The unused-PBR
+gate keeps Wireframe fast after switching from Realistic. Realistic remains
+below target; no Biped work started. Geometry, materials and skin influences
+remain intact. Current representative Realistic scopes: sync 32.4 ms, renderer
+update 9.2 ms, UI world-mesh rebuild 10.5 ms. Exact storage-buffer PBR geometry
+update is under GPU parity testing and is not yet installed or claimed faster.
