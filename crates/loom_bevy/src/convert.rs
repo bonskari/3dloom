@@ -725,7 +725,7 @@ mod tests {
                 assert!(uvs.iter().flatten().zip(data.uvs.iter().flatten()).all(|(a,b)|a.to_bits()==b.to_bits()));
                 assert_eq!(mesh.indices().unwrap().iter().collect::<Vec<_>>(),data.indices.iter().map(|i|*i as usize).collect::<Vec<_>>());
                 if *normal_map {
-                    let expected=crate::mikktspace::generate_parallel(&pool,data).expect("fresh corrected tangents");
+                    let expected=crate::mikktspace::generate_serial(data).expect("fresh corrected original subgroup tangents");
                     let VertexAttributeValues::Float32x4(tangents)=mesh.attribute(Mesh::ATTRIBUTE_TANGENT).expect("cached tangents") else{panic!("tangent format")};
                     assert_eq!(tangents.iter().map(|v|v.map(f32::to_bits)).collect::<Vec<_>>(),expected.iter().map(|v|v.map(f32::to_bits)).collect::<Vec<_>>(),"frame={frame} part={part}");
                     let mut original=data.to_bevy();

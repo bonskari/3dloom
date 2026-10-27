@@ -203,10 +203,10 @@ impl STmpVert {
 }
 
 pub unsafe fn genTangSpace<I: Geometry + Sync>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>) -> bool {
-    genTangSpaceCached(geometry, fAngularThreshold, pool, None)
+    genTangSpaceCached::<_, false>(geometry, fAngularThreshold, pool, None)
 }
 
-pub unsafe fn genTangSpaceCached<I: Geometry + Sync>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>, cache: Option<&mut super::NeighborCache>) -> bool {
+pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>, cache: Option<&mut super::NeighborCache>) -> bool {
     let prepare_scope = loom_render::profile::Scope::new("mikk.prepare");
     let mut iNrTrianglesIn = 0;
     let mut f = 0;
@@ -310,7 +310,7 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync>(geometry: &mut I, fAngularT
     let group_scope = loom_render::profile::Scope::new("mikk.groups");
     let triangle_only = (0..iNrFaces).all(|f| geometry.num_vertices_of_face(f) == 3);
     let parallel = pool.filter(|pool| triangle_only && pool.thread_num() > 1 && iNrActiveGroups >= 512)
-        .and_then(|pool| parallel::generate(
+        .and_then(|pool| parallel::generate::<_, REUSE_MEMBERS>(
             &mut psTspace,
             &pTriInfos[..iNrTrianglesIn],
             &pGroups[..iNrActiveGroups as usize],
@@ -319,7 +319,7 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync>(geometry: &mut I, fAngularT
             geometry,
             pool,
         ));
-    bRes = parallel.unwrap_or_else(|| GenerateTSpaces(
+    bRes = parallel.unwrap_or_else(|| GenerateTSpaces::<_, false>(
         &mut psTspace,
         pTriInfos.as_ptr(),
         pGroups.as_ptr(),
@@ -462,7 +462,7 @@ unsafe fn DegenEpilogue<I: Geometry>(
     }
 }
 
-unsafe fn GenerateTSpaces<I: Geometry>(
+unsafe fn GenerateTSpaces<I: Geometry, const REUSE_MEMBERS: bool>(
     psTspace: &mut [STSpace],
     mut pTriInfos: *const STriInfo,
     mut pGroups: *const SGroup,
@@ -574,7 +574,11 @@ unsafe fn GenerateTSpaces<I: Geometry>(
                 QuickSort(pTmpMembers.as_mut_ptr(), 0i32, (iMembers - 1) as i32, uSeed);
             }
             tmp_group.iNrFaces = iMembers as i32;
-            tmp_group.pTriMembers = pTmpMembers.clone();
+            if REUSE_MEMBERS {
+                std::mem::swap(&mut tmp_group.pTriMembers, &mut pTmpMembers);
+            } else {
+                tmp_group.pTriMembers = pTmpMembers.clone();
+            }
             bFound = false;
             l = 0;
             while l < iUniqueSubGroups && !bFound {
@@ -585,7 +589,11 @@ unsafe fn GenerateTSpaces<I: Geometry>(
             }
             if !bFound {
                 pUniSubGroups[iUniqueSubGroups].iNrFaces = iMembers as i32;
-                pUniSubGroups[iUniqueSubGroups].pTriMembers = tmp_group.pTriMembers.clone();
+                if REUSE_MEMBERS {
+                    pUniSubGroups[iUniqueSubGroups].pTriMembers.clone_from(&tmp_group.pTriMembers);
+                } else {
+                    pUniSubGroups[iUniqueSubGroups].pTriMembers = tmp_group.pTriMembers.clone();
+                }
 
                 pSubGroupTspace[iUniqueSubGroups] = EvalTspace(
                     tmp_group.pTriMembers.as_mut_ptr(),
@@ -608,6 +616,9 @@ unsafe fn GenerateTSpaces<I: Geometry>(
                 *pTS_out = pSubGroupTspace[l];
                 (*pTS_out).iCounter = 1i32;
                 (*pTS_out).bOrient = (*pGroup).bOrientPreserving
+            }
+            if REUSE_MEMBERS {
+                std::mem::swap(&mut tmp_group.pTriMembers, &mut pTmpMembers);
             }
             i += 1
         }

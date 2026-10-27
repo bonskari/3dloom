@@ -211,3 +211,34 @@ fn neighbor_cache_checks_changed_topology_welding_and_degeneracy() {
     assert_eq!(cache.hits,1,"same adjacency can survive deformation");
     assert_ne!(bits(&output),bits(&serial(&base).unwrap()),"current tangent math must still run");
 }
+
+#[test]
+#[ignore = "paired actual allocation benchmark requires LOOM_PERF_SCENE"]
+fn actual_ray_subgroup_storage_reuse_matches_original_and_times() {
+    let path=std::env::var("LOOM_PERF_SCENE").expect("real scene");
+    let value:serde_json::Value=serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let scene:loom_scene::Scene=serde_json::from_value(value["scene"].clone()).unwrap();
+    let ids:Vec<_>=scene.nodes().filter(|n|n.name=="Body001"||n.name=="Face001").map(|n|(n.id,n.name.clone())).collect();
+    assert_eq!(ids.len(),2);
+    let pool=bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
+    let mut old:[NeighborCache;2]=Default::default();let mut new:[NeighborCache;2]=Default::default();
+    let mut totals=[(0.0,0.0);2];
+    for (pose,frame) in (0..=157).map(|f|f as f32).chain([39.25]).enumerate() {
+        scene.set_time(frame);
+        for (i,(id,_)) in ids.iter().enumerate() {
+            let mut mesh=scene.eval_mesh(*id).value.mesh.clone();
+            loom_mesh::edit_ops::transform_mesh(&mut mesh,scene.object_matrix(*id)).unwrap();
+            let data=mesh_data_by_id(&mesh).into_iter().find(|(id,_)|*id==0).unwrap().1;
+            let mut values=[None,None];
+            for candidate in if pose%2==0 {[false,true]}else{[true,false]} {
+                let start=std::time::Instant::now();
+                let value=if candidate {generate_cached(&pool,&data,&mut new[i])}else{generate_cached_original(&pool,&data,&mut old[i])};
+                let elapsed=start.elapsed().as_secs_f64()*1000.0;
+                if candidate {totals[i].1+=elapsed;}else{totals[i].0+=elapsed;}
+                values[usize::from(candidate)]=value;
+            }
+            assert_eq!(values[0].as_ref().map(|v|bits(v)),values[1].as_ref().map(|v|bits(v)),"frame={frame} node={}",ids[i].1);
+        }
+    }
+    for ((_,name),(original,reused)) in ids.iter().zip(totals) {eprintln!("SUBGROUP_STORAGE name={name} poses=159 original_ms={:.3} reused_ms={:.3}",original/159.0,reused/159.0);}
+}
