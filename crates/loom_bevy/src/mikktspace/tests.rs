@@ -1,12 +1,12 @@
 use super::*;
 use crate::convert::{mesh_data, mesh_data_by_id, MeshData};
-use bevy::render::mesh::{Mesh, VertexAttributeValues};
 use glam::Vec3;
 
 fn serial(data: &MeshData) -> Option<Vec<[f32; 4]>> {
-    let mut mesh = data.to_bevy();
-    mesh.generate_tangents().ok()?;
-    match mesh.attribute(Mesh::ATTRIBUTE_TANGENT)? { VertexAttributeValues::Float32x4(values) => Some(values.clone()), _ => None }
+    let mut geometry = MeshGeometry { data, tangents: vec![[0.0; 4]; data.positions.len()] };
+    if !unsafe { generated::genTangSpace(&mut geometry, 180.0, None) } { return None; }
+    for tangent in &mut geometry.tangents { tangent[3] = -tangent[3]; }
+    Some(geometry.tangents)
 }
 
 fn bits(values: &[[f32; 4]]) -> Vec<[u32; 4]> { values.iter().map(|t| t.map(f32::to_bits)).collect() }
@@ -46,7 +46,7 @@ fn prepared_groups_preserve_complete_mikk_results() {
 
 #[test]
 #[ignore = "release parity/performance test requires LOOM_PERF_SCENE"]
-fn actual_all_ray_poses_match_original_mikk() {
+fn actual_all_ray_poses_match_fresh_corrected_mikk() {
     let path = std::env::var("LOOM_PERF_SCENE").expect("provide the real saved scene");
     let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let scene: loom_scene::Scene = serde_json::from_value(value["scene"].clone()).unwrap();
@@ -125,7 +125,7 @@ fn quad_geometry_keeps_original_serial_averaging() {
     let mut original = Quads { values: vec![[0.0; 4]; 32*32*4] };
     let mut prepared = original.clone();
     let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
-    assert!(bevy_mikktspace::generate_tangents(&mut original));
+    assert!(unsafe { generated::genTangSpace(&mut original, 180.0, None) });
     assert!(unsafe { generated::genTangSpace(&mut prepared, 180.0, Some(&pool)) });
     assert_eq!(bits(&prepared.values), bits(&original.values));
 }
@@ -167,4 +167,47 @@ fn actual_ray_preparation_guard_hit_rates() {
     for ((_, name), count) in ids.iter().zip(counts) {
         eprintln!("GUARD name={name} transitions={} exact_hits={} representatives_unchanged={} flags_unchanged={} canonical_and_flags_hits={}", count[0], count[1], count[2], count[3], count[4]);
     }
+}
+
+#[test]
+fn neighbor_cache_checks_changed_topology_welding_and_degeneracy() {
+    let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
+    let base = MeshData {
+        positions: vec![[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,1.0,0.0],[1.0,0.0,0.0],[1.0,1.0,0.0]],
+        normals: vec![[0.0,0.0,1.0];6],
+        uvs: vec![[0.0,0.0],[1.0,0.0],[0.0,1.0],[0.0,1.0],[1.0,0.0],[1.0,1.0]],
+        indices: vec![0,1,2,3,4,5],
+    };
+    for change in 0..6 {
+        let mut cache = NeighborCache::default();
+        assert_eq!(generate_cached(&pool,&base,&mut cache).map(|t|bits(&t)),serial(&base).map(|t|bits(&t)));
+        generate_cached(&pool,&base,&mut cache).unwrap();
+        assert_eq!((cache.hits,cache.misses),(1,1));
+        let mut data=base.clone();
+        match change {
+            0 => data.positions[3][2]=1.0,
+            1 => data.normals[3][0]=0.5,
+            2 => data.uvs[3][0]=0.25,
+            3 => data.indices[4]=0,
+            4 => data.positions[3]=data.positions[4],
+            _ => {for uv in &mut data.uvs {uv[0]=-uv[0];}},
+        }
+        assert_eq!(generate_cached(&pool,&data,&mut cache).map(|t|bits(&t)),serial(&data).map(|t|bits(&t)),"change={change}");
+        assert_eq!(cache.misses,2,"change={change} must invalidate adjacency");
+    }
+    let mut nonmanifold=base.clone();
+    nonmanifold.indices.extend([0,1,2]);
+    let mut cache=NeighborCache::default();
+    for _ in 0..2 {
+        assert_eq!(generate_cached(&pool,&nonmanifold,&mut cache).map(|t|bits(&t)),serial(&nonmanifold).map(|t|bits(&t)));
+    }
+    assert_eq!((cache.hits,cache.misses),(0,2),"ambiguous edges always prepare fresh");
+    let mut cache=NeighborCache::default();
+    generate_cached(&pool,&base,&mut cache).unwrap();
+    let mut moved=base.clone();
+    for p in &mut moved.positions {p[1]+=p[0]*0.5;}
+    let output=generate_cached(&pool,&moved,&mut cache).unwrap();
+    assert_eq!(bits(&output),bits(&serial(&moved).unwrap()));
+    assert_eq!(cache.hits,1,"same adjacency can survive deformation");
+    assert_ne!(bits(&output),bits(&serial(&base).unwrap()),"current tangent math must still run");
 }

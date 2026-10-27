@@ -1,6 +1,6 @@
 //! Test-only upstream final-bucket investigation; production unchanged.
 use super::*;
-thread_local! { static CORRECT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+thread_local! { static CORRECT: std::cell::Cell<bool> = const { std::cell::Cell::new(true) }; }
 pub(super) fn correct_final_buckets() -> bool { CORRECT.with(std::cell::Cell::get) }
 
 #[test]
@@ -28,7 +28,7 @@ fn final_buckets_pair_every_manifold_opposite_edge() {
             else { failures += usize::from(actual != expected); }
         }
     } } } }
-    CORRECT.with(|v| v.set(false));
+    CORRECT.with(|v| v.set(true));
     assert!(failures > 0, "original must exhibit omission");
     eprintln!("NEIGHBOR original_incorrect_permutations={failures}/24 corrected_incorrect=0/24");
 }
@@ -46,6 +46,7 @@ fn actual_ray_corrected_neighbors_and_edge_incidence() {
     let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
     let mut totals = [(0usize,0usize,0usize,0usize,0.0f32);2];
     let (mut reference_ms,mut cached_ms)=(0.0,0.0);
+    let mut caches=[super::super::NeighborCache::default(),super::super::NeighborCache::default()];
     capture::enable();
     for frame in (0..=157).map(|f| f as f32).chain([39.25]) {
         scene.set_time(frame);
@@ -65,18 +66,15 @@ fn actual_ray_corrected_neighbors_and_edge_incidence() {
             totals[i].2 += ambiguous;
             totals[i].3 = totals[i].3.max(ambiguous);
             CORRECT.with(|v| v.set(true));
-            CACHE.with(|c|c.borrow_mut().enabled=false);
             let timer=std::time::Instant::now();
             let corrected = generate_parallel(&pool,&data).unwrap();
             reference_ms+=timer.elapsed().as_secs_f64()*1000.0;
             let _ = capture::take();
-            CACHE.with(|c|c.borrow_mut().enabled=true);
             let timer=std::time::Instant::now();
-            let cached=generate_parallel(&pool,&data).unwrap();
+            let cached=super::super::generate_cached(&pool,&data,&mut caches[i]).unwrap();
             cached_ms+=timer.elapsed().as_secs_f64()*1000.0;
             let _ = capture::take();
             assert_eq!(corrected.iter().map(|v|v.map(f32::to_bits)).collect::<Vec<_>>(),cached.iter().map(|v|v.map(f32::to_bits)).collect::<Vec<_>>(),"corrected cache frame={frame}");
-            CACHE.with(|c|c.borrow_mut().enabled=false);
             let mut changed = 0;
             for (a,b) in original.iter().zip(&corrected) {
                 if a.map(f32::to_bits) != b.map(f32::to_bits) { changed += 1; }
@@ -87,8 +85,8 @@ fn actual_ray_corrected_neighbors_and_edge_incidence() {
             totals[i].1 += changed;
         }
     }
-    CORRECT.with(|v| v.set(false));
-    CACHE.with(|c| {let cache=c.borrow();eprintln!("CACHE hits={} misses={} corrected_ms_per_pose={:.3} cached_ms_per_pose={:.3}",cache.hits,cache.misses,reference_ms/159.0,cached_ms/159.0);});
+    CORRECT.with(|v| v.set(true));
+    eprintln!("CACHE hits={} misses={} corrected_ms_per_pose={:.3} cached_ms_per_pose={:.3}",caches.iter().map(|c|c.hits).sum::<usize>(),caches.iter().map(|c|c.misses).sum::<usize>(),reference_ms/159.0,cached_ms/159.0);
     for ((_,name),(poses,corners,ambiguous,max_ambiguous,max_delta)) in ids.iter().zip(totals) {
         eprintln!("CORRECTED name={name} poses=159 changed_poses={poses} changed_corners={corners} ambiguous_edges_sum={ambiguous} ambiguous_edges_max={max_ambiguous} max_component_delta={max_delta}");
     }
@@ -119,7 +117,7 @@ fn actual_ray_corrected_neighbor_pixels() {
     let original = generate_parallel(&pool,&data).unwrap();
     CORRECT.with(|v|v.set(true));
     let corrected = generate_parallel(&pool,&data).unwrap();
-    CORRECT.with(|v|v.set(false));
+    CORRECT.with(|v|v.set(true));
     assert_ne!(original,corrected,"must compare an affected actual pose");
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("GPU adapter");
@@ -176,40 +174,4 @@ fn actual_ray_corrected_neighbor_pixels() {
         }
         eprintln!("PIXELS frame={frame} angle={angle} changed={changed}/589824 max_channel_delta={max} mean_channel_delta={:.8}",sum as f64/(768.0*768.0*4.0));
     }
-}
-
-#[derive(PartialEq,Eq)]
-struct Guard { classes: Vec<usize>, flags: Vec<(i32,i32)> }
-struct Entry { guard: Guard, neighbors: Vec<[i32;3]> }
-#[derive(Default)]
-struct Cache { enabled: bool, entries: std::collections::HashMap<usize,Entry>, pending: Option<Guard>, hits: usize, misses: usize }
-thread_local! { static CACHE: std::cell::RefCell<Cache> = std::cell::RefCell::new(Cache::default()); }
-fn guard(triangles: &[STriInfo], indices: &[i32]) -> Guard {
-    let mut first = vec![usize::MAX;indices.iter().copied().max().unwrap_or(-1).saturating_add(1) as usize];
-    let mut next=0;
-    let classes=indices.iter().map(|id| { let slot=&mut first[*id as usize]; if *slot==usize::MAX {*slot=next;next+=1;} *slot }).collect();
-    Guard {classes,flags:triangles.iter().map(|t|(t.iOrgFaceNumber,t.iFlag)).collect()}
-}
-pub(super) fn restore(triangles: &mut [STriInfo], indices: &[i32]) -> bool {
-    CACHE.with(|c| {
-        let mut cache=c.borrow_mut();
-        if !cache.enabled || !correct_final_buckets() {return false;}
-        let current=guard(triangles,indices);
-        if let Some(entry)=cache.entries.get(&triangles.len()).filter(|e|e.guard==current) {
-            for (t,n) in triangles.iter_mut().zip(&entry.neighbors) { t.FaceNeighbors=*n; }
-            cache.hits+=1;
-            true
-        } else {cache.misses+=1;cache.pending=Some(current);false}
-    })
-}
-pub(super) fn store(triangles: &[STriInfo]) {
-    CACHE.with(|c| {
-        let mut cache=c.borrow_mut();
-        if !cache.enabled || !correct_final_buckets() {return;}
-        let Some(current)=cache.pending.take() else{return;};
-        let mut counts=std::collections::HashMap::new();
-        for t in current.classes.chunks_exact(3) {for e in 0..3 {let(a,b)=(t[e],t[(e+1)%3]);*counts.entry((a.min(b),a.max(b))).or_insert(0usize)+=1;}}
-        if counts.values().any(|count|*count>2) {return;}
-        cache.entries.insert(triangles.len(),Entry{guard:current,neighbors:triangles.iter().map(|t|t.FaceNeighbors).collect()});
-    });
 }

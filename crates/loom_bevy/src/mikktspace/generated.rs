@@ -1,5 +1,6 @@
-// Derived from bevy_mikktspace 0.16.1. Altered only to add a prepared
-// parallel-cell/group integration hooks; original arithmetic/order is retained.
+// Derived from bevy_mikktspace 0.16.1. Altered to add prepared
+// parallel-cell/group hooks and guarded adjacency reuse. Both missing final
+// neighbor-sort buckets are flushed; tangent arithmetic is retained.
 //! Everything in this module is pending to be refactored, turned into idiomatic-rust, and moved to
 //! other modules.
 
@@ -202,6 +203,10 @@ impl STmpVert {
 }
 
 pub unsafe fn genTangSpace<I: Geometry + Sync>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>) -> bool {
+    genTangSpaceCached(geometry, fAngularThreshold, pool, None)
+}
+
+pub unsafe fn genTangSpaceCached<I: Geometry + Sync>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>, cache: Option<&mut super::NeighborCache>) -> bool {
     let prepare_scope = loom_render::profile::Scope::new("mikk.prepare");
     let mut iNrTrianglesIn = 0;
     let mut f = 0;
@@ -273,6 +278,7 @@ pub unsafe fn genTangSpace<I: Geometry + Sync>(geometry: &mut I, fAngularThresho
         geometry,
         iNrTrianglesIn,
         pool,
+        cache,
     );
     #[cfg(test)]
     super::capture::record(&piTriListIn, &pTriInfos);
@@ -986,6 +992,7 @@ unsafe fn InitTriInfo<I: Geometry>(
     geometry: &mut I,
     iNrTrianglesIn: usize,
     pool: Option<&bevy_tasks::TaskPool>,
+    mut cache: Option<&mut super::NeighborCache>,
 ) {
     let mut f = 0;
     let mut i = 0;
@@ -1104,8 +1111,7 @@ unsafe fn InitTriInfo<I: Geometry>(
         }
     }
 
-    #[cfg(test)]
-    if neighbor_probe::restore(std::slice::from_raw_parts_mut(pTriInfos, iNrTrianglesIn), std::slice::from_raw_parts(piTriListIn, iNrTrianglesIn * 3)) { return; }
+    if cache.as_mut().is_some_and(|cache| cache.restore(std::slice::from_raw_parts_mut(pTriInfos, iNrTrianglesIn), std::slice::from_raw_parts(piTriListIn, iNrTrianglesIn * 3))) { return; }
     let mut pEdges = vec![SEdge::zero(); iNrTrianglesIn * 3];
     BuildNeighborsFast(
         pTriInfos,
@@ -1114,8 +1120,7 @@ unsafe fn InitTriInfo<I: Geometry>(
         iNrTrianglesIn as i32,
         pool,
     );
-    #[cfg(test)]
-    neighbor_probe::store(std::slice::from_raw_parts(pTriInfos, iNrTrianglesIn));
+    if let Some(cache) = cache { cache.store(std::slice::from_raw_parts(pTriInfos, iNrTrianglesIn)); }
 }
 
 unsafe fn BuildNeighborsFast(
@@ -1168,8 +1173,11 @@ unsafe fn BuildNeighborsFast(
         }
         i += 1
     }
+    #[cfg(not(test))]
+    let correct_final_buckets = true;
     #[cfg(test)]
-    if neighbor_probe::correct_final_buckets() {
+    let correct_final_buckets = neighbor_probe::correct_final_buckets();
+    if correct_final_buckets {
         QuickSortEdges(pEdges, iCurStartIndex, iEntries - 1, 1, uSeed);
     }
     iCurStartIndex = 0i32;
@@ -1187,8 +1195,7 @@ unsafe fn BuildNeighborsFast(
         }
         i += 1
     }
-    #[cfg(test)]
-    if neighbor_probe::correct_final_buckets() {
+    if correct_final_buckets {
         QuickSortEdges(pEdges, iCurStartIndex, iEntries - 1, 2, uSeed);
     }
     i = 0i32;

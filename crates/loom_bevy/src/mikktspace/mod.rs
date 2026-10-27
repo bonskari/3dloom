@@ -1,11 +1,13 @@
-//! Prepared parallel groups over the unchanged MikkTSpace 0.16.1 algorithm.
-//! Global welding/neighbor/group context and original per-cell ordering are
-//! retained; no cached rest-pose tangent replaces the current geometry.
+//! Prepared parallel MikkTSpace with corrected final neighbor-sort buckets.
+//! Global current-pose welding and tangent arithmetic are retained. Guarded
+//! manifold adjacency reuse never substitutes a rest-pose tangent.
 use crate::convert::MeshData;
 use bevy_mikktspace::Geometry;
 use glam::{Vec2, Vec3};
 
 mod generated;
+mod neighbor_cache;
+pub(crate) use neighbor_cache::NeighborCache;
 
 struct MeshGeometry<'a> {
     data: &'a MeshData,
@@ -31,10 +33,18 @@ impl<I: Geometry> Geometry for ReadGeometry<'_, I> {
 }
 
 pub(crate) fn generate_parallel(pool: &bevy_tasks::TaskPool, data: &MeshData) -> Option<Vec<[f32; 4]>> {
+    generate_cached_inner(pool, data, None)
+}
+
+pub(crate) fn generate_cached(pool: &bevy_tasks::TaskPool, data: &MeshData, cache: &mut NeighborCache) -> Option<Vec<[f32; 4]>> {
+    generate_cached_inner(pool, data, Some(cache))
+}
+
+fn generate_cached_inner(pool: &bevy_tasks::TaskPool, data: &MeshData, cache: Option<&mut NeighborCache>) -> Option<Vec<[f32; 4]>> {
     let mut geometry = MeshGeometry { data, tangents: vec![[0.0; 4]; data.positions.len()] };
     // The vendor's original preparation/epilogue retain their checked Geometry
     // indexing and pointer invariants. Worker boundaries contain owned indices.
-    if !unsafe { generated::genTangSpace(&mut geometry, 180.0, Some(pool)) } { return None; }
+    if !unsafe { generated::genTangSpaceCached(&mut geometry, 180.0, Some(pool), cache) } { return None; }
     // Match Bevy's existing handedness conversion, including unwritten vertices.
     for tangent in &mut geometry.tangents { tangent[3] = -tangent[3]; }
     Some(geometry.tangents)

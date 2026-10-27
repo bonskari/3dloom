@@ -120,12 +120,18 @@ pub fn mesh_data_by_id(mesh: &loom_mesh::Mesh) -> Vec<(u16, MeshData)> {
 /// Independent material meshes use the renderer's existing bounded worker
 /// pool. Each mesh still runs the same MikkTSpace tangent calculation.
 pub(crate) fn material_meshes(pool: &bevy_tasks::TaskPool, parts: &[(MeshData, bool)]) -> Vec<Mesh> {
+    let mut caches: Vec<_> = (0..parts.len()).map(|_| crate::mikktspace::NeighborCache::default()).collect();
+    material_meshes_cached(pool, parts, &mut caches)
+}
+
+pub(crate) fn material_meshes_cached(pool: &bevy_tasks::TaskPool, parts: &[(MeshData, bool)], caches: &mut [crate::mikktspace::NeighborCache]) -> Vec<Mesh> {
+    assert_eq!(parts.len(), caches.len());
     let _scope = loom_render::profile::Scope::new("bevy.material_meshes");
-    let build = |(data, tangents): &(MeshData, bool)| {
+    let build = |(data, tangents): &(MeshData, bool), cache: &mut crate::mikktspace::NeighborCache| {
         let mut mesh = data.to_bevy();
         if *tangents {
             let _scope = loom_render::profile::Scope::new("bevy.tangents");
-            if let Some(tangents) = crate::mikktspace::generate_parallel(pool, data) {
+            if let Some(tangents) = crate::mikktspace::generate_cached(pool, data, cache) {
                 mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
             }
         }
@@ -134,11 +140,11 @@ pub(crate) fn material_meshes(pool: &bevy_tasks::TaskPool, parts: &[(MeshData, b
     // Bones and other single-material objects have no independent jobs to
     // overlap. Avoid a worker-pool round trip for every small rigid mesh.
     if parts.len() < 2 || !parts.iter().any(|(_, tangents)| *tangents) {
-        return parts.iter().map(build).collect();
+        return parts.iter().zip(caches.iter_mut()).map(|(part, cache)| build(part, cache)).collect();
     }
     pool.scope(|scope| {
-        for part in parts {
-            scope.spawn(async move { build(part) });
+        for (part, cache) in parts.iter().zip(caches.iter_mut()) {
+            scope.spawn(async move { build(part, cache) });
         }
     })
 }
