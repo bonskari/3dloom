@@ -149,3 +149,19 @@ exposes ready-geometry submitted pose-time counts, distinct from UI updates.
 Repeated-layout regression reproduceddoubleadvance thenpassed; held-pose
 counter test passed. FullcurrentUI400passed,1ignored. Opt-in317half-frame
 material audit pending before next installed true-pose FPS measurement.
+
+
+Installed 51799c6 production checkpoint (2026-10-27): exact guarded weld
+reuse, projected derivative reuse and edge staging now in native app.
+400 UI tests passed, 1 ignored; release build passed. Frame39 viewport
+750x480 comparison against prior fractional/Skinbatch build: 0 changed pixels.
+Four alternating 12-second wall-clock samples with 4-second warmup each:
+Realistic 24.908 / 24.884 distinct submitted pose times/sec;
+Wireframe 76.083 / 75.502. Source30fps, fractional interpolation, same four-view
+scene/camera/materials/full geometry. Raw evidence:
+/tmp/loom-edge-weld-true-fps.jsonl. Previous same protocol:
+Realistic23.320/22.885, Wireframe68.465/67.580.
+Wireframe exceeds60; Realistic still fails goal. Native Realistic profile
+representative sync22.290ms, UI rebuild7.525ms, Bevy update2.399ms.
+Do not claim overall completion or begin controls ahead of Realistic target.
+App left paused after benchmark to free resources for GPU correctness work.
