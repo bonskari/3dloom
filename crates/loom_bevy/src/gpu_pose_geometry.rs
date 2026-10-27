@@ -430,6 +430,9 @@ fn read_records<T: Pod>(
 }
 
 #[cfg(test)]
+#[path = "gpu_mikk_prepare.rs"]
+mod mikk_prepare;
+#[cfg(test)]
 #[path = "gpu_mikk_probe.rs"]
 mod mikk_probe;
 #[cfg(test)]
@@ -634,16 +637,33 @@ mod tests {
     #[test]
     #[ignore = "actual Ray GPU posed normals requires LOOM_PERF_SCENE"]
     fn actual_ray_gpu_skin_normals_and_material_packing() {
-        ray_geometry_audit(true);
+        ray_geometry_audit(true, false, &[0.0, 39.25, 149.0]);
     }
 
     #[test]
     #[ignore = "actual Ray origin-relative GPU normals require LOOM_PERF_SCENE"]
     fn actual_ray_origin_relative_sg_accuracy_against_same_position_f64() {
-        ray_geometry_audit(false);
+        ray_geometry_audit(false, false, &[0.0, 39.25, 149.0]);
     }
 
-    fn ray_geometry_audit(strict_legacy: bool) {
+    #[test]
+    #[ignore = "actual current GPU weld/edge preparation requires LOOM_PERF_SCENE"]
+    fn actual_ray_current_gpu_weld_and_corrected_edges() {
+        let count = std::env::var("LOOM_GPU_PREP_POSES")
+            .ok()
+            .map(|v| v.parse::<usize>().unwrap())
+            .unwrap_or(317);
+        let times: Vec<_> = if count == 3 {
+            vec![0.0, 39.25, 149.0]
+        } else {
+            (0..count)
+                .map(|i| 149.0 * i as f32 / (count - 1).max(1) as f32)
+                .collect()
+        };
+        ray_geometry_audit(false, true, &times);
+    }
+
+    fn ray_geometry_audit(strict_legacy: bool, prepare: bool, times: &[f32]) {
         let path = std::env::var("LOOM_PERF_SCENE").expect("real saved scene");
         let mut value: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -658,7 +678,9 @@ mod tests {
             .map(|n| n.id)
             .collect();
         let (device, queue) = device();
-        for time in [0.0, 39.25, 149.0] {
+        let preparation_program =
+            prepare.then(|| super::mikk_prepare::Program::new(&device).unwrap());
+        for &time in times {
             scene.set_time(time);
             for id in &ids {
                 let node = scene.node(*id).unwrap();
@@ -743,6 +765,62 @@ mod tests {
                     })
                     .collect();
                 let (reference, tangents) = oracle(&expected, &parts);
+                if let Some(program) = &preparation_program {
+                    let stable = GpuPoseGeometry::new_origin_relative(
+                        &device,
+                        skin.output(),
+                        &rest,
+                        &parts,
+                        world,
+                        &tangents,
+                    )
+                    .unwrap();
+                    let mut encoder = device.create_command_encoder(&Default::default());
+                    skin.encode(&mut encoder);
+                    stable.encode(&mut encoder);
+                    queue.submit([encoder.finish()]);
+                    let records = stable.readback(&device, &queue);
+                    for (part, (range, template)) in stable.parts.iter().zip(&reference).enumerate()
+                    {
+                        let indices: Vec<_> = template
+                            .indices
+                            .iter()
+                            .map(|i| *i + range.start as u32)
+                            .collect();
+                        let preparation = super::mikk_prepare::GpuPreparation::with_program(
+                            &device,
+                            &stable.output,
+                            records.len(),
+                            &indices,
+                            program,
+                        )
+                        .unwrap();
+                        let mut encoder = device.create_command_encoder(&Default::default());
+                        preparation.encode(&mut encoder);
+                        queue.submit([encoder.finish()]);
+                        let output = preparation.readback(&device, &queue).unwrap();
+                        let current = &records[range.clone()];
+                        let same_gpu = crate::MeshData {
+                            positions: current
+                                .iter()
+                                .map(|v| v.position[..3].try_into().unwrap())
+                                .collect(),
+                            normals: current
+                                .iter()
+                                .map(|v| v.normal[..3].try_into().unwrap())
+                                .collect(),
+                            uvs: current
+                                .iter()
+                                .map(|v| v.uv[..2].try_into().unwrap())
+                                .collect(),
+                            indices: template.indices.clone(),
+                        };
+                        super::mikk_prepare::compare_cpu(&same_gpu, &output);
+                        eprintln!("GPU_CURRENT_PREP node={} time={time} part={part} corners={} exact_weld_flags_neighbors=PASS",node.name,indices.len());
+                    }
+                    continue;
+                }
+
                 let geometry =
                     GpuPoseGeometry::new(&device, skin.output(), &rest, &parts, world, &tangents)
                         .unwrap();

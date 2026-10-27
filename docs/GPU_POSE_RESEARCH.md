@@ -84,3 +84,37 @@ these ignored Bevy lib tests individually:
 
 GPU synthetic all-influence/current SG packing and affine-roundoff regression
 tests run normally. The actual scene and GPU tests are genuine work, not mocks.
+
+## Current weld and corrected edge preparation
+
+`gpu_mikk_prepare.rs` / `.wgsl` is a further test-only stage. It consumes the
+current packed GPU buffer and immutable triangle indices directly. A separate
+invocation per material part preserves material isolation. Vertex classes use
+current position, normal and UV equality, with signed zero canonicalized for
+hashing. Hash collisions compare the complete key. Atomic minimum
+representatives make labels deterministic. Edge incidence uses a separate
+collision-checked undirected-edge hash and unbounded-by-valence linked lists;
+no incidence is truncated. Each edge class pairs opposing edges in corrected
+prepared-face order, including nonmanifold buckets.
+
+The triangle-only DegenPrologue is deliberately serial in this prototype to
+preserve the existing exact swap order; inactive degenerate triangles remain in
+the tail. Current orientation/derivative-degeneracy flags are computed on GPU.
+MeshData already presents triangulated faces, so source quad triangulation is
+outside this stage. Complete groups/subgroups and degenerate tangent epilogue
+are still absent. This stage is not a complete tangent implementation or a
+production performance result.
+
+Synthetic GPU checks cover signed zero, UV and current-normal seams,
+interspersed/all-degenerate triangles, four-way nonmanifold opposing pairs,
+persistent buffer updates, forced collisions for every hash key and reported
+nonfinite inputs. Actual Ray three-pose checks at 0/39.25/149 passed across all
+five skins/all thirteen parts against the actual corrected CPU preparation
+fixture on the SAME GPU-readback attributes. Classes are compared after
+canonicalizing representative labels, while original face order, current flags
+and active face-neighbor indices are compared exactly. The complete 317-pose
+sweep from 0 through 149 passed all 4121 comparisons (317 times thirteen parts).
+Its 239.88-second test duration includes CPU oracles and GPU readbacks and is
+not a rendering throughput measurement. The current full Bevy lib test binary
+passed 47 tests with 18 opt-in tests ignored; all three preparation synthetic
+tests passed.
