@@ -719,6 +719,7 @@ mod tests {
             }
             assert_eq!(parts.len(),13);
             caches.resize_with(parts.len(),Default::default);
+            if std::env::var_os("LOOM_VALIDATE_WELD").is_some() { for cache in &mut caches { cache.weld_validation.enabled=true; } }
             let owned = std::env::var_os("LOOM_OWNED_PREPARATION").is_some().then(|| parts.clone());
             let start=std::time::Instant::now();
             let actual=if let Some(owned) = owned { owned_material_meshes_for_test(&pool,owned,&mut caches) } else { material_meshes_cached(&pool,&parts,&mut caches) };
@@ -745,6 +746,7 @@ mod tests {
             }
         }
         for (part,(poses,corners,max_delta)) in original_changes.into_iter().enumerate() {eprintln!("ORIGINAL_SUM part={part} poses={poses} corners={corners} max_delta={max_delta}");}
+        eprintln!("WELD_VALIDATION hits={} misses={} bit_rejects={} merge_rejects={} nonfinite_rejects={}",caches.iter().map(|c|c.weld_validation.hits).sum::<usize>(),caches.iter().map(|c|c.weld_validation.misses).sum::<usize>(),caches.iter().map(|c|c.weld_validation.bit_rejects).sum::<usize>(),caches.iter().map(|c|c.weld_validation.merge_rejects).sum::<usize>(),caches.iter().map(|c|c.weld_validation.nonfinite_rejects).sum::<usize>());
         eprintln!("MATERIAL_BATCH poses={poses} parts=13 tangent_comparisons={comparisons} avg_ms={:.3} cache_hits={} cache_misses={}",elapsed/poses as f64,caches.iter().map(|c|c.hits).sum::<usize>(),caches.iter().map(|c|c.misses).sum::<usize>());
     }
 

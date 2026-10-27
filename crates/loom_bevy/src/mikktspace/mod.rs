@@ -7,6 +7,8 @@ use glam::{Vec2, Vec3};
 
 mod generated;
 mod neighbor_cache;
+#[cfg(test)]
+mod weld_validation;
 pub(crate) use neighbor_cache::NeighborCache;
 
 struct MeshGeometry<'a> {
@@ -40,7 +42,10 @@ pub(crate) fn generate_parallel(pool: &bevy_tasks::TaskPool, data: &MeshData) ->
 #[cfg(test)]
 pub(crate) fn generate_serial(data: &MeshData) -> Option<Vec<[f32; 4]>> {
     let mut geometry = MeshGeometry { data, tangents: vec![[0.0; 4]; data.positions.len()] };
-    if !unsafe { generated::genTangSpace(&mut geometry, 180.0, None) } { return None; }
+    let validation = weld_validation::begin(data, None);
+    let success = unsafe { generated::genTangSpace(&mut geometry, 180.0, None) };
+    let _ = validation.finish();
+    if !success { return None; }
     for tangent in &mut geometry.tangents { tangent[3] = -tangent[3]; }
     Some(geometry.tangents)
 }
@@ -59,11 +64,19 @@ fn generate_cached_allocations(pool: &bevy_tasks::TaskPool, data: &MeshData, cac
     generate_cached_inner::<true, false>(pool, data, Some(cache))
 }
 
-fn generate_cached_inner<const REUSE_MEMBERS: bool, const REUSE_PROJECTIONS: bool>(pool: &bevy_tasks::TaskPool, data: &MeshData, cache: Option<&mut NeighborCache>) -> Option<Vec<[f32; 4]>> {
+fn generate_cached_inner<const REUSE_MEMBERS: bool, const REUSE_PROJECTIONS: bool>(pool: &bevy_tasks::TaskPool, data: &MeshData, mut cache: Option<&mut NeighborCache>) -> Option<Vec<[f32; 4]>> {
+    #[cfg(test)]
+    let validation = {
+        let owned = cache.as_deref_mut().filter(|c| c.weld_validation.enabled).map(|c| std::mem::take(&mut c.weld_validation));
+        weld_validation::begin(data, owned)
+    };
     let mut geometry = MeshGeometry { data, tangents: vec![[0.0; 4]; data.positions.len()] };
     // The vendor's original preparation/epilogue retain their checked Geometry
     // indexing and pointer invariants. Worker boundaries contain owned indices.
-    if !unsafe { generated::genTangSpaceCached::<_, REUSE_MEMBERS, REUSE_PROJECTIONS>(&mut geometry, 180.0, Some(pool), cache) } { return None; }
+    let success = unsafe { generated::genTangSpaceCached::<_, REUSE_MEMBERS, REUSE_PROJECTIONS>(&mut geometry, 180.0, Some(pool), cache.as_deref_mut()) };
+    #[cfg(test)]
+    if let Some(validation) = validation.finish() { cache.as_deref_mut().unwrap().weld_validation = validation; }
+    if !success { return None; }
     // Match Bevy's existing handedness conversion, including unwritten vertices.
     for tangent in &mut geometry.tangents { tangent[3] = -tangent[3]; }
     Some(geometry.tangents)

@@ -11,6 +11,8 @@ struct Entry { guard: Guard, neighbors: Vec<[i32; 3]> }
 
 #[derive(Default)]
 pub(crate) struct NeighborCache {
+    #[cfg(test)]
+    pub(crate) weld_validation: super::weld_validation::WeldValidation,
     entry: Option<Entry>,
     pending: Option<Guard>,
     #[cfg(test)]
