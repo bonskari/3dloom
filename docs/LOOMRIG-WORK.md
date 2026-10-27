@@ -178,3 +178,19 @@ GPU exact intermediate dot still needs instrumentation; do not assert its
 value or claim the numerical gate passed. Body subgroup masks match while
 ~2.7e-5 residual remains. Strict2e-5 gate is unchanged; no production GPU
 route enabled. Test fixture export f34022a passed its targeted test.
+
+
+GPU transport staging (not enabled in native renderer): DynamicGeometryBuffer
+commit_gpu validates immutable indices/count, finite current source positions,
+64-byte aligned/range-checked COPY_SRC candidate, before history mutation.
+It copies validated packed records into the existing persistent buffer and
+retains exact CPU-position bounds/history; no CPU normal/tangent repack.
+Producer must validate ALL part guards/layouts before the first commit and
+submit the encoder before Bevy update; never discard after successful commit.
+RED missing-method compile observed; exact GPU buffer readback/history test
+passed, including bad usage/range/overflow/count/index/nonfinite rejection.
+Forward/deferred PBR/prepass/shadow/allocator-offset render parity passed.
+All8 dynamic-geometry tests passed (1 opt-in ignored); final expanded rejection
+regression passed. Independent review found no important issue under the
+explicit producer submission contract. Full compute quality/native FPS remain
+unverified; this API alone is not production completion.
