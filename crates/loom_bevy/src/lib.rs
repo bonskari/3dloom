@@ -124,6 +124,8 @@ struct Object {
     /// One entity (and material) per face material ID drawn; one for a single material.
     parts: Vec<(Entity, ObjectMaterial)>,
     dynamic: bool,
+    /// The current storage contents came from GPU compute, not mesh_hash.
+    gpu_pose_current: bool,
     material_dirty: bool,
     buffers: Vec<DynamicGeometryBuffer>,
     part_ids: Vec<Option<u16>>,
@@ -480,7 +482,7 @@ impl BevyRenderer {
             };
             let layers = self.object_layers(o.id, o.renderable, o.flags, hidden);
             if let Some(obj) = set.get_mut(&o.id) {
-                if !obj.material_dirty && obj.dynamic == dynamic && obj.mesh_hash == hash && obj.surfaces == o.surfaces && obj.wire_color == o.wire_color && obj.flags.visibility == o.flags.visibility {
+                if !obj.gpu_pose_current && !obj.material_dirty && obj.dynamic == dynamic && obj.mesh_hash == hash && obj.surfaces == o.surfaces && obj.wire_color == o.wire_color && obj.flags.visibility == o.flags.visibility {
                     if obj.transform != o.transform {
                         obj.transform = o.transform;
                         for (e, _) in &obj.parts {
@@ -562,6 +564,7 @@ impl BevyRenderer {
                         Self::shadow_flags(e, Self::cast_flags(o));
                     }
                     obj.tangent_caches = caches;
+                    obj.gpu_pose_current = false;
                     obj.mesh_hash = hash;
                     obj.transform = o.transform;
                     obj.renderable = o.renderable;
@@ -611,7 +614,7 @@ impl BevyRenderer {
                 }
                 entities.push((entity, material_handle));
             }
-            set.insert(o.id, Object { parts: entities, dynamic, material_dirty: false, buffers, part_ids, tangent_caches: caches, mesh_hash: hash, transform: o.transform, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags });
+            set.insert(o.id, Object { parts: entities, dynamic, gpu_pose_current: false, material_dirty: false, buffers, part_ids, tangent_caches: caches, mesh_hash: hash, transform: o.transform, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags });
             self.settle = self.settle.max(3);
         }
         let gone: Vec<u64> = set.keys().filter(|id| !seen.contains(id)).copied().collect();

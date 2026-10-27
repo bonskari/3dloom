@@ -744,6 +744,34 @@ mod tests {
     }
 
     #[test]
+    fn cpu_sync_replaces_gpu_pose_even_when_the_last_cpu_hash_matches() {
+        let mut r = renderer();
+        let meshes = vec![loom_mesh::box_primitive(glam::Vec3::ONE)];
+        let ids = HashSet::from([1]);
+        r.sync_deforming(&objects(&meshes), &ids);
+        let old_hash = r.objects[&1].mesh_hash;
+        let mut changed = meshes[0].clone();
+        loom_mesh::edit_ops::translate_mesh(&mut changed, glam::Vec3::X * 7.0).unwrap();
+        let posed = posed_mesh(&changed);
+        let source = DynamicGeometryBuffer::new(&r.device, &posed).unwrap().0;
+        let VertexAttributeValues::Float32x3(positions) = posed.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() else { panic!() };
+        let indices = posed.indices().map(|v| v.iter().map(|v| v as u32).collect::<Vec<_>>());
+        let mut encoder = r.device.create_command_encoder(&Default::default());
+        let object = r.objects.get_mut(&1).unwrap();
+        object.buffers[0].commit_gpu(&r.queue, &mut encoder, source.buffer(), 0, positions, indices.as_deref()).unwrap();
+        object.gpu_pose_current = true;
+        r.queue.submit([encoder.finish()]);
+        let mut readback = crate::gpu_pose_commit::GuardReadback::new(&r.device, 1).unwrap();
+        assert_eq!(readback.read(&r.device, &r.queue, &[r.objects[&1].buffers[0].buffer()]).unwrap(), vec![positions[0][0].to_bits()]);
+        // The CPU source has not changed since its last sync, but the GPU has.
+        r.sync_deforming(&objects(&meshes), &ids);
+        assert!(!r.objects[&1].gpu_pose_current);
+        assert_eq!(r.objects[&1].mesh_hash, old_hash);
+        let expected = crate::mesh_data(&meshes[0]).positions[0][0].to_bits();
+        assert_eq!(readback.read(&r.device, &r.queue, &[r.objects[&1].buffers[0].buffer()]).unwrap(), vec![expected]);
+    }
+
+    #[test]
     fn renderer_sync_reuses_posed_resources_and_restores_render_material_settings() {
         let mut dynamic = renderer();
         let mut reference = renderer();
