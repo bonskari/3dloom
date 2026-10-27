@@ -84,19 +84,34 @@ pub struct DynamicGeometryBuffer {
 }
 
 impl DynamicGeometryBuffer {
+    /// Conservative object eligibility: every material part contains no more
+    /// vertices than the whole expanded object. Unsupported objects retain the
+    /// ordinary StandardMaterial path with the same geometry and attributes.
+    pub(crate) fn supported(limits: &wgpu::Limits, vertices: usize) -> bool {
+        let Some(bytes) = vertices
+            .checked_mul(std::mem::size_of::<PackedVertex>())
+            .and_then(|n| u64::try_from(n).ok())
+        else {
+            return false;
+        };
+        vertices > 0
+            && limits.max_storage_buffers_per_shader_stage >= 2
+            && bytes <= limits.max_buffer_size
+            && bytes <= u64::from(limits.max_storage_buffer_binding_size)
+    }
+
     pub fn new(device: &wgpu::Device, mesh: &Mesh) -> Result<(Self, Aabb), String> {
+        let count = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .map_or(0, VertexAttributeValues::len);
+        if !Self::supported(&device.limits(), count) {
+            return Err("Dynamic geometry exceeds device vertex storage limits or is empty".into());
+        }
         let mut packed = Vec::new();
         let mut last_positions = Vec::new();
         let (bounds, vertex_count, has_tangents) =
             pack_into(mesh, &mut packed, &mut last_positions)?;
         let bytes = bytemuck::cast_slice(&packed);
-        let limits = device.limits();
-        if bytes.len() as u64 > limits.max_buffer_size
-            || bytes.len() as u64 > u64::from(limits.max_storage_buffer_binding_size)
-            || limits.max_storage_buffers_per_shader_stage < 2
-        {
-            return Err("Dynamic geometry exceeds device vertex storage limits".into());
-        }
         let previous = device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("previous posed positions"),
@@ -182,6 +197,47 @@ impl DynamicGeometryBuffer {
         std::mem::swap(&mut self.last_positions, &mut self.next_positions);
         Ok(bounds)
     }
+}
+
+pub(crate) fn validate_geometry(mesh: &Mesh) -> Result<(), String> {
+    if mesh.has_morph_targets()
+        || mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_some()
+        || mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT).is_some()
+    {
+        return Err("Dynamic geometry must contain final CPU posed attributes without a second morph/skin stage".into());
+    }
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return Err("Dynamic geometry requires Float32x3 positions".into());
+    };
+    let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+    else {
+        return Err("Dynamic geometry requires Float32x3 normals".into());
+    };
+    let Some(VertexAttributeValues::Float32x2(uvs)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) else {
+        return Err("Dynamic geometry requires Float32x2 UV0".into());
+    };
+    let tangents = match mesh.attribute(Mesh::ATTRIBUTE_TANGENT) {
+        Some(VertexAttributeValues::Float32x4(t)) => Some(t),
+        Some(_) => return Err("Dynamic geometry tangents must be Float32x4".into()),
+        None => None,
+    };
+    let count = positions.len();
+    if normals.len() != count || uvs.len() != count || tangents.is_some_and(|t| t.len() != count) {
+        return Err("Dynamic geometry attributes must have equal lengths".into());
+    }
+    if !positions
+        .iter()
+        .flatten()
+        .chain(normals.iter().flatten())
+        .chain(uvs.iter().flatten())
+        .all(|f| f.is_finite())
+        || tangents.is_some_and(|t| !t.iter().flatten().all(|f| f.is_finite()))
+    {
+        return Err("Dynamic geometry attributes must be finite".into());
+    }
+    Ok(())
 }
 
 fn pack_into(
@@ -741,6 +797,85 @@ mod tests {
         assert!(pack_into(&mesh, &mut packed, &mut positions).is_err());
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0; 3]; count - 1]);
         assert!(pack_into(&mesh, &mut packed, &mut positions).is_err());
+    }
+
+    #[test]
+    fn storage_eligibility_checks_empty_overflow_and_exact_device_boundaries() {
+        let mut limits = wgpu::Limits::default();
+        limits.max_storage_buffer_binding_size = 64;
+        assert!(!DynamicGeometryBuffer::supported(&limits, 0));
+        assert!(DynamicGeometryBuffer::supported(&limits, 1));
+        assert!(!DynamicGeometryBuffer::supported(&limits, 2));
+        assert!(!DynamicGeometryBuffer::supported(&limits, usize::MAX));
+        limits.max_buffer_size = 63;
+        assert!(!DynamicGeometryBuffer::supported(&limits, 1));
+        limits.max_buffer_size = 64;
+        limits.max_storage_buffers_per_shader_stage = 1;
+        assert!(!DynamicGeometryBuffer::supported(&limits, 1));
+        let empty = mesh_data(&loom_mesh::Mesh::new()).to_bevy();
+        assert!(
+            validate_geometry(&empty).is_ok(),
+            "empty geometry is valid for the ordinary path"
+        );
+    }
+
+    #[test]
+    fn storage_ineligible_deforming_objects_keep_full_fidelity_standard_rendering() {
+        let mut dynamic = renderer();
+        let mut reference = renderer();
+        let mut meshes = vec![loom_mesh::box_primitive(glam::Vec3::splat(3.0))];
+        let ids = HashSet::from([1]);
+        let mut limits = dynamic.device.limits();
+        limits.max_storage_buffer_binding_size = 64;
+        for pose in 0..2 {
+            if pose == 1 {
+                loom_mesh::edit_ops::translate_mesh(&mut meshes[0], glam::Vec3::X).unwrap();
+            }
+            let list = objects(&meshes);
+            let mut set = std::mem::take(&mut dynamic.objects);
+            dynamic.bounds = dynamic.sync_set(&mut set, &list, false, &ids, &limits);
+            dynamic.objects = set;
+            assert!(!dynamic.objects[&1].dynamic);
+            assert!(dynamic.objects[&1].buffers.is_empty());
+            assert!(matches!(
+                dynamic.objects[&1].parts[0].1,
+                ObjectMaterial::Standard(_)
+            ));
+            let entity = dynamic.objects[&1].parts[0].0;
+            let mut set = std::mem::take(&mut dynamic.objects);
+            dynamic.bounds = dynamic.sync_set(&mut set, &list, false, &ids, &limits);
+            dynamic.objects = set;
+            assert_eq!(
+                dynamic.objects[&1].parts[0].0, entity,
+                "unchanged ineligible geometry must not rebuild"
+            );
+            reference.sync(&list);
+            let expected = render(&mut reference, false);
+            let actual = render(&mut dynamic, false);
+            assert!(
+                actual.pixels().any(|p| p[3] != 0),
+                "all geometry must still render"
+            );
+            assert_eq!(
+                actual.as_raw(),
+                expected.as_raw(),
+                "ineligible pose {pose} retains full quality"
+            );
+        }
+        dynamic.sync_deforming(&objects(&meshes), &ids);
+        assert!(
+            dynamic.objects[&1].dynamic,
+            "normal device limits still enable storage"
+        );
+        meshes[0] = loom_mesh::Mesh::new();
+        dynamic.sync_deforming(&objects(&meshes), &ids);
+        assert!(!dynamic.objects[&1].dynamic);
+        assert!(dynamic.objects[&1].buffers.is_empty());
+        let empty_image = render(&mut dynamic, false);
+        assert!(
+            empty_image.pixels().all(|p| p[3] == 0),
+            "valid empty Skin geometry must render empty without panicking"
+        );
     }
 
     #[test]

@@ -430,7 +430,7 @@ impl BevyRenderer {
     pub fn sync_deforming(&mut self, objects: &[SceneObject], deforming: &HashSet<u64>) {
         let _scope = loom_render::profile::Scope::new("bevy.sync");
         let mut set = std::mem::take(&mut self.objects);
-        self.bounds = self.sync_set(&mut set, objects, false, deforming);
+        self.bounds = self.sync_set(&mut set, objects, false, deforming, &self.device.limits());
         self.objects = set;
     }
 
@@ -441,12 +441,12 @@ impl BevyRenderer {
 
     pub fn sync_hidden_deforming(&mut self, objects: &[SceneObject], deforming: &HashSet<u64>) {
         let mut set = std::mem::take(&mut self.hidden);
-        self.sync_set(&mut set, objects, true, deforming);
+        self.sync_set(&mut set, objects, true, deforming, &self.device.limits());
         self.hidden = set;
     }
 
     /// Brings `set` in line with `objects`; returns their bounds.
-    fn sync_set(&mut self, set: &mut HashMap<u64, Object>, objects: &[SceneObject], hidden: bool, deforming: &HashSet<u64>) -> Option<(Vec3, f32)> {
+    fn sync_set(&mut self, set: &mut HashMap<u64, Object>, objects: &[SceneObject], hidden: bool, deforming: &HashSet<u64>, limits: &wgpu::Limits) -> Option<(Vec3, f32)> {
         let mut seen = HashSet::new();
         let mut lo = Vec3::splat(f32::MAX);
         let mut hi = Vec3::splat(f32::MIN);
@@ -465,7 +465,7 @@ impl BevyRenderer {
         for (o, (key, cache, data)) in objects.iter().zip(geometry) {
             self.geometry.insert(key, cache);
             seen.insert(o.id);
-            let dynamic = deforming.contains(&o.id) && !data.positions.is_empty();
+            let dynamic = deforming.contains(&o.id) && DynamicGeometryBuffer::supported(limits, data.positions.len());
             let mirrored = o.transform.determinant() < 0.0;
             if let Some(b) = data.aabb_transformed(o.transform) {
                 lo = lo.min(Vec3::from(b.min()));
@@ -575,9 +575,14 @@ impl BevyRenderer {
             let mut buffers = Vec::with_capacity(if dynamic { count } else { 0 });
             for ((mat, (d, _)), mesh) in prepared {
                 let _scope = loom_render::profile::Scope::new("bevy.entity_upload");
+                if deforming.contains(&o.id) && !dynamic {
+                    // Capacity/empty eligibility is separate from validity: the
+                    // full-fidelity ordinary path must not conceal bad data.
+                    dynamic_geometry::validate_geometry(&mesh).expect("invalid final posed geometry");
+                }
                 let buffer = if dynamic {
                     Some(DynamicGeometryBuffer::new(&self.device, &mesh)
-                        .expect("validated final posed geometry must fit the GPU storage limits"))
+                        .expect("eligible final posed geometry must have valid attributes"))
                 } else { None };
                 let world = self.app.world_mut();
                 let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
