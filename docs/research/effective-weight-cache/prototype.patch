@@ -1,0 +1,111 @@
+--- a/scene.rs
++++ b/scene.rs
+@@ -60,6 +60,8 @@
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct Scene {
++    #[serde(skip)]
++    effective_weight_cache: std::cell::RefCell<std::collections::HashMap<NodeId,crate::skin::effective_weights_probe::ExplicitWeightCache>>,
+     #[serde(skip, default = "fresh_scene_instance")]
+     instance_id: u64,
+     nodes: BTreeMap<NodeId, Node>,
+@@ -180,6 +182,7 @@
+ 
+     pub fn new() -> Self {
+         Self {
++            effective_weight_cache:Default::default(),
+             instance_id: fresh_scene_instance(),
+             nodes: BTreeMap::new(),
+             next_id: 1,
+--- a/skin_batch.rs
++++ b/skin_batch.rs
+@@ -15,6 +15,7 @@
+     animated: bool,
+     data: &'a SkinData,
+     value: StackValue,
++    effective_weights:Option<Arc<Vec<Vec<(u32,f32)>>>>,
+     object_world: Mat4,
+     worlds: Arc<HashMap<NodeId, (Mat4, bool, bool)>>,
+ }
+@@ -37,7 +38,7 @@
+             let squash = |id| self.worlds.get(&id).is_some_and(|v| v.1);
+             let ctx = crate::EvalCtx { object_world: self.object_world, object_inverse: self.object_world.inverse(), world_lookup: Some(&lookup), bone_squashes: Some(&squash), ..Default::default() };
+             let counts = (self.value.mesh.vertex_count(), self.value.mesh.face_count());
+-            let mut value = crate::skin::apply_owned(self.data, self.value, &ctx);
++            let mut value = crate::skin::apply_owned_cached_weights(self.data, self.value, &ctx,self.effective_weights.as_deref().map(Vec::as_slice));
+             let mut warnings = Vec::new();
+             finish_modifier_value(&mut value, &mut warnings, false, true, counts);
+             Arc::new(Evaluated { value, warnings })
+@@ -56,6 +57,7 @@
+         execute: impl FnOnce(Vec<SkinEvaluationJob<'a>>) -> Vec<SkinEvaluationResult>,
+     ) -> Vec<Arc<Evaluated>> {
+         self.sync_time();
++        self.effective_weight_cache.borrow_mut().retain(|id,_|self.nodes.contains_key(id));
+         // Attachment transforms can evaluate geometry and depend on the
+         // serial evaluator's recursion guards; keep those scenes serial.
+         let geometry_constraint = self.nodes.values().any(|n| matches!(&n.constraints.position, Some(crate::constraint::PositionConstraint::Attachment { .. })));
+@@ -101,8 +103,11 @@
+                 selection: match &node.object { ObjectKind::EditablePoly(p) | ObjectKind::EditableMesh(p) => p.passes_up.clone(), _ => None },
+                 shape: None, shape_selection: None, warnings: Vec::new(), patch: None, patch_steps: None,
+             };
++            let effective_weights=if crate::skin::effective_weights_probe::ENABLED.load(std::sync::atomic::Ordering::Relaxed)&&value.patch.is_none(){
++                self.effective_weight_cache.borrow_mut().entry(id).or_default().refresh(data,value.mesh.vertex_count())
++            }else{None};
+             let animated = reads != anim::animated_reads() || data.bones.iter().any(|b| worlds.get(&b.node).is_some_and(|v| v.2));
+-            SkinEvaluationJob { id, key, time, rendering, animated, data, value, object_world, worlds: worlds.clone() }
++            SkinEvaluationJob { id, key, time, rendering, animated, data, value, effective_weights, object_world, worlds: worlds.clone() }
+         }).collect();
+         let results = execute(jobs);
+         self.sync_time();
+@@ -133,3 +138,7 @@
+ #[cfg(test)]
+ #[path = "skin_batch_tests.rs"]
+ mod tests;
++
++#[cfg(test)]
++#[path="effective_weights_stage_tests.rs"]
++mod effective_weights_stage_tests;
+--- a/skin.rs
++++ b/skin.rs
+@@ -842,7 +842,8 @@
+ }
+ 
+ /// Skin has no fallible operation; callers owning a stack need no fallback copy.
+-pub(crate) fn apply_owned(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>) -> StackValue {
++pub(crate) fn apply_owned(data:&SkinData,v:StackValue,ctx:&EvalCtx<'_>)->StackValue{apply_owned_cached_weights(data,v,ctx,None)}
++pub(crate) fn apply_owned_cached_weights(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>,cached:Option<&[Vec<(u32,f32)>]>) -> StackValue {
+     let positions = weighted_points(&v);
+     let n = positions.len();
+     let mut data = std::borrow::Cow::Borrowed(data);
+@@ -867,17 +868,18 @@
+     for (i, p) in positions.iter().enumerate() {
+         let p_world = mesh_bind.transform_point3(*p);
+         let owner = if i >= nv { owners.get(i - nv).copied().flatten().map(|k| (k, mesh_bind.transform_point3(positions[k]))) } else { None };
+-        data.point_weights_into(i, p_world, owner, &mut w);
+-        if fast {
+-            strongest_in_place(&mut w);
+-        }
+-        let sum: f32 = w.iter().map(|(_, x)| *x).sum();
++        let weights=if let Some(cached)=cached.filter(|_|!fast){&cached[i][..]}else{
++            data.point_weights_into(i, p_world, owner, &mut w);
++            if fast { strongest_in_place(&mut w); }
++            &w[..]
++        };
++        let sum: f32 = weights.iter().map(|(_, x)| *x).sum();
+         if sum <= 1e-6 {
+             continue;
+         }
+         let mut acc = Vec3::ZERO;
+         let mut total = 0.0;
+-        for (b, x) in &w {
++        for (b, x) in weights {
+             if let Some(m) = mats.get(*b as usize).copied().flatten() {
+                 acc += m.transform_point3(p_world) * *x;
+                 total += *x;
+@@ -1290,3 +1292,6 @@
+         }
+     }
+ }
++
++#[path="effective_weights_probe.rs"]
++pub(crate) mod effective_weights_probe;

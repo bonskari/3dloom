@@ -1,0 +1,7 @@
+
+running 1 test
+EFFECTIVE_CACHE poses=317 meshes=1585 old_batch_ms=3.109006 new_batch_ms=4.123250 saved_ms=-1.014244 guard_ms=1.276544 cold_ms=7.776024 hits=1580 misses=5
+test scene::skin_batch::effective_weights_stage_tests::actual_effective_weight_cache_317 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 49 filtered out; finished in 8.11s
+
