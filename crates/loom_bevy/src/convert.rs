@@ -682,4 +682,54 @@ mod tests {
         eprintln!("HASH poses=159 meshes={count} original_ms_per_pose={:.3} bulk_ms_per_pose={:.3}", old_ms / 159.0, bulk_ms / 159.0);
     }
 
+    #[test]
+    #[ignore = "actual full material batch parity requires LOOM_PERF_SCENE"]
+    fn actual_all_ray_cached_material_batches_match_fresh_corrected() {
+        use bevy::render::mesh::VertexAttributeValues;
+        let path=std::env::var("LOOM_PERF_SCENE").expect("real scene");
+        let value:serde_json::Value=serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let scene:loom_scene::Scene=serde_json::from_value(value["scene"].clone()).unwrap();
+        let ids:Vec<_>=scene.nodes().filter(|n|n.modifiers.iter().any(|m|matches!(&m.modifier,loom_scene::modifier::Modifier::Skin(_)))).map(|n|n.id).collect();
+        assert_eq!(ids.len(),5);
+        let mut geometry:Vec<_>=ids.iter().map(|_|crate::prepared_geometry::GeometryCache::default()).collect();
+        let mut caches:Vec<crate::mikktspace::NeighborCache>=Vec::new();
+        let pool=bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
+        let mut elapsed=0.0;let mut comparisons=0;
+        for frame in (0..=157).map(|f|f as f32).chain([39.25]) {
+            scene.set_time(frame);
+            let mut parts=Vec::new();
+            for (i,id) in ids.iter().enumerate() {
+                let mut mesh=scene.eval_mesh(*id).value.mesh.clone();
+                loom_mesh::edit_ops::transform_mesh(&mut mesh,scene.object_matrix(*id)).unwrap();
+                let data=geometry[i].mesh_data(&mesh);
+                let surfaces=scene.node_surfaces(*id).expect("actual skin materials");
+                let material_ids:std::collections::BTreeSet<_>=mesh.faces().iter().filter(|f|!f.hidden).map(|f|f.material_id).collect();
+                for id in material_ids {
+                    let surface=surfaces.for_face(id);
+                    parts.push((mesh_data_part(&mesh,&data,Some(id),surface.faceted),surface.bump_map.is_some()));
+                }
+            }
+            assert_eq!(parts.len(),13);
+            caches.resize_with(parts.len(),Default::default);
+            let start=std::time::Instant::now();
+            let actual=material_meshes_cached(&pool,&parts,&mut caches);
+            elapsed+=start.elapsed().as_secs_f64()*1000.0;
+            for (part,((data,normal_map),mesh)) in parts.iter().zip(&actual).enumerate() {
+                let attribute=|name| match mesh.attribute(name).unwrap() {VertexAttributeValues::Float32x3(v)=>v.iter().flatten().map(|x|x.to_bits()).collect::<Vec<_>>(),_=>panic!("expected3f32")};
+                assert_eq!(attribute(Mesh::ATTRIBUTE_POSITION),data.positions.iter().flatten().map(|x|x.to_bits()).collect::<Vec<_>>());
+                assert_eq!(attribute(Mesh::ATTRIBUTE_NORMAL),data.normals.iter().flatten().map(|x|x.to_bits()).collect::<Vec<_>>());
+                let VertexAttributeValues::Float32x2(uvs)=mesh.attribute(Mesh::ATTRIBUTE_UV_0).unwrap() else{panic!("UVs")};
+                assert!(uvs.iter().flatten().zip(data.uvs.iter().flatten()).all(|(a,b)|a.to_bits()==b.to_bits()));
+                assert_eq!(mesh.indices().unwrap().iter().collect::<Vec<_>>(),data.indices.iter().map(|i|*i as usize).collect::<Vec<_>>());
+                if *normal_map {
+                    let expected=crate::mikktspace::generate_parallel(&pool,data).expect("fresh corrected tangents");
+                    let VertexAttributeValues::Float32x4(tangents)=mesh.attribute(Mesh::ATTRIBUTE_TANGENT).expect("cached tangents") else{panic!("tangent format")};
+                    assert_eq!(tangents.iter().map(|v|v.map(f32::to_bits)).collect::<Vec<_>>(),expected.iter().map(|v|v.map(f32::to_bits)).collect::<Vec<_>>(),"frame={frame} part={part}");
+                    comparisons+=1;
+                }
+            }
+        }
+        eprintln!("MATERIAL_BATCH poses=159 parts=13 tangent_comparisons={comparisons} avg_ms={:.3} cache_hits={} cache_misses={}",elapsed/159.0,caches.iter().map(|c|c.hits).sum::<usize>(),caches.iter().map(|c|c.misses).sum::<usize>());
+    }
+
 }
