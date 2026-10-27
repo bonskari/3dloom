@@ -8,7 +8,7 @@ use crate::LoomApp;
 use eframe::egui;
 use glam::Mat4;
 use loom_scene::render::RenderArea;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub struct BevyView {
@@ -214,7 +214,11 @@ impl LoomApp {
                 Some(loom_bevy::SceneObject { id: *id, mesh, transform, wire_color: *wire, surfaces: scene.node_surfaces_for(loom_scene::NodeId(*id), view), renderable: *renderable, flags: render_flags(scene, loom_scene::NodeId(*id)) })
             })
             .collect();
-        b.renderer.sync(&list);
+        // Modifier stacks provide final posed geometry; keep their GPU assets
+        // stable while the stack output changes. Topology edits are validated
+        // and rebuilt by the renderer. Rigid bone proxies retain their path.
+        let deforming: HashSet<_> = scene.nodes().filter(|n| !n.modifiers.is_empty()).map(|n| n.id.0).collect();
+        b.renderer.sync_deforming(&list, &deforming);
         b.renderer.sync_lights(&lights);
         b.synced = Some((version, for_render));
     }
@@ -333,7 +337,8 @@ impl LoomApp {
         let cam = self.camera_for(req.viewport);
         let camera = loom_bevy::ViewCamera { view: cam.view_matrix(), projection: cam.projection_matrix(aspect) };
         let Gpu::Running(b) = &mut self.gpu else { return Err("no GPU renderer".into()) };
-        b.renderer.sync_hidden(&hidden_objects);
+        let deforming: HashSet<_> = scene.nodes().filter(|n| !n.modifiers.is_empty()).map(|n| n.id.0).collect();
+        b.renderer.sync_hidden_deforming(&hidden_objects, &deforming);
         b.renderer.begin_render(options);
 
         let (full, origin, out, mask) = render_geometry(&s);
