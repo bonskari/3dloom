@@ -94,3 +94,13 @@ pub(crate) fn capture_preparation(data: &MeshData) -> PreparationFixture {
     let _ = generate_serial(data);
     capture::finish_preparation()
 }
+
+#[cfg(test)]
+pub(crate) use capture::{GroupPreparationFixture, PreparationGroup};
+
+#[cfg(test)]
+pub(crate) fn capture_group_preparation(data: &MeshData) -> GroupPreparationFixture {
+    capture::enable_prepared_groups();
+    let _ = generate_serial(data);
+    capture::take_prepared_groups()
+}

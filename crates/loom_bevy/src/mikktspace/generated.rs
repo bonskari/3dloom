@@ -234,6 +234,8 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
     if iNrTrianglesIn <= 0 {
         #[cfg(test)]
         super::capture::record(&[], &[], 0);
+        #[cfg(test)]
+        super::capture::record_prepared_groups(&[], &[], &[], 0);
         return false;
     }
 
@@ -268,6 +270,8 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
     if iNrTrianglesIn <= 0 {
         #[cfg(test)]
         super::capture::record(&piTriListIn, &pTriInfos, 0);
+        #[cfg(test)]
+        super::capture::record_prepared_groups(&piTriListIn, &pTriInfos, &[], 0);
         return false;
     }
     DegenPrologue(
@@ -298,6 +302,9 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
         piTriListIn.as_ptr(),
         iNrTrianglesIn as i32,
     );
+
+    #[cfg(test)]
+    super::capture::record_prepared_groups(&piTriListIn, &pTriInfos, &pGroups[..iNrActiveGroups as usize], iNrTrianglesIn);
 
     let mut psTspace = vec![
         STSpace {

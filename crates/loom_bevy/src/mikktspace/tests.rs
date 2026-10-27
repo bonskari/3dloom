@@ -328,3 +328,27 @@ fn preparation_fixture_retains_degenerate_mapping_and_corrected_neighbors() {
     assert_eq!(empty.active_count,0);
     assert!(empty.triangles.is_empty()&&empty.indices.is_empty());
 }
+
+#[test]
+fn prepared_group_fixture_records_actual_order_and_pointer_free_membership() {
+    let mut mesh=loom_mesh::sphere_segmented(1.0,16,0.0);
+    loom_mesh::uvmap::auto_map(&mut mesh,loom_mesh::uvmap::AutoMap::Spherical,1);
+    let data=mesh_data(&mesh);
+    let fixture=capture_group_preparation(&data);
+    assert!(!fixture.groups.is_empty());
+    for (group_id,group) in fixture.groups.iter().enumerate() {
+        let group:&PreparationGroup=group;
+        assert!(!group.members.is_empty());
+        for face in &group.members {
+            assert!(*face>=0&&(*face as usize)<fixture.preparation.active_count);
+            let face=*face as usize;
+            let corner=fixture.assigned_groups[face].iter().position(|id|*id==group_id as i32).unwrap();
+            assert_eq!(fixture.preparation.indices[face*3+corner],group.representative);
+            assert_eq!(fixture.preparation.triangles[face].flags&8!=0,group.orientation);
+        }
+    }
+    let empty=MeshData{positions:Vec::new(),normals:Vec::new(),uvs:Vec::new(),indices:Vec::new()};
+    let fixture=capture_group_preparation(&empty);
+    assert!(fixture.groups.is_empty()&&fixture.assigned_groups.is_empty());
+    assert_eq!(fixture.preparation.active_count,0);
+}

@@ -88,3 +88,53 @@ pub(super) fn finish_preparation() -> PreparationFixture {
         active_count: snapshot.active_count,
     }
 }
+
+#[derive(Clone, Debug)]
+pub(crate) struct PreparationGroup {
+    pub members: Vec<i32>,
+    pub representative: i32,
+    pub orientation: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct GroupPreparationFixture {
+    /// Flags here are AFTER Build4RuleGroups, including Any orientation changes.
+    pub preparation: PreparationFixture,
+    pub assigned_groups: Vec<[i32; 3]>,
+    pub groups: Vec<PreparationGroup>,
+}
+
+thread_local! {
+    static CAPTURE_PREPARED_GROUPS: Cell<bool> = const { Cell::new(false) };
+    static PREPARED_GROUPS: RefCell<Option<GroupPreparationFixture>> = const { RefCell::new(None) };
+}
+pub(super) fn enable_prepared_groups() {
+    CAPTURE_PREPARED_GROUPS.with(|v|v.set(true));
+    PREPARED_GROUPS.with(|v|*v.borrow_mut()=None);
+}
+pub(super) fn take_prepared_groups() -> GroupPreparationFixture {
+    CAPTURE_PREPARED_GROUPS.with(|v|v.set(false));
+    PREPARED_GROUPS.with(|v|v.borrow_mut().take().expect("actual prepared group capture"))
+}
+pub(super) fn record_prepared_groups(indices: &[i32], triangles: &[STriInfo], groups: &[super::generated::SGroup], active_count: usize) {
+    if !CAPTURE_PREPARED_GROUPS.with(Cell::get) {return;}
+    let assigned_groups=triangles.iter().map(|t|t.AssignedGroup.map(|g| {
+        if g.is_null() {-1} else {
+            let index=unsafe {g.cast_const().offset_from(groups.as_ptr())};
+            assert!(index>=0&&(index as usize)<groups.len());
+            index as i32
+        }
+    })).collect();
+    let groups=groups.iter().map(|g|PreparationGroup {
+        members:unsafe {std::slice::from_raw_parts(g.pFaceIndices,g.iNrFaces as usize)}.to_vec(),
+        representative:g.iVertexRepresentative,orientation:g.bOrientPreserving,
+    }).collect();
+    let fixture=GroupPreparationFixture {
+        preparation:PreparationFixture {
+            indices:indices.to_vec(),
+            triangles:triangles.iter().map(|t|PreparationTriangle{original_face:t.iOrgFaceNumber,flags:t.iFlag,neighbors:t.FaceNeighbors}).collect(),
+            active_count,
+        },assigned_groups,groups,
+    };
+    PREPARED_GROUPS.with(|v|*v.borrow_mut()=Some(fixture));
+}
