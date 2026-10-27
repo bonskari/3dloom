@@ -90,3 +90,30 @@ below target; no Biped work started. Geometry, materials and skin influences
 remain intact. Current representative Realistic scopes: sync 32.4 ms, renderer
 update 9.2 ms, UI world-mesh rebuild 10.5 ms. Exact storage-buffer PBR geometry
 update is under GPU parity testing and is not yet installed or claimed faster.
+
+Persistent PBR geometry integration (75a8413, UI hook 750c399): the actual
+Ray frame39 Realistic screenshot matches all360000 viewport pixels exactly.
+Bevy update dropped to~2.3ms, but actual Play regressed to~14fps because
+posed storage transport increased sync to~50ms. Ray release probe isolated
+13parts/333969 expanded vertices: pack17.377ms, full buffer update22.175ms.
+Typed bulk packing is being tested; this intermediate is not a completed
+performance fix. Wireframe repeat-switch samples remain~120fps.
+
+Typed packing e5ff492 + bulk exact hash154eb6e + parallel edge sort6dbc0cf:
+actual Play four-mode repeat test yielded20.44/20.88fps Realistic and
+119.76/119.85fps Wireframe (wall-clock rates), full geometry unchanged.
+Actual frame39 screenshot still matches all360000 compared pixels.
+Long-running process1626762 was inspected at20:51 after~10h uptime:
+Bevyupdate had grown to~260ms while sync remained~32ms. CPU perf sampling
+shows~74% in MainEntity→Tick EntityHash-map insertion, plus~6% removal,
+under Bevy material specialization. Cause and long-run fix under investigation;
+the earlier20fps result is not a claim of stable long-session performance.
+
+99876d0 fixes the long-session lifecycle root cause: upstream light
+specialization unconditionally re-adds removed NotShadowCaster entities to
+every material type's request list after material cleanup removed them.
+PostUpdate now rejects requests without the matching live Mesh3d/material
+before extraction. Accelerated shadow-disabled rebuild test failed atframe1
+with2entries before fix;128frames remain1entry/capacity3 after fix.
+Live shadow-caster changes still update their specialization tick.
+No periodic cache purge or shadow disabling is used.
