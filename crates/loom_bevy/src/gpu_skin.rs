@@ -116,6 +116,38 @@ mod tests {
     }
 
     #[test]
+    fn affine_row_roundoff_matches_glam_transform_point3_semantics() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
+            .expect("real GPU required");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter), None))
+                .unwrap();
+        let positions = [Vec3::new(1.0, 2.0, 3.0)];
+        let weights = [vec![(0, 1.0)]];
+        let mut mesh_bind = Mat4::IDENTITY;
+        mesh_bind.w_axis.w += f32::EPSILON;
+        let bones = [Some(Mat4::from_translation(Vec3::new(400_000.0, 2.0, 3.0)))];
+        let input = SkinInput {
+            positions: &positions,
+            weights: &weights,
+            bones: &bones,
+            mesh_bind,
+            object_world: Mat4::IDENTITY,
+            back: Mat4::IDENTITY,
+        };
+        let skin = GpuSkinPositions::new(&device, &input).unwrap();
+        let actual = skin.readback(&device, &queue).unwrap();
+        let expected = bones[0]
+            .unwrap()
+            .transform_point3(mesh_bind.transform_point3(positions[0]));
+        assert_eq!(
+            actual[0].to_array().map(f32::to_bits),
+            expected.to_array().map(f32::to_bits)
+        );
+    }
+
+    #[test]
     fn validation_rejects_invalid_data_before_gpu_upload() {
         let positions = [Vec3::ZERO];
         let bones = [Some(Mat4::IDENTITY)];
@@ -199,7 +231,7 @@ fn validate_pose(
         .chain(bones.iter().copied())
     {
         if let Some(m) = matrix {
-            if !m.is_finite() || m.row(3) != glam::Vec4::W {
+            if !m.is_finite() || !m.row(3).abs_diff_eq(glam::Vec4::W, 1e-6) {
                 return Err("Skin matrices must be finite and affine".into());
             }
         }

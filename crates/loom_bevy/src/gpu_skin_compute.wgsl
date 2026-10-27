@@ -10,12 +10,21 @@ struct Pose { mesh_bind: mat4x4<f32>, object_world: mat4x4<f32>, back: mat4x4<f3
 @group(0) @binding(4) var<uniform> pose: Pose;
 @group(0) @binding(5) var<storage, read_write> output: array<vec4<f32>>;
 
+// Mirror glam::Mat4::transform_point3: ordered column arithmetic, discard
+// intermediate w. Inverse affine matrices can have valid bottom-row roundoff.
+fn point(matrix: mat4x4<f32>, p: vec3<f32>) -> vec3<f32> {
+    var result = matrix[0] * p.x;
+    result = matrix[1] * p.y + result;
+    result = matrix[2] * p.z + result;
+    return (matrix[3] + result).xyz;
+}
+
 @compute @workgroup_size(64)
 fn skin(@builtin(global_invocation_id) id: vec3<u32>) {
     let i = id.x;
     if i >= pose.count.x { return; }
     let p = positions[i];
-    let pw = pose.mesh_bind * p;
+    let pw = point(pose.mesh_bind, p.xyz);
     let range = ranges[i];
     var sum = 0.0;
     var total = 0.0;
@@ -26,15 +35,15 @@ fn skin(@builtin(global_invocation_id) id: vec3<u32>) {
         sum += weight;
         let bone = bones[influence.x];
         if bone.valid.x != 0u {
-            acc += (bone.matrix * pw).xyz * weight;
+            acc += point(bone.matrix, pw) * weight;
             total += weight;
         }
     }
     var result = p;
     if sum > 1e-6 && total > 1e-6 {
         let k = min(sum, 1.0);
-        let world = acc / total * k + (pose.object_world * p).xyz * (1.0 - k);
-        result = pose.back * vec4<f32>(world, 1.0);
+        let world = acc / total * k + point(pose.object_world, p.xyz) * (1.0 - k);
+        result = vec4<f32>(point(pose.back, world), 1.0);
     }
     output[i] = result;
 }
