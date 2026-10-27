@@ -41,6 +41,14 @@ Actual command regressions reproduced self-frame feedback: the second world-spac
 
 ## Playback priority and next interaction work (26 October)
 
+Measurement correction (27 October, fractional-playback audit): previous FPS
+figures below count UI/render updates, not distinct animation samples. Playback
+floored time to integer source frames (30 fps in this scene), and repeated egui
+layout passes could tick more than once. Therefore the earlier Wireframe120fps
+result does NOT establish60 distinct interpolated poses/s. Fractional playback,
+once-per-input-frame ticking and submission pose-time telemetry are being fixed;
+both modes must be remeasured before declaring the performance goal met.
+
 User priority: at least 60 fps during actual Play on the current Ray scene,
 preferably higher. Measure presented UI updates over wall time, not idle view
 speed or a CPU-only microbenchmark. Preserve character geometry, materials and
@@ -117,3 +125,27 @@ before extraction. Accelerated shadow-disabled rebuild test failed atframe1
 with2entries before fix;128frames remain1entry/capacity3 after fix.
 Live shadow-caster changes still update their specialization tick.
 No periodic cache purge or shadow disabling is used.
+
+Installed eb65d1e checkpoint (old serial Skin evaluator, guarded tangent cache
+and lifecycle fix): actual repeat-switch wall rates23.082/22.864fps Realistic,
+119.796/119.832fps Wireframe. Representative material work11.6ms, sync25.1ms,
+renderer update2.27ms, UI world rebuild10.5ms. Target60fps is not met.
+
+Next pending installed checkpoint: Core Skin batch4a92ef9 (48 Core tests
+including159actualfull StackValue/metadata poses passed); UI166c8f4 (398
+passed,1ignored), exact subgroup allocation reuse97248ba (~.55ms/fullpose
+isolated), storage-cap/empty fixa9f4c05 (6targetedGPU tests). Independent
+review found the storage-cap issue and confirmed its fix; no important
+verified issue in Core/UI batch. Other-workspace verification running before
+release build. These are local commits only, no push.
+
+Fractional playback69728b5 +SetKeybuffer guard049e5a6: source30fps can
+produce60 distinct evaluated transforms/60ticks. Stop/scrub/mode boundaries
+snap tointeger editing time; readonly queries preserve visible fractional
+pose; AutoKey writes integer source keys. Nonfinite/overflow advances reject
+before mutation. Commands851tests passed before final narrow SetKey fix;
+final21key regressions passed. UI914930c gates tick once perinputtime and
+exposes ready-geometry submitted pose-time counts, distinct from UI updates.
+Repeated-layout regression reproduceddoubleadvance thenpassed; held-pose
+counter test passed. FullcurrentUI400passed,1ignored. Opt-in317half-frame
+material audit pending before next installed true-pose FPS measurement.
