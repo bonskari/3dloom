@@ -132,7 +132,9 @@ pub(crate) fn material_meshes(pool: &bevy_tasks::TaskPool, parts: &[(MeshData, b
         let mut mesh = data.to_bevy();
         if *tangents {
             let _scope = loom_render::profile::Scope::new("bevy.tangents");
-            let _ = mesh.generate_tangents();
+            if let Some(tangents) = crate::mikktspace::generate_parallel(pool, data) {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+            }
         }
         mesh
     };
