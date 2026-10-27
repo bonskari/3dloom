@@ -24,7 +24,12 @@ pub fn rendering() -> bool {
 
 /// Runs `f` evaluating for a render.
 pub fn with_rendering<R>(f: impl FnOnce() -> R) -> R {
-    let was = RENDERING.with(|c| c.replace(true));
+    with_rendering_state(true, f)
+}
+
+/// Preserves an executor thread's render mode around a scoped evaluation.
+pub(crate) fn with_rendering_state<R>(rendering: bool, f: impl FnOnce() -> R) -> R {
+    let was = RENDERING.with(|c| c.replace(rendering));
     let r = f();
     RENDERING.with(|c| c.set(was));
     r

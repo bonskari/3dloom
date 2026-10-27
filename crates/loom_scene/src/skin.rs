@@ -837,7 +837,12 @@ pub fn bone_matrices(data: &SkinData, ctx: &EvalCtx<'_>) -> Vec<Option<Mat4>> {
 }
 
 /// Linear blend skinning of the stack value against the bind pose.
-pub fn apply(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<StackValue, String> {
+pub fn apply(data: &SkinData, v: StackValue, ctx: &EvalCtx<'_>) -> Result<StackValue, String> {
+    Ok(apply_owned(data, v, ctx))
+}
+
+/// Skin has no fallible operation; callers owning a stack need no fallback copy.
+pub(crate) fn apply_owned(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>) -> StackValue {
     let positions = weighted_points(&v);
     let n = positions.len();
     let mut data = std::borrow::Cow::Borrowed(data);
@@ -849,7 +854,7 @@ pub fn apply(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<St
     }
     // Always Deform off: no deformation until it is turned on again (which binds anew).
     if data.bones.is_empty() || !data.always_deform {
-        return Ok(v);
+        return v;
     }
     let fast = data.fast_updates && !crate::anim::rendering();
     let mats = bone_matrices(&data, ctx);
@@ -903,7 +908,7 @@ pub fn apply(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<St
             }
         }
     }
-    Ok(v)
+    v
 }
 
 /// `Bone_L` ↔ `Bone_R`, `LeftArm` ↔ `RightArm` (for bones Mirror Mode cannot pair by position).
@@ -1214,6 +1219,22 @@ mod scratch_weight_tests {
 
     fn bits(w: &[(u32, f32)]) -> Vec<(u32, u32)> {
         w.iter().map(|(b, x)| (*b, x.to_bits())).collect()
+    }
+
+    #[test]
+    fn owned_skin_application_keeps_input_mesh_allocation_and_reference_output() {
+        let mesh = loom_mesh::box_primitive(Vec3::ONE);
+        let bones = [(NodeId(1), Mat4::IDENTITY, Envelope::default())];
+        let data = SkinData::from_file(&bones, Mat4::IDENTITY, vec![vec![(0, 1.0)]; mesh.vertex_count()]);
+        let input = StackValue { mesh, selection: None, shape: None, shape_selection: None, warnings: Vec::new(), patch: None, patch_steps: None };
+        let matrix = |_: NodeId| Some(Mat4::from_translation(Vec3::X));
+        let ctx = EvalCtx { object_world: Mat4::IDENTITY, object_inverse: Mat4::IDENTITY, world_lookup: Some(&matrix), ..Default::default() };
+        let expected = apply(&data, input.clone(), &ctx).unwrap();
+        let allocation = input.mesh.vertices().as_ptr();
+        let actual = apply_owned(&data, input, &ctx);
+        assert_eq!(allocation, actual.mesh.vertices().as_ptr());
+        assert_eq!(actual.mesh, expected.mesh);
+        assert!(actual.mesh.vertices().iter().any(|v| v.position.x > 1.0));
     }
 
     #[test]

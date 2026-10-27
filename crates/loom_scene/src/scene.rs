@@ -33,6 +33,24 @@ impl Layer {
     }
 }
 
+#[path = "skin_batch.rs"]
+mod skin_batch;
+pub use skin_batch::{SkinEvaluationJob, SkinEvaluationResult};
+
+// Common stack postprocessing also used by independently evaluated Skin jobs.
+fn finish_modifier_value(
+    value: &mut crate::modifier::StackValue,
+    warnings: &mut Vec<String>,
+    keeps_shape: bool,
+    keeps_patch: bool,
+    counts_before: (usize, usize),
+) {
+    warnings.append(&mut value.warnings);
+    if value.selection.is_some() && (value.mesh.vertex_count(), value.mesh.face_count()) != counts_before { value.selection = None; }
+    if !keeps_shape { value.shape = None; value.shape_selection = None; }
+    if !keeps_patch { value.patch = None; value.patch_steps = None; }
+}
+
 static NEXT_SCENE_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 fn fresh_scene_instance() -> u64 {
     NEXT_SCENE_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -454,25 +472,16 @@ impl Scene {
                 }
                 let keeps_shape = modifier.passes_shape() || matches!(modifier, crate::modifier::Modifier::XForm { .. });
                 let counts_before = (value.mesh.vertex_count(), value.mesh.face_count());
-                match modifier.apply(value.clone(), &ctx) {
-                    Ok(v) => value = v,
-                    Err(e) => warnings.push(format!("{}: {e}", slot.name)),
+                if let crate::modifier::Modifier::Skin(data) = modifier {
+                    value = crate::skin::apply_owned(data, value, &ctx);
+                } else {
+                    match modifier.apply(value.clone(), &ctx) {
+                        Ok(v) => value = v,
+                        Err(e) => warnings.push(format!("{}: {e}", slot.name)),
+                    }
                 }
-                warnings.append(&mut value.warnings);
-                // A selection from below cannot survive a topology change (its ids no longer mean anything).
-                if value.selection.is_some() && (value.mesh.vertex_count(), value.mesh.face_count()) != counts_before {
-                    value.selection = None;
-                }
-                // Only Edit Spline passes a shape on; anything else leaves a mesh.
-                if !keeps_shape {
-                    value.shape = None;
-                    value.shape_selection = None;
-                }
-                // Patches flow up from Surface, Edit Patch and Skin (which moves the lattice) only.
-                if !matches!(modifier, crate::modifier::Modifier::Surface { .. } | crate::modifier::Modifier::EditPatch { .. } | crate::modifier::Modifier::Skin(_)) {
-                    value.patch = None;
-                    value.patch_steps = None;
-                }
+                let keeps_patch = matches!(modifier, crate::modifier::Modifier::Surface { .. } | crate::modifier::Modifier::EditPatch { .. } | crate::modifier::Modifier::Skin(_));
+                finish_modifier_value(&mut value, &mut warnings, keeps_shape, keeps_patch, counts_before);
             }
         }
         let e = std::sync::Arc::new(Evaluated { value, warnings });
