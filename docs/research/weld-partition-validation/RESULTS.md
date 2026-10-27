@@ -19,3 +19,9 @@ A separate quiet, alternating-order159-pose pair compared the current full-weld 
 |Combined|17.031ms|14.003ms|
 
 Net saving is about3.03ms/17.8% in this isolated four-worker comparison; it includes the validation cost. It is not a native application FPS claim. Post-group metadata caching has **not** been added to this experiment yet. Production adoption requires review and the remaining requested checks; no environment variable enables this path in a normal build.
+
+## Production promotion (27 October 2026)
+
+After independent guard/TLS review, commit `51799c6` enables the same validated-weld path for production renderer caches. The opening test-only status above describes the original experiment. Production has no runtime enable switch: failed proofs always use fresh current-attribute welding. Group preparation and all current tangent math remain unchanged. The normal library and test library passed 51 unit tests, one GPU bake test and seven GPU render tests (22 opt-in tests ignored). Native playback performance for this combined build has not yet been measured.
+
+The production-enabled release test binary also passed the full317-pose/all13-material sweep against fresh serial corrected preparation: all2853 tangent comparisons and all position/normal/UV bits and indices matched. There were2844 validated hits,9 cold misses and0 member-bit/merge/nonfinite rejections. This correctness run overlapped application compilation, so its elapsed time is not a performance measurement.
