@@ -165,3 +165,16 @@ Wireframe exceeds60; Realistic still fails goal. Native Realistic profile
 representative sync22.290ms, UI rebuild7.525ms, Bevy update2.399ms.
 Do not claim overall completion or begin controls ahead of Realistic target.
 App left paused after benchmark to free resources for GPU correctness work.
+
+GPU tangent isolation checkpoint: diagnostic actual3poses/all13parts completed
+(/tmp/loom-gpu-recipe-isolation.log), not the strict acceptance test.
+Face001 time39.25 target prepared29180 CPU subgroup mask127 vs GPU125,
+also125 with exact CPU current derivatives injected only in test. Thus the
+large .00395884 vector difference remains in subgroup/evaluator math, not
+solely in GPU derivative generation. Independent explicit-f32 projection/dot
+calculation on /tmp/loom-gpu-hybrid-worst.json: excluded member28821 has
+CPU dotT=-0.9999998807907104, only1.1920929e-7 above strict -1 threshold.
+GPU exact intermediate dot still needs instrumentation; do not assert its
+value or claim the numerical gate passed. Body subgroup masks match while
+~2.7e-5 residual remains. Strict2e-5 gate is unchanged; no production GPU
+route enabled. Test fixture export f34022a passed its targeted test.
