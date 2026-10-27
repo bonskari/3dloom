@@ -1,0 +1,102 @@
+--- a/skin_batch.rs
++++ b/skin_batch.rs
+@@ -37,9 +37,14 @@
+             let squash = |id| self.worlds.get(&id).is_some_and(|v| v.1);
+             let ctx = crate::EvalCtx { object_world: self.object_world, object_inverse: self.object_world.inverse(), world_lookup: Some(&lookup), bone_squashes: Some(&squash), ..Default::default() };
+             let counts = (self.value.mesh.vertex_count(), self.value.mesh.face_count());
++            let apply_start=std::time::Instant::now();
+             let mut value = crate::skin::apply_owned(self.data, self.value, &ctx);
++            let apply_time=apply_start.elapsed();
+             let mut warnings = Vec::new();
++            let finish_start=std::time::Instant::now();
+             finish_modifier_value(&mut value, &mut warnings, false, true, counts);
++            let finish_time=finish_start.elapsed();
++            STAGE_PROBE.lock().unwrap().push((apply_time,finish_time));
+             Arc::new(Evaluated { value, warnings })
+         }));
+         SkinEvaluationResult { id: self.id, key: self.key, time: self.time, rendering: self.rendering, animated: self.animated || reads != anim::animated_reads(), evaluated }
+@@ -96,8 +101,11 @@
+         let jobs = eligible.into_iter().map(|(id, key, node, data)| {
+             let reads = anim::animated_reads();
+             let object_world = self.object_matrix(id);
++            let base_start=std::time::Instant::now();
++            let base_mesh=node.object.display_output();
++            BASE_STAGE_PROBE.lock().unwrap().push(base_start.elapsed());
+             let value = StackValue {
+-                mesh: node.object.display_output(),
++                mesh: base_mesh,
+                 selection: match &node.object { ObjectKind::EditablePoly(p) | ObjectKind::EditableMesh(p) => p.passes_up.clone(), _ => None },
+                 shape: None, shape_selection: None, warnings: Vec::new(), patch: None, patch_steps: None,
+             };
+@@ -133,3 +141,10 @@
+ #[cfg(test)]
+ #[path = "skin_batch_tests.rs"]
+ mod tests;
++
++static STAGE_PROBE:std::sync::Mutex<Vec<(std::time::Duration,std::time::Duration)>>=std::sync::Mutex::new(Vec::new());
++#[cfg(test)]
++#[path="skin_batch_stage_probe.rs"]
++mod stage_probe;
++
++static BASE_STAGE_PROBE:std::sync::Mutex<Vec<std::time::Duration>>=std::sync::Mutex::new(Vec::new());
+--- a/skin.rs
++++ b/skin.rs
+@@ -843,7 +843,9 @@
+ 
+ /// Skin has no fallible operation; callers owning a stack need no fallback copy.
+ pub(crate) fn apply_owned(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>) -> StackValue {
++    let stage_start=std::time::Instant::now();
+     let positions = weighted_points(&v);
++    let point_time=stage_start.elapsed();let setup_start=std::time::Instant::now();
+     let n = positions.len();
+     let mut data = std::borrow::Cow::Borrowed(data);
+     if data.weights.len() != n {
+@@ -862,7 +864,20 @@
+     let back = if data.back_transform { ctx.object_inverse } else { mesh_bind.inverse() };
+     let nv = v.patch.as_ref().map_or(n, |p| p.verts.len());
+     let owners = v.patch.as_ref().map(handle_owners).unwrap_or_default();
++    let setup_time=setup_start.elapsed();let copy_start=std::time::Instant::now();
+     let mut out = positions.clone();
++    let copy_time=copy_start.elapsed();
++    let weight_replay_time=if std::env::var_os("LOOM_WEIGHT_REPLAY").is_some() {
++        let queries:Vec<_>=positions.iter().enumerate().map(|(i,p)|{
++            let p_world=mesh_bind.transform_point3(*p);
++            let owner=if i>=nv{owners.get(i-nv).copied().flatten().map(|k|(k,mesh_bind.transform_point3(positions[k])))}else{None};
++            (i,p_world,owner)
++        }).collect();
++        let mut replay_weights=Vec::new();let replay_start=std::time::Instant::now();
++        for(i,p,owner)in queries{data.point_weights_into(i,p,owner,&mut replay_weights);std::hint::black_box(&replay_weights);}
++        replay_start.elapsed()
++    }else{std::time::Duration::ZERO};
++    let loop_start=std::time::Instant::now();
+     let mut w = Vec::new();
+     for (i, p) in positions.iter().enumerate() {
+         let p_world = mesh_bind.transform_point3(*p);
+@@ -890,10 +905,12 @@
+             out[i] = back.transform_point3(world);
+         }
+     }
++    let loop_time=loop_start.elapsed();let gizmo_start=std::time::Instant::now();
+     if !fast {
+         // Gizmos: Joint Angle / Bulge Angle lattices and deltas, Morph Angle targets, driven by the bones' current angles.
+         gizmos::apply(&data, ctx, &positions, &mut out);
+     }
++    let gizmo_time=gizmo_start.elapsed();let write_start=std::time::Instant::now();
+     match &mut v.patch {
+         Some(patch) => {
+             let (verts, vecs) = out.split_at(nv);
+@@ -908,6 +925,8 @@
+             }
+         }
+     }
++    let write_time=write_start.elapsed();
++    APPLY_STAGE_PROBE.lock().unwrap().push(([point_time,setup_time,copy_time,loop_time,gizmo_time,write_time,weight_replay_time],fast));
+     v
+ }
+ 
+@@ -1290,3 +1309,5 @@
+         }
+     }
+ }
++
++pub(crate) static APPLY_STAGE_PROBE:std::sync::Mutex<Vec<([std::time::Duration;7],bool)>>=std::sync::Mutex::new(Vec::new());

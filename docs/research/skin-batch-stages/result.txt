@@ -1,0 +1,19 @@
+
+running 1 test
+FLAGS node=Body001 fast_updates=false always_deform=true back_transform=true gizmos=0 patch=false influences_min=1 influences_max=12 weights=12710 bones=342
+FLAGS node=Face001 fast_updates=false always_deform=true back_transform=true gizmos=0 patch=false influences_min=1 influences_max=12 weights=34271 bones=875
+FLAGS node=SkeletalMesh001 fast_updates=false always_deform=true back_transform=true gizmos=0 patch=false influences_min=1 influences_max=5 weights=3490 bones=342
+FLAGS node=SkeletalMesh002 fast_updates=false always_deform=true back_transform=true gizmos=0 patch=false influences_min=3 influences_max=8 weights=9860 bones=342
+FLAGS node=SkeletalMesh003 fast_updates=false always_deform=true back_transform=true gizmos=0 patch=false influences_min=2 influences_max=8 weights=3009 bones=342
+BATCH poses=317 jobs=1585 prepare_ms=1.881210 base_display_ms=1.005432 executor_wall_ms=2.040730 publish_ms=0.008040 apply_sum_ms=4.035577 apply_max_ms=1.987710 finish_sum_ms=0.000256 fast_jobs=0
+APPLY stage=weighted_point_copy sum_ms=0.154246 max_ms=0.081180
+APPLY stage=matrix_setup sum_ms=0.188263 max_ms=0.053047
+APPLY stage=out_copy sum_ms=0.048711 max_ms=0.020082
+APPLY stage=all_weight_loop sum_ms=3.532025 max_ms=1.778535
+APPLY stage=gizmos sum_ms=0.000250 max_ms=0.000096
+APPLY stage=write_positions sum_ms=0.104520 max_ms=0.061766
+APPLY stage=point_weights_replay sum_ms=0.000000 max_ms=0.000000
+test scene::skin_batch::stage_probe::actual_skin_batch_stages_317 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 48 filtered out; finished in 5.33s
+
