@@ -250,3 +250,12 @@ fullBevysync7.3, Bevyupdate1.8, UIframe18.7–19.1ms. Wire UIframe8.55ms;
 actualwall intervals include additional work/wait beyond these inclusive scopes.
 Target60Realistic still fails. App paused and restoredframe39 after measurement.
 No general quality acceptance claimed: strictnumeric102 failures remain.
+
+
+Presentation hypothesis to test: native UI frame18.7–19.1ms differs from
+~24ms submitted-pose intervals. Configuration uses AutoVsync; current desktop
+mode is3840x2160@119.88Hz, scale1.5, VRR automatic. This does not establish
+vsync as the cause. Internal LOOM_EXPERIMENTAL_NO_VSYNC=1 requests AutoNoVsync
+for a controlled same-scene comparison; ordinary launches retain AutoVsync.
+Added inclusive guard-readback/wait and GPU-copy profile scopes to distinguish
+queue wait from CPU work. UI production check passed; measurements pending.

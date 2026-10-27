@@ -206,6 +206,7 @@ impl DynamicGeometryBuffer {
         &mut self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder,
         source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>,
     ) -> Result<Aabb, String> {
+        let _scope = loom_render::profile::Scope::new("bevy.dynamic.gpu_copy");
         let bytes = self.validate_gpu(source, source_offset, positions, indices)?;
         let mut lo = glam::Vec3::splat(f32::INFINITY);
         let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);

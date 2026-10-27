@@ -106,6 +106,7 @@ impl GuardReadback {
         queue: &wgpu::Queue,
         guards: &[&wgpu::Buffer],
     ) -> Result<Vec<u32>, String> {
+        let _scope = loom_render::profile::Scope::new("gpu_pose.guard_readback");
         if guards.len() != self.count
             || guards
                 .iter()
@@ -120,6 +121,7 @@ impl GuardReadback {
             encoder.copy_buffer_to_buffer(guard, 0, &self.staging, i as u64 * 4, 4);
         }
         let submission = queue.submit([encoder.finish()]);
+        let _wait = loom_render::profile::Scope::new("gpu_pose.guard_wait");
         let (tx, rx) = std::sync::mpsc::channel();
         self.staging
             .slice(..)

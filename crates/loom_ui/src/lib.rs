@@ -1565,6 +1565,10 @@ impl LoomApp {
 /// (Bevy) renderer needs, which shares it.
 pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
     egui_wgpu::WgpuConfiguration {
+        // Internal one-variable comparison; ordinary launches retain vsync.
+        present_mode: if std::env::var_os("LOOM_EXPERIMENTAL_NO_VSYNC").is_some_and(|v| v == "1") {
+            wgpu::PresentMode::AutoNoVsync
+        } else { wgpu::PresentMode::AutoVsync },
         wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
             device_descriptor: std::sync::Arc::new(|adapter: &wgpu::Adapter| {
                 if loom_bevy::supported(adapter) {
