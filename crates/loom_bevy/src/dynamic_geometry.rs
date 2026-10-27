@@ -391,6 +391,63 @@ mod tests {
     }
 
     #[test]
+    fn renderer_sync_reuses_posed_resources_and_restores_render_material_settings() {
+        let mut dynamic = renderer();
+        let mut reference = renderer();
+        let mut floor = loom_mesh::box_primitive(glam::Vec3::new(16.0, 16.0, 0.5));
+        loom_mesh::edit_ops::translate_mesh(&mut floor, glam::Vec3::new(0.0, 0.0, -2.0)).unwrap();
+        let mut meshes = vec![floor, loom_mesh::box_primitive(glam::Vec3::splat(3.0))];
+        let ids = HashSet::from([2]);
+        dynamic.sync_deforming(&objects(&meshes), &ids);
+        reference.sync(&objects(&meshes));
+        assert!(matches!(dynamic.objects[&1].parts[0].1, ObjectMaterial::Standard(_)));
+        assert!(matches!(dynamic.objects[&2].parts[0].1, ObjectMaterial::Dynamic(_)));
+        let (entity, material) = dynamic.objects[&2].parts[0].clone();
+        let mesh = dynamic.app.world().get::<Mesh3d>(entity).unwrap().0.clone();
+        let buffer = dynamic.objects[&2].buffers[0].buffer().id();
+        let mut original = None;
+        material.edit(dynamic.app.world_mut(), |m| { original = Some((m.double_sided, m.cull_mode)); });
+        let options = RenderOptions { force_two_sided: true, ..Default::default() };
+        dynamic.begin_render(options.clone());
+        reference.begin_render(options);
+        for pose in 0..2 {
+            if pose == 1 {
+                loom_mesh::edit_ops::transform_mesh(&mut meshes[1], glam::Mat4::from_scale_rotation_translation(glam::Vec3::new(1.2, 0.8, 1.1), glam::Quat::from_rotation_y(0.35), glam::Vec3::new(2.0, 0.5, 1.0))).unwrap();
+            }
+            dynamic.sync_deforming(&objects(&meshes), &ids);
+            reference.sync(&objects(&meshes));
+            let expected = render(&mut reference, false);
+            let actual = render(&mut dynamic, false);
+            assert_eq!(actual.as_raw(), expected.as_raw(), "production sync pose {pose}");
+            assert_eq!(dynamic.objects[&2].parts[0].0, entity);
+            assert_eq!(dynamic.objects[&2].parts[0].1.id(), material.id());
+            assert_eq!(dynamic.app.world().get::<Mesh3d>(entity).unwrap().0, mesh);
+            assert_eq!(dynamic.objects[&2].buffers[0].buffer().id(), buffer);
+            let expected_bounds = mesh_data(&meshes[1]).aabb().unwrap();
+            let bounds = dynamic.app.world().get::<Aabb>(entity).unwrap();
+            assert_eq!(bounds.center, expected_bounds.center);
+            assert_eq!(bounds.half_extents, expected_bounds.half_extents);
+            material.edit(dynamic.app.world_mut(), |m| { assert!(m.double_sided); assert_eq!(m.cull_mode, None); });
+        }
+        dynamic.end_render();
+        material.edit(dynamic.app.world_mut(), |m| { assert_eq!((m.double_sided, m.cull_mode), original.unwrap()); });
+        let hidden = vec![meshes[1].clone()];
+        dynamic.sync_hidden_deforming(&objects(&hidden), &HashSet::from([1]));
+        let hidden_entity = dynamic.hidden[&1].parts[0].0;
+        let mut hidden_next = hidden;
+        loom_mesh::edit_ops::translate_mesh(&mut hidden_next[0], glam::Vec3::X).unwrap();
+        dynamic.sync_hidden_deforming(&objects(&hidden_next), &HashSet::from([1]));
+        assert_eq!(dynamic.hidden[&1].parts[0].0, hidden_entity);
+        meshes[1] = loom_mesh::sphere_segmented(1.5, 12, 0.0);
+        dynamic.sync_deforming(&objects(&meshes), &ids);
+        assert_ne!(dynamic.objects[&2].parts[0].0, entity, "topology edit rebuilds the immutable mesh");
+        let before_reload = dynamic.objects[&2].parts[0].1.id();
+        dynamic.reload_bitmaps();
+        dynamic.sync_deforming(&objects(&meshes), &ids);
+        assert_ne!(dynamic.objects[&2].parts[0].1.id(), before_reload, "bitmap reload rebuilds material textures");
+    }
+
+    #[test]
     fn packed_attributes_preserve_bits_and_reject_invalid_frames() {
         let source = loom_mesh::box_primitive(glam::Vec3::splat(3.0));
         let mut mesh = posed_mesh(&source);
@@ -565,17 +622,9 @@ mod tests {
                     .flat_map(|o| o.parts.iter().map(|(_, m)| m.clone()))
                     .collect();
                 for handle in refs {
-                    reference
-                        .app
-                        .world_mut()
-                        .resource_mut::<Assets<StandardMaterial>>()
-                        .get_mut(&handle)
-                        .unwrap()
-                        .opaque_render_method = if deferred {
-                        OpaqueRendererMethod::Deferred
-                    } else {
-                        OpaqueRendererMethod::Forward
-                    };
+                    handle.edit(reference.app.world_mut(), |m| {
+                        m.opaque_render_method = if deferred { OpaqueRendererMethod::Deferred } else { OpaqueRendererMethod::Forward };
+                    });
                 }
                 let expected = render(&mut reference, deferred);
                 let actual = render(&mut dynamic, deferred);

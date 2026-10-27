@@ -10,8 +10,10 @@ pub mod lights;
 mod mikktspace;
 #[cfg(test)]
 mod gpu_skin;
+pub mod dynamic_geometry;
 
 use std::collections::{HashMap, HashSet};
+use dynamic_geometry::{DynamicGeometryBuffer, DynamicGeometryPlugin, DynamicMaterial};
 
 use bevy::app::{App, PluginsState, TerminalCtrlCHandlerPlugin};
 use bevy::asset::{Assets, Handle, RenderAssetUsages};
@@ -117,13 +119,41 @@ impl Default for ObjectFlags {
 
 struct Object {
     /// One entity (and material) per face material ID drawn; one for a single material.
-    parts: Vec<(Entity, Handle<StandardMaterial>)>,
+    parts: Vec<(Entity, ObjectMaterial)>,
+    dynamic: bool,
+    material_dirty: bool,
+    buffers: Vec<DynamicGeometryBuffer>,
+    part_ids: Vec<Option<u16>>,
     mesh_hash: u64,
     transform: glam::Mat4,
     surfaces: Option<Surfaces>,
     wire_color: [u8; 3],
     renderable: bool,
     flags: ObjectFlags,
+}
+
+#[derive(Clone, Debug)]
+enum ObjectMaterial {
+    Standard(Handle<StandardMaterial>),
+    Dynamic(Handle<DynamicMaterial>),
+}
+
+impl ObjectMaterial {
+    fn edit(&self, world: &mut bevy::ecs::world::World, edit: impl FnOnce(&mut StandardMaterial)) {
+        match self {
+            Self::Standard(h) => {
+                if let Some(m) = world.resource_mut::<Assets<StandardMaterial>>().get_mut(h) { edit(m); }
+            }
+            Self::Dynamic(h) => {
+                if let Some(m) = world.resource_mut::<Assets<DynamicMaterial>>().get_mut(h) { edit(&mut m.base); }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn id(&self) -> bevy::asset::UntypedAssetId {
+        match self { Self::Standard(h) => h.id().untyped(), Self::Dynamic(h) => h.id().untyped() }
+    }
 }
 
 struct View {
@@ -189,7 +219,7 @@ pub struct BevyRenderer {
 struct ActiveRender {
     options: RenderOptions,
     /// Materials made 2-sided by Force 2-Sided, with their own setting.
-    two_sided: Vec<(Handle<StandardMaterial>, bool, Option<bevy::render::render_resource::Face>)>,
+    two_sided: Vec<(ObjectMaterial, bool, Option<bevy::render::render_resource::Face>)>,
 }
 
 impl BevyRenderer {
@@ -213,7 +243,7 @@ impl BevyRenderer {
                 .set(WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, close_when_requested: false })
                 .set(RenderPlugin { render_creation: RenderCreation::Manual(resources), synchronous_pipeline_compilation: true, ..Default::default() }),
         );
-        app.add_plugins(bake::BakePlugin);
+        app.add_plugins((bake::BakePlugin, DynamicGeometryPlugin));
         while app.plugins_state() == PluginsState::Adding {
             bevy::tasks::tick_global_task_pools_on_main_thread();
         }
@@ -368,40 +398,61 @@ impl BevyRenderer {
     /// Brings the Bevy scene in line with `objects`: new nodes are spawned,
     /// changed meshes or materials rebuilt, removed nodes despawned.
     pub fn sync(&mut self, objects: &[SceneObject]) {
+        self.sync_deforming(objects, &HashSet::new());
+    }
+
+    /// CPU-deformed nodes keep immutable Bevy mesh/material/entity handles;
+    /// only their final posed attributes and current bounds are uploaded.
+    pub fn sync_deforming(&mut self, objects: &[SceneObject], deforming: &HashSet<u64>) {
         let _scope = loom_render::profile::Scope::new("bevy.sync");
         let mut set = std::mem::take(&mut self.objects);
-        self.bounds = self.sync_set(&mut set, objects, false);
+        self.bounds = self.sync_set(&mut set, objects, false, deforming);
         self.objects = set;
     }
 
-    /// The hidden objects a Render Hidden Geometry render draws (seen by
-    /// renders only); an empty list removes them.
+    /// The hidden objects a Render Hidden Geometry render draws.
     pub fn sync_hidden(&mut self, objects: &[SceneObject]) {
+        self.sync_hidden_deforming(objects, &HashSet::new());
+    }
+
+    pub fn sync_hidden_deforming(&mut self, objects: &[SceneObject], deforming: &HashSet<u64>) {
         let mut set = std::mem::take(&mut self.hidden);
-        self.sync_set(&mut set, objects, true);
+        self.sync_set(&mut set, objects, true, deforming);
         self.hidden = set;
     }
 
     /// Brings `set` in line with `objects`; returns their bounds.
-    fn sync_set(&mut self, set: &mut HashMap<u64, Object>, objects: &[SceneObject], hidden: bool) -> Option<(Vec3, f32)> {
+    fn sync_set(&mut self, set: &mut HashMap<u64, Object>, objects: &[SceneObject], hidden: bool, deforming: &HashSet<u64>) -> Option<(Vec3, f32)> {
         let mut seen = HashSet::new();
         let mut lo = Vec3::splat(f32::MAX);
         let mut hi = Vec3::splat(f32::MIN);
         let mut batches = Vec::new();
         let mut materials = Vec::new();
         let mut material_data = Vec::new();
-        for o in objects {
+        let geometry = {
+            let _scope = loom_render::profile::Scope::new("bevy.geometry_data");
+            let jobs = objects.iter().map(|o| {
+                let key = (hidden, o.id);
+                (key, self.geometry.remove(&key).unwrap_or_default(), o.mesh)
+            }).collect();
+            prepared_geometry::prepare_batch(bevy_tasks::ComputeTaskPool::get(), jobs)
+        };
+        for (o, (key, cache, data)) in objects.iter().zip(geometry) {
+            self.geometry.insert(key, cache);
             seen.insert(o.id);
-            let data = self.geometry.entry((hidden,o.id)).or_default().mesh_data(o.mesh);
+            let dynamic = deforming.contains(&o.id) && !data.positions.is_empty();
             let mirrored = o.transform.determinant() < 0.0;
             if let Some(b) = data.aabb_transformed(o.transform) {
                 lo = lo.min(Vec3::from(b.min()));
                 hi = hi.max(Vec3::from(b.max()));
             }
-            let hash = data.content_hash() ^ convert::material_ids_hash(o.mesh).rotate_left(1) ^ (mirrored as u64).rotate_left(2);
+            let hash = {
+                let _scope = loom_render::profile::Scope::new("bevy.geometry_hash");
+                data.content_hash() ^ convert::material_ids_hash(o.mesh).rotate_left(1) ^ (mirrored as u64).rotate_left(2)
+            };
             let layers = self.object_layers(o.id, o.renderable, o.flags, hidden);
             if let Some(obj) = set.get_mut(&o.id) {
-                if obj.mesh_hash == hash && obj.surfaces == o.surfaces && obj.wire_color == o.wire_color && obj.flags.visibility == o.flags.visibility {
+                if !obj.material_dirty && obj.dynamic == dynamic && obj.mesh_hash == hash && obj.surfaces == o.surfaces && obj.wire_color == o.wire_color && obj.flags.visibility == o.flags.visibility {
                     if obj.transform != o.transform {
                         obj.transform = o.transform;
                         for (e, _) in &obj.parts {
@@ -432,11 +483,11 @@ impl BevyRenderer {
                 Some(Surfaces::Single(s)) => vec![(None, Some((**s).clone()))],
                 None => vec![(None, None)],
             };
-            for (e, _) in set.remove(&o.id).map(|obj| obj.parts).unwrap_or_default() {
-                self.app.world_mut().despawn(e);
-            }
+            let old = set.remove(&o.id);
+            let part_ids = parts.iter().map(|(id, _)| *id).collect::<Vec<_>>();
             let count = parts.len();
             for (id, surface) in parts {
+                let _scope = loom_render::profile::Scope::new("bevy.material_partition");
                 let mat = self.material(surface.as_ref(), o.wire_color, o.flags.visibility);
                 let faceted = surface.as_ref().is_some_and(|s| s.faceted);
                 let mut d = if id.is_none() && !faceted {
@@ -449,40 +500,77 @@ impl BevyRenderer {
                 material_data.push((d, mat.normal_map_texture.is_some()));
                 materials.push(mat);
             }
-            batches.push((o, hash, layers, count));
+            batches.push((o, hash, layers, count, dynamic, part_ids, old));
         }
         // Mesh/tangent work is independent across objects as well as material
         // IDs. Submit one batch so Body, Face and clothing can overlap.
         let meshes = convert::material_meshes(bevy_tasks::ComputeTaskPool::get(), &material_data);
         let mut prepared = materials.into_iter().zip(material_data).zip(meshes);
-        for (o, hash, layers, count) in batches {
+        for (o, hash, layers, count, dynamic, part_ids, mut old) in batches {
+            let prepared: Vec<_> = prepared.by_ref().take(count).collect();
+            let can_reuse = old.as_ref().is_some_and(|obj| dynamic && obj.dynamic
+                && !obj.material_dirty && obj.surfaces == o.surfaces && obj.wire_color == o.wire_color
+                && obj.flags.visibility == o.flags.visibility && obj.part_ids == part_ids
+                && obj.buffers.len() == count);
+            if can_reuse {
+                let obj = old.as_mut().unwrap();
+                let mut bounds = Vec::with_capacity(count);
+                for (buffer, (_, mesh)) in obj.buffers.iter_mut().zip(&prepared) {
+                    match buffer.update(&self.queue, mesh) { Ok(b) => bounds.push(b), Err(_) => break }
+                }
+                if bounds.len() == count {
+                    let _scope = loom_render::profile::Scope::new("bevy.entity_upload");
+                    for ((entity, _), bounds) in obj.parts.iter().zip(bounds) {
+                        let mut e = self.app.world_mut().entity_mut(*entity);
+                        e.insert((GlobalTransform::from(o.transform), bounds, layers.clone()));
+                        if o.transform == glam::Mat4::IDENTITY { e.insert(Transform::IDENTITY); } else { e.remove::<Transform>(); }
+                        Self::shadow_flags(e, Self::cast_flags(o));
+                    }
+                    obj.mesh_hash = hash;
+                    obj.transform = o.transform;
+                    obj.renderable = o.renderable;
+                    obj.flags = o.flags;
+                    set.insert(o.id, old.take().unwrap());
+                    self.settle = self.settle.max(3);
+                    continue;
+                }
+            }
+            if let Some(obj) = old {
+                for (e, _) in obj.parts { self.app.world_mut().despawn(e); }
+            }
             let mut entities = Vec::with_capacity(count);
-            for ((mat, (d, _)), mesh) in prepared.by_ref().take(count) {
+            let mut buffers = Vec::with_capacity(if dynamic { count } else { 0 });
+            for ((mat, (d, _)), mesh) in prepared {
+                let _scope = loom_render::profile::Scope::new("bevy.entity_upload");
+                let buffer = if dynamic {
+                    Some(DynamicGeometryBuffer::new(&self.device, &mesh)
+                        .expect("validated final posed geometry must fit the GPU storage limits"))
+                } else { None };
                 let world = self.app.world_mut();
                 let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
-                let material_handle = world.resource_mut::<Assets<StandardMaterial>>().add(mat);
-                let mut e = world.spawn((Transform::IDENTITY, GlobalTransform::from(o.transform), Mesh3d(mesh), MeshMaterial3d(material_handle.clone()), layers.clone()));
-                // Preserve the full affine matrix, including shear. These
-                // meshes have no Bevy parent; the host supplies their world transform.
+                let material_handle = if let Some((buffer, _)) = &buffer {
+                    ObjectMaterial::Dynamic(world.resource_mut::<Assets<DynamicMaterial>>().add(DynamicMaterial { base: mat, extension: buffer.extension() }))
+                } else { ObjectMaterial::Standard(world.resource_mut::<Assets<StandardMaterial>>().add(mat)) };
+                let mut e = world.spawn((Transform::IDENTITY, GlobalTransform::from(o.transform), Mesh3d(mesh), layers.clone()));
+                match &material_handle {
+                    ObjectMaterial::Standard(h) => { e.insert(MeshMaterial3d(h.clone())); }
+                    ObjectMaterial::Dynamic(h) => { e.insert(MeshMaterial3d(h.clone())); }
+                }
                 if o.transform != glam::Mat4::IDENTITY { e.remove::<Transform>(); }
                 let mut e = Self::shadow_flags(e, Self::cast_flags(o));
-                // Bevy computes bounds only once per entity: keep them current.
-                if let Some(b) = d.aabb() {
-                    e.insert(b);
-                }
+                if let Some((buffer, bounds)) = buffer { e.insert(bounds); buffers.push(buffer); }
+                else if let Some(b) = d.aabb() { e.insert(b); }
                 let entity = e.id();
                 if let Some(r) = self.render.as_mut().filter(|r| r.options.force_two_sided) {
-                    // A render in progress with Force 2-Sided: new materials too.
-                    let mut mats = self.app.world_mut().resource_mut::<Assets<StandardMaterial>>();
-                    if let Some(m) = mats.get_mut(&material_handle) {
+                    material_handle.edit(self.app.world_mut(), |m| {
                         r.two_sided.push((material_handle.clone(), m.double_sided, m.cull_mode));
                         m.double_sided = true;
                         m.cull_mode = None;
-                    }
+                    });
                 }
                 entities.push((entity, material_handle));
             }
-            set.insert(o.id, Object { parts: entities, mesh_hash: hash, transform: o.transform, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags });
+            set.insert(o.id, Object { parts: entities, dynamic, material_dirty: false, buffers, part_ids, mesh_hash: hash, transform: o.transform, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags });
             self.settle = self.settle.max(3);
         }
         let gone: Vec<u64> = set.keys().filter(|id| !seen.contains(id)).copied().collect();
@@ -535,8 +623,8 @@ impl BevyRenderer {
     pub fn reload_bitmaps(&mut self) {
         self.images.clear();
         self.textures.clear();
-        for obj in self.objects.values_mut() {
-            obj.mesh_hash = 0;
+        for obj in self.objects.values_mut().chain(self.hidden.values_mut()) {
+            obj.material_dirty = true;
         }
     }
 
@@ -710,14 +798,13 @@ impl BevyRenderer {
         world.insert_resource(DirectionalLightShadowMap { size: options.shadow_map_size.clamp(512, 8192) as usize });
         let mut two_sided = Vec::new();
         if options.force_two_sided {
-            let handles: Vec<Handle<StandardMaterial>> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
-            let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
+            let handles: Vec<ObjectMaterial> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
             for h in handles {
-                if let Some(m) = mats.get_mut(&h) {
-                    two_sided.push((h, m.double_sided, m.cull_mode));
+                h.edit(world, |m| {
+                    two_sided.push((h.clone(), m.double_sided, m.cull_mode));
                     m.double_sided = true;
                     m.cull_mode = None;
-                }
+                });
             }
         }
         self.render = Some(ActiveRender { options, two_sided });
@@ -767,12 +854,8 @@ impl BevyRenderer {
         self.apply_lights();
         let world = self.app.world_mut();
         world.insert_resource(DirectionalLightShadowMap { size: 2048 });
-        let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
         for (h, double_sided, cull) in r.two_sided {
-            if let Some(m) = mats.get_mut(&h) {
-                m.double_sided = double_sided;
-                m.cull_mode = cull;
-            }
+            h.edit(world, |m| { m.double_sided = double_sided; m.cull_mode = cull; });
         }
         if r.options.selected_only.is_some() {
             self.relayer();
@@ -813,6 +896,9 @@ impl BevyRenderer {
         }
         self.fit_shadows();
         self.app.update();
+        for obj in self.objects.values().chain(self.hidden.values()) {
+            for buffer in &obj.buffers { buffer.advance_history(&self.queue); }
+        }
         for v in self.views.values_mut() {
             v.used = false;
         }
