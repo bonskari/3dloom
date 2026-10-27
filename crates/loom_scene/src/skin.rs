@@ -678,6 +678,38 @@ impl SkinData {
         w
     }
 
+    // The apply loop owns one scratch allocation. Keep the public allocating
+    // methods as the reference for envelope weights and external callers.
+    fn vertex_weights_into(&self, i: usize, p_world: Vec3, out: &mut Vec<(u32, f32)>) {
+        if !self.explicit.get(i).copied().unwrap_or(false) {
+            *out = self.vertex_weights(i, p_world);
+            return;
+        }
+        out.clear();
+        if let Some(weights) = self.weights.get(i) { out.extend_from_slice(weights); }
+        out.retain(|(b, _)| (*b as usize) < self.bones.len());
+        limit(out, self.bone_affect_limit);
+        normalize(out);
+        if self.rigid_all || self.rigid.get(i).copied().unwrap_or(false) {
+            strongest_in_place(out);
+        }
+    }
+
+    fn point_weights_into(&self, i: usize, p_world: Vec3, handle_owner: Option<(usize, Vec3)>, out: &mut Vec<(u32, f32)>) {
+        if let Some((k, k_world)) = handle_owner {
+            if self.rigid_patch_handles_all {
+                self.vertex_weights_into(k, k_world, out);
+                return;
+            }
+            if self.rigid_handles.get(k).copied().unwrap_or(false) {
+                self.vertex_weights_into(k, k_world, out);
+                strongest_in_place(out);
+                return;
+            }
+        }
+        self.vertex_weights_into(i, p_world, out);
+    }
+
     /// Sets the bone's weight on a vertex (Abs. Effect / Weight Tool): the
     /// other bones share what is left, in proportion.
     pub fn set_weight(&mut self, vertex: usize, bone: u32, weight: f32, current: &[(u32, f32)]) {
@@ -718,6 +750,12 @@ impl SkinData {
 /// The strongest bone alone, at full weight.
 pub fn strongest(w: &[(u32, f32)]) -> Vec<(u32, f32)> {
     w.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).map(|b| vec![(b.0, 1.0)]).unwrap_or_default()
+}
+
+fn strongest_in_place(w: &mut Vec<(u32, f32)>) {
+    let strongest = w.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1));
+    w.clear();
+    if let Some((bone, _)) = strongest { w.push((bone, 1.0)); }
 }
 
 pub fn normalize(w: &mut Vec<(u32, f32)>) {
@@ -820,12 +858,13 @@ pub fn apply(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<St
     let nv = v.patch.as_ref().map_or(n, |p| p.verts.len());
     let owners = v.patch.as_ref().map(handle_owners).unwrap_or_default();
     let mut out = positions.clone();
+    let mut w = Vec::new();
     for (i, p) in positions.iter().enumerate() {
         let p_world = mesh_bind.transform_point3(*p);
         let owner = if i >= nv { owners.get(i - nv).copied().flatten().map(|k| (k, mesh_bind.transform_point3(positions[k]))) } else { None };
-        let mut w = data.point_weights(i, p_world, owner);
+        data.point_weights_into(i, p_world, owner, &mut w);
         if fast {
-            w = strongest(&w);
+            strongest_in_place(&mut w);
         }
         let sum: f32 = w.iter().map(|(_, x)| *x).sum();
         if sum <= 1e-6 {
@@ -1165,6 +1204,68 @@ pub mod gizmos {
                     *p = ctx.object_inverse.transform_point3(moved);
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod scratch_weight_tests {
+    use super::*;
+
+    fn bits(w: &[(u32, f32)]) -> Vec<(u32, u32)> {
+        w.iter().map(|(b, x)| (*b, x.to_bits())).collect()
+    }
+
+    #[test]
+    fn scratch_weights_match_public_reference_for_limits_flags_and_patch_owners() {
+        let bones: Vec<_> = (0..12).map(|i| (NodeId(i), Mat4::IDENTITY, Envelope::default())).collect();
+        let mut data = SkinData::from_file(&bones, Mat4::IDENTITY, vec![
+            vec![(11, 0.2), (3, 0.2), (8, 0.01), (0, 0.4), (2, 0.2), (5, 0.02), (7, 0.03), (4, 0.01), (10, 0.01), (1, 0.01), (9, 0.01), (6, 0.01), (999, 20.0), (1, 0.0), (2, -1.0)],
+            vec![(5, 0.5), (2, 0.5)],
+            vec![],
+            vec![(2, 1e-8), (3, f32::NAN)],
+        ]);
+        data.rigid_handles.resize(data.weights.len(), false);
+        data.bones[9].enabled = false;
+        data.excluded[4].insert(0);
+        let p = Vec3::new(3.0, 4.0, 0.0);
+        let mut scratch = vec![(123, 9.0); 64];
+        for limit in [0, 1, 4, 12, 20] {
+            data.bone_affect_limit = limit;
+            for flags in 0..128 {
+                for bone in &mut data.bones { bone.envelope.relative = flags & 64 != 0; }
+                data.explicit.fill(flags & 1 != 0);
+                data.rigid.fill(flags & 2 != 0);
+                data.rigid_all = flags & 4 != 0;
+                data.rigid_handles.fill(flags & 8 != 0);
+                data.rigid_patch_handles_all = flags & 16 != 0;
+                let fast = flags & 32 != 0;
+                for i in 0..6 {
+                    for owner in [None, Some((0, p)), Some((1, p)), Some((5, p))] {
+                        let mut expected = data.point_weights(i, p, owner);
+                        if fast { expected = strongest(&expected); }
+                        data.point_weights_into(i, p, owner, &mut scratch);
+                        if fast { strongest_in_place(&mut scratch); }
+                        assert_eq!(bits(&scratch), bits(&expected), "limit={limit}, flags={flags}, point={i}, owner={owner:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_weights_reuse_scratch_capacity_and_strongest_keeps_last_tie() {
+        let bones: Vec<_> = (0..12).map(|i| (NodeId(i), Mat4::IDENTITY, Envelope::default())).collect();
+        let data = SkinData::from_file(&bones, Mat4::IDENTITY, vec![(0..12).rev().map(|b| (b, 1.0)).collect()]);
+        let mut scratch = Vec::with_capacity(12);
+        let allocation = scratch.as_ptr();
+        for _ in 0..100 {
+            data.point_weights_into(0, Vec3::ZERO, None, &mut scratch);
+            assert_eq!(scratch.as_ptr(), allocation);
+            assert_eq!(scratch.len(), 12);
+            strongest_in_place(&mut scratch);
+            assert_eq!(scratch, [(11, 1.0)]);
+            assert_eq!(scratch.as_ptr(), allocation);
         }
     }
 }
