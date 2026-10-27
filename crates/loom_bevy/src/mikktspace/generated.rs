@@ -1845,3 +1845,7 @@ fn acosf64(value: f64) -> f64 { value.acos() }
 
 #[path = "parallel.rs"]
 mod parallel;
+
+#[cfg(test)]
+#[path = "edge_sort.rs"]
+mod edge_sort;

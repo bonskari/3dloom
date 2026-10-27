@@ -22,6 +22,12 @@ fn prepared_groups_preserve_complete_mikk_results() {
     let mut mirrored = cases[0].clone();
     for uv in &mut mirrored.uvs { uv[0] = -uv[0]; }
     cases.push(mirrored);
+    let mut reflected_normals = cases[0].clone();
+    for normal in &mut reflected_normals.normals { for c in normal { *c = -*c; } }
+    cases.push(reflected_normals);
+    let mut split_normals = cases[0].clone();
+    for normal in split_normals.normals.iter_mut().take(24) { *normal = [1.0, 0.0, 0.0]; }
+    cases.push(split_normals);
     let mut zero_uv = cases[0].clone();
     for uv in zero_uv.uvs.iter_mut().take(21) { *uv = [0.0; 2]; }
     cases.push(zero_uv);
