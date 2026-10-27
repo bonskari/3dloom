@@ -187,11 +187,26 @@ mod tests {
 
 #[derive(Debug)]
 pub(super) struct Prepared {
-    active_count: usize,
+    pub(super) active_count: usize,
+    canonical: Vec<u32>,
+    original_faces: Vec<u32>,
+    pub(super) flags: Vec<u32>,
+    neighbors: Vec<[i32; 3]>,
+}
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct StructuralKey {
     canonical: Vec<u32>,
     original_faces: Vec<u32>,
     flags: Vec<u32>,
-    neighbors: Vec<[i32; 3]>,
+}
+impl Prepared {
+    pub(super) fn structural_key(&self) -> StructuralKey {
+        StructuralKey {
+            canonical: self.canonical.clone(),
+            original_faces: self.original_faces.clone(),
+            flags: self.flags.clone(),
+        }
+    }
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -255,6 +270,7 @@ impl Program {
         let pipelines = [
             "weld",
             "canonical",
+            "degen_flags",
             "degen_prologue",
             "flags",
             "edges",
@@ -409,24 +425,55 @@ impl GpuPreparation {
         })
     }
     pub(super) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
-        for buffer in [&self.arena, &self.weld, &self.edges] {
-            encoder.clear_buffer(buffer, 0, None);
+        self.encode_timed(encoder, None);
+    }
+    pub(super) fn encode_timed(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        queries: Option<&wgpu::QuerySet>,
+    ) {
+        Self::encode_batch(encoder, &[self], queries);
+    }
+    pub(super) fn encode_batch(
+        encoder: &mut wgpu::CommandEncoder,
+        parts: &[&Self],
+        queries: Option<&wgpu::QuerySet>,
+    ) {
+        let Some(first) = parts.first() else {
+            return;
+        };
+        if let Some(queries) = queries {
+            encoder.write_timestamp(queries, 0);
         }
-        for (i, pipeline) in self.pipelines.iter().enumerate() {
+        for part in parts {
+            for buffer in [&part.arena, &part.weld, &part.edges] {
+                encoder.clear_buffer(buffer, 0, None);
+            }
+        }
+        if let Some(queries) = queries {
+            encoder.write_timestamp(queries, 1);
+        }
+        for (i, pipeline) in first.pipelines.iter().enumerate() {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("current Mikk preparation stage"),
-                timestamp_writes: None,
+                label: Some("batched current Mikk preparation stage"),
+                timestamp_writes: queries.map(|query_set| wgpu::ComputePassTimestampWrites {
+                    query_set,
+                    beginning_of_pass_write_index: Some(2 + 2 * i as u32),
+                    end_of_pass_write_index: Some(3 + 2 * i as u32),
+                }),
             });
             pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &self.group, &[]);
-            let count = if i == 2 {
-                1
-            } else if i == 3 {
-                self.params.counts[1].div_ceil(64)
-            } else {
-                (self.params.counts[1] * 3).div_ceil(64)
-            };
-            pass.dispatch_workgroups(count, 1, 1);
+            for part in parts {
+                pass.set_bind_group(0, &part.group, &[]);
+                let count = if i == 3 {
+                    1
+                } else if i == 2 || i == 4 {
+                    part.params.counts[1].div_ceil(64)
+                } else {
+                    (part.params.counts[1] * 3).div_ceil(64)
+                };
+                pass.dispatch_workgroups(count, 1, 1);
+            }
         }
     }
     pub(super) fn readback(

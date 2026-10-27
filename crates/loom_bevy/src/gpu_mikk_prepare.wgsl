@@ -45,19 +45,29 @@ fn canonical(@builtin(global_invocation_id) id: vec3<u32>) {
     let slot=atomicLoad(&arena[params.offsets0.x+id.x]);
     atomicStore(&arena[params.offsets0.y+id.x],atomicLoad(&weld_table[slot])-1u);
 }
-// Exact triangle-only DegenPrologue ordering. This serial stage is research,
-// has no timing claim, and preserves all degenerate triangles in the tail.
+// Parallel exact position-degeneracy detection and group-reduced active count.
+var<workgroup> good_counts: array<u32,64>;
+@compute @workgroup_size(64)
+fn degen_flags(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_index) local:u32){
+    var good=0u;
+    if id.x<params.counts.y {
+        let a=current(id.x*3u).position.xyz;let b=current(id.x*3u+1u).position.xyz;let c=current(id.x*3u+2u).position.xyz;
+        let degen=all(a==b)||all(a==c)||all(b==c);
+        atomicStore(&arena[params.offsets0.z+id.x],id.x);
+        atomicStore(&arena[params.offsets0.w+id.x],select(0u,1u,degen));
+        good=select(1u,0u,degen);
+    }
+    good_counts[local]=good;workgroupBarrier();
+    var stride=32u;
+    loop {if stride==0u{break;}if local<stride {good_counts[local]+=good_counts[local+stride];}workgroupBarrier();stride/=2u;}
+    if local==0u {atomicAdd(&arena[0],good_counts[0]);}
+}
+// Preserve exact existing swap ordering whenever degenerates actually exist.
+// The common all-good case now performs no serial per-triangle scan.
 @compute @workgroup_size(1)
 fn degen_prologue() {
-    var good_count=0u;
-    for(var t=0u;t<params.counts.y;t++){
-        let a=current(t*3u).position.xyz;let b=current(t*3u+1u).position.xyz;let c=current(t*3u+2u).position.xyz;
-        let degen=all(a==b)||all(a==c)||all(b==c);
-        atomicStore(&arena[params.offsets0.z+t],t);
-        atomicStore(&arena[params.offsets0.w+t],select(0u,1u,degen));
-        good_count+=select(1u,0u,degen);
-    }
-    atomicStore(&arena[0],good_count);
+    let good_count=atomicLoad(&arena[0]);
+    if good_count==params.counts.y {return;}
     var next=1u;
     for(var t=0u;t<good_count;t++){
         let original=atomicLoad(&arena[params.offsets0.z+t]);

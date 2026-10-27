@@ -680,7 +680,11 @@ mod tests {
         let (device, queue) = device();
         let preparation_program =
             prepare.then(|| super::mikk_prepare::Program::new(&device).unwrap());
+        let mut first_keys = std::collections::HashMap::new();
+        let mut previous_keys = std::collections::HashMap::new();
+        let (mut first_hits, mut previous_hits, mut guard_checks) = (0usize, 0usize, 0usize);
         for &time in times {
+            let mut preparation_jobs = Vec::new();
             scene.set_time(time);
             for id in &ids {
                 let node = scene.node(*id).unwrap();
@@ -795,10 +799,6 @@ mod tests {
                             program,
                         )
                         .unwrap();
-                        let mut encoder = device.create_command_encoder(&Default::default());
-                        preparation.encode(&mut encoder);
-                        queue.submit([encoder.finish()]);
-                        let output = preparation.readback(&device, &queue).unwrap();
                         let current = &records[range.clone()];
                         let same_gpu = crate::MeshData {
                             positions: current
@@ -815,8 +815,13 @@ mod tests {
                                 .collect(),
                             indices: template.indices.clone(),
                         };
-                        super::mikk_prepare::compare_cpu(&same_gpu, &output);
-                        eprintln!("GPU_CURRENT_PREP node={} time={time} part={part} corners={} exact_weld_flags_neighbors=PASS",node.name,indices.len());
+                        preparation_jobs.push((
+                            node.name.clone(),
+                            part,
+                            indices.len(),
+                            preparation,
+                            same_gpu,
+                        ));
                     }
                     continue;
                 }
@@ -973,6 +978,70 @@ mod tests {
                     );
                 }
             }
+            if !preparation_jobs.is_empty() {
+                assert!(device.features().contains(
+                    wgpu::Features::TIMESTAMP_QUERY
+                        | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
+                ));
+                let queries = device.create_query_set(&wgpu::QuerySetDescriptor {
+                    label: Some("actual all-part current preparation stage costs"),
+                    ty: wgpu::QueryType::Timestamp,
+                    count: 16,
+                });
+                let query_results = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size: 16 * 8,
+                    usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                });
+                let refs: Vec<_> = preparation_jobs.iter().map(|job| &job.3).collect();
+                let mut encoder = device.create_command_encoder(&Default::default());
+                let dispatch = std::time::Instant::now();
+                super::mikk_prepare::GpuPreparation::encode_batch(
+                    &mut encoder,
+                    &refs,
+                    Some(&queries),
+                );
+                encoder.resolve_query_set(&queries, 0..16, &query_results, 0);
+                let encode_ms = dispatch.elapsed().as_secs_f64() * 1000.0;
+                let submit = std::time::Instant::now();
+                queue.submit([encoder.finish()]);
+                let submit_ms = submit.elapsed().as_secs_f64() * 1000.0;
+                let stamps: Vec<u64> = super::read_records(&device, &queue, &query_results, 16);
+                let costs: Vec<_> = stamps
+                    .chunks_exact(2)
+                    .map(|v| (v[1] - v[0]) as f64 * f64::from(queue.get_timestamp_period()) / 1e6)
+                    .collect();
+                let span =
+                    (stamps[15] - stamps[0]) as f64 * f64::from(queue.get_timestamp_period()) / 1e6;
+                eprintln!("GPU_PREP_BATCH time={time} parts={} clear_ms={:.6} weld_ms={:.6} canonical_ms={:.6} degen_flags_ms={:.6} degen_ms={:.6} flags_ms={:.6} edges_ms={:.6} pair_ms={:.6} gpu_span_ms={span:.6} cpu_encode_ms={encode_ms:.6} cpu_submit_ms={submit_ms:.6}",refs.len(),costs[0],costs[1],costs[2],costs[3],costs[4],costs[5],costs[6],costs[7]);
+                for (name, part, corners, preparation, same_gpu) in preparation_jobs {
+                    let output = preparation.readback(&device, &queue).unwrap();
+                    let identity = (name.clone(), part);
+                    let key = output.structural_key();
+                    if let Some(first) = first_keys.get(&identity) {
+                        guard_checks += 1;
+                        if first == &key {
+                            first_hits += 1;
+                        } else {
+                            eprintln!("GPU_RECIPE_GUARD_MISS baseline=first node={name} time={time} part={part}");
+                        }
+                        if previous_keys.get(&identity) == Some(&key) {
+                            previous_hits += 1;
+                        } else {
+                            eprintln!("GPU_RECIPE_GUARD_MISS baseline=previous node={name} time={time} part={part}");
+                        }
+                    } else {
+                        first_keys.insert(identity.clone(), key.clone());
+                    }
+                    previous_keys.insert(identity, key);
+                    super::mikk_prepare::compare_cpu(&same_gpu, &output);
+                    eprintln!("GPU_CURRENT_PREP node={name} time={time} part={part} corners={corners} degen={} any={} exact_weld_flags_neighbors=PASS",corners/3-output.active_count,output.flags[..output.active_count].iter().filter(|f|**f&4!=0).count());
+                }
+            }
+        }
+        if prepare {
+            eprintln!("GPU_RECIPE_GUARD_RESULT poses={} parts={} checks={guard_checks} first_hits={first_hits} previous_hits={previous_hits}",times.len(),first_keys.len());
         }
     }
 }

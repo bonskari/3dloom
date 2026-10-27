@@ -118,3 +118,36 @@ Its 239.88-second test duration includes CPU oracles and GPU readbacks and is
 not a rendering throughput measurement. The current full Bevy lib test binary
 passed 47 tests with 18 opt-in tests ignored; all three preparation synthetic
 tests passed.
+
+### Stage timestamps and structural recipe reuse
+
+GPU timestamp queries exposed a prototype bottleneck: serial DegenPrologue took
+58.6–59.2 ms across thirteen Ray parts at the three sampled poses, even though
+all parts had zero position-degenerate triangles. Parallel per-triangle flags
+and workgroup-reduced active counts now establish identity order, and the
+original serial swap procedure runs only when degenerates exist. Synthetic
+interspersed/all-degenerate ordering is still checked against the CPU path.
+
+All thirteen parts now dispatch in one encoder with one pass per stage and one
+submit. Across 317 poses, GPU preparation span averaged 1.026 ms (p50 0.811,
+p95 2.609, maximum 9.744); CPU encoding averaged 0.758 ms and submission 0.155
+ms in the optimized isolated probe. The three-pose sample alone was much faster
+(0.139–0.157 ms GPU); it should not substitute for the longer result. These
+measurements exclude upload, normal generation, final tangents and rendering.
+Timestamp queries and oracle readbacks are also not a production frame loop.
+
+Canonical current weld classes, exact active/tail face order and initial flags
+were compared against both the first and previous pose. Both guards hit all
+4108 non-initial part checks (317 poses, thirteen initial parts). All 4121 CPU
+structural parity checks passed. This supports a hybrid current structural
+compiler plus GPU dynamic tangent math, rather than requiring GPU group
+construction for this animation. Cached recipes must still validate these
+current guards and recompile on misses before presenting candidate output.
+Sixteen current UV/derivative-degenerate Any triangles are present on Face
+parts; their globally ordered orientation decisions cannot be dropped.
+
+A separate full-width avalanche hash candidate was tested on another 317-pose
+sweep and removed: measured GPU span averaged 1.667 ms, worse than the original
+hash run. Both retained exact structure/guard results. No hash-collision cause
+for the timing variability is established. A sampled isolated run had GPU P5
+and 405 MHz memory clocks; sustained production/render timing remains required.
