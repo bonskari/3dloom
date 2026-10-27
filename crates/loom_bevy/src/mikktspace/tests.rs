@@ -222,6 +222,7 @@ fn actual_ray_subgroup_storage_reuse_matches_original_and_times() {
     assert_eq!(ids.len(),2);
     let pool=bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
     let mut old:[NeighborCache;2]=Default::default();let mut new:[NeighborCache;2]=Default::default();
+    for cache in old.iter_mut().chain(new.iter_mut()) {cache.weld_validation.enabled=false;}
     let mut totals=[(0.0,0.0);2];
     for (pose,frame) in (0..=157).map(|f|f as f32).chain([39.25]).enumerate() {
         scene.set_time(frame);
@@ -279,6 +280,7 @@ fn actual_ray_projection_reuse_matches_allocation_baseline_and_times() {
     assert_eq!(ids.len(),2);
     let pool=bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
     let mut old:[NeighborCache;2]=Default::default();let mut new:[NeighborCache;2]=Default::default();
+    for cache in old.iter_mut().chain(new.iter_mut()) {cache.weld_validation.enabled=false;}
     let mut totals=[(0.0,0.0);2];
     for (pose,frame) in (0..=157).map(|f|f as f32).chain([39.25]).enumerate() {
         scene.set_time(frame);
@@ -403,6 +405,7 @@ fn actual_ray_weld_validation_matches_current_builder_and_times() {
     let pool=bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
     let mut old:[NeighborCache;2]=Default::default();let mut new:[NeighborCache;2]=Default::default();
     let mut totals=[(0.0,0.0);2];
+    for cache in &mut old {cache.weld_validation.enabled=false;}
     for cache in &mut new {cache.weld_validation.enabled=true;}
     for (pose,frame) in (0..=157).map(|f|f as f32).chain([39.25]).enumerate() {
         scene.set_time(frame);

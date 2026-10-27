@@ -248,13 +248,9 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
         geometry,
         iNrTrianglesIn,
     );
-    #[cfg(test)]
     let restored_weld = super::weld_validation::restore(&mut piTriListIn);
-    #[cfg(not(test))]
-    let restored_weld = false;
     if !restored_weld {
         GenerateSharedVerticesIndexList(piTriListIn.as_mut_ptr(), geometry, iNrTrianglesIn, pool);
-        #[cfg(test)]
         super::weld_validation::record(&piTriListIn);
     }
     iTotTris = iNrTrianglesIn;

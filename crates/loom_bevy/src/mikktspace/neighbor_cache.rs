@@ -1,5 +1,5 @@
-//! Pose-dependent welding is always recomputed. Cache only corrected manifold
-//! adjacency after checking its complete current dependency set.
+//! Cache only proven current-attribute welding and corrected manifold
+//! adjacency after checking their complete current dependency sets.
 use super::generated::STriInfo;
 
 #[derive(PartialEq, Eq)]
@@ -11,7 +11,6 @@ struct Entry { guard: Guard, neighbors: Vec<[i32; 3]> }
 
 #[derive(Default)]
 pub(crate) struct NeighborCache {
-    #[cfg(test)]
     pub(crate) weld_validation: super::weld_validation::WeldValidation,
     entry: Option<Entry>,
     pending: Option<Guard>,

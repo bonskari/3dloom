@@ -1,17 +1,35 @@
-//! Test-only previous-partition proof. Never substitutes a rest-pose attribute.
+//! Current-attribute partition proof. Never substitutes a rest-pose attribute.
 use super::MeshData;
 use std::cell::RefCell;
 use std::collections::{HashMap,HashSet};
 
-#[derive(Default)]
 pub(crate) struct WeldValidation {
+    #[cfg(test)]
     pub enabled: bool,
+    #[cfg(test)]
     pub hits: usize,
+    #[cfg(test)]
     pub misses: usize,
+    #[cfg(test)]
     pub bit_rejects: usize,
+    #[cfg(test)]
     pub merge_rejects: usize,
+    #[cfg(test)]
     pub nonfinite_rejects: usize,
     entry: Option<Entry>,
+}
+impl Default for WeldValidation {
+    fn default() -> Self {
+        Self {
+            #[cfg(test)] enabled: true,
+            #[cfg(test)] hits: 0,
+            #[cfg(test)] misses: 0,
+            #[cfg(test)] bit_rejects: 0,
+            #[cfg(test)] merge_rejects: 0,
+            #[cfg(test)] nonfinite_rejects: 0,
+            entry: None,
+        }
+    }
 }
 struct Input {
     indices: Vec<u32>, uvs: Vec<[f32;2]>, dimensions: [usize;3], nondegenerate: bool,
@@ -89,9 +107,12 @@ impl Entry {
 
 pub(super) struct Scope { depth:usize,closed:bool }
 pub(super) fn begin(data:&MeshData,cache:Option<WeldValidation>)->Scope {
-    let _timer=loom_render::profile::Scope::new("mikk.weld_validation");
-    let active=cache.map(|mut cache| {
+    let active=cache.map(|cache| {
+        #[cfg(test)]
+        let mut cache = cache;
+        let _timer=loom_render::profile::Scope::new("mikk.weld_validation");
         let result=cache.entry.as_ref().map_or(Err(0),|entry|entry.validate(data));
+        #[cfg(test)]
         match result {Err(1)=>cache.bit_rejects+=1,Err(2)=>cache.merge_rejects+=1,Err(3)=>cache.nonfinite_rejects+=1,_=>{}}
         let proven=result.is_ok();
         let input=(!proven).then(||Input{indices:data.indices.clone(),uvs:data.uvs.clone(),dimensions:[data.positions.len(),data.normals.len(),data.uvs.len()],nondegenerate:nondegenerate(data)});
@@ -113,8 +134,14 @@ pub(super) fn restore(indices:&mut [i32])->bool {
         let mut stack=s.borrow_mut();let Some(Some(active))=stack.last_mut() else{return false;};
         if active.proven {
             let entry=active.cache.entry.as_ref().unwrap();assert_eq!(indices.len(),entry.welded.len());
-            indices.copy_from_slice(&entry.welded);active.cache.hits+=1;true
-        } else {active.cache.misses+=1;false}
+            let _timer=loom_render::profile::Scope::new("mikk.weld_reuse");
+            indices.copy_from_slice(&entry.welded);
+            #[cfg(test)] {active.cache.hits+=1;}
+            true
+        } else {
+            #[cfg(test)] {active.cache.misses+=1;}
+            false
+        }
     })
 }
 pub(super) fn record(indices:&[i32]) {
