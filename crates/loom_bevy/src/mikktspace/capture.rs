@@ -6,6 +6,8 @@ use std::cell::{Cell, RefCell};
 pub(super) struct Snapshot {
     pub(super) indices: Vec<i32>,
     pub(super) flags: Vec<(i32, i32)>,
+    pub(super) neighbors: Vec<[i32; 3]>,
+    pub(super) active_count: usize,
 }
 
 thread_local! {
@@ -13,11 +15,11 @@ thread_local! {
     static LAST: RefCell<Option<Snapshot>> = const { RefCell::new(None) };
 }
 
-pub(super) fn enable() { ENABLED.with(|v| v.set(true)); }
+pub(super) fn enable() { ENABLED.with(|v| v.set(true)); LAST.with(|v| *v.borrow_mut() = None); }
 pub(super) fn take() -> Snapshot { LAST.with(|v| v.borrow_mut().take().expect("preparation capture")) }
-pub(super) fn record(indices: &[i32], triangles: &[STriInfo]) {
+pub(super) fn record(indices: &[i32], triangles: &[STriInfo], active_count: usize) {
     if ENABLED.with(Cell::get) {
-        LAST.with(|v| *v.borrow_mut() = Some(Snapshot { indices: indices.to_vec(), flags: triangles.iter().map(|tri| (tri.iOrgFaceNumber, tri.iFlag)).collect() }));
+        LAST.with(|v| *v.borrow_mut() = Some(Snapshot { indices: indices.to_vec(), flags: triangles.iter().map(|tri| (tri.iOrgFaceNumber, tri.iFlag)).collect(), neighbors: triangles.iter().map(|tri| tri.FaceNeighbors).collect(), active_count }));
     }
 }
 
@@ -59,4 +61,30 @@ pub(super) fn record_group(fixture: GroupFixture) {
             if groups.len() < 256 { groups.push(fixture); }
         }
     });
+}
+
+
+#[derive(Clone, Debug)]
+pub(crate) struct PreparationTriangle {
+    pub original_face: i32,
+    pub flags: i32,
+    /// Prepared-triangle indices; only active triangles have valid neighbors.
+    pub neighbors: [i32; 3],
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PreparationFixture {
+    pub indices: Vec<i32>,
+    pub triangles: Vec<PreparationTriangle>,
+    pub active_count: usize,
+}
+
+pub(super) fn finish_preparation() -> PreparationFixture {
+    ENABLED.with(|v| v.set(false));
+    let snapshot = take();
+    PreparationFixture {
+        indices: snapshot.indices,
+        triangles: snapshot.flags.into_iter().zip(snapshot.neighbors).map(|((original_face, flags), neighbors)| PreparationTriangle { original_face, flags, neighbors }).collect(),
+        active_count: snapshot.active_count,
+    }
 }

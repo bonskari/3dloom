@@ -82,3 +82,15 @@ mod capture;
 
 #[cfg(test)]
 pub(crate) use capture::{enable_group_capture, take_group_captures, GroupFace, GroupFixture};
+
+#[cfg(test)]
+pub(crate) use capture::{PreparationFixture, PreparationTriangle};
+
+/// Structural oracle on the caller's current triangle attributes, including
+/// inactive degenerate tails. No GPU/rest-pose data is substituted here.
+#[cfg(test)]
+pub(crate) fn capture_preparation(data: &MeshData) -> PreparationFixture {
+    capture::enable();
+    let _ = generate_serial(data);
+    capture::finish_preparation()
+}

@@ -232,6 +232,8 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
         f += 1
     }
     if iNrTrianglesIn <= 0 {
+        #[cfg(test)]
+        super::capture::record(&[], &[], 0);
         return false;
     }
 
@@ -264,6 +266,8 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
     iNrTrianglesIn = iTotTris - iDegenTriangles;
 
     if iNrTrianglesIn <= 0 {
+        #[cfg(test)]
+        super::capture::record(&piTriListIn, &pTriInfos, 0);
         return false;
     }
     DegenPrologue(
@@ -281,7 +285,7 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
         cache,
     );
     #[cfg(test)]
-    super::capture::record(&piTriListIn, &pTriInfos);
+    super::capture::record(&piTriListIn, &pTriInfos, iNrTrianglesIn);
     iNrMaxGroups = iNrTrianglesIn * 3;
 
     let mut pGroups = vec![SGroup::zero(); iNrMaxGroups];

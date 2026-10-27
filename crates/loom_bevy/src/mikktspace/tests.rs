@@ -299,3 +299,32 @@ fn actual_ray_projection_reuse_matches_allocation_baseline_and_times() {
     }
     for ((_,name),(original,reused)) in ids.iter().zip(totals) {eprintln!("GROUP_PROJECTION name={name} poses=159 original_ms={:.3} reused_ms={:.3}",original/159.0,reused/159.0);}
 }
+
+#[test]
+fn preparation_fixture_retains_degenerate_mapping_and_corrected_neighbors() {
+    let mut data=MeshData {
+        positions:vec![[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,1.0,0.0],[1.0,1.0,0.0]],
+        normals:vec![[0.0,0.0,1.0];4],uvs:vec![[0.0,0.0],[1.0,0.0],[0.0,1.0],[1.0,1.0]],
+        indices:vec![0,0,1,0,1,2,2,1,3],
+    };
+    let fixture=capture_preparation(&data);
+    assert_eq!(fixture.active_count,2);
+    assert_eq!(fixture.indices.len(),9);
+    assert_eq!(fixture.triangles.len(),3);
+    assert_eq!(fixture.triangles[2].original_face,0);
+    assert_ne!(fixture.triangles[2].flags&1,0);
+    let first=fixture.triangles.iter().position(|t|t.original_face==1).unwrap();
+    let second=fixture.triangles.iter().position(|t|t.original_face==2).unwrap();
+    let first_triangle:&PreparationTriangle=&fixture.triangles[first];
+    assert_eq!(first_triangle.neighbors[1],second as i32);
+    assert_eq!(fixture.triangles[second].neighbors[0],first as i32);
+    data.indices=vec![0,0,1];
+    let all_degenerate=capture_preparation(&data);
+    assert_eq!(all_degenerate.active_count,0);
+    assert_eq!(all_degenerate.triangles.len(),1);
+    assert_ne!(all_degenerate.triangles[0].flags&1,0);
+    data.indices.clear();
+    let empty=capture_preparation(&data);
+    assert_eq!(empty.active_count,0);
+    assert!(empty.triangles.is_empty()&&empty.indices.is_empty());
+}
