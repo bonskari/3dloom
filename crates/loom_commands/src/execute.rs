@@ -971,7 +971,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 state.fps = f;
             }
             state.frame_range = (s0, s1);
-            set_frame(state, state.current_frame)?;
+            let frame = state.current_frame.clamp(s0, s1);
+            if frame != state.current_frame {
+                set_frame(state, frame)?;
+            } else {
+                state.playback.accum = 0.0;
+            }
             Ok(json!({ "start": s0, "end": s1, "fps": state.fps, "frame": state.current_frame }))
         }
         C::SetFov { degrees } => {

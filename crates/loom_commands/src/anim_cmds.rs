@@ -350,7 +350,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 p.direction = v;
             }
             if snap {
-                set_frame(state, state.current_frame)?;
+                state.playback.accum = 0.0;
             }
             Ok(state_json(state))
         }

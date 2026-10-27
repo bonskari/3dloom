@@ -438,3 +438,21 @@ fn real_time_supported_speeds_keep_direction_semantics_and_large_frame_loops() {
     assert_eq!(s.current_frame,i32::MAX-2,"loop arithmetic must not overflow before wrapping");
     assert!(s.scene.time().is_finite());
 }
+
+#[test]
+fn playback_configuration_does_not_rebase_an_unkeyed_pose_at_the_same_frame() {
+    for fps_change in [false,true] {
+        let mut s=AppState::new();
+        let id=boxed(&mut s);
+        execute(&mut s,Command::SetKeyMode).unwrap();
+        frame(&mut s,10);
+        mv(&mut s,[20.0,0.0,0.0]);
+        if fps_change {
+            execute(&mut s,Command::SetTimeConfiguration{start:None,end:None,fps:Some(60.0)}).unwrap();
+        } else {
+            execute(&mut s,Command::SetPlayback{real_time:Some(false),loop_playback:None,speed:None,direction:None}).unwrap();
+        }
+        frame(&mut s,20);
+        assert!(s.scene.world_matrix(id).w_axis.x.abs()<1e-5,"configuration must preserve the original Set Key discard point");
+    }
+}
