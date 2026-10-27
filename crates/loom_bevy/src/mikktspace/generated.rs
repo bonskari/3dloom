@@ -680,6 +680,26 @@ unsafe fn EvalTspace<I: Geometry>(
     geometry: &mut I,
     iVertexRepresentative: i32,
 ) -> STSpace {
+    #[cfg(test)]
+    let captured_faces = if super::capture::wants_group() {
+        let mut faces = Vec::with_capacity(iFaces as usize);
+        for member in 0..iFaces {
+            let f = *face_indices.offset(member as isize);
+            let triangle = &*pTriInfos.offset(f as isize);
+            let ids = std::slice::from_raw_parts(piTriListIn.offset((f * 3) as isize), 3);
+            let corner = ids.iter().position(|id| *id == iVertexRepresentative).expect("group vertex belongs to member face");
+            faces.push(super::capture::GroupFace {
+                normal: get_normal(geometry, ids[corner] as usize).to_array(),
+                prev: get_position(geometry, ids[(corner + 2) % 3] as usize).to_array(),
+                position: get_position(geometry, ids[corner] as usize).to_array(),
+                next: get_position(geometry, ids[(corner + 1) % 3] as usize).to_array(),
+                os: triangle.vOs.to_array(), ot: triangle.vOt.to_array(),
+                mag_s: triangle.fMagS, mag_t: triangle.fMagT,
+                skip: triangle.iFlag & 4 != 0,
+            });
+        }
+        Some(faces)
+    } else { None };
     let mut res: STSpace = STSpace {
         vOs: Vec3::new(0.0, 0.0, 0.0),
         fMagS: 0.,
@@ -783,6 +803,13 @@ unsafe fn EvalTspace<I: Geometry>(
     if fAngleSum > 0i32 as f32 {
         res.fMagS /= fAngleSum;
         res.fMagT /= fAngleSum
+    }
+    #[cfg(test)]
+    if let Some(faces) = captured_faces {
+        super::capture::record_group(super::capture::GroupFixture {
+            faces, expected_s: res.vOs.to_array(), expected_t: res.vOt.to_array(),
+            expected_mag_s: res.fMagS, expected_mag_t: res.fMagT,
+        });
     }
     return res;
 }

@@ -74,3 +74,6 @@ mod tests;
 
 #[cfg(test)]
 mod capture;
+
+#[cfg(test)]
+pub(crate) use capture::{enable_group_capture, take_group_captures, GroupFace, GroupFixture};

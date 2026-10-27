@@ -242,3 +242,29 @@ fn actual_ray_subgroup_storage_reuse_matches_original_and_times() {
     }
     for ((_,name),(original,reused)) in ids.iter().zip(totals) {eprintln!("SUBGROUP_STORAGE name={name} poses=159 original_ms={:.3} reused_ms={:.3}",original/159.0,reused/159.0);}
 }
+
+#[test]
+fn cpu_group_fixtures_are_bounded_and_do_not_change_tangent_output() {
+    let mut mesh=loom_mesh::sphere_segmented(1.0,32,0.0);
+    loom_mesh::uvmap::auto_map(&mut mesh,loom_mesh::uvmap::AutoMap::Spherical,1);
+    let data=mesh_data(&mesh);
+    let expected=generate_serial(&data).unwrap();
+    enable_group_capture();
+    let actual=generate_serial(&data).unwrap();
+    assert_eq!(bits(&actual),bits(&expected));
+    let fixtures:Vec<GroupFixture>=take_group_captures();
+    assert_eq!(fixtures.len(),256);
+    assert!(fixtures.iter().any(|f|f.faces.len()>1));
+    for fixture in fixtures {
+        assert!(fixture.expected_s.iter().chain(&fixture.expected_t).all(|v|v.is_finite()));
+        assert!(fixture.expected_mag_s.is_finite()&&fixture.expected_mag_t.is_finite());
+        for face in &fixture.faces {
+            let face:&GroupFace=face;
+            assert!(face.normal.iter().chain(&face.position).chain(&face.prev).chain(&face.next).chain(&face.os).chain(&face.ot).all(|v|v.is_finite()));
+            assert!(face.mag_s.is_finite()&&face.mag_t.is_finite());
+            if !face.skip {assert!(face.mag_s>=0.0&&face.mag_t>=0.0);}
+        }
+    }
+    generate_serial(&data).unwrap();
+    assert!(take_group_captures().is_empty(),"recording stops after take");
+}
