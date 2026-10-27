@@ -48,17 +48,27 @@ fn actual_all_ray_poses_match_original_mikk() {
     assert_eq!(ids.len(), 2);
     let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
     let mut totals = [(0.0, 0.0, 0); 2];
+    let mut caches = [crate::prepared_geometry::GeometryCache::default(), crate::prepared_geometry::GeometryCache::default()];
     for frame in (start..=end).map(|f| f as f32).chain([39.25]) {
         scene.set_time(frame);
         for (index, (id, name)) in ids.iter().enumerate() {
             let mut mesh = scene.eval_mesh(*id).value.mesh.clone();
             loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(*id)).unwrap();
             let data = mesh_data_by_id(&mesh).into_iter().find(|(id, _)| *id == 0).unwrap().1;
+            let cached_full = caches[index].mesh_data(&mesh);
+            let cached = crate::convert::mesh_data_part(&mesh, &cached_full, Some(0), false);
+            assert_eq!(cached.indices, data.indices, "{name} indices frame {frame}");
+            for (actual, expected) in [(&cached.positions, &data.positions), (&cached.normals, &data.normals)] {
+                assert_eq!(actual.len(), expected.len());
+                assert!(actual.iter().flatten().zip(expected.iter().flatten()).all(|(a,b)| a.to_bits() == b.to_bits()), "{name} geometry bits frame {frame}");
+            }
+            assert_eq!(cached.uvs.len(), data.uvs.len());
+            assert!(cached.uvs.iter().flatten().zip(data.uvs.iter().flatten()).all(|(a,b)| a.to_bits() == b.to_bits()), "{name} UV bits frame {frame}");
             let t = std::time::Instant::now();
             let expected = serial(&data).unwrap();
             totals[index].0 += t.elapsed().as_secs_f64() * 1000.0;
             let t = std::time::Instant::now();
-            let actual = generate_parallel(&pool, &data).expect("prepared generation");
+            let actual = generate_parallel(&pool, &cached).expect("prepared generation");
             totals[index].1 += t.elapsed().as_secs_f64() * 1000.0;
             totals[index].2 += 1;
             assert_eq!(bits(&actual), bits(&expected), "{name} frame {frame}");
