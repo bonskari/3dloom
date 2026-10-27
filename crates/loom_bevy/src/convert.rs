@@ -697,7 +697,12 @@ mod tests {
         let pool=bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
         let mut elapsed=0.0;let mut comparisons=0;
         let mut original_changes=[(0usize,0usize,0.0f32);13];
-        for frame in (0..=157).map(|f|f as f32).chain([39.25]) {
+        let mut frames: Vec<_> = (0..=157).map(|f| f as f32).chain([39.25]).collect();
+        if std::env::var_os("LOOM_SUBFRAME_PARITY").is_some() {
+            frames.extend((0..=157).map(|f| f as f32 + 0.5));
+        }
+        let poses = frames.len();
+        for frame in frames {
             scene.set_time(frame);
             let mut parts=Vec::new();
             for (i,id) in ids.iter().enumerate() {
@@ -739,7 +744,7 @@ mod tests {
             }
         }
         for (part,(poses,corners,max_delta)) in original_changes.into_iter().enumerate() {eprintln!("ORIGINAL_SUM part={part} poses={poses} corners={corners} max_delta={max_delta}");}
-        eprintln!("MATERIAL_BATCH poses=159 parts=13 tangent_comparisons={comparisons} avg_ms={:.3} cache_hits={} cache_misses={}",elapsed/159.0,caches.iter().map(|c|c.hits).sum::<usize>(),caches.iter().map(|c|c.misses).sum::<usize>());
+        eprintln!("MATERIAL_BATCH poses={poses} parts=13 tangent_comparisons={comparisons} avg_ms={:.3} cache_hits={} cache_misses={}",elapsed/poses as f64,caches.iter().map(|c|c.hits).sum::<usize>(),caches.iter().map(|c|c.misses).sum::<usize>());
     }
 
 }
