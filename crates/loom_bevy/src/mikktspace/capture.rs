@@ -102,6 +102,8 @@ pub(crate) struct GroupPreparationFixture {
     pub preparation: PreparationFixture,
     pub assigned_groups: Vec<[i32; 3]>,
     pub groups: Vec<PreparationGroup>,
+    /// Current InitTriInfo derivatives in prepared triangle order; no output tangents.
+    pub derivatives: Vec<[[f32; 4]; 2]>,
 }
 
 thread_local! {
@@ -135,6 +137,7 @@ pub(super) fn record_prepared_groups(indices: &[i32], triangles: &[STriInfo], gr
             triangles:triangles.iter().map(|t|PreparationTriangle{original_face:t.iOrgFaceNumber,flags:t.iFlag,neighbors:t.FaceNeighbors}).collect(),
             active_count,
         },assigned_groups,groups,
+        derivatives: triangles.iter().map(|t| [[t.vOs.x, t.vOs.y, t.vOs.z, t.fMagS], [t.vOt.x, t.vOt.y, t.vOt.z, t.fMagT]]).collect(),
     };
     PREPARED_GROUPS.with(|v|*v.borrow_mut()=Some(fixture));
 }

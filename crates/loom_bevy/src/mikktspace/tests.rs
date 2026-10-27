@@ -338,6 +338,9 @@ fn prepared_group_fixture_records_actual_order_and_pointer_free_membership() {
     let data=mesh_data(&mesh);
     let fixture=capture_group_preparation(&data);
     assert!(!fixture.groups.is_empty());
+    assert_eq!(fixture.derivatives.len(),fixture.preparation.triangles.len());
+    assert!(fixture.derivatives.iter().flatten().flatten().all(|v|v.is_finite()));
+    assert!(fixture.derivatives.iter().any(|rows|rows[0][3]>0.0&&rows[1][3]>0.0));
     for (group_id,group) in fixture.groups.iter().enumerate() {
         let group:&PreparationGroup=group;
         assert!(!group.members.is_empty());
@@ -351,7 +354,7 @@ fn prepared_group_fixture_records_actual_order_and_pointer_free_membership() {
     }
     let empty=MeshData{positions:Vec::new(),normals:Vec::new(),uvs:Vec::new(),indices:Vec::new()};
     let fixture=capture_group_preparation(&empty);
-    assert!(fixture.groups.is_empty()&&fixture.assigned_groups.is_empty());
+    assert!(fixture.groups.is_empty()&&fixture.assigned_groups.is_empty()&&fixture.derivatives.is_empty());
     assert_eq!(fixture.preparation.active_count,0);
 }
 
