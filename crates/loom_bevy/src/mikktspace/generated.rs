@@ -272,6 +272,7 @@ pub unsafe fn genTangSpace<I: Geometry + Sync>(geometry: &mut I, fAngularThresho
         piTriListIn.as_ptr(),
         geometry,
         iNrTrianglesIn,
+        pool,
     );
     #[cfg(test)]
     super::capture::record(&piTriListIn, &pTriInfos);
@@ -984,6 +985,7 @@ unsafe fn InitTriInfo<I: Geometry>(
     mut piTriListIn: *const i32,
     geometry: &mut I,
     iNrTrianglesIn: usize,
+    pool: Option<&bevy_tasks::TaskPool>,
 ) {
     let mut f = 0;
     let mut i = 0;
@@ -1108,6 +1110,7 @@ unsafe fn InitTriInfo<I: Geometry>(
         pEdges.as_mut_ptr(),
         piTriListIn,
         iNrTrianglesIn as i32,
+        pool,
     );
 }
 
@@ -1116,6 +1119,7 @@ unsafe fn BuildNeighborsFast(
     mut pEdges: *mut SEdge,
     mut piTriListIn: *const i32,
     iNrTrianglesIn: i32,
+    pool: Option<&bevy_tasks::TaskPool>,
 ) {
     // build array of edges
     // could replace with a random seed?
@@ -1138,7 +1142,14 @@ unsafe fn BuildNeighborsFast(
         }
         f += 1
     }
-    QuickSortEdges(pEdges, 0i32, iNrTrianglesIn * 3i32 - 1i32, 0i32, uSeed);
+    {
+        let _scope = loom_render::profile::Scope::new("mikk.edge_sort");
+        if let Some(pool) = pool {
+            edge_sort::sort(std::slice::from_raw_parts_mut(pEdges, iNrTrianglesIn as usize * 3), 0, uSeed, pool, 3);
+        } else {
+            QuickSortEdges(pEdges, 0i32, iNrTrianglesIn * 3i32 - 1i32, 0i32, uSeed);
+        }
+    }
     iEntries = iNrTrianglesIn * 3i32;
     iCurStartIndex = 0i32;
     i = 1i32;
@@ -1848,6 +1859,5 @@ fn acosf64(value: f64) -> f64 { value.acos() }
 #[path = "parallel.rs"]
 mod parallel;
 
-#[cfg(test)]
 #[path = "edge_sort.rs"]
 mod edge_sort;

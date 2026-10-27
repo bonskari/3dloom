@@ -1,5 +1,5 @@
-//! Candidate exact parallel recursion for the original edge quicksort.
-//! Initially compiled only by tests; not connected to production preparation.
+//! Exact parallel recursion for the original edge quicksort.
+//! Partition, seeds, and tie ordering remain identical to the serial routine.
 use super::{QuickSortEdges, SEdge};
 
 pub(super) fn sort(edges: &mut [SEdge], channel: usize, mut seed: u32, pool: &bevy_tasks::TaskPool, depth: usize) {
