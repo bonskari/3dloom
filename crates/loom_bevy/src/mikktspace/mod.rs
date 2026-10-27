@@ -6,6 +6,19 @@ use bevy_mikktspace::Geometry;
 use glam::{Vec2, Vec3};
 
 mod generated;
+mod structural;
+pub(crate) use structural::StructuralRecipe;
+
+/// Compile current topology/group metadata without evaluating or emitting tangents.
+pub(crate) fn compile_structure(data: &MeshData) -> StructuralRecipe {
+    let mut geometry = MeshGeometry { data, tangents: Vec::new() };
+    let mut recipe = StructuralRecipe::default();
+    let validation = weld_validation::begin(data, None);
+    unsafe { generated::compile_structure(&mut geometry, &mut recipe); }
+    let _ = validation.finish();
+    recipe
+}
+
 mod neighbor_cache;
 mod weld_validation;
 pub(crate) use neighbor_cache::NeighborCache;

@@ -207,6 +207,14 @@ pub unsafe fn genTangSpace<I: Geometry + Sync>(geometry: &mut I, fAngularThresho
 }
 
 pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, const REUSE_PROJECTIONS: bool>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>, cache: Option<&mut super::NeighborCache>) -> bool {
+    prepare_or_generate::<I, REUSE_MEMBERS, REUSE_PROJECTIONS>(geometry, fAngularThreshold, pool, cache, None)
+}
+
+pub(super) unsafe fn compile_structure<I: Geometry + Sync>(geometry: &mut I, output: &mut super::StructuralRecipe) {
+    prepare_or_generate::<I, false, false>(geometry, 180.0, None, None, Some(output));
+}
+
+unsafe fn prepare_or_generate<I: Geometry + Sync, const REUSE_MEMBERS: bool, const REUSE_PROJECTIONS: bool>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>, cache: Option<&mut super::NeighborCache>, mut structure: Option<&mut super::StructuralRecipe>) -> bool {
     let prepare_scope = loom_render::profile::Scope::new("mikk.prepare");
     let mut iNrTrianglesIn = 0;
     let mut f = 0;
@@ -232,6 +240,7 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
         f += 1
     }
     if iNrTrianglesIn <= 0 {
+        if let Some(output)=structure.as_deref_mut() { *output=super::StructuralRecipe::default(); }
         #[cfg(test)]
         super::capture::record(&[], &[], 0);
         #[cfg(test)]
@@ -272,6 +281,7 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
     iNrTrianglesIn = iTotTris - iDegenTriangles;
 
     if iNrTrianglesIn <= 0 {
+        if let Some(output)=structure.as_deref_mut() { output.record(&piTriListIn,&pTriInfos,&[],0,pTriInfos.iter().map(|t|t.iFlag).collect()); }
         #[cfg(test)]
         super::capture::record(&piTriListIn, &pTriInfos, 0);
         #[cfg(test)]
@@ -299,6 +309,7 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
     let mut pGroups = vec![SGroup::zero(); iNrMaxGroups];
     let mut piGroupTrianglesBuffer = vec![0; iNrTrianglesIn * 3];
 
+    let initial_flags=structure.as_ref().map(|_|pTriInfos.iter().map(|t|t.iFlag).collect::<Vec<_>>());
     iNrActiveGroups = Build4RuleGroups(
         pTriInfos.as_mut_ptr(),
         pGroups.as_mut_ptr(),
@@ -309,6 +320,11 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, 
 
     #[cfg(test)]
     super::capture::record_prepared_groups(&piTriListIn, &pTriInfos, &pGroups[..iNrActiveGroups as usize], iNrTrianglesIn);
+
+    if let Some(output)=structure {
+        output.record(&piTriListIn,&pTriInfos,&pGroups[..iNrActiveGroups as usize],iNrTrianglesIn,initial_flags.unwrap());
+        return true;
+    }
 
     let mut psTspace = vec![
         STSpace {
