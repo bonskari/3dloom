@@ -32,6 +32,15 @@ pub enum Gpu {
     Failed,
 }
 
+impl Gpu {
+    pub(crate) fn gpu_pose_status(&self) -> Option<loom_bevy::GpuPoseStatus<'_>> {
+        match self {
+            Self::Running(view) => view.renderer.gpu_pose_status(),
+            _ => None,
+        }
+    }
+}
+
 /// Object Properties > Rendering Control of node `id` for the renderer.
 fn render_flags(scene: &loom_scene::Scene, id: loom_scene::NodeId) -> loom_bevy::ObjectFlags {
     let Some(n) = scene.node(id) else { return Default::default() };

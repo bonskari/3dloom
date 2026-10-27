@@ -206,6 +206,12 @@ impl LoomApp {
             })
         });
         let active = s.active();
+        let gpu_pose = self.gpu.gpu_pose_status().map(|status| json!({
+                "committed_objects": status.committed_objects,
+                "committed_parts": status.committed_parts,
+                "recovered_recipes": status.recovered_recipes,
+                "last_error": status.last_error,
+            }));
         json!({
             "playback": {
                 "scene_time": s.scene.time(),
@@ -214,6 +220,7 @@ impl LoomApp {
                 "submitted_distinct_pose_times": self.pose_submissions.distinct_times,
                 "submitted_pose_time": self.pose_submissions.pose_time,
                 "submitted_world_version": self.pose_submissions.world_version,
+                "gpu_pose": gpu_pose,
             },
             "egui": {
                 "input": egui_state,

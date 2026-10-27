@@ -216,3 +216,21 @@ with self/cross-target identity rejection before mutation. Direct self-copy
 rejection/history GPU test also passed; independent re-review confirmed fix.
 Dynamic8test suite passed before final alias guard; changed batch2tests and
 final direct transport regression passed after alias fix. No native activation.
+
+
+Internal renderer integration now uses the real CPU world-baked source positions,
+GPU current SG normals/preparation/tangents, all-part guarded atomic commit,
+current AABB/layer updates and persistent mesh/material/entity handles. Only
+successfully committed objects skip CPU geometry work. CPU/GPU provenance
+prevents an old CPU hash from accepting newer GPU storage on fallback.
+Two-object actual GPU readback/resource test and natural geometric degeneracy
+miss/recompile passed. Actual saved Ray5skins/all13parts passed at0,39.25,
+95.71835,149 with stable entity/buffer handles and current positions. Warm
+renderer sync5.707/5.435ms in that integration test (not native UI FPS).
+Default Bevy lib63passed30ignored; UI400passed1ignored; production lib/UI
+checks passed. Read-only review found no important host-integration issue.
+The renderer remains opt-in via LOOM_EXPERIMENTAL_GPU_POSES=1 for internal
+native comparison only. Default is CPU. Native diagnostics now report real
+committed object/part counts, recipe recoveries and last error, alongside
+actual distinct submitted pose counts. Strict2e-5 characterization still fails
+102/105868173samples (max.0001710423), so no general quality or60fps claim.

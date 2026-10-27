@@ -12,10 +12,10 @@ mod mikktspace;
 #[cfg(test)]
 mod gpu_skin;
 pub mod dynamic_geometry;
-#[cfg(test)]
 mod gpu_pose_geometry;
-#[cfg(test)]
 mod gpu_pose_runtime;
+mod gpu_pose_renderer;
+pub use gpu_pose_renderer::GpuPoseStatus;
 
 use std::collections::{HashMap, HashSet};
 use dynamic_geometry::{DynamicGeometryBuffer, DynamicGeometryPlugin, DynamicMaterial};
@@ -205,6 +205,7 @@ pub struct BevyRenderer {
     queue: wgpu::Queue,
     objects: HashMap<u64, Object>,
     geometry: HashMap<(bool,u64),prepared_geometry::GeometryCache>,
+    gpu_poses: Option<gpu_pose_renderer::GpuPoseState>,
     views: HashMap<u32, View>,
     textures: HashMap<String, Option<Handle<Image>>>,
     /// Image files as maps read them, by path.
@@ -283,7 +284,10 @@ impl BevyRenderer {
         app.insert_resource(AmbientLight { color: Color::WHITE, brightness: AMBIENT_BRIGHTNESS, affects_lightmapped_meshes: true });
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         let light = Some(Self::spawn_key_light(&mut app));
-        Self { app, device, queue, objects: HashMap::new(), geometry: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, samples: Vec::new(), scene_lights: HashMap::new(), bounds: None, settle: 3, hidden: HashMap::new(), render: None }
+        Self {
+            gpu_poses: std::env::var_os("LOOM_EXPERIMENTAL_GPU_POSES")
+                .filter(|value| value == "1").map(|_| gpu_pose_renderer::GpuPoseState::default()),
+            app, device, queue, objects: HashMap::new(), geometry: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, samples: Vec::new(), scene_lights: HashMap::new(), bounds: None, settle: 3, hidden: HashMap::new(), render: None }
     }
 
     /// Default lighting: a key light with shadows.
@@ -454,22 +458,23 @@ impl BevyRenderer {
 
     /// Brings `set` in line with `objects`; returns their bounds.
     fn sync_set(&mut self, set: &mut HashMap<u64, Object>, objects: &[SceneObject], hidden: bool, deforming: &HashSet<u64>, limits: &wgpu::Limits) -> Option<(Vec3, f32)> {
-        let mut seen = HashSet::new();
-        let mut lo = Vec3::splat(f32::MAX);
-        let mut hi = Vec3::splat(f32::MIN);
+        let (gpu_updated, gpu_bounds) = self.try_gpu_poses(set, objects, hidden, deforming);
+        let pending: Vec<_> = objects.iter().filter(|o| !gpu_updated.contains(&o.id)).collect();
+        let mut seen = gpu_updated;
+        let (mut lo, mut hi) = gpu_bounds.unwrap_or((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)));
         let mut batches = Vec::new();
         let mut materials = Vec::new();
         let mut material_data = Vec::new();
         let mut tangent_caches = Vec::new();
         let geometry = {
             let _scope = loom_render::profile::Scope::new("bevy.geometry_data");
-            let jobs = objects.iter().map(|o| {
+            let jobs = pending.iter().map(|o| {
                 let key = (hidden, o.id);
                 (key, self.geometry.remove(&key).unwrap_or_default(), o.mesh)
             }).collect();
             prepared_geometry::prepare_batch(bevy_tasks::ComputeTaskPool::get(), jobs)
         };
-        for (o, (key, cache, data)) in objects.iter().zip(geometry) {
+        for (o, (key, cache, data)) in pending.into_iter().zip(geometry) {
             self.geometry.insert(key, cache);
             seen.insert(o.id);
             let dynamic = deforming.contains(&o.id) && DynamicGeometryBuffer::supported(limits, data.positions.len());

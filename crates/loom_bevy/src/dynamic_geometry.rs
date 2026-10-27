@@ -546,6 +546,7 @@ mod tests {
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         let light = Some(BevyRenderer::spawn_key_light(&mut app));
         BevyRenderer {
+            gpu_poses: None,
             app,
             device,
             queue,
@@ -741,6 +742,41 @@ mod tests {
             update_time * 1000.0 / 12.0,
             history_time * 1000.0 / 12.0
         );
+    }
+
+    #[test]
+    fn renderer_gpu_batch_updates_current_pose_and_preserves_resources() {
+        let mut r = renderer();
+        let mut source = loom_mesh::sphere_segmented(2.0, 8, 0.0);
+        loom_mesh::uvmap::auto_map(&mut source, loom_mesh::uvmap::AutoMap::Spherical, 1);
+        let mut meshes = vec![source.clone(), source];
+        let ids = HashSet::from([1, 2]);
+        r.enable_gpu_poses();
+        r.sync_deforming(&objects(&meshes), &ids);
+        let handles: Vec<_> = (1..=2).map(|id| (r.objects[&id].parts[0].0, r.objects[&id].buffers[0].buffer().id())).collect();
+        for (i, mesh) in meshes.iter_mut().enumerate() {
+            loom_mesh::edit_ops::translate_mesh(mesh, glam::Vec3::X * (i + 2) as f32).unwrap();
+        }
+        r.sync_deforming(&objects(&meshes), &ids);
+        let mut reader = crate::gpu_pose_commit::GuardReadback::new(&r.device, 2).unwrap();
+        let mut expected = Vec::new();
+        for (i, mesh) in meshes.iter().enumerate() {
+            let object = &r.objects[&(i as u64 + 1)];
+            assert!(object.gpu_pose_current);
+            assert_eq!((object.parts[0].0, object.buffers[0].buffer().id()), handles[i]);
+            expected.push(crate::mesh_data(mesh).positions[0][0].to_bits());
+        }
+        let refs: Vec<_> = (1..=2).map(|id| &**r.objects[&id].buffers[0].buffer()).collect();
+        assert_eq!(reader.read(&r.device, &r.queue, &refs).unwrap(), expected);
+        let position = meshes[0].vertices()[0].position;
+        meshes[0].vertices_mut()[1].position = position;
+        r.sync_deforming(&objects(&meshes), &ids);
+        assert!(r.gpu_poses.as_ref().unwrap().recovered_recipes > 0);
+        for (i, id) in (1..=2).enumerate() {
+            let object = &r.objects[&id];
+            assert!(object.gpu_pose_current);
+            assert_eq!((object.parts[0].0, object.buffers[0].buffer().id()), handles[i]);
+        }
     }
 
     #[test]
