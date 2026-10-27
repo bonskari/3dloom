@@ -222,6 +222,26 @@ struct ActiveRender {
     two_sided: Vec<(ObjectMaterial, bool, Option<bevy::render::render_resource::Face>)>,
 }
 
+// Bevy 0.16.1's light specialization system appends every removed
+// NotShadowCaster entity, including despawned entities and entities carrying a
+// different material type. Extraction removes their old ticks first, then
+// reinserts those invalid requests, retaining every dead generation forever.
+// Enforce the request's live-mesh/material precondition before extraction.
+fn retain_live_material_specializations<M: bevy::pbr::Material>(
+    meshes: bevy::ecs::system::Query<(), (bevy::ecs::query::With<Mesh3d>, bevy::ecs::query::With<MeshMaterial3d<M>>)>,
+    mut requests: bevy::ecs::system::ResMut<bevy::pbr::EntitiesNeedingSpecialization<M>>,
+) {
+    requests.entities.retain(|entity| meshes.contains(*entity));
+}
+
+fn material_lifecycle<M: bevy::pbr::Material>(app: &mut App) {
+    use bevy::ecs::schedule::IntoScheduleConfigs;
+    app.add_systems(bevy::app::PostUpdate,
+        retain_live_material_specializations::<M>
+            .after(bevy::pbr::check_entities_needing_specialization::<M>)
+            .after(bevy::pbr::check_light_entities_needing_specialization::<M>));
+}
+
 impl BevyRenderer {
     /// Builds the Bevy app on `device` / `queue` (the UI's). The instance is
     /// only used by Bevy to make window surfaces, which a headless app never does.
@@ -244,6 +264,9 @@ impl BevyRenderer {
                 .set(RenderPlugin { render_creation: RenderCreation::Manual(resources), synchronous_pipeline_compilation: true, ..Default::default() }),
         );
         app.add_plugins((bake::BakePlugin, DynamicGeometryPlugin));
+        material_lifecycle::<StandardMaterial>(&mut app);
+        material_lifecycle::<DynamicMaterial>(&mut app);
+        material_lifecycle::<bevy::pbr::ExtendedMaterial<StandardMaterial, bake::UvBake>>(&mut app);
         while app.plugins_state() == PluginsState::Adding {
             bevy::tasks::tick_global_task_pools_on_main_thread();
         }
@@ -515,9 +538,11 @@ impl BevyRenderer {
             if can_reuse {
                 let obj = old.as_mut().unwrap();
                 let mut bounds = Vec::with_capacity(count);
+                let update_scope = loom_render::profile::Scope::new("bevy.posed_upload");
                 for (buffer, (_, mesh)) in obj.buffers.iter_mut().zip(&prepared) {
                     match buffer.update(&self.queue, mesh) { Ok(b) => bounds.push(b), Err(_) => break }
                 }
+                drop(update_scope);
                 if bounds.len() == count {
                     let _scope = loom_render::profile::Scope::new("bevy.entity_upload");
                     for ((entity, _), bounds) in obj.parts.iter().zip(bounds) {
@@ -1005,6 +1030,40 @@ mod affine_tests {
         assert!(renderer.has_requested_views(), "an existing view must request rendering again");
         renderer.update();
         assert!(!renderer.has_requested_views());
+    }
+
+    #[test]
+    fn specialization_ticks_drop_despawned_renderer_entities() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("real GPU required");
+        let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter), None)).unwrap();
+        let mut renderer = BevyRenderer::new(adapter, device, queue);
+        let mut mesh = loom_mesh::box_primitive(Vec3::ONE);
+        for frame in 0..128 {
+            loom_mesh::edit_ops::translate_mesh(&mut mesh, Vec3::new(0.01,0.0,0.0)).unwrap();
+            renderer.sync(&[SceneObject { id: 1, mesh: &mesh, transform: glam::Mat4::IDENTITY, wire_color: [220,30,30], surfaces: None, renderable: true, flags: ObjectFlags { cast_shadows: false, ..Default::default() } }]);
+            let camera = ViewCamera { view: glam::Mat4::look_at_rh(Vec3::new(-4.0,-6.0,4.0), Vec3::ZERO, Vec3::Z), projection: glam::Mat4::perspective_rh(0.8,1.0,0.1,100.0) };
+            renderer.set_view(0, [8,8], &camera, [0.0;4], false);
+            renderer.update();
+            let ticks = renderer.app.sub_app(RenderApp).world().resource::<bevy::pbr::EntitySpecializationTicks<StandardMaterial>>();
+            assert_eq!(ticks.len(), 1, "despawned material entities must not accumulate in specialization ticks at frame {frame}");
+            assert!(ticks.capacity() <= 3, "specialization capacity must remain bounded");
+            let world = renderer.app.sub_app(RenderApp).world();
+            assert_eq!(world.resource::<bevy::pbr::EntitySpecializationTicks<DynamicMaterial>>().len(), 0, "wrong-material removals must not create requests");
+            assert_eq!(world.resource::<bevy::pbr::EntitySpecializationTicks<bevy::pbr::ExtendedMaterial<StandardMaterial,bake::UvBake>>>().len(), 0);
+        }
+        // Drain new-asset notifications so the next request is specifically
+        // the live NotShadowCaster removal, not an unrelated asset event.
+        renderer.update();
+        renderer.update();
+        assert!(renderer.app.world().resource::<bevy::pbr::EntitiesNeedingSpecialization<StandardMaterial>>().entities.is_empty());
+        let entity = renderer.objects[&1].parts[0].0;
+        let before = renderer.app.sub_app(RenderApp).world().resource::<bevy::pbr::EntitySpecializationTicks<StandardMaterial>>()[&bevy::render::sync_world::MainEntity::from(entity)];
+        renderer.sync(&[SceneObject { id: 1, mesh: &mesh, transform: glam::Mat4::IDENTITY, wire_color: [220,30,30], surfaces: None, renderable: true, flags: ObjectFlags::default() }]);
+        renderer.update();
+        let ticks = renderer.app.sub_app(RenderApp).world().resource::<bevy::pbr::EntitySpecializationTicks<StandardMaterial>>();
+        assert_ne!(ticks[&bevy::render::sync_world::MainEntity::from(entity)], before, "live NotShadowCaster removal must still trigger respecialization");
+        assert_eq!(renderer.objects[&1].parts[0].0, entity);
     }
 
     #[test]
