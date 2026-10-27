@@ -41,16 +41,9 @@ impl MeshData {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for list in [&self.positions, &self.normals] {
             list.len().hash(&mut h);
-            for p in list.iter() {
-                for c in p {
-                    c.to_bits().hash(&mut h);
-                }
-            }
+            h.write(bytemuck::cast_slice(list.as_slice()));
         }
-        for uv in &self.uvs {
-            uv[0].to_bits().hash(&mut h);
-            uv[1].to_bits().hash(&mut h);
-        }
+        h.write(bytemuck::cast_slice(self.uvs.as_slice()));
         self.indices.hash(&mut h);
         h.finish()
     }
@@ -611,4 +604,76 @@ mod tests {
         assert_eq!(r.get_clip_from_view(), q.get_clip_from_view());
         assert_eq!(q.get_frustum_corners(-1.0, -10.0), whole.get_frustum_corners(-1.0, -10.0));
     }
+
+    fn original_content_hash(data: &MeshData) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for list in [&data.positions, &data.normals] {
+            list.len().hash(&mut h);
+            for p in list { for c in p { c.to_bits().hash(&mut h); } }
+        }
+        for uv in &data.uvs { uv[0].to_bits().hash(&mut h); uv[1].to_bits().hash(&mut h); }
+        data.indices.hash(&mut h);
+        h.finish()
+    }
+
+    #[test]
+    fn bulk_hash_preserves_float_bits_and_stream_boundaries() {
+        let values = [0u32, 0x8000_0000, 0x7fc0_0001, 0x7fc0_0002, 0x7f80_0000, 0xff80_0000, 1, u32::MAX];
+        let mut data = MeshData { positions: Vec::new(), normals: Vec::new(), uvs: Vec::new(), indices: Vec::new() };
+        assert_eq!(data.content_hash(), original_content_hash(&data));
+        for bits in values {
+            let value = f32::from_bits(bits);
+            data.positions.push([value, 1.0, -2.0]);
+            data.normals.push([-2.0, value, 1.0]);
+            data.uvs.push([value, -0.0]);
+            data.indices.push(bits);
+            assert_eq!(data.content_hash(), original_content_hash(&data));
+        }
+        let base = data.content_hash();
+        for stream in 0..6 {
+            let mut changed = data.clone();
+            match stream {
+                0 => changed.positions[0][0] = -0.0,
+                1 => changed.normals[0][1] = -0.0,
+                2 => changed.uvs[0][0] = -0.0,
+                3 => changed.indices[0] = 1,
+                4 => { changed.positions.pop(); },
+                _ => { changed.indices.pop(); },
+            }
+            assert_ne!(changed.content_hash(), base, "stream {stream}");
+            assert_eq!(changed.content_hash(), original_content_hash(&changed));
+        }
+    }
+
+    #[test]
+    #[ignore = "actual all-pose hash benchmark requires LOOM_PERF_SCENE"]
+    fn actual_ray_bulk_content_hash_matches_original_and_times() {
+        let path = std::env::var("LOOM_PERF_SCENE").expect("real scene");
+        let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let scene: loom_scene::Scene = serde_json::from_value(value["scene"].clone()).unwrap();
+        let ids: Vec<_> = scene.nodes().filter(|n| n.modifiers.iter().any(|m| matches!(&m.modifier, loom_scene::modifier::Modifier::Skin(_)))).map(|n| n.id).collect();
+        assert_eq!(ids.len(), 5);
+        let mut old_ms = 0.0;
+        let mut bulk_ms = 0.0;
+        let mut count = 0;
+        for frame in (0..=157).map(|f| f as f32).chain([39.25]) {
+            scene.set_time(frame);
+            for id in &ids {
+                let mut mesh = scene.eval_mesh(*id).value.mesh.clone();
+                loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(*id)).unwrap();
+                let data = mesh_data(&mesh);
+                let start = std::time::Instant::now();
+                let expected = std::hint::black_box(original_content_hash(&data));
+                old_ms += start.elapsed().as_secs_f64() * 1000.0;
+                let start = std::time::Instant::now();
+                let actual = std::hint::black_box(data.content_hash());
+                bulk_ms += start.elapsed().as_secs_f64() * 1000.0;
+                assert_eq!(actual, expected, "frame={frame}, id={id:?}");
+                count += 1;
+            }
+        }
+        eprintln!("HASH poses=159 meshes={count} original_ms_per_pose={:.3} bulk_ms_per_pose={:.3}", old_ms / 159.0, bulk_ms / 159.0);
+    }
+
 }
