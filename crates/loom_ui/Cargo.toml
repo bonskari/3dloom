@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bevy_tasks = { version = "0.16" }
 loom_shape  = { workspace = true }
 loom_mesh   = { workspace = true }
 loom_commands = { workspace = true }

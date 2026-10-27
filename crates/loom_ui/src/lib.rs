@@ -757,6 +757,26 @@ impl LoomApp {
         // Link Replaces Object: a linked object shows as its link only.
         let link_only = |n: &loom_scene::Node| n.display.display_links && n.display.link_replaces_object && n.parent.is_some();
         let visible: Vec<NodeId> = self.state.scene.nodes().filter(|n| self.state.is_visible(n) && !link_only(n) && (!bones_only || n.object.is_bone() || n.object.is_helper())).map(|n| n.id).collect();
+        // Prepare Skin outputs together; scene access and cache publication
+        // remain on this thread, while independent meshes share four workers.
+        let skins: Vec<_> = visible.iter().copied().filter(|id| {
+            !self.below_end_result(*id) && self.state.scene.node(*id).is_some_and(|n|
+                n.modifiers.iter().any(|s| matches!(&s.modifier, loom_scene::Modifier::Skin(_))))
+        }).collect();
+        let skin_outputs: std::collections::HashMap<_,_> = if skins.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            let _stage = loom_render::profile::Scope::new("ui.skin_batch");
+            let outputs = self.state.scene.evaluated_batch(&skins, |jobs| {
+                if jobs.is_empty() { return Vec::new(); }
+                static POOL: std::sync::OnceLock<bevy_tasks::TaskPool> = std::sync::OnceLock::new();
+                let pool = POOL.get_or_init(|| bevy_tasks::TaskPoolBuilder::new()
+                    .num_threads(std::thread::available_parallelism().map_or(1, |n| n.get().min(4)))
+                    .thread_name("3dLoom Skin".into()).build());
+                pool.scope(|scope| { for job in jobs { scope.spawn(async move { job.run() }); } })
+            });
+            skins.into_iter().zip(outputs).collect()
+        };
         let display_color = (self.state.display.wireframe_color, self.state.display.shaded_color);
         use loom_commands::display::ColorSource;
         // Material looks first (they load and bake maps, which needs `&mut self`).
@@ -832,7 +852,10 @@ impl LoomApp {
                     Some(a) => Some(self.state.scene.evaluated(id, Some(a)).value.mesh.clone()),
                 }
             } else {
-                Some(self.state.scene.eval_mesh(id).value.mesh.clone())
+                Some(match skin_outputs.get(&id) {
+                    Some(output) => output.value.mesh.clone(),
+                    None => self.state.scene.eval_mesh(id).value.mesh.clone(),
+                })
             }};
             if d.display_as_box {
                 // Display as Box: the object's local bounding box.
