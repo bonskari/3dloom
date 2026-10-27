@@ -8,6 +8,8 @@ pub mod convert;
 mod prepared_geometry;
 pub mod lights;
 mod mikktspace;
+#[cfg(test)]
+mod gpu_skin;
 
 use std::collections::{HashMap, HashSet};
 
@@ -820,6 +822,11 @@ impl BevyRenderer {
         self.settle = self.settle.saturating_sub(1);
     }
 
+    /// Whether a viewport or render camera was requested for this frame.
+    pub fn has_requested_views(&self) -> bool {
+        self.views.values().any(|view| view.used)
+    }
+
     /// True while pipelines or new assets still need frames to appear.
     pub fn needs_more_frames(&self) -> bool {
         self.settle > 0
@@ -894,6 +901,25 @@ impl BevyRenderer {
 #[cfg(test)]
 mod affine_tests {
     use super::*;
+
+    #[test]
+    fn view_requests_are_consumed_and_can_resume_after_idle_frames() {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else { return };
+        if !supported(&adapter) { return; }
+        let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter), None)).unwrap();
+        let mut renderer = BevyRenderer::new(adapter, device, queue);
+        let camera = ViewCamera { view: glam::Mat4::IDENTITY, projection: glam::Mat4::IDENTITY };
+        assert!(!renderer.has_requested_views());
+        renderer.set_view(0, [64, 64], &camera, [0.0; 4], true);
+        assert!(renderer.has_requested_views());
+        renderer.update();
+        assert!(!renderer.has_requested_views());
+        renderer.set_view(0, [64, 64], &camera, [0.0; 4], true);
+        assert!(renderer.has_requested_views(), "an existing view must request rendering again");
+        renderer.update();
+        assert!(!renderer.has_requested_views());
+    }
 
     #[test]
     fn rigid_pose_changes_keep_entities_meshes_and_materials() {
