@@ -14,6 +14,8 @@ mod gpu_skin;
 pub mod dynamic_geometry;
 #[cfg(test)]
 mod gpu_pose_geometry;
+#[cfg(test)]
+mod gpu_pose_runtime;
 
 use std::collections::{HashMap, HashSet};
 use dynamic_geometry::{DynamicGeometryBuffer, DynamicGeometryPlugin, DynamicMaterial};
