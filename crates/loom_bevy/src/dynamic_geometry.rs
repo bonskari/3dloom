@@ -60,6 +60,16 @@ impl Plugin for DynamicGeometryPlugin {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PackedVertex {
+    position: [f32; 4],
+    normal: [f32; 4],
+    tangent: [f32; 4],
+    uv: [f32; 4],
+}
+const _: [(); 64] = [(); std::mem::size_of::<PackedVertex>()];
+
 /// An immutable-size device allocation. Keep its extension handle unchanged
 /// during animation; updating buffer contents needs no material asset event.
 pub struct DynamicGeometryBuffer {
@@ -67,13 +77,19 @@ pub struct DynamicGeometryBuffer {
     vertex_count: usize,
     has_tangents: bool,
     previous: Buffer,
-    last_positions: Vec<u8>,
+    last_positions: Vec<[f32; 4]>,
+    next_positions: Vec<[f32; 4]>,
+    packed: Vec<PackedVertex>,
     indices: Option<Vec<u32>>,
 }
 
 impl DynamicGeometryBuffer {
     pub fn new(device: &wgpu::Device, mesh: &Mesh) -> Result<(Self, Aabb), String> {
-        let (bytes, bounds, vertex_count, has_tangents) = pack(mesh)?;
+        let mut packed = Vec::new();
+        let mut last_positions = Vec::new();
+        let (bounds, vertex_count, has_tangents) =
+            pack_into(mesh, &mut packed, &mut last_positions)?;
+        let bytes = bytemuck::cast_slice(&packed);
         let limits = device.limits();
         if bytes.len() as u64 > limits.max_buffer_size
             || bytes.len() as u64 > u64::from(limits.max_storage_buffer_binding_size)
@@ -81,14 +97,10 @@ impl DynamicGeometryBuffer {
         {
             return Err("Dynamic geometry exceeds device vertex storage limits".into());
         }
-        let last_positions: Vec<u8> = bytes
-            .chunks_exact(64)
-            .flat_map(|v| v[..16].iter().copied())
-            .collect();
         let previous = device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("previous posed positions"),
-                contents: &last_positions,
+                contents: bytemuck::cast_slice(&last_positions),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             })
             .into();
@@ -108,6 +120,8 @@ impl DynamicGeometryBuffer {
                 has_tangents,
                 previous,
                 last_positions,
+                next_positions: Vec::with_capacity(vertex_count),
+                packed,
                 indices: mesh.indices().map(|i| i.iter().map(|i| i as u32).collect()),
             },
             bounds,
@@ -129,14 +143,22 @@ impl DynamicGeometryBuffer {
     /// the preceding pose before writing the new one. Multiple views in one
     /// frame share the same history, so do this once per host frame.
     pub fn advance_history(&self, queue: &wgpu::Queue) {
-        queue.write_buffer(&self.previous, 0, &self.last_positions);
+        let _scope = loom_render::profile::Scope::new("bevy.dynamic.history_write");
+        queue.write_buffer(
+            &self.previous,
+            0,
+            bytemuck::cast_slice(&self.last_positions),
+        );
     }
 
     /// Mesh topology and source vertex order must match the immutable Mesh3d.
     /// Updates all four attributes in one write, returning the current local
     /// bounds for the host to insert as the entity's Aabb.
     pub fn update(&mut self, queue: &wgpu::Queue, mesh: &Mesh) -> Result<Aabb, String> {
-        let (bytes, bounds, vertex_count, has_tangents) = pack(mesh)?;
+        let _scope = loom_render::profile::Scope::new("bevy.dynamic.update");
+        let (bounds, vertex_count, has_tangents) =
+            pack_into(mesh, &mut self.packed, &mut self.next_positions)?;
+        let _indices = loom_render::profile::Scope::new("bevy.dynamic.indices");
         let same_indices = match (&self.indices, mesh.indices()) {
             (Some(expected), Some(actual)) => {
                 expected.iter().copied().eq(actual.iter().map(|i| i as u32))
@@ -147,16 +169,106 @@ impl DynamicGeometryBuffer {
         if vertex_count != self.vertex_count || has_tangents != self.has_tangents || !same_indices {
             return Err("Dynamic vertex layout changed; rebuild mesh and geometry buffer".into());
         }
-        queue.write_buffer(&self.previous, 0, &self.last_positions);
-        queue.write_buffer(&self.buffer, 0, &bytes);
-        self.last_positions.clear();
-        self.last_positions
-            .extend(bytes.chunks_exact(64).flat_map(|v| v[..16].iter().copied()));
+        drop(_indices);
+        let _write = loom_render::profile::Scope::new("bevy.dynamic.queue_write");
+        queue.write_buffer(
+            &self.previous,
+            0,
+            bytemuck::cast_slice(&self.last_positions),
+        );
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&self.packed));
+        drop(_write);
+        let _positions = loom_render::profile::Scope::new("bevy.dynamic.copy_positions");
+        std::mem::swap(&mut self.last_positions, &mut self.next_positions);
         Ok(bounds)
     }
 }
 
-fn pack(mesh: &Mesh) -> Result<(Vec<u8>, Aabb, usize, bool), String> {
+fn pack_into(
+    mesh: &Mesh,
+    vertices: &mut Vec<PackedVertex>,
+    output_positions: &mut Vec<[f32; 4]>,
+) -> Result<(Aabb, usize, bool), String> {
+    let _scope = loom_render::profile::Scope::new("bevy.dynamic.pack");
+    if mesh.has_morph_targets()
+        || mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_some()
+        || mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT).is_some()
+    {
+        return Err("Dynamic geometry must contain final CPU posed attributes without a second morph/skin stage".into());
+    }
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return Err("Dynamic geometry requires Float32x3 positions".into());
+    };
+    let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+    else {
+        return Err("Dynamic geometry requires Float32x3 normals".into());
+    };
+    let Some(VertexAttributeValues::Float32x2(uvs)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) else {
+        return Err("Dynamic geometry requires Float32x2 UV0".into());
+    };
+    let tangents = match mesh.attribute(Mesh::ATTRIBUTE_TANGENT) {
+        Some(VertexAttributeValues::Float32x4(t)) => Some(t),
+        Some(_) => return Err("Dynamic geometry tangents must be Float32x4".into()),
+        None => None,
+    };
+    let count = positions.len();
+    if count == 0
+        || normals.len() != count
+        || uvs.len() != count
+        || tangents.is_some_and(|t| t.len() != count)
+    {
+        return Err("Dynamic geometry attributes must have equal nonzero lengths".into());
+    }
+    count
+        .checked_mul(64)
+        .ok_or("Dynamic geometry size overflow")?;
+    vertices.clear();
+    output_positions.clear();
+    vertices.reserve(count);
+    output_positions.reserve(count);
+    let mut lo = glam::Vec3::splat(f32::INFINITY);
+    let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
+    for i in 0..count {
+        let p = positions[i];
+        let n = normals[i];
+        let uv = uvs[i];
+        let t = tangents.map_or([0.0; 4], |t| t[i]);
+        let vertex = PackedVertex {
+            position: [p[0], p[1], p[2], 1.0],
+            normal: [n[0], n[1], n[2], 0.0],
+            tangent: t,
+            uv: [uv[0], uv[1], 0.0, 0.0],
+        };
+        if !vertex
+            .position
+            .iter()
+            .chain(&vertex.normal)
+            .chain(&vertex.tangent)
+            .chain(&vertex.uv)
+            .all(|f| f.is_finite())
+        {
+            return Err("Dynamic geometry attributes must be finite".into());
+        }
+        output_positions.push(vertex.position);
+        vertices.push(vertex);
+        lo = lo.min(glam::Vec3::from_array(p));
+        hi = hi.max(glam::Vec3::from_array(p));
+    }
+    Ok((
+        Aabb::from_min_max(
+            bevy::math::Vec3::from_array(lo.to_array()),
+            bevy::math::Vec3::from_array(hi.to_array()),
+        ),
+        count,
+        tangents.is_some(),
+    ))
+}
+
+#[cfg(test)]
+fn pack_reference(mesh: &Mesh) -> Result<(Vec<u8>, Aabb, usize, bool), String> {
+    let _scope = loom_render::profile::Scope::new("bevy.dynamic.pack");
     if mesh.has_morph_targets()
         || mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX).is_some()
         || mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT).is_some()
@@ -391,6 +503,101 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "actual Ray GPU packing benchmark requires LOOM_PERF_SCENE"]
+    fn actual_ray_dynamic_packing_performance() {
+        let path = std::env::var("LOOM_PERF_SCENE").expect("real saved scene path");
+        let mut value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let scene: loom_scene::Scene = serde_json::from_value(value["scene"].take()).unwrap();
+        let ids: Vec<_> = scene
+            .nodes()
+            .filter(|n| {
+                n.modifiers
+                    .iter()
+                    .any(|m| matches!(m.modifier, loom_scene::Modifier::Skin(_)))
+            })
+            .map(|n| n.id)
+            .collect();
+        let mut frames = Vec::new();
+        for frame in [0.0, 39.25, 149.0] {
+            scene.set_time(frame);
+            let mut meshes = Vec::new();
+            for id in &ids {
+                let mut mesh = scene.eval_mesh(*id).value.mesh.clone();
+                loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(*id)).unwrap();
+                for (_, data) in mesh_data_by_id(&mesh) {
+                    let mut mesh = data.to_bevy();
+                    mesh.generate_tangents().unwrap();
+                    meshes.push(mesh);
+                }
+            }
+            frames.push(meshes);
+        }
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
+            .expect("real GPU required");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter), None))
+                .unwrap();
+        let mut buffers: Vec<_> = frames[0]
+            .iter()
+            .map(|m| DynamicGeometryBuffer::new(&device, m).unwrap().0)
+            .collect();
+        let mut packed = Vec::new();
+        let mut positions = Vec::new();
+        for frame in &frames {
+            for mesh in frame {
+                let (expected, _, _, _) = pack_reference(mesh).unwrap();
+                pack_into(mesh, &mut packed, &mut positions).unwrap();
+                assert_eq!(
+                    bytemuck::cast_slice::<_, u8>(&packed),
+                    expected,
+                    "actual Ray packed bytes must remain exact"
+                );
+                let expected_positions: Vec<u8> = expected
+                    .chunks_exact(64)
+                    .flat_map(|v| v[..16].iter().copied())
+                    .collect();
+                assert_eq!(
+                    bytemuck::cast_slice::<_, u8>(&positions),
+                    expected_positions
+                );
+            }
+        }
+        let mut pack_time = 0.0;
+        let mut update_time = 0.0;
+        let mut history_time = 0.0;
+        for i in 0..12 {
+            let frame = &frames[i % frames.len()];
+            let t = std::time::Instant::now();
+            for mesh in frame {
+                std::hint::black_box(pack_into(mesh, &mut packed, &mut positions).unwrap());
+            }
+            pack_time += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            for (buffer, mesh) in buffers.iter_mut().zip(frame) {
+                buffer.update(&queue, mesh).unwrap();
+            }
+            update_time += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            for buffer in &buffers {
+                buffer.advance_history(&queue);
+            }
+            history_time += t.elapsed().as_secs_f64();
+            queue.submit([]);
+            device.poll(wgpu::Maintain::Wait);
+        }
+        eprintln!(
+            "RAY_DYNAMIC parts={} vertices={} pack_ms={:.3} update_ms={:.3} history_ms={:.3}",
+            buffers.len(),
+            buffers.iter().map(|b| b.vertex_count).sum::<usize>(),
+            pack_time * 1000.0 / 12.0,
+            update_time * 1000.0 / 12.0,
+            history_time * 1000.0 / 12.0
+        );
+    }
+
+    #[test]
     fn renderer_sync_reuses_posed_resources_and_restores_render_material_settings() {
         let mut dynamic = renderer();
         let mut reference = renderer();
@@ -400,25 +607,48 @@ mod tests {
         let ids = HashSet::from([2]);
         dynamic.sync_deforming(&objects(&meshes), &ids);
         reference.sync(&objects(&meshes));
-        assert!(matches!(dynamic.objects[&1].parts[0].1, ObjectMaterial::Standard(_)));
-        assert!(matches!(dynamic.objects[&2].parts[0].1, ObjectMaterial::Dynamic(_)));
+        assert!(matches!(
+            dynamic.objects[&1].parts[0].1,
+            ObjectMaterial::Standard(_)
+        ));
+        assert!(matches!(
+            dynamic.objects[&2].parts[0].1,
+            ObjectMaterial::Dynamic(_)
+        ));
         let (entity, material) = dynamic.objects[&2].parts[0].clone();
         let mesh = dynamic.app.world().get::<Mesh3d>(entity).unwrap().0.clone();
         let buffer = dynamic.objects[&2].buffers[0].buffer().id();
         let mut original = None;
-        material.edit(dynamic.app.world_mut(), |m| { original = Some((m.double_sided, m.cull_mode)); });
-        let options = RenderOptions { force_two_sided: true, ..Default::default() };
+        material.edit(dynamic.app.world_mut(), |m| {
+            original = Some((m.double_sided, m.cull_mode));
+        });
+        let options = RenderOptions {
+            force_two_sided: true,
+            ..Default::default()
+        };
         dynamic.begin_render(options.clone());
         reference.begin_render(options);
         for pose in 0..2 {
             if pose == 1 {
-                loom_mesh::edit_ops::transform_mesh(&mut meshes[1], glam::Mat4::from_scale_rotation_translation(glam::Vec3::new(1.2, 0.8, 1.1), glam::Quat::from_rotation_y(0.35), glam::Vec3::new(2.0, 0.5, 1.0))).unwrap();
+                loom_mesh::edit_ops::transform_mesh(
+                    &mut meshes[1],
+                    glam::Mat4::from_scale_rotation_translation(
+                        glam::Vec3::new(1.2, 0.8, 1.1),
+                        glam::Quat::from_rotation_y(0.35),
+                        glam::Vec3::new(2.0, 0.5, 1.0),
+                    ),
+                )
+                .unwrap();
             }
             dynamic.sync_deforming(&objects(&meshes), &ids);
             reference.sync(&objects(&meshes));
             let expected = render(&mut reference, false);
             let actual = render(&mut dynamic, false);
-            assert_eq!(actual.as_raw(), expected.as_raw(), "production sync pose {pose}");
+            assert_eq!(
+                actual.as_raw(),
+                expected.as_raw(),
+                "production sync pose {pose}"
+            );
             assert_eq!(dynamic.objects[&2].parts[0].0, entity);
             assert_eq!(dynamic.objects[&2].parts[0].1.id(), material.id());
             assert_eq!(dynamic.app.world().get::<Mesh3d>(entity).unwrap().0, mesh);
@@ -427,10 +657,15 @@ mod tests {
             let bounds = dynamic.app.world().get::<Aabb>(entity).unwrap();
             assert_eq!(bounds.center, expected_bounds.center);
             assert_eq!(bounds.half_extents, expected_bounds.half_extents);
-            material.edit(dynamic.app.world_mut(), |m| { assert!(m.double_sided); assert_eq!(m.cull_mode, None); });
+            material.edit(dynamic.app.world_mut(), |m| {
+                assert!(m.double_sided);
+                assert_eq!(m.cull_mode, None);
+            });
         }
         dynamic.end_render();
-        material.edit(dynamic.app.world_mut(), |m| { assert_eq!((m.double_sided, m.cull_mode), original.unwrap()); });
+        material.edit(dynamic.app.world_mut(), |m| {
+            assert_eq!((m.double_sided, m.cull_mode), original.unwrap());
+        });
         let hidden = vec![meshes[1].clone()];
         dynamic.sync_hidden_deforming(&objects(&hidden), &HashSet::from([1]));
         let hidden_entity = dynamic.hidden[&1].parts[0].0;
@@ -440,18 +675,30 @@ mod tests {
         assert_eq!(dynamic.hidden[&1].parts[0].0, hidden_entity);
         meshes[1] = loom_mesh::sphere_segmented(1.5, 12, 0.0);
         dynamic.sync_deforming(&objects(&meshes), &ids);
-        assert_ne!(dynamic.objects[&2].parts[0].0, entity, "topology edit rebuilds the immutable mesh");
+        assert_ne!(
+            dynamic.objects[&2].parts[0].0, entity,
+            "topology edit rebuilds the immutable mesh"
+        );
         let before_reload = dynamic.objects[&2].parts[0].1.id();
         dynamic.reload_bitmaps();
         dynamic.sync_deforming(&objects(&meshes), &ids);
-        assert_ne!(dynamic.objects[&2].parts[0].1.id(), before_reload, "bitmap reload rebuilds material textures");
+        assert_ne!(
+            dynamic.objects[&2].parts[0].1.id(),
+            before_reload,
+            "bitmap reload rebuilds material textures"
+        );
     }
 
     #[test]
     fn packed_attributes_preserve_bits_and_reject_invalid_frames() {
         let source = loom_mesh::box_primitive(glam::Vec3::splat(3.0));
         let mut mesh = posed_mesh(&source);
-        let (bytes, _, count, _) = pack(&mesh).unwrap();
+        let (expected, _, count, _) = pack_reference(&mesh).unwrap();
+        let mut packed = Vec::new();
+        let mut positions = Vec::new();
+        pack_into(&mesh, &mut packed, &mut positions).unwrap();
+        let bytes: &[u8] = bytemuck::cast_slice(&packed);
+        assert_eq!(bytes, expected);
         let Some(VertexAttributeValues::Float32x3(p)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
             panic!()
@@ -491,9 +738,9 @@ mod tests {
             }
         }
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[f32::NAN, 0.0, 0.0]; count]);
-        assert!(pack(&mesh).is_err());
+        assert!(pack_into(&mesh, &mut packed, &mut positions).is_err());
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0; 3]; count - 1]);
-        assert!(pack(&mesh).is_err());
+        assert!(pack_into(&mesh, &mut packed, &mut positions).is_err());
     }
 
     #[test]
@@ -623,7 +870,11 @@ mod tests {
                     .collect();
                 for handle in refs {
                     handle.edit(reference.app.world_mut(), |m| {
-                        m.opaque_render_method = if deferred { OpaqueRendererMethod::Deferred } else { OpaqueRendererMethod::Forward };
+                        m.opaque_render_method = if deferred {
+                            OpaqueRendererMethod::Deferred
+                        } else {
+                            OpaqueRendererMethod::Forward
+                        };
                     });
                 }
                 let expected = render(&mut reference, deferred);
