@@ -1,0 +1,11 @@
+# Original final-bucket neighbor defect and guarded-cache experiment
+
+The original vendored neighbor builder does not flush its final i0 bucket for the secondary i1 sort, or its final i0/i1 bucket for the tertiary face sort. A four-triangle manifold fixture enumerates all 24 face orders and checks against explicit opposite-edge adjacency: original fails 15 orders; flushing both final buckets passes all 24. This is separate from the earlier rejected halo experiment.
+
+Actual source: RayAnimationTest_LoomRig.loom, Body001 and Face001 material 0, integer poses 0–157 plus 39.25. Both meshes have zero welded edges with incidence greater than two in every tested pose. Fixing the final buckets changes no Body tangent bits. Face changes 14 corners at frame17, 7 at121, 14 at146, 14 at39.25. Largest tangent component difference is 0.43010038; this is not an ULP-only difference.
+
+Real GPU renders use the actual Face StandardMaterial, diffuse texture, and normal texture (1024×1024, 9915 distinct RGB values). Front, left, right and back 768×768 renders at all four affected poses have zero changed pixels. A deliberate tangent-rotation control changes 160822, 160625, 160864 and160456 front pixels respectively, confirming the shader consumes the replacement tangents. Fresh mesh asset handles are required in this test; the earlier same-handle experiment failed the positive control and is not evidence of visual equality. The saved frame39.25 images are byte-identical and were visually inspected.
+
+The test-only guarded neighbor cache checks the current complete-mesh welding equivalence classes, current derivative flags and original face order. It only stores meshes whose welded edge incidence is at most two. It recomputes welding and pose derivatives, and retains fresh subgroup and tangent arithmetic. Across all159poses it has316hits/2first misses; every output tangent bit matches fresh corrected preparation. Combined Body/Face tangent time in this isolated release run was26.613ms/pose fresh versus19.580ms cached. This is not an application FPS measurement.
+
+The implementation and opt-in reproductions live in `crates/loom_bevy/src/mikktspace/neighbor_probe.rs`. At this checkpoint the corrected path and cache are test-only; production remains unchanged until the guarded production implementation and regressions are verified.

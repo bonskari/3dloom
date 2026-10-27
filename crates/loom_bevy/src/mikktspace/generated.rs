@@ -1104,6 +1104,8 @@ unsafe fn InitTriInfo<I: Geometry>(
         }
     }
 
+    #[cfg(test)]
+    if neighbor_probe::restore(std::slice::from_raw_parts_mut(pTriInfos, iNrTrianglesIn), std::slice::from_raw_parts(piTriListIn, iNrTrianglesIn * 3)) { return; }
     let mut pEdges = vec![SEdge::zero(); iNrTrianglesIn * 3];
     BuildNeighborsFast(
         pTriInfos,
@@ -1112,6 +1114,8 @@ unsafe fn InitTriInfo<I: Geometry>(
         iNrTrianglesIn as i32,
         pool,
     );
+    #[cfg(test)]
+    neighbor_probe::store(std::slice::from_raw_parts(pTriInfos, iNrTrianglesIn));
 }
 
 unsafe fn BuildNeighborsFast(
@@ -1164,6 +1168,10 @@ unsafe fn BuildNeighborsFast(
         }
         i += 1
     }
+    #[cfg(test)]
+    if neighbor_probe::correct_final_buckets() {
+        QuickSortEdges(pEdges, iCurStartIndex, iEntries - 1, 1, uSeed);
+    }
     iCurStartIndex = 0i32;
     i = 1i32;
     while i < iEntries {
@@ -1178,6 +1186,10 @@ unsafe fn BuildNeighborsFast(
             QuickSortEdges(pEdges, iL_0, iR_0, 2i32, uSeed);
         }
         i += 1
+    }
+    #[cfg(test)]
+    if neighbor_probe::correct_final_buckets() {
+        QuickSortEdges(pEdges, iCurStartIndex, iEntries - 1, 2, uSeed);
     }
     i = 0i32;
     while i < iEntries {
@@ -1861,3 +1873,7 @@ mod parallel;
 
 #[path = "edge_sort.rs"]
 mod edge_sort;
+
+#[cfg(test)]
+#[path = "neighbor_probe.rs"]
+mod neighbor_probe;
