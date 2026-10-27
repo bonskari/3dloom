@@ -195,7 +195,7 @@ impl LoomApp {
         let local_bones: HashMap<_,_> = objects.iter().filter_map(|(id,_,_,_)| {
             let node=scene.node(loom_scene::NodeId(*id))?;
             (node.object.is_bone() && node.modifiers.is_empty() && node.instance_of.is_none() && !scene.display_of(node).display_as_box)
-                .then(||(*id,(scene.eval_mesh(node.id),scene.object_matrix(node.id))))
+                .then(||{let mesh=self.bone_geometry.get(&node.id).map(|g|g.mesh.clone()).unwrap_or_else(||Arc::new(scene.eval_mesh(node.id).value.mesh.clone()));(*id,(mesh,scene.object_matrix(node.id)))})
         }).collect();
         let generation = self.state.bitmap_generation;
         let Gpu::Running(b) = &mut self.gpu else { return };
@@ -210,7 +210,7 @@ impl LoomApp {
         let list: Vec<loom_bevy::SceneObject> = objects
             .iter()
             .filter_map(|(id, i, wire, renderable)| {
-                let (mesh,transform)=match local_bones.get(id){Some((evaluated,transform))=>(&evaluated.value.mesh,*transform),None=>(display.get(*i)?,Mat4::IDENTITY)};
+                let (mesh,transform)=match local_bones.get(id){Some((mesh,transform))=>(mesh.as_ref(),*transform),None=>(display.get(*i)?,Mat4::IDENTITY)};
                 Some(loom_bevy::SceneObject { id: *id, mesh, transform, wire_color: *wire, surfaces: scene.node_surfaces_for(loom_scene::NodeId(*id), view), renderable: *renderable, flags: render_flags(scene, loom_scene::NodeId(*id)) })
             })
             .collect();
@@ -268,7 +268,8 @@ impl LoomApp {
                 self.last_error = Some(format!("Render: {e}"));
             }
         }
-        if matches!(self.gpu, Gpu::Running(_)) {
+        let requested=self.render_job.is_some() || matches!(&self.gpu,Gpu::Running(b) if b.renderer.has_requested_views());
+        if requested && matches!(self.gpu, Gpu::Running(_)) {
             self.sync_bevy();
             self.queue_bucket();
             let Gpu::Running(b) = &mut self.gpu else { return };
@@ -546,6 +547,24 @@ impl LoomApp {
 mod tests {
     use super::*;
     use loom_scene::render::RenderSettings;
+
+    #[test]
+    fn wireframe_after_realistic_does_not_keep_synchronizing_bevy(){
+        let instance=wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let rs=pollster::block_on(egui_wgpu::RenderState::create(&crate::wgpu_configuration(),&instance,None,None,1,false)).expect("GPU renderer");
+        let mut app=LoomApp::headless();app.gpu=Gpu::Ready(rs);
+        let id=app.state.scene.add_node(loom_scene::Node::new("model",loom_scene::ObjectKind::box_object(1.,1.,1.)));
+        app.rebuild_world_meshes();let ctx=egui::Context::default();
+        let view=Mat4::look_at_rh(glam::Vec3::splat(6.),glam::Vec3::ZERO,glam::Vec3::Z);
+        let projection=Mat4::perspective_rh(45f32.to_radians(),1.,0.1,100.);
+        app.realistic_texture(3,[32,32],view,projection);app.finish_realistic_frame(&ctx);
+        let first=match &app.gpu{Gpu::Running(b)=>b.synced,_=>panic!("Bevy was started")};
+        app.state.scene.node_mut(id).unwrap().transform.position.set(glam::Vec3::X*2.);app.rebuild_world_meshes();
+        app.finish_realistic_frame(&ctx);
+        assert_eq!(match &app.gpu{Gpu::Running(b)=>b.synced,_=>None},first,"without a requested Realistic view, pose changes must not run background PBR preparation");
+        app.realistic_texture(3,[32,32],view,projection);app.finish_realistic_frame(&ctx);
+        assert_eq!(match &app.gpu{Gpu::Running(b)=>b.synced,_=>None},Some((app.world_version,false)),"returning to Realistic must show the latest pose");
+    }
 
     #[test]
     fn areas_place_the_output_in_the_frame() {
