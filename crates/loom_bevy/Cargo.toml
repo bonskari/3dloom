@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bytemuck = { workspace = true }
 loom_mesh   = { workspace = true }
 loom_render = { workspace = true }
 loom_scene  = { workspace = true }
