@@ -206,15 +206,7 @@ impl DynamicGeometryBuffer {
         &mut self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder,
         source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>,
     ) -> Result<Aabb, String> {
-        let bytes = (self.vertex_count as u64).checked_mul(64).ok_or("GPU pose size overflow")?;
-        if positions.len() != self.vertex_count || self.indices.as_deref() != indices
-            || !positions.iter().flatten().all(|v| v.is_finite())
-            || source_offset % 64 != 0
-            || !source.usage().contains(wgpu::BufferUsages::COPY_SRC)
-            || source_offset.checked_add(bytes).is_none_or(|end| end > source.size())
-        {
-            return Err("GPU pose layout, positions or source range is invalid".into());
-        }
+        let bytes = self.validate_gpu(source, source_offset, positions, indices)?;
         let mut lo = glam::Vec3::splat(f32::INFINITY);
         let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
         self.next_positions.clear();
@@ -228,6 +220,20 @@ impl DynamicGeometryBuffer {
         encoder.copy_buffer_to_buffer(source, source_offset, &self.buffer, 0, bytes);
         std::mem::swap(&mut self.last_positions, &mut self.next_positions);
         Ok(Aabb::from_min_max(lo, hi))
+    }
+
+    pub(crate) fn validate_gpu(&self, source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>) -> Result<u64, String> {
+        let bytes = (self.vertex_count as u64).checked_mul(64).ok_or("GPU pose size overflow")?;
+        if positions.len() != self.vertex_count || self.indices.as_deref() != indices
+            || !positions.iter().flatten().all(|v| v.is_finite())
+            || source_offset % 64 != 0
+            || source == &*self.buffer
+            || !source.usage().contains(wgpu::BufferUsages::COPY_SRC)
+            || source_offset.checked_add(bytes).is_none_or(|end| end > source.size())
+        {
+            return Err("GPU pose layout, positions or source range is invalid".into());
+        }
+        Ok(bytes)
     }
 }
 
@@ -456,6 +462,8 @@ mod tests {
             label: Some("validated pose transport test"), contents: &bytes, usage: wgpu::BufferUsages::COPY_SRC,
         });
         let mut encoder = device.create_command_encoder(&Default::default());
+        let alias = buffer.buffer().clone();
+        assert!(buffer.commit_gpu(&queue, &mut encoder, &alias, 0, positions, indices.as_deref()).is_err());
         assert!(buffer.commit_gpu(&queue, &mut encoder, &candidate, 1, positions, indices.as_deref()).is_err());
         assert!(buffer.commit_gpu(&queue, &mut encoder, &candidate, u64::MAX - 63, positions, indices.as_deref()).is_err());
         assert!(buffer.commit_gpu(&queue, &mut encoder, &candidate, 128, positions, indices.as_deref()).is_err());

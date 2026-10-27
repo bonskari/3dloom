@@ -204,3 +204,15 @@ raw current flags are returned, and producer must reject the whole pose on
 any nonzero value before the first render-buffer commit. Missing-type RED
 then actual13-buffer current-change/recovery GPU regression GREEN. Independent
 read-only review found no important issue. Not yet connected to native playback.
+
+
+Complete-pose commit staging now owns submission: preflight ALL layouts,
+read ALL current guards, reject the entire pose on any nonzero word, copy ALL
+parts and submit before returning bounds. Second-part layout/guard failures
+leave both target buffers unchanged; successful batch updates both. Review
+found source/target aliasing could bypass preflight and mutate partial history;
+regression reproduced an incorrectly accepted cross-target copy, then passed
+with self/cross-target identity rejection before mutation. Direct self-copy
+rejection/history GPU test also passed; independent re-review confirmed fix.
+Dynamic8test suite passed before final alias guard; changed batch2tests and
+final direct transport regression passed after alias fix. No native activation.
