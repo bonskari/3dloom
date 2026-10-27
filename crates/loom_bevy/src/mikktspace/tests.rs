@@ -16,7 +16,9 @@ fn prepared_groups_preserve_complete_mikk_results() {
     let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
     let mut sphere = loom_mesh::sphere_segmented(1.25, 32, 0.0);
     loom_mesh::uvmap::auto_map(&mut sphere, loom_mesh::uvmap::AutoMap::Spherical, 1);
-    let mut cases = vec![mesh_data(&sphere), mesh_data(&loom_mesh::box_primitive(Vec3::ONE)), mesh_data(&loom_mesh::quad_primitive(Vec3::ZERO, Vec3::X, Vec3::Y))];
+    let mut larger = loom_mesh::sphere_segmented(1.25, 64, 0.0);
+    loom_mesh::uvmap::auto_map(&mut larger, loom_mesh::uvmap::AutoMap::Spherical, 1);
+    let mut cases = vec![mesh_data(&larger), mesh_data(&sphere), mesh_data(&loom_mesh::box_primitive(Vec3::ONE)), mesh_data(&loom_mesh::quad_primitive(Vec3::ZERO, Vec3::X, Vec3::Y))];
     let mut mirrored = cases[0].clone();
     for uv in &mut mirrored.uvs { uv[0] = -uv[0]; }
     cases.push(mirrored);

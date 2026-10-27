@@ -1,5 +1,5 @@
 // Derived from bevy_mikktspace 0.16.1. Altered only to add a prepared
-// parallel-group integration hook; original arithmetic/order is retained.
+// parallel-cell/group integration hooks; original arithmetic/order is retained.
 //! Everything in this module is pending to be refactored, turned into idiomatic-rust, and moved to
 //! other modules.
 
@@ -239,7 +239,7 @@ pub unsafe fn genTangSpace<I: Geometry + Sync>(geometry: &mut I, fAngularThresho
         geometry,
         iNrTrianglesIn,
     );
-    GenerateSharedVerticesIndexList(piTriListIn.as_mut_ptr(), geometry, iNrTrianglesIn);
+    GenerateSharedVerticesIndexList(piTriListIn.as_mut_ptr(), geometry, iNrTrianglesIn, pool);
     iTotTris = iNrTrianglesIn;
     iDegenTriangles = 0;
     t = 0;
@@ -1437,11 +1437,13 @@ unsafe fn DegenPrologue(
         }
     }
 }
-unsafe fn GenerateSharedVerticesIndexList<I: Geometry>(
+unsafe fn GenerateSharedVerticesIndexList<I: Geometry + Sync>(
     mut piTriList_in_and_out: *mut i32,
     geometry: &mut I,
     iNrTrianglesIn: usize,
+    pool: Option<&bevy_tasks::TaskPool>,
 ) {
+    let _weld_scope = loom_render::profile::Scope::new("mikk.weld");
     let mut i = 0;
     let mut iChannel: i32 = 0i32;
     let mut k = 0;
@@ -1540,6 +1542,13 @@ unsafe fn GenerateSharedVerticesIndexList<I: Geometry>(
             iMaxCount = piHashCount[k] as usize
         }
         k += 1
+    }
+    if let Some(pool) = pool.filter(|pool| pool.thread_num() > 1 && iNrTrianglesIn >= 2048) {
+        parallel::weld_cells(
+            std::slice::from_raw_parts_mut(piTriList_in_and_out, iNrTrianglesIn * 3),
+            &piHashTable, &piHashOffsets, &piHashCount, geometry, pool,
+        );
+        return;
     }
     let mut pTmpVert = vec![STmpVert::zero(); iMaxCount];
     k = 0;

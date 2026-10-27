@@ -1,6 +1,6 @@
 //! Prepared parallel groups over the unchanged MikkTSpace 0.16.1 algorithm.
-//! The complete mesh is prepared before parallel work; no local welding or
-//! cached rest-pose tangent is substituted for the current geometry.
+//! Global welding/neighbor/group context and original per-cell ordering are
+//! retained; no cached rest-pose tangent replaces the current geometry.
 use crate::convert::MeshData;
 use bevy_mikktspace::Geometry;
 use glam::{Vec2, Vec3};

@@ -126,3 +126,53 @@ pub(super) fn generate<I: Geometry + Sync>(
     }
     Some(true)
 }
+
+/// MergeVertsFast only reads/writes entries of its current grid cell. Keep
+/// the original global grid and each cell's insertion order, but evaluate
+/// disjoint cells with worker-local indices and scratch storage.
+pub(super) fn weld_cells<I: Geometry + Sync>(
+    indices: &mut [i32], table: &[i32], offsets: &[i32], counts: &[i32],
+    geometry: &I, pool: &bevy_tasks::TaskPool,
+) {
+    let pack_scope = loom_render::profile::Scope::new("mikk.weld_pack");
+    let workers = pool.thread_num().min(8);
+    let mut jobs = vec![Vec::new(); workers];
+    let mut sizes = vec![0usize; workers];
+    for (cell, count) in counts.iter().enumerate().filter(|(_, count)| **count >= 2) {
+        let worker = sizes.iter().enumerate().min_by_key(|(_, size)| **size).unwrap().0;
+        jobs[worker].push(cell);
+        sizes[worker] += *count as usize;
+    }
+    let original: &[i32] = indices;
+    drop(pack_scope);
+    let results = pool.scope(|scope| {
+        for (cells, capacity) in jobs.into_iter().zip(sizes) {
+            scope.spawn(async move {
+                let _scope = loom_render::profile::Scope::new("mikk.weld_jobs");
+                let mut view = super::super::ReadGeometry(geometry);
+                let mut local_indices = Vec::new();
+                let mut scratch = Vec::new();
+                let mut result = Vec::with_capacity(capacity);
+                for cell in cells {
+                    let count = counts[cell] as usize;
+                    let entries = &table[offsets[cell] as usize..offsets[cell] as usize + count];
+                    local_indices.clear();
+                    scratch.clear();
+                    for (local, global) in entries.iter().enumerate() {
+                        let encoded = original[*global as usize];
+                        let p = get_position(&mut view, encoded as usize);
+                        local_indices.push(encoded);
+                        scratch.push(STmpVert { vert: [p.x, p.y, p.z], index: local as i32 });
+                    }
+                    // All pointers are local to this task. The encoded Geometry
+                    // indices remain global; only array offsets are compacted.
+                    unsafe { MergeVertsFast(local_indices.as_mut_ptr(), scratch.as_mut_ptr(), &mut view, 0, count as i32 - 1); }
+                    result.extend(entries.iter().zip(&local_indices).map(|(global, encoded)| (*global as usize, *encoded)));
+                }
+                result
+            });
+        }
+    });
+    let _merge_scope = loom_render::profile::Scope::new("mikk.weld_merge");
+    for result in results { for (global, encoded) in result { indices[global] = encoded; } }
+}
