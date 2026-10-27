@@ -2,7 +2,7 @@
 //! tangents, track bar edits, playback, Re-scale Time and animation clips.
 
 use crate::command::Command;
-use crate::execute::{commit_exact as commit, set_frame};
+use crate::execute::{commit_exact as commit, set_animation_time, set_frame};
 use crate::state::AppState;
 use loom_scene::anim::{self, TangentType};
 use loom_scene::tracks::{self, AnyParam, TrackOwner, TrackPath};
@@ -105,7 +105,7 @@ pub struct Playback {
     pub loop_playback: bool,
     pub speed: f32,
     pub direction: PlayDirection,
-    /// Fractional frames not played yet (Real Time).
+    /// Subframe preview offset while Real Time plays; the timeline stays integer.
     pub accum: f32,
     /// Ping Pong: +1 forward, -1 back.
     pub sign: i32,
@@ -332,6 +332,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::MoveKeysInTime { from, to, delta } => shift_keys(state, from, to, delta, false),
         C::CopyKeys { from, to, delta } => shift_keys(state, from, to, delta, true),
         C::SetPlayback { real_time, loop_playback, speed, direction } => {
+            let snap = real_time.is_some_and(|v| v != state.playback.real_time);
             let p = &mut state.playback;
             if let Some(v) = real_time {
                 p.real_time = v;
@@ -347,6 +348,9 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             if let Some(v) = direction {
                 p.direction = v;
+            }
+            if snap {
+                set_frame(state, state.current_frame)?;
             }
             Ok(state_json(state))
         }
@@ -680,38 +684,56 @@ fn shift_keys(state: &mut AppState, from: i32, to: i32, delta: i32, copy: bool) 
 }
 
 fn tick(state: &mut AppState, seconds: f32) -> Result<Value, String> {
+    if !seconds.is_finite() {
+        return Err("playback elapsed time must be finite".into());
+    }
     if !state.playing {
         return Ok(json!({ "playing": false, "frame": state.current_frame }));
     }
     let (s0, s1) = state.frame_range;
-    let len = s1 - s0 + 1;
+    let len = i64::from(s1) - i64::from(s0) + 1;
     let p = state.playback;
-    let (steps, dir) = if p.real_time {
-        let acc = state.playback.accum + seconds.max(0.0) * state.fps * p.speed;
+    let (steps, dir, remainder) = if p.real_time {
+        if !(state.fps.is_finite() && state.fps > 0.0 && p.speed.is_finite() && p.speed > 0.0 && p.accum.is_finite()) {
+            return Err("playback FPS, speed and accumulator must be finite and valid".into());
+        }
+        let acc = p.accum + seconds.max(0.0) * state.fps * p.speed;
+        if !acc.is_finite() || acc < 0.0 {
+            return Err("playback clock must remain finite and nonnegative".into());
+        }
         let steps = acc.floor();
-        state.playback.accum = acc - steps;
-        (steps as i32, 1)
+        if steps as f64 > i32::MAX as f64 {
+            return Err("playback advance exceeds the supported integer frame step".into());
+        }
+        (steps as i32, 1, acc - steps)
     } else {
-        match p.direction {
-            PlayDirection::Forward => (1, 1),
-            PlayDirection::Reverse => (1, -1),
-            PlayDirection::PingPong => (1, p.sign),
-        }
+        let dir = match p.direction {
+            PlayDirection::Forward => 1,
+            PlayDirection::Reverse => -1,
+            PlayDirection::PingPong => p.sign,
+        };
+        (1, dir, 0.0)
     };
-    let mut f = state.current_frame + steps * dir;
-    if !p.real_time && p.direction == PlayDirection::PingPong && (f > s1 || f < s0) {
-        state.playback.sign = -p.sign;
-        f = state.current_frame - steps * dir;
+    let mut sign = p.sign;
+    let mut f = i64::from(state.current_frame) + i64::from(steps) * i64::from(dir);
+    if !p.real_time && p.direction == PlayDirection::PingPong && (f > i64::from(s1) || f < i64::from(s0)) {
+        sign = p.sign.checked_neg().ok_or("invalid playback direction")?;
+        f = i64::from(state.current_frame) - i64::from(steps) * i64::from(dir);
     }
-    if f > s1 || f < s0 {
+    let mut playing = state.playing;
+    if f > i64::from(s1) || f < i64::from(s0) {
         if p.loop_playback {
-            f = s0 + (f - s0).rem_euclid(len);
+            f = i64::from(s0) + (f - i64::from(s0)).rem_euclid(len);
         } else {
-            f = f.clamp(s0, s1);
-            state.playing = false;
+            f = f.clamp(i64::from(s0), i64::from(s1));
+            playing = false;
         }
     }
-    set_frame(state, f)?;
+    let fraction = if p.real_time && playing { remainder } else { 0.0 };
+    state.playing = playing;
+    state.playback.sign = sign;
+    state.playback.accum = fraction;
+    set_animation_time(state, f as i32, f as f32 + fraction)?;
     Ok(json!({ "playing": state.playing, "frame": state.current_frame }))
 }
 

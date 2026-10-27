@@ -16,8 +16,13 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
-    // Every edit happens at the time slider's frame, keyed when Auto Key is on.
-    state.scene.set_time(state.current_frame as f32);
+    let previous_time = state.scene.time();
+    let playback_tick = matches!(cmd, Command::TickPlayback { .. });
+    // Edits still key at the integer slider frame. Playback itself keeps its
+    // current fractional preview so a zero-duration tick does not dirty it.
+    if !playback_tick && !matches!(cmd, Command::State | Command::Measure | Command::MeasureNodes { .. } | Command::HelperReadout { .. }) {
+        state.scene.set_time(state.current_frame as f32);
+    }
     let animate = loom_scene::anim::animate();
     loom_scene::anim::set_animate(state.auto_key && !state.set_key_mode);
     loom_scene::anim::set_default_tangents(state.default_tangent);
@@ -48,7 +53,17 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         crate::anim_cmds::start_pose(state);
     }
     loom_scene::anim::set_animate(animate);
-    state.scene.set_time(state.current_frame as f32);
+    // Nested edit commands leave the outer edit at its integer key time.
+    let fraction = if outer && state.playing && state.playback.real_time { state.playback.accum } else { 0.0 };
+    let time = if playback_tick && r.is_err() {
+        previous_time
+    } else {
+        (state.current_frame as f32 + fraction).clamp(state.frame_range.0 as f32, state.frame_range.1 as f32)
+    };
+    state.scene.set_time(time);
+    if time != previous_time {
+        state.mesh_dirty = true;
+    }
     crate::stack::sync_selection(state);
     if let Some(before) = sel_before {
         crate::sel_undo::record(state, before, position);
@@ -956,7 +971,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 state.fps = f;
             }
             state.frame_range = (s0, s1);
-            state.current_frame = state.current_frame.clamp(s0, s1);
+            set_frame(state, state.current_frame)?;
             Ok(json!({ "start": s0, "end": s1, "fps": state.fps, "frame": state.current_frame }))
         }
         C::SetFov { degrees } => {
@@ -3808,17 +3823,24 @@ fn toggle(flag: &mut bool, name: &str) -> Result<Value, String> {
 }
 
 pub(crate) fn set_frame(state: &mut AppState, frame: i32) -> Result<Value, String> {
+    state.playback.accum = 0.0;
+    set_animation_time(state, frame, frame as f32)
+}
+
+/// Playback may preview between source frames; timeline/key commands stay integer.
+pub(crate) fn set_animation_time(state: &mut AppState, frame: i32, time: f32) -> Result<Value, String> {
     let frame = frame.clamp(state.frame_range.0, state.frame_range.1);
     // Set Key mode: a pose not keyed yet is dropped when the frame changes.
     if state.set_key_mode && frame != state.current_frame {
         crate::anim_cmds::discard_pose(state);
     }
-    // The viewports show the scene at the new frame.
-    if frame != state.current_frame {
+    let time = time.clamp(state.frame_range.0 as f32, state.frame_range.1 as f32);
+    // A fractional preview change also needs fresh geometry.
+    if frame != state.current_frame || time != state.scene.time() {
         state.mesh_dirty = true;
     }
     state.current_frame = frame;
-    state.scene.set_time(frame as f32);
+    state.scene.set_time(time);
     if state.set_key_mode {
         crate::anim_cmds::start_pose(state);
     }

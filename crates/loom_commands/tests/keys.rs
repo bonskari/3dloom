@@ -260,3 +260,181 @@ fn set_keys_keys_the_selection_list_set() {
     execute(&mut s, Command::SetKeys).unwrap();
     assert!(pos_keys(&s, a).iter().any(|t| t.contains(&8.0)), "back to Selected");
 }
+
+#[test]
+fn real_time_playback_presents_sixty_interpolated_poses_at_thirty_source_fps() {
+    let mut s=AppState::new();
+    let id=auto_keyed_box(&mut s);
+    frame(&mut s,0);
+    execute(&mut s,Command::SetTimeConfiguration{start:Some(0),end:Some(100),fps:Some(30.0)}).unwrap();
+    execute(&mut s,Command::PlayAnimation).unwrap();
+    let mut times=std::collections::HashSet::new();
+    let mut poses=std::collections::HashSet::new();
+    for tick in 1..=60 {
+        s.mesh_dirty=false;
+        execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+        assert!(s.mesh_dirty,"interpolated tick {tick} must refresh geometry");
+        assert!((s.scene.time()-tick as f32*0.5).abs()<1e-5,"tick {tick}: {}",s.scene.time());
+        assert_eq!(s.current_frame,tick/2,"timeline remains on integer source frames");
+        times.insert(s.scene.time().to_bits());
+        poses.insert(s.scene.object_matrix(id).w_axis.x.to_bits());
+    }
+    assert_eq!(times.len(),60);
+    assert_eq!(poses.len(),60,"actual evaluated motion, not just a repaint counter");
+}
+
+#[test]
+fn fractional_playback_stop_scrub_and_configuration_snap_to_integer_time() {
+    let mut s=AppState::new();
+    execute(&mut s,Command::PlayAnimation).unwrap();
+    execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+    assert_eq!(s.scene.time(),0.5);
+    s.mesh_dirty=false;
+    execute(&mut s,Command::PlayAnimation).unwrap();
+    assert!(!s.playing);
+    assert_eq!(s.scene.time(),0.0);
+    assert_eq!(s.playback.accum,0.0);
+    assert!(s.mesh_dirty,"stop must replace the fractional visible pose");
+    execute(&mut s,Command::PlayAnimation).unwrap();
+    execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+    frame(&mut s,0);
+    assert_eq!(s.scene.time(),0.0,"scrubbing to the displayed integer resets the fraction");
+    assert_eq!(s.playback.accum,0.0);
+    execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+    execute(&mut s,Command::SetPlayback{real_time:Some(false),loop_playback:None,speed:None,direction:None}).unwrap();
+    assert_eq!(s.scene.time(),0.0);
+    assert_eq!(s.playback.accum,0.0);
+    execute(&mut s,Command::SetTimeConfiguration{start:Some(20),end:Some(30),fps:None}).unwrap();
+    assert_eq!(s.current_frame,20);
+    assert_eq!(s.scene.time(),20.0,"range clamping must update the evaluated scene too");
+}
+
+#[test]
+fn fractional_playback_speed_loop_and_end_respect_source_frame_range() {
+    let mut s=AppState::new();
+    execute(&mut s,Command::SetTimeConfiguration{start:Some(-2),end:Some(2),fps:Some(30.0)}).unwrap();
+    frame(&mut s,-2);
+    execute(&mut s,Command::SetPlayback{real_time:None,loop_playback:Some(true),speed:Some(0.5),direction:None}).unwrap();
+    execute(&mut s,Command::PlayAnimation).unwrap();
+    execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+    assert_eq!(s.current_frame,-2);
+    assert_eq!(s.scene.time(),-1.75);
+    execute(&mut s,Command::SetPlayback{real_time:None,loop_playback:None,speed:Some(2.0),direction:None}).unwrap();
+    execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+    assert_eq!(s.scene.time(),-0.75,"speed changes preserve subframe continuity");
+    frame(&mut s,2);
+    execute(&mut s,Command::SetPlayback{real_time:None,loop_playback:None,speed:Some(1.0),direction:None}).unwrap();
+    execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+    assert_eq!(s.scene.time(),2.0,"the last source frame holds until the inclusive loop boundary");
+    execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+    assert_eq!(s.current_frame,-2);
+    assert_eq!(s.scene.time(),-2.0);
+    frame(&mut s,2);
+    execute(&mut s,Command::SetPlayback{real_time:None,loop_playback:Some(false),speed:None,direction:None}).unwrap();
+    execute(&mut s,Command::TickPlayback{seconds:0.1}).unwrap();
+    assert!(!s.playing);
+    assert_eq!(s.scene.time(),2.0);
+    assert_eq!(s.playback.accum,0.0);
+}
+
+#[test]
+fn non_real_time_reverse_and_pingpong_remain_integer_steps() {
+    use loom_commands::anim_cmds::PlayDirection;
+    let mut s=AppState::new();
+    execute(&mut s,Command::SetTimeConfiguration{start:Some(0),end:Some(2),fps:Some(30.0)}).unwrap();
+    frame(&mut s,1);
+    execute(&mut s,Command::SetPlayback{real_time:Some(false),loop_playback:Some(true),speed:Some(4.0),direction:Some(PlayDirection::Reverse)}).unwrap();
+    execute(&mut s,Command::PlayAnimation).unwrap();
+    for expected in [0,2,1] {
+        execute(&mut s,Command::TickPlayback{seconds:0.0001}).unwrap();
+        assert_eq!(s.current_frame,expected);
+        assert_eq!(s.scene.time(),expected as f32);
+    }
+    frame(&mut s,1);
+    execute(&mut s,Command::SetPlayback{real_time:None,loop_playback:None,speed:None,direction:Some(PlayDirection::PingPong)}).unwrap();
+    for expected in [2,1,0,1,2] {
+        execute(&mut s,Command::TickPlayback{seconds:1.0}).unwrap();
+        assert_eq!(s.current_frame,expected);
+        assert_eq!(s.scene.time(),expected as f32);
+    }
+}
+
+#[test]
+fn fractional_preview_survives_commands_but_autokey_edits_use_integer_frame() {
+    let mut s=AppState::new();
+    let id=boxed(&mut s);
+    execute(&mut s,Command::AutoKeyModeToggle).unwrap();
+    frame(&mut s,2);
+    execute(&mut s,Command::PlayAnimation).unwrap();
+    execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+    assert_eq!(s.scene.time(),2.5);
+    s.mesh_dirty=false;
+    execute(&mut s,Command::TickPlayback{seconds:0.0}).unwrap();
+    assert_eq!(s.scene.time(),2.5);
+    assert!(!s.mesh_dirty,"no pose change must not force another geometry preparation");
+    execute(&mut s,Command::State).unwrap();
+    assert_eq!(s.scene.time(),2.5,"read-only commands must not end fractional preview");
+    mv(&mut s,[10.0,0.0,0.0]);
+    assert_eq!(s.scene.time(),2.5,"resume the continuous preview after an integer key edit");
+    let times=pos_keys(&s,id);
+    assert!(times.iter().flatten().all(|time|time.fract()==0.0));
+    assert!(times[0].contains(&2.0));
+    assert!(!times[0].contains(&2.5));
+}
+
+#[test]
+fn state_query_samples_the_visible_fractional_transform() {
+    let mut s=AppState::new();
+    let id=auto_keyed_box(&mut s);
+    frame(&mut s,2);
+    execute(&mut s,Command::PlayAnimation).unwrap();
+    execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+    let expected=s.scene.object_matrix(id).w_axis.x;
+    let query=execute(&mut s,Command::State).unwrap();
+    let node=query["nodes"].as_array().unwrap().iter().find(|n|n["id"].as_u64()==Some(id.0)).unwrap();
+    assert!((node["position"][0].as_f64().unwrap() as f32-expected).abs()<1e-6,"query must report the visible subframe pose");
+    assert_eq!(s.scene.time(),2.5);
+}
+
+#[test]
+fn invalid_playback_clock_rejects_without_corrupting_the_visible_pose() {
+    for case in 0..6 {
+        let mut s=AppState::new();
+        frame(&mut s,2);
+        execute(&mut s,Command::PlayAnimation).unwrap();
+        execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+        let seconds=match case {
+            0=>f32::INFINITY,
+            1=>f32::NAN,
+            2=>{execute(&mut s,Command::SetPlayback{real_time:None,loop_playback:None,speed:Some(1e38),direction:None}).unwrap();0.25},
+            3=>1e8,
+            4=>{s.playback.accum=f32::NAN;0.25},
+            _=>{s.fps=f32::NAN;0.25},
+        };
+        s.mesh_dirty=false;
+        let before=(s.current_frame,s.playing,s.playback.accum.to_bits(),s.scene.time().to_bits());
+        assert!(execute(&mut s,Command::TickPlayback{seconds}).is_err(),"invalid clock case={case}");
+        assert_eq!((s.current_frame,s.playing,s.playback.accum.to_bits(),s.scene.time().to_bits()),before,"case={case}");
+        assert!(s.scene.time().is_finite(),"case={case}");
+        assert!(!s.mesh_dirty,"rejected tick cannot replace the visible pose case={case}");
+    }
+}
+
+#[test]
+fn real_time_supported_speeds_keep_direction_semantics_and_large_frame_loops() {
+    use loom_commands::anim_cmds::PlayDirection;
+    for speed in [0.25,0.5,1.0,2.0,4.0] {
+        let mut s=AppState::new();
+        execute(&mut s,Command::SetPlayback{real_time:None,loop_playback:None,speed:Some(speed),direction:Some(PlayDirection::Reverse)}).unwrap();
+        execute(&mut s,Command::PlayAnimation).unwrap();
+        execute(&mut s,Command::TickPlayback{seconds:1.0/60.0}).unwrap();
+        assert_eq!(s.scene.time(),speed*0.5,"Direction applies only with Real Time off");
+    }
+    let mut s=AppState::new();
+    execute(&mut s,Command::SetTimeConfiguration{start:Some(i32::MAX-2),end:Some(i32::MAX),fps:Some(1.0)}).unwrap();
+    frame(&mut s,i32::MAX);
+    execute(&mut s,Command::PlayAnimation).unwrap();
+    execute(&mut s,Command::TickPlayback{seconds:1.0}).unwrap();
+    assert_eq!(s.current_frame,i32::MAX-2,"loop arithmetic must not overflow before wrapping");
+    assert!(s.scene.time().is_finite());
+}
