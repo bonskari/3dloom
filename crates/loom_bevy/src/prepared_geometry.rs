@@ -97,6 +97,31 @@ impl GeometryCache {
     }
 }
 
+/// Prepares independent objects on the existing bounded worker pool. Small
+/// meshes stay on the caller; results and their caches retain input order.
+pub(crate) fn prepare_batch<K: Send + 'static>(
+    pool: &bevy_tasks::TaskPool,
+    jobs: Vec<(K, GeometryCache, &Mesh)>,
+) -> Vec<(K, GeometryCache, crate::convert::MeshData)> {
+    let mut ready = Vec::with_capacity(jobs.len());
+    let parallel = pool.scope(|scope| {
+        for (index, (key, mut cache, mesh)) in jobs.into_iter().enumerate() {
+            if mesh.face_count() < 1024 {
+                let data = cache.mesh_data(mesh);
+                ready.push((index, (key, cache, data)));
+            } else {
+                scope.spawn(async move {
+                    let data = cache.mesh_data(mesh);
+                    (index, (key, cache, data))
+                });
+            }
+        }
+    });
+    ready.extend(parallel);
+    ready.sort_unstable_by_key(|(index, _)| *index);
+    ready.into_iter().map(|(_, value)| value).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +132,27 @@ mod tests {
         let bits = |data: &crate::convert::MeshData| data.positions.iter().flatten().chain(data.normals.iter().flatten()).chain(data.uvs.iter().flatten()).map(|x| x.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&actual), bits(&expected));
     }
+    #[test]
+    fn parallel_batch_preserves_input_order_and_returns_reusable_caches() {
+        let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
+        let mut meshes = vec![loom_mesh::sphere_segmented(1.0, 64, 0.0), loom_mesh::box_primitive(Vec3::ONE), loom_mesh::sphere_segmented(1.0, 48, 0.0)];
+        let jobs = meshes.iter().enumerate().map(|(i,m)| (i, GeometryCache::default(), m)).collect();
+        let first = prepare_batch(&pool, jobs);
+        let mut caches = Vec::new();
+        for ((id, cache, actual), mesh) in first.into_iter().zip(&meshes) {
+            assert_eq!(id, caches.len());
+            assert_eq!(actual, crate::convert::mesh_data(mesh));
+            caches.push(cache);
+        }
+        meshes[0].vertices_mut()[0].position.z += 0.25;
+        meshes[2].faces_mut()[0].hidden = true;
+        let jobs = meshes.iter().zip(caches).enumerate().map(|(i,(m,c))| (i,c,m)).collect();
+        let second = prepare_batch(&pool, jobs);
+        for ((id, _, actual), mesh) in second.into_iter().zip(&meshes) {
+            assert_eq!(actual, crate::convert::mesh_data(mesh), "object {id}");
+        }
+    }
+
     #[test]
     fn matches_reference_through_pose_and_corner_property_edits() {
         let mut mesh = loom_mesh::sphere_segmented(1.25, 16, 0.0);
@@ -186,8 +232,14 @@ mod tests {
         assert!(!ids.is_empty());
         let mut caches: Vec<_> = ids.iter().map(|_| GeometryCache::default()).collect();
         let mut totals = vec![(0.0, 0.0, 0); ids.len()];
+        let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
+        let mut batch_caches: Vec<_> = ids.iter().map(|_| GeometryCache::default()).collect();
+        let mut batch_total = 0.0;
+        let mut pose_count = 0;
         for frame in (start..=end).map(|f| f as f32).chain([39.25]) {
             scene.set_time(frame);
+            let mut meshes = Vec::new();
+            let mut serial_data = Vec::new();
             for (i, (id, name)) in ids.iter().enumerate() {
                 let mut mesh = scene.eval_mesh(*id).value.mesh.clone();
                 loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(*id)).unwrap();
@@ -206,8 +258,27 @@ mod tests {
                 }
                 assert_eq!(actual.uvs.len(), expected.uvs.len(), "{name} frame {frame}");
                 assert!(actual.uvs.iter().flatten().zip(expected.uvs.iter().flatten()).all(|(a,b)| a.to_bits() == b.to_bits()), "{name} frame {frame}");
+                meshes.push(mesh);
+                serial_data.push(expected);
+            }
+            let jobs = meshes.iter().zip(std::mem::take(&mut batch_caches)).enumerate().map(|(i,(m,c))| (i,c,m)).collect();
+            let t = std::time::Instant::now();
+            let batch = prepare_batch(&pool, jobs);
+            batch_total += t.elapsed().as_secs_f64() * 1000.0;
+            pose_count += 1;
+            for ((i, cache, actual), expected) in batch.into_iter().zip(&serial_data) {
+                assert_eq!(i, batch_caches.len());
+                assert_eq!(actual.indices, expected.indices);
+                for (a,b) in [(&actual.positions, &expected.positions), (&actual.normals, &expected.normals)] {
+                    assert_eq!(a.len(), b.len());
+                    assert!(a.iter().flatten().zip(b.iter().flatten()).all(|(a,b)| a.to_bits() == b.to_bits()));
+                }
+                assert_eq!(actual.uvs.len(), expected.uvs.len());
+                assert!(actual.uvs.iter().flatten().zip(expected.uvs.iter().flatten()).all(|(a,b)| a.to_bits() == b.to_bits()));
+                batch_caches.push(cache);
             }
         }
+        eprintln!("GEOMETRY batch_avg_ms={:.3} poses={pose_count}", batch_total/pose_count as f64);
         loom_render::profile::report_if_due();
         for ((_, name), (reference, cached, count)) in ids.iter().zip(totals) {
             eprintln!("GEOMETRY name={name} poses={count} reference_avg_ms={:.3} cached_avg_ms={:.3}", reference/count as f64, cached/count as f64);
