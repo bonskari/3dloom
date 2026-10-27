@@ -67,9 +67,7 @@ fn faces_origin_relative(@builtin(global_invocation_id) invocation: vec3<u32>) {
     face_normals[face] = vec4<f32>(unit_or_zero(n), 0.0);
 }
 
-@compute @workgroup_size(64)
-fn pack_corners(@builtin(global_invocation_id) invocation: vec3<u32>) {
-    let i = invocation.x;
+fn pack_geometry(i:u32) {
     if i >= pose.counts.y { return; }
     let corner = corners[i];
     let face = corner.source.y;
@@ -86,6 +84,12 @@ fn pack_corners(@builtin(global_invocation_id) invocation: vec3<u32>) {
     }
     output[i].position = vec4<f32>(point(corner.source.x), 1.0);
     output[i].normal = vec4<f32>(n, 0.0);
-    output[i].tangent = oracle_tangents[i];
+    // Intermediate geometry is never rendered before the tangent stage.
+    output[i].tangent = vec4<f32>(0.0);
     output[i].uv = corner.uv;
 }
+
+@compute @workgroup_size(64)
+fn pack_geometry_only(@builtin(global_invocation_id) id:vec3<u32>){pack_geometry(id.x);}
+@compute @workgroup_size(64)
+fn pack_corners(@builtin(global_invocation_id) id:vec3<u32>){if id.x>=pose.counts.y{return;}pack_geometry(id.x);output[id.x].tangent=oracle_tangents[id.x];}

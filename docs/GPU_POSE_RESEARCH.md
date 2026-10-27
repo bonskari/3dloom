@@ -1,7 +1,9 @@
 # Current-pose GPU geometry research (2026-10-27)
 
-Status: test-only, unwired. Realistic playback has not reached the 60 distinct
-poses/second target. None of these experiments supplies production tangents.
+Status: experimental hybrid current-geometry path; native activation is gated
+separately. Realistic playback has not reached the 60 distinct poses/second
+target. The core now computes complete current GPU tangents using a genuine
+CPU structural compiler; general production quality is not established.
 
 `gpu_skin.rs` computes all supplied influences (including Ray's twelve and joint
 874), missing-bone handling and relative residual weights. Its affine point
@@ -50,7 +52,7 @@ is bounded quality evidence, not comprehensive visual acceptance.
 Artifacts from the local opt-in tests:
 `/tmp/loom-gpu-pose-lit-audit/{time}-{view}-{legacy,gpu-stable,f64-oracle}.png`.
 
-## Current tangent evaluator
+## Initial captured-group tangent evaluator
 
 `gpu_mikk_group.wgsl` evaluates actual ordered EvalTspace subgroup fixtures
 captured from CPU corrected Mikk at Face001/39.25. All 256 groups differ in
@@ -59,7 +61,7 @@ bits; maximum tangent-vector error was 1.91e-7 and relative magnitude error
 This implements subgroup arithmetic, not weld/group selection or the complete
 Mikk algorithm.
 
-Missing GPU stages are current attribute welding, corrected deterministic edge
+At that initial checkpoint, missing GPU stages were current attribute welding, corrected deterministic edge
 pairing, orientation/connected groups and subgroup selection, deterministic
 last-corner ownership, and degenerate epilogue. These must be checked against a
 CPU structural oracle on the SAME GPU attributes. No assumption that bind-pose
@@ -67,7 +69,7 @@ welds/groups remain valid is authorized. Nonmanifold edges, UV/normal seams,
 material isolation, signed zero equality and degenerate triangles need explicit
 coverage. Native acos's numerical difference needs coupled image acceptance.
 
-CPU editor/picking geometry, presented-pose synchronization, bounds, unsupported
+Production transport, presented-pose synchronization, bounds, unsupported
 modifier stacks/hardware and complete StandardMaterial passes remain integration
 work. No shader quality feature is disabled, and no influence is truncated.
 
@@ -151,3 +153,102 @@ sweep and removed: measured GPU span averaged 1.667 ms, worse than the original
 hash run. Both retained exact structure/guard results. No hash-collision cause
 for the timing variability is established. A sampled isolated run had GPU P5
 and 405 MHz memory clocks; sustained production/render timing remains required.
+
+## Complete hybrid tangent candidate (2026-10-28)
+
+`gpu_mikk_recipe.rs` / `.wgsl` consumes `mikktspace::compile_structure` output.
+That production compiler stops after actual current welding, corrected edge
+pairing and Build4RuleGroups; it emits no tangent values and performs no tangent
+setters. The cached recipe contains indices, initial/post-Any flags, assigned
+groups, ordered group members, representatives and orientation. Every pose still
+validates current canonical classes, flags and active/tail ordering. A rejected
+guard cannot overwrite prior candidate output; the renderer must reject the
+whole pose before copying any candidate into persistent render buffers.
+
+GPU work recomputes current UV derivatives, dynamic subgroup membership,
+projected corner-angle weights, tangent accumulation, the original last-corner
+output owner and triangle-degenerate epilogue. Synthetic tests cover all-Any,
+all-position-degenerate and interspersed-degenerate inputs, Any orientation,
+persistent pose updates and real guard misses. Input CPU tangent fields are
+poisoned with NaN in a test; candidate output remains finite and correct.
+
+A native float dot predicate was proven wrong on Face001/39.25: actual GPU dotT
+was -1.0000001192092896, CPU -0.9999998807907104; the GPU omitted one member even
+when fed the exact current CPU derivatives. The subgroup mask was 125 versus
+127. A geometric 180-degree antiparallel predicate now handles exact opposite,
+near opposite and zero directions without adding an epsilon. Corner weighting
+uses stable atan2(cross length, dot), preserving the original pi/2 rule for a
+zero projected edge. The old strict CPU comparison remains an ignored failing
+characterization, not a relabeled passing test.
+
+This exposes CPU float boundary artifacts in the opposite direction too:
+Face001/0 vertex87923 candidate-vs-f64 error was 6.86e-8 while CPU error was
+0.00341184. SkeletalMesh002/149 vertex14387 candidate error was 1.61e-7 while
+CPU error was 1.52455. These are independently checked against the same current
+represented attributes; they are not evidence that every CPU delta improves.
+The historical ad hoc "pants" artifact name identifies SkeletalMesh002; its
+isolated closeup shows collared clothing, so the node name is authoritative.
+
+### Full independent numeric characterization
+
+`gpu_mikk_f64.rs` independently recomputes f64 UV derivatives, projections,
+dynamic angular subgroup tests and atan2 weights, then preserves original
+output ownership and inactive-triangle copies. Its output is the rendered
+vertex tangent and handedness; unused bitangent/magnitude values are not the
+acceptance target. Current represented P/N/UV are identical inputs to both
+paths, and structural metadata has separate exact checks.
+
+The full 317-pose, thirteen-part diagnostic examined **105,868,173 vertices**.
+All handedness and finite-value checks passed; all 4108 non-initial structural
+guards hit. There were **102 vertex samples above the conservative 2e-5 f64
+vector gate**, with maximum **0.0001710423** at Body001/95.71835. The strict f64
+acceptance test therefore still fails and remains visible. The diagnostic
+completing is not a strict-gate pass. It also recorded 1527 CPU-delta offenders;
+no blanket claim that every offender improves is made.
+
+### Actual-material images
+
+Robust GPU, current CPU tangent and independent f64 tangent images use identical
+current represented positions/normals and actual diffuse/normal textures. The
+original legacy CPU geometry/TBN is saved as an additional reference. Camera
+framing and varying normal-map data are checked, with tangent mutation controls.
+
+- Nine lit 512-square head views at 0/39.25/149: seven GPU/f64 images identical;
+  two have one or two pixels differ by one RGB unit. Mutation: 102775 pixels.
+- Twelve component-only Body views include the worst 95.71835 sample; its three
+  GPU/f64 views are identical. Mutation: 73749 pixels.
+- Nine isolated SkeletalMesh002 clothing views frame the offender using its
+  actual triangle normal and a facing light. GPU/f64 differences stay within
+  one RGB unit. At149/front their PNG hashes are identical, while the CPU-current
+  image differs in 23 pixels by up to 68 RGB units. Mutation: 159754 pixels.
+
+The earlier full-outfit clothing closeup was dark/occluded and is not used as
+strong visual evidence. Isolated material views retain actual geometry,
+textures and standard PBR/shadows; isolation is solely a test camera setup, not
+a production performance shortcut. These thirty sampled views do not establish
+unbounded general-material correctness. The candidate remains an explicitly
+experimental native performance path until the remaining quality decision and
+end-to-end render budget are verified.
+
+Artifacts: `/tmp/loom-gpu-hybrid-tbn-lit-audit`,
+`/tmp/loom-gpu-hybrid-body-lit-audit`, and
+`/tmp/loom-gpu-hybrid-pants-component-lit-audit`. Boundary JSON and independent
+Python verification are preserved separately under
+`docs/research/gpu-tangent-boundary`.
+
+### Production-facing resource contract (not activation)
+
+`GpuPoseGeometry::from_current_positions` takes actual CPU final posed vertices;
+it allocates no CPU tangent-oracle resource. This preserves existing CPU Skin,
+Morph/gizmo/editor/picking results, including all twelve influences. It outputs
+unrendered current position/normal/UV intermediates and immutable part ranges
+and expanded-corner source indices. `GpuPreparation` owns current validated
+canonical/flag/order resources. `GpuRecipeMath` owns complete candidate outputs
+and a guard word; `output()` and `guard_buffer()` expose buffers to the renderer.
+
+The persistent dynamic material buffer may receive candidate bytes only after
+all pose guards and layouts validate. `gpu_pose_commit` owns that transaction;
+CPU current source positions continue to provide AABB/history. Renderer/resource
+transport and runtime orchestration are separate commits, not proof of native
+activation or 60 FPS. Hardware-ineligible geometry must retain the full-quality
+existing CPU/StandardMaterial route.

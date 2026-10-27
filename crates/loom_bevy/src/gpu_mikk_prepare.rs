@@ -1,5 +1,6 @@
 //! Test-only GPU current-attribute welding and corrected edge preparation.
 //! Material parts are independent. No rest-pose adjacency is reused.
+#[cfg(test)]
 use super::PackedVertex;
 use wgpu::util::DeviceExt;
 
@@ -185,22 +186,22 @@ mod tests {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct Prepared {
-    pub(super) active_count: usize,
-    canonical: Vec<u32>,
-    original_faces: Vec<u32>,
-    pub(super) flags: Vec<u32>,
+#[derive(Clone, Debug)]
+pub(crate) struct Prepared {
+    pub(crate) active_count: usize,
+    pub(crate) canonical: Vec<u32>,
+    pub(crate) original_faces: Vec<u32>,
+    pub(crate) flags: Vec<u32>,
     neighbors: Vec<[i32; 3]>,
 }
 #[derive(Clone, PartialEq, Eq)]
-pub(super) struct StructuralKey {
+pub(crate) struct StructuralKey {
     canonical: Vec<u32>,
     original_faces: Vec<u32>,
     flags: Vec<u32>,
 }
 impl Prepared {
-    pub(super) fn structural_key(&self) -> StructuralKey {
+    pub(crate) fn structural_key(&self) -> StructuralKey {
         StructuralKey {
             canonical: self.canonical.clone(),
             original_faces: self.original_faces.clone(),
@@ -215,7 +216,7 @@ struct Params {
     offsets0: [u32; 4],
     offsets1: [u32; 4],
 }
-pub(super) struct GpuPreparation {
+pub(crate) struct GpuPreparation {
     pipelines: Vec<wgpu::ComputePipeline>,
     group: wgpu::BindGroup,
     arena: wgpu::Buffer,
@@ -224,12 +225,12 @@ pub(super) struct GpuPreparation {
     params: Params,
     words: usize,
 }
-pub(super) struct Program {
+pub(crate) struct Program {
     layout: wgpu::BindGroupLayout,
     pipelines: Vec<wgpu::ComputePipeline>,
 }
 impl Program {
-    pub(super) fn new(device: &wgpu::Device) -> Result<Self, String> {
+    pub(crate) fn new(device: &wgpu::Device) -> Result<Self, String> {
         Self::with_shader(device, include_str!("gpu_mikk_prepare.wgsl"))
     }
     fn with_shader(device: &wgpu::Device, source: &str) -> Result<Self, String> {
@@ -292,7 +293,7 @@ impl Program {
     }
 }
 impl GpuPreparation {
-    fn new(
+    pub(crate) fn new(
         device: &wgpu::Device,
         vertices: &wgpu::Buffer,
         vertex_count: usize,
@@ -306,7 +307,7 @@ impl GpuPreparation {
             &Program::new(device)?,
         )
     }
-    pub(super) fn with_program(
+    pub(crate) fn with_program(
         device: &wgpu::Device,
         vertices: &wgpu::Buffer,
         vertex_count: usize,
@@ -424,17 +425,27 @@ impl GpuPreparation {
             words: next as usize,
         })
     }
-    pub(super) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub(crate) fn recipe_input(&self) -> (&wgpu::Buffer, [u32; 3]) {
+        (
+            &self.arena,
+            [
+                self.params.offsets0[1],
+                self.params.offsets0[2],
+                self.params.offsets0[3],
+            ],
+        )
+    }
+    pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
         self.encode_timed(encoder, None);
     }
-    pub(super) fn encode_timed(
+    pub(crate) fn encode_timed(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         queries: Option<&wgpu::QuerySet>,
     ) {
         Self::encode_batch(encoder, &[self], queries);
     }
-    pub(super) fn encode_batch(
+    pub(crate) fn encode_batch(
         encoder: &mut wgpu::CommandEncoder,
         parts: &[&Self],
         queries: Option<&wgpu::QuerySet>,
@@ -476,7 +487,7 @@ impl GpuPreparation {
             }
         }
     }
-    pub(super) fn readback(
+    pub(crate) fn readback(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -506,6 +517,7 @@ impl GpuPreparation {
         })
     }
 }
+#[cfg(test)]
 fn run(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -524,7 +536,8 @@ fn run(
     preparation.readback(device, queue).unwrap()
 }
 
-pub(super) fn compare_cpu(data: &crate::MeshData, output: &Prepared) {
+#[cfg(test)]
+pub(crate) fn compare_cpu(data: &crate::MeshData, output: &Prepared) {
     let cpu = crate::mikktspace::capture_preparation(data);
     assert_eq!(
         output.active_count, cpu.active_count,

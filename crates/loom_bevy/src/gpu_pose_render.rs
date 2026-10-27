@@ -1,6 +1,6 @@
-//! Headless test-only quality audit. CPU Mikk is an explicit oracle on the
-//! CURRENT GPU-represented positions and stable GPU normals, never a production
-//! hybrid or a claimed GPU tangent implementation.
+//! Headless actual-material quality audits. CPU and independent f64 math are
+//! references only; hybrid candidate tangents are computed by the GPU recipe
+//! pipeline from current attributes. No test reference is renderer input.
 use super::{precision, GpuPoseGeometry, PackedVertex};
 use crate::gpu_skin::{GpuSkinPositions, SkinInput};
 use crate::{BevyRenderer, MeshData, ObjectFlags, SceneObject, ViewCamera};
@@ -86,16 +86,41 @@ fn differences(a: &image::RgbaImage, b: &image::RgbaImage) -> (usize, usize, u8,
 #[test]
 #[ignore = "actual normal-mapped GPU posed-geometry images require LOOM_PERF_SCENE"]
 fn actual_ray_stable_gpu_sg_coupled_tbn_image_audit() {
-    run_image_audit(false);
+    run_image_audit(false, false, Focus::Head);
 }
 
 #[test]
 #[ignore = "actual well-lit normal-mapped front head images require LOOM_PERF_SCENE"]
 fn actual_ray_stable_gpu_sg_lit_front_image_audit() {
-    run_image_audit(true);
+    run_image_audit(true, false, Focus::Head);
 }
 
-fn run_image_audit(lit_front: bool) {
+#[test]
+#[ignore = "actual complete hybrid GPU tangent normal-mapped lit head images"]
+fn actual_ray_hybrid_gpu_complete_tbn_lit_front_image_audit() {
+    run_image_audit(true, true, Focus::Head);
+}
+
+#[test]
+#[ignore = "actual pants149 CPU boundary artifact versus robustGPU/F64 normal-mapped closeup"]
+fn actual_ray_hybrid_gpu_pants_lit_image_audit() {
+    run_image_audit(true, true, Focus::Pants);
+}
+#[derive(PartialEq, Eq)]
+enum Focus {
+    Head,
+    Pants,
+    Body,
+}
+#[test]
+#[ignore = "actual Body worst F64 sample closeup at95.71835"]
+fn actual_ray_hybrid_gpu_body_lit_image_audit() {
+    run_image_audit(true, true, Focus::Body);
+}
+fn run_image_audit(lit_front: bool, gpu_tangents: bool, focus: Focus) {
+    let pants = focus == Focus::Pants;
+    let body = focus == Focus::Body;
+    let closeup = pants || body;
     let size = if lit_front { 512 } else { 256 };
     let path = std::env::var("LOOM_PERF_SCENE").expect("real scene");
     let mut document: serde_json::Value =
@@ -107,19 +132,37 @@ fn run_image_audit(lit_front: bool) {
             n.modifiers
                 .iter()
                 .any(|m| matches!(m.modifier, loom_scene::Modifier::Skin(_)))
+                && (if body {
+                    n.name == "Body001"
+                } else if pants {
+                    n.name == "SkeletalMesh002"
+                } else {
+                    true
+                })
         })
         .map(|n| n.id)
         .collect();
     let dynamic: HashSet<_> = ids.iter().map(|id| id.0).collect();
     let (mut reference, mut candidate) = (renderer(), renderer());
-    let directory = std::path::Path::new(if lit_front {
+    let directory = std::path::Path::new(if body {
+        "/tmp/loom-gpu-hybrid-body-lit-audit"
+    } else if pants {
+        "/tmp/loom-gpu-hybrid-pants-component-lit-audit"
+    } else if gpu_tangents {
+        "/tmp/loom-gpu-hybrid-tbn-lit-audit"
+    } else if lit_front {
         "/tmp/loom-gpu-pose-lit-audit"
     } else {
         "/tmp/loom-gpu-pose-audit"
     });
     std::fs::create_dir_all(directory).unwrap();
     let mut positive = 0;
-    for time in [0.0, 39.25, 149.0] {
+    let times: Vec<_> = if body {
+        vec![0.0, 39.25, 149.0 * 203.0 / 316.0, 149.0]
+    } else {
+        vec![0.0, 39.25, 149.0]
+    };
+    for time in times {
         scene.set_time(time);
         let meshes: Vec<_> = ids
             .iter()
@@ -145,6 +188,7 @@ fn run_image_audit(lit_front: bool) {
         reference.sync_deforming(&objects, &dynamic);
         candidate.sync_deforming(&objects, &dynamic);
         let mut stable_frames = Vec::new();
+        let mut cpu_frames = Vec::new();
         for (id, expected) in ids.iter().zip(&meshes) {
             let node = scene.node(*id).unwrap();
             assert_eq!(node.modifiers.len(), 1);
@@ -229,17 +273,93 @@ fn run_image_audit(lit_front: bool) {
                 geometry.read_world_positions(&candidate.device, &candidate.queue);
             let truth = precision::normals_f64(&rest, &parts, &world_positions);
             assert!(precision::packed_error(&records, &truth) < 1e-5);
-            couple_tangents(&mut records, &geometry.parts, &templates);
             let mut high_precision = records.clone();
-            for (record, normal) in high_precision.iter_mut().zip(truth) {
-                record.normal = [normal.x, normal.y, normal.z, 0.0];
+            if !gpu_tangents {
+                for (record, normal) in high_precision.iter_mut().zip(truth) {
+                    record.normal = [normal.x, normal.y, normal.z, 0.0];
+                }
             }
             couple_tangents(&mut high_precision, &geometry.parts, &templates);
+            if gpu_tangents {
+                cpu_frames.push((id.0, geometry.parts.clone(), high_precision.clone()));
+                let program = super::mikk_prepare::Program::new(&candidate.device).unwrap();
+                for (range, template) in geometry.parts.iter().zip(&templates) {
+                    let indices: Vec<_> = template
+                        .indices
+                        .iter()
+                        .map(|i| *i + range.start as u32)
+                        .collect();
+                    let preparation = super::mikk_prepare::GpuPreparation::with_program(
+                        &candidate.device,
+                        &geometry.output,
+                        records.len(),
+                        &indices,
+                        &program,
+                    )
+                    .unwrap();
+                    let mut encoder = candidate.device.create_command_encoder(&Default::default());
+                    preparation.encode(&mut encoder);
+                    candidate.queue.submit([encoder.finish()]);
+                    let initial = preparation
+                        .readback(&candidate.device, &candidate.queue)
+                        .unwrap();
+                    let current = &records[range.clone()];
+                    let same_gpu = MeshData {
+                        positions: current
+                            .iter()
+                            .map(|v| v.position[..3].try_into().unwrap())
+                            .collect(),
+                        normals: current
+                            .iter()
+                            .map(|v| v.normal[..3].try_into().unwrap())
+                            .collect(),
+                        uvs: current
+                            .iter()
+                            .map(|v| v.uv[..2].try_into().unwrap())
+                            .collect(),
+                        indices: template.indices.clone(),
+                    };
+                    let structure = crate::mikktspace::compile_structure(&same_gpu);
+                    let f64_tangents = super::mikk_f64::tangents_f64(&same_gpu, &structure);
+                    assert_eq!(f64_tangents.len(), range.len());
+                    for (record, tangent) in
+                        high_precision[range.clone()].iter_mut().zip(f64_tangents)
+                    {
+                        record.tangent = tangent.map(|v| v as f32);
+                    }
+                    let math = super::mikk_recipe::GpuRecipeMath::new(
+                        &candidate.device,
+                        &geometry.output,
+                        range.start as u32,
+                        &same_gpu,
+                        &preparation,
+                        &initial,
+                        &structure,
+                    )
+                    .unwrap();
+                    let mut encoder = candidate.device.create_command_encoder(&Default::default());
+                    math.encode(&mut encoder);
+                    candidate.queue.submit([encoder.finish()]);
+                    let complete = math.readback(&candidate.device, &candidate.queue).unwrap();
+                    records[range.clone()].copy_from_slice(&complete);
+                }
+            } else {
+                couple_tangents(&mut records, &geometry.parts, &templates);
+            }
             stable_frames.push((id.0, geometry.parts, records, high_precision));
         }
         let face_index = ids
             .iter()
-            .position(|id| scene.node(*id).unwrap().name == "Face001")
+            .position(|id| {
+                scene.node(*id).unwrap().name
+                    == if pants {
+                        "SkeletalMesh002"
+                    } else if body {
+                        "Body001"
+                    } else {
+                        "Face001"
+                    }
+            })
             .unwrap();
         let (face_lo, face_hi) = meshes[face_index].aabb();
         let face_center = (face_lo + face_hi) * 0.5;
@@ -276,9 +396,35 @@ fn run_image_audit(lit_front: bool) {
             .map(|direction| camera(face_center, face_radius * 0.76, direction))
             .collect();
         }
+        let mut target = face_center;
+        if closeup {
+            let frames = stable_frames
+                .iter()
+                .find(|frame| frame.0 == ids[face_index].0)
+                .unwrap();
+            let vertex = frames.2[if body { 51156 } else { 14387 }];
+            target = Vec3::from_array(vertex.position[..3].try_into().unwrap());
+            let mut n = Vec3::from_array(vertex.normal[..3].try_into().unwrap());
+            if pants {
+                let data = crate::mesh_data(&meshes[face_index]);
+                let owner = data.indices.iter().rposition(|v| *v == 14387).unwrap();
+                let tri = &data.indices[owner / 3 * 3..owner / 3 * 3 + 3];
+                let point = |i: u32| {
+                    Vec3::from_array(frames.2[i as usize].position[..3].try_into().unwrap())
+                };
+                n = (point(tri[1]) - point(tri[0]))
+                    .cross(point(tri[2]) - point(tri[0]))
+                    .normalize();
+            }
+            let tangent = Vec3::from_array(vertex.tangent[..3].try_into().unwrap());
+            cameras = [n, n + 0.5 * tangent, n - 0.5 * tangent]
+                .into_iter()
+                .map(|direction| camera(target, 5.0, direction))
+                .collect();
+        }
         for (view, camera) in cameras.iter().enumerate() {
             if lit_front {
-                let direction = camera.view.inverse().transform_point3(Vec3::ZERO) - face_center;
+                let direction = camera.view.inverse().transform_point3(Vec3::ZERO) - target;
                 for renderer in [&mut reference, &mut candidate] {
                     let light = renderer.light.unwrap();
                     *renderer
@@ -294,14 +440,23 @@ fn run_image_audit(lit_front: bool) {
                         .world_mut()
                         .get_mut::<bevy::pbr::DirectionalLight>(light)
                         .unwrap()
-                        .illuminance = 10000.0;
+                        .illuminance = if pants { 50000.0 } else { 10000.0 };
                 }
-                for vertex in meshes[face_index].vertices() {
-                    let clip = camera.projection * camera.view * vertex.position.extend(1.0);
+                if !closeup {
+                    for vertex in meshes[face_index].vertices() {
+                        let clip = camera.projection * camera.view * vertex.position.extend(1.0);
+                        let ndc = clip.truncate() / clip.w;
+                        assert!(
+                            clip.w > 0.0 && ndc.x.abs() < 0.98 && ndc.y.abs() < 0.98,
+                            "complete head must fit: {ndc:?}"
+                        );
+                    }
+                } else {
+                    let clip = camera.projection * camera.view * target.extend(1.0);
                     let ndc = clip.truncate() / clip.w;
                     assert!(
-                        clip.w > 0.0 && ndc.x.abs() < 0.98 && ndc.y.abs() < 0.98,
-                        "complete head must fit: {ndc:?}"
+                        clip.w > 0.0 && ndc.x.abs() < 0.01 && ndc.y.abs() < 0.01,
+                        "actual pants offender point must be framed"
                     );
                 }
                 use bevy::asset::Assets;
@@ -349,6 +504,14 @@ fn run_image_audit(lit_front: bool) {
                 write_records(&candidate, *id, ranges, records);
             }
             let new = candidate.render_image(size, size, camera).unwrap();
+            let cpu_current = if gpu_tangents {
+                for (id, ranges, records) in &cpu_frames {
+                    write_records(&candidate, *id, ranges, records);
+                }
+                Some(candidate.render_image(size, size, camera).unwrap())
+            } else {
+                None
+            };
             for (id, ranges, _, truth) in &stable_frames {
                 write_records(&candidate, *id, ranges, truth);
             }
@@ -359,21 +522,31 @@ fn run_image_audit(lit_front: bool) {
             );
             let legacy = differences(&old, &new);
             let accuracy = differences(&new, &high_precision);
-            eprintln!("GPU_POSE_IMAGE time={time} view={view} legacy_changed={} legacy_coverage={} legacy_max={} legacy_mean={:.6} f64_changed={} f64_coverage={} f64_max={} f64_mean={:.6}",legacy.0,legacy.1,legacy.2,legacy.3,accuracy.0,accuracy.1,accuracy.2,accuracy.3);
-            if lit_front {
-                assert!(
-                    accuracy.1 == 0 && accuracy.2 <= 1,
-                    "stable coupled TBN must agree with same-position F64 pixels: {accuracy:?}"
-                );
-            }
+            eprintln!("GPU_POSE_IMAGE gpu_tangents={gpu_tangents} time={time} view={view} legacy_changed={} legacy_coverage={} legacy_max={} legacy_mean={:.6} reference_changed={} reference_coverage={} reference_max={} reference_mean={:.6}",legacy.0,legacy.1,legacy.2,legacy.3,accuracy.0,accuracy.1,accuracy.2,accuracy.3);
             let key = format!("{time}-{view}");
             old.save(directory.join(format!("{key}-legacy.png")))
                 .unwrap();
             new.save(directory.join(format!("{key}-gpu-stable.png")))
                 .unwrap();
             high_precision
-                .save(directory.join(format!("{key}-f64-oracle.png")))
+                .save(directory.join(format!(
+                    "{key}-{}.png",
+                    if gpu_tangents {
+                        "f64-current-tangent"
+                    } else {
+                        "f64-oracle"
+                    }
+                )))
                 .unwrap();
+            if let Some(cpu) = &cpu_current {
+                let delta = differences(&new, cpu);
+                eprintln!("GPU_CPU_CURRENT_IMAGE pants={pants} time={time} view={view} changed={} max={} mean={:.6}",delta.0,delta.2,delta.3);
+                cpu.save(directory.join(format!("{key}-cpu-current.png")))
+                    .unwrap();
+            }
+            if lit_front {
+                assert!(accuracy.1==0 && accuracy.2<=1,"current GPU TBN must agree with same-position reference pixels (GPU tangents={gpu_tangents}): {accuracy:?}");
+            }
             if time == 39.25 && view == 0 {
                 for (id, ranges, records, _) in &stable_frames {
                     let mut wrong = records.clone();
@@ -397,8 +570,8 @@ fn run_image_audit(lit_front: bool) {
         }
     }
     eprintln!(
-        "GPU_POSE_IMAGE_AUDIT views={} positive_control_changed={positive} directory={}",
-        if lit_front { 9 } else { 18 },
+        "GPU_POSE_IMAGE_AUDIT focus_body={body} focus_pants={pants} views={} positive_control_changed={positive} directory={}",
+        if body {12}else if lit_front { 9 } else { 18 },
         directory.display()
     );
 }
