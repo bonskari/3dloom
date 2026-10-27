@@ -194,3 +194,13 @@ All8 dynamic-geometry tests passed (1 opt-in ignored); final expanded rejection
 regression passed. Independent review found no important issue under the
 explicit producer submission contract. Full compute quality/native FPS remain
 unverified; this API alone is not production completion.
+
+
+Batched GPU guards staged in gpu_pose_commit.rs: one persistent52-byte
+MAP_READ buffer for13 parts, one queue submission and map/poll synchronization.
+Readback follows prior compute submissions on the same queue. Mutable receiver
+prevents overlapping maps. Counts/source usages/ranges are checked first;
+raw current flags are returned, and producer must reject the whole pose on
+any nonzero value before the first render-buffer commit. Missing-type RED
+then actual13-buffer current-change/recovery GPU regression GREEN. Independent
+read-only review found no important issue. Not yet connected to native playback.

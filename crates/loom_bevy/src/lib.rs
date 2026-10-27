@@ -6,6 +6,7 @@
 pub mod bake;
 pub mod convert;
 mod prepared_geometry;
+mod gpu_pose_commit;
 pub mod lights;
 mod mikktspace;
 #[cfg(test)]
