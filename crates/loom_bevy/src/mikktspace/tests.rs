@@ -129,3 +129,42 @@ fn quad_geometry_keeps_original_serial_averaging() {
     assert!(unsafe { generated::genTangSpace(&mut prepared, 180.0, Some(&pool)) });
     assert_eq!(bits(&prepared.values), bits(&original.values));
 }
+
+#[test]
+#[ignore = "actual preparation hit-rate probe requires LOOM_PERF_SCENE"]
+fn actual_ray_preparation_guard_hit_rates() {
+    let path = std::env::var("LOOM_PERF_SCENE").expect("real scene");
+    let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let scene: loom_scene::Scene = serde_json::from_value(value["scene"].clone()).unwrap();
+    let start = value["settings"]["frame_range"][0].as_i64().unwrap();
+    let end = value["settings"]["frame_range"][1].as_i64().unwrap();
+    let ids: Vec<_> = scene.nodes().filter(|n| n.name == "Body001" || n.name == "Face001").map(|n| (n.id, n.name.clone())).collect();
+    assert_eq!(ids.len(), 2);
+    let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
+    let mut previous: [Option<(capture::Snapshot, Vec<usize>)>; 2] = [None, None];
+    let mut counts = [[0usize; 5]; 2];
+    capture::enable();
+    for frame in (start..=end).map(|f| f as f32).chain([39.25]) {
+        scene.set_time(frame);
+        for (index, (id, _)) in ids.iter().enumerate() {
+            let mut mesh = scene.eval_mesh(*id).value.mesh.clone();
+            loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(*id)).unwrap();
+            let data = mesh_data_by_id(&mesh).into_iter().find(|(id, _)| *id == 0).unwrap().1;
+            generate_parallel(&pool, &data).unwrap();
+            let snapshot = capture::take();
+            let mut representatives = std::collections::HashMap::new();
+            let classes: Vec<_> = snapshot.indices.iter().map(|rep| { let next = representatives.len(); *representatives.entry(*rep).or_insert(next) }).collect();
+            if let Some((old, old_classes)) = &previous[index] {
+                counts[index][0] += 1;
+                counts[index][1] += usize::from(snapshot == *old);
+                counts[index][2] += usize::from(snapshot.indices == old.indices);
+                counts[index][3] += usize::from(snapshot.flags == old.flags);
+                counts[index][4] += usize::from(classes == *old_classes && snapshot.flags == old.flags);
+            }
+            previous[index] = Some((snapshot, classes));
+        }
+    }
+    for ((_, name), count) in ids.iter().zip(counts) {
+        eprintln!("GUARD name={name} transitions={} exact_hits={} representatives_unchanged={} flags_unchanged={} canonical_and_flags_hits={}", count[0], count[1], count[2], count[3], count[4]);
+    }
+}

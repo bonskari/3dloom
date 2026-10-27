@@ -273,6 +273,8 @@ pub unsafe fn genTangSpace<I: Geometry + Sync>(geometry: &mut I, fAngularThresho
         geometry,
         iNrTrianglesIn,
     );
+    #[cfg(test)]
+    super::capture::record(&piTriListIn, &pTriInfos);
     iNrMaxGroups = iNrTrianglesIn * 3;
 
     let mut pGroups = vec![SGroup::zero(); iNrMaxGroups];

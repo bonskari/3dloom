@@ -47,3 +47,6 @@ fn face_vert_to_index(face: usize, corner: usize) -> usize { face << 2 | corner 
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod capture;
