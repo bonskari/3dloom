@@ -32,6 +32,7 @@ impl<I: Geometry> Geometry for ReadGeometry<'_, I> {
     fn tex_coord(&self, face: usize, corner: usize) -> [f32; 2] { self.0.tex_coord(face, corner) }
 }
 
+#[cfg(test)]
 pub(crate) fn generate_parallel(pool: &bevy_tasks::TaskPool, data: &MeshData) -> Option<Vec<[f32; 4]>> {
     generate_cached_inner(pool, data, None)
 }

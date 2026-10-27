@@ -107,18 +107,24 @@ fn actual_ray_corrected_neighbor_pixels() {
     let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let scene: loom_scene::Scene = serde_json::from_value(value["scene"].clone()).unwrap();
     scene.set_time(frame);
-    let id = scene.nodes().find(|n| n.name == "Face001").unwrap().id;
-    let surfaces = scene.node_surfaces(id).expect("actual Face materials");
+    let node_name=std::env::var("LOOM_PROBE_NODE").unwrap_or_else(|_|"Face001".to_owned());
+    let id = scene.nodes().find(|n| n.name == node_name).unwrap().id;
+    let surfaces = scene.node_surfaces(id).expect("actual node materials");
     let mut mesh = scene.eval_mesh(id).value.mesh.clone();
     loom_mesh::edit_ops::transform_mesh(&mut mesh,scene.object_matrix(id)).unwrap();
-    let data = mesh_data_by_id(&mesh).into_iter().find(|(id,_)| *id==0).unwrap().1;
+    let data = crate::convert::mesh_data(&mesh);
     let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
-    CORRECT.with(|v|v.set(false));
-    let original = generate_parallel(&pool,&data).unwrap();
-    CORRECT.with(|v|v.set(true));
-    let corrected = generate_parallel(&pool,&data).unwrap();
-    CORRECT.with(|v|v.set(true));
-    assert_ne!(original,corrected,"must compare an affected actual pose");
+    let mut replacements=Vec::new();let mut any_changed=false;
+    for (material,part) in mesh_data_by_id(&mesh) {
+        if surfaces.for_face(material).bump_map.is_none() {continue;}
+        CORRECT.with(|v|v.set(false));
+        let original=generate_parallel(&pool,&part).unwrap();
+        CORRECT.with(|v|v.set(true));
+        let corrected=generate_parallel(&pool,&part).unwrap();
+        any_changed|=original!=corrected;
+        replacements.push((material,part,original,corrected));
+    }
+    assert!(any_changed,"must compare an affected actual pose");
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("GPU adapter");
     assert!(crate::supported(&adapter));
@@ -126,52 +132,63 @@ fn actual_ray_corrected_neighbor_pixels() {
     let mut renderer = BevyRenderer::new(adapter,device,queue);
     renderer.sync(&[SceneObject{id:1,mesh:&mesh,transform:glam::Mat4::IDENTITY,wire_color:[255;3],surfaces:Some(surfaces),renderable:true,flags:Default::default()}]);
     let object = &renderer.objects[&1];
-    let part = object.part_ids.iter().position(|id|*id==Some(0)).unwrap();
-    let (entity,material) = &object.parts[part];
-    let entity=*entity;
-    let ObjectMaterial::Standard(material) = material else { panic!("regular actual StandardMaterial required") };
-    let mat = renderer.app.world().resource::<Assets<bevy::pbr::StandardMaterial>>().get(material).unwrap();
-    assert!(mat.normal_map_texture.is_some(),"actual Face normal texture must load");
-    assert!(mat.base_color_texture.is_some(),"actual Face diffuse texture must load");
-    let texture=renderer.app.world().resource::<Assets<bevy::image::Image>>().get(mat.normal_map_texture.as_ref().unwrap()).unwrap();
-    let bytes=texture.data.as_ref().expect("loaded normal texture data");
-    let colors:std::collections::HashSet<_>=bytes.chunks_exact(4).map(|p|[p[0],p[1],p[2]]).collect();
-    assert!(colors.len()>8,"actual normal texture must vary");
-    eprintln!("NORMAL_TEXTURE width={} height={} unique_rgb={}",texture.texture_descriptor.size.width,texture.texture_descriptor.size.height,colors.len());
+    let mut entities=Vec::new();
+    for (id,_,_,_) in &replacements {
+        let part=object.part_ids.iter().position(|p|*p==Some(*id)).unwrap();
+        let (entity,material)=&object.parts[part];
+        let ObjectMaterial::Standard(material)=material else{panic!("actual StandardMaterial required")};
+        let mat=renderer.app.world().resource::<Assets<bevy::pbr::StandardMaterial>>().get(material).unwrap();
+        assert!(mat.base_color_texture.is_some(),"actual diffuse must load");
+        let texture=renderer.app.world().resource::<Assets<bevy::image::Image>>().get(mat.normal_map_texture.as_ref().expect("actual normal texture")).unwrap();
+        let bytes=texture.data.as_ref().expect("loaded normal texture data");
+        let colors:std::collections::HashSet<_>=bytes.chunks_exact(4).map(|p|[p[0],p[1],p[2]]).collect();
+        assert!(colors.len()>8,"actual normal texture must vary");
+        eprintln!("NORMAL_TEXTURE node={node_name} material={id} width={} height={} unique_rgb={}",texture.texture_descriptor.size.width,texture.texture_descriptor.size.height,colors.len());
+        entities.push(*entity);
+    }
     let lo = data.positions.iter().copied().map(glam::Vec3::from).fold(glam::Vec3::splat(f32::INFINITY),glam::Vec3::min);
     let hi = data.positions.iter().copied().map(glam::Vec3::from).fold(glam::Vec3::splat(f32::NEG_INFINITY),glam::Vec3::max);
     let center = (lo+hi)*0.5;
-    let radius = (hi-lo).max_element()*1.5;
+    let radius = (hi-lo).max_element()*2.5;
     for (angle,direction) in [("front",glam::Vec3::new(0.0,1.0,0.05)),("left",glam::Vec3::new(-0.7,1.0,0.05)),("right",glam::Vec3::new(0.7,1.0,0.05)),("back",glam::Vec3::new(0.0,-1.0,0.05))] {
         let light=renderer.light.unwrap();
         *renderer.app.world_mut().get_mut::<bevy::transform::components::Transform>(light).unwrap()=bevy::transform::components::Transform::from_translation(bevy::math::Vec3::from(direction+glam::Vec3::Z)).looking_at(bevy::math::Vec3::ZERO,bevy::math::Vec3::Z);
         let camera = ViewCamera{view:glam::Mat4::look_at_rh(center+direction.normalize()*radius,center,glam::Vec3::Z),projection:glam::Mat4::perspective_rh(35f32.to_radians(),1.0,0.01,10000.0)};
+        for p in &data.positions {
+            let clip=camera.projection*camera.view*glam::Vec3::from(*p).extend(1.0);
+            let ndc=clip.truncate()/clip.w;
+            assert!(clip.w>0.0 && ndc.x.abs()<0.98 && ndc.y.abs()<0.98,"complete node must fit angle={angle}: {ndc:?}");
+        }
         let mut images = Vec::new();
-        for (name,tangents) in [("original",&original),("corrected",&corrected)] {
-            let mut posed = data.to_bevy();
-            posed.insert_attribute(Mesh::ATTRIBUTE_TANGENT,tangents.clone());
-            let next=renderer.app.world_mut().resource_mut::<Assets<Mesh>>().add(posed);
-            renderer.app.world_mut().entity_mut(entity).insert(Mesh3d(next));
-            let image = renderer.render_image(768,768,&camera).unwrap();
-            image.save(format!("{directory}/face-{frame}-{angle}-{name}.png")).unwrap();
+        for name in ["original","corrected"] {
+            for ((_,part,original,corrected),entity) in replacements.iter().zip(&entities) {
+                let mut posed=part.to_bevy();
+                posed.insert_attribute(Mesh::ATTRIBUTE_TANGENT,if name=="original"{original.clone()}else{corrected.clone()});
+                let next=renderer.app.world_mut().resource_mut::<Assets<Mesh>>().add(posed);
+                renderer.app.world_mut().entity_mut(*entity).insert(Mesh3d(next));
+            }
+            let image=renderer.render_image(768,768,&camera).unwrap();
+            image.save(format!("{directory}/{node_name}-{frame}-{angle}-{name}.png")).unwrap();
             images.push(image);
         }
-        if angle == "front" {
-            let mut control=data.to_bevy();
-            let values: Vec<_>=original.iter().map(|t|[t[1],-t[0],t[2],-t[3]]).collect();
-            control.insert_attribute(Mesh::ATTRIBUTE_TANGENT,values);
-            let next=renderer.app.world_mut().resource_mut::<Assets<Mesh>>().add(control);
-            renderer.app.world_mut().entity_mut(entity).insert(Mesh3d(next));
+        if angle=="front" {
+            for ((_,part,original,_),entity) in replacements.iter().zip(&entities) {
+                let mut control=part.to_bevy();
+                let values:Vec<_>=original.iter().map(|t|[t[1],-t[0],t[2],-t[3]]).collect();
+                control.insert_attribute(Mesh::ATTRIBUTE_TANGENT,values);
+                let next=renderer.app.world_mut().resource_mut::<Assets<Mesh>>().add(control);
+                renderer.app.world_mut().entity_mut(*entity).insert(Mesh3d(next));
+            }
             let image=renderer.render_image(768,768,&camera).unwrap();
             let changed=image.pixels().zip(images[0].pixels()).filter(|(a,b)|a!=b).count();
-            assert!(changed>100,"tangent mutation must affect the real textured render: {changed}");
-            eprintln!("PIXEL_CONTROL frame={frame} changed={changed}");
+            assert!(changed>100,"tangent mutation must affect actual textured render: {changed}");
+            eprintln!("PIXEL_CONTROL node={node_name} frame={frame} changed={changed}");
         }
         let mut changed=0usize; let mut max=0u8; let mut sum=0u64;
         for (a,b) in images[0].pixels().zip(images[1].pixels()) {
             changed += usize::from(a!=b);
             for c in 0..4 {let delta=a[c].abs_diff(b[c]);max=max.max(delta);sum+=u64::from(delta);}
         }
-        eprintln!("PIXELS frame={frame} angle={angle} changed={changed}/589824 max_channel_delta={max} mean_channel_delta={:.8}",sum as f64/(768.0*768.0*4.0));
+        eprintln!("PIXELS node={node_name} frame={frame} angle={angle} changed={changed}/589824 max_channel_delta={max} mean_channel_delta={:.8}",sum as f64/(768.0*768.0*4.0));
     }
 }

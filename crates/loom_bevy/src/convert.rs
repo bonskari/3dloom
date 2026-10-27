@@ -119,6 +119,7 @@ pub fn mesh_data_by_id(mesh: &loom_mesh::Mesh) -> Vec<(u16, MeshData)> {
 
 /// Independent material meshes use the renderer's existing bounded worker
 /// pool. Each mesh still runs the same MikkTSpace tangent calculation.
+#[cfg(test)]
 pub(crate) fn material_meshes(pool: &bevy_tasks::TaskPool, parts: &[(MeshData, bool)]) -> Vec<Mesh> {
     let mut caches: Vec<_> = (0..parts.len()).map(|_| crate::mikktspace::NeighborCache::default()).collect();
     material_meshes_cached(pool, parts, &mut caches)
@@ -695,6 +696,7 @@ mod tests {
         let mut caches:Vec<crate::mikktspace::NeighborCache>=Vec::new();
         let pool=bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
         let mut elapsed=0.0;let mut comparisons=0;
+        let mut original_changes=[(0usize,0usize,0.0f32);13];
         for frame in (0..=157).map(|f|f as f32).chain([39.25]) {
             scene.set_time(frame);
             let mut parts=Vec::new();
@@ -705,6 +707,7 @@ mod tests {
                 let surfaces=scene.node_surfaces(*id).expect("actual skin materials");
                 let material_ids:std::collections::BTreeSet<_>=mesh.faces().iter().filter(|f|!f.hidden).map(|f|f.material_id).collect();
                 for id in material_ids {
+                    if frame==0.0 {eprintln!("PART index={} node={:?} name={} material={id}",parts.len(),ids[i],scene.node(ids[i]).unwrap().name);}
                     let surface=surfaces.for_face(id);
                     parts.push((mesh_data_part(&mesh,&data,Some(id),surface.faceted),surface.bump_map.is_some()));
                 }
@@ -725,10 +728,17 @@ mod tests {
                     let expected=crate::mikktspace::generate_parallel(&pool,data).expect("fresh corrected tangents");
                     let VertexAttributeValues::Float32x4(tangents)=mesh.attribute(Mesh::ATTRIBUTE_TANGENT).expect("cached tangents") else{panic!("tangent format")};
                     assert_eq!(tangents.iter().map(|v|v.map(f32::to_bits)).collect::<Vec<_>>(),expected.iter().map(|v|v.map(f32::to_bits)).collect::<Vec<_>>(),"frame={frame} part={part}");
+                    let mut original=data.to_bevy();
+                    original.generate_tangents().unwrap();
+                    let VertexAttributeValues::Float32x4(old)=original.attribute(Mesh::ATTRIBUTE_TANGENT).unwrap() else{panic!("original tangent format")};
+                    let mut changed=0;let mut delta=0.0f32;
+                    for (a,b) in old.iter().zip(tangents) {if a.map(f32::to_bits)!=b.map(f32::to_bits){changed+=1;}for c in 0..4 {delta=delta.max((a[c]-b[c]).abs());}}
+                    if changed>0 {eprintln!("ORIGINAL_CHANGE frame={frame} part={part} corners={changed} max_delta={delta}");original_changes[part].0+=1;original_changes[part].1+=changed;original_changes[part].2=original_changes[part].2.max(delta);}
                     comparisons+=1;
                 }
             }
         }
+        for (part,(poses,corners,max_delta)) in original_changes.into_iter().enumerate() {eprintln!("ORIGINAL_SUM part={part} poses={poses} corners={corners} max_delta={max_delta}");}
         eprintln!("MATERIAL_BATCH poses=159 parts=13 tangent_comparisons={comparisons} avg_ms={:.3} cache_hits={} cache_misses={}",elapsed/159.0,caches.iter().map(|c|c.hits).sum::<usize>(),caches.iter().map(|c|c.misses).sum::<usize>());
     }
 
