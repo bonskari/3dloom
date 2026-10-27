@@ -224,6 +224,8 @@ pub struct LoomApp {
     world_display: std::sync::Arc<Vec<Mesh>>,
     /// Bumped by every `world_meshes` rebuild.
     world_version: u64,
+    world_pose_time: Option<f32>,
+    pose_submissions: live::PoseSubmissions,
     /// What Show End Result off applied to at the last rebuild (`end_result_key`).
     shown_end_result_key: Option<Vec<NodeId>>,
     /// A base parameter change held back by the topology-dependence warning.
@@ -486,6 +488,8 @@ impl LoomApp {
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
             world_version: 0,
+            world_pose_time: None,
+            pose_submissions: Default::default(),
             shown_end_result_key: None,
             pending_topology: None,
             topology_ack: None,
@@ -942,6 +946,7 @@ impl LoomApp {
         self.world_styles = styles;
         self.world_display = std::sync::Arc::new(display);
         self.world_version += 1;
+        self.world_pose_time = Some(self.state.scene.time());
         if let Ok(mut slot) = self.pending_upload.lock() {
             *slot = Some((self.world_display.clone(), self.world_styles.clone(), bitmaps));
         }
@@ -1428,7 +1433,7 @@ impl LoomApp {
     pub fn frame(&mut self, ctx: &egui::Context) {
         let _profile=loom_render::profile::Scope::new("ui.frame");
         let time=ctx.input(|i|i.time);
-        ctx.data_mut(|d|{let counter=d.get_temp_mut_or_insert_with(egui::Id::new("live_frame_counter"),||(0u64,f64::NEG_INFINITY));if counter.1!=time{counter.0+=1;counter.1=time;}});
+        let fresh_frame = ctx.data_mut(|d|{let counter=d.get_temp_mut_or_insert_with(egui::Id::new("live_frame_counter"),||(0u64,f64::NEG_INFINITY));let fresh=counter.1!=time;if fresh{counter.0+=1;counter.1=time;}fresh});
         if self.material_previews.poll(){self.material_preview_generation=self.material_preview_generation.wrapping_add(1);ctx.request_repaint();}
         if self.material_previews.pending_count()>0{ctx.request_repaint_after(std::time::Duration::from_millis(16));}
         async_import::poll(self,ctx);
@@ -1514,8 +1519,8 @@ impl LoomApp {
             }
         }
         // Playback: advance by the wall clock (Real Time) or a frame per redraw.
-        if self.state.playing {
-            let dt = ctx.input(|i| i.stable_dt).clamp(0.0, 0.25);
+        if self.state.playing && fresh_frame {
+            let dt = ctx.input(|i| i.unstable_dt).clamp(0.0, 0.25);
             let _ = self.dispatch(Command::TickPlayback { seconds: dt });
             ctx.request_repaint();
         }
@@ -1546,6 +1551,13 @@ impl LoomApp {
         track_view::show(ctx, self);
         rendered_frame::show(ctx, self);
         self.finish_realistic_frame(ctx);
+        if !ctx.will_discard() {
+            let realistic = self.state.viewports.iter().enumerate().any(|(i,v)|
+                (!self.state.maximized || i == self.state.active_viewport) && v.shading == loom_commands::Shading::Realistic);
+            if (!realistic || self.realistic_pose_is_current()) && self.world_pose_time.is_some() {
+                self.pose_submissions.record(time, self.state.scene.instance_id(), self.world_pose_time.unwrap(), self.world_version);
+            }
+        }
     }
 }
 

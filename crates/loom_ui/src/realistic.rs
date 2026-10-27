@@ -223,6 +223,10 @@ impl LoomApp {
         b.synced = Some((version, for_render));
     }
 
+    pub(crate) fn realistic_pose_is_current(&self) -> bool {
+        matches!(&self.gpu, Gpu::Running(b) if b.synced.is_some_and(|(version,_)| version == self.world_version) && !b.textures.is_empty())
+    }
+
     /// Some Skin has Fast Updates on.
     fn fast_skins(&self) -> bool {
         self.state.scene.nodes().any(|n| n.modifiers.iter().any(|s| matches!(&s.modifier, loom_scene::Modifier::Skin(d) if d.fast_updates)))

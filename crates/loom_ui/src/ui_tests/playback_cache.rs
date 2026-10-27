@@ -74,3 +74,31 @@ fn batched_skin_display_matches_serial_evaluation_and_keeps_editing_cages() {
   }
  }
 }
+
+#[test]
+fn playback_advances_once_when_layout_repeats_the_same_input_frame() {
+ let mut app=LoomApp::headless();
+ app.dispatch(Command::PlayAnimation).unwrap();
+ let ctx=egui::Context::default();
+ let _=ctx.run(egui::RawInput{screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(1280.,800.))),time:Some(1.),..Default::default()},|ctx|{
+  app.frame(ctx);
+  let first=(app.state.current_frame,app.state.scene.time(),app.state.playback.accum);
+  app.frame(ctx);
+  assert_eq!((app.state.current_frame,app.state.scene.time(),app.state.playback.accum),first,"a repeated layout pass must not advance the animation again");
+ });
+}
+
+#[test]
+fn pose_submission_metrics_do_not_count_held_poses_as_new_animation_samples() {
+ let mut samples=crate::live::PoseSubmissions::default();
+ samples.record(1.,1,0.,10);
+ samples.record(1.,1,0.25,11); // The same UI submission is counted once.
+ assert_eq!((samples.frames,samples.distinct_times),(1,1));
+ for i in 1..=4 { samples.record(1.+i as f64/120.,1,0.,10); }
+ assert_eq!((samples.frames,samples.distinct_times),(5,1));
+ for i in 1..=4 { samples.record(2.+i as f64/120.,1,i as f32*0.25,10+i); }
+ assert_eq!((samples.frames,samples.distinct_times),(9,5));
+ samples.record(3.,2,1.,99); // A replacement scene at the same time is new.
+ assert_eq!((samples.frames,samples.distinct_times),(10,6));
+ assert_eq!(samples.world_version,99);
+}

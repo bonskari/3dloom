@@ -7,6 +7,30 @@ use eframe::egui;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 
+/// Final UI submissions carrying ready geometry; repeated poses are counted
+/// separately from distinct sampled animation times. This is submission
+/// telemetry, not a claim about the monitor's physical refresh rate.
+#[derive(Default)]
+pub(crate) struct PoseSubmissions {
+    pub frames: u64,
+    pub distinct_times: u64,
+    pub pose_time: Option<f32>,
+    pub world_version: u64,
+    last_input: Option<u64>,
+    last_scene: u64,
+}
+impl PoseSubmissions {
+    pub fn record(&mut self, input_time: f64, scene: u64, pose_time: f32, version: u64) {
+        if self.last_input == Some(input_time.to_bits()) { return; }
+        self.last_input = Some(input_time.to_bits());
+        self.frames += 1;
+        if self.last_scene != scene || self.pose_time != Some(pose_time) { self.distinct_times += 1; }
+        self.last_scene = scene;
+        self.pose_time = Some(pose_time);
+        self.world_version = version;
+    }
+}
+
 /// How many raw input events the ring buffer keeps.
 const INPUT_LOG_LEN: usize = 200;
 
@@ -183,6 +207,14 @@ impl LoomApp {
         });
         let active = s.active();
         json!({
+            "playback": {
+                "scene_time": s.scene.time(),
+                "prepared_pose_time": self.world_pose_time,
+                "submitted_frames": self.pose_submissions.frames,
+                "submitted_distinct_pose_times": self.pose_submissions.distinct_times,
+                "submitted_pose_time": self.pose_submissions.pose_time,
+                "submitted_world_version": self.pose_submissions.world_version,
+            },
             "egui": {
                 "input": egui_state,
                 "wants_pointer_input": ctx.wants_pointer_input(),
