@@ -27,3 +27,9 @@ Tests invalidate adjacency on changed topology, position/normal/UV equality clas
 Parallel group workers move the temporary member buffer into and out of the subgroup view instead of cloning it for every face. Unique subgroup vectors use `clone_from` to retain allocation capacity. Full vector contents, lengths and the original math/accumulation order remain unchanged. The serial const-mode reference retains the original clone operations for independent bit comparison.
 
 A paired, alternating-order release comparison over all159Ray poses with the application paused measured Body5.796→5.558ms and Face12.916→12.603ms with exact tangent bits in both modes. The full13-part batch also matched all1431tangent results against the fresh serial corrected reference, plus geometry/UV bits and indices. The measured gain is modest (~0.55ms combined in the paired comparison), not an application FPS result.
+
+## Current-group projected vectors
+
+Parallel workers compute each group member's original projected, normalized derivative vectors once, using the exact encoded welded representative normal shared by that group. The original ordered dot comparisons then reuse those vectors. All subgroup membership, sorting, angle-weighted accumulation and final normalization stay in their original order. Nothing is retained across poses. Serial reference mode and the independent allocation-only mode retain the original repeated projection operations.
+
+Every geometry attribute and all2853normal-mapped tangent results for the13material parts across317integer/half-frame Ray poses matched the fresh serial corrected reference bit for bit. A quiet, alternating-order159-pose pair against the allocation-only mode measured Body5.769→5.188ms and Face13.038→11.989ms (combined18.807→17.177ms, about8.7%). Full unit, GPU render and bake tests also passed. This isolated reduction is not an application60FPS result.

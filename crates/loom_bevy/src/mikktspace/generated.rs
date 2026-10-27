@@ -203,10 +203,10 @@ impl STmpVert {
 }
 
 pub unsafe fn genTangSpace<I: Geometry + Sync>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>) -> bool {
-    genTangSpaceCached::<_, false>(geometry, fAngularThreshold, pool, None)
+    genTangSpaceCached::<_, false, false>(geometry, fAngularThreshold, pool, None)
 }
 
-pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>, cache: Option<&mut super::NeighborCache>) -> bool {
+pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool, const REUSE_PROJECTIONS: bool>(geometry: &mut I, fAngularThreshold: f32, pool: Option<&bevy_tasks::TaskPool>, cache: Option<&mut super::NeighborCache>) -> bool {
     let prepare_scope = loom_render::profile::Scope::new("mikk.prepare");
     let mut iNrTrianglesIn = 0;
     let mut f = 0;
@@ -310,7 +310,7 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool>(
     let group_scope = loom_render::profile::Scope::new("mikk.groups");
     let triangle_only = (0..iNrFaces).all(|f| geometry.num_vertices_of_face(f) == 3);
     let parallel = pool.filter(|pool| triangle_only && pool.thread_num() > 1 && iNrActiveGroups >= 512)
-        .and_then(|pool| parallel::generate::<_, REUSE_MEMBERS>(
+        .and_then(|pool| parallel::generate::<_, REUSE_MEMBERS, REUSE_PROJECTIONS>(
             &mut psTspace,
             &pTriInfos[..iNrTrianglesIn],
             &pGroups[..iNrActiveGroups as usize],
@@ -319,7 +319,7 @@ pub unsafe fn genTangSpaceCached<I: Geometry + Sync, const REUSE_MEMBERS: bool>(
             geometry,
             pool,
         ));
-    bRes = parallel.unwrap_or_else(|| GenerateTSpaces::<_, false>(
+    bRes = parallel.unwrap_or_else(|| GenerateTSpaces::<_, false, false>(
         &mut psTspace,
         pTriInfos.as_ptr(),
         pGroups.as_ptr(),
@@ -462,7 +462,7 @@ unsafe fn DegenEpilogue<I: Geometry>(
     }
 }
 
-unsafe fn GenerateTSpaces<I: Geometry, const REUSE_MEMBERS: bool>(
+unsafe fn GenerateTSpaces<I: Geometry, const REUSE_MEMBERS: bool, const REUSE_PROJECTIONS: bool>(
     psTspace: &mut [STSpace],
     mut pTriInfos: *const STriInfo,
     mut pGroups: *const SGroup,
@@ -489,11 +489,26 @@ unsafe fn GenerateTSpaces<I: Geometry, const REUSE_MEMBERS: bool>(
     let mut pSubGroupTspace = vec![STSpace::zero(); iMaxNrFaces];
     let mut pUniSubGroups = vec![SSubGroup::zero(); iMaxNrFaces];
     let mut pTmpMembers = vec![0i32; iMaxNrFaces];
+    let mut projections = if REUSE_PROJECTIONS { vec![(Vec3::ZERO, Vec3::ZERO); iMaxNrFaces] } else { Vec::new() };
 
     iUniqueTspaces = 0;
     g = 0i32;
     while g < iNrActiveGroups {
         let mut pGroup: *const SGroup = &*pGroups.offset(g as isize) as *const SGroup;
+        let group_normal = if REUSE_PROJECTIONS { get_normal(geometry, (*pGroup).iVertexRepresentative as usize) } else { Vec3::ZERO };
+        if REUSE_PROJECTIONS {
+            // Every member uses this exact encoded welded representative.
+            // Preserve each projection's original operations, once per member.
+            for member in 0..(*pGroup).iNrFaces as usize {
+                let face = *(*pGroup).pFaceIndices.add(member);
+                let triangle = &*pTriInfos.offset(face as isize);
+                let mut os = triangle.vOs - (group_normal.dot(triangle.vOs) * group_normal);
+                let mut ot = triangle.vOt - (group_normal.dot(triangle.vOt) * group_normal);
+                if VNotZero(os) { os = Normalize(os); }
+                if VNotZero(ot) { ot = Normalize(ot); }
+                projections[member] = (os, ot);
+            }
+        }
         let mut iUniqueSubGroups = 0;
         let mut s = 0;
         i = 0i32;
@@ -523,33 +538,36 @@ unsafe fn GenerateTSpaces<I: Geometry, const REUSE_MEMBERS: bool>(
                 index = 2i32
             }
             iVertIndex = *piTriListIn.offset((f * 3i32 + index) as isize);
-            n = get_normal(geometry, iVertIndex as usize);
-            let mut vOs = (*pTriInfos.offset(f as isize)).vOs
-                - (n.dot((*pTriInfos.offset(f as isize)).vOs) * n);
-            let mut vOt = (*pTriInfos.offset(f as isize)).vOt
-                - (n.dot((*pTriInfos.offset(f as isize)).vOt) * n);
-            if VNotZero(vOs) {
-                vOs = Normalize(vOs)
-            }
-            if VNotZero(vOt) {
-                vOt = Normalize(vOt)
-            }
+            n = if REUSE_PROJECTIONS { group_normal } else { get_normal(geometry, iVertIndex as usize) };
+            let (vOs, vOt) = if REUSE_PROJECTIONS {
+                debug_assert_eq!(iVertIndex, (*pGroup).iVertexRepresentative);
+                projections[i as usize]
+            } else {
+                let mut vOs = (*pTriInfos.offset(f as isize)).vOs
+                    - (n.dot((*pTriInfos.offset(f as isize)).vOs) * n);
+                let mut vOt = (*pTriInfos.offset(f as isize)).vOt
+                    - (n.dot((*pTriInfos.offset(f as isize)).vOt) * n);
+                if VNotZero(vOs) { vOs = Normalize(vOs) }
+                if VNotZero(vOt) { vOt = Normalize(vOt) }
+                (vOs, vOt)
+            };
             iOF_1 = (*pTriInfos.offset(f as isize)).iOrgFaceNumber;
             iMembers = 0;
             j = 0i32;
             while j < (*pGroup).iNrFaces {
                 let t: i32 = *(*pGroup).pFaceIndices.offset(j as isize);
                 let iOF_2: i32 = (*pTriInfos.offset(t as isize)).iOrgFaceNumber;
-                let mut vOs2 = (*pTriInfos.offset(t as isize)).vOs
-                    - (n.dot((*pTriInfos.offset(t as isize)).vOs) * n);
-                let mut vOt2 = (*pTriInfos.offset(t as isize)).vOt
-                    - (n.dot((*pTriInfos.offset(t as isize)).vOt) * n);
-                if VNotZero(vOs2) {
-                    vOs2 = Normalize(vOs2)
-                }
-                if VNotZero(vOt2) {
-                    vOt2 = Normalize(vOt2)
-                }
+                let (vOs2, vOt2) = if REUSE_PROJECTIONS {
+                    projections[j as usize]
+                } else {
+                    let mut vOs2 = (*pTriInfos.offset(t as isize)).vOs
+                        - (n.dot((*pTriInfos.offset(t as isize)).vOs) * n);
+                    let mut vOt2 = (*pTriInfos.offset(t as isize)).vOt
+                        - (n.dot((*pTriInfos.offset(t as isize)).vOt) * n);
+                    if VNotZero(vOs2) { vOs2 = Normalize(vOs2) }
+                    if VNotZero(vOt2) { vOt2 = Normalize(vOt2) }
+                    (vOs2, vOt2)
+                };
                 let bAny: bool = if ((*pTriInfos.offset(f as isize)).iFlag
                     | (*pTriInfos.offset(t as isize)).iFlag)
                     & 4i32

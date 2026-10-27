@@ -23,7 +23,7 @@ struct Group {
     orientation: bool,
 }
 
-pub(super) fn generate<I: Geometry + Sync, const REUSE_MEMBERS: bool>(
+pub(super) fn generate<I: Geometry + Sync, const REUSE_MEMBERS: bool, const REUSE_PROJECTIONS: bool>(
     output: &mut [STSpace],
     triangles: &[STriInfo],
     groups: &[SGroup],
@@ -105,7 +105,7 @@ pub(super) fn generate<I: Geometry + Sync, const REUSE_MEMBERS: bool>(
                 let math_scope = loom_render::profile::Scope::new("mikk.group_math");
                 // All pointers below were reconstructed inside this worker and
                 // remain valid until the original evaluator returns.
-                let success = unsafe { GenerateTSpaces::<_, REUSE_MEMBERS>(&mut spaces, local_triangles.as_ptr(), local_groups.as_ptr(), local_groups.len() as i32, local_indices.as_ptr(), threshold, &mut view) };
+                let success = unsafe { GenerateTSpaces::<_, REUSE_MEMBERS, REUSE_PROJECTIONS>(&mut spaces, local_triangles.as_ptr(), local_groups.as_ptr(), local_groups.len() as i32, local_indices.as_ptr(), threshold, &mut view) };
                 drop(math_scope);
                 let mut result = Vec::new();
                 for (local, global) in selected.iter().enumerate() {

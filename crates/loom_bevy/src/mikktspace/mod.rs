@@ -34,7 +34,7 @@ impl<I: Geometry> Geometry for ReadGeometry<'_, I> {
 
 #[cfg(test)]
 pub(crate) fn generate_parallel(pool: &bevy_tasks::TaskPool, data: &MeshData) -> Option<Vec<[f32; 4]>> {
-    generate_cached_inner::<true>(pool, data, None)
+    generate_cached_inner::<true, true>(pool, data, None)
 }
 
 #[cfg(test)]
@@ -46,19 +46,24 @@ pub(crate) fn generate_serial(data: &MeshData) -> Option<Vec<[f32; 4]>> {
 }
 
 pub(crate) fn generate_cached(pool: &bevy_tasks::TaskPool, data: &MeshData, cache: &mut NeighborCache) -> Option<Vec<[f32; 4]>> {
-    generate_cached_inner::<true>(pool, data, Some(cache))
+    generate_cached_inner::<true, true>(pool, data, Some(cache))
 }
 
 #[cfg(test)]
 fn generate_cached_original(pool: &bevy_tasks::TaskPool, data: &MeshData, cache: &mut NeighborCache) -> Option<Vec<[f32; 4]>> {
-    generate_cached_inner::<false>(pool, data, Some(cache))
+    generate_cached_inner::<false, false>(pool, data, Some(cache))
 }
 
-fn generate_cached_inner<const REUSE_MEMBERS: bool>(pool: &bevy_tasks::TaskPool, data: &MeshData, cache: Option<&mut NeighborCache>) -> Option<Vec<[f32; 4]>> {
+#[cfg(test)]
+fn generate_cached_allocations(pool: &bevy_tasks::TaskPool, data: &MeshData, cache: &mut NeighborCache) -> Option<Vec<[f32; 4]>> {
+    generate_cached_inner::<true, false>(pool, data, Some(cache))
+}
+
+fn generate_cached_inner<const REUSE_MEMBERS: bool, const REUSE_PROJECTIONS: bool>(pool: &bevy_tasks::TaskPool, data: &MeshData, cache: Option<&mut NeighborCache>) -> Option<Vec<[f32; 4]>> {
     let mut geometry = MeshGeometry { data, tangents: vec![[0.0; 4]; data.positions.len()] };
     // The vendor's original preparation/epilogue retain their checked Geometry
     // indexing and pointer invariants. Worker boundaries contain owned indices.
-    if !unsafe { generated::genTangSpaceCached::<_, REUSE_MEMBERS>(&mut geometry, 180.0, Some(pool), cache) } { return None; }
+    if !unsafe { generated::genTangSpaceCached::<_, REUSE_MEMBERS, REUSE_PROJECTIONS>(&mut geometry, 180.0, Some(pool), cache) } { return None; }
     // Match Bevy's existing handedness conversion, including unwritten vertices.
     for tangent in &mut geometry.tangents { tangent[3] = -tangent[3]; }
     Some(geometry.tangents)
