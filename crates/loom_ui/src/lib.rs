@@ -802,7 +802,7 @@ impl LoomApp {
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
             // An Editable Patch's cage is its lattice: the surface is drawn.
             let patch = n.object.patch().is_some();
-            let mut shown = if n.modifiers.is_empty() && !nurms && !patch {
+            let mut shown = {let _stage=loom_render::profile::Scope::new("ui.evaluate_display"); if n.modifiers.is_empty() && !nurms && !patch {
                 None
             } else if self.below_end_result(id) {
                 match n.active_entry {
@@ -811,7 +811,7 @@ impl LoomApp {
                 }
             } else {
                 Some(self.state.scene.eval_mesh(id).value.mesh.clone())
-            };
+            }};
             if d.display_as_box {
                 // Display as Box: the object's local bounding box.
                 let (min, max) = mesh.aabb();
@@ -819,10 +819,11 @@ impl LoomApp {
                 let _ = loom_mesh::edit_ops::translate_mesh(&mut mesh, (min + max) * 0.5);
                 shown = None;
             }
+            {let _stage=loom_render::profile::Scope::new("ui.transform_display");
             if !cached_world{let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, world);}
             if let Some(d) = shown.as_mut() {
                 let _ = loom_mesh::edit_ops::transform_mesh(d, world);
-            }
+            }}
             let gray = n.frozen && d.show_frozen_in_gray;
             let color = if gray {
                 [0.35, 0.35, 0.35]

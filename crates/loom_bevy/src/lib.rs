@@ -5,7 +5,9 @@
 
 pub mod bake;
 pub mod convert;
+mod prepared_geometry;
 pub mod lights;
+mod mikktspace;
 
 use std::collections::{HashMap, HashSet};
 
@@ -162,6 +164,7 @@ pub struct BevyRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     objects: HashMap<u64, Object>,
+    geometry: HashMap<(bool,u64),prepared_geometry::GeometryCache>,
     views: HashMap<u32, View>,
     textures: HashMap<String, Option<Handle<Image>>>,
     /// Image files as maps read them, by path.
@@ -217,7 +220,7 @@ impl BevyRenderer {
         app.insert_resource(AmbientLight { color: Color::WHITE, brightness: AMBIENT_BRIGHTNESS, affects_lightmapped_meshes: true });
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         let light = Some(Self::spawn_key_light(&mut app));
-        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, samples: Vec::new(), scene_lights: HashMap::new(), bounds: None, settle: 3, hidden: HashMap::new(), render: None }
+        Self { app, device, queue, objects: HashMap::new(), geometry: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, samples: Vec::new(), scene_lights: HashMap::new(), bounds: None, settle: 3, hidden: HashMap::new(), render: None }
     }
 
     /// Default lighting: a key light with shadows.
@@ -387,7 +390,7 @@ impl BevyRenderer {
         let mut material_data = Vec::new();
         for o in objects {
             seen.insert(o.id);
-            let data = mesh_data(o.mesh);
+            let data = self.geometry.entry((hidden,o.id)).or_default().mesh_data(o.mesh);
             let mirrored = o.transform.determinant() < 0.0;
             if let Some(b) = data.aabb_transformed(o.transform) {
                 lo = lo.min(Vec3::from(b.min()));
@@ -482,6 +485,7 @@ impl BevyRenderer {
         }
         let gone: Vec<u64> = set.keys().filter(|id| !seen.contains(id)).copied().collect();
         for id in gone {
+            self.geometry.remove(&(hidden,id));
             if let Some(obj) = set.remove(&id) {
                 for (e, _) in obj.parts {
                     self.app.world_mut().despawn(e);
