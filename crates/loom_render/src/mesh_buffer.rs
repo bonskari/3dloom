@@ -203,6 +203,7 @@ pub struct MeshBuffer {
     /// Faces of a Wire material: their edges, always drawn in shaded views.
     pub wire_vertex_buffer: Buffer,
     pub wire_vertex_count: u32,
+    edge_staging: Vec<crate::grid::LineVertex>,
 }
 
 impl MeshBuffer {
@@ -230,18 +231,20 @@ impl MeshBuffer {
             usage: mesh_usage(BufferUsages::INDEX),
         });
 
-        let mut edges = mesh.unique_edges();
-        if style.diagonals {
-            edges.extend(dashed(&fan_diagonals(mesh), DIAGONAL_DASHES));
-        }
-        let edge_vertex_count = (edges.len() * 2) as u32;
-        let edge_vertex_buffer = edge_buffer(device, &edges, style.wire_color.unwrap_or(style.color), "loom_mesh_edge_buffer");
-        let selected_edge_vertex_buffer = edge_buffer(
-            device,
-            &edges,
-            [1.0, 1.0, 1.0],
-            "loom_mesh_selected_edge_buffer",
-        );
+        let mut edge_staging = Vec::new();
+        stage_edges(mesh, &style, &mut edge_staging);
+        let edge_vertex_count = edge_staging.len() as u32;
+        let edge_vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("loom_mesh_edge_buffer"),
+            contents: bytemuck::cast_slice(&edge_staging),
+            usage: mesh_usage(BufferUsages::VERTEX),
+        });
+        for vertex in &mut edge_staging { vertex.color = [1.0; 3]; }
+        let selected_edge_vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("loom_mesh_selected_edge_buffer"),
+            contents: bytemuck::cast_slice(&edge_staging),
+            usage: mesh_usage(BufferUsages::VERTEX),
+        });
 
         let (aabb_min, aabb_max) = mesh.aabb();
 
@@ -259,6 +262,7 @@ impl MeshBuffer {
             ranges,
             wire_vertex_buffer,
             wire_vertex_count,
+            edge_staging,
         }
     }
 
@@ -267,19 +271,17 @@ impl MeshBuffer {
         let _scope = crate::profile::Scope::new("render.upload");
         let (verts, indices, ranges) = if faces {triangulate_styled(mesh, &style)} else {(Vec::new(),Vec::new(),Vec::new())};
         let wire = wire_lines(mesh, &style);
-        let mut edges = mesh.unique_edges();
-        if style.diagonals { edges.extend(dashed(&fan_diagonals(mesh), DIAGONAL_DASHES)); }
-        let mut edge_verts = edge_vertices(&edges, style.wire_color.unwrap_or(style.color));
+        stage_edges(mesh, &style, &mut self.edge_staging);
         update_buffer(device, queue, &mut self.vertex_buffer, bytemuck::cast_slice(&verts), BufferUsages::VERTEX, "loom_mesh_vertex_buffer");
         update_buffer(device, queue, &mut self.index_buffer, bytemuck::cast_slice(&indices), BufferUsages::INDEX, "loom_mesh_index_buffer");
-        update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&edge_verts), BufferUsages::VERTEX, "loom_mesh_edge_buffer");
-        for vertex in &mut edge_verts { vertex.color = [1.0; 3]; }
-        update_buffer(device, queue, &mut self.selected_edge_vertex_buffer, bytemuck::cast_slice(&edge_verts), BufferUsages::VERTEX, "loom_mesh_selected_edge_buffer");
+        update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_edge_buffer");
+        for vertex in &mut self.edge_staging { vertex.color = [1.0; 3]; }
+        update_buffer(device, queue, &mut self.selected_edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_selected_edge_buffer");
         let empty = [crate::grid::LineVertex { position: [0.0; 3], color: [0.0; 3] }];
         update_buffer(device, queue, &mut self.wire_vertex_buffer, bytemuck::cast_slice(if wire.is_empty() { &empty[..] } else { &wire[..] }), BufferUsages::VERTEX, "loom_mesh_wire_buffer");
         self.faces_ready = faces;
         self.index_count = indices.len() as u32;
-        self.edge_vertex_count = (edges.len() * 2) as u32;
+        self.edge_vertex_count = self.edge_staging.len() as u32;
         self.wire_vertex_count = wire.len() as u32;
         (self.aabb_min, self.aabb_max) = mesh.aabb();
         self.style = style;
@@ -362,12 +364,33 @@ fn update_buffer(device: &Device, queue: &wgpu::Queue, buffer: &mut Buffer, cont
     }
 }
 
+#[cfg(test)]
 fn edge_vertices(edges: &[(Vec3, Vec3)], color: [f32; 3]) -> Vec<crate::grid::LineVertex> {
     edges.iter().flat_map(|(a, b)| [crate::grid::LineVertex { position: (*a).into(), color }, crate::grid::LineVertex { position: (*b).into(), color }]).collect()
 }
 
-fn edge_buffer(device: &Device, edges: &[(Vec3, Vec3)], color: [f32; 3], label: &str) -> Buffer {
-    device.create_buffer_init(&BufferInitDescriptor { label: Some(label), contents: bytemuck::cast_slice(&edge_vertices(edges, color)), usage: mesh_usage(BufferUsages::VERTEX) })
+// Match Mesh::unique_edges order and visibility exactly, writing current pose
+// positions directly instead of allocating an intermediate segment vector.
+fn stage_edges(mesh: &Mesh, style: &MeshStyle, vertices: &mut Vec<crate::grid::LineVertex>) {
+    vertices.clear();
+    vertices.reserve(mesh.half_edge_count());
+    let color = style.wire_color.unwrap_or(style.color);
+    let half_edges = mesh.half_edges();
+    let positions = mesh.vertices();
+    let invisible = mesh.has_invisible_edges();
+    for (i, he) in half_edges.iter().enumerate() {
+        if (i as u32) < he.twin.0 && (!invisible || mesh.edge_visible(loom_mesh::HalfEdgeId(i as u32))) {
+            let twin = &half_edges[he.twin.0 as usize];
+            vertices.push(crate::grid::LineVertex { position: positions[he.origin.0 as usize].position.into(), color });
+            vertices.push(crate::grid::LineVertex { position: positions[twin.origin.0 as usize].position.into(), color });
+        }
+    }
+    if style.diagonals {
+        for (a, b) in dashed(&fan_diagonals(mesh), DIAGONAL_DASHES) {
+            vertices.push(crate::grid::LineVertex { position: a.into(), color });
+            vertices.push(crate::grid::LineVertex { position: b.into(), color });
+        }
+    }
 }
 
 /// Triangulate every face fan-style. Each vertex is duplicated per face;
@@ -382,6 +405,11 @@ pub fn triangulate_with_face_normals(mesh: &Mesh, color: [f32; 4], vertex_colors
 /// The edges of the faces whose style is Wire, as line-list vertices in the
 /// material colour.
 pub fn wire_lines(mesh: &Mesh, style: &MeshStyle) -> Vec<crate::grid::LineVertex> {
+    let any_wire = match &style.sub {
+        Some(sub) => sub.missing.wire || sub.by_id.values().any(|s| s.wire),
+        None => style.wire,
+    };
+    if !any_wire { return Vec::new(); }
     let mut out = Vec::new();
     for (i, face) in mesh.faces().iter().enumerate() {
         let look = style.for_face(face.material_id);
@@ -542,6 +570,59 @@ mod tests {
     use loom_mesh::box_primitive;
 
     #[test]
+    fn persistent_edge_staging_matches_reference_after_connectivity_visibility_and_style_edits() {
+        let mut mesh = box_primitive(Vec3::ONE);
+        let mut staging = Vec::new();
+        let mut style = MeshStyle { color: [0.2, 0.4, 0.6], ..Default::default() };
+        let check = |mesh: &Mesh, style: &MeshStyle, staging: &mut Vec<crate::grid::LineVertex>| {
+            let mut edges = mesh.unique_edges();
+            if style.diagonals { edges.extend(dashed(&fan_diagonals(mesh), DIAGONAL_DASHES)); }
+            let expected = edge_vertices(&edges, style.wire_color.unwrap_or(style.color));
+            stage_edges(mesh, style, staging);
+            assert_eq!(bytemuck::cast_slice::<_, u8>(staging), bytemuck::cast_slice::<_, u8>(&expected));
+        };
+        check(&mesh, &style, &mut staging);
+        mesh.faces_mut()[0].hidden = true;
+        check(&mesh, &style, &mut staging); // Unique edges include hidden faces.
+        style.diagonals = true;
+        check(&mesh, &style, &mut staging);
+        let he = mesh.faces()[1].he;
+        mesh.set_edge_visible(he, false);
+        check(&mesh, &style, &mut staging); // Invisible edges become dashed diagonals.
+        style.wire_color = Some([-0.0, 0.7, 1.0]);
+        mesh.vertices_mut()[0].position += Vec3::new(0.1, -0.2, 0.3);
+        mesh.vertices_mut()[0].hidden = true;
+        check(&mesh, &style, &mut staging);
+        let counts = (mesh.vertex_count(), mesh.half_edge_count(), mesh.face_count());
+        let faces: Vec<_> = (0..mesh.face_count()).map(|i| loom_mesh::FaceId(i as u32)).collect();
+        loom_mesh::poly_ops::flip_faces(&mut mesh, &faces).unwrap();
+        assert_eq!(counts, (mesh.vertex_count(), mesh.half_edge_count(), mesh.face_count()));
+        check(&mesh, &style, &mut staging);
+        let large = loom_mesh::sphere_segmented(1.0, 32, 0.0);
+        check(&large, &style, &mut staging);
+        let allocation = staging.as_ptr();
+        check(&mesh, &style, &mut staging);
+        assert_eq!(allocation, staging.as_ptr(), "smaller updates reuse CPU line storage");
+        check(&Mesh::new(), &style, &mut staging);
+    }
+
+    #[test]
+    fn wire_material_fast_path_respects_sub_material_overrides_and_missing_ids() {
+        let mut mesh = box_primitive(Vec3::ONE);
+        for (i, f) in mesh.faces_mut().iter_mut().enumerate() { f.material_id = (i % 2) as u16; }
+        let off = MeshStyle::default().surface();
+        let on = SurfaceStyle { wire: true, color: [0.1, 0.4, 0.7], ..off };
+        let mut style = MeshStyle { wire: true, sub: Some(std::sync::Arc::new(SubStyles { by_id: [(0, off)].into_iter().collect(), missing: off })), ..Default::default() };
+        assert!(wire_lines(&mesh, &style).is_empty(), "sub-materials override the base wire flag");
+        style.sub = Some(std::sync::Arc::new(SubStyles { by_id: [(0, off)].into_iter().collect(), missing: on }));
+        let expected: Vec<_> = mesh.faces().iter().enumerate().filter(|(_, f)| f.material_id == 1).flat_map(|(i, _)| {
+            let points = mesh.face_positions(loom_mesh::FaceId(i as u32)).unwrap();
+            (0..points.len()).flat_map(move |k| [points[k], points[(k + 1) % points.len()]])
+        }).map(|p| crate::grid::LineVertex { position: p.to_array(), color: on.color }).collect();
+        assert_eq!(bytemuck::cast_slice::<_, u8>(&wire_lines(&mesh, &style)), bytemuck::cast_slice::<_, u8>(&expected));
+    }
+
+    #[test]
     fn triangulated_smoothing_matches_corner_normals() {
         let mut mesh = loom_mesh::sphere_segmented(1.25, 24, 0.0);
         for (i, face) in mesh.faces_mut().iter_mut().enumerate() {
@@ -590,6 +671,14 @@ mod tests {
         loom_mesh::edit_ops::translate_mesh(&mut moved, Vec3::new(3.0, -2.0, 1.0)).unwrap();
         let large = loom_mesh::sphere_segmented(1.25, 32, 0.0);
         let empty = Mesh::new();
+        let mut edited = small.clone();
+        edited.faces_mut()[0].hidden = true;
+        edited.set_edge_visible(edited.faces()[1].he, false);
+        edited.vertices_mut()[0].position += Vec3::new(0.2, -0.1, 0.3);
+        let mut flipped = edited.clone();
+        let faces: Vec<_> = (0..flipped.face_count()).map(|i| loom_mesh::FaceId(i as u32)).collect();
+        loom_mesh::poly_ops::flip_faces(&mut flipped, &faces).unwrap();
+        assert_eq!((edited.vertex_count(), edited.half_edge_count(), edited.face_count()), (flipped.vertex_count(), flipped.half_edge_count(), flipped.face_count()));
         let plain = MeshStyle::default();
         let colored = MeshStyle { color: [0.2, 0.4, 0.8], wire_color: Some([0.8, 0.1, 0.3]), alpha: 0.4, diagonals: true, ..Default::default() };
         let wire = MeshStyle { color: [0.0, 0.8, 0.2], wire: true, ..Default::default() };
@@ -602,7 +691,7 @@ mod tests {
         assert_eq!(read(&lazy.vertex_buffer,full.vertex_buffer.size()),read(&full.vertex_buffer,full.vertex_buffer.size()));
         assert_eq!(read(&lazy.index_buffer,full.index_buffer.size()),read(&full.index_buffer,full.index_buffer.size()));
         let mut reused = MeshBuffer::from_mesh(&device, &small, plain.clone());
-        for (mesh, style) in [(&large, &colored), (&moved, &plain), (&small, &wire), (&empty, &plain), (&small, &colored)] {
+        for (mesh, style) in [(&large, &colored), (&moved, &plain), (&small, &wire), (&edited, &colored), (&flipped, &colored), (&empty, &plain), (&small, &colored)] {
             let old = [reused.vertex_buffer.clone(), reused.index_buffer.clone(), reused.edge_vertex_buffer.clone(), reused.selected_edge_vertex_buffer.clone(), reused.wire_vertex_buffer.clone()];
             reused.update_from_mesh(&device, &queue, mesh, style.clone());
             let fresh = MeshBuffer::from_mesh(&device, mesh, style.clone());
