@@ -134,6 +134,39 @@ impl Topology {
     }
 }
 
+// A retained exact raw-descriptor proof avoids rebuilding every face fan on
+// pose-only changes. Unused map edits may conservatively miss; no position is
+// included and no changed effective descriptor can pass this comparison.
+struct DescriptorSnapshot {
+    vertex_edges: Vec<Option<loom_mesh::HalfEdgeId>>,
+    half_edges: Vec<loom_mesh::HalfEdge>,
+    faces: Vec<loom_mesh::half_edge::Face>,
+    maps: [Option<MapSnapshot>; 2],
+}
+struct MapSnapshot { corners: Vec<u32>, values: Vec<[u32; 3]> }
+impl DescriptorSnapshot {
+    fn new(mesh: &Mesh) -> Self {
+        Self {
+            vertex_edges: mesh.vertices().iter().map(|v|v.he).collect(),
+            half_edges: mesh.half_edges().to_vec(), faces: mesh.faces().to_vec(),
+            maps: [1,loom_mesh::NORMALS_CHANNEL].map(|channel|mesh.map(channel).map(|m|MapSnapshot {
+                corners:m.corners.clone(), values:m.verts.iter().map(|v|v.to_array().map(f32::to_bits)).collect(),
+            })),
+        }
+    }
+    fn matches(&self, mesh: &Mesh) -> bool {
+        self.vertex_edges.len()==mesh.vertex_count()
+            && self.vertex_edges.iter().zip(mesh.vertices()).all(|(he,v)|*he==v.he)
+            && self.half_edges==mesh.half_edges() && self.faces==mesh.faces()
+            && self.maps.iter().zip([1,loom_mesh::NORMALS_CHANNEL]).all(|(old,channel)|match (old,mesh.map(channel)) {
+                (None,None)=>true,
+                (Some(old),Some(current))=>old.corners==current.corners && old.values.len()==current.verts.len()
+                    && old.values.iter().zip(&current.verts).all(|(a,b)|*a==b.to_array().map(f32::to_bits)),
+                _=>false,
+            })
+    }
+}
+
 pub(crate) struct GpuPoseGeometry {
     world_pipeline: wgpu::ComputePipeline,
     world_binding: wgpu::BindGroup,
@@ -143,12 +176,25 @@ pub(crate) struct GpuPoseGeometry {
     face_binding: wgpu::BindGroup,
     corner_binding: wgpu::BindGroup,
     pose: wgpu::Buffer,
-    tangent: wgpu::Buffer,
+    tangent: Option<wgpu::Buffer>,
     output: wgpu::Buffer,
     counts: [u32; 4],
     pub parts: Vec<Range<usize>>,
+    part_descriptors: Vec<(Option<u16>, bool)>,
+    descriptor_snapshot: DescriptorSnapshot,
+    corner_sources: Vec<u32>,
 }
 impl GpuPoseGeometry {
+    pub(crate) fn from_current_positions(
+        device: &wgpu::Device,
+        positions: &wgpu::Buffer,
+        mesh: &Mesh,
+        parts: &[(Option<u16>, bool)],
+        world: Mat4,
+    ) -> Result<Self, String> {
+        Self::new_with_math(device, positions, mesh, parts, world, None, true)
+    }
+    #[cfg(test)]
     pub fn new(
         device: &wgpu::Device,
         positions: &wgpu::Buffer,
@@ -163,10 +209,11 @@ impl GpuPoseGeometry {
             mesh,
             parts,
             world,
-            oracle_tangents,
+            Some(oracle_tangents),
             false,
         )
     }
+    #[cfg(test)]
     pub fn new_origin_relative(
         device: &wgpu::Device,
         positions: &wgpu::Buffer,
@@ -175,7 +222,15 @@ impl GpuPoseGeometry {
         world: Mat4,
         oracle_tangents: &[[f32; 4]],
     ) -> Result<Self, String> {
-        Self::new_with_math(device, positions, mesh, parts, world, oracle_tangents, true)
+        Self::new_with_math(
+            device,
+            positions,
+            mesh,
+            parts,
+            world,
+            Some(oracle_tangents),
+            true,
+        )
     }
     fn new_with_math(
         device: &wgpu::Device,
@@ -183,18 +238,18 @@ impl GpuPoseGeometry {
         mesh: &Mesh,
         parts: &[(Option<u16>, bool)],
         world: Mat4,
-        oracle_tangents: &[[f32; 4]],
+        oracle_tangents: Option<&[[f32; 4]]>,
         origin_relative: bool,
     ) -> Result<Self, String> {
         let topology = Topology::new(mesh, parts)?;
         if positions.size() < topology.vertices as u64 * 16
-            || oracle_tangents.len() != topology.corners.len()
+            || oracle_tangents.is_some_and(|t| t.len() != topology.corners.len())
         {
             return Err("GPU position/oracle tangent counts do not match topology".into());
         }
         if !world.is_finite()
             || !world.row(3).abs_diff_eq(glam::Vec4::W, 1e-6)
-            || !oracle_tangents.iter().flatten().all(|v| v.is_finite())
+            || oracle_tangents.is_some_and(|t| !t.iter().flatten().all(|v| v.is_finite()))
         {
             return Err("GPU prototype inputs must be finite and affine".into());
         }
@@ -212,7 +267,7 @@ impl GpuPoseGeometry {
             topology.corners.len() * 64,
             topology.faces * 16,
             topology.vertices * 16,
-            oracle_tangents.len() * 16,
+            oracle_tangents.map_or(0, |t| t.len()) * 16,
         ] {
             if size as u64 > limits.max_buffer_size
                 || size as u64 > u64::from(limits.max_storage_buffer_binding_size)
@@ -242,11 +297,13 @@ impl GpuPoseGeometry {
             bytemuck::cast_slice(&topology.corners),
             false,
         );
-        let tangent = storage(
-            "CURRENT CPU tangent oracle",
-            bytemuck::cast_slice(oracle_tangents),
-            true,
-        );
+        let tangent = oracle_tangents.map(|t| {
+            storage(
+                "TEST ONLY current CPU tangent oracle",
+                bytemuck::cast_slice(t),
+                true,
+            )
+        });
         let face_normals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("posed Newell normals"),
             size: topology.faces as u64 * 16,
@@ -299,23 +356,29 @@ impl GpuPoseGeometry {
         } else {
             "faces"
         });
-        let corner_pipeline = pipeline("pack_corners");
+        let corner_pipeline = pipeline(if tangent.is_some() {
+            "pack_corners"
+        } else {
+            "pack_geometry_only"
+        });
         let buffers = [
-            positions,
-            &metadata,
-            &corners,
-            &tangent,
-            &face_normals,
-            &output,
-            &pose,
-            &world_positions,
+            Some(positions),
+            Some(&metadata),
+            Some(&corners),
+            tangent.as_ref(),
+            Some(&face_normals),
+            Some(&output),
+            Some(&pose),
+            Some(&world_positions),
         ];
         let binding = |pipeline: &wgpu::ComputePipeline, indices: &[usize]| {
             let entries: Vec<_> = indices
                 .iter()
                 .map(|&i| wgpu::BindGroupEntry {
                     binding: i as u32,
-                    resource: buffers[i].as_entire_binding(),
+                    resource: buffers[i]
+                        .expect("entry-specific normal stage binding")
+                        .as_entire_binding(),
                 })
                 .collect();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -326,7 +389,14 @@ impl GpuPoseGeometry {
         };
         let world_binding = binding(&world_pipeline, &[0, 6, 7]);
         let face_binding = binding(&face_pipeline, &[1, 4, 6, 7]);
-        let corner_binding = binding(&corner_pipeline, &[1, 2, 3, 4, 5, 6, 7]);
+        let corner_binding = binding(
+            &corner_pipeline,
+            if tangent.is_some() {
+                &[1, 2, 3, 4, 5, 6, 7]
+            } else {
+                &[1, 2, 4, 5, 6, 7]
+            },
+        );
         Ok(Self {
             world_pipeline,
             world_binding,
@@ -339,9 +409,13 @@ impl GpuPoseGeometry {
             tangent,
             output,
             counts,
-            parts: topology.parts,
+            parts: topology.parts.clone(),
+            part_descriptors: parts.to_vec(),
+            descriptor_snapshot: DescriptorSnapshot::new(mesh),
+            corner_sources: topology.corners.iter().map(|c| c.source[0]).collect(),
         })
     }
+    #[cfg(test)]
     pub fn update_oracle(
         &self,
         queue: &wgpu::Queue,
@@ -363,7 +437,50 @@ impl GpuPoseGeometry {
                 counts: self.counts,
             }),
         );
-        queue.write_buffer(&self.tangent, 0, bytemuck::cast_slice(tangents));
+        queue.write_buffer(
+            self.tangent
+                .as_ref()
+                .ok_or("normal-only pipeline has no CPU tangent oracle")?,
+            0,
+            bytemuck::cast_slice(tangents),
+        );
+        Ok(())
+    }
+    /// Exact effective GPU descriptors, intentionally excluding posed positions.
+    pub(crate) fn matches_descriptors(
+        &self,
+        mesh: &Mesh,
+        parts: &[(Option<u16>, bool)],
+    ) -> Result<bool, String> {
+        if parts != self.part_descriptors {
+            return Ok(false);
+        }
+        if self.descriptor_snapshot.matches(mesh) { return Ok(true); }
+        // Changed/invalid descriptors retain the checked constructor's errors.
+        mesh.check_invariants()?;
+        Ok(false)
+    }
+    pub(crate) fn corner_sources(&self) -> &[u32] {
+        &self.corner_sources
+    }
+    pub(crate) fn intermediate_buffer(&self) -> &wgpu::Buffer {
+        &self.output
+    }
+    pub(crate) fn source_vertex_count(&self) -> u32 {
+        self.counts[2]
+    }
+    pub(crate) fn update_transform(&self, queue: &wgpu::Queue, world: Mat4) -> Result<(), String> {
+        if !world.is_finite() || !world.row(3).abs_diff_eq(glam::Vec4::W, 1e-6) {
+            return Err("current geometry transform must be finite affine".into());
+        }
+        queue.write_buffer(
+            &self.pose,
+            0,
+            bytemuck::bytes_of(&Pose {
+                world: world.to_cols_array(),
+                counts: self.counts,
+            }),
+        );
         Ok(())
     }
     pub fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
@@ -430,11 +547,15 @@ fn read_records<T: Pod>(
 }
 
 #[cfg(test)]
+#[path = "gpu_mikk_f64.rs"]
+mod mikk_f64;
 #[path = "gpu_mikk_prepare.rs"]
-mod mikk_prepare;
+pub(crate) mod mikk_prepare;
 #[cfg(test)]
 #[path = "gpu_mikk_probe.rs"]
 mod mikk_probe;
+#[path = "gpu_mikk_recipe.rs"]
+pub(crate) mod mikk_recipe;
 #[cfg(test)]
 #[path = "gpu_pose_precision.rs"]
 mod precision;
@@ -527,6 +648,65 @@ mod tests {
         map.corners.fill(0);
         map.corners[explicit_corner] = 1;
         mesh
+    }
+    #[test]
+    fn current_position_normal_factory_has_no_cpu_tangent_resource() {
+        let (device, queue) = device();
+        let mesh = enriched_box();
+        let parts = [(Some(0), false), (Some(1), true)];
+        let positions: Vec<_> = mesh
+            .vertices()
+            .iter()
+            .map(|v| v.position.extend(1.0).to_array())
+            .collect();
+        let source = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("actual CPU final positions"),
+            contents: bytemuck::cast_slice(&positions),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let geometry = GpuPoseGeometry::from_current_positions(
+            &device,
+            &source,
+            &mesh,
+            &parts,
+            Mat4::IDENTITY,
+        )
+        .unwrap();
+        assert!(geometry.tangent.is_none());
+        assert_eq!(geometry.source_vertex_count(), positions.len() as u32);
+        assert_eq!(
+            geometry.intermediate_buffer().size(),
+            geometry.counts[1] as u64 * 64
+        );
+        geometry.update_transform(&queue, Mat4::IDENTITY).unwrap();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        geometry.encode(&mut encoder);
+        queue.submit([encoder.finish()]);
+        let actual = geometry.readback(&device, &queue);
+        let (reference, _) = oracle(&mesh, &parts);
+        assert_eq!(
+            actual.len(),
+            reference.iter().map(|p| p.positions.len()).sum::<usize>()
+        );
+        for (a, (p, n)) in actual.iter().zip(
+            reference
+                .iter()
+                .flat_map(|p| p.positions.iter().zip(&p.normals)),
+        ) {
+            assert!(
+                Vec3::from_array(a.position[..3].try_into().unwrap())
+                    .distance(Vec3::from_array(*p))
+                    < 1e-6
+            );
+            assert!(
+                Vec3::from_array(a.normal[..3].try_into().unwrap()).distance(Vec3::from_array(*n))
+                    < 1e-5
+            );
+            assert_eq!(
+                a.tangent, [0.0; 4],
+                "unrendered intermediate has no CPU tangent field"
+            );
+        }
     }
     #[test]
     fn gpu_skin_and_posed_newell_sg_normals_preserve_all_twelve_influences() {
@@ -637,13 +817,13 @@ mod tests {
     #[test]
     #[ignore = "actual Ray GPU posed normals requires LOOM_PERF_SCENE"]
     fn actual_ray_gpu_skin_normals_and_material_packing() {
-        ray_geometry_audit(true, false, &[0.0, 39.25, 149.0]);
+        ray_geometry_audit(true, false, RecipeAudit::Off, &[0.0, 39.25, 149.0]);
     }
 
     #[test]
     #[ignore = "actual Ray origin-relative GPU normals require LOOM_PERF_SCENE"]
     fn actual_ray_origin_relative_sg_accuracy_against_same_position_f64() {
-        ray_geometry_audit(false, false, &[0.0, 39.25, 149.0]);
+        ray_geometry_audit(false, false, RecipeAudit::Off, &[0.0, 39.25, 149.0]);
     }
 
     #[test]
@@ -660,10 +840,83 @@ mod tests {
                 .map(|i| 149.0 * i as f32 / (count - 1).max(1) as f32)
                 .collect()
         };
-        ray_geometry_audit(false, true, &times);
+        ray_geometry_audit(false, true, RecipeAudit::Off, &times);
     }
 
-    fn ray_geometry_audit(strict_legacy: bool, prepare: bool, times: &[f32]) {
+    #[test]
+    #[ignore = "actual current hybrid GPU tangents require LOOM_PERF_SCENE"]
+    fn actual_ray_hybrid_current_gpu_tangents() {
+        let count = std::env::var("LOOM_GPU_RECIPE_POSES")
+            .ok()
+            .map(|v| v.parse::<usize>().unwrap())
+            .unwrap_or(3);
+        let times: Vec<_> = if count == 3 {
+            vec![0.0, 39.25, 149.0]
+        } else {
+            (0..count)
+                .map(|i| 149.0 * i as f32 / (count - 1).max(1) as f32)
+                .collect()
+        };
+        ray_geometry_audit(false, true, RecipeAudit::Strict, &times);
+    }
+    #[derive(PartialEq, Eq)]
+    enum RecipeAudit {
+        Off,
+        Strict,
+        Diagnostic,
+        F64,
+        F64Diagnostic,
+    }
+    #[test]
+    #[ignore = "actual GPU tangent numeric diagnostic; no acceptance claim"]
+    fn actual_ray_hybrid_current_gpu_tangent_diagnostics() {
+        let count = std::env::var("LOOM_GPU_RECIPE_POSES")
+            .ok()
+            .map(|v| v.parse::<usize>().unwrap())
+            .unwrap_or(3);
+        let times: Vec<_> = if count == 3 {
+            vec![0.0, 39.25, 149.0]
+        } else {
+            (0..count)
+                .map(|i| 149.0 * i as f32 / (count - 1).max(1) as f32)
+                .collect()
+        };
+        ray_geometry_audit(false, true, RecipeAudit::Diagnostic, &times);
+    }
+    #[test]
+    #[ignore = "independent current F64 full-vertex tangent acceptance requires actual Ray scene"]
+    fn actual_ray_hybrid_current_gpu_tangents_f64_acceptance() {
+        let count = std::env::var("LOOM_GPU_RECIPE_POSES")
+            .ok()
+            .map(|v| v.parse::<usize>().unwrap())
+            .unwrap_or(317);
+        let times: Vec<_> = if count == 3 {
+            vec![0.0, 39.25, 149.0]
+        } else {
+            (0..count)
+                .map(|i| 149.0 * i as f32 / (count - 1).max(1) as f32)
+                .collect()
+        };
+        ray_geometry_audit(false, true, RecipeAudit::F64, &times);
+    }
+    #[test]
+    #[ignore = "full F64 diagnostic records failures; never an acceptance gate"]
+    fn actual_ray_hybrid_current_gpu_tangents_f64_diagnostics() {
+        let count = std::env::var("LOOM_GPU_RECIPE_POSES")
+            .ok()
+            .map(|v| v.parse::<usize>().unwrap())
+            .unwrap_or(317);
+        let times: Vec<_> = (0..count)
+            .map(|i| 149.0 * i as f32 / (count - 1).max(1) as f32)
+            .collect();
+        ray_geometry_audit(false, true, RecipeAudit::F64Diagnostic, &times);
+    }
+    fn ray_geometry_audit(
+        strict_legacy: bool,
+        prepare: bool,
+        recipe_math: RecipeAudit,
+        times: &[f32],
+    ) {
         let path = std::env::var("LOOM_PERF_SCENE").expect("real saved scene");
         let mut value: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -680,6 +933,8 @@ mod tests {
         let (device, queue) = device();
         let preparation_program =
             prepare.then(|| super::mikk_prepare::Program::new(&device).unwrap());
+        let mut worst_tangent_error = 0.0f32;
+        let mut recipes = std::collections::HashMap::new();
         let mut first_keys = std::collections::HashMap::new();
         let mut previous_keys = std::collections::HashMap::new();
         let (mut first_hits, mut previous_hits, mut guard_checks) = (0usize, 0usize, 0usize);
@@ -821,6 +1076,8 @@ mod tests {
                             indices.len(),
                             preparation,
                             same_gpu,
+                            stable.output.clone(),
+                            range.start as u32,
                         ));
                     }
                     continue;
@@ -1015,7 +1272,8 @@ mod tests {
                 let span =
                     (stamps[15] - stamps[0]) as f64 * f64::from(queue.get_timestamp_period()) / 1e6;
                 eprintln!("GPU_PREP_BATCH time={time} parts={} clear_ms={:.6} weld_ms={:.6} canonical_ms={:.6} degen_flags_ms={:.6} degen_ms={:.6} flags_ms={:.6} edges_ms={:.6} pair_ms={:.6} gpu_span_ms={span:.6} cpu_encode_ms={encode_ms:.6} cpu_submit_ms={submit_ms:.6}",refs.len(),costs[0],costs[1],costs[2],costs[3],costs[4],costs[5],costs[6],costs[7]);
-                for (name, part, corners, preparation, same_gpu) in preparation_jobs {
+                for (name, part, corners, preparation, same_gpu, vertices, base) in preparation_jobs
+                {
                     let output = preparation.readback(&device, &queue).unwrap();
                     let identity = (name.clone(), part);
                     let key = output.structural_key();
@@ -1036,6 +1294,151 @@ mod tests {
                     }
                     previous_keys.insert(identity, key);
                     super::mikk_prepare::compare_cpu(&same_gpu, &output);
+                    if recipe_math != RecipeAudit::Off {
+                        let cached = recipes.entry((name.clone(), part)).or_insert_with(|| {
+                            (
+                                output.clone(),
+                                crate::mikktspace::compile_structure(&same_gpu),
+                            )
+                        });
+                        let math = super::mikk_recipe::GpuRecipeMath::new(
+                            &device,
+                            &vertices,
+                            base,
+                            &same_gpu,
+                            &preparation,
+                            &cached.0,
+                            &cached.1,
+                        )
+                        .unwrap();
+                        let mut encoder = device.create_command_encoder(&Default::default());
+                        math.encode(&mut encoder);
+                        queue.submit([encoder.finish()]);
+                        let candidate = math.readback(&device, &queue).unwrap();
+                        let reference = crate::mikktspace::generate_serial(&same_gpu)
+                            .expect("actual current CPU tangent reference");
+                        assert_eq!(candidate.len(), same_gpu.positions.len());
+                        assert_eq!(reference.len(), candidate.len());
+                        let mut max_error = 0.0f32;
+                        let mut worst_vertex = 0;
+                        let mut different = 0;
+                        for (i, (actual, expected)) in candidate.iter().zip(&reference).enumerate()
+                        {
+                            assert_eq!(actual.tangent[3],expected[3],"hybrid CURRENT handedness node={name} time={time} part={part} vertex={i}");
+                            assert!(actual.tangent.iter().all(|v| v.is_finite()));
+                            let error =
+                                glam::Vec3::from_array(actual.tangent[..3].try_into().unwrap())
+                                    .distance(glam::Vec3::from_array(
+                                        expected[..3].try_into().unwrap(),
+                                    ));
+                            if error > max_error {
+                                max_error = error;
+                                worst_vertex = i;
+                            }
+                            different += usize::from(
+                                actual.tangent.map(f32::to_bits) != expected.map(f32::to_bits),
+                            );
+                        }
+                        if max_error > worst_tangent_error {
+                            worst_tangent_error = max_error;
+                            let owner = same_gpu
+                                .indices
+                                .iter()
+                                .rposition(|v| *v as usize == worst_vertex)
+                                .unwrap();
+                            let face = output
+                                .original_faces
+                                .iter()
+                                .position(|f| *f as usize == owner / 3)
+                                .unwrap();
+                            let group = cached.1.assigned_groups[face][owner % 3];
+                            if group >= 0 {
+                                let group = &cached.1.groups[group as usize];
+                                let source = (group.representative as usize >> 2) * 3
+                                    + (group.representative as usize & 3);
+                                let mut members = group.members.clone();
+                                members.sort_unstable();
+                                let records:Vec<_>=members.iter().map(|m|{let orig=output.original_faces[*m as usize] as usize;let ids=&same_gpu.indices[orig*3..orig*3+3];serde_json::json!({"prepared":m,"original":orig,"flags":cached.1.triangles[*m as usize].flags,"position":ids.iter().map(|i|same_gpu.positions[*i as usize]).collect::<Vec<_>>(),"uv":ids.iter().map(|i|same_gpu.uvs[*i as usize]).collect::<Vec<_>>()})}).collect();
+                                let mut artifact = serde_json::json!({"node":name,"part":part,"time":time,"vector_error":max_error,"vertex":worst_vertex,"target_original_face":owner/3,"normal":same_gpu.normals[same_gpu.indices[source] as usize],"representative_position":same_gpu.positions[same_gpu.indices[source] as usize],"gpu":candidate[worst_vertex].tangent,"cpu":reference[worst_vertex],"members":records});
+                                if recipe_math == RecipeAudit::Diagnostic {
+                                    let current_structure =
+                                        crate::mikktspace::capture_group_preparation(&same_gpu);
+                                    let isolation = math.diagnose_current_math(
+                                        &device,
+                                        &queue,
+                                        &same_gpu,
+                                        &output,
+                                        &current_structure,
+                                        &reference,
+                                        worst_vertex,
+                                    );
+                                    eprintln!("GPU_STAGE_ISOLATION node={name} time={time} part={part} report={isolation}");
+                                    artifact["isolation"] = isolation;
+                                }
+                                let safe_name: String = name
+                                    .chars()
+                                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                                    .collect();
+                                std::fs::write(
+                                    format!(
+                                        "/tmp/loom-gpu-hybrid-worst-{safe_name}-{time}-{part}.json"
+                                    ),
+                                    serde_json::to_vec_pretty(&artifact).unwrap(),
+                                )
+                                .unwrap();
+                                std::fs::write(
+                                    "/tmp/loom-gpu-hybrid-worst.json",
+                                    serde_json::to_vec_pretty(&artifact).unwrap(),
+                                )
+                                .unwrap();
+                            }
+                        }
+                        if matches!(recipe_math, RecipeAudit::F64 | RecipeAudit::F64Diagnostic) {
+                            let truth = super::mikk_f64::tangents_f64(&same_gpu, &cached.1);
+                            assert_eq!(truth.len(), candidate.len());
+                            let mut worst = 0.0f64;
+                            let mut offenders = 0;
+                            for (i, ((actual, cpu), f64)) in
+                                candidate.iter().zip(&reference).zip(&truth).enumerate()
+                            {
+                                assert_eq!(f64::from(actual.tangent[3]), f64[3]);
+                                let error =
+                                    glam::Vec3::from_array(actual.tangent[..3].try_into().unwrap())
+                                        .as_dvec3()
+                                        .distance(glam::DVec3::from_array(
+                                            f64[..3].try_into().unwrap(),
+                                        ));
+                                worst = worst.max(error);
+                                let cpu_delta =
+                                    glam::Vec3::from_array(actual.tangent[..3].try_into().unwrap())
+                                        .distance(glam::Vec3::from_array(
+                                            cpu[..3].try_into().unwrap(),
+                                        ));
+                                if cpu_delta > 2e-5 {
+                                    offenders += 1;
+                                    let cpu_error =
+                                        glam::Vec3::from_array(cpu[..3].try_into().unwrap())
+                                            .as_dvec3()
+                                            .distance(glam::DVec3::from_array(
+                                                f64[..3].try_into().unwrap(),
+                                            ));
+                                    eprintln!("GPU_F64_CPU_OFFENDER node={name} time={time} part={part} vertex={i} gpu_f64_error={error:e} cpu_f64_error={cpu_error:e} cpu_delta={cpu_delta:e}");
+                                }
+                                if error >= 2e-5 {
+                                    eprintln!("GPU_F64_GATE_FAILURE node={name} time={time} part={part} vertex={i} gpu_f64_error={error:e}");
+                                }
+                                if recipe_math == RecipeAudit::F64 {
+                                    assert!(error<2e-5,"independent F64 tangent mismatch node={name} time={time} part={part} vertex={i}: {error:e}");
+                                }
+                            }
+                            eprintln!("GPU_F64_ALL_VERTICES node={name} time={time} part={part} vertices={} max_error={worst:e} cpu_offenders={offenders}",truth.len());
+                        }
+                        eprintln!("GPU_CURRENT_TANGENTS node={name} time={time} part={part} vertices={} different_bits={different} max_vector_error={max_error:e}",candidate.len());
+                        if recipe_math == RecipeAudit::Strict {
+                            assert!(max_error<2e-5,"current hybrid tangent mismatch node={name} time={time} part={part}: {max_error:e}");
+                        }
+                    }
+
                     eprintln!("GPU_CURRENT_PREP node={name} time={time} part={part} corners={corners} degen={} any={} exact_weld_flags_neighbors=PASS",corners/3-output.active_count,output.flags[..output.active_count].iter().filter(|f|**f&4!=0).count());
                 }
             }
@@ -1043,5 +1446,68 @@ mod tests {
         if prepare {
             eprintln!("GPU_RECIPE_GUARD_RESULT poses={} parts={} checks={guard_checks} first_hits={first_hits} previous_hits={previous_hits}",times.len(),first_keys.len());
         }
+    }
+}
+
+#[cfg(test)]
+mod descriptor_snapshot_tests {
+    use super::*;
+    fn equivalent(a:&Topology,b:&Topology)->bool {
+        a.vertices==b.vertices&&a.faces==b.faces&&a.parts==b.parts&&a.arena==b.arena&&bytemuck::cast_slice::<Corner,u8>(&a.corners)==bytemuck::cast_slice::<Corner,u8>(&b.corners)
+    }
+    #[test]
+    fn exact_raw_snapshot_excludes_positions_and_rejects_changed_inputs(){
+        let mut mesh=loom_mesh::sphere_segmented(1.0,8,0.0);
+        loom_mesh::uvmap::auto_map(&mut mesh,loom_mesh::uvmap::AutoMap::Spherical,1);
+        let snapshot=DescriptorSnapshot::new(&mesh);let parts=[(None,false)];let original=Topology::new(&mesh,&parts).unwrap();
+        let mut posed=mesh.clone();posed.vertices_mut()[0].position+=Vec3::new(2.0,-3.0,4.0);
+        posed.vertices_mut()[1].color=[0.0;3];
+        assert!(snapshot.matches(&posed));assert!(equivalent(&original,&Topology::new(&posed,&parts).unwrap()));
+        for field in 0..8 {
+            let mut changed=mesh.clone();
+            match field {
+                0=>changed.faces_mut()[0].hidden=true,
+                1=>changed.faces_mut()[0].material_id+=1,
+                2=>changed.faces_mut()[0].smoothing_groups^=1,
+                3=>changed.faces_mut()[0].he=changed.faces()[1].he,
+                4=>changed.vertices_mut()[0].he=None,
+                5=>changed.map_mut(1).unwrap().verts[0].x+=0.25,
+                6=>changed.map_mut(1).unwrap().corners[0]=changed.map(1).unwrap().corners[0].wrapping_add(1),
+                _=>{changed.ensure_map(loom_mesh::NORMALS_CHANNEL).verts[0]=Vec3::X;},
+            }
+            assert!(!snapshot.matches(&changed),"field={field}");
+        }
+        let mut raw=serde_json::to_value(&mesh).unwrap();raw["half_edges"][0]["origin"]=serde_json::json!(1);
+        let changed:Mesh=serde_json::from_value(raw).unwrap();assert!(!snapshot.matches(&changed));
+        let mut zero=mesh.clone();zero.map_mut(1).unwrap().verts[0].x=0.0;let zero_snapshot=DescriptorSnapshot::new(&zero);
+        zero.map_mut(1).unwrap().verts[0].x=-0.0;assert!(!zero_snapshot.matches(&zero));
+        let mut nan=mesh.clone();nan.map_mut(1).unwrap().verts[0].x=f32::from_bits(0x7fc00001);let nan_snapshot=DescriptorSnapshot::new(&nan);
+        assert!(nan_snapshot.matches(&nan));nan.map_mut(1).unwrap().verts[0].x=f32::from_bits(0x7fc00002);assert!(!nan_snapshot.matches(&nan));
+    }
+    #[test]
+    #[ignore="actual descriptor oracle/timing requires LOOM_PERF_SCENE"]
+    fn actual_ray_raw_descriptors_match_rebuilt_topology(){
+        let value:serde_json::Value=serde_json::from_str(&std::fs::read_to_string(std::env::var("LOOM_PERF_SCENE").unwrap()).unwrap()).unwrap();
+        let scene:loom_scene::Scene=serde_json::from_value(value["scene"].clone()).unwrap();
+        let ids:Vec<_>=scene.nodes().filter(|n|n.modifiers.iter().any(|m|matches!(&m.modifier,loom_scene::modifier::Modifier::Skin(_)))).map(|n|n.id).collect();assert_eq!(ids.len(),5);
+        let benchmark=std::env::var_os("LOOM_DESCRIPTOR_BENCH").is_some();
+        let frames:Vec<_>=if benchmark{vec![0.0,39.25,149.0]}else{(0..=157).map(|f|f as f32).chain([39.25]).chain((0..=157).map(|f|f as f32+0.5)).collect()};let poses=frames.len();let repeats=if benchmark{16}else{1};
+        let mut originals=std::collections::HashMap::new();let mut old_time=std::time::Duration::ZERO;let mut new_time=old_time;let mut checks=0;
+        for frame in frames {
+            scene.set_time(frame);
+            for id in &ids {
+                let mut mesh=scene.eval_mesh(*id).value.mesh.clone();loom_mesh::edit_ops::transform_mesh(&mut mesh,scene.object_matrix(*id)).unwrap();
+                let surfaces=scene.node_surfaces(*id).unwrap();let materials:std::collections::BTreeSet<_>=mesh.faces().iter().filter(|f|!f.hidden).map(|f|f.material_id).collect();let parts:Vec<_>=materials.into_iter().map(|m|(Some(m),surfaces.for_face(m).faceted)).collect();
+                let (snapshot,original)=originals.entry(*id).or_insert_with(||(DescriptorSnapshot::new(&mesh),Topology::new(&mesh,&parts).unwrap()));
+                // Alternate timed order; both compare the same current mesh.
+                for iteration in 0..repeats {
+                    let mut old=||{let t=std::time::Instant::now();let current=Topology::new(&mesh,&parts).unwrap();let same=equivalent(original,&current);old_time+=t.elapsed();assert!(same);};
+                    let mut new=||{let t=std::time::Instant::now();let same=snapshot.matches(&mesh);new_time+=t.elapsed();assert!(same);};
+                    if iteration%2==0{old();new();}else{new();old();}
+                }
+                checks+=1;
+            }
+        }
+        eprintln!("DESCRIPTORS poses={poses} checks={checks} repeats={repeats} old_ms_per_pose={:.3} snapshot_ms_per_pose={:.3}",old_time.as_secs_f64()*1000.0/(poses*repeats)as f64,new_time.as_secs_f64()*1000.0/(poses*repeats)as f64);
     }
 }
