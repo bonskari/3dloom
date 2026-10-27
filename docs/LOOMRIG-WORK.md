@@ -234,3 +234,19 @@ native comparison only. Default is CPU. Native diagnostics now report real
 committed object/part counts, recipe recoveries and last error, alongside
 actual distinct submitted pose counts. Strict2e-5 characterization still fails
 102/105868173samples (max.0001710423), so no general quality or60fps claim.
+
+
+Native internal GPU comparison installed0b3d92b, actual appPID2617654,
+LOOM_EXPERIMENTAL_GPU_POSES=1, same full461-node Ray scene/fourviews/camera.
+Four alternating warmup4s+sample12s wall-clock measurements:
+Realistic41.432/41.034 distinct ready submitted pose times/sec;
+Wireframe70.648/71.598. Prior CPU checkpoint24.908/24.884 Realistic.
+Real diagnostic status5committed objects/13parts, last_error=None,
+recipe recoveries0. Frame39 viewport750x480 differs in6pixels,max1RGB
+from prior exactCPU checkpoint; geometry/materials/camera not reduced.
+Evidence persisted docs/research/native-gpu-checkpoint/2026-10-28*.
+Representative native UIworld7.8ms (Skinbatch3.7), GPUrenderer5.6,
+fullBevysync7.3, Bevyupdate1.8, UIframe18.7–19.1ms. Wire UIframe8.55ms;
+actualwall intervals include additional work/wait beyond these inclusive scopes.
+Target60Realistic still fails. App paused and restoredframe39 after measurement.
+No general quality acceptance claimed: strictnumeric102 failures remain.

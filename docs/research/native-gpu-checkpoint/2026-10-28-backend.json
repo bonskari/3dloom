@@ -1,0 +1,14 @@
+{
+  "gpu_pose": {
+    "committed_objects": 5,
+    "committed_parts": 13,
+    "last_error": null,
+    "recovered_recipes": 0
+  },
+  "prepared_pose_time": 100.43555450439453,
+  "scene_time": 100.43555450439453,
+  "submitted_distinct_pose_times": 6043,
+  "submitted_frames": 6124,
+  "submitted_pose_time": 100.43555450439453,
+  "submitted_world_version": 6046
+}
