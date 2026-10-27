@@ -719,8 +719,9 @@ mod tests {
             }
             assert_eq!(parts.len(),13);
             caches.resize_with(parts.len(),Default::default);
+            let owned = std::env::var_os("LOOM_OWNED_PREPARATION").is_some().then(|| parts.clone());
             let start=std::time::Instant::now();
-            let actual=material_meshes_cached(&pool,&parts,&mut caches);
+            let actual=if let Some(owned) = owned { owned_material_meshes_for_test(&pool,owned,&mut caches) } else { material_meshes_cached(&pool,&parts,&mut caches) };
             elapsed+=start.elapsed().as_secs_f64()*1000.0;
             for (part,((data,normal_map),mesh)) in parts.iter().zip(&actual).enumerate() {
                 let attribute=|name| match mesh.attribute(name).unwrap() {VertexAttributeValues::Float32x3(v)=>v.iter().flatten().map(|x|x.to_bits()).collect::<Vec<_>>(),_=>panic!("expected3f32")};
@@ -745,6 +746,73 @@ mod tests {
         }
         for (part,(poses,corners,max_delta)) in original_changes.into_iter().enumerate() {eprintln!("ORIGINAL_SUM part={part} poses={poses} corners={corners} max_delta={max_delta}");}
         eprintln!("MATERIAL_BATCH poses={poses} parts=13 tangent_comparisons={comparisons} avg_ms={:.3} cache_hits={} cache_misses={}",elapsed/poses as f64,caches.iter().map(|c|c.hits).sum::<usize>(),caches.iter().map(|c|c.misses).sum::<usize>());
+    }
+
+    fn mesh_from_owned_data(data:MeshData)->Mesh {
+        Mesh::new(PrimitiveTopology::TriangleList,RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION,data.positions)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL,data.normals)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,data.uvs)
+            .with_inserted_indices(Indices::U32(data.indices))
+    }
+
+    fn owned_material_meshes_for_test(pool:&bevy_tasks::TaskPool,parts:Vec<(MeshData,bool)>,caches:&mut [crate::mikktspace::NeighborCache])->Vec<Mesh> {
+        assert_eq!(parts.len(),caches.len());
+        let build=|(data,needed):(MeshData,bool),cache:&mut crate::mikktspace::NeighborCache| {
+            let tangents=needed.then(||crate::mikktspace::generate_cached(pool,&data,cache)).flatten();
+            let mut mesh=mesh_from_owned_data(data);
+            if let Some(tangents)=tangents {mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT,tangents);}
+            mesh
+        };
+        pool.scope(|scope| {
+            for (part,cache) in parts.into_iter().zip(caches.iter_mut()) {
+                let build=&build;
+                scope.spawn(async move {build(part,cache)});
+            }
+        })
+    }
+
+    #[test]
+    #[ignore = "actual copy/move preparation microbenchmark requires LOOM_PERF_SCENE"]
+    fn actual_ray_mesh_data_clone_versus_move() {
+        use bevy::render::mesh::VertexAttributeValues;
+        let path=std::env::var("LOOM_PERF_SCENE").expect("real scene");
+        let value:serde_json::Value=serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let scene:loom_scene::Scene=serde_json::from_value(value["scene"].clone()).unwrap();
+        let ids:Vec<_>=scene.nodes().filter(|n|n.modifiers.iter().any(|m|matches!(&m.modifier,loom_scene::modifier::Modifier::Skin(_)))).map(|n|n.id).collect();
+        assert_eq!(ids.len(),5);
+        let (mut cloned_ms,mut moved_ms,mut count)=(0.0,0.0,0usize);
+        for (pose,frame) in (0..=157).map(|f|f as f32).chain([39.25]).enumerate() {
+            scene.set_time(frame);
+            for id in &ids {
+                let mut mesh=scene.eval_mesh(*id).value.mesh.clone();
+                loom_mesh::edit_ops::transform_mesh(&mut mesh,scene.object_matrix(*id)).unwrap();
+                for (_,data) in mesh_data_by_id(&mesh) {
+                    let mut owned=Some(data.clone()); // input setup excluded from BOTH timers
+                    let mut results=[None,None];
+                    for move_data in if pose%2==0 {[false,true]}else{[true,false]} {
+                        let start=std::time::Instant::now();
+                        let output=if move_data {mesh_from_owned_data(owned.take().unwrap())}else{data.to_bevy()};
+                        let elapsed=start.elapsed().as_secs_f64()*1000.0;
+                        if move_data {moved_ms+=elapsed;}else{cloned_ms+=elapsed;}
+                        results[usize::from(move_data)]=Some(output);
+                    }
+                    let a=results[0].as_ref().unwrap();let b=results[1].as_ref().unwrap();
+                    for name in [Mesh::ATTRIBUTE_POSITION,Mesh::ATTRIBUTE_NORMAL,Mesh::ATTRIBUTE_UV_0] {
+                        let floats=|m:&Mesh| match m.attribute(name).unwrap() {
+                            VertexAttributeValues::Float32x3(v)=>v.iter().flatten().map(|x|x.to_bits()).collect::<Vec<_>>(),
+                            VertexAttributeValues::Float32x2(v)=>v.iter().flatten().map(|x|x.to_bits()).collect(),
+                            _=>panic!("mesh attribute format"),
+                        };
+                        assert_eq!(floats(a),floats(b));
+                    }
+                    assert_eq!(a.indices().unwrap().iter().collect::<Vec<_>>(),b.indices().unwrap().iter().collect::<Vec<_>>());
+                    count+=1;
+                }
+            }
+        }
+        assert_eq!(count,159*13);
+        eprintln!("MESH_MOVE poses=159 parts=13 cloned_ms_per_pose={:.3} moved_ms_per_pose={:.3}",cloned_ms/159.0,moved_ms/159.0);
     }
 
 }
