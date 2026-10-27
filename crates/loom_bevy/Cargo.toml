@@ -16,6 +16,8 @@ bevy = { version = "0.16", default-features = false, features = ["std", "async_e
 
 # Tangent workers are parallel; Bevy retains the host-controlled ECS/render schedule.
 bevy_tasks = { version = "0.16", features = ["multi_threaded"] }
+bevy_mikktspace = "0.16.1"
 
 [dev-dependencies]
+serde_json = { workspace = true }
 pollster = { workspace = true }

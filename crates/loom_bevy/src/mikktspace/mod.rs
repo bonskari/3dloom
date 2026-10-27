@@ -1,0 +1,49 @@
+//! Prepared parallel groups over the unchanged MikkTSpace 0.16.1 algorithm.
+//! The complete mesh is prepared before parallel work; no local welding or
+//! cached rest-pose tangent is substituted for the current geometry.
+use crate::convert::MeshData;
+use bevy_mikktspace::Geometry;
+use glam::{Vec2, Vec3};
+
+mod generated;
+
+struct MeshGeometry<'a> {
+    data: &'a MeshData,
+    tangents: Vec<[f32; 4]>,
+}
+
+impl Geometry for MeshGeometry<'_> {
+    fn num_faces(&self) -> usize { self.data.indices.len() / 3 }
+    fn num_vertices_of_face(&self, _: usize) -> usize { 3 }
+    fn position(&self, face: usize, corner: usize) -> [f32; 3] { self.data.positions[self.data.indices[face * 3 + corner] as usize] }
+    fn normal(&self, face: usize, corner: usize) -> [f32; 3] { self.data.normals[self.data.indices[face * 3 + corner] as usize] }
+    fn tex_coord(&self, face: usize, corner: usize) -> [f32; 2] { self.data.uvs[self.data.indices[face * 3 + corner] as usize] }
+    fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, corner: usize) { self.tangents[self.data.indices[face * 3 + corner] as usize] = tangent; }
+}
+
+struct ReadGeometry<'a, I>(&'a I);
+impl<I: Geometry> Geometry for ReadGeometry<'_, I> {
+    fn num_faces(&self) -> usize { self.0.num_faces() }
+    fn num_vertices_of_face(&self, face: usize) -> usize { self.0.num_vertices_of_face(face) }
+    fn position(&self, face: usize, corner: usize) -> [f32; 3] { self.0.position(face, corner) }
+    fn normal(&self, face: usize, corner: usize) -> [f32; 3] { self.0.normal(face, corner) }
+    fn tex_coord(&self, face: usize, corner: usize) -> [f32; 2] { self.0.tex_coord(face, corner) }
+}
+
+pub(crate) fn generate_parallel(pool: &bevy_tasks::TaskPool, data: &MeshData) -> Option<Vec<[f32; 4]>> {
+    let mut geometry = MeshGeometry { data, tangents: vec![[0.0; 4]; data.positions.len()] };
+    // The vendor's original preparation/epilogue retain their checked Geometry
+    // indexing and pointer invariants. Worker boundaries contain owned indices.
+    if !unsafe { generated::genTangSpace(&mut geometry, 180.0, Some(pool)) } { return None; }
+    // Match Bevy's existing handedness conversion, including unwritten vertices.
+    for tangent in &mut geometry.tangents { tangent[3] = -tangent[3]; }
+    Some(geometry.tangents)
+}
+
+fn get_position<I: Geometry>(geometry: &mut I, index: usize) -> Vec3 { geometry.position(index >> 2, index & 3).into() }
+fn get_normal<I: Geometry>(geometry: &mut I, index: usize) -> Vec3 { geometry.normal(index >> 2, index & 3).into() }
+fn get_tex_coord<I: Geometry>(geometry: &mut I, index: usize) -> Vec3 { Vec2::from(geometry.tex_coord(index >> 2, index & 3)).extend(1.0) }
+fn face_vert_to_index(face: usize, corner: usize) -> usize { face << 2 | corner & 3 }
+
+#[cfg(test)]
+mod tests;

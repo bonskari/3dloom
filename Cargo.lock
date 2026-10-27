@@ -3179,6 +3179,7 @@ name = "loom_bevy"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_mikktspace",
  "bevy_tasks",
  "glam",
  "image",
@@ -3186,6 +3187,7 @@ dependencies = [
  "loom_render",
  "loom_scene",
  "pollster",
+ "serde_json",
  "wgpu",
 ]
 
