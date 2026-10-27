@@ -16,6 +16,7 @@ pub(crate) struct GeometryCache {
 
 impl GeometryCache {
     pub(crate) fn mesh_data(&mut self, mesh: &Mesh) -> crate::convert::MeshData {
+        let topology_scope = loom_render::profile::Scope::new("bevy.geometry_topology");
         let same = self.vertex_edges.len() == mesh.vertex_count()
             && self.half_edges == mesh.half_edges()
             && self.face_edges.len() == mesh.face_count()
@@ -27,15 +28,25 @@ impl GeometryCache {
             self.face_edges = mesh.faces().iter().map(|f| f.he).collect();
             self.fans = (0..mesh.vertex_count()).map(|i| mesh.faces_around_vertex(VertexId(i as u32))).collect();
         }
+        drop(topology_scope);
+        let normals_scope = loom_render::profile::Scope::new("bevy.geometry_face_normals");
         self.face_normals.clear();
         self.face_normals.extend((0..mesh.face_count()).map(|i| mesh.face_normal(FaceId(i as u32))));
         self.vertex_normals.resize(mesh.vertex_count(), (0, Vec3::ZERO));
         self.vertex_normals.fill((0, Vec3::ZERO));
+        drop(normals_scope);
+        let _corners_scope = loom_render::profile::Scope::new("bevy.geometry_corners");
         let mut out = crate::convert::MeshData {
             positions: Vec::with_capacity(mesh.half_edges().len()),
             normals: Vec::with_capacity(mesh.half_edges().len()),
             uvs: Vec::with_capacity(mesh.half_edges().len()),
             indices: Vec::with_capacity(mesh.face_count() * 3),
+        };
+        let uv_map = mesh.map(1);
+        let normal_map = mesh.map(loom_mesh::NORMALS_CHANNEL);
+        let corner_value = |map: Option<&loom_mesh::half_edge::MapChannel>, he: HalfEdgeId| {
+            let map = map?;
+            map.verts.get(*map.corners.get(he.0 as usize)? as usize).copied()
         };
         for (fi, face) in mesh.faces().iter().enumerate() {
             if face.hidden { continue; }
@@ -45,7 +56,8 @@ impl GeometryCache {
             loop {
                 let he = &mesh.half_edges()[current.0 as usize];
                 let vi = he.origin.0 as usize;
-                let normal = match mesh.explicit_normal(current) {
+                let explicit = corner_value(normal_map, current).and_then(|n| (n.length_squared() > 1e-12).then(|| n.normalize()));
+                let normal = match explicit {
                     Some(normal) => normal,
                     None if face.smoothing_groups == 0 => self.face_normals[fi],
                     None => {
@@ -65,7 +77,7 @@ impl GeometryCache {
                 };
                 out.positions.push(mesh.vertices()[vi].position.to_array());
                 out.normals.push(normal.to_array());
-                let uv = mesh.corner_uv(1, current).map(|t| [t.x, t.y]).unwrap_or([0.0, 0.0]);
+                let uv = corner_value(uv_map, current).map(|t| [t.x, t.y]).unwrap_or([0.0, 0.0]);
                 // Preserve the reference identity transform's floating-point operations.
                 out.uvs.push([1.0 * uv[0] + 0.0 * uv[1] + 0.0, 1.0 - (0.0 * uv[0] + 1.0 * uv[1] + 0.0)]);
                 current = he.next;
@@ -160,6 +172,46 @@ mod tests {
             }
         }
         assert!(tested > 0, "scene must contain evaluated geometry");
+    }
+
+    #[test]
+    #[ignore = "release parity/performance test requires LOOM_PERF_SCENE"]
+    fn actual_all_poses_geometry_performance() {
+        let path = std::env::var("LOOM_PERF_SCENE").expect("provide the real saved scene");
+        let mut value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let start = value["settings"]["frame_range"][0].as_i64().unwrap();
+        let end = value["settings"]["frame_range"][1].as_i64().unwrap();
+        let scene: loom_scene::Scene = serde_json::from_value(value["scene"].take()).unwrap();
+        let ids: Vec<_> = scene.nodes().filter(|n| n.modifiers.iter().any(|m| matches!(&m.modifier, loom_scene::modifier::Modifier::Skin(_)))).map(|n| (n.id, n.name.clone())).collect();
+        assert!(!ids.is_empty());
+        let mut caches: Vec<_> = ids.iter().map(|_| GeometryCache::default()).collect();
+        let mut totals = vec![(0.0, 0.0, 0); ids.len()];
+        for frame in (start..=end).map(|f| f as f32).chain([39.25]) {
+            scene.set_time(frame);
+            for (i, (id, name)) in ids.iter().enumerate() {
+                let mut mesh = scene.eval_mesh(*id).value.mesh.clone();
+                loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(*id)).unwrap();
+                let t = std::time::Instant::now();
+                let expected = crate::convert::mesh_data(&mesh);
+                totals[i].0 += t.elapsed().as_secs_f64() * 1000.0;
+                let t = std::time::Instant::now();
+                let actual = caches[i].mesh_data(&mesh);
+                totals[i].1 += t.elapsed().as_secs_f64() * 1000.0;
+                totals[i].2 += 1;
+                assert_eq!(actual.indices, expected.indices, "{name} frame {frame}");
+                assert_eq!(actual.content_hash(), expected.content_hash(), "{name} frame {frame}");
+                for (a, b) in [(&actual.positions, &expected.positions), (&actual.normals, &expected.normals)] {
+                    assert_eq!(a.len(), b.len(), "{name} frame {frame}");
+                    assert!(a.iter().flatten().zip(b.iter().flatten()).all(|(a,b)| a.to_bits() == b.to_bits()), "{name} frame {frame}");
+                }
+                assert_eq!(actual.uvs.len(), expected.uvs.len(), "{name} frame {frame}");
+                assert!(actual.uvs.iter().flatten().zip(expected.uvs.iter().flatten()).all(|(a,b)| a.to_bits() == b.to_bits()), "{name} frame {frame}");
+            }
+        }
+        loom_render::profile::report_if_due();
+        for ((_, name), (reference, cached, count)) in ids.iter().zip(totals) {
+            eprintln!("GEOMETRY name={name} poses={count} reference_avg_ms={:.3} cached_avg_ms={:.3}", reference/count as f64, cached/count as f64);
+        }
     }
 
 }
