@@ -1,0 +1,509 @@
+--- a/gpu_pose_geometry.rs
++++ b/gpu_pose_geometry.rs
+@@ -139,7 +139,7 @@
+ // included and no changed effective descriptor can pass this comparison.
+ struct DescriptorSnapshot {
+     vertex_edges: Vec<Option<loom_mesh::HalfEdgeId>>,
+-    half_edges: loom_mesh::HalfEdgeSnapshot,
++    half_edges: Vec<loom_mesh::HalfEdge>,
+     faces: Vec<loom_mesh::half_edge::Face>,
+     maps: [Option<MapSnapshot>; 2],
+ }
+@@ -148,7 +148,7 @@
+     fn new(mesh: &Mesh) -> Self {
+         Self {
+             vertex_edges: mesh.vertices().iter().map(|v|v.he).collect(),
+-            half_edges: mesh.half_edge_snapshot(), faces: mesh.faces().to_vec(),
++            half_edges: mesh.half_edges().to_vec(), faces: mesh.faces().to_vec(),
+             maps: [1,loom_mesh::NORMALS_CHANNEL].map(|channel|mesh.map(channel).map(|m|MapSnapshot {
+                 corners:m.corners.clone(), values:m.verts.iter().map(|v|v.to_array().map(f32::to_bits)).collect(),
+             })),
+@@ -157,7 +157,7 @@
+     fn matches(&self, mesh: &Mesh) -> bool {
+         self.vertex_edges.len()==mesh.vertex_count()
+             && self.vertex_edges.iter().zip(mesh.vertices()).all(|(he,v)|*he==v.he)
+-            && self.half_edges.matches(mesh) && self.faces==mesh.faces()
++            && self.half_edges==mesh.half_edges() && self.faces==mesh.faces()
+             && self.maps.iter().zip([1,loom_mesh::NORMALS_CHANNEL]).all(|(old,channel)|match (old,mesh.map(channel)) {
+                 (None,None)=>true,
+                 (Some(old),Some(current))=>old.corners==current.corners && old.values.len()==current.verts.len()
+@@ -902,13 +902,7 @@
+     #[test]
+     #[ignore = "full F64 diagnostic records failures; never an acceptance gate"]
+     fn actual_ray_hybrid_current_gpu_tangents_f64_diagnostics() {
+-        let count = std::env::var("LOOM_GPU_RECIPE_POSES")
+-            .ok()
+-            .map(|v| v.parse::<usize>().unwrap())
+-            .unwrap_or(317);
+-        let times: Vec<_> = (0..count)
+-            .map(|i| 149.0 * i as f32 / (count - 1).max(1) as f32)
+-            .collect();
++        let times: Vec<f32> = (0..317).map(|i|149.0*i as f32/316.0).collect();
+         ray_geometry_audit(false, true, RecipeAudit::F64Diagnostic, &times);
+     }
+     fn ray_geometry_audit(
+@@ -1274,6 +1268,7 @@
+                 eprintln!("GPU_PREP_BATCH time={time} parts={} clear_ms={:.6} weld_ms={:.6} canonical_ms={:.6} degen_flags_ms={:.6} degen_ms={:.6} flags_ms={:.6} edges_ms={:.6} pair_ms={:.6} gpu_span_ms={span:.6} cpu_encode_ms={encode_ms:.6} cpu_submit_ms={submit_ms:.6}",refs.len(),costs[0],costs[1],costs[2],costs[3],costs[4],costs[5],costs[6],costs[7]);
+                 for (name, part, corners, preparation, same_gpu, vertices, base) in preparation_jobs
+                 {
++                    let frame=(time/149.0*316.0).round()as u32;
+                     let output = preparation.readback(&device, &queue).unwrap();
+                     let identity = (name.clone(), part);
+                     let key = output.structural_key();
+@@ -1315,6 +1310,31 @@
+                         math.encode(&mut encoder);
+                         queue.submit([encoder.finish()]);
+                         let candidate = math.readback(&device, &queue).unwrap();
++                        std::env::set_var("LOOM_CAPTURE_BASELINE","1");
++                        let baseline=super::mikk_recipe::GpuRecipeMath::new(&device,&vertices,base,&same_gpu,&preparation,&cached.0,&cached.1).unwrap();
++                        std::env::remove_var("LOOM_CAPTURE_BASELINE");
++                        let mut encoder=device.create_command_encoder(&Default::default());baseline.encode(&mut encoder);queue.submit([encoder.finish()]);
++                        let original=baseline.readback(&device,&queue).unwrap();
++                        let risk=math.read_precision_risks(&device,&queue);
++                        let truth=super::mikk_f64::tangents_f64(&same_gpu,&cached.1);
++                        let mut precise_corners=vec![false;same_gpu.indices.len()];
++                        let mut first=std::collections::HashMap::new();
++                        for f in 0..cached.1.active_count {for c in 0..3 {let source=cached.0.original_faces[f]as usize*3+c;let canonical=cached.0.canonical[source];first.entry(canonical).or_insert(source);let gid=cached.1.assigned_groups[f][c];precise_corners[source]=gid>=0&&risk[gid as usize]!=0;}}
++                        for f in cached.1.active_count..cached.0.original_faces.len(){for c in 0..3{let source=cached.0.original_faces[f]as usize*3+c;if let Some(old)=first.get(&cached.0.canonical[source]){precise_corners[source]=precise_corners[*old];}}}
++                        let mut owners=vec![None;same_gpu.positions.len()];for(corner,&v)in same_gpu.indices.iter().enumerate(){owners[v as usize]=Some(corner);}
++                        let(mut max_f64,mut unchanged,mut precise)=(0.0f64,0usize,0usize);
++                        assert_eq!(candidate.len(),truth.len());assert_eq!(candidate.len(),original.len());
++                        for(i,((actual,base),truth))in candidate.iter().zip(&original).zip(&truth).enumerate(){
++                            let changed=owners[i].is_some_and(|owner|precise_corners[owner]);
++                            if !changed {assert_eq!(bytemuck::bytes_of(actual),bytemuck::bytes_of(base),"nonflaggedvertexchanged node={name} frame={frame} vertex={i}");unchanged+=1;}else{precise+=1;assert_eq!(bytemuck::bytes_of(&actual.position),bytemuck::bytes_of(&base.position));assert_eq!(bytemuck::bytes_of(&actual.normal),bytemuck::bytes_of(&base.normal));assert_eq!(bytemuck::bytes_of(&actual.uv),bytemuck::bytes_of(&base.uv));assert_eq!(actual.tangent[3].to_bits(),base.tangent[3].to_bits());}
++                            let error=glam::Vec3::from_array(actual.tangent[..3].try_into().unwrap()).as_dvec3().distance(glam::DVec3::from_array(truth[..3].try_into().unwrap()));max_f64=max_f64.max(error);
++                            assert!(actual.tangent.iter().all(|v|v.is_finite()));assert_eq!(f64::from(actual.tangent[3]),truth[3]);
++                            assert!(error<=2e-5,"PRECISION_GATE_FAILED node={name} frame={frame} vertex={i} error={error:e} precision={changed}");
++                        }
++                        eprintln!("PRECISION_GATE_PASS node={name} frame={frame} part={part} vertices={} unchanged={unchanged} precision={precise} risk_groups={}/{} max_f64={max_f64:e}",candidate.len(),risk.iter().filter(|v|**v!=0).count(),risk.len());
++                        let risk_indices:Vec<_>=risk.iter().enumerate().filter_map(|(i,v)|(*v!=0).then_some(i)).collect();
++                        use std::io::Write as _;
++                        writeln!(std::fs::OpenOptions::new().create(true).append(true).open("/tmp/loom-f64-full317/part-evidence.jsonl").unwrap(),"{}",serde_json::json!({"node":name,"frame":frame,"part":part,"vertices":candidate.len(),"unchanged_bytes_verified":unchanged,"precision_outputs":precise,"risk_indices":risk_indices,"groups":risk.len(),"max_f64":max_f64,"positions_normals_uv_bytes_verified":true,"handedness_bits_verified":true})).unwrap();
+                         let reference = crate::mikktspace::generate_serial(&same_gpu)
+                             .expect("actual current CPU tangent reference");
+                         assert_eq!(candidate.len(), same_gpu.positions.len());
+@@ -1339,7 +1359,7 @@
+                                 actual.tangent.map(f32::to_bits) != expected.map(f32::to_bits),
+                             );
+                         }
+-                        if max_error > worst_tangent_error {
++                        if false && max_error > worst_tangent_error {
+                             worst_tangent_error = max_error;
+                             let owner = same_gpu
+                                 .indices
+--- a/gpu_mikk_recipe.rs
++++ b/gpu_mikk_recipe.rs
+@@ -142,7 +142,7 @@
+                         .map(|g| g.members.len())
+                         .max()
+                         .unwrap_or(0) as u32
+-                        * 4,
++                        * 32,
+             )
+             .ok_or("recipe debug overflow")? as usize;
+         Ok(Self {
+@@ -174,6 +174,7 @@
+     params: Params,
+     uniform: wgpu::Buffer,
+     derivatives: wgpu::Buffer,
++    precision_risks: wgpu::Buffer,
+ }
+ impl GpuRecipeMath {
+     pub(crate) fn new(
+@@ -185,6 +186,7 @@
+         initial: &Prepared,
+         groups: &crate::mikktspace::StructuralRecipe,
+     ) -> Result<Self, String> {
++        if !device.features().contains(wgpu::Features::SHADER_F64) {return Err("nativeF64feature unavailable; keep ordinarybackend".into());}
+         let (prep, offsets) = preparation.recipe_input();
+         let recipe = Recipe::from_current_structure(data, initial, groups, offsets, base)?;
+         let limits = device.limits();
+@@ -196,7 +198,7 @@
+             u64::from(recipe.params.counts[0]) * 64,
+             u64::from(recipe.params.counts[1]) * 32,
+         ];
+-        if limits.max_storage_buffers_per_shader_stage < 8
++        if limits.max_storage_buffers_per_shader_stage < 9
+             || c.div_ceil(64) > u64::from(limits.max_compute_workgroups_per_dimension)
+             || sizes.iter().any(|s| {
+                 *s > limits.max_buffer_size
+@@ -243,7 +245,8 @@
+             contents: bytemuck::bytes_of(&recipe.params),
+             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+         });
+-        let entries: Vec<_> = (0..9)
++        let precision_risks=storage("current group precision risks",(recipe.params.counts[3]as u64*4).max(4));
++        let entries: Vec<_> = (0..10)
+             .map(|binding| wgpu::BindGroupLayoutEntry {
+                 binding,
+                 visibility: wgpu::ShaderStages::COMPUTE,
+@@ -270,17 +273,15 @@
+             bind_group_layouts: &[&layout],
+             push_constant_ranges: &[],
+         });
+-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+-            label: Some("all-current GPU tangent derivative subgroup angle epilogue"),
+-            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_mikk_recipe.wgsl").into()),
+-        });
+-        let pipelines = ["guard_init", "derive", "evaluate", "epilogue", "pack"]
++        let baseline_shader=device.create_shader_module(wgpu::ShaderModuleDescriptor { label:Some("unchanged fast GPU tangent math"),source:wgpu::ShaderSource::Wgsl(include_str!("gpu_mikk_recipe_baseline.wgsl").into())});
++        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("condition-selected current Float64 math"),source:wgpu::ShaderSource::Wgsl(if std::env::var_os("LOOM_CAPTURE_BASELINE").is_some(){"@compute @workgroup_size(64) fn risk(){} @compute @workgroup_size(64) fn refine_group(){}"}else{include_str!("gpu_mikk_recipe.wgsl")}.into())});
++        let pipelines = ["guard_init", "derive", "evaluate", "risk", "refine_group", "epilogue", "pack"]
+             .into_iter()
+             .map(|entry| {
+                 device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                     label: Some(entry),
+                     layout: Some(&pipeline_layout),
+-                    module: &shader,
++                    module: if matches!(entry,"risk"|"refine_group"){&shader}else{&baseline_shader},
+                     entry_point: Some(entry),
+                     compilation_options: Default::default(),
+                     cache: None,
+@@ -297,6 +298,7 @@
+             &output,
+             &derivatives,
+             &uniform,
++            &precision_risks,
+         ]
+         .into_iter()
+         .enumerate()
+@@ -319,6 +321,7 @@
+             params: recipe.params,
+             uniform,
+             derivatives,
++            precision_risks,
+         })
+     }
+     pub(crate) fn output(&self) -> &wgpu::Buffer {
+@@ -332,6 +335,7 @@
+     }
+     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+         encoder.clear_buffer(&self.scratch, 0, None);
++        encoder.clear_buffer(&self.precision_risks,0,None);
+         for (i, pipeline) in self.pipelines.iter().enumerate() {
+             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                 label: Some("current GPU tangent math"),
+@@ -341,7 +345,8 @@
+             pass.set_bind_group(0, &self.group, &[]);
+             let count = match i {
+                 1 => self.counts[1],
+-                4 => self.counts[0],
++                3 | 4 => self.counts[3],
++                6 => self.counts[0],
+                 _ => self.counts[1] * 3,
+             };
+             pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
+@@ -350,8 +355,8 @@
+     /// Keep stage barriers while sharing each pass across independent parts.
+     pub(crate) fn encode_batch(encoder: &mut wgpu::CommandEncoder, parts: &[&Self]) {
+         if parts.is_empty() { return; }
+-        for part in parts { encoder.clear_buffer(&part.scratch, 0, None); }
+-        for stage in 0..5 {
++        for part in parts { encoder.clear_buffer(&part.scratch, 0, None);encoder.clear_buffer(&part.precision_risks,0,None); }
++        for stage in 0..7 {
+             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                 label: Some("current GPU tangent math batch"),
+                 timestamp_writes: None,
+@@ -361,7 +366,8 @@
+                 pass.set_bind_group(0, &part.group, &[]);
+                 let count = match stage {
+                     1 => part.counts[1],
+-                    4 => part.counts[0],
++                    3 | 4 => part.counts[3],
++                    6 => part.counts[0],
+                     _ => part.counts[1] * 3,
+                 };
+                 pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
+@@ -513,6 +519,33 @@
+         execute(&self.params);
+         result
+     }
++    pub(crate) fn read_precision_risks(&self,device:&wgpu::Device,queue:&wgpu::Queue)->Vec<u32>{super::read_records(device,queue,&self.precision_risks,self.counts[3]as usize)}
++    pub(crate) fn capture_derivatives(&self,device:&wgpu::Device,queue:&wgpu::Queue)->Vec<[[f32;4];2]>{super::read_records(device,queue,&self.derivatives,self.counts[1]as usize)}
++    #[cfg(test)]
++    pub(crate) fn capture_conditioning(&self, device:&wgpu::Device, queue:&wgpu::Queue,data:&crate::MeshData,initial:&Prepared,groups:&crate::mikktspace::StructuralRecipe,vertex:usize,candidate:&[PackedVertex])->serde_json::Value {
++        let owner=data.indices.iter().rposition(|i|*i as usize==vertex).unwrap();
++        let face=initial.original_faces.iter().position(|f|*f as usize==owner/3).unwrap();
++        let group_index=groups.assigned_groups[face][owner%3];assert!(group_index>=0);
++        let group=&groups.groups[group_index as usize];
++        let representative=(group.representative as usize>>2)*3+(group.representative as usize&3);
++        let mut members=group.members.clone();members.sort_unstable();
++        let mut debug=self.params;debug.debug[0]=(face*3+owner%3+1)as u32;
++        queue.write_buffer(&self.uniform,0,bytemuck::bytes_of(&debug));
++        let mut encoder=device.create_command_encoder(&Default::default());self.encode(&mut encoder);queue.submit([encoder.finish()]);
++        let current=self.readback(device,queue).unwrap();
++        let debug_delta=glam::Vec3::from_array(current[vertex].tangent[..3].try_into().unwrap()).distance(glam::Vec3::from_array(candidate[vertex].tangent[..3].try_into().unwrap()));
++        let start=self.params.debug[1]+self.params.debug[2];
++        let words:Vec<u32>=super::read_records(device,queue,&self.scratch,start as usize+members.len()*32);
++        let derivatives:Vec<[[f32;4];2]>=super::read_records(device,queue,&self.derivatives,self.counts[1]as usize);
++        let rows:Vec<_>=members.iter().enumerate().map(|(j,m)|{
++            let orig=initial.original_faces[*m as usize]as usize;let ids=&data.indices[orig*3..orig*3+3];
++            let raw=&words[start as usize+j*32..start as usize+(j+1)*32];let floats:Vec<_>=raw.iter().map(|v|f32::from_bits(*v)).collect();
++            let corner=groups.assigned_groups[*m as usize].iter().position(|id|*id==group_index).unwrap();
++            serde_json::json!({"prepared":m,"original":orig,"flags":groups.triangles[*m as usize].flags,"corner":corner,"position":ids.iter().map(|i|data.positions[*i as usize]).collect::<Vec<_>>(),"uv":ids.iter().map(|i|data.uvs[*i as usize]).collect::<Vec<_>>(),"derivatives":derivatives[*m as usize],"debug_floats":floats,"debug_words":raw})
++        }).collect();
++        queue.write_buffer(&self.uniform,0,bytemuck::bytes_of(&self.params));
++        serde_json::json!({"target_original_face":owner/3,"target_prepared":face,"group":group_index,"normal":data.normals[data.indices[representative]as usize],"representative_position":data.positions[data.indices[representative]as usize],"debug_output_delta":debug_delta,"candidate":candidate[vertex].tangent,"members":rows})
++    }
+     pub(crate) fn readback(
+         &self,
+         device: &wgpu::Device,
+--- a/gpu_mikk_recipe.wgsl
++++ b/gpu_mikk_recipe.wgsl
+@@ -130,3 +130,121 @@
+     if owner!=0u {let source=owner-1u;result.tangent=vec4<f32>(spaces[source*2u].xyz,select(1.0,-1.0,atomicLoad(&scratch[params.scratch.z+source])!=0u));}
+     output[i]=result;
+ }
++// Current geometric upper-half-plane angle: y is cross length, x is dot.
++const ATAN_COEFF:array<f64,21> = array<f64,21>(1.0lf,0.33333333333333331lf,0.20000000000000001lf,0.14285714285714285lf,0.1111111111111111lf,0.090909090909090912lf,0.076923076923076927lf,0.066666666666666666lf,0.058823529411764705lf,0.052631578947368418lf,0.047619047619047616lf,0.043478260869565216lf,0.040000000000000001lf,0.037037037037037035lf,0.034482758620689655lf,0.032258064516129031lf,0.030303030303030304lf,0.028571428571428571lf,0.027027027027027029lf,0.02564102564102564lf,0.024390243902439025lf);
++fn atan_reduced(z:f64)->f64{
++    let zz=z*z;
++    var p=ATAN_COEFF[20];
++    for(var k:i32=19;k>=0;k--){p=ATAN_COEFF[u32(k)]-zz*p;}
++    return z*p;
++}
++fn angle_upper(y_input:f64,x:f64)->f64{
++    let y=abs(y_input);
++    let ax=abs(x);
++    let pi:f64=3.1415926535897932384626433832795lf;
++    let half:f64=1.5707963267948966192313216916398lf;
++    let quarter:f64=0.78539816339744830961566084581988lf;
++    if y==0.0lf && ax==0.0lf{return half;}
++    let invert=y>ax;
++    var r:f64;
++    if invert {r=ax/y;}else{r=y/ax;}
++    var z=r;var offset:f64=0.0lf;
++    if r>0.4142135623730950488016887242097lf {z=(r-1.0lf)/(r+1.0lf);offset=quarter;}
++    var result=offset+atan_reduced(z);
++    if invert {result=half-result;}
++    if x<0.0lf {result=pi-result;}
++    return result;
++}
++// Independent current group arithmetic in native Float64. No captured terms.
++fn d_dot(a:vec3<f64>,b:vec3<f64>)->f64{return a.x*b.x+a.y*b.y+a.z*b.z;}
++fn d_cross(a:vec3<f64>,b:vec3<f64>)->vec3<f64>{return vec3<f64>(a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x);}
++fn d_length(v:vec3<f64>)->f64{return sqrt(d_dot(v,v));}
++fn d_nonzero(v:vec3<f64>)->bool{return any(abs(v)>vec3<f64>(1.1754943508222875e-38lf));}
++fn d_unit(v:vec3<f64>)->vec3<f64>{if d_nonzero(v){return v/d_length(v);}return v;}
++fn d_project(v:vec3<f64>,n:vec3<f64>)->vec3<f64>{return d_unit(v-d_dot(n,v)*n);}
++fn d_angle(a:vec3<f64>,b:vec3<f64>)->f64{
++    if all(a==vec3<f64>(0.0lf)) || all(b==vec3<f64>(0.0lf)){return 1.57079632679489661923lf;}
++    return angle_upper(d_length(d_cross(a,b)),d_dot(a,b));
++}
++struct DSpace{s:vec3<f64>,t:vec3<f64>,mag_s:f64,mag_t:f64}
++fn d_derive(f:u32)->DSpace{
++    let a=welded(f,0u);let b=welded(f,1u);let c=welded(f,2u);
++    let x=vec2<f64>(b.uv.xy)-vec2<f64>(a.uv.xy);let y=vec2<f64>(c.uv.xy)-vec2<f64>(a.uv.xy);
++    let d1=vec3<f64>(b.position.xyz)-vec3<f64>(a.position.xyz);let d2=vec3<f64>(c.position.xyz)-vec3<f64>(a.position.xyz);
++    let area=x.x*y.y-x.y*y.x;
++    if abs(area)<=1.1754943508222875e-38lf{return DSpace(vec3<f64>(0.0lf),vec3<f64>(0.0lf),0.0lf,0.0lf);}
++    let s=y.y*d1-x.y*d2;let t=x.x*d2-y.x*d1;
++    let sign=select(f64(-1.0),1.0lf,area>0.0lf);
++    return DSpace(d_unit(s)*sign,d_unit(t)*sign,d_length(s)/abs(area),d_length(t)/abs(area));
++}
++fn member_corner(member:u32,representative:u32)->u32{
++    for(var c=0u;c<3u;c++){if canonical(original(member)*3u+c)==representative{return c;}}
++    return 3u;
++}
++@group(0) @binding(9) var<storage,read_write> precision_risks:array<atomic<u32>>;
++// Separate risk pass leaves the original evaluate arithmetic untouched.
++@compute @workgroup_size(64)
++fn risk(@builtin(global_invocation_id) id:vec3<u32>){
++    let gid=id.x;if gid>=params.counts.w || atomicLoad(&scratch[0])!=0u{return;}
++    let g=descriptor(gid);let n=value(g.z).normal.xyz;let representative=canonical(g.z);
++    var d_condition=0.0;var p_condition=0.0;
++    for(var j=0u;j<g.y;j++){
++        let member=recipe[params.recipe1.z+g.x+j];let flags=recipe[params.recipe0.w+member];if (flags&4u)!=0u{continue;}
++        let a=welded(member,0u);let b=welded(member,1u);let c=welded(member,2u);
++        let x=b.uv.xy-a.uv.xy;let y=c.uv.xy-a.uv.xy;let e1=b.position.xyz-a.position.xyz;let e2=c.position.xyz-a.position.xyz;
++        let sa=y.y*e1;let sb=x.y*e2;let ta=x.x*e2;let tb=y.x*e1;
++        let ls=sqrt(dot(sa-sb,sa-sb));let lt=sqrt(dot(ta-tb,ta-tb));
++        if ls<=1.17549435e-38 || lt<=1.17549435e-38{atomicStore(&precision_risks[gid],1u);return;}
++        d_condition=max(d_condition,max((length(sa)+length(sb))/ls,(length(ta)+length(tb))/lt));
++        let s=derivatives[member*2u].xyz;let t=derivatives[member*2u+1u].xyz;
++        let ps=s-dot(n,s)*n;let pt=t-dot(n,t)*n;
++        let lp=sqrt(dot(ps,ps));let lq=sqrt(dot(pt,pt));
++        if lp<=1.17549435e-38 || lq<=1.17549435e-38{atomicStore(&precision_risks[gid],1u);return;}
++        p_condition=max(p_condition,max(length(s)/lp,length(t)/lq));
++    }
++    for(var k=0u;k<g.y;k++){
++        let face=recipe[params.recipe1.z+g.x+k];let own_flags=recipe[params.recipe0.w+face];
++        let os=projected(derivatives[face*2u].xyz,n);let ot=projected(derivatives[face*2u+1u].xyz,n);
++        var sum=vec3<f32>(0.0);var angles=0.0;var contributing=0.0;
++        for(var j=0u;j<g.y;j++){
++            let member=recipe[params.recipe1.z+g.x+j];let flags=recipe[params.recipe0.w+member];if (flags&4u)!=0u{continue;}
++            let ps=projected(derivatives[member*2u].xyz,n);let pt=projected(derivatives[member*2u+1u].xyz,n);
++            let include=((own_flags|flags)&4u)!=0u || original(face)==original(member) || (angular_member(os,ps)&&angular_member(ot,pt));
++            if !include{continue;}
++            let corner=member_corner(member,representative);if corner==3u{atomicOr(&scratch[0],8u);return;}
++            let center=welded(member,corner).position.xyz;
++            let a=projected(welded(member,(corner+2u)%3u).position.xyz-center,n);let b=projected(welded(member,(corner+1u)%3u).position.xyz-center,n);
++            let angle=corner_angle(a,b);sum+=angle*ps;angles+=angle;contributing+=1.0;
++        }
++        if contributing==0.0{continue;}
++        let magnitude=sqrt(dot(sum,sum));
++        if magnitude<=1.17549435e-38{atomicStore(&precision_risks[gid],1u);return;}
++        let indicator=5.960464477539063e-8*(angles/magnitude)*(d_condition+p_condition+contributing);
++        if indicator>=2.0e-5{atomicStore(&precision_risks[gid],1u);return;}
++    }
++}
++@compute @workgroup_size(64)
++fn refine_group(@builtin(global_invocation_id) id:vec3<u32>){
++    let gid=id.x;if gid>=params.counts.w || atomicLoad(&scratch[0])!=0u || atomicLoad(&precision_risks[gid])==0u{return;}
++    let g=descriptor(gid);let n=vec3<f64>(value(g.z).normal.xyz);let representative=canonical(g.z);
++    for(var k=0u;k<g.y;k++){
++        let face=recipe[params.recipe1.z+g.x+k];let own_flags=recipe[params.recipe0.w+face];
++        let own=d_derive(face);let os=d_project(own.s,n);let ot=d_project(own.t,n);
++        var s=vec3<f64>(0.0lf);var t=vec3<f64>(0.0lf);var mag_s:f64=0.0lf;var mag_t:f64=0.0lf;var angles:f64=0.0lf;
++        for(var j=0u;j<g.y;j++){
++            let member=recipe[params.recipe1.z+g.x+j];let flags=recipe[params.recipe0.w+member];
++            let d=d_derive(member);let ps=d_project(d.s,n);let pt=d_project(d.t,n);
++            let include=((own_flags|flags)&4u)!=0u || original(face)==original(member) || (d_angle(os,ps)<3.14159265358979323846lf && d_angle(ot,pt)<3.14159265358979323846lf);
++            if !include || (flags&4u)!=0u{continue;}
++            let corner=member_corner(member,representative);if corner==3u{atomicOr(&scratch[0],8u);return;}
++            let center=vec3<f64>(welded(member,corner).position.xyz);
++            let a=d_project(vec3<f64>(welded(member,(corner+2u)%3u).position.xyz)-center,n);let b=d_project(vec3<f64>(welded(member,(corner+1u)%3u).position.xyz)-center,n);
++            let angle=d_angle(a,b);s+=angle*ps;t+=angle*pt;mag_s+=angle*d.mag_s;mag_t+=angle*d.mag_t;angles+=angle;
++        }
++        if angles>0.0lf{mag_s/=angles;mag_t/=angles;}
++        let corner=member_corner(face,representative);if corner==3u{atomicOr(&scratch[0],8u);return;}
++        let destination=original(face)*3u+corner;
++        spaces[destination*2u]=vec4<f32>(vec3<f32>(d_unit(s)),f32(mag_s));spaces[destination*2u+1u]=vec4<f32>(vec3<f32>(d_unit(t)),f32(mag_t));
++        // Original evaluate already stored the validated group's handedness.
++    }
++}
+--- /dev/null
++++ b/gpu_mikk_recipe_baseline.wgsl
+@@ -0,0 +1,132 @@
++// Hybrid current structural recipe; ALL tangent floating-point math is current
++// GPU work. Recipe contains no tangent, derivative, angle or normal values.
++struct Vertex {position:vec4<f32>,normal:vec4<f32>,tangent:vec4<f32>,uv:vec4<f32>}
++struct Params {counts:vec4<u32>,prep:vec4<u32>,recipe0:vec4<u32>,recipe1:vec4<u32>,scratch:vec4<u32>,debug:vec4<u32>}
++@group(0) @binding(0) var<storage,read> vertices:array<Vertex>;
++@group(0) @binding(1) var<storage,read> triangles:array<vec4<u32>>;
++@group(0) @binding(2) var<storage,read_write> prep:array<atomic<u32>>;
++@group(0) @binding(3) var<storage,read> recipe:array<u32>;
++@group(0) @binding(4) var<storage,read_write> scratch:array<atomic<u32>>;
++@group(0) @binding(5) var<storage,read_write> spaces:array<vec4<f32>>;
++@group(0) @binding(6) var<storage,read_write> output:array<Vertex>;
++@group(0) @binding(7) var<storage,read_write> derivatives:array<vec4<f32>>;
++@group(0) @binding(8) var<uniform> params:Params;
++fn original(f:u32)->u32{return atomicLoad(&prep[params.prep.y+f]);}
++fn canonical(corner:u32)->u32{return atomicLoad(&prep[params.prep.x+corner]);}
++fn value(corner:u32)->Vertex{return vertices[params.prep.w+triangles[corner/3u][corner%3u]];}
++fn welded(f:u32,c:u32)->Vertex{return value(canonical(original(f)*3u+c));}
++fn nonzero(v:vec3<f32>)->bool{return any(abs(v)>vec3<f32>(1.17549435e-38));}
++fn not_zero(v:f32)->bool{return abs(v)>1.17549435e-38;}
++fn unit(v:vec3<f32>)->vec3<f32>{return (1.0/sqrt(dot(v,v)))*v;}
++fn projected(v:vec3<f32>,n:vec3<f32>)->vec3<f32>{var p=v-dot(n,v)*n;if nonzero(p){p=unit(p);}return p;}
++// At the renderer's fixed 180-degree threshold, normalized dot>-1 means
++// every direction except exactly antiparallel. Testing geometric directions
++// avoids a rounded unit-vector dot falling BELOW -1 (the actual Face failure).
++fn angular_member(a:vec3<f32>,b:vec3<f32>)->bool {
++    if !nonzero(a)||!nonzero(b){return true;}
++    if all(a == -b){return false;}
++    let perpendicular=cross(a,b);
++    return dot(a,b)>=0.0 || any(perpendicular!=vec3<f32>(0.0));
++}
++fn corner_angle(a:vec3<f32>,b:vec3<f32>)->f32 {
++    // Original acos(dot(0,v)) is pi/2 when a projected edge is zero.
++    if !nonzero(a)||!nonzero(b){return 1.5707963267948966;}
++    if all(a==b){return 0.0;}
++    let perpendicular=cross(a,b);
++    return atan2(sqrt(dot(perpendicular,perpendicular)),dot(a,b));
++}
++fn descriptor(group:u32)->vec4<u32>{let i=params.recipe1.y+group*4u;return vec4<u32>(recipe[i],recipe[i+1u],recipe[i+2u],recipe[i+3u]);}
++@compute @workgroup_size(64)
++fn guard_init(@builtin(global_invocation_id) id:vec3<u32>){
++    let i=id.x;let corners=params.counts.y*3u;
++    if i>=corners{return;}
++    if canonical(i)!=recipe[params.recipe0.x+i]{atomicOr(&scratch[0],1u);}
++    if i<params.counts.y {
++        if original(i)!=recipe[params.recipe0.y+i] || atomicLoad(&prep[params.prep.z+original(i)])!=recipe[params.recipe0.z+i] {atomicOr(&scratch[0],2u);}
++    }
++    if i==0u {if atomicLoad(&prep[0])!=params.counts.z {atomicOr(&scratch[0],4u);}if atomicLoad(&prep[1])!=0u {atomicOr(&scratch[0],16u);}}
++    let f=i/3u;let c=i%3u;let source=original(f)*3u+c;
++    atomicStore(&scratch[params.scratch.w+source],i);
++    let vertex=triangles[source/3u][source%3u];
++    atomicMax(&scratch[params.scratch.x+vertex],source+1u);
++    if f<atomicLoad(&prep[0]) {atomicMax(&scratch[params.scratch.y+canonical(source)],0xffffffffu-i);}
++    spaces[source*2u]=vec4<f32>(1.0,0.0,0.0,1.0);
++    spaces[source*2u+1u]=vec4<f32>(0.0,1.0,0.0,1.0);
++}
++@compute @workgroup_size(64)
++fn derive(@builtin(global_invocation_id) id:vec3<u32>){
++    let f=id.x;if params.debug.w!=0u || f>=params.counts.z || atomicLoad(&scratch[0])!=0u{return;}
++    let a=welded(f,0u);let b=welded(f,1u);let c=welded(f,2u);
++    let x=b.uv.xy-a.uv.xy;let y=c.uv.xy-a.uv.xy;
++    let d1=b.position.xyz-a.position.xyz;let d2=c.position.xyz-a.position.xyz;
++    let area=x.x*y.y-x.y*y.x;
++    var s=vec4<f32>(0.0);var t=vec4<f32>(0.0);
++    if not_zero(area){
++        let os=y.y*d1-x.y*d2;let ot=(-y.x)*d1+x.x*d2;
++        let ls=sqrt(dot(os,os));let lt=sqrt(dot(ot,ot));let sign=select(-1.0,1.0,area>0.0);
++        if not_zero(ls){s=vec4<f32>((sign/ls)*os,0.0);}
++        if not_zero(lt){t=vec4<f32>((sign/lt)*ot,0.0);}
++        s.w=ls/abs(area);t.w=lt/abs(area);
++    }
++    derivatives[f*2u]=s;derivatives[f*2u+1u]=t;
++}
++@compute @workgroup_size(64)
++fn evaluate(@builtin(global_invocation_id) id:vec3<u32>){
++    let i=id.x;if i>=params.counts.z*3u || atomicLoad(&scratch[0])!=0u{return;}
++    let assigned=recipe[params.recipe1.x+i];if assigned==0u{return;}
++    let group=descriptor(assigned-1u);let face=i/3u;
++    let n=value(group.z).normal.xyz;let representative=canonical(group.z);
++    let os=projected(derivatives[face*2u].xyz,n);let ot=projected(derivatives[face*2u+1u].xyz,n);
++    let own_flags=recipe[params.recipe0.w+face];
++    var s=vec3<f32>(0.0);var t=vec3<f32>(0.0);var mag_s=0.0;var mag_t=0.0;var angles=0.0;
++    // Compiler sorts current group members by prepared face, matching the CPU
++    // evaluator's ordered subgroup sum. Membership tests remain dynamic here.
++    for(var j=0u;j<group.y;j++){
++        let member=recipe[params.recipe1.z+group.x+j];
++        let flags=recipe[params.recipe0.w+member];
++        let ms=derivatives[member*2u];let mt=derivatives[member*2u+1u];
++        let ps=projected(ms.xyz,n);let pt=projected(mt.xyz,n);
++        let cosine_s=dot(os,ps);let cosine_t=dot(ot,pt);
++        let include=((own_flags|flags)&4u)!=0u || original(face)==original(member) || (angular_member(os,ps) && angular_member(ot,pt));
++        if params.debug.x==i+1u {let out=params.debug.y+params.debug.z+j*4u;atomicStore(&scratch[out],bitcast<u32>(cosine_s));atomicStore(&scratch[out+1u],bitcast<u32>(cosine_t));}
++        if include && params.debug.x==i+1u {atomicOr(&scratch[params.debug.y+j/32u],1u<<(j%32u));}
++        if (flags&4u)!=0u {continue;}
++        var corner=3u;
++        for(var c=0u;c<3u;c++){if canonical(original(member)*3u+c)==representative {corner=c;break;}}
++        if corner==3u {atomicOr(&scratch[0],8u);return;}
++        let center=welded(member,corner).position.xyz;
++        let before=welded(member,(corner+2u)%3u).position.xyz;
++        let after=welded(member,(corner+1u)%3u).position.xyz;
++        let a=projected(before-center,n);let b=projected(after-center,n);
++        // Native GPU acos is measured against CPU f64-acos-rounded-to-f32;
++        // bit parity is explicitly not assumed.
++        let angle_cosine=clamp(dot(a,b),-1.0,1.0);let angle=corner_angle(a,b);
++        if params.debug.x==i+1u {let out=params.debug.y+params.debug.z+j*4u;atomicStore(&scratch[out+2u],bitcast<u32>(angle_cosine));atomicStore(&scratch[out+3u],bitcast<u32>(angle));}
++        if !include {continue;}
++        s=s+angle*ps;t=t+angle*pt;mag_s+=angle*ms.w;mag_t+=angle*mt.w;angles+=angle;
++    }
++    if nonzero(s){s=unit(s);}if nonzero(t){t=unit(t);}
++    if angles>0.0 {mag_s/=angles;mag_t/=angles;}
++    let destination=original(face)*3u+i%3u;
++    spaces[destination*2u]=vec4<f32>(s,mag_s);spaces[destination*2u+1u]=vec4<f32>(t,mag_t);
++    atomicStore(&scratch[params.scratch.z+destination],group.w);
++}
++@compute @workgroup_size(64)
++fn epilogue(@builtin(global_invocation_id) id:vec3<u32>){
++    let i=id.x;if i>=params.counts.y*3u || i<params.counts.z*3u || atomicLoad(&scratch[0])!=0u{return;}
++    let destination=original(i/3u)*3u+i%3u;
++    let first=atomicLoad(&scratch[params.scratch.y+canonical(destination)]);
++    if first==0u{return;}
++    let source_prepared=0xffffffffu-first;
++    let source=original(source_prepared/3u)*3u+source_prepared%3u;
++    spaces[destination*2u]=spaces[source*2u];spaces[destination*2u+1u]=spaces[source*2u+1u];
++    atomicStore(&scratch[params.scratch.z+destination],atomicLoad(&scratch[params.scratch.z+source]));
++}
++@compute @workgroup_size(64)
++fn pack(@builtin(global_invocation_id) id:vec3<u32>){
++    let i=id.x;if i>=params.counts.x || atomicLoad(&scratch[0])!=0u{return;}
++    var result=vertices[params.prep.w+i];let owner=atomicLoad(&scratch[params.scratch.x+i]);
++    result.tangent=vec4<f32>(0.0,0.0,0.0,-0.0);
++    if owner!=0u {let source=owner-1u;result.tangent=vec4<f32>(spaces[source*2u].xyz,select(1.0,-1.0,atomicLoad(&scratch[params.scratch.z+source])!=0u));}
++    output[i]=result;
++}

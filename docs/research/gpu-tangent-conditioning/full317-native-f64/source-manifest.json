@@ -1,0 +1,8 @@
+{
+  "gpu_pose_geometry.rs": "4bb5ef99213bfe6504fe0e723f484ba7a978239e36c87679c3ef2422159b66cf",
+  "gpu_mikk_recipe.rs": "d9c9fe458db56cc23cdceb2157375c37236281e1e1560c43560eacef1d132392",
+  "gpu_mikk_recipe.wgsl": "786edcbc6beaaf020df20840eaf24f29decbb9f69e7ac24fbabc46db6b602129",
+  "input_snapshot_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "executable_sha256": "054a32df925cd5d5e9eea3cb7f0a35c1d9cf275cdb897038250847361782a0b4",
+  "original_fast_shader_byte_identical": true
+}

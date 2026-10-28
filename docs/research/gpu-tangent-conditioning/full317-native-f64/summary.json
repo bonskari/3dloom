@@ -1,0 +1,25 @@
+{
+  "parts": 4121,
+  "poses": 317,
+  "vertices": 105868173,
+  "unchanged_bytes_verified": 105850547,
+  "precision_outputs": 17626,
+  "flagged_group_instances": 2841,
+  "group_instances": 20077195,
+  "max_f64": 3.334380286261724e-06,
+  "all_pnuv_bytes_verified": true,
+  "all_handedness_bits_verified": true,
+  "worst": {
+    "frame": 53,
+    "groups": 24027,
+    "handedness_bits_verified": true,
+    "max_f64": 3.334380286261724e-06,
+    "node": "Face001",
+    "part": 0,
+    "positions_normals_uv_bytes_verified": true,
+    "precision_outputs": 0,
+    "risk_indices": [],
+    "unchanged_bytes_verified": 141654,
+    "vertices": 141654
+  }
+}
