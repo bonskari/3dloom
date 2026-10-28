@@ -1,0 +1,676 @@
+{
+  "samples": [
+    {
+      "time": "0",
+      "mode": "finite8",
+      "pass": "whole",
+      "samples": "64",
+      "gpu_ms": 3.885896,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "finite8",
+      "pass": "guard",
+      "samples": "64",
+      "gpu_ms": 0.022702,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "finite8",
+      "pass": "derive",
+      "samples": "64",
+      "gpu_ms": 0.011084,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "finite8",
+      "pass": "evaluate",
+      "samples": "64",
+      "gpu_ms": 0.129109,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "finite8",
+      "pass": "risk",
+      "samples": "64",
+      "gpu_ms": 2.643471,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "finite8",
+      "pass": "refine64",
+      "samples": "64",
+      "gpu_ms": 0.988661,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "finite8",
+      "pass": "epilogue",
+      "samples": "64",
+      "gpu_ms": 0.008092,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "finite8",
+      "pass": "pack",
+      "samples": "64",
+      "gpu_ms": 0.038968,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "finite8",
+      "pass": "validate",
+      "samples": "64",
+      "gpu_ms": 0.011937,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "cone8",
+      "pass": "whole",
+      "samples": "64",
+      "gpu_ms": 1.538136,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "cone8",
+      "pass": "guard",
+      "samples": "64",
+      "gpu_ms": 0.023148,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "cone8",
+      "pass": "derive",
+      "samples": "64",
+      "gpu_ms": 0.011239,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "cone8",
+      "pass": "evaluate",
+      "samples": "64",
+      "gpu_ms": 0.128986,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "cone8",
+      "pass": "risk",
+      "samples": "64",
+      "gpu_ms": 0.145359,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "cone8",
+      "pass": "refine64",
+      "samples": "64",
+      "gpu_ms": 1.138298,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "cone8",
+      "pass": "epilogue",
+      "samples": "64",
+      "gpu_ms": 0.008155,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "cone8",
+      "pass": "pack",
+      "samples": "64",
+      "gpu_ms": 0.038054,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "0",
+      "mode": "cone8",
+      "pass": "validate",
+      "samples": "64",
+      "gpu_ms": 0.012034,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "finite8",
+      "pass": "whole",
+      "samples": "64",
+      "gpu_ms": 4.185901,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "finite8",
+      "pass": "guard",
+      "samples": "64",
+      "gpu_ms": 0.024721,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "finite8",
+      "pass": "derive",
+      "samples": "64",
+      "gpu_ms": 0.012621,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "finite8",
+      "pass": "evaluate",
+      "samples": "64",
+      "gpu_ms": 0.132052,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "finite8",
+      "pass": "risk",
+      "samples": "64",
+      "gpu_ms": 2.76655,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "finite8",
+      "pass": "refine64",
+      "samples": "64",
+      "gpu_ms": 1.044098,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "finite8",
+      "pass": "epilogue",
+      "samples": "64",
+      "gpu_ms": 0.008135,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "finite8",
+      "pass": "pack",
+      "samples": "64",
+      "gpu_ms": 0.11251,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "finite8",
+      "pass": "validate",
+      "samples": "64",
+      "gpu_ms": 0.0516,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "cone8",
+      "pass": "whole",
+      "samples": "64",
+      "gpu_ms": 1.696337,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "cone8",
+      "pass": "guard",
+      "samples": "64",
+      "gpu_ms": 0.024219,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "cone8",
+      "pass": "derive",
+      "samples": "64",
+      "gpu_ms": 0.012235,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "cone8",
+      "pass": "evaluate",
+      "samples": "64",
+      "gpu_ms": 0.130778,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "cone8",
+      "pass": "risk",
+      "samples": "64",
+      "gpu_ms": 0.14127,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "cone8",
+      "pass": "refine64",
+      "samples": "64",
+      "gpu_ms": 1.287498,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "cone8",
+      "pass": "epilogue",
+      "samples": "64",
+      "gpu_ms": 0.007952,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "cone8",
+      "pass": "pack",
+      "samples": "64",
+      "gpu_ms": 0.045363,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "39.25",
+      "mode": "cone8",
+      "pass": "validate",
+      "samples": "64",
+      "gpu_ms": 0.012603,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "finite8",
+      "pass": "whole",
+      "samples": "64",
+      "gpu_ms": 4.027738,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "finite8",
+      "pass": "guard",
+      "samples": "64",
+      "gpu_ms": 0.023461,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "finite8",
+      "pass": "derive",
+      "samples": "64",
+      "gpu_ms": 0.01166,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "finite8",
+      "pass": "evaluate",
+      "samples": "64",
+      "gpu_ms": 0.13088,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "finite8",
+      "pass": "risk",
+      "samples": "64",
+      "gpu_ms": 2.700922,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "finite8",
+      "pass": "refine64",
+      "samples": "64",
+      "gpu_ms": 1.014196,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "finite8",
+      "pass": "epilogue",
+      "samples": "64",
+      "gpu_ms": 0.008018,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "finite8",
+      "pass": "pack",
+      "samples": "64",
+      "gpu_ms": 0.067941,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "finite8",
+      "pass": "validate",
+      "samples": "64",
+      "gpu_ms": 0.038585,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "cone8",
+      "pass": "whole",
+      "samples": "64",
+      "gpu_ms": 1.60242,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "cone8",
+      "pass": "guard",
+      "samples": "64",
+      "gpu_ms": 0.02346,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "cone8",
+      "pass": "derive",
+      "samples": "64",
+      "gpu_ms": 0.01186,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "cone8",
+      "pass": "evaluate",
+      "samples": "64",
+      "gpu_ms": 0.130177,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "cone8",
+      "pass": "risk",
+      "samples": "64",
+      "gpu_ms": 0.141485,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "cone8",
+      "pass": "refine64",
+      "samples": "64",
+      "gpu_ms": 1.202198,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "cone8",
+      "pass": "epilogue",
+      "samples": "64",
+      "gpu_ms": 0.007867,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "cone8",
+      "pass": "pack",
+      "samples": "64",
+      "gpu_ms": 0.040167,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "95.71835",
+      "mode": "cone8",
+      "pass": "validate",
+      "samples": "64",
+      "gpu_ms": 0.012181,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "finite8",
+      "pass": "whole",
+      "samples": "64",
+      "gpu_ms": 4.063944,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "finite8",
+      "pass": "guard",
+      "samples": "64",
+      "gpu_ms": 0.023467,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "finite8",
+      "pass": "derive",
+      "samples": "64",
+      "gpu_ms": 0.011606,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "finite8",
+      "pass": "evaluate",
+      "samples": "64",
+      "gpu_ms": 0.130576,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "finite8",
+      "pass": "risk",
+      "samples": "64",
+      "gpu_ms": 2.703208,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "finite8",
+      "pass": "refine64",
+      "samples": "64",
+      "gpu_ms": 1.01106,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "finite8",
+      "pass": "epilogue",
+      "samples": "64",
+      "gpu_ms": 0.008216,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "finite8",
+      "pass": "pack",
+      "samples": "64",
+      "gpu_ms": 0.059459,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "finite8",
+      "pass": "validate",
+      "samples": "64",
+      "gpu_ms": 0.083723,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "cone8",
+      "pass": "whole",
+      "samples": "64",
+      "gpu_ms": 1.620153,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "cone8",
+      "pass": "guard",
+      "samples": "64",
+      "gpu_ms": 0.023259,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "cone8",
+      "pass": "derive",
+      "samples": "64",
+      "gpu_ms": 0.011499,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "cone8",
+      "pass": "evaluate",
+      "samples": "64",
+      "gpu_ms": 0.130781,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "cone8",
+      "pass": "risk",
+      "samples": "64",
+      "gpu_ms": 0.141253,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "cone8",
+      "pass": "refine64",
+      "samples": "64",
+      "gpu_ms": 1.218213,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "cone8",
+      "pass": "epilogue",
+      "samples": "64",
+      "gpu_ms": 0.008375,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "cone8",
+      "pass": "pack",
+      "samples": "64",
+      "gpu_ms": 0.040837,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    },
+    {
+      "time": "149",
+      "mode": "cone8",
+      "pass": "validate",
+      "samples": "64",
+      "gpu_ms": 0.012313,
+      "outputs_exact": "PASS",
+      "flags_exact": "PASS\n"
+    }
+  ],
+  "four_pose_means": {
+    "finite8": {
+      "whole": 4.040869750000001,
+      "guard": 0.023587749999999998,
+      "derive": 0.01174275,
+      "evaluate": 0.13065425,
+      "risk": 2.7035377499999997,
+      "refine64": 1.01450375,
+      "epilogue": 0.008115250000000001,
+      "pack": 0.0697195,
+      "validate": 0.04646125
+    },
+    "cone8": {
+      "whole": 1.6142615,
+      "guard": 0.0235215,
+      "derive": 0.01170825,
+      "evaluate": 0.1301805,
+      "risk": 0.14234175,
+      "refine64": 1.21155175,
+      "epilogue": 0.00808725,
+      "pack": 0.041105249999999996,
+      "validate": 0.01228275
+    }
+  }
+}

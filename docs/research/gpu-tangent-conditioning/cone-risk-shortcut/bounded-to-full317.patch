@@ -1,0 +1,36 @@
+--- /tmp/loom-f64-cone/src/gpu_pose_geometry.rs	2026-10-28 04:53:58.729571921 +0200
++++ /tmp/loom-f64-cone-full317/src/gpu_pose_geometry.rs	2026-10-28 05:18:40.436876783 +0200
+@@ -902,7 +902,7 @@
+     #[test]
+     #[ignore = "full F64 diagnostic records failures; never an acceptance gate"]
+     fn actual_ray_hybrid_current_gpu_tangents_f64_diagnostics() {
+-        let times: Vec<f32> = [9,19,33,59,62,104,110,139,147,161,203,228,248,259,269,279,310].into_iter().map(|i|149.0*i as f32/316.0).collect();
++        let times: Vec<f32> = (0..317).map(|i|149.0*i as f32/316.0).collect();
+         ray_geometry_audit(false, true, RecipeAudit::F64Diagnostic, &times);
+     }
+     fn ray_geometry_audit(
+@@ -937,7 +937,6 @@
+             scene.set_time(time);
+             for id in &ids {
+                 let node = scene.node(*id).unwrap();
+-                let frame=(time/149.0*316.0).round()as u32;let wanted=match node.name.as_str(){"Body001"=>matches!(frame,9|19|59|62|104|139|147|161|203|228|248|259|269|310),"Face001"=>matches!(frame,33|110|279),_=>false};if !wanted{continue;}
+                 assert_eq!(
+                     node.modifiers.len(),
+                     1,
+@@ -1036,7 +1035,6 @@
+                     let records = stable.readback(&device, &queue);
+                     for (part, (range, template)) in stable.parts.iter().zip(&reference).enumerate()
+                     {
+-                        if part!=0{continue;}
+                         let indices: Vec<_> = template
+                             .indices
+                             .iter()
+@@ -1342,7 +1340,7 @@
+                         eprintln!("PRECISION_GATE_PASS node={name} frame={frame} part={part} vertices={} unchanged={unchanged} precision={precise} risk_groups={}/{} max_f64={max_f64:e}",candidate.len(),risk.iter().filter(|v|**v!=0).count(),risk.len());
+                         let risk_indices:Vec<_>=risk.iter().enumerate().filter_map(|(i,v)|(*v!=0).then_some(i)).collect();
+                         use std::io::Write as _;
+-                        writeln!(std::fs::OpenOptions::new().create(true).append(true).open("/tmp/loom-f64-cone/part-evidence.jsonl").unwrap(),"{}",serde_json::json!({"node":name,"frame":frame,"part":part,"vertices":candidate.len(),"unchanged_bytes_verified":unchanged,"precision_outputs":precise,"risk_indices":risk_indices,"groups":risk.len(),"max_f64":max_f64,"positions_normals_uv_bytes_verified":true,"handedness_bits_verified":true})).unwrap();
++                        writeln!(std::fs::OpenOptions::new().create(true).append(true).open("/tmp/loom-f64-cone-full317/part-evidence.jsonl").unwrap(),"{}",serde_json::json!({"node":name,"frame":frame,"part":part,"vertices":candidate.len(),"unchanged_bytes_verified":unchanged,"precision_outputs":precise,"risk_indices":risk_indices,"groups":risk.len(),"max_f64":max_f64,"positions_normals_uv_bytes_verified":true,"handedness_bits_verified":true})).unwrap();
+                         let reference = crate::mikktspace::generate_serial(&same_gpu)
+                             .expect("actual current CPU tangent reference");
+                         assert_eq!(candidate.len(), same_gpu.positions.len());
