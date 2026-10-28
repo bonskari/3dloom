@@ -1,0 +1,18 @@
+{
+  "captures": 153,
+  "unique_group_instances": 68,
+  "baseline_failures": 102,
+  "passing_controls": 51,
+  "exact_historical_failure_locations": true,
+  "captured_member_rows": 904,
+  "derivative_record_bit_mismatches": 0,
+  "membership_mismatches": 0,
+  "max_reference_reconstruction_error": 2.355021009926927e-13,
+  "max_target_instrumentation_delta": 0.00012757517590544838,
+  "min_failed_baseline_indicator": 0.00010091712207188135,
+  "max_control_baseline_indicator": 1.0394208565339357e-06,
+  "indicator_true_positive": 102,
+  "indicator_false_positive": 0,
+  "baseline_derivative_f64_rest_failures": 30,
+  "max_control_error": 1.0875056983671888e-07
+}
