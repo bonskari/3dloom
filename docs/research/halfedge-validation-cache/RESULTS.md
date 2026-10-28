@@ -1,6 +1,6 @@
 # Isolated success-only shared half-edge validation prototype
 
-Production is unchanged. This prototype uses post-COW baseline `aebf742495c006735eb12ae2538c62ccac4dfbda` (including the immutable snapshot API from3af118d), rather than the earlier owned-Vec implementation.
+The isolated experiment uses post-COW baseline `aebf742495c006735eb12ae2538c62ccac4dfbda` (including the immutable snapshot API from3af118d), rather than the earlier owned-Vec implementation.
 
 The private storage contains an owned HalfEdge vector and `OnceLock<()>`. Its read-only Deref exposes a slice; it has no DerefMut. The only mutable-vector accessor clears the success proof **before** returning the mutable borrow. All five constructor bindings and two existing test mutation sites pass through that accessor. A child-module privacy boundary prevents other Mesh modules from writing the vector/cache fields directly.
 
@@ -18,7 +18,7 @@ After the full GPU quality run finished, two quiet317-pose paired runs passed al
 |Display clone/checked world transform|1.062832|0.394405|1.065975|0.392784|
 |Combined|4.463438|4.029788|4.493002|4.013984|
 
-Combined savings were0.433650ms and0.479017ms; display-stage savings were0.668428ms and0.673191ms. Skin batch was slower by0.234790ms and0.194440ms despite no Skin arithmetic changes; that regression's cause was not isolated and is included in the net result. No cache/scheduling explanation is asserted as fact. Total test times were9.46s and9.17s. The application was paused, other agents held jobs, and no other compiler/test processes were visible. These are standalone paired CPU pipeline results, not native FPS measurements. Production remains unchanged pending the parent's promotion decision.
+Combined savings were0.433650ms and0.479017ms; display-stage savings were0.668428ms and0.673191ms. Skin batch was slower by0.234790ms and0.194440ms despite no Skin arithmetic changes; that regression's cause was not isolated and is included in the net result. No cache/scheduling explanation is asserted as fact. Total test times were9.46s and9.17s. The application was paused, other agents held jobs, and no other compiler/test processes were visible. These are standalone paired CPU pipeline results, not native FPS measurements. The parent approved production promotion after both positive pairs and read-only review.
 
 Reproduction uses the fixed baseline archive and changes only ignored target/:
 
@@ -28,3 +28,8 @@ CARGO_TARGET_DIR="$PWD/target/halfedge-validation-repro/build" cargo test --mani
 # Add LOOM_REVERSE_ORDER=1 to reverse the initial pipeline order.
 LOOM_PERF_SCENE='/tmp/loom-conditioning-capture/input.loom' CARGO_TARGET_DIR="$PWD/target/halfedge-validation-repro/build" cargo test --manifest-path target/halfedge-validation-repro/Cargo.toml --release -j4 -p cow_probe actual_halfedge_validation_317 -- --ignored --nocapture
 ```
+
+
+## Production promotion
+
+The exact tested four Mesh source files were promoted after verifying that production matched the recorded baseline. Production Mesh/Scene correctness then passed268 tests,0 failures,1 opt-in test ignored and0 warnings. Scene/Shape/runtime logic was not changed. All map checks remain unconditional. Native application FPS and pixel comparison for this promotion have not yet been measured.

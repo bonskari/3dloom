@@ -19,7 +19,7 @@ pub type Slice = Option<(f32, f32)>;
 /// without a neighbour gets a boundary half-edge with `face == None`.
 pub fn build_merged(polygons: &[Vec<Vec3>]) -> Mesh {
     let mut mesh = Mesh::default();
-    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges).edges_mut();
     let mut vertex_map: HashMap<(i64, i64, i64), VertexId> = HashMap::new();
     let mut edge_map: HashMap<(VertexId, VertexId), HalfEdgeId> = HashMap::new();
     let key = |p: Vec3| ((p.x * 1e5).round() as i64, (p.y * 1e5).round() as i64, (p.z * 1e5).round() as i64);

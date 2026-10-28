@@ -29,7 +29,7 @@ pub fn box_primitive(half_extents: Vec3) -> Mesh {
     ];
 
     let mut mesh = Mesh::default();
-    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges).edges_mut();
     for p in positions {
         mesh.vertices.push(Vertex::new(p, None));
     }
@@ -91,7 +91,7 @@ pub fn quad_primitive(corner: Vec3, edge_u: Vec3, edge_v: Vec3) -> Mesh {
     ];
 
     let mut mesh = Mesh::default();
-    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges).edges_mut();
     for p in positions {
         mesh.vertices.push(Vertex::new(p, None));
     }
@@ -190,7 +190,7 @@ pub fn sphere_primitive(radius: f32, segments: u32, rings: u32) -> Mesh {
 fn build_closed(polygons: &[Vec<Vec3>]) -> Mesh {
     use crate::half_edge::{Face, FaceId, HalfEdge, HalfEdgeId, Vertex, VertexId};
     let mut mesh = Mesh::default();
-    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges).edges_mut();
     let mut vertex_map: HashMap<(u32, u32, u32), VertexId> = HashMap::new();
     let mut edge_map: HashMap<(VertexId, VertexId), HalfEdgeId> = HashMap::new();
     for (face_i, poly) in polygons.iter().enumerate() {

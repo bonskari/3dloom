@@ -35,7 +35,7 @@ impl Polygon {
 pub struct Mesh {
     pub(crate) vertices: Vec<Vertex>,
     #[serde(with="half_edges_serde")]
-    pub(crate) half_edges: std::sync::Arc<Vec<HalfEdge>>,
+    pub(crate) half_edges: std::sync::Arc<half_edge_storage::HalfEdgeData>,
     pub(crate) faces: Vec<Face>,
     /// Map channels by number (1 = the default texture channel). Channel 0,
     /// the vertex colour, lives on `Vertex.color`.
@@ -51,7 +51,7 @@ pub struct Mesh {
 /// An immutable connectivity snapshot. It excludes vertices, faces, maps and
 /// edge visibility. Keeping this handle alive forces edits to detach storage.
 #[derive(Clone)]
-pub struct HalfEdgeSnapshot(std::sync::Arc<Vec<HalfEdge>>);
+pub struct HalfEdgeSnapshot(std::sync::Arc<half_edge_storage::HalfEdgeData>);
 impl HalfEdgeSnapshot {
     pub fn matches(&self, mesh: &Mesh) -> bool {
         std::sync::Arc::ptr_eq(&self.0, &mesh.half_edges)
@@ -513,30 +513,7 @@ impl Mesh {
 
     /// Verifies half-edge invariants. Returns Err with the first violation found.
     pub fn check_invariants(&self) -> Result<(), String> {
-        for (i, he) in self.half_edges.iter().enumerate() {
-            let id = HalfEdgeId(i as u32);
-
-            // Twin of twin = self
-            let twin = &self.half_edges[he.twin.0 as usize];
-            if twin.twin != id {
-                return Err(format!("HE {}: twin's twin is not self", i));
-            }
-
-            // Next/prev consistency
-            let next = &self.half_edges[he.next.0 as usize];
-            if next.prev != id {
-                return Err(format!("HE {}: next's prev is not self", i));
-            }
-            let prev = &self.half_edges[he.prev.0 as usize];
-            if prev.next != id {
-                return Err(format!("HE {}: prev's next is not self", i));
-            }
-
-            // Face consistency: all half-edges around a face share the face
-            if he.face != next.face {
-                return Err(format!("HE {}: face differs from next's face", i));
-            }
-        }
+        self.half_edges.check()?;
         for (ch, m) in &self.maps {
             if m.corners.len() != self.half_edges.len() {
                 return Err(format!("map channel {ch}: {} corners for {} half-edges", m.corners.len(), self.half_edges.len()));
@@ -634,8 +611,8 @@ mod tests {
 mod half_edges_serde {
     use super::HalfEdge;
     use serde::{Serialize,Deserialize};
-    pub(super) fn serialize<S:serde::Serializer>(value:&std::sync::Arc<Vec<HalfEdge>>,serializer:S)->Result<S::Ok,S::Error>{value.as_ref().serialize(serializer)}
-    pub(super) fn deserialize<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<std::sync::Arc<Vec<HalfEdge>>,D::Error>{Vec::<HalfEdge>::deserialize(deserializer).map(std::sync::Arc::new)}
+    pub(super) fn serialize<S:serde::Serializer>(value:&std::sync::Arc<super::half_edge_storage::HalfEdgeData>,serializer:S)->Result<S::Ok,S::Error>{value.as_ref().as_slice().serialize(serializer)}
+    pub(super) fn deserialize<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<std::sync::Arc<super::half_edge_storage::HalfEdgeData>,D::Error>{Vec::<HalfEdge>::deserialize(deserializer).map(|edges|std::sync::Arc::new(super::half_edge_storage::HalfEdgeData::new(edges)))}
 }
 
 #[cfg(test)]
@@ -652,7 +629,7 @@ mod half_edge_cow_tests {
         mesh.set_edge_visible(HalfEdgeId(0), false);
         assert!(snapshot.matches(&mesh), "non-connectivity fields need their own guards");
         let count = mesh.vertex_count() as u32;
-        let edges = std::sync::Arc::make_mut(&mut mesh.half_edges);
+        let edges = std::sync::Arc::make_mut(&mut mesh.half_edges).edges_mut();
         edges[0].origin.0 = (edges[0].origin.0 + 1) % count;
         assert!(!snapshot.matches(&mesh));
         assert!(snapshot.matches(&loaded), "a retained proof cannot mutate with its source");
@@ -671,12 +648,95 @@ mod half_edge_cow_tests {
         edited.vertices[0].position+=glam::Vec3::X;edited.faces[0].hidden=true;
         edited.ensure_map(1).verts[0]=glam::Vec3::Y;edited.set_edge_visible(HalfEdgeId(0),true);
         assert_eq!(source,undo);assert_eq!(serde_json::to_value(&source).unwrap(),before);
-        let hes=std::sync::Arc::make_mut(&mut edited.half_edges);
+        let hes=std::sync::Arc::make_mut(&mut edited.half_edges).edges_mut();
         for he in hes {he.origin.0=match he.origin.0{0=>1,1=>0,v=>v};}
         edited.vertices.swap(0,1);edited.check_invariants().unwrap();
         assert!(!std::sync::Arc::ptr_eq(&source.half_edges,&edited.half_edges));
         assert_eq!(serde_json::to_value(&source).unwrap(),before);
         edited=undo.clone();assert_eq!(serde_json::to_value(&edited).unwrap(),before);
         let loaded:Mesh=serde_json::from_value(before.clone()).unwrap();assert_eq!(serde_json::to_value(&loaded).unwrap(),before);loaded.check_invariants().unwrap();
+    }
+}
+
+mod half_edge_storage {
+    use super::{HalfEdge,HalfEdgeId};
+    #[derive(Default)]
+    pub(crate) struct HalfEdgeData { edges:Vec<HalfEdge>, valid:std::sync::OnceLock<()> }
+    impl HalfEdgeData {
+        pub(crate) fn new(edges:Vec<HalfEdge>)->Self{Self{edges,valid:std::sync::OnceLock::new()}}
+        pub(crate) fn as_slice(&self)->&[HalfEdge]{&self.edges}
+        pub(crate) fn edges_mut(&mut self)->&mut Vec<HalfEdge>{let _=self.valid.take();&mut self.edges}
+        pub(crate) fn check(&self)->Result<(),String>{
+            if self.valid.get().is_none(){self.check_uncached()?;let _=self.valid.set(());}
+            Ok(())
+        }
+        #[cfg(test)]
+        pub(super) fn is_cached(&self)->bool{self.valid.get().is_some()}
+        fn check_uncached(&self)->Result<(),String>{
+        for (i, he) in self.edges.iter().enumerate() {
+            let id = HalfEdgeId(i as u32);
+
+            // Twin of twin = self
+            let twin = &self.edges[he.twin.0 as usize];
+            if twin.twin != id {
+                return Err(format!("HE {}: twin's twin is not self", i));
+            }
+
+            // Next/prev consistency
+            let next = &self.edges[he.next.0 as usize];
+            if next.prev != id {
+                return Err(format!("HE {}: next's prev is not self", i));
+            }
+            let prev = &self.edges[he.prev.0 as usize];
+            if prev.next != id {
+                return Err(format!("HE {}: prev's next is not self", i));
+            }
+
+            // Face consistency: all half-edges around a face share the face
+            if he.face != next.face {
+                return Err(format!("HE {}: face differs from next's face", i));
+            }
+        }
+            Ok(())
+        }
+    }
+    impl std::ops::Deref for HalfEdgeData{type Target=[HalfEdge];fn deref(&self)->&[HalfEdge]{&self.edges}}
+    impl Clone for HalfEdgeData{fn clone(&self)->Self{Self::new(self.edges.clone())}}
+    impl PartialEq for HalfEdgeData{fn eq(&self,other:&Self)->bool{self.edges==other.edges}}
+    impl std::fmt::Debug for HalfEdgeData{fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{std::fmt::Debug::fmt(&self.edges,f)}}
+}
+
+#[cfg(test)]
+mod validation_cache_tests {
+    use super::*;
+    #[test]
+    fn successful_proof_is_shared_but_not_part_of_value_debug_or_json(){
+        let mesh=crate::box_primitive(glam::Vec3::ONE);let original=serde_json::to_value(&mesh).unwrap();
+        let loaded:Mesh=serde_json::from_value(original.clone()).unwrap();assert!(!mesh.half_edges.is_cached());assert!(!loaded.half_edges.is_cached());
+        let clone=mesh.clone();mesh.check_invariants().unwrap();assert!(clone.half_edges.is_cached());
+        assert_eq!(mesh,loaded);assert_eq!(format!("{mesh:?}"),format!("{loaded:?}"));assert_eq!(serde_json::to_value(&mesh).unwrap(),original);
+        let snapshot=mesh.half_edge_snapshot();assert!(snapshot.matches(&loaded));
+        let mut edited=mesh.clone();let old=edited.half_edges[0].next;
+        std::sync::Arc::make_mut(&mut edited.half_edges).edges_mut()[0].next=HalfEdgeId(0);
+        assert!(!edited.half_edges.is_cached());assert!(edited.check_invariants().is_err());assert!(mesh.half_edges.is_cached());assert!(!snapshot.matches(&edited));
+        std::sync::Arc::make_mut(&mut edited.half_edges).edges_mut()[0].next=old;edited.check_invariants().unwrap();assert!(snapshot.matches(&edited));
+        edited=clone;assert_eq!(serde_json::to_value(&edited).unwrap(),original);
+    }
+    #[test]
+    fn unique_storage_mutation_clears_success_and_panics_are_not_cached(){
+        let mut mesh=crate::box_primitive(glam::Vec3::ONE);mesh.check_invariants().unwrap();assert!(mesh.half_edges.is_cached());
+        let old=mesh.half_edges[0].next;std::sync::Arc::make_mut(&mut mesh.half_edges).edges_mut()[0].next=HalfEdgeId(0);
+        assert!(!mesh.half_edges.is_cached());assert_eq!(mesh.check_invariants().unwrap_err(),"HE 0: next's prev is not self");
+        std::sync::Arc::make_mut(&mut mesh.half_edges).edges_mut()[0].next=old;mesh.check_invariants().unwrap();
+        std::sync::Arc::make_mut(&mut mesh.half_edges).edges_mut()[0].twin=HalfEdgeId(u32::MAX);
+        for _ in 0..2{assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||mesh.check_invariants())).is_err());assert!(!mesh.half_edges.is_cached());}
+    }
+    #[test]
+    fn every_map_is_checked_after_cached_halfedge_success(){
+        let mut mesh=crate::box_primitive(glam::Vec3::ONE);mesh.check_invariants().unwrap();assert!(mesh.half_edges.is_cached());
+        mesh.ensure_map(1).corners[0]=999;assert!(mesh.check_invariants().unwrap_err().starts_with("map channel 1: corner"));assert!(mesh.half_edges.is_cached());
+        mesh.ensure_map(1).corners[0]=0;mesh.check_invariants().unwrap();
+        mesh.ensure_map(7).corners.pop();assert!(mesh.check_invariants().unwrap_err().starts_with("map channel 7:"));assert!(mesh.half_edges.is_cached());
+        mesh.remove_map(7);mesh.check_invariants().unwrap();
     }
 }

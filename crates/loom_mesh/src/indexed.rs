@@ -186,7 +186,7 @@ impl IndexedMesh {
     /// removed ones (renumbered after a delete).
     pub fn build(&self) -> Result<Mesh, String> {
         let mut mesh = Mesh::default();
-    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges).edges_mut();
         let mut used: BTreeSet<u32> = self.keep.iter().copied().filter(|i| (*i as usize) < self.positions.len()).collect();
         for face in &self.faces {
             used.extend(face.ids.iter().copied());
