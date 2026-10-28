@@ -1,0 +1,75 @@
+--- a/skin_batch.rs
++++ b/skin_batch.rs
+@@ -14,7 +14,8 @@
+     rendering: bool,
+     animated: bool,
+     data: &'a SkinData,
+-    value: StackValue,
++    mesh: std::borrow::Cow<'a,loom_mesh::Mesh>,
++    selection: Option<(loom_mesh::select_ops::SubLevel,Vec<u32>)>,
+     object_world: Mat4,
+     worlds: Arc<HashMap<NodeId, (Mat4, bool, bool)>>,
+ }
+@@ -36,8 +37,9 @@
+             let lookup = |id| self.worlds.get(&id).map(|v| v.0);
+             let squash = |id| self.worlds.get(&id).is_some_and(|v| v.1);
+             let ctx = crate::EvalCtx { object_world: self.object_world, object_inverse: self.object_world.inverse(), world_lookup: Some(&lookup), bone_squashes: Some(&squash), ..Default::default() };
+-            let counts = (self.value.mesh.vertex_count(), self.value.mesh.face_count());
+-            let mut value = crate::skin::apply_owned(self.data, self.value, &ctx);
++            let value=StackValue {mesh:self.mesh.into_owned(),selection:self.selection,shape:None,shape_selection:None,warnings:Vec::new(),patch:None,patch_steps:None};
++            let counts = (value.mesh.vertex_count(), value.mesh.face_count());
++            let mut value = crate::skin::apply_owned(self.data, value, &ctx);
+             let mut warnings = Vec::new();
+             finish_modifier_value(&mut value, &mut warnings, false, true, counts);
+             Arc::new(Evaluated { value, warnings })
+@@ -96,13 +98,11 @@
+         let jobs = eligible.into_iter().map(|(id, key, node, data)| {
+             let reads = anim::animated_reads();
+             let object_world = self.object_matrix(id);
+-            let value = StackValue {
+-                mesh: node.object.display_output(),
+-                selection: match &node.object { ObjectKind::EditablePoly(p) | ObjectKind::EditableMesh(p) => p.passes_up.clone(), _ => None },
+-                shape: None, shape_selection: None, warnings: Vec::new(), patch: None, patch_steps: None,
+-            };
++            let mesh=match &node.object {ObjectKind::EditablePoly(p)=>p.display_mesh(),object=>object.mesh()};
++            let mesh=if DEFER_CLONE.load(std::sync::atomic::Ordering::Relaxed){mesh}else{std::borrow::Cow::Owned(mesh.into_owned())};
++            let selection=match &node.object {ObjectKind::EditablePoly(p)|ObjectKind::EditableMesh(p)=>p.passes_up.clone(),_=>None};
+             let animated = reads != anim::animated_reads() || data.bones.iter().any(|b| worlds.get(&b.node).is_some_and(|v| v.2));
+-            SkinEvaluationJob { id, key, time, rendering, animated, data, value, object_world, worlds: worlds.clone() }
++            SkinEvaluationJob { id, key, time, rendering, animated, data, mesh, selection, object_world, worlds: worlds.clone() }
+         }).collect();
+         let results = execute(jobs);
+         self.sync_time();
+@@ -133,3 +133,8 @@
+ #[cfg(test)]
+ #[path = "skin_batch_tests.rs"]
+ mod tests;
++
++static DEFER_CLONE:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(true);
++#[cfg(test)]
++#[path="deferred_clone_probe.rs"]
++mod deferred_clone_probe;
+--- a/skin_batch_tests.rs
++++ b/skin_batch_tests.rs
+@@ -171,3 +171,21 @@
+     let actual = scene.evaluated_batch(&[skin], |jobs| { assert!(jobs.is_empty()); Vec::new() });
+     compare(&actual[0], &serial.evaluated(skin, None));
+ }
++
++#[test]
++fn deferred_clone_preserves_borrowed_mesh_and_owned_nurms_inputs(){
++    DEFER_CLONE.store(true,std::sync::atomic::Ordering::Relaxed);
++    let (mut scene,skin,_bone)=fixture();
++    for nurms in [false,true]{
++        let node=scene.node_mut(skin).unwrap();
++        let ObjectKind::EditablePoly(poly)=&mut node.object else{panic!("poly fixture")};
++        poly.subdiv.use_nurms.set(nurms);poly.subdiv.iterations.set(1);
++        scene.set_time(3.0);let serial=scene.clone();let expected=serial.evaluated(skin,None);
++        let actual=scene.evaluated_batch(&[skin],|jobs|{
++            assert_eq!(jobs.len(),1);
++            assert_eq!(matches!(&jobs[0].mesh,std::borrow::Cow::Owned(_)),nurms);
++            parallel(jobs)
++        });
++        compare(&actual[0],&expected);
++    }
++}

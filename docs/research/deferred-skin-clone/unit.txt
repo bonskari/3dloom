@@ -1,0 +1,55 @@
+
+running 50 tests
+test camera::tests::default_lens_matches_default_fov ... ok
+test camera::tests::diagonal_and_vertical_fov_follow_the_render_aspect ... ok
+test camera::tests::frame_spans_the_fov_in_front_of_the_camera ... ok
+test caches9::tests::a_failed_read_is_not_kept ... ok
+test light::tests::decay_and_attenuation_match_the_reference_formulas ... ok
+test light::tests::exclusion_scopes ... ok
+test camera::tests::icon_lies_behind_the_eye_and_is_closed_where_drawn ... ok
+test light::tests::falloff_follows_hotspot_and_keeps_its_gap ... ok
+test light::tests::kelvin_colours_run_from_warm_to_white ... ok
+test light::tests::spot_cone_is_full_inside_the_hotspot_and_dark_outside_the_falloff ... ok
+test light::tests::photometric_intensity_units_convert_through_candela ... ok
+test light::tests::icons_are_closed_meshes_around_the_pivot ... ok
+test maps::tests::bitmap_crop_and_place ... ok
+test maps::tests::bump_heights_tilt_the_normals ... ok
+test maps::tests::checker_gradient_noise_and_mix ... ok
+test maps::tests::decal_and_mirror ... ok
+test material::tests::a_shell_shows_its_viewport_or_render_choice ... ok
+test material::tests::blend_mixes_by_amount_and_a_mask_goes_through_a_mix_map ... ok
+test material::tests::coordinates_offset_tile_and_rotate ... ok
+test material::tests::levels_resolve_through_sub_materials_and_maps ... ok
+test scene::skin_batch::deferred_clone_probe::actual_deferred_clone_317 ... ignored, actual paired317 timing requires LOOM_PERF_SCENE
+test scene::skin_batch::tests::actual_all_159_skin_poses_match_serial_full_stack ... ignored, requires LOOM_PERF_SCENE real saved scene
+test material::tests::multi_sub_resolves_per_face_id_and_missing_ids_are_black ... ok
+test modifier::modifier_list_tests::every_modifier_is_in_or_out ... ok
+test scene::skin_batch::tests::geometry_attachment_constraints_keep_serial_cycle_guards ... ok
+test scene::tests::add_node_assigns_increasing_ids_never_reused ... ok
+test scene::tests::next_name_follows_numbering_convention ... ok
+test scene::tests::remove_parent_keeps_children_world_transform ... ok
+test scene::skin_batch::tests::static_skin_keeps_timeless_cache_and_instanced_slots_use_serial ... ok
+test scene::tests::transform_matrix_roundtrip ... ok
+test scene::tests::parametric_box_mesh_matches_primitive ... ok
+test sun::tests::morning_sun_rises_in_the_east_and_night_is_below_the_horizon ... ok
+test scene::skin_batch::tests::batch_render_mode_and_changed_time_use_ordinary_cache_rules ... ok
+test scene::tests::set_parent_keeps_world_transform ... ok
+test sun::tests::noon_sun_is_south_and_high_in_june_in_san_francisco ... ok
+test skin::scratch_weight_tests::explicit_weights_reuse_scratch_capacity_and_strongest_keeps_last_tie ... ok
+test undo::tests::commit_then_undo_restores_scene ... ok
+test scene::skin_batch::tests::deferred_clone_preserves_borrowed_mesh_and_owned_nurms_inputs ... ok
+test sun::tests::dates ... ok
+test undo::tests::entry_identity_survives_redo_but_never_branches_resets_or_eviction ... ok
+test skin::scratch_weight_tests::owned_skin_application_keeps_input_mesh_allocation_and_reference_output ... ok
+test undo::tests::failed_group_leaves_scene_unchanged ... ok
+test undo::tests::limit_drops_oldest ... ok
+test undo::tests::redo_reapplies_and_new_commit_clears_redo ... ok
+test undo::tests::nested_begin_joins_the_outer_transaction ... ok
+test undo::tests::set_transform_undo_restores_position ... ok
+test undo::tests::remove_node_inverse_restores_children ... ok
+test undo::tests::transaction_collapses_drag_steps_into_one_and_ignores_limit ... ok
+test scene::skin_batch::tests::batch_jobs_preserve_full_output_cache_edits_and_worker_tls ... ok
+test skin::scratch_weight_tests::scratch_weights_match_public_reference_for_limits_flags_and_patch_owners ... ok
+
+test result: ok. 48 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

@@ -1,0 +1,7 @@
+
+running 1 test
+DEFERRED_CLONE poses=317 meshes=1585 old_batch_ms=3.119847 new_batch_ms=3.750280 saved_ms=-0.630433 old_prep_ms=1.834082 new_prep_ms=0.838190 old_exec_ms=1.277019 new_exec_ms=2.894902
+test scene::skin_batch::deferred_clone_probe::actual_deferred_clone_317 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 48 filtered out; finished in 7.90s
+
