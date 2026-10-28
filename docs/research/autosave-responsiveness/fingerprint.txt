@@ -1,0 +1,2 @@
+/home/b1s/dev/github/3dloom/target/release/.fingerprint/loom_app-1b6657686551f3c1/bin-loom.json
+/home/b1s/dev/github/3dloom/target/release/.fingerprint/loom_commands-7f3a283ca73e275d/lib-loom_commands

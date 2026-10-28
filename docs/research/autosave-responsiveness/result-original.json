@@ -1,0 +1,101 @@
+{
+  "backup": "/home/b1s/dev/github/3dloom/target/autosave-ray-probe/homes/b2e606b4-d71f-42e5-b932-1a6c15eb0294/autoback/IsolatedRayBackup01.loom",
+  "context": "isolated release path during native stability correctness test 32851; not quiet/native FPS",
+  "document_send": true,
+  "file_and_undo_state_unchanged": true,
+  "input": "/tmp/loom-conditioning-capture/input.loom",
+  "input_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "load_ms": 929.696761,
+  "mutable_animation_clone_isolated": true,
+  "nodes": 461,
+  "original_backup_now_ms": 547.730545,
+  "pretty_bytes": 271346303,
+  "private_loom_home": "/home/b1s/dev/github/3dloom/target/autosave-ray-probe/homes/b2e606b4-d71f-42e5-b932-1a6c15eb0294",
+  "props": [
+    {
+      "id": 5,
+      "name": "Ray_OfficeDesk",
+      "node_sha256": "e052a55094d6b63980b48ac89fe48a8dbf02282495e37d2dc68c8f0a8577450c",
+      "world_bits": [
+        1065353216,
+        452984832,
+        637796350,
+        0,
+        2785279995,
+        884998140,
+        1065353209,
+        0,
+        2592079866,
+        3212836857,
+        884998140,
+        0,
+        1150673222,
+        3289344330,
+        1119085434,
+        1065353216
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Ray_OfficeChair",
+      "node_sha256": "5baf39c720aca4759937f29891b40d3f4f3470d215d1faf5cbacc86f6eb10984",
+      "world_bits": [
+        3213971032,
+        1039794481,
+        3019882595,
+        0,
+        3016889572,
+        873604299,
+        1066542284,
+        0,
+        1039794483,
+        1066487385,
+        3029476556,
+        0,
+        1150512201,
+        3290501187,
+        1117542753,
+        1065353216
+      ]
+    }
+  ],
+  "reopen_ms": 673.1329870000001,
+  "retention_index_advanced_after_success": true,
+  "saved_bytes": 271346303,
+  "scene_send": true,
+  "scene_sha256": "4cf225a47205a3a4c1b1b16e99115d4a416fad4311a413750df4101f0acddd90",
+  "separate_pretty_serialization_ms": 356.025078,
+  "separate_snapshot_clone_ms": 3.935025,
+  "skins": [
+    {
+      "max_influences": 12,
+      "node": "Body001",
+      "skin_sha256": "1e05bafe0b9f99eb792ee384d7248ed1ec079c980787e09a6691201527fbda90",
+      "vertices": 12710
+    },
+    {
+      "max_influences": 12,
+      "node": "Face001",
+      "skin_sha256": "0a524ccb80bba43b9fac323c18fb59927eddd5f8b38be085698037a84e1ba7f2",
+      "vertices": 34271
+    },
+    {
+      "max_influences": 5,
+      "node": "SkeletalMesh001",
+      "skin_sha256": "383bb8c46795ad75d3059dd5ff6b7db907d68a4b6e0a62058aa2756af694fe6b",
+      "vertices": 3490
+    },
+    {
+      "max_influences": 8,
+      "node": "SkeletalMesh002",
+      "skin_sha256": "d72646b366ab5526d955b69f5a08a0c3119561cf00357c45a496594a1b6caf03",
+      "vertices": 9860
+    },
+    {
+      "max_influences": 8,
+      "node": "SkeletalMesh003",
+      "skin_sha256": "9abfd1464791f4dfff03c3c3500813424cadaad41abec963456716e7a2461fac",
+      "vertices": 3009
+    }
+  ]
+}
