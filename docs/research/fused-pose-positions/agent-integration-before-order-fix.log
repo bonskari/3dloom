@@ -1,0 +1,159 @@
+   Compiling loom_bevy v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_bevy)
+warning: fields `part` and `reason` are never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:15:14
+   |
+15 |     Layout { part: usize, reason: String },
+   |     ------   ^^^^         ^^^^^^
+   |     |
+   |     fields in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `0` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:16:14
+   |
+16 |     Readback(String),
+   |     -------- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+16 -     Readback(String),
+16 +     Readback(()),
+   |
+
+warning: fields `world_positions`, `pose`, and `tangent` are never read
+   --> crates/loom_bevy/src/gpu_pose_geometry.rs:180:5
+    |
+177 | pub(crate) struct GpuPoseGeometry {
+    |                   --------------- fields in this struct
+...
+180 |     world_positions: wgpu::Buffer,
+    |     ^^^^^^^^^^^^^^^
+...
+185 |     pose: wgpu::Buffer,
+    |     ^^^^
+186 |     tangent: Option<wgpu::Buffer>,
+    |     ^^^^^^^
+
+warning: methods `source_vertex_count`, `update_transform`, and `read_world_positions` are never used
+   --> crates/loom_bevy/src/gpu_pose_geometry.rs:476:19
+    |
+194 | impl GpuPoseGeometry {
+    | -------------------- methods in this implementation
+...
+476 |     pub(crate) fn source_vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^^^^^^^^
+...
+479 |     pub(crate) fn update_transform(&self, queue: &wgpu::Queue, world: Mat4) -> Result<(), String> {
+    |                   ^^^^^^^^^^^^^^^^
+...
+508 |     pub fn read_world_positions(
+    |            ^^^^^^^^^^^^^^^^^^^^
+
+warning: field `neighbors` is never read
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:195:5
+    |
+190 | pub(crate) struct Prepared {
+    |                   -------- field in this struct
+...
+195 |     neighbors: Vec<[i32; 3]>,
+    |     ^^^^^^^^^
+    |
+    = note: `Prepared` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: struct `StructuralKey` is never constructed
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:198:19
+    |
+198 | pub(crate) struct StructuralKey {
+    |                   ^^^^^^^^^^^^^
+
+warning: method `structural_key` is never used
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:204:19
+    |
+203 | impl Prepared {
+    | ------------- method in this implementation
+204 |     pub(crate) fn structural_key(&self) -> StructuralKey {
+    |                   ^^^^^^^^^^^^^^
+
+warning: associated items `new`, `encode`, and `encode_timed` are never used
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:296:19
+    |
+295 | impl GpuPreparation {
+    | ------------------- associated items in this implementation
+296 |     pub(crate) fn new(
+    |                   ^^^
+...
+438 |     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^
+...
+441 |     pub(crate) fn encode_timed(
+    |                   ^^^^^^^^^^^^
+
+warning: fields `params`, `uniform`, and `derivatives` are never read
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:204:5
+    |
+196 | pub(crate) struct GpuRecipeMath {
+    |                   ------------- fields in this struct
+...
+204 |     params: Params,
+    |     ^^^^^^
+205 |     uniform: wgpu::Buffer,
+    |     ^^^^^^^
+206 |     derivatives: wgpu::Buffer,
+    |     ^^^^^^^^^^^
+
+warning: associated items `new`, `vertex_count`, and `readback` are never used
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:209:19
+    |
+208 | impl GpuRecipeMath {
+    | ------------------ associated items in this implementation
+209 |     pub(crate) fn new(
+    |                   ^^^
+...
+379 |     pub(crate) fn vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^
+...
+575 |     pub(crate) fn readback(
+    |                   ^^^^^^^^
+
+warning: associated items `new`, `encode`, and `encode_math` are never used
+   --> crates/loom_bevy/src/gpu_pose_runtime.rs:41:19
+    |
+ 39 | impl GpuPoseRuntime {
+    | ------------------- associated items in this implementation
+ 40 |     /// Mesh positions are already the final CPU world-baked pose.
+ 41 |     pub(crate) fn new(
+    |                   ^^^
+...
+164 |     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^
+...
+168 |     pub(crate) fn encode_math(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^^^^^^
+
+warning: `loom_bevy` (lib) generated 11 warnings
+    Finished `release` profile [optimized] target(s) in 18.33s
+     Running tests/bake.rs (target/release/deps/bake-e370e6abf6d39d2c)
+
+running 1 test
+test a_lighting_map_is_brighter_under_the_spot_light ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.38s
+
+     Running tests/render.rs (target/release/deps/render-5609e26a3378ddbd)
+
+running 7 tests
+test a_red_spot_lights_a_plane_only_inside_its_cone ... ok
+test a_view_follows_its_camera ... ok
+test affine_objects_match_world_baked_geometry ... ok
+test buckets_join_into_the_full_frame ... ok
+test render_layers_pick_what_a_render_shows ... ok
+test rendering_control_flags_reach_the_render ... ok
+test renders_a_lit_red_box ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.29s
+

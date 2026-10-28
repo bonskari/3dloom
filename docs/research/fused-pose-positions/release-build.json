@@ -1,0 +1,9 @@
+{
+  "source_commit": "747cb9d4300b576c25c9d3d89078291cfcf0c75d",
+  "command": "cargo build -p loom_app --release -j4",
+  "binary_sha256": "ffbcdd60f5c83f7afea6ab60ec1d753860d7a3466b87490c3c0cdb12564a8e99",
+  "binary_bytes": 133965160,
+  "native_runtime_verified": false,
+  "experimental_default": "off",
+  "performance_verified": false
+}

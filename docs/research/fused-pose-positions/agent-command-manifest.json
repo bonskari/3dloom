@@ -1,0 +1,90 @@
+{
+  "input_path": "/tmp/loom-conditioning-capture/input.loom",
+  "input_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "final_source_sha256": {
+    "crates/loom_bevy/src/dynamic_geometry.rs": "5ea39c77fc50be99d81b95e5895ef541e91d87a62cb2ac76d24e4ce26dcd2503",
+    "crates/loom_bevy/src/gpu_pose_commit.rs": "01e79e3751bd2aae368f2fa0fd41671b7fb9bc6588f4fbf0d5047f7312d9dbf6",
+    "crates/loom_bevy/src/gpu_pose_renderer.rs": "f49e86b85d22f6471ce5b1d050fbc3b53dde6021a1c4c9e409e3bd4535073bb6",
+    "crates/loom_bevy/src/gpu_pose_runtime.rs": "15187a93c3a18832299def0f13d848b15c603659edf590cb6c21edf13c489fcd"
+  },
+  "unchanged_shader_sha256": {
+    "crates/loom_bevy/src/gpu_mikk_recipe.wgsl": "786edcbc6beaaf020df20840eaf24f29decbb9f69e7ac24fbabc46db6b602129",
+    "crates/loom_bevy/src/gpu_mikk_precision.wgsl": "daa19bffd2a34be32e2cba02dee47cb62c44c4656082862e7f23c1285ba4cbe7",
+    "crates/loom_bevy/src/gpu_mikk_refinement.wgsl": "bbfe876303abcf9b0ebcc3305489b97152c35248f05b54f7037b0f4d87e7ebcc"
+  },
+  "commands": {
+    "agent-api-red.log": {
+      "command": "cargo test -p loom_bevy --lib prepared_current_positions -j4 -- --test-threads=1",
+      "environment": {},
+      "cwd": "/home/b1s/dev/github/3dloom",
+      "log_sha256": "b8dc70ddf45110e8784c57eee429ec6cb1499c73b150daf51d4f0df8ae9f4bc3"
+    },
+    "agent-final-atomic-history.log": {
+      "command": "cargo test --release -p loom_bevy --lib fused_position -j4 -- --test-threads=1",
+      "environment": {},
+      "cwd": "/home/b1s/dev/github/3dloom",
+      "log_sha256": "e8ce367d6c3fb7d4fe676938e7c7ee358c9dcab934a2cca542370d5a185baf1b"
+    },
+    "agent-actual317-helper.log": {
+      "command": "cargo test --release -p loom_bevy --lib actual_ray_317_fused_position_history_bounds_bits -j4 -- --ignored --nocapture --test-threads=1",
+      "environment": {
+        "LOOM_PERF_SCENE": "/tmp/loom-conditioning-capture/input.loom"
+      },
+      "cwd": "/home/b1s/dev/github/3dloom",
+      "log_sha256": "3e8404adbda0555567a26641d402a0075c15ba5e9818b328469cd109160f3ea3"
+    },
+    "agent-final-renderer317.log": {
+      "command": "cargo test --release -p loom_bevy --lib actual_ray_fused_317_renderer_history_bounds_and_current_positions -j4 -- --ignored --nocapture --test-threads=1",
+      "environment": {
+        "LOOM_PERF_SCENE": "/tmp/loom-conditioning-capture/input.loom",
+        "LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS": "1"
+      },
+      "cwd": "/home/b1s/dev/github/3dloom",
+      "log_sha256": "34697322d22114fca46c10092b30bdda1f6c68f20e87ec9e7cb0d80dca9fc081"
+    },
+    "agent-final-gpu-parity.log": {
+      "command": "cargo test --release -p loom_bevy --lib actual_ray_precise_all_thirteen_parts_keep_current_pose_and_resources -j4 -- --ignored --nocapture --test-threads=1",
+      "environment": {
+        "LOOM_PERF_SCENE": "/tmp/loom-conditioning-capture/input.loom",
+        "LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS": "1"
+      },
+      "cwd": "/home/b1s/dev/github/3dloom",
+      "log_sha256": "24730b0140d5121f00bc42e816a40390b65c6226eea56a6f323b211d46b158e1"
+    },
+    "agent-final-default-suite.log": {
+      "command": "cargo test --release -p loom_bevy --lib -j4 -- --test-threads=1",
+      "environment": {},
+      "cwd": "/home/b1s/dev/github/3dloom",
+      "log_sha256": "ef9b3017f2a58a87cd31b0cd1e93f15b55ee0ee1b976e661f5a26db4a3afab5b"
+    },
+    "agent-final-on-suite.log": {
+      "command": "cargo test --release -p loom_bevy --lib -j4 -- --test-threads=1",
+      "environment": {
+        "LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS": "1"
+      },
+      "cwd": "/home/b1s/dev/github/3dloom",
+      "log_sha256": "25cca1fd0d301c82be338bb8dbe48d8de8b00e73eda2695cd011f475d00dfb3c"
+    },
+    "agent-runtime-rebuild-green.log": {
+      "command": "cargo test --release -p loom_bevy --lib cached_runtime_rebuilds_current_guards_and_changed_descriptors -j4 -- --nocapture --test-threads=1",
+      "environment": {
+        "LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS": "1"
+      },
+      "cwd": "/home/b1s/dev/github/3dloom",
+      "log_sha256": "286f6fc788aaa6b45f648e460f1bb1a801b8bf68594a893006ddc21a19c13ede"
+    },
+    "agent-integration-before-order-fix.log": {
+      "command": "cargo test --release -p loom_bevy --test bake --test render -j4 -- --test-threads=1",
+      "environment": {
+        "LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS": "1"
+      },
+      "cwd": "/home/b1s/dev/github/3dloom",
+      "log_sha256": "bfb0943314ea6ee5d6e2506e721cc4a21b3f1fb6b64ac071cb10559aa26c472d"
+    }
+  },
+  "notes": [
+    "No native timings claimed. Tests ran during parent native reliability window.",
+    "Helper317/runtime-rebuild/integration logs precede final copy-before-swap correction; final renderer317/GPU parity/default/on suite logs use final sources.",
+    "Environment entries are exact command prefixes. Commands without fused prefix used the default (unset) path."
+  ]
+}
