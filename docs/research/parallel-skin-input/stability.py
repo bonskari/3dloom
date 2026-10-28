@@ -13,16 +13,19 @@ def memory(pid):
 def filehash(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 ping=call('ping');assert ping['commit']==sys.argv[1], 'wrong binary for stability test';pid=ping['pid'];before=call('State');d=call('diagnostics')
+parallel=sys.argv[2] if len(sys.argv)>2 else 'unset';assert parallel in ['unset','1']
 env=Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
 assert not any(e.startswith((b'LOOM_PROFILE_FRAMES=',b'LOOM_EXPERIMENTAL_GPU_POSES=')) for e in env)
 assert not any(e.startswith((b'LOOM_EXPERIMENTAL_CPU_EDGE_BATCH=',b'LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS=')) for e in env)
+if parallel=='1':assert b'LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION=1' in env
+else:assert not any(e.startswith(b'LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION=') for e in env)
 assert not before['dirty'] and not before['animation']['playing'] and not before['animation']['auto_key']
 assert not before['undo_labels']
 prefs=d['modes']['prefs'];assert prefs['auto_backup_enable'] and prefs['auto_backup_interval_min']<=10
 original_file_hash=filehash(before['file']);assert original_file_hash=='84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935'
 # Two nondirty selection changes exercise the real backup clock without altering any model data.
 selected=before['selection']['selected'];alternate=4967 if selected!=[4967] else 4988
-emit({'kind':'start','app_pid':pid,'test_pid':os.getpid(),'commit':ping['commit'],'memory':memory(pid),'context':'production defaults with parallel Skin input preparation and limb controls; long playback/backup reliability, not a quiet FPS acceptance benchmark','backup_interval_min':prefs['auto_backup_interval_min']})
+emit({'kind':'start','app_pid':pid,'test_pid':os.getpid(),'commit':ping['commit'],'parallel_preparation':parallel,'memory':memory(pid),'context':'long playback/backup reliability with explicit recorded configuration; possible concurrent correctness work, not a quiet FPS acceptance benchmark','backup_interval_min':prefs['auto_backup_interval_min']})
 call('Select Nodes',ids=[alternate],op='replace');call('Select Nodes',ids=selected,op='replace')
 call('Viewport Shading',shading='Realistic');play_start=time.time();call('Play Animation')
 backup_paths=set();complete=False
