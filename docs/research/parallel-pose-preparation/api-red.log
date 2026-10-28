@@ -1,0 +1,16 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+   Compiling loom_bevy v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_bevy)
+error[E0425]: cannot find function `update_cached_runtimes` in this scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:322:20
+    |
+322 |         assert_eq!(update_cached_runtimes(&device, &queue, &mut cache, &jobs).unwrap_err(), "nonfinite current world position");
+    |                    ^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `update_cached_runtimes` in this scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:330:9
+    |
+330 |         update_cached_runtimes(&device, &queue, &mut cache, &jobs).unwrap();
+    |         ^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `loom_bevy` (lib test) due to 2 previous errors

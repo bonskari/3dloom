@@ -1,0 +1,361 @@
+warning: field `reason` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:15:27
+   |
+15 |     Layout { part: usize, reason: String },
+   |     ------                ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `0` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:16:14
+   |
+16 |     Readback(String),
+   |     -------- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+16 -     Readback(String),
+16 +     Readback(()),
+   |
+
+warning: method `vertex_count` is never used
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:379:19
+    |
+208 | impl GpuRecipeMath {
+    | ------------------ method in this implementation
+...
+379 |     pub(crate) fn vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^
+
+warning: `loom_bevy` (lib test) generated 3 warnings
+    Finished `release` profile [optimized] target(s) in 0.36s
+     Running unittests src/lib.rs (target/release/deps/loom_bevy-d37bfa3ba707912c)
+
+running 1 test
+test gpu_pose_renderer::tests::actual_ray_fused_317_renderer_history_bounds_and_current_positions ... RAY_GPU_RENDERER time=0 sync_ms=806.825
+RAY_GPU_RENDERER time=1 sync_ms=5.600
+RAY_GPU_RENDERER time=2 sync_ms=5.028
+RAY_GPU_RENDERER time=3 sync_ms=6.057
+RAY_GPU_RENDERER time=4 sync_ms=5.409
+RAY_GPU_RENDERER time=5 sync_ms=5.853
+RAY_GPU_RENDERER time=6 sync_ms=5.164
+RAY_GPU_RENDERER time=7 sync_ms=5.558
+RAY_GPU_RENDERER time=8 sync_ms=4.800
+RAY_GPU_RENDERER time=9 sync_ms=5.350
+RAY_GPU_RENDERER time=10 sync_ms=4.893
+RAY_GPU_RENDERER time=11 sync_ms=5.292
+RAY_GPU_RENDERER time=12 sync_ms=5.522
+RAY_GPU_RENDERER time=13 sync_ms=5.115
+RAY_GPU_RENDERER time=14 sync_ms=5.814
+RAY_GPU_RENDERER time=15 sync_ms=4.955
+RAY_GPU_RENDERER time=16 sync_ms=5.488
+RAY_GPU_RENDERER time=17 sync_ms=5.394
+RAY_GPU_RENDERER time=18 sync_ms=5.232
+RAY_GPU_RENDERER time=19 sync_ms=4.795
+RAY_GPU_RENDERER time=20 sync_ms=5.097
+RAY_GPU_RENDERER time=21 sync_ms=5.054
+RAY_GPU_RENDERER time=22 sync_ms=5.395
+RAY_GPU_RENDERER time=23 sync_ms=5.367
+RAY_GPU_RENDERER time=24 sync_ms=6.065
+RAY_GPU_RENDERER time=25 sync_ms=5.187
+RAY_GPU_RENDERER time=26 sync_ms=5.033
+RAY_GPU_RENDERER time=27 sync_ms=4.933
+RAY_GPU_RENDERER time=28 sync_ms=4.822
+RAY_GPU_RENDERER time=29 sync_ms=6.048
+RAY_GPU_RENDERER time=30 sync_ms=5.490
+RAY_GPU_RENDERER time=31 sync_ms=6.934
+RAY_GPU_RENDERER time=32 sync_ms=5.454
+RAY_GPU_RENDERER time=33 sync_ms=5.457
+RAY_GPU_RENDERER time=34 sync_ms=4.904
+RAY_GPU_RENDERER time=35 sync_ms=5.224
+RAY_GPU_RENDERER time=36 sync_ms=5.659
+RAY_GPU_RENDERER time=37 sync_ms=4.928
+RAY_GPU_RENDERER time=38 sync_ms=5.307
+RAY_GPU_RENDERER time=39 sync_ms=5.533
+RAY_GPU_RENDERER time=40 sync_ms=5.261
+RAY_GPU_RENDERER time=41 sync_ms=5.388
+RAY_GPU_RENDERER time=42 sync_ms=5.292
+RAY_GPU_RENDERER time=43 sync_ms=5.450
+RAY_GPU_RENDERER time=44 sync_ms=4.936
+RAY_GPU_RENDERER time=45 sync_ms=4.988
+RAY_GPU_RENDERER time=46 sync_ms=6.072
+RAY_GPU_RENDERER time=47 sync_ms=5.058
+RAY_GPU_RENDERER time=48 sync_ms=5.608
+RAY_GPU_RENDERER time=49 sync_ms=5.240
+RAY_GPU_RENDERER time=50 sync_ms=6.137
+RAY_GPU_RENDERER time=51 sync_ms=5.191
+RAY_GPU_RENDERER time=52 sync_ms=5.464
+RAY_GPU_RENDERER time=53 sync_ms=5.830
+RAY_GPU_RENDERER time=54 sync_ms=5.263
+RAY_GPU_RENDERER time=55 sync_ms=5.702
+RAY_GPU_RENDERER time=56 sync_ms=4.948
+RAY_GPU_RENDERER time=57 sync_ms=5.197
+RAY_GPU_RENDERER time=58 sync_ms=5.773
+RAY_GPU_RENDERER time=59 sync_ms=5.099
+RAY_GPU_RENDERER time=60 sync_ms=5.051
+RAY_GPU_RENDERER time=61 sync_ms=5.501
+RAY_GPU_RENDERER time=62 sync_ms=5.307
+RAY_GPU_RENDERER time=63 sync_ms=7.418
+RAY_GPU_RENDERER time=64 sync_ms=5.289
+RAY_GPU_RENDERER time=65 sync_ms=5.202
+RAY_GPU_RENDERER time=66 sync_ms=5.174
+RAY_GPU_RENDERER time=67 sync_ms=4.874
+RAY_GPU_RENDERER time=68 sync_ms=7.619
+RAY_GPU_RENDERER time=69 sync_ms=5.549
+RAY_GPU_RENDERER time=70 sync_ms=5.288
+RAY_GPU_RENDERER time=71 sync_ms=6.327
+RAY_GPU_RENDERER time=72 sync_ms=5.650
+RAY_GPU_RENDERER time=73 sync_ms=5.658
+RAY_GPU_RENDERER time=74 sync_ms=5.409
+RAY_GPU_RENDERER time=75 sync_ms=6.055
+RAY_GPU_RENDERER time=76 sync_ms=5.883
+RAY_GPU_RENDERER time=77 sync_ms=4.928
+RAY_GPU_RENDERER time=78 sync_ms=5.205
+RAY_GPU_RENDERER time=79 sync_ms=6.275
+RAY_GPU_RENDERER time=80 sync_ms=5.241
+RAY_GPU_RENDERER time=81 sync_ms=5.341
+RAY_GPU_RENDERER time=82 sync_ms=5.156
+RAY_GPU_RENDERER time=83 sync_ms=6.000
+RAY_GPU_RENDERER time=84 sync_ms=5.685
+RAY_GPU_RENDERER time=85 sync_ms=4.951
+RAY_GPU_RENDERER time=86 sync_ms=5.133
+RAY_GPU_RENDERER time=87 sync_ms=5.116
+RAY_GPU_RENDERER time=88 sync_ms=5.434
+RAY_GPU_RENDERER time=89 sync_ms=4.979
+RAY_GPU_RENDERER time=90 sync_ms=5.665
+RAY_GPU_RENDERER time=91 sync_ms=5.269
+RAY_GPU_RENDERER time=92 sync_ms=5.025
+RAY_GPU_RENDERER time=93 sync_ms=5.762
+RAY_GPU_RENDERER time=94 sync_ms=5.054
+RAY_GPU_RENDERER time=95 sync_ms=5.560
+RAY_GPU_RENDERER time=96 sync_ms=5.235
+RAY_GPU_RENDERER time=97 sync_ms=5.028
+RAY_GPU_RENDERER time=98 sync_ms=5.361
+RAY_GPU_RENDERER time=99 sync_ms=5.306
+RAY_GPU_RENDERER time=100 sync_ms=6.242
+RAY_GPU_RENDERER time=101 sync_ms=5.265
+RAY_GPU_RENDERER time=102 sync_ms=4.976
+RAY_GPU_RENDERER time=103 sync_ms=5.027
+RAY_GPU_RENDERER time=104 sync_ms=5.562
+RAY_GPU_RENDERER time=105 sync_ms=5.365
+RAY_GPU_RENDERER time=106 sync_ms=5.692
+RAY_GPU_RENDERER time=107 sync_ms=5.031
+RAY_GPU_RENDERER time=108 sync_ms=5.248
+RAY_GPU_RENDERER time=109 sync_ms=4.966
+RAY_GPU_RENDERER time=110 sync_ms=5.001
+RAY_GPU_RENDERER time=111 sync_ms=6.081
+RAY_GPU_RENDERER time=112 sync_ms=5.363
+RAY_GPU_RENDERER time=113 sync_ms=5.227
+RAY_GPU_RENDERER time=114 sync_ms=5.440
+RAY_GPU_RENDERER time=115 sync_ms=6.124
+RAY_GPU_RENDERER time=116 sync_ms=5.312
+RAY_GPU_RENDERER time=117 sync_ms=5.134
+RAY_GPU_RENDERER time=118 sync_ms=5.107
+RAY_GPU_RENDERER time=119 sync_ms=5.304
+RAY_GPU_RENDERER time=120 sync_ms=4.964
+RAY_GPU_RENDERER time=121 sync_ms=5.306
+RAY_GPU_RENDERER time=122 sync_ms=5.222
+RAY_GPU_RENDERER time=123 sync_ms=5.167
+RAY_GPU_RENDERER time=124 sync_ms=5.495
+RAY_GPU_RENDERER time=125 sync_ms=5.645
+RAY_GPU_RENDERER time=126 sync_ms=5.417
+RAY_GPU_RENDERER time=127 sync_ms=5.146
+RAY_GPU_RENDERER time=128 sync_ms=5.219
+RAY_GPU_RENDERER time=129 sync_ms=5.175
+RAY_GPU_RENDERER time=130 sync_ms=5.284
+RAY_GPU_RENDERER time=131 sync_ms=5.206
+RAY_GPU_RENDERER time=132 sync_ms=5.541
+RAY_GPU_RENDERER time=133 sync_ms=5.519
+RAY_GPU_RENDERER time=134 sync_ms=6.088
+RAY_GPU_RENDERER time=135 sync_ms=5.482
+RAY_GPU_RENDERER time=136 sync_ms=5.246
+RAY_GPU_RENDERER time=137 sync_ms=5.135
+RAY_GPU_RENDERER time=138 sync_ms=5.137
+RAY_GPU_RENDERER time=139 sync_ms=5.074
+RAY_GPU_RENDERER time=140 sync_ms=5.569
+RAY_GPU_RENDERER time=141 sync_ms=6.930
+RAY_GPU_RENDERER time=142 sync_ms=6.578
+RAY_GPU_RENDERER time=143 sync_ms=4.702
+RAY_GPU_RENDERER time=144 sync_ms=5.191
+RAY_GPU_RENDERER time=145 sync_ms=4.961
+RAY_GPU_RENDERER time=146 sync_ms=5.163
+RAY_GPU_RENDERER time=147 sync_ms=5.404
+RAY_GPU_RENDERER time=148 sync_ms=4.768
+RAY_GPU_RENDERER time=149 sync_ms=5.814
+RAY_GPU_RENDERER time=150 sync_ms=4.717
+RAY_GPU_RENDERER time=151 sync_ms=5.954
+RAY_GPU_RENDERER time=152 sync_ms=5.490
+RAY_GPU_RENDERER time=153 sync_ms=5.603
+RAY_GPU_RENDERER time=154 sync_ms=5.617
+RAY_GPU_RENDERER time=155 sync_ms=5.908
+RAY_GPU_RENDERER time=156 sync_ms=5.105
+RAY_GPU_RENDERER time=157 sync_ms=5.140
+RAY_GPU_RENDERER time=39.25 sync_ms=5.066
+RAY_GPU_RENDERER time=0.5 sync_ms=4.825
+RAY_GPU_RENDERER time=1.5 sync_ms=5.590
+RAY_GPU_RENDERER time=2.5 sync_ms=5.480
+RAY_GPU_RENDERER time=3.5 sync_ms=5.286
+RAY_GPU_RENDERER time=4.5 sync_ms=6.153
+RAY_GPU_RENDERER time=5.5 sync_ms=5.599
+RAY_GPU_RENDERER time=6.5 sync_ms=6.529
+RAY_GPU_RENDERER time=7.5 sync_ms=5.358
+RAY_GPU_RENDERER time=8.5 sync_ms=5.328
+RAY_GPU_RENDERER time=9.5 sync_ms=5.249
+RAY_GPU_RENDERER time=10.5 sync_ms=5.545
+RAY_GPU_RENDERER time=11.5 sync_ms=5.108
+RAY_GPU_RENDERER time=12.5 sync_ms=5.038
+RAY_GPU_RENDERER time=13.5 sync_ms=5.266
+RAY_GPU_RENDERER time=14.5 sync_ms=5.099
+RAY_GPU_RENDERER time=15.5 sync_ms=4.852
+RAY_GPU_RENDERER time=16.5 sync_ms=4.845
+RAY_GPU_RENDERER time=17.5 sync_ms=5.280
+RAY_GPU_RENDERER time=18.5 sync_ms=5.642
+RAY_GPU_RENDERER time=19.5 sync_ms=5.525
+RAY_GPU_RENDERER time=20.5 sync_ms=5.691
+RAY_GPU_RENDERER time=21.5 sync_ms=5.081
+RAY_GPU_RENDERER time=22.5 sync_ms=5.510
+RAY_GPU_RENDERER time=23.5 sync_ms=5.003
+RAY_GPU_RENDERER time=24.5 sync_ms=4.912
+RAY_GPU_RENDERER time=25.5 sync_ms=4.931
+RAY_GPU_RENDERER time=26.5 sync_ms=5.984
+RAY_GPU_RENDERER time=27.5 sync_ms=4.845
+RAY_GPU_RENDERER time=28.5 sync_ms=4.793
+RAY_GPU_RENDERER time=29.5 sync_ms=4.765
+RAY_GPU_RENDERER time=30.5 sync_ms=5.507
+RAY_GPU_RENDERER time=31.5 sync_ms=4.938
+RAY_GPU_RENDERER time=32.5 sync_ms=5.701
+RAY_GPU_RENDERER time=33.5 sync_ms=5.268
+RAY_GPU_RENDERER time=34.5 sync_ms=5.321
+RAY_GPU_RENDERER time=35.5 sync_ms=5.300
+RAY_GPU_RENDERER time=36.5 sync_ms=5.177
+RAY_GPU_RENDERER time=37.5 sync_ms=5.397
+RAY_GPU_RENDERER time=38.5 sync_ms=5.272
+RAY_GPU_RENDERER time=39.5 sync_ms=5.485
+RAY_GPU_RENDERER time=40.5 sync_ms=5.057
+RAY_GPU_RENDERER time=41.5 sync_ms=5.208
+RAY_GPU_RENDERER time=42.5 sync_ms=5.345
+RAY_GPU_RENDERER time=43.5 sync_ms=5.085
+RAY_GPU_RENDERER time=44.5 sync_ms=6.246
+RAY_GPU_RENDERER time=45.5 sync_ms=5.124
+RAY_GPU_RENDERER time=46.5 sync_ms=5.158
+RAY_GPU_RENDERER time=47.5 sync_ms=5.365
+RAY_GPU_RENDERER time=48.5 sync_ms=5.215
+RAY_GPU_RENDERER time=49.5 sync_ms=6.000
+RAY_GPU_RENDERER time=50.5 sync_ms=4.941
+RAY_GPU_RENDERER time=51.5 sync_ms=5.361
+RAY_GPU_RENDERER time=52.5 sync_ms=5.205
+RAY_GPU_RENDERER time=53.5 sync_ms=5.252
+RAY_GPU_RENDERER time=54.5 sync_ms=4.947
+RAY_GPU_RENDERER time=55.5 sync_ms=4.995
+RAY_GPU_RENDERER time=56.5 sync_ms=5.680
+RAY_GPU_RENDERER time=57.5 sync_ms=5.148
+RAY_GPU_RENDERER time=58.5 sync_ms=5.263
+RAY_GPU_RENDERER time=59.5 sync_ms=5.092
+RAY_GPU_RENDERER time=60.5 sync_ms=4.966
+RAY_GPU_RENDERER time=61.5 sync_ms=4.967
+RAY_GPU_RENDERER time=62.5 sync_ms=5.236
+RAY_GPU_RENDERER time=63.5 sync_ms=4.641
+RAY_GPU_RENDERER time=64.5 sync_ms=5.360
+RAY_GPU_RENDERER time=65.5 sync_ms=5.232
+RAY_GPU_RENDERER time=66.5 sync_ms=4.948
+RAY_GPU_RENDERER time=67.5 sync_ms=5.074
+RAY_GPU_RENDERER time=68.5 sync_ms=5.346
+RAY_GPU_RENDERER time=69.5 sync_ms=5.047
+RAY_GPU_RENDERER time=70.5 sync_ms=5.377
+RAY_GPU_RENDERER time=71.5 sync_ms=5.092
+RAY_GPU_RENDERER time=72.5 sync_ms=4.644
+RAY_GPU_RENDERER time=73.5 sync_ms=5.746
+RAY_GPU_RENDERER time=74.5 sync_ms=4.876
+RAY_GPU_RENDERER time=75.5 sync_ms=5.294
+RAY_GPU_RENDERER time=76.5 sync_ms=5.479
+RAY_GPU_RENDERER time=77.5 sync_ms=4.833
+RAY_GPU_RENDERER time=78.5 sync_ms=4.894
+RAY_GPU_RENDERER time=79.5 sync_ms=4.709
+RAY_GPU_RENDERER time=80.5 sync_ms=4.799
+RAY_GPU_RENDERER time=81.5 sync_ms=5.135
+RAY_GPU_RENDERER time=82.5 sync_ms=5.708
+RAY_GPU_RENDERER time=83.5 sync_ms=4.873
+RAY_GPU_RENDERER time=84.5 sync_ms=5.795
+RAY_GPU_RENDERER time=85.5 sync_ms=5.302
+RAY_GPU_RENDERER time=86.5 sync_ms=5.691
+RAY_GPU_RENDERER time=87.5 sync_ms=5.205
+RAY_GPU_RENDERER time=88.5 sync_ms=4.955
+RAY_GPU_RENDERER time=89.5 sync_ms=5.141
+RAY_GPU_RENDERER time=90.5 sync_ms=6.489
+RAY_GPU_RENDERER time=91.5 sync_ms=4.809
+RAY_GPU_RENDERER time=92.5 sync_ms=5.521
+RAY_GPU_RENDERER time=93.5 sync_ms=5.158
+RAY_GPU_RENDERER time=94.5 sync_ms=5.134
+RAY_GPU_RENDERER time=95.5 sync_ms=4.908
+RAY_GPU_RENDERER time=96.5 sync_ms=5.022
+RAY_GPU_RENDERER time=97.5 sync_ms=5.597
+RAY_GPU_RENDERER time=98.5 sync_ms=5.067
+RAY_GPU_RENDERER time=99.5 sync_ms=6.730
+RAY_GPU_RENDERER time=100.5 sync_ms=4.975
+RAY_GPU_RENDERER time=101.5 sync_ms=5.593
+RAY_GPU_RENDERER time=102.5 sync_ms=5.028
+RAY_GPU_RENDERER time=103.5 sync_ms=5.740
+RAY_GPU_RENDERER time=104.5 sync_ms=5.179
+RAY_GPU_RENDERER time=105.5 sync_ms=5.535
+RAY_GPU_RENDERER time=106.5 sync_ms=5.145
+RAY_GPU_RENDERER time=107.5 sync_ms=5.002
+RAY_GPU_RENDERER time=108.5 sync_ms=5.458
+RAY_GPU_RENDERER time=109.5 sync_ms=4.962
+RAY_GPU_RENDERER time=110.5 sync_ms=5.116
+RAY_GPU_RENDERER time=111.5 sync_ms=5.115
+RAY_GPU_RENDERER time=112.5 sync_ms=6.360
+RAY_GPU_RENDERER time=113.5 sync_ms=5.382
+RAY_GPU_RENDERER time=114.5 sync_ms=5.295
+RAY_GPU_RENDERER time=115.5 sync_ms=4.808
+RAY_GPU_RENDERER time=116.5 sync_ms=5.009
+RAY_GPU_RENDERER time=117.5 sync_ms=5.117
+RAY_GPU_RENDERER time=118.5 sync_ms=5.107
+RAY_GPU_RENDERER time=119.5 sync_ms=5.045
+RAY_GPU_RENDERER time=120.5 sync_ms=5.164
+RAY_GPU_RENDERER time=121.5 sync_ms=4.921
+RAY_GPU_RENDERER time=122.5 sync_ms=5.630
+RAY_GPU_RENDERER time=123.5 sync_ms=5.037
+RAY_GPU_RENDERER time=124.5 sync_ms=5.493
+RAY_GPU_RENDERER time=125.5 sync_ms=4.880
+RAY_GPU_RENDERER time=126.5 sync_ms=5.567
+RAY_GPU_RENDERER time=127.5 sync_ms=4.856
+RAY_GPU_RENDERER time=128.5 sync_ms=5.768
+RAY_GPU_RENDERER time=129.5 sync_ms=7.029
+RAY_GPU_RENDERER time=130.5 sync_ms=5.597
+RAY_GPU_RENDERER time=131.5 sync_ms=5.094
+RAY_GPU_RENDERER time=132.5 sync_ms=5.242
+RAY_GPU_RENDERER time=133.5 sync_ms=5.361
+RAY_GPU_RENDERER time=134.5 sync_ms=5.696
+RAY_GPU_RENDERER time=135.5 sync_ms=4.955
+RAY_GPU_RENDERER time=136.5 sync_ms=5.375
+RAY_GPU_RENDERER time=137.5 sync_ms=5.883
+RAY_GPU_RENDERER time=138.5 sync_ms=5.058
+RAY_GPU_RENDERER time=139.5 sync_ms=6.114
+RAY_GPU_RENDERER time=140.5 sync_ms=5.220
+RAY_GPU_RENDERER time=141.5 sync_ms=5.293
+RAY_GPU_RENDERER time=142.5 sync_ms=4.885
+RAY_GPU_RENDERER time=143.5 sync_ms=5.041
+RAY_GPU_RENDERER time=144.5 sync_ms=5.471
+RAY_GPU_RENDERER time=145.5 sync_ms=5.035
+RAY_GPU_RENDERER time=146.5 sync_ms=5.728
+RAY_GPU_RENDERER time=147.5 sync_ms=5.132
+RAY_GPU_RENDERER time=148.5 sync_ms=5.016
+RAY_GPU_RENDERER time=149.5 sync_ms=5.004
+RAY_GPU_RENDERER time=150.5 sync_ms=5.417
+RAY_GPU_RENDERER time=151.5 sync_ms=5.258
+RAY_GPU_RENDERER time=152.5 sync_ms=5.567
+RAY_GPU_RENDERER time=153.5 sync_ms=5.851
+RAY_GPU_RENDERER time=154.5 sync_ms=4.855
+RAY_GPU_RENDERER time=155.5 sync_ms=5.774
+RAY_GPU_RENDERER time=156.5 sync_ms=5.077
+RAY_GPU_RENDERER time=157.5 sync_ms=6.162
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 127 filtered out; finished in 15.75s
+

@@ -6,6 +6,35 @@ use crate::gpu_pose_runtime::GpuPoseRuntime;
 use crate::gpu_pose_geometry::mikk_recipe::GpuRecipeMath;
 use bevy::render::primitives::Aabb;
 
+fn parallel_preparation_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION").as_deref() == Some(std::ffi::OsStr::new("1")))
+}
+
+type CachedRuntimeUpdate<'a> = ((bool, u64), &'a loom_mesh::Mesh, Vec<(Option<u16>, bool)>);
+
+fn update_cached_runtimes(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    cache: &mut HashMap<(bool, u64), GpuPoseRuntime>,
+    jobs: &[CachedRuntimeUpdate<'_>],
+) -> Result<(), String> {
+    let _scope = loom_render::profile::Scope::new("gpu_pose.runtime_batch");
+    let ready: Vec<_> = cache.iter_mut().filter_map(|(key, runtime)| {
+        jobs.iter().enumerate().find(|(_, (id, _, _))| id == key)
+            .map(|(index, (_, mesh, descriptors))| (index, runtime, *mesh, descriptors.as_slice()))
+    }).collect();
+    assert_eq!(ready.len(), jobs.len(), "each scheduled runtime must exist");
+    let mut results = bevy_tasks::ComputeTaskPool::get().scope(|scope| {
+        for (index, runtime, mesh, descriptors) in ready {
+            scope.spawn(async move { (index, runtime.update(device, queue, mesh, descriptors)) });
+        }
+    });
+    results.sort_unstable_by_key(|(index, _)| *index);
+    for (_, result) in results { result?; }
+    Ok(())
+}
+
 /// All source vertices of one successfully committed current world-space pose.
 #[derive(Clone)]
 pub struct GpuPoseSource {
@@ -154,6 +183,8 @@ impl GpuPoseState {
         self.cache
             .retain(|(h, id), _| *h != hidden || seen.contains(id));
         let mut eligible = HashSet::new();
+        let parallel = parallel_preparation_enabled();
+        let mut jobs = Vec::new();
         for source in objects {
             let Some(object) = set.get(&source.id).filter(|o| {
                 o.dynamic
@@ -194,7 +225,9 @@ impl GpuPoseState {
                 })
                 .collect();
             let key = (hidden, source.id);
-            if let Some(runtime) = self.cache.get_mut(&key) {
+            if parallel && self.cache.contains_key(&key) {
+                jobs.push((key, source.mesh, descriptors));
+            } else if let Some(runtime) = self.cache.get_mut(&key) {
                 runtime.update(device, queue, source.mesh, &descriptors)?;
             } else {
                 self.cache.insert(
@@ -203,6 +236,9 @@ impl GpuPoseState {
                 );
             }
             eligible.insert(source.id);
+        }
+        if !jobs.is_empty() {
+            update_cached_runtimes(device, queue, &mut self.cache, &jobs)?;
         }
         if eligible.is_empty() {
             return Ok((Vec::new(), None));
@@ -299,6 +335,67 @@ impl GpuPoseState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parallel_cached_runtime_updates_preserve_sources_and_recover_late_failure() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter), None)).unwrap();
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        bevy_tasks::ComputeTaskPool::get_or_init(|| bevy_tasks::TaskPoolBuilder::new().num_threads(4).build());
+        let precise = GpuPoseState::selected(&device, None).and_then(|state| state.precision);
+        for precision in [None, precise] {
+            let first = loom_mesh::box_primitive(Vec3::ONE);
+            let second = loom_mesh::box_primitive(Vec3::new(1., 2., 3.));
+            let descriptors = vec![(None, false)];
+            let make_cache = || HashMap::from([
+                ((false, 1), GpuPoseRuntime::with_precision(&device, &queue, &first, &descriptors, precision.clone()).unwrap()),
+                ((true, 2), GpuPoseRuntime::with_precision(&device, &queue, &second, &descriptors, precision.clone()).unwrap()),
+            ]);
+            let mut cache = make_cache();
+            let mut baseline = make_cache();
+            let mut moved = first.clone();
+            loom_mesh::edit_ops::translate_mesh(&mut moved, Vec3::new(2., -3., 4.)).unwrap();
+            let mut invalid = second.clone();
+            invalid.vertices_mut()[0].position.x = f32::NAN;
+            let jobs = vec![((false, 1), &moved, descriptors.clone()), ((true, 2), &invalid, descriptors.clone())];
+            assert_eq!(update_cached_runtimes(&device, &queue, &mut cache, &jobs).unwrap_err(), "nonfinite current world position");
+            assert_eq!(cache.len(), 2, "failed source must not lose either runtime");
+            let expected = crate::convert::mesh_data(&moved).positions;
+            let candidate = cache.get_mut(&(false, 1)).unwrap().commit_candidates();
+            if let Some(prepared) = candidate[0].prepared.as_ref() { prepared.assert_current_bits(&expected); }
+            else { assert_eq!(candidate[0].positions, expected); }
+            drop(candidate);
+            let jobs = vec![((false, 1), &moved, descriptors), ((true, 2), &second, vec![(None, true)])];
+            update_cached_runtimes(&device, &queue, &mut cache, &jobs).unwrap();
+            for (key, mesh, descriptors) in &jobs {
+                baseline.get_mut(key).unwrap().update(&device, &queue, mesh, descriptors).unwrap();
+            }
+            for (key, mesh, _) in &jobs {
+                let expected = crate::convert::mesh_data(mesh).positions;
+                let candidate = cache.get_mut(key).unwrap().commit_candidates();
+                assert_eq!(candidate.len(), 1);
+                if let Some(prepared) = candidate[0].prepared.as_ref() { prepared.assert_current_bits(&expected); }
+                else { assert_eq!(candidate[0].positions, expected); }
+            }
+            let records = |cache: &HashMap<_, GpuPoseRuntime>| {
+                let mut encoder = device.create_command_encoder(&Default::default());
+                for runtime in cache.values() { runtime.encode(&mut encoder); }
+                queue.submit([encoder.finish()]);
+                cache.iter().map(|(key, runtime)| {
+                    let parts = runtime.maths().into_iter().map(|math| {
+                        let records = math.readback(&device, &queue).unwrap();
+                        bytemuck::cast_slice::<_, u8>(&records).to_vec()
+                    }).collect::<Vec<_>>();
+                    (*key, parts)
+                }).collect::<HashMap<_, _>>()
+            };
+            assert_eq!(records(&cache), records(&baseline), "parallel preparation changed complete GPU records");
+            assert_eq!(first, loom_mesh::box_primitive(Vec3::ONE));
+            assert_eq!(second, loom_mesh::box_primitive(Vec3::new(1., 2., 3.)));
+        }
+        assert!(pollster::block_on(device.pop_error_scope()).is_none());
+    }
 
     #[test]
     fn default_selection_on_supported_device_uses_precise_geometry() {

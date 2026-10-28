@@ -15,6 +15,8 @@ import time
 output = Path(sys.argv[1])
 expected_mode = sys.argv[2]
 expected_commit = sys.argv[3]
+expected_parallel = sys.argv[4] if len(sys.argv) > 4 else 'unset'
+assert expected_parallel in ['unset', '1']
 
 def call(command, **args):
     with socket.socket(socket.AF_UNIX) as sock:
@@ -49,6 +51,10 @@ else:
     assert ('LOOM_EXPERIMENTAL_GPU_POSES=' + expected_mode).encode() in env
 assert not any(e.startswith(b'LOOM_PROFILE_FRAMES=') for e in env)
 assert not any(e.startswith((b'LOOM_EXPERIMENTAL_CPU_EDGE_BATCH=', b'LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS=')) for e in env), 'Production acceptance requires unset feature overrides'
+if expected_parallel == '1':
+    assert b'LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION=1' in env
+else:
+    assert not any(e.startswith(b'LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION=') for e in env)
 call('input', events=[{'type': 'leave'}])
 before = call('State')
 initial = diag()
@@ -58,7 +64,8 @@ scene = Path(before['file'])
 scene_hash = hashlib.sha256(scene.read_bytes()).hexdigest()
 original_shading = initial['viewports']['active_view']['shading']
 original_selection = before['selection']
-emit({'kind': 'start', 'pid': pid, 'commit': ping['commit'], 'mode': expected_mode, 'experimental_overrides_unset': True,
+emit({'kind': 'start', 'pid': pid, 'commit': ping['commit'], 'mode': expected_mode, 'parallel_preparation': expected_parallel,
+      'experimental_overrides_unset': not any(e.startswith(b'LOOM_EXPERIMENTAL_') for e in env),
       'frame': before['frame'], 'scene_sha256': scene_hash})
 try:
     for shading in ['Realistic', 'Wireframe']:
