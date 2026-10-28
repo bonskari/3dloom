@@ -356,20 +356,12 @@ impl ViewportRenderer {
             pass.set_pipeline(self.grid.line_pipeline());
             pass.set_bind_group(0, bind_group, &[]);
             if show_edges {
-                for mb in meshes.iter().filter(|mb| mb.edge_vertex_count > 0) {
-                    pass.set_vertex_buffer(0, mb.edge_buffer().slice(..));
-                    pass.draw(0..mb.edge_vertex_count, 0..1);
-                }
+                record_edges(pass, meshes.iter().copied());
             }
             if !selected.is_empty() {
                 pass.set_pipeline(self.grid.selected_line_pipeline());
             }
-            for &idx in selected {
-                if let Some(mb) = meshes.get(idx).filter(|mb| mb.edge_vertex_count > 0) {
-                    pass.set_vertex_buffer(0, mb.edge_buffer().slice(..));
-                    pass.draw(0..mb.edge_vertex_count, 0..1);
-                }
-            }
+            record_edges(pass, selected.iter().filter_map(|&idx| meshes.get(idx).copied()));
         }
         if let Some(lines) = lines {
             pass.set_pipeline(self.grid.line_pipeline());
@@ -377,6 +369,30 @@ impl ViewportRenderer {
             pass.set_vertex_buffer(0, lines.buffer.slice(..));
             pass.draw(0..lines.count, 0..1);
         }
+    }
+}
+
+// Only consecutive ranges in the same buffer can share a LineList draw.
+fn record_edges<'a>(pass: &mut RenderPass<'_>, meshes: impl Iterator<Item = &'a MeshBuffer>) {
+    let mut pending: Option<(&Buffer, std::ops::Range<u32>)> = None;
+    for mesh in meshes.filter(|mesh| mesh.edge_vertex_count > 0) {
+        let buffer = mesh.edge_buffer();
+        let range = mesh.edge_range();
+        if let Some((previous, previous_range)) = &mut pending {
+            if *previous == buffer && previous_range.end == range.start && (previous_range.end - previous_range.start) % 2 == 0 {
+                previous_range.end = range.end;
+                continue;
+            }
+        }
+        if let Some((previous, range)) = pending.take() {
+            pass.set_vertex_buffer(0, previous.slice(..));
+            pass.draw(range, 0..1);
+        }
+        pending = Some((buffer, range));
+    }
+    if let Some((buffer, range)) = pending {
+        pass.set_vertex_buffer(0, buffer.slice(..));
+        pass.draw(range, 0..1);
     }
 }
 
@@ -491,11 +507,27 @@ mod selected_line_tests {
                     ..Default::default()
                 },
             ];
-            let buffers: Vec<_> = meshes
+            let mut buffers: Vec<_> = meshes
                 .iter()
                 .zip(&styles)
                 .map(|(m, s)| MeshBuffer::from_mesh(&device, m, s.clone()))
                 .collect();
+            if format == TextureFormat::Rgba8UnormSrgb {
+                let positions: Vec<[f32; 4]> = meshes[1].vertices().iter().map(|v| [v.position.x, v.position.y, v.position.z, 1.0]).collect();
+                let source = device.create_buffer_init(&BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&positions), usage: BufferUsages::STORAGE });
+                let program = crate::gpu_edges::GpuEdgeProgram::new(&device).unwrap();
+                let edges = std::sync::Arc::new(crate::gpu_edges::GpuEdges::new(&device, &program, crate::gpu_edges::EdgeSource { buffer: &source, offset: 0, vertex_count: positions.len() }, &meshes[1], &styles[1]).unwrap());
+                let mut encoder = device.create_command_encoder(&Default::default());
+                edges.encode(&mut encoder); queue.submit([encoder.finish()]);
+                buffers[1].update_from_mesh_deferred_edges(&device, &queue, &meshes[1], styles[1].clone(), true, Some(edges), true);
+            }
+            // Public draw counts may truncate an endpoint pair. Each node's
+            // LineList must drop its own trailing vertex, never pair across nodes.
+            if format == TextureFormat::Rgba8Unorm { buffers[0].edge_vertex_count -= 1; }
+            let mut batch = crate::mesh_buffer::CpuEdgeBatch::default();
+            batch.update(&device, &queue, &mut buffers);
+            if format == TextureFormat::Rgba8Unorm { assert_eq!(buffers[0].edge_buffer(), buffers[1].edge_buffer()); }
+            else { assert_ne!(buffers[0].edge_buffer(), buffers[1].edge_buffer()); }
             let mut white = Vec::new();
             for (mesh, style) in meshes.iter().zip(&styles) {
                 let mut edges = mesh.unique_edges();
@@ -520,10 +552,7 @@ mod selected_line_tests {
                         ]
                     })
                     .collect();
-                assert_eq!(
-                    vertices.len() as u32,
-                    buffers[white.len()].edge_vertex_count
-                );
+                assert!(vertices.len() as u32 >= buffers[white.len()].edge_vertex_count);
                 white.push(device.create_buffer_init(&BufferInitDescriptor {
                     label: Some("legacy selected white edge reference"),
                     contents: bytemuck::cast_slice(&vertices),
@@ -606,7 +635,7 @@ mod selected_line_tests {
                         0,
                         &references,
                         if legacy { &[] } else { selected },
-                        show_edges,
+                        show_edges && !legacy,
                         shaded,
                         &[1],
                         Some(GridPlane::XY),
@@ -617,6 +646,12 @@ mod selected_line_tests {
                     if legacy {
                         pass.set_pipeline(renderer.grid.line_pipeline());
                         pass.set_bind_group(0, &renderer.slots[0].1, &[]);
+                        if show_edges {
+                            for buffer in &buffers {
+                                pass.set_vertex_buffer(0, buffer.edge_vertex_buffer.slice(..));
+                                pass.draw(0..buffer.edge_vertex_count, 0..1);
+                            }
+                        }
                         for &i in selected {
                             pass.set_vertex_buffer(0, white[i].slice(..));
                             pass.draw(0..buffers[i].edge_vertex_count, 0..1);
@@ -652,7 +687,7 @@ mod selected_line_tests {
                 staging.unmap();
                 bytes
             };
-            for selected in [&[][..], &[0][..], &[0, 1][..]] {
+            for selected in [&[][..], &[0][..], &[0, 1][..], &[1, 0][..], &[0, 0][..]] {
                 for show_edges in [false, true] {
                     for shaded in [false, true] {
                         assert_eq!(

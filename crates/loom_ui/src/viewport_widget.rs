@@ -18,6 +18,7 @@ use crate::LoomApp;
 pub struct ViewportResources {
     pub renderer: ViewportRenderer,
     pub mesh_buffers: Vec<MeshBuffer>,
+    cpu_edge_batch: Option<loom_render::mesh_buffer::CpuEdgeBatch>,
     mesh_source: Option<crate::GeometryUpload>,
     gpu_edge_program: Option<loom_render::gpu_edges::GpuEdgeProgram>,
     gpu_edges: std::collections::HashMap<u64, std::sync::Arc<loom_render::gpu_edges::GpuEdges>>,
@@ -40,6 +41,7 @@ pub fn init_render_resources(wgpu: &egui_wgpu::RenderState) {
         .insert(ViewportResources {
             renderer,
             mesh_buffers: Vec::new(),
+            cpu_edge_batch: (std::env::var_os("LOOM_EXPERIMENTAL_CPU_EDGE_BATCH").as_deref() == Some(std::ffi::OsStr::new("1"))).then(Default::default),
             mesh_source: None,
             gpu_edge_program: None,
             gpu_edges: Default::default(),
@@ -200,6 +202,7 @@ impl CallbackTrait for ViewportCallback {
             if res.gpu_edge_program.is_none() && !upload.gpu_sources.is_empty() {
                 res.gpu_edge_program = loom_render::gpu_edges::GpuEdgeProgram::new(device).ok();
             }
+            let batch_edges = res.cpu_edge_batch.is_some();
             for (i, mesh) in meshes.iter().enumerate() {
                 let style = styles.get(i).cloned().unwrap_or_default();
                 let gpu_edges = upload.ids.get(i).and_then(|id| {
@@ -219,11 +222,12 @@ impl CallbackTrait for ViewportCallback {
                     Some(edges)
                 });
                 if let Some(buffer) = res.mesh_buffers.get_mut(i) {
-                    buffer.update_from_mesh_with_gpu_edges(device, queue, mesh, style, self.faces_needed, gpu_edges);
+                    buffer.update_from_mesh_deferred_edges(device, queue, mesh, style, self.faces_needed, gpu_edges, batch_edges);
                 } else {
                     res.mesh_buffers.push(MeshBuffer::from_mesh_with_faces(device, mesh, style, self.faces_needed));
                 }
             }
+            if let Some(batch) = &mut res.cpu_edge_batch { batch.update(device, queue, &mut res.mesh_buffers); }
             res.mesh_source = Some(upload);
         }
         if let Some(upload) = pending {
@@ -3199,7 +3203,7 @@ mod tests {
         let Some(adapter)=pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))else{return};
         let(device,queue)=pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(),None)).unwrap();
         let mut resources=CallbackResources::default();
-        resources.insert(ViewportResources{renderer:ViewportRenderer::new(&device,wgpu::TextureFormat::Rgba8UnormSrgb),mesh_buffers:vec![],mesh_source:None,gpu_edge_program:None,gpu_edges:Default::default(),textures:None,bitmap_cache:Default::default(),base_textures:None,helper_lines:vec![]});
+        resources.insert(ViewportResources{renderer:ViewportRenderer::new(&device,wgpu::TextureFormat::Rgba8UnormSrgb),mesh_buffers:vec![],cpu_edge_batch:None,mesh_source:None,gpu_edge_program:None,gpu_edges:Default::default(),textures:None,bitmap_cache:Default::default(),base_textures:None,helper_lines:vec![]});
         let upload:crate::PendingUpload=std::sync::Arc::new(std::sync::Mutex::new(Some(crate::GeometryUpload { meshes: std::sync::Arc::new(vec![loom_mesh::box_primitive(Vec3::ONE)]), styles: vec![loom_render::MeshStyle::default()], ..Default::default() })));
         let mut callback=ViewportCallback{slot:0,view_proj:Mat4::IDENTITY,camera_pos:Vec3::Z,upload:upload.clone(),shading:Default::default(),selected:vec![],show_edges:true,shaded:false,faces_needed:false,shade_only:vec![],grid:None,orthographic:false,grid_params:loom_render::GridParams{spacing:1.,major_every:5,cells:10,ortho_cells:100},helper_lines:vec![]};
         let screen=ScreenDescriptor{size_in_pixels:[100,100],pixels_per_point:1.};let mut encoder=device.create_command_encoder(&Default::default());
@@ -3218,7 +3222,7 @@ mod tests {
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("real GPU");
         let (device, queue) = pollster::block_on(adapter.request_device(&Default::default(), None)).unwrap();
         let mut resources = CallbackResources::default();
-        resources.insert(ViewportResources { renderer: ViewportRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb), mesh_buffers: vec![], mesh_source: None, gpu_edge_program: None, gpu_edges: Default::default(), textures: None, bitmap_cache: Default::default(), base_textures: None, helper_lines: vec![] });
+        resources.insert(ViewportResources { renderer: ViewportRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb), mesh_buffers: vec![], cpu_edge_batch: Some(Default::default()), mesh_source: None, gpu_edge_program: None, gpu_edges: Default::default(), textures: None, bitmap_cache: Default::default(), base_textures: None, helper_lines: vec![] });
         let upload: crate::PendingUpload = Default::default();
         let mut callback = ViewportCallback { slot: 0, view_proj: Mat4::IDENTITY, camera_pos: Vec3::Z, upload: upload.clone(), shading: Default::default(), selected: vec![], show_edges: true, shaded: false, faces_needed: false, shade_only: vec![], grid: None, orthographic: false, grid_params: loom_render::GridParams { spacing: 1., major_every: 5, cells: 10, ortho_cells: 100 }, helper_lines: vec![] };
         let screen = ScreenDescriptor { size_in_pixels: [100, 100], pixels_per_point: 1. };
@@ -3258,7 +3262,12 @@ mod tests {
                 old_edges = Some(edges);
                 let expected: Vec<_> = mesh.unique_edges().into_iter().flat_map(|(a, b)| [a, b]).map(|p| loom_render::grid::LineVertex { position: p.to_array(), color: style.color }).collect();
                 assert_eq!(read(buffer.edge_buffer(), expected.len() as u64 * 24), bytemuck::cast_slice::<_, u8>(&expected));
-            } else { assert_eq!(buffer.edge_buffer(), &buffer.edge_vertex_buffer, "absent/mismatched/diagonal source keeps ordinary geometry"); }
+            } else {
+                assert_eq!(buffer.edge_range().end - buffer.edge_range().start, buffer.edge_vertex_count);
+                let ordinary = loom_render::MeshBuffer::from_mesh_with_faces(&device, &mesh, style.clone(), false);
+                assert_eq!(buffer.edge_vertex_count, ordinary.edge_vertex_count, "failed GPU source keeps complete CPU edge geometry");
+                assert_eq!(buffer.style, ordinary.style);
+            }
             if step == 1 {
                 // Another viewport can request shaded faces without a new pose.
                 callback.faces_needed = true;

@@ -204,11 +204,15 @@ pub struct MeshBuffer {
     pub wire_vertex_count: u32,
     edge_staging: Vec<crate::grid::LineVertex>,
     gpu_edges: Option<std::sync::Arc<crate::gpu_edges::GpuEdges>>,
+    edge_batch: Option<(Buffer, std::ops::Range<u32>)>,
 }
 
 impl MeshBuffer {
     pub fn edge_buffer(&self) -> &wgpu::Buffer {
-        self.gpu_edges.as_ref().map_or(&self.edge_vertex_buffer, |edges| edges.output_buffer())
+        self.edge_batch.as_ref().map_or_else(|| self.gpu_edges.as_ref().map_or(&self.edge_vertex_buffer, |edges| edges.output_buffer()), |(buffer, _)| buffer)
+    }
+    pub fn edge_range(&self) -> std::ops::Range<u32> {
+        self.edge_batch.as_ref().map_or(0..self.edge_vertex_count, |(_, range)| range.clone())
     }
     pub fn from_mesh(device:&Device,mesh:&Mesh,style:MeshStyle)->Self{Self::from_mesh_with_faces(device,mesh,style,true)}
     pub fn update_from_mesh(&mut self,device:&Device,queue:&wgpu::Queue,mesh:&Mesh,style:MeshStyle){self.update_from_mesh_with_faces(device,queue,mesh,style,true);}
@@ -260,6 +264,7 @@ impl MeshBuffer {
             wire_vertex_count,
             edge_staging,
             gpu_edges: None,
+            edge_batch: None,
         }
     }
 
@@ -270,7 +275,13 @@ impl MeshBuffer {
 
     /// The caller proves that edges describe this exact current mesh/pose.
     pub fn update_from_mesh_with_gpu_edges(&mut self, device: &Device, queue: &wgpu::Queue, mesh: &Mesh, style: MeshStyle, faces: bool, gpu_edges: Option<std::sync::Arc<crate::gpu_edges::GpuEdges>>) {
+        self.update_from_mesh_deferred_edges(device, queue, mesh, style, faces, gpu_edges, false);
+    }
+
+    /// Batch users must call CpuEdgeBatch::update before drawing these meshes.
+    pub fn update_from_mesh_deferred_edges(&mut self, device: &Device, queue: &wgpu::Queue, mesh: &Mesh, style: MeshStyle, faces: bool, gpu_edges: Option<std::sync::Arc<crate::gpu_edges::GpuEdges>>, defer: bool) {
         self.gpu_edges = gpu_edges;
+        self.edge_batch = None;
         let _scope = crate::profile::Scope::new("render.upload");
         let (verts, indices, ranges) = if faces {triangulate_styled(mesh, &style)} else {(Vec::new(),Vec::new(),Vec::new())};
         let wire = { let _scope = crate::profile::Scope::new("render.upload.wire"); wire_lines(mesh, &style) };
@@ -278,7 +289,7 @@ impl MeshBuffer {
         let queue_scope = crate::profile::Scope::new("render.upload.queue");
         update_buffer(device, queue, &mut self.vertex_buffer, bytemuck::cast_slice(&verts), BufferUsages::VERTEX, "loom_mesh_vertex_buffer");
         update_buffer(device, queue, &mut self.index_buffer, bytemuck::cast_slice(&indices), BufferUsages::INDEX, "loom_mesh_index_buffer");
-        if self.gpu_edges.is_none() { update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_edge_buffer"); }
+        if self.gpu_edges.is_none() && !defer { update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_edge_buffer"); }
         update_buffer(device, queue, &mut self.wire_vertex_buffer, bytemuck::cast_slice(&wire), BufferUsages::VERTEX, "loom_mesh_wire_buffer");
         drop(queue_scope);
         self.faces_ready = faces;
@@ -290,6 +301,43 @@ impl MeshBuffer {
         self.ranges = ranges;
     }
 
+}
+
+/// Persistent exact CPU-edge stream shared by meshes in their current order.
+#[derive(Default)]
+pub struct CpuEdgeBatch {
+    buffer: Option<Buffer>,
+    vertices: Vec<crate::grid::LineVertex>,
+}
+
+impl CpuEdgeBatch {
+    pub fn update(&mut self, device: &Device, queue: &wgpu::Queue, meshes: &mut [MeshBuffer]) {
+        let count = meshes.iter().filter(|m| m.gpu_edges.is_none())
+            .try_fold(0usize, |n, m| n.checked_add(m.edge_staging.len()));
+        let fits = meshes.iter().filter(|m| m.gpu_edges.is_none()).all(|m| m.edge_vertex_count as usize <= m.edge_staging.len()) && count.and_then(|n| n.checked_mul(24).map(|bytes| (n, bytes)))
+            .is_some_and(|(n, bytes)| n <= u32::MAX as usize && bytes as u64 <= device.limits().max_buffer_size);
+        for mesh in meshes.iter_mut() { mesh.edge_batch = None; }
+        if !fits {
+            for mesh in meshes.iter_mut().filter(|m| m.gpu_edges.is_none()) {
+                update_buffer(device, queue, &mut mesh.edge_vertex_buffer, bytemuck::cast_slice(&mesh.edge_staging), BufferUsages::VERTEX, "loom_mesh_edge_buffer");
+            }
+            return;
+        }
+        self.vertices.clear();
+        for mesh in meshes.iter().filter(|m| m.gpu_edges.is_none()) { self.vertices.extend_from_slice(&mesh.edge_staging); }
+        if self.vertices.is_empty() { return; }
+        let bytes = bytemuck::cast_slice(&self.vertices);
+        match &mut self.buffer {
+            Some(buffer) => update_buffer(device, queue, buffer, bytes, BufferUsages::VERTEX, "loom_cpu_edge_batch"),
+            None => self.buffer = Some(device.create_buffer_init(&BufferInitDescriptor { label: Some("loom_cpu_edge_batch"), contents: bytes, usage: mesh_usage(BufferUsages::VERTEX) })),
+        }
+        let mut start = 0;
+        for mesh in meshes.iter_mut().filter(|m| m.gpu_edges.is_none()) {
+            let end = start + mesh.edge_vertex_count;
+            mesh.edge_batch = Some((self.buffer.as_ref().unwrap().clone(), start..end));
+            start += mesh.edge_staging.len() as u32;
+        }
+    }
 }
 
 /// Dashes per diagonal when Edges Only is off.
@@ -647,6 +695,46 @@ mod tests {
             }
         }
         assert_eq!(corner, verts.len());
+    }
+
+    #[test]
+    fn cpu_edge_batch_preserves_exact_bytes_and_ranges_across_updates() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("real GPU");
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default(), None)).unwrap();
+        let mut mesh = box_primitive(Vec3::ONE);
+        mesh.vertices_mut()[0].position.x = -0.0;
+        let mut buffers = Vec::new();
+        let mut batch = CpuEdgeBatch::default();
+        for step in 0..6 {
+            let count = [3, 1, 4, 0, 2, 3][step];
+            buffers.truncate(count);
+            let mut expected = Vec::new();
+            for i in 0..count {
+                let mut current = mesh.clone();
+                if i % 2 == 1 { let he = current.faces()[0].he; current.set_edge_visible(he, false); }
+                if step == 2 { current = loom_mesh::sphere_segmented(1.0, 12, 0.0); }
+                let style = MeshStyle { color: [i as f32 * 0.1, -0.0, 0.6], diagonals: step % 2 == 1, ..Default::default() };
+                if buffers.len() <= i { buffers.push(MeshBuffer::from_mesh_with_faces(&device, &current, style.clone(), false)); }
+                buffers[i].update_from_mesh_deferred_edges(&device, &queue, &current, style.clone(), false, None, true);
+                expected.extend_from_slice(&buffers[i].edge_staging);
+            }
+            if step == 5 { buffers.reverse(); expected = buffers.iter().flat_map(|b| b.edge_staging.iter().copied()).collect(); }
+            batch.update(&device, &queue, &mut buffers);
+            if expected.is_empty() { continue; }
+            let size = expected.len() as u64 * 24;
+            let staging = device.create_buffer(&wgpu::BufferDescriptor { label: None, size, usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ, mapped_at_creation: false });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(buffers[0].edge_buffer(), 0, &staging, 0, size);
+            queue.submit([encoder.finish()]);
+            let (tx, rx) = std::sync::mpsc::channel();
+            staging.slice(..).map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+            device.poll(wgpu::Maintain::Wait); rx.recv().unwrap().unwrap();
+            assert_eq!(&*staging.slice(..).get_mapped_range(), bytemuck::cast_slice::<_, u8>(&expected));
+            staging.unmap();
+            let mut end = 0;
+            for b in &buffers { assert_eq!(b.edge_range(), end..end+b.edge_vertex_count); assert_eq!(b.edge_vertex_count % 2, 0); end += b.edge_vertex_count; }
+        }
     }
 
     #[test]
