@@ -38,3 +38,15 @@ Earlier checked items record the initial implementation, not completion of the e
 3. Complete Biped-like LoomRig controls using the retained imported skeleton, editable chains/IK/FK, and pose plus planted/sliding/free keys. Existing Point controls and IK/FK tracks do not satisfy these requirements.
 4. Keep animation authoring in separately opened tools. Verify actual Kimodo generation, local API preferences, movable clips, materials, and exact desk/chair preservation in the final installed application.
 5. Commit locally to main, never push. Keep the goal active until the full user requirements are verified.
+
+## Next animation phase: source audit, not completed functionality
+
+Implementation remains behind the native performance/reliability gate.
+
+- The generic Set Keys pose buffer (`anim_cmds.rs:553–600`) records node tracks. It does not capture LoomRig `blend` or `pose_offsets`; those require an atomic rig-pose-key operation alongside control transforms. Preserve source bone controllers rather than baking corrections into them.
+- Existing limb blend-key commands, undo, key movement and the separate Animation Editor remain the base. Current clip movement moves member-node keys; rig metadata tracks are independent and must not accidentally move with a source clip.
+- Proposed persistent contact data: a default-empty, typed per-limb contact track with discrete HOLD semantics. Before its first key the state is Free. Plant/Slide use effective IK=1; Free restores the authored blend curve. This is a pending design/implementation, not present behavior.
+- Plant captures the currently solved end-pivot world position and orientation. Slide constrains the authored goal to an explicit plane while retaining tangential movement. The existing world-goal/end-orientation path requires real contact tests before promising this behavior. An end pivot is not an automatically detected foot sole or terrain contact.
+- A typed contact lookup must notify `anim::note_animated_read()` when time-dependent, or the IK cache may reuse a static-scene result at another time.
+- Required tests include planted position/orientation under root motion, tilted-plane sliding, exact Free/empty-track compatibility, fractional/backward/random-access time evaluation without a scene-version edit, undo/reload, atomic key collision rejection, clip movement, and explicit nonuniform-scale/shear orientation behavior.
+- Limb-shaped controls still need matching draw/pick geometry mapped onto the existing control IDs. The repaired generic bone-axis overlay is skeleton visibility, not completion of Biped-style LoomRig controls.
