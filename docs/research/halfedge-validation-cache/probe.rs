@@ -41,10 +41,11 @@ fn actual_halfedge_validation_317(){
  let path=std::env::var("LOOM_PERF_SCENE").unwrap();let value:serde_json::Value=serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();let original:old::Scene=serde_json::from_value(value["scene"].clone()).unwrap();let shared:cow::Scene=serde_json::from_value(value["scene"].clone()).unwrap();let serial=original.clone();drop(value);
  let ids:Vec<_>=original.nodes().filter(|n|n.modifiers.iter().any(|m|matches!(&m.modifier,old::Modifier::Skin(_)))).map(|n|n.id).collect();assert_eq!(ids.len(),5);let cids:Vec<_>=ids.iter().map(|id|cow::NodeId(id.0)).collect();
  let cages:Vec<_>=ids.iter().map(|id|original.node(*id).unwrap().cage_mesh().into_owned()).collect();let modifiers:Vec<_>=ids.iter().map(|id|serde_json::to_vec(&original.node(*id).unwrap().modifiers).unwrap()).collect();let source_pointers:Vec<_>=cids.iter().map(|id|shared.node(*id).unwrap().object.mesh().half_edges().as_ptr()).collect();
+ let reverse=std::env::var_os("LOOM_REVERSE_ORDER").is_some();
  let pool=bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();let mut old_times=[Duration::ZERO;3];let mut new_times=old_times;
  for(index,frame)in (0..=157).map(|f|f as f32).chain([39.25]).chain((0..=157).map(|f|f as f32+0.5)).enumerate(){
   original.set_time(frame);shared.set_time(frame);serial.set_time(frame);
-  let(a,b)=if index%2==0{let a=run_old(&original,&ids,&pool);let b=run_cow(&shared,&cids,&pool);(a,b)}else{let b=run_cow(&shared,&cids,&pool);let a=run_old(&original,&ids,&pool);(a,b)};
+  let(a,b)=if (index%2==0)!=reverse{let a=run_old(&original,&ids,&pool);let b=run_cow(&shared,&cids,&pool);(a,b)}else{let b=run_cow(&shared,&cids,&pool);let a=run_old(&original,&ids,&pool);(a,b)};
   for(i,(x,y))in [a.2,a.3,a.4].into_iter().zip([b.2,b.3,b.4]).enumerate(){old_times[i]+=x;new_times[i]+=y;}
   for i in 0..5{
    evaluated(&a.0[i],&b.0[i]);evaluated(&serial.evaluated(ids[i],None),&b.0[i]);meshes(&a.1[i],&b.1[i]);meshes(&cages[i],shared.node(cids[i]).unwrap().cage_mesh().as_ref());assert_eq!(&cages[i],original.node(ids[i]).unwrap().cage_mesh().as_ref());
@@ -53,6 +54,7 @@ fn actual_halfedge_validation_317(){
   }
  }
  for i in 0..5{assert_eq!(modifiers[i],serde_json::to_vec(&original.node(ids[i]).unwrap().modifiers).unwrap());assert_eq!(modifiers[i],serde_json::to_vec(&shared.node(cids[i]).unwrap().modifiers).unwrap());}
+ eprintln!("HALFEDGE_VALIDATION initial_order={}",if reverse{"candidate_first"}else{"baseline_first"});
  for(i,name)in["skin_batch","display_clone_world","combined"].into_iter().enumerate(){let ms=|d:Duration|d.as_secs_f64()*1000.0/317.0;eprintln!("HALFEDGE_VALIDATION poses=317 meshes=1585 stage={name} original_ms={:.6} cow_ms={:.6} saved_ms={:.6}",ms(old_times[i]),ms(new_times[i]),ms(old_times[i])-ms(new_times[i]));}
 }
 #[test]

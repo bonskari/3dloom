@@ -1,0 +1,10 @@
+
+running 1 test
+HALFEDGE_VALIDATION initial_order=candidate_first
+HALFEDGE_VALIDATION poses=317 meshes=1585 stage=skin_batch original_ms=3.423698 cow_ms=3.618138 saved_ms=-0.194440
+HALFEDGE_VALIDATION poses=317 meshes=1585 stage=display_clone_world original_ms=1.065975 cow_ms=0.392784 saved_ms=0.673191
+HALFEDGE_VALIDATION poses=317 meshes=1585 stage=combined original_ms=4.493002 cow_ms=4.013984 saved_ms=0.479017
+test tests::actual_halfedge_validation_317 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 9.17s
+

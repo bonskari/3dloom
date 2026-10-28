@@ -10,12 +10,21 @@ Mesh Clone shares the storage and proof. Storage Clone (used by Arc::make_mut) c
 
 Correctness is green:270 unit/integration tests,0 failures,2 opt-in tests ignored,0 warnings. Explicit cases cover validation success followed by shared/unique mutation, valid repair, undo/snapshot behavior, cache-independent equality/Debug/JSON, map1 and map7 changes after a cached HE success, baseline error equality and repeated malformed-index panics. The original and candidate Mesh/Shape/Scene packages are separate real source builds linked into one probe.
 
-The actual317-pose paired timing has **not run yet**: it is held until the other agent's full GPU quality run finishes. No performance or native FPS claim is made, and production promotion is not authorized by this document.
+After the full GPU quality run finished, two quiet317-pose paired runs passed all1585 full StackValue/Mesh/map/vertex-bit/world-output comparisons and unchanged source/cage/weight checks. The same unchanged post-COW original and candidate packages alternate their complete pipeline each pose. The second run reverses the initial order. Both retain the independent ordinary serial reference and JSON compatibility checks.
+
+| Stage | First original ms | First candidate ms | Reversed original ms | Reversed candidate ms |
+|---|---:|---:|---:|---:|
+|Skin batch|3.397596|3.632386|3.423698|3.618138|
+|Display clone/checked world transform|1.062832|0.394405|1.065975|0.392784|
+|Combined|4.463438|4.029788|4.493002|4.013984|
+
+Combined savings were0.433650ms and0.479017ms; display-stage savings were0.668428ms and0.673191ms. Skin batch was slower by0.234790ms and0.194440ms despite no Skin arithmetic changes; that regression's cause was not isolated and is included in the net result. No cache/scheduling explanation is asserted as fact. Total test times were9.46s and9.17s. The application was paused, other agents held jobs, and no other compiler/test processes were visible. These are standalone paired CPU pipeline results, not native FPS measurements. Production remains unchanged pending the parent's promotion decision.
 
 Reproduction uses the fixed baseline archive and changes only ignored target/:
 
 ```sh
 python3 docs/research/halfedge-validation-cache/setup_probe.py
 CARGO_TARGET_DIR="$PWD/target/halfedge-validation-repro/build" cargo test --manifest-path target/halfedge-validation-repro/Cargo.toml --release -j4 -p loom_mesh_cow -p loom_scene_cow -p cow_probe
+# Add LOOM_REVERSE_ORDER=1 to reverse the initial pipeline order.
 LOOM_PERF_SCENE='/tmp/loom-conditioning-capture/input.loom' CARGO_TARGET_DIR="$PWD/target/halfedge-validation-repro/build" cargo test --manifest-path target/halfedge-validation-repro/Cargo.toml --release -j4 -p cow_probe actual_halfedge_validation_317 -- --ignored --nocapture
 ```
