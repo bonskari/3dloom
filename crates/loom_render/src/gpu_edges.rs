@@ -248,7 +248,10 @@ impl GpuEdges {
             return Err(GpuEdgeError::Diagonals);
         }
         Ok(self.source_count == mesh.vertex_count()
-            && self.topology.matches(mesh)
+            && {
+                let _scope = crate::profile::Scope::new("render.gpu_edges.half_edge_check");
+                self.topology.matches(mesh)
+            }
             && if self.all_visible {
                 // The same effective predicate used by ordinary edge emission;
                 // an absent visibility array needs no per-half-edge scan.

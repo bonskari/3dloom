@@ -157,7 +157,10 @@ impl DescriptorSnapshot {
     fn matches(&self, mesh: &Mesh) -> bool {
         self.vertex_edges.len()==mesh.vertex_count()
             && self.vertex_edges.iter().zip(mesh.vertices()).all(|(he,v)|*he==v.he)
-            && self.half_edges.matches(mesh) && self.faces==mesh.faces()
+            && {
+                let _scope = loom_render::profile::Scope::new("gpu_pose.half_edge_check");
+                self.half_edges.matches(mesh)
+            } && self.faces==mesh.faces()
             && self.maps.iter().zip([1,loom_mesh::NORMALS_CHANNEL]).all(|(old,channel)|match (old,mesh.map(channel)) {
                 (None,None)=>true,
                 (Some(old),Some(current))=>old.corners==current.corners && old.values.len()==current.verts.len()
