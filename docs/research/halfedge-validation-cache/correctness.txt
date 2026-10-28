@@ -1,0 +1,406 @@
+   Compiling loom_mesh_cow v0.1.0 (/home/b1s/dev/github/3dloom/target/halfedge-validation-probe/crates/loom_mesh_cow)
+   Compiling loom_mesh v0.1.0 (/home/b1s/dev/github/3dloom/target/halfedge-validation-probe/crates/loom_mesh)
+   Compiling loom_shape_cow v0.1.0 (/home/b1s/dev/github/3dloom/target/halfedge-validation-probe/crates/loom_shape_cow)
+   Compiling loom_scene_cow v0.1.0 (/home/b1s/dev/github/3dloom/target/halfedge-validation-probe/crates/loom_scene_cow)
+   Compiling loom_shape v0.1.0 (/home/b1s/dev/github/3dloom/target/halfedge-validation-probe/crates/loom_shape)
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/target/halfedge-validation-probe/crates/loom_scene)
+   Compiling cow_probe v0.1.0 (/home/b1s/dev/github/3dloom/target/halfedge-validation-probe/crates/cow_probe)
+    Finished `release` profile [optimized] target(s) in 1m 13s
+     Running unittests src/lib.rs (target/halfedge-validation-probe/build/release/deps/cow_probe-048b1d02a5e7e478)
+
+running 3 tests
+test tests::actual_halfedge_validation_317 ... ignored, actual paired317 requires LOOM_PERF_SCENE
+test tests::old_and_cow_mesh_json_are_bidirectionally_compatible ... ok
+test tests::validation_error_and_panic_contract_matches_current_baseline ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/halfedge-validation-probe/build/release/deps/loom_mesh-95dc126f49f03a36)
+
+running 143 tests
+test deform::tests::bend_90_turns_the_top_sideways ... ok
+test deform::tests::slice_modes_and_spherify_and_noise ... ok
+test deform::tests::taper_and_twist_scale_by_height ... ok
+test dxf::tests::polyface_meshes_are_read ... ok
+test deform::tests::symmetry_keeps_the_positive_side_unless_flipped ... ok
+test deform::tests::lattice_and_preserve ... ok
+test dxf::tests::a_box_round_trips_as_quads_on_its_layer ... ok
+test edit_ops::tests::edge_loop_after_connect_ring_selects_connected_loop ... ok
+test deform::tests::symmetry_welds_the_seam_and_mirror_copies ... ok
+test edit_ops::tests::edge_ring_on_box_finds_parallel_ring ... ok
+test csg::tests::cut_modes_keep_or_drop_the_parts_and_disjoint_operands_report ... ok
+test csg::tests::subtracting_a_smaller_box_cuts_a_hole ... ok
+test edit_ops::tests::connect_edge_ring_splits_quad_strip ... ok
+test edit_ops::tests::extrude_box_face_preserves_closed_topology ... ok
+test edit_ops::tests::transform_mesh_preserves_topology ... ok
+test edit_ops::tests::translate_single_vertex_preserves_topology ... ok
+test ffd::tests::conform_moves_points_onto_the_shape ... ok
+test ffd::tests::cylinder_rings_close_and_weight_their_neighbours ... ok
+test ffd::tests::moving_a_corner_moves_near_points_more ... ok
+test ffd::tests::rest_lattice_is_identity ... ok
+test geom_ops::tests::constrain_to_edges_keeps_vertex_on_edge ... ok
+test geom_ops::tests::attach_keeps_world_positions ... ok
+test geom_ops::tests::cut_between_two_face_points ... ok
+test geom_ops::tests::detach_as_clone_keeps_source ... ok
+test geom_ops::tests::quickslice_through_plane ... ok
+test geom_ops::tests::msmooth_keeps_open_border_and_attributes ... ok
+test geom_ops::tests::relax_moves_toward_neighbours_holds_boundary ... ok
+test geom_ops::tests::tessellate_face_kind_quadruples ... ok
+test geom_ops::tests::slice_box_adds_loop ... ok
+test mesh::tests::empty_mesh_has_no_elements ... ok
+test mesh::half_edge_cow_tests::topology_snapshot_stays_immutable_and_checks_independent_equal_storage ... ok
+test mesh::tests::empty_mesh_invariants_hold ... ok
+test mesh::half_edge_cow_tests::clone_edit_and_undo_snapshots_detach_and_keep_json_arrays ... ok
+test mesh::tests::extruded_cap_inherits_sg_and_material ... ok
+test mesh::tests::vertex_normal_follows_smoothing_groups ... ok
+test mesh::tests::auto_smooth_box_gives_six_groups_sphere_one ... ok
+test mesh::validation_cache_tests::every_map_is_checked_after_cached_halfedge_success ... ok
+test mesh::validation_cache_tests::unique_storage_mutation_clears_success_and_panics_are_not_cached ... ok
+test mesh_mods::tests::cap_holes_and_stl_check_report_open_edges ... ok
+test mesh::validation_cache_tests::successful_proof_is_shared_but_not_part_of_value_debug_or_json ... ok
+test mesh_mods::tests::face_extrude_scales_tops_and_material_by_element_cycles ... ok
+test obj::tests::bad_index_is_an_error ... ok
+test mesh_mods::tests::shell_thickens_an_open_plane ... ok
+test mesh::tests::streamed_face_normals_match_newell_positions ... ok
+test obj::tests::import_flips_inconsistent_winding_and_splits_nonmanifold ... ok
+test obj::tests::export_normals_follow_smoothing_groups ... ok
+test obj::tests::missing_o_uses_file_stem_or_g ... ok
+test obj::tests::parses_ngons_negative_indices_and_groups ... ok
+test mesh_mods::tests::triangulate_and_subdivide_keep_the_surface ... ok
+test obj::tests::rewound_faces_keep_their_uvs_with_their_vertices ... ok
+test obj::tests::round_trip_box_keeps_counts_smoothing_and_material ... ok
+test patch::tests::cage_moves_carry_handles ... ok
+test patch::tests::flat_quad_grid_tessellates_flat_with_hidden_interior ... ok
+test optimize::tests::turn_to_poly_merges_coplanar_faces_and_optimize_triangulates_them ... ok
+test patch::tests::add_quad_weld_and_extrude ... ok
+test patch::tests::moving_a_handle_bends_the_surface_and_steps_refine_it ... ok
+test patch::tests::mesh_converts_to_patches_with_the_same_shape ... ok
+test patch::tests::neighbouring_patches_share_tessellated_edges ... ok
+test patch::tests::relax_smooths_and_delete_compacts ... ok
+test pc2::tests::a_header_claiming_more_samples_than_the_file_holds_is_refused ... ok
+test patch::tests::tri_patch_tessellates_into_steps_squared_triangles ... ok
+test poly_ops::tests::bevel_height_and_outline ... ok
+test poly_ops::tests::flip_reverses_winding_and_normal ... ok
+test poly_ops::tests::hinge_rotates_about_edge ... ok
+test poly_ops::tests::extrude_group_vs_by_polygon_face_counts ... ok
+test poly_ops::tests::make_planar_z_flattens ... ok
+test poly_ops::tests::inset_keeps_outer_ring ... ok
+test primitives::tests::box_has_correct_element_counts ... ok
+test primitives::tests::box_invariants_hold ... ok
+test primitives::tests::quad_has_one_face_four_edges_eight_half_edges ... ok
+test primitives::tests::test_room_has_five_meshes ... ok
+test select_ops::tests::border_edge_loop_runs_around_the_plane ... ok
+test select_ops::tests::convert_contained_requires_all_vertices ... ok
+test select_ops::tests::grow_and_shrink_faces_on_a_box ... ok
+test soft_select::tests::edge_distance_limits_rings ... ok
+test soft_select::tests::weight_is_one_on_selection_zero_past_falloff ... ok
+test standard_primitives::tests::cone_with_zero_radius2_has_apex_triangles ... ok
+test standard_primitives::tests::box_segments_multiply_faces ... ok
+test standard_primitives::tests::geosphere_triangle_count_follows_subdivision ... ok
+test standard_primitives::tests::sliced_cylinder_has_cut_faces_and_is_closed ... ok
+test standard_primitives::tests::every_primitive_passes_invariants_at_min_params ... ok
+test standard_primitives::tests::hemisphere_half_keeps_upper_half ... ok
+test standard_primitives::tests::negative_height_builds_below_the_construction_plane ... ok
+test primitives::tests::box_invariants_hold_for_any_size ... ok
+test stl::tests::without_weld_every_face_keeps_its_vertices_and_doubles_drop ... ok
+test standard_primitives::tests::sliced_sphere_is_closed_and_smaller ... ok
+test stl::tests::binary_and_ascii_round_trip_a_box ... ok
+test tds::tests::a_box_with_a_material_light_and_camera_round_trips ... ok
+test tds::tests::names_are_cut_to_ten_bytes_and_stay_unique ... ok
+test standard_primitives::tests::twins_are_matched_for_closed_solids ... ok
+test topo_ops::tests::break_vertex_splits_corners ... ok
+test standard_primitives::tests::torus_smooth_options_assign_groups_by_side_or_segment ... ok
+test topo_ops::tests::bridge_two_borders ... ok
+test standard_primitives::tests::sphere_squash_keeps_the_vertex_count_and_chop_removes_vertices ... ok
+test topo_ops::tests::cap_open_border_closes_mesh ... ok
+test standard_primitives::tests::torus_vertex_count_is_segments_times_sides ... ok
+test topo_ops::tests::chamfer_edge_makes_segments_faces ... ok
+test topo_ops::tests::chamfer_any_single_edge_of_a_standard_box ... ok
+test topo_ops::tests::chamfer_vertex_makes_a_polygon ... ok
+test topo_ops::tests::chamfer_single_interior_edge_of_a_grid_keeps_the_end_vertices ... ok
+test topo_ops::tests::collapse_whole_face_removes_it ... ok
+test topo_ops::tests::chamfer_box_loops_and_segments_stay_closed ... ok
+test topo_ops::tests::connect_edges_three_segments ... ok
+test topo_ops::tests::connect_vertices_adds_a_diagonal ... ok
+test topo_ops::tests::extrude_edges_height_width ... ok
+test topo_ops::tests::extrude_vertex_makes_a_pyramid ... ok
+test topo_ops::tests::insert_vertex_on_box_edge_keeps_manifold ... ok
+test topo_ops::tests::insert_vertex_on_edge_and_in_face ... ok
+test topo_ops::tests::remove_vertex_merges_faces ... ok
+test topo_ops::tests::split_edges_tears_the_mesh ... ok
+test topo_ops::tests::turn_edge_flips_diagonal ... ok
+test topo_ops::tests::weld_refuses_to_make_non_manifold ... ok
+test topo_ops::tests::weld_within_threshold_merges ... ok
+test tri_mesh::tests::auto_edge_hides_coplanar_edges ... ok
+test standard_primitives::tests::teapot_has_closed_manifold_body ... ok
+test tri_mesh::tests::convert_cuts_polygons_with_invisible_diagonals ... ok
+test tri_mesh::tests::divide_edge_splits_both_sides_with_invisible_spokes ... ok
+test tri_mesh::tests::explode_splits_by_angle ... ok
+test tri_mesh::tests::ignore_visible_edges_selects_by_planar_threshold ... ok
+test tri_mesh::tests::extrude_and_outline_keep_triangles ... ok
+test tri_mesh::tests::polygon_edits_are_made_triangles_again ... ok
+test tri_mesh::tests::tessellate_by_edge_and_face_center ... ok
+test tri_mesh::tests::turn_swaps_the_diagonal_and_keeps_it_invisible ... ok
+test optimize::tests::decimate_reaches_the_target_without_flipping ... ok
+test unwrap::tests::break_then_weld_round_trip ... ok
+test tri_mesh::tests::unify_turns_inside_out_elements_outward ... ok
+test unwrap::tests::normal_map_align_by_width_lays_clusters_wide ... ok
+test unwrap::tests::pack_keeps_clusters_inside_and_apart ... ok
+test unwrap::tests::flatten_box_gives_six_clusters_and_normal_map_too ... ok
+test unwrap::tests::quick_planar_fits_the_square_and_overlaps_are_found ... ok
+test unwrap::tests::rotate_clusters_rotates_instead_of_mirroring ... ok
+test unwrap::tests::seam_path_on_a_grid_is_the_short_route ... ok
+test unwrap::tests::pelt_of_a_hemisphere_is_a_disc ... ok
+test unwrap::tests::stitch_closes_a_seam ... ok
+test unwrap::tests::pelt_keeps_pinned_tvs ... ok
+test unwrap::tests::soft_weights_by_edge_distance ... ok
+test unwrap::tests::unfold_strip_is_a_strip ... ok
+test unwrap::tests::relax_reduces_edge_length_variance ... ok
+test unwrap::tests::weld_selected_joins_tvs_of_different_vertices_within_threshold ... ok
+test uvmap::tests::box_mapping_puts_every_face_in_the_unit_square ... ok
+test uvmap::tests::spherical_v_runs_pole_to_pole ... ok
+test uvmap::tests::torus_covers_both_angles ... ok
+test standard_primitives::determinism_tests::open_primitives_build_the_same_half_edges_every_time ... ok
+
+test result: ok. 143 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/map_channels.rs (target/halfedge-validation-probe/build/release/deps/map_channels-f69b8a0c5c454772)
+
+running 10 tests
+test box_primitive_has_box_mapping_on_channel_1 ... ok
+test cylindrical_odd_sides_keep_each_face_narrow ... ok
+test channel_survives_extrude_and_delete ... ok
+test cylindrical_seam_corners_differ ... ok
+test missing_channel_is_created_on_demand ... ok
+test planar_projection_maps_bounds_to_unit_square ... ok
+test projections_weld_only_within_a_vertex ... ok
+test loom_round_trips_maps ... ok
+test obj_round_trips_uvs ... ok
+test uvs_follow_common_edits ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/smoothing.rs (target/halfedge-validation-probe/build/release/deps/smoothing-6ff3cb8f090b8d22)
+
+running 2 tests
+test corner_normals_follow_smoothing_groups ... ok
+test smoothing_groups_from_hard_edges_colour_adjacent_regions ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/halfedge-validation-probe/build/release/deps/loom_scene-5639409f707cc352)
+
+running 48 tests
+test camera::tests::default_lens_matches_default_fov ... ok
+test camera::tests::diagonal_and_vertical_fov_follow_the_render_aspect ... ok
+test camera::tests::frame_spans_the_fov_in_front_of_the_camera ... ok
+test caches9::tests::a_failed_read_is_not_kept ... ok
+test light::tests::decay_and_attenuation_match_the_reference_formulas ... ok
+test light::tests::exclusion_scopes ... ok
+test camera::tests::icon_lies_behind_the_eye_and_is_closed_where_drawn ... ok
+test light::tests::falloff_follows_hotspot_and_keeps_its_gap ... ok
+test light::tests::kelvin_colours_run_from_warm_to_white ... ok
+test light::tests::photometric_intensity_units_convert_through_candela ... ok
+test light::tests::spot_cone_is_full_inside_the_hotspot_and_dark_outside_the_falloff ... ok
+test light::tests::icons_are_closed_meshes_around_the_pivot ... ok
+test maps::tests::bump_heights_tilt_the_normals ... ok
+test maps::tests::bitmap_crop_and_place ... ok
+test maps::tests::checker_gradient_noise_and_mix ... ok
+test maps::tests::decal_and_mirror ... ok
+test material::tests::a_shell_shows_its_viewport_or_render_choice ... ok
+test material::tests::blend_mixes_by_amount_and_a_mask_goes_through_a_mix_map ... ok
+test material::tests::coordinates_offset_tile_and_rotate ... ok
+test material::tests::levels_resolve_through_sub_materials_and_maps ... ok
+test scene::skin_batch::tests::actual_all_159_skin_poses_match_serial_full_stack ... ignored, requires LOOM_PERF_SCENE real saved scene
+test material::tests::multi_sub_resolves_per_face_id_and_missing_ids_are_black ... ok
+test modifier::modifier_list_tests::every_modifier_is_in_or_out ... ok
+test scene::skin_batch::tests::geometry_attachment_constraints_keep_serial_cycle_guards ... ok
+test scene::tests::add_node_assigns_increasing_ids_never_reused ... ok
+test scene::tests::next_name_follows_numbering_convention ... ok
+test scene::skin_batch::tests::static_skin_keeps_timeless_cache_and_instanced_slots_use_serial ... ok
+test scene::tests::set_parent_keeps_world_transform ... ok
+test scene::tests::remove_parent_keeps_children_world_transform ... ok
+test scene::tests::parametric_box_mesh_matches_primitive ... ok
+test skin::scratch_weight_tests::explicit_weights_reuse_scratch_capacity_and_strongest_keeps_last_tie ... ok
+test scene::tests::transform_matrix_roundtrip ... ok
+test skin::scratch_weight_tests::owned_skin_application_keeps_input_mesh_allocation_and_reference_output ... ok
+test sun::tests::dates ... ok
+test scene::skin_batch::tests::batch_render_mode_and_changed_time_use_ordinary_cache_rules ... ok
+test sun::tests::morning_sun_rises_in_the_east_and_night_is_below_the_horizon ... ok
+test sun::tests::noon_sun_is_south_and_high_in_june_in_san_francisco ... ok
+test undo::tests::commit_then_undo_restores_scene ... ok
+test undo::tests::entry_identity_survives_redo_but_never_branches_resets_or_eviction ... ok
+test undo::tests::failed_group_leaves_scene_unchanged ... ok
+test undo::tests::limit_drops_oldest ... ok
+test undo::tests::nested_begin_joins_the_outer_transaction ... ok
+test undo::tests::redo_reapplies_and_new_commit_clears_redo ... ok
+test undo::tests::set_transform_undo_restores_position ... ok
+test undo::tests::remove_node_inverse_restores_children ... ok
+test undo::tests::transaction_collapses_drag_steps_into_one_and_ignores_limit ... ok
+test scene::skin_batch::tests::batch_jobs_preserve_full_output_cache_edits_and_worker_tls ... ok
+test skin::scratch_weight_tests::scratch_weights_match_public_reference_for_limits_flags_and_patch_owners ... ok
+
+test result: ok. 47 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/anim.rs (target/halfedge-validation-probe/build/release/deps/anim-676c0d02a7e91211)
+
+running 8 tests
+test auto_key_creates_keys_and_off_offsets ... ok
+test bezier_auto_passes_through_keys_and_is_smooth ... ok
+test list_sums_weighted_controllers ... ok
+test noise_is_deterministic_and_bounded ... ok
+test out_of_range_types_extend_the_curve ... ok
+test old_constant_params_deserialise ... ok
+test step_and_linear_tangents ... ok
+test tcb_passes_through_keys ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bones.rs (target/halfedge-validation-probe/build/release/deps/bones-f96a13670ada8efd)
+
+running 2 tests
+test helpers_are_helpers_with_their_sizes ... ok
+test bone_mesh_points_along_x_and_tapers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ik.rs (target/halfedge-validation-probe/build/release/deps/ik-8b6bf4663993e983)
+
+running 7 tests
+test hi_solver_reaches_a_goal_in_range ... ok
+test hi_solver_reaches_toward_an_unreachable_goal ... ok
+test limb_at_fk_endpoint_keeps_twist_and_every_local_rotation ... ok
+test limb_solver_is_exact_and_bends_in_the_swivel_plane ... ok
+test limb_uses_the_existing_bend_side_when_goal_moves ... ok
+test malformed_legacy_limb_keeps_fk_without_panicking ... ok
+test spline_ik_lays_bones_along_the_shape ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/loomrig.rs (target/halfedge-validation-probe/build/release/deps/loomrig-fe09967b16f96381)
+
+running 4 tests
+test characterization_checks_hierarchy_instead_of_accepting_unrelated_named_bones ... ok
+test characterization_requires_real_mapped_bones ... ok
+test control_offsets_drive_existing_bone_without_editing_transform ... ok
+test edit_revision_changes_on_edit_but_not_playback ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/maps_preview_limits.rs (target/halfedge-validation-probe/build/release/deps/maps_preview_limits-f63db17fa5c98e74)
+
+running 4 tests
+test zero_preview_budget_produces_no_bitmap_or_procedural_output ... ok
+test nested_procedural_map_obeys_preview_limit ... ok
+test placed_image_is_baked_within_preview_limit_before_allocation ... ok
+test legacy_bake_matches_its_original_limit ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/morph.rs (target/halfedge-validation-probe/build/release/deps/morph-d3dd54524a43f98b)
+
+running 3 tests
+test morpher_blends_progressive_targets_by_value ... ok
+test morpher_skips_a_target_with_a_different_vertex_count ... ok
+test skin_morph_fires_at_the_bone_angle ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin.rs (target/halfedge-validation-probe/build/release/deps/skin-a0cd99d5666195e3)
+
+running 3 tests
+test envelope_weights_fall_off_between_inner_and_outer ... ok
+test skin_follows_a_bone_move_without_editing_the_node ... ok
+test skin_keeps_weights_by_vertex_when_faces_are_deleted_below ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_envelopes.rs (target/halfedge-validation-probe/build/release/deps/skin_envelopes-8301e9545a902765)
+
+running 11 tests
+test a_relative_envelope_keeps_partial_weight_and_the_rest_stays_put ... ok
+test animatable_envelope_radii_key_and_play_back ... ok
+test cross_sections_shape_the_radius_along_the_envelope ... ok
+test always_deform_off_leaves_the_mesh_undeformed ... ok
+test a_spline_bone_gets_an_envelope_along_its_curve_and_a_box_along_its_longest_side ... ok
+test a_relative_vertex_moves_part_of_the_way_with_its_bone ... ok
+test back_transform_vertices_off_moves_a_linked_mesh_twice ... ok
+test rigid_vertices_all_follow_the_strongest_bone_only ... ok
+test fast_updates_preview_rigidly_but_render_in_full ... ok
+test ignore_bone_scale_and_squash ... ok
+test skin_on_a_patch_moves_the_lattice_and_rigid_handles_follow_one_bone ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_gizmos.rs (target/halfedge-validation-probe/build/release/deps/skin_gizmos-0bce4ad2053ddf74)
+
+running 3 tests
+test mirror_pastes_weights_across_the_plane ... ok
+test joint_angle_gizmo_adds_its_deltas_at_the_key ... ok
+test bulge_angle_gizmo_scales_the_joint_at_its_key_angle ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_morph.rs (target/halfedge-validation-probe/build/release/deps/skin_morph-028f8c4b2bbf3568)
+
+running 5 tests
+test soft_selection_weights_fall_off_within_the_radius_and_the_edge_limit ... ok
+test ball_joints_track_twist_and_planar_joints_only_the_parent_plane ... ok
+test an_old_morph_without_a_pose_still_uses_its_angle ... ok
+test custom_falloff_follows_the_graph_and_edit_mode_holds_the_morph_full ... ok
+test the_morph_fades_out_at_half_the_influence_angle ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_wrap.rs (target/halfedge-validation-probe/build/release/deps/skin_wrap-5170fb9c98cd3ab1)
+
+running 8 tests
+test face_engine_is_rigid_at_the_lowest_falloff ... ok
+test skin_wrap_defaults_follow_the_reference ... ok
+test face_limit_counts_faces_from_the_closest_face ... ok
+test distance_influence_is_a_radius_of_average_edge_lengths ... ok
+test local_scale_and_axes_shape_the_volume_of_influence ... ok
+test local_strength_scales_and_flips_the_pull ... ok
+test blend_to_base_mesh_weakens_points_far_from_the_control_faces ... ok
+test skin_wrap_follows_the_deformed_base ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_wrap_patch.rs (target/halfedge-validation-probe/build/release/deps/skin_wrap_patch-7a9ccbde93567ed9)
+
+running 2 tests
+test a_changed_patch_topology_warns_until_resampled ... ok
+test a_patch_object_deforms_the_wrapped_mesh ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/standard_primitives.rs (target/halfedge-validation-probe/build/release/deps/standard_primitives-320650de43b77024)
+
+running 6 tests
+test documented_defaults ... ok
+test geosphere_base_type_is_a_choice_segments_cap_at_200_and_base_to_pivot_lifts ... ok
+test torus_smooth_is_all_sides_none_segments_with_all_the_default ... ok
+test cone_cylinder_and_tube_take_a_negative_height ... ok
+test sphere_has_chop_squash_slice_and_base_to_pivot ... ok
+test round_primitives_have_smooth_on_by_default_and_off_facets_them ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests cow_probe
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_mesh
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_scene
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
