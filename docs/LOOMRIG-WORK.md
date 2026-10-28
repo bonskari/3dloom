@@ -286,3 +286,27 @@ last_error=None/recoveries0. Compared with8884ba8 control40.511/40.416 and
 69.441/70.227, combined changes improve both modes; this measurement does not
 isolate individual contributions. Realistic60 still fails. App paused/frame39
 restored. Raw four-window results persisted2026-10-28-history-edge.jsonl.
+
+
+Next measured boundary56e6570: native encode+submit1.232–1.239ms,
+guardwait1.067–1.086ms, layoutvalidation~0.438ms/pose (26calls),
+scenebounds0.194–0.196ms. This identifies command encoding as a larger target
+than the additional bounds scan; no cause inferred beyond these timings.
+
+c4fbe10 shares GPU tangent passes by stage across independent material parts
+(5passes instead of5perpart). Each part retains its own pipeline/bindgroup,
+all guard initialization and dependencies preserved between stages. Ordinary
+Bevy65passed/30ignored. ActualRay4pose integration passed, with full output
+byte equality vs prior serial math for all13parts at39.25/95.71835/149;
+immutable render resources and current position readbacks also passed.
+Native performance measurement is in progress; no improvement claimed yet.
+
+Native c4fbe10 result: Realistic46.392/46.059; Wireframe76.483/78.191
+actual distinct ready poses/s. Same camera/geometry/materials as prior checkpoint.
+Native encode+submit~0.793–0.799ms, guardwait~0.173–0.177ms,
+GPUrenderer4.332–4.378ms. All5objects/13parts committed, no errors/recoveries.
+Frame39 Realistic viewport byte-identical to305855b screenshot (0pixels differ).
+Raw results persisted2026-10-28-stage-batch.jsonl. Independent read-only review
+found no important issues in pass isolation/stage ordering or history boundary.
+App paused/frame39 restored. Realistic60 and broader numeric quality gate remain
+unfinished; no completion or general default-enable claim.
