@@ -406,3 +406,28 @@ Read-only COW audit: fiveSkin meshClone heap payload15.147MB excludingallocator
 metadata: halfedges8.363MB(55.2%), vertices3.294MB, faces1.336MB, UV2.154MB.
 Isolatedhalfedges-only Arc+COW prototype now runs correctness/paired probes;
 productionMesh schema/ownership remains unchanged pendingpositiveverification.
+
+
+92682a5 shares immutableHalfEdge storage onMeshClone with copy-on-write edits,
+keepingVecJSON andpublicsliceAPI. ProductionMesh/Scene264passed, paired317
+fullSkin+display/cages/weights/JSON equalitypassed with0.383962msCPU saving.
+3af118d addsopaque strongHalfEdgeSnapshot, identity-or-exact-value guard; GPU
+geometry descriptor keepsALLvertex.he/Face/map/partguards, GPUedge keepssource/
+count/visibilitychecks. Sharedproofexcludespositions/maps/faces/invisible.
+66Bevy140Mesh34Render402UI librarytests passed, independentread-onlyreview
+foundnoimportantissue. Nodataformatmigration/meshreduction/materialchange.
+
+Native3af118d(after10m50s releasebuild) Realistic57.129/56.669, Wire88.424/87.850
+actualdistinctreadyposes/s vsbb30aa151.068/51.003 and82.315/82.932. Combined
+includesCOW/snapshot/allvisibleguard; cannotisolateindividualFPScontributions.
+SameRaypath/camera,5objects13parts, noerror/recovery. Allfourframe39viewports
+pixelidenticaltobb30aa1. Apppaused/frame39restored. Rawfourwindows persisted
+2026-10-28-topology-snapshot.jsonl.60Realisticstillnotmet.
+
+SeparateisolatednativeF64wholegrouprefinebounded17qualitygate positive:
+1,414,482vertices≤2e-5,max4.64955e-7;102refinedhistoricalfailures,1,414,380
+nonflaggedPackedVertexrecordsbitidentical. NoCPUoracle/capturedterm inputs,
+wholeprepguards15/15. Full317gate remainsrequired. Nativef64atan2compiler
+faultwasisolated; testedrange-reducedpolynomial usesbasicf64ops instead.
+Prototype NOTinproduction; noqualitycompletion/performanceclaim from17gate.
+NextCore sharedHEvalidationcachealsoisolatedpendingtests/pairedmeasurement.
