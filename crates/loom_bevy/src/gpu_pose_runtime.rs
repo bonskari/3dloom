@@ -9,19 +9,27 @@ use crate::MeshData;
 use loom_mesh::{FaceId, Mesh};
 use wgpu::util::DeviceExt;
 
+fn fused_positions_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS").as_deref() == Some(std::ffi::OsStr::new("1")))
+}
+
 pub(crate) struct Candidate<'a> {
     pub output: &'a wgpu::Buffer,
     pub guard: &'a wgpu::Buffer,
     pub positions: &'a [[f32; 3]],
+    pub prepared: Option<&'a mut crate::dynamic_geometry::PreparedPositions>,
     pub indices: &'a [u32],
 }
 struct Part {
     indices: Vec<u32>,
     positions: Vec<[f32; 3]>,
+    prepared: crate::dynamic_geometry::PreparedPositions,
     preparation: GpuPreparation,
     math: Option<GpuRecipeMath>,
 }
 pub(crate) struct GpuPoseRuntime {
+    fused: bool,
     source: bevy::render::render_resource::Buffer,
     geometry: GpuPoseGeometry,
     parts: Vec<Part>,
@@ -78,6 +86,7 @@ impl GpuPoseRuntime {
             parts.push(Part {
                 indices,
                 positions: Vec::new(),
+                prepared: Default::default(),
                 preparation: GpuPreparation::with_program(
                     device,
                     geometry.intermediate_buffer(),
@@ -90,13 +99,14 @@ impl GpuPoseRuntime {
         }
         let guards = GuardReadback::new(device, parts.len())?;
         let mut runtime = Self {
+            fused: fused_positions_enabled(),
             source,
             geometry,
             parts,
             guards,
             precision,
         };
-        runtime.gather_positions(mesh);
+        runtime.gather_positions(mesh)?;
         let mut encoder = device.create_command_encoder(&Default::default());
         runtime.encode_preparation(&mut encoder);
         queue.submit([encoder.finish()]);
@@ -128,19 +138,18 @@ impl GpuPoseRuntime {
             let positions = source_positions(mesh)?;
             queue.write_buffer(&self.source, 0, bytemuck::cast_slice(&positions));
         }
-        self.gather_positions(mesh);
+        self.gather_positions(mesh)?;
         Ok(false)
     }
-    fn gather_positions(&mut self, mesh: &Mesh) {
+    fn gather_positions(&mut self, mesh: &Mesh) -> Result<(), String> {
         let _scope = loom_render::profile::Scope::new("gpu_pose.corner_gather");
         for (part, range) in self.parts.iter_mut().zip(&self.geometry.parts) {
-            part.positions.clear();
-            part.positions.extend(
-                self.geometry.corner_sources()[range.clone()]
-                    .iter()
-                    .map(|i| mesh.vertices()[*i as usize].position.to_array()),
-            );
+            let positions = self.geometry.corner_sources()[range.clone()].iter()
+                .map(|i| mesh.vertices()[*i as usize].position.to_array());
+            if self.fused { part.prepared.gather(positions)?; }
+            else { part.positions.clear(); part.positions.extend(positions); }
         }
+        Ok(())
     }
     pub(crate) fn encode_normals(&self, encoder: &mut wgpu::CommandEncoder) {
         self.geometry.encode(encoder);
@@ -253,6 +262,17 @@ impl GpuPoseRuntime {
             .collect();
         self.guards.read(device, queue, &refs)
     }
+    #[cfg(test)]
+    pub(crate) fn uses_fused_positions(&self) -> bool { self.fused }
+    pub(crate) fn commit_candidates(&mut self) -> Vec<Candidate<'_>> {
+        let fused = self.fused;
+        self.parts.iter_mut().map(|p| {
+            let math = p.math.as_ref().unwrap();
+            Candidate { output: math.output(), guard: math.guard_buffer(), positions: &p.positions,
+                prepared: fused.then_some(&mut p.prepared), indices: &p.indices }
+        }).collect()
+    }
+    #[cfg(test)]
     pub(crate) fn candidates(&self) -> Vec<Candidate<'_>> {
         self.parts
             .iter()
@@ -262,6 +282,7 @@ impl GpuPoseRuntime {
                     output: math.output(),
                     guard: math.guard_buffer(),
                     positions: &p.positions,
+                    prepared: None,
                     indices: &p.indices,
                 }
             })
@@ -488,10 +509,13 @@ mod tests {
         );
         let candidates = runtime.candidates();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(
-            candidates[0].positions.len() as u64 * 64,
-            candidates[0].output.size()
-        );
+        if runtime.fused {
+            let positions: Vec<_> = runtime.geometry.corner_sources()[runtime.geometry.parts[0].clone()].iter().map(|i| mesh.vertices()[*i as usize].position.to_array()).collect();
+            runtime.parts[0].prepared.assert_current_bits(&positions);
+            assert_eq!(positions.len() as u64 * 64, candidates[0].output.size());
+        } else {
+            assert_eq!(candidates[0].positions.len() as u64 * 64, candidates[0].output.size());
+        }
         assert!(!candidates[0].indices.is_empty());
         assert!(candidates[0].guard.size() >= 4);
     }

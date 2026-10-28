@@ -70,6 +70,49 @@ struct PackedVertex {
 }
 const _: [(); 64] = [(); std::mem::size_of::<PackedVertex>()];
 
+/// Current CPU positions prepared in original corner order. Fields stay private:
+/// the finite/bounds proof is invalidated whenever the owned staging is refilled.
+#[derive(Default)]
+pub(crate) struct PreparedPositions {
+    positions: Vec<[f32; 4]>,
+    min: glam::Vec3,
+    max: glam::Vec3,
+    valid: bool,
+}
+impl PreparedPositions {
+    pub(crate) fn gather(&mut self, positions: impl ExactSizeIterator<Item = [f32; 3]>) -> Result<(), String> {
+        self.valid = false;
+        self.positions.clear();
+        self.positions.reserve(positions.len());
+        self.min = glam::Vec3::splat(f32::INFINITY);
+        self.max = glam::Vec3::splat(f32::NEG_INFINITY);
+        for p in positions {
+            if !p.iter().all(|v| v.is_finite()) { return Err("GPU pose positions must be finite".into()); }
+            self.min = self.min.min(glam::Vec3::from_array(p));
+            self.max = self.max.max(glam::Vec3::from_array(p));
+            self.positions.push([p[0], p[1], p[2], 1.0]);
+        }
+        self.valid = true;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl PreparedPositions {
+    pub(crate) fn assert_current_bits(&self, positions: &[[f32; 3]]) {
+        assert!(self.valid);
+        assert_eq!(self.positions.len(), positions.len());
+        for (actual, expected) in self.positions.iter().zip(positions) {
+            assert_eq!(actual.map(f32::to_bits), [expected[0], expected[1], expected[2], 1.0].map(f32::to_bits));
+        }
+    }
+}
+
+enum CurrentPositions<'a> {
+    Raw(&'a [[f32; 3]]),
+    Prepared(&'a mut PreparedPositions),
+}
+
 /// An immutable-size device allocation. Keep its extension handle unchanged
 /// during animation; updating buffer contents needs no material asset event.
 pub struct DynamicGeometryBuffer {
@@ -151,6 +194,14 @@ impl DynamicGeometryBuffer {
             previous_positions: self.previous.clone(),
         }
     }
+    #[cfg(test)]
+    pub(crate) fn assert_current_history_bits(&self, positions: &[[f32; 3]]) {
+        assert_eq!(self.last_positions.len(), positions.len());
+        for (actual, expected) in self.last_positions.iter().zip(positions) {
+            assert_eq!(actual.map(f32::to_bits), [expected[0], expected[1], expected[2], 1.0].map(f32::to_bits));
+        }
+    }
+
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
     }
@@ -205,7 +256,7 @@ impl DynamicGeometryBuffer {
         positions: &'a [[f32; 3]], indices: Option<&[u32]>,
     ) -> Result<ValidatedGpuCopy<'a>, String> {
         let bytes = self.validate_gpu(source, source_offset, positions, indices)?;
-        Ok(ValidatedGpuCopy { target: self, source, source_offset, positions, bytes })
+        Ok(ValidatedGpuCopy { target: self, source, source_offset, positions: CurrentPositions::Raw(positions), bytes })
     }
 
     #[cfg(test)]
@@ -216,11 +267,28 @@ impl DynamicGeometryBuffer {
         Ok(self.prepare_gpu(source, source_offset, positions, indices)?.commit(encoder).0)
     }
 
+    pub(crate) fn prepare_gpu_fused<'a>(&'a mut self, source: &'a wgpu::Buffer, source_offset: u64, positions: &'a mut PreparedPositions, indices: Option<&[u32]>) -> Result<ValidatedGpuCopy<'a>, String> {
+        let bytes = self.validate_gpu_layout(source, source_offset, positions.positions.len(), positions.valid, indices)?;
+        Ok(ValidatedGpuCopy { target: self, source, source_offset, positions: CurrentPositions::Prepared(positions), bytes })
+    }
+
     pub(crate) fn validate_gpu(&self, source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>) -> Result<u64, String> {
         let _scope = loom_render::profile::Scope::new("gpu_pose.layout_validation");
         let bytes = (self.vertex_count as u64).checked_mul(64).ok_or("GPU pose size overflow")?;
         if positions.len() != self.vertex_count || self.indices.as_deref() != indices
             || !positions.iter().flatten().all(|v| v.is_finite())
+            || source_offset % 64 != 0 || source == &*self.buffer
+            || !source.usage().contains(wgpu::BufferUsages::COPY_SRC)
+            || source_offset.checked_add(bytes).is_none_or(|end| end > source.size()) {
+            return Err("GPU pose layout, positions or source range is invalid".into());
+        }
+        Ok(bytes)
+    }
+
+    fn validate_gpu_layout(&self, source: &wgpu::Buffer, source_offset: u64, count: usize, finite: bool, indices: Option<&[u32]>) -> Result<u64, String> {
+        let _scope = loom_render::profile::Scope::new("gpu_pose.layout_validation");
+        let bytes = (self.vertex_count as u64).checked_mul(64).ok_or("GPU pose size overflow")?;
+        if count != self.vertex_count || self.indices.as_deref() != indices || !finite
             || source_offset % 64 != 0
             || source == &*self.buffer
             || !source.usage().contains(wgpu::BufferUsages::COPY_SRC)
@@ -237,7 +305,7 @@ pub(crate) struct ValidatedGpuCopy<'a> {
     target: &'a mut DynamicGeometryBuffer,
     source: &'a wgpu::Buffer,
     source_offset: u64,
-    positions: &'a [[f32; 3]],
+    positions: CurrentPositions<'a>,
     bytes: u64,
 }
 impl ValidatedGpuCopy<'_> {
@@ -245,17 +313,31 @@ impl ValidatedGpuCopy<'_> {
     pub(crate) fn commit(self, encoder: &mut wgpu::CommandEncoder) -> (Aabb, (glam::Vec3, glam::Vec3)) {
         let _scope = loom_render::profile::Scope::new("bevy.dynamic.gpu_copy");
         let target = self.target;
-        let mut lo = glam::Vec3::splat(f32::INFINITY);
-        let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
-        target.next_positions.clear();
-        target.next_positions.reserve(self.positions.len());
-        for &p in self.positions {
-            lo = lo.min(glam::Vec3::from_array(p));
-            hi = hi.max(glam::Vec3::from_array(p));
-            target.next_positions.push([p[0], p[1], p[2], 1.0]);
-        }
+        let (lo, hi) = match &self.positions {
+            CurrentPositions::Raw(positions) => {
+                let mut lo = glam::Vec3::splat(f32::INFINITY);
+                let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
+                target.next_positions.clear();
+                target.next_positions.reserve(positions.len());
+                for &p in *positions {
+                    lo = lo.min(glam::Vec3::from_array(p));
+                    hi = hi.max(glam::Vec3::from_array(p));
+                    target.next_positions.push([p[0], p[1], p[2], 1.0]);
+                }
+                (lo, hi)
+            }
+            CurrentPositions::Prepared(prepared) => {
+                (prepared.min, prepared.max)
+            }
+        };
         encoder.copy_buffer_to_buffer(self.source, self.source_offset, &target.buffer, 0, self.bytes);
-        std::mem::swap(&mut target.last_positions, &mut target.next_positions);
+        match self.positions {
+            CurrentPositions::Raw(_) => std::mem::swap(&mut target.last_positions, &mut target.next_positions),
+            CurrentPositions::Prepared(prepared) => {
+                std::mem::swap(&mut target.last_positions, &mut prepared.positions);
+                prepared.valid = false;
+            }
+        }
         target.history_needs_advance = true;
         (Aabb::from_min_max(lo, hi), (lo, hi))
     }
@@ -1360,4 +1442,117 @@ mod tests {
         );
         assert!(offsets.iter().any(|&i| i > 0));
     }
+}
+
+#[cfg(test)]
+mod fused_position_tests {
+    use super::*;
+    #[test]
+    fn prepared_current_positions_keep_order_bits_bounds_and_reject_nonfinite() {
+        let positions = [[-0.0, 2.0, -3.0], [0.0, -4.0, 5.0], [7.0, 0.0, -0.0]];
+        let mut prepared = PreparedPositions::default();
+        prepared.gather(positions.into_iter()).unwrap();
+        let mut lo = glam::Vec3::splat(f32::INFINITY);
+        let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
+        for p in positions { lo = lo.min(p.into()); hi = hi.max(p.into()); }
+        assert_eq!(prepared.min.to_array().map(f32::to_bits), lo.to_array().map(f32::to_bits));
+        assert_eq!(prepared.max.to_array().map(f32::to_bits), hi.to_array().map(f32::to_bits));
+        assert_eq!(prepared.positions.iter().map(|p| p.map(f32::to_bits)).collect::<Vec<_>>(), positions.map(|p| [p[0],p[1],p[2],1.0].map(f32::to_bits)));
+        assert!(prepared.gather([[f32::NAN, 0.0, 0.0]].into_iter()).is_err());
+        assert!(!prepared.valid);
+        prepared.gather(positions.into_iter()).unwrap();
+        assert!(prepared.valid);
+        prepared.gather(std::iter::empty()).unwrap();
+        assert!(prepared.valid);
+    }
+    #[test]
+    fn fused_commit_rejects_later_layout_and_guard_without_partial_history_then_recovers() {
+        use wgpu::util::DeviceExt;
+        use crate::gpu_pose_commit::{commit_pose, GuardReadback, PoseCandidate, PoseCommitError};
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("real GPU");
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default(), None)).unwrap();
+        let initial = crate::mesh_data(&loom_mesh::box_primitive(glam::Vec3::ONE));
+        let mut current = initial.clone();
+        for p in &mut current.positions { p[0] += 3.0; }
+        let mut targets: Vec<_> = (0..2).map(|_| DynamicGeometryBuffer::new(&device, &initial.to_bevy()).unwrap().0).collect();
+        let output = DynamicGeometryBuffer::new(&device, &current.to_bevy()).unwrap().0;
+        let guards: Vec<_> = [0u32, 8].iter().map(|flag| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::bytes_of(flag), usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST })).collect();
+        let mut reader = GuardReadback::new(&device, 2).unwrap();
+        let mut prepared = [PreparedPositions::default(), PreparedPositions::default()];
+        let before: Vec<_> = targets.iter().map(|t| (t.last_positions.clone(), t.history_needs_advance)).collect();
+        for stage in 0..3 {
+            for (i, p) in prepared.iter_mut().enumerate() { p.gather(current.positions[if stage == 0 && i == 1 { 1 } else { 0 }..].iter().copied()).unwrap(); }
+            let candidates = targets.iter_mut().zip(&guards).zip(&mut prepared).map(|((target, guard), p)| PoseCandidate { target, guard, output: output.buffer(), offset: 0, positions: &[], prepared: Some(p), indices: Some(&current.indices) }).collect();
+            let result = commit_pose(&device, &queue, &mut reader, candidates);
+            if stage == 0 { assert!(matches!(result, Err(PoseCommitError::Layout { part: 1, .. }))); }
+            else if stage == 1 { assert!(matches!(result, Err(PoseCommitError::Guards(_)))); }
+            else { assert!(result.is_ok()); }
+            for (i, target) in targets.iter().enumerate() {
+                if stage < 2 { assert_eq!((target.last_positions.clone(), target.history_needs_advance), before[i]); assert!(prepared[i].valid); }
+                else {
+                    assert_eq!(target.last_positions.iter().map(|p| p.map(f32::to_bits)).collect::<Vec<_>>(), current.positions.iter().map(|p| [p[0],p[1],p[2],1.0].map(f32::to_bits)).collect::<Vec<_>>());
+                    assert!(target.history_needs_advance); assert!(!prepared[i].valid);
+                }
+            }
+            if stage == 1 { queue.write_buffer(&guards[1], 0, bytemuck::bytes_of(&0u32)); }
+        }
+        // A consumed proof cannot publish swapped-out old positions twice.
+        let candidates = targets.iter_mut().zip(&guards).zip(&mut prepared).map(|((target, guard), p)| PoseCandidate { target, guard, output: output.buffer(), offset: 0, positions: &[], prepared: Some(p), indices: Some(&current.indices) }).collect();
+        assert!(matches!(commit_pose(&device, &queue, &mut reader, candidates), Err(PoseCommitError::Layout { part: 0, .. })));
+        let read_history = |target: &DynamicGeometryBuffer| {
+            let size = target.last_positions.len() as u64 * 16;
+            let staging = device.create_buffer(&wgpu::BufferDescriptor { label: None, size, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+            let mut encoder = device.create_command_encoder(&Default::default()); encoder.copy_buffer_to_buffer(&target.previous, 0, &staging, 0, size); queue.submit([encoder.finish()]);
+            let (tx, rx) = std::sync::mpsc::channel(); staging.slice(..).map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap()); device.poll(wgpu::Maintain::Wait); rx.recv().unwrap().unwrap();
+            let bytes = staging.slice(..).get_mapped_range().to_vec(); staging.unmap(); bytes
+        };
+        for (i, target) in targets.iter_mut().enumerate() {
+            target.advance_history(&queue);
+            assert!(!target.history_needs_advance);
+            assert_eq!(read_history(target), bytemuck::cast_slice::<_, u8>(&target.last_positions));
+            // Repeated same pose refills the consumed proof before commit.
+            prepared[i].gather(current.positions.iter().copied()).unwrap();
+            let mut encoder = device.create_command_encoder(&Default::default());
+            target.prepare_gpu_fused(output.buffer(), 0, &mut prepared[i], Some(&current.indices)).unwrap().commit(&mut encoder);
+            queue.submit([encoder.finish()]); target.advance_history(&queue);
+            assert_eq!(read_history(target), bytemuck::cast_slice::<_, u8>(&target.last_positions));
+            // Ordinary CPU fallback then advances the same history stream.
+            target.update(&queue, &initial.to_bevy()).unwrap(); target.advance_history(&queue);
+            target.assert_current_history_bits(&initial.positions);
+            assert_eq!(read_history(target), bytemuck::cast_slice::<_, u8>(&target.last_positions));
+        }
+    }
+
+    #[test]
+    #[ignore = "actual 317 CPU poses require LOOM_PERF_SCENE"]
+    fn actual_ray_317_fused_position_history_bounds_bits() {
+        let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(std::env::var("LOOM_PERF_SCENE").unwrap()).unwrap()).unwrap();
+        let scene: loom_scene::Scene = serde_json::from_value(value["scene"].clone()).unwrap();
+        let ids: Vec<_> = scene.nodes().filter(|n| n.modifiers.iter().any(|m| matches!(&m.modifier, loom_scene::Modifier::Skin(_)))).map(|n| n.id).collect();
+        assert_eq!(ids.len(), 5);
+        let mut prepared = PreparedPositions::default();
+        let mut parts = 0; let mut vertices = 0;
+        for time in (0..=157).map(|t| t as f32).chain([39.25]).chain((0..=157).map(|t| t as f32 + 0.5)) {
+            scene.set_time(time);
+            let mut pose_parts = 0;
+            for id in &ids {
+                let mut mesh = scene.eval_mesh(*id).value.mesh.clone();
+                loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(*id)).unwrap();
+                for (_, data) in crate::convert::mesh_data_by_id(&mesh) {
+                    prepared.gather(data.positions.iter().copied()).unwrap();
+                    let mut lo = glam::Vec3::splat(f32::INFINITY); let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
+                    let mut history = Vec::new();
+                    for p in &data.positions { lo = lo.min((*p).into()); hi = hi.max((*p).into()); history.push([p[0],p[1],p[2],1.0]); }
+                    assert_eq!(prepared.min.to_array().map(f32::to_bits), lo.to_array().map(f32::to_bits));
+                    assert_eq!(prepared.max.to_array().map(f32::to_bits), hi.to_array().map(f32::to_bits));
+                    assert_eq!(bytemuck::cast_slice::<_,u8>(&prepared.positions), bytemuck::cast_slice::<_,u8>(&history));
+                    vertices += data.positions.len(); pose_parts += 1;
+                }
+            }
+            assert_eq!(pose_parts, 13); parts += pose_parts;
+        }
+        assert_eq!(parts, 4121); eprintln!("FUSED_CPU_POSITION_PARITY poses=317 parts={parts} vertices={vertices}");
+    }
+
 }

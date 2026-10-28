@@ -6,6 +6,7 @@ pub(crate) struct PoseCandidate<'a> {
     pub output: &'a wgpu::Buffer,
     pub offset: u64,
     pub positions: &'a [[f32; 3]],
+    pub prepared: Option<&'a mut crate::dynamic_geometry::PreparedPositions>,
     pub indices: Option<&'a [u32]>,
 }
 
@@ -44,8 +45,10 @@ pub(crate) fn commit_pose(
     }
     let guards: Vec<_> = candidates.iter().map(|c| c.guard).collect();
     let prepared: Vec<_> = candidates.into_iter().enumerate().map(|(part, c)| {
-        c.target.prepare_gpu(c.output, c.offset, c.positions, c.indices)
-            .map_err(|reason| PoseCommitError::Layout { part, reason })
+        match c.prepared {
+            Some(prepared) => c.target.prepare_gpu_fused(c.output, c.offset, prepared, c.indices),
+            None => c.target.prepare_gpu(c.output, c.offset, c.positions, c.indices),
+        }.map_err(|reason| PoseCommitError::Layout { part, reason })
     }).collect::<Result<_, _>>()?;
     let flags = reader
         .read(device, queue, &guards)
@@ -186,6 +189,7 @@ mod tests {
                 } else {
                     &current.positions
                 },
+                prepared: None,
                 indices: Some(&current.indices),
             })
             .collect();
@@ -202,6 +206,7 @@ mod tests {
                 output: output.buffer(),
                 offset: 0,
                 positions: &current.positions,
+                prepared: None,
                 indices: Some(&current.indices),
             })
             .collect();
@@ -225,6 +230,7 @@ mod tests {
                 output: if i == 1 { &alias } else { output.buffer() },
                 offset: 0,
                 positions: &current.positions,
+                prepared: None,
                 indices: Some(&current.indices),
             })
             .collect();
@@ -246,6 +252,7 @@ mod tests {
                 output: output.buffer(),
                 offset: 0,
                 positions: &current.positions,
+                prepared: None,
                 indices: Some(&current.indices),
             })
             .collect();

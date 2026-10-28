@@ -259,8 +259,11 @@ impl GpuPoseState {
     ) -> Result<(Result<PoseBounds, PoseCommitError>, Vec<(u64, usize)>), String> {
         let mut candidates = Vec::new();
         let mut order = Vec::new();
+        let mut runtimes: Vec<_> = self.cache.iter_mut().filter(|((h, id), _)| *h == hidden && eligible.contains(id)).collect();
         for (id, object) in set.iter_mut().filter(|(id, _)| eligible.contains(id)) {
-            let parts = self.cache[&(hidden, *id)].candidates();
+            let index = runtimes.iter().position(|((_, key), _)| key == id).unwrap();
+            let (_, runtime) = runtimes.swap_remove(index);
+            let parts = runtime.commit_candidates();
             if parts.len() != object.buffers.len() {
                 return Err("GPU material part count changed".into());
             }
@@ -272,6 +275,7 @@ impl GpuPoseState {
                     output: source.output,
                     offset: 0,
                     positions: source.positions,
+                    prepared: source.prepared,
                     indices: Some(source.indices),
                 });
             }
@@ -398,7 +402,17 @@ mod tests {
     fn actual_ray_precise_all_thirteen_parts_keep_current_pose_and_resources() {
         current_renderer_resources(true);
     }
+    #[test]
+    #[ignore = "full actual fused GPU renderer path requires LOOM_PERF_SCENE and experimental flag"]
+    fn actual_ray_fused_317_renderer_history_bounds_and_current_positions() {
+        assert_eq!(std::env::var("LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS").as_deref(), Ok("1"));
+        let times = (0..=157).map(|t| t as f32).chain([39.25]).chain((0..=157).map(|t| t as f32 + 0.5)).collect();
+        current_renderer_resources_at(true, times, false);
+    }
     fn current_renderer_resources(precise: bool) {
+        current_renderer_resources_at(precise, vec![0.0, 0.0, 39.25, 39.25, 95.71835, 149.0], true);
+    }
+    fn current_renderer_resources_at(precise: bool, times: Vec<f32>, check_math: bool) {
         let path = std::env::var("LOOM_PERF_SCENE").expect("actual saved Ray scene");
         let value: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -426,7 +440,7 @@ mod tests {
         let deforming = ids.iter().map(|id| id.0).collect();
         let mut snapshots = HashMap::new();
         let mut readback = GuardReadback::new(&renderer.device, 13).unwrap();
-        for (frame, time) in [0.0, 39.25, 95.71835, 149.0].into_iter().enumerate() {
+        for (frame, time) in times.into_iter().enumerate() {
             scene.set_time(time);
             let owned: Vec<_> = ids
                 .iter()
@@ -451,11 +465,15 @@ mod tests {
                 .collect();
             let started = std::time::Instant::now();
             renderer.sync_deforming(&objects, &deforming);
+            // Each successful repeat must refill current staging before commit.
+            renderer.sync_deforming(&objects, &deforming);
+            let requested_fused = std::env::var_os("LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS").as_deref() == Some(std::ffi::OsStr::new("1"));
+            assert!(renderer.gpu_poses.as_ref().unwrap().cache.values().all(|runtime| runtime.uses_fused_positions() == requested_fused));
             eprintln!(
                 "RAY_GPU_RENDERER time={time} sync_ms={:.3}",
                 started.elapsed().as_secs_f64() * 1000.0
             );
-            if frame > 0 {
+            if check_math && frame > 0 {
                 let state = renderer.gpu_poses.as_ref().unwrap();
                 let maths: Vec<_> = state.cache.values().flat_map(|runtime| runtime.maths()).collect();
                 assert_eq!(maths.len(), 13);
@@ -489,8 +507,13 @@ mod tests {
                     assert_eq!(handles, snapshots[&source.id]);
                 }
                 let data = crate::mesh_data(source.mesh);
-                for (id, buffer) in object.part_ids.iter().zip(&object.buffers) {
+                for (part_index, (id, buffer)) in object.part_ids.iter().zip(&object.buffers).enumerate() {
                     let part = crate::convert::mesh_data_part(source.mesh, &data, *id, false);
+                    buffer.assert_current_history_bits(&part.positions);
+                    let actual = renderer.app.world().entity(object.parts[part_index].0).get::<Aabb>().copied().unwrap();
+                    let expected_aabb = part.aabb().unwrap();
+                    assert_eq!(actual.center.to_array().map(f32::to_bits), expected_aabb.center.to_array().map(f32::to_bits));
+                    assert_eq!(actual.half_extents.to_array().map(f32::to_bits), expected_aabb.half_extents.to_array().map(f32::to_bits));
                     expected.push(part.positions[0][0].to_bits());
                     buffers.push(&**buffer.buffer());
                 }
