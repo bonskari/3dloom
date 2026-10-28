@@ -310,3 +310,20 @@ Raw results persisted2026-10-28-stage-batch.jsonl. Independent read-only review
 found no important issues in pass isolation/stage ordering or history boundary.
 App paused/frame39 restored. Realistic60 and broader numeric quality gate remain
 unfinished; no completion or general default-enable claim.
+
+
+bce2500 moves post-evaluation Skin display cloning/world transforms onto the
+existing bounded4worker pool. Scene evaluation/cache publication and object
+matrix reads remain on host. Main loop takes owned current display meshes and
+skips the already-applied world transform; editing cages/styling remain separate.
+The operations themselves are unchanged, including transform_mesh invariants.
+UI401passed/1ignored; explicit translated-object integration passes exact serial
+world-display/position-bits/cage comparison. Independent read-only review found
+no important TLS/scene/endresult/displaybox issue. Native benefit unmeasured.
+
+Native bce2500 ready-pose rates: [('Realistic', 47.261), ('Wireframe', 80.676), ('Realistic', 47.104), ('Wireframe', 80.279)].
+Same scene/camera/full materials/geometry,5objects/13parts committed with no
+error or recovery. Frame39 Realistic viewport byte-identical to c4fbe10.
+Rebuild world7.261–7.324ms, skin display worker wall1.199–1.216ms.
+Raw rates2026-10-28-skin-display.jsonl. App paused/frame39 restored.
+This measured incremental gain is retained. Realistic60 remains unfinished.
