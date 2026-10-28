@@ -87,6 +87,7 @@ pub(crate) fn visible_node<'a>(app: &'a crate::LoomApp, proxy: &ControlProxy) ->
 
 /// Prepare once with the evaluated world pose. Existing rig/node data is read-only.
 pub(crate) fn prepare(scene: &Scene, out: &mut Vec<ControlProxy>) {
+    let _profile = loom_render::profile::Scope::new("ui.loomrig_prepare");
     out.clear();
     for rig in &scene.loom_rigs {
         for limb in &rig.limbs {

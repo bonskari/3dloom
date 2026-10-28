@@ -72,6 +72,7 @@ fn bone_axis_visible(app: &LoomApp, node: &loom_scene::Node) -> bool {
 /// Every visible helper's lines for one viewport: (depth-tested lines in
 /// linear colour for the GPU, on-top lines in sRGB for the painter).
 pub fn lines(app: &LoomApp, view_proj: Mat4, rect: egui::Rect, realistic: bool) -> (DepthLines, TopLines) {
+    let _profile = loom_render::profile::Scope::new("ui.helper_lines");
     let mut depth = Vec::new();
     let mut top = Vec::new();
     let up = |p: Vec3| {
@@ -112,6 +113,7 @@ pub fn lines(app: &LoomApp, view_proj: Mat4, rect: egui::Rect, realistic: bool) 
 
 /// Draws the on-top lines and the helpers' text labels.
 pub fn draw(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, rect: egui::Rect, top: &[(Vec3, Vec3, [u8; 3])]) {
+    let _profile = loom_render::profile::Scope::new("ui.helper_draw");
     for (a, b, c) in top {
         if let Some(s) = crate::camera_overlay::segment(view_proj, rect, *a, *b) {
             painter.line_segment(s, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(c[0], c[1], c[2])));
