@@ -1,0 +1,42 @@
+[
+  {
+    "guard": "HalfEdgeSnapshot",
+    "rounds": 32,
+    "repeats": 16,
+    "meshes": 5,
+    "shared_ms": 9.385e-06,
+    "old_snapshot_fresh_equal_ms": 0.362506953,
+    "fresh_snapshot_fresh_ms": 1.8906e-05,
+    "extra_ms": 0.362497568
+  },
+  {
+    "guard": "GpuDescriptor",
+    "rounds": 32,
+    "repeats": 16,
+    "meshes": 5,
+    "shared_ms": 0.177981221,
+    "old_snapshot_fresh_equal_ms": 0.645473765,
+    "fresh_snapshot_fresh_ms": 0.174659877,
+    "extra_ms": 0.467492544
+  },
+  {
+    "guard": "GpuEdgeGeometry",
+    "rounds": 32,
+    "repeats": 16,
+    "meshes": 5,
+    "shared_ms": 2.0479e-05,
+    "old_snapshot_fresh_equal_ms": 0.362556249,
+    "fresh_snapshot_fresh_ms": 3.1563e-05,
+    "extra_ms": 0.362535771
+  },
+  {
+    "guard": "BevyGeometryTopology",
+    "rounds": 32,
+    "repeats": 16,
+    "meshes": 5,
+    "shared_ms": 0.479358274,
+    "old_snapshot_fresh_equal_ms": 0.467860633,
+    "fresh_snapshot_fresh_ms": 0.506258557,
+    "extra_ms": -0.011497642
+  }
+]

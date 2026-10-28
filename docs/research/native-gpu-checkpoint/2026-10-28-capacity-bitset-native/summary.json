@@ -1,0 +1,16 @@
+[
+  {
+    "kind": "summary",
+    "shading": "Realistic",
+    "active_windows": 17,
+    "active_ready_pose_fps": 62.22153954508873,
+    "min_active_window_fps": 61.33537496609225
+  },
+  {
+    "kind": "summary",
+    "shading": "Wireframe",
+    "active_windows": 18,
+    "active_ready_pose_fps": 95.60545172591053,
+    "min_active_window_fps": 91.15895815090524
+  }
+]
