@@ -358,11 +358,12 @@ fn mesh_usage(usage: BufferUsages) -> BufferUsages {
     usage
 }
 
-fn update_buffer(device: &Device, queue: &wgpu::Queue, buffer: &mut Buffer, contents: &[u8], usage: BufferUsages, label: &str) {
+fn update_buffer(device: &Device, queue: &wgpu::Queue, buffer: &mut Buffer, contents: &[u8], usage: BufferUsages, label: &'static str) {
     if contents.len() as u64 > buffer.size() {
         *buffer = device.create_buffer_init(&BufferInitDescriptor { label: Some(label), contents, usage: mesh_usage(usage) });
     } else if !contents.is_empty() {
         queue.write_buffer(buffer, 0, contents);
+        crate::profile::buffer_write(label, contents.len() as u64);
     }
 }
 

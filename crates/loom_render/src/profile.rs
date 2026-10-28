@@ -18,11 +18,23 @@ struct Samples {
 struct Profile {
     started: Instant,
     samples: BTreeMap<&'static str, Samples>,
+    writes: BTreeMap<&'static str, (u64, u64)>,
 }
 
 fn profile() -> &'static Mutex<Profile> {
     static PROFILE: OnceLock<Mutex<Profile>> = OnceLock::new();
-    PROFILE.get_or_init(|| Mutex::new(Profile { started: Instant::now(), samples: BTreeMap::new() }))
+    PROFILE.get_or_init(|| Mutex::new(Profile { started: Instant::now(), samples: BTreeMap::new(), writes: BTreeMap::new() }))
+}
+
+/// Counts actual mesh-buffer queue writes separately from timed scopes.
+/// Disabled counters use the same cached flag and do not lock.
+pub(crate) fn buffer_write(name: &'static str, bytes: u64) {
+    if !enabled() { return; }
+    if let Ok(mut profile) = profile().lock() {
+        let counter = profile.writes.entry(name).or_default();
+        counter.0 += 1;
+        counter.1 += bytes;
+    }
 }
 
 /// Measures an inclusive scope only when `LOOM_PROFILE_FRAMES` is set.
@@ -55,10 +67,14 @@ pub fn report_if_due() {
     let Ok(mut profile) = profile().lock() else { return };
     if profile.started.elapsed() < Duration::from_secs(5) { return; }
     let samples = std::mem::take(&mut profile.samples);
+    let writes = std::mem::take(&mut profile.writes);
     profile.started = Instant::now();
     drop(profile);
     for (name, sample) in samples {
         let total_ms = sample.total.as_secs_f64() * 1000.0;
         eprintln!("[loom_profile] {name} count={} avg_ms={:.3} max_ms={:.3} total_ms={total_ms:.3}", sample.count, total_ms / sample.count as f64, sample.max.as_secs_f64() * 1000.0);
+    }
+    for (name, (count, bytes)) in writes {
+        eprintln!("[loom_profile_counter] {name} writes={count} bytes={bytes}");
     }
 }
