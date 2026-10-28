@@ -103,6 +103,7 @@ pub struct GpuEdges {
     source_offset: u64,
     half_edges: Vec<(u32, u32)>,
     visible: Vec<bool>,
+    all_visible: bool,
 }
 impl GpuEdges {
     pub fn new(
@@ -236,6 +237,7 @@ impl GpuEdges {
             source: source.buffer.clone(),
             source_offset: source.offset,
             half_edges,
+            all_visible: visible.iter().all(|visible| *visible),
             visible,
         })
     }
@@ -252,11 +254,14 @@ impl GpuEdges {
                 .iter()
                 .zip(mesh.half_edges())
                 .all(|(&(origin, twin), he)| origin == he.origin.0 && twin == he.twin.0)
-            && self
-                .visible
-                .iter()
-                .enumerate()
-                .all(|(i, visible)| *visible == mesh.edge_visible(HalfEdgeId(i as u32))))
+            && if self.all_visible {
+                // The same effective predicate used by ordinary edge emission;
+                // an absent visibility array needs no per-half-edge scan.
+                !mesh.has_invisible_edges()
+            } else {
+                self.visible.iter().enumerate()
+                    .all(|(i, visible)| *visible == mesh.edge_visible(HalfEdgeId(i as u32)))
+            })
     }
     /// A replacement source allocation or changed range requires rebinding,
     /// even when mesh topology is unchanged.
