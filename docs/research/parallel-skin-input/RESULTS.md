@@ -22,3 +22,9 @@ Reproduce after building release dependencies: `python3 docs/research/parallel-s
 ## First native result: no proven end-to-end gain
 
 Installedb2e2d82 preserved all four viewport pixel crops exactly and passed real FK pointer/gizmo/skin/Undo, all original node/selection/frame/source checks. The unprofiled production candidate measured60.183R/86.987W (min57.028R/81.872W). Interleaved previous171722a with the same Rotate tool measured the values retained in native/baseline-now.jsonl; its Realistic average60.729/min55.586 also missed stable60. These data do not establish a causal slowdown or a net speedup. The candidate native ui.skin_batch remained around3.09–3.17ms in steady profile windows despite the isolated benchmark gain. Additional UI executor-vs-empty-cache instrumentation is needed before attributing the difference. Native performance acceptance and long stability remain incomplete; do not ship a claim of improved FPS.
+
+## Native executor boundary
+
+Installedb4aca16 adds only an optional UI timing scope around the existing executor callback. Its native22second run shows nonempty execution on every steady pose rebuild: executor2.168–2.357ms and complete batch3.067–3.296ms. There were only3empty callbacks during the initial partial/idle window. Four actual named Skin worker threads were present. Thus the hypothesis that native playback only hit an already evaluated cache is contradicted; it does run worker jobs. The isolated/native timing difference remains unexplained. These results do not establish a net production speedup or a causal slowdown.
+
+The candidate remains fully output-verified, but native performance acceptance remains open. A separate15minute production-default reliability/real-backup run is now live onb4aca16; it is explicitly not the quiet FPS acceptance gate. Original171722a andb2e2d82 executables are retained locally, as are all earlier versions. No source scene was saved or overwritten, and no public push occurred.
