@@ -34,7 +34,8 @@ impl Polygon {
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Mesh {
     pub(crate) vertices: Vec<Vertex>,
-    pub(crate) half_edges: Vec<HalfEdge>,
+    #[serde(with="half_edges_serde")]
+    pub(crate) half_edges: std::sync::Arc<Vec<HalfEdge>>,
     pub(crate) faces: Vec<Face>,
     /// Map channels by number (1 = the default texture channel). Channel 0,
     /// the vertex colour, lives on `Vertex.color`.
@@ -303,7 +304,7 @@ impl Mesh {
             r
         }
         let mut adjacent: Vec<(usize, usize)> = Vec::new();
-        for he in &self.half_edges {
+        for he in self.half_edges.iter() {
             let twin = &self.half_edges[he.twin.0 as usize];
             if let (Some(a), Some(b)) = (he.face, twin.face) {
                 let (a, b) = (a.0 as usize, b.0 as usize);
@@ -612,5 +613,38 @@ mod tests {
         let cap = crate::edit_ops::extrude_face(&mut b, FaceId(0), 0.5).unwrap();
         assert_eq!(b.faces()[cap.0 as usize].smoothing_groups, 1 << 4);
         assert_eq!(b.faces()[cap.0 as usize].material_id, 3);
+    }
+}
+
+mod half_edges_serde {
+    use super::HalfEdge;
+    use serde::{Serialize,Deserialize};
+    pub(super) fn serialize<S:serde::Serializer>(value:&std::sync::Arc<Vec<HalfEdge>>,serializer:S)->Result<S::Ok,S::Error>{value.as_ref().serialize(serializer)}
+    pub(super) fn deserialize<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<std::sync::Arc<Vec<HalfEdge>>,D::Error>{Vec::<HalfEdge>::deserialize(deserializer).map(std::sync::Arc::new)}
+}
+
+#[cfg(test)]
+mod half_edge_cow_tests {
+    use super::*;
+    #[test]
+    fn clone_edit_and_undo_snapshots_detach_and_keep_json_arrays(){
+        let mut source=crate::box_primitive(glam::Vec3::ONE);
+        crate::uvmap::auto_map(&mut source,crate::uvmap::AutoMap::Spherical,1);
+        source.set_edge_visible(HalfEdgeId(0),false);
+        let undo=source.clone();let before=serde_json::to_value(&source).unwrap();
+        assert!(before["half_edges"].is_array());
+        let mut edited=source.clone();
+        assert!(std::sync::Arc::ptr_eq(&source.half_edges,&edited.half_edges));
+        assert_ne!(source.vertices.as_ptr(),edited.vertices.as_ptr());
+        edited.vertices[0].position+=glam::Vec3::X;edited.faces[0].hidden=true;
+        edited.ensure_map(1).verts[0]=glam::Vec3::Y;edited.set_edge_visible(HalfEdgeId(0),true);
+        assert_eq!(source,undo);assert_eq!(serde_json::to_value(&source).unwrap(),before);
+        let hes=std::sync::Arc::make_mut(&mut edited.half_edges);
+        for he in hes {he.origin.0=match he.origin.0{0=>1,1=>0,v=>v};}
+        edited.vertices.swap(0,1);edited.check_invariants().unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&source.half_edges,&edited.half_edges));
+        assert_eq!(serde_json::to_value(&source).unwrap(),before);
+        edited=undo.clone();assert_eq!(serde_json::to_value(&edited).unwrap(),before);
+        let loaded:Mesh=serde_json::from_value(before.clone()).unwrap();assert_eq!(serde_json::to_value(&loaded).unwrap(),before);loaded.check_invariants().unwrap();
     }
 }

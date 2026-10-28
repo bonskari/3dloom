@@ -186,6 +186,7 @@ impl IndexedMesh {
     /// removed ones (renumbered after a delete).
     pub fn build(&self) -> Result<Mesh, String> {
         let mut mesh = Mesh::default();
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
         let mut used: BTreeSet<u32> = self.keep.iter().copied().filter(|i| (*i as usize) < self.positions.len()).collect();
         for face in &self.faces {
             used.extend(face.ids.iter().copied());
@@ -219,7 +220,7 @@ impl IndexedMesh {
             }
             let vids: Vec<VertexId> = ids.iter().map(|id| remap[id]).collect();
             let face_id = FaceId(mesh.faces.len() as u32);
-            let start = mesh.half_edges.len() as u32;
+            let start = half_edges.len() as u32;
             let n = vids.len();
             for (ch, out) in corner_uvs.iter_mut() {
                 match face.uv.get(ch) {
@@ -236,7 +237,7 @@ impl IndexedMesh {
                 if mesh.vertices[o.0 as usize].he.is_none() {
                     mesh.vertices[o.0 as usize].he = Some(he_id);
                 }
-                mesh.half_edges.push(HalfEdge { origin: o, twin: he_id, next: HalfEdgeId(start + ((i + 1) % n) as u32), prev: HalfEdgeId(start + ((i + n - 1) % n) as u32), face: Some(face_id) });
+                half_edges.push(HalfEdge { origin: o, twin: he_id, next: HalfEdgeId(start + ((i + 1) % n) as u32), prev: HalfEdgeId(start + ((i + n - 1) % n) as u32), face: Some(face_id) });
             }
             mesh.faces.push(Face { he: HalfEdgeId(start), smoothing_groups: face.smoothing_groups, material_id: face.material_id, hidden: face.hidden });
         }
@@ -245,11 +246,11 @@ impl IndexedMesh {
         let mut boundary: Vec<HalfEdgeId> = Vec::new();
         for ((o, d), he) in pairs {
             if let Some(t) = directed.get(&(d, o)) {
-                mesh.half_edges[he.0 as usize].twin = *t;
+                half_edges[he.0 as usize].twin = *t;
             } else {
-                let b = HalfEdgeId(mesh.half_edges.len() as u32);
-                mesh.half_edges.push(HalfEdge { origin: d, twin: he, next: b, prev: b, face: None });
-                mesh.half_edges[he.0 as usize].twin = b;
+                let b = HalfEdgeId(half_edges.len() as u32);
+                half_edges.push(HalfEdge { origin: d, twin: he, next: b, prev: b, face: None });
+                half_edges[he.0 as usize].twin = b;
                 for out in corner_uvs.values_mut() {
                     out.push(Vec3::ZERO);
                 }
@@ -260,13 +261,13 @@ impl IndexedMesh {
         // leaves o on the same side of the fan: rotate around o away from the
         // face edge until the next gap. Vertices on two borders stay valid.
         for b in boundary {
-            let h = mesh.half_edges[b.0 as usize].twin; // o→d in a face
+            let h = half_edges[b.0 as usize].twin; // o→d in a face
             let mut cur = h;
             let mut next = None;
-            for _ in 0..mesh.half_edges.len() {
-                let prev = mesh.half_edges[cur.0 as usize].prev; // x→o in cur's face
-                let t = mesh.half_edges[prev.0 as usize].twin; // o→x
-                if mesh.half_edges[t.0 as usize].face.is_none() {
+            for _ in 0..half_edges.len() {
+                let prev = half_edges[cur.0 as usize].prev; // x→o in cur's face
+                let t = half_edges[prev.0 as usize].twin; // o→x
+                if half_edges[t.0 as usize].face.is_none() {
                     next = Some(t);
                     break;
                 }
@@ -276,8 +277,8 @@ impl IndexedMesh {
                 }
             }
             if let Some(n) = next {
-                mesh.half_edges[b.0 as usize].next = n;
-                mesh.half_edges[n.0 as usize].prev = b;
+                half_edges[b.0 as usize].next = n;
+                half_edges[n.0 as usize].prev = b;
             }
         }
         mesh.check_invariants()?;

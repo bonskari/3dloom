@@ -19,6 +19,7 @@ pub type Slice = Option<(f32, f32)>;
 /// without a neighbour gets a boundary half-edge with `face == None`.
 pub fn build_merged(polygons: &[Vec<Vec3>]) -> Mesh {
     let mut mesh = Mesh::default();
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
     let mut vertex_map: HashMap<(i64, i64, i64), VertexId> = HashMap::new();
     let mut edge_map: HashMap<(VertexId, VertexId), HalfEdgeId> = HashMap::new();
     let key = |p: Vec3| ((p.x * 1e5).round() as i64, (p.y * 1e5).round() as i64, (p.z * 1e5).round() as i64);
@@ -46,7 +47,7 @@ pub fn build_merged(polygons: &[Vec<Vec3>]) -> Mesh {
             continue;
         }
         let face = FaceId(mesh.faces.len() as u32);
-        let base = mesh.half_edges.len() as u32;
+        let base = half_edges.len() as u32;
         let n = ids.len();
         for i in 0..n {
             let he = HalfEdgeId(base + i as u32);
@@ -54,7 +55,7 @@ pub fn build_merged(polygons: &[Vec<Vec3>]) -> Mesh {
             if mesh.vertices[ids[i].0 as usize].he.is_none() {
                 mesh.vertices[ids[i].0 as usize].he = Some(he);
             }
-            mesh.half_edges.push(HalfEdge {
+            half_edges.push(HalfEdge {
                 origin: ids[i],
                 twin: he,
                 next: HalfEdgeId(base + ((i + 1) % n) as u32),
@@ -72,11 +73,11 @@ pub fn build_merged(polygons: &[Vec<Vec3>]) -> Mesh {
     pairs.sort_by_key(|(_, he)| he.0);
     for ((from, to), he) in pairs {
         if let Some(twin) = edge_map.get(&(to, from)) {
-            mesh.half_edges[he.0 as usize].twin = *twin;
+            half_edges[he.0 as usize].twin = *twin;
         } else {
-            let b = HalfEdgeId(mesh.half_edges.len() as u32);
-            mesh.half_edges.push(HalfEdge { origin: to, twin: he, next: b, prev: b, face: None });
-            mesh.half_edges[he.0 as usize].twin = b;
+            let b = HalfEdgeId(half_edges.len() as u32);
+            half_edges.push(HalfEdge { origin: to, twin: he, next: b, prev: b, face: None });
+            half_edges[he.0 as usize].twin = b;
             boundary_by_origin.insert(to, b);
         }
     }
@@ -84,12 +85,12 @@ pub fn build_merged(polygons: &[Vec<Vec3>]) -> Mesh {
     let boundary: Vec<HalfEdgeId> = boundary_by_origin.values().copied().collect();
     for b in boundary {
         let end = {
-            let he = &mesh.half_edges[b.0 as usize];
-            mesh.half_edges[he.twin.0 as usize].origin
+            let he = &half_edges[b.0 as usize];
+            half_edges[he.twin.0 as usize].origin
         };
         if let Some(next) = boundary_by_origin.get(&end).copied() {
-            mesh.half_edges[b.0 as usize].next = next;
-            mesh.half_edges[next.0 as usize].prev = b;
+            half_edges[b.0 as usize].next = next;
+            half_edges[next.0 as usize].prev = b;
         }
     }
     // Primitives come with smoothing: faceted across hard edges, smooth

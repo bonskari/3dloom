@@ -1,0 +1,9 @@
+
+running 1 test
+HALFEDGE_COW poses=317 meshes=1585 stage=skin_batch original_ms=4.047414 cow_ms=3.736697 saved_ms=0.310717
+HALFEDGE_COW poses=317 meshes=1585 stage=display_clone_world original_ms=1.185305 cow_ms=1.111985 saved_ms=0.073320
+HALFEDGE_COW poses=317 meshes=1585 stage=combined original_ms=5.235855 cow_ms=4.851894 saved_ms=0.383962
+test tests::actual_halfedge_cow_317 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 9.95s
+

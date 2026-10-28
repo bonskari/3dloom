@@ -29,6 +29,7 @@ pub fn box_primitive(half_extents: Vec3) -> Mesh {
     ];
 
     let mut mesh = Mesh::default();
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
     for p in positions {
         mesh.vertices.push(Vertex::new(p, None));
     }
@@ -41,14 +42,14 @@ pub fn box_primitive(half_extents: Vec3) -> Mesh {
 
     for (fi, loop_) in faces_v.iter().enumerate() {
         let face_id = FaceId(fi as u32);
-        let base = mesh.half_edges.len() as u32;
+        let base = half_edges.len() as u32;
         for i in 0..4 {
             let from = loop_[i];
             let to = loop_[(i + 1) % 4];
             let he_id = HalfEdgeId(base + i as u32);
             let next = HalfEdgeId(base + ((i as u32 + 1) % 4));
             let prev = HalfEdgeId(base + ((i as u32 + 3) % 4));
-            mesh.half_edges.push(HalfEdge {
+            half_edges.push(HalfEdge {
                 origin: VertexId(from),
                 twin: HalfEdgeId(u32::MAX), // filled in below
                 next,
@@ -70,7 +71,7 @@ pub fn box_primitive(half_extents: Vec3) -> Mesh {
             .get(&(*to, *from))
             .copied()
             .expect("box: every directed edge must have a twin");
-        mesh.half_edges[he_id.0 as usize].twin = twin_id;
+        half_edges[he_id.0 as usize].twin = twin_id;
     }
 
     mesh
@@ -90,6 +91,7 @@ pub fn quad_primitive(corner: Vec3, edge_u: Vec3, edge_v: Vec3) -> Mesh {
     ];
 
     let mut mesh = Mesh::default();
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
     for p in positions {
         mesh.vertices.push(Vertex::new(p, None));
     }
@@ -98,7 +100,7 @@ pub fn quad_primitive(corner: Vec3, edge_u: Vec3, edge_v: Vec3) -> Mesh {
     for i in 0u32..4 {
         let next = (i + 1) % 4;
         let prev = (i + 3) % 4;
-        mesh.half_edges.push(HalfEdge {
+        half_edges.push(HalfEdge {
             origin: VertexId(i),
             twin: HalfEdgeId(i + 4),
             next: HalfEdgeId(next),
@@ -111,7 +113,7 @@ pub fn quad_primitive(corner: Vec3, edge_u: Vec3, edge_v: Vec3) -> Mesh {
         let origin = (i + 1) % 4;
         let next_bdry = ((i + 3) % 4) + 4;
         let prev_bdry = ((i + 1) % 4) + 4;
-        mesh.half_edges.push(HalfEdge {
+        half_edges.push(HalfEdge {
             origin: VertexId(origin),
             twin: HalfEdgeId(i),
             next: HalfEdgeId(next_bdry),
@@ -188,6 +190,7 @@ pub fn sphere_primitive(radius: f32, segments: u32, rings: u32) -> Mesh {
 fn build_closed(polygons: &[Vec<Vec3>]) -> Mesh {
     use crate::half_edge::{Face, FaceId, HalfEdge, HalfEdgeId, Vertex, VertexId};
     let mut mesh = Mesh::default();
+    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
     let mut vertex_map: HashMap<(u32, u32, u32), VertexId> = HashMap::new();
     let mut edge_map: HashMap<(VertexId, VertexId), HalfEdgeId> = HashMap::new();
     for (face_i, poly) in polygons.iter().enumerate() {
@@ -202,7 +205,7 @@ fn build_closed(polygons: &[Vec<Vec3>]) -> Mesh {
             });
             ids.push(id);
         }
-        let base = mesh.half_edges.len() as u32;
+        let base = half_edges.len() as u32;
         for i in 0..ids.len() {
             let he = HalfEdgeId(base + i as u32);
             let next = HalfEdgeId(base + ((i + 1) % ids.len()) as u32);
@@ -211,7 +214,7 @@ fn build_closed(polygons: &[Vec<Vec3>]) -> Mesh {
             if mesh.vertices[ids[i].0 as usize].he.is_none() {
                 mesh.vertices[ids[i].0 as usize].he = Some(he);
             }
-            mesh.half_edges.push(HalfEdge {
+            half_edges.push(HalfEdge {
                 origin: ids[i],
                 twin: he,
                 next,
@@ -223,7 +226,7 @@ fn build_closed(polygons: &[Vec<Vec3>]) -> Mesh {
     }
     for ((from, to), he) in edge_map.clone() {
         if let Some(twin) = edge_map.get(&(to, from)) {
-            mesh.half_edges[he.0 as usize].twin = *twin;
+            half_edges[he.0 as usize].twin = *twin;
         }
     }
     mesh
