@@ -819,6 +819,7 @@ impl LoomApp {
             looks.push(self.material_look(surfaces, texture, &mut bitmaps, &mut bitmap_index));
         }
         let mut looks = looks.into_iter();
+        let mut skin_colors = None;
         for id in visible {
             let n = self.state.scene.node(id).expect("collected above");
             // Display Properties By Layer come from the layer.
@@ -912,13 +913,18 @@ impl LoomApp {
             if vertex_colors {
                 color = [1.0; 3];
             }
-            if let (Some(d), Some((skinned, colors))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
-                if skinned == id && d.vertex_count() == colors.len() {
-                    for (v, c) in d.vertices_mut().iter_mut().zip(colors) {
-                        v.color = [srgb(c[0]), srgb(c[1]), srgb(c[2])];
+            if let Some(d) = shown.as_mut() {
+                if let Some((skinned, colors)) = skin_colors
+                    .get_or_insert_with(|| loom_commands::skin::colored_faces(&self.state))
+                    .as_ref()
+                {
+                    if *skinned == id && d.vertex_count() == colors.len() {
+                        for (v, c) in d.vertices_mut().iter_mut().zip(colors) {
+                            v.color = [srgb(c[0]), srgb(c[1]), srgb(c[2])];
+                        }
+                        vertex_colors = true;
+                        color = [1.0; 3];
                     }
-                    vertex_colors = true;
-                    color = [1.0; 3];
                 }
             }
             let fade = if see_through { 0.35 * visibility } else { visibility };
@@ -1565,10 +1571,6 @@ impl LoomApp {
 /// (Bevy) renderer needs, which shares it.
 pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
     egui_wgpu::WgpuConfiguration {
-        // Internal one-variable comparison; ordinary launches retain vsync.
-        present_mode: if std::env::var_os("LOOM_EXPERIMENTAL_NO_VSYNC").is_some_and(|v| v == "1") {
-            wgpu::PresentMode::AutoNoVsync
-        } else { wgpu::PresentMode::AutoVsync },
         wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
             device_descriptor: std::sync::Arc::new(|adapter: &wgpu::Adapter| {
                 if loom_bevy::supported(adapter) {

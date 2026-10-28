@@ -60,7 +60,6 @@ pub(crate) fn commit_pose(
         .map(|c| {
             c.target
                 .commit_gpu(
-                    queue,
                     &mut encoder,
                     c.output,
                     c.offset,

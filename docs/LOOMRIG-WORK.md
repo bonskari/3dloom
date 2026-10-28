@@ -259,3 +259,22 @@ vsync as the cause. Internal LOOM_EXPERIMENTAL_NO_VSYNC=1 requests AutoNoVsync
 for a controlled same-scene comparison; ordinary launches retain AutoVsync.
 Added inclusive guard-readback/wait and GPU-copy profile scopes to distinguish
 queue wait from CPU work. UI production check passed; measurements pending.
+
+
+2026-10-28 continuation: the controlled presentation experiment showed no
+measured improvement: AutoNoVsync Realistic40.626/40.415, Wire70.169/69.864;
+AutoVsync Realistic40.511/40.416, Wire69.441/70.227 distinct ready poses/s.
+Raw measurements are in research/native-gpu-checkpoint/*vsync*.jsonl.
+Removed the experimental presentation override. This does not establish the
+source of every presentation wait. The native render.upload callback is outside
+the UIframe scope and accounts for roughly4.2ms of otherwise uncounted work.
+
+Fixed dynamic geometry history at the scene render boundary: intermediate CPU
+or GPU updates no longer overwrite the last rendered positions. Removed the
+redundant per-pose previous-position upload; idle buffers also avoid rewriting
+unchanged history. The real-GPU regression failed before the fix and passes
+afterward for both CPU and GPU producers. Bevy library64passed/30ignored,
+including11dynamic geometry tests covering PBR/prepass/shadows/resource reuse.
+Skin weight visualization now computes face colors lazily once per rebuild,
+rather than eagerly for each visible object. UI400passed/1ignored before the
+whitespace-only cleanup. These changes have not yet been measured natively.

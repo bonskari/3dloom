@@ -78,6 +78,7 @@ pub struct DynamicGeometryBuffer {
     has_tangents: bool,
     previous: Buffer,
     last_positions: Vec<[f32; 4]>,
+    history_needs_advance: bool,
     next_positions: Vec<[f32; 4]>,
     packed: Vec<PackedVertex>,
     indices: Option<Vec<u32>>,
@@ -116,7 +117,7 @@ impl DynamicGeometryBuffer {
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("previous posed positions"),
                 contents: bytemuck::cast_slice(&last_positions),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             })
             .into();
         let buffer = device
@@ -135,6 +136,7 @@ impl DynamicGeometryBuffer {
                 has_tangents,
                 previous,
                 last_positions,
+                history_needs_advance: false,
                 next_positions: Vec::with_capacity(vertex_count),
                 packed,
                 indices: mesh.indices().map(|i| i.iter().map(|i| i as u32).collect()),
@@ -153,11 +155,13 @@ impl DynamicGeometryBuffer {
         &self.buffer
     }
 
-    /// Before a render frame with no new pose, advance history to the current
-    /// positions. Call `update` instead when a new pose is supplied; it records
-    /// the preceding pose before writing the new one. Multiple views in one
-    /// frame share the same history, so do this once per host frame.
-    pub fn advance_history(&self, queue: &wgpu::Queue) {
+    /// Advance to the rendered positions once after the scene frame finishes.
+    /// Intermediate updates before that boundary share the preceding frame.
+    pub fn advance_history(&mut self, queue: &wgpu::Queue) {
+        if !self.history_needs_advance {
+            return;
+        }
+        self.history_needs_advance = false;
         let _scope = loom_render::profile::Scope::new("bevy.dynamic.history_write");
         queue.write_buffer(
             &self.previous,
@@ -186,15 +190,11 @@ impl DynamicGeometryBuffer {
         }
         drop(_indices);
         let _write = loom_render::profile::Scope::new("bevy.dynamic.queue_write");
-        queue.write_buffer(
-            &self.previous,
-            0,
-            bytemuck::cast_slice(&self.last_positions),
-        );
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&self.packed));
         drop(_write);
         let _positions = loom_render::profile::Scope::new("bevy.dynamic.copy_positions");
         std::mem::swap(&mut self.last_positions, &mut self.next_positions);
+        self.history_needs_advance = true;
         Ok(bounds)
     }
 
@@ -203,7 +203,7 @@ impl DynamicGeometryBuffer {
     /// vertex layout as its 64-byte packed records. Validate every part's compute
     /// guards before committing any part, then submit before rendering.
     pub(crate) fn commit_gpu(
-        &mut self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder,
+        &mut self, encoder: &mut wgpu::CommandEncoder,
         source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>,
     ) -> Result<Aabb, String> {
         let _scope = loom_render::profile::Scope::new("bevy.dynamic.gpu_copy");
@@ -217,9 +217,9 @@ impl DynamicGeometryBuffer {
             hi = hi.max(glam::Vec3::from_array(p));
             self.next_positions.push([p[0], p[1], p[2], 1.0]);
         }
-        queue.write_buffer(&self.previous, 0, bytemuck::cast_slice(&self.last_positions));
         encoder.copy_buffer_to_buffer(source, source_offset, &self.buffer, 0, bytes);
         std::mem::swap(&mut self.last_positions, &mut self.next_positions);
+        self.history_needs_advance = true;
         Ok(Aabb::from_min_max(lo, hi))
     }
 
@@ -444,6 +444,39 @@ mod tests {
     use bevy::render::mesh::allocator::MeshAllocator;
 
     #[test]
+    fn history_ignores_intermediate_poses_until_the_scene_frame_finishes() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter), None)).unwrap();
+        let mut geometry = loom_mesh::box_primitive(glam::Vec3::ONE);
+        let first = posed_mesh(&geometry);
+        loom_mesh::edit_ops::translate_mesh(&mut geometry, glam::Vec3::X * 2.0).unwrap();
+        let middle = posed_mesh(&geometry);
+        loom_mesh::edit_ops::translate_mesh(&mut geometry, glam::Vec3::X * 2.0).unwrap();
+        let last = posed_mesh(&geometry);
+        let mut buffer = DynamicGeometryBuffer::new(&device, &first).unwrap().0;
+        let first_x = buffer.last_positions[0][0].to_bits();
+        let mut reader = crate::gpu_pose_commit::GuardReadback::new(&device, 1).unwrap();
+        buffer.update(&queue, &middle).unwrap();
+        buffer.update(&queue, &last).unwrap();
+        assert_eq!(reader.read(&device, &queue, &[&buffer.previous]).unwrap(), vec![first_x]);
+        let last_x = buffer.last_positions[0][0].to_bits();
+        buffer.advance_history(&queue);
+        assert_eq!(reader.read(&device, &queue, &[&buffer.previous]).unwrap(), vec![last_x]);
+        for mesh in [&middle, &first] {
+            let output = DynamicGeometryBuffer::new(&device, mesh).unwrap().0;
+            let VertexAttributeValues::Float32x3(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() else { panic!() };
+            let indices = mesh.indices().map(|i| i.iter().map(|i| i as u32).collect::<Vec<_>>());
+            let mut encoder = device.create_command_encoder(&Default::default());
+            buffer.commit_gpu(&mut encoder, output.buffer(), 0, positions, indices.as_deref()).unwrap();
+            queue.submit([encoder.finish()]);
+        }
+        assert_eq!(reader.read(&device, &queue, &[&buffer.previous]).unwrap(), vec![last_x]);
+        buffer.advance_history(&queue);
+        assert_eq!(reader.read(&device, &queue, &[&buffer.previous]).unwrap(), vec![first_x]);
+    }
+
+    #[test]
     fn gpu_pose_commit_preserves_storage_and_last_committed_history() {
         let instance = wgpu::Instance::new(&Default::default());
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
@@ -464,21 +497,21 @@ mod tests {
         });
         let mut encoder = device.create_command_encoder(&Default::default());
         let alias = buffer.buffer().clone();
-        assert!(buffer.commit_gpu(&queue, &mut encoder, &alias, 0, positions, indices.as_deref()).is_err());
-        assert!(buffer.commit_gpu(&queue, &mut encoder, &candidate, 1, positions, indices.as_deref()).is_err());
-        assert!(buffer.commit_gpu(&queue, &mut encoder, &candidate, u64::MAX - 63, positions, indices.as_deref()).is_err());
-        assert!(buffer.commit_gpu(&queue, &mut encoder, &candidate, 128, positions, indices.as_deref()).is_err());
-        assert!(buffer.commit_gpu(&queue, &mut encoder, &candidate, 64, &positions[1..], indices.as_deref()).is_err());
+        assert!(buffer.commit_gpu(&mut encoder, &alias, 0, positions, indices.as_deref()).is_err());
+        assert!(buffer.commit_gpu(&mut encoder, &candidate, 1, positions, indices.as_deref()).is_err());
+        assert!(buffer.commit_gpu(&mut encoder, &candidate, u64::MAX - 63, positions, indices.as_deref()).is_err());
+        assert!(buffer.commit_gpu(&mut encoder, &candidate, 128, positions, indices.as_deref()).is_err());
+        assert!(buffer.commit_gpu(&mut encoder, &candidate, 64, &positions[1..], indices.as_deref()).is_err());
         let no_copy_source = device.create_buffer(&wgpu::BufferDescriptor {
             label: None, size: candidate.size(), usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false,
         });
-        assert!(buffer.commit_gpu(&queue, &mut encoder, &no_copy_source, 64, positions, indices.as_deref()).is_err());
+        assert!(buffer.commit_gpu(&mut encoder, &no_copy_source, 64, positions, indices.as_deref()).is_err());
         let mut nonfinite = positions.clone(); nonfinite[0][0] = f32::NAN;
-        assert!(buffer.commit_gpu(&queue, &mut encoder, &candidate, 64, &nonfinite, indices.as_deref()).is_err());
+        assert!(buffer.commit_gpu(&mut encoder, &candidate, 64, &nonfinite, indices.as_deref()).is_err());
         let mut changed_indices = indices.clone().unwrap(); changed_indices.swap(0, 1);
-        assert!(buffer.commit_gpu(&queue, &mut encoder, &candidate, 64, positions, Some(&changed_indices)).is_err());
+        assert!(buffer.commit_gpu(&mut encoder, &candidate, 64, positions, Some(&changed_indices)).is_err());
         assert_eq!(buffer.last_positions, previous);
-        let actual_bounds = buffer.commit_gpu(&queue, &mut encoder, &candidate, 64, positions, indices.as_deref()).unwrap();
+        let actual_bounds = buffer.commit_gpu(&mut encoder, &candidate, 64, positions, indices.as_deref()).unwrap();
         assert_eq!(actual_bounds, bounds);
         let readback = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: expected.len() as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
         encoder.copy_buffer_to_buffer(buffer.buffer(), 0, &readback, 0, expected.len() as u64);
@@ -728,7 +761,7 @@ mod tests {
             }
             update_time += t.elapsed().as_secs_f64();
             let t = std::time::Instant::now();
-            for buffer in &buffers {
+            for buffer in &mut buffers {
                 buffer.advance_history(&queue);
             }
             history_time += t.elapsed().as_secs_f64();
@@ -795,7 +828,7 @@ mod tests {
         let indices = posed.indices().map(|v| v.iter().map(|v| v as u32).collect::<Vec<_>>());
         let mut encoder = r.device.create_command_encoder(&Default::default());
         let object = r.objects.get_mut(&1).unwrap();
-        object.buffers[0].commit_gpu(&r.queue, &mut encoder, source.buffer(), 0, positions, indices.as_deref()).unwrap();
+        object.buffers[0].commit_gpu(&mut encoder, source.buffer(), 0, positions, indices.as_deref()).unwrap();
         object.gpu_pose_current = true;
         r.queue.submit([encoder.finish()]);
         let mut readback = crate::gpu_pose_commit::GuardReadback::new(&r.device, 1).unwrap();
@@ -1124,7 +1157,7 @@ mod tests {
                     let VertexAttributeValues::Float32x3(positions) = posed.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() else { panic!() };
                     let indices = posed.indices().map(|v| v.iter().map(|v| v as u32).collect::<Vec<_>>());
                     let mut encoder = dynamic.device.create_command_encoder(&Default::default());
-                    let bounds = buffers[i].commit_gpu(&dynamic.queue, &mut encoder, &candidate, 0, positions, indices.as_deref()).unwrap();
+                    let bounds = buffers[i].commit_gpu(&mut encoder, &candidate, 0, positions, indices.as_deref()).unwrap();
                     dynamic.queue.submit([encoder.finish()]);
                     bounds
                 } else {
@@ -1213,7 +1246,7 @@ mod tests {
                     expected.pixels().filter(|p| p[3] != 0).count()
                 );
                 if pose == 0 && !deferred {
-                    for buffer in &buffers {
+                    for buffer in &mut buffers {
                         buffer.advance_history(&dynamic.queue);
                     }
                     let light = dynamic.light.unwrap();

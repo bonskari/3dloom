@@ -947,8 +947,8 @@ impl BevyRenderer {
         }
         self.fit_shadows();
         self.app.update();
-        for obj in self.objects.values().chain(self.hidden.values()) {
-            for buffer in &obj.buffers { buffer.advance_history(&self.queue); }
+        for obj in self.objects.values_mut().chain(self.hidden.values_mut()) {
+            for buffer in &mut obj.buffers { buffer.advance_history(&self.queue); }
         }
         for v in self.views.values_mut() {
             v.used = false;
