@@ -1,0 +1,8 @@
+{
+  "recorded_binary_commit": "f8bd88d8e8a4b401ad8c0d8b9ab4bf5e4598974d",
+  "code_commit": "f8bd88d",
+  "binary_sha256": "754e328f13b70cafe7c6c965dc1b1a0e3fb9efcd69d948ab07dff9e0fd9420e1",
+  "binary_bytes": 133962576,
+  "command": "cargo build -p loom_app --release -j4",
+  "native_acceptance_pending": true
+}
