@@ -40,6 +40,22 @@ impl Region {
         }
     }
 
+    /// Crossing selection of a displayed line, including between its endpoints.
+    pub fn intersects_segment(&self, a: egui::Pos2, b: egui::Pos2) -> bool {
+        if self.contains(a) || self.contains(b) { return true; }
+        match self {
+            Region::Rect(r) => {
+                let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+                corners.windows(2).any(|w| segment_pair_distance(a, b, w[0], w[1]) <= 1e-6)
+            }
+            Region::Circle { center, radius } => segment_distance(*center, a, b) <= *radius,
+            Region::Polygon(points) => points.len() >= 3 && points.iter().zip(points.iter().cycle().skip(1))
+                .any(|(c, d)| segment_pair_distance(a, b, *c, *d) <= 1e-6),
+            Region::Paint { path, radius } => if path.len() == 1 { segment_distance(path[0], a, b) <= *radius }
+                else { path.windows(2).any(|w| segment_pair_distance(a, b, w[0], w[1]) <= *radius) },
+        }
+    }
+
     pub fn bounding_rect(&self) -> egui::Rect {
         match self {
             Region::Rect(r) => *r,
@@ -76,8 +92,38 @@ fn segment_distance(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     (a + ab * t).distance(p)
 }
 
+fn segment_pair_distance(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2, d: egui::Pos2) -> f32 {
+    let cross = |u: egui::Vec2, v: egui::Vec2| u.x * v.y - u.y * v.x;
+    let ab = b - a;
+    let cd = d - c;
+    let denominator = cross(ab, cd);
+    if denominator.abs() > 1e-6 {
+        let t = cross(c - a, cd) / denominator;
+        let u = cross(c - a, ab) / denominator;
+        if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) { return 0.; }
+    }
+    segment_distance(a, c, d).min(segment_distance(b, c, d))
+        .min(segment_distance(c, a, b)).min(segment_distance(d, a, b))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn selection_regions_intersect_control_segments_between_vertices() {
+        let regions = [
+            Region::Rect(egui::Rect::from_min_max(egui::pos2(4.9, -0.1), egui::pos2(5.1, 0.1))),
+            Region::Circle { center: egui::pos2(5., 0.), radius: 0.1 },
+            Region::Polygon(vec![egui::pos2(4.9, -0.1), egui::pos2(5.1, -0.1), egui::pos2(5.1, 0.1), egui::pos2(4.9, 0.1)]),
+            Region::Paint { path: vec![egui::pos2(5., -1.), egui::pos2(5., 1.)], radius: 0.1 },
+        ];
+        for region in regions {
+            assert!(region.intersects_segment(egui::pos2(0., 0.), egui::pos2(10., 0.)));
+            assert!(!region.intersects_segment(egui::pos2(0., 20.), egui::pos2(10., 20.)));
+            assert!(region.intersects_segment(egui::pos2(5., 0.), egui::pos2(5., 0.)));
+        }
+        let edge = Region::Rect(egui::Rect::from_min_max(egui::pos2(4., 0.), egui::pos2(6., 1.)));
+        assert!(edge.intersects_segment(egui::pos2(0., 0.), egui::pos2(10., 0.)));
+    }
     use super::*;
     use eframe::egui::pos2;
 

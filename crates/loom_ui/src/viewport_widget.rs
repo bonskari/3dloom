@@ -1992,6 +1992,16 @@ fn pick_object(
 /// On-top bone axes are picked with the same projected segment that is drawn.
 /// Material drops continue to use surface hits through `node_at`.
 fn object_selection_hits(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Vec<usize> {
+    let mut controls = Vec::new();
+    for proxy in &app.rig_controls {
+        let Some(node) = crate::loomrig_overlay::visible_node(app, proxy).filter(|node| app.state.is_selectable(node)) else { continue };
+        let Some(index) = app.world_meshes().iter().position(|(id, _)| *id == node.id) else { continue };
+        let depth = proxy.screen_depth(p, proj * view, rect);
+        let distance = if depth.is_some() { 0. } else { proxy.segments().filter_map(|(a, b)| crate::camera_overlay::segment(proj * view, rect, a, b))
+            .map(|[a, b]| distance_to_segment(p, a, b)).fold(f32::INFINITY, f32::min) };
+        if distance <= 6.0 { controls.push((distance, depth.unwrap_or(f32::INFINITY), index)); }
+    }
+    controls.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
     let mut axes = Vec::new();
     for (i, (id, _)) in app.world_meshes().iter().enumerate() {
         let Some(node) = app.state.scene.node(*id) else { continue };
@@ -2002,7 +2012,8 @@ fn object_selection_hits(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: M
         if distance <= 4.0 { axes.push((distance, i)); }
     }
     axes.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    let mut hits: Vec<_> = axes.into_iter().map(|(_, i)| i).collect();
+    let mut hits: Vec<_> = controls.into_iter().map(|(_, _, i)| i).collect();
+    for (_, i) in axes { if !hits.contains(&i) { hits.push(i); } }
     for i in object_hits(app, p, rect, view, proj) {
         if !hits.contains(&i) { hits.push(i); }
     }
@@ -2319,10 +2330,16 @@ fn region_select_mode(app: &LoomApp, region: &crate::region::Region, viewport_re
     for (mesh_i, (node_id, mesh)) in app.world_meshes().iter().enumerate() {
         match app.state.selection_mode {
             SelectionMode::Object => {
-                let selectable = app.state.scene.node(*node_id).is_some_and(|n| !n.frozen && app.state.selection_filter.accepts(n));
-                if selectable && object_in_region(app.drawn_mesh(mesh_i), region, view_proj, viewport_rect, window) {
-                    items.push(Pick::Object(mesh_i));
-                }
+                let selectable = app.state.scene.node(*node_id).is_some_and(|n| app.state.is_selectable(n));
+                if !selectable { continue; }
+                let marker = object_in_region(app.drawn_mesh(mesh_i), region, view_proj, viewport_rect, window);
+                let proxy = app.rig_controls.iter().find(|proxy| proxy.control == *node_id && crate::loomrig_overlay::visible_node(app, proxy).is_some());
+                let hit = match proxy {
+                    Some(proxy) if window => marker && proxy.in_region(region, view_proj, viewport_rect, true),
+                    Some(proxy) => marker || proxy.in_region(region, view_proj, viewport_rect, false),
+                    None => marker,
+                };
+                if hit { items.push(Pick::Object(mesh_i)); }
             }
             // A sub-object level edits only the selected objects.
             _ if !app.state.selection.contains(node_id) => {}
@@ -3177,6 +3194,111 @@ pub(crate) fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn limb_overlay_camera_plane_clipped_side_interior_is_pickable() {
+        let (state, _) = crate::loomrig_overlay::tests::rig();
+        let mut app = LoomApp::headless(); app.state = state;
+        app.state.mesh_dirty = true; app.sync_after_command();
+        let control = app.rig_controls[0].control;
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 400.));
+        let view = Mat4::look_at_rh(Vec3::new(5., 0., 0.), Vec3::new(10., 0., 0.), Vec3::Y);
+        let proj = Mat4::perspective_rh(60f32.to_radians(), 1.5, 0.1, 20.);
+        // Outside the projected front cap and away from its wire edges, but
+        // inside a visible side face whose rear vertices cross the camera plane.
+        let p = rect.center() + egui::vec2(200., 0.);
+        assert!(matches!(pick_object(&app, p, rect, view, proj), Some(Pick::Object(i)) if app.world_meshes()[i].0 == control));
+    }
+
+    #[test]
+    fn limb_overlay_interior_is_pickable_where_on_top_outline_is_drawn() {
+        let (state, _) = crate::loomrig_overlay::tests::rig();
+        let mut app = LoomApp::headless(); app.state = state;
+        app.state.mesh_dirty = true; app.sync_after_command();
+        let proxy = &app.rig_controls[0]; let control = proxy.control;
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 400.));
+        let view = Mat4::look_at_rh(Vec3::new(10., 0., 40.), Vec3::new(10., 0., 0.), Vec3::Y);
+        // The on-top helper projection deliberately ignores the GPU depth clip.
+        let proj = Mat4::orthographic_rh(-15., 15., -10., 10., 0.1, 1.);
+        assert!(crate::camera_overlay::segment(proj * view, rect, proxy.vertices[0], proxy.vertices[4]).is_some());
+        let centre = proxy.vertices.iter().copied().sum::<Vec3>() / 8.;
+        let p = project_world_to_screen(centre, proj * view, rect).unwrap();
+        assert!(matches!(pick_object(&app, p, rect, view, proj), Some(Pick::Object(i)) if app.world_meshes()[i].0 == control));
+    }
+
+    #[test]
+    fn limb_overlay_camera_plane_edge_and_helper_visibility_share_pick_rules() {
+        let (state, _) = crate::loomrig_overlay::tests::rig();
+        let mut app = LoomApp::headless(); app.state = state;
+        app.state.mesh_dirty = true; app.sync_after_command();
+        let proxy = &app.rig_controls[0]; let control = proxy.control;
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 400.));
+        let view = Mat4::look_at_rh(Vec3::new(5., 0., 0.), Vec3::new(10., 0., 0.), Vec3::Y);
+        let proj = Mat4::perspective_rh(60f32.to_radians(), 1.5, 0.1, 20.);
+        assert!((proj * view * proxy.vertices[0].extend(1.)).w < 0.);
+        assert!(crate::camera_overlay::segment(proj * view, rect, proxy.vertices[0], proxy.vertices[4]).is_some());
+        let p = project_world_to_screen(proxy.vertices[0].lerp(proxy.vertices[4], 0.75), proj * view, rect).unwrap();
+        let selected = |app: &LoomApp| matches!(pick_object(app, p, rect, view, proj), Some(Pick::Object(i)) if app.world_meshes()[i].0 == control);
+        assert!(selected(&app));
+        app.state.hide_category.helpers = true; assert!(!selected(&app));
+        app.state.hide_category.helpers = false;
+        let layer = app.state.scene.node(control).unwrap().layer;
+        app.state.scene.layer_mut(layer).unwrap().frozen = true; assert!(!selected(&app));
+    }
+
+    #[test]
+    fn limb_region_selection_uses_the_displayed_shaft_and_window_union() {
+        let (state, _) = crate::loomrig_overlay::tests::rig();
+        let mut app = LoomApp::headless();
+        app.state = state;
+        app.state.mesh_dirty = true;
+        app.sync_after_command();
+        let proxy = &app.rig_controls[0];
+        let control = proxy.control;
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 400.));
+        let view = Mat4::look_at_rh(Vec3::new(10., 0., 40.), Vec3::new(10., 0., 0.), Vec3::Y);
+        let vp = Mat4::orthographic_rh(-15., 15., -10., 10., 0.1, 100.) * view;
+        let midpoint = project_world_to_screen((proxy.vertices[0] + proxy.vertices[4]) * 0.5, vp, viewport).unwrap();
+        let small = crate::region::Region::Rect(egui::Rect::from_center_size(midpoint, egui::vec2(2., 2.)));
+        let contains = |items: Vec<Pick>| items.iter().any(|p| matches!(p, Pick::Object(i) if app.world_meshes()[*i].0 == control));
+        assert!(contains(region_select_mode(&app, &small, viewport, vp, false)), "crossing a shaft away from the old Point cage selects the control");
+        assert!(!contains(region_select_mode(&app, &small, viewport, vp, true)));
+        assert!(contains(region_select_mode(&app, &crate::region::Region::Rect(viewport), viewport, vp, true)));
+        let index = app.world_meshes().iter().position(|(id, _)| *id == control).unwrap();
+        let points: Vec<_> = app.drawn_mesh(index).vertices().iter().filter_map(|v| project_world_to_screen(v.position, vp, viewport)).collect();
+        let marker_only = crate::region::Region::Rect(egui::Rect::from_points(&points).expand(1.));
+        assert!(!contains(region_select_mode(&app, &marker_only, viewport, vp, true)), "window must enclose the complete visible control, not only its old marker");
+    }
+
+    #[test]
+    fn limb_outline_selects_existing_control_through_skin_but_not_material_target() {
+        let (state, _) = crate::loomrig_overlay::tests::rig();
+        let mut app = LoomApp::headless();
+        app.state = state;
+        let mut skin = loom_scene::Node::new("skin", loom_scene::ObjectKind::box_object(30., 30., 1.));
+        skin.transform.position.set(Vec3::new(10., 0., 10.));
+        let skin = app.state.scene.add_node(skin);
+        app.state.viewports[app.state.active_viewport].shading = loom_commands::Shading::SmoothHighlights;
+        app.state.mesh_dirty = true;
+        app.sync_after_command();
+        let proxy = &app.rig_controls[0];
+        let control = proxy.control;
+        let world = (proxy.vertices[0] + proxy.vertices[4]) * 0.5;
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600., 400.));
+        let view = Mat4::look_at_rh(Vec3::new(10., 0., 40.), Vec3::new(10., 0., 0.), Vec3::Y);
+        let proj = Mat4::orthographic_rh(-15., 15., -10., 10., 0.1, 100.);
+        let point = project_world_to_screen(world, proj * view, rect).unwrap();
+        assert_eq!(app.world_meshes()[object_hits(&app, point, rect, view, proj)[0]].0, skin, "material-drop surface remains the skin");
+        assert!(matches!(pick_object(&app, point, rect, view, proj), Some(Pick::Object(i)) if app.world_meshes()[i].0 == control), "clicking the displayed limb shaft must select its existing FK control");
+        let centre = app.rig_controls[0].vertices.iter().copied().sum::<Vec3>() / 8.;
+        let centre = project_world_to_screen(centre, proj * view, rect).unwrap();
+        assert!(matches!(pick_object(&app, centre, rect, view, proj), Some(Pick::Object(i)) if app.world_meshes()[i].0 == control), "the limb interior selects the control rather than the underlying skeleton axis");
+        app.state.scene.node_mut(control).unwrap().frozen = true;
+        assert!(!matches!(pick_object(&app, point, rect, view, proj), Some(Pick::Object(i)) if app.world_meshes()[i].0 == control));
+        app.state.scene.node_mut(control).unwrap().frozen = false;
+        app.state.scene.node_mut(control).unwrap().hidden = true;
+        assert!(!matches!(pick_object(&app, point, rect, view, proj), Some(Pick::Object(i)) if app.world_meshes()[i].0 == control));
+    }
+
     #[test]
     fn cpu_edge_batch_is_enabled_by_default() {
         assert!(std::env::var_os("LOOM_EXPERIMENTAL_CPU_EDGE_BATCH").is_none());

@@ -39,3 +39,20 @@ fn explicit_bone_display_preserves_own_hidden_and_frozen_policies() {
     assert!(!state.is_visible(state.scene.node(hidden).unwrap()));
     assert!(!state.is_visible(state.scene.node(frozen).unwrap()));
 }
+
+#[test]
+fn helper_category_is_independent_of_geometry_and_bones() {
+    let mut state = AppState::new();
+    let helper = state.scene.add_node(Node::new("control", ObjectKind::point(4.)));
+    let bone = state.scene.add_node(Node::new("bone", ObjectKind::bone(10.)));
+    let mesh = state.scene.add_node(Node::new("skin", ObjectKind::box_object(1., 1., 1.)));
+    state.hide_category.helpers = true;
+    assert!(!state.is_visible(state.scene.node(helper).unwrap()), "Helpers hides control markers");
+    assert!(state.is_visible(state.scene.node(bone).unwrap()));
+    assert!(state.is_visible(state.scene.node(mesh).unwrap()));
+    state.hide_category.helpers = false;
+    state.hide_category.geometry = true;
+    assert!(state.is_visible(state.scene.node(helper).unwrap()), "Geometry must not hide animator controls");
+    assert!(state.is_visible(state.scene.node(bone).unwrap()));
+    assert!(!state.is_visible(state.scene.node(mesh).unwrap()));
+}

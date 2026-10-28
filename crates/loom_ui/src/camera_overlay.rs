@@ -18,22 +18,26 @@ const CLIP: egui::Color32 = egui::Color32::from_rgb(230, 40, 40);
 /// The horizon line.
 const HORIZON: egui::Color32 = egui::Color32::from_gray(20);
 
+pub(crate) const MIN_PROJECT_W: f32 = 1e-4;
+
+pub(crate) fn project_clip(c: Vec4, rect: egui::Rect) -> egui::Pos2 {
+    egui::pos2(rect.min.x + (c.x / c.w + 1.0) * 0.5 * rect.width(), rect.min.y + (1.0 - c.y / c.w) * 0.5 * rect.height())
+}
+
 /// A world segment clipped to the part in front of the eye, in screen space.
 pub(crate) fn segment(view_proj: Mat4, rect: egui::Rect, a: Vec3, b: Vec3) -> Option<[egui::Pos2; 2]> {
     let mut ca = view_proj * a.extend(1.0);
     let mut cb = view_proj * b.extend(1.0);
-    const W: f32 = 1e-4;
-    if ca.w < W && cb.w < W {
+    if ca.w < MIN_PROJECT_W && cb.w < MIN_PROJECT_W {
         return None;
     }
-    let cut = |p: Vec4, q: Vec4| p + (q - p) * ((W - p.w) / (q.w - p.w));
-    if ca.w < W {
+    let cut = |p: Vec4, q: Vec4| p + (q - p) * ((MIN_PROJECT_W - p.w) / (q.w - p.w));
+    if ca.w < MIN_PROJECT_W {
         ca = cut(ca, cb);
-    } else if cb.w < W {
+    } else if cb.w < MIN_PROJECT_W {
         cb = cut(cb, ca);
     }
-    let screen = |c: Vec4| egui::pos2(rect.min.x + (c.x / c.w + 1.0) * 0.5 * rect.width(), rect.min.y + (1.0 - c.y / c.w) * 0.5 * rect.height());
-    Some([screen(ca), screen(cb)])
+    Some([project_clip(ca, rect), project_clip(cb, rect)])
 }
 
 pub fn draw(painter: &egui::Painter, app: &LoomApp, index: usize, view_proj: Mat4, rect: egui::Rect) {

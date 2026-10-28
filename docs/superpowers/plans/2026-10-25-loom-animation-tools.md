@@ -41,7 +41,7 @@ Earlier checked items record the initial implementation, not completion of the e
 
 ## Next animation phase: source audit, not completed functionality
 
-Implementation remains behind the native performance/reliability gate.
+The desktop minimum native performance/reliability gate has passed; continue with the remaining animation tasks below. Mac native verification remains pending.
 
 - The generic Set Keys pose buffer (`anim_cmds.rs:553–600`) records node tracks. It does not capture LoomRig `blend` or `pose_offsets`; those require an atomic rig-pose-key operation alongside control transforms. Preserve source bone controllers rather than baking corrections into them.
 - Existing limb blend-key commands, undo, key movement and the separate Animation Editor remain the base. Current clip movement moves member-node keys; rig metadata tracks are independent and must not accidentally move with a source clip.
@@ -54,3 +54,14 @@ Implementation remains behind the native performance/reliability gate.
 ## Added user requirements — macOS and touchpads
 
 User explicitly requested macOS support and confirmed touchpad navigation for both macOS and Linux. Keep these within the active work scope after the performance/stability gate. Audit native build/package/runtime paths and Metal capability fallback without reducing geometry or weights. Add usable two-finger pan, pinch zoom and modifier-assisted orbit while preserving mouse controls and ensuring navigation affects only the hovered viewport. Verify event routing through the real input integration, not just a mathematical helper. Actual macOS build/runtime evidence is required before claiming Mac support complete; Linux-only tests cannot certify it.
+
+## Task 9: limb-shaped FK display and direct selection
+
+**Files:** Create `crates/loom_ui/src/loomrig_overlay.rs`; modify `lib.rs`, `helper_overlay.rs`, `viewport_widget.rs`.
+**Interfaces:** `ControlProxy { control:NodeId, vertices:[Vec3;8] }`; `ControlProxy::segments(&self)` iterates fixed shared box-edge indices; `prepare(scene:&Scene, out:&mut Vec<ControlProxy>)` fills pose-dependent world vertices for each existing upper/lower FK binding. `LoomApp.rig_controls` retains the buffer and rebuilds with world meshes, never in draw/pick calls.
+
+- [ ] RED: tests cover two FK spans per mapped limb, current solved endpoint alignment under authored offsets/nonuniform and mirrored transforms, zero-length finite handling, no serialized-node/rig changes, retained topology/storage across poses, no new animated reads in draw/pick, direct through-skin limb-outline clicks selecting the existing control ID, hidden/frozen/category and material-drop behavior.
+- [ ] GREEN: use a shared canonical tapered eight-vertex/twelve-edge limb cage and a pose frame derived from actual mapped endpoints plus current control orientation. Do not change source control transforms to align visuals. Keep all existing Point mesh/helper geometry; add meaningful limb outlines rather than removing geometry to increase FPS. World-vertex work occurs once per pose, not once per viewport.
+- [ ] Integrate on-top drawing in both shading modes and corresponding control-hit priority before generic bone axes in object selection. Keep `node_at` on surface picking. Existing control IDs route to current gizmo/FK commands; goals/poles/master and IK/FK authoring remain available in separate Animation Editor.
+- [ ] Verify `cargo test -p loom_ui --lib loomrig_overlay -j4 -- --test-threads=1` and focused viewport/helper tests; full UI suite; actual Ray source/skin records and native direct click/edit/Undo; default native throughput remains≥60 in both views. No claim of full Biped/contacts completion from this first visual/selection increment.
+- [ ] Local main commit with evidence; no push. Continue remaining end/body/goal interactions and contact/pose/timeline requirements afterward.

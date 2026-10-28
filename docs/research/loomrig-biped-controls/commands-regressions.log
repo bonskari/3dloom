@@ -1,0 +1,43 @@
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.46s
+     Running tests/bone_display.rs (target/debug/deps/bone_display-f92dc4ee733a735f)
+
+running 4 tests
+test helper_category_is_independent_of_geometry_and_bones ... ok
+test explicit_bone_display_preserves_own_hidden_and_frozen_policies ... ok
+test explicit_bone_display_is_independent_of_the_geometry_category ... ok
+test explicit_bone_display_modes_clear_the_conflicting_hide_bones_filter ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/group_layers.rs (target/debug/deps/group_layers-b85cb3a457e667aa)
+
+running 6 tests
+test layer_hidden_hides_members_in_picks ... ok
+test move_to_layer_and_current_layer_for_new_objects ... ok
+test group_makes_head_and_parents_members ... ok
+test select_ancestor_child_children_similar ... ok
+test closed_group_selects_as_one_open_selects_members ... ok
+test ungroup_explode_restore_world_transforms ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/loomrig.rs (target/debug/deps/loomrig-1baafaf29ff436be)
+
+running 13 tests
+test neutral_controls_preserve_original_animated_fk_at_all_frames ... ok
+test mapping_edits_preserve_authored_controls_and_keys ... ok
+test master_moves_in_world_under_rotated_scaled_parent_and_fk_control_is_not_doubled ... ok
+test ik_respects_rotated_scaled_skeleton_parent ... ok
+test autokey_blend_and_pose_match_offsets_preserve_prior_frames_and_source_keys ... ok
+test hi_pole_uses_final_solved_bend_plane ... ok
+test keyed_full_ik_goal_stays_planted_while_native_root_motion_continues ... ok
+test ik_goal_rotates_end_joint_and_pole_moves_bend ... ok
+test switching_solver_keeps_current_visible_pose ... ok
+test matched_solver_switch_keeps_later_goals_constrained ... ok
+test ambiguous_role_mappings_are_rejected_atomically ... ok
+test saved_rig_evaluates_same_pose_without_needing_an_edit ... ok
+test rig_is_undoable_and_controls_drive_original_chain ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

@@ -1,0 +1,31 @@
+{
+  "source_sha256": {
+    "crates/loom_commands/src/state.rs": "c87a3902949a0b7a6b935a6f4541188a8ada403977bccc2d6c9266ef8c317f28",
+    "crates/loom_commands/tests/bone_display.rs": "dbe8b51a21d4f3abccebbd4f94909610b0891f36f3ba940e51e1a248f6e371e2",
+    "crates/loom_ui/src/loomrig_overlay.rs": "c85d0e7c47cd3b0739f87feecde852d87efe6ca23d2336a355f8e1fe3f6dbf53",
+    "crates/loom_ui/src/camera_overlay.rs": "8d19b4d87226ba56b7d76ad9e60c38e65aaa134e38c3dcefc6d1cc0419d49aa4",
+    "crates/loom_ui/src/helper_overlay.rs": "e42d0b886f84f68b9de8490849ce85785a7e06cfdf88121323944bb9928952e7",
+    "crates/loom_ui/src/lib.rs": "70d8ea68a61d79d99270b1fa3560f2713c8a8b763164239a8c366ecb97684df8",
+    "crates/loom_ui/src/region.rs": "cd7fdf476e6a278fd78c9e69f9cbde32310121357cf4fb3fdcab34fa077b56b2",
+    "crates/loom_ui/src/ui_tests/loomrig.rs": "915d7d43ade31581a85de96bcff797e1f54a9c8a545f4485dd61bdc2b20195db",
+    "crates/loom_ui/src/viewport_widget.rs": "36b2baf4170b25731b8c938df05dd1d65d2c9f03484dfa1ebba868a6c9aa1f38"
+  },
+  "logs_sha256": {
+    "geometry-api-red.log": "b904586d38278553d007f68134f2471e2896501773b2c9d0eedf4c72d31c86af",
+    "display-pick-red.log": "34fb8a0c16f574aed4b6a89d13a3f435b94ee7d8f63d1e6ba5a7ea6090256fbb",
+    "interior-pick-red.log": "87155433cf7dd0e545996a9b0670803b5dfc0fdc8c46ca29339ba956046ebfc5",
+    "region-api-red.log": "ef4770eae3e11706b1899c4ae084f92afcb145c524c0c55bc9ddee83bd051ea1",
+    "region-selection-red.log": "b12af61d16d0d640541bb08f1955dcdfd7d7478b24b67a2fd1bff2564f4d1678",
+    "helper-category-red.log": "04c554af76929c9fb73b172492ae1f575a6ad6f42a46f68c03ce23c491cd0e71",
+    "closed-container-red.log": "0ebb8a1dc3c8d63d75bcee2650c0b4072eb581dfeed270dbc5540647d57bc513",
+    "clipped-interior-red.log": "cd80f1a55d1c829042fd0016ccfce72290145edd1f72d41fccb212599cb95251",
+    "focused-final.log": "a013d244ee2e703433ef30f4f7e04681260810ae4c4ab9342596a74a11c796ba",
+    "commands-regressions.log": "c8dd3219a773e81fec6da22c6e271fc8bae18475d1445aedc6c913ec633d97f2",
+    "ui-final.log": "81674da2b8970638e15b48b9a25f3ab05d02f6913edb426e9860e44c4b96761e"
+  },
+  "ui_passed": 446,
+  "ui_ignored": 2,
+  "commands_passed": 23,
+  "native_ray_verified": false,
+  "native_fps_verified": false
+}

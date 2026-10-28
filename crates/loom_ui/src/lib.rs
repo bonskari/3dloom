@@ -7,6 +7,7 @@ mod async_import;
 mod preview_cache;
 mod opacity_preview;
 mod loomrig_panel;
+mod loomrig_overlay;
 mod clip_timeline;
 mod rig_timeline;
 mod camera_overlay;
@@ -230,6 +231,7 @@ pub struct LoomApp {
     cage_cache_keys: std::collections::HashMap<NodeId,(u64,u64,u64,Mat4)>,
     bone_geometry: std::collections::HashMap<NodeId,BoneGeometry>,
     bone_axes: Vec<(NodeId, Vec3, Vec3)>,
+    rig_controls: Vec<loomrig_overlay::ControlProxy>,
     /// Draw styles parallel to `world_meshes`.
     world_styles: Vec<loom_render::MeshStyle>,
     /// What the viewports draw (the stack result), parallel to `world_meshes`.
@@ -499,6 +501,7 @@ impl LoomApp {
             cage_cache_keys: Default::default(),
             bone_geometry: Default::default(),
             bone_axes: Vec::new(),
+            rig_controls: Vec::new(),
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
             world_version: 0,
@@ -1008,6 +1011,7 @@ impl LoomApp {
             display.push(shown.unwrap_or_else(|| mesh.clone()));
             meshes.push((n.id, mesh));
         }
+        loomrig_overlay::prepare(&self.state.scene, &mut self.rig_controls);
         self.world_meshes = meshes;
         self.world_styles = styles;
         self.world_display = std::sync::Arc::new(display);

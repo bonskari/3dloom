@@ -142,3 +142,84 @@ fn second_character_can_be_rigged_and_chain_rows_are_editable() {
     assert_eq!(h.app.state.scene.loom_rigs.len(),2);
     assert_eq!(h.app.state.scene.loom_rigs[1].mapping.root,second);
 }
+
+#[test]
+fn limb_proxy_pointer_rotate_drives_skin_once_and_undo_restores_authored_offset() {
+    let mut h = Harness::new();
+    let (state, mapping) = crate::loomrig_overlay::tests::rig();
+    h.app.state = state;
+    let bone = mapping.pelvis;
+    let control = h.app.state.scene.loom_rigs[0].bindings.iter().find(|b| b.bone == bone).unwrap().control;
+    h.app.state.scene.node_mut(mapping.root).unwrap().transform.scale.set(Vec3::new(-2., 3., 0.5));
+    h.app.state.scene.node_mut(control).unwrap().transform.rotation.set(Vec3::new(20., 0., 35.));
+    let a = h.app.state.scene.world_matrix(bone).transform_point3(Vec3::ZERO);
+    let b = h.app.state.scene.world_matrix(mapping.limbs[0].middle).transform_point3(Vec3::ZERO);
+    let mut skin = Node::new("skinned arm surface", ObjectKind::box_object(2., 2., 2.));
+    skin.transform.position.set(a.lerp(b, 0.5) - Vec3::Z);
+    let skin = h.app.state.scene.add_node(skin);
+    let mut binding = loom_scene::skin::SkinData::bind(&h.app.state.scene, skin, &[bone]);
+    for row in &mut binding.weights { *row = vec![(0, 1.)]; }
+    h.app.state.scene.node_mut(skin).unwrap().modifiers.push(loom_scene::ModifierSlot::new(loom_scene::Modifier::Skin(Box::new(binding))));
+    h.app.state.selection.clear();
+    h.app.state.mesh_dirty = true;
+    h.app.sync_after_command();
+    framed(&mut h);
+    h.cmd(Command::SelectObject);
+    let proxy = h.app.rig_controls.iter().find(|p| p.control == control).unwrap();
+    let centre = proxy.vertices.iter().copied().sum::<Vec3>() / 8.;
+    let p = h.screen_of(centre);
+    h.click(p);
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![control], "the actual pointer event must select the rig input, not a source bone or skin");
+    let source = h.app.state.scene.node(bone).unwrap().transform.clone();
+    let before_control = h.app.state.scene.node(control).unwrap().transform.clone();
+    let before_world = h.app.state.scene.world_matrix(bone);
+    let before_skin = serde_json::to_value(&h.app.state.scene.node(skin).unwrap().modifiers).unwrap();
+    let positions = |h: &Harness| {
+        let index = h.app.world_meshes().iter().position(|(id, _)| *id == skin).unwrap();
+        h.app.drawn_mesh(index).vertices().iter().map(|v| v.position).collect::<Vec<_>>()
+    };
+    let before = positions(&h);
+    h.cmd(Command::SelectAndRotate);
+    let viewport = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[viewport];
+    let camera = h.app.camera_for(viewport);
+    let projection = crate::gizmo::Projection::new(camera.view_matrix(), camera.projection_matrix(rect.width() / rect.height()), rect);
+    let layout = crate::gizmo::layout_for(&h.app, viewport, rect.height());
+    let origin = projection.screen(layout.origin).unwrap();
+    let start = (0..360).step_by(5).flat_map(|angle| (10..150).step_by(2).map(move |radius| (angle as f32, radius as f32)))
+        .map(|(angle, radius)| origin + egui::vec2(angle.to_radians().cos(), angle.to_radians().sin()) * radius)
+        .find(|p| rect.shrink(10.).contains(*p) && matches!(crate::gizmo::hit(&h.app, &layout, &projection, *p), Some(crate::gizmo::Handle::Axis(_))))
+        .expect("visible rotate ring");
+    h.drag(start, start + (start - origin).normalized().rot90() * 25.);
+    let after_world = h.app.state.scene.world_matrix(bone);
+    assert_ne!(h.app.state.scene.node(control).unwrap().transform, before_control);
+    assert!(!after_world.abs_diff_eq(before_world, 1e-4));
+    assert_eq!(h.app.state.scene.node(bone).unwrap().transform, source, "source bone controllers must not be baked or edited");
+    assert!(h.app.state.scene.world_matrix(control).abs_diff_eq(after_world, 1e-4));
+    let delta = after_world * before_world.inverse();
+    let after = positions(&h);
+    assert!(after.iter().zip(&before).any(|(a, b)| a.distance(*b) > 1e-4));
+    for (a, b) in after.iter().zip(&before) { assert!(a.abs_diff_eq(delta.transform_point3(*b), 2e-4), "the FK correction must affect the skin exactly once"); }
+    assert_eq!(serde_json::to_value(&h.app.state.scene.node(skin).unwrap().modifiers).unwrap(), before_skin);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.node(control).unwrap().transform, before_control);
+    for (a, b) in positions(&h).iter().zip(&before) { assert!(a.abs_diff_eq(*b, 1e-4)); }
+}
+
+#[test]
+fn limb_proxy_pointer_selects_animator_input_inside_closed_character_group() {
+    let mut h = Harness::new();
+    let (mut state, mapping) = crate::loomrig_overlay::tests::rig();
+    let group = state.scene.add_node(Node::new("character group", ObjectKind::Group { open: false }));
+    state.scene.node_mut(mapping.root).unwrap().parent = Some(group);
+    h.app.state = state;
+    h.app.state.selection.clear();
+    h.app.state.mesh_dirty = true;
+    h.app.sync_after_command();
+    framed(&mut h); h.cmd(Command::SelectObject);
+    let proxy = &h.app.rig_controls[0]; let control = proxy.control;
+    let centre = proxy.vertices.iter().copied().sum::<Vec3>() / 8.;
+    h.click(h.screen_of(centre));
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![control], "an animator input must remain directly selectable inside a closed character container");
+    assert_eq!(h.app.state.selection_target(mapping.pelvis), group, "source-bone group behavior stays intact");
+}

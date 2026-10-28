@@ -2079,9 +2079,15 @@ impl AppState {
         self.is_visible(node) && !node.frozen && !layer_frozen && self.selection_filter.accepts(node)
     }
 
-    /// What a click on `id` selects: the outermost closed group it belongs
-    /// to, else the node itself.
+    /// Animator inputs select directly; other nodes select the outermost
+    /// closed group they belong to, else the node itself.
     pub fn selection_target(&self, id: NodeId) -> NodeId {
+        // Animator inputs remain accessible inside an imported character container.
+        if self.scene.loom_rigs.iter().any(|rig| rig.master == id
+            || rig.bindings.iter().any(|binding| binding.control == id)
+            || rig.limbs.iter().any(|limb| limb.goal == id || limb.pole == id)) {
+            return id;
+        }
         self.scene.closed_group_of(id).unwrap_or(id)
     }
 
@@ -2110,6 +2116,7 @@ impl AppState {
             ObjectKind::Camera { .. } => c.cameras,
             ObjectKind::Light(_) => c.lights,
             ref o if o.is_shape() => c.shapes,
+            ref o if o.is_helper() => c.helpers,
             _ => c.geometry,
         }
     }

@@ -102,6 +102,11 @@ pub fn lines(app: &LoomApp, view_proj: Mat4, rect: egui::Rect, realistic: bool) 
             }
         }
     }
+    for proxy in &app.rig_controls {
+        let Some(node) = crate::loomrig_overlay::visible_node(app, proxy) else { continue };
+        let c = color(app, node, LineKind::Wire);
+        top.extend(proxy.segments().map(|(a, b)| (a, b, c)));
+    }
     (depth, top)
 }
 
