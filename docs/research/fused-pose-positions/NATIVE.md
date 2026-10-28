@@ -55,3 +55,7 @@ Second fresh-process order was on then off, same binary and edge batching on. Ex
 ```
 
 Both experimental-on runs exceeded60 in all accepted active windows in both modes. Both preserved node/selection/frame/source data. The repeated pair and first pair show the Realistic gain in the same direction; long-run fused stability and default-unset acceptance are still pending.
+
+## Fused fifteen-minute reliability gate
+
+The747cb9d binary with both flags1 completed30×30-second samples without pose errors/recoveries, all5GPU objects/13material parts present. All node records, undo history and source bytes were restored. A real271346304-byte auto-backup completed during playback and its scene JSON exactly matched the source. Concurrent default-promotion correctness builds/tests were allowed: observed rates are not a quiet performance acceptance result. This validates the same fused/batched algorithms whose initialization default is changed in f8bd88d; native default-unset acceptance follows separately.
