@@ -1,0 +1,2 @@
+ANGLE_ADAPTER AdapterInfo { name: "NVIDIA GeForce RTX 5080", vendor: 4318, device: 11266, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "610.57.04", backend: Vulkan }
+F64_ANGLE_POLYNOMIAL_PASS cases=41219 max_abs_error=4.440892098500626e-16 worst_input=[0.015625, -1.0, 0.0, 0.0] degree41_truncation_bound=8.075642313016715e-19

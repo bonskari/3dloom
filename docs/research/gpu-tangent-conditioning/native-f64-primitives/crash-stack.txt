@@ -1,0 +1,40 @@
+           PID: 2798721 (probe)
+           TID: 2798721 (probe)
+           UID: 1000 (b1s)
+           GID: 1000 (b1s)
+        Signal: 11 (SEGV) si_code: SEGV_MAPERR
+     Timestamp: Wed 2026-10-28 03:07:54 EET (10min ago)
+  Command Line: /tmp/loom-f64-capability/probe
+    Executable: /tmp/loom-f64-capability/probe
+ Control Group: /user.slice/user-1000.slice/user@1000.service/app.slice/app-org.chromium.Chromium-22298.scope
+          Unit: user@1000.service
+     User Unit: app-org.chromium.Chromium-22298.scope
+         Slice: user-1000.slice
+     Owner UID: 1000 (b1s)
+       Boot ID: 895161bb7b9f40b182aadbf085fad483
+    Machine ID: 6e0b2d84d5ad466f97f92be776da54ff
+      Hostname: cachyos-x8664
+       Storage: /var/lib/systemd/coredump/core.probe.1000.895161bb7b9f40b182aadbf085fad483.2798721.1793149674000000.zst (present)
+  Size on Disk: 3.2M
+       Message: Process 2798721 (probe) of user 1000 dumped core.
+                
+                Stack trace of thread 2798721:
+                #0  0x00007fce91863420 n/a (libnvidia-gpucomp.so.610.57.04 + 0x1663420)
+                #1  0x00007fce907c3b8c n/a (libnvidia-gpucomp.so.610.57.04 + 0x5c3b8c)
+                #2  0x00007fce907c3f9d n/a (libnvidia-gpucomp.so.610.57.04 + 0x5c3f9d)
+                #3  0x00007fce907f749e n/a (libnvidia-gpucomp.so.610.57.04 + 0x5f749e)
+                #4  0x00007fce91846251 n/a (libnvidia-gpucomp.so.610.57.04 + 0x1646251)
+                #5  0x00007fce906f7d96 n/a (libnvidia-gpucomp.so.610.57.04 + 0x4f7d96)
+                #6  0x00007fce82aa21f4 n/a (libnvidia-glvkspirv.so.610.57.04 + 0xa21f4)
+                #7  0x00007fce82aa2a06 _nv002nvvm (libnvidia-glvkspirv.so.610.57.04 + 0xa2a06)
+                #8  0x00007fce97c72726 n/a (libnvidia-glcore.so.610.57.04 + 0xe72726)
+                #9  0x00007fce97c7b422 n/a (libnvidia-glcore.so.610.57.04 + 0xe7b422)
+                #10 0x00007fce97c7d23a n/a (libnvidia-glcore.so.610.57.04 + 0xe7d23a)
+                #11 0x00007fce97da5c3b n/a (libnvidia-glcore.so.610.57.04 + 0xfa5c3b)
+                #12 0x00007fce97c7e1a7 n/a (libnvidia-glcore.so.610.57.04 + 0xe7e1a7)
+                #13 0x00007fce97c7e565 n/a (libnvidia-glcore.so.610.57.04 + 0xe7e565)
+                #14 0x00007fce97d96340 n/a (libnvidia-glcore.so.610.57.04 + 0xf96340)
+                #15 0x00007fce97b1d0e5 n/a (libnvidia-glcore.so.610.57.04 + 0xd1d0e5)
+                #16 0x000055602739222c n/a (/tmp/loom-f64-capability/probe + 0x22122c)
+                #17 0x000000000000001e n/a (n/a + 0x0)
+                ELF object binary architecture: AMD x86-64
