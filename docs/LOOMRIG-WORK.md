@@ -431,3 +431,25 @@ wholeprepguards15/15. Full317gate remainsrequired. Nativef64atan2compiler
 faultwasisolated; testedrange-reducedpolynomial usesbasicf64ops instead.
 Prototype NOTinproduction; noqualitycompletion/performanceclaim from17gate.
 NextCore sharedHEvalidationcachealsoisolatedpendingtests/pairedmeasurement.
+
+
+The shared half-edge validation cache was promoted in ca68d4d after two quiet
+317-pose pairs: combined CPU preparation improved by 0.434 and 0.479 ms.
+The display stage improved by about 0.67 ms; the Skin stage regressed by
+0.19–0.23 ms, with its cause not isolated. This is a net CPU result, not FPS.
+Production Mesh/Scene tests: 268 passed. Integration tests after promotion and
+raw-bounds reuse: 66 Bevy and 402 UI tests passed. The release build is live
+(session 80669); installed native version remains 3af118d until it completes.
+
+f67108b reuses raw committed part minima/maxima for scene bounds. The Aabb
+conversion is unchanged and no rounded center/extents are used for merging.
+All 66 Bevy tests and a two-object global-bounds regression passed; independent
+review found no important issue. Its native performance has not been measured.
+
+The isolated precision prototype passed the full 317-pose independent-F64 gate
+(all 105,868,173 vertices), archived in 7abfd45. However, its measured GPU math
+span is approximately 3.80–3.88 ms versus 0.206–0.208 ms for the actual original
+five-pass production batch. It is NOT promoted. Per-pass cost diagnosis and
+nonfinite/boundary tests remain required. A review finding about intermediate
+overflow has not yet been demonstrated by a GPU reproducer; do not call it a
+reproduced failure. Existing native math and the last measured 57 FPS stay as-is.
