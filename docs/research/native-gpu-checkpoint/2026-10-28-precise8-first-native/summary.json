@@ -1,0 +1,34 @@
+{
+  "precise8": [
+    {
+      "kind": "summary",
+      "shading": "Realistic",
+      "active_windows": 14,
+      "active_ready_pose_fps": 49.699093972630955,
+      "min_active_window_fps": 48.49195670317879
+    },
+    {
+      "kind": "summary",
+      "shading": "Wireframe",
+      "active_windows": 19,
+      "active_ready_pose_fps": 76.92201015629132,
+      "min_active_window_fps": 71.33193166296688
+    }
+  ],
+  "fast5": [
+    {
+      "kind": "summary",
+      "shading": "Realistic",
+      "active_windows": 16,
+      "active_ready_pose_fps": 53.13801056850369,
+      "min_active_window_fps": 49.92391131438566
+    },
+    {
+      "kind": "summary",
+      "shading": "Wireframe",
+      "active_windows": 18,
+      "active_ready_pose_fps": 77.72499577246411,
+      "min_active_window_fps": 75.33711087051094
+    }
+  ]
+}

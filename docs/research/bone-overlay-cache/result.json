@@ -1,0 +1,362 @@
+{
+  "cache_setup_ms": 0.9867700000000001,
+  "cache_setup_reads": 5258,
+  "cached_axes": 420,
+  "frame": 39,
+  "input": "/tmp/loom-conditioning-capture/input.loom",
+  "input_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "matrix_source": "frozen SceneSettings + LoomApp.camera_for; active orbit bit-checked against live diagnostics",
+  "parity": [
+    {
+      "new_counts": [
+        168,
+        420
+      ],
+      "old_counts": [
+        168,
+        420
+      ],
+      "ordered_depth_exact": true,
+      "ordered_top_exact": true,
+      "view": 0
+    },
+    {
+      "new_counts": [
+        168,
+        420
+      ],
+      "old_counts": [
+        168,
+        420
+      ],
+      "ordered_depth_exact": true,
+      "ordered_top_exact": true,
+      "view": 1
+    },
+    {
+      "new_counts": [
+        168,
+        420
+      ],
+      "old_counts": [
+        168,
+        420
+      ],
+      "ordered_depth_exact": true,
+      "ordered_top_exact": true,
+      "view": 2
+    },
+    {
+      "new_counts": [
+        0,
+        588
+      ],
+      "old_counts": [
+        0,
+        588
+      ],
+      "ordered_depth_exact": true,
+      "ordered_top_exact": true,
+      "view": 3
+    }
+  ],
+  "rect_source": "live diagnostics",
+  "rows": [
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 0,
+      "elapsed_ms": 468.26764199999997,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": false
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 0,
+      "elapsed_ms": 41.688091,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": true
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 0,
+      "elapsed_ms": 42.067961000000004,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": true
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 0,
+      "elapsed_ms": 460.919723,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": false
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 1,
+      "elapsed_ms": 463.678022,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": false
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 1,
+      "elapsed_ms": 41.197672,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": true
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 1,
+      "elapsed_ms": 41.365501,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": true
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 1,
+      "elapsed_ms": 465.39390099999997,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": false
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 2,
+      "elapsed_ms": 460.471633,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": false
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 2,
+      "elapsed_ms": 40.791451,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": true
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 2,
+      "elapsed_ms": 40.378312,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": true
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 2,
+      "elapsed_ms": 471.94662,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": false
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 3,
+      "elapsed_ms": 466.761971,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": false
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 3,
+      "elapsed_ms": 40.819371,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": true
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 3,
+      "elapsed_ms": 40.796931,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": true
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 3,
+      "elapsed_ms": 465.975452,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "iterations": 200,
+      "new_cached": false
+    }
+  ],
+  "scene_mesh_rebuilds": 0,
+  "scene_nodes": 461,
+  "setup_measures_full_rebuild": false,
+  "source": {
+    "new_full_source_sha256": "6738b48cae1fbc520c8d1a36223f6f21ea022ebf44541513c97b516daf51bd8b",
+    "new_prefix_sha256": "13fa8216138cf31d4eb6d12bd7297e7c990ed5293c250ec38e99cefa677ffbcc",
+    "old_prefix_sha256": "de71e17598689609661c7b177137d377f8ce8ef66badc9f922e0d0eaa8f6f287"
+  },
+  "source_scene_sha_after": "4cf225a47205a3a4c1b1b16e99115d4a416fad4311a413750df4101f0acddd90",
+  "source_scene_sha_before": "4cf225a47205a3a4c1b1b16e99115d4a416fad4311a413750df4101f0acddd90",
+  "views": [
+    {
+      "realistic": false,
+      "rect": [
+        1.0,
+        49.65625,
+        504.0,
+        371.25
+      ],
+      "view_projection": [
+        0.0024828240275382996,
+        1.6974642524925088e-10,
+        0.0,
+        0.0,
+        -1.0852755499834998e-10,
+        0.003883345751091838,
+        2.7407907055021496e-7,
+        0.0,
+        -1.1898029219845063e-13,
+        4.2573669816192705e-6,
+        -0.00025000047753565013,
+        0.0,
+        -2.9774374961853027,
+        2.2840652465820312,
+        0.5299391150474548,
+        1.0
+      ]
+    },
+    {
+      "realistic": false,
+      "rect": [
+        506.0,
+        49.65625,
+        1009.0,
+        371.25
+      ],
+      "view_projection": [
+        0.0024828240275382996,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0002500006230548024,
+        0.0,
+        0.0,
+        0.0038833478465676308,
+        0.0,
+        0.0,
+        -2.9443440437316895,
+        -0.46326276659965515,
+        0.6470741033554077,
+        1.0
+      ]
+    },
+    {
+      "realistic": false,
+      "rect": [
+        1.0,
+        373.25,
+        504.0,
+        694.84375
+      ],
+      "view_projection": [
+        2.2730932414116722e-10,
+        0.0,
+        0.0002500006230548024,
+        0.0,
+        -0.0024828240275382996,
+        0.0,
+        2.2888241649199337e-11,
+        0.0,
+        0.0,
+        0.0038833478465676308,
+        0.0,
+        0.0,
+        -1.4606459140777588,
+        -0.46256959438323975,
+        0.20019447803497314,
+        1.0
+      ]
+    },
+    {
+      "realistic": true,
+      "rect": [
+        506.0,
+        373.25,
+        1009.0,
+        694.84375
+      ],
+      "view_projection": [
+        -0.960490882396698,
+        0.4437575340270996,
+        0.7609182000160217,
+        0.7609174847602844,
+        -1.2082815170288086,
+        -0.3527531623840332,
+        -0.6048714518547058,
+        -0.6048708558082581,
+        -3.450060148679768e-8,
+        2.346714973449707,
+        -0.23481057584285736,
+        -0.23481035232543945,
+        380.1965026855469,
+        -908.0076904296875,
+        -1016.920166015625,
+        -1016.7093505859375
+      ]
+    }
+  ]
+}

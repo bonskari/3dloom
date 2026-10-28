@@ -60,14 +60,13 @@ pub type TopLines = Vec<(Vec3, Vec3, [u8; 3])>;
 /// The evaluated bone axis used by both its on-top display and selection.
 /// Source width and skin bindings are not changed by this display proxy.
 pub(crate) fn bone_axis(app: &LoomApp, node: &loom_scene::Node) -> Option<(Vec3, Vec3)> {
-    let tip = node.object.bone_tip_local()?;
-    if !app.state.is_visible(node)
-        || (node.parent.is_some() && node.display.display_links && node.display.link_replaces_object)
-    { return None; }
-    let world = app.state.scene.world_matrix(node.id);
-    let a = world.transform_point3(Vec3::ZERO);
-    let b = world.transform_point3(tip);
-    (a.is_finite() && b.is_finite()).then_some((a, b))
+    if !bone_axis_visible(app, node) { return None; }
+    app.bone_axes.iter().find_map(|(id, a, b)| (*id == node.id).then_some((*a, *b)))
+}
+
+fn bone_axis_visible(app: &LoomApp, node: &loom_scene::Node) -> bool {
+    app.state.is_visible(node)
+        && !(node.parent.is_some() && node.display.display_links && node.display.link_replaces_object)
 }
 
 /// Every visible helper's lines for one viewport: (depth-tested lines in
@@ -84,11 +83,12 @@ pub fn lines(app: &LoomApp, view_proj: Mat4, rect: egui::Rect, realistic: bool) 
         (q - p).normalize_or_zero()
     };
     let upp = |p: Vec3| units_per_pixel(view_proj, rect.height(), p, up(p));
-    for n in app.state.scene.nodes() {
-        if let Some((a, b)) = bone_axis(app, n) {
-            top.push((a, b, color(app, n, LineKind::Wire)));
-            continue;
+    for (id, a, b) in &app.bone_axes {
+        if let Some(n) = app.state.scene.node(*id).filter(|n| bone_axis_visible(app, n)) {
+            top.push((*a, *b, color(app, n, LineKind::Wire)));
         }
+    }
+    for n in app.state.scene.nodes() {
         if !n.object.is_helper() || !app.state.is_visible(n) {
             continue;
         }
@@ -132,6 +132,45 @@ mod bone_tests {
     use loom_scene::Node;
 
     #[test]
+    fn prepared_bone_axes_follow_pose_changes_and_scene_replacement() {
+        let mut app = LoomApp::headless();
+        let mut bone = Node::new("animated bone", ObjectKind::bone(0.5));
+        bone.object_offset.position.set(Vec3::new(10., 0., 0.));
+        loom_scene::anim::with(10., true, || bone.transform.position.set(Vec3::new(0.5, 0., 0.)));
+        let id = app.state.scene.add_node(bone);
+        let mut axes = Vec::new();
+        for frame in [0, 5, 10, 3] {
+            app.state.mesh_dirty = true;
+            app.dispatch(loom_commands::Command::SetFrame { frame }).unwrap();
+            let node = app.state.scene.node(id).unwrap();
+            let actual = bone_axis(&app, node).unwrap();
+            let world = app.state.scene.world_matrix(id);
+            assert_eq!(actual, (world.transform_point3(Vec3::ZERO), world.transform_point3(node.object.bone_tip_local().unwrap())));
+            axes.push(actual);
+        }
+        assert_ne!(axes[0], axes[1]);
+        app.state.scene = loom_scene::Scene::new();
+        app.state.mesh_dirty = true;
+        app.sync_after_command();
+        assert!(app.bone_axes.is_empty(), "a new scene cannot retain the previous skeleton axes");
+    }
+
+    #[test]
+    fn viewport_bone_axes_do_not_reevaluate_the_animated_pose() {
+        let mut app = LoomApp::headless();
+        let mut bone = Node::new("animated bone", ObjectKind::bone(0.5));
+        loom_scene::anim::with(10., true, || bone.transform.position.set(Vec3::new(0.5, 0., 0.)));
+        app.state.scene.add_node(bone);
+        app.state.scene.set_time(5.);
+        app.state.mesh_dirty = true;
+        app.sync_after_command();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400., 400.));
+        let reads = loom_scene::anim::animated_reads();
+        for _ in 0..4 { lines(&app, Mat4::IDENTITY, rect, true); }
+        assert_eq!(loom_scene::anim::animated_reads(), reads, "viewport axes must reuse the already prepared pose");
+    }
+
+    #[test]
     fn link_replacing_bone_has_no_unpickable_axis_proxy() {
         let mut app = LoomApp::headless();
         let parent = app.state.scene.add_node(Node::new("parent", ObjectKind::bone(0.5)));
@@ -150,6 +189,8 @@ mod bone_tests {
         if let ObjectKind::Bone { width, height, .. } = &mut bone { width.set(0.01); height.set(0.01); }
         let id = app.state.scene.add_node(Node::new("thin imported bone", bone));
         app.state.hide_category.geometry = true;
+        app.state.mesh_dirty = true;
+        app.sync_after_command();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400., 400.));
         let (depth, top) = lines(&app, Mat4::IDENTITY, rect, true);
         assert!(depth.is_empty());

@@ -1,0 +1,302 @@
+{
+  "frame": 39,
+  "input": "/tmp/loom-conditioning-capture/input.loom",
+  "input_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "matrix_source": "frozen SceneSettings + LoomApp.camera_for; active orbit bit-checked against live diagnostics",
+  "rect_source": "live diagnostics",
+  "rows": [
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 0,
+      "elapsed_ms": 467.884698,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "hide_bones": false,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 0,
+      "elapsed_ms": 17.190633000000002,
+      "four_view_line_counts": [
+        504,
+        168
+      ],
+      "hide_bones": true,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 0,
+      "elapsed_ms": 17.117792,
+      "four_view_line_counts": [
+        504,
+        168
+      ],
+      "hide_bones": true,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 0,
+      "elapsed_ms": 468.746249,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "hide_bones": false,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 1,
+      "elapsed_ms": 464.536228,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "hide_bones": false,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 1,
+      "elapsed_ms": 16.985442,
+      "four_view_line_counts": [
+        504,
+        168
+      ],
+      "hide_bones": true,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 1,
+      "elapsed_ms": 16.978073,
+      "four_view_line_counts": [
+        504,
+        168
+      ],
+      "hide_bones": true,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 1,
+      "elapsed_ms": 467.65243699999996,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "hide_bones": false,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 2,
+      "elapsed_ms": 466.730798,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "hide_bones": false,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 2,
+      "elapsed_ms": 17.095342,
+      "four_view_line_counts": [
+        504,
+        168
+      ],
+      "hide_bones": true,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 2,
+      "elapsed_ms": 16.961213,
+      "four_view_line_counts": [
+        504,
+        168
+      ],
+      "hide_bones": true,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 2,
+      "elapsed_ms": 465.22323700000004,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "hide_bones": false,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 3,
+      "elapsed_ms": 467.61660700000004,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "hide_bones": false,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 3,
+      "elapsed_ms": 17.094552,
+      "four_view_line_counts": [
+        504,
+        168
+      ],
+      "hide_bones": true,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 99200,
+      "cycle": 3,
+      "elapsed_ms": 17.062662999999997,
+      "four_view_line_counts": [
+        504,
+        168
+      ],
+      "hide_bones": true,
+      "iterations": 200
+    },
+    {
+      "animated_reads_delta": 4282400,
+      "cycle": 3,
+      "elapsed_ms": 468.774626,
+      "four_view_line_counts": [
+        504,
+        1848
+      ],
+      "hide_bones": false,
+      "iterations": 200
+    }
+  ],
+  "scene_mesh_rebuilds": 0,
+  "scene_nodes": 461,
+  "source": {
+    "path": "crates/loom_ui/src/helper_overlay.rs",
+    "prefix_sha256": "de71e17598689609661c7b177137d377f8ce8ef66badc9f922e0d0eaa8f6f287",
+    "sha256": "36b657fbd1733f579c292160f4e255b5caf1d6241cf9663fde7297ea89db9735"
+  },
+  "views": [
+    {
+      "realistic": false,
+      "rect": [
+        1.0,
+        49.65625,
+        504.0,
+        371.25
+      ],
+      "view_projection": [
+        0.0024828240275382996,
+        1.6974642524925088e-10,
+        0.0,
+        0.0,
+        -1.0852755499834998e-10,
+        0.003883345751091838,
+        2.7407907055021496e-7,
+        0.0,
+        -1.1898029219845063e-13,
+        4.2573669816192705e-6,
+        -0.00025000047753565013,
+        0.0,
+        -2.9774374961853027,
+        2.2840652465820312,
+        0.5299391150474548,
+        1.0
+      ]
+    },
+    {
+      "realistic": false,
+      "rect": [
+        506.0,
+        49.65625,
+        1009.0,
+        371.25
+      ],
+      "view_projection": [
+        0.0024828240275382996,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0002500006230548024,
+        0.0,
+        0.0,
+        0.0038833478465676308,
+        0.0,
+        0.0,
+        -2.9443440437316895,
+        -0.46326276659965515,
+        0.6470741033554077,
+        1.0
+      ]
+    },
+    {
+      "realistic": false,
+      "rect": [
+        1.0,
+        373.25,
+        504.0,
+        694.84375
+      ],
+      "view_projection": [
+        2.2730932414116722e-10,
+        0.0,
+        0.0002500006230548024,
+        0.0,
+        -0.0024828240275382996,
+        0.0,
+        2.2888241649199337e-11,
+        0.0,
+        0.0,
+        0.0038833478465676308,
+        0.0,
+        0.0,
+        -1.4606459140777588,
+        -0.46256959438323975,
+        0.20019447803497314,
+        1.0
+      ]
+    },
+    {
+      "realistic": true,
+      "rect": [
+        506.0,
+        373.25,
+        1009.0,
+        694.84375
+      ],
+      "view_projection": [
+        -0.960490882396698,
+        0.4437575340270996,
+        0.7609182000160217,
+        0.7609174847602844,
+        -1.2082815170288086,
+        -0.3527531623840332,
+        -0.6048714518547058,
+        -0.6048708558082581,
+        -3.450060148679768e-8,
+        2.346714973449707,
+        -0.23481057584285736,
+        -0.23481035232543945,
+        380.1965026855469,
+        -908.0076904296875,
+        -1016.920166015625,
+        -1016.7093505859375
+      ]
+    }
+  ]
+}

@@ -229,6 +229,7 @@ pub struct LoomApp {
     world_meshes: Vec<(NodeId, Mesh)>,
     cage_cache_keys: std::collections::HashMap<NodeId,(u64,u64,u64,Mat4)>,
     bone_geometry: std::collections::HashMap<NodeId,BoneGeometry>,
+    bone_axes: Vec<(NodeId, Vec3, Vec3)>,
     /// Draw styles parallel to `world_meshes`.
     world_styles: Vec<loom_render::MeshStyle>,
     /// What the viewports draw (the stack result), parallel to `world_meshes`.
@@ -497,6 +498,7 @@ impl LoomApp {
             world_meshes: Vec::new(),
             cage_cache_keys: Default::default(),
             bone_geometry: Default::default(),
+            bone_axes: Vec::new(),
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
             world_version: 0,
@@ -797,6 +799,7 @@ impl LoomApp {
         let mut old_meshes:std::collections::HashMap<_,_>=std::mem::take(&mut self.world_meshes).into_iter().collect();
         let old_cage_keys=std::mem::take(&mut self.cage_cache_keys);
         let mut old_bone_geometry=std::mem::take(&mut self.bone_geometry);
+        self.bone_axes.clear();
         let mut meshes = Vec::new();
         let mut display = Vec::new();
         let mut styles = Vec::new();
@@ -874,7 +877,13 @@ impl LoomApp {
             let n = self.state.scene.node(id).expect("collected above");
             // Display Properties By Layer come from the layer.
             let d = self.state.scene.display_of(n);
-            let world=self.state.scene.object_matrix(n.id);
+            let pivot_world = self.state.scene.world_matrix(n.id);
+            let world = pivot_world * n.object_offset.matrix();
+            if let Some(tip) = n.object.bone_tip_local() {
+                let a = pivot_world.transform_point3(Vec3::ZERO);
+                let b = pivot_world.transform_point3(tip);
+                if a.is_finite() && b.is_finite() { self.bone_axes.push((id, a, b)); }
+            }
             let cage_key=(self.state.scene.instance_id(),n.version,n.geom_version,world);
             let cacheable=matches!(&n.object,loom_scene::ObjectKind::EditablePoly(_)|loom_scene::ObjectKind::EditableMesh(_)) && n.active_entry.is_none() && n.instance_of.is_none() && !d.display_as_box;
             let cached_world=cacheable && old_cage_keys.get(&id)==Some(&cage_key) && old_meshes.contains_key(&id);
