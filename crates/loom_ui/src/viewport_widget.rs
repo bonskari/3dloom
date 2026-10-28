@@ -1907,7 +1907,27 @@ fn pick_object(
     view: Mat4,
     proj: Mat4,
 ) -> Option<Pick> {
-    object_hits(app, p, rect, view, proj).first().map(|&i| Pick::Object(i))
+    object_selection_hits(app, p, rect, view, proj).first().map(|&i| Pick::Object(i))
+}
+
+/// On-top bone axes are picked with the same projected segment that is drawn.
+/// Material drops continue to use surface hits through `node_at`.
+fn object_selection_hits(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Vec<usize> {
+    let mut axes = Vec::new();
+    for (i, (id, _)) in app.world_meshes().iter().enumerate() {
+        let Some(node) = app.state.scene.node(*id) else { continue };
+        if !app.state.is_selectable(node) { continue; }
+        let Some((a, b)) = crate::helper_overlay::bone_axis(app, node) else { continue };
+        let Some([a, b]) = crate::camera_overlay::segment(proj * view, rect, a, b) else { continue };
+        let distance = distance_to_segment(p, a, b);
+        if distance <= 4.0 { axes.push((distance, i)); }
+    }
+    axes.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let mut hits: Vec<_> = axes.into_iter().map(|(_, i)| i).collect();
+    for i in object_hits(app, p, rect, view, proj) {
+        if !hits.contains(&i) { hits.push(i); }
+    }
+    hits
 }
 
 /// The object drawn under screen point `p` in whichever viewport holds it
@@ -1979,7 +1999,7 @@ fn cycle_object_pick(app: &mut LoomApp, p: egui::Pos2, rect: egui::Rect, view: M
         app.pick_cycle = None;
         return;
     }
-    let hits = object_hits(app, p, rect, view, proj);
+    let hits = object_selection_hits(app, p, rect, view, proj);
     let ids: Vec<NodeId> = hits.iter().map(|&i| app.world_meshes()[i].0).collect();
     let k = match &app.pick_cycle {
         Some((q, prev, k)) if !double && q.distance(p) <= 2.0 && *prev == ids => (k + 1) % ids.len(),
@@ -3079,6 +3099,28 @@ pub(crate) fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visible_bone_axis_can_be_selected_through_skin() {
+        let mut app = LoomApp::headless();
+        let mut bone = loom_scene::ObjectKind::bone(0.5);
+        if let loom_scene::ObjectKind::Bone { width, height, .. } = &mut bone { width.set(0.01); height.set(0.01); }
+        let bone = app.state.scene.add_node(loom_scene::Node::new("thin bone", bone));
+        let mut body = loom_scene::Node::new("skin", loom_scene::ObjectKind::box_object(1., 1., 0.2));
+        body.transform.position.set(Vec3::new(0., 0., 1.));
+        let body = app.state.scene.add_node(body);
+        app.state.mesh_dirty = true;
+        app.sync_after_command();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400., 400.));
+        let view = Mat4::look_at_rh(Vec3::new(0., 0., 3.), Vec3::ZERO, Vec3::Y);
+        let proj = Mat4::orthographic_rh(-1., 1., -1., 1., 0.1, 10.);
+        let p = project_world_to_screen(Vec3::new(0.25, 0., 0.), proj * view, rect).unwrap();
+        let hit = pick_object(&app, p, rect, view, proj).unwrap();
+        assert!(matches!(hit, Pick::Object(i) if app.world_meshes()[i].0 == bone), "on-top bone axis must be selectable through the skin");
+        app.state.scene.node_mut(bone).unwrap().frozen = true;
+        let hit = pick_object(&app, p, rect, view, proj).unwrap();
+        assert!(matches!(hit, Pick::Object(i) if app.world_meshes()[i].0 == body), "frozen bones remain visible but cannot intercept selection");
+    }
 
     #[test]
     fn switching_to_shaded_without_scene_changes_restores_gpu_faces(){

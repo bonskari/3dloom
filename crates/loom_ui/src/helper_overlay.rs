@@ -57,6 +57,19 @@ pub type DepthLines = Vec<(Vec3, Vec3, [f32; 3])>;
 /// World segments with an sRGB (painter) colour.
 pub type TopLines = Vec<(Vec3, Vec3, [u8; 3])>;
 
+/// The evaluated bone axis used by both its on-top display and selection.
+/// Source width and skin bindings are not changed by this display proxy.
+pub(crate) fn bone_axis(app: &LoomApp, node: &loom_scene::Node) -> Option<(Vec3, Vec3)> {
+    let tip = node.object.bone_tip_local()?;
+    if !app.state.is_visible(node)
+        || (node.parent.is_some() && node.display.display_links && node.display.link_replaces_object)
+    { return None; }
+    let world = app.state.scene.world_matrix(node.id);
+    let a = world.transform_point3(Vec3::ZERO);
+    let b = world.transform_point3(tip);
+    (a.is_finite() && b.is_finite()).then_some((a, b))
+}
+
 /// Every visible helper's lines for one viewport: (depth-tested lines in
 /// linear colour for the GPU, on-top lines in sRGB for the painter).
 pub fn lines(app: &LoomApp, view_proj: Mat4, rect: egui::Rect, realistic: bool) -> (DepthLines, TopLines) {
@@ -72,6 +85,10 @@ pub fn lines(app: &LoomApp, view_proj: Mat4, rect: egui::Rect, realistic: bool) 
     };
     let upp = |p: Vec3| units_per_pixel(view_proj, rect.height(), p, up(p));
     for n in app.state.scene.nodes() {
+        if let Some((a, b)) = bone_axis(app, n) {
+            top.push((a, b, color(app, n, LineKind::Wire)));
+            continue;
+        }
         if !n.object.is_helper() || !app.state.is_visible(n) {
             continue;
         }
@@ -106,5 +123,40 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, rect: egui:
                 painter.text(s, egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(12.0), c);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod bone_tests {
+    use super::*;
+    use loom_scene::Node;
+
+    #[test]
+    fn link_replacing_bone_has_no_unpickable_axis_proxy() {
+        let mut app = LoomApp::headless();
+        let parent = app.state.scene.add_node(Node::new("parent", ObjectKind::bone(0.5)));
+        let mut bone = Node::new("link only", ObjectKind::bone(0.5));
+        bone.parent = Some(parent);
+        bone.display.display_links = true;
+        bone.display.link_replaces_object = true;
+        let id = app.state.scene.add_node(bone);
+        assert!(bone_axis(&app, app.state.scene.node(id).unwrap()).is_none());
+    }
+
+    #[test]
+    fn visible_bones_have_on_top_axes_even_with_geometry_hidden() {
+        let mut app = LoomApp::headless();
+        let mut bone = ObjectKind::bone(0.5);
+        if let ObjectKind::Bone { width, height, .. } = &mut bone { width.set(0.01); height.set(0.01); }
+        let id = app.state.scene.add_node(Node::new("thin imported bone", bone));
+        app.state.hide_category.geometry = true;
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400., 400.));
+        let (depth, top) = lines(&app, Mat4::IDENTITY, rect, true);
+        assert!(depth.is_empty());
+        let world = app.state.scene.world_matrix(id);
+        let tip = app.state.scene.node(id).unwrap().object.bone_tip_local().unwrap();
+        assert!(top.iter().any(|(a, b, _)| *a == world.transform_point3(Vec3::ZERO) && *b == world.transform_point3(tip)), "visible bones need an on-top axis independent of source width");
+        app.state.display.hide_bones = true;
+        assert!(lines(&app, Mat4::IDENTITY, rect, true).1.is_empty());
     }
 }
