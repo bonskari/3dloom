@@ -149,7 +149,9 @@ impl GpuPoseState {
             if !deforming.contains(&source.id) || source.transform != glam::Mat4::IDENTITY {
                 continue;
             }
-            let part_ids: Vec<_> = if matches!(source.surfaces, Some(Surfaces::PerId(_))) {
+            let part_ids: Vec<_> = {
+                let _scope = loom_render::profile::Scope::new("gpu_pose.material_ids");
+                if matches!(source.surfaces, Some(Surfaces::PerId(_))) {
                 source
                     .mesh
                     .faces()
@@ -160,8 +162,9 @@ impl GpuPoseState {
                     .into_iter()
                     .map(Some)
                     .collect()
-            } else {
-                vec![None]
+                } else {
+                    vec![None]
+                }
             };
             if part_ids != object.part_ids || part_ids.len() != object.buffers.len() {
                 continue;
