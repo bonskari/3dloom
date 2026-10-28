@@ -1,0 +1,72 @@
+SOURCE_CAPACITY node=NodeId(4543) vertices=12710 current_len=12710 current_capacity=16384 reserved_len=12710 reserved_capacity=12710 output_bits_exact=PASS
+SOURCE_CAPACITY node=NodeId(4544) vertices=34271 current_len=34271 current_capacity=65536 reserved_len=34271 reserved_capacity=34271 output_bits_exact=PASS
+SOURCE_CAPACITY node=NodeId(4545) vertices=3490 current_len=3490 current_capacity=4096 reserved_len=3490 reserved_capacity=3490 output_bits_exact=PASS
+SOURCE_CAPACITY node=NodeId(4546) vertices=9860 current_len=9860 current_capacity=16384 reserved_len=9860 reserved_capacity=9860 output_bits_exact=PASS
+SOURCE_CAPACITY node=NodeId(4547) vertices=3009 current_len=3009 current_capacity=4096 reserved_len=3009 reserved_capacity=3009 output_bits_exact=PASS
+SOURCE_ERROR_SEMANTICS empty=PASS nonfinite_cases=9 signed_zero_maxfinite_bits=PASS
+SOURCE_ABBA round=0 current_ms_per5mesh=0.591215250 reserved_ms_per5mesh=0.082565844 delta_ms=0.508649406
+SOURCE_ABBA round=1 current_ms_per5mesh=0.604189594 reserved_ms_per5mesh=0.078434281 delta_ms=0.525755312
+SOURCE_ABBA round=2 current_ms_per5mesh=0.610351750 reserved_ms_per5mesh=0.077241813 delta_ms=0.533109937
+SOURCE_ABBA round=3 current_ms_per5mesh=0.571428094 reserved_ms_per5mesh=0.077719906 delta_ms=0.493708188
+SOURCE_ABBA round=4 current_ms_per5mesh=0.576185250 reserved_ms_per5mesh=0.076912719 delta_ms=0.499272531
+SOURCE_ABBA round=5 current_ms_per5mesh=0.576080875 reserved_ms_per5mesh=0.076553656 delta_ms=0.499527219
+SOURCE_ABBA round=6 current_ms_per5mesh=0.570458406 reserved_ms_per5mesh=0.078154906 delta_ms=0.492303500
+SOURCE_ABBA round=7 current_ms_per5mesh=0.569489031 reserved_ms_per5mesh=0.078299594 delta_ms=0.491189437
+SOURCE_ABBA round=8 current_ms_per5mesh=0.572900250 reserved_ms_per5mesh=0.077665844 delta_ms=0.495234406
+SOURCE_ABBA round=9 current_ms_per5mesh=0.586137125 reserved_ms_per5mesh=0.076890531 delta_ms=0.509246594
+SOURCE_ABBA round=10 current_ms_per5mesh=0.574341813 reserved_ms_per5mesh=0.080244906 delta_ms=0.494096906
+SOURCE_ABBA round=11 current_ms_per5mesh=0.577583063 reserved_ms_per5mesh=0.078744938 delta_ms=0.498838125
+SOURCE_ABBA round=12 current_ms_per5mesh=0.584494625 reserved_ms_per5mesh=0.076680844 delta_ms=0.507813781
+SOURCE_ABBA round=13 current_ms_per5mesh=0.586067438 reserved_ms_per5mesh=0.077161469 delta_ms=0.508905969
+SOURCE_ABBA round=14 current_ms_per5mesh=0.577869625 reserved_ms_per5mesh=0.077640219 delta_ms=0.500229406
+SOURCE_ABBA round=15 current_ms_per5mesh=0.571147781 reserved_ms_per5mesh=0.078098656 delta_ms=0.493049125
+SOURCE_ABBA round=16 current_ms_per5mesh=0.575244312 reserved_ms_per5mesh=0.077267719 delta_ms=0.497976594
+SOURCE_ABBA round=17 current_ms_per5mesh=0.573841156 reserved_ms_per5mesh=0.077183063 delta_ms=0.496658094
+SOURCE_ABBA round=18 current_ms_per5mesh=0.573744344 reserved_ms_per5mesh=0.076876781 delta_ms=0.496867563
+SOURCE_ABBA round=19 current_ms_per5mesh=0.584462750 reserved_ms_per5mesh=0.088369594 delta_ms=0.496093156
+SOURCE_ABBA round=20 current_ms_per5mesh=0.595871469 reserved_ms_per5mesh=0.078226781 delta_ms=0.517644687
+SOURCE_ABBA round=21 current_ms_per5mesh=0.625152406 reserved_ms_per5mesh=0.083459594 delta_ms=0.541692813
+SOURCE_ABBA round=22 current_ms_per5mesh=0.615828312 reserved_ms_per5mesh=0.077744906 delta_ms=0.538083406
+SOURCE_ABBA round=23 current_ms_per5mesh=0.582902469 reserved_ms_per5mesh=0.078011156 delta_ms=0.504891312
+SOURCE_ABBA round=24 current_ms_per5mesh=0.567658375 reserved_ms_per5mesh=0.077255531 delta_ms=0.490402844
+SOURCE_ABBA round=25 current_ms_per5mesh=0.569180906 reserved_ms_per5mesh=0.076805219 delta_ms=0.492375687
+SOURCE_ABBA round=26 current_ms_per5mesh=0.574486500 reserved_ms_per5mesh=0.076899594 delta_ms=0.497586906
+SOURCE_ABBA round=27 current_ms_per5mesh=0.645896750 reserved_ms_per5mesh=0.083504906 delta_ms=0.562391844
+SOURCE_ABBA round=28 current_ms_per5mesh=0.592942781 reserved_ms_per5mesh=0.080363000 delta_ms=0.512579781
+SOURCE_ABBA round=29 current_ms_per5mesh=0.569785563 reserved_ms_per5mesh=0.076916781 delta_ms=0.492868781
+SOURCE_ABBA round=30 current_ms_per5mesh=0.572796813 reserved_ms_per5mesh=0.076596500 delta_ms=0.496200313
+SOURCE_ABBA round=31 current_ms_per5mesh=0.576865562 reserved_ms_per5mesh=0.076306781 delta_ms=0.500558781
+SOURCE_ABBA round=32 current_ms_per5mesh=0.570203375 reserved_ms_per5mesh=0.077826813 delta_ms=0.492376562
+SOURCE_ABBA round=33 current_ms_per5mesh=0.570457125 reserved_ms_per5mesh=0.077392094 delta_ms=0.493065031
+SOURCE_ABBA round=34 current_ms_per5mesh=0.574083719 reserved_ms_per5mesh=0.077104906 delta_ms=0.496978813
+SOURCE_ABBA round=35 current_ms_per5mesh=0.575368375 reserved_ms_per5mesh=0.076678344 delta_ms=0.498690031
+SOURCE_ABBA round=36 current_ms_per5mesh=0.572352750 reserved_ms_per5mesh=0.077694313 delta_ms=0.494658437
+SOURCE_ABBA round=37 current_ms_per5mesh=0.569053375 reserved_ms_per5mesh=0.078284281 delta_ms=0.490769094
+SOURCE_ABBA round=38 current_ms_per5mesh=0.572704000 reserved_ms_per5mesh=0.077489938 delta_ms=0.495214062
+SOURCE_ABBA round=39 current_ms_per5mesh=0.575123063 reserved_ms_per5mesh=0.076740219 delta_ms=0.498382844
+SOURCE_ABBA round=40 current_ms_per5mesh=0.574245906 reserved_ms_per5mesh=0.077540844 delta_ms=0.496705063
+SOURCE_ABBA round=41 current_ms_per5mesh=0.567866187 reserved_ms_per5mesh=0.077210531 delta_ms=0.490655656
+SOURCE_ABBA round=42 current_ms_per5mesh=0.571348719 reserved_ms_per5mesh=0.077654594 delta_ms=0.493694125
+SOURCE_ABBA round=43 current_ms_per5mesh=0.583956500 reserved_ms_per5mesh=0.076817406 delta_ms=0.507139094
+SOURCE_ABBA round=44 current_ms_per5mesh=0.570830281 reserved_ms_per5mesh=0.079903344 delta_ms=0.490926938
+SOURCE_ABBA round=45 current_ms_per5mesh=0.568142750 reserved_ms_per5mesh=0.077218344 delta_ms=0.490924406
+SOURCE_ABBA round=46 current_ms_per5mesh=0.569790906 reserved_ms_per5mesh=0.077112719 delta_ms=0.492678187
+SOURCE_ABBA round=47 current_ms_per5mesh=0.575689625 reserved_ms_per5mesh=0.076608031 delta_ms=0.499081594
+SOURCE_ABBA round=48 current_ms_per5mesh=0.599288375 reserved_ms_per5mesh=0.120511094 delta_ms=0.478777281
+SOURCE_ABBA round=49 current_ms_per5mesh=0.571289625 reserved_ms_per5mesh=0.078050563 delta_ms=0.493239063
+SOURCE_ABBA round=50 current_ms_per5mesh=0.606612094 reserved_ms_per5mesh=0.077393344 delta_ms=0.529218750
+SOURCE_ABBA round=51 current_ms_per5mesh=0.575424313 reserved_ms_per5mesh=0.078710219 delta_ms=0.496714094
+SOURCE_ABBA round=52 current_ms_per5mesh=0.574782469 reserved_ms_per5mesh=0.077691781 delta_ms=0.497090688
+SOURCE_ABBA round=53 current_ms_per5mesh=0.572268375 reserved_ms_per5mesh=0.078234906 delta_ms=0.494033469
+SOURCE_ABBA round=54 current_ms_per5mesh=0.570582469 reserved_ms_per5mesh=0.076711781 delta_ms=0.493870688
+SOURCE_ABBA round=55 current_ms_per5mesh=0.582061812 reserved_ms_per5mesh=0.079401469 delta_ms=0.502660344
+SOURCE_ABBA round=56 current_ms_per5mesh=0.580217437 reserved_ms_per5mesh=0.081789906 delta_ms=0.498427531
+SOURCE_ABBA round=57 current_ms_per5mesh=0.578772438 reserved_ms_per5mesh=0.080173344 delta_ms=0.498599094
+SOURCE_ABBA round=58 current_ms_per5mesh=0.578703969 reserved_ms_per5mesh=0.078016500 delta_ms=0.500687469
+SOURCE_ABBA round=59 current_ms_per5mesh=0.587913687 reserved_ms_per5mesh=0.080746156 delta_ms=0.507167531
+SOURCE_ABBA round=60 current_ms_per5mesh=0.574257781 reserved_ms_per5mesh=0.078705844 delta_ms=0.495551938
+SOURCE_ABBA round=61 current_ms_per5mesh=0.577903062 reserved_ms_per5mesh=0.076174281 delta_ms=0.501728781
+SOURCE_ABBA round=62 current_ms_per5mesh=0.573650563 reserved_ms_per5mesh=0.077781156 delta_ms=0.495869406
+SOURCE_ABBA round=63 current_ms_per5mesh=0.580153406 reserved_ms_per5mesh=0.080433031 delta_ms=0.499720375
+SOURCE_SCENE_SHA before=4cf225a47205a3a4c1b1b16e99115d4a416fad4311a413750df4101f0acddd90 after=4cf225a47205a3a4c1b1b16e99115d4a416fad4311a413750df4101f0acddd90 exact=PASS
+SOURCE_SUMMARY rounds=64 repeats=16 meshes=5 current_ms_per5mesh=0.580339046 reserved_ms_per5mesh=0.078915627 delta_ms=0.501423419 output_bits_exact=PASS error_semantics=PASS

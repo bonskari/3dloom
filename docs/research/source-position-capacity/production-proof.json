@@ -1,0 +1,29 @@
+{
+  "production_function_sha256": "fe93da73b0b5e62cfa57a884d98f640804d28908a0b402f28aa3da476410729f",
+  "benchmarked_reserved_body_source_identical_except_function_name": true,
+  "actual_frame": 39,
+  "actual_skin_meshes": 5,
+  "actual_vertices": 63340,
+  "actual_all_output_float_bits_legacy_equal": true,
+  "actual_serialized_scene_bytes_unchanged": true,
+  "allocation_budget_counts": [
+    3,
+    17
+  ],
+  "nonfinite_positions": [
+    "first",
+    "middle",
+    "last"
+  ],
+  "nonfinite_values": [
+    "NaN",
+    "+Infinity",
+    "-Infinity"
+  ],
+  "components": [
+    "x",
+    "y",
+    "z"
+  ],
+  "GPU_or_queue_changes": false
+}

@@ -264,16 +264,14 @@ fn source_positions(mesh: &Mesh) -> Result<Vec<[f32; 4]>, String> {
     if mesh.vertex_count() == 0 {
         return Err("GPU runtime requires nonempty source positions".into());
     }
-    mesh.vertices()
-        .iter()
-        .map(|v| {
-            if v.position.is_finite() {
-                Ok([v.position.x, v.position.y, v.position.z, 1.0])
-            } else {
-                Err("nonfinite current world position".into())
-            }
-        })
-        .collect()
+    let mut values = Vec::with_capacity(mesh.vertex_count());
+    for v in mesh.vertices() {
+        if !v.position.is_finite() {
+            return Err("nonfinite current world position".into());
+        }
+        values.push([v.position.x, v.position.y, v.position.z, 1.0]);
+    }
+    Ok(values)
 }
 fn part_indices(mesh: &Mesh, parts: &[(Option<u16>, bool)]) -> Result<Vec<Vec<u32>>, String> {
     parts
@@ -307,6 +305,63 @@ fn part_indices(mesh: &Mesh, parts: &[(Option<u16>, bool)]) -> Result<Vec<Vec<u3
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn isolated_source_mesh(count: usize) -> Mesh {
+        let mut indexed = loom_mesh::indexed::IndexedMesh::default();
+        for i in 0..count {
+            let id = indexed.add_vertex(glam::Vec3::new(i as f32, -(i as f32), 0.5), None);
+            indexed.keep.insert(id);
+        }
+        indexed.build().unwrap()
+    }
+    fn reference_source_positions(mesh: &Mesh) -> Result<Vec<[f32;4]>,String> {
+        if mesh.vertex_count() == 0 { return Err("GPU runtime requires nonempty source positions".into()); }
+        mesh.vertices().iter().map(|v| if v.position.is_finite() {
+            Ok([v.position.x,v.position.y,v.position.z,1.0])
+        } else { Err("nonfinite current world position".into()) }).collect()
+    }
+    #[test]
+    fn source_positions_reserves_exact_vertex_count() {
+        for count in [3,17] {
+            let mesh = isolated_source_mesh(count);
+            let values = source_positions(&mesh).unwrap();
+            assert_eq!(values.len(),count);
+            assert_eq!(values.capacity(),count,"known source count must not geometrically over-reserve");
+        }
+    }
+    #[test]
+    fn source_positions_preserves_every_float_bit_and_error_semantics() {
+        let mut mesh = isolated_source_mesh(17);
+        mesh.vertices_mut()[0].position = glam::Vec3::new(-0.0,f32::from_bits(1),f32::MAX);
+        let actual=source_positions(&mesh).unwrap();let expected=reference_source_positions(&mesh).unwrap();
+        assert_eq!(actual.len(),expected.len());
+        for(a,b)in actual.iter().zip(&expected){assert_eq!(a.map(f32::to_bits),b.map(f32::to_bits));}
+        assert_eq!(source_positions(&Mesh::new()).unwrap_err(),"GPU runtime requires nonempty source positions");
+        for invalid in [f32::NAN,f32::INFINITY,f32::NEG_INFINITY] {
+            for index in [0,8,16] { for component in 0..3 {
+                let mut invalid_mesh=mesh.clone();invalid_mesh.vertices_mut()[index].position[component]=invalid;
+                assert_eq!(source_positions(&invalid_mesh).unwrap_err(),reference_source_positions(&invalid_mesh).unwrap_err());
+                assert_eq!(source_positions(&invalid_mesh).unwrap_err(),"nonfinite current world position");
+            }}
+        }
+    }
+    #[test]
+    #[ignore = "requires frozen LOOM_PERF_SCENE; real five-mesh CPU source parity"]
+    fn actual_ray_source_positions_reservation_matches_legacy_bits() {
+        let value:serde_json::Value=serde_json::from_slice(&std::fs::read(std::env::var("LOOM_PERF_SCENE").unwrap()).unwrap()).unwrap();
+        let scene:loom_scene::Scene=serde_json::from_value(value["scene"].clone()).unwrap();scene.set_time(39.0);
+        let ids:Vec<_>=scene.nodes().filter(|n|n.modifiers.iter().any(|m|matches!(&m.modifier,loom_scene::modifier::Modifier::Skin(_)))).map(|n|n.id).collect();
+        assert_eq!(ids.len(),5);
+        let meshes:Vec<_>=ids.iter().map(|id|{let mut mesh=scene.eval_mesh(*id).value.mesh.clone();loom_mesh::edit_ops::transform_mesh(&mut mesh,scene.object_matrix(*id)).unwrap();mesh}).collect();
+        let before=serde_json::to_vec(&scene).unwrap();let mut total=0;
+        for mesh in &meshes {
+            let actual=source_positions(mesh).unwrap();let expected=reference_source_positions(mesh).unwrap();
+            assert_eq!(actual.len(),expected.len());assert_eq!(actual.capacity(),mesh.vertex_count());
+            for(a,b)in actual.iter().zip(&expected){assert_eq!(a.map(f32::to_bits),b.map(f32::to_bits));}
+            total+=actual.len();
+        }
+        assert!(before==serde_json::to_vec(&scene).unwrap(),"source packing must leave serialized Scene unchanged");
+        eprintln!("ACTUAL_SOURCE_POSITIONS_BIT_PARITY frame=39 meshes={} vertices={total} scene_json_bytes_exact=PASS",meshes.len());
+    }
     fn device() -> (wgpu::Device, wgpu::Queue) {
         let instance = wgpu::Instance::new(&Default::default());
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();

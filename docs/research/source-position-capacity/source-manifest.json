@@ -1,0 +1,6 @@
+{
+  "original_function_sha256": "07926875209bf18f1020218477a3569571b0470a461a8e1de7cbeb481f38ee1d",
+  "main_sha256": "f57e367c942367d38b0493290ee1e16efb37754f7733221867f665e34dd4c223",
+  "original_source": "crates/loom_bevy/src/gpu_pose_runtime.rs::source_positions",
+  "frame": 39.0
+}
