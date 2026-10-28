@@ -1,0 +1,50 @@
+warning: field `reason` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:15:27
+   |
+15 |     Layout { part: usize, reason: String },
+   |     ------                ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `0` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:16:14
+   |
+16 |     Readback(String),
+   |     -------- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+16 -     Readback(String),
+16 +     Readback(()),
+   |
+
+warning: method `vertex_count` is never used
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:379:19
+    |
+208 | impl GpuRecipeMath {
+    | ------------------ method in this implementation
+...
+379 |     pub(crate) fn vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^
+
+warning: `loom_bevy` (lib test) generated 3 warnings
+    Finished `release` profile [optimized] target(s) in 0.13s
+     Running unittests src/lib.rs (target/release/deps/loom_bevy-d37bfa3ba707912c)
+
+running 1 test
+test gpu_pose_renderer::tests::actual_ray_precise_all_thirteen_parts_keep_current_pose_and_resources ... RAY_GPU_RENDERER time=0 sync_ms=791.324
+RAY_GPU_RENDERER time=0 sync_ms=6.071
+RAY_GPU_RENDERER time=39.25 sync_ms=6.647
+RAY_GPU_RENDERER time=39.25 sync_ms=5.761
+RAY_GPU_RENDERER time=95.71835 sync_ms=6.566
+RAY_GPU_RENDERER time=149 sync_ms=6.854
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 126 filtered out; finished in 3.62s
+

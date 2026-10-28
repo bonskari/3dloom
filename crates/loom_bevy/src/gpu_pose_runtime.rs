@@ -11,7 +11,7 @@ use wgpu::util::DeviceExt;
 
 fn fused_positions_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS").as_deref() == Some(std::ffi::OsStr::new("1")))
+    *ENABLED.get_or_init(|| std::env::var_os("LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS").as_deref().is_none_or(|value| value == std::ffi::OsStr::new("1")))
 }
 
 pub(crate) struct Candidate<'a> {
@@ -333,6 +333,11 @@ fn part_indices(mesh: &Mesh, parts: &[(Option<u16>, bool)]) -> Result<Vec<Vec<u3
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fused_positions_are_enabled_by_default() {
+        assert!(std::env::var_os("LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS").is_none());
+        assert!(super::fused_positions_enabled());
+    }
     use super::*;
     fn isolated_source_mesh(count: usize) -> Mesh {
         let mut indexed = loom_mesh::indexed::IndexedMesh::default();

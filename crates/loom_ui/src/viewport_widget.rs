@@ -14,6 +14,10 @@ use crate::LoomApp;
 // Resource stored permanently in egui-wgpu's CallbackResources TypeMap
 // ---------------------------------------------------------------------------
 
+fn cpu_edge_batch_enabled() -> bool {
+    std::env::var_os("LOOM_EXPERIMENTAL_CPU_EDGE_BATCH").as_deref().is_none_or(|value| value == std::ffi::OsStr::new("1"))
+}
+
 /// Persistent GPU-side state shared across all frames.
 pub struct ViewportResources {
     pub renderer: ViewportRenderer,
@@ -41,7 +45,7 @@ pub fn init_render_resources(wgpu: &egui_wgpu::RenderState) {
         .insert(ViewportResources {
             renderer,
             mesh_buffers: Vec::new(),
-            cpu_edge_batch: (std::env::var_os("LOOM_EXPERIMENTAL_CPU_EDGE_BATCH").as_deref() == Some(std::ffi::OsStr::new("1"))).then(Default::default),
+            cpu_edge_batch: cpu_edge_batch_enabled().then(Default::default),
             mesh_source: None,
             gpu_edge_program: None,
             gpu_edges: Default::default(),
@@ -3173,6 +3177,11 @@ pub(crate) fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cpu_edge_batch_is_enabled_by_default() {
+        assert!(std::env::var_os("LOOM_EXPERIMENTAL_CPU_EDGE_BATCH").is_none());
+        assert!(super::cpu_edge_batch_enabled());
+    }
     use super::*;
 
     #[test]

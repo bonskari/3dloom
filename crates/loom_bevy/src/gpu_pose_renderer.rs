@@ -467,7 +467,7 @@ mod tests {
             renderer.sync_deforming(&objects, &deforming);
             // Each successful repeat must refill current staging before commit.
             renderer.sync_deforming(&objects, &deforming);
-            let requested_fused = std::env::var_os("LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS").as_deref() == Some(std::ffi::OsStr::new("1"));
+            let requested_fused = match std::env::var_os("LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS") { None => true, Some(value) => value == "1" };
             assert!(renderer.gpu_poses.as_ref().unwrap().cache.values().all(|runtime| runtime.uses_fused_positions() == requested_fused));
             eprintln!(
                 "RAY_GPU_RENDERER time={time} sync_ms={:.3}",

@@ -1,0 +1,14 @@
+{
+  "feature_overrides_unset_during_tests": true,
+  "source_sha256": {
+    "crates/loom_bevy/src/gpu_pose_runtime.rs": "54d113cc17639b9efe8338d8587f9653beed22a9ee3a57eaf0a45ffb7f7d43aa",
+    "crates/loom_bevy/src/gpu_pose_renderer.rs": "16698cc4b4f24bd62982bd14edc674ed4e6f4a6abd3b5e51fc3f9f8f6e49c898",
+    "crates/loom_ui/src/viewport_widget.rs": "3695e61a26e25bbb1a5fc84018fb54080bdd1a18ff968e8dfe78084c507f9b93"
+  },
+  "ui_passed": 434,
+  "ui_ignored": 2,
+  "bevy_passed": 89,
+  "bevy_ignored": 38,
+  "actual_ray_gpu_default_path_passed": true,
+  "native_production_performance_verified": false
+}
