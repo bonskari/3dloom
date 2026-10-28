@@ -224,6 +224,7 @@ impl DynamicGeometryBuffer {
     }
 
     pub(crate) fn validate_gpu(&self, source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>) -> Result<u64, String> {
+        let _scope = loom_render::profile::Scope::new("gpu_pose.layout_validation");
         let bytes = (self.vertex_count as u64).checked_mul(64).ok_or("GPU pose size overflow")?;
         if positions.len() != self.vertex_count || self.indices.as_deref() != indices
             || !positions.iter().flatten().all(|v| v.is_finite())

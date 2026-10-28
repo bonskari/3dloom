@@ -161,6 +161,7 @@ impl GpuPoseState {
         if eligible.is_empty() {
             return Ok((Vec::new(), None));
         }
+        let encode_scope = loom_render::profile::Scope::new("gpu_pose.encode_submit");
         let mut encoder = device.create_command_encoder(&Default::default());
         for id in &eligible {
             self.cache[&(hidden, *id)].encode_normals(&mut encoder);
@@ -174,6 +175,7 @@ impl GpuPoseState {
             self.cache[&(hidden, *id)].encode_math(&mut encoder);
         }
         queue.submit([encoder.finish()]);
+        drop(encode_scope);
         let (mut result, mut order) = self.commit(device, queue, set, hidden, &eligible)?;
         if let Err(PoseCommitError::Guards(flags)) = &result {
             let rejected: HashSet<_> = order
@@ -196,6 +198,7 @@ impl GpuPoseState {
             .zip(bounds)
             .map(|((id, part), bounds)| (id, part, bounds))
             .collect();
+        let _bounds_scope = loom_render::profile::Scope::new("gpu_pose.scene_bounds");
         let mut lo = Vec3::splat(f32::MAX);
         let mut hi = Vec3::splat(f32::MIN);
         for id in &eligible {
