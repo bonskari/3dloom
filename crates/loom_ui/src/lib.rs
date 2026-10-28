@@ -828,6 +828,7 @@ impl LoomApp {
             let outputs = {
                 let _stage = loom_render::profile::Scope::new("ui.skin_batch");
                 self.state.scene.evaluated_batch(&skins, |jobs| {
+                    let _executor = loom_render::profile::Scope::new(if jobs.is_empty() { "ui.skin_jobs_empty" } else { "ui.skin_jobs_execute" });
                     if jobs.is_empty() { return Vec::new(); }
                     pool.scope(|scope| { for job in jobs { scope.spawn(async move { job.run() }); } })
                 })
