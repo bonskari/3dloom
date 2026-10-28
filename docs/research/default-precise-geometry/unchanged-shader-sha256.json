@@ -1,0 +1,13 @@
+{
+  "crates/loom_bevy/src/dynamic_geometry_forward.wgsl": "9da3b16288f3581108d6310ac0d38ac2a60b88977b43046a82ed1c95394fdf0b",
+  "crates/loom_bevy/src/dynamic_geometry_prepass.wgsl": "3dea1a796505783a2165b46eff43b9cd1685c0ddf1994564e500f85878702baa",
+  "crates/loom_bevy/src/gpu_mikk_group.wgsl": "09effa2418633046bc56244759f7fd7502574658a2b3cba46e5848647ba53e8c",
+  "crates/loom_bevy/src/gpu_mikk_precision.wgsl": "daa19bffd2a34be32e2cba02dee47cb62c44c4656082862e7f23c1285ba4cbe7",
+  "crates/loom_bevy/src/gpu_mikk_prepare.wgsl": "b81b54da8d9bc2d49d7539159b45d5bdbe3eaec72db9abcc06caf3327e6007b9",
+  "crates/loom_bevy/src/gpu_mikk_recipe.wgsl": "786edcbc6beaaf020df20840eaf24f29decbb9f69e7ac24fbabc46db6b602129",
+  "crates/loom_bevy/src/gpu_mikk_refinement.wgsl": "bbfe876303abcf9b0ebcc3305489b97152c35248f05b54f7037b0f4d87e7ebcc",
+  "crates/loom_bevy/src/gpu_mikk_refinement_serial_test.wgsl": "7c259f2d87145766ff736219ede938832dade3095f9dfb576691b740251128d8",
+  "crates/loom_bevy/src/gpu_pose_geometry.wgsl": "0d1dd339f0b41cef80ee93a220b45f2325af403f39bfcd42e0eaeb409258b033",
+  "crates/loom_bevy/src/gpu_skin_compute.wgsl": "e73bade39bdff54793c56696e8d62a2d2957a9eca2a69e31b5f88f07b36dc1ba",
+  "crates/loom_bevy/src/uv_bake.wgsl": "1a8b46f937d836d1af5f4d371c44614b23d766e0ab806d50416ca65b72899e8d"
+}

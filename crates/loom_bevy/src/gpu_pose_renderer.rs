@@ -127,13 +127,15 @@ fn visible_material_ids(faces: &[loom_mesh::Face]) -> Vec<Option<u16>> {
 
 impl GpuPoseState {
     pub(super) fn selected(device: &wgpu::Device, value: Option<&std::ffi::OsStr>) -> Option<Self> {
-        match value.and_then(|v| v.to_str()) {
-            Some("1") => Some(Self::default()),
-            Some("precise8") => match crate::gpu_mikk_precision::PrecisionProgram::new(device) {
-                Ok(program) => Some(Self { precision: Some(std::sync::Arc::new(program)), ..Default::default() }),
-                Err(error) => { eprintln!("precise8 unavailable; using CPU geometry: {error}"); None }
-            },
-            _ => None,
+        if value == Some(std::ffi::OsStr::new("1")) {
+            return Some(Self::default());
+        }
+        if value.is_some_and(|v| v != std::ffi::OsStr::new("precise8")) {
+            return None;
+        }
+        match crate::gpu_mikk_precision::PrecisionProgram::new(device) {
+            Ok(program) => Some(Self { precision: Some(std::sync::Arc::new(program)), ..Default::default() }),
+            Err(error) => { eprintln!("precise8 unavailable; using CPU geometry: {error}"); None }
         }
     }
 
@@ -295,6 +297,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_selection_on_supported_device_uses_precise_geometry() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, _) = pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter), None)).unwrap();
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let default = GpuPoseState::selected(&device, None).expect("supported default must select current precise geometry");
+        assert!(default.precision.is_some());
+        assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("1"))).unwrap().precision.is_none());
+        assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("0"))).is_none());
+        assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("other"))).is_none());
+        assert!(pollster::block_on(device.pop_error_scope()).is_none());
+    }
+
+    #[test]
     fn precise_selection_on_device_without_f64_keeps_cpu_backend() {
         let instance = wgpu::Instance::new(&Default::default());
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
@@ -303,9 +319,9 @@ mod tests {
         let (device, queue) = pollster::block_on(adapter.request_device(&descriptor, None)).unwrap();
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8"))).is_none());
+        assert!(GpuPoseState::selected(&device, None).is_none());
         assert!(pollster::block_on(device.pop_error_scope()).is_none());
         assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("1"))).is_some());
-        assert!(GpuPoseState::selected(&device, None).is_none());
         assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("other"))).is_none());
         let selection = GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8")));
         let mut renderer = BevyRenderer::new(adapter, device, queue);
@@ -334,6 +350,7 @@ mod tests {
             let (device, _) = pollster::block_on(adapter.request_device(&descriptor, None)).unwrap();
             device.push_error_scope(wgpu::ErrorFilter::Validation);
             assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8"))).is_none(), "low limit case={case}");
+            assert!(GpuPoseState::selected(&device, None).is_none(), "unsupported default must keep CPU case={case}");
             assert!(pollster::block_on(device.pop_error_scope()).is_none(), "shader/layout creation must not be attempted for case={case}");
         }
     }

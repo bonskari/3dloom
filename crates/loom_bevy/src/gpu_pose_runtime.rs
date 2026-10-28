@@ -46,6 +46,14 @@ impl GpuPoseRuntime {
         precision: Option<std::sync::Arc<crate::gpu_mikk_precision::PrecisionProgram>>,
     ) -> Result<Self, String> {
         let positions = source_positions(mesh)?;
+        let source_bytes = u64::try_from(positions.len()).ok().and_then(|n| n.checked_mul(16))
+            .ok_or("current source position byte count overflow")?;
+        let limits = device.limits();
+        if source_bytes > limits.max_buffer_size
+            || source_bytes > u64::from(limits.max_storage_buffer_binding_size)
+        {
+            return Err("current source positions exceed GPU buffer/storage limits".into());
+        }
         let source: bevy::render::render_resource::Buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("current CPU world-baked source positions"),
             contents: bytemuck::cast_slice(&positions),
@@ -318,6 +326,22 @@ mod tests {
         mesh.vertices().iter().map(|v| if v.position.is_finite() {
             Ok([v.position.x,v.position.y,v.position.z,1.0])
         } else { Err("nonfinite current world position".into()) }).collect()
+    }
+    #[test]
+    fn source_gpu_buffer_limits_reject_before_resource_creation() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let mesh = isolated_source_mesh(17); //272 source bytes; no huge allocation.
+        for buffer_limit in [true,false] {
+            let mut descriptor = crate::device_descriptor(&adapter);
+            descriptor.required_limits.max_storage_buffer_binding_size = 256;
+            if buffer_limit { descriptor.required_limits.max_buffer_size = 256; }
+            let (device,queue) = pollster::block_on(adapter.request_device(&descriptor,None)).unwrap();
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let error = GpuPoseRuntime::with_precision(&device,&queue,&mesh,&[(None,false)],None).err().expect("oversized source must be rejected");
+            assert_eq!(error,"current source positions exceed GPU buffer/storage limits");
+            assert!(pollster::block_on(device.pop_error_scope()).is_none(),"oversized source must not create invalid buffer/binding");
+        }
     }
     #[test]
     fn source_positions_reserves_exact_vertex_count() {

@@ -1,0 +1,109 @@
+diff --git a/crates/loom_bevy/src/gpu_pose_renderer.rs b/crates/loom_bevy/src/gpu_pose_renderer.rs
+index 35eeaf5..67e43aa 100644
+--- a/crates/loom_bevy/src/gpu_pose_renderer.rs
++++ b/crates/loom_bevy/src/gpu_pose_renderer.rs
+@@ -127,13 +127,15 @@ fn visible_material_ids(faces: &[loom_mesh::Face]) -> Vec<Option<u16>> {
+ 
+ impl GpuPoseState {
+     pub(super) fn selected(device: &wgpu::Device, value: Option<&std::ffi::OsStr>) -> Option<Self> {
+-        match value.and_then(|v| v.to_str()) {
+-            Some("1") => Some(Self::default()),
+-            Some("precise8") => match crate::gpu_mikk_precision::PrecisionProgram::new(device) {
+-                Ok(program) => Some(Self { precision: Some(std::sync::Arc::new(program)), ..Default::default() }),
+-                Err(error) => { eprintln!("precise8 unavailable; using CPU geometry: {error}"); None }
+-            },
+-            _ => None,
++        if value == Some(std::ffi::OsStr::new("1")) {
++            return Some(Self::default());
++        }
++        if value.is_some_and(|v| v != std::ffi::OsStr::new("precise8")) {
++            return None;
++        }
++        match crate::gpu_mikk_precision::PrecisionProgram::new(device) {
++            Ok(program) => Some(Self { precision: Some(std::sync::Arc::new(program)), ..Default::default() }),
++            Err(error) => { eprintln!("precise8 unavailable; using CPU geometry: {error}"); None }
+         }
+     }
+ 
+@@ -294,6 +296,20 @@ impl GpuPoseState {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn default_selection_on_supported_device_uses_precise_geometry() {
++        let instance = wgpu::Instance::new(&Default::default());
++        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
++        let (device, _) = pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter), None)).unwrap();
++        device.push_error_scope(wgpu::ErrorFilter::Validation);
++        let default = GpuPoseState::selected(&device, None).expect("supported default must select current precise geometry");
++        assert!(default.precision.is_some());
++        assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("1"))).unwrap().precision.is_none());
++        assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("0"))).is_none());
++        assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("other"))).is_none());
++        assert!(pollster::block_on(device.pop_error_scope()).is_none());
++    }
++
+     #[test]
+     fn precise_selection_on_device_without_f64_keeps_cpu_backend() {
+         let instance = wgpu::Instance::new(&Default::default());
+@@ -303,9 +319,9 @@ mod tests {
+         let (device, queue) = pollster::block_on(adapter.request_device(&descriptor, None)).unwrap();
+         device.push_error_scope(wgpu::ErrorFilter::Validation);
+         assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8"))).is_none());
++        assert!(GpuPoseState::selected(&device, None).is_none());
+         assert!(pollster::block_on(device.pop_error_scope()).is_none());
+         assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("1"))).is_some());
+-        assert!(GpuPoseState::selected(&device, None).is_none());
+         assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("other"))).is_none());
+         let selection = GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8")));
+         let mut renderer = BevyRenderer::new(adapter, device, queue);
+@@ -334,6 +350,7 @@ mod tests {
+             let (device, _) = pollster::block_on(adapter.request_device(&descriptor, None)).unwrap();
+             device.push_error_scope(wgpu::ErrorFilter::Validation);
+             assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8"))).is_none(), "low limit case={case}");
++            assert!(GpuPoseState::selected(&device, None).is_none(), "unsupported default must keep CPU case={case}");
+             assert!(pollster::block_on(device.pop_error_scope()).is_none(), "shader/layout creation must not be attempted for case={case}");
+         }
+     }
+diff --git a/crates/loom_bevy/src/gpu_pose_runtime.rs b/crates/loom_bevy/src/gpu_pose_runtime.rs
+index d9bd28a..8be6a80 100644
+--- a/crates/loom_bevy/src/gpu_pose_runtime.rs
++++ b/crates/loom_bevy/src/gpu_pose_runtime.rs
+@@ -46,6 +46,14 @@ impl GpuPoseRuntime {
+         precision: Option<std::sync::Arc<crate::gpu_mikk_precision::PrecisionProgram>>,
+     ) -> Result<Self, String> {
+         let positions = source_positions(mesh)?;
++        let source_bytes = u64::try_from(positions.len()).ok().and_then(|n| n.checked_mul(16))
++            .ok_or("current source position byte count overflow")?;
++        let limits = device.limits();
++        if source_bytes > limits.max_buffer_size
++            || source_bytes > u64::from(limits.max_storage_buffer_binding_size)
++        {
++            return Err("current source positions exceed GPU buffer/storage limits".into());
++        }
+         let source: bevy::render::render_resource::Buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+             label: Some("current CPU world-baked source positions"),
+             contents: bytemuck::cast_slice(&positions),
+@@ -320,6 +328,22 @@ mod tests {
+         } else { Err("nonfinite current world position".into()) }).collect()
+     }
+     #[test]
++    fn source_gpu_buffer_limits_reject_before_resource_creation() {
++        let instance = wgpu::Instance::new(&Default::default());
++        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
++        let mesh = isolated_source_mesh(17); //272 source bytes; no huge allocation.
++        for buffer_limit in [true,false] {
++            let mut descriptor = crate::device_descriptor(&adapter);
++            descriptor.required_limits.max_storage_buffer_binding_size = 256;
++            if buffer_limit { descriptor.required_limits.max_buffer_size = 256; }
++            let (device,queue) = pollster::block_on(adapter.request_device(&descriptor,None)).unwrap();
++            device.push_error_scope(wgpu::ErrorFilter::Validation);
++            let error = GpuPoseRuntime::with_precision(&device,&queue,&mesh,&[(None,false)],None).err().expect("oversized source must be rejected");
++            assert_eq!(error,"current source positions exceed GPU buffer/storage limits");
++            assert!(pollster::block_on(device.pop_error_scope()).is_none(),"oversized source must not create invalid buffer/binding");
++        }
++    }
++    #[test]
+     fn source_positions_reserves_exact_vertex_count() {
+         for count in [3,17] {
+             let mesh = isolated_source_mesh(count);
