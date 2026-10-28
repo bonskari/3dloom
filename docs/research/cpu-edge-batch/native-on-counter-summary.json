@@ -1,0 +1,21 @@
+{
+  "commit": "0b4adc1a628ae55a8200e141ea4cf487813aac22",
+  "profile_enabled": true,
+  "steady_block": {
+    "poses": 302,
+    "world_mesh_upload_scopes": 139222,
+    "nodes_per_pose": 461,
+    "actual_cpu_edge_batch_queue_writes": 302,
+    "actual_cpu_edge_bytes": 323028864,
+    "writes_per_pose": 1,
+    "bytes_per_pose": 1069632.0
+  },
+  "comparison": {
+    "baseline_cpu_edge_writes_per_pose": 450,
+    "baseline_cpu_edge_bytes_per_pose": 1069632
+  },
+  "limitations": [
+    "Profiled counters prove nonempty existing-buffer queue calls, not allocation counts or production FPS.",
+    "Per-mesh render.upload.queue scope excludes the shared batch upload; its timing must not be treated as total edge upload time."
+  ]
+}

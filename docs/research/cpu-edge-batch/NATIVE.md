@@ -11,4 +11,12 @@ These count distinct ready submitted pose times in moving-clip windows, not inde
 
 All four frame39 viewport crops are byte-exact in RGB between modes. Scene node records, selection, frame and source bytes were preserved. See native-pixel-parity.json, native-*-1.jsonl and native-*-frame39.png. The top/side viewports and perspective material output are all included; only surrounding UI is excluded from the pixel comparison.
 
-The running test app may carry the explicit experimental flag; this is not a default-on production change. Native queue counters for batch-on still need measurement. No public push was performed.
+The running test app may carry the explicit experimental flag; this is not a default-on production change. Native queue counters are recorded below. No public push was performed.
+
+## Reversed second pair
+
+The same unprofiled release binary was relaunched fresh with batch on, then fresh with batch off. Realistic: on61.5275 / off60.2533 ready pose times/s. Wireframe: on92.6462 / off90.2848. Minimum Realistic active windows: on58.5305 / off58.1655. All per-run node/source preservation checks passed. The improvement has the same direction in both pairs, but sustained60 remains unproven and no default promotion has been made. Raw second-pair files: native-on-2.jsonl and native-off-2.jsonl.
+
+## Actual queue calls
+
+A separate profiled native run measured302 world-geometry updates (139222 per-mesh scopes /461 nodes). Its nonempty existing-buffer counter reported302 shared CPU-edge writes and323028864bytes, exactly **one write and1069632bytes per pose**. The baseline measured450writes and the same1069632bytes per pose. Allocation growth is outside this counter. Per-mesh render.upload.queue timing excludes the new shared upload and is not a total-upload comparison. Profile instrumentation was disabled again afterward; the app was restored to default-off batch mode at frame39. See native-on-profile.log and native-on-counter-summary.json.
