@@ -767,19 +767,24 @@ impl LoomApp {
             !self.below_end_result(*id) && self.state.scene.node(*id).is_some_and(|n|
                 n.modifiers.iter().any(|s| matches!(&s.modifier, loom_scene::Modifier::Skin(_))))
         }).collect();
-        let skin_outputs: std::collections::HashMap<_,_> = if skins.is_empty() {
+        let mut skin_outputs: std::collections::HashMap<_,_> = if skins.is_empty() {
             std::collections::HashMap::new()
         } else {
-            let _stage = loom_render::profile::Scope::new("ui.skin_batch");
-            let outputs = self.state.scene.evaluated_batch(&skins, |jobs| {
-                if jobs.is_empty() { return Vec::new(); }
-                static POOL: std::sync::OnceLock<bevy_tasks::TaskPool> = std::sync::OnceLock::new();
-                let pool = POOL.get_or_init(|| bevy_tasks::TaskPoolBuilder::new()
-                    .num_threads(std::thread::available_parallelism().map_or(1, |n| n.get().min(4)))
-                    .thread_name("3dLoom Skin".into()).build());
-                pool.scope(|scope| { for job in jobs { scope.spawn(async move { job.run() }); } })
-            });
-            skins.into_iter().zip(outputs).collect()
+            static POOL: std::sync::OnceLock<bevy_tasks::TaskPool> = std::sync::OnceLock::new();
+            let pool = POOL.get_or_init(|| bevy_tasks::TaskPoolBuilder::new()
+                .num_threads(std::thread::available_parallelism().map_or(1, |n| n.get().min(4)))
+                .thread_name("3dLoom Skin".into()).build());
+            let outputs = {
+                let _stage = loom_render::profile::Scope::new("ui.skin_batch");
+                self.state.scene.evaluated_batch(&skins, |jobs| {
+                    if jobs.is_empty() { return Vec::new(); }
+                    pool.scope(|scope| { for job in jobs { scope.spawn(async move { job.run() }); } })
+                })
+            };
+            let sources: Vec<_> = skins.iter().zip(&outputs).map(|(id, output)|
+                (*id, &output.value.mesh, self.state.scene.object_matrix(*id))
+            ).collect();
+            skin_display_meshes(pool, &sources).into_iter().collect()
         };
         let display_color = (self.state.display.wireframe_color, self.state.display.shaded_color);
         use loom_commands::display::ColorSource;
@@ -849,6 +854,7 @@ impl LoomApp {
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
             // An Editable Patch's cage is its lattice: the surface is drawn.
             let patch = n.object.patch().is_some();
+            let mut shown_world = false;
             let mut shown = {let _stage=loom_render::profile::Scope::new("ui.evaluate_display"); if n.modifiers.is_empty() && !nurms && !patch {
                 None
             } else if self.below_end_result(id) {
@@ -857,8 +863,8 @@ impl LoomApp {
                     Some(a) => Some(self.state.scene.evaluated(id, Some(a)).value.mesh.clone()),
                 }
             } else {
-                Some(match skin_outputs.get(&id) {
-                    Some(output) => output.value.mesh.clone(),
+                Some(match skin_outputs.remove(&id) {
+                    Some(mesh) => { shown_world = true; mesh },
                     None => self.state.scene.eval_mesh(id).value.mesh.clone(),
                 })
             }};
@@ -871,7 +877,7 @@ impl LoomApp {
             }
             {let _stage=loom_render::profile::Scope::new("ui.transform_display");
             if !cached_world{let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, world);}
-            if let Some(d) = shown.as_mut() {
+            if let Some(d) = shown.as_mut().filter(|_| !shown_world) {
                 let _ = loom_mesh::edit_ops::transform_mesh(d, world);
             }}
             let gray = n.frozen && d.show_frozen_in_gray;
@@ -1620,4 +1626,22 @@ fn collect_preview_paths(map:&loom_scene::Map,paths:&mut std::collections::BTree
 
 fn plain_preview_map(map:&loom_scene::Map)->bool {
     map.kind==loom_scene::material::MapType::Bitmap&&!map.crop.apply&&!map.coords.mirror[0]&&!map.coords.mirror[1]
+}
+
+// Clone and transform independent Skin displays after scene evaluation has
+// published its cache. Scene access and all display styling stay on the host.
+fn skin_display_meshes(
+    pool: &bevy_tasks::TaskPool,
+    sources: &[(NodeId, &loom_mesh::Mesh, glam::Mat4)],
+) -> Vec<(NodeId, loom_mesh::Mesh)> {
+    let _scope = loom_render::profile::Scope::new("ui.skin_display_batch");
+    pool.scope(|scope| {
+        for &(id, source, world) in sources {
+            scope.spawn(async move {
+                let mut mesh = source.clone();
+                let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, world);
+                (id, mesh)
+            });
+        }
+    })
 }

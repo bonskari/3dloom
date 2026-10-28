@@ -4032,3 +4032,28 @@ fn a_checker_sub_material_shows_checks_in_the_viewport() {
     }
 }
 mod scene;
+
+#[test]
+fn skin_display_workers_preserve_serial_geometry_and_sources() {
+    let pool = bevy_tasks::TaskPoolBuilder::new().num_threads(4).build();
+    let meshes: Vec<_> = [8, 12, 16, 20, 24].into_iter()
+        .map(|segments| loom_mesh::sphere_segmented(1.0, segments, 0.0)).collect();
+    let before: Vec<_> = meshes.iter().map(|mesh| serde_json::to_value(mesh).unwrap()).collect();
+    for time in [0.0, 0.25, 17.5] {
+        let sources: Vec<_> = meshes.iter().enumerate().map(|(i, mesh)| (
+            loom_scene::NodeId(i as u64), mesh,
+            glam::Mat4::from_scale_rotation_translation(
+                glam::Vec3::new(1.0, 2.0, 0.5),
+                glam::Quat::from_rotation_y(time),
+                glam::Vec3::new(i as f32, time, -3.0),
+            ),
+        )).collect();
+        let actual: std::collections::HashMap<_, _> = super::skin_display_meshes(&pool, &sources).into_iter().collect();
+        for (id, source, world) in sources {
+            let mut expected = source.clone();
+            loom_mesh::edit_ops::transform_mesh(&mut expected, world).unwrap();
+            assert_eq!(serde_json::to_value(&actual[&id]).unwrap(), serde_json::to_value(expected).unwrap());
+        }
+    }
+    assert_eq!(before, meshes.iter().map(|mesh| serde_json::to_value(mesh).unwrap()).collect::<Vec<_>>());
+}

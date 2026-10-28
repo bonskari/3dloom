@@ -53,6 +53,7 @@ fn batched_skin_display_matches_serial_evaluation_and_keeps_editing_cages() {
   let weights=vec![vec![(0,1.)];poly.mesh.vertex_count()];
   let data=loom_scene::skin::SkinData::from_file(&[(bone,glam::Mat4::IDENTITY,loom_scene::skin::Envelope::default())],glam::Mat4::IDENTITY,weights);
   let mut node=Node::new("shirt",ObjectKind::EditablePoly(poly));
+  node.transform.position.set(Vec3::new(size,-2.*size,0.5));
   node.modifiers.push(loom_scene::ModifierSlot::new(loom_scene::Modifier::Skin(Box::new(data))));
   skins.push(h.app.state.scene.add_node(node));
  }
