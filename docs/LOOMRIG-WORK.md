@@ -373,3 +373,17 @@ Allfour frame39 viewports match prior d8a0bd4 screenshots pixel-for-pixel
 (Top/Front/Left/Realistic:0changedpixels). Apppaused/frame39 restored.
 Rawfour-windowmeasurements2026-10-28-gpu-edges.jsonl. Realistic60 and full
 numeric GPUquality/stability/rigtool requirements remainunfinished; goalactive.
+
+
+bb30aa1 removes duplicate layout validation through private-field
+ValidatedGpuCopy tokens. Targets exclusively borrowed and source positions
+immutablyborrowed until commit/drop; crossalias preflight remains first,
+alltokensvalidated beforeguardreadback, allguardszero beforeanyrender/history
+mutation.66Bevytests passed, independent read-onlyreview foundnoimportantissue.
+Native Realistic51.068/51.003, Wire82.315/82.932: no establishedwholeframeFPS
+benefit vs e617f00. Do not labelthis anFPSgain. Validationprofiles13calls/pose
+ratherthan26; privatecheckedtoken contract retained. Allfour frame39viewports
+remainpixelidentical to e617f00; apppaused/frame39 restored. Rawfourwindows in
+2026-10-28-validated-copy.jsonl. Realistic60 remainsunfinished.
+Bounded17part-pose tangent-conditioningcapture nowruns against animmutable
+prehashed input snapshot, separatelyfromFPSmeasurement; no productionmathchange.
