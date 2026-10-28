@@ -122,6 +122,10 @@ impl Drop for ControlledApp {
     /// Update > Restart now: once the window has really closed (unsaved
     /// changes were asked about), the installed version starts.
     fn drop(&mut self) {
+        if let Err(error) = self.inner.finish_automatic_backup() {
+            log::error!("Automatic backup before shutdown: {error}");
+            return; // A failed final write must not start a replacement process.
+        }
         let restart = self.inner.update.as_ref().is_some_and(|h| {
             let s = h.lock().unwrap();
             s.restart_requested && matches!(s.status, loom_ui::update_menu::UpdateStatus::Ready { .. })

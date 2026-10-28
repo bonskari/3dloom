@@ -1,0 +1,2 @@
+import json,pathlib,subprocess,os
+root=pathlib.Path('/home/b1s/dev/github/3dloom');a=json.loads((root/'target/autosave-ray-probe/args.json').read_text());a[a.index('--crate-name')+1]='autosave_lifecycle';a[a.index('--crate-name')+2]=str(root/'target/autosave-async-scratch/lifecycle.rs');a[a.index('-o')+1]=str(root/'target/autosave-async-scratch/tests');a+=['--test'];env=os.environ.copy();env['CARGO_PKG_VERSION']='0.1.0';subprocess.run(a,cwd=root,env=env,check=True)

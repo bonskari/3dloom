@@ -3345,9 +3345,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     }
 }
 
-/// Runs a JSON `{"cmd": name, "args": {...}}` body and always returns a
-/// JSON object with `ok`.
-pub fn execute_json(state: &mut AppState, body: &Value) -> Value {
+/// Parses the same JSON command forms accepted by execute_json.
+pub fn parse_json_command(body: &Value) -> Result<Command, String> {
     // Unit commands reject an `args` value, but callers (MCP) often send
     // `{}` or null; strip those so `{"cmd":"State","args":{}}` works.
     let mut body = body.clone();
@@ -3363,9 +3362,14 @@ pub fn execute_json(state: &mut AppState, body: &Value) -> Value {
             obj.insert("args".into(), json!({}));
         }
     }
-    let cmd: Command = match serde_json::from_value(body) {
-        Ok(c) => c,
-        Err(e) => return json!({ "ok": false, "error": format!("bad command: {e}") }),
+    serde_json::from_value(body).map_err(|e| format!("bad command: {e}"))
+}
+
+/// Runs a JSON command body and always returns an object with `ok`.
+pub fn execute_json(state: &mut AppState, body: &Value) -> Value {
+    let cmd = match parse_json_command(body) {
+        Ok(command) => command,
+        Err(error) => return json!({ "ok": false, "error": error }),
     };
     match execute(state, cmd) {
         Ok(mut v) => {
@@ -3749,7 +3753,7 @@ fn run_pending(state: &mut AppState) -> Result<(), String> {
 }
 
 /// Save Incremental: `a.loom` → `a01.loom`, `a01.loom` → `a02.loom` (first free number).
-fn incremental_path(current: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn incremental_path(current: &std::path::Path) -> std::path::PathBuf {
     let stem = current.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ext = current.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "loom".into());
     let base = {

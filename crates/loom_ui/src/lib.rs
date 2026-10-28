@@ -2,6 +2,7 @@
 //! All scene mutations go through `loom_commands::execute` via `dispatch`.
 
 mod kimodo;
+mod auto_backup;
 mod async_import;
 mod preview_cache;
 mod opacity_preview;
@@ -221,6 +222,7 @@ struct BoneGeometry {
 }
 
 pub struct LoomApp {
+    auto_backup: auto_backup::AutoBackup,
     pub state: AppState,
     pub camera_controller: ViewportNavigator,
     /// World-space meshes of visible nodes, rebuilt when `state.mesh_dirty`.
@@ -489,6 +491,7 @@ impl LoomApp {
     /// App state without GPU resources, for tests of UI models.
     pub fn headless() -> Self {
         Self {
+            auto_backup: Default::default(),
             state: AppState::new(),
             camera_controller: ViewportNavigator::new(),
             world_meshes: Vec::new(),
@@ -631,7 +634,28 @@ impl LoomApp {
         }
     }
 
+    pub fn finish_automatic_backup(&mut self) -> Result<(), String> {
+        if self.auto_backup.pending() {
+            let path = match self.auto_backup.finish(&mut self.state) {
+                Ok(path) => path,
+                Err(error) => {
+                    self.auto_backup.close_requested = false;
+                    self.state.exit_requested = false;
+                    return Err(error);
+                }
+            };
+            self.state.status_prompt = format!("Auto Backup: {}", path.display());
+        }
+        Ok(())
+    }
+
     pub fn dispatch(&mut self, cmd: Command) -> Result<serde_json::Value, String> {
+        if self.auto_backup.command_needs_drain(&self.state, &cmd) {
+            if let Err(error) = self.finish_automatic_backup() {
+                self.last_error = Some(error.clone());
+                return Err(error);
+            }
+        }
         if matches!(cmd, Command::UndoSceneOperation | Command::RedoSceneOperation) && self.create.is_some() {
             // Undo during creation ends the creation; its transaction closes first.
             self.create = None;
@@ -672,6 +696,14 @@ impl LoomApp {
     }
 
     pub fn dispatch_json(&mut self, body: &serde_json::Value) -> serde_json::Value {
+        if let Ok(cmd) = loom_commands::execute::parse_json_command(body) {
+            if self.auto_backup.command_needs_drain(&self.state, &cmd) {
+                if let Err(error) = self.finish_automatic_backup() {
+                    self.last_error = Some(error.clone());
+                    return serde_json::json!({"ok": false, "error": error});
+                }
+            }
+        }
         if let Some(name) = body["cmd"].as_str() {
             self.end_create_mode_for(name);
         }
@@ -691,6 +723,10 @@ impl LoomApp {
     }
 
     pub(crate) fn sync_after_command(&mut self) {
+        // Capture approved exit before another command can edit during the drain.
+        if self.state.exit_requested && self.auto_backup.pending() {
+            self.auto_backup.defer_close(&self.state);
+        }
         let key = self.end_result_key();
         if key != self.shown_end_result_key {
             self.shown_end_result_key = key;
@@ -1473,15 +1509,34 @@ impl LoomApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_file_action(loom_commands::PendingFileAction::Exit);
         }
-        if self.state.exit_requested {
+        if let Some(result) = self.auto_backup.poll(&mut self.state) {
+            match result {
+                Ok(path) => self.state.status_prompt = format!("Auto Backup: {}", path.display()),
+                Err(error) => {
+                    self.last_error = Some(error);
+                    self.auto_backup.close_requested = false;
+                    self.state.exit_requested = false;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                }
+            }
+        }
+        let closing = self.state.exit_requested || (ctx.input(|i| i.viewport().close_requested()) && !self.state.dirty());
+        if closing && self.auto_backup.pending() {
+            self.auto_backup.defer_close(&self.state);
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        } else if self.auto_backup.close_needs_prompt(&self.state) {
+            self.auto_backup.close_requested = false;
+            self.state.exit_requested = false;
+            self.request_file_action(loom_commands::PendingFileAction::Exit);
+        } else if self.state.exit_requested || self.auto_backup.close_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        // Auto Backup: a cheap check each frame; the clock decides.
-        match loom_commands::autosave::tick(&mut self.state, std::time::Instant::now()) {
-            Ok(Some(path)) => self.state.status_prompt = format!("Auto Backup: {}", path.display()),
-            Err(e) => self.last_error = Some(e),
-            Ok(None) => {}
+        if !closing && !self.auto_backup.close_requested && !self.auto_backup.pending() {
+            if let Some(job) = loom_commands::autosave::prepare_due(&mut self.state, std::time::Instant::now()) {
+                self.auto_backup.start(job);
+            }
         }
+        if self.auto_backup.pending() { ctx.request_repaint_after(std::time::Duration::from_millis(16)); }
         // XRefs set to Update Automatically: re-read a changed file (checked once a second).
         if !self.state.scene.xrefs.is_empty() && self.state.xref_checked.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
             self.state.xref_checked = Some(std::time::Instant::now());

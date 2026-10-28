@@ -1,0 +1,16 @@
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.47s
+     Running tests/autosave.rs (target/debug/deps/autosave-c4b98d0ebf4743d9)
+
+running 8 tests
+test auto_backup_name_and_count_preferences ... ok
+test autosave_skips_open_transaction ... ok
+test fetch_without_hold_file_errors ... ok
+test home_follows_loom_home_then_xdg ... ok
+test hold_writes_file_and_fetch_reads_it_after_a_fresh_state ... ok
+test owned_job_captures_edit_version_and_does_not_acknowledge_opened_scene ... ok
+test tick_skips_when_unchanged_or_disabled ... ok
+test tick_writes_after_interval_and_cycles_names ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

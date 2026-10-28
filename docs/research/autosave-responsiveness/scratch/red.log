@@ -1,0 +1,9 @@
+error[E0425]: cannot find function `prepare_now` in module `autosave`
+ --> target/autosave-async-scratch/lifecycle.rs:7:20
+  |
+7 |  let job=autosave::prepare_now(&state);
+  |                    ^^^^^^^^^^^ not found in `autosave`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0425`.

@@ -1,0 +1,7 @@
+
+running 2 tests
+test delayed_snapshot_acknowledges_only_captured_scene_version ... ok
+test delayed_worker_edits_failure_manual_order_and_shutdown ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+

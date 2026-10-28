@@ -143,3 +143,24 @@ fn fetch_without_hold_file_errors() {
     assert!(err.contains("nothing held"), "{err}");
     assert_eq!(s.scene.len(), 1);
 }
+
+#[test]
+fn owned_job_captures_edit_version_and_does_not_acknowledge_opened_scene() {
+    let (_home, _g) = home("snapshot-job");
+    let mut state=AppState::new();
+    boxed(&mut state,0.0);
+    let captured=state.undo.version();
+    let job=loom_commands::autosave::prepare_now(&state);
+    boxed(&mut state,20.0);
+    let path=job.write().unwrap().apply(&mut state);
+    assert_eq!(state.autosave.last_version,Some(captured));
+    assert_ne!(captured,state.undo.version());
+    assert_eq!(loom_commands::file::read(&path).unwrap().scene.len(),1);
+    let job=loom_commands::autosave::prepare_now(&state);
+    let original=state.scene.instance_id();
+    execute(&mut state,Command::OpenFile{path:Some(path.display().to_string())}).unwrap();
+    assert_ne!(original,state.scene.instance_id());
+    job.write().unwrap().apply(&mut state);
+    assert_eq!(state.autosave.last_version,None);
+    assert_eq!(state.autosave.next_index,3);
+}
