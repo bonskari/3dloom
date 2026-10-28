@@ -1,0 +1,12 @@
+[package]
+name="cow_probe"
+version="0.1.0"
+edition="2021"
+[dependencies]
+original_scene={package="loom_scene",path="../loom_scene"}
+cow_scene={package="loom_scene_cow",path="../loom_scene_cow"}
+original_mesh={package="loom_mesh",path="../loom_mesh"}
+cow_mesh={package="loom_mesh_cow",path="../loom_mesh_cow"}
+serde_json={workspace=true}
+bevy_tasks={version="0.16",features=["multi_threaded"]}
+glam={workspace=true}

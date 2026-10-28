@@ -1,0 +1,290 @@
+--- a/src/mesh.rs
++++ b/src/mesh.rs
+@@ -34,7 +34,8 @@
+ #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+ pub struct Mesh {
+     pub(crate) vertices: Vec<Vertex>,
+-    pub(crate) half_edges: Vec<HalfEdge>,
++    #[serde(with="half_edges_serde")]
++    pub(crate) half_edges: std::sync::Arc<Vec<HalfEdge>>,
+     pub(crate) faces: Vec<Face>,
+     /// Map channels by number (1 = the default texture channel). Channel 0,
+     /// the vertex colour, lives on `Vertex.color`.
+@@ -303,7 +304,7 @@
+             r
+         }
+         let mut adjacent: Vec<(usize, usize)> = Vec::new();
+-        for he in &self.half_edges {
++        for he in self.half_edges.iter() {
+             let twin = &self.half_edges[he.twin.0 as usize];
+             if let (Some(a), Some(b)) = (he.face, twin.face) {
+                 let (a, b) = (a.0 as usize, b.0 as usize);
+@@ -614,3 +615,36 @@
+         assert_eq!(b.faces()[cap.0 as usize].material_id, 3);
+     }
+ }
++
++mod half_edges_serde {
++    use super::HalfEdge;
++    use serde::{Serialize,Deserialize};
++    pub(super) fn serialize<S:serde::Serializer>(value:&std::sync::Arc<Vec<HalfEdge>>,serializer:S)->Result<S::Ok,S::Error>{value.as_ref().serialize(serializer)}
++    pub(super) fn deserialize<'de,D:serde::Deserializer<'de>>(deserializer:D)->Result<std::sync::Arc<Vec<HalfEdge>>,D::Error>{Vec::<HalfEdge>::deserialize(deserializer).map(std::sync::Arc::new)}
++}
++
++#[cfg(test)]
++mod half_edge_cow_tests {
++    use super::*;
++    #[test]
++    fn clone_edit_and_undo_snapshots_detach_and_keep_json_arrays(){
++        let mut source=crate::box_primitive(glam::Vec3::ONE);
++        crate::uvmap::auto_map(&mut source,crate::uvmap::AutoMap::Spherical,1);
++        source.set_edge_visible(HalfEdgeId(0),false);
++        let undo=source.clone();let before=serde_json::to_value(&source).unwrap();
++        assert!(before["half_edges"].is_array());
++        let mut edited=source.clone();
++        assert!(std::sync::Arc::ptr_eq(&source.half_edges,&edited.half_edges));
++        assert_ne!(source.vertices.as_ptr(),edited.vertices.as_ptr());
++        edited.vertices[0].position+=glam::Vec3::X;edited.faces[0].hidden=true;
++        edited.ensure_map(1).verts[0]=glam::Vec3::Y;edited.set_edge_visible(HalfEdgeId(0),true);
++        assert_eq!(source,undo);assert_eq!(serde_json::to_value(&source).unwrap(),before);
++        let hes=std::sync::Arc::make_mut(&mut edited.half_edges);
++        for he in hes {he.origin.0=match he.origin.0{0=>1,1=>0,v=>v};}
++        edited.vertices.swap(0,1);edited.check_invariants().unwrap();
++        assert!(!std::sync::Arc::ptr_eq(&source.half_edges,&edited.half_edges));
++        assert_eq!(serde_json::to_value(&source).unwrap(),before);
++        edited=undo.clone();assert_eq!(serde_json::to_value(&edited).unwrap(),before);
++        let loaded:Mesh=serde_json::from_value(before.clone()).unwrap();assert_eq!(serde_json::to_value(&loaded).unwrap(),before);loaded.check_invariants().unwrap();
++    }
++}
+--- a/src/indexed.rs
++++ b/src/indexed.rs
+@@ -186,6 +186,7 @@
+     /// removed ones (renumbered after a delete).
+     pub fn build(&self) -> Result<Mesh, String> {
+         let mut mesh = Mesh::default();
++    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+         let mut used: BTreeSet<u32> = self.keep.iter().copied().filter(|i| (*i as usize) < self.positions.len()).collect();
+         for face in &self.faces {
+             used.extend(face.ids.iter().copied());
+@@ -219,7 +220,7 @@
+             }
+             let vids: Vec<VertexId> = ids.iter().map(|id| remap[id]).collect();
+             let face_id = FaceId(mesh.faces.len() as u32);
+-            let start = mesh.half_edges.len() as u32;
++            let start = half_edges.len() as u32;
+             let n = vids.len();
+             for (ch, out) in corner_uvs.iter_mut() {
+                 match face.uv.get(ch) {
+@@ -236,7 +237,7 @@
+                 if mesh.vertices[o.0 as usize].he.is_none() {
+                     mesh.vertices[o.0 as usize].he = Some(he_id);
+                 }
+-                mesh.half_edges.push(HalfEdge { origin: o, twin: he_id, next: HalfEdgeId(start + ((i + 1) % n) as u32), prev: HalfEdgeId(start + ((i + n - 1) % n) as u32), face: Some(face_id) });
++                half_edges.push(HalfEdge { origin: o, twin: he_id, next: HalfEdgeId(start + ((i + 1) % n) as u32), prev: HalfEdgeId(start + ((i + n - 1) % n) as u32), face: Some(face_id) });
+             }
+             mesh.faces.push(Face { he: HalfEdgeId(start), smoothing_groups: face.smoothing_groups, material_id: face.material_id, hidden: face.hidden });
+         }
+@@ -245,11 +246,11 @@
+         let mut boundary: Vec<HalfEdgeId> = Vec::new();
+         for ((o, d), he) in pairs {
+             if let Some(t) = directed.get(&(d, o)) {
+-                mesh.half_edges[he.0 as usize].twin = *t;
++                half_edges[he.0 as usize].twin = *t;
+             } else {
+-                let b = HalfEdgeId(mesh.half_edges.len() as u32);
+-                mesh.half_edges.push(HalfEdge { origin: d, twin: he, next: b, prev: b, face: None });
+-                mesh.half_edges[he.0 as usize].twin = b;
++                let b = HalfEdgeId(half_edges.len() as u32);
++                half_edges.push(HalfEdge { origin: d, twin: he, next: b, prev: b, face: None });
++                half_edges[he.0 as usize].twin = b;
+                 for out in corner_uvs.values_mut() {
+                     out.push(Vec3::ZERO);
+                 }
+@@ -260,13 +261,13 @@
+         // leaves o on the same side of the fan: rotate around o away from the
+         // face edge until the next gap. Vertices on two borders stay valid.
+         for b in boundary {
+-            let h = mesh.half_edges[b.0 as usize].twin; // o→d in a face
++            let h = half_edges[b.0 as usize].twin; // o→d in a face
+             let mut cur = h;
+             let mut next = None;
+-            for _ in 0..mesh.half_edges.len() {
+-                let prev = mesh.half_edges[cur.0 as usize].prev; // x→o in cur's face
+-                let t = mesh.half_edges[prev.0 as usize].twin; // o→x
+-                if mesh.half_edges[t.0 as usize].face.is_none() {
++            for _ in 0..half_edges.len() {
++                let prev = half_edges[cur.0 as usize].prev; // x→o in cur's face
++                let t = half_edges[prev.0 as usize].twin; // o→x
++                if half_edges[t.0 as usize].face.is_none() {
+                     next = Some(t);
+                     break;
+                 }
+@@ -276,8 +277,8 @@
+                 }
+             }
+             if let Some(n) = next {
+-                mesh.half_edges[b.0 as usize].next = n;
+-                mesh.half_edges[n.0 as usize].prev = b;
++                half_edges[b.0 as usize].next = n;
++                half_edges[n.0 as usize].prev = b;
+             }
+         }
+         mesh.check_invariants()?;
+--- a/src/primitives.rs
++++ b/src/primitives.rs
+@@ -29,6 +29,7 @@
+     ];
+ 
+     let mut mesh = Mesh::default();
++    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+     for p in positions {
+         mesh.vertices.push(Vertex::new(p, None));
+     }
+@@ -41,14 +42,14 @@
+ 
+     for (fi, loop_) in faces_v.iter().enumerate() {
+         let face_id = FaceId(fi as u32);
+-        let base = mesh.half_edges.len() as u32;
++        let base = half_edges.len() as u32;
+         for i in 0..4 {
+             let from = loop_[i];
+             let to = loop_[(i + 1) % 4];
+             let he_id = HalfEdgeId(base + i as u32);
+             let next = HalfEdgeId(base + ((i as u32 + 1) % 4));
+             let prev = HalfEdgeId(base + ((i as u32 + 3) % 4));
+-            mesh.half_edges.push(HalfEdge {
++            half_edges.push(HalfEdge {
+                 origin: VertexId(from),
+                 twin: HalfEdgeId(u32::MAX), // filled in below
+                 next,
+@@ -70,7 +71,7 @@
+             .get(&(*to, *from))
+             .copied()
+             .expect("box: every directed edge must have a twin");
+-        mesh.half_edges[he_id.0 as usize].twin = twin_id;
++        half_edges[he_id.0 as usize].twin = twin_id;
+     }
+ 
+     mesh
+@@ -90,6 +91,7 @@
+     ];
+ 
+     let mut mesh = Mesh::default();
++    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+     for p in positions {
+         mesh.vertices.push(Vertex::new(p, None));
+     }
+@@ -98,7 +100,7 @@
+     for i in 0u32..4 {
+         let next = (i + 1) % 4;
+         let prev = (i + 3) % 4;
+-        mesh.half_edges.push(HalfEdge {
++        half_edges.push(HalfEdge {
+             origin: VertexId(i),
+             twin: HalfEdgeId(i + 4),
+             next: HalfEdgeId(next),
+@@ -111,7 +113,7 @@
+         let origin = (i + 1) % 4;
+         let next_bdry = ((i + 3) % 4) + 4;
+         let prev_bdry = ((i + 1) % 4) + 4;
+-        mesh.half_edges.push(HalfEdge {
++        half_edges.push(HalfEdge {
+             origin: VertexId(origin),
+             twin: HalfEdgeId(i),
+             next: HalfEdgeId(next_bdry),
+@@ -188,6 +190,7 @@
+ fn build_closed(polygons: &[Vec<Vec3>]) -> Mesh {
+     use crate::half_edge::{Face, FaceId, HalfEdge, HalfEdgeId, Vertex, VertexId};
+     let mut mesh = Mesh::default();
++    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+     let mut vertex_map: HashMap<(u32, u32, u32), VertexId> = HashMap::new();
+     let mut edge_map: HashMap<(VertexId, VertexId), HalfEdgeId> = HashMap::new();
+     for (face_i, poly) in polygons.iter().enumerate() {
+@@ -202,7 +205,7 @@
+             });
+             ids.push(id);
+         }
+-        let base = mesh.half_edges.len() as u32;
++        let base = half_edges.len() as u32;
+         for i in 0..ids.len() {
+             let he = HalfEdgeId(base + i as u32);
+             let next = HalfEdgeId(base + ((i + 1) % ids.len()) as u32);
+@@ -211,7 +214,7 @@
+             if mesh.vertices[ids[i].0 as usize].he.is_none() {
+                 mesh.vertices[ids[i].0 as usize].he = Some(he);
+             }
+-            mesh.half_edges.push(HalfEdge {
++            half_edges.push(HalfEdge {
+                 origin: ids[i],
+                 twin: he,
+                 next,
+@@ -223,7 +226,7 @@
+     }
+     for ((from, to), he) in edge_map.clone() {
+         if let Some(twin) = edge_map.get(&(to, from)) {
+-            mesh.half_edges[he.0 as usize].twin = *twin;
++            half_edges[he.0 as usize].twin = *twin;
+         }
+     }
+     mesh
+--- a/src/standard_primitives.rs
++++ b/src/standard_primitives.rs
+@@ -19,6 +19,7 @@
+ /// without a neighbour gets a boundary half-edge with `face == None`.
+ pub fn build_merged(polygons: &[Vec<Vec3>]) -> Mesh {
+     let mut mesh = Mesh::default();
++    let half_edges=std::sync::Arc::make_mut(&mut mesh.half_edges);
+     let mut vertex_map: HashMap<(i64, i64, i64), VertexId> = HashMap::new();
+     let mut edge_map: HashMap<(VertexId, VertexId), HalfEdgeId> = HashMap::new();
+     let key = |p: Vec3| ((p.x * 1e5).round() as i64, (p.y * 1e5).round() as i64, (p.z * 1e5).round() as i64);
+@@ -46,7 +47,7 @@
+             continue;
+         }
+         let face = FaceId(mesh.faces.len() as u32);
+-        let base = mesh.half_edges.len() as u32;
++        let base = half_edges.len() as u32;
+         let n = ids.len();
+         for i in 0..n {
+             let he = HalfEdgeId(base + i as u32);
+@@ -54,7 +55,7 @@
+             if mesh.vertices[ids[i].0 as usize].he.is_none() {
+                 mesh.vertices[ids[i].0 as usize].he = Some(he);
+             }
+-            mesh.half_edges.push(HalfEdge {
++            half_edges.push(HalfEdge {
+                 origin: ids[i],
+                 twin: he,
+                 next: HalfEdgeId(base + ((i + 1) % n) as u32),
+@@ -72,11 +73,11 @@
+     pairs.sort_by_key(|(_, he)| he.0);
+     for ((from, to), he) in pairs {
+         if let Some(twin) = edge_map.get(&(to, from)) {
+-            mesh.half_edges[he.0 as usize].twin = *twin;
++            half_edges[he.0 as usize].twin = *twin;
+         } else {
+-            let b = HalfEdgeId(mesh.half_edges.len() as u32);
+-            mesh.half_edges.push(HalfEdge { origin: to, twin: he, next: b, prev: b, face: None });
+-            mesh.half_edges[he.0 as usize].twin = b;
++            let b = HalfEdgeId(half_edges.len() as u32);
++            half_edges.push(HalfEdge { origin: to, twin: he, next: b, prev: b, face: None });
++            half_edges[he.0 as usize].twin = b;
+             boundary_by_origin.insert(to, b);
+         }
+     }
+@@ -84,12 +85,12 @@
+     let boundary: Vec<HalfEdgeId> = boundary_by_origin.values().copied().collect();
+     for b in boundary {
+         let end = {
+-            let he = &mesh.half_edges[b.0 as usize];
+-            mesh.half_edges[he.twin.0 as usize].origin
++            let he = &half_edges[b.0 as usize];
++            half_edges[he.twin.0 as usize].origin
+         };
+         if let Some(next) = boundary_by_origin.get(&end).copied() {
+-            mesh.half_edges[b.0 as usize].next = next;
+-            mesh.half_edges[next.0 as usize].prev = b;
++            half_edges[b.0 as usize].next = next;
++            half_edges[next.0 as usize].prev = b;
+         }
+     }
+     // Primitives come with smoothing: faceted across hard edges, smooth
