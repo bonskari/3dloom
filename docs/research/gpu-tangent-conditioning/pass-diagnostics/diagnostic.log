@@ -1,0 +1,310 @@
+
+running 1 test
+test gpu_pose_geometry::tests::actual_ray_hybrid_current_gpu_tangents_f64_diagnostics ... GPU posed normals adapter: AdapterInfo { name: "NVIDIA GeForce RTX 5080", vendor: 4318, device: 11266, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "610.57.04", backend: Vulkan }
+GPU_POSE_MATRIX_AUDIT node=Body001 time=0 nonfinite=0 homogeneous_row_error=2.3841858e-7
+GPU_POSE_MATRIX_AUDIT node=Face001 time=0 nonfinite=0 homogeneous_row_error=2.3841858e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh001 time=0 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh002 time=0 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh003 time=0 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_PREP_BATCH time=0 parts=13 clear_ms=0.014720 weld_ms=0.032896 canonical_ms=0.006400 degen_flags_ms=0.008192 degen_ms=0.004320 flags_ms=0.014400 edges_ms=0.022816 pair_ms=0.018592 gpu_span_ms=0.149024 cpu_encode_ms=0.215770 cpu_submit_ms=0.063570
+PRECISION_GATE_PASS node=Body001 frame=0 part=0 vertices=70680 unchanged=70674 precision=6 risk_groups=1/12710 max_f64=1.6671696047057456e-7
+GPU_F64_CPU_OFFENDER node=Body001 time=0 part=0 vertex=51156 gpu_f64_error=2.560899941334908e-8 cpu_f64_error=2.374276689374063e-5 cpu_delta=2.3724244e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=0 part=0 vertex=51161 gpu_f64_error=2.560899941334908e-8 cpu_f64_error=2.374276689374063e-5 cpu_delta=2.3724244e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=0 part=0 vertex=51170 gpu_f64_error=2.560899941334908e-8 cpu_f64_error=2.374276689374063e-5 cpu_delta=2.3724244e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=0 part=0 vertex=51176 gpu_f64_error=2.560899941334908e-8 cpu_f64_error=2.374276689374063e-5 cpu_delta=2.3724244e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=0 part=0 vertex=51182 gpu_f64_error=2.560899941334908e-8 cpu_f64_error=2.374276689374063e-5 cpu_delta=2.3724244e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=0 part=0 vertex=51183 gpu_f64_error=2.560899941334908e-8 cpu_f64_error=2.374276689374063e-5 cpu_delta=2.3724244e-5
+GPU_F64_ALL_VERTICES node=Body001 time=0 part=0 vertices=70680 max_error=1.6671696047057456e-7 cpu_offenders=6
+GPU_CURRENT_TANGENTS node=Body001 time=0 part=0 vertices=70680 different_bits=63653 max_vector_error=2.3724244e-5
+GPU_CURRENT_PREP node=Body001 time=0 part=0 corners=70680 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=0 part=0 vertices=141654 unchanged=141654 precision=0 risk_groups=0/24027 max_f64=3.8577786101114915e-7
+GPU_F64_CPU_OFFENDER node=Face001 time=0 part=0 vertex=87923 gpu_f64_error=6.857164472976205e-8 cpu_f64_error=3.411841221953508e-3 cpu_delta=3.411836e-3
+GPU_F64_ALL_VERTICES node=Face001 time=0 part=0 vertices=141654 max_error=3.8577786101114915e-7 cpu_offenders=1
+GPU_CURRENT_TANGENTS node=Face001 time=0 part=0 vertices=141654 different_bits=128373 max_vector_error=3.411836e-3
+GPU_CURRENT_PREP node=Face001 time=0 part=0 corners=141654 degen=0 any=7 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=0 part=1 vertices=25050 unchanged=25050 precision=0 risk_groups=0/4610 max_f64=3.41878362672815e-7
+GPU_F64_ALL_VERTICES node=Face001 time=0 part=1 vertices=25050 max_error=3.41878362672815e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=0 part=1 vertices=25050 different_bits=22961 max_vector_error=2.323351e-6
+GPU_CURRENT_PREP node=Face001 time=0 part=1 corners=25050 degen=0 any=3 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=0 part=2 vertices=3012 unchanged=3012 precision=0 risk_groups=0/660 max_f64=1.3827944935810685e-7
+GPU_F64_ALL_VERTICES node=Face001 time=0 part=2 vertices=3012 max_error=1.3827944935810685e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=0 part=2 vertices=3012 different_bits=2864 max_vector_error=3.9642848e-7
+GPU_CURRENT_PREP node=Face001 time=0 part=2 corners=3012 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=0 part=3 vertices=4608 unchanged=4608 precision=0 risk_groups=0/802 max_f64=1.4195841854458336e-7
+GPU_F64_ALL_VERTICES node=Face001 time=0 part=3 vertices=4608 max_error=1.4195841854458336e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=0 part=3 vertices=4608 different_bits=4200 max_vector_error=1.937151e-7
+GPU_CURRENT_PREP node=Face001 time=0 part=3 corners=4608 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=0 part=4 vertices=4608 unchanged=4608 precision=0 risk_groups=0/802 max_f64=1.2334594744509301e-7
+GPU_F64_ALL_VERTICES node=Face001 time=0 part=4 vertices=4608 max_error=1.2334594744509301e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=0 part=4 vertices=4608 different_bits=4212 max_vector_error=1.8863363e-7
+GPU_CURRENT_PREP node=Face001 time=0 part=4 corners=4608 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=0 part=5 vertices=2940 unchanged=2940 precision=0 risk_groups=0/560 max_f64=1.1987526371994567e-7
+GPU_F64_ALL_VERTICES node=Face001 time=0 part=5 vertices=2940 max_error=1.1987526371994567e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=0 part=5 vertices=2940 different_bits=2640 max_vector_error=2.2302017e-7
+GPU_CURRENT_PREP node=Face001 time=0 part=5 corners=2940 degen=0 any=4 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=0 part=6 vertices=5166 unchanged=5166 precision=0 risk_groups=0/2142 max_f64=1.4024211425681796e-7
+GPU_F64_ALL_VERTICES node=Face001 time=0 part=6 vertices=5166 max_error=1.4024211425681796e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=0 part=6 vertices=5166 different_bits=4568 max_vector_error=1.937151e-7
+GPU_CURRENT_PREP node=Face001 time=0 part=6 corners=5166 degen=0 any=2 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=0 part=7 vertices=1158 unchanged=1158 precision=0 risk_groups=0/276 max_f64=3.5360391912429903e-7
+GPU_F64_ALL_VERTICES node=Face001 time=0 part=7 vertices=1158 max_error=3.5360391912429903e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=0 part=7 vertices=1158 different_bits=1069 max_vector_error=4.3316012e-7
+GPU_CURRENT_PREP node=Face001 time=0 part=7 corners=1158 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=0 part=8 vertices=1728 unchanged=1728 precision=0 risk_groups=0/386 max_f64=1.2559625867070868e-7
+GPU_F64_ALL_VERTICES node=Face001 time=0 part=8 vertices=1728 max_error=1.2559625867070868e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=0 part=8 vertices=1728 different_bits=1572 max_vector_error=1.8848644e-7
+GPU_CURRENT_PREP node=Face001 time=0 part=8 corners=1728 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh001 frame=0 part=0 vertices=16314 unchanged=16314 precision=0 risk_groups=0/3490 max_f64=2.59147329297401e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh001 time=0 part=0 vertices=16314 max_error=2.59147329297401e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh001 time=0 part=0 vertices=16314 different_bits=15211 max_vector_error=7.6389347e-7
+GPU_CURRENT_PREP node=SkeletalMesh001 time=0 part=0 corners=16314 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh002 frame=0 part=0 vertices=42597 unchanged=42554 precision=43 risk_groups=7/9861 max_f64=7.265599399356267e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh002 time=0 part=0 vertices=42597 max_error=7.265599399356267e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh002 time=0 part=0 vertices=42597 different_bits=39005 max_vector_error=1.1665049e-5
+GPU_CURRENT_PREP node=SkeletalMesh002 time=0 part=0 corners=42597 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh003 frame=0 part=0 vertices=14454 unchanged=14454 precision=0 risk_groups=0/3009 max_f64=3.4793049983181264e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh003 time=0 part=0 vertices=14454 max_error=3.4793049983181264e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh003 time=0 part=0 vertices=14454 different_bits=13210 max_vector_error=4.496526e-6
+GPU_CURRENT_PREP node=SkeletalMesh003 time=0 part=0 corners=14454 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=original5 pass=guard gpu_ms=0.026016 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=original5 pass=derive gpu_ms=0.011710 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=original5 pass=evaluate gpu_ms=0.128156 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=original5 pass=epilogue gpu_ms=0.007894 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=original5 pass=pack gpu_ms=0.032279 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=provisional7 pass=guard gpu_ms=0.023611 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=provisional7 pass=derive gpu_ms=0.011139 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=provisional7 pass=evaluate gpu_ms=0.129844 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=provisional7 pass=risk gpu_ms=2.610262 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=provisional7 pass=refine64 gpu_ms=0.965985 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=provisional7 pass=epilogue gpu_ms=0.007804 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=0 mode=provisional7 pass=pack gpu_ms=0.037810 samples=32 outputs_exact=PASS
+GPU_POSE_MATRIX_AUDIT node=Body001 time=39.25 nonfinite=0 homogeneous_row_error=2.3841858e-7
+GPU_POSE_MATRIX_AUDIT node=Face001 time=39.25 nonfinite=0 homogeneous_row_error=2.3841858e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh001 time=39.25 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh002 time=39.25 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh003 time=39.25 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_PREP_BATCH time=39.25 parts=13 clear_ms=0.014080 weld_ms=0.031872 canonical_ms=0.006496 degen_flags_ms=0.010304 degen_ms=0.003264 flags_ms=0.014464 edges_ms=0.023488 pair_ms=0.018720 gpu_span_ms=0.149568 cpu_encode_ms=0.174030 cpu_submit_ms=0.030030
+PRECISION_GATE_PASS node=Body001 frame=83 part=0 vertices=70680 unchanged=70674 precision=6 risk_groups=1/12710 max_f64=1.8516030001984432e-7
+GPU_F64_CPU_OFFENDER node=Body001 time=39.25 part=0 vertex=51156 gpu_f64_error=5.389914933808116e-9 cpu_f64_error=5.256414938189845e-5 cpu_delta=5.2569194e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=39.25 part=0 vertex=51161 gpu_f64_error=5.389914933808116e-9 cpu_f64_error=5.256414938189845e-5 cpu_delta=5.2569194e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=39.25 part=0 vertex=51170 gpu_f64_error=5.389914933808116e-9 cpu_f64_error=5.256414938189845e-5 cpu_delta=5.2569194e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=39.25 part=0 vertex=51176 gpu_f64_error=5.389914933808116e-9 cpu_f64_error=5.256414938189845e-5 cpu_delta=5.2569194e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=39.25 part=0 vertex=51182 gpu_f64_error=5.389914933808116e-9 cpu_f64_error=5.256414938189845e-5 cpu_delta=5.2569194e-5
+GPU_F64_CPU_OFFENDER node=Body001 time=39.25 part=0 vertex=51183 gpu_f64_error=5.389914933808116e-9 cpu_f64_error=5.256414938189845e-5 cpu_delta=5.2569194e-5
+GPU_F64_ALL_VERTICES node=Body001 time=39.25 part=0 vertices=70680 max_error=1.8516030001984432e-7 cpu_offenders=6
+GPU_CURRENT_TANGENTS node=Body001 time=39.25 part=0 vertices=70680 different_bits=63043 max_vector_error=5.2569194e-5
+GPU_CURRENT_PREP node=Body001 time=39.25 part=0 corners=70680 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=83 part=0 vertices=141654 unchanged=141654 precision=0 risk_groups=0/24027 max_f64=2.566295326491622e-7
+GPU_F64_ALL_VERTICES node=Face001 time=39.25 part=0 vertices=141654 max_error=2.566295326491622e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=39.25 part=0 vertices=141654 different_bits=128621 max_vector_error=1.0154679e-6
+GPU_CURRENT_PREP node=Face001 time=39.25 part=0 corners=141654 degen=0 any=7 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=83 part=1 vertices=25050 unchanged=25050 precision=0 risk_groups=0/4610 max_f64=8.47742911628933e-7
+GPU_F64_ALL_VERTICES node=Face001 time=39.25 part=1 vertices=25050 max_error=8.47742911628933e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=39.25 part=1 vertices=25050 different_bits=22994 max_vector_error=4.2624615e-6
+GPU_CURRENT_PREP node=Face001 time=39.25 part=1 corners=25050 degen=0 any=3 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=83 part=2 vertices=3012 unchanged=3012 precision=0 risk_groups=0/660 max_f64=1.282672440436371e-7
+GPU_F64_ALL_VERTICES node=Face001 time=39.25 part=2 vertices=3012 max_error=1.282672440436371e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=39.25 part=2 vertices=3012 different_bits=2862 max_vector_error=3.8771665e-7
+GPU_CURRENT_PREP node=Face001 time=39.25 part=2 corners=3012 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=83 part=3 vertices=4608 unchanged=4608 precision=0 risk_groups=0/802 max_f64=1.4468424896488376e-7
+GPU_F64_ALL_VERTICES node=Face001 time=39.25 part=3 vertices=4608 max_error=1.4468424896488376e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=39.25 part=3 vertices=4608 different_bits=4281 max_vector_error=2.1503672e-7
+GPU_CURRENT_PREP node=Face001 time=39.25 part=3 corners=4608 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=83 part=4 vertices=4608 unchanged=4608 precision=0 risk_groups=0/802 max_f64=1.494416966424865e-7
+GPU_F64_ALL_VERTICES node=Face001 time=39.25 part=4 vertices=4608 max_error=1.494416966424865e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=39.25 part=4 vertices=4608 different_bits=4181 max_vector_error=1.8671102e-7
+GPU_CURRENT_PREP node=Face001 time=39.25 part=4 corners=4608 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=83 part=5 vertices=2940 unchanged=2940 precision=0 risk_groups=0/560 max_f64=1.3366915907096519e-7
+GPU_F64_ALL_VERTICES node=Face001 time=39.25 part=5 vertices=2940 max_error=1.3366915907096519e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=39.25 part=5 vertices=2940 different_bits=2596 max_vector_error=1.7881393e-7
+GPU_CURRENT_PREP node=Face001 time=39.25 part=5 corners=2940 degen=0 any=4 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=83 part=6 vertices=5166 unchanged=5166 precision=0 risk_groups=0/2142 max_f64=1.4266148486561168e-7
+GPU_F64_ALL_VERTICES node=Face001 time=39.25 part=6 vertices=5166 max_error=1.4266148486561168e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=39.25 part=6 vertices=5166 different_bits=4566 max_vector_error=2.4575624e-7
+GPU_CURRENT_PREP node=Face001 time=39.25 part=6 corners=5166 degen=0 any=2 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=83 part=7 vertices=1158 unchanged=1158 precision=0 risk_groups=0/276 max_f64=1.4137345076132576e-7
+GPU_F64_ALL_VERTICES node=Face001 time=39.25 part=7 vertices=1158 max_error=1.4137345076132576e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=39.25 part=7 vertices=1158 different_bits=1087 max_vector_error=1.9992005e-7
+GPU_CURRENT_PREP node=Face001 time=39.25 part=7 corners=1158 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=83 part=8 vertices=1728 unchanged=1728 precision=0 risk_groups=0/386 max_f64=1.2199308497280457e-7
+GPU_F64_ALL_VERTICES node=Face001 time=39.25 part=8 vertices=1728 max_error=1.2199308497280457e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=39.25 part=8 vertices=1728 different_bits=1591 max_vector_error=1.8848644e-7
+GPU_CURRENT_PREP node=Face001 time=39.25 part=8 corners=1728 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh001 frame=83 part=0 vertices=16314 unchanged=16314 precision=0 risk_groups=0/3490 max_f64=2.922638607922743e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh001 time=39.25 part=0 vertices=16314 max_error=2.922638607922743e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh001 time=39.25 part=0 vertices=16314 different_bits=15279 max_vector_error=1.0941958e-6
+GPU_CURRENT_PREP node=SkeletalMesh001 time=39.25 part=0 corners=16314 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh002 frame=83 part=0 vertices=42597 unchanged=42547 precision=50 risk_groups=8/9861 max_f64=7.170270413382783e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh002 time=39.25 part=0 vertices=42597 max_error=7.170270413382783e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh002 time=39.25 part=0 vertices=42597 different_bits=39178 max_vector_error=8.460941e-6
+GPU_CURRENT_PREP node=SkeletalMesh002 time=39.25 part=0 corners=42597 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh003 frame=83 part=0 vertices=14454 unchanged=14454 precision=0 risk_groups=0/3009 max_f64=8.219234630756099e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh003 time=39.25 part=0 vertices=14454 max_error=8.219234630756099e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh003 time=39.25 part=0 vertices=14454 different_bits=13171 max_vector_error=8.6791815e-6
+GPU_CURRENT_PREP node=SkeletalMesh003 time=39.25 part=0 corners=14454 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=original5 pass=guard gpu_ms=0.024345 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=original5 pass=derive gpu_ms=0.011668 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=original5 pass=evaluate gpu_ms=0.129364 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=original5 pass=epilogue gpu_ms=0.007807 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=original5 pass=pack gpu_ms=0.033782 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=provisional7 pass=guard gpu_ms=0.023342 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=provisional7 pass=derive gpu_ms=0.011608 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=provisional7 pass=evaluate gpu_ms=0.130352 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=provisional7 pass=risk gpu_ms=2.707232 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=provisional7 pass=refine64 gpu_ms=1.004342 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=provisional7 pass=epilogue gpu_ms=0.007832 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=39.25 mode=provisional7 pass=pack gpu_ms=0.058982 samples=32 outputs_exact=PASS
+GPU_POSE_MATRIX_AUDIT node=Body001 time=95.71835 nonfinite=0 homogeneous_row_error=2.3841858e-7
+GPU_POSE_MATRIX_AUDIT node=Face001 time=95.71835 nonfinite=0 homogeneous_row_error=2.3841858e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh001 time=95.71835 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh002 time=95.71835 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh003 time=95.71835 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_PREP_BATCH time=95.71835 parts=13 clear_ms=0.014656 weld_ms=0.032800 canonical_ms=0.006560 degen_flags_ms=0.008448 degen_ms=0.004352 flags_ms=0.014528 edges_ms=0.022624 pair_ms=0.018624 gpu_span_ms=0.148832 cpu_encode_ms=0.171830 cpu_submit_ms=0.029640
+PRECISION_GATE_PASS node=Body001 frame=203 part=0 vertices=70680 unchanged=70674 precision=6 risk_groups=1/12710 max_f64=1.7732028144551412e-7
+GPU_F64_CPU_OFFENDER node=Body001 time=95.71835 part=0 vertex=51156 gpu_f64_error=1.567170782062513e-8 cpu_f64_error=2.473316348026018e-4 cpu_delta=2.473164e-4
+GPU_F64_CPU_OFFENDER node=Body001 time=95.71835 part=0 vertex=51161 gpu_f64_error=1.567170782062513e-8 cpu_f64_error=2.473316348026018e-4 cpu_delta=2.473164e-4
+GPU_F64_CPU_OFFENDER node=Body001 time=95.71835 part=0 vertex=51170 gpu_f64_error=1.567170782062513e-8 cpu_f64_error=2.473316348026018e-4 cpu_delta=2.473164e-4
+GPU_F64_CPU_OFFENDER node=Body001 time=95.71835 part=0 vertex=51176 gpu_f64_error=1.567170782062513e-8 cpu_f64_error=2.473316348026018e-4 cpu_delta=2.473164e-4
+GPU_F64_CPU_OFFENDER node=Body001 time=95.71835 part=0 vertex=51182 gpu_f64_error=1.567170782062513e-8 cpu_f64_error=2.473316348026018e-4 cpu_delta=2.473164e-4
+GPU_F64_CPU_OFFENDER node=Body001 time=95.71835 part=0 vertex=51183 gpu_f64_error=1.567170782062513e-8 cpu_f64_error=2.473316348026018e-4 cpu_delta=2.473164e-4
+GPU_F64_ALL_VERTICES node=Body001 time=95.71835 part=0 vertices=70680 max_error=1.7732028144551412e-7 cpu_offenders=6
+GPU_CURRENT_TANGENTS node=Body001 time=95.71835 part=0 vertices=70680 different_bits=63261 max_vector_error=2.473164e-4
+GPU_CURRENT_PREP node=Body001 time=95.71835 part=0 corners=70680 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=203 part=0 vertices=141654 unchanged=141654 precision=0 risk_groups=0/24027 max_f64=2.6789884172893526e-7
+GPU_F64_CPU_OFFENDER node=Face001 time=95.71835 part=0 vertex=87923 gpu_f64_error=9.170022780289644e-8 cpu_f64_error=3.443598996211079e-3 cpu_delta=3.4436071e-3
+GPU_F64_ALL_VERTICES node=Face001 time=95.71835 part=0 vertices=141654 max_error=2.6789884172893526e-7 cpu_offenders=1
+GPU_CURRENT_TANGENTS node=Face001 time=95.71835 part=0 vertices=141654 different_bits=128626 max_vector_error=3.4436071e-3
+GPU_CURRENT_PREP node=Face001 time=95.71835 part=0 corners=141654 degen=0 any=7 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=203 part=1 vertices=25050 unchanged=25050 precision=0 risk_groups=0/4610 max_f64=4.2771932275836866e-7
+GPU_F64_ALL_VERTICES node=Face001 time=95.71835 part=1 vertices=25050 max_error=4.2771932275836866e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=95.71835 part=1 vertices=25050 different_bits=22958 max_vector_error=5.7050484e-6
+GPU_CURRENT_PREP node=Face001 time=95.71835 part=1 corners=25050 degen=0 any=3 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=203 part=2 vertices=3012 unchanged=3012 precision=0 risk_groups=0/660 max_f64=1.3867909351995352e-7
+GPU_F64_ALL_VERTICES node=Face001 time=95.71835 part=2 vertices=3012 max_error=1.3867909351995352e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=95.71835 part=2 vertices=3012 different_bits=2821 max_vector_error=2.8932823e-7
+GPU_CURRENT_PREP node=Face001 time=95.71835 part=2 corners=3012 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=203 part=3 vertices=4608 unchanged=4608 precision=0 risk_groups=0/802 max_f64=1.4893617682543594e-7
+GPU_F64_ALL_VERTICES node=Face001 time=95.71835 part=3 vertices=4608 max_error=1.4893617682543594e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=95.71835 part=3 vertices=4608 different_bits=4261 max_vector_error=2.0047462e-7
+GPU_CURRENT_PREP node=Face001 time=95.71835 part=3 corners=4608 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=203 part=4 vertices=4608 unchanged=4608 precision=0 risk_groups=0/802 max_f64=1.438155289745307e-7
+GPU_F64_ALL_VERTICES node=Face001 time=95.71835 part=4 vertices=4608 max_error=1.438155289745307e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=95.71835 part=4 vertices=4608 different_bits=4205 max_vector_error=2.1696418e-7
+GPU_CURRENT_PREP node=Face001 time=95.71835 part=4 corners=4608 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=203 part=5 vertices=2940 unchanged=2940 precision=0 risk_groups=0/560 max_f64=1.5573327007848238e-7
+GPU_F64_ALL_VERTICES node=Face001 time=95.71835 part=5 vertices=2940 max_error=1.5573327007848238e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=95.71835 part=5 vertices=2940 different_bits=2712 max_vector_error=1.9768625e-7
+GPU_CURRENT_PREP node=Face001 time=95.71835 part=5 corners=2940 degen=0 any=4 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=203 part=6 vertices=5166 unchanged=5166 precision=0 risk_groups=0/2142 max_f64=1.4881286494188066e-7
+GPU_F64_ALL_VERTICES node=Face001 time=95.71835 part=6 vertices=5166 max_error=1.4881286494188066e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=95.71835 part=6 vertices=5166 different_bits=4612 max_vector_error=2.1950781e-7
+GPU_CURRENT_PREP node=Face001 time=95.71835 part=6 corners=5166 degen=0 any=2 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=203 part=7 vertices=1158 unchanged=1158 precision=0 risk_groups=0/276 max_f64=2.1332218101857057e-7
+GPU_F64_ALL_VERTICES node=Face001 time=95.71835 part=7 vertices=1158 max_error=2.1332218101857057e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=95.71835 part=7 vertices=1158 different_bits=1071 max_vector_error=2.1696418e-7
+GPU_CURRENT_PREP node=Face001 time=95.71835 part=7 corners=1158 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=203 part=8 vertices=1728 unchanged=1728 precision=0 risk_groups=0/386 max_f64=1.4106464529278012e-7
+GPU_F64_ALL_VERTICES node=Face001 time=95.71835 part=8 vertices=1728 max_error=1.4106464529278012e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=95.71835 part=8 vertices=1728 different_bits=1590 max_vector_error=1.9082798e-7
+GPU_CURRENT_PREP node=Face001 time=95.71835 part=8 corners=1728 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh001 frame=203 part=0 vertices=16314 unchanged=16314 precision=0 risk_groups=0/3490 max_f64=2.2424883678042196e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh001 time=95.71835 part=0 vertices=16314 max_error=2.2424883678042196e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh001 time=95.71835 part=0 vertices=16314 different_bits=15254 max_vector_error=2.4877354e-6
+GPU_CURRENT_PREP node=SkeletalMesh001 time=95.71835 part=0 corners=16314 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh002 frame=203 part=0 vertices=42597 unchanged=42547 precision=50 risk_groups=8/9861 max_f64=1.4673425202973325e-6
+GPU_F64_ALL_VERTICES node=SkeletalMesh002 time=95.71835 part=0 vertices=42597 max_error=1.4673425202973325e-6 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh002 time=95.71835 part=0 vertices=42597 different_bits=38952 max_vector_error=9.741314e-6
+GPU_CURRENT_PREP node=SkeletalMesh002 time=95.71835 part=0 corners=42597 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh003 frame=203 part=0 vertices=14454 unchanged=14454 precision=0 risk_groups=0/3009 max_f64=8.668880809527573e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh003 time=95.71835 part=0 vertices=14454 max_error=8.668880809527573e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh003 time=95.71835 part=0 vertices=14454 different_bits=13214 max_vector_error=6.8949116e-6
+GPU_CURRENT_PREP node=SkeletalMesh003 time=95.71835 part=0 corners=14454 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=original5 pass=guard gpu_ms=0.025003 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=original5 pass=derive gpu_ms=0.012117 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=original5 pass=evaluate gpu_ms=0.129862 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=original5 pass=epilogue gpu_ms=0.007831 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=original5 pass=pack gpu_ms=0.033388 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=provisional7 pass=guard gpu_ms=0.024104 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=provisional7 pass=derive gpu_ms=0.011484 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=provisional7 pass=evaluate gpu_ms=0.130412 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=provisional7 pass=risk gpu_ms=2.711578 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=provisional7 pass=refine64 gpu_ms=0.995487 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=provisional7 pass=epilogue gpu_ms=0.007965 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=95.71835 mode=provisional7 pass=pack gpu_ms=0.071489 samples=32 outputs_exact=PASS
+GPU_POSE_MATRIX_AUDIT node=Body001 time=149 nonfinite=0 homogeneous_row_error=2.3841858e-7
+GPU_POSE_MATRIX_AUDIT node=Face001 time=149 nonfinite=0 homogeneous_row_error=2.3841858e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh001 time=149 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh002 time=149 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_POSE_MATRIX_AUDIT node=SkeletalMesh003 time=149 nonfinite=0 homogeneous_row_error=3.5762787e-7
+GPU_PREP_BATCH time=149 parts=13 clear_ms=0.014624 weld_ms=0.034016 canonical_ms=0.006272 degen_flags_ms=0.011520 degen_ms=0.004352 flags_ms=0.014592 edges_ms=0.024800 pair_ms=0.018752 gpu_span_ms=0.157024 cpu_encode_ms=0.165119 cpu_submit_ms=0.030520
+PRECISION_GATE_PASS node=Body001 frame=316 part=0 vertices=70680 unchanged=70674 precision=6 risk_groups=1/12710 max_f64=1.9054011611938051e-7
+GPU_F64_ALL_VERTICES node=Body001 time=149 part=0 vertices=70680 max_error=1.9054011611938051e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Body001 time=149 part=0 vertices=70680 different_bits=63302 max_vector_error=1.2971758e-5
+GPU_CURRENT_PREP node=Body001 time=149 part=0 corners=70680 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=316 part=0 vertices=141654 unchanged=141654 precision=0 risk_groups=0/24027 max_f64=2.7767736230580864e-7
+GPU_F64_ALL_VERTICES node=Face001 time=149 part=0 vertices=141654 max_error=2.7767736230580864e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=149 part=0 vertices=141654 different_bits=128275 max_vector_error=1.5945113e-6
+GPU_CURRENT_PREP node=Face001 time=149 part=0 corners=141654 degen=0 any=7 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=316 part=1 vertices=25050 unchanged=25050 precision=0 risk_groups=0/4610 max_f64=3.4750110005811993e-7
+GPU_F64_ALL_VERTICES node=Face001 time=149 part=1 vertices=25050 max_error=3.4750110005811993e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=149 part=1 vertices=25050 different_bits=23163 max_vector_error=2.901865e-6
+GPU_CURRENT_PREP node=Face001 time=149 part=1 corners=25050 degen=0 any=3 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=316 part=2 vertices=3012 unchanged=3012 precision=0 risk_groups=0/660 max_f64=1.51415547859439e-7
+GPU_F64_ALL_VERTICES node=Face001 time=149 part=2 vertices=3012 max_error=1.51415547859439e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=149 part=2 vertices=3012 different_bits=2864 max_vector_error=3.3453023e-7
+GPU_CURRENT_PREP node=Face001 time=149 part=2 corners=3012 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=316 part=3 vertices=4608 unchanged=4608 precision=0 risk_groups=0/802 max_f64=1.7633102481023993e-7
+GPU_F64_ALL_VERTICES node=Face001 time=149 part=3 vertices=4608 max_error=1.7633102481023993e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=149 part=3 vertices=4608 different_bits=4211 max_vector_error=2.1542358e-7
+GPU_CURRENT_PREP node=Face001 time=149 part=3 corners=4608 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=316 part=4 vertices=4608 unchanged=4608 precision=0 risk_groups=0/802 max_f64=1.5231431410564462e-7
+GPU_F64_ALL_VERTICES node=Face001 time=149 part=4 vertices=4608 max_error=1.5231431410564462e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=149 part=4 vertices=4608 different_bits=4201 max_vector_error=1.937151e-7
+GPU_CURRENT_PREP node=Face001 time=149 part=4 corners=4608 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=316 part=5 vertices=2940 unchanged=2940 precision=0 risk_groups=0/560 max_f64=1.429978598102023e-7
+GPU_F64_ALL_VERTICES node=Face001 time=149 part=5 vertices=2940 max_error=1.429978598102023e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=149 part=5 vertices=2940 different_bits=2671 max_vector_error=2.149076e-7
+GPU_CURRENT_PREP node=Face001 time=149 part=5 corners=2940 degen=0 any=4 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=316 part=6 vertices=5166 unchanged=5166 precision=0 risk_groups=0/2142 max_f64=1.494197416878426e-7
+GPU_F64_ALL_VERTICES node=Face001 time=149 part=6 vertices=5166 max_error=1.494197416878426e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=149 part=6 vertices=5166 different_bits=4598 max_vector_error=2.0047462e-7
+GPU_CURRENT_PREP node=Face001 time=149 part=6 corners=5166 degen=0 any=2 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=316 part=7 vertices=1158 unchanged=1158 precision=0 risk_groups=0/276 max_f64=4.3028927944087864e-7
+GPU_F64_ALL_VERTICES node=Face001 time=149 part=7 vertices=1158 max_error=4.3028927944087864e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=149 part=7 vertices=1158 different_bits=1098 max_vector_error=1.8907454e-7
+GPU_CURRENT_PREP node=Face001 time=149 part=7 corners=1158 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=Face001 frame=316 part=8 vertices=1728 unchanged=1728 precision=0 risk_groups=0/386 max_f64=1.5254435011584308e-7
+GPU_F64_ALL_VERTICES node=Face001 time=149 part=8 vertices=1728 max_error=1.5254435011584308e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=Face001 time=149 part=8 vertices=1728 different_bits=1581 max_vector_error=1.6049042e-7
+GPU_CURRENT_PREP node=Face001 time=149 part=8 corners=1728 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh001 frame=316 part=0 vertices=16314 unchanged=16314 precision=0 risk_groups=0/3490 max_f64=3.082339744753196e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh001 time=149 part=0 vertices=16314 max_error=3.082339744753196e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh001 time=149 part=0 vertices=16314 different_bits=15275 max_vector_error=9.4243217e-7
+GPU_CURRENT_PREP node=SkeletalMesh001 time=149 part=0 corners=16314 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh002 frame=316 part=0 vertices=42597 unchanged=42547 precision=50 risk_groups=8/9861 max_f64=7.193228564902937e-7
+GPU_F64_CPU_OFFENDER node=SkeletalMesh002 time=149 part=0 vertex=14362 gpu_f64_error=1.6056494445548963e-7 cpu_f64_error=1.1393197681044165e-1 cpu_delta=1.1393185e-1
+GPU_F64_CPU_OFFENDER node=SkeletalMesh002 time=149 part=0 vertex=14387 gpu_f64_error=1.6056494445548963e-7 cpu_f64_error=1.5245536315966501e0 cpu_delta=1.5245538e0
+GPU_F64_ALL_VERTICES node=SkeletalMesh002 time=149 part=0 vertices=42597 max_error=7.193228564902937e-7 cpu_offenders=2
+GPU_CURRENT_TANGENTS node=SkeletalMesh002 time=149 part=0 vertices=42597 different_bits=39144 max_vector_error=1.5245538e0
+GPU_CURRENT_PREP node=SkeletalMesh002 time=149 part=0 corners=42597 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PRECISION_GATE_PASS node=SkeletalMesh003 frame=316 part=0 vertices=14454 unchanged=14447 precision=7 risk_groups=1/3009 max_f64=1.819861082092312e-7
+GPU_F64_ALL_VERTICES node=SkeletalMesh003 time=149 part=0 vertices=14454 max_error=1.819861082092312e-7 cpu_offenders=0
+GPU_CURRENT_TANGENTS node=SkeletalMesh003 time=149 part=0 vertices=14454 different_bits=13320 max_vector_error=3.5661128e-6
+GPU_CURRENT_PREP node=SkeletalMesh003 time=149 part=0 corners=14454 degen=0 any=0 exact_weld_flags_neighbors=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=original5 pass=guard gpu_ms=0.023173 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=original5 pass=derive gpu_ms=0.011523 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=original5 pass=evaluate gpu_ms=0.128805 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=original5 pass=epilogue gpu_ms=0.007952 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=original5 pass=pack gpu_ms=0.033372 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=provisional7 pass=guard gpu_ms=0.023438 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=provisional7 pass=derive gpu_ms=0.011701 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=provisional7 pass=evaluate gpu_ms=0.130773 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=provisional7 pass=risk gpu_ms=2.728102 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=provisional7 pass=refine64 gpu_ms=0.987586 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=provisional7 pass=epilogue gpu_ms=0.007753 samples=32 outputs_exact=PASS
+PASS_GPU_DIAGNOSTIC concurrent_cpu_build=false time=149 mode=provisional7 pass=pack gpu_ms=0.078590 samples=32 outputs_exact=PASS
+GPU_RECIPE_GUARD_RESULT poses=4 parts=13 checks=39 first_hits=39 previous_hits=39
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 99 filtered out; finished in 8.54s
+

@@ -1,0 +1,434 @@
+[
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "original5",
+    "pass": "guard",
+    "gpu_ms": 0.026016,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "original5",
+    "pass": "derive",
+    "gpu_ms": 0.01171,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "original5",
+    "pass": "evaluate",
+    "gpu_ms": 0.128156,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "original5",
+    "pass": "epilogue",
+    "gpu_ms": 0.007894,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "original5",
+    "pass": "pack",
+    "gpu_ms": 0.032279,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "provisional7",
+    "pass": "guard",
+    "gpu_ms": 0.023611,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "provisional7",
+    "pass": "derive",
+    "gpu_ms": 0.011139,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "provisional7",
+    "pass": "evaluate",
+    "gpu_ms": 0.129844,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "provisional7",
+    "pass": "risk",
+    "gpu_ms": 2.610262,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "provisional7",
+    "pass": "refine64",
+    "gpu_ms": 0.965985,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "provisional7",
+    "pass": "epilogue",
+    "gpu_ms": 0.007804,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "0",
+    "mode": "provisional7",
+    "pass": "pack",
+    "gpu_ms": 0.03781,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "original5",
+    "pass": "guard",
+    "gpu_ms": 0.024345,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "original5",
+    "pass": "derive",
+    "gpu_ms": 0.011668,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "original5",
+    "pass": "evaluate",
+    "gpu_ms": 0.129364,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "original5",
+    "pass": "epilogue",
+    "gpu_ms": 0.007807,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "original5",
+    "pass": "pack",
+    "gpu_ms": 0.033782,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "provisional7",
+    "pass": "guard",
+    "gpu_ms": 0.023342,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "provisional7",
+    "pass": "derive",
+    "gpu_ms": 0.011608,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "provisional7",
+    "pass": "evaluate",
+    "gpu_ms": 0.130352,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "provisional7",
+    "pass": "risk",
+    "gpu_ms": 2.707232,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "provisional7",
+    "pass": "refine64",
+    "gpu_ms": 1.004342,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "provisional7",
+    "pass": "epilogue",
+    "gpu_ms": 0.007832,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "39.25",
+    "mode": "provisional7",
+    "pass": "pack",
+    "gpu_ms": 0.058982,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "original5",
+    "pass": "guard",
+    "gpu_ms": 0.025003,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "original5",
+    "pass": "derive",
+    "gpu_ms": 0.012117,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "original5",
+    "pass": "evaluate",
+    "gpu_ms": 0.129862,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "original5",
+    "pass": "epilogue",
+    "gpu_ms": 0.007831,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "original5",
+    "pass": "pack",
+    "gpu_ms": 0.033388,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "provisional7",
+    "pass": "guard",
+    "gpu_ms": 0.024104,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "provisional7",
+    "pass": "derive",
+    "gpu_ms": 0.011484,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "provisional7",
+    "pass": "evaluate",
+    "gpu_ms": 0.130412,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "provisional7",
+    "pass": "risk",
+    "gpu_ms": 2.711578,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "provisional7",
+    "pass": "refine64",
+    "gpu_ms": 0.995487,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "provisional7",
+    "pass": "epilogue",
+    "gpu_ms": 0.007965,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "95.71835",
+    "mode": "provisional7",
+    "pass": "pack",
+    "gpu_ms": 0.071489,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "original5",
+    "pass": "guard",
+    "gpu_ms": 0.023173,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "original5",
+    "pass": "derive",
+    "gpu_ms": 0.011523,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "original5",
+    "pass": "evaluate",
+    "gpu_ms": 0.128805,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "original5",
+    "pass": "epilogue",
+    "gpu_ms": 0.007952,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "original5",
+    "pass": "pack",
+    "gpu_ms": 0.033372,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "provisional7",
+    "pass": "guard",
+    "gpu_ms": 0.023438,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "provisional7",
+    "pass": "derive",
+    "gpu_ms": 0.011701,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "provisional7",
+    "pass": "evaluate",
+    "gpu_ms": 0.130773,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "provisional7",
+    "pass": "risk",
+    "gpu_ms": 2.728102,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "provisional7",
+    "pass": "refine64",
+    "gpu_ms": 0.987586,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "provisional7",
+    "pass": "epilogue",
+    "gpu_ms": 0.007753,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  },
+  {
+    "concurrent_cpu_build": "false",
+    "time": "149",
+    "mode": "provisional7",
+    "pass": "pack",
+    "gpu_ms": 0.07859,
+    "samples": "32",
+    "outputs_exact": "PASS\n"
+  }
+]

@@ -1,0 +1,49 @@
+
+running 7 tests
+test gpu_pose_geometry::mikk_recipe::tests::current_recipe_all_any_and_all_position_degenerate_defaults_match_f64 ... ok
+test gpu_pose_geometry::mikk_recipe::tests::current_recipe_handles_interspersed_degenerate_face_order ... ok
+test gpu_pose_geometry::mikk_recipe::tests::final_nonfinite_payload_and_invalid_source_are_guard_rejections ... FINITE_CASE_PREP gpu_flags=[8, 4, 1] cpu_flags=[8, 4, 1]
+FINAL_NONFINITE_REJECTED guard=[32]
+INVALID_SOURCE_REJECTED_BEFORE_RECIPE 4 nonfinite current attribute corners
+ok
+test gpu_pose_geometry::mikk_recipe::tests::finite_large_small_and_near_antiparallel_cases_remain_finite_and_accurate ... FINITE_CASE_PREP gpu_flags=[8] cpu_flags=[8]
+FINITE_SCALE_PASS scale=1e-16 risks=[0, 0, 0]
+FINITE_CASE_PREP gpu_flags=[8] cpu_flags=[8]
+FINITE_SCALE_PASS scale=1e-8 risks=[0, 0, 0]
+FINITE_CASE_PREP gpu_flags=[8] cpu_flags=[8]
+FINITE_SCALE_PASS scale=1e0 risks=[0, 0, 0]
+FINITE_CASE_PREP gpu_flags=[8] cpu_flags=[8]
+FINITE_SCALE_PASS scale=1e18 risks=[0, 0, 0]
+FINITE_CASE_PREP gpu_flags=[8] cpu_flags=[8]
+FINITE_SCALE_PASS scale=1e20 risks=[1, 1, 1]
+FINITE_CASE_PREP gpu_flags=[8] cpu_flags=[8]
+FINITE_SCALE_PASS scale=1e30 risks=[1, 1, 1]
+FINITE_CASE_PREP gpu_flags=[0, 0] cpu_flags=[0, 0]
+FINITE_ANTIPARALLEL_PASS skew=1e0 risks=[0, 0, 0, 0] tangent=[8.2612255e-9, 1.0, 0.0, 1.0]
+FINITE_CASE_PREP gpu_flags=[0, 0] cpu_flags=[0, 0]
+FINITE_ANTIPARALLEL_PASS skew=1e3 risks=[1, 1, 0, 0] tangent=[2.4862255e-14, 1.0, 0.0, 1.0]
+FINITE_CASE_PREP gpu_flags=[0, 0] cpu_flags=[0, 0]
+FINITE_ANTIPARALLEL_PASS skew=1e8 risks=[1, 1, 0, 0] tangent=[0.0, 1.0, 0.0, 1.0]
+FINITE_CASE_PREP gpu_flags=[0, 0] cpu_flags=[0, 0]
+FINITE_ANTIPARALLEL_PASS skew=1e12 risks=[1, 1, 0, 0] tangent=[0.0, 1.0, 0.0, 1.0]
+FINITE_CASE_PREP gpu_flags=[0, 0] cpu_flags=[0, 0]
+FINITE_ANTIPARALLEL_PASS skew=1e15 risks=[1, 1, 0, 0] tangent=[0.0, 1.0, 0.0, 1.0]
+FINITE_CASE_PREP gpu_flags=[0, 0] cpu_flags=[0, 0]
+FINITE_ANTIPARALLEL_PASS skew=2e15 risks=[1, 1, 0, 0] tangent=[0.0, 1.0, 0.0, 1.0]
+FINITE_CASE_PREP gpu_flags=[0, 0] cpu_flags=[0, 0]
+FINITE_ANTIPARALLEL_PASS skew=4e15 risks=[1, 1, 0, 0] tangent=[0.0, 1.0, 0.0, 1.0]
+FINITE_CASE_PREP gpu_flags=[0, 0] cpu_flags=[0, 0]
+FINITE_ANTIPARALLEL_PASS skew=1e16 risks=[1, 1, 0, 0] tangent=[1.0, 9.9999995e-17, 0.0, 1.0]
+FINITE_CASE_PREP gpu_flags=[0, 0] cpu_flags=[0, 0]
+FINITE_ANTIPARALLEL_PASS skew=1e20 risks=[1, 1, 1, 1] tangent=[1.0, 1e-20, 0.0, 1.0]
+ok
+test gpu_pose_geometry::mikk_recipe::tests::finite_source_overflow_must_refine_or_reject_before_commit ... FINITE_OVERFLOW_PREP gpu_flags=[8] cpu_flags=[8]
+FINITE_OVERFLOW_RESULT vertex=0 guard=[0] risks=[1, 1, 1] tangent=[1.0, 0.0, 0.0, -1.0] truth=[1.0, 0.0, 0.0, -1.0]
+FINITE_OVERFLOW_RESULT vertex=1 guard=[0] risks=[1, 1, 1] tangent=[1.0, 0.0, 0.0, -1.0] truth=[1.0, 0.0, 0.0, -1.0]
+FINITE_OVERFLOW_RESULT vertex=2 guard=[0] risks=[1, 1, 1] tangent=[1.0, 0.0, 0.0, -1.0] truth=[1.0, 0.0, 0.0, -1.0]
+ok
+test gpu_pose_geometry::mikk_recipe::tests::gpu_current_recipe_math_preserves_any_orientation_last_owner_and_degenerate_epilogue ... ok
+test gpu_pose_geometry::mikk_recipe::tests::stable_angular_predicates_preserve_opposite_near_opposite_zero_and_any_inputs ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 92 filtered out; finished in 1.77s
+

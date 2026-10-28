@@ -1,0 +1,17 @@
+
+running 1 test
+test gpu_pose_geometry::mikk_recipe::tests::finite_source_overflow_must_refine_or_reject_before_commit ... FINITE_OVERFLOW_PREP gpu_flags=[8] cpu_flags=[8]
+FINITE_OVERFLOW_RESULT vertex=0 guard=[0] risks=[0, 0, 0] tangent=[NaN, NaN, NaN, -1.0] truth=[1.0, 0.0, 0.0, -1.0]
+
+thread 'gpu_pose_geometry::mikk_recipe::tests::finite_source_overflow_must_refine_or_reject_before_commit' (2877556) panicked at /tmp/loom-f64-finite/src/gpu_mikk_recipe.rs:655:282:
+FINITE_OVERFLOW_PUBLISHED_NONFINITE
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    gpu_pose_geometry::mikk_recipe::tests::finite_source_overflow_must_refine_or_reject_before_commit
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 96 filtered out; finished in 0.45s
+

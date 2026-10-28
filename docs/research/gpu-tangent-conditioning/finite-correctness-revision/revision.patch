@@ -1,0 +1,182 @@
+--- a/gpu_mikk_recipe.rs
++++ b/gpu_mikk_recipe.rs
+@@ -274,14 +274,14 @@
+             push_constant_ranges: &[],
+         });
+         let baseline_shader=device.create_shader_module(wgpu::ShaderModuleDescriptor { label:Some("unchanged fast GPU tangent math"),source:wgpu::ShaderSource::Wgsl(include_str!("gpu_mikk_recipe_baseline.wgsl").into())});
+-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("condition-selected current Float64 math"),source:wgpu::ShaderSource::Wgsl(if std::env::var_os("LOOM_CAPTURE_BASELINE").is_some(){"@compute @workgroup_size(64) fn risk(){} @compute @workgroup_size(64) fn refine_group(){}"}else{include_str!("gpu_mikk_recipe.wgsl")}.into())});
+-        let pipelines = ["guard_init", "derive", "evaluate", "risk", "refine_group", "epilogue", "pack"]
++        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("condition-selected current Float64 math"),source:wgpu::ShaderSource::Wgsl(if std::env::var_os("LOOM_CAPTURE_BASELINE").is_some(){"@compute @workgroup_size(64) fn risk(){} @compute @workgroup_size(64) fn refine_group(){} @compute @workgroup_size(64) fn validate_output(){}"}else{include_str!("gpu_mikk_recipe.wgsl")}.into())});
++        let pipelines = ["guard_init", "derive", "evaluate", "risk", "refine_group", "epilogue", "pack", "validate_output"]
+             .into_iter()
+             .map(|entry| {
+                 device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                     label: Some(entry),
+                     layout: Some(&pipeline_layout),
+-                    module: if matches!(entry,"risk"|"refine_group"){&shader}else{&baseline_shader},
++                    module: if matches!(entry,"risk"|"refine_group"|"validate_output"){&shader}else{&baseline_shader},
+                     entry_point: Some(entry),
+                     compilation_options: Default::default(),
+                     cache: None,
+@@ -346,7 +346,7 @@
+             let count = match i {
+                 1 => self.counts[1],
+                 3 | 4 => self.counts[3],
+-                6 => self.counts[0],
++                6 | 7 => self.counts[0],
+                 _ => self.counts[1] * 3,
+             };
+             pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
+@@ -356,7 +356,7 @@
+     pub(crate) fn encode_batch(encoder: &mut wgpu::CommandEncoder, parts: &[&Self]) {
+         if parts.is_empty() { return; }
+         for part in parts { encoder.clear_buffer(&part.scratch, 0, None);encoder.clear_buffer(&part.precision_risks,0,None); }
+-        for stage in 0..7 {
++        for stage in 0..8 {
+             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                 label: Some("current GPU tangent math batch"),
+                 timestamp_writes: None,
+@@ -367,7 +367,7 @@
+                 let count = match stage {
+                     1 => part.counts[1],
+                     3 | 4 => part.counts[3],
+-                    6 => part.counts[0],
++                    6 | 7 => part.counts[0],
+                     _ => part.counts[1] * 3,
+                 };
+                 pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
+@@ -642,6 +642,48 @@
+         }
+         maximum
+     }
++    fn precision_fixture(device:&wgpu::Device,queue:&wgpu::Queue,data:&MeshData)->(GpuRecipeMath,crate::mikktspace::StructuralRecipe){
++        let values=packed(data);let input=device.create_buffer_init(&wgpu::util::BufferInitDescriptor{label:Some("real synthetic current attributes"),contents:bytemuck::cast_slice(&values),usage:wgpu::BufferUsages::STORAGE});
++        let prep=GpuPreparation::new(device,&input,values.len(),&data.indices).unwrap();submit(device,queue,&prep,None);let initial=prep.readback(device,queue).unwrap();let structure=crate::mikktspace::compile_structure(data);
++        eprintln!("FINITE_CASE_PREP gpu_flags={:?} cpu_flags={:?}",initial.flags,structure.initial_flags);
++        let math=GpuRecipeMath::new(device,&input,0,data,&prep,&initial,&structure).unwrap();submit(device,queue,&prep,Some(&math));(math,structure)
++    }
++    fn precision_reference_check(data:&MeshData,structure:&crate::mikktspace::StructuralRecipe,actual:&[PackedVertex]){
++        let truth=super::super::mikk_f64::tangents_f64(data,structure);assert_eq!(truth.len(),actual.len());
++        for(i,(v,t))in actual.iter().zip(truth).enumerate(){assert!(v.tangent.iter().all(|x|x.is_finite()),"nonfinite output vertex={i}");assert_eq!(f64::from(v.tangent[3]),t[3]);let error=glam::Vec3::from_array(v.tangent[..3].try_into().unwrap()).as_dvec3().distance(glam::DVec3::from_array(t[..3].try_into().unwrap()));assert!(error<2e-5,"synthetic precision mismatch vertex={i} error={error:e} actual={:?} expected={t:?}",v.tangent);}
++    }
++    #[test]
++    fn finite_large_small_and_near_antiparallel_cases_remain_finite_and_accurate(){
++        let(device,queue)=device();
++        for scale in [1e-16f32,1e-8,1.0,1e18,1e20,1e30]{
++            let data=MeshData{positions:vec![[0.0,0.0,0.0],[scale,0.0,0.0],[0.0,scale,0.0]],normals:vec![[0.0,0.0,1.0];3],uvs:vec![[0.0,0.0],[1.0,0.0],[0.0,1.0]],indices:vec![0,1,2]};
++            let(math,structure)=precision_fixture(&device,&queue,&data);let actual=math.readback(&device,&queue).unwrap();precision_reference_check(&data,&structure,&actual);eprintln!("FINITE_SCALE_PASS scale={scale:e} risks={:?}",math.read_precision_risks(&device,&queue));
++        }
++        for skew in [1.0f32,1e3,1e8,1e12,1e15,2e15,4e15,1e16,1e20]{
++            let data=MeshData{positions:vec![[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,-1.0,0.0]],normals:vec![[0.0,0.0,1.0];4],uvs:vec![[0.0,0.0],[0.0,1.0],[1.0,skew],[-1.0,skew]],indices:vec![0,1,2,1,0,3]};
++            let(math,structure)=precision_fixture(&device,&queue,&data);let actual=math.readback(&device,&queue).unwrap();precision_reference_check(&data,&structure,&actual);eprintln!("FINITE_ANTIPARALLEL_PASS skew={skew:e} risks={:?} tangent={:?}",math.read_precision_risks(&device,&queue),actual[0].tangent);
++        }
++    }
++    #[test]
++    fn final_nonfinite_payload_and_invalid_source_are_guard_rejections(){
++        let(device,queue)=device();let data=fixture();let(math,_)=precision_fixture(&device,&queue,&data);math.readback(&device,&queue).unwrap();
++        queue.write_buffer(&math.output,32,bytemuck::cast_slice(&[f32::NAN,0.0,0.0,1.0]));
++        let mut encoder=device.create_command_encoder(&Default::default());{let mut pass=encoder.begin_compute_pass(&Default::default());pass.set_pipeline(math.pipelines.last().unwrap());pass.set_bind_group(0,&math.group,&[]);pass.dispatch_workgroups(math.counts[0].div_ceil(64),1,1);}queue.submit([encoder.finish()]);
++        let guard:Vec<u32>=super::super::read_records(&device,&queue,math.guard_buffer(),1);assert_ne!(guard[0]&32,0);assert!(math.readback(&device,&queue).is_err());eprintln!("FINAL_NONFINITE_REJECTED guard={guard:?}");
++        let mut invalid=fixture();invalid.normals[0]=[f32::INFINITY,0.0,1.0];let values=packed(&invalid);let input=device.create_buffer_init(&wgpu::util::BufferInitDescriptor{label:Some("invalid source is rejected before recipe"),contents:bytemuck::cast_slice(&values),usage:wgpu::BufferUsages::STORAGE});let prep=GpuPreparation::new(&device,&input,values.len(),&invalid.indices).unwrap();submit(&device,&queue,&prep,None);let error=prep.readback(&device,&queue).unwrap_err();assert!(error.contains("nonfinite current attribute"));eprintln!("INVALID_SOURCE_REJECTED_BEFORE_RECIPE {error}");
++    }
++    #[test]
++    fn finite_source_overflow_must_refine_or_reject_before_commit() {
++        let (device,queue)=device();
++        let data=MeshData{positions:vec![[0.0,0.0,0.0],[1e30,0.0,0.0],[0.0,1e30,0.0]],normals:vec![[0.0,0.0,1.0];3],uvs:vec![[0.0,0.0],[1e10,0.0],[0.0,1e10]],indices:vec![0,1,2]};
++        assert!(data.positions.iter().flatten().chain(data.normals.iter().flatten()).chain(data.uvs.iter().flatten()).all(|v|v.is_finite()));
++        let values=packed(&data);let input=device.create_buffer_init(&wgpu::util::BufferInitDescriptor{label:Some("finite actual arithmetic overflow case"),contents:bytemuck::cast_slice(&values),usage:wgpu::BufferUsages::STORAGE});
++        let preparation=GpuPreparation::new(&device,&input,values.len(),&data.indices).unwrap();submit(&device,&queue,&preparation,None);let initial=preparation.readback(&device,&queue).unwrap();let structure=crate::mikktspace::compile_structure(&data);
++        eprintln!("FINITE_OVERFLOW_PREP gpu_flags={:?} cpu_flags={:?}",initial.flags,structure.initial_flags);
++        let math=GpuRecipeMath::new(&device,&input,0,&data,&preparation,&initial,&structure).unwrap();submit(&device,&queue,&preparation,Some(&math));
++        let guard:Vec<u32>=super::super::read_records(&device,&queue,math.guard_buffer(),1);let risks=math.read_precision_risks(&device,&queue);
++        match math.readback(&device,&queue){Ok(output)=>{let truth=super::super::mikk_f64::tangents_f64(&data,&structure);for(i,v)in output.iter().enumerate(){eprintln!("FINITE_OVERFLOW_RESULT vertex={i} guard={guard:?} risks={risks:?} tangent={:?} truth={:?}",v.tangent,truth[i]);assert!(v.tangent.iter().all(|x|x.is_finite()),"FINITE_OVERFLOW_PUBLISHED_NONFINITE");let error=glam::Vec3::from_array(v.tangent[..3].try_into().unwrap()).as_dvec3().distance(glam::DVec3::from_array(truth[i][..3].try_into().unwrap()));assert!(error<2e-5);}},Err(error)=>panic!("recoverable finite overflow must refine successfully: {error} guard={guard:?} risks={risks:?}")}
++    }
+     #[test]
+     fn gpu_current_recipe_math_preserves_any_orientation_last_owner_and_degenerate_epilogue() {
+         let (device, queue) = device();
+--- a/gpu_mikk_recipe.wgsl
++++ b/gpu_mikk_recipe.wgsl
+@@ -182,25 +182,43 @@
+     return 3u;
+ }
+ @group(0) @binding(9) var<storage,read_write> precision_risks:array<atomic<u32>>;
++fn finite1(v:f32)->bool{return (bitcast<u32>(v)&0x7f800000u)!=0x7f800000u;}
++fn finite2(v:vec2<f32>)->bool{return all((bitcast<vec2<u32>>(v)&vec2<u32>(0x7f800000u))!=vec2<u32>(0x7f800000u));}
++fn finite3(v:vec3<f32>)->bool{return all((bitcast<vec3<u32>>(v)&vec3<u32>(0x7f800000u))!=vec3<u32>(0x7f800000u));}
++fn finite4(v:vec4<f32>)->bool{return all((bitcast<vec4<u32>>(v)&vec4<u32>(0x7f800000u))!=vec4<u32>(0x7f800000u));}
++fn valid_inputs(v:Vertex)->bool{return finite4(v.position)&&finite3(v.normal.xyz)&&finite2(v.uv.xy);}
+ // Separate risk pass leaves the original evaluate arithmetic untouched.
+ @compute @workgroup_size(64)
+ fn risk(@builtin(global_invocation_id) id:vec3<u32>){
+     let gid=id.x;if gid>=params.counts.w || atomicLoad(&scratch[0])!=0u{return;}
+     let g=descriptor(gid);let n=value(g.z).normal.xyz;let representative=canonical(g.z);
++    if !finite3(n){atomicOr(&scratch[0],32u);return;}
+     var d_condition=0.0;var p_condition=0.0;
+     for(var j=0u;j<g.y;j++){
+         let member=recipe[params.recipe1.z+g.x+j];let flags=recipe[params.recipe0.w+member];if (flags&4u)!=0u{continue;}
+         let a=welded(member,0u);let b=welded(member,1u);let c=welded(member,2u);
++        if !valid_inputs(a)||!valid_inputs(b)||!valid_inputs(c){atomicOr(&scratch[0],32u);return;}
+         let x=b.uv.xy-a.uv.xy;let y=c.uv.xy-a.uv.xy;let e1=b.position.xyz-a.position.xyz;let e2=c.position.xyz-a.position.xyz;
++        if !finite2(x)||!finite2(y)||!finite3(e1)||!finite3(e2){atomicStore(&precision_risks[gid],1u);return;}
+         let sa=y.y*e1;let sb=x.y*e2;let ta=x.x*e2;let tb=y.x*e1;
+-        let ls=sqrt(dot(sa-sb,sa-sb));let lt=sqrt(dot(ta-tb,ta-tb));
++        let ds=sa-sb;let dt=ta-tb;
++        if !finite3(sa)||!finite3(sb)||!finite3(ta)||!finite3(tb)||!finite3(ds)||!finite3(dt){atomicStore(&precision_risks[gid],1u);return;}
++        let ls=sqrt(dot(ds,ds));let lt=sqrt(dot(dt,dt));
++        if !finite1(ls)||!finite1(lt){atomicStore(&precision_risks[gid],1u);return;}
+         if ls<=1.17549435e-38 || lt<=1.17549435e-38{atomicStore(&precision_risks[gid],1u);return;}
+-        d_condition=max(d_condition,max((length(sa)+length(sb))/ls,(length(ta)+length(tb))/lt));
++        let cs=(length(sa)+length(sb))/ls;let ct=(length(ta)+length(tb))/lt;
++        if !finite1(cs)||!finite1(ct){atomicStore(&precision_risks[gid],1u);return;}
++        d_condition=max(d_condition,max(cs,ct));
+         let s=derivatives[member*2u].xyz;let t=derivatives[member*2u+1u].xyz;
++        if !finite3(s)||!finite3(t){atomicStore(&precision_risks[gid],1u);return;}
+         let ps=s-dot(n,s)*n;let pt=t-dot(n,t)*n;
++        if !finite3(ps)||!finite3(pt){atomicStore(&precision_risks[gid],1u);return;}
+         let lp=sqrt(dot(ps,ps));let lq=sqrt(dot(pt,pt));
++        if !finite1(lp)||!finite1(lq){atomicStore(&precision_risks[gid],1u);return;}
+         if lp<=1.17549435e-38 || lq<=1.17549435e-38{atomicStore(&precision_risks[gid],1u);return;}
+-        p_condition=max(p_condition,max(length(s)/lp,length(t)/lq));
++        let cps=length(s)/lp;let cpt=length(t)/lq;
++        if !finite1(cps)||!finite1(cpt){atomicStore(&precision_risks[gid],1u);return;}
++        p_condition=max(p_condition,max(cps,cpt));
+     }
+     for(var k=0u;k<g.y;k++){
+         let face=recipe[params.recipe1.z+g.x+k];let own_flags=recipe[params.recipe0.w+face];
+@@ -213,14 +231,22 @@
+             if !include{continue;}
+             let corner=member_corner(member,representative);if corner==3u{atomicOr(&scratch[0],8u);return;}
+             let center=welded(member,corner).position.xyz;
+-            let a=projected(welded(member,(corner+2u)%3u).position.xyz-center,n);let b=projected(welded(member,(corner+1u)%3u).position.xyz-center,n);
+-            let angle=corner_angle(a,b);sum+=angle*ps;angles+=angle;contributing+=1.0;
++            let ea=welded(member,(corner+2u)%3u).position.xyz-center;let eb=welded(member,(corner+1u)%3u).position.xyz-center;
++            let pa=ea-dot(n,ea)*n;let pb=eb-dot(n,eb)*n;
++            let aa=dot(pa,pa);let bb=dot(pb,pb);
++            if !finite3(ea)||!finite3(eb)||!finite3(pa)||!finite3(pb)||!finite1(aa)||!finite1(bb)||aa==0.0||bb==0.0{atomicStore(&precision_risks[gid],1u);return;}
++            let a=projected(ea,n);let b=projected(eb,n);
++            let angle=corner_angle(a,b);
++            if !finite3(a)||!finite3(b)||!finite1(angle){atomicStore(&precision_risks[gid],1u);return;}
++            sum+=angle*ps;angles+=angle;contributing+=1.0;
++            if !finite3(sum)||!finite1(angles){atomicStore(&precision_risks[gid],1u);return;}
+         }
+         if contributing==0.0{continue;}
+         let magnitude=sqrt(dot(sum,sum));
++        if !finite1(magnitude){atomicStore(&precision_risks[gid],1u);return;}
+         if magnitude<=1.17549435e-38{atomicStore(&precision_risks[gid],1u);return;}
+         let indicator=5.960464477539063e-8*(angles/magnitude)*(d_condition+p_condition+contributing);
+-        if indicator>=2.0e-5{atomicStore(&precision_risks[gid],1u);return;}
++        if !finite1(indicator)||indicator>=2.0e-5{atomicStore(&precision_risks[gid],1u);return;}
+     }
+ }
+ @compute @workgroup_size(64)
+@@ -248,3 +274,10 @@
+         // Original evaluate already stored the validated group's handedness.
+     }
+ }
++
++@compute @workgroup_size(64)
++fn validate_output(@builtin(global_invocation_id) id:vec3<u32>){
++    let i=id.x;if i>=params.counts.x || atomicLoad(&scratch[0])!=0u{return;}
++    let v=output[i];
++    if !finite4(v.tangent)||!valid_inputs(v){atomicOr(&scratch[0],32u);}
++}
