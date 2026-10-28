@@ -1,0 +1,80 @@
+{
+  "binary_commit": "d8d3264b1c3ddc12364ddab9a68d65a2a0d4929f",
+  "binary_sha256": "d326232447bf72f6b9c831d3b02438c80f5b09f2ffae65935f39f27bd6f0d0ac",
+  "rate_clock": "client round-trip wall time; no independent submission-event timestamp yet",
+  "order": [
+    "off",
+    "on",
+    "on2",
+    "off2"
+  ],
+  "summaries": {
+    "off": [
+      {
+        "kind": "summary",
+        "shading": "Realistic",
+        "active_windows": 17,
+        "active_ready_pose_fps": 61.327622101716386,
+        "min_active_window_fps": 53.52595773787678
+      },
+      {
+        "kind": "summary",
+        "shading": "Wireframe",
+        "active_windows": 18,
+        "active_ready_pose_fps": 89.73108233501506,
+        "min_active_window_fps": 83.9312992410356
+      }
+    ],
+    "on": [
+      {
+        "kind": "summary",
+        "shading": "Realistic",
+        "active_windows": 18,
+        "active_ready_pose_fps": 63.87677979852602,
+        "min_active_window_fps": 60.80077034794779
+      },
+      {
+        "kind": "summary",
+        "shading": "Wireframe",
+        "active_windows": 18,
+        "active_ready_pose_fps": 91.56234183834182,
+        "min_active_window_fps": 84.90328072106607
+      }
+    ],
+    "on2": [
+      {
+        "kind": "summary",
+        "shading": "Realistic",
+        "active_windows": 18,
+        "active_ready_pose_fps": 63.880408939211854,
+        "min_active_window_fps": 59.61276999279188
+      },
+      {
+        "kind": "summary",
+        "shading": "Wireframe",
+        "active_windows": 17,
+        "active_ready_pose_fps": 91.59406406148729,
+        "min_active_window_fps": 83.09851190394346
+      }
+    ],
+    "off2": [
+      {
+        "kind": "summary",
+        "shading": "Realistic",
+        "active_windows": 17,
+        "active_ready_pose_fps": 62.143414151806375,
+        "min_active_window_fps": 55.758260395850435
+      },
+      {
+        "kind": "summary",
+        "shading": "Wireframe",
+        "active_windows": 18,
+        "active_ready_pose_fps": 92.40239276900095,
+        "min_active_window_fps": 89.18418287161795
+      }
+    ]
+  },
+  "all_four_viewport_pixels_identical_in_all_runs": true,
+  "native_fk_edit_undo_and_source_restoration_all_runs": true,
+  "acceptance": "incomplete: second on Realistic minimum59.61277 <60"
+}
