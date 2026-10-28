@@ -48,9 +48,24 @@ pub struct Mesh {
     pub(crate) invisible: Vec<bool>,
 }
 
+/// An immutable connectivity snapshot. It excludes vertices, faces, maps and
+/// edge visibility. Keeping this handle alive forces edits to detach storage.
+#[derive(Clone)]
+pub struct HalfEdgeSnapshot(std::sync::Arc<Vec<HalfEdge>>);
+impl HalfEdgeSnapshot {
+    pub fn matches(&self, mesh: &Mesh) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &mesh.half_edges)
+            || self.0.as_slice() == mesh.half_edges()
+    }
+}
+
 impl Mesh {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn half_edge_snapshot(&self) -> HalfEdgeSnapshot {
+        HalfEdgeSnapshot(self.half_edges.clone())
     }
 
     pub fn half_edge_count(&self) -> usize {
@@ -626,6 +641,23 @@ mod half_edges_serde {
 #[cfg(test)]
 mod half_edge_cow_tests {
     use super::*;
+    #[test]
+    fn topology_snapshot_stays_immutable_and_checks_independent_equal_storage() {
+        let mut mesh = crate::box_primitive(glam::Vec3::ONE);
+        let snapshot = mesh.half_edge_snapshot();
+        let loaded: Mesh = serde_json::from_value(serde_json::to_value(&mesh).unwrap()).unwrap();
+        assert!(snapshot.matches(&loaded));
+        mesh.vertices[0].position += glam::Vec3::X;
+        mesh.faces[0].hidden = true;
+        mesh.set_edge_visible(HalfEdgeId(0), false);
+        assert!(snapshot.matches(&mesh), "non-connectivity fields need their own guards");
+        let count = mesh.vertex_count() as u32;
+        let edges = std::sync::Arc::make_mut(&mut mesh.half_edges);
+        edges[0].origin.0 = (edges[0].origin.0 + 1) % count;
+        assert!(!snapshot.matches(&mesh));
+        assert!(snapshot.matches(&loaded), "a retained proof cannot mutate with its source");
+    }
+
     #[test]
     fn clone_edit_and_undo_snapshots_detach_and_keep_json_arrays(){
         let mut source=crate::box_primitive(glam::Vec3::ONE);

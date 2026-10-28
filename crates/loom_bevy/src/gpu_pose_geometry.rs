@@ -139,7 +139,7 @@ impl Topology {
 // included and no changed effective descriptor can pass this comparison.
 struct DescriptorSnapshot {
     vertex_edges: Vec<Option<loom_mesh::HalfEdgeId>>,
-    half_edges: Vec<loom_mesh::HalfEdge>,
+    half_edges: loom_mesh::HalfEdgeSnapshot,
     faces: Vec<loom_mesh::half_edge::Face>,
     maps: [Option<MapSnapshot>; 2],
 }
@@ -148,7 +148,7 @@ impl DescriptorSnapshot {
     fn new(mesh: &Mesh) -> Self {
         Self {
             vertex_edges: mesh.vertices().iter().map(|v|v.he).collect(),
-            half_edges: mesh.half_edges().to_vec(), faces: mesh.faces().to_vec(),
+            half_edges: mesh.half_edge_snapshot(), faces: mesh.faces().to_vec(),
             maps: [1,loom_mesh::NORMALS_CHANNEL].map(|channel|mesh.map(channel).map(|m|MapSnapshot {
                 corners:m.corners.clone(), values:m.verts.iter().map(|v|v.to_array().map(f32::to_bits)).collect(),
             })),
@@ -157,7 +157,7 @@ impl DescriptorSnapshot {
     fn matches(&self, mesh: &Mesh) -> bool {
         self.vertex_edges.len()==mesh.vertex_count()
             && self.vertex_edges.iter().zip(mesh.vertices()).all(|(he,v)|*he==v.he)
-            && self.half_edges==mesh.half_edges() && self.faces==mesh.faces()
+            && self.half_edges.matches(mesh) && self.faces==mesh.faces()
             && self.maps.iter().zip([1,loom_mesh::NORMALS_CHANNEL]).all(|(old,channel)|match (old,mesh.map(channel)) {
                 (None,None)=>true,
                 (Some(old),Some(current))=>old.corners==current.corners && old.values.len()==current.verts.len()

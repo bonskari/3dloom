@@ -28,7 +28,7 @@ pub mod standard_primitives;
 mod teapot_data;
 
 pub use half_edge::{Face, FaceId, HalfEdge, HalfEdgeId, Vertex, VertexId};
-pub use mesh::{Mesh, Polygon};
+pub use mesh::{HalfEdgeSnapshot, Mesh, Polygon};
 
 /// The map channel that carries explicit normals (Edit Normals): one
 /// vector per corner, zero where the normal is computed from smoothing

@@ -101,7 +101,7 @@ pub struct GpuEdges {
     source_count: usize,
     source: wgpu::Buffer,
     source_offset: u64,
-    half_edges: Vec<(u32, u32)>,
+    topology: loom_mesh::HalfEdgeSnapshot,
     visible: Vec<bool>,
     all_visible: bool,
 }
@@ -236,24 +236,19 @@ impl GpuEdges {
             source_count: source.vertex_count,
             source: source.buffer.clone(),
             source_offset: source.offset,
-            half_edges,
+            topology: mesh.half_edge_snapshot(),
             all_visible: visible.iter().all(|visible| *visible),
             visible,
         })
     }
-    /// Exact dependencies of ordinary unique-edge emission. Does not establish
-    /// source identity or pose freshness. `false` requires rebuilding this plan.
+    /// Conservative connectivity and exact effective visibility guard. Does not
+    /// establish source identity or pose freshness; a miss requires rebuilding.
     pub fn matches_geometry(&self, mesh: &Mesh, style: &MeshStyle) -> Result<bool, GpuEdgeError> {
         if style.diagonals {
             return Err(GpuEdgeError::Diagonals);
         }
         Ok(self.source_count == mesh.vertex_count()
-            && self.half_edges.len() == mesh.half_edge_count()
-            && self
-                .half_edges
-                .iter()
-                .zip(mesh.half_edges())
-                .all(|(&(origin, twin), he)| origin == he.origin.0 && twin == he.twin.0)
+            && self.topology.matches(mesh)
             && if self.all_visible {
                 // The same effective predicate used by ordinary edge emission;
                 // an absent visibility array needs no per-half-edge scan.
