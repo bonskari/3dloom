@@ -3,12 +3,28 @@ use std::sync::Arc;
 
 pub(crate) struct PrecisionProgram {
     pub layout: wgpu::BindGroupLayout,
+    pub parallel_refinement: bool,
     pub pipelines: Arc<[wgpu::ComputePipeline]>,
 }
 impl PrecisionProgram {
     /// Check before parsing/creating either f64 shader. Unsupported devices keep
     /// the ordinary CPU geometry backend; the fast5 comparator is separate.
     pub fn new(device: &wgpu::Device) -> Result<Self, String> {
+        Self::with_refinement(device, include_str!("gpu_mikk_refinement.wgsl"), true)
+    }
+    #[cfg(test)]
+    pub fn serial(device: &wgpu::Device) -> Result<Self, String> {
+        Self::with_refinement(
+            device,
+            include_str!("gpu_mikk_refinement_serial_test.wgsl"),
+            false,
+        )
+    }
+    fn with_refinement(
+        device: &wgpu::Device,
+        refinement_source: &'static str,
+        parallel_refinement: bool,
+    ) -> Result<Self, String> {
         let limits = device.limits();
         if !device.features().contains(wgpu::Features::SHADER_F64)
             || limits.max_storage_buffers_per_shader_stage < 9
@@ -56,7 +72,7 @@ impl PrecisionProgram {
         });
         let refinement = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("finite current whole-group refinement and output validation"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_mikk_refinement.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(refinement_source.into()),
         });
         let pipelines = [
             "guard_init",
@@ -87,6 +103,10 @@ impl PrecisionProgram {
         })
         .collect::<Vec<_>>()
         .into();
-        Ok(Self { layout, pipelines })
+        Ok(Self {
+            layout,
+            pipelines,
+            parallel_refinement,
+        })
     }
 }

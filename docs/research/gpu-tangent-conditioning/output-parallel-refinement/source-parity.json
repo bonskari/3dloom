@@ -1,0 +1,9 @@
+{
+  "gpu_mikk_recipe.wgsl": "786edcbc6beaaf020df20840eaf24f29decbb9f69e7ac24fbabc46db6b602129",
+  "gpu_mikk_precision.wgsl": "daa19bffd2a34be32e2cba02dee47cb62c44c4656082862e7f23c1285ba4cbe7",
+  "serial_refinement_sha256": "7c259f2d87145766ff736219ede938832dade3095f9dfb576691b740251128d8",
+  "parallel_refinement_sha256": "bbfe876303abcf9b0ebcc3305489b97152c35248f05b54f7037b0f4d87e7ebcc",
+  "before_refine_source_byte_equal": true,
+  "single_output_f64_body_byte_equal": true,
+  "after_refine_validate_source_byte_equal": true
+}

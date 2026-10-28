@@ -1,0 +1,20 @@
+
+running 1 test
+test gpu_pose_runtime::tests::actual_ray_fast_current_cpu_positions_f64_positive_control - should panic ... 
+thread 'gpu_pose_runtime::tests::actual_ray_fast_current_cpu_positions_f64_positive_control' (3095768) panicked at /tmp/loom-parallel-production/src/gpu_mikk_recipe.rs:427:74:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+---- gpu_pose_runtime::tests::actual_ray_fast_current_cpu_positions_f64_positive_control stdout ----
+note: panic did not contain expected string
+      panic message: "called `Option::unwrap()` on a `None` value"
+ expected substring: "production precise8 F64"
+
+failures:
+    gpu_pose_runtime::tests::actual_ray_fast_current_cpu_positions_f64_positive_control
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 112 filtered out; finished in 2.00s
+

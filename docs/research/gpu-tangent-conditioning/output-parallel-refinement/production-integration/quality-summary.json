@@ -1,0 +1,26 @@
+{
+  "four-pose": {
+    "parts": 52,
+    "poses": 4,
+    "vertices": 1335876,
+    "max_f64": 1.437707381266227e-06,
+    "all_output64_bytes_and_risk_flags_serial_equal": true,
+    "elapsed_seconds_not_performance_claim": 3.26
+  },
+  "full317": {
+    "parts": 4121,
+    "poses": 317,
+    "vertices": 105868173,
+    "max_f64": 3.338108500276807e-06,
+    "all_output64_bytes_and_risk_flags_serial_equal": true,
+    "elapsed_seconds_not_performance_claim": 75.43
+  },
+  "endpoints": {
+    "parts": 52,
+    "poses": 4,
+    "vertices": 1335876,
+    "max_f64": 1.4115617414233096e-06,
+    "all_output64_bytes_and_risk_flags_serial_equal": true,
+    "elapsed_seconds_not_performance_claim": 3.08
+  }
+}

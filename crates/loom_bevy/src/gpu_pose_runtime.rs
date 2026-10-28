@@ -494,14 +494,25 @@ mod tests {
     fn actual_ray_fast_current_cpu_positions_f64_positive_control() {
         current_cpu_positions_quality(false);
     }
+    #[test]
+    #[ignore = "bounded actual native timeline endpoint CPU producer parity"]
+    fn actual_ray_parallel_native_endpoint_cpu_positions_f64_quality() {
+        current_cpu_positions_quality_at(true, vec![149.000015,150.0,153.5,157.0]);
+    }
     fn current_cpu_positions_quality(precise: bool) {
+        let times: Vec<f32> = if std::env::var_os("LOOM_PRECISE_FULL317").is_some() { (0..317).map(|i| i as f32 * 149.0 / 316.0).collect() } else { vec![0.0, 39.25, 95.71835, 149.0] };
+        current_cpu_positions_quality_at(precise, times);
+    }
+    fn current_cpu_positions_quality_at(precise: bool, times: Vec<f32>) {
         let (device, queue) = device();
         let program = precise.then(|| std::sync::Arc::new(crate::gpu_mikk_precision::PrecisionProgram::new(&device).unwrap()));
         let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(std::env::var("LOOM_PERF_SCENE").unwrap()).unwrap()).unwrap();
         let scene: loom_scene::Scene = serde_json::from_value(value["scene"].clone()).unwrap();
         let ids: Vec<_> = scene.nodes().filter(|n| n.modifiers.iter().any(|m| matches!(&m.modifier, loom_scene::modifier::Modifier::Skin(_)))).map(|n|n.id).collect();
         assert_eq!(ids.len(), 5);
-        let times: Vec<f32> = if std::env::var_os("LOOM_PRECISE_FULL317").is_some() { (0..317).map(|i| i as f32 * 149.0 / 316.0).collect() } else { vec![0.0, 39.25, 95.71835, 149.0] };
+
+        let reference_program = precise.then(|| std::sync::Arc::new(crate::gpu_mikk_precision::PrecisionProgram::serial(&device).unwrap()));
+        let mut references = std::collections::HashMap::new();
         let mut runtimes = std::collections::HashMap::new();
         let mut total_parts = 0usize;
         let mut total_vertices = 0usize;
@@ -521,6 +532,9 @@ mod tests {
                 let runtime = runtimes.get_mut(id).unwrap();
                 runtime.update(&device, &queue, &mesh, &parts).unwrap();
                 run(runtime, &device, &queue);
+                if !references.contains_key(id) { references.insert(*id, GpuPoseRuntime::with_precision(&device, &queue, &mesh, &parts, reference_program.clone()).unwrap()); }
+                let reference = references.get_mut(id).unwrap();
+                reference.update(&device, &queue, &mesh, &parts).unwrap(); run(reference, &device, &queue);
                 let records = runtime.geometry.readback(&device, &queue);
                 for (part_index, (part, range)) in runtime.parts.iter().zip(&runtime.geometry.parts).enumerate() {
                     let attrs = &records[range.clone()];
@@ -528,6 +542,10 @@ mod tests {
                     let structure = crate::mikktspace::compile_structure(&data);
                     let truth = crate::gpu_pose_geometry::mikk_f64::tangents_f64(&data, &structure);
                     let actual = part.math.as_ref().unwrap().readback(&device, &queue).unwrap();
+                    let reference_math = reference.parts[part_index].math.as_ref().unwrap();
+                    let serial = reference_math.readback(&device, &queue).unwrap();
+                    assert_eq!(part.math.as_ref().unwrap().read_precision_risks(&device, &queue), reference_math.read_precision_risks(&device, &queue), "parallel changes risk flags");
+                    assert_eq!(bytemuck::cast_slice::<_,u8>(&actual),bytemuck::cast_slice::<_,u8>(&serial),"parallel output bytes frame={frame} node={id:?} part={part_index}");
                     assert_eq!(actual.len(), truth.len()); assert_eq!(actual.len(), attrs.len());
                     let mut part_max = 0.0f64;
                     for (i, ((v,t),a)) in actual.iter().zip(&truth).zip(attrs).enumerate() {
@@ -542,7 +560,7 @@ mod tests {
                         assert!(error <= 2e-5,"production precise8 F64 frame={frame} node={id:?} part={part_index} vertex={i} error={error:e}");
                     }
                     maximum = maximum.max(part_max); total_vertices += actual.len(); total_parts += 1; count += 1;
-                    eprintln!("PRODUCTION_PRECISE_F64_PASS frame={frame} node={id:?} part={part_index} vertices={} max_f64={part_max:e}",actual.len());
+                    eprintln!("PARALLEL_SERIAL_BYTES_F64_PASS frame={frame} node={id:?} part={part_index} vertices={} max_f64={part_max:e}",actual.len());
                 }
             }
             assert_eq!(count,13);

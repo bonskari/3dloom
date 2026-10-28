@@ -506,4 +506,172 @@ mod precision_tests {
             }
         }
     }
+    fn serial_parallel_parity(device: &wgpu::Device, queue: &wgpu::Queue, data: &MeshData) {
+        let values = packed(data);
+        let input = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("actual shared indexed / duplicated triangle / degenerate source"),
+            contents: bytemuck::cast_slice(&values),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let prep = GpuPreparation::new(device, &input, values.len(), &data.indices).unwrap();
+        submit(device, queue, &prep, None);
+        let initial = prep.readback(device, queue).unwrap();
+        let structure = crate::mikktspace::compile_structure(data);
+        let recipe =
+            Recipe::from_current_structure(data, &initial, &structure, [0; 3], 0, true).unwrap();
+        assert_eq!(
+            recipe.refine_work_items as usize,
+            structure
+                .groups
+                .iter()
+                .map(|g| g.members.len())
+                .sum::<usize>()
+        );
+        let fast =
+            Recipe::from_current_structure(data, &initial, &structure, [0; 3], 0, false).unwrap();
+        assert_eq!(fast.refine_work_items, 0);
+        assert_eq!(fast.params.recipe1[3], 0);
+        assert_eq!(
+            fast.words,
+            &recipe.words[..recipe.params.recipe1[3] as usize]
+        );
+        let mut same_params = recipe.params;
+        same_params.recipe1[3] = 0;
+        assert_eq!(
+            bytemuck::bytes_of(&fast.params),
+            bytemuck::bytes_of(&same_params)
+        );
+
+        let parallel_program = crate::gpu_mikk_precision::PrecisionProgram::new(device).unwrap();
+        let serial_program = crate::gpu_mikk_precision::PrecisionProgram::serial(device).unwrap();
+        let parallel = GpuRecipeMath::with_precision(
+            device,
+            &input,
+            0,
+            data,
+            &prep,
+            &initial,
+            &structure,
+            Some(&parallel_program),
+        )
+        .unwrap();
+        let serial = GpuRecipeMath::with_precision(
+            device,
+            &input,
+            0,
+            data,
+            &prep,
+            &initial,
+            &structure,
+            Some(&serial_program),
+        )
+        .unwrap();
+        submit(device, queue, &prep, Some(&serial));
+        submit(device, queue, &prep, Some(&parallel));
+        let a = serial.readback(device, queue).unwrap();
+        let b = parallel.readback(device, queue).unwrap();
+        assert_eq!(
+            serial.read_precision_risks(device, queue),
+            parallel.read_precision_risks(device, queue)
+        );
+        assert_eq!(
+            bytemuck::cast_slice::<_, u8>(&a),
+            bytemuck::cast_slice::<_, u8>(&b),
+            "parallel per-output writes differ from serial group loop"
+        );
+        precision_reference_check(data, &structure, &b);
+        eprintln!(
+            "PARALLEL_SYNTHETIC_BYTES_PASS triangles={} groups={} unique_writers={} vertices={}",
+            data.indices.len() / 3,
+            structure.groups.len(),
+            recipe.refine_work_items,
+            values.len()
+        );
+    }
+    #[test]
+    fn parallel_writes_preserve_duplicate_triangles_shared_vertices_any_and_degenerate_cases() {
+        let (device, queue) = device();
+        let original = fixture();
+        serial_parallel_parity(&device, &queue, &original);
+        let mut repeated = original.clone();
+        repeated.indices.extend_from_slice(&original.indices[..3]);
+        serial_parallel_parity(&device, &queue, &repeated);
+        repeated.indices.extend_from_slice(&original.indices[..3]);
+        serial_parallel_parity(&device, &queue, &repeated);
+        let mut any = original.clone();
+        any.uvs.fill([0.0; 2]);
+        serial_parallel_parity(&device, &queue, &any);
+        let mut degen = original.clone();
+        degen.positions.fill([0.0; 3]);
+        serial_parallel_parity(&device, &queue, &degen);
+        let mut interspersed = original.clone();
+        interspersed.indices = vec![0, 0, 1, 0, 1, 2, 1, 1, 0, 1, 0, 3];
+        serial_parallel_parity(&device, &queue, &interspersed);
+        let mut nonmanifold = original.clone();
+        nonmanifold.positions.push([0.5, 1.0, 1.0]);
+        nonmanifold.normals.push([0.0, 0.0, 1.0]);
+        nonmanifold.uvs.push([0.5, 1.0]);
+        nonmanifold.indices.extend_from_slice(&[0, 1, 4]);
+        serial_parallel_parity(&device, &queue, &nonmanifold);
+        for scale in [1e-16f32, 1e-8, 1.0, 1e18, 1e20, 1e30] {
+            let data = MeshData {
+                positions: vec![[0.0, 0.0, 0.0], [scale, 0.0, 0.0], [0.0, scale, 0.0]],
+                normals: vec![[0.0, 0.0, 1.0]; 3],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                indices: vec![0, 1, 2],
+            };
+            serial_parallel_parity(&device, &queue, &data);
+        }
+        for skew in [1.0f32, 1e3, 1e8, 1e12, 1e15, 2e15, 4e15, 1e16, 1e20] {
+            let data = MeshData {
+                positions: vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, -1.0, 0.0],
+                ],
+                normals: vec![[0.0, 0.0, 1.0]; 4],
+                uvs: vec![[0.0, 0.0], [0.0, 1.0], [1.0, skew], [-1.0, skew]],
+                indices: vec![0, 1, 2, 1, 0, 3],
+            };
+            serial_parallel_parity(&device, &queue, &data);
+        }
+    }
+    #[test]
+    fn parallel_metadata_rejects_duplicate_writers_without_dropping_inner_members() {
+        let (device, queue) = device();
+        let data = fixture();
+        let values = packed(&data);
+        let input = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ownership validation input"),
+            contents: bytemuck::cast_slice(&values),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let prep = GpuPreparation::new(&device, &input, values.len(), &data.indices).unwrap();
+        submit(&device, &queue, &prep, None);
+        let initial = prep.readback(&device, &queue).unwrap();
+        let structure = crate::mikktspace::compile_structure(&data);
+        let mut duplicate = structure.clone();
+        let member = duplicate.groups[0].members[0];
+        duplicate.groups[0].members.push(member);
+        assert!(
+            Recipe::from_current_structure(&data, &initial, &duplicate, [0; 3], 0, true)
+                .err()
+                .unwrap()
+                .contains("duplicate spaces writer")
+        );
+        let mut cross = structure.clone();
+        cross.groups.push(cross.groups[0].clone());
+        assert!(
+            Recipe::from_current_structure(&data, &initial, &cross, [0; 3], 0, true)
+                .err()
+                .unwrap()
+                .contains("duplicate spaces writer")
+        );
+        assert_eq!(
+            structure.groups[0].members,
+            crate::mikktspace::compile_structure(&data).groups[0].members,
+            "inner membership is never deduplicated/reordered by output flattening"
+        );
+    }
 }

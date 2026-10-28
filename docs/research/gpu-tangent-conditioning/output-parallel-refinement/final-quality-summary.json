@@ -1,0 +1,22 @@
+{
+  "full317": {
+    "parts": 4121,
+    "poses": 317,
+    "vertices": 105868173,
+    "max_f64": 3.338108500276807e-06,
+    "all_output64_bytes_serial_equal": true,
+    "all_risk_arrays_serial_equal": true,
+    "PNUV_CPU_history_handedness_finite_verified": true,
+    "elapsed_seconds_not_a_performance_claim": 75.35
+  },
+  "endpoints": {
+    "parts": 52,
+    "poses": 4,
+    "vertices": 1335876,
+    "max_f64": 1.4115617414233096e-06,
+    "all_output64_bytes_serial_equal": true,
+    "all_risk_arrays_serial_equal": true,
+    "PNUV_CPU_history_handedness_finite_verified": true,
+    "elapsed_seconds_not_a_performance_claim": 3.01
+  }
+}

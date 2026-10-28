@@ -20,6 +20,7 @@ struct Recipe {
     words: Vec<u32>,
     params: Params,
     scratch_words: usize,
+    refine_work_items: u32,
 }
 impl Recipe {
     fn from_current_structure(
@@ -28,6 +29,7 @@ impl Recipe {
         groups: &crate::mikktspace::StructuralRecipe,
         prep: [u32; 3],
         base: u32,
+        parallel_refinement: bool,
     ) -> Result<Self, String> {
         let corners = u32::try_from(data.indices.len()).map_err(|_| "recipe corner count")?;
         let triangles = corners / 3;
@@ -78,7 +80,9 @@ impl Recipe {
         );
         let mut descriptors = Vec::new();
         let mut members = Vec::new();
-        for group in &groups.groups {
+        let mut work_items = Vec::new();
+        let mut writer = parallel_refinement.then(|| vec![false; corners as usize]);
+        for (gid, group) in groups.groups.iter().enumerate() {
             if group.representative < 0
                 || group
                     .members
@@ -100,10 +104,33 @@ impl Recipe {
                 representative,
                 u32::from(group.orientation),
             ]);
+            if let Some(writer) = &mut writer {
+                let representative_class = initial.canonical[representative as usize];
+                for &face in &ordered {
+                    let original = initial.original_faces[face as usize];
+                    if original >= triangles { return Err("parallel recipe original face out of bounds".into()); }
+                    let corner = (0..3usize).find(|c| initial.canonical[original as usize * 3 + *c] == representative_class)
+                        .ok_or("parallel recipe member has no representative corner")?;
+                    let destination = original as usize * 3 + corner;
+                    if std::mem::replace(&mut writer[destination], true) {
+                        return Err("parallel recipe duplicate spaces writer".into());
+                    }
+                    work_items.extend([u32::try_from(gid).map_err(|_| "parallel group count overflow")?, face]);
+                }
+            }
             members.extend(ordered);
         }
         let group_offset = append(&descriptors);
         let member_offset = append(&members);
+        let (work_offset, refine_work_items) = if parallel_refinement {
+            let refine_work_items = u32::try_from(work_items.len() / 2).map_err(|_| "parallel work count overflow")?;
+            if refine_work_items > corners { return Err("parallel work count exceeds unique corner writers".into()); }
+            let work_offset = u32::try_from(words.len()).map_err(|_| "parallel metadata offset overflow")?;
+            let end = words.len().checked_add(1).and_then(|n| n.checked_add(work_items.len())).ok_or("parallel metadata size overflow")?;
+            u32::try_from(end).map_err(|_| "parallel metadata indexing overflow")?;
+            words.push(refine_work_items); words.extend(work_items);
+            (work_offset, refine_work_items)
+        } else { (0, 0) };
         if groups
             .assigned_groups
             .iter()
@@ -156,11 +183,12 @@ impl Recipe {
                 ],
                 prep: [prep[0], prep[1], prep[2], base],
                 recipe0: [canonical, order, flags, post],
-                recipe1: [assigned, group_offset, member_offset, 0],
+                recipe1: [assigned, group_offset, member_offset, work_offset],
                 scratch: [owner, first, orient, inverse],
                 debug: [0, debug_base, debug_words, 0],
             },
             scratch_words,
+            refine_work_items,
         })
     }
 }
@@ -168,6 +196,7 @@ impl Recipe {
 pub(crate) struct GpuRecipeMath {
     pipelines: std::sync::Arc<[wgpu::ComputePipeline]>,
     precision_risks: Option<wgpu::Buffer>,
+    refine_work_items: u32,
     group: wgpu::BindGroup,
     scratch: wgpu::Buffer,
     output: wgpu::Buffer,
@@ -199,7 +228,7 @@ impl GpuRecipeMath {
         precision: Option<&crate::gpu_mikk_precision::PrecisionProgram>,
     ) -> Result<Self, String> {
         let (prep, offsets) = preparation.recipe_input();
-        let recipe = Recipe::from_current_structure(data, initial, groups, offsets, base)?;
+        let recipe = Recipe::from_current_structure(data, initial, groups, offsets, base, precision.is_some_and(|p| p.parallel_refinement))?;
         let limits = device.limits();
         let c = u64::from(recipe.params.counts[1]) * 3;
         let sizes = [
@@ -338,6 +367,7 @@ impl GpuRecipeMath {
             uniform,
             derivatives,
             precision_risks,
+            refine_work_items: if precision.is_some_and(|p| p.parallel_refinement) { recipe.refine_work_items } else { recipe.params.counts[3] },
         })
     }
     pub(crate) fn output(&self) -> &wgpu::Buffer {
@@ -386,15 +416,16 @@ impl GpuRecipeMath {
     }
     fn dispatch_count(&self, stage: usize) -> u32 {
         if self.precision_risks.is_some() {
-            match stage { 1 => self.counts[1], 3 | 4 => self.counts[3], 6 | 7 => self.counts[0], _ => self.counts[1] * 3 }
+            match stage { 1 => self.counts[1], 3 => self.counts[3], 4 => self.refine_work_items, 6 | 7 => self.counts[0], _ => self.counts[1] * 3 }
         } else {
             match stage { 1 => self.counts[1], 4 => self.counts[0], _ => self.counts[1] * 3 }
         }
     }
     #[cfg(test)]
-    fn read_precision_risks(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<u32> {
+    pub(crate) fn read_precision_risks(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<u32> {
+        let Some(risks) = &self.precision_risks else { return Vec::new(); };
         if self.counts[3] == 0 { return Vec::new(); }
-        super::read_records(device, queue, self.precision_risks.as_ref().unwrap(), self.counts[3] as usize)
+        super::read_records(device, queue, risks, self.counts[3] as usize)
     }
     #[cfg(test)]
     /// Test-only isolation: current CPU InitTriInfo derivatives are uploaded

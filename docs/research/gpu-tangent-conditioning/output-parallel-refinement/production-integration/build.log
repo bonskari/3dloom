@@ -1,0 +1,39 @@
+DIRECT_BINARY=/tmp/loom-parallel-production/tests
+warning: field `reason` is never read
+  --> /tmp/loom-parallel-production/src/gpu_pose_commit.rs:14:27
+   |
+14 |     Layout { part: usize, reason: String },
+   |     ------                ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `0` is never read
+  --> /tmp/loom-parallel-production/src/gpu_pose_commit.rs:15:14
+   |
+15 |     Readback(String),
+   |     -------- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+15 -     Readback(String),
+15 +     Readback(()),
+   |
+
+warning: method `vertex_count` is never used
+   --> /tmp/loom-parallel-production/src/gpu_mikk_recipe.rs:379:19
+    |
+208 | impl GpuRecipeMath {
+    | ------------------ method in this implementation
+...
+379 |     pub(crate) fn vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^
+
+warning: 3 warnings emitted
+
+DIRECT_COMPILE_OK

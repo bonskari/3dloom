@@ -251,10 +251,11 @@ fn risk(@builtin(global_invocation_id) id:vec3<u32>){
 }
 @compute @workgroup_size(64)
 fn refine_group(@builtin(global_invocation_id) id:vec3<u32>){
-    let gid=id.x;if gid>=params.counts.w || atomicLoad(&scratch[0])!=0u || atomicLoad(&precision_risks[gid])==0u{return;}
+    let work=id.x;if work>=recipe[params.recipe1.w] || atomicLoad(&scratch[0])!=0u{return;}
+    let gid=recipe[params.recipe1.w+1u+work*2u];let face=recipe[params.recipe1.w+2u+work*2u];
+    if atomicLoad(&precision_risks[gid])==0u{return;}
     let g=descriptor(gid);let n=vec3<f64>(value(g.z).normal.xyz);let representative=canonical(g.z);
-    for(var k=0u;k<g.y;k++){
-        let face=recipe[params.recipe1.z+g.x+k];let own_flags=recipe[params.recipe0.w+face];
+        let own_flags=recipe[params.recipe0.w+face];
         let own=d_derive(face);let os=d_project(own.s,n);let ot=d_project(own.t,n);
         var s=vec3<f64>(0.0lf);var t=vec3<f64>(0.0lf);var mag_s:f64=0.0lf;var mag_t:f64=0.0lf;var angles:f64=0.0lf;
         for(var j=0u;j<g.y;j++){
@@ -272,7 +273,6 @@ fn refine_group(@builtin(global_invocation_id) id:vec3<u32>){
         let destination=original(face)*3u+corner;
         spaces[destination*2u]=vec4<f32>(vec3<f32>(d_unit(s)),f32(mag_s));spaces[destination*2u+1u]=vec4<f32>(vec3<f32>(d_unit(t)),f32(mag_t));
         // Original evaluate already stored the validated group's handedness.
-    }
 }
 
 @compute @workgroup_size(64)

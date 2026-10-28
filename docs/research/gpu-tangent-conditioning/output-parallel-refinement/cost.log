@@ -1,0 +1,147 @@
+
+running 1 test
+test gpu_pose_runtime::tests::actual_ray_precise_current_cpu_positions_f64_quality ... PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4543) part=0 vertices=70680 max_f64=1.53558871391427e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4544) part=0 vertices=141654 max_f64=2.56452152583392e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4544) part=1 vertices=25050 max_f64=2.934747907687286e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4544) part=2 vertices=3012 max_f64=1.3035972403012498e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4544) part=3 vertices=4608 max_f64=1.3716519764969304e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4544) part=4 vertices=4608 max_f64=1.4400426507326753e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4544) part=5 vertices=2940 max_f64=1.2201785812144172e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4544) part=6 vertices=5166 max_f64=1.509433505854074e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4544) part=7 vertices=1158 max_f64=3.5926242092440575e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4544) part=8 vertices=1728 max_f64=1.5709439525496565e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4545) part=0 vertices=16314 max_f64=2.730647130585998e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4546) part=0 vertices=42597 max_f64=7.901398054376249e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=0 node=NodeId(4547) part=0 vertices=14454 max_f64=4.840704827045708e-7
+PARALLEL_REFINE_COST frame=0 mode=serial pass=whole_gpu samples=64 ms=1.492251500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=guard samples=64 ms=0.023335500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=derive samples=64 ms=0.011099500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=evaluate samples=64 ms=0.128889000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=risk samples=64 ms=0.144263000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=refine64 samples=64 ms=1.104850000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=epilogue samples=64 ms=0.007869000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=pack samples=64 ms=0.036672500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=validate samples=64 ms=0.011825000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=cpu_encode samples=64 ms=0.118687625 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=serial pass=cpu_submit_completion samples=64 ms=1.584970891 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=whole_gpu samples=64 ms=0.533424000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=guard samples=64 ms=0.023239500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=derive samples=64 ms=0.011286000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=evaluate samples=64 ms=0.126975000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=risk samples=64 ms=0.145539000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=refine64 samples=64 ms=0.145869000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=epilogue samples=64 ms=0.008043500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=pack samples=64 ms=0.036546500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=validate samples=64 ms=0.011728500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=cpu_encode samples=64 ms=0.126037625 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=0 mode=parallel pass=cpu_submit_completion samples=64 ms=0.638884578 outputs_exact=PASS flags_exact=PASS
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4543) part=0 vertices=70680 max_f64=1.6364556270282642e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4544) part=0 vertices=141654 max_f64=2.5672563941739063e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4544) part=1 vertices=25050 max_f64=8.40936532702154e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4544) part=2 vertices=3012 max_f64=1.750263214418024e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4544) part=3 vertices=4608 max_f64=1.5412971199392172e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4544) part=4 vertices=4608 max_f64=1.400504939053417e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4544) part=5 vertices=2940 max_f64=1.1881901943261957e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4544) part=6 vertices=5166 max_f64=1.4232081256368354e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4544) part=7 vertices=1158 max_f64=2.0497498030903857e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4544) part=8 vertices=1728 max_f64=1.1895598814014568e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4545) part=0 vertices=16314 max_f64=2.9962384051151815e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4546) part=0 vertices=42597 max_f64=7.008276333551875e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=39.25 node=NodeId(4547) part=0 vertices=14454 max_f64=5.899073932048934e-7
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=whole_gpu samples=64 ms=1.518577000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=guard samples=64 ms=0.023323000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=derive samples=64 ms=0.011418500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=evaluate samples=64 ms=0.129329500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=risk samples=64 ms=0.143716000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=refine64 samples=64 ms=1.131114000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=epilogue samples=64 ms=0.007760500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=pack samples=64 ms=0.037003000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=validate samples=64 ms=0.011814000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=cpu_encode samples=64 ms=0.118232734 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=serial pass=cpu_submit_completion samples=64 ms=1.622014156 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=whole_gpu samples=64 ms=0.535281000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=guard samples=64 ms=0.023421500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=derive samples=64 ms=0.011005000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=evaluate samples=64 ms=0.126955000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=risk samples=64 ms=0.145110500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=refine64 samples=64 ms=0.149290000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=epilogue samples=64 ms=0.007916000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=pack samples=64 ms=0.036577000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=validate samples=64 ms=0.011827000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=cpu_encode samples=64 ms=0.127371391 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=39.25 mode=parallel pass=cpu_submit_completion samples=64 ms=0.631409484 outputs_exact=PASS flags_exact=PASS
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4543) part=0 vertices=70680 max_f64=1.5948811672450852e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4544) part=0 vertices=141654 max_f64=3.745442744193489e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4544) part=1 vertices=25050 max_f64=4.2771932275836866e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4544) part=2 vertices=3012 max_f64=1.2869404192436247e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4544) part=3 vertices=4608 max_f64=1.4004919111967598e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4544) part=4 vertices=4608 max_f64=1.4800796603641413e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4544) part=5 vertices=2940 max_f64=1.3345052641532762e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4544) part=6 vertices=5166 max_f64=1.7007749053292473e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4544) part=7 vertices=1158 max_f64=1.7840545632375616e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4544) part=8 vertices=1728 max_f64=1.232210708433809e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4545) part=0 vertices=16314 max_f64=2.4457690656623516e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4546) part=0 vertices=42597 max_f64=1.437707381266227e-6
+PARALLEL_SERIAL_BYTES_F64_PASS frame=95.71835 node=NodeId(4547) part=0 vertices=14454 max_f64=8.02014956351972e-7
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=whole_gpu samples=64 ms=1.539651500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=guard samples=64 ms=0.023170000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=derive samples=64 ms=0.011014500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=evaluate samples=64 ms=0.128995500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=risk samples=64 ms=0.144045000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=refine64 samples=64 ms=1.152971000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=epilogue samples=64 ms=0.007705500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=pack samples=64 ms=0.036515000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=validate samples=64 ms=0.011980000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=cpu_encode samples=64 ms=0.113167297 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=serial pass=cpu_submit_completion samples=64 ms=1.614046625 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=whole_gpu samples=64 ms=0.536847500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=guard samples=64 ms=0.023232000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=derive samples=64 ms=0.011327500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=evaluate samples=64 ms=0.127345500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=risk samples=64 ms=0.145396500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=refine64 samples=64 ms=0.149121500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=epilogue samples=64 ms=0.008077500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=pack samples=64 ms=0.036581000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=validate samples=64 ms=0.011871500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=cpu_encode samples=64 ms=0.120235422 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=95.71835 mode=parallel pass=cpu_submit_completion samples=64 ms=0.610000594 outputs_exact=PASS flags_exact=PASS
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4543) part=0 vertices=70680 max_f64=1.64038672104607e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4544) part=0 vertices=141654 max_f64=2.801715383996678e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4544) part=1 vertices=25050 max_f64=3.6778472621016276e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4544) part=2 vertices=3012 max_f64=1.3705120871374915e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4544) part=3 vertices=4608 max_f64=1.7633102481023993e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4544) part=4 vertices=4608 max_f64=1.4654014623143903e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4544) part=5 vertices=2940 max_f64=1.2746926995449425e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4544) part=6 vertices=5166 max_f64=1.5759167822501898e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4544) part=7 vertices=1158 max_f64=4.2832673920930216e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4544) part=8 vertices=1728 max_f64=1.2610938988162634e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4545) part=0 vertices=16314 max_f64=2.8081903882889384e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4546) part=0 vertices=42597 max_f64=6.954376083908245e-7
+PARALLEL_SERIAL_BYTES_F64_PASS frame=149 node=NodeId(4547) part=0 vertices=14454 max_f64=2.8818706636394077e-7
+PARALLEL_REFINE_COST frame=149 mode=serial pass=whole_gpu samples=64 ms=1.548119500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=guard samples=64 ms=0.023151500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=derive samples=64 ms=0.011279500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=evaluate samples=64 ms=0.129441500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=risk samples=64 ms=0.143311000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=refine64 samples=64 ms=1.161534000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=epilogue samples=64 ms=0.007605000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=pack samples=64 ms=0.036840000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=validate samples=64 ms=0.011811500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=cpu_encode samples=64 ms=0.115171063 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=serial pass=cpu_submit_completion samples=64 ms=1.634247734 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=whole_gpu samples=64 ms=0.535123000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=guard samples=64 ms=0.023373500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=derive samples=64 ms=0.010803000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=evaluate samples=64 ms=0.126920500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=risk samples=64 ms=0.145002000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=refine64 samples=64 ms=0.149306500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=epilogue samples=64 ms=0.007848500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=pack samples=64 ms=0.036347500 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=validate samples=64 ms=0.011721000 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=cpu_encode samples=64 ms=0.118900922 outputs_exact=PASS flags_exact=PASS
+PARALLEL_REFINE_COST frame=149 mode=parallel pass=cpu_submit_completion samples=64 ms=0.613475719 outputs_exact=PASS flags_exact=PASS
+PRODUCTION_PRECISE_F64_COMPLETE poses=4 parts=52 vertices=1335876 max_f64=1.437707381266227e-6
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 111 filtered out; finished in 4.24s
+

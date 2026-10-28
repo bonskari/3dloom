@@ -1,0 +1,17 @@
+{
+  "gpu_mikk_recipe.wgsl": {
+    "sha256": "786edcbc6beaaf020df20840eaf24f29decbb9f69e7ac24fbabc46db6b602129",
+    "scratch_shader_bytes_equal": true
+  },
+  "gpu_mikk_precision.wgsl": {
+    "sha256": "daa19bffd2a34be32e2cba02dee47cb62c44c4656082862e7f23c1285ba4cbe7",
+    "scratch_shader_bytes_equal": true
+  },
+  "gpu_mikk_refinement.wgsl": {
+    "sha256": "bbfe876303abcf9b0ebcc3305489b97152c35248f05b54f7037b0f4d87e7ebcc",
+    "scratch_shader_bytes_equal": true
+  },
+  "one_output_f64_body_byte_equal": true,
+  "validate_tail_byte_equal": true,
+  "pre_refine_functions_byte_equal": true
+}
