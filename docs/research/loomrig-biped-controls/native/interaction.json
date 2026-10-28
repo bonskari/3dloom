@@ -1,0 +1,55 @@
+{
+  "commit": "490dbbb39d8fdf89af6534026a5cf87710913bc7",
+  "binary_sha256": "51809f93bc7eb00743a6993d7cc159180aa6165e21de9fe8e8b1d29f806d9e5e",
+  "source_scene_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "original_frame": 39,
+  "nodes": 461,
+  "direct_click": {
+    "viewport": "Front",
+    "wireframe_and_realistic": true,
+    "logical_position": [
+      720,
+      229
+    ],
+    "selected_control": 4975,
+    "name": "LoomRig1 Left Arm FK Upper"
+  },
+  "rotate": {
+    "logical_from": [
+      725,
+      142
+    ],
+    "logical_to": [
+      758,
+      151
+    ],
+    "steps": 8,
+    "changed_node_ids": [
+      4975
+    ]
+  },
+  "undo_all_node_records_restored": true,
+  "original_scene_reopened_after_undo": true,
+  "original_nodes_selection_frame_restored": true,
+  "performance_acceptance": {
+    "average_both_modes_above_60": true,
+    "every_active_window_60": false,
+    "summaries": [
+      {
+        "kind": "summary",
+        "shading": "Realistic",
+        "active_windows": 17,
+        "active_ready_pose_fps": 62.25638347015174,
+        "min_active_window_fps": 59.575685228589485
+      },
+      {
+        "kind": "summary",
+        "shading": "Wireframe",
+        "active_windows": 18,
+        "active_ready_pose_fps": 92.42850766676534,
+        "min_active_window_fps": 86.39741029179827
+      }
+    ],
+    "nodes_selection_frame_restored": true
+  }
+}

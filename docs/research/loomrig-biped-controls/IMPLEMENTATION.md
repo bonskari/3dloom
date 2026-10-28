@@ -1,4 +1,4 @@
-# First limb-shaped LoomRig increment — native acceptance pending
+# First limb-shaped LoomRig increment — native interaction verified
 
 Adds tapered upper/lower FK limb cages on existing control IDs. Current source skeleton, node IDs/parents/controllers, skin binds/weights and rig serialization are unchanged. All existing Point/cage/helper geometry remains. Master/end/goal/pole controls retain their existing interactions; this is not completion of the full Biped/contact/timeline goal.
 
@@ -10,4 +10,6 @@ Evidence: final11focused UI tests;446full UI tests passed,2ignored; Commands bon
 
 Full UI command: cargo test -p loom_ui --lib -j4 -- --test-threads=1. Focused: same with limb_ filter. Commands: cargo test -p loom_commands --test bone_display --test loomrig --test group_layers -j4. Exact source/log SHA256 is in source-proof.json. The final full UI run includes the reviewed mixed-camera-plane correction. No claim that every generic helper draw path is evaluation-free: only the added proxy loop consumes cached vertices; existing Point helper work remains.
 
-Native Ray appearance, direct interaction and≥60ready-pose throughput are still pending. The installed app remains the earlier default-renderer checkpoint until those next steps. Preferred120fps and native Mac verification also remain incomplete. No public push or source model save occurred.
+Native Ray direct click, rotation and Undo are verified on installed490dbbb. Both Wireframe and Realistic clicks select the existing4975upper-arm control through the character. Only that control changes during rotation; Undo restores every node record, and reopening the unchanged source restores all nodes, selection and frame39. Screenshots and filtered evidence are in native/.
+
+Default production measurements (no experimental or profile overrides): first candidate62.256R/92.429W, baseline63.265R/90.237W, reverse candidate63.191R/90.390W. These averages exceed60, but candidate Realistic minima59.576/58.233 do not pass the retained per-active-window60 acceptance gate. Baseline minimum61.201R. This small sequence does not identify a root cause or establish a uniform regression; do not repeat until a lucky pass or markTask9complete. Next: measure frame-boundary costs and gain adequate performance margin without hiding geometry/helpers or dropping weights. Preferred120fps and native Mac verification remain incomplete. No public push or source model save occurred.
