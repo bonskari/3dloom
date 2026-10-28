@@ -345,3 +345,31 @@ improvement versus bce2500 (also adds per-object profiling); Wireframe increased
 in this run. Do not attribute a Realistic gain to this cleanup. All5objects and
 13parts committed without reported error/recovery. Frame39 Realistic viewport
 byte-identical to bce2500. App paused/frame39 restored. Full60gate unfinished.
+
+
+35e58f0/e617f00 exact GPU edge integration: source handles published only for
+successfullycommitted current visible poses. Typed GeometryUpload associates
+IDs/world_version; onlysamependingversion receives sourcehandles afterBevy sync.
+Callback validatesactualsourcebuffer/count and exactorigin/twin/effectivevisibility,
+updatescolor, records gather beforepaint, selects persistent GPUedge output.
+CPU editing/picking mesh remains unchanged. Absent/failed/replaced/mismatched
+sources and diagonalstyles keep current ordinaryedge rendering. No sourcevertex
+or influence reduction. Default nonexperimental backend has no GPU sources.
+66Bevy/34Render/402UI librarytests passed (30/0/1opt-in ignored). Added realGPU
+callback coverage for pose/color/sourceID/sourcebuffer/visibility/diagonal/second
+viewport/shading transitions, and failed currentreadback sourcewithdrawal/recovery.
+Independent read-only review found no important sourceepoch/resourcebarrier issue.
+Standalone317audit and its historicalinputhash limitation archived separately in
+research/gpu-edge-gather; do not claim an exact historical scene SHA.
+
+Native e617f00 ready-pose FPS: Realistic51.272/51.390, Wireframe84.464/84.557.
+Prior d8a0bd4 Realistic46.960/46.649, Wire82.442/82.140. Same savedscene path
+and camera. All5objects/13parts current, no error/recovery. Profile258poses
+shows1290GPUedge dispatches (5/pose),117648CPUedge stages (456/pose),118938total
+meshupdates (461/pose), so current gather is actuallyused rather than merely
+compiled. CPUedge stage72.882ms/258 (~0.282ms/frame); queue124.662ms/258
+(~0.483ms/frame). Timings inclusive; exactgeometry guard time is outside these.
+Allfour frame39 viewports match prior d8a0bd4 screenshots pixel-for-pixel
+(Top/Front/Left/Realistic:0changedpixels). Apppaused/frame39 restored.
+Rawfour-windowmeasurements2026-10-28-gpu-edges.jsonl. Realistic60 and full
+numeric GPUquality/stability/rigtool requirements remainunfinished; goalactive.
