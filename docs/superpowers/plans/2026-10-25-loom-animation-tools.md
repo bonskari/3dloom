@@ -18,7 +18,7 @@
 4. [x] LoomRig scene model and commands: characterization, master/pelvis/spine/head, limb goal and pole controls, editable mappings, live IK/FK/solver matching. Verify original controllers/bindings survive, controls affect evaluated skin, undo and serialization.
 5. [x] Motion-panel LoomRig UI using actual commands: creation, control selection, chain/mapping edits, pose match and solver settings. Headless egui interaction tests.
 6. [x] Real Kimodo/MetaHuman retarget: reference-frame/proportion correction, original placement and skin preserved. Verify actual source samples and target geometry; expose in Motion UI.
-7. [x] Character timeline: trim source range, move clips and animate control corrections/contact changes; preserve timing and undo. Test sample equivalence and save/reload.
+7. [ ] Character timeline: trim source range, move clips and animate control corrections/contact changes; preserve timing and undo. Clip sequencing and animated IK/FK exist; typed planted/sliding/free contacts and their editing/verification remain incomplete.
 8. [x] Review integration, build/install locally, reload Ray test scene and verify real generated motion + controls. Save source and scene in their respective Git/SVN repositories; no public push.
 
 ## Current ledger
@@ -28,3 +28,13 @@
 - Final full workspace: 1653 passed, zero failed, seven ignored. Actual-asset FBX regressions additionally cover material slot binding, source preservation and roundtrip export.
 - Source and material-export checkpoint is SVN r1317; final corrected scene and preparation script are SVN r1318. Git changes remain local main, no push.
 - Preview limits: Unreal screen-space eye-occlusion composition and hair grooms are not reproduced; original source shader data and full Unreal character are preserved. The timeline supports non-overlapping native clip sequencing, not an overlapping NLA crossfade mixer.
+
+## Revalidated priorities — 2026-10-28
+
+Earlier checked items record the initial implementation, not completion of the expanded current user goal.
+
+1. Keep full geometry/materials/influences and verify distinct ready-pose throughput in both shading modes. The installed experimental GPU path reached approximately 60–61 fps Realistic and 93–94 fps Wireframe in quiet samples; the default launch and revised tangent precision path are not yet certified. Fifteen minutes of loaded playback completed; this does not certify editing or backup responsiveness. Evidence: `docs/research/native-gpu-checkpoint/2026-10-28-stability-15m.md`.
+2. Restore reliable skeleton display and selection. Bone/geometry category independence and bulk buttons have regression coverage; on-top readability and limb-shaped selectable controls remain incomplete.
+3. Complete Biped-like LoomRig controls using the retained imported skeleton, editable chains/IK/FK, and pose plus planted/sliding/free keys. Existing Point controls and IK/FK tracks do not satisfy these requirements.
+4. Keep animation authoring in separately opened tools. Verify actual Kimodo generation, local API preferences, movable clips, materials, and exact desk/chair preservation in the final installed application.
+5. Commit locally to main, never push. Keep the goal active until the full user requirements are verified.
