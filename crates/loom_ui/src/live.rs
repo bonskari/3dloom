@@ -16,18 +16,58 @@ pub(crate) struct PoseSubmissions {
     pub distinct_times: u64,
     pub pose_time: Option<f32>,
     pub world_version: u64,
+    pub distinct_submission_seconds: Option<f64>,
+    epoch: Option<std::time::Instant>,
     last_input: Option<u64>,
     last_scene: u64,
 }
 impl PoseSubmissions {
     pub fn record(&mut self, input_time: f64, scene: u64, pose_time: f32, version: u64) {
+        self.record_at(input_time, scene, pose_time, version, std::time::Instant::now());
+    }
+
+    fn record_at(&mut self, input_time: f64, scene: u64, pose_time: f32, version: u64, now: std::time::Instant) {
         if self.last_input == Some(input_time.to_bits()) { return; }
         self.last_input = Some(input_time.to_bits());
         self.frames += 1;
-        if self.last_scene != scene || self.pose_time != Some(pose_time) { self.distinct_times += 1; }
+        if self.last_scene != scene || self.pose_time != Some(pose_time) {
+            self.distinct_times += 1;
+            let epoch = self.epoch.get_or_insert(now);
+            self.distinct_submission_seconds = Some(now.duration_since(*epoch).as_secs_f64());
+        }
         self.last_scene = scene;
         self.pose_time = Some(pose_time);
         self.world_version = version;
+    }
+}
+
+#[cfg(test)]
+mod submission_clock_tests {
+    use super::PoseSubmissions;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn submission_clock_tracks_distinct_ready_events_not_input_or_redraw_times() {
+        let mut samples = PoseSubmissions::default();
+        let epoch = Instant::now();
+        assert_eq!(samples.distinct_submission_seconds, None);
+        samples.record_at(1., 77, 0., 1, epoch);
+        assert_eq!(samples.distinct_submission_seconds, Some(0.));
+        samples.record_at(1., 77, 0.5, 2, epoch + Duration::from_millis(20));
+        assert_eq!((samples.frames, samples.distinct_times), (1, 1));
+        assert_eq!(samples.distinct_submission_seconds, Some(0.));
+        samples.record_at(1000., 77, 0., 3, epoch + Duration::from_millis(40));
+        assert_eq!((samples.frames, samples.distinct_times), (2, 1));
+        assert_eq!(samples.distinct_submission_seconds, Some(0.));
+        samples.record_at(2000., 77, 0.5, 4, epoch + Duration::from_millis(60));
+        assert_eq!((samples.frames, samples.distinct_times), (3, 2));
+        assert!((samples.distinct_submission_seconds.unwrap() - 0.06).abs() < 1e-9);
+        let last = samples.distinct_submission_seconds;
+        samples.record_at(3000., 77, 0.5, 5, epoch + Duration::from_millis(80));
+        assert_eq!(samples.distinct_submission_seconds, last);
+        samples.record_at(4000., 88, 0.5, 6, epoch + Duration::from_millis(100));
+        assert_eq!((samples.frames, samples.distinct_times), (5, 3));
+        assert!((samples.distinct_submission_seconds.unwrap() - 0.1).abs() < 1e-9);
     }
 }
 
@@ -218,6 +258,7 @@ impl LoomApp {
                 "prepared_pose_time": self.world_pose_time,
                 "submitted_frames": self.pose_submissions.frames,
                 "submitted_distinct_pose_times": self.pose_submissions.distinct_times,
+                "submitted_distinct_seconds": self.pose_submissions.distinct_submission_seconds,
                 "submitted_pose_time": self.pose_submissions.pose_time,
                 "submitted_world_version": self.pose_submissions.world_version,
                 "gpu_pose": gpu_pose,

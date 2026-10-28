@@ -1,0 +1,364 @@
+warning: fields `part` and `reason` are never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:15:14
+   |
+15 |     Layout { part: usize, reason: String },
+   |     ------   ^^^^         ^^^^^^
+   |     |
+   |     fields in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `0` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:16:14
+   |
+16 |     Readback(String),
+   |     -------- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+16 -     Readback(String),
+16 +     Readback(()),
+   |
+
+warning: fields `world_positions`, `pose`, and `tangent` are never read
+   --> crates/loom_bevy/src/gpu_pose_geometry.rs:180:5
+    |
+177 | pub(crate) struct GpuPoseGeometry {
+    |                   --------------- fields in this struct
+...
+180 |     world_positions: wgpu::Buffer,
+    |     ^^^^^^^^^^^^^^^
+...
+185 |     pose: wgpu::Buffer,
+    |     ^^^^
+186 |     tangent: Option<wgpu::Buffer>,
+    |     ^^^^^^^
+
+warning: methods `source_vertex_count`, `update_transform`, and `read_world_positions` are never used
+   --> crates/loom_bevy/src/gpu_pose_geometry.rs:476:19
+    |
+194 | impl GpuPoseGeometry {
+    | -------------------- methods in this implementation
+...
+476 |     pub(crate) fn source_vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^^^^^^^^
+...
+479 |     pub(crate) fn update_transform(&self, queue: &wgpu::Queue, world: Mat4) -> Result<(), String> {
+    |                   ^^^^^^^^^^^^^^^^
+...
+508 |     pub fn read_world_positions(
+    |            ^^^^^^^^^^^^^^^^^^^^
+
+warning: field `neighbors` is never read
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:195:5
+    |
+190 | pub(crate) struct Prepared {
+    |                   -------- field in this struct
+...
+195 |     neighbors: Vec<[i32; 3]>,
+    |     ^^^^^^^^^
+    |
+    = note: `Prepared` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: struct `StructuralKey` is never constructed
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:198:19
+    |
+198 | pub(crate) struct StructuralKey {
+    |                   ^^^^^^^^^^^^^
+
+warning: method `structural_key` is never used
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:204:19
+    |
+203 | impl Prepared {
+    | ------------- method in this implementation
+204 |     pub(crate) fn structural_key(&self) -> StructuralKey {
+    |                   ^^^^^^^^^^^^^^
+
+warning: associated items `new`, `encode`, and `encode_timed` are never used
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:296:19
+    |
+295 | impl GpuPreparation {
+    | ------------------- associated items in this implementation
+296 |     pub(crate) fn new(
+    |                   ^^^
+...
+438 |     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^
+...
+441 |     pub(crate) fn encode_timed(
+    |                   ^^^^^^^^^^^^
+
+warning: fields `params`, `uniform`, and `derivatives` are never read
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:204:5
+    |
+196 | pub(crate) struct GpuRecipeMath {
+    |                   ------------- fields in this struct
+...
+204 |     params: Params,
+    |     ^^^^^^
+205 |     uniform: wgpu::Buffer,
+    |     ^^^^^^^
+206 |     derivatives: wgpu::Buffer,
+    |     ^^^^^^^^^^^
+
+warning: associated items `new`, `vertex_count`, and `readback` are never used
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:209:19
+    |
+208 | impl GpuRecipeMath {
+    | ------------------ associated items in this implementation
+209 |     pub(crate) fn new(
+    |                   ^^^
+...
+379 |     pub(crate) fn vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^
+...
+575 |     pub(crate) fn readback(
+    |                   ^^^^^^^^
+
+warning: associated items `new`, `encode`, and `encode_math` are never used
+   --> crates/loom_bevy/src/gpu_pose_runtime.rs:41:19
+    |
+ 39 | impl GpuPoseRuntime {
+    | ------------------- associated items in this implementation
+ 40 |     /// Mesh positions are already the final CPU world-baked pose.
+ 41 |     pub(crate) fn new(
+    |                   ^^^
+...
+164 |     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^
+...
+168 |     pub(crate) fn encode_math(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^^^^^^
+
+warning: `loom_bevy` (lib) generated 11 warnings
+   Compiling loom_ui v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_ui)
+warning: unused import: `HoverShortcut`
+ --> crates/loom_ui/src/menubar.rs:6:37
+  |
+6 | use crate::shortcuts::{menu_button, HoverShortcut};
+  |                                     ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/clip_timeline.rs:105:126
+    |
+105 | ...t,row.bottom())],egui::Stroke::new(1.0,egui::Color32::from_rgb(235,184,70)));
+    |                                       ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+    = note: `#[warn(float_literal_f32_fallback)]` (part of `#[warn(future_incompatible)]`) on by default
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/rig_timeline.rs:57:55
+   |
+57 | ...                   egui::Stroke::new(1., egui::Color32::from_gray(45)),
+   |                                         ^^ help: explicitly specify the type as `f32`: `1._f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/rig_timeline.rs:70:45
+   |
+70 | ...                   1.,
+   |                       ^^ help: explicitly specify the type as `f32`: `1._f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/rig_timeline.rs:170:55
+    |
+170 | ...                   egui::Stroke::new(1., egui::Color32::WHITE),
+    |                                         ^^ help: explicitly specify the type as `f32`: `1._f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/command_panel/modify_poly/soft_selection.rs:72:60
+   |
+72 |             p.add(egui::Shape::line(pts, egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 80))));
+   |                                                            ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/dialogs/viewport_configuration.rs:250:49
+    |
+250 |         p.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(220)), egui::StrokeKind::Middle);
+    |                                                 ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/dialogs/viewport_configuration.rs:277:55
+    |
+277 | ...   painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, if active { crate::viewports::ACTIVE_FRAME } else { egui::Color32::from_gr...
+    |                                                     ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:115:66
+    |
+115 |             painter.line_segment([q[1], q[2]], egui::Stroke::new(1.5, c(va)));
+    |                                                                  ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:116:66
+    |
+116 |             painter.line_segment([q[3], q[2]], egui::Stroke::new(1.5, c(ua)));
+    |                                                                  ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:123:72
+    |
+123 |             painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
+    |                                                                        ^^^ help: explicitly specify the type as `f32`: `3.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:123:85
+    |
+123 |             painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
+    |                                                                                     ^^^ help: explicitly specify the type as `f32`: `2.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/gizmo/tripod.rs:29:60
+   |
+29 |             painter.line_segment([s, e], egui::Stroke::new(1.5, color));
+   |                                                            ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:1478:70
+     |
+1478 |                 painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(180))));
+     |                                                                      ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2394:36
+     |
+2394 |     let stroke = egui::Stroke::new(1.0, egui::Color32::from_white_alpha(180));
+     |                                    ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2515:70
+     |
+2515 |                     painter.circle_stroke(sp, 4.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
+     |                                                                      ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2558:36
+     |
+2558 |     let stroke = egui::Stroke::new(2.0, orange);
+     |                                    ^^^ help: explicitly specify the type as `f32`: `2.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2571:47
+     |
+2571 | ...                   egui::Stroke::new(1.0, egui::Color32::BLACK),
+     |                                         ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2662:36
+     |
+2662 |     let stroke = egui::Stroke::new(1.5, color);
+     |                                    ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:3085:36
+     |
+3085 |     let stroke = egui::Stroke::new(2.0, color);
+     |                                    ^^^ help: explicitly specify the type as `f32`: `2.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/viewports.rs:54:102
+   |
+54 | ...Stroke::new(if app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
+   |                                        ^^^ help: explicitly specify the type as `f32`: `3.0_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/viewports.rs:54:115
+   |
+54 | ...f app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
+   |                                        ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: variable does not need to be mutable
+   --> crates/loom_ui/src/dialogs/track_view_dialogs.rs:337:21
+    |
+337 |                 let mut spin = |ui: &mut egui::Ui, l: &str, v: &mut f32| {
+    |                     ----^^^^
+    |                     |
+    |                     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `win`
+    --> crates/loom_ui/src/ui_tests.rs:3874:9
+     |
+3874 |     let win = options_rect(&h, "fbx_import_options");
+     |         ^^^ help: if this is intentional, prefix it with an underscore: `_win`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `loom_ui` (lib test) generated 24 warnings (run `cargo fix --lib -p loom_ui --tests` to apply 24 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.78s
+     Running unittests src/lib.rs (target/debug/deps/loom_ui-6d48b34c61d75745)
+
+running 2 tests
+test live::submission_clock_tests::submission_clock_tracks_distinct_ready_events_not_input_or_redraw_times ... ok
+test ui_tests::playback_cache::pose_submission_metrics_do_not_count_held_poses_as_new_animation_samples ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 447 filtered out; finished in 0.00s
+

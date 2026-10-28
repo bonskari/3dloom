@@ -1,0 +1,810 @@
+warning: fields `part` and `reason` are never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:15:14
+   |
+15 |     Layout { part: usize, reason: String },
+   |     ------   ^^^^         ^^^^^^
+   |     |
+   |     fields in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `0` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:16:14
+   |
+16 |     Readback(String),
+   |     -------- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+16 -     Readback(String),
+16 +     Readback(()),
+   |
+
+warning: fields `world_positions`, `pose`, and `tangent` are never read
+   --> crates/loom_bevy/src/gpu_pose_geometry.rs:180:5
+    |
+177 | pub(crate) struct GpuPoseGeometry {
+    |                   --------------- fields in this struct
+...
+180 |     world_positions: wgpu::Buffer,
+    |     ^^^^^^^^^^^^^^^
+...
+185 |     pose: wgpu::Buffer,
+    |     ^^^^
+186 |     tangent: Option<wgpu::Buffer>,
+    |     ^^^^^^^
+
+warning: methods `source_vertex_count`, `update_transform`, and `read_world_positions` are never used
+   --> crates/loom_bevy/src/gpu_pose_geometry.rs:476:19
+    |
+194 | impl GpuPoseGeometry {
+    | -------------------- methods in this implementation
+...
+476 |     pub(crate) fn source_vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^^^^^^^^
+...
+479 |     pub(crate) fn update_transform(&self, queue: &wgpu::Queue, world: Mat4) -> Result<(), String> {
+    |                   ^^^^^^^^^^^^^^^^
+...
+508 |     pub fn read_world_positions(
+    |            ^^^^^^^^^^^^^^^^^^^^
+
+warning: field `neighbors` is never read
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:195:5
+    |
+190 | pub(crate) struct Prepared {
+    |                   -------- field in this struct
+...
+195 |     neighbors: Vec<[i32; 3]>,
+    |     ^^^^^^^^^
+    |
+    = note: `Prepared` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: struct `StructuralKey` is never constructed
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:198:19
+    |
+198 | pub(crate) struct StructuralKey {
+    |                   ^^^^^^^^^^^^^
+
+warning: method `structural_key` is never used
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:204:19
+    |
+203 | impl Prepared {
+    | ------------- method in this implementation
+204 |     pub(crate) fn structural_key(&self) -> StructuralKey {
+    |                   ^^^^^^^^^^^^^^
+
+warning: associated items `new`, `encode`, and `encode_timed` are never used
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:296:19
+    |
+295 | impl GpuPreparation {
+    | ------------------- associated items in this implementation
+296 |     pub(crate) fn new(
+    |                   ^^^
+...
+438 |     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^
+...
+441 |     pub(crate) fn encode_timed(
+    |                   ^^^^^^^^^^^^
+
+warning: fields `params`, `uniform`, and `derivatives` are never read
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:204:5
+    |
+196 | pub(crate) struct GpuRecipeMath {
+    |                   ------------- fields in this struct
+...
+204 |     params: Params,
+    |     ^^^^^^
+205 |     uniform: wgpu::Buffer,
+    |     ^^^^^^^
+206 |     derivatives: wgpu::Buffer,
+    |     ^^^^^^^^^^^
+
+warning: associated items `new`, `vertex_count`, and `readback` are never used
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:209:19
+    |
+208 | impl GpuRecipeMath {
+    | ------------------ associated items in this implementation
+209 |     pub(crate) fn new(
+    |                   ^^^
+...
+379 |     pub(crate) fn vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^
+...
+575 |     pub(crate) fn readback(
+    |                   ^^^^^^^^
+
+warning: associated items `new`, `encode`, and `encode_math` are never used
+   --> crates/loom_bevy/src/gpu_pose_runtime.rs:41:19
+    |
+ 39 | impl GpuPoseRuntime {
+    | ------------------- associated items in this implementation
+ 40 |     /// Mesh positions are already the final CPU world-baked pose.
+ 41 |     pub(crate) fn new(
+    |                   ^^^
+...
+164 |     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^
+...
+168 |     pub(crate) fn encode_math(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^^^^^^
+
+warning: `loom_bevy` (lib) generated 11 warnings
+warning: unused import: `HoverShortcut`
+ --> crates/loom_ui/src/menubar.rs:6:37
+  |
+6 | use crate::shortcuts::{menu_button, HoverShortcut};
+  |                                     ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/clip_timeline.rs:105:126
+    |
+105 | ...t,row.bottom())],egui::Stroke::new(1.0,egui::Color32::from_rgb(235,184,70)));
+    |                                       ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+    = note: `#[warn(float_literal_f32_fallback)]` (part of `#[warn(future_incompatible)]`) on by default
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/rig_timeline.rs:57:55
+   |
+57 | ...                   egui::Stroke::new(1., egui::Color32::from_gray(45)),
+   |                                         ^^ help: explicitly specify the type as `f32`: `1._f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/rig_timeline.rs:70:45
+   |
+70 | ...                   1.,
+   |                       ^^ help: explicitly specify the type as `f32`: `1._f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/rig_timeline.rs:170:55
+    |
+170 | ...                   egui::Stroke::new(1., egui::Color32::WHITE),
+    |                                         ^^ help: explicitly specify the type as `f32`: `1._f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/command_panel/modify_poly/soft_selection.rs:72:60
+   |
+72 |             p.add(egui::Shape::line(pts, egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 80))));
+   |                                                            ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/dialogs/viewport_configuration.rs:250:49
+    |
+250 |         p.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(220)), egui::StrokeKind::Middle);
+    |                                                 ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/dialogs/viewport_configuration.rs:277:55
+    |
+277 | ...   painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, if active { crate::viewports::ACTIVE_FRAME } else { egui::Color32::from_gr...
+    |                                                     ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:115:66
+    |
+115 |             painter.line_segment([q[1], q[2]], egui::Stroke::new(1.5, c(va)));
+    |                                                                  ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:116:66
+    |
+116 |             painter.line_segment([q[3], q[2]], egui::Stroke::new(1.5, c(ua)));
+    |                                                                  ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:123:72
+    |
+123 |             painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
+    |                                                                        ^^^ help: explicitly specify the type as `f32`: `3.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:123:85
+    |
+123 |             painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
+    |                                                                                     ^^^ help: explicitly specify the type as `f32`: `2.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/gizmo/tripod.rs:29:60
+   |
+29 |             painter.line_segment([s, e], egui::Stroke::new(1.5, color));
+   |                                                            ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:1478:70
+     |
+1478 |                 painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(180))));
+     |                                                                      ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2394:36
+     |
+2394 |     let stroke = egui::Stroke::new(1.0, egui::Color32::from_white_alpha(180));
+     |                                    ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2515:70
+     |
+2515 |                     painter.circle_stroke(sp, 4.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
+     |                                                                      ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2558:36
+     |
+2558 |     let stroke = egui::Stroke::new(2.0, orange);
+     |                                    ^^^ help: explicitly specify the type as `f32`: `2.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2571:47
+     |
+2571 | ...                   egui::Stroke::new(1.0, egui::Color32::BLACK),
+     |                                         ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2662:36
+     |
+2662 |     let stroke = egui::Stroke::new(1.5, color);
+     |                                    ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:3085:36
+     |
+3085 |     let stroke = egui::Stroke::new(2.0, color);
+     |                                    ^^^ help: explicitly specify the type as `f32`: `2.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/viewports.rs:54:102
+   |
+54 | ...Stroke::new(if app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
+   |                                        ^^^ help: explicitly specify the type as `f32`: `3.0_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/viewports.rs:54:115
+   |
+54 | ...f app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
+   |                                        ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: variable does not need to be mutable
+   --> crates/loom_ui/src/dialogs/track_view_dialogs.rs:337:21
+    |
+337 |                 let mut spin = |ui: &mut egui::Ui, l: &str, v: &mut f32| {
+    |                     ----^^^^
+    |                     |
+    |                     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `win`
+    --> crates/loom_ui/src/ui_tests.rs:3874:9
+     |
+3874 |     let win = options_rect(&h, "fbx_import_options");
+     |         ^^^ help: if this is intentional, prefix it with an underscore: `_win`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `loom_ui` (lib test) generated 24 warnings (run `cargo fix --lib -p loom_ui --tests` to apply 24 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.36s
+     Running unittests src/lib.rs (target/debug/deps/loom_ui-6d48b34c61d75745)
+
+running 449 tests
+test async_import::tests::cancellation_and_reader_errors_leave_scene_unchanged_and_allow_retry ... ok
+test async_import::tests::changing_scene_pose_units_or_frame_rate_rejects_completion_without_mutation ... ok
+test async_import::tests::external_large_fbx_preparation_keeps_egui_frames_running_and_scene_untouched ... ok
+test async_import::tests::file_statistics_use_worker_and_report_real_source_counts ... ok
+test async_import::tests::preparation_is_background_only_and_original_command_commits_one_undo ... ok
+test auto_backup::tests::directory_symlink_alias_is_guarded_before_first_backup_creates_its_folder ... ok
+test auto_backup::tests::drop_drains_the_started_real_write ... ok
+test auto_backup::tests::edits_after_raw_close_or_approved_exit_require_a_new_prompt ... ok
+test auto_backup::tests::incremental_and_save_changes_paths_are_guarded ... ok
+test auto_backup::tests::json_and_typed_manual_backups_join_before_writing_next_slot ... ok
+test auto_backup::tests::pending_snapshot_is_bounded_and_manual_backup_is_serialized ... ok
+test auto_backup::tests::ray_snapshot_worker_reopens_full_document ... ignored, actual frozen Ray snapshot: explicit isolated verification
+test auto_backup::tests::replacement_scene_is_not_acknowledged_and_failure_preserves_rotation ... ok
+test auto_backup::tests::save_selected_archive_and_export_conflicts_are_guarded ... ok
+test auto_backup::tests::temporary_path_collision_is_detected ... ok
+test auto_backup::tests::unrelated_save_and_hold_finish_while_automatic_writer_is_delayed ... ok
+test command_panel::modify::convert_tests::a_primitive_converts_to_editable_poly_from_the_stack ... ok
+test command_panel::scene::tests::children_hang_under_their_parent ... ok
+test command_panel::scene::tests::icon_kind_follows_the_object_kind ... ok
+test command_panel::scene::tests::modifier_keys_pick_the_selection_op ... ok
+test dialogs::exchange_options::tests::wildcards_match_like_the_object_filter ... ok
+test dialogs::file_dialog::tests::animation_picker_filters_source_formats_and_uses_dedicated_command ... ok
+test dialogs::file_dialog::tests::system_dialogs_unless_remote_controlled ... ok
+test dialogs::material_editor::tests::a_map_level_shows_the_map_flat ... ok
+test dialogs::material_editor::tests::preview_shows_the_diffuse_colour_and_the_highlight ... ok
+test dialogs::material_editor::tests::sample_types_have_their_silhouettes ... ok
+test gizmo::tests::angle_snap_accumulates_slow_rotate_drags ... ok
+test gizmo::tests::axis_handle_hit_within_8px ... ok
+test gizmo::tests::centre_hit_when_axes_degenerate ... ok
+test gizmo::tests::fk_control_gizmo_drag_accumulates_pointer_steps_without_changing_source ... ok
+test gizmo::tests::plane_handle_hit_inside_square ... ok
+test gizmo::tests::preview_undo_only_removes_its_own_entry ... ok
+test gizmo::tests::rotate_circle_hit_by_ring_distance ... ok
+test gizmo::tests::rotate_drag_angle_is_signed_by_axis_toward_viewer ... ok
+test gizmo::tests::rotate_ring_back_half_is_not_hittable ... ok
+test gizmo::tests::rotate_ring_front_half_faces_the_eye_in_perspective ... ok
+test gizmo::tests::scale_hit_follows_the_scale_size_preference ... ok
+test gizmo::tests::scale_triangle_handles ... ok
+test gizmo::tests::scale_uniform_hit_centre ... ok
+test gizmo::tests::squash_keeps_the_volume ... ok
+test helper_overlay::bone_tests::link_replacing_bone_has_no_unpickable_axis_proxy ... ok
+test helper_overlay::bone_tests::prepared_bone_axes_follow_pose_changes_and_scene_replacement ... ok
+test helper_overlay::bone_tests::viewport_bone_axes_do_not_reevaluate_the_animated_pose ... ok
+test helper_overlay::bone_tests::visible_bones_have_on_top_axes_even_with_geometry_hidden ... ok
+test hotkeys::tests::ctrl_z_maps_to_z_with_ctrl ... ok
+test hotkeys::tests::paste_event_becomes_ctrl_v_clone ... ok
+test icons::tests::every_character_the_ui_draws_has_a_glyph ... ok
+test icons::tests::hover_text_carries_the_chord_and_the_hint ... ok
+test icons::tests::the_icon_font_has_every_glyph_and_text_keeps_its_own_font ... ok
+test kimodo::tests::api_address_is_user_configured_and_preserves_base_path ... ok
+test kimodo::tests::real_queue_generation_downloads_imports_and_starts_playback ... ignored, requires a running Kimodo GPU queue; set LOOM_KIMODO_API_URL
+test kimodo::tests::result_from_another_scene_is_preserved_without_modifying_current_scene ... ok
+test label_menus::tests::general_menu_toggles_reflect_state ... ok
+test label_menus::tests::pov_menu_lists_views_in_order ... ok
+test live::submission_clock_tests::submission_clock_tracks_distinct_ready_events_not_input_or_redraw_times ... ok
+test loomrig_overlay::tests::collapsed_limb_span_does_not_generate_nonfinite_proxy_geometry ... ok
+test loomrig_overlay::tests::limb_proxies_follow_current_fk_pose_without_editing_scene ... ok
+test loomrig_overlay::tests::limb_proxy_storage_is_reused_and_scene_replacement_clears_it ... ok
+test loomrig_overlay::tests::prepared_limb_outlines_draw_on_top_in_both_shading_modes ... ok
+test main_toolbar::tests::toolbar_items_follow_reference_order ... ok
+test menubar::tests::modifiers_menu_holds_every_modifier_list_entry_once ... ok
+test opacity_preview::tests::composed_diffuse_keeps_rgba_decal_coverage_and_linear_light_blending ... ok
+test opacity_preview::tests::diffuse_and_opacity_keep_independent_uv_crop_and_show_map_settings ... ok
+test opacity_preview::tests::missing_required_pixels_stay_pending_and_composition_is_bounded ... ok
+test opacity_preview::tests::opacity_retains_each_pixel_including_low_nonuniform_lacrimal_values ... ok
+test preview_cache::tests::decode_errors_are_reported_asynchronously_and_reload_retries ... ok
+test preview_cache::tests::derived_results_cannot_exceed_the_preview_tier ... ok
+test preview_cache::tests::derived_tasks_run_only_on_worker_and_cancelled_or_full_queue_jobs_do_not_run ... ok
+test preview_cache::tests::policy_change_discards_stale_preview_results ... ok
+test preview_cache::tests::preview_dimensions_fit_the_aggregate_visible_budget ... ok
+test preview_cache::tests::real_8k_png_decodes_in_worker_at_preview_size_without_changing_source ... ok
+test preview_cache::tests::retaining_visible_paths_cancels_hidden_jobs_and_releases_ready_images ... ok
+test quad_menu::tests::animation_quad_has_set_and_coordinates ... ok
+test quad_menu::tests::modifiers_pick_the_quad ... ok
+test quad_menu::tests::quadrants_match_defaults ... ok
+test quad_menu::tests::render_quad_renders_and_toggles_the_selections_rendering_controls ... ok
+test quad_menu::tests::tools2_lists_the_level_tools ... ok
+test realistic::tests::areas_place_the_output_in_the_frame ... ok
+test realistic::tests::buckets_cover_the_area_row_by_row ... ok
+test realistic::tests::supersampled_buckets_average_their_samples ... ok
+test realistic::tests::wireframe_after_realistic_does_not_keep_synchronizing_bevy ... ok
+test region::tests::circular_and_lasso_regions_contain_points ... ok
+test region::tests::selection_regions_intersect_control_segments_between_vertices ... ok
+test region::tests::window_crossing_marquee_selects_fully_enclosed_only ... ok
+test ribbon::tests::cycle_through_all_visits_every_state_in_the_reference_order ... ok
+test shortcuts::tests::command_without_a_chord_has_no_suffix ... ok
+test shortcuts::tests::editable_poly_levels_use_the_poly_group ... ok
+test shortcuts::tests::main_ui_command_gets_its_chord ... ok
+test spinner::tests::ctrl_drag_is_faster_and_alt_drag_slower ... ok
+test spinner::tests::right_click_sets_the_minimum_and_reports_a_change ... ok
+test spinner::tests::wrap_cursor_moves_the_pointer_to_the_other_edge_and_the_jump_is_not_a_drag ... ok
+test time_slider::tests::thumb_stays_inside_the_track_and_round_trips ... ok
+test ui_tests::a_box_drag_ends_the_create_mode_when_keep_creating_is_off ... ok
+test ui_tests::a_box_drag_keeps_the_tool_on_when_keep_creating_is_on ... ok
+test ui_tests::a_box_inside_a_see_through_box_is_picked_and_a_repeat_click_goes_deeper ... ok
+test ui_tests::a_checker_sub_material_shows_checks_in_the_viewport ... ok
+test ui_tests::a_click_on_empty_space_clears_the_selection_at_every_level_and_tool ... ok
+test ui_tests::a_click_through_the_hole_of_a_torus_selects_nothing ... ok
+test ui_tests::a_move_drag_ends_when_the_focus_is_lost ... ok
+test ui_tests::a_render_runs_in_buckets_into_the_window_and_saves_its_file ... ok
+test ui_tests::a_scene_named_on_the_command_line_opens ... ok
+test ui_tests::a_second_empty_click_at_polygon_level_releases_the_object_and_the_level ... ok
+test ui_tests::a_skinned_object_deselects_on_an_empty_click_at_object_level_and_in_edit_envelopes ... ok
+test ui_tests::a_wireframe_view_picks_objects_by_their_edges ... ok
+test ui_tests::alt_click_removes_and_alt_drag_region_removes ... ok
+test ui_tests::alt_r_rings_from_the_keyboard ... ok
+test ui_tests::alt_r_rings_on_an_edit_poly_modifier_and_a_sphere ... ok
+test ui_tests::an_image_file_dropped_on_selected_polygons_assigns_it_there ... ok
+test ui_tests::an_imported_skinned_character_brackets_the_posed_mesh ... ok
+test ui_tests::an_iterative_region_render_keeps_the_rest_of_the_window ... ok
+test ui_tests::autogrid_tripod_follows_the_cursor_over_surfaces ... ok
+test ui_tests::background_rect_keeps_the_bitmap_aspect_and_follows_the_zoom_when_locked ... ok
+test ui_tests::backspace_removes_vertices_and_ctrl_backspace_cleans_edges ... ok
+test ui_tests::bake::a_lighting_map_renders_on_the_gpu_from_the_dialog ... ok
+test ui_tests::bake::render_to_texture_dialog_adds_an_element_and_renders_it ... ok
+test ui_tests::base_parameter_change_under_edit_poly_asks_yes_hold_yes_no ... ok
+test ui_tests::biped::create_footsteps_append_takes_viewport_clicks ... ok
+test ui_tests::biped::footsteps_from_the_dialog_make_the_biped_walk ... ok
+test ui_tests::biped::save_and_load_file_write_and_read_a_figure ... ok
+test ui_tests::biped::structure_rollout_body_type_and_check_boxes ... ok
+test ui_tests::biped::xtras_group_creates_selects_and_picks_a_parent ... ok
+test ui_tests::bridge_edges_dialog_takes_edges_selected_while_it_is_open ... ok
+test ui_tests::browser_get_material_eyedropper_and_dragging_a_slot_onto_an_object ... ok
+test ui_tests::camera_view_honours_clip_manually_and_orthographic_projection ... ok
+test ui_tests::camera_view_swaps_the_navigation_buttons_and_truck_moves_the_camera_with_one_undo ... ok
+test ui_tests::cancel_expert_mode_button_brings_the_interface_back ... ok
+test ui_tests::cancel_stops_a_render_and_keeps_the_buckets_done ... ok
+test ui_tests::channel_toggles_change_what_the_window_shows ... ok
+test ui_tests::clicking_a_free_camera_places_it_looking_down_and_its_icon_selects_it ... ok
+test ui_tests::clicking_a_polygon_selects_it ... ok
+test ui_tests::clicking_a_polygon_selects_it_with_the_move_tool ... ok
+test ui_tests::clicking_a_vertex_selects_it ... ok
+test ui_tests::clicking_an_omni_places_it_and_its_icon_selects_it ... ok
+test ui_tests::clicking_the_first_line_knot_asks_close_spline ... ok
+test ui_tests::clips::imported_animation_can_be_dragged_as_one_clip_and_undone_once ... ok
+test ui_tests::cone_second_radius_starts_at_the_first_and_decreases_towards_a_point ... ok
+test ui_tests::copy_clone_and_clear ... ok
+test ui_tests::create_panel_buttons_keep_their_tool_on ... ok
+test ui_tests::cube_creation_method_is_one_drag_with_equal_sides ... ok
+test ui_tests::cut_clicks_chain_until_right_click ... ok
+test ui_tests::cylinder_and_line_end_the_create_mode_only_when_finished ... ok
+test ui_tests::diagnostics_show_a_held_alt_press_until_reset_interaction ... ok
+test ui_tests::display::category_bulk_buttons_include_bone_objects ... ok
+test ui_tests::display::display_panel_display_color_hide_frozen_and_link_display ... ok
+test ui_tests::display::object_properties_freeze_acts_on_the_selection_only ... ok
+test ui_tests::display::object_properties_rendering_control_and_user_defined_panel ... ok
+test ui_tests::display::seven_shows_the_statistics_of_the_scene ... ok
+test ui_tests::display::the_colour_swatch_opens_object_color_and_ok_colours_the_object ... ok
+test ui_tests::double_clicking_an_edge_selects_its_loop ... ok
+test ui_tests::double_clicking_an_object_selects_its_hierarchy ... ok
+test ui_tests::drag_creating_a_box_keeps_it_selected ... ok
+test ui_tests::drag_creating_a_cylinder_downwards_gives_a_negative_height ... ok
+test ui_tests::drag_creating_a_sphere_centres_it_on_the_click_and_selects_it ... ok
+test ui_tests::dragging_a_biped_sets_its_height_from_the_feet ... ok
+test ui_tests::dragging_a_target_camera_puts_the_camera_at_the_press_and_the_target_at_the_release ... ok
+test ui_tests::dragging_a_target_spot_puts_the_light_at_the_press_and_the_target_at_the_release ... ok
+test ui_tests::dragging_the_viewcube_orbits_and_turns_an_axis_view_orthographic ... ok
+test ui_tests::edge_creation_method_draws_a_sphere_edge_to_edge ... ok
+test ui_tests::edit_normals_click_ctrl_alt_and_empty_click_select_normals ... ok
+test ui_tests::edit_normals_draws_explicit_normals_green_and_the_rotate_tool_turns_them ... ok
+test ui_tests::edit_poly_modifier_polygons_pick_and_levels_stay_in_step ... ok
+test ui_tests::edit_region_drags_the_render_region_in_the_viewport ... ok
+test ui_tests::extrude_along_spline_dialog_previews_the_picked_spline ... ok
+test ui_tests::fbx_export_goes_through_its_options_dialog ... ok
+test ui_tests::fbx_import_options_cancel_and_cameras_off ... ok
+test ui_tests::fillet_mode_drags_on_a_selected_vertex ... ok
+test ui_tests::hiding_the_command_panel_widens_the_viewports ... ok
+test ui_tests::hsds_element_button_shows_the_yellow_cage_and_the_level_list_displays_a_level ... ok
+test ui_tests::i_pans_the_point_under_the_cursor_to_the_centre ... ok
+test ui_tests::icons::command_panel_tab_and_category_icons ... ok
+test ui_tests::icons::every_icon_button_has_a_name ... ok
+test ui_tests::icons::main_toolbar_icons_run_their_commands ... ok
+test ui_tests::icons::main_toolbar_undo_and_redo_icons ... ok
+test ui_tests::icons::modifier_stack_icons_run_their_commands ... ok
+test ui_tests::icons::status_bar_icons_run_their_commands ... ok
+test ui_tests::icons::the_icon_font_is_loaded_with_the_ui ... ok
+test ui_tests::icons::time_slider_arrows_step_a_frame ... ok
+test ui_tests::injected_alt_drag_removes_like_a_mouse ... ok
+test ui_tests::injected_input_rejects_bad_events ... ok
+test ui_tests::keep_creating_in_the_create_menu_and_preferences ... ok
+test ui_tests::keyboard_entry_camera_and_helper_creation_end_the_create_mode ... ok
+test ui_tests::keyboard_panel_assigns_a_pressed_hotkey_and_names_its_current_owner ... ok
+test ui_tests::kimodo::kimodo_is_available_without_selection_and_exposes_local_api_settings ... ok
+test ui_tests::label_menus_close_on_a_click_elsewhere_and_on_escape ... ok
+test ui_tests::label_right_click_menus_run_items_and_close ... ok
+test ui_tests::label_submenus_open_to_the_right ... ok
+test ui_tests::lightcam2::a_light_view_shows_the_light_controls ... ok
+test ui_tests::lightcam2::a_model_file_dropped_on_the_window_is_imported ... ok
+test ui_tests::lightcam2::a_target_lights_quad_menu_selects_its_target_and_the_animation_quad_freezes ... ok
+test ui_tests::lightcam2::asset_tracking_shows_missing_files_and_strip_path_repaths ... ok
+test ui_tests::lightcam2::creating_a_target_light_does_not_move_the_viewports ... ok
+test ui_tests::lightcam2::dragging_a_sunlight_sizes_its_compass_and_places_the_sun ... ok
+test ui_tests::lightcam2::dragging_a_target_light_puts_the_light_at_the_press_and_its_target_at_the_release ... ok
+test ui_tests::lightcam2::edit_select_by_layer_picks_layers_and_selects_their_objects ... ok
+test ui_tests::lightcam2::file_replace_lists_the_matching_objects_and_ok_replaces_them ... ok
+test ui_tests::lightcam2::light_and_sun_rollouts_keep_the_command_panel_width ... ok
+test ui_tests::lightcam2::link_inheritance_utility_unchecks_an_axis_on_every_selected_object ... ok
+test ui_tests::lightcam2::the_lights_category_starts_photometric_and_switches_to_standard ... ok
+test ui_tests::lightcam2::the_templates_rollout_and_distribution_list_edit_a_photometric_light ... ok
+test ui_tests::lightcam2::views_add_default_lights_to_scene_dialog_adds_the_omnis ... ok
+test ui_tests::lightcam2::views_update_during_spinner_drag_holds_the_viewports_until_release ... ok
+test ui_tests::loomrig::limb_proxy_pointer_rotate_drives_skin_once_and_undo_restores_authored_offset ... ok
+test ui_tests::loomrig::limb_proxy_pointer_selects_animator_input_inside_closed_character_group ... ok
+test ui_tests::loomrig::motion_panel_applies_source_clip_to_existing_character ... ok
+test ui_tests::loomrig::motion_panel_builds_real_loomrig_and_selects_animatable_controls ... ok
+test ui_tests::loomrig::rig_timeline_moves_one_ik_fk_key_with_one_undo ... ok
+test ui_tests::loomrig::second_character_can_be_rigged_and_chain_rows_are_editable ... ok
+test ui_tests::loop_mode_click_selects_the_edge_loop ... ok
+test ui_tests::m_opens_the_material_editor_and_an_assigned_material_colours_the_viewport ... ok
+test ui_tests::material_editor_stays_open_across_a_map_pick_and_cancel ... ok
+test ui_tests::material_previews::cropping_8k_source_is_async_bounded_and_keeps_normalized_region_and_source ... ok
+test ui_tests::material_previews::editor_input_previews_share_quarter_viewport_budget_and_release_unused_paths ... ok
+test ui_tests::material_previews::material_sample_waits_for_actual_pixels_and_refreshes_after_completion ... ok
+test ui_tests::menus::at_sub_object_level_the_named_sets_field_names_and_lists_the_objects_sets ... ok
+test ui_tests::menus::box_keyboard_entry_has_length_width_and_height ... ok
+test ui_tests::menus::create_menu_shapes_and_compound_start_their_tools ... ok
+test ui_tests::menus::file_references_xref_objects_picks_from_the_list ... ok
+test ui_tests::menus::modifier_list_t_then_enter_adds_taper ... ok
+test ui_tests::menus::modifiers_menu_adds_modifiers_from_its_categories ... ok
+test ui_tests::menus::right_click_on_a_spinner_sets_it_to_zero ... ok
+test ui_tests::menus::right_click_on_a_spinner_with_a_minimum_sets_the_minimum_in_one_undo_step ... ok
+test ui_tests::menus::scale_flyout_chooses_uniform_non_uniform_or_squash ... ok
+test ui_tests::menus::the_scale_type_decides_what_an_axis_handle_drag_scales ... ok
+test ui_tests::menus::typing_a_name_in_the_named_selection_sets_field_makes_a_set ... ok
+test ui_tests::merge_lists_and_brings_in_max_objects ... ok
+test ui_tests::mesh_patch::an_editable_patch_draws_its_surface_and_picks_on_its_lattice ... ok
+test ui_tests::mesh_patch::edit_mesh_modifier_shows_the_editable_mesh_rollouts ... ok
+test ui_tests::mesh_patch::editable_mesh_rollouts_extrude_and_hide_edges ... ok
+test ui_tests::mesh_patch::quad_menu_converts_to_editable_mesh_and_polygon_picks_the_whole_side ... ok
+test ui_tests::mesh_patch::quad_patch_drags_out_and_patch_level_extrudes ... ok
+test ui_tests::middle_drag_pans_even_when_frames_come_slowly ... ok
+test ui_tests::modifier_stack_right_click_menus_close ... ok
+test ui_tests::modify_rollouts_edit_a_light ... ok
+test ui_tests::multi_sub_from_the_type_button_colours_faces_by_material_id ... ok
+test ui_tests::navigation_recovers_after_a_release_lost_to_focus_loss ... ok
+test ui_tests::obj_import_options_pick_the_objects ... ok
+test ui_tests::only_the_map_buttons_open_a_chooser_from_the_material_editor ... ok
+test ui_tests::orbit_mode_outside_the_trackball_rolls_the_view ... ok
+test ui_tests::paint_weights_stroke_brushes_the_current_bone_alt_erases_and_right_click_ends ... ok
+test ui_tests::pick_hinge_and_pick_bridge_edge_take_a_clicked_edge ... ok
+test ui_tests::playback_cache::batched_skin_display_matches_serial_evaluation_and_keeps_editing_cages ... ok
+test ui_tests::playback_cache::playback_advances_once_when_layout_repeats_the_same_input_frame ... ok
+test ui_tests::playback_cache::playback_reuses_static_editable_cages_and_invalidates_world_and_scene_changes ... ok
+test ui_tests::playback_cache::pose_submission_metrics_do_not_count_held_poses_as_new_animation_samples ... ok
+test ui_tests::playback_cache::rigid_bone_geometry_survives_pose_changes_but_tracks_animated_dimensions ... ok
+test ui_tests::pov_label_menu_runs_an_item_and_closes ... ok
+test ui_tests::precision::array_dialog_shows_equivalent_totals_previews_as_boxes_and_keeps_its_settings ... ok
+test ui_tests::precision::autogrid_with_alt_keeps_an_active_grid_on_the_surface ... ok
+test ui_tests::precision::clone_and_align_dialog_picks_destinations_previews_and_applies ... ok
+test ui_tests::precision::compass_drag_sets_its_radius ... ok
+test ui_tests::precision::grid_and_snap_settings_shows_the_override_marker_colour_and_user_grids ... ok
+test ui_tests::precision::grid_is_dragged_corner_to_corner_and_activated_from_the_quad_menu ... ok
+test ui_tests::precision::helpers_object_type_lists_the_standard_helpers ... ok
+test ui_tests::precision::measure_distance_from_the_tools_menu ... ok
+test ui_tests::precision::measure_utility_shows_the_name_lock_selected_and_a_floater ... ok
+test ui_tests::precision::objects_are_created_on_the_active_grid ... ok
+test ui_tests::precision::place_highlight_drag_moves_the_selection_onto_the_reflected_ray ... ok
+test ui_tests::precision::protractor_pick_object_buttons_pick_in_the_viewport ... ok
+test ui_tests::precision::snapshot_dialog_from_the_tools_menu_makes_range_copies ... ok
+test ui_tests::precision::spacing_tool_picks_a_path_and_uses_the_distribution_list ... ok
+test ui_tests::precision::tape_is_dragged_from_the_tape_to_its_target ... ok
+test ui_tests::preview_budget::actual_opacity_map_reaches_viewport_alpha_without_gamma_or_pending_hiding ... ok
+test ui_tests::preview_budget::material_variants_share_budget_and_hidden_bakes_are_evicted ... ok
+test ui_tests::qa::a_move_drag_released_in_the_same_frame_as_its_last_motion_keeps_that_motion ... ok
+test ui_tests::qa::angle_snap_rotates_in_whole_steps ... ok
+test ui_tests::qa::bevel_mode_drag_and_ctrl_alt_sub_clicks ... ok
+test ui_tests::qa::chamfer_mode_drag_on_an_edge_chamfers_it ... ok
+test ui_tests::qa::circular_region_selects_and_ctrl_region_adds ... ok
+test ui_tests::qa::command_panel_tabs_switch_on_click ... ok
+test ui_tests::qa::creating_by_drag_undoes_in_one_step ... ok
+test ui_tests::qa::ctrl_v_clone_dialog_ok_copies_in_place ... ok
+test ui_tests::qa::ctrl_z_after_a_click_restores_the_previous_selection ... ok
+test ui_tests::qa::delete_at_polygon_level_deletes_the_faces ... ok
+test ui_tests::qa::delete_key_removes_and_undo_restores ... ok
+test ui_tests::qa::display_toggle_keys ... ok
+test ui_tests::qa::every_menu_opens_and_escape_closes_it ... ok
+test ui_tests::qa::every_primitive_drag_creates_in_every_viewport ... ok
+test ui_tests::qa::extrude_button_then_drag_on_the_face_extrudes_it ... ok
+test ui_tests::qa::extrude_drag_starting_on_the_move_gizmo_makes_one_extrusion ... ok
+test ui_tests::qa::frozen_objects_cannot_be_clicked_and_hidden_ones_vanish ... ok
+test ui_tests::qa::grid_snap_moves_onto_grid_points ... ok
+test ui_tests::qa::hide_and_freeze_unselected ... ok
+test ui_tests::qa::hold_and_fetch_restore_the_scene ... ok
+test ui_tests::qa::instance_clone_follows_parameter_edits ... ok
+test ui_tests::qa::isolate_selection_and_exit ... ok
+test ui_tests::qa::local_coordinate_system_moves_along_the_rotated_axis ... ok
+test ui_tests::qa::menu_toggles_show_a_check_mark ... ok
+test ui_tests::qa::middle_drag_pans_alt_middle_orbits_and_wheel_zooms ... ok
+test ui_tests::qa::mirror_and_array_dialog_commands ... ok
+test ui_tests::qa::modifier_add_delete_and_collapse ... ok
+test ui_tests::qa::modifier_reorder_and_delete_with_undo ... ok
+test ui_tests::qa::modifier_stack_drag_reorders_and_trash_removes ... ok
+test ui_tests::qa::modify_spinner_drag_is_one_undo_step ... ok
+test ui_tests::qa::move_tool_drag_on_a_polygon_moves_it ... ok
+test ui_tests::qa::move_tool_drag_on_an_unselected_object_selects_and_moves_it ... ok
+test ui_tests::qa::moving_a_parent_carries_its_child_and_group_selects_as_one ... ok
+test ui_tests::qa::moving_with_x_constraint_moves_only_along_x_and_undoes ... ok
+test ui_tests::qa::navigation_buttons_zoom_pan_orbit_and_right_click_leaves_them ... ok
+test ui_tests::qa::preferences_and_other_dialogs_open_and_close ... ok
+test ui_tests::qa::region_drag_crossing_and_window ... ok
+test ui_tests::qa::right_click_during_a_move_drag_cancels_it ... ok
+test ui_tests::qa::ring_loop_and_connect_buttons_on_edges ... ok
+test ui_tests::qa::rotate_and_scale_drags_change_the_object_and_undo_in_one_step ... ok
+test ui_tests::qa::save_new_open_export_import_merge_round_trip ... ok
+test ui_tests::qa::select_by_name_click_picks_one_and_double_click_selects_and_closes ... ok
+test ui_tests::qa::select_by_name_opens_with_the_selection_and_select_all_skips_unlisted_objects ... ok
+test ui_tests::qa::selection_center_rotates_two_objects_about_their_middle ... ok
+test ui_tests::qa::selection_changes_undo_and_ctrl_a_d_i ... ok
+test ui_tests::qa::shift_drag_clones_through_the_clone_options_dialog ... ok
+test ui_tests::qa::slash_plays_and_stops_the_animation ... ok
+test ui_tests::qa::space_locks_the_selection_against_clicks ... ok
+test ui_tests::qa::status_bar_type_in_moves_the_selection ... ok
+test ui_tests::qa::the_command_panel_keeps_its_width_across_tabs_and_poly_levels ... ok
+test ui_tests::qa::time_slider_keys_and_set_frame ... ok
+test ui_tests::qa::view_keys_switch_the_active_viewport ... ok
+test ui_tests::quad_menu_closes_on_an_item_a_click_anywhere_and_escape_and_reopens_on_a_new_right_click ... ok
+test ui_tests::realistic_shading_from_the_label_menu_runs_without_a_gpu ... ok
+test ui_tests::refine_with_connect_by_clicks_and_right_click_ends_it ... ok
+test ui_tests::region_selection_uses_the_drawn_geometry_not_the_bounding_box ... ok
+test ui_tests::render_setup_dialog_sets_the_output_size_and_renderer ... ok
+test ui_tests::ribbon::a_minimized_panel_opens_under_its_title ... ok
+test ui_tests::ribbon::branches_shift_drag_grows_a_branch_from_the_selected_polygon ... ok
+test ui_tests::ribbon::ctrl_click_on_a_level_converts_the_selection ... ok
+test ui_tests::ribbon::edit_panel_swift_loop_loop_mode_and_constraints ... ok
+test ui_tests::ribbon::modify_mode_previous_modifier_and_show_end_result ... ok
+test ui_tests::ribbon::selection_tab_by_half_selects_and_inverts ... ok
+test ui_tests::ribbon::shift_click_opens_settings_and_ctrl_click_remove_takes_the_vertices ... ok
+test ui_tests::ribbon::soft_selection_and_use_nurms_open_their_panels ... ok
+test ui_tests::ribbon::the_level_panel_follows_the_sub_object_level ... ok
+test ui_tests::ribbon::the_ribbon_starts_minimized_to_panel_titles_and_the_button_cycles_to_full ... ok
+test ui_tests::ribbon::without_a_poly_object_the_ribbon_tools_are_inactive ... ok
+test ui_tests::right_click_or_the_select_tool_ends_the_create_mode ... ok
+test ui_tests::save_image_writes_the_picture_through_the_file_dialog ... ok
+test ui_tests::scene::attach_list_has_a_scene_root_row_and_select_all_attaches_only_listed_objects ... ok
+test ui_tests::scene::display_children_shows_the_hierarchy_and_expand_all_opens_it ... ok
+test ui_tests::scene::display_properties_apply_to_every_selected_object ... ok
+test ui_tests::scene::double_clicking_a_name_selects_it_and_closes ... ok
+test ui_tests::scene::group_asks_for_the_group_name ... ok
+test ui_tests::scene::h_in_select_and_link_is_select_parent_and_links_the_selection ... ok
+test ui_tests::scene::layer_manager_render_colour_hide_all_and_the_object_list ... ok
+test ui_tests::scene::layers_toolbar_sets_the_current_layer_and_adds_the_selection ... ok
+test ui_tests::scene::merge_starts_with_nothing_highlighted_and_asks_about_duplicate_names ... ok
+test ui_tests::scene::new_on_a_scene_with_objects_asks_what_to_keep ... ok
+test ui_tests::scene::object_properties_by_layer_buttons_and_layer_properties ... ok
+test ui_tests::scene::reset_asks_do_you_really_want_to_reset ... ok
+test ui_tests::scene::select_and_link_drags_from_the_child_to_the_parent ... ok
+test ui_tests::scene::select_from_scene_does_not_list_hidden_or_frozen_objects ... ok
+test ui_tests::scene::select_from_scene_highlights_the_selection_click_replaces_ctrl_adds_and_select_applies ... ok
+test ui_tests::scene::select_from_scene_starts_with_the_selection_and_ctrl_click_removes_from_it ... ok
+test ui_tests::scene::summary_info_shows_totals_and_keeps_the_description ... ok
+test ui_tests::settings_are_written_on_change_and_read_at_the_next_start ... ok
+test ui_tests::shift_and_ctrl_drag_in_the_stack_copy_and_instance_a_modifier ... ok
+test ui_tests::shift_lines_a_new_line_knot_up_with_the_last ... ok
+test ui_tests::shift_q_opens_the_rendered_frame_window ... ok
+test ui_tests::show_end_result_starts_off_and_only_the_edited_object_shows_up_to_its_active_entry ... ok
+test ui_tests::skin2::absolute_relative_buttons_and_paste_to_multiple_bones ... ok
+test ui_tests::skin2::add_cross_section_by_clicking_the_bone_then_drag_its_ring_and_an_end_point ... ok
+test ui_tests::skin2::advanced_display_and_mirror_controls_set_the_skin ... ok
+test ui_tests::skin2::gizmos_rollout_adds_deformers_and_edit_lattice_picks_and_curves_edit ... ok
+test ui_tests::skin2::load_envelopes_dialog_lines_up_by_name_and_loads ... ok
+test ui_tests::skin2::painter_options_pressure_and_the_falloff_graph ... ok
+test ui_tests::skin2::weight_table_exclusions_flip_ui_vertex_sets_and_highlight ... ok
+test ui_tests::skin_backface_cull_vertices_skips_vertices_facing_away ... ok
+test ui_tests::skin_display_workers_preserve_serial_geometry_and_sources ... ok
+test ui_tests::skin_select_vertices_click_ctrl_click_and_an_empty_click_clears ... ok
+test ui_tests::skin_wrap::skin_morph_bone_list_points_clicks_and_edit_with_the_move_gizmo ... ok
+test ui_tests::skin_wrap::skin_morph_pick_bone_custom_falloff_graph_and_soft_selection_graph ... ok
+test ui_tests::skin_wrap::skin_wrap_add_by_picking_control_vertices_locals_display_and_bake ... ok
+test ui_tests::skin_wrap::skin_wrap_patch_picks_a_patch_and_resamples ... ok
+test ui_tests::slow_frames_drag_create_a_box ... ok
+test ui_tests::slow_frames_extrude_drag_extrudes ... ok
+test ui_tests::slow_frames_lasso_region_selects ... ok
+test ui_tests::slow_frames_line_drag_shapes_the_knot ... ok
+test ui_tests::slow_frames_move_gizmo_drag_moves_the_object ... ok
+test ui_tests::slow_frames_paint_stroke_paints_along_the_drag ... ok
+test ui_tests::smooth_modifier_has_32_smoothing_group_buttons ... ok
+test ui_tests::square_plane_and_centre_pyramid_creation_methods ... ok
+test ui_tests::status_bar_flyouts_close ... ok
+test ui_tests::swift_loop_click_inserts_a_loop ... ok
+test ui_tests::the_lights_category_buttons_start_light_creation ... ok
+test ui_tests::the_object_type_pin_toggles_keep_creating_in_every_category ... ok
+test ui_tests::the_pixel_under_the_pointer_is_read_out ... ok
+test ui_tests::time_slider_right_click_menu_closes ... ok
+test ui_tests::touchpad::alt_two_finger_orbit_preserves_distance_and_fixed_axis_views_become_free ... ok
+test ui_tests::touchpad::automatic_mouse_wheel_and_page_scroll_preserve_the_legacy_zoom_factor ... ok
+test ui_tests::touchpad::both_pan_axes_work_in_orthographic_and_perspective_views ... ok
+test ui_tests::touchpad::disabled_views_and_zero_orbit_events_do_not_navigate ... ok
+test ui_tests::touchpad::explicit_device_modes_cover_x11_and_precision_mice_and_roundtrip_locally ... ok
+test ui_tests::touchpad::modifier_zoom_uses_each_raw_event_once_without_panning ... ok
+test ui_tests::touchpad::native_input_protocol_delivers_pixel_scroll_and_pinch_and_rejects_bad_factors ... ok
+test ui_tests::touchpad::native_pinch_zooms_once_and_does_not_repeat_on_later_frames ... ok
+test ui_tests::touchpad::pinch_over_a_side_panel_does_not_change_the_scene_view ... ok
+test ui_tests::touchpad::preferences_exposes_the_persistent_navigation_device_choice ... ok
+test ui_tests::touchpad::scene_camera_pan_changes_the_node_and_undo_restores_it ... ok
+test ui_tests::touchpad::scene_camera_pinch_and_orbit_have_atomic_undo_in_camera_modes ... ok
+test ui_tests::touchpad::shift_two_finger_scroll_is_horizontal_like_the_native_input_convention ... ok
+test ui_tests::touchpad::two_finger_pan_changes_only_the_hovered_viewport_without_zooming ... ok
+test ui_tests::touchpad::wheel_before_pinch_keeps_event_order_at_the_zoom_limit ... ok
+test ui_tests::track_view_right_click_menu_closes ... ok
+test ui_tests::transforms::ctrl_click_toggles_a_polygon ... ok
+test ui_tests::transforms::ctrl_click_toggles_an_object_in_the_selection ... ok
+test ui_tests::transforms::hierarchy_pivot_buttons_follow_the_affect_mode ... ok
+test ui_tests::transforms::pick_in_the_coordinate_list_takes_the_clicked_object ... ok
+test ui_tests::transforms::working_pivot_buttons_and_viewport_legend ... ok
+test ui_tests::ui_hit_names_the_viewport_and_panel_under_a_point ... ok
+test ui_tests::uv_editor_right_click_menu_stays_open_and_closes ... ok
+test ui_tests::vertex_paint_dialog_face_selection_paint_all_new_layer_and_eyedropper ... ok
+test ui_tests::viewcube_corner_click_gives_the_three_quarter_view_and_a_current_face_keeps_its_view ... ok
+test ui_tests::viewcube_menu_sets_the_home_view_and_alt_ctrl_v_hides_the_cube ... ok
+test ui_tests::viewcube_triangles_go_to_the_adjacent_face_and_the_arrows_roll ... ok
+test ui_tests::viewport_background_dialog_sets_aspect_and_picks_the_viewport ... ok
+test ui_tests::viewport_navigation_orbits_pans_and_zooms ... ok
+test ui_tests::weight_table_cells_edit_by_right_click_and_drag_and_ids_select ... ok
+test ui_tests::weight_tool_preset_buttons_set_the_current_bone_on_the_selection ... ok
+test ui_tests::wheel_zooms_and_middle_drag_pans_the_image ... ok
+test ui_tests::widgets::a_quadrant_title_repeats_its_last_command ... ok
+test ui_tests::widgets::alt_right_click_quad_sets_the_reference_coordinate_system ... ok
+test ui_tests::widgets::ctrl_alt_right_click_opens_the_render_quad ... ok
+test ui_tests::widgets::ctrl_drag_on_a_spinner_is_faster_and_alt_drag_slower ... ok
+test ui_tests::widgets::edit_menu_select_by_color_region_and_instances ... ok
+test ui_tests::widgets::menu_bar_menus_are_in_the_reference_order ... ok
+test ui_tests::widgets::right_click_on_a_time_control_opens_time_configuration ... ok
+test ui_tests::widgets::right_click_on_spinner_snap_opens_preferences ... ok
+test ui_tests::widgets::right_click_on_the_time_slider_opens_create_key ... ok
+test ui_tests::widgets::the_move_settings_icon_opens_transform_type_in ... ok
+test ui_tests::widgets::the_track_bar_opens_and_closes_the_mini_curve_editor ... ok
+test ui_tests::widgets::tools_menu_align_holds_the_spacing_tool_and_grids_snaps_use_axis_constraints ... ok
+test ui_tests::widgets::views_menu_toggles_the_transform_gizmo ... ok
+test update_menu::tests::the_dot_shows_only_with_news ... ok
+test viewport_gizmo::tests::corner_spot_looks_down_its_diagonal ... ok
+test viewport_gizmo::tests::cube_follows_the_viewport_projection ... ok
+test viewport_gizmo::tests::cube_shows_only_in_active_non_camera_views ... ok
+test viewport_gizmo::tests::face_view_has_roll_arrows_and_adjacent_triangles ... ok
+test viewport_gizmo::tests::home_view_hits_faces_edges_and_the_near_corner ... ok
+test viewport_gizmo::tests::home_view_shows_top_left_front ... ok
+test viewport_gizmo::tests::roll_for_keeps_the_given_up ... ok
+test viewport_gizmo::tests::top_face_is_drawn_above_the_cube_centre ... ok
+test viewport_widget::tests::cpu_edge_batch_is_enabled_by_default ... ok
+test viewport_widget::tests::face_buffers_follow_all_visible_viewports_and_shaded_selection ... ok
+test viewport_widget::tests::gpu_edge_callback_keeps_current_pose_and_withdraws_stale_sources ... ok
+test viewport_widget::tests::limb_outline_selects_existing_control_through_skin_but_not_material_target ... ok
+test viewport_widget::tests::limb_overlay_camera_plane_clipped_side_interior_is_pickable ... ok
+test viewport_widget::tests::limb_overlay_camera_plane_edge_and_helper_visibility_share_pick_rules ... ok
+test viewport_widget::tests::limb_overlay_interior_is_pickable_where_on_top_outline_is_drawn ... ok
+test viewport_widget::tests::limb_region_selection_uses_the_displayed_shaft_and_window_union ... ok
+test viewport_widget::tests::point_segment_distance_hits_segment_body ... ok
+test viewport_widget::tests::ray_triangle_hits_front_face ... ok
+test viewport_widget::tests::switching_to_shaded_without_scene_changes_restores_gpu_faces ... ok
+test viewport_widget::tests::visible_bone_axis_can_be_selected_through_skin ... ok
+
+test result: ok. 447 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 127.81s
+

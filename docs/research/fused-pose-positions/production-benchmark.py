@@ -66,6 +66,7 @@ original_shading = initial['viewports']['active_view']['shading']
 original_selection = before['selection']
 emit({'kind': 'start', 'pid': pid, 'commit': ping['commit'], 'mode': expected_mode, 'parallel_preparation': expected_parallel,
       'experimental_overrides_unset': not any(e.startswith(b'LOOM_EXPERIMENTAL_') for e in env),
+      'rate_clocks': ['client_ipc_wall_seconds', 'app_distinct_submission_seconds'],
       'frame': before['frame'], 'scene_sha256': scene_hash})
 try:
     for shading in ['Realistic', 'Wireframe']:
@@ -74,6 +75,7 @@ try:
         call('Play Animation')
         time.sleep(8)
         rates = []
+        event_rates = []
         for index in range(24):
             a = diag()['playback']
             t0 = time.perf_counter()
@@ -86,15 +88,23 @@ try:
             start, end = a['submitted_pose_time'], b['submitted_pose_time']
             active = 0 <= start < end < 149
             rate = count / elapsed
+            assert a.get('submitted_distinct_seconds') is not None and b.get('submitted_distinct_seconds') is not None, 'Requires the submission-event clock verification build'
+            event_elapsed = b['submitted_distinct_seconds'] - a['submitted_distinct_seconds']
+            assert event_elapsed > 0, 'Ready submission clock did not advance'
+            event_rate = count / event_elapsed
             if active:
                 rates.append((count, elapsed))
+                event_rates.append((count, event_elapsed))
             emit({'kind': 'sample', 'shading': shading, 'sample': index,
                   'ready_pose_times': count, 'seconds': elapsed, 'fps': rate,
+                  'event_seconds': event_elapsed, 'event_fps': event_rate,
                   'start_time': start, 'end_time': end, 'active_clip_window': active})
         assert len(rates) >= 12, 'Not enough moving-clip windows'
         emit({'kind': 'summary', 'shading': shading, 'active_windows': len(rates),
               'active_ready_pose_fps': sum(n for n, _ in rates) / sum(t for _, t in rates),
-              'min_active_window_fps': min(n/t for n, t in rates)})
+              'min_active_window_fps': min(n/t for n, t in rates),
+              'active_event_ready_pose_fps': sum(n for n, _ in event_rates) / sum(t for _, t in event_rates),
+              'min_active_event_window_fps': min(n/t for n, t in event_rates)})
         call('Play Animation')
 finally:
     current = call('State')

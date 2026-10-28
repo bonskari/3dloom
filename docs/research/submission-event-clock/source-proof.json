@@ -1,0 +1,8 @@
+{
+  "files": {
+    "crates/loom_ui/src/live.rs": "94d8ca51810727c915fb4d8547b2f240251e5ee7d7aea151b0595942a2985e79",
+    "docs/research/fused-pose-positions/production-benchmark.py": "48701e4b0737ac076d5d641f5bec8efb7427d0633d285d2ecc70fc457b4aab1a"
+  },
+  "native_clock_comparison": "pending",
+  "pose_count_and_ready_geometry_gates_unchanged": true
+}
