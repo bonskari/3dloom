@@ -2,6 +2,7 @@
 
 pub mod camera;
 pub mod grid;
+pub mod gpu_edges;
 pub mod mesh_buffer;
 pub mod pick;
 pub mod profile;
