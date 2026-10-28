@@ -1,0 +1,25 @@
+{
+  "source_scene_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "files": {
+    "crates/loom_scene/src/skin_batch.rs": "2e8dd8125ca3886084023d13809eb5cd5313d1202c834c9239c22cc23fd70cac",
+    "crates/loom_scene/src/skin_batch_tests.rs": "2acb605bddac83336572a718f038369a1eeae3cfc4f6315cd3ae49472802b805",
+    "docs/research/parallel-skin-input/baseline.rs": "fcfdc84c6afeb6459840e64d4e5ada2cb9233e1c1e533a90054e358ab382ff3b",
+    "docs/research/parallel-skin-input/probe.rs": "67f0cd46153376b91e0f4d8d7870b408a9283bd7a4355bc0561536938095d075",
+    "docs/research/parallel-skin-input/compile_probe.py": "843b27f18d05eba5a214a1962a81900c1a8ecbcb7c46b5a2690bfb04e5d2dc4d"
+  },
+  "actual_poses": 317,
+  "actual_skin_outputs": 1585,
+  "full_mesh_metadata_and_vertex_map_bits_equal": true,
+  "all_source_cages_and_modifier_bytes_unchanged": true,
+  "baseline_ms": 3.3214,
+  "candidate_ms": 2.377052,
+  "native_acceptance": "pending",
+  "tests": {
+    "scene_passed": 115,
+    "scene_ignored": 1,
+    "ui_passed": 446,
+    "ui_ignored": 2,
+    "bevy_passed": 89,
+    "bevy_ignored": 38
+  }
+}

@@ -1,0 +1,208 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.19s
+     Running unittests src/lib.rs (target/debug/deps/loom_scene-d1742087114ff936)
+
+running 50 tests
+test camera::tests::default_lens_matches_default_fov ... ok
+test camera::tests::diagonal_and_vertical_fov_follow_the_render_aspect ... ok
+test camera::tests::frame_spans_the_fov_in_front_of_the_camera ... ok
+test light::tests::decay_and_attenuation_match_the_reference_formulas ... ok
+test light::tests::exclusion_scopes ... ok
+test light::tests::falloff_follows_hotspot_and_keeps_its_gap ... ok
+test caches9::tests::a_failed_read_is_not_kept ... ok
+test light::tests::kelvin_colours_run_from_warm_to_white ... ok
+test light::tests::photometric_intensity_units_convert_through_candela ... ok
+test light::tests::spot_cone_is_full_inside_the_hotspot_and_dark_outside_the_falloff ... ok
+test maps::tests::bump_heights_tilt_the_normals ... ok
+test camera::tests::icon_lies_behind_the_eye_and_is_closed_where_drawn ... ok
+test maps::tests::checker_gradient_noise_and_mix ... ok
+test maps::tests::bitmap_crop_and_place ... ok
+test maps::tests::decal_and_mirror ... ok
+test material::tests::coordinates_offset_tile_and_rotate ... ok
+test material::tests::a_shell_shows_its_viewport_or_render_choice ... ok
+test material::tests::blend_mixes_by_amount_and_a_mask_goes_through_a_mix_map ... ok
+test scene::skin_batch::tests::actual_all_159_skin_poses_match_serial_full_stack ... ignored, requires LOOM_PERF_SCENE real saved scene
+test material::tests::levels_resolve_through_sub_materials_and_maps ... ok
+test material::tests::multi_sub_resolves_per_face_id_and_missing_ids_are_black ... ok
+test modifier::modifier_list_tests::every_modifier_is_in_or_out ... ok
+test scene::tests::next_name_follows_numbering_convention ... ok
+test scene::skin_batch::tests::geometry_attachment_constraints_keep_serial_cycle_guards ... ok
+test scene::tests::add_node_assigns_increasing_ids_never_reused ... ok
+test light::tests::icons_are_closed_meshes_around_the_pivot ... ok
+test scene::tests::parametric_box_mesh_matches_primitive ... ok
+test sun::tests::dates ... ok
+test scene::tests::transform_matrix_roundtrip ... ok
+test sun::tests::morning_sun_rises_in_the_east_and_night_is_below_the_horizon ... ok
+test scene::tests::set_parent_keeps_world_transform ... ok
+test scene::skin_batch::tests::static_skin_keeps_timeless_cache_and_instanced_slots_use_serial ... ok
+test undo::tests::commit_then_undo_restores_scene ... ok
+test undo::tests::redo_reapplies_and_new_commit_clears_redo ... ok
+test undo::tests::limit_drops_oldest ... ok
+test scene::tests::remove_parent_keeps_children_world_transform ... ok
+test undo::tests::nested_begin_joins_the_outer_transaction ... ok
+test undo::tests::remove_node_inverse_restores_children ... ok
+test sun::tests::noon_sun_is_south_and_high_in_june_in_san_francisco ... ok
+test undo::tests::set_transform_undo_restores_position ... ok
+test skin::scratch_weight_tests::owned_skin_application_keeps_input_mesh_allocation_and_reference_output ... ok
+test undo::tests::entry_identity_survives_redo_but_never_branches_resets_or_eviction ... ok
+test skin::scratch_weight_tests::explicit_weights_reuse_scratch_capacity_and_strongest_keeps_last_tie ... ok
+test undo::tests::failed_group_leaves_scene_unchanged ... ok
+test scene::skin_batch::tests::batch_render_mode_and_changed_time_use_ordinary_cache_rules ... ok
+test scene::skin_batch::tests::editable_mesh_input_does_not_apply_poly_subdivision_settings ... ok
+test undo::tests::transaction_collapses_drag_steps_into_one_and_ignores_limit ... ok
+test scene::skin_batch::tests::base_output_runs_in_executor_and_propagates_animated_reads ... ok
+test scene::skin_batch::tests::batch_jobs_preserve_full_output_cache_edits_and_worker_tls ... ok
+test skin::scratch_weight_tests::scratch_weights_match_public_reference_for_limits_flags_and_patch_owners ... ok
+
+test result: ok. 49 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/anim.rs (target/debug/deps/anim-68b46653d556190f)
+
+running 8 tests
+test auto_key_creates_keys_and_off_offsets ... ok
+test bezier_auto_passes_through_keys_and_is_smooth ... ok
+test list_sums_weighted_controllers ... ok
+test noise_is_deterministic_and_bounded ... ok
+test step_and_linear_tangents ... ok
+test out_of_range_types_extend_the_curve ... ok
+test tcb_passes_through_keys ... ok
+test old_constant_params_deserialise ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bones.rs (target/debug/deps/bones-78604daf4e2f54a2)
+
+running 2 tests
+test helpers_are_helpers_with_their_sizes ... ok
+test bone_mesh_points_along_x_and_tapers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ik.rs (target/debug/deps/ik-2bd852efce3f9ff9)
+
+running 7 tests
+test hi_solver_reaches_a_goal_in_range ... ok
+test limb_at_fk_endpoint_keeps_twist_and_every_local_rotation ... ok
+test limb_solver_is_exact_and_bends_in_the_swivel_plane ... ok
+test limb_uses_the_existing_bend_side_when_goal_moves ... ok
+test malformed_legacy_limb_keeps_fk_without_panicking ... ok
+test spline_ik_lays_bones_along_the_shape ... ok
+test hi_solver_reaches_toward_an_unreachable_goal ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/loomrig.rs (target/debug/deps/loomrig-ad9101abbf308cc3)
+
+running 4 tests
+test characterization_checks_hierarchy_instead_of_accepting_unrelated_named_bones ... ok
+test characterization_requires_real_mapped_bones ... ok
+test edit_revision_changes_on_edit_but_not_playback ... ok
+test control_offsets_drive_existing_bone_without_editing_transform ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/maps_preview_limits.rs (target/debug/deps/maps_preview_limits-e3c37675d3638f8a)
+
+running 4 tests
+test zero_preview_budget_produces_no_bitmap_or_procedural_output ... ok
+test nested_procedural_map_obeys_preview_limit ... ok
+test placed_image_is_baked_within_preview_limit_before_allocation ... ok
+test legacy_bake_matches_its_original_limit ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/morph.rs (target/debug/deps/morph-322ab7fdd045be0b)
+
+running 3 tests
+test morpher_blends_progressive_targets_by_value ... ok
+test morpher_skips_a_target_with_a_different_vertex_count ... ok
+test skin_morph_fires_at_the_bone_angle ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin.rs (target/debug/deps/skin-a96714d7b1f03526)
+
+running 3 tests
+test envelope_weights_fall_off_between_inner_and_outer ... ok
+test skin_follows_a_bone_move_without_editing_the_node ... ok
+test skin_keeps_weights_by_vertex_when_faces_are_deleted_below ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_envelopes.rs (target/debug/deps/skin_envelopes-959c3ad07f4ac1b3)
+
+running 11 tests
+test a_relative_envelope_keeps_partial_weight_and_the_rest_stays_put ... ok
+test animatable_envelope_radii_key_and_play_back ... ok
+test cross_sections_shape_the_radius_along_the_envelope ... ok
+test rigid_vertices_all_follow_the_strongest_bone_only ... ok
+test always_deform_off_leaves_the_mesh_undeformed ... ok
+test a_spline_bone_gets_an_envelope_along_its_curve_and_a_box_along_its_longest_side ... ok
+test a_relative_vertex_moves_part_of_the_way_with_its_bone ... ok
+test back_transform_vertices_off_moves_a_linked_mesh_twice ... ok
+test fast_updates_preview_rigidly_but_render_in_full ... ok
+test ignore_bone_scale_and_squash ... ok
+test skin_on_a_patch_moves_the_lattice_and_rigid_handles_follow_one_bone ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_gizmos.rs (target/debug/deps/skin_gizmos-998912511ea4b4cb)
+
+running 3 tests
+test mirror_pastes_weights_across_the_plane ... ok
+test bulge_angle_gizmo_scales_the_joint_at_its_key_angle ... ok
+test joint_angle_gizmo_adds_its_deltas_at_the_key ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_morph.rs (target/debug/deps/skin_morph-910050abb5887e9b)
+
+running 5 tests
+test soft_selection_weights_fall_off_within_the_radius_and_the_edge_limit ... ok
+test an_old_morph_without_a_pose_still_uses_its_angle ... ok
+test custom_falloff_follows_the_graph_and_edit_mode_holds_the_morph_full ... ok
+test ball_joints_track_twist_and_planar_joints_only_the_parent_plane ... ok
+test the_morph_fades_out_at_half_the_influence_angle ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_wrap.rs (target/debug/deps/skin_wrap-666586e892c517b1)
+
+running 8 tests
+test skin_wrap_defaults_follow_the_reference ... ok
+test face_engine_is_rigid_at_the_lowest_falloff ... ok
+test face_limit_counts_faces_from_the_closest_face ... ok
+test local_strength_scales_and_flips_the_pull ... ok
+test local_scale_and_axes_shape_the_volume_of_influence ... ok
+test distance_influence_is_a_radius_of_average_edge_lengths ... ok
+test skin_wrap_follows_the_deformed_base ... ok
+test blend_to_base_mesh_weakens_points_far_from_the_control_faces ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_wrap_patch.rs (target/debug/deps/skin_wrap_patch-2fb4377d25af1431)
+
+running 2 tests
+test a_changed_patch_topology_warns_until_resampled ... ok
+test a_patch_object_deforms_the_wrapped_mesh ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/standard_primitives.rs (target/debug/deps/standard_primitives-ecf3b86130adaa35)
+
+running 6 tests
+test documented_defaults ... ok
+test geosphere_base_type_is_a_choice_segments_cap_at_200_and_base_to_pivot_lifts ... ok
+test torus_smooth_is_all_sides_none_segments_with_all_the_default ... ok
+test cone_cylinder_and_tube_take_a_negative_height ... ok
+test sphere_has_chop_squash_slice_and_base_to_pivot ... ok
+test round_primitives_have_smooth_on_by_default_and_off_facets_them ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+   Doc-tests loom_scene
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

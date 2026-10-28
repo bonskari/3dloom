@@ -57,6 +57,51 @@ fn parallel(jobs: Vec<SkinEvaluationJob<'_>>) -> Vec<SkinEvaluationResult> {
 }
 
 #[test]
+fn base_output_runs_in_executor_and_propagates_animated_reads() {
+    let (mut scene, skin, bone) = fixture();
+    scene.transform_mut(bone).unwrap().transform = crate::Transform::default();
+    let ObjectKind::EditablePoly(poly) = &mut scene.node_mut(skin).unwrap().object else { unreachable!() };
+    anim::with(0.0, true, || poly.subdiv.use_nurms.set(false));
+    anim::with(10.0, true, || poly.subdiv.use_nurms.set(true));
+    let serial = scene.clone();
+    let source = serde_json::to_vec(&scene).unwrap();
+    for frame in [0.0, 10.0, 3.25, 10.0, 0.0] {
+        scene.set_time(frame);
+        serial.set_time(frame);
+        let expected = serial.evaluated(skin, None);
+        let reads = anim::animated_reads();
+        let actual = scene.evaluated_batch(&[skin], |jobs| {
+            assert_eq!(anim::animated_reads(), reads, "base object evaluated before the executor");
+            assert_eq!(jobs.len(), 1, "animated base output reused at another time");
+            parallel(jobs)
+        });
+        compare(&actual[0], &expected);
+        assert!(anim::animated_reads() > reads, "worker's animated base read was not published");
+        let cached = scene.evaluated_batch(&[skin], |jobs| { assert!(jobs.is_empty()); vec![] });
+        assert!(Arc::ptr_eq(&actual[0], &cached[0]));
+    }
+    assert_eq!(serde_json::to_vec(&scene).unwrap(), source);
+}
+
+#[test]
+fn editable_mesh_input_does_not_apply_poly_subdivision_settings() {
+    let (mut scene, skin, _) = fixture();
+    let node = scene.node_mut(skin).unwrap();
+    let ObjectKind::EditablePoly(mut poly) = node.object.clone() else { unreachable!() };
+    poly.subdiv.use_nurms.set(true);
+    let count = poly.mesh.vertex_count();
+    node.object = ObjectKind::EditableMesh(poly);
+    let serial = scene.clone();
+    for frame in [0.0, 3.25, 10.0, 0.0] {
+        scene.set_time(frame);
+        serial.set_time(frame);
+        let actual = scene.evaluated_batch(&[skin], parallel);
+        compare(&actual[0], &serial.evaluated(skin, None));
+        assert_eq!(actual[0].value.mesh.vertex_count(), count);
+    }
+}
+
+#[test]
 fn batch_jobs_preserve_full_output_cache_edits_and_worker_tls() {
     let (mut scene, skin, bone) = fixture();
     for step in 0..7 {

@@ -1,0 +1,7 @@
+
+running 1 test
+PAIRED poses=317 skins=5 baseline_ms=3.321400 candidate_ms=2.377052 baseline_prepare_ms=1.308302 candidate_prepare_ms=0.851801
+test scene::parallel_skin_input_probe::actual_parallel_skin_input_317 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 6.21s
+

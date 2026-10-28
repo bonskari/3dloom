@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 /// An independent Skin evaluation prepared by [`Scene::evaluated_batch`].
-/// Run it on the caller's bounded worker pool; it never borrows the scene.
+/// Run it on the caller's bounded worker pool; only immutable source data is shared.
 pub struct SkinEvaluationJob<'a> {
     id: NodeId,
     key: u64,
@@ -14,7 +14,8 @@ pub struct SkinEvaluationJob<'a> {
     rendering: bool,
     animated: bool,
     data: &'a SkinData,
-    value: StackValue,
+    source: &'a crate::PolyObject,
+    is_poly: bool,
     object_world: Mat4,
     worlds: Arc<HashMap<NodeId, (Mat4, bool, bool)>>,
 }
@@ -36,8 +37,13 @@ impl SkinEvaluationJob<'_> {
             let lookup = |id| self.worlds.get(&id).map(|v| v.0);
             let squash = |id| self.worlds.get(&id).is_some_and(|v| v.1);
             let ctx = crate::EvalCtx { object_world: self.object_world, object_inverse: self.object_world.inverse(), world_lookup: Some(&lookup), bone_squashes: Some(&squash), ..Default::default() };
-            let counts = (self.value.mesh.vertex_count(), self.value.mesh.face_count());
-            let mut value = crate::skin::apply_owned(self.data, self.value, &ctx);
+            let value = StackValue {
+                mesh: if self.is_poly { self.source.display_mesh().into_owned() } else { self.source.mesh.clone() },
+                selection: self.source.passes_up.clone(),
+                shape: None, shape_selection: None, warnings: Vec::new(), patch: None, patch_steps: None,
+            };
+            let counts = (value.mesh.vertex_count(), value.mesh.face_count());
+            let mut value = crate::skin::apply_owned(self.data, value, &ctx);
             let mut warnings = Vec::new();
             finish_modifier_value(&mut value, &mut warnings, false, true, counts);
             Arc::new(Evaluated { value, warnings })
@@ -96,13 +102,13 @@ impl Scene {
         let jobs = eligible.into_iter().map(|(id, key, node, data)| {
             let reads = anim::animated_reads();
             let object_world = self.object_matrix(id);
-            let value = StackValue {
-                mesh: node.object.display_output(),
-                selection: match &node.object { ObjectKind::EditablePoly(p) | ObjectKind::EditableMesh(p) => p.passes_up.clone(), _ => None },
-                shape: None, shape_selection: None, warnings: Vec::new(), patch: None, patch_steps: None,
-            };
             let animated = reads != anim::animated_reads() || data.bones.iter().any(|b| worlds.get(&b.node).is_some_and(|v| v.2));
-            SkinEvaluationJob { id, key, time, rendering, animated, data, value, object_world, worlds: worlds.clone() }
+            let (source, is_poly) = match &node.object {
+                ObjectKind::EditablePoly(p) => (p, true),
+                ObjectKind::EditableMesh(p) => (p, false),
+                _ => unreachable!("eligible mesh object"),
+            };
+            SkinEvaluationJob { id, key, time, rendering, animated, data, source, is_poly, object_world, worlds: worlds.clone() }
         }).collect();
         let results = execute(jobs);
         self.sync_time();

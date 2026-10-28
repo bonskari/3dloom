@@ -1,0 +1,92 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.61s
+     Running unittests src/lib.rs (target/debug/deps/loom_scene-d1742087114ff936)
+
+running 6 tests
+test scene::skin_batch::tests::actual_all_159_skin_poses_match_serial_full_stack ... ignored, requires LOOM_PERF_SCENE real saved scene
+test scene::skin_batch::tests::geometry_attachment_constraints_keep_serial_cycle_guards ... ok
+test scene::skin_batch::tests::static_skin_keeps_timeless_cache_and_instanced_slots_use_serial ... ok
+test scene::skin_batch::tests::batch_render_mode_and_changed_time_use_ordinary_cache_rules ... ok
+test scene::skin_batch::tests::base_output_runs_in_executor_and_propagates_animated_reads ... ok
+test scene::skin_batch::tests::batch_jobs_preserve_full_output_cache_edits_and_worker_tls ... ok
+
+test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 43 filtered out; finished in 0.01s
+
+     Running tests/anim.rs (target/debug/deps/anim-68b46653d556190f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/bones.rs (target/debug/deps/bones-78604daf4e2f54a2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/ik.rs (target/debug/deps/ik-2bd852efce3f9ff9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/loomrig.rs (target/debug/deps/loomrig-ad9101abbf308cc3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/maps_preview_limits.rs (target/debug/deps/maps_preview_limits-e3c37675d3638f8a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/morph.rs (target/debug/deps/morph-322ab7fdd045be0b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/skin.rs (target/debug/deps/skin-a96714d7b1f03526)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/skin_envelopes.rs (target/debug/deps/skin_envelopes-959c3ad07f4ac1b3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/skin_gizmos.rs (target/debug/deps/skin_gizmos-998912511ea4b4cb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/skin_morph.rs (target/debug/deps/skin_morph-910050abb5887e9b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/skin_wrap.rs (target/debug/deps/skin_wrap-666586e892c517b1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/skin_wrap_patch.rs (target/debug/deps/skin_wrap_patch-2fb4377d25af1431)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/standard_primitives.rs (target/debug/deps/standard_primitives-ecf3b86130adaa35)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
