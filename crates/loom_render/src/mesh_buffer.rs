@@ -268,8 +268,7 @@ impl MeshBuffer {
         update_buffer(device, queue, &mut self.vertex_buffer, bytemuck::cast_slice(&verts), BufferUsages::VERTEX, "loom_mesh_vertex_buffer");
         update_buffer(device, queue, &mut self.index_buffer, bytemuck::cast_slice(&indices), BufferUsages::INDEX, "loom_mesh_index_buffer");
         update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_edge_buffer");
-        let empty = [crate::grid::LineVertex { position: [0.0; 3], color: [0.0; 3] }];
-        update_buffer(device, queue, &mut self.wire_vertex_buffer, bytemuck::cast_slice(if wire.is_empty() { &empty[..] } else { &wire[..] }), BufferUsages::VERTEX, "loom_mesh_wire_buffer");
+        update_buffer(device, queue, &mut self.wire_vertex_buffer, bytemuck::cast_slice(&wire), BufferUsages::VERTEX, "loom_mesh_wire_buffer");
         drop(queue_scope);
         self.faces_ready = faces;
         self.index_count = indices.len() as u32;
@@ -683,7 +682,7 @@ mod tests {
         assert_eq!(read(&lazy.vertex_buffer,full.vertex_buffer.size()),read(&full.vertex_buffer,full.vertex_buffer.size()));
         assert_eq!(read(&lazy.index_buffer,full.index_buffer.size()),read(&full.index_buffer,full.index_buffer.size()));
         let mut reused = MeshBuffer::from_mesh(&device, &small, plain.clone());
-        for (mesh, style) in [(&large, &colored), (&moved, &plain), (&small, &wire), (&edited, &colored), (&flipped, &colored), (&empty, &plain), (&small, &colored)] {
+        for (mesh, style) in [(&large, &colored), (&moved, &plain), (&small, &wire), (&edited, &colored), (&flipped, &colored), (&empty, &plain), (&small, &colored), (&small, &wire)] {
             let old = [reused.vertex_buffer.clone(), reused.index_buffer.clone(), reused.edge_vertex_buffer.clone(), reused.wire_vertex_buffer.clone()];
             reused.update_from_mesh(&device, &queue, mesh, style.clone());
             let fresh = MeshBuffer::from_mesh(&device, mesh, style.clone());
@@ -693,8 +692,12 @@ mod tests {
             assert_eq!((reused.aabb_min, reused.aabb_max), (fresh.aabb_min, fresh.aabb_max));
             let current = [&reused.vertex_buffer, &reused.index_buffer, &reused.edge_vertex_buffer, &reused.wire_vertex_buffer];
             let expected = [&fresh.vertex_buffer, &fresh.index_buffer, &fresh.edge_vertex_buffer, &fresh.wire_vertex_buffer];
-            for ((current, expected), old) in current.into_iter().zip(expected).zip(old) {
-                assert_eq!(read(current, expected.size()), read(expected, expected.size()));
+            for (stream, ((current, expected), old)) in current.into_iter().zip(expected).zip(old).enumerate() {
+                // Inactive wire bytes are never drawn; transitions back to wire
+                // must still replace all active vertices exactly.
+                if stream != 3 || fresh.wire_vertex_count > 0 {
+                    assert_eq!(read(current, expected.size()), read(expected, expected.size()));
+                }
                 if expected.size() <= old.size() { assert_eq!(current, &old, "an allocation that fits must be reused"); }
                 else { assert_ne!(current, &old, "larger geometry needs a new allocation"); }
             }
