@@ -20,3 +20,7 @@ The same unprofiled release binary was relaunched fresh with batch on, then fres
 ## Actual queue calls
 
 A separate profiled native run measured302 world-geometry updates (139222 per-mesh scopes /461 nodes). Its nonempty existing-buffer counter reported302 shared CPU-edge writes and323028864bytes, exactly **one write and1069632bytes per pose**. The baseline measured450writes and the same1069632bytes per pose. Allocation growth is outside this counter. Per-mesh render.upload.queue timing excludes the new shared upload and is not a total-upload comparison. Profile instrumentation was disabled again afterward; the app was restored to default-off batch mode at frame39. See native-on-profile.log and native-on-counter-summary.json.
+
+## Fifteen-minute reliability gate
+
+The explicit batch-on, unprofiled old candidate binary completed30×30-second samples with5committed objects/13parts, no reported pose errors or recipe recoveries. All original node records, undo history and source bytes were restored. A real271346304-byte automatic backup completed after playback began and its scene JSON matched the source scene. See native-stability-15m.jsonl and stability.py. Concurrent development correctness builds/tests were allowed; observed rates include clip tails and wrap, so they are reliability fields rather than quiet ≥60fps acceptance. This verifies batching reliability, not yet the separate fused-position candidate.
