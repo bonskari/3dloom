@@ -1,0 +1,694 @@
+{
+  "actual_five_branch_rows": [
+    {
+      "cycle": 0,
+      "elapsed_ms": 62.72460400000001,
+      "iterations": 600,
+      "new_bitset": false
+    },
+    {
+      "cycle": 0,
+      "elapsed_ms": 22.345843000000002,
+      "iterations": 600,
+      "new_bitset": true
+    },
+    {
+      "cycle": 0,
+      "elapsed_ms": 22.387622999999998,
+      "iterations": 600,
+      "new_bitset": true
+    },
+    {
+      "cycle": 0,
+      "elapsed_ms": 63.127224,
+      "iterations": 600,
+      "new_bitset": false
+    },
+    {
+      "cycle": 1,
+      "elapsed_ms": 62.558455,
+      "iterations": 600,
+      "new_bitset": false
+    },
+    {
+      "cycle": 1,
+      "elapsed_ms": 22.543353,
+      "iterations": 600,
+      "new_bitset": true
+    },
+    {
+      "cycle": 1,
+      "elapsed_ms": 22.573771999999998,
+      "iterations": 600,
+      "new_bitset": true
+    },
+    {
+      "cycle": 1,
+      "elapsed_ms": 63.247533999999995,
+      "iterations": 600,
+      "new_bitset": false
+    },
+    {
+      "cycle": 2,
+      "elapsed_ms": 62.976764,
+      "iterations": 600,
+      "new_bitset": false
+    },
+    {
+      "cycle": 2,
+      "elapsed_ms": 22.391253,
+      "iterations": 600,
+      "new_bitset": true
+    },
+    {
+      "cycle": 2,
+      "elapsed_ms": 22.550213,
+      "iterations": 600,
+      "new_bitset": true
+    },
+    {
+      "cycle": 2,
+      "elapsed_ms": 63.160394,
+      "iterations": 600,
+      "new_bitset": false
+    },
+    {
+      "cycle": 3,
+      "elapsed_ms": 62.923254,
+      "iterations": 600,
+      "new_bitset": false
+    },
+    {
+      "cycle": 3,
+      "elapsed_ms": 22.507053,
+      "iterations": 600,
+      "new_bitset": true
+    },
+    {
+      "cycle": 3,
+      "elapsed_ms": 22.496883,
+      "iterations": 600,
+      "new_bitset": true
+    },
+    {
+      "cycle": 3,
+      "elapsed_ms": 63.093714,
+      "iterations": 600,
+      "new_bitset": false
+    }
+  ],
+  "boundary_and_full_u16_hidden_cases_passed": true,
+  "frame": 39,
+  "input_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "nodes": 461,
+  "objects": [
+    {
+      "bevy_viewport_per_id": false,
+      "faces": 23560,
+      "frozen_gray": false,
+      "hidden_faces": 0,
+      "id": 4543,
+      "ids": [
+        0
+      ],
+      "name": "Body001",
+      "shaded_color_material": true,
+      "wanted_per_id": false
+    },
+    {
+      "bevy_viewport_per_id": true,
+      "faces": 63308,
+      "frozen_gray": false,
+      "hidden_faces": 0,
+      "id": 4544,
+      "ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "name": "Face001",
+      "shaded_color_material": true,
+      "wanted_per_id": true
+    },
+    {
+      "bevy_viewport_per_id": true,
+      "faces": 5438,
+      "frozen_gray": false,
+      "hidden_faces": 0,
+      "id": 4545,
+      "ids": [
+        0
+      ],
+      "name": "SkeletalMesh001",
+      "shaded_color_material": true,
+      "wanted_per_id": true
+    },
+    {
+      "bevy_viewport_per_id": true,
+      "faces": 14199,
+      "frozen_gray": false,
+      "hidden_faces": 0,
+      "id": 4546,
+      "ids": [
+        0
+      ],
+      "name": "SkeletalMesh002",
+      "shaded_color_material": true,
+      "wanted_per_id": true
+    },
+    {
+      "bevy_viewport_per_id": true,
+      "faces": 4818,
+      "frozen_gray": false,
+      "hidden_faces": 0,
+      "id": 4547,
+      "ids": [
+        0
+      ],
+      "name": "SkeletalMesh003",
+      "shaded_color_material": true,
+      "wanted_per_id": true
+    }
+  ],
+  "rows": [
+    {
+      "batch_elapsed_ms": 40.301311999999996,
+      "cycle": 0,
+      "new_bitset": false,
+      "per_object": [
+        {
+          "elapsed_ms": 8.76928,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 22.495182999999997,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 2.053607,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 5.139494,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 1.841058,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 14.239463,
+      "cycle": 0,
+      "new_bitset": true,
+      "per_object": [
+        {
+          "elapsed_ms": 2.906586,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 7.938931,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 0.8026490000000001,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 1.833928,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 0.755619,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 14.194183,
+      "cycle": 0,
+      "new_bitset": true,
+      "per_object": [
+        {
+          "elapsed_ms": 2.914136,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 7.891281,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 0.815478,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 1.819188,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 0.75212,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 40.386381,
+      "cycle": 0,
+      "new_bitset": false,
+      "per_object": [
+        {
+          "elapsed_ms": 8.735439,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 22.544153,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 2.076407,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 5.181124,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 1.846828,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 40.262381,
+      "cycle": 1,
+      "new_bitset": false,
+      "per_object": [
+        {
+          "elapsed_ms": 8.615839,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 22.550783000000003,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 2.0756580000000002,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 5.164083,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 1.853878,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 14.252723,
+      "cycle": 1,
+      "new_bitset": true,
+      "per_object": [
+        {
+          "elapsed_ms": 2.9039669999999997,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 7.9596100000000005,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 0.801399,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 1.8274380000000001,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 0.758909,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 14.192033,
+      "cycle": 1,
+      "new_bitset": true,
+      "per_object": [
+        {
+          "elapsed_ms": 2.9276660000000003,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 7.888411,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 0.829369,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 1.811018,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 0.734159,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 40.212121,
+      "cycle": 1,
+      "new_bitset": false,
+      "per_object": [
+        {
+          "elapsed_ms": 8.66902,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 22.514982,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 2.069638,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 5.133024,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 1.823977,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 39.856702,
+      "cycle": 2,
+      "new_bitset": false,
+      "per_object": [
+        {
+          "elapsed_ms": 8.53177,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 22.325173,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 2.0541180000000003,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 5.105934,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 1.838807,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 14.069483,
+      "cycle": 2,
+      "new_bitset": true,
+      "per_object": [
+        {
+          "elapsed_ms": 2.880227,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 7.825191,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 0.806028,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 1.819918,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 0.737399,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 14.135173,
+      "cycle": 2,
+      "new_bitset": true,
+      "per_object": [
+        {
+          "elapsed_ms": 2.903287,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 7.842969999999999,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 0.819789,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 1.8267680000000002,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 0.7415689999999999,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 39.849222,
+      "cycle": 2,
+      "new_bitset": false,
+      "per_object": [
+        {
+          "elapsed_ms": 8.65526,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 22.229903,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 2.038668,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 5.105353,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 1.818478,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 39.603443,
+      "cycle": 3,
+      "new_bitset": false,
+      "per_object": [
+        {
+          "elapsed_ms": 8.48658,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 22.170883,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 2.0338779999999996,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 5.088984,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 1.821528,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 14.370142000000001,
+      "cycle": 3,
+      "new_bitset": true,
+      "per_object": [
+        {
+          "elapsed_ms": 3.1683760000000003,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 7.843279999999999,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 0.807819,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 1.809368,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 0.739959,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 14.044023,
+      "cycle": 3,
+      "new_bitset": true,
+      "per_object": [
+        {
+          "elapsed_ms": 2.894847,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 7.79009,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 0.808839,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 1.811138,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 0.737599,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    },
+    {
+      "batch_elapsed_ms": 39.819132,
+      "cycle": 3,
+      "new_bitset": false,
+      "per_object": [
+        {
+          "elapsed_ms": 8.590250000000001,
+          "iterations": 300,
+          "object": 0
+        },
+        {
+          "elapsed_ms": 22.254503,
+          "iterations": 300,
+          "object": 1
+        },
+        {
+          "elapsed_ms": 2.039458,
+          "iterations": 300,
+          "object": 2
+        },
+        {
+          "elapsed_ms": 5.108364,
+          "iterations": 300,
+          "object": 3
+        },
+        {
+          "elapsed_ms": 1.8238569999999998,
+          "iterations": 300,
+          "object": 4
+        }
+      ]
+    }
+  ],
+  "scope": "ID collection only; all five separately, actual Bevy Viewport Surfaces::PerId classification plus exact UI wanted classification"
+}

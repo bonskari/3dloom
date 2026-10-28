@@ -1,0 +1,7 @@
+{
+  "path": "crates/loom_bevy/src/gpu_pose_renderer.rs",
+  "full_source_sha256": "71dfd55617fe64112be29458359212055f5494aaeaa61879012a5b9181435197",
+  "material_ids_loop_sha256": "d00ec8f9d15eb4582980fdd68377b57e4dd175fe0af034e281daa920b806404b",
+  "probe_source_sha256": "454d7a043dbdb0cda4825c4fce09767b7723ed6905277ce79100caa78e975da3",
+  "final_probe_source_sha256": "d96d6fa72b91b58927bb0240de95651f7b4b40e26755968dc2f4e19e0aba7cfa"
+}

@@ -1,0 +1,30 @@
+   Compiling loom_bevy v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_bevy)
+warning: unused import: `super::*`
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:487:9
+    |
+487 |     use super::*;
+    |         ^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0425]: cannot find function `visible_material_ids` in this scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:502:24
+    |
+502 |             assert_eq!(visible_material_ids(&faces), reference(&faces));
+    |                        ^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `visible_material_ids` in this scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:512:24
+    |
+512 |             assert_eq!(visible_material_ids(&faces), reference(&faces));
+    |                        ^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `visible_material_ids` in this scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:528:28
+    |
+528 |                 assert_eq!(visible_material_ids(mesh.value.mesh.faces()), reference(mesh.value.mesh.faces()));
+    |                            ^^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+For more information about this error, try `rustc --explain E0425`.
+warning: `loom_bevy` (lib test) generated 1 warning
+error: could not compile `loom_bevy` (lib test) due to 3 previous errors; 1 warning emitted

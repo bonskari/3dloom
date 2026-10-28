@@ -106,6 +106,25 @@ impl BevyRenderer {
     }
 }
 
+/// Sorted material IDs of visible faces over the complete u16 ID range.
+fn visible_material_ids(faces: &[loom_mesh::Face]) -> Vec<Option<u16>> {
+    let mut bits = [0u64; 1024];
+    for face in faces {
+        if !face.hidden {
+            bits[face.material_id as usize / 64] |= 1u64 << (face.material_id % 64);
+        }
+    }
+    let mut ids = Vec::new();
+    for (word, mut set) in bits.into_iter().enumerate() {
+        while set != 0 {
+            let bit = set.trailing_zeros();
+            ids.push(Some((word * 64 + bit as usize) as u16));
+            set &= set - 1;
+        }
+    }
+    ids
+}
+
 impl GpuPoseState {
     pub(super) fn selected(device: &wgpu::Device, value: Option<&std::ffi::OsStr>) -> Option<Self> {
         match value.and_then(|v| v.to_str()) {
@@ -152,16 +171,7 @@ impl GpuPoseState {
             let part_ids: Vec<_> = {
                 let _scope = loom_render::profile::Scope::new("gpu_pose.material_ids");
                 if matches!(source.surfaces, Some(Surfaces::PerId(_))) {
-                source
-                    .mesh
-                    .faces()
-                    .iter()
-                    .filter(|f| !f.hidden)
-                    .map(|f| f.material_id)
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .into_iter()
-                    .map(Some)
-                    .collect()
+                    visible_material_ids(source.mesh.faces())
                 } else {
                     vec![None]
                 }
@@ -479,5 +489,54 @@ mod tests {
         assert!(renderer.gpu_poses.as_ref().unwrap().last_error.is_none());
         let status = renderer.gpu_pose_status().unwrap();
         assert_eq!((status.committed_objects, status.committed_parts), (5, 13));
+    }
+}
+
+#[cfg(test)]
+mod material_id_tests {
+    use super::*;
+    fn reference(faces: &[loom_mesh::Face]) -> Vec<Option<u16>> {
+        faces.iter().filter(|f| !f.hidden).map(|f| f.material_id)
+            .collect::<std::collections::BTreeSet<_>>().into_iter().map(Some).collect()
+    }
+    fn face(id: u16, hidden: bool) -> loom_mesh::Face {
+        let mut face = loom_mesh::Face::new(loom_mesh::HalfEdgeId(0));
+        face.material_id = id;
+        face.hidden = hidden;
+        face
+    }
+    #[test]
+    fn material_ids_cover_boundaries_duplicates_and_hidden_faces() {
+        for faces in [vec![], vec![face(65535, false), face(64, false), face(63, false),
+            face(0, false), face(1, true), face(64, true), face(63, false)]] {
+            assert_eq!(visible_material_ids(&faces), reference(&faces));
+        }
+    }
+    #[test]
+    fn material_ids_cover_every_u16_with_independent_hidden_patterns() {
+        for pattern in 0..4 {
+            let faces: Vec<_> = (0..=u16::MAX).rev().flat_map(|id| {
+                let hidden = match pattern { 0 => false, 1 => true, 2 => id % 3 == 0, _ => id % 2 == 0 };
+                [face(id, hidden), face(id, true)]
+            }).collect();
+            assert_eq!(visible_material_ids(&faces), reference(&faces));
+        }
+    }
+    #[test]
+    #[ignore = "actual saved Ray scene requires LOOM_PERF_SCENE"]
+    fn material_ids_match_actual_ray_evaluated_meshes() {
+        let path = std::env::var("LOOM_PERF_SCENE").expect("actual saved Ray scene");
+        let document: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let scene: loom_scene::Scene = serde_json::from_value(document["scene"].clone()).unwrap();
+        let ids: Vec<_> = scene.nodes().filter(|n| n.modifiers.iter().any(|m|
+            matches!(m.modifier, loom_scene::Modifier::Skin(_)))).map(|n| n.id).collect();
+        assert_eq!(ids.len(), 5);
+        for time in [0., 39., 149.] {
+            scene.set_time(time);
+            for id in &ids {
+                let mesh = scene.eval_mesh(*id);
+                assert_eq!(visible_material_ids(mesh.value.mesh.faces()), reference(mesh.value.mesh.faces()));
+            }
+        }
     }
 }
