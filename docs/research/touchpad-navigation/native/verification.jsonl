@@ -1,0 +1,8 @@
+{"kind": "start", "pid": 4113304, "commit": "5f91f1e6e3f21f852c47d0cc0400c58066f0d11b", "original_navigation_device": "auto"}
+{"kind": "pixel_pan", "passed": true}
+{"kind": "native_zoom_event", "passed": true}
+{"kind": "command_zoom_once", "passed": true}
+{"kind": "alt_orbit", "passed": true}
+{"kind": "x11_line_pan_mode", "passed": true}
+{"kind": "precision_mouse_scroll_zoom", "passed": true}
+{"kind": "restored", "all_node_records_unchanged": true, "source_file_unchanged": true, "original_navigation_preference_restored": true}

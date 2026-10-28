@@ -1,0 +1,60 @@
+--- a/skin.rs
++++ b/skin.rs
+@@ -5,6 +5,8 @@
+ //! On a patch object the weighted points are the lattice's vertices
+ //! followed by its handles (the order of `PatchMesh::cage`); the deformed
+ //! lattice flows up and is tessellated again.
++
++pub(crate) static SINGLE_PROBE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ 
+ use crate::modifier::{EvalCtx, StackValue};
+ use crate::{NodeId, Param, Scene, Transform};
+@@ -686,6 +688,16 @@
+             return;
+         }
+         out.clear();
++        if let Some(&[(bone, weight)]) = self.weights.get(i).map(Vec::as_slice) {
++            if SINGLE_PROBE.load(std::sync::atomic::Ordering::Relaxed) {
++                if (bone as usize) < self.bones.len() && weight > 1e-7 {
++                    let sum: f32 = std::iter::once(weight).sum();
++                    out.push((bone, weight / sum));
++                    if self.rigid_all || self.rigid.get(i).copied().unwrap_or(false) { strongest_in_place(out); }
++                }
++                return;
++            }
++        }
+         if let Some(weights) = self.weights.get(i) { out.extend_from_slice(weights); }
+         out.retain(|(b, _)| (*b as usize) < self.bones.len());
+         limit(out, self.bone_affect_limit);
+@@ -1290,3 +1302,21 @@
+         }
+     }
+ }
++
++#[cfg(test)]
++mod single_exact_tests {
++ use super::*;
++ #[test]
++ fn single_exact_flags() {
++ let bones=vec![(NodeId(1),Mat4::IDENTITY,Envelope::default()),(NodeId(2),Mat4::IDENTITY,Envelope::default())];
++ for weight in [-0.0,0.0,-1.0,1e-8,1e-7,1.00001e-7,0.3,1.0,f32::MAX,f32::INFINITY,f32::NAN] {for bone in [0,1,99] {for flags in 0..128 {for limit in [0,1,20] {
++ let mut d=SkinData::from_file(&bones,Mat4::IDENTITY,vec![vec![(bone,weight)];2]);
++ d.explicit.fill(flags&1!=0);d.rigid.fill(flags&2!=0);d.rigid_all=flags&4!=0;d.rigid_handles=vec![flags&8!=0;2];d.rigid_patch_handles_all=flags&16!=0;d.bone_affect_limit=limit;
++ for b in &mut d.bones {b.envelope.relative=flags&64!=0;}
++ for owner in [None,Some((0,Vec3::ZERO)),Some((1,Vec3::X))] {
++ let mut old=Vec::new();let mut new=Vec::new();SINGLE_PROBE.store(false,std::sync::atomic::Ordering::Relaxed);d.point_weights_into(1,Vec3::ZERO,owner,&mut old);SINGLE_PROBE.store(true,std::sync::atomic::Ordering::Relaxed);d.point_weights_into(1,Vec3::ZERO,owner,&mut new);
++ if flags&32!=0 {strongest_in_place(&mut old);strongest_in_place(&mut new);}
++ let bits=|w:Vec<(u32,f32)>|w.into_iter().map(|(b,x)|(b,x.to_bits())).collect::<Vec<_>>();assert_eq!(bits(old),bits(new),"weight={weight} bone={bone} flags={flags} limit={limit}");
++ }}}}}
++ }
++}
+--- a/scene.rs
++++ b/scene.rs
+@@ -1279,3 +1279,7 @@
+         let _: Param<f32> = Param::new(1.0);
+     }
+ }
++
++#[cfg(test)]
++#[path="single_probe.rs"]
++mod single_probe;

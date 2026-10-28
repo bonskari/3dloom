@@ -1,0 +1,14 @@
+{
+  "input": "/tmp/loom-conditioning-capture/input.loom",
+  "input_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "source_sha256": {
+    "crates/loom_scene/src/skin.rs": "20de6069bb759a8941e4827517ab65c5ac2c5c99f21351ce2f163aacdef1f543",
+    "crates/loom_scene/src/skin_batch.rs": "fcfdc84c6afeb6459840e64d4e5ada2cb9233e1c1e533a90054e358ab382ff3b",
+    "crates/loom_scene/src/scene.rs": "250ad50d065cf6f8effd3cf4cddb52d836be3bdae51a7cf85b3e6bebf50a69fc"
+  },
+  "exact_probe_sha256": {
+    "prototype.patch": "0f0001a6099d1a9e0e9349e8584819dc3b2a7dee559e7735e254f84fe828a8fd",
+    "probe.rs": "f99c3effa201f50cc6a829cd97a6e8a2e62450f7d2bb2809644a7140fdfbc1ec",
+    "args.json": "dbdf2c6966c240b406dc956f276c74990bf52b83db416a753dce1e5934a9fbaa"
+  }
+}
