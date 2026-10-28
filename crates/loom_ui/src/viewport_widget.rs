@@ -18,7 +18,9 @@ use crate::LoomApp;
 pub struct ViewportResources {
     pub renderer: ViewportRenderer,
     pub mesh_buffers: Vec<MeshBuffer>,
-    mesh_source: Option<(std::sync::Arc<Vec<Mesh>>,Vec<loom_render::MeshStyle>)>,
+    mesh_source: Option<crate::GeometryUpload>,
+    gpu_edge_program: Option<loom_render::gpu_edges::GpuEdgeProgram>,
+    gpu_edges: std::collections::HashMap<u64, std::sync::Arc<loom_render::gpu_edges::GpuEdges>>,
     /// Built on the first frame (needs the queue) and whenever bitmaps change.
     pub textures: Option<loom_render::TextureSet>,
     /// GPU bitmaps by path: uploaded once, reused across scene rebuilds.
@@ -39,6 +41,8 @@ pub fn init_render_resources(wgpu: &egui_wgpu::RenderState) {
             renderer,
             mesh_buffers: Vec::new(),
             mesh_source: None,
+            gpu_edge_program: None,
+            gpu_edges: Default::default(),
             textures: None,
             bitmap_cache: std::collections::HashMap::new(),
             base_textures: None,
@@ -178,26 +182,52 @@ impl CallbackTrait for ViewportCallback {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _screen_descriptor: &ScreenDescriptor,
-        _egui_encoder: &mut wgpu::CommandEncoder,
+        egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let res: &mut ViewportResources = callback_resources.get_mut().unwrap();
         res.renderer.set_grid_params(device, self.grid_params);
 
         let pending = self.upload.lock().ok().and_then(|mut slot| slot.take());
-        let geometry=if let Some((meshes,styles,_))=&pending {Some((meshes.clone(),styles.clone()))}
-            else if res.mesh_buffers.iter().any(|buffer|buffer.faces_ready!=self.faces_needed){res.mesh_source.clone()}
-            else{None};
-        if let Some((meshes,styles))=geometry{
+        let geometry = if let Some(upload) = &pending { Some(upload.clone()) }
+            else if res.mesh_buffers.iter().any(|buffer| buffer.faces_ready != self.faces_needed) { res.mesh_source.clone() }
+            else { None };
+        if let Some(upload) = geometry {
+            let meshes = &upload.meshes;
+            let styles = &upload.styles;
             res.mesh_buffers.truncate(meshes.len());
-            for (i,mesh) in meshes.iter().enumerate(){
-                let style=styles.get(i).cloned().unwrap_or_default();
-                if let Some(buffer)=res.mesh_buffers.get_mut(i){buffer.update_from_mesh_with_faces(device,queue,mesh,style,self.faces_needed);}
-                else{res.mesh_buffers.push(MeshBuffer::from_mesh_with_faces(device,mesh,style,self.faces_needed));}
+            res.gpu_edges.retain(|id, _| upload.ids.contains(id));
+            if res.gpu_edge_program.is_none() && !upload.gpu_sources.is_empty() {
+                res.gpu_edge_program = loom_render::gpu_edges::GpuEdgeProgram::new(device).ok();
             }
-            res.mesh_source=Some((meshes,styles));
+            for (i, mesh) in meshes.iter().enumerate() {
+                let style = styles.get(i).cloned().unwrap_or_default();
+                let gpu_edges = upload.ids.get(i).and_then(|id| {
+                    let source = upload.gpu_sources.iter().find(|source| source.id == *id)?;
+                    let program = res.gpu_edge_program.as_ref()?;
+                    let input = loom_render::gpu_edges::EdgeSource { buffer: &source.positions, offset: 0, vertex_count: source.vertex_count };
+                    let reuse = res.gpu_edges.get(id).is_some_and(|edges|
+                        edges.matches_source(&input) && edges.matches_geometry(mesh, &style).unwrap_or(false));
+                    if !reuse {
+                        let edges = loom_render::gpu_edges::GpuEdges::new(device, program, input, mesh, &style).ok()?;
+                        res.gpu_edges.insert(*id, std::sync::Arc::new(edges));
+                    }
+                    let edges = res.gpu_edges.get(id)?.clone();
+                    edges.update_style(queue, &style).ok()?;
+                    let _scope = loom_render::profile::Scope::new("render.gpu_edges");
+                    edges.encode(egui_encoder);
+                    Some(edges)
+                });
+                if let Some(buffer) = res.mesh_buffers.get_mut(i) {
+                    buffer.update_from_mesh_with_gpu_edges(device, queue, mesh, style, self.faces_needed, gpu_edges);
+                } else {
+                    res.mesh_buffers.push(MeshBuffer::from_mesh_with_faces(device, mesh, style, self.faces_needed));
+                }
+            }
+            res.mesh_source = Some(upload);
         }
-        if let Some((_,_,bitmaps))=pending{
+        if let Some(upload) = pending {
+            let bitmaps = upload.bitmaps;
             // The clear and checker textures are made once; bitmaps once per path.
             let (none, checker) = res.base_textures.get_or_insert_with(|| res.renderer.base_textures(device, queue)).clone();
             let mut groups = Vec::with_capacity(bitmaps.len());
@@ -3056,8 +3086,8 @@ mod tests {
         let Some(adapter)=pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))else{return};
         let(device,queue)=pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(),None)).unwrap();
         let mut resources=CallbackResources::default();
-        resources.insert(ViewportResources{renderer:ViewportRenderer::new(&device,wgpu::TextureFormat::Rgba8UnormSrgb),mesh_buffers:vec![],mesh_source:None,textures:None,bitmap_cache:Default::default(),base_textures:None,helper_lines:vec![]});
-        let upload:crate::PendingUpload=std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(vec![loom_mesh::box_primitive(Vec3::ONE)]),vec![loom_render::MeshStyle::default()],vec![]))));
+        resources.insert(ViewportResources{renderer:ViewportRenderer::new(&device,wgpu::TextureFormat::Rgba8UnormSrgb),mesh_buffers:vec![],mesh_source:None,gpu_edge_program:None,gpu_edges:Default::default(),textures:None,bitmap_cache:Default::default(),base_textures:None,helper_lines:vec![]});
+        let upload:crate::PendingUpload=std::sync::Arc::new(std::sync::Mutex::new(Some(crate::GeometryUpload { meshes: std::sync::Arc::new(vec![loom_mesh::box_primitive(Vec3::ONE)]), styles: vec![loom_render::MeshStyle::default()], ..Default::default() })));
         let mut callback=ViewportCallback{slot:0,view_proj:Mat4::IDENTITY,camera_pos:Vec3::Z,upload:upload.clone(),shading:Default::default(),selected:vec![],show_edges:true,shaded:false,faces_needed:false,shade_only:vec![],grid:None,orthographic:false,grid_params:loom_render::GridParams{spacing:1.,major_every:5,cells:10,ortho_cells:100},helper_lines:vec![]};
         let screen=ScreenDescriptor{size_in_pixels:[100,100],pixels_per_point:1.};let mut encoder=device.create_command_encoder(&Default::default());
         callback.prepare(&device,&queue,&screen,&mut encoder,&mut resources);
@@ -3066,6 +3096,65 @@ mod tests {
         callback.faces_needed=true;callback.shaded=true;
         callback.prepare(&device,&queue,&screen,&mut encoder,&mut resources);
         assert_eq!(resources.get::<ViewportResources>().unwrap().mesh_buffers[0].index_count,36,"changing viewport shading must restore faces without another scene edit");
+    }
+
+    #[test]
+    fn gpu_edge_callback_keeps_current_pose_and_withdraws_stale_sources() {
+        use wgpu::util::DeviceExt;
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("real GPU");
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default(), None)).unwrap();
+        let mut resources = CallbackResources::default();
+        resources.insert(ViewportResources { renderer: ViewportRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb), mesh_buffers: vec![], mesh_source: None, gpu_edge_program: None, gpu_edges: Default::default(), textures: None, bitmap_cache: Default::default(), base_textures: None, helper_lines: vec![] });
+        let upload: crate::PendingUpload = Default::default();
+        let mut callback = ViewportCallback { slot: 0, view_proj: Mat4::IDENTITY, camera_pos: Vec3::Z, upload: upload.clone(), shading: Default::default(), selected: vec![], show_edges: true, shaded: false, faces_needed: false, shade_only: vec![], grid: None, orthographic: false, grid_params: loom_render::GridParams { spacing: 1., major_every: 5, cells: 10, ortho_cells: 100 }, helper_lines: vec![] };
+        let screen = ScreenDescriptor { size_in_pixels: [100, 100], pixels_per_point: 1. };
+        let positions = |mesh: &Mesh| mesh.vertices().iter().map(|v| [v.position.x, v.position.y, v.position.z, 1.]).collect::<Vec<_>>();
+        let make_source = |mesh: &Mesh| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&positions(mesh)), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST });
+        let read = |buffer: &wgpu::Buffer, size: u64| {
+            let staging = device.create_buffer(&wgpu::BufferDescriptor { label: None, size, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, size);
+            queue.submit([encoder.finish()]);
+            let (tx, rx) = std::sync::mpsc::channel();
+            staging.slice(..).map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+            device.poll(wgpu::Maintain::Wait); rx.recv().unwrap().unwrap();
+            let bytes = staging.slice(..).get_mapped_range().to_vec(); staging.unmap(); bytes
+        };
+        let base = loom_mesh::box_primitive(Vec3::ONE);
+        let mut source = make_source(&base);
+        let mut old_edges = None;
+        for step in 0..7 {
+            let mut mesh = base.clone();
+            loom_mesh::edit_ops::translate_mesh(&mut mesh, Vec3::X * step as f32).unwrap();
+            if step == 4 { let edge = mesh.faces()[0].he; mesh.set_edge_visible(edge, false); }
+            if step == 5 { source = make_source(&mesh); }
+            queue.write_buffer(&source, 0, bytemuck::cast_slice(&positions(&mesh)));
+            let style = loom_render::MeshStyle { color: [step as f32 * 0.1, 0.4, 0.6], diagonals: step == 3, ..Default::default() };
+            let sources = if step == 2 { vec![] } else { vec![loom_bevy::GpuPoseSource { id: if step == 6 { 99 } else { 1 }, positions: source.clone().into(), vertex_count: mesh.vertex_count() }] };
+            *upload.lock().unwrap() = Some(crate::GeometryUpload { meshes: std::sync::Arc::new(vec![mesh.clone()]), styles: vec![style.clone()], ids: vec![1], version: step, gpu_sources: sources, bitmaps: vec![] });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            callback.prepare(&device, &queue, &screen, &mut encoder, &mut resources);
+            queue.submit([encoder.finish()]);
+            let res = resources.get::<ViewportResources>().unwrap();
+            let buffer = &res.mesh_buffers[0];
+            if [1, 4, 5].contains(&step) {
+                assert_ne!(buffer.edge_buffer(), &buffer.edge_vertex_buffer, "current source must activate gather");
+                let edges = res.gpu_edges[&1].clone();
+                if step == 4 { assert!(!std::sync::Arc::ptr_eq(old_edges.as_ref().unwrap(), &edges), "visibility changes rebuild recipe"); }
+                old_edges = Some(edges);
+                let expected: Vec<_> = mesh.unique_edges().into_iter().flat_map(|(a, b)| [a, b]).map(|p| loom_render::grid::LineVertex { position: p.to_array(), color: style.color }).collect();
+                assert_eq!(read(buffer.edge_buffer(), expected.len() as u64 * 24), bytemuck::cast_slice::<_, u8>(&expected));
+            } else { assert_eq!(buffer.edge_buffer(), &buffer.edge_vertex_buffer, "absent/mismatched/diagonal source keeps ordinary geometry"); }
+            if step == 1 {
+                // Another viewport can request shaded faces without a new pose.
+                callback.faces_needed = true;
+                let mut encoder = device.create_command_encoder(&Default::default());
+                callback.prepare(&device, &queue, &screen, &mut encoder, &mut resources);
+                queue.submit([encoder.finish()]);
+                assert_eq!(resources.get::<ViewportResources>().unwrap().mesh_buffers[0].index_count, 36);
+            }
+        }
     }
 
     #[test]

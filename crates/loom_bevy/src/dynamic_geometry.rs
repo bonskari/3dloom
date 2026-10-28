@@ -788,11 +788,15 @@ mod tests {
         let ids = HashSet::from([1, 2]);
         r.enable_gpu_poses();
         r.sync_deforming(&objects(&meshes), &ids);
+        assert!(r.gpu_pose_sources().is_empty(), "cold CPU initialization is not a committed GPU source");
         let handles: Vec<_> = (1..=2).map(|id| (r.objects[&id].parts[0].0, r.objects[&id].buffers[0].buffer().id())).collect();
         for (i, mesh) in meshes.iter_mut().enumerate() {
             loom_mesh::edit_ops::translate_mesh(mesh, glam::Vec3::X * (i + 2) as f32).unwrap();
         }
         r.sync_deforming(&objects(&meshes), &ids);
+        let sources = r.gpu_pose_sources();
+        assert_eq!(sources.len(), 2);
+        for source in sources { assert_eq!(source.vertex_count, meshes[source.id as usize - 1].vertex_count()); }
         let mut reader = crate::gpu_pose_commit::GuardReadback::new(&r.device, 2).unwrap();
         let mut expected = Vec::new();
         for (i, mesh) in meshes.iter().enumerate() {
@@ -812,6 +816,15 @@ mod tests {
             assert!(object.gpu_pose_current);
             assert_eq!((object.parts[0].0, object.buffers[0].buffer().id()), handles[i]);
         }
+        r.sync(&objects(&meshes));
+        assert!(r.gpu_pose_sources().is_empty(), "CPU sync must withdraw preceding GPU sources");
+        r.sync_deforming(&objects(&meshes), &ids);
+        assert!(r.gpu_pose_sources().is_empty(), "return to deformation initializes dynamic resources on the ordinary path");
+        r.sync_deforming(&objects(&meshes), &ids);
+        assert_eq!(r.gpu_pose_sources().len(), 2);
+        r.sync_deforming(&[], &ids);
+        assert!(r.gpu_pose_sources().is_empty(), "removed objects cannot export cached sources");
+
     }
 
     #[test]

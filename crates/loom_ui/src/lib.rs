@@ -74,7 +74,16 @@ pub struct ViewAnimation {
 }
 
 /// Meshes and colours waiting for GPU upload, shared with the viewport callbacks.
-pub type PendingUpload = std::sync::Arc<std::sync::Mutex<Option<(std::sync::Arc<Vec<Mesh>>, Vec<loom_render::MeshStyle>, Vec<(String, std::sync::Arc<loom_render::Bitmap>)>)>>>;
+#[derive(Clone, Default)]
+pub struct GeometryUpload {
+    pub meshes: std::sync::Arc<Vec<Mesh>>,
+    pub styles: Vec<loom_render::MeshStyle>,
+    pub bitmaps: Vec<(String, std::sync::Arc<loom_render::Bitmap>)>,
+    pub ids: Vec<u64>,
+    pub version: u64,
+    pub gpu_sources: Vec<loom_bevy::GpuPoseSource>,
+}
+pub type PendingUpload = std::sync::Arc<std::sync::Mutex<Option<GeometryUpload>>>;
 
 /// Keyboard Entry rollout values.
 #[derive(Debug, Clone, Copy)]
@@ -496,7 +505,7 @@ impl LoomApp {
             gpu: realistic::Gpu::None,
             render_job: None,
             rfw: Default::default(),
-            pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some((std::sync::Arc::new(Vec::new()), Vec::new(), Vec::new())))),
+            pending_upload: std::sync::Arc::new(std::sync::Mutex::new(Some(GeometryUpload::default()))),
             texture_previews:preview_cache::PreviewCache::default(),
             material_previews:preview_cache::PreviewCache::default(),
             material_preview_generation:0,
@@ -960,7 +969,11 @@ impl LoomApp {
         self.world_version += 1;
         self.world_pose_time = Some(self.state.scene.time());
         if let Ok(mut slot) = self.pending_upload.lock() {
-            *slot = Some((self.world_display.clone(), self.world_styles.clone(), bitmaps));
+            *slot = Some(GeometryUpload {
+                meshes: self.world_display.clone(), styles: self.world_styles.clone(), bitmaps,
+                ids: self.world_meshes.iter().map(|(id, _)| id.0).collect(),
+                version: self.world_version, gpu_sources: Vec::new(),
+            });
         }
     }
 

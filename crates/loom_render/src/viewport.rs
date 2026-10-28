@@ -357,7 +357,7 @@ impl ViewportRenderer {
             pass.set_bind_group(0, bind_group, &[]);
             if show_edges {
                 for mb in meshes.iter().filter(|mb| mb.edge_vertex_count > 0) {
-                    pass.set_vertex_buffer(0, mb.edge_vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(0, mb.edge_buffer().slice(..));
                     pass.draw(0..mb.edge_vertex_count, 0..1);
                 }
             }
@@ -366,7 +366,7 @@ impl ViewportRenderer {
             }
             for &idx in selected {
                 if let Some(mb) = meshes.get(idx).filter(|mb| mb.edge_vertex_count > 0) {
-                    pass.set_vertex_buffer(0, mb.edge_vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(0, mb.edge_buffer().slice(..));
                     pass.draw(0..mb.edge_vertex_count, 0..1);
                 }
             }

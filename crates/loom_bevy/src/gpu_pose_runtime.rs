@@ -22,7 +22,7 @@ struct Part {
     math: Option<GpuRecipeMath>,
 }
 pub(crate) struct GpuPoseRuntime {
-    source: wgpu::Buffer,
+    source: bevy::render::render_resource::Buffer,
     geometry: GpuPoseGeometry,
     parts: Vec<Part>,
     guards: GuardReadback,
@@ -36,11 +36,11 @@ impl GpuPoseRuntime {
         descriptors: &[(Option<u16>, bool)],
     ) -> Result<Self, String> {
         let positions = source_positions(mesh)?;
-        let source = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let source: bevy::render::render_resource::Buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("current CPU world-baked source positions"),
             contents: bytemuck::cast_slice(&positions),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
+        }).into();
         let geometry = GpuPoseGeometry::from_current_positions(
             device,
             &source,
@@ -83,6 +83,9 @@ impl GpuPoseRuntime {
         queue.submit([encoder.finish()]);
         runtime.recompile(device, queue, &(0..runtime.parts.len()).collect::<Vec<_>>())?;
         Ok(runtime)
+    }
+    pub(crate) fn source_buffer(&self) -> bevy::render::render_resource::Buffer {
+        self.source.clone()
     }
     /// Exact descriptor comparison; a changed topology/UV/normal/material layout
     /// creates a new candidate cache without modifying committed render geometry.

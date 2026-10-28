@@ -15,7 +15,7 @@ pub mod dynamic_geometry;
 mod gpu_pose_geometry;
 mod gpu_pose_runtime;
 mod gpu_pose_renderer;
-pub use gpu_pose_renderer::GpuPoseStatus;
+pub use gpu_pose_renderer::{GpuPoseSource, GpuPoseStatus};
 
 use std::collections::{HashMap, HashSet};
 use dynamic_geometry::{DynamicGeometryBuffer, DynamicGeometryPlugin, DynamicMaterial};

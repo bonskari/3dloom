@@ -203,9 +203,13 @@ pub struct MeshBuffer {
     pub wire_vertex_buffer: Buffer,
     pub wire_vertex_count: u32,
     edge_staging: Vec<crate::grid::LineVertex>,
+    gpu_edges: Option<std::sync::Arc<crate::gpu_edges::GpuEdges>>,
 }
 
 impl MeshBuffer {
+    pub fn edge_buffer(&self) -> &wgpu::Buffer {
+        self.gpu_edges.as_ref().map_or(&self.edge_vertex_buffer, |edges| edges.output_buffer())
+    }
     pub fn from_mesh(device:&Device,mesh:&Mesh,style:MeshStyle)->Self{Self::from_mesh_with_faces(device,mesh,style,true)}
     pub fn update_from_mesh(&mut self,device:&Device,queue:&wgpu::Queue,mesh:&Mesh,style:MeshStyle){self.update_from_mesh_with_faces(device,queue,mesh,style,true);}
     pub fn from_mesh_with_faces(device: &Device, mesh: &Mesh, style: MeshStyle, faces: bool) -> Self {
@@ -255,24 +259,31 @@ impl MeshBuffer {
             wire_vertex_buffer,
             wire_vertex_count,
             edge_staging,
+            gpu_edges: None,
         }
     }
 
     /// Updates every geometry stream while keeping GPU allocations that fit.
     pub fn update_from_mesh_with_faces(&mut self, device: &Device, queue: &wgpu::Queue, mesh: &Mesh, style: MeshStyle, faces: bool) {
+        self.update_from_mesh_with_gpu_edges(device, queue, mesh, style, faces, None);
+    }
+
+    /// The caller proves that edges describe this exact current mesh/pose.
+    pub fn update_from_mesh_with_gpu_edges(&mut self, device: &Device, queue: &wgpu::Queue, mesh: &Mesh, style: MeshStyle, faces: bool, gpu_edges: Option<std::sync::Arc<crate::gpu_edges::GpuEdges>>) {
+        self.gpu_edges = gpu_edges;
         let _scope = crate::profile::Scope::new("render.upload");
         let (verts, indices, ranges) = if faces {triangulate_styled(mesh, &style)} else {(Vec::new(),Vec::new(),Vec::new())};
         let wire = { let _scope = crate::profile::Scope::new("render.upload.wire"); wire_lines(mesh, &style) };
-        { let _scope = crate::profile::Scope::new("render.upload.edges"); stage_edges(mesh, &style, &mut self.edge_staging); }
+        if self.gpu_edges.is_none() { let _scope = crate::profile::Scope::new("render.upload.edges"); stage_edges(mesh, &style, &mut self.edge_staging); }
         let queue_scope = crate::profile::Scope::new("render.upload.queue");
         update_buffer(device, queue, &mut self.vertex_buffer, bytemuck::cast_slice(&verts), BufferUsages::VERTEX, "loom_mesh_vertex_buffer");
         update_buffer(device, queue, &mut self.index_buffer, bytemuck::cast_slice(&indices), BufferUsages::INDEX, "loom_mesh_index_buffer");
-        update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_edge_buffer");
+        if self.gpu_edges.is_none() { update_buffer(device, queue, &mut self.edge_vertex_buffer, bytemuck::cast_slice(&self.edge_staging), BufferUsages::VERTEX, "loom_mesh_edge_buffer"); }
         update_buffer(device, queue, &mut self.wire_vertex_buffer, bytemuck::cast_slice(&wire), BufferUsages::VERTEX, "loom_mesh_wire_buffer");
         drop(queue_scope);
         self.faces_ready = faces;
         self.index_count = indices.len() as u32;
-        self.edge_vertex_count = self.edge_staging.len() as u32;
+        self.edge_vertex_count = self.gpu_edges.as_ref().map_or(self.edge_staging.len() as u32, |edges| edges.vertex_count());
         self.wire_vertex_count = wire.len() as u32;
         { let _scope = crate::profile::Scope::new("render.upload.bounds"); (self.aabb_min, self.aabb_max) = mesh.aabb(); }
         self.style = style;

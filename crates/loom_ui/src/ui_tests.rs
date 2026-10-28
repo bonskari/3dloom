@@ -4005,7 +4005,7 @@ fn a_checker_sub_material_shows_checks_in_the_viewport() {
     }
     assert!(uvs.iter().any(|u| *u != uvs[0]), "the checker faces have varying UVs: {uvs:?}");
     let upload = h.app.pending_upload.lock().unwrap().clone();
-    let bitmaps = upload.map(|u| u.2).unwrap_or_default();
+    let bitmaps = upload.map(|u| u.bitmaps).unwrap_or_default();
     let bm = &bitmaps.get(i as usize).expect("the baked checker is uploaded").1;
     let px: std::collections::BTreeSet<[u8; 3]> = bm.rgba.chunks(4).map(|p| [p[0], p[1], p[2]]).collect();
     assert!(px.contains(&[0, 0, 0]) && px.contains(&[240, 200, 40]), "both checker colours: {} colours", px.len());

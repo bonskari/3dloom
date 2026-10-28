@@ -230,6 +230,13 @@ impl LoomApp {
         b.renderer.sync_deforming(&list, &deforming);
         b.renderer.sync_lights(&lights);
         b.synced = Some((version, for_render));
+        if !for_render {
+            if let Ok(mut slot) = self.pending_upload.lock() {
+                if let Some(upload) = slot.as_mut().filter(|upload| upload.version == version) {
+                    upload.gpu_sources = b.renderer.gpu_pose_sources();
+                }
+            }
+        }
     }
 
     pub(crate) fn realistic_pose_is_current(&self) -> bool {

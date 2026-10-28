@@ -28,7 +28,7 @@ fn actual_opacity_map_reaches_viewport_alpha_without_gamma_or_pending_hiding(){
  h.app.rebuild_world_meshes();assert!(!h.app.world_styles()[0].texture_alpha,"pending composition must not hide geometry");
  let deadline=std::time::Instant::now()+std::time::Duration::from_secs(5);
  while !h.app.world_styles()[0].texture_alpha{h.frames(1);assert!(std::time::Instant::now()<deadline,"opacity never reached viewport");std::thread::sleep(std::time::Duration::from_millis(1));}
- let upload=h.app.pending_upload.lock().unwrap();let bitmap=&upload.as_ref().unwrap().2[0].1;
+ let upload=h.app.pending_upload.lock().unwrap();let bitmap=&upload.as_ref().unwrap().bitmaps[0].1;
  assert_eq!(bitmap.rgba.chunks_exact(4).map(|p|p[3]).collect::<Vec<_>>(),vec![0,4,128,255]);
  std::fs::remove_file(path).unwrap();
 }

@@ -6,6 +6,14 @@ use crate::gpu_pose_runtime::GpuPoseRuntime;
 use crate::gpu_pose_geometry::mikk_recipe::GpuRecipeMath;
 use bevy::render::primitives::Aabb;
 
+/// All source vertices of one successfully committed current world-space pose.
+#[derive(Clone)]
+pub struct GpuPoseSource {
+    pub id: u64,
+    pub positions: bevy::render::render_resource::Buffer,
+    pub vertex_count: usize,
+}
+
 /// Observed state of the opt-in internal geometry backend.
 pub struct GpuPoseStatus<'a> {
     pub committed_objects: usize,
@@ -18,11 +26,20 @@ pub struct GpuPoseStatus<'a> {
 pub(super) struct GpuPoseState {
     cache: HashMap<(bool, u64), GpuPoseRuntime>,
     reader: Option<(usize, GuardReadback)>,
+    current_sources: HashSet<(bool, u64)>,
     last_error: Option<String>,
     pub(super) recovered_recipes: usize,
 }
 
 impl BevyRenderer {
+    pub fn gpu_pose_sources(&self) -> Vec<GpuPoseSource> {
+        let Some(state) = &self.gpu_poses else { return Vec::new() };
+        state.current_sources.iter().filter(|(hidden, _)| !hidden).map(|key| {
+            let positions = state.cache[key].source_buffer();
+            GpuPoseSource { id: key.1, vertex_count: positions.size() as usize / 16, positions }
+        }).collect()
+    }
+
     pub fn gpu_pose_status(&self) -> Option<GpuPoseStatus<'_>> {
         let state = self.gpu_poses.as_ref()?;
         let objects: Vec<_> = self
@@ -99,6 +116,7 @@ impl GpuPoseState {
         deforming: &HashSet<u64>,
     ) -> Result<(Vec<(u64, usize, Aabb)>, Option<(Vec3, Vec3)>), String> {
         let _scope = loom_render::profile::Scope::new("gpu_pose.renderer");
+        self.current_sources.retain(|(h, _)| *h != hidden);
         let seen: HashSet<_> = objects.iter().map(|o| o.id).collect();
         self.cache
             .retain(|(h, id), _| *h != hidden || seen.contains(id));
@@ -211,6 +229,7 @@ impl GpuPoseState {
                 }
             }
         }
+        self.current_sources.extend(eligible.iter().map(|id| (hidden, *id)));
         Ok((updates, Some((lo, hi))))
     }
 
@@ -260,6 +279,29 @@ impl GpuPoseState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_current_readback_withdraws_exported_source_handles() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter), None)).unwrap();
+        let mut renderer = BevyRenderer::new(adapter, device, queue);
+        renderer.enable_gpu_poses();
+        let mesh = loom_mesh::box_primitive(Vec3::ONE);
+        let objects = [SceneObject { id: 1, mesh: &mesh, transform: glam::Mat4::IDENTITY, wire_color: [128; 3], surfaces: None, renderable: true, flags: Default::default() }];
+        let deforming = HashSet::from([1]);
+        renderer.sync_deforming(&objects, &deforming);
+        renderer.sync_deforming(&objects, &deforming);
+        assert_eq!(renderer.gpu_pose_sources().len(), 1);
+        // Inject a real guard-reader range mismatch before the next commit.
+        renderer.gpu_poses.as_mut().unwrap().reader = Some((1, GuardReadback::new(&renderer.device, 2).unwrap()));
+        renderer.sync_deforming(&objects, &deforming);
+        assert!(renderer.gpu_pose_sources().is_empty());
+        assert!(renderer.gpu_pose_status().unwrap().last_error.is_some());
+        renderer.gpu_poses.as_mut().unwrap().reader = None;
+        renderer.sync_deforming(&objects, &deforming);
+        assert_eq!(renderer.gpu_pose_sources().len(), 1);
+    }
 
     #[test]
     #[ignore = "actual full Ray scene GPU renderer integration requires LOOM_PERF_SCENE"]
