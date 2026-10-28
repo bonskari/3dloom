@@ -42,3 +42,7 @@ Risk decreased94.7%; whole GPU span decreased60.1%. Refinement source/scheduling
 ## Exact full317 source separation
 
 `cone.patch` is a bounded diagnostic patch: it includes 17-part-pose filters and part0 selection, and is neither a production patch nor the full317 source. `full317-source.tar` contains the actual full317 source and build.py, with those filters removed and times `(0..317)*149/316`. `full317-source-sha256.txt` hashes every source file actually compiled. `bounded-to-full317.patch` records exactly the harness change; no production source is activated. Expected completion is4121 parts; only terminal evidence may establish that count. Environment/reference selectors remain isolated test controls.
+
+## Full317 terminal evidence
+
+Session89913 completed GREEN in495.14s. All4121 parts / 105,868,173 expanded vertices passed independentF64 <=2e-5; maximum vector error 3.33438028626e-06. All4121 finite8/cone8 comparisons have identical flags and complete output bytes. 105,850,547 nonflagged64B records match the original fast pipeline; 17,626 refined records preserve P/N/UV bytes and handedness bits. All4108 first/previous structural guards hit. Eight synthetic/finite tests passed separately in2.91s. The editor was started during this correctness sweep; no timing or FPS inference is made. This validates the isolated GPU-skin producer audit, not yet the native CPU-position producer integration.

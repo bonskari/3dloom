@@ -1,0 +1,17 @@
+{
+  "parts": 4121,
+  "poses": 317,
+  "parts_per_pose": 13,
+  "vertices": 105868173,
+  "nonflagged_records_byte_exact": 105850547,
+  "refined_records_pnuv_handedness_verified": 17626,
+  "risk_group_instances": 2841,
+  "group_instances": 20077195,
+  "max_f64_vector_error": 3.334380286261724e-06,
+  "cone_reference_pass_count": 4121,
+  "f64_gate_failure_count": 0,
+  "guards": [
+    "GPU_RECIPE_GUARD_RESULT poses=317 parts=13 checks=4108 first_hits=4108 previous_hits=4108"
+  ],
+  "terminal_seconds": 495.14
+}
