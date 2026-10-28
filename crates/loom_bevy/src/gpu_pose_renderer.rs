@@ -3,6 +3,7 @@ use super::*;
 use crate::gpu_pose_commit::{commit_pose, GuardReadback, PoseCandidate, PoseCommitError};
 use crate::gpu_pose_geometry::mikk_prepare::GpuPreparation;
 use crate::gpu_pose_runtime::GpuPoseRuntime;
+use crate::gpu_pose_geometry::mikk_recipe::GpuRecipeMath;
 use bevy::render::primitives::Aabb;
 
 /// Observed state of the opt-in internal geometry backend.
@@ -171,9 +172,10 @@ impl GpuPoseState {
             .flat_map(|id| self.cache[&(hidden, *id)].preparations())
             .collect();
         GpuPreparation::encode_batch(&mut encoder, &preparations, None);
-        for id in &eligible {
-            self.cache[&(hidden, *id)].encode_math(&mut encoder);
-        }
+        let maths: Vec<_> = eligible.iter()
+            .flat_map(|id| self.cache[&(hidden, *id)].maths())
+            .collect();
+        GpuRecipeMath::encode_batch(&mut encoder, &maths);
         queue.submit([encoder.finish()]);
         drop(encode_scope);
         let (mut result, mut order) = self.commit(device, queue, set, hidden, &eligible)?;
@@ -315,6 +317,19 @@ mod tests {
                 "RAY_GPU_RENDERER time={time} sync_ms={:.3}",
                 started.elapsed().as_secs_f64() * 1000.0
             );
+            if frame > 0 {
+                let state = renderer.gpu_poses.as_ref().unwrap();
+                let maths: Vec<_> = state.cache.values().flat_map(|runtime| runtime.maths()).collect();
+                assert_eq!(maths.len(), 13);
+                let batched: Vec<_> = maths.iter().map(|math| math.readback(&renderer.device, &renderer.queue).unwrap()).collect();
+                let mut encoder = renderer.device.create_command_encoder(&Default::default());
+                for math in &maths { math.encode(&mut encoder); }
+                renderer.queue.submit([encoder.finish()]);
+                for (math, batched) in maths.into_iter().zip(batched) {
+                    let serial = math.readback(&renderer.device, &renderer.queue).unwrap();
+                    assert_eq!(bytemuck::cast_slice::<_, u8>(&batched), bytemuck::cast_slice::<_, u8>(&serial), "batch differs from serial at{time}");
+                }
+            }
             let mut expected = Vec::new();
             let mut buffers = Vec::new();
             for source in &objects {

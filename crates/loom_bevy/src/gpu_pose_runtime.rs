@@ -142,6 +142,9 @@ impl GpuPoseRuntime {
                 .encode(encoder);
         }
     }
+    pub(crate) fn maths(&self) -> Vec<&GpuRecipeMath> {
+        self.parts.iter().map(|part| part.math.as_ref().expect("compiled current recipe")).collect()
+    }
     /// Run only after the current normal/preparation submission. Rejected recipes
     /// read that SAME current GPU intermediate; no rest/CPU-final tangent input.
     pub(crate) fn recompile(
@@ -314,6 +317,40 @@ mod tests {
                     .to_vec()
             })
             .collect()
+    }
+    #[test]
+    fn stage_batched_math_matches_serial_parts_for_current_poses() {
+        let (device, queue) = device();
+        let mut meshes: Vec<_> = [8, 12].into_iter().map(|segments| {
+            let mut mesh = loom_mesh::sphere_segmented(1.0, segments, 0.0);
+            loom_mesh::uvmap::auto_map(&mut mesh, loom_mesh::uvmap::AutoMap::Spherical, 1);
+            mesh
+        }).collect();
+        let descriptors = [(None, false), (None, true)];
+        let mut runtimes: Vec<_> = meshes.iter().map(|mesh|
+            GpuPoseRuntime::new(&device, &queue, mesh, &descriptors).unwrap()
+        ).collect();
+        for step in 0..3 {
+            for (mesh, runtime) in meshes.iter_mut().zip(&mut runtimes) {
+                loom_mesh::edit_ops::translate_mesh(mesh, glam::Vec3::new(0.13, -0.07, step as f32 * 0.1)).unwrap();
+                runtime.update(&device, &queue, mesh, &descriptors).unwrap();
+                run(runtime, &device, &queue);
+            }
+            let expected: Vec<_> = runtimes.iter().map(|r| output(r, &device, &queue)).collect();
+            let mut encoder = device.create_command_encoder(&Default::default());
+            for runtime in &runtimes { runtime.encode_normals(&mut encoder); }
+            let preparations: Vec<_> = runtimes.iter().flat_map(|r| r.preparations()).collect();
+            GpuPreparation::encode_batch(&mut encoder, &preparations, None);
+            let maths: Vec<_> = runtimes.iter().flat_map(|r| r.parts.iter().map(|p| p.math.as_ref().unwrap())).collect();
+            GpuRecipeMath::encode_batch(&mut encoder, &maths);
+            queue.submit([encoder.finish()]);
+            for (runtime, expected) in runtimes.iter().zip(expected) {
+                let flags = runtime.parts.iter().map(|p| p.math.as_ref().unwrap().guard_buffer()).collect::<Vec<_>>();
+                let mut reader = GuardReadback::new(&device, flags.len()).unwrap();
+                assert_eq!(reader.read(&device, &queue, &flags).unwrap(), vec![0; flags.len()]);
+                assert_eq!(output(runtime, &device, &queue), expected);
+            }
+        }
     }
     #[test]
     fn cached_runtime_rebuilds_current_guards_and_changed_descriptors() {

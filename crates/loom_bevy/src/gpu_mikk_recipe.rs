@@ -347,6 +347,27 @@ impl GpuRecipeMath {
             pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
         }
     }
+    /// Keep stage barriers while sharing each pass across independent parts.
+    pub(crate) fn encode_batch(encoder: &mut wgpu::CommandEncoder, parts: &[&Self]) {
+        if parts.is_empty() { return; }
+        for part in parts { encoder.clear_buffer(&part.scratch, 0, None); }
+        for stage in 0..5 {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("current GPU tangent math batch"),
+                timestamp_writes: None,
+            });
+            for part in parts {
+                pass.set_pipeline(&part.pipelines[stage]);
+                pass.set_bind_group(0, &part.group, &[]);
+                let count = match stage {
+                    1 => part.counts[1],
+                    4 => part.counts[0],
+                    _ => part.counts[1] * 3,
+                };
+                pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
+            }
+        }
+    }
     #[cfg(test)]
     /// Test-only isolation: current CPU InitTriInfo derivatives are uploaded
     /// solely to distinguish derivative arithmetic from GPU evaluator behavior.
