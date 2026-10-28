@@ -13,3 +13,9 @@ The bounded average exceeds60 in both modes after reload, but Realistic has litt
 Serial lib regressions:86Bevy passed/36ignored,35Render passed/0ignored. The separately enabled actual-Ray descriptor oracle passed317poses/1585checks, including fractional frames. All four frame39viewport crops are pixel-identical to the accurate pre-fix default version (image-parity.json).
 
 The first parallel full-suite invocation was interrupted after thread stacks showed many concurrent Vulkan device/instance calls waiting inside Vulkan/NVIDIA driver locks; it is not recorded as passing, nor does this prove why the driver stalled. The same full lib suites completed when invoked with --test-threads=1. No production rendering backend was altered for these tests.
+
+## Post-fix15minute reliability
+
+The900.889second run completed30samples with all5GPU-pose objects/13parts, no pose errors or recovered recipes. Real auto-backup AutoBackup02.loom completed during playback and its entire saved scene JSON equals the original. Source-file bytes, all node records, original selection/frame and empty undo history were restored. The run included two non-dirty selection changes and a final source reload.
+
+This is reliability evidence, NOT quiet performance acceptance: a first UI test build (including the large command library) ran concurrently from roughly minute3 onward. Raw30second distinct-pose throughput also includes clip tail/wrap intervals and must not be equated to the active-window throughput measured separately. No claim of constant60FPS under build load is made.
