@@ -13,3 +13,4 @@ wgpu       = { workspace = true }
 
 [dev-dependencies]
 pollster = { workspace = true }
+serde_json = { workspace = true }

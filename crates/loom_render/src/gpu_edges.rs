@@ -101,7 +101,7 @@ pub struct GpuEdges {
     source_count: usize,
     source: wgpu::Buffer,
     source_offset: u64,
-    topology: loom_mesh::HalfEdgeSnapshot,
+    topology: std::sync::Mutex<loom_mesh::HalfEdgeSnapshot>,
     visible: Vec<bool>,
     all_visible: bool,
 }
@@ -236,7 +236,7 @@ impl GpuEdges {
             source_count: source.vertex_count,
             source: source.buffer.clone(),
             source_offset: source.offset,
-            topology: mesh.half_edge_snapshot(),
+            topology: std::sync::Mutex::new(mesh.half_edge_snapshot()),
             all_visible: visible.iter().all(|visible| *visible),
             visible,
         })
@@ -247,19 +247,20 @@ impl GpuEdges {
         if style.diagonals {
             return Err(GpuEdgeError::Diagonals);
         }
-        Ok(self.source_count == mesh.vertex_count()
-            && {
+        if self.source_count != mesh.vertex_count() { return Ok(false); }
+        let Some(mut topology) = self.topology.lock().ok() else { return Ok(false); };
+        let matches = {
                 let _scope = crate::profile::Scope::new("render.gpu_edges.half_edge_check");
-                self.topology.matches(mesh)
+                topology.matches(mesh)
             }
             && if self.all_visible {
-                // The same effective predicate used by ordinary edge emission;
-                // an absent visibility array needs no per-half-edge scan.
                 !mesh.has_invisible_edges()
             } else {
                 self.visible.iter().enumerate()
                     .all(|(i, visible)| *visible == mesh.edge_visible(HalfEdgeId(i as u32)))
-            })
+            };
+        if matches { *topology = mesh.half_edge_snapshot(); }
+        Ok(matches)
     }
     /// A replacement source allocation or changed range requires rebinding,
     /// even when mesh topology is unchanged.
@@ -375,6 +376,16 @@ mod tests {
         let result = staging.slice(..).get_mapped_range().to_vec();
         staging.unmap();
         result
+    }
+    #[test]
+    fn equal_reload_refreshes_edge_snapshot_without_weakening_guards() {
+        let(device,queue)=device();let program=GpuEdgeProgram::new(&device).unwrap();let original=loom_mesh::box_primitive(Vec3::ONE);let style=MeshStyle::default();
+        let source=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:None,contents:bytemuck::cast_slice(&positions(&original)),usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST});
+        let edges=std::sync::Arc::new(GpuEdges::new(&device,&program,EdgeSource{buffer:&source,offset:0,vertex_count:original.vertex_count()},&original,&style).unwrap());
+        for _ in 0..4 {let fresh:Mesh=serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();assert!(edges.matches_geometry(&fresh,&style).unwrap());assert_eq!(read(&device,&queue,&edges),bytemuck::cast_slice::<_,u8>(&expected(&fresh,&style)));}
+        assert!(edges.matches_geometry(&original,&style).unwrap());
+        let mut invisible=original.clone();invisible.set_edge_visible(HalfEdgeId(0),false);assert!(!edges.matches_geometry(&invisible,&style).unwrap());
+        let mut changed=serde_json::to_value(&original).unwrap();changed["half_edges"][0]["origin"]=serde_json::json!(1);let changed:Mesh=serde_json::from_value(changed).unwrap();assert!(!edges.matches_geometry(&changed,&style).unwrap());
     }
     #[test]
     fn current_gpu_edges_match_cpu_bits_and_require_descriptor_rebuilds() {

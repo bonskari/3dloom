@@ -154,8 +154,8 @@ impl DescriptorSnapshot {
             })),
         }
     }
-    fn matches(&self, mesh: &Mesh) -> bool {
-        self.vertex_edges.len()==mesh.vertex_count()
+    fn matches(&mut self, mesh: &Mesh) -> bool {
+        let matches = self.vertex_edges.len()==mesh.vertex_count()
             && self.vertex_edges.iter().zip(mesh.vertices()).all(|(he,v)|*he==v.he)
             && {
                 let _scope = loom_render::profile::Scope::new("gpu_pose.half_edge_check");
@@ -166,7 +166,11 @@ impl DescriptorSnapshot {
                 (Some(old),Some(current))=>old.corners==current.corners && old.values.len()==current.verts.len()
                     && old.values.iter().zip(&current.verts).all(|(a,b)|*a==b.to_array().map(f32::to_bits)),
                 _=>false,
-            })
+            });
+        if matches {
+            self.half_edges = mesh.half_edge_snapshot();
+        }
+        matches
     }
 }
 
@@ -451,7 +455,7 @@ impl GpuPoseGeometry {
     }
     /// Exact effective GPU descriptors, intentionally excluding posed positions.
     pub(crate) fn matches_descriptors(
-        &self,
+        &mut self,
         mesh: &Mesh,
         parts: &[(Option<u16>, bool)],
     ) -> Result<bool, String> {
@@ -1459,10 +1463,26 @@ mod descriptor_snapshot_tests {
         a.vertices==b.vertices&&a.faces==b.faces&&a.parts==b.parts&&a.arena==b.arena&&bytemuck::cast_slice::<Corner,u8>(&a.corners)==bytemuck::cast_slice::<Corner,u8>(&b.corners)
     }
     #[test]
+    fn equal_reload_refreshes_retained_allocation_and_preserves_other_guards() {
+        let original=loom_mesh::box_primitive(Vec3::ONE);
+        let mut snapshot=DescriptorSnapshot::new(&original);
+        for _ in 0..4 {
+            let fresh:Mesh=serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
+            assert_ne!(original.half_edges().as_ptr(),fresh.half_edges().as_ptr());
+            assert!(snapshot.matches(&fresh));
+            assert!(snapshot.matches(&fresh));
+        }
+        assert!(snapshot.matches(&original));
+        let mut posed=original.clone();posed.vertices_mut()[0].position.x+=1.0;assert!(snapshot.matches(&posed));
+        let mut changed=serde_json::to_value(&original).unwrap();changed["half_edges"][0]["origin"]=serde_json::json!(1);let changed:Mesh=serde_json::from_value(changed).unwrap();
+        assert!(!snapshot.matches(&changed));
+        let mut changed=original.clone();changed.faces_mut()[0].smoothing_groups^=1;assert!(!snapshot.matches(&changed));
+    }
+    #[test]
     fn exact_raw_snapshot_excludes_positions_and_rejects_changed_inputs(){
         let mut mesh=loom_mesh::sphere_segmented(1.0,8,0.0);
         loom_mesh::uvmap::auto_map(&mut mesh,loom_mesh::uvmap::AutoMap::Spherical,1);
-        let snapshot=DescriptorSnapshot::new(&mesh);let parts=[(None,false)];let original=Topology::new(&mesh,&parts).unwrap();
+        let mut snapshot=DescriptorSnapshot::new(&mesh);let parts=[(None,false)];let original=Topology::new(&mesh,&parts).unwrap();
         let mut posed=mesh.clone();posed.vertices_mut()[0].position+=Vec3::new(2.0,-3.0,4.0);
         posed.vertices_mut()[1].color=[0.0;3];
         assert!(snapshot.matches(&posed));assert!(equivalent(&original,&Topology::new(&posed,&parts).unwrap()));
@@ -1482,9 +1502,9 @@ mod descriptor_snapshot_tests {
         }
         let mut raw=serde_json::to_value(&mesh).unwrap();raw["half_edges"][0]["origin"]=serde_json::json!(1);
         let changed:Mesh=serde_json::from_value(raw).unwrap();assert!(!snapshot.matches(&changed));
-        let mut zero=mesh.clone();zero.map_mut(1).unwrap().verts[0].x=0.0;let zero_snapshot=DescriptorSnapshot::new(&zero);
+        let mut zero=mesh.clone();zero.map_mut(1).unwrap().verts[0].x=0.0;let mut zero_snapshot=DescriptorSnapshot::new(&zero);
         zero.map_mut(1).unwrap().verts[0].x=-0.0;assert!(!zero_snapshot.matches(&zero));
-        let mut nan=mesh.clone();nan.map_mut(1).unwrap().verts[0].x=f32::from_bits(0x7fc00001);let nan_snapshot=DescriptorSnapshot::new(&nan);
+        let mut nan=mesh.clone();nan.map_mut(1).unwrap().verts[0].x=f32::from_bits(0x7fc00001);let mut nan_snapshot=DescriptorSnapshot::new(&nan);
         assert!(nan_snapshot.matches(&nan));nan.map_mut(1).unwrap().verts[0].x=f32::from_bits(0x7fc00002);assert!(!nan_snapshot.matches(&nan));
     }
     #[test]

@@ -1,0 +1,4 @@
+{
+  "crates/loom_bevy/src/gpu_pose_geometry.rs": "65344f233973807fedd8b7ae7a3f81ab958d1113ee16f752ac8dd7bcbb03939e",
+  "crates/loom_render/src/gpu_edges.rs": "3be421faa3ae482b17bf05a455f2f74789f2050d9c1dce8c2cadca56a9938592"
+}
