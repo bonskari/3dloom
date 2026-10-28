@@ -327,3 +327,21 @@ error or recovery. Frame39 Realistic viewport byte-identical to c4fbe10.
 Rebuild world7.261–7.324ms, skin display worker wall1.199–1.216ms.
 Raw rates2026-10-28-skin-display.jsonl. App paused/frame39 restored.
 This measured incremental gain is retained. Realistic60 remains unfinished.
+
+
+7a7b1e7 native upload breakdown: over a steady Realistic report interval,
+234UIframes/107874meshupdates: edges413.396ms(~1.77ms/frame), queue300.263ms
+(~1.28ms/frame), bounds15.279ms(~0.065ms/frame), wire construction2.358ms.
+These are inclusive reported scopes; totals are not additional frame costs.
+Wire-material preparation was already skipped when no wire material exists,
+but each zero-count wire stream still wrote one unused line vertex every pose.
+d8a0bd4 removes only that inactive upload, retaining prior allocation and zero
+draw count. Nonempty wire reactivation writes current vertices normally.
+Full Render31unit+1integrationpassed, including realGPU reuse/empty/wire/empty/
+wire transitions and exact active buffer/raster comparisons. Native gain pending.
+
+Native d8a0bd4 rates [('Realistic', 46.96), ('Wireframe', 82.442), ('Realistic', 46.649), ('Wireframe', 82.14)]. Realistic has no established
+improvement versus bce2500 (also adds per-object profiling); Wireframe increased
+in this run. Do not attribute a Realistic gain to this cleanup. All5objects and
+13parts committed without reported error/recovery. Frame39 Realistic viewport
+byte-identical to bce2500. App paused/frame39 restored. Full60gate unfinished.
