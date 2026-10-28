@@ -1,0 +1,44 @@
+   Compiling loom_render v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_render)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.64s
+     Running unittests src/lib.rs (target/debug/deps/loom_render-b4ed0912268ddfe4)
+
+running 36 tests
+test camera::tests::camera_frame_looks_straight_down_and_its_fov_spans_the_width ... ok
+test camera::tests::orthographic_clipping_cuts_by_distance_from_the_eye ... ok
+test camera::tests::orthographic_projection_ignores_depth_for_size ... ok
+test camera::tests::orthographic_view_does_not_clip_near_the_target_and_ignores_fov ... ok
+test camera::tests::perspective_clip_planes_follow_the_orbit_distance ... ok
+test camera::tests::view_matrix_follows_roll_and_pitch_over_the_pole ... ok
+test camera::tests::view_projection_finite_for_default_camera ... ok
+test gpu_edges::tests::current_gpu_edges_match_cpu_bits_and_require_descriptor_rebuilds ... ok
+test gpu_edges::tests::equal_reload_refreshes_edge_snapshot_without_weakening_guards ... ok
+test gpu_edges::tests::gpu_edge_source_ranges_are_checked_before_binding ... ok
+test gpu_edges::tests::open_empty_unused_vertices_and_nonzero_source_ranges_are_exact ... ok
+test grid::tests::centre_lines_are_black_and_there_is_no_z_line ... ok
+test mesh_buffer::tests::box_triangulates_to_12_triangles ... ok
+test mesh_buffer::tests::checker_is_an_eight_by_eight_grid_and_uvs_come_from_channel_1 ... ok
+test mesh_buffer::tests::cpu_edge_batch_preserves_exact_bytes_and_ranges_across_updates ... ok
+test mesh_buffer::tests::edges_only_off_adds_one_dashed_diagonal_per_quad ... ok
+test mesh_buffer::tests::hidden_faces_are_not_drawn ... ok
+test mesh_buffer::tests::map_uv_transform_and_faceted ... ok
+test mesh_buffer::tests::multi_sub_faces_take_their_material_id_colour_and_group_by_texture ... ok
+test mesh_buffer::tests::opacity_bitmap_routes_full_material_opacity_to_blend_without_changing_vertex_layout ... ok
+test mesh_buffer::tests::persistent_edge_staging_matches_reference_after_connectivity_visibility_and_style_edits ... ok
+test mesh_buffer::tests::reused_gpu_buffers_match_fresh_geometry_after_growth_shrink_and_style_changes ... ok
+test mesh_buffer::tests::smoothed_box_corners_share_a_normal ... ok
+test mesh_buffer::tests::sphere_triangulates_within_index_range ... ok
+test mesh_buffer::tests::triangulated_smoothing_matches_corner_normals ... ok
+test mesh_buffer::tests::vertex_colours_tint_when_shown ... ok
+test mesh_buffer::tests::wire_faces_draw_as_edges_in_the_material_colour ... ok
+test mesh_buffer::tests::wire_material_fast_path_respects_sub_material_overrides_and_missing_ids ... ok
+test pick::ray_tests::orthographic_rays_are_parallel_with_distinct_origins ... ok
+test pick::ray_tests::perspective_rays_start_near_the_eye ... ok
+test pick::tests::a_ray_through_a_hole_misses_the_mesh ... ok
+test pick::tests::ray_hits_unit_cube_from_camera_aimed_at_origin ... ok
+test pick::tests::ray_misses_parallel_offset ... ok
+test pick::tests::ray_misses_when_aimed_away ... ok
+test viewport::selected_line_tests::selected_viewport_matches_legacy_white_edges_with_default_and_subobject_lines ... ok
+test viewport::shade_tests::wireframe_views_shade_only_the_shade_selected_meshes ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.53s
+

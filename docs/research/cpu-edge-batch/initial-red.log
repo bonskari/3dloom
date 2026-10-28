@@ -1,0 +1,9 @@
+   Compiling loom_render v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_render)
+error[E0433]: cannot find `CpuEdgeBatch` in `mesh_buffer`
+   --> crates/loom_render/src/viewport.rs:499:49
+    |
+499 |             let mut batch = crate::mesh_buffer::CpuEdgeBatch::default();
+    |                                                 ^^^^^^^^^^^^ could not find `CpuEdgeBatch` in `mesh_buffer`
+
+For more information about this error, try `rustc --explain E0433`.
+error: could not compile `loom_render` (lib test) due to 1 previous error
