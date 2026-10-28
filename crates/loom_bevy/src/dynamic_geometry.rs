@@ -213,7 +213,7 @@ impl DynamicGeometryBuffer {
         &mut self, encoder: &mut wgpu::CommandEncoder,
         source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>,
     ) -> Result<Aabb, String> {
-        Ok(self.prepare_gpu(source, source_offset, positions, indices)?.commit(encoder))
+        Ok(self.prepare_gpu(source, source_offset, positions, indices)?.commit(encoder).0)
     }
 
     pub(crate) fn validate_gpu(&self, source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>) -> Result<u64, String> {
@@ -242,7 +242,7 @@ pub(crate) struct ValidatedGpuCopy<'a> {
 }
 impl ValidatedGpuCopy<'_> {
     /// Whole-pose callers must validate all compute guards before any commit.
-    pub(crate) fn commit(self, encoder: &mut wgpu::CommandEncoder) -> Aabb {
+    pub(crate) fn commit(self, encoder: &mut wgpu::CommandEncoder) -> (Aabb, (glam::Vec3, glam::Vec3)) {
         let _scope = loom_render::profile::Scope::new("bevy.dynamic.gpu_copy");
         let target = self.target;
         let mut lo = glam::Vec3::splat(f32::INFINITY);
@@ -257,7 +257,7 @@ impl ValidatedGpuCopy<'_> {
         encoder.copy_buffer_to_buffer(self.source, self.source_offset, &target.buffer, 0, self.bytes);
         std::mem::swap(&mut target.last_positions, &mut target.next_positions);
         target.history_needs_advance = true;
-        Aabb::from_min_max(lo, hi)
+        (Aabb::from_min_max(lo, hi), (lo, hi))
     }
 }
 
@@ -816,6 +816,11 @@ mod tests {
             loom_mesh::edit_ops::translate_mesh(mesh, glam::Vec3::X * (i + 2) as f32).unwrap();
         }
         r.sync_deforming(&objects(&meshes), &ids);
+        let (min, max) = meshes.iter().flat_map(|mesh| mesh.vertices()).fold(
+            (glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN)),
+            |(min, max), vertex| (min.min(vertex.position), max.max(vertex.position)),
+        );
+        assert_eq!(r.bounds, Some(((min + max) * 0.5, ((max - min) * 0.5).length().max(1e-3))), "global bounds must include both differently posed objects without Aabb roundtrip");
         let sources = r.gpu_pose_sources();
         assert_eq!(sources.len(), 2);
         for source in sources { assert_eq!(source.vertex_count, meshes[source.id as usize - 1].vertex_count()); }

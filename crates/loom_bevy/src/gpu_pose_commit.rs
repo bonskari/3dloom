@@ -16,6 +16,12 @@ pub(crate) enum PoseCommitError {
     Guards(Vec<u32>),
 }
 
+pub(crate) struct PoseBounds {
+    pub parts: Vec<bevy::render::primitives::Aabb>,
+    pub min: glam::Vec3,
+    pub max: glam::Vec3,
+}
+
 /// Validate the complete pose before changing any render buffer or history.
 /// Copies are submitted here so successful commits cannot leave an unsubmitted
 /// encoder behind. The caller inserts all returned bounds before Bevy update.
@@ -24,7 +30,7 @@ pub(crate) fn commit_pose(
     queue: &wgpu::Queue,
     reader: &mut GuardReadback,
     candidates: Vec<PoseCandidate<'_>>,
-) -> Result<Vec<bevy::render::primitives::Aabb>, PoseCommitError> {
+) -> Result<PoseBounds, PoseCommitError> {
     for (part, candidate) in candidates.iter().enumerate() {
         if candidates
             .iter()
@@ -50,7 +56,13 @@ pub(crate) fn commit_pose(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("commit complete current geometry pose"),
     });
-    let bounds = prepared.into_iter().map(|copy| copy.commit(&mut encoder)).collect();
+    let mut bounds = PoseBounds { parts: Vec::with_capacity(prepared.len()), min: glam::Vec3::splat(f32::MAX), max: glam::Vec3::splat(f32::MIN) };
+    for copy in prepared {
+        let (part, (min, max)) = copy.commit(&mut encoder);
+        bounds.parts.push(part);
+        bounds.min = bounds.min.min(min);
+        bounds.max = bounds.max.max(max);
+    }
     queue.submit([encoder.finish()]);
     Ok(bounds)
 }
@@ -237,12 +249,13 @@ mod tests {
                 indices: Some(&current.indices),
             })
             .collect();
-        assert_eq!(
-            commit_pose(&device, &queue, &mut reader, candidates)
-                .unwrap()
-                .len(),
-            2
-        );
+        let bounds = commit_pose(&device, &queue, &mut reader, candidates).unwrap();
+        assert_eq!(bounds.parts.len(), 2);
+        let expected = current.positions.iter().fold((glam::Vec3::splat(f32::MAX), glam::Vec3::splat(f32::MIN)), |(min, max), p| {
+            (min.min(glam::Vec3::from_array(*p)), max.max(glam::Vec3::from_array(*p)))
+        });
+        assert_eq!((bounds.min, bounds.max), expected);
+
         let refs: Vec<_> = targets.iter().map(|t| &**t.buffer()).collect();
         assert_eq!(
             reader.read(&device, &queue, &refs).unwrap(),

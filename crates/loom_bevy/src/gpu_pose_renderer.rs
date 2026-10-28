@@ -1,6 +1,6 @@
 //! Experimental renderer integration for internal native comparison runs.
 use super::*;
-use crate::gpu_pose_commit::{commit_pose, GuardReadback, PoseCandidate, PoseCommitError};
+use crate::gpu_pose_commit::{commit_pose, GuardReadback, PoseCandidate, PoseCommitError, PoseBounds};
 use crate::gpu_pose_geometry::mikk_prepare::GpuPreparation;
 use crate::gpu_pose_runtime::GpuPoseRuntime;
 use crate::gpu_pose_geometry::mikk_recipe::GpuRecipeMath;
@@ -215,22 +215,11 @@ impl GpuPoseState {
         let bounds = result.map_err(|e| format!("{e:?}"))?;
         let updates = order
             .into_iter()
-            .zip(bounds)
+            .zip(bounds.parts)
             .map(|((id, part), bounds)| (id, part, bounds))
             .collect();
-        let _bounds_scope = loom_render::profile::Scope::new("gpu_pose.scene_bounds");
-        let mut lo = Vec3::splat(f32::MAX);
-        let mut hi = Vec3::splat(f32::MIN);
-        for id in &eligible {
-            for candidate in self.cache[&(hidden, *id)].candidates() {
-                for p in candidate.positions {
-                    lo = lo.min(Vec3::from_array(*p));
-                    hi = hi.max(Vec3::from_array(*p));
-                }
-            }
-        }
         self.current_sources.extend(eligible.iter().map(|id| (hidden, *id)));
-        Ok((updates, Some((lo, hi))))
+        Ok((updates, Some((bounds.min, bounds.max))))
     }
 
     fn commit(
@@ -240,7 +229,7 @@ impl GpuPoseState {
         set: &mut HashMap<u64, Object>,
         hidden: bool,
         eligible: &HashSet<u64>,
-    ) -> Result<(Result<Vec<Aabb>, PoseCommitError>, Vec<(u64, usize)>), String> {
+    ) -> Result<(Result<PoseBounds, PoseCommitError>, Vec<(u64, usize)>), String> {
         let mut candidates = Vec::new();
         let mut order = Vec::new();
         for (id, object) in set.iter_mut().filter(|(id, _)| eligible.contains(id)) {
