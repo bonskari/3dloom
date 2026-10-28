@@ -1,0 +1,9 @@
+{
+  "poses": 4,
+  "parts": 52,
+  "vertices": 1335876,
+  "max_f64_vector_error": 1.4115617414233096e-06,
+  "gpu_session": 70797,
+  "build_session": 75930,
+  "elapsed_seconds_not_a_performance_measurement": 3.42
+}

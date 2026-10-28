@@ -1,0 +1,22 @@
+diff --git a/src/gpu_pose_runtime.rs b/src/gpu_pose_runtime.rs
+index dc21eac..001ef09 100644
+--- a/src/gpu_pose_runtime.rs
++++ b/src/gpu_pose_runtime.rs
+@@ -485,7 +485,7 @@ mod tests {
+     }
+     #[test]
+     #[ignore = "full current CPU-position producer requires LOOM_PERF_SCENE; LOOM_PRECISE_FULL317=1 selects all poses"]
+-    fn actual_ray_precise_current_cpu_positions_f64_quality() {
++    fn actual_ray_precise_native_endpoint_cpu_positions_f64_quality() {
+         current_cpu_positions_quality(true);
+     }
+     #[test]
+@@ -501,7 +501,7 @@ mod tests {
+         let scene: loom_scene::Scene = serde_json::from_value(value["scene"].clone()).unwrap();
+         let ids: Vec<_> = scene.nodes().filter(|n| n.modifiers.iter().any(|m| matches!(&m.modifier, loom_scene::modifier::Modifier::Skin(_)))).map(|n|n.id).collect();
+         assert_eq!(ids.len(), 5);
+-        let times: Vec<f32> = if std::env::var_os("LOOM_PRECISE_FULL317").is_some() { (0..317).map(|i| i as f32 * 149.0 / 316.0).collect() } else { vec![0.0, 39.25, 95.71835, 149.0] };
++        let times: Vec<f32> = vec![149.000015, 150.0, 153.5, 157.0];
+         let mut runtimes = std::collections::HashMap::new();
+         let mut total_parts = 0usize;
+         let mut total_vertices = 0usize;
