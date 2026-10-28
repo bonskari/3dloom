@@ -198,29 +198,22 @@ impl DynamicGeometryBuffer {
         Ok(bounds)
     }
 
-    /// Commit an already validated current GPU candidate without a CPU attribute
-    /// readback/repack. The producer must supply the same positions and immutable
-    /// vertex layout as its 64-byte packed records. Validate every part's compute
-    /// guards before committing any part, then submit before rendering.
+    /// Validate once while borrowing the immutable source layout and exclusive
+    /// target until the caller commits or drops this operation.
+    pub(crate) fn prepare_gpu<'a>(
+        &'a mut self, source: &'a wgpu::Buffer, source_offset: u64,
+        positions: &'a [[f32; 3]], indices: Option<&[u32]>,
+    ) -> Result<ValidatedGpuCopy<'a>, String> {
+        let bytes = self.validate_gpu(source, source_offset, positions, indices)?;
+        Ok(ValidatedGpuCopy { target: self, source, source_offset, positions, bytes })
+    }
+
+    #[cfg(test)]
     pub(crate) fn commit_gpu(
         &mut self, encoder: &mut wgpu::CommandEncoder,
         source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>,
     ) -> Result<Aabb, String> {
-        let _scope = loom_render::profile::Scope::new("bevy.dynamic.gpu_copy");
-        let bytes = self.validate_gpu(source, source_offset, positions, indices)?;
-        let mut lo = glam::Vec3::splat(f32::INFINITY);
-        let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
-        self.next_positions.clear();
-        self.next_positions.reserve(positions.len());
-        for &p in positions {
-            lo = lo.min(glam::Vec3::from_array(p));
-            hi = hi.max(glam::Vec3::from_array(p));
-            self.next_positions.push([p[0], p[1], p[2], 1.0]);
-        }
-        encoder.copy_buffer_to_buffer(source, source_offset, &self.buffer, 0, bytes);
-        std::mem::swap(&mut self.last_positions, &mut self.next_positions);
-        self.history_needs_advance = true;
-        Ok(Aabb::from_min_max(lo, hi))
+        Ok(self.prepare_gpu(source, source_offset, positions, indices)?.commit(encoder))
     }
 
     pub(crate) fn validate_gpu(&self, source: &wgpu::Buffer, source_offset: u64, positions: &[[f32; 3]], indices: Option<&[u32]>) -> Result<u64, String> {
@@ -236,6 +229,35 @@ impl DynamicGeometryBuffer {
             return Err("GPU pose layout, positions or source range is invalid".into());
         }
         Ok(bytes)
+    }
+}
+
+/// Fields stay private: an operation can only be obtained from checked layout.
+pub(crate) struct ValidatedGpuCopy<'a> {
+    target: &'a mut DynamicGeometryBuffer,
+    source: &'a wgpu::Buffer,
+    source_offset: u64,
+    positions: &'a [[f32; 3]],
+    bytes: u64,
+}
+impl ValidatedGpuCopy<'_> {
+    /// Whole-pose callers must validate all compute guards before any commit.
+    pub(crate) fn commit(self, encoder: &mut wgpu::CommandEncoder) -> Aabb {
+        let _scope = loom_render::profile::Scope::new("bevy.dynamic.gpu_copy");
+        let target = self.target;
+        let mut lo = glam::Vec3::splat(f32::INFINITY);
+        let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
+        target.next_positions.clear();
+        target.next_positions.reserve(self.positions.len());
+        for &p in self.positions {
+            lo = lo.min(glam::Vec3::from_array(p));
+            hi = hi.max(glam::Vec3::from_array(p));
+            target.next_positions.push([p[0], p[1], p[2], 1.0]);
+        }
+        encoder.copy_buffer_to_buffer(self.source, self.source_offset, &target.buffer, 0, self.bytes);
+        std::mem::swap(&mut target.last_positions, &mut target.next_positions);
+        target.history_needs_advance = true;
+        Aabb::from_min_max(lo, hi)
     }
 }
 

@@ -35,17 +35,12 @@ pub(crate) fn commit_pose(
                 reason: "GPU candidate aliases a render target buffer".into(),
             });
         }
-        candidate
-            .target
-            .validate_gpu(
-                candidate.output,
-                candidate.offset,
-                candidate.positions,
-                candidate.indices,
-            )
-            .map_err(|reason| PoseCommitError::Layout { part, reason })?;
     }
     let guards: Vec<_> = candidates.iter().map(|c| c.guard).collect();
+    let prepared: Vec<_> = candidates.into_iter().enumerate().map(|(part, c)| {
+        c.target.prepare_gpu(c.output, c.offset, c.positions, c.indices)
+            .map_err(|reason| PoseCommitError::Layout { part, reason })
+    }).collect::<Result<_, _>>()?;
     let flags = reader
         .read(device, queue, &guards)
         .map_err(PoseCommitError::Readback)?;
@@ -55,20 +50,7 @@ pub(crate) fn commit_pose(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("commit complete current geometry pose"),
     });
-    let bounds = candidates
-        .into_iter()
-        .map(|c| {
-            c.target
-                .commit_gpu(
-                    &mut encoder,
-                    c.output,
-                    c.offset,
-                    c.positions,
-                    c.indices,
-                )
-                .expect("all immutable candidate layouts were prevalidated")
-        })
-        .collect();
+    let bounds = prepared.into_iter().map(|copy| copy.commit(&mut encoder)).collect();
     queue.submit([encoder.finish()]);
     Ok(bounds)
 }
