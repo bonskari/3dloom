@@ -387,3 +387,22 @@ remainpixelidentical to e617f00; apppaused/frame39 restored. Rawfourwindows in
 2026-10-28-validated-copy.jsonl. Realistic60 remainsunfinished.
 Bounded17part-pose tangent-conditioningcapture nowruns against animmutable
 prehashed input snapshot, separatelyfromFPSmeasurement; no productionmathchange.
+
+
+8907fec caches whether the GPUedge recipe has every effectiveedgevisible.
+For that case it uses exact !Mesh.has_invisible_edges() instead of scanning
+edge_visible for everyhalfedge eachpose. Origin/twin/count/sourceproofs remain;
+nonallvisible recipes retain exact peredgevisibility comparisons. FullRender
+34unit+1integrationpassed. Not installed/measurednatively yet; no FPSclaim.
+
+9c4182f boundedconditioning evidence (separatehashedimmutableinput): all102
+baselinefailures reproduced,51controls, no membermismatch; baseline derivatives
+bitidenticalto instrumentedderivatives904memberrecords despite evaluatortrace
+perturbation. IndependentPython/RustF64≤2.36e-13. BaselineGPUderivatives with
+F64remainingmathstillfail30/102; finalcompensatedsumalone is insufficient.
+Higherprecisionwholecurrentgroup prototype is researchonly; no mathchange shipped.
+
+Read-only COW audit: fiveSkin meshClone heap payload15.147MB excludingallocator
+metadata: halfedges8.363MB(55.2%), vertices3.294MB, faces1.336MB, UV2.154MB.
+Isolatedhalfedges-only Arc+COW prototype now runs correctness/paired probes;
+productionMesh schema/ownership remains unchanged pendingpositiveverification.
