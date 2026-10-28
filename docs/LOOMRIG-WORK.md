@@ -453,3 +453,29 @@ five-pass production batch. It is NOT promoted. Per-pass cost diagnosis and
 nonfinite/boundary tests remain required. A review finding about intermediate
 overflow has not yet been demonstrated by a GPU reproducer; do not call it a
 reproduced failure. Existing native math and the last measured 57 FPS stay as-is.
+
+
+Native ca68d4d is installed with the shared validation cache and raw-bounds reuse.
+The release build completed in 10m46s. Profiled ready-pose rates were
+Realistic 59.817/59.661 and Wireframe 92.638/92.187. All four frame39 viewports
+were pixel-identical to 3af118d; geometry, materials, camera and weights unchanged.
+
+A controlled restart removed ONLY LOOM_PROFILE_FRAMES. Pose telemetry remained
+active. Same binary, GPU backend and scene: Realistic 60.766/60.350,
+Wireframe 94.431/93.453. A subsequent 60.032-second Realistic run submitted
+3664 distinct ready poses (61.034 FPS); its three 20-second windows were
+61.096, 60.974 and 61.033 FPS. All reported five objects / thirteen parts,
+no error and zero recipe recoveries. All four frame39 viewports also match the
+profiled version pixel-for-pixel. The app is paused at frame39 after verification.
+The service now leaves profiling OFF, with LOOM_EXPERIMENTAL_GPU_POSES=1 still
+explicitly enabled. This proves the current native GPU configuration, not an
+ordinary launch with that experimental feature disabled, and not long-term
+stability or the full goal. Raw profiled/unprofiled and 60-second data persisted
+in native-gpu-checkpoint/2026-10-28-validation-cache-*.jsonl.
+
+The precision prototype remains excluded: its quality gate passed but cost is
+unacceptable. The review's finite-overflow finding was reproduced on a real GPU:
+finite P=1e30 / UV=1e10 yielded guard0, no risk flag, and a NaN tangent while F64
+was finite. The isolated correction and scale/boundary tests are still pending;
+no production fix or general quality acceptance is claimed. All timing jobs were
+held during native samples and released only after the app was paused.

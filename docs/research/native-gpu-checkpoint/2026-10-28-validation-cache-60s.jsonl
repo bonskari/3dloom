@@ -1,0 +1,4 @@
+{"window": 1, "wall_seconds": 20.017567286035046, "distinct_pose_samples": 1223, "distinct_pose_fps": 61.09633516022736, "gpu_pose": {"committed_objects": 5, "committed_parts": 13, "last_error": null, "recovered_recipes": 0}}
+{"window": 2, "wall_seconds": 20.00857033499051, "distinct_pose_samples": 1220, "distinct_pose_fps": 60.97387167470397, "gpu_pose": {"committed_objects": 5, "committed_parts": 13, "last_error": null, "recovered_recipes": 0}}
+{"window": 3, "wall_seconds": 20.005640984978527, "distinct_pose_samples": 1221, "distinct_pose_fps": 61.032785748619716, "gpu_pose": {"committed_objects": 5, "committed_parts": 13, "last_error": null, "recovered_recipes": 0}}
+{"total_wall_seconds": 60.03177860600408, "distinct_pose_samples": 3664, "distinct_pose_fps": 61.03434022915231}
