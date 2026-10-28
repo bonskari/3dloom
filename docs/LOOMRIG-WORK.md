@@ -278,3 +278,11 @@ including11dynamic geometry tests covering PBR/prepass/shadows/resource reuse.
 Skin weight visualization now computes face colors lazily once per rebuild,
 rather than eagerly for each visible object. UI400passed/1ignored before the
 whitespace-only cleanup. These changes have not yet been measured natively.
+
+Native305855b measurement with history fix and d65988d selected-edge sharing:
+Realistic43.088/42.305 and Wireframe76.086/75.974 distinct ready poses/s.
+Same scene and camera, full geometry/materials, GPUstatus5objects/13parts,
+last_error=None/recoveries0. Compared with8884ba8 control40.511/40.416 and
+69.441/70.227, combined changes improve both modes; this measurement does not
+isolate individual contributions. Realistic60 still fails. App paused/frame39
+restored. Raw four-window results persisted2026-10-28-history-edge.jsonl.
