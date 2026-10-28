@@ -2087,6 +2087,8 @@ impl AppState {
         }
         let c = &self.hide_category;
         !match node.object {
+            // Bone Objects uses display.hide_bones above, independently of geometry.
+            ObjectKind::Bone { .. } => false,
             ObjectKind::Camera { .. } => c.cameras,
             ObjectKind::Light(_) => c.lights,
             ref o if o.is_shape() => c.shapes,

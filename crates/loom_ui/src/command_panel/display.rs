@@ -63,21 +63,21 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         ui.horizontal(|ui| {
             if ui.button("All").clicked() {
-                for (on, cmd) in [(c.geometry, Command::HideGeometryToggle), (c.shapes, Command::HideShapesToggle), (c.lights, Command::HideLightsToggle), (c.cameras, Command::HideCamerasToggle), (c.helpers, Command::HideHelpersToggle)] {
+                for (on, cmd) in [(c.geometry, Command::HideGeometryToggle), (c.shapes, Command::HideShapesToggle), (c.lights, Command::HideLightsToggle), (c.cameras, Command::HideCamerasToggle), (c.helpers, Command::HideHelpersToggle), (app.state.display.hide_bones, Command::HideBoneObjectsToggle)] {
                     if !on {
                         let _ = app.dispatch(cmd);
                     }
                 }
             }
             if ui.button("None").clicked() {
-                for (on, cmd) in [(c.geometry, Command::HideGeometryToggle), (c.shapes, Command::HideShapesToggle), (c.lights, Command::HideLightsToggle), (c.cameras, Command::HideCamerasToggle), (c.helpers, Command::HideHelpersToggle)] {
+                for (on, cmd) in [(c.geometry, Command::HideGeometryToggle), (c.shapes, Command::HideShapesToggle), (c.lights, Command::HideLightsToggle), (c.cameras, Command::HideCamerasToggle), (c.helpers, Command::HideHelpersToggle), (app.state.display.hide_bones, Command::HideBoneObjectsToggle)] {
                     if on {
                         let _ = app.dispatch(cmd);
                     }
                 }
             }
             if ui.button("Invert").clicked() {
-                for cmd in [Command::HideGeometryToggle, Command::HideShapesToggle, Command::HideLightsToggle, Command::HideCamerasToggle, Command::HideHelpersToggle] {
+                for cmd in [Command::HideGeometryToggle, Command::HideShapesToggle, Command::HideLightsToggle, Command::HideCamerasToggle, Command::HideHelpersToggle, Command::HideBoneObjectsToggle] {
                     let _ = app.dispatch(cmd);
                 }
             }

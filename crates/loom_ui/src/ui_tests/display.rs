@@ -97,3 +97,16 @@ fn seven_shows_the_statistics_of_the_scene() {
     h.cmd(Command::SetStatistics { polygons: Some(false), triangles: None, edges: None, vertices: None, fps: None, scope: None, default_settings: None });
     assert!(h.text_rects("Polys:").is_empty(), "Polygon Count off hides its line");
 }
+
+#[test]
+fn category_bulk_buttons_include_bone_objects() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.app.panel_tab = crate::Tab::Display;
+    h.frames(2);
+    for (label, expected) in [("All", true), ("None", false), ("Invert", true), ("Invert", false)] {
+        h.click(h.find(Role::Button, label).center());
+        assert_eq!(h.app.state.display.hide_bones, expected, "{label} must include Bone Objects");
+        assert_eq!(h.app.state.hide_category.geometry, expected);
+    }
+}
