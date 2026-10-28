@@ -12,3 +12,46 @@ These count distinct ready submitted pose times in moving-clip windows; complete
 All four frame39 viewport crops were exact in RGB off/on. Both runs restored all original node records/frame/selection and unchanged source bytes. See native-pixel-parity.json, native-*-1.jsonl and native-*-frame39.png. The earlier15-minute reliability proof applies to CPU-edge batching on the prior binary, not retrospectively to this new fused preparation.
 
 The running app currently uses both explicit experimental flags and is paused at frame39; this is not a default-on production claim. No public push was performed.
+
+## Reversed repeated pair
+
+Second fresh-process order was on then off, same binary and edge batching on. Exact results:
+
+```json
+{
+  "off": [
+    {
+      "kind": "summary",
+      "shading": "Realistic",
+      "active_windows": 17,
+      "active_ready_pose_fps": 62.38153039895674,
+      "min_active_window_fps": 59.22422560036437
+    },
+    {
+      "kind": "summary",
+      "shading": "Wireframe",
+      "active_windows": 18,
+      "active_ready_pose_fps": 91.94210586750562,
+      "min_active_window_fps": 87.73945776464909
+    }
+  ],
+  "on": [
+    {
+      "kind": "summary",
+      "shading": "Realistic",
+      "active_windows": 17,
+      "active_ready_pose_fps": 63.361048535737915,
+      "min_active_window_fps": 61.01382758661878
+    },
+    {
+      "kind": "summary",
+      "shading": "Wireframe",
+      "active_windows": 18,
+      "active_ready_pose_fps": 91.83412618959554,
+      "min_active_window_fps": 83.08009136764969
+    }
+  ]
+}
+```
+
+Both experimental-on runs exceeded60 in all accepted active windows in both modes. Both preserved node/selection/frame/source data. The repeated pair and first pair show the Realistic gain in the same direction; long-run fused stability and default-unset acceptance are still pending.
