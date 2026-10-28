@@ -1,0 +1,18 @@
+{
+  "source_commit": "3beffbe09a00ae6ec6912461a09b2acccec9d506",
+  "profile_enabled": true,
+  "steady_block": {
+    "world_mesh_upload_scopes": 135073,
+    "nodes_per_pose": 461,
+    "poses": 293,
+    "actual_cpu_edge_queue_writes": 131850,
+    "actual_cpu_edge_bytes": 313402176,
+    "writes_per_pose": 450.0,
+    "bytes_per_pose": 1069632.0
+  },
+  "limitations": [
+    "Profiling overhead enabled; not a production FPS acceptance result.",
+    "Counters cover nonempty existing-buffer queue writes, not allocation growth or GPU edge uniforms."
+  ],
+  "log_sha256": "472a8f5eec067bfb8feb4970b4c590eeb585dbf4d342df094adf208c07b57b78"
+}
