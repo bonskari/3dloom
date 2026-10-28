@@ -108,6 +108,25 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             }
             Tab::Viewports => {
                 ui.group(|ui| {
+                    use loom_commands::state::NavigationDevice as D;
+                    ui.label(egui::RichText::new("Navigation").strong());
+                    let before = app.state.prefs.viewport_navigation_device;
+                    let mut device = before;
+                    ui.horizontal(|ui| {
+                        ui.label("Input device:");
+                        egui::ComboBox::from_id_salt("viewport_navigation_device")
+                            .selected_text(match device { D::Auto => "Automatic", D::Mouse => "Mouse", D::Touchpad => "Touchpad" })
+                            .show_ui(ui, |ui| {
+                                for (value, label) in [(D::Auto, "Automatic"), (D::Mouse, "Mouse"), (D::Touchpad, "Touchpad")] {
+                                    ui.selectable_value(&mut device, value, label);
+                                }
+                            });
+                    });
+                    if device != before { set(app, "Viewport Navigation Device", device as u8 as f64); }
+                    ui.small(if device == D::Mouse { "Mouse scrolling and pinch gestures zoom the view." } else { "Two fingers: pan. Alt/Option: orbit. Pinch or Ctrl/Command: zoom." });
+                    ui.small("If two-finger scrolling zooms instead of panning, choose Touchpad.");
+                });
+                ui.group(|ui| {
                     ui.label(egui::RichText::new("Viewport Parameters").strong());
                     check(ui, app, "Viewport Tooltips", "Viewport tooltips");
                     ui.horizontal(|ui|number(ui,app,"Viewport Texture Max Size","Texture preview size:",128.0..=8192.0,0));

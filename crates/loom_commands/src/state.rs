@@ -785,9 +785,19 @@ impl Default for GizmoPrefs {
 /// build makes one object, then returns to Select).
 pub const KEEP_CREATING_DEFAULT: bool = false;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigationDevice {
+    #[default]
+    Auto = 0,
+    Mouse = 1,
+    Touchpad = 2,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
+    pub viewport_navigation_device: NavigationDevice,
     /// Motion > Kimodo > Settings; local user configuration, never scene data.
     pub kimodo_api_url: String,
     /// Local viewport preview limits; source textures remain unchanged.
@@ -844,6 +854,7 @@ fn default_nudge() -> f32 {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
+            viewport_navigation_device: NavigationDevice::Auto,
             kimodo_api_url: String::new(),
             viewport_texture_max_size:2048,
             viewport_texture_budget_mb:256,
@@ -886,6 +897,7 @@ impl Prefs {
     pub fn get(&self, name: &str) -> Option<f64> {
         let b = |v: bool| if v { 1.0 } else { 0.0 };
         Some(match name {
+            "Viewport Navigation Device" => self.viewport_navigation_device as u8 as f64,
             "Viewport Texture Max Size" => self.viewport_texture_max_size as f64,
             "Viewport Texture Budget MB" => self.viewport_texture_budget_mb as f64,
             "Scene Undo Levels" => self.undo_levels as f64,
@@ -930,6 +942,12 @@ impl Prefs {
         let on = v != 0.0;
         let f = v as f32;
         match name {
+            "Viewport Navigation Device" => self.viewport_navigation_device = match v {
+                0.0 => NavigationDevice::Auto,
+                1.0 => NavigationDevice::Mouse,
+                2.0 => NavigationDevice::Touchpad,
+                _ => return Err("navigation device must be 0 (automatic), 1 (mouse) or 2 (touchpad)".into()),
+            },
             "Viewport Texture Max Size" => self.viewport_texture_max_size=v.clamp(128.,8192.) as u32,
             "Viewport Texture Budget MB" => self.viewport_texture_budget_mb=v.clamp(16.,2048.) as u32,
             "Scene Undo Levels" => self.undo_levels = (v.max(1.0)) as usize,

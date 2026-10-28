@@ -1,0 +1,9 @@
+{
+  "crates/loom_commands/src/state.rs": "d324487e826afd8a1d1e11697b0c9fb5f1cf90e9db42b06f5e1d853cdf63864c",
+  "crates/loom_commands/src/command.rs": "7ae8916bd7f0753074c175ff3861ed913e89eadb97c9957a4d341d5240626c87",
+  "crates/loom_ui/src/dialogs/preferences.rs": "b8cd430ad02096af6b16c6d91d775f5631c68f3d367fd42fb66e63c38aea077e",
+  "crates/loom_ui/src/live.rs": "20c6d85f09fe84c6737489b7cd9f0476946cbfad8479c14d99e3d209ec58b3a3",
+  "crates/loom_ui/src/ui_tests.rs": "1de1a72d3281cc96189ade5027643efdc7b89344ea6b6e31759949b1fbafd16b",
+  "crates/loom_ui/src/ui_tests/touchpad.rs": "cd817ebd33f29802836dd7c8df9a83173ceea54a2c0f7c2a3f3d49f6bd52207a",
+  "crates/loom_ui/src/viewport_widget.rs": "c5fe1eb36b3f5e46aaf24a2534a5219519080ecbcef5eed2dee0fc845035575c"
+}

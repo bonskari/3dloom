@@ -1190,14 +1190,49 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                 }
             }
-            let scroll = ctx.input(|i| i.raw_scroll_delta.y);
-            if scroll.abs() > 0.0 && response.hovered() && !disabled {
-                let delta = scroll / 50.0;
-                nav_event(app, index, rect, InputEvent::Scroll {
-                        delta_y: delta,
-                        pos: Vec2::ZERO,
-                        mods,
-                    });
+            if response.hovered() && !disabled {
+                let events = ctx.input(|i| i.events.clone());
+                let line_speed = ctx.options(|o| o.line_scroll_speed);
+                use loom_commands::state::NavigationDevice as D;
+                let device = app.state.prefs.viewport_navigation_device;
+                let mut wheel = 0.0;
+                for event in events {
+                    let gesture = match event {
+                        egui::Event::MouseWheel { unit, delta, modifiers } => {
+                            let scale = match unit {
+                                egui::MouseWheelUnit::Line => line_speed,
+                                egui::MouseWheelUnit::Page => ctx.screen_rect().height(),
+                                egui::MouseWheelUnit::Point => 1.0,
+                            };
+                            let delta = delta * scale;
+                            let delta = if modifiers.shift { egui::vec2(delta.x + delta.y, 0.0) } else { delta };
+                            if device == D::Mouse || (device == D::Auto && unit != egui::MouseWheelUnit::Point) {
+                                if !modifiers.shift { wheel += delta.y; }
+                                continue;
+                            }
+                            if modifiers.ctrl || modifiers.command || modifiers.mac_cmd {
+                                ViewNavigation::Zoom((delta.y * 0.002).clamp(-20.0, 20.0).exp())
+                            } else if modifiers.alt {
+                                ViewNavigation::Orbit(Vec2::new(delta.x, delta.y))
+                            } else {
+                                ViewNavigation::Pan(Vec2::new(delta.x, delta.y))
+                            }
+                        }
+                        egui::Event::Zoom(factor) => ViewNavigation::Zoom(factor),
+                        _ => continue,
+                    };
+                    if wheel != 0.0 {
+                        if nav_event(app, index, rect, InputEvent::Scroll { delta_y: wheel / 50.0, pos: Vec2::ZERO, mods }) { ctx.request_repaint(); }
+                        wheel = 0.0;
+                    }
+                    if matches!(gesture, ViewNavigation::Orbit(delta) if delta.is_finite() && delta != Vec2::ZERO) && app.state.viewports[index].kind.angles().is_some() {
+                        let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
+                    }
+                    if nav_input(app, index, rect, gesture) { ctx.request_repaint(); }
+                }
+                if wheel != 0.0 && nav_event(app, index, rect, InputEvent::Scroll { delta_y: wheel / 50.0, pos: Vec2::ZERO, mods }) {
+                    ctx.request_repaint();
+                }
             }
 
             // --- Build callback and enqueue ---
@@ -1473,8 +1508,44 @@ fn nav_change_name(mode: loom_input::NavMode) -> &'static str {
 /// FOV), each drag one scene undo step. A press in an Orbit mode uses the
 /// trackball (`rect`) and Angle Snap.
 fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) -> bool {
+    nav_input(app, index, rect, ViewNavigation::Pointer(ev))
+}
+
+#[derive(Clone, Copy)]
+enum ViewNavigation {
+    Pointer(InputEvent),
+    Pan(Vec2),
+    Orbit(Vec2),
+    Zoom(f32),
+}
+
+impl ViewNavigation {
+    fn apply(self, controller: &mut loom_input::ViewportNavigator, camera: &mut loom_input::OrbitCamera) -> bool {
+        match self {
+            Self::Pointer(event) => controller.handle(event, camera),
+            Self::Pan(delta) if delta.is_finite() && delta != Vec2::ZERO => {
+                let (right, up, _) = camera.basis();
+                camera.target += (-right * delta.x + up * delta.y) * (camera.distance * 0.0015);
+                true
+            }
+            Self::Orbit(delta) if delta.is_finite() && delta != Vec2::ZERO => {
+                camera.orbit(delta.x * 0.006, delta.y * 0.006);
+                true
+            }
+            Self::Zoom(factor) if factor.is_finite() && factor > 0.0 => {
+                let distance = (camera.distance / factor).clamp(0.05, 10_000.0);
+                let changed = camera.distance != distance;
+                camera.distance = distance;
+                changed
+            }
+            _ => false,
+        }
+    }
+}
+
+fn nav_input(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: ViewNavigation) -> bool {
     use loom_input::NavMode as N;
-    if let InputEvent::MouseDown { .. } = ev {
+    if let ViewNavigation::Pointer(InputEvent::MouseDown { .. }) = ev {
         let orbit_mode = matches!(app.state.nav_mode, N::Orbit | N::OrbitSelected | N::OrbitSubObject);
         let c = rect.center();
         app.camera_controller.set_trackball(orbit_mode.then(|| (Vec2::new(c.x, c.y), trackball_radius(rect))));
@@ -1486,14 +1557,14 @@ fn nav_event(app: &mut LoomApp, index: usize, rect: egui::Rect, ev: InputEvent) 
         _ => None,
     };
     let Some(before) = camera.and_then(|id| loom_commands::camera::orbit_of(&app.state.scene, id)) else {
-        return app.camera_controller.handle(ev, &mut app.state.viewports[index].camera);
+        return ev.apply(&mut app.camera_controller, &mut app.state.viewports[index].camera);
     };
     if app.state.active_viewport != index {
         let _ = app.dispatch(Command::ActiveViewport { index: index as u32 });
     }
     let was = app.camera_controller.is_dragging();
     let mut after = before.clone();
-    let changed = app.camera_controller.handle(ev, &mut after);
+    let changed = ev.apply(&mut app.camera_controller, &mut after);
     let now = app.camera_controller.is_dragging();
     if now && !was && !app.camera_nav_open {
         app.state.undo.begin("Camera Navigation");

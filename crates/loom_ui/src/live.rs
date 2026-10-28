@@ -436,7 +436,8 @@ fn parse_mods(v: &Value) -> Result<egui::Modifiers, String> {
                 m.command = true;
             }
             "shift" => m.shift = true,
-            other => return Err(format!("unknown modifier `{other}` (alt, ctrl, shift)")),
+            "command" => { m.mac_cmd = true; m.command = true; }
+            other => return Err(format!("unknown modifier `{other}` (alt, ctrl, shift, command)")),
         }
     }
     Ok(m)
@@ -460,7 +461,7 @@ fn parse_button(v: &Value) -> Result<egui::PointerButton, String> {
 
 /// Parses `input {events: [...]}` into one step per frame. Event shapes
 /// (`pos`, `from`, `to` are `[x, y]` in window points; `mods` a list of
-/// "alt", "ctrl", "shift"):
+/// "alt", "ctrl", "shift", "command"):
 ///
 /// - `{"type": "move", "pos"}`
 /// - `{"type": "button", "pos", "button": "left|right|middle", "pressed", "mods"}`
@@ -468,7 +469,8 @@ fn parse_button(v: &Value) -> Result<egui::PointerButton, String> {
 /// - `{"type": "drag", "from", "to", "button", "mods", "steps"}`: move, press, `steps` moves (default 8), release
 /// - `{"type": "key", "key": "A|Escape|F3|Space|...", "pressed", "mods"}`: without `pressed`, press then release
 /// - `{"type": "text", "text"}`
-/// - `{"type": "scroll", "delta": [dx, dy], "mods"}` in lines
+/// - `{"type": "scroll", "delta": [dx, dy], "unit": "line|point|page", "mods"}` (default: lines)
+/// - `{"type": "zoom", "factor": 1.25}`: native pinch magnification
 /// - `{"type": "modifiers", "mods"}`: hold these from now on (`[]` releases)
 /// - `{"type": "leave"}`: the pointer leaves the window
 /// - `{"type": "wait", "frames"}`
@@ -517,7 +519,18 @@ pub fn parse_input(events: &Value) -> Result<Vec<InputStep>, String> {
             "text" => steps.push(ev(egui::Event::Text(e["text"].as_str().ok_or("`text` is required")?.to_owned()))),
             "scroll" => {
                 let d = parse_pos(&e["delta"], "delta")?;
-                steps.push(ev(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: d.to_vec2(), modifiers: mods }));
+                let unit = match e["unit"].as_str().unwrap_or("line") {
+                    "line" => egui::MouseWheelUnit::Line,
+                    "point" => egui::MouseWheelUnit::Point,
+                    "page" => egui::MouseWheelUnit::Page,
+                    _ => return Err("scroll unit must be line, point or page".into()),
+                };
+                steps.push(ev(egui::Event::MouseWheel { unit, delta: d.to_vec2(), modifiers: mods }));
+            }
+            "zoom" => {
+                let factor = e["factor"].as_f64().ok_or("zoom factor is required")? as f32;
+                if !factor.is_finite() || factor <= 0.0 { return Err("zoom factor must be finite and positive".into()); }
+                steps.push(ev(egui::Event::Zoom(factor)));
             }
             "modifiers" => steps.push(InputStep::Hold(mods)),
             "leave" => steps.push(ev(egui::Event::PointerGone)),

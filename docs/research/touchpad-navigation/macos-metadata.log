@@ -1,0 +1,2 @@
+PASS: real Cargo version 0.1.0 and actual Git state roundtrip through the production plist generator.
+No Mac executable, code signature, launch or Metal rendering was verified.

@@ -24,6 +24,7 @@ mod loomrig;
 mod preview_budget;
 mod playback_cache;
 mod material_previews;
+mod touchpad;
 mod lightcam2;
 mod bake;
 

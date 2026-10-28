@@ -1,0 +1,5 @@
+Set Preference {"error": "unknown preference \"Viewport Navigation Device\"", "ok": false}
+input {"error": "unknown event type `zoom`", "ok": false}
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+AssertionError: New navigation preference and native zoom injection must be supported
