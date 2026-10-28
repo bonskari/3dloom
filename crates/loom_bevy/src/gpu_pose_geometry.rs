@@ -548,7 +548,7 @@ fn read_records<T: Pod>(
 
 #[cfg(test)]
 #[path = "gpu_mikk_f64.rs"]
-mod mikk_f64;
+pub(crate) mod mikk_f64;
 #[path = "gpu_mikk_prepare.rs"]
 pub(crate) mod mikk_prepare;
 #[cfg(test)]

@@ -1,0 +1,12 @@
+{
+  "gpu_mikk_precision.rs": "53ba69bf05de91b91e5a165c0911e459ae989344962989f457f9d6a672983856",
+  "gpu_mikk_precision.wgsl": "daa19bffd2a34be32e2cba02dee47cb62c44c4656082862e7f23c1285ba4cbe7",
+  "gpu_mikk_refinement.wgsl": "7c259f2d87145766ff736219ede938832dade3095f9dfb576691b740251128d8",
+  "gpu_mikk_precision_tests.rs": "001670f6333c1771b0cf4cdbf7f4afb9d39de01ade3403c13397608b58b8a3d8",
+  "gpu_mikk_recipe.rs": "bdb0e2907fae2b0f176553498343f0e67e6fa366cca4755f37cc7189a5a92f66",
+  "gpu_pose_runtime.rs": "a335b755fff754d468605379ba0caed4292c644b217fd2e4af8f6161a73d1114",
+  "gpu_pose_renderer.rs": "f44ecd96defb32b818a39959a3b38d09c2a0a0825ad26291997166f2a06fdc99",
+  "gpu_pose_geometry.rs": "b9f9e70f6345ad262eff00d58138c07796a99157186187281fd350fd88e1546a",
+  "gpu_mikk_f64.rs": "a794f8ea5b91794c3e8f5e026213425b867fa8410c5ad8fd62274b04f8065eac",
+  "lib.rs": "906d0d5c2ecdbbb4ce32dc553154ee927cba4ddbe5076701924f87feaa780ee7"
+}

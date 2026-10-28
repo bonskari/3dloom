@@ -166,7 +166,8 @@ impl Recipe {
 }
 
 pub(crate) struct GpuRecipeMath {
-    pipelines: Vec<wgpu::ComputePipeline>,
+    pipelines: std::sync::Arc<[wgpu::ComputePipeline]>,
+    precision_risks: Option<wgpu::Buffer>,
     group: wgpu::BindGroup,
     scratch: wgpu::Buffer,
     output: wgpu::Buffer,
@@ -184,6 +185,18 @@ impl GpuRecipeMath {
         preparation: &GpuPreparation,
         initial: &Prepared,
         groups: &crate::mikktspace::StructuralRecipe,
+    ) -> Result<Self, String> {
+        Self::with_precision(device, vertices, base, data, preparation, initial, groups, None)
+    }
+    pub(crate) fn with_precision(
+        device: &wgpu::Device,
+        vertices: &wgpu::Buffer,
+        base: u32,
+        data: &crate::MeshData,
+        preparation: &GpuPreparation,
+        initial: &Prepared,
+        groups: &crate::mikktspace::StructuralRecipe,
+        precision: Option<&crate::gpu_mikk_precision::PrecisionProgram>,
     ) -> Result<Self, String> {
         let (prep, offsets) = preparation.recipe_input();
         let recipe = Recipe::from_current_structure(data, initial, groups, offsets, base)?;
@@ -243,6 +256,7 @@ impl GpuRecipeMath {
             contents: bytemuck::bytes_of(&recipe.params),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let precision_risks = precision.map(|_| storage("current group precision risks", (u64::from(recipe.params.counts[3]) * 4).max(4)));
         let entries: Vec<_> = (0..9)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
@@ -261,33 +275,38 @@ impl GpuRecipeMath {
                 count: None,
             })
             .collect();
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("current recipe dynamic GPU math"),
-            entries: &entries,
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
-        });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("all-current GPU tangent derivative subgroup angle epilogue"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_mikk_recipe.wgsl").into()),
-        });
-        let pipelines = ["guard_init", "derive", "evaluate", "epilogue", "pack"]
-            .into_iter()
-            .map(|entry| {
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some(entry),
-                    layout: Some(&pipeline_layout),
-                    module: &shader,
-                    entry_point: Some(entry),
-                    compilation_options: Default::default(),
-                    cache: None,
+        let (layout, pipelines) = if let Some(program) = precision {
+            (program.layout.clone(), program.pipelines.clone())
+        } else {
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("current recipe dynamic GPU math"),
+                entries: &entries,
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[&layout],
+                push_constant_ranges: &[],
+            });
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("all-current GPU tangent derivative subgroup angle epilogue"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("gpu_mikk_recipe.wgsl").into()),
+            });
+            let pipelines: std::sync::Arc<[wgpu::ComputePipeline]> = ["guard_init", "derive", "evaluate", "epilogue", "pack"]
+                .into_iter()
+                .map(|entry| {
+                    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                        label: Some(entry),
+                        layout: Some(&pipeline_layout),
+                        module: &shader,
+                        entry_point: Some(entry),
+                        compilation_options: Default::default(),
+                        cache: None,
+                    })
                 })
-            })
-            .collect();
-        let entries: Vec<_> = [
+                .collect::<Vec<_>>().into();
+            (layout, pipelines)
+        };
+        let mut buffers = vec![
             vertices,
             &triangles,
             prep,
@@ -297,10 +316,9 @@ impl GpuRecipeMath {
             &output,
             &derivatives,
             &uniform,
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(binding, b)| wgpu::BindGroupEntry {
+        ];
+        if let Some(risks) = &precision_risks { buffers.push(risks); }
+        let entries: Vec<_> = buffers.into_iter().enumerate().map(|(binding, b)| wgpu::BindGroupEntry {
             binding: binding as u32,
             resource: b.as_entire_binding(),
         })
@@ -319,6 +337,7 @@ impl GpuRecipeMath {
             params: recipe.params,
             uniform,
             derivatives,
+            precision_risks,
         })
     }
     pub(crate) fn output(&self) -> &wgpu::Buffer {
@@ -332,6 +351,7 @@ impl GpuRecipeMath {
     }
     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
         encoder.clear_buffer(&self.scratch, 0, None);
+        if let Some(risks) = &self.precision_risks { encoder.clear_buffer(risks, 0, None); }
         for (i, pipeline) in self.pipelines.iter().enumerate() {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("current GPU tangent math"),
@@ -339,19 +359,19 @@ impl GpuRecipeMath {
             });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.group, &[]);
-            let count = match i {
-                1 => self.counts[1],
-                4 => self.counts[0],
-                _ => self.counts[1] * 3,
-            };
+            let count = self.dispatch_count(i);
             pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
         }
     }
     /// Keep stage barriers while sharing each pass across independent parts.
     pub(crate) fn encode_batch(encoder: &mut wgpu::CommandEncoder, parts: &[&Self]) {
         if parts.is_empty() { return; }
-        for part in parts { encoder.clear_buffer(&part.scratch, 0, None); }
-        for stage in 0..5 {
+        for part in parts {
+            encoder.clear_buffer(&part.scratch, 0, None);
+            if let Some(risks) = &part.precision_risks { encoder.clear_buffer(risks, 0, None); }
+        }
+        assert!(parts.iter().all(|p| p.pipelines.len() == parts[0].pipelines.len()), "one math mode per batch");
+        for stage in 0..parts[0].pipelines.len() {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("current GPU tangent math batch"),
                 timestamp_writes: None,
@@ -359,14 +379,22 @@ impl GpuRecipeMath {
             for part in parts {
                 pass.set_pipeline(&part.pipelines[stage]);
                 pass.set_bind_group(0, &part.group, &[]);
-                let count = match stage {
-                    1 => part.counts[1],
-                    4 => part.counts[0],
-                    _ => part.counts[1] * 3,
-                };
+                let count = part.dispatch_count(stage);
                 pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
             }
         }
+    }
+    fn dispatch_count(&self, stage: usize) -> u32 {
+        if self.precision_risks.is_some() {
+            match stage { 1 => self.counts[1], 3 | 4 => self.counts[3], 6 | 7 => self.counts[0], _ => self.counts[1] * 3 }
+        } else {
+            match stage { 1 => self.counts[1], 4 => self.counts[0], _ => self.counts[1] * 3 }
+        }
+    }
+    #[cfg(test)]
+    fn read_precision_risks(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<u32> {
+        if self.counts[3] == 0 { return Vec::new(); }
+        super::read_records(device, queue, self.precision_risks.as_ref().unwrap(), self.counts[3] as usize)
     }
     #[cfg(test)]
     /// Test-only isolation: current CPU InitTriInfo derivatives are uploaded
@@ -841,3 +869,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+include!("gpu_mikk_precision_tests.rs");

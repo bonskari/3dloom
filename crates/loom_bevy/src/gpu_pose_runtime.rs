@@ -26,6 +26,7 @@ pub(crate) struct GpuPoseRuntime {
     geometry: GpuPoseGeometry,
     parts: Vec<Part>,
     guards: GuardReadback,
+    precision: Option<std::sync::Arc<crate::gpu_mikk_precision::PrecisionProgram>>,
 }
 impl GpuPoseRuntime {
     /// Mesh positions are already the final CPU world-baked pose.
@@ -34,6 +35,15 @@ impl GpuPoseRuntime {
         queue: &wgpu::Queue,
         mesh: &Mesh,
         descriptors: &[(Option<u16>, bool)],
+    ) -> Result<Self, String> {
+        Self::with_precision(device, queue, mesh, descriptors, None)
+    }
+    pub(crate) fn with_precision(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        mesh: &Mesh,
+        descriptors: &[(Option<u16>, bool)],
+        precision: Option<std::sync::Arc<crate::gpu_mikk_precision::PrecisionProgram>>,
     ) -> Result<Self, String> {
         let positions = source_positions(mesh)?;
         let source: bevy::render::render_resource::Buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -76,6 +86,7 @@ impl GpuPoseRuntime {
             geometry,
             parts,
             guards,
+            precision,
         };
         runtime.gather_positions(mesh);
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -101,7 +112,7 @@ impl GpuPoseRuntime {
             self.geometry.matches_descriptors(mesh, descriptors)?
         };
         if !same {
-            *self = Self::new(device, queue, mesh, descriptors)?;
+            *self = Self::with_precision(device, queue, mesh, descriptors, self.precision.clone())?;
             return Ok(true);
         }
         {
@@ -181,7 +192,7 @@ impl GpuPoseRuntime {
             };
             let prepared = part.preparation.readback(device, queue)?;
             let structure = crate::mikktspace::compile_structure(&data);
-            part.math = Some(GpuRecipeMath::new(
+            part.math = Some(GpuRecipeMath::with_precision(
                 device,
                 self.geometry.intermediate_buffer(),
                 range.start as u32,
@@ -189,6 +200,7 @@ impl GpuPoseRuntime {
                 &part.preparation,
                 &prepared,
                 &structure,
+                self.precision.as_deref(),
             )?);
         }
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -471,4 +483,72 @@ mod tests {
             update_time.as_secs_f64() * 1000.0 / 3.0
         );
     }
+    #[test]
+    #[ignore = "full current CPU-position producer requires LOOM_PERF_SCENE; LOOM_PRECISE_FULL317=1 selects all poses"]
+    fn actual_ray_precise_current_cpu_positions_f64_quality() {
+        current_cpu_positions_quality(true);
+    }
+    #[test]
+    #[ignore = "positive control characterizes the original fast5 numeric failure on actual CPU-position input"]
+    #[should_panic(expected = "production precise8 F64")]
+    fn actual_ray_fast_current_cpu_positions_f64_positive_control() {
+        current_cpu_positions_quality(false);
+    }
+    fn current_cpu_positions_quality(precise: bool) {
+        let (device, queue) = device();
+        let program = precise.then(|| std::sync::Arc::new(crate::gpu_mikk_precision::PrecisionProgram::new(&device).unwrap()));
+        let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(std::env::var("LOOM_PERF_SCENE").unwrap()).unwrap()).unwrap();
+        let scene: loom_scene::Scene = serde_json::from_value(value["scene"].clone()).unwrap();
+        let ids: Vec<_> = scene.nodes().filter(|n| n.modifiers.iter().any(|m| matches!(&m.modifier, loom_scene::modifier::Modifier::Skin(_)))).map(|n|n.id).collect();
+        assert_eq!(ids.len(), 5);
+        let times: Vec<f32> = if std::env::var_os("LOOM_PRECISE_FULL317").is_some() { (0..317).map(|i| i as f32 * 149.0 / 316.0).collect() } else { vec![0.0, 39.25, 95.71835, 149.0] };
+        let mut runtimes = std::collections::HashMap::new();
+        let mut total_parts = 0usize;
+        let mut total_vertices = 0usize;
+        let mut maximum = 0.0f64;
+        for frame in &times {
+            scene.set_time(*frame);
+            let mut count = 0;
+            for id in &ids {
+                let mut mesh = scene.eval_mesh(*id).value.mesh.clone();
+                loom_mesh::edit_ops::transform_mesh(&mut mesh, scene.object_matrix(*id)).unwrap();
+                let surfaces = scene.node_surfaces(*id).unwrap();
+                let materials: std::collections::BTreeSet<_> = mesh.faces().iter().filter(|f|!f.hidden).map(|f|f.material_id).collect();
+                let parts: Vec<_> = materials.into_iter().map(|m|(Some(m),surfaces.for_face(m).faceted)).collect();
+                if !runtimes.contains_key(id) {
+                    runtimes.insert(*id, GpuPoseRuntime::with_precision(&device, &queue, &mesh, &parts, program.clone()).unwrap());
+                }
+                let runtime = runtimes.get_mut(id).unwrap();
+                runtime.update(&device, &queue, &mesh, &parts).unwrap();
+                run(runtime, &device, &queue);
+                let records = runtime.geometry.readback(&device, &queue);
+                for (part_index, (part, range)) in runtime.parts.iter().zip(&runtime.geometry.parts).enumerate() {
+                    let attrs = &records[range.clone()];
+                    let data = MeshData { positions: attrs.iter().map(|v|v.position[..3].try_into().unwrap()).collect(), normals: attrs.iter().map(|v|v.normal[..3].try_into().unwrap()).collect(), uvs: attrs.iter().map(|v|v.uv[..2].try_into().unwrap()).collect(), indices: part.indices.clone() };
+                    let structure = crate::mikktspace::compile_structure(&data);
+                    let truth = crate::gpu_pose_geometry::mikk_f64::tangents_f64(&data, &structure);
+                    let actual = part.math.as_ref().unwrap().readback(&device, &queue).unwrap();
+                    assert_eq!(actual.len(), truth.len()); assert_eq!(actual.len(), attrs.len());
+                    let mut part_max = 0.0f64;
+                    for (i, ((v,t),a)) in actual.iter().zip(&truth).zip(attrs).enumerate() {
+                        assert_eq!(bytemuck::bytes_of(&v.position),bytemuck::bytes_of(&a.position));
+                        assert_eq!(bytemuck::bytes_of(&v.normal),bytemuck::bytes_of(&a.normal));
+                        assert_eq!(bytemuck::bytes_of(&v.uv),bytemuck::bytes_of(&a.uv));
+                        assert_eq!(v.position[..3],part.positions[i]);
+                        assert!(v.tangent.iter().all(|x|x.is_finite()));
+                        assert_eq!(f64::from(v.tangent[3]),t[3],"handedness frame={frame} node={id:?} part={part_index} vertex={i}");
+                        let error = glam::DVec3::new(v.tangent[0] as f64,v.tangent[1] as f64,v.tangent[2] as f64).distance(glam::DVec3::new(t[0],t[1],t[2]));
+                        part_max = part_max.max(error);
+                        assert!(error <= 2e-5,"production precise8 F64 frame={frame} node={id:?} part={part_index} vertex={i} error={error:e}");
+                    }
+                    maximum = maximum.max(part_max); total_vertices += actual.len(); total_parts += 1; count += 1;
+                    eprintln!("PRODUCTION_PRECISE_F64_PASS frame={frame} node={id:?} part={part_index} vertices={} max_f64={part_max:e}",actual.len());
+                }
+            }
+            assert_eq!(count,13);
+        }
+        assert_eq!(total_parts,times.len()*13);
+        eprintln!("PRODUCTION_PRECISE_F64_COMPLETE poses={} parts={total_parts} vertices={total_vertices} max_f64={maximum:e}",times.len());
+    }
+
 }

@@ -1,0 +1,9 @@
+{
+  "parts": 4121,
+  "vertices": 105868173,
+  "max_f64_vector_error": 3.338108500276807e-06,
+  "poses": 317,
+  "terminal_seconds": 70.76,
+  "producer": "current CPU final world-baked positions via GpuPoseRuntime",
+  "quality_threshold": 2e-05
+}

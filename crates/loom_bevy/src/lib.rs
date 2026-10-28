@@ -14,6 +14,7 @@ mod gpu_skin;
 pub mod dynamic_geometry;
 mod gpu_pose_geometry;
 mod gpu_pose_runtime;
+mod gpu_mikk_precision;
 mod gpu_pose_renderer;
 pub use gpu_pose_renderer::{GpuPoseSource, GpuPoseStatus};
 
@@ -285,8 +286,7 @@ impl BevyRenderer {
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         let light = Some(Self::spawn_key_light(&mut app));
         Self {
-            gpu_poses: std::env::var_os("LOOM_EXPERIMENTAL_GPU_POSES")
-                .filter(|value| value == "1").map(|_| gpu_pose_renderer::GpuPoseState::default()),
+            gpu_poses: gpu_pose_renderer::GpuPoseState::selected(&device, std::env::var_os("LOOM_EXPERIMENTAL_GPU_POSES").as_deref()),
             app, device, queue, objects: HashMap::new(), geometry: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, samples: Vec::new(), scene_lights: HashMap::new(), bounds: None, settle: 3, hidden: HashMap::new(), render: None }
     }
 

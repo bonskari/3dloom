@@ -1,0 +1,43 @@
+   Compiling loom_mesh v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_mesh)
+   Compiling loom_shape v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_shape)
+   Compiling loom_render v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_render)
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+   Compiling loom_bevy v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_bevy)
+error[E0599]: no associated function or constant named `selected` found for struct `gpu_pose_renderer::GpuPoseState` in the current scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:280:31
+    |
+ 26 | pub(super) struct GpuPoseState {
+    | ------------------------------ associated function or constant `selected` not found for this struct
+...
+280 |         assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8"))).is_none());
+    |                               ^^^^^^^^ associated function or constant not found in `gpu_pose_renderer::GpuPoseState`
+
+error[E0599]: no associated function or constant named `selected` found for struct `gpu_pose_renderer::GpuPoseState` in the current scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:282:31
+    |
+ 26 | pub(super) struct GpuPoseState {
+    | ------------------------------ associated function or constant `selected` not found for this struct
+...
+282 |         assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("1"))).is_some());
+    |                               ^^^^^^^^ associated function or constant not found in `gpu_pose_renderer::GpuPoseState`
+
+error[E0599]: no associated function or constant named `selected` found for struct `gpu_pose_renderer::GpuPoseState` in the current scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:283:31
+    |
+ 26 | pub(super) struct GpuPoseState {
+    | ------------------------------ associated function or constant `selected` not found for this struct
+...
+283 |         assert!(GpuPoseState::selected(&device, None).is_none());
+    |                               ^^^^^^^^ associated function or constant not found in `gpu_pose_renderer::GpuPoseState`
+
+error[E0599]: no associated function or constant named `selected` found for struct `gpu_pose_renderer::GpuPoseState` in the current scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:284:31
+    |
+ 26 | pub(super) struct GpuPoseState {
+    | ------------------------------ associated function or constant `selected` not found for this struct
+...
+284 |         assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("other"))).is_none());
+    |                               ^^^^^^^^ associated function or constant not found in `gpu_pose_renderer::GpuPoseState`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `loom_bevy` (lib test) due to 4 previous errors

@@ -25,6 +25,7 @@ pub struct GpuPoseStatus<'a> {
 #[derive(Default)]
 pub(super) struct GpuPoseState {
     cache: HashMap<(bool, u64), GpuPoseRuntime>,
+    precision: Option<std::sync::Arc<crate::gpu_mikk_precision::PrecisionProgram>>,
     reader: Option<(usize, GuardReadback)>,
     current_sources: HashSet<(bool, u64)>,
     last_error: Option<String>,
@@ -106,6 +107,17 @@ impl BevyRenderer {
 }
 
 impl GpuPoseState {
+    pub(super) fn selected(device: &wgpu::Device, value: Option<&std::ffi::OsStr>) -> Option<Self> {
+        match value.and_then(|v| v.to_str()) {
+            Some("1") => Some(Self::default()),
+            Some("precise8") => match crate::gpu_mikk_precision::PrecisionProgram::new(device) {
+                Ok(program) => Some(Self { precision: Some(std::sync::Arc::new(program)), ..Default::default() }),
+                Err(error) => { eprintln!("precise8 unavailable; using CPU geometry: {error}"); None }
+            },
+            _ => None,
+        }
+    }
+
     fn update(
         &mut self,
         device: &wgpu::Device,
@@ -172,7 +184,7 @@ impl GpuPoseState {
             } else {
                 self.cache.insert(
                     key,
-                    GpuPoseRuntime::new(device, queue, source.mesh, &descriptors)?,
+                    GpuPoseRuntime::with_precision(device, queue, source.mesh, &descriptors, self.precision.clone())?,
                 );
             }
             eligible.insert(source.id);
@@ -270,12 +282,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn precise_selection_on_device_without_f64_keeps_cpu_backend() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let mut descriptor = crate::device_descriptor(&adapter);
+        descriptor.required_features.remove(wgpu::Features::SHADER_F64);
+        let (device, queue) = pollster::block_on(adapter.request_device(&descriptor, None)).unwrap();
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8"))).is_none());
+        assert!(pollster::block_on(device.pop_error_scope()).is_none());
+        assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("1"))).is_some());
+        assert!(GpuPoseState::selected(&device, None).is_none());
+        assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("other"))).is_none());
+        let selection = GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8")));
+        let mut renderer = BevyRenderer::new(adapter, device, queue);
+        renderer.gpu_poses = selection;
+        let mesh = loom_mesh::box_primitive(Vec3::ONE);
+        let objects = [SceneObject { id: 1, mesh: &mesh, transform: glam::Mat4::IDENTITY, wire_color: [128; 3], surfaces: None, renderable: true, flags: Default::default() }];
+        renderer.sync_deforming(&objects, &HashSet::from([1]));
+        renderer.sync_deforming(&objects, &HashSet::from([1]));
+        assert!(renderer.gpu_pose_status().is_none());
+        assert!(!renderer.objects[&1].gpu_pose_current);
+        assert!(!renderer.objects[&1].buffers.is_empty(), "ordinary CPU geometry remains rendered");
+    }
+
+    #[test]
+    fn precise_selection_on_low_device_limits_keeps_cpu_backend() {
+        let instance = wgpu::Instance::new(&Default::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        for case in 0..4 {
+            let mut descriptor = crate::device_descriptor(&adapter);
+            match case {
+                0 => descriptor.required_limits.max_bindings_per_bind_group = 9,
+                1 => descriptor.required_limits.max_compute_workgroup_size_x = 63,
+                2 => descriptor.required_limits.max_compute_invocations_per_workgroup = 63,
+                _ => descriptor.required_limits.max_storage_buffers_per_shader_stage = 8,
+            }
+            let (device, _) = pollster::block_on(adapter.request_device(&descriptor, None)).unwrap();
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            assert!(GpuPoseState::selected(&device, Some(std::ffi::OsStr::new("precise8"))).is_none(), "low limit case={case}");
+            assert!(pollster::block_on(device.pop_error_scope()).is_none(), "shader/layout creation must not be attempted for case={case}");
+        }
+    }
+
+    #[test]
     fn failed_current_readback_withdraws_exported_source_handles() {
+        failed_current_readback(false);
+    }
+    #[test]
+    fn precise_failed_current_readback_withdraws_exported_source_handles() {
+        failed_current_readback(true);
+    }
+    fn failed_current_readback(precise: bool) {
         let instance = wgpu::Instance::new(&Default::default());
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
         let (device, queue) = pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter), None)).unwrap();
         let mut renderer = BevyRenderer::new(adapter, device, queue);
-        renderer.enable_gpu_poses();
+        if precise {
+            renderer.gpu_poses = GpuPoseState::selected(&renderer.device, Some(std::ffi::OsStr::new("precise8")));
+            assert!(renderer.gpu_poses.as_ref().unwrap().precision.is_some());
+        } else { renderer.enable_gpu_poses(); }
         let mesh = loom_mesh::box_primitive(Vec3::ONE);
         let objects = [SceneObject { id: 1, mesh: &mesh, transform: glam::Mat4::IDENTITY, wire_color: [128; 3], surfaces: None, renderable: true, flags: Default::default() }];
         let deforming = HashSet::from([1]);
@@ -295,6 +361,14 @@ mod tests {
     #[test]
     #[ignore = "actual full Ray scene GPU renderer integration requires LOOM_PERF_SCENE"]
     fn actual_ray_all_thirteen_parts_keep_current_pose_and_resources() {
+        current_renderer_resources(false);
+    }
+    #[test]
+    #[ignore = "actual full Ray scene precise8 renderer integration requires LOOM_PERF_SCENE"]
+    fn actual_ray_precise_all_thirteen_parts_keep_current_pose_and_resources() {
+        current_renderer_resources(true);
+    }
+    fn current_renderer_resources(precise: bool) {
         let path = std::env::var("LOOM_PERF_SCENE").expect("actual saved Ray scene");
         let value: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -315,7 +389,10 @@ mod tests {
             pollster::block_on(adapter.request_device(&crate::device_descriptor(&adapter), None))
                 .unwrap();
         let mut renderer = BevyRenderer::new(adapter, device, queue);
-        renderer.enable_gpu_poses();
+        if precise {
+            renderer.gpu_poses = GpuPoseState::selected(&renderer.device, Some(std::ffi::OsStr::new("precise8")));
+            assert!(renderer.gpu_poses.as_ref().unwrap().precision.is_some());
+        } else { renderer.enable_gpu_poses(); }
         let deforming = ids.iter().map(|id| id.0).collect();
         let mut snapshots = HashMap::new();
         let mut readback = GuardReadback::new(&renderer.device, 13).unwrap();

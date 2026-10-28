@@ -1,0 +1,23 @@
+
+running 1 test
+test gpu_pose_runtime::tests::actual_ray_fast_current_cpu_positions_f64_positive_control - should panic ... PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4543) part=0 vertices=70680 max_f64=1.93740400017246e-6
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4544) part=0 vertices=141654 max_f64=2.56452152583392e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4544) part=1 vertices=25050 max_f64=2.934747907687286e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4544) part=2 vertices=3012 max_f64=1.3035972403012498e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4544) part=3 vertices=4608 max_f64=1.3716519764969304e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4544) part=4 vertices=4608 max_f64=1.4400426507326753e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4544) part=5 vertices=2940 max_f64=1.2201785812144172e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4544) part=6 vertices=5166 max_f64=1.509433505854074e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4544) part=7 vertices=1158 max_f64=3.5926242092440575e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4544) part=8 vertices=1728 max_f64=1.5709439525496565e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4545) part=0 vertices=16314 max_f64=2.730647130585998e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4546) part=0 vertices=42597 max_f64=7.901398054376249e-7
+PRODUCTION_PRECISE_F64_PASS frame=0 node=NodeId(4547) part=0 vertices=14454 max_f64=4.840704827045708e-7
+
+thread 'gpu_pose_runtime::tests::actual_ray_fast_current_cpu_positions_f64_positive_control' (3001041) panicked at /tmp/loom-precision-production/src/gpu_pose_runtime.rs:542:25:
+production precise8 F64 frame=39.25 node=NodeId(4543) part=0 vertex=51156 error=3.2967734654902204e-5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 108 filtered out; finished in 2.59s
+

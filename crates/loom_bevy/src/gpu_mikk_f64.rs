@@ -29,7 +29,7 @@ fn decode(index: i32) -> usize {
 fn vertex(data: &MeshData, index: i32) -> usize {
     data.indices[decode(index)] as usize
 }
-pub(super) fn tangents_f64(data: &MeshData, recipe: &StructuralRecipe) -> Vec<[f64; 4]> {
+pub(crate) fn tangents_f64(data: &MeshData, recipe: &StructuralRecipe) -> Vec<[f64; 4]> {
     let corners = data.indices.len();
     let active = recipe.active_count;
     let position = |f: usize, c: usize| {

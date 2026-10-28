@@ -1,0 +1,10 @@
+
+running 1 test
+test gpu_pose_renderer::tests::actual_ray_precise_all_thirteen_parts_keep_current_pose_and_resources ... RAY_GPU_RENDERER time=0 sync_ms=667.033
+RAY_GPU_RENDERER time=39.25 sync_ms=90.870
+RAY_GPU_RENDERER time=95.71835 sync_ms=4.596
+RAY_GPU_RENDERER time=149 sync_ms=4.778
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 108 filtered out; finished in 2.91s
+
