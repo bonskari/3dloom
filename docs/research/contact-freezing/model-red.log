@@ -1,0 +1,74 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+error[E0599]: no method named `frozen` found for struct `ContactTrack` in the current scope
+   --> crates/loom_scene/src/loomrig_contact_tests.rs:274:28
+    |
+274 |         let frozen = track.frozen(time, glam::Mat4::IDENTITY).unwrap();
+    |                            ^^^^^^ method not found in `ContactTrack`
+    |
+   ::: crates/loom_scene/src/loomrig_contact.rs:40:1
+    |
+ 40 | pub struct ContactTrack {
+    | ----------------------- method `frozen` not found for this struct
+
+error[E0599]: no associated function or constant named `constant` found for struct `ContactTrack` in the current scope
+   --> crates/loom_scene/src/loomrig_contact_tests.rs:293:27
+    |
+293 |     assert!(ContactTrack::constant(reference(ContactSpace::World), f32::NAN).is_err());
+    |                           ^^^^^^^^ associated function or constant not found in `ContactTrack`
+    |
+   ::: crates/loom_scene/src/loomrig_contact.rs:40:1
+    |
+ 40 | pub struct ContactTrack {
+    | ----------------------- associated function or constant `constant` not found for this struct
+    |
+note: if you're trying to build a new `ContactTrack`, consider using `ContactTrack::new` which returns `Result<ContactTrack, std::string::String>`
+   --> crates/loom_scene/src/loomrig_contact.rs:56:5
+    |
+ 56 | /     pub fn new(
+ 57 | |         references: BTreeMap<u64, ContactReference>,
+ 58 | |         keys: Vec<ContactKey>,
+ 59 | |     ) -> Result<Self, String> {
+    | |_____________________________^
+
+error[E0599]: no associated function or constant named `constant` found for struct `ContactTrack` in the current scope
+   --> crates/loom_scene/src/loomrig_contact_tests.rs:294:27
+    |
+294 |     assert!(ContactTrack::constant(reference(ContactSpace::World), 1.1).is_err());
+    |                           ^^^^^^^^ associated function or constant not found in `ContactTrack`
+    |
+   ::: crates/loom_scene/src/loomrig_contact.rs:40:1
+    |
+ 40 | pub struct ContactTrack {
+    | ----------------------- associated function or constant `constant` not found for this struct
+    |
+note: if you're trying to build a new `ContactTrack`, consider using `ContactTrack::new` which returns `Result<ContactTrack, std::string::String>`
+   --> crates/loom_scene/src/loomrig_contact.rs:56:5
+    |
+ 56 | /     pub fn new(
+ 57 | |         references: BTreeMap<u64, ContactReference>,
+ 58 | |         keys: Vec<ContactKey>,
+ 59 | |     ) -> Result<Self, String> {
+    | |_____________________________^
+
+error[E0599]: no associated function or constant named `constant` found for struct `ContactTrack` in the current scope
+   --> crates/loom_scene/src/loomrig_contact_tests.rs:295:36
+    |
+295 |     let mut frozen = ContactTrack::constant(reference(ContactSpace::World), 0.5).unwrap();
+    |                                    ^^^^^^^^ associated function or constant not found in `ContactTrack`
+    |
+   ::: crates/loom_scene/src/loomrig_contact.rs:40:1
+    |
+ 40 | pub struct ContactTrack {
+    | ----------------------- associated function or constant `constant` not found for this struct
+    |
+note: if you're trying to build a new `ContactTrack`, consider using `ContactTrack::new` which returns `Result<ContactTrack, std::string::String>`
+   --> crates/loom_scene/src/loomrig_contact.rs:56:5
+    |
+ 56 | /     pub fn new(
+ 57 | |         references: BTreeMap<u64, ContactReference>,
+ 58 | |         keys: Vec<ContactKey>,
+ 59 | |     ) -> Result<Self, String> {
+    | |_____________________________^
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `loom_scene` (lib test) due to 4 previous errors

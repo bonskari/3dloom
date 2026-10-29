@@ -1,0 +1,25 @@
+    Blocking waiting for file lock on build directory
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.97s
+     Running unittests src/lib.rs (target/debug/deps/loom_scene-d1742087114ff936)
+
+running 1 test
+test loomrig_contact_tests::freezing_an_existing_constant_keeps_its_space_and_authored_references ... FAILED
+
+failures:
+
+---- loomrig_contact_tests::freezing_an_existing_constant_keeps_its_space_and_authored_references stdout ----
+
+thread 'loomrig_contact_tests::freezing_an_existing_constant_keeps_its_space_and_authored_references' (378411) panicked at crates/loom_scene/src/loomrig_contact_tests.rs:310:5:
+assertion `left == right` failed
+  left: ContactTrack { references: {1: ContactReference { space: World, position: Vec3(2.1422243, 5.23154, 7.0), rotation: Quat(0.0, 0.0, 0.19866933, 0.9800666), pole_position: Vec3(2.0, 3.0, 5.0) }}, keys: [], constant: Some(ContactState { reference: 1, blend: 0.7 }) }
+ right: ContactTrack { references: {1: ContactReference { space: Body, position: Vec3(1.0, 2.0, 3.0), rotation: Quat(0.0, 0.0, 0.0, 1.0), pole_position: Vec3(0.0, 0.0, 1.0) }, 15: ContactReference { space: World, position: Vec3(1.0, 2.0, 3.0), rotation: Quat(0.0, 0.0, 0.0, 1.0), pole_position: Vec3(0.0, 0.0, 1.0) }}, keys: [], constant: Some(ContactState { reference: 1, blend: 0.7 }) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    loomrig_contact_tests::freezing_an_existing_constant_keeps_its_space_and_authored_references
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 59 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p loom_scene --lib`

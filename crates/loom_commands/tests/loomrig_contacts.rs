@@ -685,4 +685,330 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
         execute(&mut s, Command::UndoSceneOperation).unwrap();
         assert_eq!(source(&s), before);
     }
+    for name in ["Left Leg", "Right Leg", "Left Arm", "Right Arm"] {
+        execute(
+            &mut s,
+            Command::CreateLoomRigContactKey {
+                rig,
+                limb: name.into(),
+                time: 39.,
+                preset: "planted".into(),
+            },
+        )
+        .unwrap();
+    }
+    let expected: Vec<_> = s
+        .scene
+        .nodes()
+        .map(|node| (node.id, s.scene.world_matrix(node.id)))
+        .collect();
+    let materials = serde_json::to_value(&s.scene.materials).unwrap();
+    execute(
+        &mut s,
+        Command::NewSceneKeep {
+            keep: "objects_and_hierarchy".into(),
+        },
+    )
+    .unwrap();
+    assert!(s.scene.loom_rigs[0]
+        .limbs
+        .iter()
+        .all(|limb| limb.contacts.keys().is_empty() && limb.contacts.constant_state().is_some()));
+    assert_eq!(serde_json::to_value(&s.scene.materials).unwrap(), materials);
+    for time in [0., 60., 149.] {
+        s.scene.at_time(time, || {
+            for (id, world) in &expected {
+                assert!(
+                    s.scene.world_matrix(*id).abs_diff_eq(*world, 0.003),
+                    "freeze changed {id:?} at {time}"
+                );
+            }
+        });
+    }
+    assert!(s.scene.contact_errors().is_empty());
+}
+
+#[test]
+fn new_keep_freezes_contacts_at_current_pose_without_retaining_contact_animation() {
+    for (frame, scale) in [0, 10, 15, 30].into_iter().flat_map(|frame| {
+        [Vec3::ONE, Vec3::new(2., 3., 1.), Vec3::new(-2., 3., 1.)].map(|scale| (frame, scale))
+    }) {
+        let (mut s, root, end) = rigged();
+        let mut parent = Node::new("affine parent", ObjectKind::dummy(1.));
+        parent.transform.scale.set(scale);
+        parent
+            .transform
+            .set_rotation_quat(Quat::from_rotation_z(0.3));
+        let parent = s.scene.add_node(parent);
+        s.scene.node_mut(root).unwrap().parent = Some(parent);
+        s.scene
+            .node_mut(root)
+            .unwrap()
+            .transform
+            .set_rotation_quat(Quat::from_rotation_z(0.4));
+        s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+            [
+                (1, reference(ContactSpace::World, Vec3::new(12., 8., 0.))),
+                (2, reference(ContactSpace::Body, Vec3::new(8., 12., 0.))),
+            ]
+            .into(),
+            vec![key(10., 1, 1.), key(20., 2, 0.5)],
+        )
+        .unwrap();
+        s.scene.bump_version();
+        execute(&mut s, Command::SetFrame { frame }).unwrap();
+        let expected = s.scene.world_matrix(end);
+        execute(
+            &mut s,
+            Command::NewSceneKeep {
+                keep: "objects_and_hierarchy".into(),
+            },
+        )
+        .unwrap();
+        assert!(s.scene.loom_rigs[0].limbs[0].contacts.keys().is_empty());
+        let path = std::env::temp_dir().join(format!(
+            "loom-contact-freeze-{}-{frame}-{}.loom",
+            std::process::id(),
+            scale.x.to_bits()
+        ));
+        execute(
+            &mut s,
+            Command::SaveFileAsCopy {
+                path: Some(path.to_string_lossy().into_owned()),
+            },
+        )
+        .unwrap();
+        let mut reopened = AppState::new();
+        execute(
+            &mut reopened,
+            Command::OpenFile {
+                path: Some(path.to_string_lossy().into_owned()),
+            },
+        )
+        .unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(reopened
+            .scene
+            .world_matrix(end)
+            .abs_diff_eq(expected, 0.001));
+        let reads = loom_scene::anim::animated_reads();
+        for time in [-100., 0., 10., 15., 50.] {
+            let actual = s.scene.at_time(time, || s.scene.world_matrix(end));
+            assert!(
+                actual.abs_diff_eq(expected, 0.001),
+                "frame{frame},time{time}: {actual:?} != {expected:?}"
+            );
+        }
+        assert_eq!(
+            loom_scene::anim::animated_reads(),
+            reads,
+            "frozen Scene retained contact time dependence"
+        );
+    }
+}
+
+#[test]
+fn deleting_selected_control_animation_freezes_only_its_limb_in_one_undo_step() {
+    let (mut s, _, end) = rigged();
+    s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+        [
+            (1, reference(ContactSpace::World, Vec3::new(12., 8., 0.))),
+            (2, reference(ContactSpace::Body, Vec3::new(8., 12., 0.))),
+        ]
+        .into(),
+        vec![key(10., 1, 1.), key(20., 2, 0.5)],
+    )
+    .unwrap();
+    s.scene.bump_version();
+    let root = s.scene.loom_rigs[0].mapping.root;
+    let mut joints = Vec::new();
+    for i in 0..3 {
+        let mut node = Node::new("other limb", ObjectKind::bone(10.));
+        node.parent = Some(if i == 0 { root } else { joints[i - 1] });
+        node.transform
+            .position
+            .set(if i == 0 { Vec3::Y * 30. } else { Vec3::X * 10. });
+        joints.push(s.scene.add_node(node));
+    }
+    let mut mapping = s.scene.loom_rigs[0].mapping.clone();
+    mapping.limbs.push(LimbMapping {
+        name: "Other".into(),
+        start: joints[0],
+        middle: joints[1],
+        end: joints[2],
+    });
+    execute(&mut s, Command::SetLoomRigMapping { rig: 1, mapping }).unwrap();
+    s.scene.loom_rigs[0].limbs[1].contacts = s.scene.loom_rigs[0].limbs[0].contacts.clone();
+    let doc = loom_commands::file::Document {
+        format: loom_commands::file::FORMAT,
+        app: "3dloom".into(),
+        scene: s.scene.clone(),
+        settings: loom_commands::file::SceneSettings::from_state(&s),
+    };
+    loom_commands::file::merge_map(&mut s, &doc, None, &[], "Other rig").unwrap();
+    execute(&mut s, Command::SetFrame { frame: 15 }).unwrap();
+    let goal = s.scene.loom_rigs[0].limbs[0].goal;
+    let linear = (
+        loom_scene::anim::TangentType::Linear,
+        loom_scene::anim::TangentType::Linear,
+    );
+    let keys = s
+        .scene
+        .node_mut(goal)
+        .unwrap()
+        .transform
+        .position
+        .ensure_keys()
+        .unwrap();
+    keys.tracks[0].set_key(0., 0., linear);
+    keys.tracks[0].set_key(30., 10., linear);
+    let expected = s.scene.world_matrix(end);
+    let rigs = s.scene.loom_rigs.clone();
+    let node = s.scene.node(goal).unwrap().clone();
+    let undo = s.undo.position();
+    s.selection = [goal].into();
+    execute(&mut s, Command::DeleteSelectedAnimation).unwrap();
+    assert_eq!(s.undo.position(), undo + 1);
+    assert!(s.scene.loom_rigs[0].limbs[0].contacts.keys().is_empty());
+    assert!(s
+        .scene
+        .node(goal)
+        .unwrap()
+        .transform
+        .position
+        .keys()
+        .is_none());
+    assert_eq!(s.scene.loom_rigs[1], rigs[1]);
+    assert_eq!(s.scene.loom_rigs[0].limbs[1], rigs[0].limbs[1]);
+    for time in [0., 15., 30.] {
+        assert!(s
+            .scene
+            .at_time(time, || s.scene.world_matrix(end))
+            .abs_diff_eq(expected, 0.001));
+    }
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs, rigs);
+    assert_eq!(s.scene.node(goal).unwrap(), &node);
+    execute(&mut s, Command::RedoSceneOperation).unwrap();
+    assert!(s.scene.loom_rigs[0].limbs[0].contacts.keys().is_empty());
+}
+
+#[test]
+fn invalid_contact_freeze_is_atomic_even_when_selected_node_tracks_would_change() {
+    let (mut s, root, _) = rigged();
+    let goal = s.scene.loom_rigs[0].limbs[0].goal;
+    let linear = (
+        loom_scene::anim::TangentType::Linear,
+        loom_scene::anim::TangentType::Linear,
+    );
+    s.scene
+        .node_mut(goal)
+        .unwrap()
+        .transform
+        .position
+        .ensure_keys()
+        .unwrap()
+        .tracks[0]
+        .set_key(0., 2., linear);
+    s.scene
+        .node_mut(root)
+        .unwrap()
+        .transform
+        .scale
+        .set(Vec3::new(0., 1., 1.));
+    s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+        [(1, reference(ContactSpace::Body, Vec3::X))].into(),
+        vec![key(0., 1, 1.)],
+    )
+    .unwrap();
+    s.scene.bump_version();
+    s.selection = [goal].into();
+    let before = serde_json::to_value(&s.scene).unwrap();
+    let undo = s.undo.position();
+    assert!(execute(&mut s, Command::DeleteSelectedAnimation).is_err());
+    assert_eq!(serde_json::to_value(&s.scene).unwrap(), before);
+    assert_eq!(s.undo.position(), undo);
+}
+
+#[test]
+fn ik_cache_drops_old_time_dependence_and_recovers_it_for_new_native_animation() {
+    let (mut s, _, end) = rigged();
+    let master = s.scene.loom_rigs[0].master;
+    let animate = |s: &mut AppState| {
+        let keys = s
+            .scene
+            .node_mut(master)
+            .unwrap()
+            .transform
+            .position
+            .ensure_keys()
+            .unwrap();
+        keys.tracks[0].interp = loom_scene::anim::Interp::Linear;
+        let linear = (
+            loom_scene::anim::TangentType::Linear,
+            loom_scene::anim::TangentType::Linear,
+        );
+        keys.tracks[0].set_key(0., 0., linear);
+        keys.tracks[0].set_key(10., 2., linear);
+    };
+    animate(&mut s);
+    assert!(point(&s, end, 0.).abs_diff_eq(Vec3::X * 20., 0.001));
+    assert!(point(&s, end, 10.).abs_diff_eq(Vec3::X * 22., 0.001));
+    s.scene.node_mut(master).unwrap().transform.position = loom_scene::Param::new(Vec3::X);
+    let reads = loom_scene::anim::animated_reads();
+    for time in [0., 10., 5.] {
+        assert!(point(&s, end, time).abs_diff_eq(Vec3::X * 21., 0.001));
+    }
+    assert_eq!(
+        loom_scene::anim::animated_reads(),
+        reads,
+        "removed animation kept the IK cache time-dependent"
+    );
+    animate(&mut s);
+    assert!(point(&s, end, 0.).abs_diff_eq(Vec3::X * 20., 0.001));
+    assert!(point(&s, end, 10.).abs_diff_eq(Vec3::X * 22., 0.001));
+    assert!(loom_scene::anim::animated_reads() > reads);
+}
+
+#[test]
+fn deleting_body_contact_animation_keeps_body_inheritance_and_source_motion() {
+    let (mut s, root, end) = rigged();
+    let linear = (
+        loom_scene::anim::TangentType::Linear,
+        loom_scene::anim::TangentType::Linear,
+    );
+    let keys = s
+        .scene
+        .node_mut(root)
+        .unwrap()
+        .transform
+        .position
+        .ensure_keys()
+        .unwrap();
+    keys.tracks[1].interp = loom_scene::anim::Interp::Linear;
+    keys.tracks[1].set_key(0., 0., linear);
+    keys.tracks[1].set_key(40., 2., linear);
+    s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+        [
+            (1, reference(ContactSpace::Body, Vec3::new(12., 8., 0.))),
+            (2, reference(ContactSpace::Body, Vec3::new(8., 12., 0.))),
+        ]
+        .into(),
+        vec![key(10., 1, 1.), key(20., 2, 1.)],
+    )
+    .unwrap();
+    s.scene.bump_version();
+    execute(&mut s, Command::SetFrame { frame: 15 }).unwrap();
+    let expected = s.scene.world_matrix(end).w_axis.truncate();
+    let root_before = s.scene.node(root).unwrap().transform.clone();
+    s.selection = [s.scene.loom_rigs[0].limbs[0].goal].into();
+    execute(&mut s, Command::DeleteSelectedAnimation).unwrap();
+    assert_eq!(s.scene.node(root).unwrap().transform, root_before);
+    for time in [0., 15., 30.] {
+        let target = expected + Vec3::Y * ((time - 15.) * 0.05);
+        assert!(
+            point(&s, end, time).distance(target) < 0.001,
+            "body inheritance lost at {time}"
+        );
+    }
 }

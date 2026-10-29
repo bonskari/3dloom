@@ -1,0 +1,22 @@
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.20s
+     Running tests/loomrig_contacts.rs (target/debug/deps/loomrig_contacts-7497a055ee27aaf2)
+
+running 1 test
+test deleting_selected_control_animation_freezes_only_its_limb_in_one_undo_step ... FAILED
+
+failures:
+
+---- deleting_selected_control_animation_freezes_only_its_limb_in_one_undo_step stdout ----
+
+thread 'deleting_selected_control_animation_freezes_only_its_limb_in_one_undo_step' (375892) panicked at crates/loom_commands/tests/loomrig_contacts.rs:767:5:
+assertion failed: s.scene.loom_rigs[0].limbs[0].contacts.keys().is_empty()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    deleting_selected_control_animation_freezes_only_its_limb_in_one_undo_step
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p loom_commands --test loomrig_contacts`

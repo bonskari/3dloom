@@ -906,7 +906,13 @@ impl Scene {
         }
         let reads = crate::anim::animated_reads();
         self.ik_solving.set(true);
-        self.ik_cache.borrow_mut().2.clear();
+        {
+            let mut cache = self.ik_cache.borrow_mut();
+            // The new solve must discover its own time dependencies. Reading
+            // its partial results must not inherit the previous solve's flag.
+            cache.1 = None;
+            cache.2.clear();
+        }
         self.contact_errors.borrow_mut().clear();
         // Offset controls are identity at creation: native animation keeps playing.
         for rig in &self.loom_rigs {

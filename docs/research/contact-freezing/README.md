@@ -1,0 +1,19 @@
+# Constant contacts and animation deletion — development checkpoint
+
+ContactTrack has a validated optional constant state (reference ID and blend), separate from its animated keys. Empty legacy rigs still omit contact data; tracks without a constant omit the new field. The constant has no key time and creates no animated read by itself. A later first key uses the constant before its authored domain. Deleting a key does not delete a reference still used by the constant.
+
+Freezing an animated track keeps its sampled blend and target. A shared Body/World space is retained, so deleting a Body contact's keys does not remove its inherited body motion. A transition between different spaces freezes its current world target. Before any active contact, the legacy fallback remains. Already constant tracks are unchanged, including their original reference space and other authored references. Invalid references, blends and frames fail before any edit.
+
+Delete Selected Animation now builds selected node edits and associated rig channel edits before committing one Undo group. Selecting a limb goal, pole or mapped FK control freezes that limb's contacts, blend and pose offsets; other limbs and rigs are untouched. New Scene Keep selects all controllers and uses this same path; there is no separate contact-freeze implementation in the file command. Node track locks retain their prior behavior.
+
+## IK cache finding
+
+A new whole-Scene test showed a frozen pose still produced animated-read notifications. At solve start the old matrix cache was cleared, but its old time-dependency flag remained. Reading partially rebuilt matrices through local_matrix then propagated that stale flag into the new solve. The rebuild now clears its old dependency flag before collecting current dependencies. A separate native-animation regression (without any contact track) reproduced the defect and verifies both dropping an old dependency and recovering it when animation is added again. No source-time sampling or geometry-ready submission gate is bypassed.
+
+## Evidence scope
+
+Tests cover before-first, exact, held and interpolated contacts; static serialization; invalid input; preserving a constant's reference data; atomic Undo/Redo; ownership across limbs in one rig and across different rigs; Body inheritance with retained source animation; mirrored/nonuniform rotated ancestors; save/read serialization and static Scene dependency notifications. The real Ray test additionally freezes all four contacts at frame39 with New Scene Keep and compares all node world matrices at0,60,149 with the kept pose (0.003 absolute component tolerance), retaining materials. This does not certify native viewport rendering, native contact editing or performance.
+
+Still required: effective goal/pole drawing and edits, Free pose matching, ordinary rig pose keys, separate Animation Editor contacts, native Ray interaction/visual/performance/stability and final Kimodo/Mac acceptance. No app replacement or public push occurs in this increment. Flattening an affine hierarchy into TRS-only unparented nodes is not certified by the hierarchy-preserving tests.
+
+Final verification: Scene/Commands/UI/Bevy all-package regression command exited0:1545 passed,0failed,49ignored across151 test/doc-test binaries (Bevy91passed/38ignored; UI447passed/2ignored). The final focused Scene/Commands run exited0 (22+14+60passed,3ignored), including actual Save File As Copy→Open File in each hierarchy-freeze case; its temporary files were removed. The opt-in real Ray capture+freeze test separately passed in30.87s. Source file SHA256 remains84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935; installed app ping remains442101869f6cfaaa19d0335f6c002878da707810. Compiler warnings in unchanged files remain in retained logs. This is a local source checkpoint pending review, not native delivery or full-goal completion.

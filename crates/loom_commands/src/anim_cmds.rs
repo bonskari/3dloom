@@ -382,14 +382,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.show_trajectories = !state.show_trajectories;
             Ok(json!({ "show_trajectories": state.show_trajectories }))
         }
-        C::DeleteSelectedAnimation => {
-            let t = state.current_frame as f32;
-            edit_selection(state, "Delete Selected Animation", |_| true, |_, p| {
-                if p.is_animated() {
-                    p.freeze(t);
-                }
-            })
-        }
+        C::DeleteSelectedAnimation => delete_selected_animation(state),
         _ => Err("not an animation command".into()),
     }
 }
@@ -463,8 +456,8 @@ pub fn node_change(before: &Node, after: &Node) -> Option<Change> {
     (!steps.is_empty()).then_some(Change::Group(steps))
 }
 
-/// Edits the chosen tracks of nodes `ids` as one undo entry.
-pub fn edit_nodes(state: &mut AppState, label: &str, ids: &[NodeId], choose: impl Fn(&TrackPath) -> bool, mut f: impl FnMut(&TrackPath, &mut AnyParam)) -> Result<Value, String> {
+/// Builds selected node-track edits; the caller owns the Undo transaction.
+fn node_edits(state: &AppState, ids: &[NodeId], choose: impl Fn(&TrackPath) -> bool, mut f: impl FnMut(&TrackPath, &mut AnyParam)) -> Result<Vec<Change>, String> {
     let mut changes = Vec::new();
     // Locked tracks (Track View > Locked) take no edits.
     let locked: Vec<tracks::TrackKey> = state.scene.track_data.flags.iter().filter(|(_, f)| f.locked).map(|(k, _)| k.clone()).collect();
@@ -477,11 +470,40 @@ pub fn edit_nodes(state: &mut AppState, label: &str, ids: &[NodeId], choose: imp
             changes.push(c);
         }
     }
+    Ok(changes)
+}
+
+/// Edits the chosen tracks of nodes `ids` as one undo entry.
+pub fn edit_nodes(state: &mut AppState, label: &str, ids: &[NodeId], choose: impl Fn(&TrackPath) -> bool, f: impl FnMut(&TrackPath, &mut AnyParam)) -> Result<Value, String> {
+    let changes = node_edits(state,ids,choose,f)?;
     let n = changes.len();
-    if n > 0 {
-        commit(state, label, Change::Group(changes))?;
+    if n > 0 { commit(state,label,Change::Group(changes))?; }
+    Ok(json!({ "changed":n }))
+}
+
+fn delete_selected_animation(state: &mut AppState) -> Result<Value, String> {
+    let t = state.current_frame as f32;
+    let ids: Vec<_> = state.selection.iter().copied().collect();
+    let mut changes = node_edits(state,&ids,|_|true,|_,p| { if p.is_animated() { p.freeze(t); } })?;
+    let before = state.scene.loom_rigs.clone();
+    let mut after = before.clone();
+    for rig in &mut after {
+        let frame = state.scene.world_matrix(rig.mapping.root);
+        for limb in &mut rig.limbs {
+            let bones = [limb.mapping.start,limb.mapping.middle,limb.mapping.end];
+            let selected = ids.contains(&limb.goal) || ids.contains(&limb.pole)
+                || rig.bindings.iter().any(|binding|bones.contains(&binding.bone) && ids.contains(&binding.control));
+            if selected {
+                limb.contacts = limb.contacts.frozen(t,frame).map_err(|error|format!("LoomRig {} {}: {error}",rig.id,limb.mapping.name))?;
+                limb.blend = loom_scene::Param::new(limb.blend.get());
+                for offset in &mut limb.pose_offsets { *offset = loom_scene::Param::new(offset.get()); }
+            }
+        }
     }
-    Ok(json!({ "changed": n }))
+    if before != after { changes.push(Change::SetLoomRigs { before,after }); }
+    let n = changes.len();
+    if n > 0 { commit(state,"Delete Selected Animation",Change::Group(changes))?; }
+    Ok(json!({ "changed":n }))
 }
 
 fn edit_selection(state: &mut AppState, label: &str, choose: impl Fn(&TrackPath) -> bool, f: impl FnMut(&TrackPath, &mut AnyParam)) -> Result<Value, String> {

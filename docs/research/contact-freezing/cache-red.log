@@ -1,0 +1,24 @@
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.98s
+     Running tests/loomrig_contacts.rs (target/debug/deps/loomrig_contacts-7497a055ee27aaf2)
+
+running 1 test
+test ik_cache_drops_old_time_dependence_and_recovers_it_for_new_native_animation ... FAILED
+
+failures:
+
+---- ik_cache_drops_old_time_dependence_and_recovers_it_for_new_native_animation stdout ----
+
+thread 'ik_cache_drops_old_time_dependence_and_recovers_it_for_new_native_animation' (384671) panicked at crates/loom_commands/tests/loomrig_contacts.rs:940:5:
+assertion `left == right` failed: removed animation kept the IK cache time-dependent
+  left: 98
+ right: 29
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    ik_cache_drops_old_time_dependence_and_recovers_it_for_new_native_animation
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p loom_commands --test loomrig_contacts`

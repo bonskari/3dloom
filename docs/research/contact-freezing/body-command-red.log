@@ -1,0 +1,23 @@
+    Blocking waiting for file lock on build directory
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.25s
+     Running tests/loomrig_contacts.rs (target/debug/deps/loomrig_contacts-7497a055ee27aaf2)
+
+running 1 test
+test deleting_body_contact_animation_keeps_body_inheritance_and_source_motion ... FAILED
+
+failures:
+
+---- deleting_body_contact_animation_keeps_body_inheritance_and_source_motion stdout ----
+
+thread 'deleting_body_contact_animation_keeps_body_inheritance_and_source_motion' (403019) panicked at crates/loom_commands/tests/loomrig_contacts.rs:987:9:
+body inheritance lost at 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    deleting_body_contact_animation_keeps_body_inheritance_and_source_motion
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p loom_commands --test loomrig_contacts`

@@ -35,21 +35,35 @@ pub struct ContactKey {
     pub reference: u64,
     pub blend: f32,
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContactState {
+    pub reference: u64,
+    pub blend: f32,
+}
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "ContactData")]
 pub struct ContactTrack {
     references: BTreeMap<u64, ContactReference>,
     keys: Vec<ContactKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    constant: Option<ContactState>,
 }
 #[derive(Deserialize)]
 struct ContactData {
     references: BTreeMap<u64, ContactReference>,
     keys: Vec<ContactKey>,
+    #[serde(default)]
+    constant: Option<ContactState>,
 }
 impl TryFrom<ContactData> for ContactTrack {
     type Error = String;
     fn try_from(data: ContactData) -> Result<Self, String> {
-        Self::new(data.references, data.keys)
+        let mut track = Self::new(data.references, data.keys)?;
+        if let Some(state) = &data.constant {
+            track.validate_value(state.reference, state.blend)?;
+        }
+        track.constant = data.constant;
+        Ok(track)
     }
 }
 impl ContactTrack {
@@ -57,7 +71,11 @@ impl ContactTrack {
         references: BTreeMap<u64, ContactReference>,
         keys: Vec<ContactKey>,
     ) -> Result<Self, String> {
-        let track = Self { references, keys };
+        let track = Self {
+            references,
+            keys,
+            constant: None,
+        };
         for reference in track.references.values() {
             reference.validate()?;
         }
@@ -73,14 +91,71 @@ impl ContactTrack {
         }
         Ok(track)
     }
-    fn validate_key(&self, key: &ContactKey) -> Result<(), String> {
-        if !key.time.is_finite() || !key.blend.is_finite() || !(0. ..=1.).contains(&key.blend) {
-            return Err("contact key requires finite time and blend in 0..=1".into());
+    fn validate_value(&self, reference: u64, blend: f32) -> Result<(), String> {
+        if !blend.is_finite() || !(0. ..=1.).contains(&blend) {
+            return Err("contact blend must be finite and in 0..=1".into());
         }
-        if !self.references.contains_key(&key.reference) {
-            return Err("contact key references a missing pose".into());
+        if !self.references.contains_key(&reference) {
+            return Err("contact references a missing pose".into());
         }
         Ok(())
+    }
+    fn validate_key(&self, key: &ContactKey) -> Result<(), String> {
+        if !key.time.is_finite() {
+            return Err("contact time must be finite".into());
+        }
+        self.validate_value(key.reference, key.blend)
+    }
+    pub fn constant(reference: ContactReference, blend: f32) -> Result<Self, String> {
+        let mut track = Self::new([(1, reference)].into(), vec![])?;
+        track.validate_value(1, blend)?;
+        track.constant = Some(ContactState {
+            reference: 1,
+            blend,
+        });
+        Ok(track)
+    }
+    pub fn constant_state(&self) -> Option<&ContactState> {
+        self.constant.as_ref()
+    }
+    /// Freeze without a key time; retain a shared reference space, or capture
+    /// the current world target when interpolating between different spaces.
+    pub fn frozen(&self, time: f32, body_frame: glam::Mat4) -> Result<Self, String> {
+        let sample = self.sample(time, body_frame)?;
+        if self.keys.is_empty() {
+            return Ok(self.clone());
+        }
+        match sample {
+            Some(sample) => {
+                let key = self.active_key(time)?;
+                let mut space = key
+                    .map(|key| self.references[&key.reference].space.clone())
+                    .or_else(|| {
+                        self.constant
+                            .as_ref()
+                            .map(|state| self.references[&state.reference].space.clone())
+                    })
+                    .unwrap_or(ContactSpace::World);
+                if let Some(key) = key {
+                    if let Some(next) = self
+                        .keys
+                        .get(self.keys.partition_point(|key| key.time <= time))
+                    {
+                        if time > key.time && self.references[&next.reference].space != space {
+                            space = ContactSpace::World;
+                        }
+                    }
+                }
+                let reference = ContactReference::capture(
+                    space,
+                    body_frame,
+                    glam::Mat4::from_rotation_translation(sample.rotation, sample.position),
+                    sample.pole_position,
+                )?;
+                Self::constant(reference, sample.blend)
+            }
+            None => Ok(Self::default()),
+        }
     }
     fn index(&self, time: f32) -> Result<usize, String> {
         if !time.is_finite() {
@@ -156,6 +231,10 @@ impl ContactTrack {
             .keys
             .iter()
             .any(|other| other.reference == key.reference)
+            && !self
+                .constant
+                .as_ref()
+                .is_some_and(|state| state.reference == key.reference)
         {
             self.references.remove(&key.reference);
         }
@@ -225,7 +304,14 @@ impl ContactTrack {
         time: f32,
         body_frame: glam::Mat4,
     ) -> Result<Option<ContactSample>, String> {
-        let Some(key) = self.active_key(time)? else {
+        let key = self.active_key(time)?;
+        let state = key
+            .map(|key| ContactState {
+                reference: key.reference,
+                blend: key.blend,
+            })
+            .or_else(|| self.constant.clone());
+        let Some(state) = state else {
             return Ok(None);
         };
         let resolve = |id| -> Result<ContactSample, String> {
@@ -244,14 +330,15 @@ impl ContactTrack {
                 position,
                 rotation,
                 pole_position,
-                blend: key.blend,
+                blend: state.blend,
             })
         };
-        let mut result = resolve(key.reference)?;
-        let next = self
-            .keys
-            .get(self.keys.partition_point(|other| other.time <= time));
-        if let Some(next) = next {
+        let mut result = resolve(state.reference)?;
+        let next = key.and_then(|_| {
+            self.keys
+                .get(self.keys.partition_point(|other| other.time <= time))
+        });
+        if let (Some(key), Some(next)) = (key, next) {
             let amount = ((time as f64 - key.time as f64) / (next.time as f64 - key.time as f64))
                 .clamp(0., 1.) as f32;
             result.blend = key.blend + (next.blend - key.blend) * amount;

@@ -108,3 +108,10 @@ Following tasks still required: contact evaluator and no-pop/affine/pole tests; 
 - Generic animation deletion and normal rig-pose capture must account for rig-owned channels. Verify selected controller/limb ownership and existing key filters, not just node transforms.
 - Before enabling native authoring, goal/pole rendering, hit testing, inspector values, SetTransform and actual gizmo edits must share the effective contact target. An interpolated target must follow the pointer exactly; do not merely move a raw helper while the constrained foot remains elsewhere. Combine multi-controller edits into one correct Undo/Redo transaction without overwriting sibling rig edits.
 - Add the controls/contact rows to the separate Animation Editor; full native Ray pose/skin/appearance, contact-edit, clip/Kimodo and performance acceptance remains required.
+
+## Task 13: constant contact controllers and scene-freeze preservation
+
+- [ ] RED: a sampled contact freezes to a validated constant state with no key times or animated reads; before-first/held/interpolated body/world targets, legacy serialization, invalid states and shared reference deletion are covered. New Scene Keep at these times preserves the full solved pose and removes contact key animation.
+- [ ] GREEN: explicit optional constant reference/blend state in ContactTrack; no sentinel times, synthetic keys or discarded live constraint. Sample it before the first animated key; validate saved and edited references. Freeze the current effective target and blend before changing source controllers; retain an unambiguous Body/World reference space, and capture a mixed-space interval in world coordinates.
+- [ ] Cover undoable selected-controller animation deletion, unaffected limbs, body/world/mixed and affine frames, save/reopen and source preservation. Do not claim affine flattening to TRS is exact.
+- [ ] Full Scene/Commands/UI regressions; actual Ray constant-freeze test; local main commit, no push. Continue effective viewport/controller edits and separate editor contacts, Free pose matching, normal rig pose keys and native acceptance afterward.

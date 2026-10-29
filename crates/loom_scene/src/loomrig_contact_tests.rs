@@ -265,3 +265,90 @@ fn contact_capture_roundtrips_world_pose_under_affine_body_frames() {
     }
     assert!(ContactReference::capture(ContactSpace::Body, Mat4::ZERO, end, pole).is_err());
 }
+
+#[test]
+fn frozen_contact_is_a_validated_constant_without_key_times_or_animated_reads() {
+    let track = track();
+    for time in [0., 10., 15., 25., 40.] {
+        let expected = track.sample(time, glam::Mat4::IDENTITY).unwrap();
+        let frozen = track.frozen(time, glam::Mat4::IDENTITY).unwrap();
+        assert!(frozen.keys().is_empty());
+        if time == 25. {
+            let state = frozen.constant_state().unwrap();
+            assert_eq!(
+                frozen.references()[&state.reference].space,
+                ContactSpace::World
+            );
+        }
+        let reads = crate::anim::animated_reads();
+        for time in [-100., 0., 12.5, 100.] {
+            let sample = frozen.sample(time, glam::Mat4::IDENTITY).unwrap();
+            assert_eq!(sample.is_some(), expected.is_some());
+            if let (Some(a), Some(b)) = (sample, expected.as_ref()) {
+                assert!(a.position.abs_diff_eq(b.position, 1e-5));
+                assert_eq!(a.blend, b.blend);
+                assert!(a.pole_position.abs_diff_eq(b.pole_position, 1e-5));
+                assert!(a.rotation.abs_diff_eq(b.rotation, 1e-5));
+            }
+        }
+        assert_eq!(crate::anim::animated_reads(), reads);
+        assert_eq!(
+            serde_json::from_value::<ContactTrack>(serde_json::to_value(&frozen).unwrap()).unwrap(),
+            frozen
+        );
+    }
+    assert!(ContactTrack::constant(reference(ContactSpace::World), f32::NAN).is_err());
+    assert!(ContactTrack::constant(reference(ContactSpace::World), 1.1).is_err());
+    let mut frozen = ContactTrack::constant(reference(ContactSpace::World), 0.5).unwrap();
+    let reference = frozen.constant_state().unwrap().reference;
+    frozen.insert_key(key(5., reference, 1.)).unwrap();
+    frozen.remove_key(5.).unwrap();
+    assert!(frozen.sample(0., glam::Mat4::IDENTITY).unwrap().is_some());
+    let mut value = serde_json::to_value(&frozen).unwrap();
+    value["constant"]["reference"] = serde_json::json!(99);
+    assert!(serde_json::from_value::<ContactTrack>(value).is_err());
+}
+
+#[test]
+fn freezing_an_existing_constant_keeps_its_space_and_authored_references() {
+    let mut constant = ContactTrack::constant(reference(ContactSpace::Body), 0.7).unwrap();
+    constant
+        .insert_reference(15, reference(ContactSpace::World))
+        .unwrap();
+    let frame =
+        glam::Mat4::from_rotation_translation(Quat::from_rotation_z(0.4), Vec3::new(2., 3., 4.));
+    assert_eq!(constant.frozen(15., frame).unwrap(), constant);
+    assert!(constant.frozen(f32::NAN, frame).is_err());
+}
+
+#[test]
+fn freezing_a_body_animation_preserves_its_inherited_frame() {
+    let mut a = reference(ContactSpace::Body);
+    a.position = Vec3::new(4., 5., 6.);
+    let mut b = a.clone();
+    b.position.x = 8.;
+    let track = ContactTrack::new(
+        [(1, a), (2, b)].into(),
+        vec![key(10., 1, 1.), key(20., 2, 0.7)],
+    )
+    .unwrap();
+    let frame =
+        glam::Mat4::from_rotation_translation(Quat::from_rotation_z(0.4), Vec3::new(2., 3., 4.));
+    let frozen = track.frozen(15., frame).unwrap();
+    let state = frozen.constant_state().unwrap();
+    assert_eq!(
+        frozen.references()[&state.reference].space,
+        ContactSpace::Body
+    );
+    let before = track.sample(15., frame).unwrap().unwrap();
+    let delta = Vec3::new(2., -3., 1.);
+    let after = frozen
+        .sample(0., glam::Mat4::from_translation(delta) * frame)
+        .unwrap()
+        .unwrap();
+    assert!(after.position.abs_diff_eq(before.position + delta, 1e-5));
+    assert!(after
+        .pole_position
+        .abs_diff_eq(before.pole_position + delta, 1e-5));
+    assert_eq!(after.blend, before.blend);
+}
