@@ -487,3 +487,56 @@ fn limb_proxy_pointer_selects_animator_input_inside_closed_character_group() {
     assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![control], "an animator input must remain directly selectable inside a closed character container");
     assert_eq!(h.app.state.selection_target(mapping.pelvis), group, "source-bone group behavior stays intact");
 }
+
+#[test]
+fn end_and_body_shapes_pointer_select_move_skin_and_undo_without_editing_source_bones() {
+    for role in ["IK hand","FK foot","pelvis","master"] {
+        let mut h=Harness::new();
+        let (state,mapping)=crate::loomrig_overlay::tests::body_rig();h.app.state=state;
+        let rig=h.app.state.scene.loom_rigs[0].clone();
+        let bone=match role {"IK hand"=>mapping.limbs[1].end,"FK foot"=>mapping.limbs[3].end,"pelvis"=>mapping.pelvis,_=>mapping.root};
+        let control=if role=="IK hand" {
+            h.cmd(Command::SetLoomRigContactPreset {rig:1,limb:rig.limbs[1].mapping.name.clone(),time:0.,preset:"planted".into()});
+            h.cmd(Command::SetTransform {id:rig.limbs[1].goal.0,position:Some([60.,8.,155.]),rotation_deg:None,scale:None});
+            rig.limbs[1].goal
+        } else {rig.bindings.iter().find(|binding|binding.bone==bone).unwrap().control};
+        let pivot=h.app.state.scene.world_matrix(bone).w_axis.truncate();
+        let mut surface=Node::new("bound surface",ObjectKind::box_object(2.,2.,2.));surface.transform.position.set(pivot);
+        let surface=h.app.state.scene.add_node(surface);
+        let mut skin=loom_scene::skin::SkinData::bind(&h.app.state.scene,surface,&[bone]);
+        for weights in &mut skin.weights {*weights=vec![(0,1.)];}
+        h.app.state.scene.node_mut(surface).unwrap().modifiers.push(loom_scene::ModifierSlot::new(loom_scene::Modifier::Skin(Box::new(skin))));
+        h.app.state.selection.clear();h.app.state.mesh_dirty=true;h.app.sync_after_command();framed(&mut h);h.cmd(Command::SelectObject);
+        let proxy=h.app.rig_controls.iter().find(|proxy|proxy.control==control).unwrap();
+        let point=if role=="master" {(proxy.vertices[0]+proxy.vertices[1])*0.5} else {proxy.vertices.into_iter().sum::<Vec3>()/8.};
+        h.click(h.screen_of(point));
+        assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(),vec![control],"{role}: click the actual control shape, not a source bone or Skin");
+        h.cmd(Command::SelectAndMove);
+        let source:Vec<_>=h.app.state.scene.nodes().filter(|node|node.object.is_bone()).map(|node|(node.id,node.transform.clone())).collect();
+        let modifiers=serde_json::to_value(&h.app.state.scene.node(surface).unwrap().modifiers).unwrap();
+        let original=h.app.state.scene.loom_rigs.clone();let before_world=h.app.state.scene.world_matrix(bone);
+        let positions=|h:&Harness| {
+            let index=h.app.world_meshes().iter().position(|(id,_)|*id==surface).unwrap();
+            h.app.drawn_mesh(index).vertices().iter().map(|vertex|vertex.position).collect::<Vec<_>>()
+        };
+        let before=positions(&h);let history=h.app.state.undo.position();
+        let origin=h.screen_of(h.app.state.scene.world_matrix(control).w_axis.truncate());
+        h.drag(origin,origin+egui::vec2(15.,-12.));
+        assert_eq!(h.app.state.undo.position(),history+1,"{role}: one gesture, one Undo");
+        let after_world=h.app.state.scene.world_matrix(bone);assert!(!after_world.abs_diff_eq(before_world,0.0001),"{role}: move must reach the skeleton");
+        let delta=after_world*before_world.inverse();let after=positions(&h);
+        assert!(after.iter().zip(&before).any(|(a,b)|a.distance(*b)>0.001),"{role}: real skinned vertices must move");
+        for (a,b) in after.iter().zip(&before) {assert!(a.abs_diff_eq(delta.transform_point3(*b),0.002),"{role}: Skin applies the controller delta exactly once");}
+        for (id,transform) in &source {assert_eq!(&h.app.state.scene.node(*id).unwrap().transform,transform,"{role}: source tracks retained");}
+        assert_eq!(serde_json::to_value(&h.app.state.scene.node(surface).unwrap().modifiers).unwrap(),modifiers);
+        h.cmd(Command::UndoSceneOperation);assert_eq!(h.app.state.scene.loom_rigs,original);
+        assert!(h.app.state.scene.world_matrix(bone).abs_diff_eq(before_world,0.001));
+        for (a,b) in positions(&h).iter().zip(&before) {assert!(a.abs_diff_eq(*b,0.002),"{role}: Undo restores skinned geometry");}
+        for hidden in [false,true] {
+            let node=h.app.state.scene.node_mut(control).unwrap();node.frozen=!hidden;node.hidden=hidden;
+            h.app.state.selection.clear();h.app.state.mesh_dirty=true;h.app.sync_after_command();h.cmd(Command::SelectObject);
+            h.click(h.screen_of(point));
+            assert!(!h.app.state.selection.contains(&control),"{role}: hidden or frozen control shape must not be selectable");
+        }
+    }
+}
