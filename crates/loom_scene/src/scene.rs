@@ -1224,19 +1224,53 @@ impl Scene {
         self.ik_solving.set(false);
     }
 
-    /// Frame for editing a stored transform. FK helpers display at their
-    /// corrected bone pivot, while their stored transform is an input offset.
-    /// Remove that offset from the solved display frame before converting an
-    /// additional world-space edit back to stored coordinates.
+    /// Reference frame before a stored transform input. FK helpers display
+    /// at their corrected bone pivot, but their input precedes pose matching.
+    /// Parent/Gimbal axes therefore use the source bone frame before that input.
     pub fn edit_parent_frame(&self, id: NodeId) -> Mat4 {
         if let Some(binding) = self.loom_rigs.iter().find_map(|rig| {
             rig.bindings.iter().find(|b| b.control == id && id != rig.master)
         }) {
-            if let Some(control) = self.nodes.get(&id) {
-                return self.world_matrix(binding.bone) * control.transform.matrix().inverse();
+            if let Some(bone) = self.nodes.get(&binding.bone) {
+                return self.parent_frame(binding.bone)*bone.transform.matrix()*binding.rest.inverse();
             }
         }
         self.parent_frame(id)
+    }
+
+    /// Convert between an FK input offset and its displayed bone frame.
+    /// Matching and pose offsets follow the input on the right; treating them
+    /// as its parent conjugates edits into the wrong coordinate system.
+    fn edit_frames(&self,id:NodeId)->Result<(Mat4,Mat4),String> {
+        if let Some(binding)=self.loom_rigs.iter().find_map(|rig|rig.bindings.iter().find(|binding|binding.control==id && id!=rig.master)) {
+            let bone=self.node(binding.bone).ok_or("FK bone is missing")?;
+            let control=self.node(id).ok_or("FK control is missing")?;
+            let base=self.parent_frame(binding.bone)*bone.transform.matrix()*binding.rest.inverse();
+            let input_world=base*control.transform.matrix();
+            if !input_world.is_finite() || input_world.determinant()==0. {
+                return Err("FK input frame must be finite and invertible".into());
+            }
+            let post=input_world.inverse()*self.world_matrix(binding.bone);
+            if !post.is_finite() || post.determinant()==0. {
+                return Err("FK matched frame must be finite and invertible".into());
+            }
+            return Ok((base,post));
+        }
+        Ok((self.parent_frame(id),Mat4::IDENTITY))
+    }
+
+    /// Stored input for a requested displayed world transform.
+    pub fn edit_local_matrix(&self,id:NodeId,world:Mat4)->Result<Mat4,String> {
+        let (base,post)=self.edit_frames(id)?;
+        let local=base.inverse()*world*post.inverse();
+        if !local.is_finite() {return Err("transform edit frame must be finite and invertible".into());}
+        Ok(local)
+    }
+
+    /// Displayed frame with a replacement input, retaining current post corrections.
+    pub fn edit_world_matrix(&self,id:NodeId,input:Mat4)->Result<Mat4,String> {
+        let (base,post)=self.edit_frames(id)?;
+        Ok(base*input*post)
     }
 
     /// The frame a node's local transform is relative to: its parent's world

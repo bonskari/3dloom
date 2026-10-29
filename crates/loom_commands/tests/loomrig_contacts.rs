@@ -1344,6 +1344,31 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
             }
         });
         assert_eq!(source(&s),before,"Free matching changed source nodes or materials");
+        // Exercise a genuinely changed IK pose before releasing it to FK.
+        {
+            let mut probe=AppState::new();probe.scene=s.scene.clone();
+            execute(&mut probe,Command::SetFrame {frame:40}).unwrap();
+            execute(&mut probe,Command::SetLoomRigContactPreset {rig,limb:name.into(),time:40.,preset:"planted".into()}).unwrap();
+            let a=probe.scene.world_matrix(limb.mapping.start).w_axis.truncate();
+            let b=probe.scene.world_matrix(limb.mapping.end).w_axis.truncate();
+            let delta=(a-b)*0.15+Vec3::Z*a.distance(b)*0.05;
+            probe.selection=[limb.goal].into();
+            execute(&mut probe,Command::MoveSelection {delta:delta.to_array(),system:Some(loom_commands::CoordSystem::World)}).unwrap();
+            execute(&mut probe,Command::SetLoomRigContactPreset {rig,limb:name.into(),time:40.,preset:"free".into()}).unwrap();
+            let baseline=source(&probe);let metadata=probe.scene.loom_rigs.clone();
+            for bone in ids {
+                let control=probe.scene.loom_rigs[0].bindings.iter().find(|binding|binding.bone==bone).unwrap().control;
+                probe.selection=[control].into();let before=probe.scene.world_matrix(bone);let pivot=before.w_axis.truncate();
+                let expected=glam::Mat4::from_translation(pivot)*glam::Mat4::from_rotation_x(15f32.to_radians())*glam::Mat4::from_translation(-pivot)*before;
+                execute(&mut probe,Command::RotateSelection {axis:loom_commands::Axis::X,degrees:15.,system:Some(loom_commands::CoordSystem::World)}).unwrap();
+                let actual=probe.scene.world_matrix(bone);
+                assert!(actual.w_axis.abs_diff_eq(expected.w_axis,0.003),"{name} Free FK moved its pivot");
+                assert!(loom_scene::loomrig_contact::affine_rotation(actual).unwrap().dot(loom_scene::loomrig_contact::affine_rotation(expected).unwrap()).abs()>1.-1e-6,"{name} Free FK ignored world rotation");
+                execute(&mut probe,Command::UndoSceneOperation).unwrap();
+            }
+            assert_eq!(source(&probe),baseline,"Free FK input changed source data after Undo");
+            assert_eq!(probe.scene.loom_rigs,metadata);
+        }
         execute(&mut s, Command::UndoSceneOperation).unwrap();
         assert_eq!(s.scene.loom_rigs,contacts);
         s.selection = selection;
@@ -2181,4 +2206,81 @@ fn world_type_in_rotation_remains_exact_under_a_mirrored_controller_parent() {
     )
     .unwrap();
     assert!(loom_commands::type_in_values(&s).abs_diff_eq(Vec3::new(15., 25., 35.), 0.001));
+}
+
+fn bent_free_rig()->(AppState,loom_scene::loomrig::RigLimb) {
+    let (mut s,_,_)=rigged();let limb=s.scene.loom_rigs[0].limbs[0].clone();
+    execute(&mut s,Command::SetLoomRigLimb {rig:1,limb:"Arm".into(),solver:"limb".into(),blend:1.}).unwrap();
+    execute(&mut s,Command::SetTransform {id:limb.goal.0,position:Some([13.,7.,0.]),rotation_deg:None,scale:None}).unwrap();
+    execute(&mut s,Command::SetLoomRigContactPreset {rig:1,limb:"Arm".into(),time:0.,preset:"free".into()}).unwrap();
+    assert!(s.scene.loom_rigs[0].limbs[0].pose_matches.keys()[0].offsets.iter().any(|offset|!offset.abs_diff_eq(glam::Mat4::IDENTITY,0.01)));
+    (s,limb)
+}
+
+#[test]
+fn free_matched_fk_rotation_follows_world_delta_without_changing_source_tracks() {
+    use glam::Mat4;
+    for index in 0..3 {
+        let (mut s,limb)=bent_free_rig();
+        let bone=[limb.mapping.start,limb.mapping.middle,limb.mapping.end][index];
+        let control=s.scene.loom_rigs[0].bindings.iter().find(|binding|binding.bone==bone).unwrap().control;
+        let sources:Vec<_>=s.scene.nodes().filter(|node|node.object.is_bone()).map(|node|(node.id,node.transform.clone())).collect();
+        let before=s.scene.world_matrix(bone);let pivot=before.w_axis.truncate();
+        let expected=Mat4::from_translation(pivot)*Mat4::from_rotation_x(15f32.to_radians())*Mat4::from_translation(-pivot)*before;
+        s.selection=[control].into();
+        execute(&mut s,Command::RotateSelection {axis:loom_commands::Axis::X,degrees:15.,system:Some(loom_commands::CoordSystem::World)}).unwrap();
+        assert!(s.scene.world_matrix(bone).abs_diff_eq(expected,0.001),"joint {index}: Free FK rotation did not follow its world-space input");
+        for (id,transform) in sources {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+        execute(&mut s,Command::UndoSceneOperation).unwrap();
+        assert!(s.scene.world_matrix(bone).abs_diff_eq(before,0.001));
+    }
+}
+
+#[test]
+fn free_matched_fk_absolute_rotation_uses_the_displayed_world_orientation() {
+    for index in 0..3 {
+        let (mut s,limb)=bent_free_rig();let bone=[limb.mapping.start,limb.mapping.middle,limb.mapping.end][index];
+        let control=s.scene.loom_rigs[0].bindings.iter().find(|binding|binding.bone==bone).unwrap().control;
+        s.selection=[control].into();s.active_tool=loom_commands::Tool::Rotate;s.coord_system=loom_commands::CoordSystem::World;
+        let before=s.scene.world_matrix(bone);
+        execute(&mut s,Command::TransformTypeIn {absolute:true,values:[20.,-10.,30.]}).unwrap();
+        let expected=Quat::from_euler(glam::EulerRot::XYZ,20f32.to_radians(),-10f32.to_radians(),30f32.to_radians());
+        let after=s.scene.world_matrix(bone);
+        assert!(loom_scene::loomrig_contact::affine_rotation(after).unwrap().dot(expected).abs()>1.-1e-5,"joint {index}: wrong typed world orientation");
+        assert!(after.w_axis.abs_diff_eq(before.w_axis,0.001));
+        execute(&mut s,Command::UndoSceneOperation).unwrap();assert!(s.scene.world_matrix(bone).abs_diff_eq(before,0.001));
+    }
+}
+
+#[test]
+fn free_matched_fk_move_and_uniform_scale_follow_the_displayed_frame() {
+    use glam::Mat4;
+    for scale in [false,true] {
+        for index in 0..3 {
+            let (mut s,limb)=bent_free_rig();let bone=[limb.mapping.start,limb.mapping.middle,limb.mapping.end][index];
+            let control=s.scene.loom_rigs[0].bindings.iter().find(|binding|binding.bone==bone).unwrap().control;
+            s.selection=[control].into();let before=s.scene.world_matrix(bone);let pivot=before.w_axis.truncate();
+            let expected=if scale {
+                execute(&mut s,Command::ScaleSelection {factors:[1.1;3],system:Some(loom_commands::CoordSystem::World)}).unwrap();
+                Mat4::from_translation(pivot)*Mat4::from_scale(Vec3::splat(1.1))*Mat4::from_translation(-pivot)*before
+            } else {
+                execute(&mut s,Command::MoveSelection {delta:[1.,2.,3.],system:Some(loom_commands::CoordSystem::World)}).unwrap();
+                Mat4::from_translation(Vec3::new(1.,2.,3.))*before
+            };
+            assert!(s.scene.world_matrix(bone).abs_diff_eq(expected,0.001),"joint {index} scale={scale}: displayed transform differs from input");
+            execute(&mut s,Command::UndoSceneOperation).unwrap();assert!(s.scene.world_matrix(bone).abs_diff_eq(before,0.001));
+        }
+    }
+}
+
+#[test]
+fn free_matched_fk_gimbal_edits_one_stored_euler_channel() {
+    for index in 0..3 {
+        let (mut s,limb)=bent_free_rig();let bone=[limb.mapping.start,limb.mapping.middle,limb.mapping.end][index];
+        let control=s.scene.loom_rigs[0].bindings.iter().find(|binding|binding.bone==bone).unwrap().control;
+        execute(&mut s,Command::SetTransform {id:control.0,position:None,rotation_deg:Some([10.,-5.,8.]),scale:None}).unwrap();
+        s.selection=[control].into();
+        execute(&mut s,Command::RotateSelection {axis:loom_commands::Axis::X,degrees:15.,system:Some(loom_commands::CoordSystem::Gimbal)}).unwrap();
+        assert!(s.scene.node(control).unwrap().transform.rotation.get().abs_diff_eq(Vec3::new(25.,-5.,8.),0.001),"joint {index}: Gimbal X changed the wrong input channels");
+    }
 }

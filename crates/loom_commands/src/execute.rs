@@ -4263,6 +4263,12 @@ fn transform_type_in(state: &mut AppState, absolute: bool, values: Vec3) -> Resu
                         let parent=state.scene.edit_parent_frame(id);
                         let local=if let Some(control)=state.scene.contact_control(id)?.filter(|control|control.kind==loom_scene::loomrig_contact::ContactControlKind::Goal) {
                             loom_scene::loomrig_contact::ContactReference::capture(loom_scene::loomrig_contact::ContactSpace::Body,parent,Mat4::from_rotation_translation(target,control.sample.position),control.sample.pole_position)?.rotation
+                        } else if state.scene.loom_rigs.iter().any(|rig|rig.bindings.iter().any(|binding|binding.control==id && id!=rig.master)) {
+                            let world=state.scene.world_matrix(id);
+                            let current=loom_scene::loomrig_contact::affine_rotation(world)?;
+                            let pivot=world.w_axis.truncate();
+                            let desired=Mat4::from_translation(pivot)*Mat4::from_quat(target*current.inverse())*Mat4::from_translation(-pivot)*world;
+                            loom_scene::loomrig_contact::affine_rotation(state.scene.edit_local_matrix(id,desired)?)?
                         } else {parent.to_scale_rotation_translation().1.inverse()*target};
                         let rot = if state.scene.node(id).is_some_and(|n| n.parent.is_none()) {
                             values
@@ -4616,7 +4622,6 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
         for id in state.selection.iter().copied().filter(|id| !has_selected_ancestor(*id) || state.scene.contact_control(*id).ok().flatten().is_some()) {
             let (m, hint) = matrix_for(state, Some(id));
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-            let parent_world = state.scene.edit_parent_frame(id);
             let world = state.scene.world_matrix(id);
             if state.affect_pivot_only && label == "Scale" {
                 // A Scale transform has no effect on the pivot.
@@ -4649,12 +4654,12 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 contact_edits.push(edit);
                 continue;
             }
-            let new_local = parent_world.inverse() * m * world;
+            let new_local = state.scene.edit_local_matrix(id,m*world)?;
             let after = apply_locks(&node.transform, Transform::from_matrix_near(new_local, &node.transform, hint), node.locks);
             if state.affect_pivot_only {
                 // Pivot moves; the object offset compensates so the mesh stays,
                 // and the children stay too.
-                let new_world = parent_world * after.matrix();
+                let new_world = state.scene.edit_world_matrix(id,after.matrix())?;
                 let mesh_world = state.scene.object_matrix(id);
                 let mut props = node.props();
                 props.object_offset = Transform::from_matrix(new_world.inverse() * mesh_world);
@@ -4662,7 +4667,7 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 changes.extend(keep_children(state, id, new_world));
             } else if state.dont_affect_children {
                 // Adjust Transform > Don't Affect Children.
-                changes.extend(keep_children(state, id, parent_world * after.matrix()));
+                changes.extend(keep_children(state, id, state.scene.edit_world_matrix(id,after.matrix())?));
             }
             changes.push(Change::SetTransform {
                 id,
