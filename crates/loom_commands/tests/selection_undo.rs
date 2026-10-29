@@ -32,6 +32,23 @@ fn redo(s: &mut AppState) {
 }
 
 #[test]
+fn selection_undo_redo_stays_clean_without_concealing_a_real_move() {
+    let mut s=AppState::new();let a=boxed(&mut s,0.);let b=boxed(&mut s,20.);
+    s.undo.mark_saved();let original=serde_json::to_value(&s.scene).unwrap();
+    for ids in [vec![a.0],vec![b.0],vec![]] {
+        execute(&mut s,Command::SelectNodes {ids,op:SelectOp::Replace}).unwrap();assert!(!s.dirty());
+    }
+    for _ in 0..3 {undo(&mut s);assert!(!s.dirty());assert_eq!(serde_json::to_value(&s.scene).unwrap(),original);}
+    assert_eq!(sel(&s),vec![b]);
+    for _ in 0..3 {redo(&mut s);assert!(!s.dirty());}
+    execute(&mut s,Command::SelectNodes {ids:vec![a.0],op:SelectOp::Replace}).unwrap();
+    execute(&mut s,Command::MoveSelection {delta:[3.,0.,0.],system:Some(loom_commands::CoordSystem::World)}).unwrap();assert!(s.dirty());
+    execute(&mut s,Command::SelectNodes {ids:vec![b.0],op:SelectOp::Replace}).unwrap();assert!(s.dirty());
+    undo(&mut s);assert!(s.dirty());undo(&mut s);assert!(!s.dirty());
+    assert_eq!(serde_json::to_value(&s.scene).unwrap(),original);
+}
+
+#[test]
 fn undo_restores_the_previous_selection_and_redo_reapplies_it() {
     let mut s = AppState::new();
     let a = boxed(&mut s, 0.0);

@@ -10,6 +10,7 @@ struct Entry {
     label: String,
     change: Change,
     pose_preview: bool,
+    selection_marker: bool,
 }
 
 /// Change-level undo/redo. Each entry stores the inverse of what was
@@ -76,11 +77,11 @@ impl UndoStack {
     }
 
     /// A new entry on top: a saved position below the top is now unreachable.
-    fn push_entry(&mut self, entry: (String, Change), pose_preview:bool) {
+    fn push_entry(&mut self, entry: (String, Change), pose_preview:bool, selection_marker:bool) {
         if self.saved.is_some_and(|s| s > self.undo.len()) {
             self.saved = None;
         }
-        self.undo.push(Entry { id: NEXT_ENTRY_ID.fetch_add(1, Ordering::Relaxed), label: entry.0, change: entry.1, pose_preview });
+        self.undo.push(Entry { id: NEXT_ENTRY_ID.fetch_add(1, Ordering::Relaxed), label: entry.0, change: entry.1, pose_preview, selection_marker });
         self.trim();
         self.redo.clear();
     }
@@ -172,7 +173,7 @@ impl UndoStack {
             *preview &= self.recording_pose;
             return Ok(());
         }
-        self.push_entry((label.to_owned(), inverse),self.recording_pose);
+        self.push_entry((label.to_owned(), inverse),self.recording_pose,false);
         Ok(())
     }
 
@@ -182,7 +183,7 @@ impl UndoStack {
     pub fn push_marker(&mut self, label: &str) {
         let at_saved = self.saved == Some(self.undo.len());
         self.version += 1;
-        self.push_entry((label.to_owned(), Change::Group(Vec::new())),false);
+        self.push_entry((label.to_owned(), Change::Group(Vec::new())),false,true);
         if at_saved {
             self.saved = Some(self.undo.len());
         }
@@ -210,7 +211,7 @@ impl UndoStack {
         }
         // Inverses are collected oldest-first; undoing runs newest-first.
         steps.reverse();
-        self.push_entry((label, Change::Group(steps)),preview);
+        self.push_entry((label, Change::Group(steps)),preview,false);
     }
 
     /// Complete a gesture before establishing or rolling back a pose boundary.
@@ -222,28 +223,30 @@ impl UndoStack {
     pub fn undo(&mut self, scene: &mut Scene) -> Option<String> {
         // A drag whose release was lost must not absorb later commits.
         self.finish_transaction();
-        let Entry { id, label, change: inverse, pose_preview } = self.undo.pop()?;
+        let Entry { id, label, change: inverse, pose_preview, selection_marker } = self.undo.pop()?;
         self.version += 1;
         let redo = inverse.inverse(scene);
         if let Err(e) = inverse.apply(scene) {
             // Keep the entry so the history is not silently lost.
-            self.undo.push(Entry { id, label: format!("{label} (failed: {e})"), change: inverse,pose_preview });
+            self.undo.push(Entry { id, label: format!("{label} (failed: {e})"), change: inverse,pose_preview,selection_marker });
             return None;
         }
-        self.redo.push(Entry { id, label: label.clone(), change: redo,pose_preview });
+        if selection_marker && self.saved==Some(self.undo.len()+1) { self.saved=Some(self.undo.len()); }
+        self.redo.push(Entry { id, label: label.clone(), change: redo,pose_preview,selection_marker });
         Some(label)
     }
 
     pub fn redo(&mut self, scene: &mut Scene) -> Option<String> {
         self.finish_transaction();
-        let Entry { id, label, change, pose_preview } = self.redo.pop()?;
+        let Entry { id, label, change, pose_preview, selection_marker } = self.redo.pop()?;
         self.version += 1;
         let inverse = change.inverse(scene);
         if let Err(e) = change.apply(scene) {
-            self.redo.push(Entry { id, label: format!("{label} (failed: {e})"), change,pose_preview });
+            self.redo.push(Entry { id, label: format!("{label} (failed: {e})"), change,pose_preview,selection_marker });
             return None;
         }
-        self.undo.push(Entry { id, label: label.clone(), change: inverse,pose_preview });
+        if selection_marker && self.saved==Some(self.undo.len()) { self.saved=Some(self.undo.len()+1); }
+        self.undo.push(Entry { id, label: label.clone(), change: inverse,pose_preview,selection_marker });
         self.trim();
         Some(label)
     }
@@ -304,6 +307,45 @@ mod tests {
     use crate::scene::Scene;
     use crate::NodeId;
     use glam::Vec3;
+
+    #[test]
+    fn selection_markers_preserve_saved_state_through_undo_redo() {
+        let mut scene=Scene::new();let mut stack=UndoStack::new(100);
+        for _ in 0..3 {stack.push_marker("Select");assert!(stack.is_saved());}
+        for _ in 0..3 {stack.undo(&mut scene).unwrap();assert!(stack.is_saved());}
+        for _ in 0..3 {stack.redo(&mut scene).unwrap();assert!(stack.is_saved());}
+        stack.mark_unsaved();stack.push_marker("Select");stack.undo(&mut scene).unwrap();
+        assert!(!stack.is_saved());stack.redo(&mut scene).unwrap();assert!(!stack.is_saved());
+    }
+
+    #[test]
+    fn selection_markers_do_not_hide_real_or_empty_group_edits() {
+        let mut scene=Scene::new();let mut stack=UndoStack::new(100);
+        stack.push_marker("Select");
+        stack.commit("Timing sidecar",Change::Group(vec![]),&mut scene).unwrap();
+        assert!(!stack.is_saved());stack.push_marker("Select");assert!(!stack.is_saved());
+        stack.undo(&mut scene).unwrap();assert!(!stack.is_saved());
+        stack.undo(&mut scene).unwrap();assert!(stack.is_saved());
+        stack.undo(&mut scene).unwrap();assert!(stack.is_saved());
+        stack.redo(&mut scene).unwrap();assert!(stack.is_saved());
+        stack.redo(&mut scene).unwrap();assert!(!stack.is_saved());
+        stack.mark_saved();stack.push_marker("Select");
+        stack.undo(&mut scene).unwrap();assert!(stack.is_saved());
+        stack.undo(&mut scene).unwrap();assert!(!stack.is_saved());
+        stack.commit("Branch",Change::Group(vec![]),&mut scene).unwrap();assert!(!stack.is_saved());
+    }
+
+    #[test]
+    fn selection_saved_state_survives_limits_and_retained_pose_history() {
+        for retained in [false,true] {for limit in [1,2,10] {
+            let mut scene=Scene::new();let mut stack=UndoStack::new(limit);
+            if retained {stack.retain_from(Some(stack.position()));}
+            for _ in 0..6 {stack.push_marker("Select");assert!(stack.is_saved());}
+            while stack.can_undo() {stack.undo(&mut scene).unwrap();assert!(stack.is_saved());}
+            while stack.can_redo() {stack.redo(&mut scene).unwrap();assert!(stack.is_saved());}
+            stack.retain_from(None);assert!(stack.is_saved());
+        }}
+    }
 
     fn add_box(stack: &mut UndoStack, scene: &mut Scene) -> NodeId {
         let node = Node::new("Box001", ObjectKind::box_object(1.0, 1.0, 1.0));
