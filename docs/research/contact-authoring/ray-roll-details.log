@@ -1,0 +1,22 @@
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.56s
+     Running tests/loomrig_contacts.rs (target/debug/deps/loomrig_contacts-7497a055ee27aaf2)
+
+running 1 test
+test production_ray_contact_capture_preserves_source_data_and_solved_pose ... FAILED
+
+failures:
+
+---- production_ray_contact_capture_preserves_source_data_and_solved_pose stdout ----
+
+thread 'production_ray_contact_capture_preserves_source_data_and_solved_pose' (342472) panicked at crates/loom_commands/tests/loomrig_contacts.rs:653:13:
+Left Leg NodeId(4551) solver Limb: capture changed solved pose; expected Mat4 { x_axis: Vec4(0.08208153, -0.9931777, 0.08282803, 0.0), y_axis: Vec4(0.21774442, -0.06322943, -0.9739555, 0.0), z_axis: Vec4(0.97254825, 0.09797913, 0.21106894, 0.0), w_axis: Vec4(1179.3391, -616.46747, 80.69375, 1.0) }; actual Mat4 { x_axis: Vec4(0.08208087, -0.99317914, 0.08281164, 0.0), y_axis: Vec4(-0.07660201, 0.076559305, 0.9941181, 0.0), z_axis: Vec4(-0.9936775, -0.08794163, -0.069795445, 0.0), w_axis: Vec4(1179.3391, -616.46747, 80.69375, 1.0) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    production_ray_contact_capture_preserves_source_data_and_solved_pose
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 9.31s
+
+error: test failed, to rerun pass `-p loom_commands --test loomrig_contacts`

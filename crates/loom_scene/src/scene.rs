@@ -1029,7 +1029,11 @@ impl Scene {
                         }
                     })
                     .collect();
-                let solved = crate::ik::solve(&chain, &bones, goal, None);
+                let solved = if contact.is_some() {
+                    crate::ik::solve_preserving_roll(&chain, &bones, goal)
+                } else {
+                    crate::ik::solve(&chain, &bones, goal, None)
+                };
                 for (id, q) in solved {
                     let (scale, fk, pos) = self.local_matrix(id).to_scale_rotation_translation();
                     self.ik_cache.borrow_mut().2.insert(

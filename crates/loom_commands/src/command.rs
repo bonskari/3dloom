@@ -82,6 +82,16 @@ impl ArgSchema for crate::track_view::KeyArg {
 impl ArgSchema for loom_scene::loomrig::HumanoidMapping {
     fn schema() -> Value { json!({"type":"object","properties":{"root":{"type":"integer"},"pelvis":{"type":"integer"},"head":{"type":"integer"},"spine":{"type":"array","items":{"type":"integer"}},"limbs":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"start":{"type":"integer"},"middle":{"type":"integer"},"end":{"type":"integer"}},"required":["name","start","middle","end"]}}},"required":["root","pelvis","spine","head","limbs"]}) }
 }
+impl ArgSchema for loom_scene::loomrig_contact::ContactKey {
+    fn schema() -> Value {
+        json!({"type":"object","properties":{"time":{"type":"number"},"reference":{"type":"integer","minimum":0},"blend":{"type":"number","minimum":0,"maximum":1}},"required":["time","reference","blend"],"additionalProperties":false})
+    }
+}
+impl ArgSchema for loom_scene::loomrig_contact::ContactReference {
+    fn schema() -> Value {
+        json!({"type":"object","properties":{"space":{"type":"string","enum":["body","world"]},"position":<[f32;3]>::schema(),"rotation":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},"pole_position":<[f32;3]>::schema()},"required":["space","position","rotation","pole_position"],"additionalProperties":false})
+    }
+}
 impl ArgSchema for crate::retarget::BoneMapping {
     fn schema() -> Value { json!({"type":"object","properties":{"source":{"type":"integer","minimum":0},"target":{"type":"integer","minimum":0}},"required":["source","target"]}) }
 }
@@ -1579,6 +1589,11 @@ commands! {
     SetLoomRigLimb => "Set LoomRig Limb", Loom, "Set HI/Limb solver and IK/FK blend with current pose matching." { rig:u32, limb:String, solver:String, blend:f32 };
     SetLoomRigBlendKey => "Set LoomRig Blend Key", Loom, "Set a native IK/FK key; omit value to delete. Independent of source motion." { rig:u32, limb:String, time:f32, value:Option<f32> };
     MoveLoomRigBlendKey => "Move LoomRig Blend Key", Loom, "Move one IK/FK blend key without overwriting neighboring keys." { rig:u32, limb:String, from:f32, to:f32 };
+    CreateLoomRigContactKey => "Create LoomRig Contact Key", Loom, "Capture a solved limb pose as a planted, sliding or free contact key." { rig:u32, limb:String, time:f32, preset:String };
+    EditLoomRigContactKey => "Edit LoomRig Contact Key", Loom, "Edit an existing contact key's blend or shared reference." { rig:u32, limb:String, key:loom_scene::loomrig_contact::ContactKey };
+    EditLoomRigContactReference => "Edit LoomRig Contact Reference", Loom, "Edit a shared contact pose in body or world coordinates." { rig:u32, limb:String, reference:u64, pose:loom_scene::loomrig_contact::ContactReference };
+    MoveLoomRigContactKey => "Move LoomRig Contact Key", Loom, "Move a contact key without overwriting another key." { rig:u32, limb:String, from:f32, to:f32 };
+    DeleteLoomRigContactKey => "Delete LoomRig Contact Key", Loom, "Delete a contact key while preserving references used by other keys." { rig:u32, limb:String, time:f32 };
     RemoveLoomRig => "Remove LoomRig", Loom, "Remove animator controls while preserving original skeleton and skin." { rig:u32 };
     CreateIkChain => "Create IK Chain", Loom, "An IK chain from bone `start` to bone `end` with a goal node; solver \"hi\", \"limb\" or \"spline\"." { start: u64, end: u64, solver: String, name: Option<String> };
     SetIkChainParameter => "Set IK Chain Parameter", Loom, "Hierarchy > IK rollouts: Enabled, IK For FK Pose, Swivel Angle, Threshold, Iterations." { chain: u32, name: String, value: f64 };

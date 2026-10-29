@@ -1,0 +1,18 @@
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.64s
+     Running tests/loomrig_contacts.rs (target/debug/deps/loomrig_contacts-7497a055ee27aaf2)
+
+running 10 tests
+test production_ray_contact_capture_preserves_source_data_and_solved_pose ... ignored, requires LOOM_RAY_CONTACT_SOURCE production scene
+test invalid_contact_frames_are_reported_and_recover_after_the_frame_is_fixed ... ok
+test contact_blend_interpolates_and_master_motion_does_not_move_a_world_contact ... ok
+test new_plant_after_free_captures_a_new_stance_and_duplicate_creation_is_atomic ... ok
+test contact_targets_slide_between_independent_references_at_fractional_times ... ok
+test contact_commands_publish_typed_schemas_and_roundtrip_through_command_json ... ok
+test contact_authoring_captures_solved_pose_and_edits_are_atomic_and_undoable ... ok
+test world_contact_holds_body_contact_follows_root_and_free_releases ... ok
+test captured_contact_has_no_pop_and_preserves_stretch_under_affine_parents ... ok
+test invalid_contact_authoring_leaves_the_scene_and_undo_unchanged ... ok
+
+test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

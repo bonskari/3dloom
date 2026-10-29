@@ -1,0 +1,1036 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+   Compiling loom_bevy v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_bevy)
+warning: fields `part` and `reason` are never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:15:14
+   |
+15 |     Layout { part: usize, reason: String },
+   |     ------   ^^^^         ^^^^^^
+   |     |
+   |     fields in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `0` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:16:14
+   |
+16 |     Readback(String),
+   |     -------- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+16 -     Readback(String),
+16 +     Readback(()),
+   |
+
+warning: fields `world_positions`, `pose`, and `tangent` are never read
+   --> crates/loom_bevy/src/gpu_pose_geometry.rs:180:5
+    |
+177 | pub(crate) struct GpuPoseGeometry {
+    |                   --------------- fields in this struct
+...
+180 |     world_positions: wgpu::Buffer,
+    |     ^^^^^^^^^^^^^^^
+...
+185 |     pose: wgpu::Buffer,
+    |     ^^^^
+186 |     tangent: Option<wgpu::Buffer>,
+    |     ^^^^^^^
+
+warning: methods `source_vertex_count`, `update_transform`, and `read_world_positions` are never used
+   --> crates/loom_bevy/src/gpu_pose_geometry.rs:476:19
+    |
+194 | impl GpuPoseGeometry {
+    | -------------------- methods in this implementation
+...
+476 |     pub(crate) fn source_vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^^^^^^^^
+...
+479 |     pub(crate) fn update_transform(&self, queue: &wgpu::Queue, world: Mat4) -> Result<(), String> {
+    |                   ^^^^^^^^^^^^^^^^
+...
+508 |     pub fn read_world_positions(
+    |            ^^^^^^^^^^^^^^^^^^^^
+
+warning: field `neighbors` is never read
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:195:5
+    |
+190 | pub(crate) struct Prepared {
+    |                   -------- field in this struct
+...
+195 |     neighbors: Vec<[i32; 3]>,
+    |     ^^^^^^^^^
+    |
+    = note: `Prepared` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: struct `StructuralKey` is never constructed
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:198:19
+    |
+198 | pub(crate) struct StructuralKey {
+    |                   ^^^^^^^^^^^^^
+
+warning: method `structural_key` is never used
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:204:19
+    |
+203 | impl Prepared {
+    | ------------- method in this implementation
+204 |     pub(crate) fn structural_key(&self) -> StructuralKey {
+    |                   ^^^^^^^^^^^^^^
+
+warning: associated items `new`, `encode`, and `encode_timed` are never used
+   --> crates/loom_bevy/src/gpu_mikk_prepare.rs:296:19
+    |
+295 | impl GpuPreparation {
+    | ------------------- associated items in this implementation
+296 |     pub(crate) fn new(
+    |                   ^^^
+...
+438 |     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^
+...
+441 |     pub(crate) fn encode_timed(
+    |                   ^^^^^^^^^^^^
+
+warning: fields `params`, `uniform`, and `derivatives` are never read
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:204:5
+    |
+196 | pub(crate) struct GpuRecipeMath {
+    |                   ------------- fields in this struct
+...
+204 |     params: Params,
+    |     ^^^^^^
+205 |     uniform: wgpu::Buffer,
+    |     ^^^^^^^
+206 |     derivatives: wgpu::Buffer,
+    |     ^^^^^^^^^^^
+
+warning: associated items `new`, `vertex_count`, and `readback` are never used
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:209:19
+    |
+208 | impl GpuRecipeMath {
+    | ------------------ associated items in this implementation
+209 |     pub(crate) fn new(
+    |                   ^^^
+...
+379 |     pub(crate) fn vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^
+...
+575 |     pub(crate) fn readback(
+    |                   ^^^^^^^^
+
+warning: associated items `new`, `encode`, and `encode_math` are never used
+   --> crates/loom_bevy/src/gpu_pose_runtime.rs:41:19
+    |
+ 39 | impl GpuPoseRuntime {
+    | ------------------- associated items in this implementation
+ 40 |     /// Mesh positions are already the final CPU world-baked pose.
+ 41 |     pub(crate) fn new(
+    |                   ^^^
+...
+164 |     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^
+...
+168 |     pub(crate) fn encode_math(&self, encoder: &mut wgpu::CommandEncoder) {
+    |                   ^^^^^^^^^^^
+
+warning: `loom_bevy` (lib) generated 11 warnings
+   Compiling loom_ui v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_ui)
+warning: unused import: `HoverShortcut`
+ --> crates/loom_ui/src/menubar.rs:6:37
+  |
+6 | use crate::shortcuts::{menu_button, HoverShortcut};
+  |                                     ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/clip_timeline.rs:105:126
+    |
+105 | ...t,row.bottom())],egui::Stroke::new(1.0,egui::Color32::from_rgb(235,184,70)));
+    |                                       ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+    = note: `#[warn(float_literal_f32_fallback)]` (part of `#[warn(future_incompatible)]`) on by default
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/rig_timeline.rs:57:55
+   |
+57 | ...                   egui::Stroke::new(1., egui::Color32::from_gray(45)),
+   |                                         ^^ help: explicitly specify the type as `f32`: `1._f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/rig_timeline.rs:70:45
+   |
+70 | ...                   1.,
+   |                       ^^ help: explicitly specify the type as `f32`: `1._f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/rig_timeline.rs:170:55
+    |
+170 | ...                   egui::Stroke::new(1., egui::Color32::WHITE),
+    |                                         ^^ help: explicitly specify the type as `f32`: `1._f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/command_panel/modify_poly/soft_selection.rs:72:60
+   |
+72 |             p.add(egui::Shape::line(pts, egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 80))));
+   |                                                            ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/dialogs/viewport_configuration.rs:250:49
+    |
+250 |         p.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(220)), egui::StrokeKind::Middle);
+    |                                                 ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/dialogs/viewport_configuration.rs:277:55
+    |
+277 | ...   painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, if active { crate::viewports::ACTIVE_FRAME } else { egui::Color32::from_gr...
+    |                                                     ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:115:66
+    |
+115 |             painter.line_segment([q[1], q[2]], egui::Stroke::new(1.5, c(va)));
+    |                                                                  ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:116:66
+    |
+116 |             painter.line_segment([q[3], q[2]], egui::Stroke::new(1.5, c(ua)));
+    |                                                                  ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:123:72
+    |
+123 |             painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
+    |                                                                        ^^^ help: explicitly specify the type as `f32`: `3.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+   --> crates/loom_ui/src/gizmo/move_gizmo.rs:123:85
+    |
+123 |             painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
+    |                                                                                     ^^^ help: explicitly specify the type as `f32`: `2.0_f32`
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/gizmo/tripod.rs:29:60
+   |
+29 |             painter.line_segment([s, e], egui::Stroke::new(1.5, color));
+   |                                                            ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:1478:70
+     |
+1478 |                 painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(180))));
+     |                                                                      ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2394:36
+     |
+2394 |     let stroke = egui::Stroke::new(1.0, egui::Color32::from_white_alpha(180));
+     |                                    ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2515:70
+     |
+2515 |                     painter.circle_stroke(sp, 4.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
+     |                                                                      ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2558:36
+     |
+2558 |     let stroke = egui::Stroke::new(2.0, orange);
+     |                                    ^^^ help: explicitly specify the type as `f32`: `2.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2571:47
+     |
+2571 | ...                   egui::Stroke::new(1.0, egui::Color32::BLACK),
+     |                                         ^^^ help: explicitly specify the type as `f32`: `1.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:2662:36
+     |
+2662 |     let stroke = egui::Stroke::new(1.5, color);
+     |                                    ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+    --> crates/loom_ui/src/viewport_widget.rs:3085:36
+     |
+3085 |     let stroke = egui::Stroke::new(2.0, color);
+     |                                    ^^^ help: explicitly specify the type as `f32`: `2.0_f32`
+     |
+     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+     = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/viewports.rs:54:102
+   |
+54 | ...Stroke::new(if app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
+   |                                        ^^^ help: explicitly specify the type as `f32`: `3.0_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied
+  --> crates/loom_ui/src/viewports.rs:54:115
+   |
+54 | ...f app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
+   |                                        ^^^ help: explicitly specify the type as `f32`: `1.5_f32`
+   |
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #154024 <https://github.com/rust-lang/rust/issues/154024>
+
+warning: variable does not need to be mutable
+   --> crates/loom_ui/src/dialogs/track_view_dialogs.rs:337:21
+    |
+337 |                 let mut spin = |ui: &mut egui::Ui, l: &str, v: &mut f32| {
+    |                     ----^^^^
+    |                     |
+    |                     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `loom_ui` (lib) generated 23 warnings (run `cargo fix --lib -p loom_ui` to apply 23 suggestions)
+warning: variable does not need to be mutable
+   --> crates/loom_commands/tests/review7_fixes.rs:175:9
+    |
+175 |     let mut skin = |s: &mut AppState, segs: f64, x: f32| {
+    |         ----^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `loom_commands` (test "review7_fixes") generated 1 warning (run `cargo fix --test "review7_fixes" -p loom_commands` to apply 1 suggestion)
+warning: unused variable: `win`
+    --> crates/loom_ui/src/ui_tests.rs:3874:9
+     |
+3874 |     let win = options_rect(&h, "fbx_import_options");
+     |         ^^^ help: if this is intentional, prefix it with an underscore: `_win`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `loom_ui` (lib test) generated 24 warnings (23 duplicates) (run `cargo fix --lib -p loom_ui --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 10s
+     Running unittests src/lib.rs (target/debug/deps/loom_commands-5e7ca6ad4570fd09)
+
+running 23 tests
+test exchange::tests::setting_an_option_makes_the_preset_user_defined_and_presets_load_back ... ok
+test keymap::tests::alt_r_rings_and_alt_l_loops_in_both_poly_groups ... ok
+test keymap::tests::every_chart_action_is_registered_or_out_of_scope ... ok
+test keymap::tests::every_edit_poly_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::every_editable_poly_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::every_ffd_chart_action_is_registered ... ok
+test keymap::tests::every_spline_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::every_unwrap_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::main_ui_bindings_only_reference_registered_commands ... ok
+test keymap::tests::no_duplicate_chords_in_main_ui ... ok
+test keymap::tests::parses_every_chord_in_chart ... ok
+test keymap::tests::space_locks_the_selection_only_when_enabled ... ok
+test keymap::tests::w_is_select_and_move_and_ctrl_z_is_undo ... ok
+test retarget::real_assets::kimodo_on_metahuman_preserves_skin_and_skeleton_and_deforms_mesh ... ignored, requires LOOM_RETARGET_BVH and LOOM_RETARGET_FBX real production assets
+test retarget::tests::continuous_euler_keys_reconstruct_quaternion_across_wrap ... ok
+test retarget::tests::palm_reference_preserves_source_axial_twist ... ok
+test retarget::tests::world_reference_correction_preserves_target_bind_axes ... ok
+test state::tests::top_and_front_views_put_x_on_screen_right ... ok
+test viewport::tests::cells_never_negative_for_tiny_rects ... ok
+test viewport::tests::default_kinds_follow_reference ... ok
+test viewport::tests::four_grid_cells_cover_unit_square_without_overlap ... ok
+test viewport::tests::fourteen_layouts_have_expected_cell_counts ... ok
+test viewport::tests::splits_clamp_to_five_percent ... ok
+
+test result: ok. 22 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/align.rs (target/debug/deps/align-4afd28e263591667)
+
+running 8 tests
+test align_camera_looks_down_the_picked_normal ... ok
+test align_max_to_min_stacks_boxes ... ok
+test align_position_center_to_center ... ok
+test align_to_view_points_local_z_at_camera ... ok
+test mirror_copy_flips_about_frame_axis ... ok
+test mirror_no_clone_mirrors_in_place ... ok
+test normal_align_opposes_normals ... ok
+test quick_align_matches_pivot ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/animation.rs (target/debug/deps/animation-091847e5b2bfe62e)
+
+running 8 tests
+test animated_box_height_and_bend_angle ... ok
+test animated_parameter_reevaluates_per_frame_and_static_stays_cached ... ok
+test auto_key_move_creates_position_keys ... ok
+test auto_key_off_edits_offset_existing_keys ... ok
+test changing_frame_redraws_the_viewports ... ok
+test importing_with_auto_key_on_does_not_animate ... ok
+test skinned_mesh_follows_keyed_bones ... ok
+test undo_removes_auto_keys ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/animation_clips.rs (target/debug/deps/animation_clips-cee1b2d9978f3042)
+
+running 8 tests
+test bvh_clip_moves_fractional_native_keys_atomically_and_saves ... ok
+test deleting_clip_members_prunes_metadata_and_undo_redo_restores_membership ... ok
+test invalid_clip_moves_are_atomic_and_do_not_touch_unrelated_animation ... ok
+test moving_keeps_list_object_visibility_and_offset_keys_editable ... ok
+test new_keep_renews_empty_scene_identity_too ... ok
+test new_scene_and_new_keep_do_not_leave_ghost_clips ... ok
+test old_scene_without_clip_metadata_loads_and_unchanged_move_has_no_undo_step ... ok
+test save_selected_contains_only_exported_clip_members_and_keeps_original_scene ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/array.rs (target/debug/deps/array-f1d24d79b0889f18)
+
+running 7 tests
+test array_1d_count_3_move_x_creates_two_copies ... ok
+test array_2d_grid_counts ... ok
+test array_count_0_rejected ... ok
+test array_count_1_is_noop_no_undo ... ok
+test array_totals_mode_divides_increment ... ok
+test repeating_an_array_continues_it_from_the_last_copy ... ok
+test spacing_tool_distributes_evenly ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/assets.rs (target/debug/deps/assets-303ac814c3e26d58)
+
+running 4 tests
+test asset_tracking_lists_repaths_and_finds_missing_files ... ok
+test replace_swaps_the_geometry_of_same_named_objects_and_keeps_their_transforms ... ok
+test reset_starts_from_the_projects_startup_scene ... ok
+test set_project_folder_makes_the_folders_and_is_a_setting ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/autosave.rs (target/debug/deps/autosave-471a7488af6096fa)
+
+running 8 tests
+test auto_backup_name_and_count_preferences ... ok
+test autosave_skips_open_transaction ... ok
+test fetch_without_hold_file_errors ... ok
+test hold_writes_file_and_fetch_reads_it_after_a_fresh_state ... ok
+test home_follows_loom_home_then_xdg ... ok
+test owned_job_captures_edit_version_and_does_not_acknowledge_opened_scene ... ok
+test tick_skips_when_unchanged_or_disabled ... ok
+test tick_writes_after_interval_and_cycles_names ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/bake.rs (target/debug/deps/bake-424daafbea65d732)
+
+running 8 tests
+test a_flat_planes_normals_map_is_flat ... ok
+test lit_elements_wait_for_the_renderer ... ok
+test output_into_source_puts_the_map_into_the_objects_material ... ok
+test projection_bakes_from_the_picked_object ... ok
+test render_to_texture_opens_its_dialog_with_0 ... ok
+test settings_are_checked_undoable_and_saved ... ok
+test shells_switch_views_and_clear_to_either_material ... ok
+test unwrap_only_and_clear_unwrappers ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/biped.rs (target/debug/deps/biped-65d71786bff3cefd)
+
+running 9 tests
+test a_biped_round_trips_through_loom_files ... ok
+test a_new_biped_has_the_reference_names_hierarchy_colours_and_height ... ok
+test fbx_export_writes_the_biped_as_a_skeleton_and_reads_back ... ok
+test figure_mode_keeps_the_figure_pose_apart_from_the_animated_pose ... ok
+test height_scales_the_pose_about_the_feet ... ok
+test rebuilds_and_creation_undo_and_redo ... ok
+test root_name_renames_the_whole_biped ... ok
+test skin_binds_to_biped_parts ... ok
+test structure_changes_rebuild_the_parts_and_keep_the_names ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/biped_footsteps.rs (target/debug/deps/biped_footsteps-dc95d8fe825047eb)
+
+running 7 tests
+test activation_walks_the_biped_over_its_footsteps ... ok
+test create_footsteps_append_places_clicked_footsteps ... ok
+test create_multiple_footsteps_walk_alternates_with_walk_timing ... ok
+test deactivate_and_delete_remove_the_keys ... ok
+test footstep_mode_is_needed_and_leaves_figure_mode ... ok
+test footsteps_draw_as_coloured_footprints_with_numbers ... ok
+test run_and_jump_timing ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/biped_structure.rs (target/debug/deps/biped_structure-1ab9670fd30df3e3)
+
+running 11 tests
+test ankle_attach_slides_the_foot_block_under_the_ankle ... ok
+test body_types_change_the_shapes_but_not_the_names ... ok
+test create_biped_takes_every_structure_value ... ok
+test figure_files_save_and_load_the_structure_and_figure_pose ... ok
+test knuckles_makes_an_anatomical_hand_and_excludes_forefeet ... ok
+test pick_parent_takes_the_clicked_part ... ok
+test ponytails_hang_from_the_head ... ok
+test props_appear_by_the_hands_and_in_front_of_the_torso ... ok
+test triangle_pelvis_and_neck_reparent_the_thighs_and_clavicles ... ok
+test twist_links_are_frozen_links_along_the_limbs ... ok
+test xtras_create_mirror_reparent_rename_and_delete ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/bone_display.rs (target/debug/deps/bone_display-356d4acdbab57a39)
+
+running 4 tests
+test explicit_bone_display_is_independent_of_the_geometry_category ... ok
+test explicit_bone_display_modes_clear_the_conflicting_hide_bones_filter ... ok
+test explicit_bone_display_preserves_own_hidden_and_frozen_policies ... ok
+test helper_category_is_independent_of_geometry_and_bones ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/bones.rs (target/debug/deps/bones-1253cf0622b6bcc1)
+
+running 3 tests
+test bone_chain_has_lengths_parents_and_a_nub ... ok
+test bone_edit_mode_stretches_the_parent_and_refine_splits ... ok
+test mirror_and_reassign_root ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/bvh.rs (target/debug/deps/bvh-d382892e466eb0bf)
+
+running 7 tests
+test branched_and_evicted_import_timing_never_attaches_to_another_step ... ok
+test external_kimodo_motion ... ignored, requires a real local Kimodo BVH supplied via LOOM_KIMODO_BVH
+test hierarchy_units_channel_order_timeline_undo_and_save ... ok
+test malformed_motion_is_atomic ... ok
+test rotations_do_not_jump_at_wrap ... ok
+test scene_system_scale_applies_once_and_names_stay_unique ... ok
+test undo_redo_restores_import_timing_with_original_nondefault_timeline ... ok
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/caches9.rs (target/debug/deps/caches9-231cc59ec22d10e9)
+
+running 8 tests
+test hsds_level_list_picks_the_edited_level_and_display_hides_finer_levels ... ok
+test hsds_subdivides_selected_faces ... ok
+test point_cache_count_mismatch_warns ... ok
+test point_cache_record_refuses_a_changing_vertex_count ... ok
+test point_cache_records_and_plays ... ok
+test point_cache_retries_a_missing_file ... ok
+test point_cache_wsm_records_world_space ... ok
+test subdivide_wsm_uses_world_size ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/camera.rs (target/debug/deps/camera-8d7ed3a27e36deab)
+
+running 7 tests
+test camera_files_without_the_new_parameters_still_load ... ok
+test free_camera_looks_along_the_given_direction ... ok
+test lens_and_fov_stay_in_sync ... ok
+test new_camera_has_the_reference_defaults ... ok
+test overlay_cone_reaches_the_target_in_the_render_aspect ... ok
+test target_camera_aims_at_its_target_and_follows_it ... ok
+test type_switch_removes_or_adds_the_target ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/clip_trim.rs (target/debug/deps/clip_trim-214c7b3f4b40648c)
+
+running 3 tests
+test invalid_and_unsupported_trims_leave_scene_and_history_unchanged ... ok
+test trim_one_character_clip_preserves_neighbor_motion_on_shared_bones ... ok
+test trim_preserves_fractional_interior_poses_and_undo_restores_original_keys ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/compound.rs (target/debug/deps/compound-ed402b4d40f13b2d)
+
+running 4 tests
+test boolean_pick_defaults_to_subtraction_a_minus_b ... ok
+test boolean_subtracts_the_picked_operand_and_keeps_or_moves_it ... ok
+test loft_skins_shapes_along_a_path ... ok
+test proboolean_chains_operands ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/compound_materials.rs (target/debug/deps/compound_materials-df122ed02b54a16f)
+
+running 10 tests
+test a_bitmap_dropped_on_selected_polygons_gets_its_own_sub_material ... ok
+test blend_keeps_the_old_material_and_takes_a_mask ... ok
+test compound_materials_round_trip_through_the_loom_file ... ok
+test dropping_materials_on_selected_polygons_builds_a_multi_sub ... ok
+test eyedropper_slot_copy_browser_get_and_options ... ok
+test faces_draw_with_their_material_id_sub_material ... ok
+test go_to_sub_material_edit_it_and_go_back_to_parent ... ok
+test maps_through_the_browser_with_coordinates_cropping_and_sub_maps ... ok
+test set_number_add_delete_and_rows ... ok
+test type_button_makes_a_multi_sub_and_keeps_the_old_material_as_id_1 ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/constraints.rs (target/debug/deps/constraints-62e787bd9011e6ab)
+
+running 8 tests
+test assign_tcb_and_noise_to_position ... ok
+test attachment_sticks_to_a_face ... ok
+test link_constraint_switches_parent_over_time ... ok
+test list_controller_adds_noise_to_keys ... ok
+test lookat_aims_the_axis ... ok
+test orientation_blends_targets ... ok
+test path_constraint_follows_the_shape ... ok
+test position_constraint_weights_targets ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/deformers.rs (target/debug/deps/deformers-dcbdf419ab55cf7c)
+
+running 3 tests
+test bend_through_commands_and_gizmo_move ... ok
+test linked_xform_follows_its_control ... ok
+test symmetry_slice_and_mirror_change_topology ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/deformers9.rs (target/debug/deps/deformers9-135dbd92bd7d0eac)
+
+running 13 tests
+test affect_region_pulls_neighbours ... ok
+test flex_lags_behind_motion ... ok
+test paste_instanced_keeps_wsm_on_top ... ok
+test pathdeform_cycle_does_not_hang ... ok
+test pathdeform_follows_the_paths_modifier_stack ... ok
+test pathdeform_rotation_turns_the_section ... ok
+test pathdeform_wraps_on_closed_paths ... ok
+test spline_ik_control_helpers_move_knots ... ok
+test spline_ik_control_keeps_helpers_per_spline ... ok
+test substitute_uses_the_picked_mesh ... ok
+test vertex_weld_merges ... ok
+test wsm_cannot_move_below_object_space ... ok
+test wsm_stays_on_top ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/display_settings.rs (target/debug/deps/display_settings-5a95f95289f63a1d)
+
+running 4 tests
+test display_color_defaults_to_object_wire_and_material_shading ... ok
+test hide_frozen_objects_and_bone_objects_leave_the_viewports ... ok
+test object_color_dialog_colours_the_selection_and_sets_the_colour_for_new_objects ... ok
+test statistics_and_safe_frame_options_are_kept_in_the_scene_file ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/edit_normals.rs (target/debug/deps/edit_normals-ead03556cfd0118c)
+
+running 10 tests
+test applying_edit_normals_enters_the_normal_level ... ok
+test average_selected_and_copy_paste ... ok
+test break_unify_and_specify ... ok
+test copy_normal_is_not_an_undo_step ... ok
+test edit_normals_after_a_topology_change_below ... ok
+test edit_normals_chart_rows_exist ... ok
+test explicit_normals_survive_edits ... ok
+test fbx_writes_explicit_normals ... ok
+test same_counts_different_topology_drops_the_edits ... ok
+test the_rotate_tool_turns_the_selected_normals_not_the_object ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/exchange.rs (target/debug/deps/exchange-7d97aa9d7bd29f59)
+
+running 13 tests
+test fbx_axis_units_format_and_triangulate ... ok
+test fbx_export_selection_sets_instances_turbosmooth_and_dummy_bones ... ok
+test fbx_import_bones_as_dummies_and_units_override ... ok
+test fbx_include_options_cameras_animation_and_deformations ... ok
+test fbx_lights_option_both_ways ... ok
+test fbx_materials_and_textures_round_trip_with_embedded_media ... ok
+test obj_export_import_round_trip_keeps_materials ... ok
+test obj_export_options_change_the_text ... ok
+test obj_hidden_objects_option ... ok
+test obj_import_options_objects_materials_and_geometry ... ok
+test options_are_set_by_command_and_listed ... ok
+test render_output_saves_every_listed_image_format ... ok
+test y_up_export_keeps_cameras_and_objects_in_place ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/extras.rs (target/debug/deps/extras-ec3c01fd5f2f1306)
+
+running 7 tests
+test clone_and_align_only_on_chosen_axes ... ok
+test clone_and_align_pick_adds_destinations ... ok
+test clone_and_align_puts_a_clone_on_every_destination ... ok
+test place_highlight_reflects_the_view_ray_keeping_the_distance ... ok
+test snapshot_instance_and_mesh_methods ... ok
+test snapshot_range_spaces_the_copies_evenly_in_time ... ok
+test snapshot_single_clones_the_object_where_it_is_at_the_current_frame ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/fbx.rs (target/debug/deps/fbx-a3babe7da853a088)
+
+running 4 tests
+test export_and_import_round_trip_keeps_names_materials_uvs_and_hierarchy ... ok
+test export_selected_child_keeps_world_transform ... ok
+test import_fbx_creates_nodes_with_hierarchy_materials_and_one_undo_entry ... ok
+test obj_still_goes_through_the_obj_path ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/fbx_anim.rs (target/debug/deps/fbx_anim-a7138da6f3793281)
+
+running 3 tests
+test imported_clip_plays_on_the_skin ... ok
+test keyed_box_exports_and_reimports ... ok
+test mixamo_clip_round_trips ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+
+     Running tests/fbx_material_assignment.rs (target/debug/deps/fbx_material_assignment-076b1ec2fbbd6db5)
+
+running 2 tests
+test external_ray_textured_fbx_binds_all_multi_slot_meshes_without_changing_geometry_or_source ... ok
+test fbx_mesh_material_slots_bind_native_multi_sub_in_source_order_and_undo_atomically ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/fbx_prepared.rs (target/debug/deps/fbx_prepared-db4311e9b86cedb2)
+
+running 4 tests
+test external_prepared_metahuman_preserves_source_and_commits_native_body_atomically ... ok
+test mismatched_prepared_path_kind_or_units_do_not_modify_scene ... ok
+test preparation_errors_do_not_touch_existing_scene ... ok
+test prepared_import_uses_snapshot_once_without_reopening_source_and_is_one_undo ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/fbx_skin.rs (target/debug/deps/fbx_skin-82a4dd7ce58178c4)
+
+running 2 tests
+test imports_the_mixamo_rig_with_bones_and_skin_and_exports_it_back ... ok
+test morpher_channels_round_trip_as_blend_shapes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.64s
+
+     Running tests/ffd.rs (target/debug/deps/ffd-902bb62f16414d94)
+
+running 2 tests
+test control_point_move_deforms_nearby_and_undoes ... ok
+test ffd_keymap_group_is_live_only_with_an_ffd_entry_active ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/file_commands.rs (target/debug/deps/file_commands-949eaa28a55d02ac)
+
+running 8 tests
+test corrupt_file_leaves_scene_untouched ... ok
+test open_and_save_are_registered_and_bound ... ok
+test open_clears_undo_and_sets_title ... ok
+test reset_file_restores_defaults ... ok
+test save_as_copy_keeps_current_file ... ok
+test save_file_without_path_opens_save_as_dialog ... ok
+test save_incremental_numbers_files ... ok
+test save_then_open_restores_scene_and_selection ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/geom_formats.rs (target/debug/deps/geom_formats-307467fd9de69a27)
+
+running 3 tests
+test dxf_round_trip_puts_each_object_on_its_layer ... ok
+test stl_binary_and_ascii_round_trips_weld_into_one_mesh ... ok
+test three_ds_round_trip_keeps_meshes_pivots_materials_lights_and_cameras ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/group_layers.rs (target/debug/deps/group_layers-4b341cb1e0947e24)
+
+running 6 tests
+test closed_group_selects_as_one_open_selects_members ... ok
+test group_makes_head_and_parents_members ... ok
+test layer_hidden_hides_members_in_picks ... ok
+test move_to_layer_and_current_layer_for_new_objects ... ok
+test select_ancestor_child_children_similar ... ok
+test ungroup_explode_restore_world_transforms ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/helpers.rs (target/debug/deps/helpers-753995a2a86be0e4)
+
+running 18 tests
+test activate_grid_needs_a_selected_grid_and_deleting_it_returns_the_home_grid ... ok
+test active_grid_spacing_drives_grid_snaps ... ok
+test align_grid_to_view_turns_the_grid_to_face_the_view ... ok
+test compass_has_rose_and_radius ... ok
+test deleting_either_end_of_a_tape_deletes_both ... ok
+test display_plane_chooses_the_construction_plane ... ok
+test grid_object_parameters_and_activation ... ok
+test measure_create_center_point_puts_a_point_at_the_centre_of_mass ... ok
+test measure_distance_reports_distance_and_deltas ... ok
+test measure_names_the_object_and_uses_the_solid_centre_of_mass ... ok
+test measure_nodes_measures_a_locked_set_and_reports_open_meshes ... ok
+test measure_sums_shape_lengths ... ok
+test nudge_grid_moves_the_active_grid_along_its_normal ... ok
+test point_has_all_display_options ... ok
+test point_lines_follow_the_display_options ... ok
+test protractor_measures_the_angle_between_two_picked_objects ... ok
+test tape_measures_the_distance_to_its_target_and_follows_it ... ok
+test tape_specify_length_reports_the_typed_length ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/hierarchy_select.rs (target/debug/deps/hierarchy_select-e59bc545ac1c636f)
+
+running 9 tests
+test freeze_transform_makes_the_current_pose_the_zero_pose ... ok
+test link_inheritance_applies_to_every_selected_object ... ok
+test page_down_selects_immediate_children_and_ctrl_page_down_all_descendants ... ok
+test paint_selection_size_up_and_down_change_the_brush ... ok
+test select_by_layer_selects_the_objects_of_several_layers ... ok
+test select_similar_needs_the_same_type_layer_and_material ... ok
+test siblings_follow_the_reference_definition_in_an_uneven_hierarchy ... ok
+test update_during_spinner_drag_toggles ... ok
+test view_undo_names_the_change_and_keeps_twenty ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/ik.rs (target/debug/deps/ik-c6c8394c11e657de)
+
+running 4 tests
+test creating_limb_preserves_existing_fk_pose_and_controllers ... ok
+test hi_chain_moves_bones_when_the_goal_moves_and_fk_snap_bakes_it ... ok
+test limb_and_spline_chains_through_commands ... ok
+test limb_creation_rejects_wrong_segment_count_without_scene_changes ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/import_animation_clip.rs (target/debug/deps/import_animation_clip-bc88ee717f6e479f)
+
+running 5 tests
+test dedicated_animation_import_rejects_static_corrupt_and_other_formats_atomically ... ok
+test dedicated_animation_picker_and_bvh_import_route ... ok
+test dedicated_fbx_import_keeps_target_and_options_and_source_clip_is_reversible ... ok
+test imported_bvh_and_fbx_keep_project_fps_and_preserve_motion_in_seconds ... ok
+test legacy_fbx_update_does_not_create_or_reown_source_clips ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.56s
+
+     Running tests/instances.rs (target/debug/deps/instances-62e6f47c46b28bfc)
+
+running 1 test
+test vertex_edits_on_an_instance_change_every_instance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/keys.rs (target/debug/deps/keys-2b246b573e9fd7d6)
+
+running 21 tests
+test default_tangent_applies_to_new_keys ... ok
+test fractional_playback_speed_loop_and_end_respect_source_frame_range ... ok
+test fractional_playback_stop_scrub_and_configuration_snap_to_integer_time ... ok
+test fractional_preview_survives_commands_but_autokey_edits_use_integer_frame ... ok
+test invalid_playback_clock_rejects_without_corrupting_the_visible_pose ... ok
+test key_position_x_keys_one_axis ... ok
+test key_shortcuts_are_bound ... ok
+test next_previous_key_step_over_selection_keys ... ok
+test non_real_time_reverse_and_pingpong_remain_integer_steps ... ok
+test playback_advances_and_loops ... ok
+test playback_configuration_does_not_rebase_an_unkeyed_pose_at_the_same_frame ... ok
+test real_time_playback_presents_sixty_interpolated_poses_at_thirty_source_fps ... ok
+test real_time_supported_speeds_keep_direction_semantics_and_large_frame_loops ... ok
+test rescale_time_scales_keys ... ok
+test save_and_load_animation_clip ... ok
+test set_key_mode_buffer_is_discarded_on_frame_change_and_kept_by_k ... ok
+test set_keys_keys_the_selection_list_set ... ok
+test set_keys_respects_filters ... ok
+test state_query_samples_the_visible_fractional_transform ... ok
+test track_bar_move_copy_delete_keys ... ok
+test tracks_lists_object_and_modifier_params ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/kimodo_scene_identity.rs (target/debug/deps/kimodo_scene_identity-9bc8d16df57d294a)
+
+running 1 test
+test file_new_always_changes_project_identity_even_for_an_empty_saved_scene ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/kimodo_settings.rs (target/debug/deps/kimodo_settings-7bd2d513ee42ee67)
+
+running 1 test
+test kimodo_address_is_local_preferences_and_not_project_data ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/lightcam2.rs (target/debug/deps/lightcam2-00b14aa1302a0869)
+
+running 11 tests
+test add_default_lights_to_scene_makes_the_key_and_fill_omnis ... ok
+test daylight_system_adds_a_skylight_and_is_one_undo_step ... ok
+test light_view_controls_move_the_light_and_change_its_cone ... ok
+test photometric_light_renders_with_inverse_square_from_one_metre_and_its_distribution ... ok
+test photometric_lights_survive_save_and_load ... ok
+test photometric_target_and_free_lights_have_the_reference_names_and_defaults ... ok
+test renaming_a_target_camera_or_light_renames_its_target ... ok
+test select_target_selects_the_targets_of_the_selection ... ok
+test sunlight_system_places_the_sun_by_date_time_and_location ... ok
+test target_distance_moves_the_target_of_target_cameras_and_lights ... ok
+test templates_set_distribution_intensity_lamp_and_beam ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/lights.rs (target/debug/deps/lights-bbb6232f38a7e80c)
+
+running 11 tests
+test a_target_spot_aims_at_its_target_node_and_follows_it ... ok
+test creating_a_target_light_is_one_undo_step ... ok
+test default_lights_count_is_a_viewport_setting ... ok
+test every_standard_light_is_created_with_the_reference_names_and_defaults ... ok
+test exclusion_and_projector_map_are_undoable_and_survive_save_and_load ... ok
+test fbx_round_trip_keeps_light_type_colour_cone_decay_and_aim ... ok
+test hide_lights_and_the_lights_selection_filter_apply_to_lights ... ok
+test light_type_and_targeted_switch_keep_the_aim ... ok
+test light_view_and_light_lister ... ok
+test parameters_set_clamp_and_undo ... ok
+test scene_lights_evaluate_what_the_renderers_draw ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/live.rs (target/debug/deps/live-a6738ab586e1eb45)
+
+running 5 tests
+test instances_list_sockets_and_mark_the_current_one ... ok
+test log_file_names_carry_the_utc_date_and_pid ... ok
+test prune_keeps_the_newest_logs ... ok
+test runtime_and_log_dirs_follow_xdg ... ok
+test tail_returns_the_last_lines ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/loom_file.rs (target/debug/deps/loom_file-0c74f3da979d6bf0)
+
+running 8 tests
+test animation_survives_save_and_open ... ok
+test every_modifier_round_trips ... ok
+test every_object_kind_round_trips ... ok
+test newer_format_is_refused ... ok
+test rig_survives_save_and_open ... ok
+test save_is_atomic ... ok
+test settings_round_trip ... ok
+test summary_lists_nodes ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/loomrig.rs (target/debug/deps/loomrig-8c208946a2e91d48)
+
+running 14 tests
+test ambiguous_role_mappings_are_rejected_atomically ... ok
+test applying_mapping_preserves_authored_limb_settings_and_keys ... ok
+test autokey_blend_and_pose_match_offsets_preserve_prior_frames_and_source_keys ... ok
+test hi_pole_uses_final_solved_bend_plane ... ok
+test ik_goal_rotates_end_joint_and_pole_moves_bend ... ok
+test ik_respects_rotated_scaled_skeleton_parent ... ok
+test keyed_full_ik_goal_stays_planted_while_native_root_motion_continues ... ok
+test mapping_edits_preserve_authored_controls_and_keys ... ok
+test master_moves_in_world_under_rotated_scaled_parent_and_fk_control_is_not_doubled ... ok
+test matched_solver_switch_keeps_later_goals_constrained ... ok
+test neutral_controls_preserve_original_animated_fk_at_all_frames ... ok
+test rig_is_undoable_and_controls_drive_original_chain ... ok
+test saved_rig_evaluates_same_pose_without_needing_an_edit ... ok
+test switching_solver_keeps_current_visible_pose ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/loomrig_contacts.rs (target/debug/deps/loomrig_contacts-9239b39b174c322b)
+
+running 10 tests
+test captured_contact_has_no_pop_and_preserves_stretch_under_affine_parents ... ok
+test contact_authoring_captures_solved_pose_and_edits_are_atomic_and_undoable ... ok
+test contact_blend_interpolates_and_master_motion_does_not_move_a_world_contact ... FAILED
+test contact_commands_publish_typed_schemas_and_roundtrip_through_command_json ... ok
+test contact_targets_slide_between_independent_references_at_fractional_times ... ok
+test invalid_contact_authoring_leaves_the_scene_and_undo_unchanged ... ok
+test invalid_contact_frames_are_reported_and_recover_after_the_frame_is_fixed ... ok
+test new_plant_after_free_captures_a_new_stance_and_duplicate_creation_is_atomic ... ok
+test production_ray_contact_capture_preserves_source_data_and_solved_pose ... ignored, requires LOOM_RAY_CONTACT_SOURCE production scene
+test world_contact_holds_body_contact_follows_root_and_free_releases ... ok
+
+failures:
+
+---- contact_blend_interpolates_and_master_motion_does_not_move_a_world_contact stdout ----
+
+thread 'contact_blend_interpolates_and_master_motion_does_not_move_a_world_contact' (362410) panicked at crates/loom_commands/tests/loomrig_contacts.rs:309:5:
+Mat4 { x_axis: Vec4(0.9661284, 0.20248653, -0.15998465, 0.0), y_axis: Vec4(-0.1869272, 0.9765172, 0.10710949, 0.0), z_axis: Vec4(0.17791602, -0.073576, 0.9812912, 0.0), w_axis: Vec4(17.626705, 5.776146, 0.3968904, 1.0) } != Mat4 { x_axis: Vec4(0.9884141, -0.061110556, -0.13893518, 0.0), y_axis: Vec4(0.12452129, 0.8498817, 0.51205033, 0.0), z_axis: Vec4(0.08678679, -0.5234181, 0.8476447, 0.0), w_axis: Vec4(18.257036, 3.2947423, -0.21763086, 1.0) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    contact_blend_interpolates_and_master_motion_does_not_move_a_world_contact
+
+test result: FAILED. 8 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p loom_commands --test loomrig_contacts`

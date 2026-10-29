@@ -1,0 +1,9 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.12s
+     Running tests/ik_contact_roll.rs (target/debug/deps/ik_contact_roll-f91f986f9198c28a)
+
+running 1 test
+test contact_limb_solution_keeps_roll_continuous_without_changing_analytic_joint_positions ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

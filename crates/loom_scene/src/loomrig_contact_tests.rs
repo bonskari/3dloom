@@ -232,3 +232,36 @@ fn contact_interpolation_handles_all_valid_finite_key_times() {
     assert!(sample.position.is_finite());
     assert_eq!(sample.position.x, 0.);
 }
+
+#[test]
+fn contact_capture_roundtrips_world_pose_under_affine_body_frames() {
+    use glam::Mat4;
+    let rotation = Quat::from_euler(glam::EulerRot::XYZ, 0.3, -0.5, 0.7);
+    let end = Mat4::from_scale_rotation_translation(
+        Vec3::new(2., 3., 1.),
+        rotation,
+        Vec3::new(4., 5., 6.),
+    );
+    let pole = Vec3::new(-4., 12., 15.);
+    for sign in [1., -1.] {
+        let frame = Mat4::from_scale_rotation_translation(
+            Vec3::new(sign * 2., 3., 1.),
+            Quat::from_rotation_z(0.4),
+            Vec3::new(2., 1., 3.),
+        ) * Mat4::from_rotation_y(0.3);
+        for space in [ContactSpace::World, ContactSpace::Body] {
+            let captured = ContactReference::capture(space, frame, end, pole).unwrap();
+            let track = ContactTrack::new([(7, captured)].into(), vec![key(0., 7, 1.)]).unwrap();
+            let sample = track.sample(0., frame).unwrap().unwrap();
+            assert!(sample.position.abs_diff_eq(end.w_axis.truncate(), 1e-4));
+            assert!(sample.pole_position.abs_diff_eq(pole, 1e-4));
+            assert!(
+                sample.rotation.abs_diff_eq(rotation, 1e-4)
+                    || sample.rotation.abs_diff_eq(-rotation, 1e-4),
+                "{sign}: {:?} != {rotation:?}",
+                sample.rotation
+            );
+        }
+    }
+    assert!(ContactReference::capture(ContactSpace::Body, Mat4::ZERO, end, pole).is_err());
+}

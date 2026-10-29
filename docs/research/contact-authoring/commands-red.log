@@ -1,0 +1,64 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+error[E0599]: no variant named `CreateLoomRigContactKey` found for enum `loom_commands::Command`
+   --> crates/loom_commands/tests/loomrig_contacts.rs:321:29
+    |
+321 |     execute(&mut s,Command::CreateLoomRigContactKey {rig:1,limb:"Arm".into(),time:10.,preset:"planted".into()}).unwrap();
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^ variant not found in `loom_commands::Command`
+
+error[E0599]: no variant named `CreateLoomRigContactKey` found for enum `loom_commands::Command`
+   --> crates/loom_commands/tests/loomrig_contacts.rs:334:33
+    |
+334 |         execute(&mut s,Command::CreateLoomRigContactKey {rig:1,limb:"Arm".into(),time,preset:preset.into()}).unwrap();
+    |                                 ^^^^^^^^^^^^^^^^^^^^^^^ variant not found in `loom_commands::Command`
+
+error[E0599]: no variant named `EditLoomRigContactReference` found for enum `loom_commands::Command`
+   --> crates/loom_commands/tests/loomrig_contacts.rs:344:29
+    |
+344 |     execute(&mut s,Command::EditLoomRigContactReference {rig:1,limb:"Arm".into(),reference,pose:pose.clone()}).unwrap();
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ variant not found in `loom_commands::Command`
+
+error[E0599]: no variant named `EditLoomRigContactKey` found for enum `loom_commands::Command`
+   --> crates/loom_commands/tests/loomrig_contacts.rs:347:29
+    |
+347 |     execute(&mut s,Command::EditLoomRigContactKey {rig:1,limb:"Arm".into(),key:changed.clone()}).unwrap();
+    |                             ^^^^^^^^^^^^^^^^^^^^^ variant not found in `loom_commands::Command`
+
+error[E0599]: no variant named `MoveLoomRigContactKey` found for enum `loom_commands::Command`
+   --> crates/loom_commands/tests/loomrig_contacts.rs:349:29
+    |
+349 |     execute(&mut s,Command::MoveLoomRigContactKey {rig:1,limb:"Arm".into(),from:20.,to:25.}).unwrap();
+    |                             ^^^^^^^^^^^^^^^^^^^^^
+    |
+help: there is a variant with a similar name
+    |
+349 -     execute(&mut s,Command::MoveLoomRigContactKey {rig:1,limb:"Arm".into(),from:20.,to:25.}).unwrap();
+349 +     execute(&mut s,Command::MoveLoomRigBlendKey {rig:1,limb:"Arm".into(),from:20.,to:25.}).unwrap();
+    |
+
+error[E0599]: no variant named `MoveLoomRigContactKey` found for enum `loom_commands::Command`
+   --> crates/loom_commands/tests/loomrig_contacts.rs:351:37
+    |
+351 |     assert!(execute(&mut s,Command::MoveLoomRigContactKey {rig:1,limb:"Arm".into(),from:10.,to:25.}).is_err());
+    |                                     ^^^^^^^^^^^^^^^^^^^^^
+    |
+help: there is a variant with a similar name
+    |
+351 -     assert!(execute(&mut s,Command::MoveLoomRigContactKey {rig:1,limb:"Arm".into(),from:10.,to:25.}).is_err());
+351 +     assert!(execute(&mut s,Command::MoveLoomRigBlendKey {rig:1,limb:"Arm".into(),from:10.,to:25.}).is_err());
+    |
+
+error[E0599]: no variant named `DeleteLoomRigContactKey` found for enum `loom_commands::Command`
+   --> crates/loom_commands/tests/loomrig_contacts.rs:353:29
+    |
+353 |     execute(&mut s,Command::DeleteLoomRigContactKey {rig:1,limb:"Arm".into(),time:10.}).unwrap();
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^ variant not found in `loom_commands::Command`
+
+error[E0599]: no variant named `CreateLoomRigContactKey` found for enum `loom_commands::Command`
+   --> crates/loom_commands/tests/loomrig_contacts.rs:364:41
+    |
+364 |         assert!(execute(&mut s,Command::CreateLoomRigContactKey {rig,limb:"Arm".into(),time,preset:preset.into()}).is_err());
+    |                                         ^^^^^^^^^^^^^^^^^^^^^^^ variant not found in `loom_commands::Command`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `loom_commands` (test "loomrig_contacts") due to 8 previous errors

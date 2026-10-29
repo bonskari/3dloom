@@ -1,0 +1,9 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+error[E0425]: cannot find function `solve_preserving_roll` in module `loom_scene::ik`
+  --> crates/loom_scene/tests/ik_contact_roll.rs:21:37
+   |
+21 |         let contact=loom_scene::ik::solve_preserving_roll(&chain,&bones,goal);
+   |                                     ^^^^^^^^^^^^^^^^^^^^^ not found in `loom_scene::ik`
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `loom_scene` (test "ik_contact_roll") due to 1 previous error

@@ -94,3 +94,17 @@ Following tasks still required: contact evaluator and no-pop/affine/pole tests; 
 - [ ] GREEN: resolve reference poses in world or characterized-root coordinates, interpolate independently authored targets/blends between keys, retain joined target identity, feed the same resolved goal/pole data into solving and later visualization/editing. Contact reference poses need captured pole/bend information; extend the unreleased metadata with validated pole coordinates rather than deriving a new bend at each playback time.
 - [ ] Verify no-pop root/middle/end and orientation, mirrored/nonuniform/sheared and singular frames explicitly; do not claim affine support from naive quaternion decomposition. Preserve legacy empty-track behavior. Complete target editing and authoring commands in subsequent tasks before claiming usable planted/sliding/free tools.
 - [ ] Core Scene and command regressions, local main commit, no push; no native replacement until an actual useful authoring increment is ready and verified.
+
+## Task 12: atomic contact authoring commands
+
+- [ ] Capture the current solved end/pole pose at the requested finite time; presets create World/full-IK Planted and Sliding references or Body/FK Free references. Reuse a compatible prior world reference for continuous planting; never silently snap a newly captured stance to a different old target. Expose explicit editable key/reference data as well as preset creation.
+- [ ] Add typed command routing for creation, key/reference edits, collision-safe move and deletion; one exact Undo/Redo entry, invalid edits leave all scene/rig/source records untouched. Capture must restore scene evaluation time, source node tracks and existing contact IDs. Persist/save/reopen existing authored references.
+- [ ] Test real bent/twisted chains, root/master and affine frames; confirm solved-pose capture continuity for full-IK activation, and track remaining Free-to-FK pose matching until normal rig-pose keys are implemented.
+- [ ] Do not enable native contact authoring until direct target display/editing and contact-aware scene-freeze/delete-animation behaviors are implemented and tested. Task11 and full goal remain incomplete until these integration gates pass.
+
+## Next integration gate: static contacts and effective controller edits
+
+- New Scene Keep must preserve the current solved pose while removing contact time dependence. Implement and test an explicit constant contact state, consistent with constant native controllers; do not fake a static track with sentinel key times or silently discard a live constraint. Keep empty legacy serialization compatible. Cover contacts before/inside/after keys, body/world/mixed references and affine parents; preserve each source scene on disk.
+- Generic animation deletion and normal rig-pose capture must account for rig-owned channels. Verify selected controller/limb ownership and existing key filters, not just node transforms.
+- Before enabling native authoring, goal/pole rendering, hit testing, inspector values, SetTransform and actual gizmo edits must share the effective contact target. An interpolated target must follow the pointer exactly; do not merely move a raw helper while the constrained foot remains elsewhere. Combine multi-controller edits into one correct Undo/Redo transaction without overwriting sibling rig edits.
+- Add the controls/contact rows to the separate Animation Editor; full native Ray pose/skin/appearance, contact-edit, clip/Kimodo and performance acceptance remains required.

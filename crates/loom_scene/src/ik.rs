@@ -275,3 +275,37 @@ pub fn solve(chain: &IkChain, bones: &[IkBone], goal_world: Vec3, spline: Option
 pub fn spline_start(shape: &loom_shape::Shape) -> Option<Vec3> {
     shape.splines.first().and_then(|s| s.knots.first()).map(|k| k.pos)
 }
+
+/// Keep the analytic Limb joint positions while transporting the input axial roll.
+/// Contact capture must not replace an imported bone's roll with the solver's
+/// canonical perpendicular frame merely because of a small positional correction.
+/// Legacy chains continue to use `solve` unchanged.
+pub fn solve_preserving_roll(chain: &IkChain, bones: &[IkBone], goal: Vec3) -> Vec<(NodeId, Quat)> {
+    let solved = solve(chain, bones, goal, None);
+    if chain.solver != IkSolver::Limb || bones.len() != 2 { return solved; }
+    let rotations: Vec<_> = solved.iter().map(|(_,rotation)|*rotation).collect();
+    let desired = worlds(bones,&rotations);
+    let mut result = Vec::with_capacity(bones.len());
+    let mut previous = Mat4::IDENTITY;
+    for (index,bone) in bones.iter().enumerate() {
+        let parent = if index == 0 { bone.parent_frame } else { previous };
+        let reference = parent * Mat4::from_rotation_translation(bone.rotation,bone.position);
+        let from = reference.transform_vector3(bone.tip).normalize_or_zero();
+        let to = (desired[index].transform_point3(bone.tip) - reference.w_axis.truncate()).normalize_or_zero();
+        let rotation = if from == Vec3::ZERO || to == Vec3::ZERO { bone.rotation } else {
+            // Preserve small corrections as HI does; the generic arc helper
+            // snaps near-parallel vectors to identity.
+            let cross = from.cross(to);
+            let dot = from.dot(to);
+            let swing = if dot < -1. + 2. * f32::EPSILON {
+                Quat::from_rotation_arc(from,to)
+            } else {
+                Quat::from_xyzw(cross.x,cross.y,cross.z,1. + dot).normalize()
+            };
+            (rot_of(parent).inverse() * swing * rot_of(reference)).normalize()
+        };
+        previous = parent * Mat4::from_rotation_translation(rotation,bone.position);
+        result.push((bone.id,rotation));
+    }
+    result
+}

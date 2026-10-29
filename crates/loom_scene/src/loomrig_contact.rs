@@ -281,3 +281,38 @@ pub struct ContactEvaluationError {
     pub limb: String,
     pub message: String,
 }
+
+impl ContactReference {
+    /// Capture the solved world pose without interpreting a sheared parent as TRS.
+    pub fn capture(
+        space: ContactSpace,
+        body_frame: glam::Mat4,
+        end_world: glam::Mat4,
+        pole_world: Vec3,
+    ) -> Result<Self, String> {
+        let frame = match space {
+            ContactSpace::World => glam::Mat4::IDENTITY,
+            ContactSpace::Body => body_frame,
+        };
+        let frame_rotation = affine_rotation(frame)?;
+        let desired = affine_rotation(end_world)?;
+        let mut rotation = (frame_rotation.inverse() * desired).normalize();
+        if frame.determinant() < 0. {
+            // The proper-polar convention reflects X on the right. Undo that
+            // reflection around the local rotation before storing it.
+            let reflection = glam::Mat3::from_diagonal(Vec3::new(-1., 1., 1.));
+            rotation =
+                Quat::from_mat3(&(reflection * glam::Mat3::from_quat(rotation) * reflection))
+                    .normalize();
+        }
+        let inverse = frame.inverse();
+        let result = Self {
+            space,
+            position: inverse.transform_point3(end_world.w_axis.truncate()),
+            rotation,
+            pole_position: inverse.transform_point3(pole_world),
+        };
+        result.validate()?;
+        Ok(result)
+    }
+}

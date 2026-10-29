@@ -1,0 +1,26 @@
+    Blocking waiting for file lock on build directory
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+error[E0599]: no associated function or constant named `capture` found for struct `ContactReference` in the current scope
+   --> crates/loom_scene/src/loomrig_contact_tests.rs:245:44
+    |
+245 |             let captured=ContactReference::capture(space,frame,end,pole).unwrap();
+    |                                            ^^^^^^^ associated function or constant not found in `ContactReference`
+    |
+   ::: crates/loom_scene/src/loomrig_contact.rs:14:1
+    |
+ 14 | pub struct ContactReference {
+    | --------------------------- associated function or constant `capture` not found for this struct
+
+error[E0599]: no associated function or constant named `capture` found for struct `ContactReference` in the current scope
+   --> crates/loom_scene/src/loomrig_contact_tests.rs:253:31
+    |
+253 |     assert!(ContactReference::capture(ContactSpace::Body,Mat4::ZERO,end,pole).is_err());
+    |                               ^^^^^^^ associated function or constant not found in `ContactReference`
+    |
+   ::: crates/loom_scene/src/loomrig_contact.rs:14:1
+    |
+ 14 | pub struct ContactReference {
+    | --------------------------- associated function or constant `capture` not found for this struct
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `loom_scene` (lib test) due to 2 previous errors
