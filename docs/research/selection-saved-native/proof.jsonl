@@ -1,0 +1,17 @@
+{"kind": "saved_state", "phase": "select0", "dirty": false, "history_length": 1}
+{"kind": "saved_state", "phase": "select1", "dirty": false, "history_length": 2}
+{"kind": "saved_state", "phase": "select2", "dirty": false, "history_length": 3}
+{"kind": "saved_state", "phase": "undo_select0", "dirty": false, "history_length": 2}
+{"kind": "saved_state", "phase": "undo_select1", "dirty": false, "history_length": 1}
+{"kind": "saved_state", "phase": "undo_select2", "dirty": false, "history_length": 0}
+{"kind": "saved_state", "phase": "redo_select0", "dirty": false, "history_length": 1}
+{"kind": "saved_state", "phase": "redo_select1", "dirty": false, "history_length": 2}
+{"kind": "saved_state", "phase": "redo_select2", "dirty": false, "history_length": 3}
+{"kind": "saved_state", "phase": "select_for_real_move", "dirty": false, "history_length": 1}
+{"kind": "saved_state", "phase": "real_move", "dirty": true, "history_length": 2}
+{"kind": "saved_state", "phase": "selection_after_real_move", "dirty": true, "history_length": 3}
+{"kind": "saved_state", "phase": "undo_selection_keeps_real_move_dirty", "dirty": true, "history_length": 2}
+{"kind": "saved_state", "phase": "undo_real_move", "dirty": false, "history_length": 1}
+{"kind": "saved_state", "phase": "undo_initial_selection", "dirty": false, "history_length": 0}
+{"kind": "passed", "clean_without_reload": true, "real_edit_remained_dirty_until_undone": true, "all_node_records_restored": true}
+{"kind": "restored", "source_hash": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935", "frame": 39, "selection": [4988], "clean": true}
