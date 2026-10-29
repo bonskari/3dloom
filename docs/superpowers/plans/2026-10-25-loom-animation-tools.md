@@ -134,5 +134,13 @@ Following tasks still required: contact evaluator and no-pop/affine/pole tests; 
 - Zero release must preserve the solved affine pose in one Undo transaction, retaining constant data without synthetic times. The separate editor slider must show and edit the contact's effective value.
 - Test solver switching on twisted limbs: preserve solved joint positions and transport axial roll for the two-bone contact HI path, leaving legacy solving unchanged. Cover real Ray settings release and full source fingerprints.
 - The existing legacy Key IK/FK command/timeline still needs contact/ordinary-pose routing. This increment does not satisfy the full pose-key, contact editor or native acceptance gate.
+
+## Task 15: separate contact editor and timeline
+
+- Keep contact presets, key/reference properties and timeline markers inside the separately opened Animation Editor. Preserve the main UI and existing source/base IK tracks.
+- Add explicit Set Contact Preset (create or replace this key) while retaining Create Contact Key's collision protection. Key Contact captures the effective target and weight at the requested time; it is not a full-rig pose-key command.
+- Provide Planted/Sliding/Free authoring, key weights/shared-anchor selection, reference position/rotation/pole coordinates and Body/World conversion that preserves the current world pose. The anchor inspector defaults to the active reference at the current frame.
+- Draw actual contact markers beside the base IK/FK track, with drag/release move, collision rejection, explicit contact deletion and Undo including associated FK corrections. Test real pointer/menu events and exclusion from the closed editor/main UI.
+- Verify command atomicity, source preservation, requested-time restoration, affine reference conversion, actual Ray preset replacement/key capture and UI regressions. Full-rig pose keys, buffered-pose integration, Free FK/gizmo and Auto Key target editing, native rendering/performance and the full goal remain required.
 - [ ] Preserve target/reference identity, independent goal/pole fields, visual helper scale, locks and legacy empty tracks; test affine skeleton frames and parented controller conversions explicitly. Record remaining Free/FK pose-matching and auto-key/pose-key routing until implemented; do not claim them complete from IK target edits.
 - [ ] Add separate Animation Editor contact authoring/properties, native Ray pointer/Undo and visual evidence, actual default ≥60 ready distinct poses/s in both modes, save/reopen and source/material/desk/chair preservation before native delivery. Full goal remains active afterward for remaining rig/pose/timeline/Kimodo/Mac requirements.

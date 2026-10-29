@@ -27,6 +27,13 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     .show(ui, |ui| {
                         for rig in &rigs {
                             for limb in &rig.limbs {
+                              for contact in [false,true] {
+                                if contact && limb.contacts.is_empty() {continue;}
+                                let times:Vec<f32> = if contact {
+                                    limb.contacts.keys().iter().map(|key|key.time).collect()
+                                } else {
+                                    limb.blend.keys().map(|keys|keys.tracks[0].keys.iter().map(|key|key.time).collect()).unwrap_or_default()
+                                };
                                 let (row, _) = ui.allocate_exact_size(
                                     egui::vec2(ui.available_width(), 23.),
                                     egui::Sense::hover(),
@@ -36,7 +43,7 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                                 ui.painter().text(
                                     row.left_center(),
                                     egui::Align2::LEFT_CENTER,
-                                    format!("{} · {}", rig.name, limb.mapping.name),
+                                    format!("{} · {}{}", rig.name, limb.mapping.name,if contact {" · Contact"} else {" · Base IK/FK"}),
                                     egui::FontId::proportional(11.),
                                     egui::Color32::LIGHT_GRAY,
                                 );
@@ -56,12 +63,12 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                                     ],
                                     egui::Stroke::new(1., egui::Color32::from_gray(45)),
                                 );
-                                if let Some(keys) = limb.blend.keys() {
-                                    let track = &keys.tracks[0];
+                                if !times.is_empty() || (contact && limb.contacts.constant_state().is_some()) {
                                     let points: Vec<_> = (0..=80)
                                         .map(|i| {
                                             let t = first + span * i as f32 / 80.;
-                                            egui::pos2(frame_x(t), value_y(limb.blend.get_at(t)))
+                                            let value = if contact {limb.contacts.sample_blend(t).expect("finite timeline frame").unwrap_or_else(||limb.blend.get_at(t))} else {limb.blend.get_at(t)};
+                                            egui::pos2(frame_x(t), value_y(value))
                                         })
                                         .collect();
                                     painter.add(egui::Shape::line(
@@ -71,20 +78,21 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                                             egui::Color32::from_rgb(80, 180, 195),
                                         ),
                                     ));
-                                    for key in &track.keys {
+                                    for key_time in times {
                                         let id = egui::Id::new((
                                             "loomrig_key",
+                                            contact,
                                             scene,
                                             rig.id,
                                             &limb.mapping.name,
-                                            key.time.to_bits(),
+                                            key_time.to_bits(),
                                         ));
                                         let mut drag = ctx.data_mut(|d| d.get_temp::<Drag>(id));
                                         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                                             drag = None;
                                             ctx.data_mut(|d| d.remove::<Drag>(id));
                                         }
-                                        let time = drag.as_ref().map(|d| d.to).unwrap_or(key.time);
+                                        let time = drag.as_ref().map(|d| d.to).unwrap_or(key_time);
                                         let center = egui::pos2(frame_x(time), row.center().y);
                                         let rect = egui::Rect::from_center_size(
                                             center,
@@ -97,8 +105,8 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                                                 egui::WidgetType::Button,
                                                 ui.is_enabled(),
                                                 format!(
-                                                    "{} IK/FK @ {}",
-                                                    limb.mapping.name, key.time
+                                                    "{} {} @ {}",
+                                                    limb.mapping.name, if contact {"Contact"} else {"IK/FK"},key_time
                                                 ),
                                             )
                                         });
@@ -109,12 +117,12 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                                                 center + egui::vec2(0., 5.),
                                                 center + egui::vec2(-5., 0.),
                                             ],
-                                            egui::Color32::from_rgb(225, 180, 70),
+                                            if contact {egui::Color32::from_rgb(90,200,160)} else {egui::Color32::from_rgb(225,180,70)},
                                             egui::Stroke::NONE,
                                         ));
                                         if response.clicked() {
                                             command = Some(Command::SetFrame {
-                                                frame: key.time.round() as i32,
+                                                frame: key_time.round() as i32,
                                             });
                                         }
                                         if response.drag_started() {
@@ -122,8 +130,8 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                                                 ctx.input(|i| i.pointer.press_origin())
                                             {
                                                 drag = Some(Drag {
-                                                    from: key.time,
-                                                    to: key.time,
+                                                    from: key_time,
+                                                    to: key_time,
                                                     origin: origin.x,
                                                 });
                                             }
@@ -136,12 +144,14 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                                         }
                                         if response.drag_stopped() {
                                             if let Some(d) = drag.take() {
-                                                command = Some(Command::MoveLoomRigBlendKey {
+                                                command = Some(if contact {Command::MoveLoomRigContactKey {
+                                                    rig:rig.id,limb:limb.mapping.name.clone(),from:d.from,to:d.to,
+                                                }} else {Command::MoveLoomRigBlendKey {
                                                     rig: rig.id,
                                                     limb: limb.mapping.name.clone(),
                                                     from: d.from,
                                                     to: d.to,
-                                                });
+                                                }});
                                             }
                                         }
                                         ctx.data_mut(|data| {
@@ -152,13 +162,15 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                                             }
                                         });
                                         response.context_menu(|ui| {
-                                            if ui.button("Delete IK / FK Key").clicked() {
-                                                command = Some(Command::SetLoomRigBlendKey {
+                                            if ui.button(if contact {"Delete Contact Key"} else {"Delete IK / FK Key"}).clicked() {
+                                                command = Some(if contact {Command::DeleteLoomRigContactKey {
+                                                    rig:rig.id,limb:limb.mapping.name.clone(),time:key_time,
+                                                }} else {Command::SetLoomRigBlendKey {
                                                     rig: rig.id,
                                                     limb: limb.mapping.name.clone(),
-                                                    time: key.time,
+                                                    time: key_time,
                                                     value: None,
-                                                });
+                                                }});
                                                 ui.close_menu();
                                             }
                                         });
@@ -169,6 +181,7 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                                     [egui::pos2(x, row.top()), egui::pos2(x, row.bottom())],
                                     egui::Stroke::new(1., egui::Color32::WHITE),
                                 );
+                              }
                             }
                         }
                     });

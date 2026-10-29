@@ -10,6 +10,7 @@ mod loomrig_panel;
 mod loomrig_overlay;
 mod clip_timeline;
 mod rig_timeline;
+mod rig_contacts;
 mod camera_overlay;
 mod command_panel;
 pub mod create_tool;

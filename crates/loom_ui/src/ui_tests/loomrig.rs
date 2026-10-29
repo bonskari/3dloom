@@ -144,6 +144,119 @@ fn second_character_can_be_rigged_and_chain_rows_are_editable() {
 }
 
 #[test]
+fn contact_editor_presets_are_separate_and_capture_replace_and_key_real_contacts() {
+    let mut h = Harness::new();
+    h.screen.max.y = 1800.;
+    let (state,mapping) = crate::loomrig_overlay::tests::rig();
+    h.app.state = state;
+    h.frames(3);
+    assert!(!h.has(egui::accesskit::Role::Button,"Planted"));
+    h.app.clip_timeline.open = true;
+    h.app.clip_timeline.tab = 2;
+    h.frames(3);
+    h.click_text_anywhere("Planted");
+    assert_eq!(h.app.state.scene.loom_rigs[0].limbs[0].contacts.keys()[0].blend,1.);
+    h.cmd(Command::SetFrame {frame:10});
+    h.click_text_anywhere("Sliding");
+    let limb = h.app.state.scene.loom_rigs[0].limbs[0].clone();
+    assert_ne!(limb.contacts.keys()[0].reference,limb.contacts.keys()[1].reference);
+    let ids = [mapping.limbs[0].start,mapping.limbs[0].middle,mapping.limbs[0].end];
+    let pose = ids.map(|id|h.app.state.scene.world_matrix(id));
+    let before = h.app.state.scene.loom_rigs.clone();
+    let undo = h.app.state.undo.position();
+    h.click_text_anywhere("Free");
+    assert_eq!(h.app.state.scene.loom_rigs[0].limbs[0].contacts.keys().len(),2);
+    assert_eq!(h.app.state.scene.loom_rigs[0].limbs[0].contacts.keys()[1].blend,0.);
+    assert_eq!(h.app.state.undo.position(),undo+1);
+    for (id,expected) in ids.iter().zip(pose) {assert!(h.app.state.scene.world_matrix(*id).abs_diff_eq(expected,0.001));}
+    h.click_text_anywhere("Contact Anchors");
+    assert!(!h.text_rects("Body").is_empty(),"the inspector must initially select this frame's active Free anchor");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.loom_rigs,before);
+    h.cmd(Command::SetFrame {frame:5});
+    assert!(!h.has(egui::accesskit::Role::Button,"Key IK / FK"));
+    h.click_text_anywhere("Key Contact");
+    assert!(h.app.state.scene.loom_rigs[0].limbs[0].contacts.keys().iter().any(|key|key.time == 5.));
+    h.app.clip_timeline.open = false;
+    h.frames(3);
+    assert!(!h.has(egui::accesskit::Role::Button,"Planted"));
+}
+
+#[test]
+fn contact_editor_changes_anchor_space_without_moving_affine_world_pose() {
+    let mut h = Harness::new();
+    h.screen.max.y = 1800.;
+    let (state,mapping) = crate::loomrig_overlay::tests::rig();
+    h.app.state=state;
+    let root = h.app.state.scene.node_mut(mapping.root).unwrap();
+    root.transform.scale.set(Vec3::new(-2.,3.,0.5));
+    root.transform.rotation.set(Vec3::new(0.,0.,23.));
+    root.transform.position.set(Vec3::Y*3.);
+    h.app.state.scene.bump_version();
+    h.cmd(Command::SetLoomRigContactPreset {rig:1,limb:"Arm".into(),time:0.,preset:"planted".into()});
+    let goal = h.app.state.scene.loom_rigs[0].limbs[0].goal;
+    let before = h.app.state.scene.world_matrix(goal);
+    let pole = h.app.state.scene.loom_rigs[0].limbs[0].pole;
+    let before_pole = h.app.state.scene.world_matrix(pole);
+    let ids = [mapping.limbs[0].start,mapping.limbs[0].middle,mapping.limbs[0].end];
+    let bones = ids.map(|id|h.app.state.scene.world_matrix(id));
+    let metadata = h.app.state.scene.loom_rigs.clone();
+    h.app.clip_timeline.open=true;
+    h.app.clip_timeline.tab=2;
+    h.frames(3);
+    h.click_text_anywhere("Contact Anchors");
+    let world = *h.text_rects("World").last().expect("anchor reference space combo");
+    h.click(world.center());
+    h.click_text_anywhere("Body");
+    let limb = &h.app.state.scene.loom_rigs[0].limbs[0];
+    let reference = limb.contacts.keys()[0].reference;
+    assert_eq!(limb.contacts.references()[&reference].space,loom_scene::loomrig_contact::ContactSpace::Body);
+    assert!(h.app.state.scene.world_matrix(goal).abs_diff_eq(before,0.001));
+    assert!(h.app.state.scene.world_matrix(pole).abs_diff_eq(before_pole,0.001));
+    for (id,expected) in ids.iter().zip(bones) {assert!(h.app.state.scene.world_matrix(*id).abs_diff_eq(expected,0.003));}
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.loom_rigs,metadata);
+}
+
+#[test]
+fn contact_timeline_moves_and_deletes_contact_with_matching_pose_in_one_undo() {
+    let mut h = Harness::new();
+    let (state,_) = crate::loomrig_overlay::tests::rig();
+    h.app.state = state;
+    for (time,preset) in [(0.,"planted"),(20.,"free")] {
+        h.cmd(Command::CreateLoomRigContactKey {rig:1,limb:"Arm".into(),time,preset:preset.into()});
+    }
+    let before = h.app.state.scene.loom_rigs.clone();
+    h.app.state.frame_range = (0,100);
+    h.app.clip_timeline.open = true;
+    h.app.clip_timeline.tab = 0;
+    h.frames(3);
+    let marker = h.find(egui::accesskit::Role::Button,"Arm Contact @ 20");
+    let undo = h.app.state.undo.position();
+    h.drag(marker.center(),marker.center()+egui::vec2(75.,0.));
+    let limb = &h.app.state.scene.loom_rigs[0].limbs[0];
+    let moved = limb.contacts.keys()[1].time;
+    assert!(moved>20.);
+    assert!(limb.pose_matches.keys().iter().any(|key|key.time == moved));
+    assert_eq!(h.app.state.undo.position(),undo+1);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.loom_rigs,before);
+    let marker = h.find(egui::accesskit::Role::Button,"Arm Contact @ 20");
+    let occupied = h.find(egui::accesskit::Role::Button,"Arm Contact @ 0");
+    let undo = h.app.state.undo.position();
+    h.drag(marker.center(),occupied.center());
+    assert_eq!(h.app.state.scene.loom_rigs,before,"collision must retain both contact and pose keys");
+    assert_eq!(h.app.state.undo.position(),undo);
+    let marker = h.find(egui::accesskit::Role::Button,"Arm Contact @ 20");
+    right_click(&mut h,marker.center());
+    h.click_text_anywhere("Delete Contact Key");
+    assert_eq!(h.app.state.scene.loom_rigs[0].limbs[0].contacts.keys().len(),1);
+    assert!(!h.app.state.scene.loom_rigs[0].limbs[0].pose_matches.keys().iter().any(|key|key.time == 20.));
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.loom_rigs,before);
+}
+
+#[test]
 fn animation_editor_displays_the_effective_contact_ik_weight() {
     let mut h = Harness::new();
     h.screen.max.y = 1800.;

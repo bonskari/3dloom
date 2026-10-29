@@ -1590,6 +1590,8 @@ commands! {
     SetLoomRigBlendKey => "Set LoomRig Blend Key", Loom, "Set a native IK/FK key; omit value to delete. Independent of source motion." { rig:u32, limb:String, time:f32, value:Option<f32> };
     MoveLoomRigBlendKey => "Move LoomRig Blend Key", Loom, "Move one IK/FK blend key without overwriting neighboring keys." { rig:u32, limb:String, from:f32, to:f32 };
     CreateLoomRigContactKey => "Create LoomRig Contact Key", Loom, "Capture a solved limb pose as a planted, sliding or free contact key." { rig:u32, limb:String, time:f32, preset:String };
+    SetLoomRigContactPreset => "Set LoomRig Contact Preset", Loom, "Capture the solved limb pose and explicitly create or replace its contact key with a planted, sliding or free preset." { rig:u32, limb:String, time:f32, preset:String };
+    KeyLoomRigContact => "Key LoomRig Contact", Loom, "Key the current effective contact target and IK weight at the requested time, retaining neighboring keys and source animation." { rig:u32, limb:String, time:f32 };
     EditLoomRigContactKey => "Edit LoomRig Contact Key", Loom, "Edit an existing contact key's blend or shared reference." { rig:u32, limb:String, key:loom_scene::loomrig_contact::ContactKey };
     EditLoomRigContactReference => "Edit LoomRig Contact Reference", Loom, "Edit a shared contact pose in body or world coordinates." { rig:u32, limb:String, reference:u64, pose:loom_scene::loomrig_contact::ContactReference };
     MoveLoomRigContactKey => "Move LoomRig Contact Key", Loom, "Move a contact key without overwriting another key." { rig:u32, limb:String, from:f32, to:f32 };

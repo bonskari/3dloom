@@ -69,7 +69,7 @@ impl Draft {
         })
     }
 }
-fn run(app: &mut LoomApp, command: Command) {
+pub(crate) fn run(app: &mut LoomApp, command: Command) {
     if let Err(e) = app.dispatch(command) {
         app.state.status_prompt = e;
     }
@@ -217,15 +217,19 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         if let Some(limb)=rig.limbs.get(index) {
             ui.horizontal(|ui| {if ui.button("Select Goal").clicked(){select(app,limb.goal);}if ui.button("Select Pole").clicked(){select(app,limb.pole);}});
             ui.label("IK / FK");
-            let mut blend=match limb.contacts.sample_blend(app.state.current_frame as f32) {
-                Ok(value)=>value.unwrap_or_else(||limb.blend.get()),
+            let contact_blend=match limb.contacts.sample_blend(app.state.current_frame as f32) {
+                Ok(value)=>value,
                 Err(error)=>{ui.colored_label(egui::Color32::RED,error);return;}
             };
+            let mut blend=contact_blend.unwrap_or_else(||limb.blend.get());
             let mut solver=limb.solver;
             let changed=ui.add(egui::Slider::new(&mut blend,0.0..=1.0).text("IK weight")).changed();
             egui::ComboBox::from_id_salt("loomrig_solver").selected_text(solver.label()).show_ui(ui,|ui|{for s in [loom_scene::ik::IkSolver::Limb,loom_scene::ik::IkSolver::HI]{ui.selectable_value(&mut solver,s,s.label());}});
             if changed||solver!=limb.solver {run(app,Command::SetLoomRigLimb{rig:rig.id,limb:limb.mapping.name.clone(),solver:match solver{loom_scene::ik::IkSolver::HI=>"hi",_=>"limb"}.into(),blend});}
-            if ui.button("Key IK / FK").clicked(){run(app,Command::SetLoomRigBlendKey{rig:rig.id,limb:limb.mapping.name.clone(),time:app.state.current_frame as f32,value:Some(limb.blend.get())});}
+            if contact_blend.is_some() {
+                if ui.button("Key Contact").clicked(){run(app,Command::KeyLoomRigContact{rig:rig.id,limb:limb.mapping.name.clone(),time:app.state.current_frame as f32});}
+            } else if ui.button("Key IK / FK").clicked(){run(app,Command::SetLoomRigBlendKey{rig:rig.id,limb:limb.mapping.name.clone(),time:app.state.current_frame as f32,value:Some(limb.blend.get())});}
+            crate::rig_contacts::show(ui,app,rig,limb);
             ui.small("IK goals stay in world space for planted feet. Switching matches the current pose.");
         }
         egui::CollapsingHeader::new("Edit Characterization").show(ui,|ui| {

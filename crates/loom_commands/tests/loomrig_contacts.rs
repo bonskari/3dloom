@@ -113,6 +113,55 @@ fn point(s: &AppState, id: NodeId, time: f32) -> Vec3 {
 }
 
 #[test]
+fn explicit_contact_presets_replace_one_key_and_keying_preserves_target_and_source() {
+    let (mut s,root,_) = rigged();
+    for (time,preset) in [(0.,"planted"),(10.,"sliding")] {
+        execute(&mut s,Command::SetLoomRigContactPreset {rig:1,limb:"Arm".into(),time,preset:preset.into()}).unwrap();
+        if time == 0. {
+            let goal = s.scene.loom_rigs[0].limbs[0].goal;
+            execute(&mut s,Command::SetTransform {id:goal.0,position:Some([12.,8.,0.]),rotation_deg:None,scale:None}).unwrap();
+        }
+    }
+    execute(&mut s,Command::SetFrame {frame:10}).unwrap();
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    let ids = [limb.mapping.start,limb.mapping.middle,limb.mapping.end];
+    let pose = ids.map(|id|s.scene.world_matrix(id));
+    let nodes:Vec<_> = s.scene.nodes().map(|n|(n.id,n.transform.clone())).collect();
+    let before = s.scene.loom_rigs.clone();
+    let undo = s.undo.position();
+    execute(&mut s,Command::SetLoomRigContactPreset {rig:1,limb:"Arm".into(),time:10.,preset:"free".into()}).unwrap();
+    assert_eq!(s.undo.position(),undo+1);
+    assert_eq!(s.scene.loom_rigs[0].limbs[0].contacts.keys()[0],before[0].limbs[0].contacts.keys()[0]);
+    assert_eq!(s.scene.loom_rigs[0].limbs[0].contacts.keys()[1].blend,0.);
+    for (id,expected) in ids.iter().zip(pose) {assert!(s.scene.world_matrix(*id).abs_diff_eq(expected,0.001));}
+    let free = s.scene.loom_rigs.clone();
+    execute(&mut s,Command::SetLoomRigContactPreset {rig:1,limb:"Arm".into(),time:10.,preset:"planted".into()}).unwrap();
+    for (id,expected) in ids.iter().zip(pose) {assert!(s.scene.world_matrix(*id).abs_diff_eq(expected,0.001));}
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs,free);
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs,before);
+    assert!(execute(&mut s,Command::SetLoomRigContactPreset {rig:1,limb:"Arm".into(),time:10.,preset:"unknown".into()}).is_err());
+    assert_eq!(s.scene.loom_rigs,before);
+    assert!(execute(&mut s,Command::CreateLoomRigContactKey {rig:1,limb:"Arm".into(),time:10.,preset:"free".into()}).is_err());
+    assert_eq!(s.scene.loom_rigs,before);
+    let target = s.scene.at_time(5.,||s.scene.contact_control(limb.goal).unwrap().unwrap().sample);
+    execute(&mut s,Command::KeyLoomRigContact {rig:1,limb:"Arm".into(),time:5.}).unwrap();
+    let after = s.scene.loom_rigs[0].limbs[0].contacts.sample(5.,s.scene.world_matrix(root)).unwrap().unwrap();
+    assert!(after.position.abs_diff_eq(target.position,0.001));
+    assert!(after.pole_position.abs_diff_eq(target.pole_position,0.001));
+    assert!(after.rotation.dot(target.rotation).abs()>1.-1e-5);
+    assert!((after.blend-target.blend).abs()<1e-6);
+    assert_eq!(s.current_frame,10);
+    assert_eq!(s.scene.time(),10.);
+    for (id,transform) in nodes {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs,before);
+    assert!(execute(&mut s,Command::KeyLoomRigContact {rig:1,limb:"Arm".into(),time:-1.}).is_err());
+    assert_eq!(s.scene.loom_rigs,before);
+}
+
+#[test]
 fn auto_key_contact_weight_before_a_future_key_keeps_constant_fallback() {
     let (mut s,_,_) = rigged();
     let mut track = ContactTrack::constant(reference(ContactSpace::World,Vec3::new(12.,8.,0.)),1.).unwrap();
@@ -957,6 +1006,24 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
             assert!(s.scene.world_matrix(*id).abs_diff_eq(expected,0.003),"{name} settings release changed {id:?}");
         }
         assert_eq!(source(&s),before,"settings changed source nodes or materials");
+        execute(&mut s,Command::UndoSceneOperation).unwrap();
+        assert_eq!(s.scene.loom_rigs,contacts);
+        let preset_pose = ids.map(|id|s.scene.world_matrix(id));
+        execute(&mut s,Command::SetLoomRigContactPreset {rig,limb:name.into(),time:39.,preset:"free".into()}).unwrap();
+        for (id,expected) in ids.iter().zip(preset_pose) {
+            assert!(s.scene.world_matrix(*id).abs_diff_eq(expected,0.003),"{name} preset replacement changed {id:?}");
+        }
+        assert_eq!(source(&s),before,"preset replacement changed source nodes or materials");
+        execute(&mut s,Command::UndoSceneOperation).unwrap();
+        assert_eq!(s.scene.loom_rigs,contacts);
+        let keyed_pose = s.scene.at_time(40.,||ids.map(|id|s.scene.world_matrix(id)));
+        execute(&mut s,Command::KeyLoomRigContact {rig,limb:name.into(),time:40.}).unwrap();
+        s.scene.at_time(40.,|| {
+            for (id,expected) in ids.iter().zip(keyed_pose) {
+                assert!(s.scene.world_matrix(*id).abs_diff_eq(expected,0.003),"{name} contact key changed {id:?}");
+            }
+        });
+        assert_eq!(source(&s),before,"contact key changed source nodes or materials");
         execute(&mut s,Command::UndoSceneOperation).unwrap();
         assert_eq!(s.scene.loom_rigs,contacts);
         let free_pose = s.scene.at_time(40.,||ids.map(|id|s.scene.world_matrix(id)));

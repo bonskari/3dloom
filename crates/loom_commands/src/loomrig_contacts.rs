@@ -124,8 +124,11 @@ fn key_contact_weight(
 }
 
 pub fn execute(state: &mut AppState, command: Command) -> Result<Value, String> {
+    let replace = matches!(&command,Command::SetLoomRigContactPreset {..});
     let (rig_id, name) = match &command {
         Command::CreateLoomRigContactKey { rig, limb, .. }
+        | Command::SetLoomRigContactPreset { rig, limb, .. }
+        | Command::KeyLoomRigContact { rig, limb, .. }
         | Command::EditLoomRigContactKey { rig, limb, .. }
         | Command::EditLoomRigContactReference { rig, limb, .. }
         | Command::MoveLoomRigContactKey { rig, limb, .. }
@@ -149,14 +152,16 @@ pub fn execute(state: &mut AppState, command: Command) -> Result<Value, String> 
     let mut moved_match = None;
     let mut deleted_match = None;
     match command {
-        Command::CreateLoomRigContactKey { time, preset, .. } => {
+        Command::CreateLoomRigContactKey { time, preset, .. }
+        | Command::SetLoomRigContactPreset { time, preset, .. } => {
             valid_time(time)?;
             let (space, blend) = match preset.as_str() {
                 "planted" | "sliding" => (ContactSpace::World, 1.),
                 "free" => (ContactSpace::Body, 0.),
                 _ => return Err("contact preset must be planted, sliding or free".into()),
             };
-            if track.keys().iter().any(|key| key.time == time) {
+            let existing = track.keys().iter().any(|key| key.time == time);
+            if existing && !replace {
                 return Err("contact key time already exists".into());
             }
             if preset == "free" {
@@ -202,12 +207,22 @@ pub fn execute(state: &mut AppState, command: Command) -> Result<Value, String> 
                 track.insert_reference(id, pose)?;
                 id
             };
-            track.insert_key(ContactKey {
+            let key = ContactKey {
                 time,
                 reference,
                 blend,
-            })?;
+            };
+            if existing {track.update_key(key)?;} else {track.insert_key(key)?;}
             reference_id = Some(reference);
+        }
+        Command::KeyLoomRigContact {time,..} => {
+            valid_time(time)?;
+            let root = before[ri].mapping.root;
+            let goal = before[ri].limbs[li].goal;
+            state.scene.at_time(time,|| {
+                let control = state.scene.contact_control(goal)?.ok_or("no active contact at this time; choose a contact preset first")?;
+                key_contact_weight(track,time,control.sample.blend,&control.sample,state.scene.world_matrix(root))
+            })?;
         }
         Command::EditLoomRigContactKey { key, .. } => {
             valid_time(key.time)?;
