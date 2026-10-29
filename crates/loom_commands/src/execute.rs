@@ -2976,6 +2976,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SetTransform { id, position, rotation_deg, scale } => {
             let id = NodeId(id);
+            if let Some(result)=crate::loomrig_controller::set_control_transform(state,id,position,rotation_deg,scale)? { return Ok(result); }
             let before = state.scene.node(id).ok_or_else(|| missing(id))?.transform.clone();
             let mut after = before.clone();
             if let Some(p) = position {
@@ -4204,11 +4205,13 @@ pub fn type_in_values(state: &AppState) -> Vec3 {
     }
     match state.active_tool {
         Tool::Rotate => first.and_then(|id| state.scene.node(id)).map(|n| {
-            let (_, q, _) = state.scene.world_matrix(n.id).to_scale_rotation_translation();
+            let contact=state.scene.contact_control(n.id).ok().flatten();
+            let q=if let Some(control)=contact.as_ref().filter(|c|c.kind==loom_scene::loomrig_contact::ContactControlKind::Goal) {control.sample.rotation}
+                else {state.scene.world_matrix(n.id).to_scale_rotation_translation().1};
             let (x, y, z) = q.to_euler(glam::EulerRot::XYZ);
             let w = Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees());
             // A single node reports its own accumulating Euler values.
-            if state.selection.len() == 1 && n.parent.is_none() { n.euler_deg() } else { w }
+            if state.selection.len() == 1 && n.parent.is_none() && contact.as_ref().is_none_or(|c|c.kind!=loom_scene::loomrig_contact::ContactControlKind::Goal) { n.euler_deg() } else { w }
         }).unwrap_or(Vec3::ZERO),
         Tool::Scale => first.and_then(|id| state.scene.node(id)).map(|n| n.transform.scale.get() * 100.0).unwrap_or(Vec3::splat(100.0)),
         _ => {
@@ -4247,8 +4250,10 @@ fn transform_type_in(state: &mut AppState, absolute: bool, values: Vec3) -> Resu
                     let ids: Vec<NodeId> = state.selection.iter().copied().collect();
                     let target = Quat::from_euler(glam::EulerRot::XYZ, values.x.to_radians(), values.y.to_radians(), values.z.to_radians());
                     for id in ids {
-                        let (_, pq, _) = state.scene.edit_parent_frame(id).to_scale_rotation_translation();
-                        let local = pq.inverse() * target;
+                        let parent=state.scene.edit_parent_frame(id);
+                        let local=if let Some(control)=state.scene.contact_control(id)?.filter(|control|control.kind==loom_scene::loomrig_contact::ContactControlKind::Goal) {
+                            loom_scene::loomrig_contact::ContactReference::capture(loom_scene::loomrig_contact::ContactSpace::Body,parent,Mat4::from_rotation_translation(target,control.sample.position),control.sample.pole_position)?.rotation
+                        } else {parent.to_scale_rotation_translation().1.inverse()*target};
                         let rot = if state.scene.node(id).is_some_and(|n| n.parent.is_none()) {
                             values
                         } else {
@@ -4445,6 +4450,7 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
         return Ok(json!({}));
     }
     let mut changes = Vec::new();
+    let mut contact_edits = Vec::new();
     // A modifier gizmo level (XForm Gizmo / Center): the tools move the gizmo.
     let gizmo_targets: Vec<(NodeId, usize, u32)> = state
         .selection
@@ -4597,7 +4603,7 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
             }
             false
         };
-        for id in state.selection.iter().copied().filter(|id| !has_selected_ancestor(*id)) {
+        for id in state.selection.iter().copied().filter(|id| !has_selected_ancestor(*id) || state.scene.contact_control(*id).ok().flatten().is_some()) {
             let (m, hint) = matrix_for(state, Some(id));
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
             let parent_world = state.scene.edit_parent_frame(id);
@@ -4629,6 +4635,10 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(after) });
                 continue;
             }
+            if let Some(edit)=crate::loomrig_controller::matrix_control_edit(state,id,m,label)? {
+                contact_edits.push(edit);
+                continue;
+            }
             let new_local = parent_world.inverse() * m * world;
             let after = apply_locks(&node.transform, Transform::from_matrix_near(new_local, &node.transform, hint), node.locks);
             if state.affect_pivot_only {
@@ -4651,6 +4661,8 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
             });
         }
     }
+    let contact_changes=crate::loomrig_controller::control_changes(state,&contact_edits,&changes)?;
+    changes.extend(contact_changes);
     if state.bone_edit_mode {
         crate::rig::bone_edit_adjust(state, &mut changes);
     }
@@ -4720,7 +4732,7 @@ fn keep_children(state: &AppState, id: NodeId, new_world: Mat4) -> Vec<Change> {
 }
 
 /// Keeps locked components of `before` (Link Info > Locks).
-fn apply_locks(before: &Transform, mut after: Transform, locks: loom_scene::Axes3) -> Transform {
+pub(crate) fn apply_locks(before: &Transform, mut after: Transform, locks: loom_scene::Axes3) -> Transform {
     if locks == loom_scene::Axes3::NONE {
         return after;
     }

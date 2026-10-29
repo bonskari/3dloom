@@ -264,7 +264,7 @@ pub struct ContactSample {
 
 /// A proper polar rotation with a fixed X reflection convention for mirrored frames.
 /// The remaining stretch is retained separately when replacing an end orientation.
-pub(crate) fn affine_rotation(matrix: glam::Mat4) -> Result<Quat, String> {
+pub fn affine_rotation(matrix: glam::Mat4) -> Result<Quat, String> {
     let mut basis = glam::Mat3::from_mat4(matrix);
     if !matrix.is_finite()
         || !matrix.row(3).abs_diff_eq(glam::Vec4::W, 1e-6)
@@ -381,17 +381,7 @@ impl ContactReference {
             ContactSpace::World => glam::Mat4::IDENTITY,
             ContactSpace::Body => body_frame,
         };
-        let frame_rotation = affine_rotation(frame)?;
-        let desired = affine_rotation(end_world)?;
-        let mut rotation = (frame_rotation.inverse() * desired).normalize();
-        if frame.determinant() < 0. {
-            // The proper-polar convention reflects X on the right. Undo that
-            // reflection around the local rotation before storing it.
-            let reflection = glam::Mat3::from_diagonal(Vec3::new(-1., 1., 1.));
-            rotation =
-                Quat::from_mat3(&(reflection * glam::Mat3::from_quat(rotation) * reflection))
-                    .normalize();
-        }
+        let rotation = rotation_in_frame(frame, affine_rotation(end_world)?)?;
         let inverse = frame.inverse();
         let result = Self {
             space,
@@ -402,4 +392,60 @@ impl ContactReference {
         result.validate()?;
         Ok(result)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContactControlKind {
+    Goal,
+    Pole,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContactControl {
+    pub rig: u32,
+    pub limb: usize,
+    pub kind: ContactControlKind,
+    pub sample: ContactSample,
+}
+
+impl ContactTrack {
+    /// References with positive weight at this time, including a constant base.
+    pub fn active_references(&self, time: f32) -> Result<Vec<u64>, String> {
+        if let Some(key) = self.active_key(time)? {
+            let mut ids = vec![key.reference];
+            if time > key.time {
+                if let Some(next) = self
+                    .keys
+                    .get(self.keys.partition_point(|key| key.time <= time))
+                {
+                    if next.reference != key.reference {
+                        ids.push(next.reference);
+                    }
+                }
+            }
+            Ok(ids)
+        } else {
+            Ok(self
+                .constant
+                .as_ref()
+                .map(|state| vec![state.reference])
+                .unwrap_or_default())
+        }
+    }
+}
+
+/// Convert a proper world orientation to a local orientation using the same
+/// fixed reflection convention as contact sampling.
+pub fn rotation_in_frame(frame: glam::Mat4, desired: Quat) -> Result<Quat, String> {
+    if !desired.is_finite() || (desired.length_squared() - 1.).abs() > 1e-4 {
+        return Err("contact rotation must be finite and unit length".into());
+    }
+    let frame_rotation = affine_rotation(frame)?;
+    let mut rotation = (frame_rotation.inverse() * desired).normalize();
+    if frame.determinant() < 0. {
+        let reflection = glam::Mat3::from_diagonal(Vec3::new(-1., 1., 1.));
+        rotation = Quat::from_mat3(&(reflection * glam::Mat3::from_quat(rotation) * reflection))
+            .normalize();
+    }
+    Ok(rotation)
 }

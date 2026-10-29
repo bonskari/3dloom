@@ -604,15 +604,24 @@ fn set_keys(state: &mut AppState) -> Result<Value, String> {
         }
     }
     let posed: HashMap<NodeId, Node> = ids.iter().filter_map(|id| state.scene.node(*id).map(|n| (*id, n.clone()))).collect();
+    let posed_rigs = state.scene.loom_rigs.clone();
     discard_pose(state);
     let t = state.current_frame as f32;
     let unkeyable = unkeyable(state);
-    let r = edit_nodes(state, "Set Keys", &ids, |tr| filters.allows(tr) && !unkeyable.contains(&tr.key()), |tr, p| {
+    let changes = node_edits(state, &ids, |tr| filters.allows(tr) && !unkeyable.contains(&tr.key()), |tr, p| {
         p.key_now();
         if let Some(pose) = posed.get(&tr.node).and_then(|n| tracks::read_node(n, tr)) {
             let c = pose.comps_at(t);
             anim::with(t, true, || p.set_comps(&c));
         }
+    });
+    let r = changes.and_then(|mut changes| {
+        if filters.ik_parameters && state.scene.loom_rigs != posed_rigs {
+            changes.push(Change::SetLoomRigs { before: state.scene.loom_rigs.clone(), after: posed_rigs });
+        }
+        let n = changes.len();
+        if n > 0 { commit(state, "Set Keys", Change::Group(changes))?; }
+        Ok(json!({ "changed": n }))
     });
     start_pose(state);
     r

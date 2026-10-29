@@ -53,6 +53,59 @@ fn key(time: f32, reference: u64, blend: f32) -> ContactKey {
         blend,
     }
 }
+
+#[test]
+fn set_keys_preserves_authored_contact_keys_and_target_edits_as_one_undo() {
+    let (mut s, _, _) = rigged();
+    let rig = s.scene.loom_rigs[0].id;
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::CreateLoomRigContactKey {
+        rig, limb: limb.mapping.name.clone(), time: 10., preset: "planted".into(),
+    }).unwrap();
+    let before = s.scene.loom_rigs.clone();
+    execute(&mut s, Command::SetKeyMode).unwrap();
+    let target = s.scene.world_matrix(limb.goal).w_axis.truncate() + Vec3::Y;
+    execute(&mut s, Command::SetTransform {
+        id: limb.goal.0, position: Some(target.to_array()), rotation_deg: None, scale: None,
+    }).unwrap();
+    let posed = s.scene.loom_rigs.clone();
+    let position = s.set_key_buffer.as_ref().unwrap().position;
+    execute(&mut s, Command::SetKeys).unwrap();
+    assert_eq!(s.scene.loom_rigs, posed, "Set Keys must preserve explicit contact authoring");
+    assert_eq!(s.undo.position(), position + 1);
+    execute(&mut s, Command::SetKeyMode).unwrap();
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs, before);
+    execute(&mut s, Command::RedoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs, posed);
+}
+
+#[test]
+fn contact_pose_buffer_respects_ik_filter_and_explicit_discard() {
+    for discard in [false, true] {
+        let (mut s, _, _) = rigged();
+        let rig = s.scene.loom_rigs[0].id;
+        execute(&mut s, Command::CreateLoomRigContactKey {
+            rig, limb: "Arm".into(), time: 0., preset: "planted".into(),
+        }).unwrap();
+        let before = s.scene.loom_rigs.clone();
+        let goal = s.scene.loom_rigs[0].limbs[0].goal;
+        execute(&mut s, Command::SetKeyMode).unwrap();
+        let target = s.scene.world_matrix(goal).w_axis.truncate() + Vec3::Y;
+        execute(&mut s, Command::SetTransform {
+            id: goal.0, position: Some(target.to_array()), rotation_deg: None, scale: None,
+        }).unwrap();
+        assert_ne!(s.scene.loom_rigs, before);
+        if discard {
+            execute(&mut s, Command::ClearSetKeyModeBuffer).unwrap();
+        } else {
+            s.key_filters.ik_parameters = false;
+            execute(&mut s, Command::SetKeys).unwrap();
+        }
+        assert_eq!(s.scene.loom_rigs, before);
+    }
+}
 fn point(s: &AppState, id: NodeId, time: f32) -> Vec3 {
     s.scene.at_time(time, || {
         s.scene.world_matrix(id).transform_point3(Vec3::ZERO)
@@ -1011,4 +1064,509 @@ fn deleting_body_contact_animation_keeps_body_inheritance_and_source_motion() {
             "body inheritance lost at {time}"
         );
     }
+}
+
+#[test]
+fn contact_controller_world_poses_follow_the_effective_sample_without_changing_raw_helpers() {
+    let (mut s, root, _) = rigged();
+    s.scene
+        .node_mut(root)
+        .unwrap()
+        .transform
+        .position
+        .set(Vec3::Y * 2.);
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    let raw = s.scene.node(limb.goal).unwrap().transform.clone();
+    s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+        [
+            (1, reference(ContactSpace::World, Vec3::new(12., 8., 0.))),
+            (2, reference(ContactSpace::Body, Vec3::new(8., 12., 0.))),
+        ]
+        .into(),
+        vec![key(10., 1, 1.), key(20., 2, 1.)],
+    )
+    .unwrap();
+    s.scene.bump_version();
+    for time in [0., 10., 15., 20., 12.5] {
+        s.scene.at_time(time, || {
+            let sample = s.scene.loom_rigs[0].limbs[0]
+                .contacts
+                .sample(time, s.scene.world_matrix(root))
+                .unwrap();
+            let goal = s.scene.world_matrix(limb.goal);
+            let pole = s.scene.world_matrix(limb.pole);
+            if let Some(sample) = sample {
+                assert!(goal.w_axis.truncate().distance(sample.position) < 0.001);
+                assert!(goal
+                    .to_scale_rotation_translation()
+                    .1
+                    .abs_diff_eq(sample.rotation, 0.001));
+                assert!(pole.w_axis.truncate().distance(sample.pole_position) < 0.001);
+            } else {
+                assert!(goal.abs_diff_eq(raw.matrix(), 0.001));
+            }
+        });
+    }
+    assert_eq!(s.scene.node(limb.goal).unwrap().transform, raw);
+}
+
+#[test]
+fn set_transform_edits_contact_goals_and_poles_with_atomic_undo_and_keeps_source_tracks() {
+    let (mut s, root, end) = rigged();
+    s.scene
+        .node_mut(root)
+        .unwrap()
+        .transform
+        .position
+        .set(Vec3::Y * 2.);
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+        [
+            (1, reference(ContactSpace::World, Vec3::new(12., 8., 0.))),
+            (2, reference(ContactSpace::Body, Vec3::new(8., 12., 0.))),
+        ]
+        .into(),
+        vec![key(10., 1, 1.), key(20., 2, 1.)],
+    )
+    .unwrap();
+    s.scene.bump_version();
+    execute(&mut s, Command::SetFrame { frame: 15 }).unwrap();
+    let source: Vec<_> = s.scene.nodes().cloned().collect();
+    let before = s.scene.loom_rigs.clone();
+    let undo = s.undo.position();
+    let sample = before[0].limbs[0]
+        .contacts
+        .sample(15., s.scene.world_matrix(root))
+        .unwrap()
+        .unwrap();
+    let position = sample.position + Vec3::new(1., -2., 0.5);
+    let rotation = Quat::from_rotation_y(0.4) * sample.rotation;
+    let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);
+    execute(
+        &mut s,
+        Command::SetTransform {
+            id: limb.goal.0,
+            position: Some(position.to_array()),
+            rotation_deg: Some([x.to_degrees(), y.to_degrees(), z.to_degrees()]),
+            scale: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(s.undo.position(), undo + 1);
+    assert!(
+        s.scene
+            .world_matrix(limb.goal)
+            .w_axis
+            .truncate()
+            .distance(position)
+            < 0.001
+    );
+    assert!(
+        s.scene
+            .world_matrix(end)
+            .w_axis
+            .truncate()
+            .distance(position)
+            < 0.001
+    );
+    assert_eq!(s.scene.nodes().cloned().collect::<Vec<_>>(), source);
+    let edited = s.scene.loom_rigs.clone();
+    assert_ne!(edited, before);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs, before);
+    execute(&mut s, Command::RedoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs, edited);
+    let goal = s.scene.world_matrix(limb.goal);
+    let middle = s.scene.world_matrix(limb.mapping.middle);
+    let pole = sample.pole_position + Vec3::new(7., -5., -8.);
+    execute(
+        &mut s,
+        Command::SetTransform {
+            id: limb.pole.0,
+            position: Some(pole.to_array()),
+            rotation_deg: None,
+            scale: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        s.scene
+            .world_matrix(limb.pole)
+            .w_axis
+            .truncate()
+            .distance(pole)
+            < 0.001
+    );
+    assert!(s.scene.world_matrix(limb.goal).abs_diff_eq(goal, 0.001));
+    assert!(
+        s.scene
+            .world_matrix(end)
+            .w_axis
+            .truncate()
+            .distance(position)
+            < 0.001
+    );
+    assert!(!s
+        .scene
+        .world_matrix(limb.mapping.middle)
+        .abs_diff_eq(middle, 0.001));
+    assert_eq!(s.scene.nodes().cloned().collect::<Vec<_>>(), source);
+    let before = s.scene.loom_rigs.clone();
+    let undo = s.undo.position();
+    assert!(execute(
+        &mut s,
+        Command::SetTransform {
+            id: limb.goal.0,
+            position: Some([f32::NAN, 0., 0.]),
+            rotation_deg: None,
+            scale: None
+        }
+    )
+    .is_err());
+    assert_eq!(s.scene.loom_rigs, before);
+    assert_eq!(s.undo.position(), undo);
+}
+
+#[test]
+fn parented_contact_transform_uses_local_fields_without_losing_affine_body_orientation() {
+    for sign in [1., -1.] {
+        let (mut s, root, end) = rigged();
+        let limb = s.scene.loom_rigs[0].limbs[0].clone();
+        let mut parent = Node::new("body frame", ObjectKind::dummy(1.));
+        parent.transform.scale.set(Vec3::new(sign * 2., 3., 1.));
+        parent
+            .transform
+            .set_rotation_quat(Quat::from_rotation_z(0.4));
+        parent.transform.position.set(Vec3::new(3., 4., 5.));
+        let parent = s.scene.add_node(parent);
+        s.scene.node_mut(root).unwrap().parent = Some(parent);
+        s.scene.node_mut(limb.goal).unwrap().parent = Some(parent);
+        s.scene.node_mut(limb.pole).unwrap().parent = Some(parent);
+        s.scene.loom_rigs[0].limbs[0].contacts =
+            ContactTrack::constant(reference(ContactSpace::Body, Vec3::new(12., 8., 0.)), 1.)
+                .unwrap();
+        s.scene.bump_version();
+        let raw = s.scene.node(limb.goal).unwrap().transform.clone();
+        let frame = s.scene.world_matrix(parent);
+        let position = Vec3::new(1., 2., 0.);
+        let rotation = Quat::from_euler(
+            glam::EulerRot::XYZ,
+            10_f32.to_radians(),
+            20_f32.to_radians(),
+            30_f32.to_radians(),
+        );
+        let expected_rotation =
+            loom_scene::loomrig_contact::affine_rotation(frame * glam::Mat4::from_quat(rotation))
+                .unwrap();
+        execute(
+            &mut s,
+            Command::SetTransform {
+                id: limb.goal.0,
+                position: Some(position.to_array()),
+                rotation_deg: Some([10., 20., 30.]),
+                scale: None,
+            },
+        )
+        .unwrap();
+        let goal = s.scene.world_matrix(limb.goal);
+        assert!(
+            goal.w_axis
+                .truncate()
+                .distance(frame.transform_point3(position))
+                < 0.001
+        );
+        let actual_rotation = goal.to_scale_rotation_translation().1;
+        assert!(
+            actual_rotation.abs_diff_eq(expected_rotation, 0.001)
+                || actual_rotation.abs_diff_eq(-expected_rotation, 0.001)
+        );
+        assert!(
+            s.scene
+                .world_matrix(end)
+                .w_axis
+                .truncate()
+                .distance(goal.w_axis.truncate())
+                < 0.003
+        );
+        assert_eq!(s.scene.node(limb.goal).unwrap().transform, raw);
+        let before = s.scene.loom_rigs.clone();
+        let foot = s.scene.world_matrix(end);
+        execute(
+            &mut s,
+            Command::SetTransform {
+                id: limb.goal.0,
+                position: None,
+                rotation_deg: None,
+                scale: Some([2., 3., 4.]),
+            },
+        )
+        .unwrap();
+        assert_eq!(s.scene.loom_rigs, before);
+        assert_eq!(
+            s.scene.node(limb.goal).unwrap().transform.scale.get(),
+            Vec3::new(2., 3., 4.)
+        );
+        assert!(s.scene.world_matrix(end).abs_diff_eq(foot, 0.003));
+        let pole = Vec3::new(4., 1., 6.);
+        execute(
+            &mut s,
+            Command::SetTransform {
+                id: limb.pole.0,
+                position: Some(pole.to_array()),
+                rotation_deg: None,
+                scale: None,
+            },
+        )
+        .unwrap();
+        assert!(
+            s.scene
+                .world_matrix(limb.pole)
+                .w_axis
+                .truncate()
+                .distance(frame.transform_point3(pole))
+                < 0.001
+        );
+    }
+}
+
+#[test]
+fn cross_rig_contact_dependency_cycle_is_rejected_without_recursion() {
+    let (mut s, root, _) = rigged();
+    let goal = s.scene.loom_rigs[0].limbs[0].goal;
+    let other_root = s.scene.add_node(Node::new("other root", ObjectKind::bone(1.)));
+    let mut other_goal_node = s.scene.node(goal).unwrap().clone();
+    other_goal_node.id = NodeId(0);
+    let other_goal = s.scene.add_node(other_goal_node);
+    assert_ne!(goal, other_goal);
+    let mut other = s.scene.loom_rigs[0].clone();
+    other.id = 2;
+    other.mapping.root = other_root;
+    other.limbs[0].goal = other_goal;
+    s.scene.loom_rigs.push(other);
+    for rig in &mut s.scene.loom_rigs {
+        rig.limbs[0].contacts = ContactTrack::constant(
+            reference(ContactSpace::World, Vec3::new(12., 8., 0.)), 1.,
+        ).unwrap();
+    }
+    s.scene.node_mut(root).unwrap().parent = Some(other_goal);
+    s.scene.node_mut(other_root).unwrap().parent = Some(goal);
+    s.scene.bump_version();
+    assert!(s.scene.contact_control(goal).is_err());
+    assert!(s.scene.contact_control(other_goal).is_err());
+    assert!(s.scene.world_matrix(goal).is_finite());
+    assert!(s.scene.contact_errors().iter().any(|error|error.message.contains("cyclic")));
+    s.scene.node_mut(other_root).unwrap().parent = None;
+    s.scene.bump_version();
+    assert!(s.scene.contact_control(goal).unwrap().is_some());
+    assert!(s.scene.contact_control(other_goal).unwrap().is_some());
+}
+
+#[test]
+fn contact_controller_dependency_cycle_reports_error_without_recursive_world_queries() {
+    let (mut s, root, _) = rigged();
+    let goal = s.scene.loom_rigs[0].limbs[0].goal;
+    s.scene.node_mut(root).unwrap().parent = Some(goal);
+    s.scene.loom_rigs[0].limbs[0].contacts =
+        ContactTrack::constant(reference(ContactSpace::World, Vec3::new(12., 8., 0.)), 1.).unwrap();
+    s.scene.bump_version();
+    assert!(s.scene.contact_control(goal).is_err());
+    assert!(s.scene.world_matrix(goal).is_finite());
+    assert!(s
+        .scene
+        .contact_errors()
+        .iter()
+        .any(|error| error.message.contains("ancestor")));
+    let before = s.scene.loom_rigs.clone();
+    let undo = s.undo.position();
+    assert!(execute(
+        &mut s,
+        Command::SetTransform {
+            id: goal.0,
+            position: Some([1., 2., 3.]),
+            rotation_deg: None,
+            scale: None
+        }
+    )
+    .is_err());
+    assert_eq!(s.scene.loom_rigs, before);
+    assert_eq!(s.undo.position(), undo);
+}
+
+#[test]
+fn selection_transforms_move_goal_and_pole_in_one_contact_edit_and_respect_locks() {
+    let (mut s, _, end) = rigged();
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+        [
+            (1, reference(ContactSpace::World, Vec3::new(12., 8., 0.))),
+            (2, reference(ContactSpace::World, Vec3::new(8., 12., 0.))),
+        ]
+        .into(),
+        vec![key(10., 1, 1.), key(20., 2, 1.)],
+    )
+    .unwrap();
+    s.scene.bump_version();
+    execute(&mut s, Command::SetFrame { frame: 15 }).unwrap();
+    let goal = s.scene.world_matrix(limb.goal).w_axis.truncate();
+    let pole = s.scene.world_matrix(limb.pole).w_axis.truncate();
+    let nodes: Vec<_> = s.scene.nodes().cloned().collect();
+    let rigs = s.scene.loom_rigs.clone();
+    let undo = s.undo.position();
+    s.selection = [limb.goal, limb.pole].into();
+    let delta = Vec3::new(0.5, -1., 2.);
+    execute(
+        &mut s,
+        Command::MoveSelection {
+            delta: delta.to_array(),
+            system: Some(loom_commands::CoordSystem::World),
+        },
+    )
+    .unwrap();
+    assert_eq!(s.undo.position(), undo + 1);
+    assert!(
+        s.scene
+            .world_matrix(limb.goal)
+            .w_axis
+            .truncate()
+            .distance(goal + delta)
+            < 0.001
+    );
+    assert!(
+        s.scene
+            .world_matrix(limb.pole)
+            .w_axis
+            .truncate()
+            .distance(pole + delta)
+            < 0.001
+    );
+    assert!(
+        s.scene
+            .world_matrix(end)
+            .w_axis
+            .truncate()
+            .distance(goal + delta)
+            < 0.001
+    );
+    assert_eq!(s.scene.nodes().cloned().collect::<Vec<_>>(), nodes);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs, rigs);
+    s.selection = [limb.goal].into();
+    s.scene.node_mut(limb.goal).unwrap().locks.move_axes[0] = true;
+    execute(
+        &mut s,
+        Command::MoveSelection {
+            delta: [2., 1., 0.],
+            system: Some(loom_commands::CoordSystem::World),
+        },
+    )
+    .unwrap();
+    assert!(
+        s.scene
+            .world_matrix(limb.goal)
+            .w_axis
+            .truncate()
+            .distance(goal + Vec3::Y)
+            < 0.001
+    );
+}
+
+#[test]
+fn transform_type_in_reads_and_edits_the_effective_contact_rotation() {
+    let (mut s, _, _) = rigged();
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    s.scene.loom_rigs[0].limbs[0].contacts =
+        ContactTrack::constant(reference(ContactSpace::World, Vec3::new(12., 8., 0.)), 1.).unwrap();
+    s.scene.bump_version();
+    s.selection = [limb.goal].into();
+    s.active_tool = loom_commands::Tool::Rotate;
+    s.coord_system = loom_commands::CoordSystem::World;
+    assert!((loom_commands::type_in_values(&s).x - 0.3_f32.to_degrees()).abs() < 0.001);
+    let before = s.scene.loom_rigs.clone();
+    let node = s.scene.node(limb.goal).unwrap().clone();
+    let undo = s.undo.position();
+    execute(
+        &mut s,
+        Command::TransformTypeIn {
+            absolute: true,
+            values: [15., 25., 35.],
+        },
+    )
+    .unwrap();
+    assert!(loom_commands::type_in_values(&s).abs_diff_eq(Vec3::new(15., 25., 35.), 0.001));
+    assert_eq!(s.undo.position(), undo + 1);
+    assert_eq!(s.scene.node(limb.goal).unwrap(), &node);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs, before);
+}
+
+#[test]
+fn moving_master_and_body_contact_together_does_not_apply_the_motion_twice() {
+    let (mut s, _, end) = rigged();
+    let rig = s.scene.loom_rigs[0].clone();
+    let goal = rig.limbs[0].goal;
+    s.scene.loom_rigs[0].limbs[0].contacts =
+        ContactTrack::constant(reference(ContactSpace::Body, Vec3::new(12., 8., 0.)), 1.).unwrap();
+    s.scene.bump_version();
+    let before = s.scene.world_matrix(goal).w_axis.truncate();
+    let rigs = s.scene.loom_rigs.clone();
+    let node = s.scene.node(rig.master).unwrap().transform.clone();
+    let undo = s.undo.position();
+    s.selection = [rig.master, goal].into();
+    let delta = Vec3::new(1., 2., 0.);
+    execute(
+        &mut s,
+        Command::MoveSelection {
+            delta: delta.to_array(),
+            system: Some(loom_commands::CoordSystem::World),
+        },
+    )
+    .unwrap();
+    assert!(
+        s.scene
+            .world_matrix(goal)
+            .w_axis
+            .truncate()
+            .distance(before + delta)
+            < 0.001
+    );
+    assert!(
+        s.scene
+            .world_matrix(end)
+            .w_axis
+            .truncate()
+            .distance(before + delta)
+            < 0.001
+    );
+    assert_eq!(s.undo.position(), undo + 1);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs, rigs);
+    assert_eq!(s.scene.node(rig.master).unwrap().transform, node);
+}
+
+#[test]
+fn world_type_in_rotation_remains_exact_under_a_mirrored_controller_parent() {
+    let (mut s, _, _) = rigged();
+    let goal = s.scene.loom_rigs[0].limbs[0].goal;
+    let mut parent = Node::new("controller parent", ObjectKind::dummy(1.));
+    parent.transform.scale.set(Vec3::new(-2., 3., 1.));
+    parent
+        .transform
+        .set_rotation_quat(Quat::from_rotation_z(0.4));
+    let parent = s.scene.add_node(parent);
+    s.scene.node_mut(goal).unwrap().parent = Some(parent);
+    s.scene.loom_rigs[0].limbs[0].contacts =
+        ContactTrack::constant(reference(ContactSpace::World, Vec3::new(12., 8., 0.)), 1.).unwrap();
+    s.scene.bump_version();
+    s.selection = [goal].into();
+    s.active_tool = loom_commands::Tool::Rotate;
+    s.coord_system = loom_commands::CoordSystem::World;
+    execute(
+        &mut s,
+        Command::TransformTypeIn {
+            absolute: true,
+            values: [15., 25., 35.],
+        },
+    )
+    .unwrap();
+    assert!(loom_commands::type_in_values(&s).abs_diff_eq(Vec3::new(15., 25., 35.), 0.001));
 }

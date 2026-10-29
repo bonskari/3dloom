@@ -71,7 +71,8 @@ pub fn frame_for(state: &AppState, viewport: usize, id: Option<NodeId>) -> Trans
 /// of them changes only that Euler track.
 fn gimbal_axes(state: &AppState, id: NodeId) -> Mat3 {
     let parent = rotation_only(state.scene.edit_parent_frame(id));
-    let r = state.scene.node(id).map(|n| n.euler_deg()).unwrap_or_default();
+    let r = crate::loomrig_controller::local_control_transform(state,id).ok().flatten().map(|t|t.rotation.get())
+        .unwrap_or_else(||state.scene.node(id).map(|n|n.euler_deg()).unwrap_or_default());
     let qx = glam::Quat::from_rotation_x(r.x.to_radians());
     let qy = glam::Quat::from_rotation_y(r.y.to_radians());
     parent * Mat3::from_cols(Vec3::X, qx * Vec3::Y, qx * qy * Vec3::Z)
@@ -138,7 +139,11 @@ pub fn frame_for_system(state: &AppState, viewport: usize, id: Option<NodeId>, s
             sub_object_axes(state).unwrap_or(Mat3::IDENTITY)
         }
         CoordSystem::Local => match id {
-            Some(i) => rotation_only(state.scene.world_matrix(i)),
+            Some(i) => {
+                if let Ok(Some(_))=state.scene.contact_control(i) {
+                    crate::loomrig_controller::world_control_rotation(state,i).map(Mat3::from_quat).unwrap_or_else(|_|rotation_only(state.scene.world_matrix(i)))
+                } else {rotation_only(state.scene.world_matrix(i))}
+            },
             None => Mat3::IDENTITY,
         },
         CoordSystem::Gimbal => match id {

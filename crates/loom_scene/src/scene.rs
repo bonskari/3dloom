@@ -668,11 +668,79 @@ impl Scene {
     /// Node (pivot) world matrix: the inherit-filtered parent frame times
     /// the local transform (IK-solved for a bone in an enabled chain).
     pub fn world_matrix(&self, id: NodeId) -> Mat4 {
-        if !self.nodes.contains_key(&id) {
-            return Mat4::IDENTITY;
-        }
+        let Some(node)=self.nodes.get(&id) else {return Mat4::IDENTITY;};
         self.sync_time();
+        if !self.ik_solving.get() && node.object.is_helper() {
+            if let Ok(Some(control)) = self.contact_control(id) {
+                match control.kind {
+                    crate::loomrig_contact::ContactControlKind::Goal => {
+                        return Mat4::from_scale_rotation_translation(node.transform.scale.get(),control.sample.rotation,control.sample.position);
+                    }
+                    crate::loomrig_contact::ContactControlKind::Pole => {
+                        let mut world=self.frame_of(id) * self.local_matrix(id);
+                        world.w_axis=control.sample.pole_position.extend(1.);
+                        return world;
+                    }
+                }
+            }
+        }
         self.frame_of(id) * self.local_matrix(id)
+    }
+
+    /// The effective contact controller, separate from its retained source tracks.
+    pub fn contact_control(&self, id: NodeId) -> Result<Option<crate::loomrig_contact::ContactControl>,String> {
+        use crate::loomrig_contact::{ContactControl,ContactControlKind};
+        if self.ik_solving.get() { return Ok(None); }
+        for rig in &self.loom_rigs {
+            for (index,limb) in rig.limbs.iter().enumerate() {
+                let kind = if id == limb.goal { ContactControlKind::Goal } else if id == limb.pole { ContactControlKind::Pole } else { continue };
+                if limb.contacts.is_empty() { return Ok(None); }
+                let active=limb.contacts.active_key(self.time())?.is_some() || limb.contacts.constant_state().is_some();
+                if !active { return Ok(None); }
+                if self.ancestors(rig.mapping.root).contains(&id) {
+                    return Err("contact controller cannot be an ancestor of its rig root".into());
+                }
+                self.validate_contact_dependencies(id)?;
+                self.ensure_ik();
+                let sample=limb.contacts.sample(self.time(),self.world_matrix(rig.mapping.root))?;
+                return Ok(sample.map(|sample|ContactControl {rig:rig.id,limb:index,kind,sample}));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Contact targets add world-matrix dependencies outside the node tree.
+    /// Walk those edges without evaluating matrices, including across rigs.
+    fn validate_contact_dependencies(&self, start: NodeId) -> Result<(), String> {
+        use std::collections::BTreeSet;
+        let mut path = BTreeSet::new();
+        let mut done = BTreeSet::new();
+        let mut pending = vec![(start, false)];
+        while let Some((id, leaving)) = pending.pop() {
+            if leaving {
+                path.remove(&id);
+                done.insert(id);
+                continue;
+            }
+            if done.contains(&id) { continue; }
+            if !path.insert(id) { return Err("cyclic contact controller dependency".into()); }
+            pending.push((id, true));
+            let Some(node) = self.nodes.get(&id) else { continue };
+            let contact = self.loom_rigs.iter().find_map(|rig| {
+                rig.limbs.iter().find(|limb| id == limb.goal || id == limb.pole).map(|limb|(rig,limb))
+            });
+            if let Some((rig,limb)) = contact.filter(|_|node.object.is_helper()) {
+                let active = limb.contacts.active_key(self.time())?.is_some() || limb.contacts.constant_state().is_some();
+                if active {
+                    pending.push((rig.mapping.root, false));
+                    // Goal world poses bypass their helper parent. Poles retain
+                    // that parent's visual frame in addition to their target.
+                    if id == limb.goal { continue; }
+                }
+            }
+            if let Some(parent) = node.parent { pending.push((parent, false)); }
+        }
+        Ok(())
     }
 
     /// The local matrix as the user set it, IK ignored (FK).
@@ -971,6 +1039,20 @@ impl Scene {
                         }
                     }
                 };
+                if contact.is_some() && self.ancestors(rig.mapping.root).iter().any(|id|*id == limb.goal || *id == limb.pole) {
+                    self.contact_errors.borrow_mut().push(crate::loomrig_contact::ContactEvaluationError {
+                        rig:rig.id,limb:limb.mapping.name.clone(),message:"contact controller cannot be an ancestor of its rig root".into(),
+                    });
+                    continue;
+                }
+                if contact.is_some() {
+                    if let Err(message) = self.validate_contact_dependencies(limb.goal).and_then(|_|self.validate_contact_dependencies(limb.pole)) {
+                        self.contact_errors.borrow_mut().push(crate::loomrig_contact::ContactEvaluationError {
+                            rig:rig.id,limb:limb.mapping.name.clone(),message,
+                        });
+                        continue;
+                    }
+                }
                 let blend = contact.as_ref().map_or_else(|| limb.blend.get().clamp(0.0, 1.0), |c| c.blend);
                 // Solve in the start joint's parent space: bone lengths and
                 // targets must share units even under a scaled scene parent.

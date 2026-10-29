@@ -75,3 +75,4 @@ pub use keymap::{keyboard_chart, write_keyboard_chart, ChartRow};
 pub mod loomrig;
 mod loomrig_keys;
 mod loomrig_contacts;
+mod loomrig_controller;
