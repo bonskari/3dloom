@@ -100,7 +100,7 @@ pub(crate) fn set_active_limb(
     Ok(Some(json!({})))
 }
 
-fn key_contact_weight(
+pub(crate) fn key_contact_weight(
     track:&mut loom_scene::loomrig_contact::ContactTrack,time:f32,blend:f32,
     sample:&loom_scene::loomrig_contact::ContactSample,body_frame:glam::Mat4,
 ) -> Result<(),String> {

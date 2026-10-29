@@ -637,6 +637,119 @@ fn set_keys(state: &mut AppState) -> Result<Value, String> {
     r
 }
 
+fn keyable<T>(controller:&loom_scene::param::Controller<T>) -> bool {
+    use loom_scene::param::Controller;
+    match controller {
+        Controller::Constant(_) | Controller::Keys(_) => true,
+        Controller::Noise(_) => false,
+        Controller::List(items) => items.first().is_some_and(|item|item.weight != 0. && keyable(&item.controller)),
+    }
+}
+
+fn keyable_param(param:&AnyParam) -> bool {
+    match param {
+        AnyParam::F32(p)=>keyable(&p.controller),AnyParam::U32(p)=>keyable(&p.controller),
+        AnyParam::Bool(p)=>keyable(&p.controller),AnyParam::Vec3(p)=>keyable(&p.controller),
+    }
+}
+
+/// Explicit full-rig capture; prepare every fallible edit before live rollback.
+pub(crate) fn key_rig_pose(state:&mut AppState,rig_id:u32) -> Result<Value,String> {
+    use std::collections::BTreeSet;
+    let time=state.current_frame as f32;
+    let rig=state.scene.loom_rigs.iter().find(|rig|rig.id == rig_id).ok_or("LoomRig not found")?;
+    let mut owned:BTreeSet<_>=rig.bindings.iter().map(|binding|binding.control).collect();
+    owned.insert(rig.master);
+    let mut contact_goals=BTreeSet::new();
+    let mut contact_poles=BTreeSet::new();
+    for limb in &rig.limbs {
+        owned.extend([limb.goal,limb.pole]);
+        if state.scene.contact_control(limb.goal)?.is_some() {
+            contact_goals.insert(limb.goal);contact_poles.insert(limb.pole);
+        }
+    }
+    if owned.iter().any(|id|state.scene.node(*id).is_some_and(|node|node.object.is_bone())) {
+        return Err("rig controls must not overwrite source bone tracks".into());
+    }
+    let staged=if state.set_key_mode {
+        Some(state.undo.pose_baseline(&state.scene,state.set_key_buffer.as_ref().ok_or("Set Key pose baseline is missing")?.position)?)
+    } else {None};
+    let baseline=staged.as_ref().unwrap_or(&state.scene);
+    let mut ids=owned.clone();
+    if state.set_key_mode {
+        let buffer=state.set_key_buffer.as_ref().unwrap();
+        ids.extend(state.scene.nodes().filter(|node|buffer.versions.get(&node.id) != Some(&(node.version,node.geom_version))).map(|node|node.id));
+    }
+    let mut changes=Vec::new();
+    for id in ids {
+        let before=baseline.node(id).ok_or("posed node is missing from its baseline")?;
+        let posed=state.scene.node(id).ok_or("posed node is missing")?;
+        let mut after=before.clone();
+        let mut chosen=Vec::new();
+        for track in tracks::node_tracks(before) {
+            let wanted=if owned.contains(&id) {
+                track.owner == TrackOwner::Transform
+                    && !(contact_goals.contains(&id) && matches!(track.pointer.as_str(),"/position"|"/rotation"))
+                    && !(contact_poles.contains(&id) && track.pointer == "/position")
+            } else {state.key_filters.allows(&track)};
+            if !wanted {continue;}
+            let pose=tracks::read_node(posed,&track).ok_or("posed track is missing")?;
+            let value=pose.comps_at(time);
+            if value.iter().any(|value|!value.is_finite()) {return Err("cannot key a nonfinite rig pose".into());}
+            let protected=baseline.track_data.flags.iter().any(|(key,flags)|*key == track.key() && (flags.locked || flags.not_keyable));
+            if protected {
+                if tracks::read_node(before,&track).ok_or("baseline track is missing")?.comps_at(time) != value {
+                    return Err("pose changes a protected track; unlock it before keying".into());
+                }
+                continue;
+            }
+            if !keyable_param(&tracks::read_node(before,&track).ok_or("baseline track is missing")?) {
+                return Err("rig pose controller cannot be keyed".into());
+            }
+            chosen.push(track);
+        }
+        tracks::edit_node(&mut after,&chosen,|track,param| {
+            let value=tracks::read_node(posed,track).unwrap().comps_at(time);
+            anim::with(time,true,|| {param.key_now();param.set_comps(&value);});
+        })?;
+        if let Some(change)=node_change(before,&after) {changes.push(change);}
+    }
+    let before=baseline.loom_rigs.clone();
+    let mut after=before.clone();
+    for current in &state.scene.loom_rigs {
+        let index=after.iter().position(|rig|rig.id == current.id).ok_or("rig is missing from pose baseline")?;
+        let capture=current.id == rig_id || (state.set_key_mode && state.key_filters.ik_parameters && current != &before[index]);
+        if !capture {continue;}
+        let mut keyed=current.clone();
+        for limb in &mut keyed.limbs {
+            if !keyable(&limb.blend.controller) || !limb.blend.get_at(time).is_finite() {return Err("rig blend controller cannot be keyed".into());}
+            let blend=limb.blend.get_at(time).clamp(0.,1.);
+            anim::with(time,true,|| {limb.blend.key_now();limb.blend.set(blend);});
+            while limb.pose_offsets.len()<3 {limb.pose_offsets.push(loom_scene::Param::new(glam::Vec3::ZERO));}
+            for offset in limb.pose_offsets.iter_mut().take(3) {
+                if !keyable(&offset.controller) || !offset.get_at(time).is_finite() {return Err("rig offset controller cannot be keyed".into());}
+                anim::with(time,false,||offset.key_now());
+            }
+            if !limb.pose_matches.is_empty() {
+                limb.pose_matches.set_key(loom_scene::loomrig_pose::RigPoseKey {time,offsets:limb.pose_matches.sample(time)?})?;
+            }
+            if let Some(control)=state.scene.contact_control(limb.goal)? {
+                crate::loomrig_contacts::key_contact_weight(&mut limb.contacts,time,control.sample.blend,&control.sample,state.scene.world_matrix(current.mapping.root))?;
+            }
+        }
+        after[index]=keyed;
+    }
+    if before != after {changes.push(Change::SetLoomRigs {before,after});}
+    let count=changes.len();
+    let change=Change::Group(changes);
+    crate::xref::guard(baseline,&change)?;
+    // Baseline/desired controllers are now validated; rollback cannot drop a failed draft.
+    if state.set_key_mode {discard_pose(state);}
+    if count>0 {commit(state,"Key Rig Pose",change)?;}
+    if state.set_key_mode {start_pose(state);}
+    Ok(json!({"rig":rig_id,"changed":count,"frame":state.current_frame}))
+}
+
 /// The selection's tracks the track bar filter lets through.
 fn track_bar_tracks(state: &AppState) -> Vec<tracks::TrackKey> {
     state.selection.iter().flat_map(|id| tracks::list_tracks(&state.scene, *id)).filter(|t| track_bar_allows(state, t)).map(|t| t.key()).collect()

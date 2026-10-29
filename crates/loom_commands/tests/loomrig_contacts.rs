@@ -6,6 +6,10 @@ use loom_scene::{Node, NodeId, ObjectKind};
 
 fn rigged() -> (AppState, NodeId, NodeId) {
     let mut s = AppState::new();
+    let (root,end)=add_rig(&mut s);
+    (s,root,end)
+}
+fn add_rig(s:&mut AppState) -> (NodeId,NodeId) {
     let root = s.scene.add_node(Node::new("root", ObjectKind::bone(1.)));
     let mut ids = vec![];
     for i in 0..3 {
@@ -29,14 +33,14 @@ fn rigged() -> (AppState, NodeId, NodeId) {
         }],
     };
     execute(
-        &mut s,
+        s,
         Command::CreateLoomRig {
             root: root.0,
             mapping: Some(m),
         },
     )
     .unwrap();
-    (s, root, ids[2])
+    (root, ids[2])
 }
 fn reference(space: ContactSpace, position: Vec3) -> ContactReference {
     ContactReference {
@@ -110,6 +114,141 @@ fn point(s: &AppState, id: NodeId, time: f32) -> Vec3 {
     s.scene.at_time(time, || {
         s.scene.world_matrix(id).transform_point3(Vec3::ZERO)
     })
+}
+
+#[test]
+fn rig_pose_key_validation_keeps_a_live_buffer_on_error() {
+    for protected in [false,true] {
+        let (mut s,_,_)=rigged();
+        let control=s.scene.loom_rigs[0].bindings[1].control;
+        if protected {
+            let path=loom_scene::tracks::node_tracks(s.scene.node(control).unwrap()).into_iter().find(|path|path.pointer == "/rotation").unwrap();
+            s.scene.track_data.set_flags(path.key(),loom_scene::tracks::TrackFlags {locked:true,..Default::default()});
+        } else {
+            s.scene.loom_rigs[0].limbs[0].blend.controller=loom_scene::param::Controller::Noise(Default::default());
+        }
+        s.scene.bump_version();
+        execute(&mut s,Command::SetFrame {frame:10}).unwrap();execute(&mut s,Command::SetKeyMode).unwrap();
+        execute(&mut s,Command::SetTransform {id:control.0,position:None,rotation_deg:Some([5.,0.,0.]),scale:None}).unwrap();
+        let nodes:Vec<_>=s.scene.nodes().map(|node|(node.id,node.transform.clone())).collect();
+        let rigs=s.scene.loom_rigs.clone();let history=s.undo.position();let baseline=s.set_key_buffer.as_ref().unwrap().position;
+        assert!(execute(&mut s,Command::KeyLoomRigPose {rig:1}).is_err());
+        assert_eq!(s.undo.position(),history);assert_eq!(s.set_key_buffer.as_ref().unwrap().position,baseline);
+        assert_eq!(s.scene.loom_rigs,rigs);
+        for (id,transform) in nodes {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+        execute(&mut s,Command::ClearSetKeyModeBuffer).unwrap();
+        assert!(s.scene.node(control).unwrap().transform.rotation.get().abs_diff_eq(Vec3::ZERO,1e-6));
+    }
+}
+
+#[test]
+fn rig_pose_key_rejects_xref_controls_without_losing_pending_pose() {
+    let (mut s,_,_)=rigged();
+    let control=s.scene.loom_rigs[0].bindings[1].control;
+    let referenced=s.scene.loom_rigs[0].master;
+    s.scene.xrefs.push(loom_scene::XrefRecord {
+        path:"referenced-rig.loom".into(),scene:true,automatic:false,
+        nodes:vec![("Master".into(),referenced)],
+    });
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    execute(&mut s,Command::SetTransform {id:control.0,position:None,rotation_deg:Some([5.,0.,0.]),scale:None}).unwrap();
+    let nodes:Vec<_>=s.scene.nodes().map(|node|(node.id,node.transform.clone())).collect();
+    let rigs=s.scene.loom_rigs.clone();
+    let history=s.undo.position();let baseline=s.set_key_buffer.as_ref().unwrap().position;
+    let error=execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap_err();
+    assert!(error.contains("XRef Scene"),"{error}");
+    assert_eq!(s.undo.position(),history);
+    assert_eq!(s.set_key_buffer.as_ref().unwrap().position,baseline);
+    assert_eq!(s.scene.loom_rigs,rigs);
+    for (id,transform) in nodes {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+    execute(&mut s,Command::ClearSetKeyModeBuffer).unwrap();
+    assert!(s.scene.node(control).unwrap().transform.rotation.get().abs_diff_eq(Vec3::ZERO,1e-6));
+}
+
+#[test]
+fn rig_pose_key_is_scoped_but_commits_other_pending_set_key_edits() {
+    for buffered in [false,true] {
+        let (mut s,_,_)=rigged();add_rig(&mut s);
+        let other=s.scene.loom_rigs[1].clone();
+        let control=other.bindings[1].control;
+        let original=s.scene.node(control).unwrap().transform.clone();
+        execute(&mut s,Command::SetFrame {frame:10}).unwrap();
+        if buffered {
+            execute(&mut s,Command::SetKeyMode).unwrap();
+            execute(&mut s,Command::SetTransform {id:control.0,position:None,rotation_deg:Some([0.,0.,7.]),scale:None}).unwrap();
+        }
+        execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap();
+        assert_eq!(s.scene.loom_rigs[1],other);
+        if buffered {
+            execute(&mut s,Command::SetFrame {frame:20}).unwrap();
+            assert!(s.scene.node(control).unwrap().transform.rotation.get_at(10.).abs_diff_eq(Vec3::new(0.,0.,7.),1e-6));
+            assert!(s.scene.node(control).unwrap().transform.rotation.keys().is_some());
+        } else {assert_eq!(s.scene.node(control).unwrap().transform,original);}
+    }
+}
+
+#[test]
+fn rig_pose_key_captures_owned_channels_without_rewriting_source_bones() {
+    let (mut s,_,_) = rigged();
+    let rig = s.scene.loom_rigs[0].clone();
+    let sources:Vec<_> = s.scene.nodes().filter(|node|node.object.is_bone()).map(|node|(node.id,node.transform.clone())).collect();
+    let control = rig.bindings.iter().find(|binding|binding.bone == rig.mapping.pelvis).unwrap().control;
+    execute(&mut s,Command::SetTransform {id:control.0,position:None,rotation_deg:Some([0.,0.,15.]),scale:None}).unwrap();
+    execute(&mut s,Command::SetFrame {frame:10}).unwrap();
+    let pose:Vec<_> = sources.iter().map(|(id,_)|(*id,s.scene.world_matrix(*id))).collect();
+    let before = s.scene.loom_rigs.clone();
+    let nodes:Vec<_> = s.scene.nodes().map(|node|(node.id,node.transform.clone())).collect();
+    let undo = s.undo.position();
+    execute(&mut s,Command::KeyLoomRigPose {rig:rig.id}).unwrap();
+    assert_eq!(s.undo.position(),undo+1);
+    for binding in &rig.bindings {
+        let transform = &s.scene.node(binding.control).unwrap().transform;
+        for param in [&transform.position,&transform.rotation,&transform.scale] {
+            assert!(param.keys().unwrap().tracks.iter().all(|track|track.key_at(10.).is_some()));
+        }
+    }
+    for limb in &s.scene.loom_rigs[0].limbs {
+        assert!(limb.blend.keys().unwrap().tracks[0].key_at(10.).is_some());
+        assert!(limb.pose_offsets[..3].iter().all(|param|param.keys().unwrap().tracks.iter().all(|track|track.key_at(10.).is_some())));
+    }
+    for (id,expected) in &pose {assert!(s.scene.world_matrix(*id).abs_diff_eq(*expected,0.001));}
+    for (id,transform) in sources {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+    let path=std::env::temp_dir().join(format!("loom-full-rig-pose-{}.loom",std::process::id()));
+    execute(&mut s,Command::SaveFileAsCopy {path:Some(path.to_string_lossy().into_owned())}).unwrap();
+    let mut reopened=AppState::new();
+    execute(&mut reopened,Command::OpenFile {path:Some(path.to_string_lossy().into_owned())}).unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(reopened.scene.loom_rigs,s.scene.loom_rigs);
+    reopened.scene.at_time(10.,|| {for (id,expected) in &pose {assert!(reopened.scene.world_matrix(*id).abs_diff_eq(*expected,0.001));}});
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs,before);
+    for (id,transform) in nodes {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+}
+
+#[test]
+fn rig_pose_key_commits_a_buffered_contact_and_fk_pose_as_one_key_step() {
+    let (mut s,_,_) = rigged();
+    execute(&mut s,Command::SetLoomRigContactPreset {rig:1,limb:"Arm".into(),time:0.,preset:"planted".into()}).unwrap();
+    execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap();
+    execute(&mut s,Command::SetFrame {frame:10}).unwrap();
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    let rig = s.scene.loom_rigs[0].clone();
+    let control = rig.bindings.iter().find(|binding|binding.bone == rig.mapping.pelvis).unwrap().control;
+    execute(&mut s,Command::SetTransform {id:control.0,position:None,rotation_deg:Some([5.,0.,0.]),scale:None}).unwrap();
+    execute(&mut s,Command::SetTransform {id:rig.limbs[0].goal.0,position:Some([12.,8.,0.]),rotation_deg:None,scale:None}).unwrap();
+    let pose = [rig.limbs[0].mapping.start,rig.limbs[0].mapping.middle,rig.limbs[0].mapping.end].map(|id|(id,s.scene.world_matrix(id)));
+    let start = s.set_key_buffer.as_ref().unwrap().position;
+    let sources:Vec<_> = s.scene.nodes().filter(|node|node.object.is_bone()).map(|node|(node.id,node.transform.clone())).collect();
+    execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap();
+    assert_eq!(s.undo.position(),start+1);
+    let rotation = &s.scene.node(control).unwrap().transform.rotation;
+    assert!(rotation.get_at(0.).abs_diff_eq(Vec3::ZERO,1e-6));
+    assert!(rotation.get_at(10.).abs_diff_eq(Vec3::new(5.,0.,0.),1e-6));
+    assert!(s.scene.loom_rigs[0].limbs[0].contacts.keys().iter().any(|key|key.time == 10.));
+    for (id,expected) in pose {assert!(s.scene.world_matrix(id).abs_diff_eq(expected,0.001));}
+    for (id,transform) in sources {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+    execute(&mut s,Command::SetFrame {frame:20}).unwrap();
+    assert!(s.scene.node(control).unwrap().transform.rotation.get_at(20.).abs_diff_eq(Vec3::new(5.,0.,0.),1e-6));
 }
 
 #[test]
@@ -948,6 +1087,42 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
     let mut s = AppState::new();
     execute(&mut s, Command::OpenFile { path: Some(path) }).unwrap();
     execute(&mut s, Command::SetFrame { frame: 39 }).unwrap();
+    // Capture the complete production rig in isolation; never save over the source.
+    {
+        let mut keyed = AppState::new();
+        keyed.scene = s.scene.clone();
+        execute(&mut keyed, Command::SetFrame {frame:39}).unwrap();
+        let rig = keyed.scene.loom_rigs[0].clone();
+        let mut owned:std::collections::BTreeSet<_> = rig.bindings.iter().map(|binding|binding.control).collect();
+        owned.insert(rig.master);
+        for limb in &rig.limbs {owned.extend([limb.goal,limb.pole]);}
+        let untouched = |state:&AppState| {
+            let mut out = Fingerprint(Default::default());
+            for node in state.scene.nodes().filter(|node|!owned.contains(&node.id)) {
+                serde_json::to_writer(&mut out,node).unwrap();
+            }
+            serde_json::to_writer(&mut out,&state.scene.materials).unwrap();
+            out.0.finish()
+        };
+        let fingerprint = untouched(&keyed);
+        let pose:Vec<_> = keyed.scene.nodes().filter(|node|!owned.contains(&node.id)).map(|node|(node.id,keyed.scene.world_matrix(node.id))).collect();
+        let metadata = keyed.scene.loom_rigs.clone();
+        let controls:Vec<_> = owned.iter().map(|id|(*id,keyed.scene.node(*id).unwrap().transform.clone())).collect();
+        let history = keyed.undo.position();
+        let timer = std::time::Instant::now();
+        execute(&mut keyed,Command::KeyLoomRigPose {rig:rig.id}).unwrap();
+        println!("Ray full-rig pose capture latency: {:?}",timer.elapsed());
+        assert_eq!(keyed.undo.position(),history+1);
+        assert_eq!(untouched(&keyed),fingerprint,"full-rig capture changed source data, skin or materials");
+        for (id,expected) in pose {assert!(keyed.scene.world_matrix(id).abs_diff_eq(expected,0.003),"full-rig capture changed {id:?}");}
+        for binding in &rig.bindings {
+            assert!(keyed.scene.node(binding.control).unwrap().transform.rotation.keys().unwrap().tracks.iter().all(|track|track.key_at(39.).is_some()));
+        }
+        execute(&mut keyed,Command::UndoSceneOperation).unwrap();
+        assert_eq!(keyed.scene.loom_rigs,metadata);
+        for (id,transform) in controls {assert_eq!(keyed.scene.node(id).unwrap().transform,transform);}
+        assert_eq!(untouched(&keyed),fingerprint);
+    }
     let before = source(&s);
     let rig = s.scene.loom_rigs[0].id;
     for name in ["Left Leg", "Right Leg", "Left Arm", "Right Arm"] {

@@ -127,6 +127,23 @@ impl UndoStack {
         entry.pose_preview || matches!(&entry.change,Change::Group(steps) if steps.is_empty())
     }
 
+    /// Read-only rollback used to validate a key before dropping its live pose.
+    pub fn pose_baseline(&self,scene:&Scene,position:u64) -> Result<Scene,String> {
+        if position < self.trimmed || position > self.position() {
+            return Err("pose history baseline is no longer available".into());
+        }
+        let mut baseline=scene.clone();
+        if let Some((_,steps,preview)) = &self.open {
+            if !steps.is_empty() && !preview {return Ok(baseline);}
+            for inverse in steps.iter().rev() {inverse.apply(&mut baseline)?;}
+        }
+        for (offset,entry) in self.undo.iter().rev().enumerate() {
+            if self.position()-offset as u64 <= position || !Self::is_pose_preview(entry) {break;}
+            entry.change.apply(&mut baseline)?;
+        }
+        Ok(baseline)
+    }
+
     /// Preferences > Scene Undo Levels: trims the stack when lowered.
     pub fn set_limit(&mut self, limit: usize) {
         self.limit = limit.max(1);

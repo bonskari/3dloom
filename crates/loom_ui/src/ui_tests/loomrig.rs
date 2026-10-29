@@ -144,6 +144,33 @@ fn second_character_can_be_rigged_and_chain_rows_are_editable() {
 }
 
 #[test]
+fn rig_pose_key_button_records_buffered_controls_only_in_the_separate_editor() {
+    let mut h=Harness::new();h.screen.max.y=1800.;
+    let (state,mapping)=crate::loomrig_overlay::tests::rig();h.app.state=state;h.frames(3);
+    assert!(!h.has(egui::accesskit::Role::Button,"Key Rig Pose"));
+    h.app.clip_timeline.open=true;h.app.clip_timeline.tab=2;h.frames(3);
+    h.click_text_anywhere("Key Rig Pose");
+    h.cmd(Command::SetFrame {frame:10});h.cmd(Command::SetKeyMode);
+    let rig=h.app.state.scene.loom_rigs[0].clone();
+    let control=rig.bindings.iter().find(|binding|binding.bone == mapping.pelvis).unwrap().control;
+    h.cmd(Command::SetTransform {id:control.0,position:None,rotation_deg:Some([0.,0.,12.]),scale:None});
+    let start=h.app.state.set_key_buffer.as_ref().unwrap().position;
+    let before=h.app.state.scene.world_matrix(mapping.pelvis);
+    let source=h.app.state.scene.node(mapping.pelvis).unwrap().transform.clone();
+    h.click_text_anywhere("Key Rig Pose");
+    assert_eq!(h.app.state.undo.position(),start+1);
+    let rotation=&h.app.state.scene.node(control).unwrap().transform.rotation;
+    assert!(rotation.get_at(0.).abs_diff_eq(Vec3::ZERO,1e-6));
+    assert!(rotation.get_at(10.).abs_diff_eq(Vec3::new(0.,0.,12.),1e-6));
+    assert!(h.app.state.scene.world_matrix(mapping.pelvis).abs_diff_eq(before,0.001));
+    assert_eq!(h.app.state.scene.node(mapping.pelvis).unwrap().transform,source);
+    h.cmd(Command::UndoSceneOperation);h.cmd(Command::RedoSceneOperation);h.cmd(Command::SetFrame {frame:20});
+    assert!(h.app.state.scene.node(control).unwrap().transform.rotation.get_at(20.).abs_diff_eq(Vec3::new(0.,0.,12.),1e-6));
+    h.app.clip_timeline.open=false;h.frames(3);
+    assert!(!h.has(egui::accesskit::Role::Button,"Key Rig Pose"));
+}
+
+#[test]
 fn contact_editor_presets_are_separate_and_capture_replace_and_key_real_contacts() {
     let mut h = Harness::new();
     h.screen.max.y = 1800.;

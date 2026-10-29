@@ -201,6 +201,7 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.ctx().data_mut(|d|d.insert_temp(key,active));
         let rig=rigs.iter().find(|r|r.id==active).unwrap();
         if ui.button("Select Master").clicked(){select(app,rig.master);}
+        if ui.button("Key Rig Pose").on_hover_text("Record the full rig at this frame. In Set Key mode, pending pose edits are committed too.").clicked(){run(app,Command::KeyLoomRigPose{rig:rig.id});}
         retarget_panel(ui,app,rig.mapping.root);
         ui.small("FK controls add keyed corrections to the source motion. Enable Auto Key to animate them.");
         egui::CollapsingHeader::new("FK Controls").show(ui,|ui| {
