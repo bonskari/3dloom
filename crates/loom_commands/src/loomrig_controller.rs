@@ -226,6 +226,21 @@ pub(crate) fn control_changes(
             .as_ref()
             .is_none_or(|probe| control_targets_match(probe, edits))
         {
+            if state.auto_key {
+                let time=state.current_frame as f32;
+                let evaluation=probe.as_ref().unwrap_or(&state.scene);
+                for (ri,rig) in after.iter_mut().enumerate() {
+                    let body_frame=evaluation.world_matrix(rig.mapping.root);
+                    for (li,limb) in rig.limbs.iter_mut().enumerate() {
+                        let original=&before[ri].limbs[li].contacts;
+                        if limb.contacts==*original {continue;}
+                        let target=limb.contacts.sample(time,body_frame)?.ok_or("contact target has no active pose")?;
+                        let mut keyed=original.clone();
+                        crate::loomrig_contacts::key_contact_target(&mut keyed,time,&target,body_frame)?;
+                        limb.contacts=keyed;
+                    }
+                }
+            }
             if before != after {
                 changes.push(Change::SetLoomRigs { before, after });
             }
@@ -359,7 +374,7 @@ pub(crate) fn matrix_control_edit(
         after.scale = loom_scene::Param::new(glyph_scale(before.scale.get(), orientation, matrix));
     }
     let after = crate::execute::apply_locks(&before, after, node.locks);
-    let rotation_deg = if label == "Rotate" {
+    let rotation_deg = if label == "Rotate" && after.rotation.get() != before.rotation.get() {
         let r = after.rotation_quat();
         let world = affine_rotation(parent * Mat4::from_quat(r))?;
         let (x, y, z) = world.to_euler(glam::EulerRot::XYZ);
@@ -370,9 +385,9 @@ pub(crate) fn matrix_control_edit(
     Ok(Some(ControlEdit {
         space: ControlSpace::World,
         id,
-        position: Some(parent.transform_point3(after.position.get()).to_array()),
+        position: (after.position.get() != before.position.get()).then(|| parent.transform_point3(after.position.get()).to_array()),
         rotation_deg,
-        scale: (label == "Scale").then(|| after.scale.get().to_array()),
+        scale: (label == "Scale" && after.scale.get() != before.scale.get()).then(|| after.scale.get().to_array()),
     }))
 }
 

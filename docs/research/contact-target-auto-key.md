@@ -1,0 +1,11 @@
+# Contact target Auto Key
+
+With Auto Key enabled, direct Goal/Pole edits now snapshot the effective target at the current frame. Previously they changed a shared contact reference across its existing keys. The snapshot is prepared from the original track after pending master/parent changes have converged, using the resulting body frame. Earlier references and keys remain intact. Repeated edits reuse the current key's private reference instead of allocating another reference for every pointer update. Auto Key off and explicit reference editing retain their existing behavior.
+
+The initial regression reproduced the missing current-frame key. Four focused tests cover constant and keyed tracks, World/Body references, parented controls, mirrored nonuniform body frames, mixed-reference interpolation, master motion, repeated edits and Undo. The locked-control regression additionally exposed quaternion round-trip noise creating a key for an unchanged rotation. The locked transform adapter now emits only fields that actually changed after locks, avoiding that conversion altogether. All four focused tests and the complete contact suite (49 passed, one opt-in production test ignored) pass.
+
+The expanded real-pointer UI test passes for Goal and Pole in ordinary, buffered Set Key and Auto Key modes, including one-gesture Undo and retention of prior references. The complete Commands integration run passed 917 tests across 128 binaries (eight opt-in tests ignored). The separately enabled production Ray test passed in 142.18s, including all four real limbs with prior-reference retention, new target keys, source-node/material fingerprints and Undo. The original scene SHA-256 remains `84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935`.
+
+Read-only source review found no concrete Important defect. Native application acceptance remains pending; this document does not certify installed-app behavior or performance. The original Ray asset is never overwritten, and no public push is authorized.
+
+The final complete UI library run passed 455 tests, with two ignored, in 71.89s. Evidence logs: `/tmp/loom-target-auto-key-command-regressions.log`, `/tmp/loom-target-auto-key-ray.log`, `/tmp/loom-target-auto-key-ui.log` and `/tmp/loom-target-auto-key-ui-regressions.log`.

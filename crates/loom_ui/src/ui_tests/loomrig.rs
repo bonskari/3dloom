@@ -343,7 +343,7 @@ fn animation_editor_displays_the_effective_contact_ik_weight() {
 
 #[test]
 fn contact_controller_pointer_drag_updates_target_and_keeps_source_tracks_with_one_undo() {
-    for set_key_mode in [false,true] {
+    for (auto_key,set_key_mode) in [(false,false),(false,true),(true,false)] {
     for pole in [false, true] {
         let mut h = Harness::new();
         let (state, mapping) = crate::loomrig_overlay::tests::rig();
@@ -357,6 +357,7 @@ fn contact_controller_pointer_drag_updates_target_and_keeps_source_tracks_with_o
         h.cmd(Command::SetTransform {
             id: goal.0, position: Some([12., 8., 0.]), rotation_deg: None, scale: None,
         });
+        if auto_key {h.cmd(Command::SetFrame {frame:10});h.cmd(Command::AutoKeyModeToggle);}
         h.app.state.selection = [control].into();
         h.app.state.mesh_dirty = true;
         h.app.sync_after_command();
@@ -374,6 +375,13 @@ fn contact_controller_pointer_drag_updates_target_and_keeps_source_tracks_with_o
         assert_ne!(h.app.state.scene.loom_rigs, before, "pointer input must edit the contact reference");
         assert_eq!(h.app.state.undo.position(), undo + 1, "one gesture must be one Undo");
         assert_eq!(h.app.state.undo.undo_is_pose_preview(),set_key_mode);
+        if auto_key {
+            let original=&before[0].limbs[0].contacts;
+            let keyed=&h.app.state.scene.loom_rigs[0].limbs[0].contacts;
+            assert!(keyed.keys().iter().any(|key|key.time==10.));
+            for key in original.keys() {assert!(keyed.keys().contains(key));}
+            for (id,reference) in original.references() {assert_eq!(keyed.references().get(id),Some(reference));}
+        }
         let target = h.app.state.scene.world_matrix(goal).w_axis.truncate();
         let actual = h.app.state.scene.world_matrix(end).w_axis.truncate();
         if pole {

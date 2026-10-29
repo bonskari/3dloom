@@ -1183,6 +1183,35 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
     let mut s = AppState::new();
     execute(&mut s, Command::OpenFile { path: Some(path) }).unwrap();
     execute(&mut s, Command::SetFrame { frame: 39 }).unwrap();
+    {
+        let mut keyed=AppState::new();keyed.scene=s.scene.clone();
+        execute(&mut keyed,Command::SetFrame {frame:39}).unwrap();
+        let rig=keyed.scene.loom_rigs[0].clone();
+        for limb in &rig.limbs {
+            execute(&mut keyed,Command::SetLoomRigContactPreset {rig:rig.id,limb:limb.mapping.name.clone(),time:39.,preset:"planted".into()}).unwrap();
+        }
+        execute(&mut keyed,Command::SetFrame {frame:40}).unwrap();
+        execute(&mut keyed,Command::AutoKeyModeToggle).unwrap();
+        let fingerprint=source(&keyed);
+        for (i,limb) in rig.limbs.iter().enumerate() {
+            let original=keyed.scene.loom_rigs.clone();
+            let frame=keyed.scene.world_matrix(rig.mapping.root);
+            let before=original[0].limbs[i].contacts.sample(40.,frame).unwrap().unwrap();
+            keyed.selection=[limb.goal,limb.pole].into();
+            let delta=Vec3::new(0.5,0.25,0.75);
+            execute(&mut keyed,Command::MoveSelection {delta:delta.to_array(),system:Some(loom_commands::CoordSystem::World)}).unwrap();
+            let track=&keyed.scene.loom_rigs[0].limbs[i].contacts;
+            let after=track.sample(40.,frame).unwrap().unwrap();
+            assert!(after.position.abs_diff_eq(before.position+delta,0.003));
+            assert!(after.pole_position.abs_diff_eq(before.pole_position+delta,0.003));
+            assert!(track.keys().iter().any(|key|key.time==40.));
+            for (id,reference) in original[0].limbs[i].contacts.references() {assert_eq!(track.references().get(id),Some(reference));}
+            assert_eq!(source(&keyed),fingerprint,"contact Auto Key changed raw source nodes, skin or materials");
+            execute(&mut keyed,Command::UndoSceneOperation).unwrap();
+            assert_eq!(keyed.scene.loom_rigs,original);
+            assert_eq!(source(&keyed),fingerprint);
+        }
+    }
     // Capture the complete production rig in isolation; never save over the source.
     {
         let mut keyed = AppState::new();
@@ -2282,5 +2311,98 @@ fn free_matched_fk_gimbal_edits_one_stored_euler_channel() {
         s.selection=[control].into();
         execute(&mut s,Command::RotateSelection {axis:loom_commands::Axis::X,degrees:15.,system:Some(loom_commands::CoordSystem::Gimbal)}).unwrap();
         assert!(s.scene.node(control).unwrap().transform.rotation.get().abs_diff_eq(Vec3::new(25.,-5.,8.),0.001),"joint {index}: Gimbal X changed the wrong input channels");
+    }
+}
+
+#[test]
+fn target_auto_key_retains_prior_anchors_and_reuses_the_current_target_key() {
+    for constant in [false,true] {
+        for body in [false,true] {
+            for parented in [false,true] {
+                let (mut s,root,_)=rigged();let limb=s.scene.loom_rigs[0].limbs[0].clone();
+                if body {
+                    let node=s.scene.node_mut(root).unwrap();node.transform.position.set(Vec3::new(3.,-2.,4.));
+                    node.transform.rotation.set(Vec3::new(10.,20.,30.));node.transform.scale.set(Vec3::new(1.2,0.8,1.3));
+                }
+                if parented {s.scene.node_mut(limb.goal).unwrap().parent=Some(root);s.scene.node_mut(limb.pole).unwrap().parent=Some(root);}
+                let pose=reference(if body {ContactSpace::Body} else {ContactSpace::World},Vec3::new(13.,7.,0.));
+                s.scene.loom_rigs[0].limbs[0].contacts=if constant {ContactTrack::constant(pose,1.).unwrap()} else {ContactTrack::new([(1,pose)].into(),vec![key(0.,1,1.),key(20.,1,1.)]).unwrap()};
+                s.scene.bump_version();execute(&mut s,Command::SetFrame {frame:10}).unwrap();execute(&mut s,Command::AutoKeyModeToggle).unwrap();
+                s.selection=[limb.goal,limb.pole].into();let old=s.scene.loom_rigs[0].limbs[0].contacts.clone();
+                let before=old.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap();
+                let nodes:Vec<_>=s.scene.nodes().map(|node|(node.id,node.transform.clone())).collect();let history=s.undo.position();
+                let delta=Vec3::new(1.,2.,3.);
+                execute(&mut s,Command::MoveSelection {delta:delta.to_array(),system:Some(loom_commands::CoordSystem::World)}).unwrap();
+                let first=s.scene.loom_rigs[0].limbs[0].contacts.clone();
+                assert!(first.keys().iter().any(|key|key.time==10.),"Auto Key did not create a current target key");
+                assert_eq!(first.keys().iter().map(|key|key.time).collect::<Vec<_>>(),if constant {vec![0.,10.]} else {vec![0.,10.,20.]});
+                assert_eq!(first.references().get(&1),old.references().get(&1),"Auto Key rewrote a prior anchor");
+                for k in old.keys() {assert!(first.keys().contains(k));}
+                let sample=first.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap();
+                assert!(sample.position.abs_diff_eq(before.position+delta,0.001));assert!(sample.pole_position.abs_diff_eq(before.pole_position+delta,0.001));
+                assert_eq!(s.undo.position(),history+1);
+                execute(&mut s,Command::MoveSelection {delta:delta.to_array(),system:Some(loom_commands::CoordSystem::World)}).unwrap();
+                let second=&s.scene.loom_rigs[0].limbs[0].contacts;
+                assert_eq!(second.keys().len(),first.keys().len());assert_eq!(second.references().len(),first.references().len(),"repeated drag steps leaked contact references");
+                assert_eq!(second.active_key(10.).unwrap().unwrap().reference,first.active_key(10.).unwrap().unwrap().reference);
+                assert_eq!(second.references().get(&1),old.references().get(&1));
+                for (id,transform) in &nodes {assert_eq!(&s.scene.node(*id).unwrap().transform,transform);}
+                execute(&mut s,Command::UndoSceneOperation).unwrap();assert_eq!(s.scene.loom_rigs[0].limbs[0].contacts,first);
+                execute(&mut s,Command::UndoSceneOperation).unwrap();assert_eq!(s.scene.loom_rigs[0].limbs[0].contacts,old);
+            }
+        }
+    }
+}
+
+#[test]
+fn target_auto_key_rotation_snapshots_interpolated_mixed_references() {
+    let (mut s,root,_)=rigged();let limb=s.scene.loom_rigs[0].limbs[0].clone();
+    let node=s.scene.node_mut(root).unwrap();node.transform.rotation.set(Vec3::new(10.,20.,30.));node.transform.scale.set(Vec3::new(-1.2,0.8,1.3));
+    s.scene.loom_rigs[0].limbs[0].contacts=ContactTrack::new(
+        [(1,reference(ContactSpace::World,Vec3::new(13.,7.,0.))),(2,reference(ContactSpace::Body,Vec3::new(10.,8.,2.)))].into(),
+        vec![key(0.,1,0.4),key(20.,2,1.)]).unwrap();
+    s.scene.bump_version();execute(&mut s,Command::SetFrame {frame:10}).unwrap();execute(&mut s,Command::AutoKeyModeToggle).unwrap();s.selection=[limb.goal].into();
+    let old=s.scene.loom_rigs[0].limbs[0].contacts.clone();let before=old.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap();
+    execute(&mut s,Command::RotateSelection {axis:loom_commands::Axis::X,degrees:15.,system:Some(loom_commands::CoordSystem::World)}).unwrap();
+    let after=&s.scene.loom_rigs[0].limbs[0].contacts;let sample=after.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap();
+    assert!(sample.rotation.dot(Quat::from_rotation_x(15f32.to_radians())*before.rotation).abs()>1.-1e-5);
+    assert!((sample.blend-before.blend).abs()<1e-6);assert!(sample.pole_position.abs_diff_eq(before.pole_position,0.001));
+    for (id,pose) in old.references() {assert_eq!(after.references().get(id),Some(pose));}
+    for k in old.keys() {assert!(after.keys().contains(k));}
+    assert_eq!(after.keys().len(),3);assert_eq!(after.references().len(),3);
+    execute(&mut s,Command::UndoSceneOperation).unwrap();assert_eq!(s.scene.loom_rigs[0].limbs[0].contacts,old);
+}
+
+#[test]
+fn target_auto_key_visual_edits_and_locked_targets_do_not_create_contact_keys() {
+    let (mut s,_,_)=rigged();let limb=s.scene.loom_rigs[0].limbs[0].clone();
+    s.scene.loom_rigs[0].limbs[0].contacts=ContactTrack::new([(1,reference(ContactSpace::World,Vec3::new(13.,7.,0.)))].into(),vec![key(0.,1,1.),key(20.,1,1.)]).unwrap();s.scene.bump_version();
+    execute(&mut s,Command::SetFrame {frame:10}).unwrap();execute(&mut s,Command::AutoKeyModeToggle).unwrap();
+    let before=s.scene.loom_rigs.clone();
+    execute(&mut s,Command::SetTransform {id:limb.goal.0,position:None,rotation_deg:None,scale:Some([2.;3])}).unwrap();
+    execute(&mut s,Command::SetTransform {id:limb.pole.0,position:None,rotation_deg:Some([0.,0.,15.]),scale:None}).unwrap();
+    assert_eq!(s.scene.loom_rigs,before);
+    s.scene.node_mut(limb.goal).unwrap().locks=loom_scene::Axes3::ALL;s.selection=[limb.goal].into();
+    let history=s.undo.position();
+    execute(&mut s,Command::MoveSelection {delta:[1.,2.,3.],system:Some(loom_commands::CoordSystem::World)}).unwrap();
+    execute(&mut s,Command::RotateSelection {axis:loom_commands::Axis::Z,degrees:15.,system:Some(loom_commands::CoordSystem::World)}).unwrap();
+    assert_eq!(s.scene.loom_rigs,before);
+    assert_eq!(s.undo.position(),history);
+}
+
+#[test]
+fn target_auto_key_with_master_motion_preserves_world_targets_and_prior_keys() {
+    for body in [false,true] {
+        let (mut s,root,_)=rigged();let rig=s.scene.loom_rigs[0].clone();let limb=rig.limbs[0].clone();
+        s.scene.loom_rigs[0].limbs[0].contacts=ContactTrack::new([(1,reference(if body {ContactSpace::Body} else {ContactSpace::World},Vec3::new(13.,7.,0.)))].into(),vec![key(0.,1,1.),key(20.,1,1.)]).unwrap();s.scene.bump_version();
+        execute(&mut s,Command::SetFrame {frame:10}).unwrap();execute(&mut s,Command::AutoKeyModeToggle).unwrap();
+        let before=s.scene.loom_rigs[0].limbs[0].contacts.clone();let sample=before.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap();
+        s.selection=[rig.master,limb.goal,limb.pole].into();let delta=Vec3::new(1.,2.,3.);
+        execute(&mut s,Command::MoveSelection {delta:delta.to_array(),system:Some(loom_commands::CoordSystem::World)}).unwrap();
+        let after=&s.scene.loom_rigs[0].limbs[0].contacts;let current=after.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap();
+        assert!(current.position.abs_diff_eq(sample.position+delta,0.001));assert!(current.pole_position.abs_diff_eq(sample.pole_position+delta,0.001));
+        assert_eq!(after.references().get(&1),before.references().get(&1));for k in before.keys() {assert!(after.keys().contains(k));}
+        let at_zero=s.scene.at_time(0.,||after.sample(0.,s.scene.world_matrix(root)).unwrap().unwrap());assert!(at_zero.position.abs_diff_eq(sample.position,0.001));
+        execute(&mut s,Command::UndoSceneOperation).unwrap();assert_eq!(s.scene.loom_rigs[0].limbs[0].contacts,before);
     }
 }

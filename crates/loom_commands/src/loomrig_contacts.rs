@@ -123,6 +123,27 @@ pub(crate) fn key_contact_weight(
     if track.keys().iter().any(|key|key.time == time) {track.update_key(key)} else {track.insert_key(key)}
 }
 
+/// Key a target snapshot without rewriting anchors shared by other times.
+pub(crate) fn key_contact_target(
+    track:&mut loom_scene::loomrig_contact::ContactTrack,time:f32,
+    sample:&loom_scene::loomrig_contact::ContactSample,body_frame:glam::Mat4,
+)->Result<(),String> {
+    key_contact_weight(track,time,sample.blend,sample,body_frame)?;
+    let key=track.active_key(time)?.cloned().ok_or("target key is missing")?;
+    let exclusive=!track.keys().iter().any(|other|other.time!=time && other.reference==key.reference)
+        && track.constant_state().is_none_or(|state|state.reference!=key.reference);
+    let space=track.references()[&key.reference].space.clone();
+    let pose=ContactReference::capture(space,body_frame,
+        glam::Mat4::from_rotation_translation(sample.rotation,sample.position),sample.pole_position)?;
+    let reference=if exclusive {
+        track.update_reference(key.reference,pose)?;key.reference
+    } else {
+        let id=track.references().last_key_value().and_then(|(id,_)|id.checked_add(1)).ok_or("contact reference IDs exhausted")?;
+        track.insert_reference(id,pose)?;id
+    };
+    track.update_key(ContactKey {reference,..key})
+}
+
 pub fn execute(state: &mut AppState, command: Command) -> Result<Value, String> {
     let replace = matches!(&command,Command::SetLoomRigContactPreset {..});
     let (rig_id, name) = match &command {
