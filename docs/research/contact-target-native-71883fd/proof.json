@@ -1,0 +1,35 @@
+{
+  "commit": "71883fd71cfc4fc7949a3bc8dfca406afddc276a",
+  "pid": 980794,
+  "binary_sha256": "9ac08f9e86c5cf368c8d9fd2350851b4953debded0e59a3be492e752e7a6ae38",
+  "source_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "release_build_seconds": 660,
+  "committed_objects": 5,
+  "committed_parts": 13,
+  "restored_all_four_viewport_pixels_identical": true,
+  "prior_binary_retained": true,
+  "autoback_archive_files": 4,
+  "autoback_archive_bytes": 814052858,
+  "autoback_archive_hashes_verified": true,
+  "test_copy_archive_files": 21,
+  "test_copy_archive_bytes": 3264379869,
+  "test_copy_archive_hashes_verified": true,
+  "free_matched_pointer_gizmo_verified": true,
+  "throughput": [
+    {
+      "kind": "summary",
+      "shading": "Realistic",
+      "active_windows": 17,
+      "active_ready_pose_fps": 62.502211601909586,
+      "min_active_window_fps": 60.269736614286344
+    },
+    {
+      "kind": "summary",
+      "shading": "Wireframe",
+      "active_windows": 18,
+      "active_ready_pose_fps": 87.9774870851861,
+      "min_active_window_fps": 83.01693208405399
+    }
+  ],
+  "performance_context": "Normal desktop with other GPU activity observed; no application killed or quiet-host claim."
+}

@@ -1,0 +1,4 @@
+{"kind": "pointer_auto_key", "role": "goal", "current_frame": 40, "prior_anchors_retained": true, "one_gesture_one_undo": true, "raw_nodes_materials_retained": true}
+{"kind": "pointer_auto_key", "role": "pole", "current_frame": 40, "prior_anchors_retained": true, "one_gesture_one_undo": true, "raw_nodes_materials_retained": true}
+{"kind": "matched_free_fk", "world_x_degrees": 15, "changed_node_ids": [4975], "source_tracks_and_matching_retained": true, "undo_restored": true}
+{"kind": "restored", "original_scene_hash": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935", "original_nodes_selection_frame_and_history": true}
