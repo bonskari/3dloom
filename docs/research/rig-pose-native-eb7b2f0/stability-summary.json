@@ -1,0 +1,12 @@
+{
+  "seconds": 900.694666869007,
+  "samples": 30,
+  "submitted_distinct_pose_times": 59418,
+  "min_observed_30s_rate": 64.30455913500346,
+  "max_observed_30s_rate": 66.70001130659779,
+  "min_in_play_rss_plus_swap_kib": 1324200,
+  "max_in_play_rss_plus_swap_kib": 1407596,
+  "real_backup_scene_equality": true,
+  "complete_node_history_frame_selection_restore": true,
+  "not_a_quiet_fps_benchmark": true
+}

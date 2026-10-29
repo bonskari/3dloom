@@ -294,3 +294,51 @@ fn fk_control_gizmo_drag_accumulates_pointer_steps_without_changing_source() {
     }
     assert_eq!(app.state.scene.node(bone).unwrap().transform, original);
 }
+
+#[test]
+fn fk_rotation_in_a_rotated_rest_frame_matches_world_delta_in_both_key_modes() {
+    use loom_commands::{Command, CoordSystem, Tool};
+    use loom_scene::{loomrig::HumanoidMapping, Node, ObjectKind};
+    for buffered in [false,true] {
+        let mut app=crate::LoomApp::headless();
+        let mut root=Node::new("root",ObjectKind::bone(1.));
+        root.transform.rotation.set(Vec3::new(20.,35.,-45.));
+        root.transform.scale.set(Vec3::splat(1.25));
+        let root=app.state.scene.add_node(root);
+        let mut pelvis=Node::new("pelvis",ObjectKind::bone(10.));
+        pelvis.parent=Some(root);
+        pelvis.transform.position.set(Vec3::new(3.,4.,5.));
+        pelvis.transform.rotation.set(Vec3::new(-40.,12.,90.));
+        let bone=app.state.scene.add_node(pelvis);
+        let mut head=Node::new("head",ObjectKind::bone(1.));
+        head.parent=Some(bone);head.transform.position.set(Vec3::X*10.);
+        let head=app.state.scene.add_node(head);
+        app.dispatch(Command::CreateLoomRig {root:root.0,mapping:Some(HumanoidMapping {root,pelvis:bone,head,spine:vec![],limbs:vec![]})}).unwrap();
+        let control=app.state.scene.loom_rigs[0].bindings.iter().find(|binding|binding.bone==bone).unwrap().control;
+        let source=app.state.scene.node(bone).unwrap().transform.clone();
+        if buffered {app.dispatch(Command::KeyLoomRigPose {rig:1}).unwrap();}
+        app.dispatch(Command::SetFrame {frame:39}).unwrap();
+        if buffered {app.dispatch(Command::SetKeyMode).unwrap();}
+        app.state.selection=[control].into();app.state.active_tool=Tool::Rotate;app.state.coord_system=CoordSystem::World;
+        let before=app.state.scene.world_matrix(bone);
+        let pivot=before.w_axis.truncate();
+        let projection=top_projection();let mut rotate_layout=layout();rotate_layout.origin=pivot;
+        let center=projection.screen(pivot).unwrap();
+        let at=|degrees:f32|center+egui::vec2(40.*degrees.to_radians().cos(),-40.*degrees.to_radians().sin());
+        let mut rotating=DragState::new(Handle::Axis(Axis::Z),at(0.));
+        for step in 1..=3 {
+            drag(&mut app,&mut rotating,&rotate_layout,&projection,at(15.*step as f32),0);
+            let radians=(15.*step as f32).to_radians();
+            let expected=Mat4::from_translation(pivot)*Mat4::from_rotation_z(radians)*Mat4::from_translation(-pivot)*before;
+            let actual=app.state.scene.world_matrix(bone);
+            assert!(actual.abs_diff_eq(expected,0.001),"buffered={buffered} step={step}: world rotation does not follow the pointer");
+            let delta=app.state.scene.node(control).unwrap().transform.matrix().to_scale_rotation_translation().1;
+            assert!((delta.angle_between(glam::Quat::IDENTITY)-radians).abs()<0.001,"local correction angle differs from the applied world angle");
+            assert_eq!(app.state.scene.node(bone).unwrap().transform,source);
+        }
+        if buffered {
+            app.dispatch(Command::ClearSetKeyModeBuffer).unwrap();
+            assert!(app.state.scene.world_matrix(bone).abs_diff_eq(before,0.001));
+        }
+    }
+}
