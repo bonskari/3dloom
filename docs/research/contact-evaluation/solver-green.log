@@ -1,0 +1,105 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 43.91s
+     Running unittests src/lib.rs (target/debug/deps/loom_commands-729c22a731210a33)
+
+running 23 tests
+test keymap::tests::alt_r_rings_and_alt_l_loops_in_both_poly_groups ... ok
+test keymap::tests::parses_every_chord_in_chart ... ok
+test keymap::tests::no_duplicate_chords_in_main_ui ... ok
+test exchange::tests::setting_an_option_makes_the_preset_user_defined_and_presets_load_back ... ok
+test retarget::real_assets::kimodo_on_metahuman_preserves_skin_and_skeleton_and_deforms_mesh ... ignored, requires LOOM_RETARGET_BVH and LOOM_RETARGET_FBX real production assets
+test retarget::tests::palm_reference_preserves_source_axial_twist ... ok
+test keymap::tests::w_is_select_and_move_and_ctrl_z_is_undo ... ok
+test retarget::tests::world_reference_correction_preserves_target_bind_axes ... ok
+test retarget::tests::continuous_euler_keys_reconstruct_quaternion_across_wrap ... ok
+test viewport::tests::default_kinds_follow_reference ... ok
+test state::tests::top_and_front_views_put_x_on_screen_right ... ok
+test viewport::tests::cells_never_negative_for_tiny_rects ... ok
+test viewport::tests::four_grid_cells_cover_unit_square_without_overlap ... ok
+test viewport::tests::fourteen_layouts_have_expected_cell_counts ... ok
+test viewport::tests::splits_clamp_to_five_percent ... ok
+test keymap::tests::space_locks_the_selection_only_when_enabled ... ok
+test keymap::tests::every_ffd_chart_action_is_registered ... ok
+test keymap::tests::every_chart_action_is_registered_or_out_of_scope ... ok
+test keymap::tests::every_spline_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::every_edit_poly_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::every_editable_poly_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::main_ui_bindings_only_reference_registered_commands ... ok
+test keymap::tests::every_unwrap_chart_action_is_registered_or_deferred ... ok
+
+test result: ok. 22 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/loomrig_contacts.rs (target/debug/deps/loomrig_contacts-7497a055ee27aaf2)
+
+running 5 tests
+test invalid_contact_frames_are_reported_and_recover_after_the_frame_is_fixed ... ok
+test contact_blend_interpolates_and_master_motion_does_not_move_a_world_contact ... ok
+test contact_targets_slide_between_independent_references_at_fractional_times ... ok
+test captured_contact_has_no_pop_and_preserves_stretch_under_affine_parents ... ok
+test world_contact_holds_body_contact_follows_root_and_free_releases ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/loom_scene-a255baacf2b1ed93)
+
+running 56 tests
+test camera::tests::default_lens_matches_default_fov ... ok
+test camera::tests::diagonal_and_vertical_fov_follow_the_render_aspect ... ok
+test camera::tests::frame_spans_the_fov_in_front_of_the_camera ... ok
+test light::tests::falloff_follows_hotspot_and_keeps_its_gap ... ok
+test light::tests::exclusion_scopes ... ok
+test light::tests::decay_and_attenuation_match_the_reference_formulas ... ok
+test light::tests::spot_cone_is_full_inside_the_hotspot_and_dark_outside_the_falloff ... ok
+test light::tests::photometric_intensity_units_convert_through_candela ... ok
+test light::tests::kelvin_colours_run_from_warm_to_white ... ok
+test maps::tests::bump_heights_tilt_the_normals ... ok
+test loomrig_contact_tests::contact_edits_and_collisions_are_atomic_and_keep_shared_references ... ok
+test loomrig_contact_tests::contact_reference_insertion_and_invalid_edits_preserve_authored_data ... ok
+test maps::tests::checker_gradient_noise_and_mix ... ok
+test maps::tests::decal_and_mirror ... ok
+test loomrig_contact_tests::contact_sampling_resolves_affine_body_frames_and_rejects_singular_frames ... ok
+test camera::tests::icon_lies_behind_the_eye_and_is_closed_where_drawn ... ok
+test loomrig_contact_tests::contact_sampling_preserves_references_and_registers_time_dependence ... ok
+test maps::tests::bitmap_crop_and_place ... ok
+test loomrig_contact_tests::contact_invalid_data_is_rejected_by_construction_and_deserialization ... ok
+test material::tests::coordinates_offset_tile_and_rotate ... ok
+test scene::skin_batch::tests::actual_all_159_skin_poses_match_serial_full_stack ... ignored, requires LOOM_PERF_SCENE real saved scene
+test material::tests::multi_sub_resolves_per_face_id_and_missing_ids_are_black ... ok
+test material::tests::a_shell_shows_its_viewport_or_render_choice ... ok
+test caches9::tests::a_failed_read_is_not_kept ... ok
+test material::tests::blend_mixes_by_amount_and_a_mask_goes_through_a_mix_map ... ok
+test scene::tests::add_node_assigns_increasing_ids_never_reused ... ok
+test material::tests::levels_resolve_through_sub_materials_and_maps ... ok
+test loomrig_contact_tests::contact_limb_legacy_serialization_omits_empty_track_and_roundtrips_authored_data ... ok
+test scene::tests::transform_matrix_roundtrip ... ok
+test scene::tests::remove_parent_keeps_children_world_transform ... ok
+test scene::tests::set_parent_keeps_world_transform ... ok
+test light::tests::icons_are_closed_meshes_around_the_pivot ... ok
+test scene::skin_batch::tests::geometry_attachment_constraints_keep_serial_cycle_guards ... ok
+test scene::tests::parametric_box_mesh_matches_primitive ... ok
+test skin::scratch_weight_tests::explicit_weights_reuse_scratch_capacity_and_strongest_keeps_last_tie ... ok
+test scene::tests::next_name_follows_numbering_convention ... ok
+test skin::scratch_weight_tests::owned_skin_application_keeps_input_mesh_allocation_and_reference_output ... ok
+test modifier::modifier_list_tests::every_modifier_is_in_or_out ... ok
+test undo::tests::commit_then_undo_restores_scene ... ok
+test undo::tests::failed_group_leaves_scene_unchanged ... ok
+test scene::skin_batch::tests::static_skin_keeps_timeless_cache_and_instanced_slots_use_serial ... ok
+test sun::tests::dates ... ok
+test undo::tests::entry_identity_survives_redo_but_never_branches_resets_or_eviction ... ok
+test sun::tests::morning_sun_rises_in_the_east_and_night_is_below_the_horizon ... ok
+test sun::tests::noon_sun_is_south_and_high_in_june_in_san_francisco ... ok
+test scene::skin_batch::tests::batch_render_mode_and_changed_time_use_ordinary_cache_rules ... ok
+test undo::tests::nested_begin_joins_the_outer_transaction ... ok
+test undo::tests::redo_reapplies_and_new_commit_clears_redo ... ok
+test undo::tests::limit_drops_oldest ... ok
+test undo::tests::remove_node_inverse_restores_children ... ok
+test undo::tests::set_transform_undo_restores_position ... ok
+test scene::skin_batch::tests::editable_mesh_input_does_not_apply_poly_subdivision_settings ... ok
+test undo::tests::transaction_collapses_drag_steps_into_one_and_ignores_limit ... ok
+test scene::skin_batch::tests::base_output_runs_in_executor_and_propagates_animated_reads ... ok
+test scene::skin_batch::tests::batch_jobs_preserve_full_output_cache_edits_and_worker_tls ... ok
+test skin::scratch_weight_tests::scratch_weights_match_public_reference_for_limits_flags_and_patch_owners ... ok
+
+test result: ok. 55 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.11s
+

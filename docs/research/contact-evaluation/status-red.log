@@ -1,0 +1,15 @@
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+error[E0599]: no method named `contact_errors` found for struct `Scene` in the current scope
+   --> crates/loom_commands/tests/loomrig_contacts.rs:236:26
+    |
+236 |     let errors = s.scene.contact_errors();
+    |                          ^^^^^^^^^^^^^^ method not found in `Scene`
+
+error[E0599]: no method named `contact_errors` found for struct `Scene` in the current scope
+   --> crates/loom_commands/tests/loomrig_contacts.rs:242:21
+    |
+242 |     assert!(s.scene.contact_errors().is_empty());
+    |                     ^^^^^^^^^^^^^^ method not found in `Scene`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `loom_commands` (test "loomrig_contacts") due to 2 previous errors

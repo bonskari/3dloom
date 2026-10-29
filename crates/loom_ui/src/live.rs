@@ -263,6 +263,7 @@ impl LoomApp {
                 "submitted_pose_time": self.pose_submissions.pose_time,
                 "submitted_world_version": self.pose_submissions.world_version,
                 "gpu_pose": gpu_pose,
+                "rig_contact_errors": s.scene.contact_errors(),
             },
             "egui": {
                 "input": egui_state,

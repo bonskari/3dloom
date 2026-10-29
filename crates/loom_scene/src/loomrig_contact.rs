@@ -15,10 +15,12 @@ pub struct ContactReference {
     pub space: ContactSpace,
     pub position: Vec3,
     pub rotation: Quat,
+    pub pole_position: Vec3,
 }
 impl ContactReference {
     fn validate(&self) -> Result<(), String> {
         if !self.position.is_finite()
+            || !self.pole_position.is_finite()
             || !self.rotation.is_finite()
             || (self.rotation.length_squared() - 1.).abs() > 1e-4
         {
@@ -170,4 +172,112 @@ impl ContactTrack {
         let end = self.keys.partition_point(|key| key.time <= time);
         Ok(end.checked_sub(1).map(|index| &self.keys[index]))
     }
+}
+
+/// Effective world-space input shared by contact solving and controller editing.
+#[derive(Debug, Clone)]
+pub struct ContactSample {
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub pole_position: Vec3,
+    pub blend: f32,
+}
+
+/// A proper polar rotation with a fixed X reflection convention for mirrored frames.
+/// The remaining stretch is retained separately when replacing an end orientation.
+pub(crate) fn affine_rotation(matrix: glam::Mat4) -> Result<Quat, String> {
+    let mut basis = glam::Mat3::from_mat4(matrix);
+    if !matrix.is_finite()
+        || !matrix.row(3).abs_diff_eq(glam::Vec4::W, 1e-6)
+        || !basis.inverse().is_finite()
+    {
+        return Err("contact frame must be finite, affine and invertible".into());
+    }
+    if basis.determinant() < 0. {
+        basis.x_axis = -basis.x_axis;
+    }
+    let scale = basis
+        .x_axis
+        .length()
+        .max(basis.y_axis.length())
+        .max(basis.z_axis.length());
+    basis *= scale.recip();
+    for _ in 0..64 {
+        let next = (basis + basis.inverse().transpose()) * 0.5;
+        if !next.is_finite() {
+            return Err("contact frame rotation is undefined".into());
+        }
+        let converged = next.abs_diff_eq(basis, 1e-6);
+        basis = next;
+        if converged {
+            break;
+        }
+    }
+    if !(basis.transpose() * basis).abs_diff_eq(glam::Mat3::IDENTITY, 1e-4) {
+        return Err("contact frame rotation did not converge".into());
+    }
+    Ok(Quat::from_mat3(&basis).normalize())
+}
+
+impl ContactTrack {
+    pub fn sample(
+        &self,
+        time: f32,
+        body_frame: glam::Mat4,
+    ) -> Result<Option<ContactSample>, String> {
+        let Some(key) = self.active_key(time)? else {
+            return Ok(None);
+        };
+        let resolve = |id| -> Result<ContactSample, String> {
+            let reference = &self.references[&id];
+            let frame = match reference.space {
+                ContactSpace::World => glam::Mat4::IDENTITY,
+                ContactSpace::Body => body_frame,
+            };
+            let rotation = affine_rotation(frame * glam::Mat4::from_quat(reference.rotation))?;
+            let position = frame.transform_point3(reference.position);
+            let pole_position = frame.transform_point3(reference.pole_position);
+            if !position.is_finite() || !pole_position.is_finite() {
+                return Err("contact frame produces a nonfinite target".into());
+            }
+            Ok(ContactSample {
+                position,
+                rotation,
+                pole_position,
+                blend: key.blend,
+            })
+        };
+        let mut result = resolve(key.reference)?;
+        let next = self
+            .keys
+            .get(self.keys.partition_point(|other| other.time <= time));
+        if let Some(next) = next {
+            let amount = ((time as f64 - key.time as f64) / (next.time as f64 - key.time as f64))
+                .clamp(0., 1.) as f32;
+            result.blend = key.blend + (next.blend - key.blend) * amount;
+            if next.reference != key.reference && amount > 0. {
+                let target = resolve(next.reference)?;
+                let interpolate = |a: Vec3, b: Vec3| {
+                    let amount = amount as f64;
+                    Vec3::new(
+                        ((1. - amount) * a.x as f64 + amount * b.x as f64) as f32,
+                        ((1. - amount) * a.y as f64 + amount * b.y as f64) as f32,
+                        ((1. - amount) * a.z as f64 + amount * b.z as f64) as f32,
+                    )
+                };
+                result.position = interpolate(result.position, target.position);
+                result.rotation = result.rotation.slerp(target.rotation, amount).normalize();
+                result.pole_position = interpolate(result.pole_position, target.pole_position);
+            }
+        }
+        Ok(Some(result))
+    }
+}
+
+/// Evaluation failure for a specific rig limb; runtime-only, never saved in a scene.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ContactEvaluationError {
+    pub rig: u32,
+    pub limb: String,
+    pub message: String,
 }

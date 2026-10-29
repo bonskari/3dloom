@@ -7,6 +7,7 @@ fn reference(space: ContactSpace) -> ContactReference {
         space,
         position: Vec3::new(1., 2., 3.),
         rotation: Quat::IDENTITY,
+        pole_position: Vec3::Z,
     }
 }
 fn key(time: f32, reference: u64, blend: f32) -> ContactKey {
@@ -187,4 +188,47 @@ fn contact_reference_insertion_and_invalid_edits_preserve_authored_data() {
     assert!(track.remove_key(f32::NAN).is_err());
     track.move_key(1., 1.).unwrap();
     assert_eq!(track, original);
+}
+
+#[test]
+fn contact_sampling_resolves_affine_body_frames_and_rejects_singular_frames() {
+    use glam::Mat4;
+    let track = track();
+    let frame = Mat4::from_cols_array(&[
+        -2., 0., 0., 0., 0.4, 3., 0., 0., 0., 0.3, 1., 0., 4., 5., 6., 1.,
+    ]);
+    let sample = track.sample(30., frame).unwrap().unwrap();
+    assert!(sample
+        .position
+        .abs_diff_eq(frame.transform_point3(Vec3::new(1., 2., 3.)), 1e-5));
+    assert!(sample.rotation.is_finite());
+    assert!((sample.rotation.length_squared() - 1.).abs() < 1e-5);
+    assert!(track
+        .sample(30., Mat4::from_scale(Vec3::new(0., 1., 1.)))
+        .is_err());
+    assert!(track
+        .sample(30., Mat4::from_cols_array(&[f32::NAN; 16]))
+        .is_err());
+    // A world-space contact does not depend on an unrelated singular body frame.
+    assert!(track.sample(10., Mat4::ZERO).unwrap().is_some());
+    let mut bad = reference(ContactSpace::World);
+    bad.pole_position.x = f32::INFINITY;
+    assert!(ContactTrack::new([(7, bad)].into(), vec![key(0., 7, 1.)]).is_err());
+}
+
+#[test]
+fn contact_interpolation_handles_all_valid_finite_key_times() {
+    let mut a = reference(ContactSpace::World);
+    let mut b = a.clone();
+    a.position.x = -f32::MAX;
+    b.position.x = f32::MAX;
+    let track = ContactTrack::new(
+        [(1, a), (2, b)].into(),
+        vec![key(-f32::MAX, 1, 0.), key(f32::MAX, 2, 1.)],
+    )
+    .unwrap();
+    let sample = track.sample(0., glam::Mat4::IDENTITY).unwrap().unwrap();
+    assert_eq!(sample.blend, 0.5);
+    assert!(sample.position.is_finite());
+    assert_eq!(sample.position.x, 0.);
 }

@@ -96,6 +96,8 @@ pub struct Scene {
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
     #[serde(skip)]
     ik_solving: std::cell::Cell<bool>,
+    #[serde(skip)]
+    contact_errors: std::cell::RefCell<Vec<crate::loomrig_contact::ContactEvaluationError>>,
     /// Nodes whose stack is being evaluated right now (cycle guard for eval lookups).
     #[serde(skip)]
     eval_in_progress: std::cell::RefCell<std::collections::HashSet<NodeId>>,
@@ -198,6 +200,7 @@ impl Scene {
             xrefs: Vec::new(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
+            contact_errors: Default::default(),
             eval_in_progress: Default::default(),
             time: std::cell::Cell::new(0.0),
             constraint_busy: Default::default(),
@@ -886,6 +889,11 @@ impl Scene {
         self.ik_chains.iter().find(|c| c.goal == id || self.ik_chain_bones(c).contains(&id))
     }
 
+    pub fn contact_errors(&self) -> Vec<crate::loomrig_contact::ContactEvaluationError> {
+        self.ensure_ik();
+        self.contact_errors.borrow().clone()
+    }
+
     fn ensure_ik(&self) {
         self.sync_time();
         let v = self.version_counter.get();
@@ -899,6 +907,7 @@ impl Scene {
         let reads = crate::anim::animated_reads();
         self.ik_solving.set(true);
         self.ik_cache.borrow_mut().2.clear();
+        self.contact_errors.borrow_mut().clear();
         // Offset controls are identity at creation: native animation keeps playing.
         for rig in &self.loom_rigs {
             for binding in &rig.bindings {
@@ -943,11 +952,33 @@ impl Scene {
                 let Some(pole_node) = self.nodes.get(&limb.pole) else {
                     continue;
                 };
+                let contact = if limb.contacts.is_empty() {
+                    None
+                } else {
+                    match limb.contacts.sample(now, self.world_matrix(rig.mapping.root)) {
+                        Ok(contact) => contact,
+                        Err(message) => {
+                            self.contact_errors.borrow_mut().push(crate::loomrig_contact::ContactEvaluationError {
+                                rig: rig.id, limb: limb.mapping.name.clone(), message,
+                            });
+                            continue;
+                        }
+                    }
+                };
+                let blend = contact.as_ref().map_or_else(|| limb.blend.get().clamp(0.0, 1.0), |c| c.blend);
                 // Solve in the start joint's parent space: bone lengths and
                 // targets must share units even under a scaled scene parent.
                 let solve_frame = self.parent_frame(ids[0]).inverse();
-                let goal = solve_frame
-                    .transform_point3(self.world_matrix(goal_node.id).transform_point3(Vec3::ZERO));
+                if contact.is_some() && !solve_frame.is_finite() {
+                    self.contact_errors.borrow_mut().push(crate::loomrig_contact::ContactEvaluationError {
+                        rig: rig.id, limb: limb.mapping.name.clone(),
+                        message: "contact solve frame must be finite and invertible".into(),
+                    });
+                    continue;
+                }
+                let goal_world = contact.as_ref().map_or_else(
+                    || self.world_matrix(goal_node.id).transform_point3(Vec3::ZERO), |c| c.position);
+                let goal = solve_frame.transform_point3(goal_world);
                 let root = solve_frame
                     .transform_point3(self.world_matrix(ids[0]).transform_point3(Vec3::ZERO));
                 let mid = solve_frame
@@ -961,9 +992,9 @@ impl Scene {
                         current = Vec3::Z - axis * Vec3::Z.dot(axis);
                     }
                 }
-                let desired = solve_frame
-                    .transform_point3(self.world_matrix(pole_node.id).transform_point3(Vec3::ZERO))
-                    - root;
+                let pole_world = contact.as_ref().map_or_else(
+                    || self.world_matrix(pole_node.id).transform_point3(Vec3::ZERO), |c| c.pole_position);
+                let desired = solve_frame.transform_point3(pole_world) - root;
                 let projected = desired - axis * desired.dot(axis);
                 let swivel = axis
                     .dot(current.cross(projected))
@@ -1005,10 +1036,32 @@ impl Scene {
                         id,
                         Mat4::from_scale_rotation_translation(
                             scale,
-                            fk.slerp(q, limb.blend.get().clamp(0.0, 1.0)).normalize(),
+                            fk.slerp(q, blend).normalize(),
                             pos,
                         ),
                     );
+                }
+                if let Some(contact) = contact {
+                    // Replace only the proper world orientation, retaining the complete
+                    // signed stretch/shear and solved pivot under affine parents.
+                    if blend > 0. {
+                        let parent = self.parent_frame(ids[2]);
+                        let world = self.world_matrix(ids[2]);
+                        match crate::loomrig_contact::affine_rotation(world) {
+                            Ok(rotation) => {
+                                let target = rotation.slerp(contact.rotation, blend).normalize();
+                                let delta = Mat4::from_quat(target * rotation.inverse());
+                                let mut oriented = delta * world;
+                                oriented.w_axis = world.w_axis;
+                                let local = parent.inverse() * oriented;
+                                if local.is_finite() { self.ik_cache.borrow_mut().2.insert(ids[2], local); }
+                            }
+                            Err(message) => self.contact_errors.borrow_mut().push(crate::loomrig_contact::ContactEvaluationError {
+                                rig: rig.id, limb: limb.mapping.name.clone(), message,
+                            }),
+                        }
+                    }
+                    continue;
                 }
                 let (scale, fk, pos) = self.local_matrix(ids[2]).to_scale_rotation_translation();
                 let target = (self

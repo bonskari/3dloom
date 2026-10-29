@@ -1,0 +1,15 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.34s
+     Running unittests src/lib.rs (target/debug/deps/loom_scene-d1742087114ff936)
+
+running 7 tests
+test loomrig_contact_tests::contact_interpolation_handles_all_valid_finite_key_times ... ok
+test loomrig_contact_tests::contact_sampling_resolves_affine_body_frames_and_rejects_singular_frames ... ok
+test loomrig_contact_tests::contact_edits_and_collisions_are_atomic_and_keep_shared_references ... ok
+test loomrig_contact_tests::contact_reference_insertion_and_invalid_edits_preserve_authored_data ... ok
+test loomrig_contact_tests::contact_sampling_preserves_references_and_registers_time_dependence ... ok
+test loomrig_contact_tests::contact_invalid_data_is_rejected_by_construction_and_deserialization ... ok
+test loomrig_contact_tests::contact_limb_legacy_serialization_omits_empty_track_and_roundtrips_authored_data ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 0.00s
+

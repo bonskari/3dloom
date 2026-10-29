@@ -1,0 +1,30 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.85s
+     Running tests/loomrig_contacts.rs (target/debug/deps/loomrig_contacts-7497a055ee27aaf2)
+
+running 2 tests
+test contact_targets_slide_between_independent_references_at_fractional_times ... FAILED
+test world_contact_holds_body_contact_follows_root_and_free_releases ... FAILED
+
+failures:
+
+---- contact_targets_slide_between_independent_references_at_fractional_times stdout ----
+
+thread 'contact_targets_slide_between_independent_references_at_fractional_times' (302196) panicked at crates/loom_commands/tests/loomrig_contacts.rs:66:9:
+at 10: Vec3(20.0, 0.0, 0.0) != Vec3(12.0, 8.0, 0.0)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- world_contact_holds_body_contact_follows_root_and_free_releases stdout ----
+
+thread 'world_contact_holds_body_contact_follows_root_and_free_releases' (302197) panicked at crates/loom_commands/tests/loomrig_contacts.rs:49:13:
+World at 10: Vec3(20.0, 0.5, 0.0), expected Vec3(12.0, 8.0, 0.0)
+
+
+failures:
+    contact_targets_slide_between_independent_references_at_fractional_times
+    world_contact_holds_body_contact_follows_root_and_free_releases
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p loom_commands --test loomrig_contacts`

@@ -85,3 +85,12 @@ Desktop production-unset64.8022Realistic/92.7629Wireframe ready distinctpose tim
 - [x] Verify core Scene tests plus rig-command serialization/undo/mapping preservation tests. Keep original Ray source untouched; local main commit, no push.
 
 Following tasks still required: contact evaluator and no-pop/affine/pole tests; transform/pose-key command routing; direct body/end/goal/pole controls; separate Animation Editor contact rows and clip/key editing; real Ray acceptance, final Kimodo workflow and native Mac verification. Preserve the full objective.
+
+## Task 11: contact target evaluation and skeleton integration
+
+**Files:** contact model/sampler and Scene IK evaluator; focused real-command fixtures.
+
+- [ ] RED: world contacts hold through root/master motion; body contacts follow the characterized root; free blend0 releases to unchanged FK; before-first/empty tracks preserve prior evaluation; fractional/reverse/random-access time changes invalidate static IK caches. Test moving sliding references, editable blends, joined references and source-controller preservation.
+- [ ] GREEN: resolve reference poses in world or characterized-root coordinates, interpolate independently authored targets/blends between keys, retain joined target identity, feed the same resolved goal/pole data into solving and later visualization/editing. Contact reference poses need captured pole/bend information; extend the unreleased metadata with validated pole coordinates rather than deriving a new bend at each playback time.
+- [ ] Verify no-pop root/middle/end and orientation, mirrored/nonuniform/sheared and singular frames explicitly; do not claim affine support from naive quaternion decomposition. Preserve legacy empty-track behavior. Complete target editing and authoring commands in subsequent tasks before claiming usable planted/sliding/free tools.
+- [ ] Core Scene and command regressions, local main commit, no push; no native replacement until an actual useful authoring increment is ready and verified.
