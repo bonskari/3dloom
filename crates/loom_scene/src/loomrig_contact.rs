@@ -274,6 +274,28 @@ impl ContactTrack {
         }
         Ok(())
     }
+    pub fn rescaled(&self, mut map: impl FnMut(f32) -> Result<f32, String>) -> Result<Self, String> {
+        let mut keys = Vec::with_capacity(self.keys.len());
+        for key in &self.keys {
+            let time = map(key.time)?;
+            if !time.is_finite() {
+                return Err("contact time must be finite".into());
+            }
+            if keys.last().is_some_and(|prev: &ContactKey| time <= prev.time || time - prev.time < crate::anim::SAME_TIME) {
+                return Err("contact key times must remain strictly increasing".into());
+            }
+            keys.push(ContactKey {
+                time,
+                reference: key.reference,
+                blend: key.blend,
+            });
+        }
+        Ok(Self {
+            references: self.references.clone(),
+            keys,
+            constant: self.constant.clone(),
+        })
+    }
     /// Held metadata lookup, including time-dependence before the first key.
     pub fn active_key(&self, time: f32) -> Result<Option<&ContactKey>, String> {
         if !time.is_finite() {

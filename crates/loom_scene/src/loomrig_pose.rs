@@ -154,6 +154,21 @@ impl RigPoseTrack {
             constant: Some(self.sample(time)?),
         })
     }
+
+    pub fn rescaled(&self, mut map: impl FnMut(f32) -> Result<f32, String>) -> Result<Self, String> {
+        let mut keys = Vec::with_capacity(self.keys.len());
+        for key in &self.keys {
+            let time = map(key.time)?;
+            if !time.is_finite() {
+                return Err("rig pose key time must be finite".into());
+            }
+            if keys.last().is_some_and(|prev: &RigPoseKey| time <= prev.time || time - prev.time < crate::anim::SAME_TIME) {
+                return Err("rig pose key times must remain strictly increasing".into());
+            }
+            keys.push(RigPoseKey { time, offsets: key.offsets });
+        }
+        Ok(Self { keys, constant: self.constant })
+    }
 }
 
 #[cfg(test)]

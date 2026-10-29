@@ -2406,3 +2406,201 @@ fn target_auto_key_with_master_motion_preserves_world_targets_and_prior_keys() {
         execute(&mut s,Command::UndoSceneOperation).unwrap();assert_eq!(s.scene.loom_rigs[0].limbs[0].contacts,before);
     }
 }
+
+#[test]
+fn ordinary_set_keys_routes_selected_contact_and_limb_channels_without_raw_target_keys() {
+    for buffered in [false, true] {
+        let (mut s, root, _) = rigged();
+        let rig = s.scene.loom_rigs[0].clone();
+        let limb = rig.limbs[0].clone();
+        let sources: Vec<_> = s.scene.nodes().filter(|n| n.object.is_bone()).map(|n| (n.id, n.transform.clone())).collect();
+        execute(&mut s, Command::SetLoomRigContactPreset {
+            rig: rig.id, limb: limb.mapping.name.clone(), time: 0., preset: "planted".into(),
+        }).unwrap();
+        let ref_at_zero = s.scene.loom_rigs[0].limbs[0].contacts.references().get(&1).cloned().unwrap();
+        execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+        s.selection = [limb.goal, limb.pole].into();
+        if buffered {
+            execute(&mut s, Command::SetKeyMode).unwrap();
+            let delta = Vec3::new(1., 2., 3.);
+            execute(&mut s, Command::MoveSelection {
+                delta: delta.to_array(), system: Some(loom_commands::CoordSystem::World),
+            }).unwrap();
+        }
+        let expected_sample = s.scene.loom_rigs[0].limbs[0].contacts.sample(10., s.scene.world_matrix(root)).unwrap().unwrap();
+        execute(&mut s, Command::SetKeys).unwrap();
+        let contacts = &s.scene.loom_rigs[0].limbs[0].contacts;
+        assert_eq!(contacts.keys().iter().map(|k| k.time).collect::<Vec<_>>(), vec![0., 10.]);
+        assert_eq!(contacts.references().get(&1), Some(&ref_at_zero), "buffered={buffered}: frame 0 anchor must stay intact");
+        let sample_10 = contacts.sample(10., s.scene.world_matrix(root)).unwrap().unwrap();
+        assert!(sample_10.position.abs_diff_eq(expected_sample.position, 0.001));
+        assert!(sample_10.pole_position.abs_diff_eq(expected_sample.pole_position, 0.001));
+        assert!(!s.scene.node(limb.goal).unwrap().transform.position.is_animated());
+        assert!(!s.scene.node(limb.goal).unwrap().transform.rotation.is_animated());
+        assert!(!s.scene.node(limb.pole).unwrap().transform.position.is_animated());
+        assert!(s.scene.node(limb.goal).unwrap().transform.scale.is_animated());
+        for (id, transform) in &sources {
+            assert_eq!(&s.scene.node(*id).unwrap().transform, transform);
+        }
+    }
+    // Base IK/FK limb without active contact: SetKeys keys limb.blend and limb.pose_offsets when a limb control is selected or posed.
+    for buffered in [false, true] {
+        let (mut s, _, _) = rigged();
+        let rig = s.scene.loom_rigs[0].clone();
+        let fk_control = rig.bindings.iter().find(|b| b.bone == rig.limbs[0].mapping.start).unwrap().control;
+        execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+        if buffered {
+            execute(&mut s, Command::SetKeyMode).unwrap();
+        }
+        s.selection = [fk_control].into();
+        execute(&mut s, Command::SetLoomRigLimb {
+            rig: rig.id, limb: "Arm".into(), solver: "limb".into(), blend: 0.75,
+        }).unwrap();
+        execute(&mut s, Command::SetTransform {
+            id: fk_control.0, position: None, rotation_deg: Some([0., 0., 15.]), scale: None,
+        }).unwrap();
+        execute(&mut s, Command::SetKeys).unwrap();
+        let limb = &s.scene.loom_rigs[0].limbs[0];
+        assert!(limb.blend.keys().unwrap().tracks[0].key_at(10.).is_some());
+        assert!((limb.blend.get_at(10.) - 0.75).abs() < 1e-6);
+        assert!(limb.pose_offsets[..3].iter().all(|p| p.keys().unwrap().tracks.iter().all(|tr| tr.key_at(10.).is_some())));
+        assert!(s.scene.node(fk_control).unwrap().transform.rotation.keys().unwrap().tracks.iter().all(|tr| tr.key_at(10.).is_some()));
+    }
+    // Direct KeyPosition / KeyRotation on an active contact Goal routes to the contact track instead of raw node tracks.
+    let (mut s, root, _) = rigged();
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    execute(&mut s, Command::SetLoomRigContactPreset {
+        rig: 1, limb: "Arm".into(), time: 0., preset: "planted".into(),
+    }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 15 }).unwrap();
+    s.selection = [limb.goal].into();
+    execute(&mut s, Command::KeyPosition).unwrap();
+    assert!(s.scene.loom_rigs[0].limbs[0].contacts.keys().iter().any(|k| k.time == 15.));
+    assert!(!s.scene.node(limb.goal).unwrap().transform.position.is_animated());
+    let _ = root;
+}
+
+#[test]
+fn selection_key_times_and_track_bar_ops_include_rig_contact_and_blend_keys() {
+    let (mut s, _, _) = rigged();
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    for time in [0., 10., 20.] {
+        execute(&mut s, Command::SetLoomRigContactPreset {
+            rig: 1, limb: "Arm".into(), time, preset: (if time == 10. { "free" } else { "planted" }).into(),
+        }).unwrap();
+    }
+    s.selection = [limb.goal].into();
+    assert_eq!(loom_commands::anim_cmds::selection_key_times(&s), vec![0., 10., 20.]);
+    execute(&mut s, Command::SetFrame { frame: 0 }).unwrap();
+    execute(&mut s, Command::GoToNextKey).unwrap();
+    assert_eq!(s.current_frame, 10);
+    execute(&mut s, Command::MoveKeysInTime { from: 10, to: 10, delta: 5 }).unwrap();
+    assert_eq!(loom_commands::anim_cmds::selection_key_times(&s), vec![0., 15., 20.]);
+    assert!(s.scene.loom_rigs[0].limbs[0].pose_matches.keys().iter().any(|k| k.time == 15.));
+    execute(&mut s, Command::DeleteKeys { from: 15, to: 15 }).unwrap();
+    assert_eq!(loom_commands::anim_cmds::selection_key_times(&s), vec![0., 20.]);
+    assert!(s.scene.loom_rigs[0].limbs[0].pose_matches.keys().iter().all(|k| k.time != 15.));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(loom_commands::anim_cmds::selection_key_times(&s), vec![0., 15., 20.]);
+}
+
+#[test]
+fn rescale_time_stretches_all_rig_channels_pose_frames_and_clips_with_undo() {
+    let (mut s, root, end) = rigged();
+    let rig = s.scene.loom_rigs[0].clone();
+    let fk_control = rig.bindings.iter().find(|b| b.bone == rig.limbs[0].mapping.start).unwrap().control;
+    execute(&mut s, Command::SetLoomRigContactPreset {
+        rig: 1, limb: "Arm".into(), time: 0., preset: "planted".into(),
+    }).unwrap();
+    execute(&mut s, Command::KeyLoomRigPose { rig: 1 }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::SetTransform {
+        id: fk_control.0, position: None, rotation_deg: Some([0., 0., 20.]), scale: None,
+    }).unwrap();
+    execute(&mut s, Command::SetLoomRigContactPreset {
+        rig: 1, limb: "Arm".into(), time: 10., preset: "free".into(),
+    }).unwrap();
+    execute(&mut s, Command::KeyLoomRigPose { rig: 1 }).unwrap();
+    s.scene.animation_clips.push(loom_scene::AnimationClip {
+        id: 1, name: "Walk".into(), nodes: vec![root], start: 0., end: 10.,
+    });
+    let before_rigs = s.scene.loom_rigs.clone();
+    let before_clips = s.scene.animation_clips.clone();
+    let pose_at_5 = s.scene.at_time(5., || [root, end].map(|id| s.scene.world_matrix(id)));
+    let pose_at_10 = s.scene.at_time(10., || [root, end].map(|id| s.scene.world_matrix(id)));
+    let history = s.undo.position();
+    execute(&mut s, Command::RescaleTime { start: 0, end: 200 }).unwrap();
+    assert_eq!(s.undo.position(), history + 1);
+    assert_eq!(s.frame_range, (0, 200));
+    assert_eq!(s.current_frame, 20);
+    let r = &s.scene.loom_rigs[0];
+    assert_eq!(r.pose_frames.times(), &[0., 20.]);
+    let l = &r.limbs[0];
+    assert_eq!(l.contacts.keys().iter().map(|k| k.time).collect::<Vec<_>>(), vec![0., 20.]);
+    assert_eq!(l.pose_matches.keys().iter().map(|k| k.time).collect::<Vec<_>>(), vec![0., 20.]);
+    assert!(l.blend.keys().unwrap().tracks[0].key_at(20.).is_some());
+    assert!(l.pose_offsets[..3].iter().all(|p| p.keys().unwrap().tracks.iter().all(|tr| tr.key_at(20.).is_some())));
+    assert_eq!((s.scene.animation_clips[0].start, s.scene.animation_clips[0].end), (0., 20.));
+    let rescaled_10 = s.scene.at_time(10., || [root, end].map(|id| s.scene.world_matrix(id)));
+    let rescaled_20 = s.scene.at_time(20., || [root, end].map(|id| s.scene.world_matrix(id)));
+    for i in 0..2 {
+        assert!(rescaled_10[i].abs_diff_eq(pose_at_5[i], 0.001));
+        assert!(rescaled_20[i].abs_diff_eq(pose_at_10[i], 0.001));
+    }
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.frame_range, (0, 100));
+    assert_eq!(s.current_frame, 10);
+    assert_eq!(s.scene.loom_rigs, before_rigs);
+    assert_eq!(s.scene.animation_clips, before_clips);
+    execute(&mut s, Command::RedoSceneOperation).unwrap();
+    assert_eq!(s.frame_range, (0, 200));
+    assert_eq!(s.current_frame, 20);
+    assert_eq!(s.scene.loom_rigs[0].pose_frames.times(), &[0., 20.]);
+}
+
+#[test]
+fn set_keys_and_rescale_time_reject_invalid_locked_and_xref_states_atomically() {
+    // 1. SetKeys in SetKeyMode preserves the live preview buffer when rejected by Noise blend controller.
+    let (mut s, root, _) = rigged();
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    execute(&mut s, Command::SetLoomRigContactPreset {
+        rig: 1, limb: "Arm".into(), time: 0., preset: "planted".into(),
+    }).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::SetKeyMode).unwrap();
+    s.selection = [limb.goal].into();
+    execute(&mut s, Command::MoveSelection {
+        delta: [2., 0., 0.], system: Some(loom_commands::CoordSystem::World),
+    }).unwrap();
+    let preview_pose = s.scene.loom_rigs[0].limbs[0].contacts.sample(10., s.scene.world_matrix(root)).unwrap().unwrap();
+    s.scene.loom_rigs[0].limbs[0].blend.controller = loom_scene::param::Controller::Noise(Default::default());
+    assert!(execute(&mut s, Command::SetKeys).is_err());
+    assert!(s.set_key_buffer.is_some());
+    let still_preview = s.scene.loom_rigs[0].limbs[0].contacts.sample(10., s.scene.world_matrix(root)).unwrap().unwrap();
+    assert!(still_preview.position.abs_diff_eq(preview_pose.position, 1e-4));
+
+    // 2. RescaleTime rejects invalid range, collision on shrink, and locked rig controls atomically.
+    let (mut s, _, _) = rigged();
+    execute(&mut s, Command::SetLoomRigContactPreset {
+        rig: 1, limb: "Arm".into(), time: 0., preset: "planted".into(),
+    }).unwrap();
+    execute(&mut s, Command::SetLoomRigContactPreset {
+        rig: 1, limb: "Arm".into(), time: 0.005, preset: "free".into(),
+    }).unwrap();
+    let snap_rigs = s.scene.loom_rigs.clone();
+    let history = s.undo.position();
+    assert!(execute(&mut s, Command::RescaleTime { start: 10, end: 10 }).is_err());
+    assert!(execute(&mut s, Command::RescaleTime { start: 0, end: 1 }).is_err());
+    let goal = s.scene.loom_rigs[0].limbs[0].goal;
+    let path = loom_scene::tracks::node_tracks(s.scene.node(goal).unwrap())
+        .into_iter()
+        .find(|path| path.pointer == "/position")
+        .unwrap();
+    s.scene.track_data.set_flags(path.key(), loom_scene::tracks::TrackFlags { locked: true, ..Default::default() });
+    assert!(execute(&mut s, Command::RescaleTime { start: 0, end: 200 }).is_err());
+    assert_eq!(s.frame_range, (0, 100));
+    assert_eq!(s.undo.position(), history);
+    assert_eq!(s.scene.loom_rigs, snap_rigs);
+}
+
+
