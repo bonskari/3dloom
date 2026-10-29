@@ -125,6 +125,8 @@ pub struct RigLimb {
     pub blend: crate::Param<f32>,
     #[serde(default)]
     pub pose_offsets: Vec<crate::Param<Vec3>>,
+    #[serde(default, skip_serializing_if = "crate::loomrig_contact::ContactTrack::is_empty")]
+    pub contacts: crate::loomrig_contact::ContactTrack,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoomRig {

@@ -137,3 +137,30 @@ fn new_keep_hierarchy_freezes_native_rig_metadata_tracks_at_current_values() {
     assert!(limb.blend.keys().is_none());
     assert!(limb.pose_offsets.iter().all(|p| p.keys().is_none()));
 }
+
+#[test]
+fn authored_contacts_survive_save_merge_mapping_and_undo() {
+    use loom_scene::loomrig_contact::{ContactKey, ContactReference, ContactSpace, ContactTrack};
+    let mut source = rigged();
+    source.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+        [(7, ContactReference { space: ContactSpace::World, position: Vec3::new(4., 5., 6.), rotation: glam::Quat::IDENTITY })].into(),
+        vec![ContactKey { time: 10., reference: 7, blend: 1. }, ContactKey { time: 20., reference: 7, blend: 0.5 }],
+    ).unwrap();
+    let expected = source.scene.loom_rigs[0].limbs[0].contacts.clone();
+    let mapping = source.scene.loom_rigs[0].mapping.clone();
+    execute(&mut source, Command::SetLoomRigMapping { rig: 1, mapping }).unwrap();
+    assert_eq!(source.scene.loom_rigs[0].limbs[0].contacts, expected);
+    let saved_path = path("contacts");
+    source.selection = source.scene.nodes().map(|n| n.id).collect();
+    execute(&mut source, Command::SaveSelected { path: Some(saved_path.clone()) }).unwrap();
+    let doc = loom_commands::file::read(std::path::Path::new(&saved_path)).unwrap();
+    assert_eq!(doc.scene.loom_rigs[0].limbs[0].contacts, expected);
+    let mut target = AppState::new();
+    loom_commands::file::merge_map(&mut target, &doc, None, &[], "Contacts").unwrap();
+    assert_eq!(target.scene.loom_rigs[0].limbs[0].contacts, expected);
+    execute(&mut target, Command::UndoSceneOperation).unwrap();
+    assert!(target.scene.loom_rigs.is_empty());
+    execute(&mut target, Command::RedoSceneOperation).unwrap();
+    assert_eq!(target.scene.loom_rigs[0].limbs[0].contacts, expected);
+    std::fs::remove_file(saved_path).unwrap();
+}

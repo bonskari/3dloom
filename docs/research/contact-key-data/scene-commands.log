@@ -1,0 +1,1857 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+warning: variable does not need to be mutable
+   --> crates/loom_commands/tests/review7_fixes.rs:175:9
+    |
+175 |     let mut skin = |s: &mut AppState, segs: f64, x: f32| {
+    |         ----^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `loom_commands` (test "review7_fixes") generated 1 warning (run `cargo fix --test "review7_fixes" -p loom_commands` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 39s
+     Running unittests src/lib.rs (target/debug/deps/loom_commands-729c22a731210a33)
+
+running 23 tests
+test retarget::real_assets::kimodo_on_metahuman_preserves_skin_and_skeleton_and_deforms_mesh ... ignored, requires LOOM_RETARGET_BVH and LOOM_RETARGET_FBX real production assets
+test viewport::tests::splits_clamp_to_five_percent ... ok
+test viewport::tests::default_kinds_follow_reference ... ok
+test state::tests::top_and_front_views_put_x_on_screen_right ... ok
+test viewport::tests::four_grid_cells_cover_unit_square_without_overlap ... ok
+test retarget::tests::continuous_euler_keys_reconstruct_quaternion_across_wrap ... ok
+test viewport::tests::fourteen_layouts_have_expected_cell_counts ... ok
+test retarget::tests::world_reference_correction_preserves_target_bind_axes ... ok
+test viewport::tests::cells_never_negative_for_tiny_rects ... ok
+test retarget::tests::palm_reference_preserves_source_axial_twist ... ok
+test keymap::tests::parses_every_chord_in_chart ... ok
+test keymap::tests::alt_r_rings_and_alt_l_loops_in_both_poly_groups ... ok
+test keymap::tests::no_duplicate_chords_in_main_ui ... ok
+test keymap::tests::w_is_select_and_move_and_ctrl_z_is_undo ... ok
+test exchange::tests::setting_an_option_makes_the_preset_user_defined_and_presets_load_back ... ok
+test keymap::tests::space_locks_the_selection_only_when_enabled ... ok
+test keymap::tests::every_edit_poly_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::every_chart_action_is_registered_or_out_of_scope ... ok
+test keymap::tests::every_ffd_chart_action_is_registered ... ok
+test keymap::tests::every_spline_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::every_editable_poly_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::every_unwrap_chart_action_is_registered_or_deferred ... ok
+test keymap::tests::main_ui_bindings_only_reference_registered_commands ... ok
+
+test result: ok. 22 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/align.rs (target/debug/deps/align-731ca410b2c09c8c)
+
+running 8 tests
+test quick_align_matches_pivot ... ok
+test align_to_view_points_local_z_at_camera ... ok
+test mirror_no_clone_mirrors_in_place ... ok
+test align_camera_looks_down_the_picked_normal ... ok
+test normal_align_opposes_normals ... ok
+test mirror_copy_flips_about_frame_axis ... ok
+test align_position_center_to_center ... ok
+test align_max_to_min_stacks_boxes ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/animation.rs (target/debug/deps/animation-4fc2a0852da104a5)
+
+running 8 tests
+test changing_frame_redraws_the_viewports ... ok
+test undo_removes_auto_keys ... ok
+test auto_key_move_creates_position_keys ... ok
+test auto_key_off_edits_offset_existing_keys ... ok
+test animated_parameter_reevaluates_per_frame_and_static_stays_cached ... ok
+test animated_box_height_and_bend_angle ... ok
+test skinned_mesh_follows_keyed_bones ... ok
+test importing_with_auto_key_on_does_not_animate ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/animation_clips.rs (target/debug/deps/animation_clips-4051c29bf4b1fdbf)
+
+running 8 tests
+test new_keep_renews_empty_scene_identity_too ... ok
+test old_scene_without_clip_metadata_loads_and_unchanged_move_has_no_undo_step ... ok
+test deleting_clip_members_prunes_metadata_and_undo_redo_restores_membership ... ok
+test moving_keeps_list_object_visibility_and_offset_keys_editable ... ok
+test new_scene_and_new_keep_do_not_leave_ghost_clips ... ok
+test save_selected_contains_only_exported_clip_members_and_keeps_original_scene ... ok
+test invalid_clip_moves_are_atomic_and_do_not_touch_unrelated_animation ... ok
+test bvh_clip_moves_fractional_native_keys_atomically_and_saves ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/array.rs (target/debug/deps/array-4ddc321e1a3a1da5)
+
+running 7 tests
+test array_count_1_is_noop_no_undo ... ok
+test array_count_0_rejected ... ok
+test array_1d_count_3_move_x_creates_two_copies ... ok
+test array_totals_mode_divides_increment ... ok
+test repeating_an_array_continues_it_from_the_last_copy ... ok
+test array_2d_grid_counts ... ok
+test spacing_tool_distributes_evenly ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/assets.rs (target/debug/deps/assets-03b7c21c762da671)
+
+running 4 tests
+test set_project_folder_makes_the_folders_and_is_a_setting ... ok
+test reset_starts_from_the_projects_startup_scene ... ok
+test asset_tracking_lists_repaths_and_finds_missing_files ... ok
+test replace_swaps_the_geometry_of_same_named_objects_and_keeps_their_transforms ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/autosave.rs (target/debug/deps/autosave-c4b98d0ebf4743d9)
+
+running 8 tests
+test fetch_without_hold_file_errors ... ok
+test hold_writes_file_and_fetch_reads_it_after_a_fresh_state ... ok
+test home_follows_loom_home_then_xdg ... ok
+test owned_job_captures_edit_version_and_does_not_acknowledge_opened_scene ... ok
+test tick_skips_when_unchanged_or_disabled ... ok
+test tick_writes_after_interval_and_cycles_names ... ok
+test auto_backup_name_and_count_preferences ... ok
+test autosave_skips_open_transaction ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/bake.rs (target/debug/deps/bake-bb3da0a2ff20d19b)
+
+running 8 tests
+test render_to_texture_opens_its_dialog_with_0 ... ok
+test shells_switch_views_and_clear_to_either_material ... ok
+test lit_elements_wait_for_the_renderer ... ok
+test unwrap_only_and_clear_unwrappers ... ok
+test settings_are_checked_undoable_and_saved ... ok
+test output_into_source_puts_the_map_into_the_objects_material ... ok
+test projection_bakes_from_the_picked_object ... ok
+test a_flat_planes_normals_map_is_flat ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/biped.rs (target/debug/deps/biped-02c21060ae3290eb)
+
+running 9 tests
+test root_name_renames_the_whole_biped ... ok
+test a_new_biped_has_the_reference_names_hierarchy_colours_and_height ... ok
+test figure_mode_keeps_the_figure_pose_apart_from_the_animated_pose ... ok
+test height_scales_the_pose_about_the_feet ... ok
+test skin_binds_to_biped_parts ... ok
+test rebuilds_and_creation_undo_and_redo ... ok
+test a_biped_round_trips_through_loom_files ... ok
+test structure_changes_rebuild_the_parts_and_keep_the_names ... ok
+test fbx_export_writes_the_biped_as_a_skeleton_and_reads_back ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/biped_footsteps.rs (target/debug/deps/biped_footsteps-887158b5f3e83336)
+
+running 7 tests
+test create_footsteps_append_places_clicked_footsteps ... ok
+test create_multiple_footsteps_walk_alternates_with_walk_timing ... ok
+test footstep_mode_is_needed_and_leaves_figure_mode ... ok
+test run_and_jump_timing ... ok
+test footsteps_draw_as_coloured_footprints_with_numbers ... ok
+test activation_walks_the_biped_over_its_footsteps ... ok
+test deactivate_and_delete_remove_the_keys ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/biped_structure.rs (target/debug/deps/biped_structure-573cb473af150662)
+
+running 11 tests
+test create_biped_takes_every_structure_value ... ok
+test triangle_pelvis_and_neck_reparent_the_thighs_and_clavicles ... ok
+test props_appear_by_the_hands_and_in_front_of_the_torso ... ok
+test ankle_attach_slides_the_foot_block_under_the_ankle ... ok
+test pick_parent_takes_the_clicked_part ... ok
+test body_types_change_the_shapes_but_not_the_names ... ok
+test knuckles_makes_an_anatomical_hand_and_excludes_forefeet ... ok
+test twist_links_are_frozen_links_along_the_limbs ... ok
+test xtras_create_mirror_reparent_rename_and_delete ... ok
+test ponytails_hang_from_the_head ... ok
+test figure_files_save_and_load_the_structure_and_figure_pose ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/bone_display.rs (target/debug/deps/bone_display-f92dc4ee733a735f)
+
+running 4 tests
+test helper_category_is_independent_of_geometry_and_bones ... ok
+test explicit_bone_display_preserves_own_hidden_and_frozen_policies ... ok
+test explicit_bone_display_modes_clear_the_conflicting_hide_bones_filter ... ok
+test explicit_bone_display_is_independent_of_the_geometry_category ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/bones.rs (target/debug/deps/bones-bb0dc32ad8610df8)
+
+running 3 tests
+test bone_chain_has_lengths_parents_and_a_nub ... ok
+test bone_edit_mode_stretches_the_parent_and_refine_splits ... ok
+test mirror_and_reassign_root ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/bvh.rs (target/debug/deps/bvh-11179f1b5a813f9a)
+
+running 7 tests
+test external_kimodo_motion ... ignored, requires a real local Kimodo BVH supplied via LOOM_KIMODO_BVH
+test malformed_motion_is_atomic ... ok
+test rotations_do_not_jump_at_wrap ... ok
+test branched_and_evicted_import_timing_never_attaches_to_another_step ... ok
+test scene_system_scale_applies_once_and_names_stay_unique ... ok
+test undo_redo_restores_import_timing_with_original_nondefault_timeline ... ok
+test hierarchy_units_channel_order_timeline_undo_and_save ... ok
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/caches9.rs (target/debug/deps/caches9-24b2c3d0a0a1fbc8)
+
+running 8 tests
+test point_cache_wsm_records_world_space ... ok
+test point_cache_record_refuses_a_changing_vertex_count ... ok
+test point_cache_count_mismatch_warns ... ok
+test hsds_level_list_picks_the_edited_level_and_display_hides_finer_levels ... ok
+test hsds_subdivides_selected_faces ... ok
+test point_cache_retries_a_missing_file ... ok
+test point_cache_records_and_plays ... ok
+test subdivide_wsm_uses_world_size ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/camera.rs (target/debug/deps/camera-64b1dfd40556ef07)
+
+running 7 tests
+test free_camera_looks_along_the_given_direction ... ok
+test new_camera_has_the_reference_defaults ... ok
+test camera_files_without_the_new_parameters_still_load ... ok
+test target_camera_aims_at_its_target_and_follows_it ... ok
+test overlay_cone_reaches_the_target_in_the_render_aspect ... ok
+test lens_and_fov_stay_in_sync ... ok
+test type_switch_removes_or_adds_the_target ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/clip_trim.rs (target/debug/deps/clip_trim-6a134248fdef27bf)
+
+running 3 tests
+test invalid_and_unsupported_trims_leave_scene_and_history_unchanged ... ok
+test trim_one_character_clip_preserves_neighbor_motion_on_shared_bones ... ok
+test trim_preserves_fractional_interior_poses_and_undo_restores_original_keys ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/compound.rs (target/debug/deps/compound-c1759a82bff648ba)
+
+running 4 tests
+test loft_skins_shapes_along_a_path ... ok
+test boolean_pick_defaults_to_subtraction_a_minus_b ... ok
+test proboolean_chains_operands ... ok
+test boolean_subtracts_the_picked_operand_and_keeps_or_moves_it ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/compound_materials.rs (target/debug/deps/compound_materials-f2ecd33a2e1ff1af)
+
+running 10 tests
+test go_to_sub_material_edit_it_and_go_back_to_parent ... ok
+test maps_through_the_browser_with_coordinates_cropping_and_sub_maps ... ok
+test blend_keeps_the_old_material_and_takes_a_mask ... ok
+test set_number_add_delete_and_rows ... ok
+test type_button_makes_a_multi_sub_and_keeps_the_old_material_as_id_1 ... ok
+test eyedropper_slot_copy_browser_get_and_options ... ok
+test a_bitmap_dropped_on_selected_polygons_gets_its_own_sub_material ... ok
+test faces_draw_with_their_material_id_sub_material ... ok
+test dropping_materials_on_selected_polygons_builds_a_multi_sub ... ok
+test compound_materials_round_trip_through_the_loom_file ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/constraints.rs (target/debug/deps/constraints-32cbecd5d9cff04b)
+
+running 8 tests
+test lookat_aims_the_axis ... ok
+test orientation_blends_targets ... ok
+test position_constraint_weights_targets ... ok
+test link_constraint_switches_parent_over_time ... ok
+test list_controller_adds_noise_to_keys ... ok
+test attachment_sticks_to_a_face ... ok
+test path_constraint_follows_the_shape ... ok
+test assign_tcb_and_noise_to_position ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/deformers.rs (target/debug/deps/deformers-09b5983c2858cbc8)
+
+running 3 tests
+test linked_xform_follows_its_control ... ok
+test bend_through_commands_and_gizmo_move ... ok
+test symmetry_slice_and_mirror_change_topology ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/deformers9.rs (target/debug/deps/deformers9-d4e24b2aaf196d2f)
+
+running 13 tests
+test pathdeform_cycle_does_not_hang ... ok
+test wsm_cannot_move_below_object_space ... ok
+test spline_ik_control_helpers_move_knots ... ok
+test spline_ik_control_keeps_helpers_per_spline ... ok
+test paste_instanced_keeps_wsm_on_top ... ok
+test pathdeform_rotation_turns_the_section ... ok
+test pathdeform_follows_the_paths_modifier_stack ... ok
+test wsm_stays_on_top ... ok
+test vertex_weld_merges ... ok
+test pathdeform_wraps_on_closed_paths ... ok
+test flex_lags_behind_motion ... ok
+test substitute_uses_the_picked_mesh ... ok
+test affect_region_pulls_neighbours ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/display_settings.rs (target/debug/deps/display_settings-0e66906454ac7343)
+
+running 4 tests
+test display_color_defaults_to_object_wire_and_material_shading ... ok
+test statistics_and_safe_frame_options_are_kept_in_the_scene_file ... ok
+test hide_frozen_objects_and_bone_objects_leave_the_viewports ... ok
+test object_color_dialog_colours_the_selection_and_sets_the_colour_for_new_objects ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/edit_normals.rs (target/debug/deps/edit_normals-b413536513a44366)
+
+running 10 tests
+test same_counts_different_topology_drops_the_edits ... ok
+test edit_normals_chart_rows_exist ... ok
+test applying_edit_normals_enters_the_normal_level ... ok
+test the_rotate_tool_turns_the_selected_normals_not_the_object ... ok
+test copy_normal_is_not_an_undo_step ... ok
+test explicit_normals_survive_edits ... ok
+test fbx_writes_explicit_normals ... ok
+test edit_normals_after_a_topology_change_below ... ok
+test average_selected_and_copy_paste ... ok
+test break_unify_and_specify ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/exchange.rs (target/debug/deps/exchange-8f7db656fe4d1702)
+
+running 13 tests
+test render_output_saves_every_listed_image_format ... ok
+test options_are_set_by_command_and_listed ... ok
+test obj_export_import_round_trip_keeps_materials ... ok
+test obj_hidden_objects_option ... ok
+test y_up_export_keeps_cameras_and_objects_in_place ... ok
+test obj_import_options_objects_materials_and_geometry ... ok
+test obj_export_options_change_the_text ... ok
+test fbx_lights_option_both_ways ... ok
+test fbx_axis_units_format_and_triangulate ... ok
+test fbx_materials_and_textures_round_trip_with_embedded_media ... ok
+test fbx_export_selection_sets_instances_turbosmooth_and_dummy_bones ... ok
+test fbx_include_options_cameras_animation_and_deformations ... ok
+test fbx_import_bones_as_dummies_and_units_override ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/extras.rs (target/debug/deps/extras-f75f1a49873668af)
+
+running 7 tests
+test clone_and_align_pick_adds_destinations ... ok
+test clone_and_align_only_on_chosen_axes ... ok
+test place_highlight_reflects_the_view_ray_keeping_the_distance ... ok
+test clone_and_align_puts_a_clone_on_every_destination ... ok
+test snapshot_range_spaces_the_copies_evenly_in_time ... ok
+test snapshot_single_clones_the_object_where_it_is_at_the_current_frame ... ok
+test snapshot_instance_and_mesh_methods ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/fbx.rs (target/debug/deps/fbx-9bf1a94e2a2635bc)
+
+running 4 tests
+test obj_still_goes_through_the_obj_path ... ok
+test export_selected_child_keeps_world_transform ... ok
+test export_and_import_round_trip_keeps_names_materials_uvs_and_hierarchy ... ok
+test import_fbx_creates_nodes_with_hierarchy_materials_and_one_undo_entry ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/fbx_anim.rs (target/debug/deps/fbx_anim-03bdee7bff96d584)
+
+running 3 tests
+test keyed_box_exports_and_reimports ... ok
+test imported_clip_plays_on_the_skin ... ok
+test mixamo_clip_round_trips ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+
+     Running tests/fbx_material_assignment.rs (target/debug/deps/fbx_material_assignment-28b4738d369f3415)
+
+running 2 tests
+test external_ray_textured_fbx_binds_all_multi_slot_meshes_without_changing_geometry_or_source ... ok
+test fbx_mesh_material_slots_bind_native_multi_sub_in_source_order_and_undo_atomically ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/fbx_prepared.rs (target/debug/deps/fbx_prepared-2945044aafcc59d2)
+
+running 4 tests
+test external_prepared_metahuman_preserves_source_and_commits_native_body_atomically ... ok
+test prepared_import_uses_snapshot_once_without_reopening_source_and_is_one_undo ... ok
+test mismatched_prepared_path_kind_or_units_do_not_modify_scene ... ok
+test preparation_errors_do_not_touch_existing_scene ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/fbx_skin.rs (target/debug/deps/fbx_skin-3214e951582730b1)
+
+running 2 tests
+test morpher_channels_round_trip_as_blend_shapes ... ok
+test imports_the_mixamo_rig_with_bones_and_skin_and_exports_it_back ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.63s
+
+     Running tests/ffd.rs (target/debug/deps/ffd-51f8859ba47a2712)
+
+running 2 tests
+test ffd_keymap_group_is_live_only_with_an_ffd_entry_active ... ok
+test control_point_move_deforms_nearby_and_undoes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/file_commands.rs (target/debug/deps/file_commands-49b704edc2e6fe23)
+
+running 8 tests
+test open_and_save_are_registered_and_bound ... ok
+test corrupt_file_leaves_scene_untouched ... ok
+test reset_file_restores_defaults ... ok
+test save_incremental_numbers_files ... ok
+test save_file_without_path_opens_save_as_dialog ... ok
+test open_clears_undo_and_sets_title ... ok
+test save_then_open_restores_scene_and_selection ... ok
+test save_as_copy_keeps_current_file ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/geom_formats.rs (target/debug/deps/geom_formats-f71ca5204374ee13)
+
+running 3 tests
+test dxf_round_trip_puts_each_object_on_its_layer ... ok
+test three_ds_round_trip_keeps_meshes_pivots_materials_lights_and_cameras ... ok
+test stl_binary_and_ascii_round_trips_weld_into_one_mesh ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/group_layers.rs (target/debug/deps/group_layers-b85cb3a457e667aa)
+
+running 6 tests
+test layer_hidden_hides_members_in_picks ... ok
+test move_to_layer_and_current_layer_for_new_objects ... ok
+test select_ancestor_child_children_similar ... ok
+test group_makes_head_and_parents_members ... ok
+test closed_group_selects_as_one_open_selects_members ... ok
+test ungroup_explode_restore_world_transforms ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/helpers.rs (target/debug/deps/helpers-d14f094b62ddeb9d)
+
+running 18 tests
+test measure_distance_reports_distance_and_deltas ... ok
+test active_grid_spacing_drives_grid_snaps ... ok
+test align_grid_to_view_turns_the_grid_to_face_the_view ... ok
+test display_plane_chooses_the_construction_plane ... ok
+test grid_object_parameters_and_activation ... ok
+test tape_specify_length_reports_the_typed_length ... ok
+test compass_has_rose_and_radius ... ok
+test point_lines_follow_the_display_options ... ok
+test point_has_all_display_options ... ok
+test measure_sums_shape_lengths ... ok
+test nudge_grid_moves_the_active_grid_along_its_normal ... ok
+test deleting_either_end_of_a_tape_deletes_both ... ok
+test tape_measures_the_distance_to_its_target_and_follows_it ... ok
+test activate_grid_needs_a_selected_grid_and_deleting_it_returns_the_home_grid ... ok
+test protractor_measures_the_angle_between_two_picked_objects ... ok
+test measure_nodes_measures_a_locked_set_and_reports_open_meshes ... ok
+test measure_create_center_point_puts_a_point_at_the_centre_of_mass ... ok
+test measure_names_the_object_and_uses_the_solid_centre_of_mass ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/hierarchy_select.rs (target/debug/deps/hierarchy_select-65dbbe3e6e693a7a)
+
+running 9 tests
+test update_during_spinner_drag_toggles ... ok
+test paint_selection_size_up_and_down_change_the_brush ... ok
+test link_inheritance_applies_to_every_selected_object ... ok
+test select_similar_needs_the_same_type_layer_and_material ... ok
+test select_by_layer_selects_the_objects_of_several_layers ... ok
+test freeze_transform_makes_the_current_pose_the_zero_pose ... ok
+test page_down_selects_immediate_children_and_ctrl_page_down_all_descendants ... ok
+test siblings_follow_the_reference_definition_in_an_uneven_hierarchy ... ok
+test view_undo_names_the_change_and_keeps_twenty ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/ik.rs (target/debug/deps/ik-9bf8fcb6f85104ae)
+
+running 4 tests
+test creating_limb_preserves_existing_fk_pose_and_controllers ... ok
+test limb_and_spline_chains_through_commands ... ok
+test limb_creation_rejects_wrong_segment_count_without_scene_changes ... ok
+test hi_chain_moves_bones_when_the_goal_moves_and_fk_snap_bakes_it ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/import_animation_clip.rs (target/debug/deps/import_animation_clip-b3d2d2899cc86e16)
+
+running 5 tests
+test dedicated_animation_picker_and_bvh_import_route ... ok
+test dedicated_animation_import_rejects_static_corrupt_and_other_formats_atomically ... ok
+test legacy_fbx_update_does_not_create_or_reown_source_clips ... ok
+test imported_bvh_and_fbx_keep_project_fps_and_preserve_motion_in_seconds ... ok
+test dedicated_fbx_import_keeps_target_and_options_and_source_clip_is_reversible ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
+
+     Running tests/instances.rs (target/debug/deps/instances-b8ecd5daa42156e9)
+
+running 1 test
+test vertex_edits_on_an_instance_change_every_instance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/keys.rs (target/debug/deps/keys-69e4365ceec5c8f7)
+
+running 21 tests
+test key_shortcuts_are_bound ... ok
+test real_time_supported_speeds_keep_direction_semantics_and_large_frame_loops ... ok
+test fractional_playback_stop_scrub_and_configuration_snap_to_integer_time ... ok
+test playback_advances_and_loops ... ok
+test fractional_playback_speed_loop_and_end_respect_source_frame_range ... ok
+test non_real_time_reverse_and_pingpong_remain_integer_steps ... ok
+test invalid_playback_clock_rejects_without_corrupting_the_visible_pose ... ok
+test playback_configuration_does_not_rebase_an_unkeyed_pose_at_the_same_frame ... ok
+test set_keys_keys_the_selection_list_set ... ok
+test rescale_time_scales_keys ... ok
+test set_key_mode_buffer_is_discarded_on_frame_change_and_kept_by_k ... ok
+test next_previous_key_step_over_selection_keys ... ok
+test tracks_lists_object_and_modifier_params ... ok
+test set_keys_respects_filters ... ok
+test track_bar_move_copy_delete_keys ... ok
+test real_time_playback_presents_sixty_interpolated_poses_at_thirty_source_fps ... ok
+test fractional_preview_survives_commands_but_autokey_edits_use_integer_frame ... ok
+test default_tangent_applies_to_new_keys ... ok
+test state_query_samples_the_visible_fractional_transform ... ok
+test key_position_x_keys_one_axis ... ok
+test save_and_load_animation_clip ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/kimodo_scene_identity.rs (target/debug/deps/kimodo_scene_identity-cb884c1d266f2c16)
+
+running 1 test
+test file_new_always_changes_project_identity_even_for_an_empty_saved_scene ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/kimodo_settings.rs (target/debug/deps/kimodo_settings-30a9d7da4db9a7a5)
+
+running 1 test
+test kimodo_address_is_local_preferences_and_not_project_data ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/lightcam2.rs (target/debug/deps/lightcam2-2503cff32116e55a)
+
+running 11 tests
+test photometric_target_and_free_lights_have_the_reference_names_and_defaults ... ok
+test daylight_system_adds_a_skylight_and_is_one_undo_step ... ok
+test templates_set_distribution_intensity_lamp_and_beam ... ok
+test select_target_selects_the_targets_of_the_selection ... ok
+test target_distance_moves_the_target_of_target_cameras_and_lights ... ok
+test sunlight_system_places_the_sun_by_date_time_and_location ... ok
+test renaming_a_target_camera_or_light_renames_its_target ... ok
+test add_default_lights_to_scene_makes_the_key_and_fill_omnis ... ok
+test photometric_light_renders_with_inverse_square_from_one_metre_and_its_distribution ... ok
+test light_view_controls_move_the_light_and_change_its_cone ... ok
+test photometric_lights_survive_save_and_load ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/lights.rs (target/debug/deps/lights-39b7b43e04ecee38)
+
+running 11 tests
+test default_lights_count_is_a_viewport_setting ... ok
+test hide_lights_and_the_lights_selection_filter_apply_to_lights ... ok
+test creating_a_target_light_is_one_undo_step ... ok
+test a_target_spot_aims_at_its_target_node_and_follows_it ... ok
+test light_view_and_light_lister ... ok
+test every_standard_light_is_created_with_the_reference_names_and_defaults ... ok
+test scene_lights_evaluate_what_the_renderers_draw ... ok
+test light_type_and_targeted_switch_keep_the_aim ... ok
+test parameters_set_clamp_and_undo ... ok
+test fbx_round_trip_keeps_light_type_colour_cone_decay_and_aim ... ok
+test exclusion_and_projector_map_are_undoable_and_survive_save_and_load ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/live.rs (target/debug/deps/live-b547543078c906c6)
+
+running 5 tests
+test log_file_names_carry_the_utc_date_and_pid ... ok
+test runtime_and_log_dirs_follow_xdg ... ok
+test tail_returns_the_last_lines ... ok
+test prune_keeps_the_newest_logs ... ok
+test instances_list_sockets_and_mark_the_current_one ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/loom_file.rs (target/debug/deps/loom_file-4ca45465e3233b3c)
+
+running 8 tests
+test newer_format_is_refused ... ok
+test save_is_atomic ... ok
+test settings_round_trip ... ok
+test animation_survives_save_and_open ... ok
+test summary_lists_nodes ... ok
+test rig_survives_save_and_open ... ok
+test every_object_kind_round_trips ... ok
+test every_modifier_round_trips ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/loomrig.rs (target/debug/deps/loomrig-1baafaf29ff436be)
+
+running 14 tests
+test mapping_edits_preserve_authored_controls_and_keys ... ok
+test master_moves_in_world_under_rotated_scaled_parent_and_fk_control_is_not_doubled ... ok
+test autokey_blend_and_pose_match_offsets_preserve_prior_frames_and_source_keys ... ok
+test keyed_full_ik_goal_stays_planted_while_native_root_motion_continues ... ok
+test ik_goal_rotates_end_joint_and_pole_moves_bend ... ok
+test neutral_controls_preserve_original_animated_fk_at_all_frames ... ok
+test hi_pole_uses_final_solved_bend_plane ... ok
+test ik_respects_rotated_scaled_skeleton_parent ... ok
+test switching_solver_keeps_current_visible_pose ... ok
+test ambiguous_role_mappings_are_rejected_atomically ... ok
+test matched_solver_switch_keeps_later_goals_constrained ... ok
+test applying_mapping_preserves_authored_limb_settings_and_keys ... ok
+test saved_rig_evaluates_same_pose_without_needing_an_edit ... ok
+test rig_is_undoable_and_controls_drive_original_chain ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/loomrig_export.rs (target/debug/deps/loomrig_export-683ba9270cda97e5)
+
+running 4 tests
+test real_ray342_export150_frames_bakes_rig_without_helpers ... ignored, requires LOOM_RETARGET_FBX real Ray MetaHuman export
+test ordinary_parented_bones_keep_their_pose_without_a_control_rig ... ok
+test ordinary_animated_bone_keeps_evaluated_default_and_baked_motion ... ok
+test default_fbx_export_bakes_fk_and_ik_on_original_bones_without_helpers ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/loomrig_interaction.rs (target/debug/deps/loomrig_interaction-d6325ff89db55ef3)
+
+running 5 tests
+test fk_world_edits_undo_and_redo_the_accumulated_offset ... ok
+test absolute_world_typein_reaches_each_requested_position ... ok
+test repeated_world_rotations_accumulate_on_fk_helper ... ok
+test repeated_world_moves_accumulate_on_fk_helper ... ok
+test absolute_world_rotation_and_direct_local_offsets_are_repeatable ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/loomrig_keys.rs (target/debug/deps/loomrig_keys-4763f39b8b3c20c9)
+
+running 2 tests
+test explicit_blend_keys_edit_move_delete_and_undo_without_changing_source_bones ... ok
+test invalid_key_moves_are_atomic_and_never_overwrite_another_transition ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/loomrig_persistence.rs (target/debug/deps/loomrig_persistence-68b8705c56430fdb)
+
+running 7 tests
+test new_scene_prunes_rigs_and_undo_restores_the_complete_character ... ok
+test new_keep_hierarchy_freezes_native_rig_metadata_tracks_at_current_values ... ok
+test merge_remaps_complete_rigs_and_allocates_unique_rig_ids_atomically ... ok
+test deleting_a_rig_bone_or_control_prunes_only_affected_metadata_and_undo_restores_it ... ok
+test new_keep_preserves_static_rig_with_hierarchy_and_visible_pose_without_hierarchy ... ok
+test authored_contacts_survive_save_merge_mapping_and_undo ... ok
+test selected_save_keeps_complete_rig_and_drops_partial_without_touching_source ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/loomrig_real.rs (target/debug/deps/loomrig_real-8e2e6b05962769ad)
+
+running 1 test
+test real_body342_controls_retarget_skin_and_plant_preserve_native_data ... ignored, requires LOOM_RETARGET_FBX and LOOM_RETARGET_BVH production assets
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mapping9.rs (target/debug/deps/mapping9-c5fce5890d255f9f)
+
+running 7 tests
+test uvw_mapping_add_and_clear ... ok
+test edge_snap_and_freeform_gizmo ... ok
+test map_scaler_keeps_texel_size ... ok
+test unwrap_paint_select_and_cursor_size ... ok
+test camera_map_projects_from_the_camera ... ok
+test spline_map_follows_the_spline ... ok
+test unwrap_sketch_line_and_circle ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/materials.rs (target/debug/deps/materials-7a8f0760a449c85b)
+
+running 6 tests
+test material_editor_toggle_opens_and_closes_the_editor ... ok
+test maps_set_and_clear ... ok
+test parameters_are_clamped_to_max_ranges ... ok
+test empty_slots_show_max_defaults_and_editing_creates_the_material ... ok
+test assign_pick_and_reset ... ok
+test materials_round_trip_through_the_loom_file ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/max_import.rs (target/debug/deps/max_import-bb007b0d39cf9500)
+
+running 6 tests
+test imported_stacks_evaluate_to_the_bounds_the_file_stored ... ok
+test imported_ffd_and_symmetry_match_the_files_bounds ... ok
+test imported_materials_lights_and_unwrap ... ok
+test open_reads_a_max_scene_untitled ... ok
+test merge_reads_max_files ... ok
+test import_max_keeps_world_placement_and_undoes ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/merge.rs (target/debug/deps/merge-ee16f475b1501404)
+
+running 5 tests
+test merge_renames_colliding_names ... ok
+test merge_remaps_all_node_references ... ok
+test merge_adds_all_nodes_with_fresh_ids_and_selects_them ... ok
+test merge_is_one_undo_entry ... ok
+test merge_subset_by_name_drops_outside_parent_keeping_world_transform ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/mesh_modifiers.rs (target/debug/deps/mesh_modifiers-128306e5dc22622f)
+
+running 4 tests
+test vertex_paint_colours_vertices_near_the_stroke ... ok
+test holes_checks_materials_and_deletion_follow_the_selection ... ok
+test edit_poly_above_a_box_edits_the_input_and_warns_on_topology_change ... ok
+test smoothing_shell_and_reduction_modifiers_change_counts ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/mesh_patch.rs (target/debug/deps/mesh_patch-f86fa70096aa7ca3)
+
+running 11 tests
+test convert_to_editable_mesh_cuts_polygons_with_invisible_edges ... ok
+test face_and_polygon_levels_and_ignore_visible_edges ... ok
+test auto_edge_turn_and_divide ... ok
+test polygon_tools_keep_an_editable_mesh_triangles ... ok
+test add_quad_weld_and_relax ... ok
+test explode_to_objects_and_elements ... ok
+test edit_mesh_modifier_is_its_own_modifier ... ok
+test patch_grids_and_editable_patch ... ok
+test extrude_bevel_tessellate_and_normals ... ok
+test edit_patch_edits_the_surface_patches ... ok
+test editable_mesh_and_patch_save_and_export ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/metahuman_import.rs (target/debug/deps/metahuman_import-52567fb46241883f)
+
+running 4 tests
+test external_metahuman_imports_only_body_skeleton_and_native_skins ... ok
+test body_profile_validates_face_morphs_even_when_deformations_disabled ... ok
+test animation_clip_bypasses_body_rest_profile_and_restores_options ... ok
+test body_profile_option_is_opt_in_persisted_and_imports_native_rest_skin ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/metahuman_performance.rs (target/debug/deps/metahuman_performance-9228c6a16becf32b)
+
+running 1 test
+test external_metahuman_native_evaluation_cost ... ignored, release benchmark requires LOOM_METAHUMAN_FBX
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/modifier_list.rs (target/debug/deps/modifier_list-ca81b2ba3e79cdfe)
+
+running 4 tests
+test search_matches_anywhere_in_the_name_ignoring_case ... ok
+test search_lists_names_starting_with_the_typed_text_first ... ok
+test usage_round_trips_through_its_file ... ok
+test most_used_starts_from_the_common_ones_and_follows_use ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/morph.rs (target/debug/deps/morph-f61a19523610268a)
+
+running 2 tests
+test morpher_picks_a_target_and_extracts_one ... ok
+test skin_morph_creates_a_morph_at_the_bone_angle ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/navigation.rs (target/debug/deps/navigation-8ae5afba9ed1c1cd)
+
+running 14 tests
+test camera_modes_toggle_like_the_other_nav_modes ... ok
+test navigate_camera_needs_a_camera_view ... ok
+test pan_viewport_recentres_on_a_point ... ok
+test shade_selected_toggles ... ok
+test free_camera_dolly_keeps_its_target_distance ... ok
+test c_with_several_cameras_and_none_selected_opens_the_select_camera_list ... ok
+test truck_orbit_and_pan_camera ... ok
+test home_view_is_the_default_perspective_until_set ... ok
+test save_and_restore_active_view_per_view_kind ... ok
+test perspective_widens_fov_and_dollies_in_keeping_the_framing ... ok
+test roll_camera_turns_free_and_target_cameras_about_the_line_of_sight ... ok
+test dolly_moves_the_camera_or_target_along_the_line_of_sight ... ok
+test viewcube_toggle_and_options ... ok
+test create_camera_from_view_matches_and_switches_the_view ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/obj.rs (target/debug/deps/obj-647dbd9464c85afb)
+
+running 3 tests
+test import_creates_editable_polys_as_one_undo_entry ... ok
+test export_selected_writes_only_selection_in_world_space ... ok
+test export_then_import_matches_face_counts ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/object_properties.rs (target/debug/deps/object_properties-f128378a8918fd5c)
+
+running 4 tests
+test new_display_properties_are_settable_by_name ... ok
+test render_properties_default_on_and_apply_to_the_selection_in_one_undo_step ... ok
+test visibility_spinner_sets_the_visibility_track_and_inherits_from_the_parent ... ok
+test user_defined_text_and_render_props_survive_save_and_load ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/perf9.rs (target/debug/deps/perf9-19ca3be7f7effaba)
+
+running 6 tests
+test edit_normals_is_linear ... ok
+test path_deform_is_linear ... ok
+test affect_region_is_linear ... ok
+test flex_is_linear ... ok
+test point_cache_is_linear ... ok
+test edited_normals_evaluate_in_linear_time ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.12s
+
+     Running tests/persistence9.rs (target/debug/deps/persistence9-fbbae234ab25685b)
+
+running 1 test
+test phase9_modifiers_round_trip_through_loom_files ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/poly_attrs.rs (target/debug/deps/poly_attrs-f5e2c97059cbfb6e)
+
+running 2 tests
+test mesh_edits_keep_poly_settings ... ok
+test convert_to_poly_keeps_primitive_smoothing ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/poly_draw.rs (target/debug/deps/poly_draw-3ba7bd47135736c7)
+
+running 4 tests
+test a_branch_needs_a_path ... ok
+test branches_mode_toggles_and_ends_the_other_poly_modes ... ok
+test a_taper_below_minus_one_shrinks_to_a_point_then_grows_again ... ok
+test a_branch_extrudes_one_segment_per_path_point_and_tapers_its_end ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/poly_edit.rs (target/debug/deps/poly_edit-1e7159dab335d018)
+
+running 5 tests
+test insert_vertex_create_and_turn ... ok
+test border_ops_cap_and_bridge ... ok
+test vertex_ops_remove_break_weld_chamfer ... ok
+test chamfer_two_objects_one_undo ... ok
+test edge_ops_connect_split_extrude_and_repeat_last ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/poly_faces.rs (target/debug/deps/poly_faces-4a1bcdcee79c7fcb)
+
+running 4 tests
+test hinge_from_picked_edge ... ok
+test extrude_kinds_through_commands ... ok
+test make_planar_and_grid_align ... ok
+test inset_bevel_outline_and_flip ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/poly_geometry.rs (target/debug/deps/poly_geometry-10c75b123442b7fc)
+
+running 5 tests
+test constrain_to_edges_keeps_vertex_on_edge ... ok
+test collapse_at_polygon_level ... ok
+test slice_plane_moves_with_transforms_and_slices ... ok
+test attach_and_detach_round_trip ... ok
+test msmooth_tessellate_relax ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/poly_props.rs (target/debug/deps/poly_props-48310192236945bd)
+
+running 7 tests
+test paint_relax_smooths ... ok
+test paint_push_pull_moves_along_normal ... ok
+test material_id_set_and_select ... ok
+test vertex_color_set_and_render_tint ... ok
+test smoothing_groups_set_select_clear_auto ... ok
+test nurms_keeps_open_border_and_attributes ... ok
+test nurms_display_mesh_has_more_faces_base_unchanged ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/poly_select.rs (target/debug/deps/poly_select-f1537749a7dbed9b)
+
+running 10 tests
+test undoing_a_clone_at_polygon_level_selects_the_original_again ... ok
+test named_sub_selection_copy_paste ... ok
+test by_vertex_and_convert_selection ... ok
+test base_object_stack_levels ... ok
+test sub_object_level_cannot_select_an_unselected_object ... ok
+test ring_and_loop_step_move_along_the_plane ... ok
+test grow_shrink_round_trip_on_plane ... ok
+test hide_unhide_sub_objects_affect_picks ... ok
+test edit_poly_entry_level_follows_every_level_change ... ok
+test editable_poly_chords_only_with_a_poly_selected ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/poly_soft.rs (target/debug/deps/poly_soft-7248eb5482ad7345)
+
+running 3 tests
+test paint_soft_selection_sets_weights ... ok
+test lock_keeps_weights_after_reselect ... ok
+test soft_move_scales_neighbours_by_weight ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/poly_topology.rs (target/debug/deps/poly_topology-e46dac2889088450)
+
+running 12 tests
+test edges_are_numbered_from_one_in_first_use_order ... ok
+test settings_spinners_take_unit_strings ... ok
+test select_by_half_and_invert_axis ... ok
+test loop_mode_selects_loops ... ok
+test one_border_edge_is_not_enough_to_bridge ... ok
+test cut_chains_from_the_last_point_until_right_click ... ok
+test bridge_edge_runs_of_different_lengths_zip_with_triangles ... ok
+test bridge_specific_edges_uses_the_picked_edges ... ok
+test deleting_polygons_asks_about_isolated_vertices ... ok
+test swift_loop_inserts_a_loop_across_the_ring ... ok
+test bridge_two_edge_runs_on_one_border ... ok
+test ctrl_remove_also_removes_the_leftover_vertices ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/prefs.rs (target/debug/deps/prefs-5da64426047392a0)
+
+running 5 tests
+test reference_coordinate_system_is_per_tool_unless_constant ... ok
+test units_display_formats_metres ... ok
+test preferences_undo_levels_apply ... ok
+test manipulate_mode_drag_changes_radius ... ok
+test customize_ui_lists_every_keymap_binding ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/registry.rs (target/debug/deps/registry-d426a4ff6fc42200)
+
+running 55 tests
+test delete_with_empty_selection_pushes_no_undo ... ok
+test fov_mode_changes_fov_not_distance ... ok
+test fov_is_per_viewport ... ok
+test coordinate_display_toggle_and_orbit_flyout ... ok
+test cycle_selection_method_walks_the_region_flyout ... ok
+test create_box_then_undo_removes_it ... ok
+test camera_view_reverts_when_camera_is_deleted ... ok
+test delete_and_move_at_sub_object_level_with_nothing_selected_are_no_ops ... ok
+test hide_by_hit_mode_hides_clicked_node ... ok
+test hide_selection_and_unhide_all ... ok
+test locks_block_move_on_locked_axes ... ok
+test clone_names_box002 ... ok
+test display_as_box_flag_roundtrips ... ok
+test link_undo_restores_child_position ... ok
+test hide_and_freeze_nodes_by_id ... ok
+test link_mode_sets_parent_and_unlink_clears_it ... ok
+test hidden_and_frozen_nodes_cannot_be_selected ... ok
+test inherit_off_ignores_parent_position ... ok
+test move_selection_is_undoable_in_one_step ... ok
+test delete_parent_undo_restores_hierarchy ... ok
+test see_through_toggle_sets_the_property_on_the_selection ... ok
+test reset_xform_leaves_cameras_alone ... ok
+test named_selection_sets_round_trip ... ok
+test set_time_configuration_clamps_frame ... ok
+test set_wire_color_is_undoable ... ok
+test select_invert_respects_filter_and_filter_keeps_selection ... ok
+test selection_filter_limits_select_all_and_picks ... ok
+test set_parameter_clamps_to_minimum ... ok
+test test_room_creates_five_editable_polys ... ok
+test view_commands_set_view_kind_and_viewport_undo ... ok
+test moves_respect_inherit_flags ... ok
+test hotkey_runs_the_bound_command ... ok
+test measure_reports_box_volume ... ok
+test reset_xform_keeps_a_spline_a_spline ... ok
+test moving_parent_and_child_together_moves_child_once ... ok
+test optional_only_struct_commands_accept_empty_args ... ok
+test window_crossing_and_region_state_toggle ... ok
+test convert_to_editable_poly_keeps_mesh_and_undoes ... ok
+test element_level_selects_connected_faces ... ok
+test affect_pivot_only_moves_pivot_not_mesh ... ok
+test pivot_edits_never_move_children ... ok
+test select_sub_subtract_removes_ids ... ok
+test zoom_extents_all_selected_frames_every_viewport ... ok
+test extrude_converts_parametric_box_to_editable_poly ... ok
+test reset_xform_adds_an_xform_modifier_holding_rotation_and_scale ... ok
+test border_level_selects_open_edges ... ok
+test set_parameter_rebuilds_mesh_and_is_undoable ... ok
+test undo_restores_the_sub_selection_from_before_the_step ... ok
+test execute_json_bad_args_returns_error_not_panic ... ok
+test slice_zero_to_zero_keeps_the_full_object ... ok
+test every_variant_is_in_registry_and_roundtrips_json ... ok
+test torus_twist_rotates_cross_sections_not_shear ... ok
+test long_drag_is_one_undo_step_and_keeps_history ... ok
+test created_primitive_meshes_transform_cleanly ... ok
+test every_standard_primitive_can_be_created_and_named ... ok
+
+test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/render.rs (target/debug/deps/render-aff1872936bf2da2)
+
+running 19 tests
+test render_viewport_lock_keeps_the_chosen_view ... ok
+test a_second_render_waits_for_the_first ... ok
+test blowup_keeps_its_own_rectangle_at_the_output_shape ... ok
+test edit_region_switches_view_to_region ... ok
+test render_with_a_path_records_where_to_save ... ok
+test render_opens_the_rendered_frame_window_instead_of_a_file_dialog ... ok
+test cancel_and_pause_act_on_the_render_in_progress ... ok
+test save_image_writes_every_format_by_extension ... ok
+test wireframe_toggle_leaves_realistic_for_wireframe ... ok
+test selected_area_needs_a_selection ... ok
+test viewport_shading_sets_realistic_on_the_active_viewport ... ok
+test channels_clone_clear_and_copy ... ok
+test render_sizes_and_settings_out_of_range_are_refused ... ok
+test render_commands_are_named_actions ... ok
+test production_saves_the_render_output_file_only_with_save_file ... ok
+test image_aspect_lock_keeps_width_and_height_together ... ok
+test render_last_repeats_the_last_render_without_saving ... ok
+test realistic_shading_is_kept_in_the_loom_file ... ok
+test render_setup_values_are_one_undo_step_each_and_saved_in_the_file ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/retarget_import_names.rs (target/debug/deps/retarget_import_names-9702aed83ca7fa1c)
+
+running 2 tests
+test repeated_ray_and_kimodo_imports_characterize_and_retarget_independently ... ignored, requires LOOM_RETARGET_FBX and LOOM_RETARGET_BVH actual production assets
+test repeated_animated_fbx_import_preserves_canonical_numbered_bone_names ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+     Running tests/retarget_sequence.rs (target/debug/deps/retarget_sequence-0164d12729dda428)
+
+running 4 tests
+test varying_source_scale_rejects_without_mutation ... ok
+test user_keys_outside_owned_clips_reject_append_without_mutation ... ok
+test disjoint_target_clips_append_and_move_only_their_native_keys ... ok
+test master_rotation_and_scale_do_not_change_baked_motion_when_applied_before_retarget ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/review2_fixes.rs (target/debug/deps/review2_fixes-1e162d3265300e93)
+
+running 7 tests
+test preview_version_survives_a_full_undo_stack ... ok
+test soft_selection_backfacing_uses_the_object_frame ... ok
+test detach_keeps_the_object_offset ... ok
+test remove_two_edge_vertex_restores_quads_and_vertex_chamfer_selects_vertices ... ok
+test named_paste_drops_stale_ids_instead_of_panicking ... ok
+test connect_with_many_edges_and_msmooth_on_a_selection ... ok
+test closed_group_delete_clone_attach ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/review3_fixes.rs (target/debug/deps/review3_fixes-7841e3fbd94d4798)
+
+running 10 tests
+test divide_spaces_knots_evenly_and_hide_is_undoable ... ok
+test extrude_along_a_one_knot_line_reports_and_a_short_line_is_an_error_not_a_panic ... ok
+test gizmo_edits_belong_to_each_instance_node ... ok
+test normal_has_no_dead_unify_switch_and_displace_decays ... ok
+test moving_an_object_does_not_re_evaluate_its_stack ... ok
+test compound_results_are_cached_and_self_intersecting_outlines_still_build ... ok
+test collapse_on_an_object_instance_is_one_undo_entry_and_lathe_clamps_degrees ... ok
+test stack_edits_on_a_source_keep_the_instances_pointing_at_the_same_modifier ... ok
+test edit_poly_deltas_follow_vertices_after_its_own_deletes ... ok
+test stale_selection_through_a_topology_changer_is_dropped_not_indexed ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/review4_fixes.rs (target/debug/deps/review4_fixes-36dda5feed95edc8)
+
+running 7 tests
+test autosave_resumes_after_open ... ok
+test auto_backup_interval_is_clamped ... ok
+test import_names_are_unique ... ok
+test new_scene_clears_the_file_name ... ok
+test save_changes_reply_runs_the_pending_action ... ok
+test save_incremental_handles_multibyte_names ... ok
+test settings_missing_keys_default_and_viewports_match_layout ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/review5_fixes.rs (target/debug/deps/review5_fixes-d6d2a51f46bea13c)
+
+running 10 tests
+test real_world_map_size_maps_in_world_units ... ok
+test uvw_xform_channel_0_edits_vertex_colors ... ok
+test same_count_topology_change_below_is_detected ... ok
+test load_uvw_refuses_a_different_mesh ... ok
+test editor_select_element_toggle_selects_whole_charts ... ok
+test empty_selection_edits_do_nothing_but_mapping_uses_all_faces ... ok
+test edit_after_topology_change_keeps_the_carried_layout ... ok
+test groups_survive_edits_and_closing_the_editor_ends_a_drag ... ok
+test select_all_and_region_skip_hidden_and_frozen ... ok
+test render_template_with_far_tvs_finishes ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/review7_fixes.rs (target/debug/deps/review7_fixes-a926cbd745b7516d)
+
+running 9 tests
+test nested_chains_solve_parent_first ... ok
+test imported_blend_shapes_sit_below_the_skin ... ok
+test moving_a_skinned_node_keeps_the_mesh_with_the_bones ... ok
+test exported_skin_with_a_pivot_offset_skins_in_place ... ok
+test skin_wrap_binds_to_the_mesh_below_it ... ok
+test skin_vertex_selection_does_not_leak_between_skins ... ok
+test ik_on_the_imported_mixamo_arm_reaches_its_goal ... ok
+test fbx_import_is_one_undo_entry ... ok
+test imported_skin_keeps_its_world_bind ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.86s
+
+     Running tests/review8_fixes.rs (target/debug/deps/review8_fixes-0ba8ec4a44b3c428)
+
+running 7 tests
+test set_key_mode_keeps_objects_created_while_posing ... ok
+test link_and_lookat_together ... ok
+test link_follows_an_unkeyed_move_of_the_target ... ok
+test linking_under_auto_key_does_not_key ... ok
+test paste_time_keeps_components_apart ... ok
+test key_time_cache_is_per_scene ... ok
+test track_bar_key_times_are_cached ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.95s
+
+     Running tests/review_1c.rs (target/debug/deps/review_1c-d482ef33d99c7c47)
+
+running 10 tests
+test array_rejects_non_positive_scale ... ok
+test spacing_pick_points_is_a_command ... ok
+test copy_of_an_instance_is_independent ... ok
+test undo_force_closes_a_leaked_transaction ... ok
+test local_z_rotation_after_world_x_keeps_clean_euler ... ok
+test absolute_rotate_type_in_sets_the_typed_euler ... ok
+test array_without_reorient_still_scales ... ok
+test face_snap_takes_the_nearest_face_along_the_ray ... ok
+test cloning_a_hierarchy_keeps_it_together ... ok
+test converting_an_instance_makes_it_unique ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/scene_files.rs (target/debug/deps/scene_files-6e484c8528690f43)
+
+running 14 tests
+test archive_entries_inflate_back_to_the_files ... ok
+test layers_toolbar_toggles ... ok
+test reset_asks_to_confirm_after_the_save_prompt ... ok
+test hide_and_freeze_all_layers_in_one_step ... ok
+test display_properties_and_rendering_control_by_layer ... ok
+test layer_color_render_and_objects_by_layer ... ok
+test set_current_layer_to_selections_layer ... ok
+test new_scene_keeps_objects_and_hierarchy_or_only_objects ... ok
+test fbx_export_and_import_keep_the_layers ... ok
+test merged_objects_keep_their_layers_by_name ... ok
+test layer_colors_and_file_properties_are_saved_in_the_scene_file ... ok
+test save_selected_writes_the_selection_with_its_ancestors ... ok
+test archive_zips_the_scene_and_its_bitmaps_or_lists_them ... ok
+test merge_duplicate_names_skip_merge_delete_old_rename_and_auto_rename ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/scene_render_performance.rs (target/debug/deps/scene_render_performance-789261691607866e)
+
+running 1 test
+test saved_scene_triangulation_cost ... ignored, release benchmark requires LOOM_PERF_SCENE
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/select_by.rs (target/debug/deps/select_by-5f4bab81a09720c0)
+
+running 2 tests
+test select_by_color_pick_selects_the_picked_objects_colour ... ok
+test select_instances_selects_the_whole_instance_group ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/select_modifiers.rs (target/debug/deps/select_modifiers-72eebf57a76f004c)
+
+running 5 tests
+test normalize_spline_even_segments ... ok
+test spline_select_and_delete_spline ... ok
+test vol_select_box_and_sphere ... ok
+test mesh_select_passes_selection_up ... ok
+test renderable_spline_makes_a_tube ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/selection_undo.rs (target/debug/deps/selection_undo-ccbc022f6a1069b7)
+
+running 8 tests
+test a_selection_that_does_not_change_adds_no_undo_step ... ok
+test undo_restores_the_previous_selection_and_redo_reapplies_it ... ok
+test a_new_selection_after_undo_clears_redo ... ok
+test undo_walks_selection_and_scene_operations_in_order ... ok
+test selecting_does_not_mark_the_scene_unsaved ... ok
+test sub_object_selection_undoes_like_object_selection ... ok
+test undoing_a_sub_object_move_keeps_the_sub_object_selection ... ok
+test undoing_an_extrude_brings_back_the_polygons_it_extruded ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/settings.rs (target/debug/deps/settings-d960c9c1609e5849)
+
+running 11 tests
+test the_config_dir_follows_loom_config_dir ... ok
+test every_key_survives_the_chart_text_round_trip ... ok
+test a_missing_or_partial_file_gives_the_defaults_and_garbage_is_an_error ... ok
+test keep_creating_starts_at_its_default_and_toggles ... ok
+test assign_moves_a_taken_hotkey_and_remove_clears_all_of_an_actions_keys ... ok
+test group_shortcuts_apply_in_their_context_only ... ok
+test reset_keeps_the_users_units_and_an_opened_file_does_not_change_them ... ok
+test shortcut_files_save_and_load ... ok
+test ui_schemes_save_load_and_revert_to_the_startup_layout ... ok
+test settings_round_trip_through_json ... ok
+test recent_files_are_newest_first_unique_and_capped ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/shape_modifiers.rs (target/debug/deps/shape_modifiers-5a7c5d27fa8ed113)
+
+running 2 tests
+test edit_spline_modifier_edits_the_shape_below_and_feeds_extrude ... ok
+test extrude_lathe_bevel_and_sweep_turn_shapes_into_meshes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/shapes.rs (target/debug/deps/shapes-14b867c454900ba3)
+
+running 3 tests
+test convert_to_editable_spline_keeps_the_outline_and_rendering ... ok
+test line_tool_adds_knots_removes_the_last_and_closes ... ok
+test every_shape_kind_creates_a_parametric_shape_with_an_outline ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/skin.rs (target/debug/deps/skin-569c939b8b77b583)
+
+running 3 tests
+test moving_a_bone_bends_the_skinned_mesh_and_skin_pose_restores ... ok
+test skin_modifier_binds_bones_and_weight_tool_edits_vertices ... ok
+test selection_tools_and_vertex_by_bone_and_exclude ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/skin_morph_tools.rs (target/debug/deps/skin_morph_tools-e3ec48ddd7d90917)
+
+running 7 tests
+test pick_bone_adds_bones_until_turned_off ... ok
+test paste_mirror_copies_a_bones_morphs_to_its_mirror_bone ... ok
+test with_beginner_mode_off_moving_points_creates_a_morph_on_the_fly ... ok
+test soft_selection_spreads_a_move_over_nearby_points ... ok
+test joint_type_external_mesh_and_reload_target ... ok
+test points_level_selects_and_the_selection_tools_grow_shrink_loop_and_ring ... ok
+test edit_mode_poses_the_bone_and_moving_points_makes_the_morph ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/skin_tools.rs (target/debug/deps/skin_tools-439735827e9e99af)
+
+running 2 tests
+test mirror_mode_pastes_green_to_blue_through_commands ... ok
+test gizmo_commands_add_keys_and_reset ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/skin_tools2.rs (target/debug/deps/skin_tools2-6eb91f10adea23c7)
+
+running 17 tests
+test skin_goes_onto_every_selected_object_at_once ... ok
+test mirror_sides_and_paste_green_to_blue_bones ... ok
+test rigid_handles_on_an_editable_patch ... ok
+test always_deform_back_on_binds_at_the_ref_frame_pose ... ok
+test the_vertices_filter_starts_off_and_envelope_mode_toggles_relative ... ok
+test zoom_extents_selected_frames_the_skin_selection_and_the_highlight ... ok
+test paste_to_multiple_bones_pastes_the_copied_envelope_onto_the_picked_bones ... ok
+test envelope_end_points_move_with_the_move_tool_and_not_the_object ... ok
+test cross_sections_are_added_on_the_bone_selected_resized_and_removed ... ok
+test exclusion_cells_and_vertex_sets ... ok
+test select_element_brings_the_whole_element_and_projection_limits_sides ... ok
+test rigid_handles_need_a_patch_and_remove_zero_weights_uses_the_limit ... ok
+test morph_angle_gizmo_takes_a_target_from_the_stack_at_the_bones_angle ... ok
+test pen_pressure_runs_strength_from_min_to_max_and_the_graph_shapes_the_brush ... ok
+test reset_selected_verts_bone_and_all_go_back_to_the_envelopes ... ok
+test save_and_load_envelopes_match_bones_and_vertex_data ... ok
+test joint_gizmo_lattice_points_move_and_key_at_the_angle_copy_paste_and_options ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/skin_weights.rs (target/debug/deps/skin_weights-42c0924331857afd)
+
+running 7 tests
+test bone_name_field_and_envelope_visibility ... ok
+test weight_table_cells_set_one_bone_on_given_vertices_without_touching_the_selection ... ok
+test paint_blend_weights_smooths_towards_the_neighbours ... ok
+test weight_tool_scale_weight_uses_its_own_field_and_five_percent_steps ... ok
+test paste_pos_fills_only_vertices_within_the_tolerance ... ok
+test paint_weights_brushes_the_current_bone_near_the_stroke_and_alt_erases ... ok
+test preset_weight_buttons_set_the_current_bone_and_undo_restores ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests/skin_wrap.rs (target/debug/deps/skin_wrap-f0f645349262ab3e)
+
+running 1 test
+test skin_wrap_follows_the_skinned_arm_and_converts_to_skin ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/skin_wrap_patch.rs (target/debug/deps/skin_wrap_patch-ee60f6231b70e717)
+
+running 1 test
+test a_picked_patch_deforms_the_mesh ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/skin_wrap_tools.rs (target/debug/deps/skin_wrap_tools-777534fe95f8128f)
+
+running 5 tests
+test mirror_selected_copies_local_settings_across_the_plane ... ok
+test options_rebind_with_the_reference_ranges ... ok
+test unassigned_points_are_counted_for_the_display ... ok
+test bake_and_retrieve_control_verts_round_trip_through_the_control_object ... ok
+test add_picks_control_objects_and_the_control_vertex_level_sets_locals ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/snap.rs (target/debug/deps/snap-ed00df015d35a370)
+
+running 11 tests
+test grid_points_snap_rounds_to_spacing ... ok
+test percent_snap_rounds_scale ... ok
+test angle_snap_rounds_to_increment ... ok
+test snap_preview_radius_and_snap_radius_push_each_other ... ok
+test snap_marker_colour_and_major_lines_minimum ... ok
+test cycle_snap_type_2d_25d_3d ... ok
+test user_grids_activate_grids_when_creating ... ok
+test no_candidate_in_radius_leaves_point_free ... ok
+test vertex_snap_picks_nearest_within_radius ... ok
+test snap_modes_restrict_to_the_construction_plane ... ok
+test sequence_of_snapped_moves_lands_exactly ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/spacing.rs (target/debug/deps/spacing-f87f63cd64dd9530)
+
+running 4 tests
+test edges_context_keeps_end_objects_inside_and_spaces_between_edges ... ok
+test distribution_modes_place_objects_as_the_reference_describes ... ok
+test space_along_points_and_free_center_runs_straight ... ok
+test pick_path_spaces_objects_along_a_curved_shape ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/spline_edit.rs (target/debug/deps/spline_edit-2a71ea0520d78fa1)
+
+running 3 tests
+test spline_levels_pick_and_move_knots_segments_and_splines ... ok
+test create_shape_from_edges_and_extrude_along_spline ... ok
+test geometry_rollout_operations ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/spline_geometry.rs (target/debug/deps/spline_geometry-723f7fa2bbb8b5c7)
+
+running 10 tests
+test editable_spline_trim_extend_cross_insert ... ok
+test cross_section_and_tangent_copy_paste ... ok
+test bind_follows_segment ... ok
+test spline_soft_selection_falloff ... ok
+test a_missed_trim_or_extend_changes_nothing ... ok
+test bevel_profile_along_rectangle ... ok
+test fillet_and_chamfer_corners ... ok
+test bevel_profile_reads_the_profiles_modifier_stack ... ok
+test trim_extend_edge_cases ... ok
+test cross_section_connects_splines ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/stack.rs (target/debug/deps/stack-2fe863d1a2e875dd)
+
+running 9 tests
+test smooth_prevent_indirect_smoothing_separates_faces_meeting_at_a_vertex ... ok
+test evaluation_is_cached_until_changed ... ok
+test state_lists_the_stack_with_modifier_names_and_levels ... ok
+test show_end_result_off_and_set_parameter_routing ... ok
+test topology_change_below_drops_upper_selection_with_warning ... ok
+test taper_center_level_moves_only_the_center ... ok
+test copy_and_instance_a_modifier_within_the_stack ... ok
+test add_delete_reorder_toggle_are_undoable ... ok
+test collapse_to_keeps_instances_elsewhere ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/toolbar_sets.rs (target/debug/deps/toolbar_sets-bc43bda0e8fe5030)
+
+running 2 tests
+test scale_flyout_picks_the_scale_type_and_scale_cycle_steps_through_it ... ok
+test sub_object_sets_belong_to_their_object_and_level ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/track_view.rs (target/debug/deps/track_view-9b65e6a02e94fd21)
+
+running 11 tests
+test parameter_curve_out_of_range_types ... ok
+test every_track_view_chart_row_exists ... ok
+test copy_paste_controller_and_make_unique ... ok
+test scale_keys_and_values ... ok
+test time_tools_scale_reverse_insert_cut_copy_paste ... ok
+test note_tracks_and_track_sets ... ok
+test set_tangents_on_selection ... ok
+test normalize_time_and_constant_velocity ... ok
+test select_and_move_keys ... ok
+test simplify_curve_reduces_keys_within_threshold ... ok
+test filters_animated_selected ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/trajectories.rs (target/debug/deps/trajectories-cf0136330ff5db6f)
+
+running 7 tests
+test constraint_pick_mode_assigns_on_click ... ok
+test move_tool_moves_trajectory_keys_in_sub_object_keys ... ok
+test trajectory_sub_object_keys_move ... ok
+test delete_selected_animation_and_toggles ... ok
+test trajectory_convert_to_and_from_round_trip ... ok
+test collapse_bakes_constraints_into_keys ... ok
+test track_bar_filter_current_transform ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/transform.rs (target/debug/deps/transform-d18d99bb9ed2464c)
+
+running 13 tests
+test old_pixel_gizmo_size_pref_loads ... ok
+test constraints_cycle_f8_xy_yz_zx ... ok
+test local_system_uses_node_rotation ... ok
+test rotate_selection_free_applies_quaternion ... ok
+test rotation_accumulates_past_360 ... ok
+test view_system_in_front_view_maps_y_to_world_z ... ok
+test pick_system_uses_picked_node ... ok
+test parent_system_uses_parent_frame ... ok
+test pivot_centre_rotation_keeps_positions ... ok
+test clone_options_instance_shares_object ... ok
+test selection_centre_rotation_orbits_objects ... ok
+test gizmo_toggle_and_size_commands ... ok
+test transform_type_in_absolute_rotation_uses_centre_mode ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/transform_frames.rs (target/debug/deps/transform_frames-22999556b6e084f1)
+
+running 16 tests
+test affect_pivot_only_ignores_scale ... ok
+test working_pivot_reset_and_place ... ok
+test transform_managers_are_remembered_per_transform_tool ... ok
+test gimbal_move_and_scale_use_the_parent_axes ... ok
+test gimbal_rotation_changes_only_its_own_euler_track ... ok
+test working_pivot_edit_then_use ... ok
+test dont_affect_children_keeps_the_children_in_place ... ok
+test axis_constraints_are_kept_per_object_and_sub_object_level ... ok
+test reset_xform_puts_rotation_and_scale_in_an_xform_modifier ... ok
+test affect_hierarchy_only_rotates_the_links_not_the_objects ... ok
+test local_at_sub_object_level_uses_the_selection_normal ... ok
+test status_bar_rotate_type_in_rotates_the_slice_plane_only ... ok
+test choosing_pick_in_the_list_picks_an_object_and_keeps_four_recent_names ... ok
+test reset_transform_and_reset_scale_keep_the_look_and_the_children ... ok
+test auto_key_rotate_uses_each_pivot ... ok
+test alignment_buttons_follow_the_affect_mode ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/undo9.rs (target/debug/deps/undo9-3ce66c265fd9017f)
+
+running 4 tests
+test undo_spline_ik_control_create_helpers ... ok
+test undo_edit_normals_copy_paste ... ok
+test undo_pathdeform_edits ... ok
+test undo_point_cache_load_and_unload ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/unwrap.rs (target/debug/deps/unwrap-82f28bf539315bda)
+
+running 8 tests
+test every_chart_row_is_a_command_or_deferred ... ok
+test unwrap_on_mesh_without_uvs ... ok
+test topology_change_below_unwrap_keeps_surviving_uvs ... ok
+test flatten_and_pack_tolerate_degenerate_faces ... ok
+test save_and_load_uvw ... ok
+test seams_from_edge_selection_and_point_to_point ... ok
+test edit_uvws_commands_are_undoable_as_one_entry ... ok
+test render_template_writes_png_and_refuses_huge ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/uvw_map.rs (target/debug/deps/uvw_map-f4104829d8626814)
+
+running 5 tests
+test uvw_xform_tiles_and_offsets ... ok
+test uvw_map_planar_on_box_fits_bounds ... ok
+test uvw_map_channel_0_writes_vertex_colors ... ok
+test texture_display_is_set_by_command_and_saved ... ok
+test uvw_map_fit_center_reset_are_undoable ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/vertex_color_channel.rs (target/debug/deps/vertex_color_channel-b8cc447a16c9b56f)
+
+running 2 tests
+test state_reports_map_channels ... ok
+test unwrap_channel_0_edits_vertex_colors ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/vertex_paint.rs (target/debug/deps/vertex_paint-831680c8365b38ca)
+
+running 4 tests
+test face_selection_restricts_the_brush_and_paint_all_fills_it ... ok
+test soft_strokes_build_up_and_the_eyedropper_picks_the_painted_colour ... ok
+test assign_vertex_colors_bakes_the_lights_and_their_shadows ... ok
+test new_layer_opacity_and_blend_modes ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/viewport_background.rs (target/debug/deps/viewport_background-6c17150155d0ef2b)
+
+running 2 tests
+test aspect_and_display_apply_to_the_active_view_or_all ... ok
+test lock_zoom_pan_remembers_the_view_it_was_locked_in ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/viewport_clipping.rs (target/debug/deps/viewport_clipping-73e8a7ba2c43afbf)
+
+running 1 test
+test clipping_toggles_and_keeps_its_planes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/viewport_home.rs (target/debug/deps/viewport_home-992a6ac663e0de78)
+
+running 1 test
+test default_perspective_looks_from_front_left ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/viewport_preview_prefs.rs (target/debug/deps/viewport_preview_prefs-b7425efeefc40f70)
+
+running 1 test
+test preview_limits_are_local_preferences_and_legacy_config_gets_safe_defaults ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/viewports.rs (target/debug/deps/viewports-a569c0ca33a58f65)
+
+running 9 tests
+test virtual_viewport_rows_are_out_of_scope ... ok
+test default_state_is_top_front_left_perspective_active_3 ... ok
+test maximize_toggle_round_trips ... ok
+test nav_mode_toggles_off_when_run_twice ... ok
+test zoom_extents_on_empty_scene_keeps_camera ... ok
+test viewport_layout_command_resizes_viewport_list ... ok
+test view_commands_change_only_active_viewport ... ok
+test hide_geometry_toggle_hides_boxes_but_not_shapes ... ok
+test isolate_selection_restores_previously_hidden ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/wp6_splines.rs (target/debug/deps/wp6_splines-d223a62ddb0a7b93)
+
+running 9 tests
+test area_selection_threshold_defaults_to_a_tenth ... ok
+test fillet_and_chamfer_modes_toggle ... ok
+test refine_on_an_existing_vertex_asks_refine_or_connect_only ... ok
+test refine_with_connect_joins_the_inserted_vertices_in_order ... ok
+test clicking_the_first_vertex_asks_to_close_the_spline ... ok
+test lathe_revolves_about_the_pivot_until_an_align_button_is_pressed ... ok
+test pick_spline_in_the_open_dialog_keeps_the_path_for_the_preview ... ok
+test extrude_along_spline_rotation_turns_the_path_about_the_face_normal ... ok
+test extrude_along_spline_taper_amount_and_taper_curve ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/xref.rs (target/debug/deps/xref-9eb0fe5b097e6494)
+
+running 2 tests
+test xref_objects_are_read_only_and_follow_their_file ... ok
+test xref_scene_is_frozen_and_takes_in_what_the_file_gains ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (target/debug/deps/loom_scene-a255baacf2b1ed93)
+
+running 54 tests
+test camera::tests::default_lens_matches_default_fov ... ok
+test camera::tests::diagonal_and_vertical_fov_follow_the_render_aspect ... ok
+test camera::tests::frame_spans_the_fov_in_front_of_the_camera ... ok
+test light::tests::falloff_follows_hotspot_and_keeps_its_gap ... ok
+test light::tests::kelvin_colours_run_from_warm_to_white ... ok
+test light::tests::exclusion_scopes ... ok
+test maps::tests::checker_gradient_noise_and_mix ... ok
+test light::tests::decay_and_attenuation_match_the_reference_formulas ... ok
+test light::tests::spot_cone_is_full_inside_the_hotspot_and_dark_outside_the_falloff ... ok
+test maps::tests::bump_heights_tilt_the_normals ... ok
+test maps::tests::decal_and_mirror ... ok
+test loomrig_contact_tests::contact_edits_and_collisions_are_atomic_and_keep_shared_references ... ok
+test light::tests::photometric_intensity_units_convert_through_candela ... ok
+test caches9::tests::a_failed_read_is_not_kept ... ok
+test material::tests::a_shell_shows_its_viewport_or_render_choice ... ok
+test loomrig_contact_tests::contact_sampling_preserves_references_and_registers_time_dependence ... ok
+test maps::tests::bitmap_crop_and_place ... ok
+test loomrig_contact_tests::contact_invalid_data_is_rejected_by_construction_and_deserialization ... ok
+test material::tests::blend_mixes_by_amount_and_a_mask_goes_through_a_mix_map ... ok
+test loomrig_contact_tests::contact_limb_legacy_serialization_omits_empty_track_and_roundtrips_authored_data ... ok
+test camera::tests::icon_lies_behind_the_eye_and_is_closed_where_drawn ... ok
+test material::tests::multi_sub_resolves_per_face_id_and_missing_ids_are_black ... ok
+test scene::skin_batch::tests::actual_all_159_skin_poses_match_serial_full_stack ... ignored, requires LOOM_PERF_SCENE real saved scene
+test material::tests::coordinates_offset_tile_and_rotate ... ok
+test material::tests::levels_resolve_through_sub_materials_and_maps ... ok
+test modifier::modifier_list_tests::every_modifier_is_in_or_out ... ok
+test scene::tests::transform_matrix_roundtrip ... ok
+test sun::tests::dates ... ok
+test scene::tests::next_name_follows_numbering_convention ... ok
+test scene::tests::add_node_assigns_increasing_ids_never_reused ... ok
+test skin::scratch_weight_tests::owned_skin_application_keeps_input_mesh_allocation_and_reference_output ... ok
+test sun::tests::morning_sun_rises_in_the_east_and_night_is_below_the_horizon ... ok
+test light::tests::icons_are_closed_meshes_around_the_pivot ... ok
+test scene::tests::parametric_box_mesh_matches_primitive ... ok
+test sun::tests::noon_sun_is_south_and_high_in_june_in_san_francisco ... ok
+test undo::tests::commit_then_undo_restores_scene ... ok
+test undo::tests::entry_identity_survives_redo_but_never_branches_resets_or_eviction ... ok
+test skin::scratch_weight_tests::explicit_weights_reuse_scratch_capacity_and_strongest_keeps_last_tie ... ok
+test undo::tests::limit_drops_oldest ... ok
+test undo::tests::redo_reapplies_and_new_commit_clears_redo ... ok
+test undo::tests::set_transform_undo_restores_position ... ok
+test undo::tests::nested_begin_joins_the_outer_transaction ... ok
+test scene::tests::set_parent_keeps_world_transform ... ok
+test scene::tests::remove_parent_keeps_children_world_transform ... ok
+test undo::tests::remove_node_inverse_restores_children ... ok
+test scene::skin_batch::tests::geometry_attachment_constraints_keep_serial_cycle_guards ... ok
+test undo::tests::failed_group_leaves_scene_unchanged ... ok
+test scene::skin_batch::tests::static_skin_keeps_timeless_cache_and_instanced_slots_use_serial ... ok
+test scene::skin_batch::tests::batch_render_mode_and_changed_time_use_ordinary_cache_rules ... ok
+test scene::skin_batch::tests::editable_mesh_input_does_not_apply_poly_subdivision_settings ... ok
+test undo::tests::transaction_collapses_drag_steps_into_one_and_ignores_limit ... ok
+test scene::skin_batch::tests::base_output_runs_in_executor_and_propagates_animated_reads ... ok
+test scene::skin_batch::tests::batch_jobs_preserve_full_output_cache_edits_and_worker_tls ... ok
+test skin::scratch_weight_tests::scratch_weights_match_public_reference_for_limits_flags_and_patch_owners ... ok
+
+test result: ok. 53 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/anim.rs (target/debug/deps/anim-abf0a3448845a30e)
+
+running 8 tests
+test list_sums_weighted_controllers ... ok
+test bezier_auto_passes_through_keys_and_is_smooth ... ok
+test auto_key_creates_keys_and_off_offsets ... ok
+test out_of_range_types_extend_the_curve ... ok
+test noise_is_deterministic_and_bounded ... ok
+test step_and_linear_tangents ... ok
+test tcb_passes_through_keys ... ok
+test old_constant_params_deserialise ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bones.rs (target/debug/deps/bones-1b571d97f73bd8db)
+
+running 2 tests
+test helpers_are_helpers_with_their_sizes ... ok
+test bone_mesh_points_along_x_and_tapers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ik.rs (target/debug/deps/ik-908249bf496070d4)
+
+running 7 tests
+test hi_solver_reaches_a_goal_in_range ... ok
+test limb_at_fk_endpoint_keeps_twist_and_every_local_rotation ... ok
+test limb_solver_is_exact_and_bends_in_the_swivel_plane ... ok
+test malformed_legacy_limb_keeps_fk_without_panicking ... ok
+test limb_uses_the_existing_bend_side_when_goal_moves ... ok
+test spline_ik_lays_bones_along_the_shape ... ok
+test hi_solver_reaches_toward_an_unreachable_goal ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/loomrig.rs (target/debug/deps/loomrig-fb5d18cc0c563d58)
+
+running 4 tests
+test characterization_checks_hierarchy_instead_of_accepting_unrelated_named_bones ... ok
+test edit_revision_changes_on_edit_but_not_playback ... ok
+test characterization_requires_real_mapped_bones ... ok
+test control_offsets_drive_existing_bone_without_editing_transform ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/maps_preview_limits.rs (target/debug/deps/maps_preview_limits-d1016b80ffde8785)
+
+running 4 tests
+test zero_preview_budget_produces_no_bitmap_or_procedural_output ... ok
+test nested_procedural_map_obeys_preview_limit ... ok
+test placed_image_is_baked_within_preview_limit_before_allocation ... ok
+test legacy_bake_matches_its_original_limit ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/morph.rs (target/debug/deps/morph-19cbdf4dc967a4d3)
+
+running 3 tests
+test morpher_blends_progressive_targets_by_value ... ok
+test morpher_skips_a_target_with_a_different_vertex_count ... ok
+test skin_morph_fires_at_the_bone_angle ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin.rs (target/debug/deps/skin-8cd4a628c38adb35)
+
+running 3 tests
+test envelope_weights_fall_off_between_inner_and_outer ... ok
+test skin_follows_a_bone_move_without_editing_the_node ... ok
+test skin_keeps_weights_by_vertex_when_faces_are_deleted_below ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_envelopes.rs (target/debug/deps/skin_envelopes-fc9c69df958cc1c7)
+
+running 11 tests
+test a_relative_envelope_keeps_partial_weight_and_the_rest_stays_put ... ok
+test animatable_envelope_radii_key_and_play_back ... ok
+test cross_sections_shape_the_radius_along_the_envelope ... ok
+test rigid_vertices_all_follow_the_strongest_bone_only ... ok
+test a_spline_bone_gets_an_envelope_along_its_curve_and_a_box_along_its_longest_side ... ok
+test fast_updates_preview_rigidly_but_render_in_full ... ok
+test always_deform_off_leaves_the_mesh_undeformed ... ok
+test a_relative_vertex_moves_part_of_the_way_with_its_bone ... ok
+test ignore_bone_scale_and_squash ... ok
+test back_transform_vertices_off_moves_a_linked_mesh_twice ... ok
+test skin_on_a_patch_moves_the_lattice_and_rigid_handles_follow_one_bone ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_gizmos.rs (target/debug/deps/skin_gizmos-0d7cad7734a67a50)
+
+running 3 tests
+test mirror_pastes_weights_across_the_plane ... ok
+test bulge_angle_gizmo_scales_the_joint_at_its_key_angle ... ok
+test joint_angle_gizmo_adds_its_deltas_at_the_key ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_morph.rs (target/debug/deps/skin_morph-c40ab9022b7a3e58)
+
+running 5 tests
+test soft_selection_weights_fall_off_within_the_radius_and_the_edge_limit ... ok
+test an_old_morph_without_a_pose_still_uses_its_angle ... ok
+test custom_falloff_follows_the_graph_and_edit_mode_holds_the_morph_full ... ok
+test ball_joints_track_twist_and_planar_joints_only_the_parent_plane ... ok
+test the_morph_fades_out_at_half_the_influence_angle ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_wrap.rs (target/debug/deps/skin_wrap-838a567c486b01f4)
+
+running 8 tests
+test skin_wrap_defaults_follow_the_reference ... ok
+test face_limit_counts_faces_from_the_closest_face ... ok
+test face_engine_is_rigid_at_the_lowest_falloff ... ok
+test distance_influence_is_a_radius_of_average_edge_lengths ... ok
+test local_scale_and_axes_shape_the_volume_of_influence ... ok
+test skin_wrap_follows_the_deformed_base ... ok
+test blend_to_base_mesh_weakens_points_far_from_the_control_faces ... ok
+test local_strength_scales_and_flips_the_pull ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/skin_wrap_patch.rs (target/debug/deps/skin_wrap_patch-f99101c6656f56ea)
+
+running 2 tests
+test a_changed_patch_topology_warns_until_resampled ... ok
+test a_patch_object_deforms_the_wrapped_mesh ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/standard_primitives.rs (target/debug/deps/standard_primitives-d8e5328edc473fa8)
+
+running 6 tests
+test documented_defaults ... ok
+test geosphere_base_type_is_a_choice_segments_cap_at_200_and_base_to_pivot_lifts ... ok
+test torus_smooth_is_all_sides_none_segments_with_all_the_default ... ok
+test cone_cylinder_and_tube_take_a_negative_height ... ok
+test sphere_has_chop_squash_slice_and_base_to_pivot ... ok
+test round_primitives_have_smooth_on_by_default_and_off_facets_them ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+   Doc-tests loom_commands
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests loom_scene
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

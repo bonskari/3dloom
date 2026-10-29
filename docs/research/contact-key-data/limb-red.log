@@ -1,0 +1,29 @@
+    Blocking waiting for file lock on build directory
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+error[E0560]: struct `RigLimb` has no field named `contacts`
+  --> crates/loom_scene/src/loomrig_contact_tests.rs:88:9
+   |
+88 |         contacts: ContactTrack::default(),
+   |         ^^^^^^^^ `RigLimb` does not have this field
+   |
+   = note: all struct fields are already assigned
+
+error[E0609]: no field `contacts` on type `RigLimb`
+  --> crates/loom_scene/src/loomrig_contact_tests.rs:93:10
+   |
+93 |     limb.contacts = track();
+   |          ^^^^^^^^ unknown field
+   |
+   = note: available fields are: `mapping`, `goal`, `pole`, `goal_rest`, `pole_rest` ... and 3 others
+
+error[E0609]: no field `contacts` on type `RigLimb`
+  --> crates/loom_scene/src/loomrig_contact_tests.rs:97:10
+   |
+97 |     limb.contacts = ContactTrack::default();
+   |          ^^^^^^^^ unknown field
+   |
+   = note: available fields are: `mapping`, `goal`, `pole`, `goal_rest`, `pole_rest` ... and 3 others
+
+Some errors have detailed explanations: E0560, E0609.
+For more information about an error, try `rustc --explain E0560`.
+error: could not compile `loom_scene` (lib test) due to 3 previous errors

@@ -1,4 +1,4 @@
-# Contact-key implementation contract — not implemented yet
+# Contact-key implementation contract — metadata implemented, evaluation pending
 
 Implementation starts after Task9's production-unset performance delivery. This design refines the pending proposal; it does not certify contact functionality.
 
@@ -23,6 +23,6 @@ Our implementation must keep an empty contact track exactly compatible with the 
 
 ## Existing-state checks
 
-Current RigLimb has blend and pose_offsets, no contact track. Current generated goal/pole helpers are world-space (no parent); FK display controls parent their mapped bones. SetLoomRigMapping already carries prior limb metadata by role name and reuses controls. A new real-command regression test confirmed solver, keyed blend, pose_offsets, goal/pole IDs and original bone records survive an identical mapping apply and an unrelated head-role change. It passed before any production change; no mapping-loss bug was reproduced or fixed.
+RigLimb now has validated contact metadata alongside blend and pose_offsets; the contact evaluator and authoring UI remain unimplemented. Current generated goal/pole helpers are world-space (no parent); FK display controls parent their mapped bones. SetLoomRigMapping already carries prior limb metadata by role name and reuses controls. A new real-command regression test confirmed solver, keyed blend, pose_offsets, goal/pole IDs and original bone records survive an identical mapping apply and an unrelated head-role change. It passed before any production change; no mapping-loss bug was reproduced or fixed.
 
 Suggested next tasks: typed key/reference sampling and validation; evaluator with no-pop matching/cache/affine tests; atomic commands and pose-key routing; shared viewport goal/pole editing; separate timeline/editor controls; real Ray acceptance. Treat each as incomplete until its actual behavior is verified.

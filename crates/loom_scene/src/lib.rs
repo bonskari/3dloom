@@ -37,3 +37,6 @@ pub use change::Change;
 pub use undo::UndoStack;
 
 pub mod loomrig;
+pub mod loomrig_contact;
+#[cfg(test)]
+mod loomrig_contact_tests;
