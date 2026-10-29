@@ -1,11 +1,13 @@
-//! Self-update from the nightly release.
+//! Self-update from signed per-branch GitHub releases.
 //!
-//! Release builds made by CI carry an update channel. After the window opens,
-//! a background check fetches the release's `latest.json` and its ed25519
-//! signature, checks the signature against the key built into the program and
-//! lists the changes since this version. Only when the user picks Update does
-//! it download the binary for this platform, check its SHA-256 and replace
-//! the executable; the new version runs after a restart.
+//! Each branch published by CI uploads a signed `latest.json` and `latest.json.sig`
+//! under its release tag (`nightly` for `main`, `branch-<slug>` for other branches).
+//! After the window opens, a background check fetches available release branches,
+//! downloads the selected branch's `latest.json` and ed25519 signature, checks the
+//! signature against the key built into the program, and lists changes since this
+//! version. Only when the user picks Update does it download the binary for this
+//! platform, check its SHA-256, and replace the executable; the new version runs
+//! after a restart.
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
@@ -15,11 +17,14 @@ use std::io::Read;
 
 /// The release key's public half (the private half signs in CI).
 const PUBLIC_KEY: [u8; 32] = hex32("f02444c7ca846b68a5f543f5e76439dd7753af32a225890ff7b6904d18a424bd");
-const RELEASE_URL: &str = "https://github.com/bonskari/3dloom/releases/download/nightly";
+const RELEASES_DOWNLOAD_BASE: &str = "https://github.com/bonskari/3dloom/releases/download";
+const RELEASES_API_URL: &str = "https://api.github.com/repos/bonskari/3dloom/releases?per_page=50";
 
-/// `latest.json`: the commit the release was built from and its binaries.
+/// `latest.json`: the branch/commit the release was built from and its binaries.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Manifest {
+    #[serde(default)]
+    pub branch: Option<String>,
     pub commit: String,
     pub assets: BTreeMap<String, Asset>,
 }
@@ -30,13 +35,143 @@ pub struct Asset {
     pub sha256: String,
 }
 
-/// Whether this run updates itself: only CI release builds (they carry a
-/// channel), and not when remote-controlled or told not to (the desktop
-/// launcher already fetches the newest build).
-pub fn enabled(channel: Option<&str>, control_port: Option<&str>, no_update: Option<&str>) -> bool {
-    channel.is_some_and(|c| !c.is_empty())
-        && control_port.is_none_or(|p| p.trim().is_empty() || p.trim() == "0")
+/// Whether this run shows the Update menu: enabled for interactive runs unless
+/// remote-controlled or explicitly disabled via `LOOM_NO_UPDATE`.
+pub fn enabled(_channel: Option<&str>, control_port: Option<&str>, no_update: Option<&str>) -> bool {
+    control_port.is_none_or(|p| p.trim().is_empty() || p.trim() == "0")
         && no_update.is_none_or(|v| v.is_empty() || v == "0")
+}
+
+/// Normalizes a branch or channel name (`nightly` / empty -> `main`).
+pub fn normalize_branch(branch: &str) -> String {
+    let b = branch.trim();
+    if b.is_empty() || b == "nightly" || b == "HEAD" {
+        "main".to_owned()
+    } else {
+        b.to_owned()
+    }
+}
+
+/// Maps a Git branch name to its GitHub release tag (`main` -> `nightly`,
+/// other branches -> `branch-<sanitized-slug>`).
+pub fn release_tag(branch: &str) -> String {
+    let b = normalize_branch(branch);
+    if b == "main" {
+        return "nightly".to_owned();
+    }
+    if let Some(rest) = b.strip_prefix("branch-") {
+        if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')) {
+            return b;
+        }
+    }
+    let slug: String = b
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-');
+    if slug.is_empty() {
+        "nightly".to_owned()
+    } else {
+        format!("branch-{slug}")
+    }
+}
+
+/// Download base URL for a given branch's release assets.
+pub fn release_url_for_branch(branch: &str) -> String {
+    format!("{RELEASES_DOWNLOAD_BASE}/{}", release_tag(branch))
+}
+
+/// Parses GitHub Releases API JSON and returns branches that publish a signed
+/// `latest.json` + `latest.json.sig`, always starting with `main`.
+pub fn parse_release_branches(body: &[u8]) -> Vec<String> {
+    let mut out = vec!["main".to_owned()];
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return out;
+    };
+    let Some(releases) = v.as_array() else {
+        return out;
+    };
+    for rel in releases {
+        let Some(assets) = rel["assets"].as_array() else { continue };
+        let has_manifest = assets.iter().any(|a| a["name"].as_str() == Some("latest.json"));
+        let has_sig = assets.iter().any(|a| a["name"].as_str() == Some("latest.json.sig"));
+        if !(has_manifest && has_sig) {
+            continue;
+        }
+        let tag = rel["tag_name"].as_str().unwrap_or("");
+        let title = rel["name"].as_str().unwrap_or("");
+        let branch = if tag == "nightly" {
+            "main".to_owned()
+        } else if let Some(inner) = title.strip_prefix("3dLoom (").and_then(|s| s.strip_suffix(')')) {
+            normalize_branch(inner)
+        } else if let Some(rest) = tag.strip_prefix("branch-") {
+            normalize_branch(rest)
+        } else if !tag.is_empty() {
+            normalize_branch(tag)
+        } else {
+            continue;
+        };
+        if !out.contains(&branch) {
+            out.push(branch);
+        }
+    }
+    out
+}
+
+/// Queries GitHub Releases for available signed branches, ensuring `current` and
+/// `main` are always present.
+pub fn fetch_branches(current: &str) -> Vec<String> {
+    let mut branches = match fetch(RELEASES_API_URL, 10) {
+        Ok(body) => parse_release_branches(&body),
+        Err(_) => vec!["main".to_owned()],
+    };
+    let current = normalize_branch(current);
+    if !branches.contains(&current) {
+        branches.push(current);
+    }
+    branches
+}
+
+fn branch_pref_path() -> Option<std::path::PathBuf> {
+    #[cfg(unix)]
+    {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+            .map(|dir| dir.join("3dloom").join("update-branch"))
+    }
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA")
+            .map(std::path::PathBuf::from)
+            .map(|dir| dir.join("3dloom").join("update-branch"))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        None
+    }
+}
+
+/// Loads the user's persisted update branch preference, falling back to `default_branch`.
+pub fn load_saved_branch(default_branch: &str) -> String {
+    if let Some(path) = branch_pref_path() {
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            let trimmed = contents.trim();
+            if !trimmed.is_empty() {
+                return normalize_branch(trimmed);
+            }
+        }
+    }
+    normalize_branch(default_branch)
+}
+
+/// Persists the user's selected update branch preference locally.
+pub fn save_branch(branch: &str) {
+    let Some(path) = branch_pref_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, format!("{}\n", normalize_branch(branch)));
 }
 
 /// This platform's key in the manifest.
@@ -65,11 +200,12 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The signed manifest and this platform's asset, when the release is another commit.
-pub fn check(own_commit: &str) -> Result<Option<(Manifest, Asset)>, String> {
+/// The signed manifest and this platform's asset for `branch`, when the release is another commit.
+pub fn check_branch(own_commit: &str, branch: &str) -> Result<Option<(Manifest, Asset)>, String> {
     let platform = platform().ok_or("no release build for this platform")?;
-    let manifest = fetch(&format!("{RELEASE_URL}/latest.json"), 15)?;
-    let signature = fetch(&format!("{RELEASE_URL}/latest.json.sig"), 15)?;
+    let base_url = release_url_for_branch(branch);
+    let manifest = fetch(&format!("{base_url}/latest.json"), 15)?;
+    let signature = fetch(&format!("{base_url}/latest.json.sig"), 15)?;
     let manifest = verify(&manifest, &signature, &PUBLIC_KEY)?;
     let asset = pending(&manifest, own_commit, platform).cloned();
     Ok(asset.map(|a| (manifest, a)))
@@ -94,9 +230,10 @@ pub fn commit_titles(body: &[u8]) -> Vec<String> {
     out
 }
 
-/// Downloads the asset, checks its SHA-256 and replaces this executable.
-pub fn install(manifest: &Manifest, asset: &Asset) -> Result<(), String> {
-    let binary = fetch(&format!("{RELEASE_URL}/{}", asset.name), 300)?;
+/// Downloads the asset from `branch`'s release, checks its SHA-256 and replaces this executable.
+pub fn install_from_branch(branch: &str, manifest: &Manifest, asset: &Asset) -> Result<(), String> {
+    let base_url = release_url_for_branch(branch);
+    let binary = fetch(&format!("{base_url}/{}", asset.name), 300)?;
     if sha256_hex(&binary) != asset.sha256 {
         return Err(format!("{} does not match its checksum", asset.name));
     }
@@ -200,12 +337,27 @@ mod tests {
     }
 
     #[test]
-    fn updates_only_in_release_builds_run_by_a_person() {
+    fn updates_only_in_interactive_builds_run_by_a_person() {
         assert!(enabled(Some("nightly"), None, None));
-        assert!(!enabled(None, None, None), "local builds never update");
+        assert!(enabled(None, None, None), "interactive local builds also show the Update branch menu");
         assert!(!enabled(Some("nightly"), Some("7841"), None), "remote-controlled");
         assert!(!enabled(Some("nightly"), None, Some("1")), "the launcher handles it");
         assert!(enabled(Some("nightly"), Some("0"), Some("0")));
+    }
+
+    #[test]
+    fn release_tag_and_discovery_map_branches_cleanly() {
+        assert_eq!(release_tag("main"), "nightly");
+        assert_eq!(release_tag("nightly"), "nightly");
+        assert_eq!(release_tag("dev"), "branch-dev");
+        assert_eq!(release_tag("feat/ik-contacts"), "branch-feat-ik-contacts");
+        let api = br#"[
+            {"tag_name":"nightly","name":"3dLoom nightly","assets":[{"name":"latest.json"},{"name":"latest.json.sig"}]},
+            {"tag_name":"branch-dev","name":"3dLoom (dev)","assets":[{"name":"latest.json"},{"name":"latest.json.sig"}]},
+            {"tag_name":"branch-feat-ik","name":"3dLoom (feat/ik)","assets":[{"name":"latest.json"},{"name":"latest.json.sig"}]},
+            {"tag_name":"v1.0","name":"Unsigned release","assets":[{"name":"loom-linux-x64"}]}
+        ]"#;
+        assert_eq!(parse_release_branches(api), vec!["main", "dev", "feat/ik"]);
     }
 
     #[test]
