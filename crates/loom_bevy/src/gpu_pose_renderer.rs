@@ -8,7 +8,11 @@ use bevy::render::primitives::Aabb;
 
 fn parallel_preparation_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION").as_deref() == Some(std::ffi::OsStr::new("1")))
+    *ENABLED.get_or_init(|| parallel_preparation_selected(std::env::var_os("LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION").as_deref()))
+}
+
+fn parallel_preparation_selected(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_none_or(|value| value == std::ffi::OsStr::new("1"))
 }
 
 type CachedRuntimeUpdate<'a> = ((bool, u64), &'a loom_mesh::Mesh, Vec<(Option<u16>, bool)>);
@@ -45,6 +49,7 @@ pub struct GpuPoseSource {
 
 /// Observed state of the opt-in internal geometry backend.
 pub struct GpuPoseStatus<'a> {
+    pub parallel_preparation_enabled: bool,
     pub committed_objects: usize,
     pub committed_parts: usize,
     pub recovered_recipes: usize,
@@ -78,6 +83,7 @@ impl BevyRenderer {
             .filter(|o| o.gpu_pose_current)
             .collect();
         Some(GpuPoseStatus {
+            parallel_preparation_enabled: parallel_preparation_enabled(),
             committed_objects: objects.len(),
             committed_parts: objects.iter().map(|o| o.buffers.len()).sum(),
             recovered_recipes: state.recovered_recipes,
@@ -335,6 +341,14 @@ impl GpuPoseState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parallel_preparation_selection_defaults_on_and_respects_overrides() {
+        assert!(parallel_preparation_selected(None));
+        assert!(parallel_preparation_selected(Some(std::ffi::OsStr::new("1"))));
+        assert!(!parallel_preparation_selected(Some(std::ffi::OsStr::new("0"))));
+        assert!(!parallel_preparation_selected(Some(std::ffi::OsStr::new("other"))));
+    }
 
     #[test]
     fn parallel_cached_runtime_updates_preserve_sources_and_recover_late_failure() {

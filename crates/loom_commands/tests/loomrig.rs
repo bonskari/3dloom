@@ -33,6 +33,33 @@ fn setup() -> (AppState, HumanoidMapping) {
     };
     (s, m)
 }
+
+#[test]
+fn applying_mapping_preserves_authored_limb_settings_and_keys() {
+    for change_head in [false, true] {
+        let (mut state, mut mapping) = setup();
+        execute(&mut state, Command::CreateLoomRig { root: mapping.root.0, mapping: Some(mapping.clone()) }).unwrap();
+        execute(&mut state, Command::SetLoomRigLimb { rig: 1, limb: "Arm".into(), solver: "hi".into(), blend: 0.4 }).unwrap();
+        for (time, value) in [(5., 0.3), (15., 0.8)] {
+            execute(&mut state, Command::SetLoomRigBlendKey { rig: 1, limb: "Arm".into(), time, value: Some(value) }).unwrap();
+        }
+        let before = state.scene.loom_rigs[0].limbs[0].clone();
+        let bones: Vec<_> = state.scene.nodes().filter(|n| n.object.is_bone()).cloned().collect();
+        if change_head {
+            let mut head = Node::new("new head role", ObjectKind::bone(1.));
+            head.parent = Some(mapping.root);
+            mapping.head = state.scene.add_node(head);
+        }
+        execute(&mut state, Command::SetLoomRigMapping { rig: 1, mapping }).unwrap();
+        let after = &state.scene.loom_rigs[0].limbs[0];
+        assert_eq!(after.solver, before.solver, "mapping apply reset the authored solver");
+        assert_eq!(after.blend, before.blend, "mapping apply discarded native IK/FK keys");
+        assert_eq!(after.pose_offsets, before.pose_offsets, "mapping apply discarded matched pose offsets");
+        assert_eq!((after.goal, after.pole), (before.goal, before.pole));
+        for bone in bones { assert_eq!(state.scene.node(bone.id).unwrap(), &bone); }
+    }
+}
+
 #[test]
 fn rig_is_undoable_and_controls_drive_original_chain() {
     let (mut s, m) = setup();

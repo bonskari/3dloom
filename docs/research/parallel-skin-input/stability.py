@@ -35,6 +35,7 @@ try:
   time.sleep(30);current=call('diagnostics');now=time.monotonic()
   assert call('ping')['pid']==pid,'native process restarted'
   gpu=current['playback']['gpu_pose'];assert gpu and (gpu['committed_objects'],gpu['committed_parts'])==(5,13),gpu
+  assert gpu['parallel_preparation_enabled'] is True,'wrong active preparation configuration'
   assert gpu['last_error'] is None and gpu['recovered_recipes']==0,gpu
   count=current['playback']['submitted_distinct_pose_times']-last['playback']['submitted_distinct_pose_times'];assert count>0
   prompt=current['ui']['status_prompt']

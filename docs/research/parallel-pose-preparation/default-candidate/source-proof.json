@@ -1,0 +1,9 @@
+{
+  "files": {
+    "crates/loom_bevy/src/gpu_pose_renderer.rs": "e9773c6784b58f7bf3a7292d690656d9c5e6496482e04a0907cd75bc15eeb028",
+    "crates/loom_ui/src/live.rs": "ed5a7fecf65d5415112ffcd0b3262da459ed18d3caf8f45bcd0f5f1ae70e670e",
+    "docs/research/fused-pose-positions/production-benchmark.py": "8b843ab65148c364926246bef637c38336be7f99d09abb195f8c50371e2610bd"
+  },
+  "unset_selects_parallel": true,
+  "native_unset_acceptance": "pending"
+}

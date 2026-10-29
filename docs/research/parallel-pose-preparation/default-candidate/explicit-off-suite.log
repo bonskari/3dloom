@@ -1,0 +1,172 @@
+warning: field `reason` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:15:27
+   |
+15 |     Layout { part: usize, reason: String },
+   |     ------                ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `0` is never read
+  --> crates/loom_bevy/src/gpu_pose_commit.rs:16:14
+   |
+16 |     Readback(String),
+   |     -------- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `PoseCommitError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+16 -     Readback(String),
+16 +     Readback(()),
+   |
+
+warning: method `vertex_count` is never used
+   --> crates/loom_bevy/src/gpu_mikk_recipe.rs:379:19
+    |
+208 | impl GpuRecipeMath {
+    | ------------------ method in this implementation
+...
+379 |     pub(crate) fn vertex_count(&self) -> u32 {
+    |                   ^^^^^^^^^^^^
+
+warning: `loom_bevy` (lib test) generated 3 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.28s
+     Running unittests src/lib.rs (target/debug/deps/loom_bevy-f57e69819739627a)
+
+running 129 tests
+test affine_tests::actual_ray_renderer_preserves_tangent_neighbor_caches ... ignored, actual renderer cache integration requires LOOM_PERF_SCENE
+test affine_tests::rigid_pose_changes_keep_entities_meshes_and_materials ... ok
+test affine_tests::specialization_ticks_drop_despawned_renderer_entities ... ok
+test affine_tests::view_requests_are_consumed_and_can_resume_after_idle_frames ... ok
+test convert::tests::a_box_becomes_twelve_triangles_with_one_vertex_per_corner ... ok
+test convert::tests::a_bucket_projection_maps_its_part_of_the_frame_to_the_whole_image ... ok
+test convert::tests::a_normal_bump_map_turns_green_up_for_bevy ... ok
+test convert::tests::actual_all_ray_cached_material_batches_match_fresh_corrected ... ignored, actual full material batch parity requires LOOM_PERF_SCENE
+test convert::tests::actual_ray_bulk_content_hash_matches_original_and_times ... ignored, actual all-pose hash benchmark requires LOOM_PERF_SCENE
+test convert::tests::actual_ray_mesh_data_clone_versus_move ... ignored, actual copy/move preparation microbenchmark requires LOOM_PERF_SCENE
+test convert::tests::bulk_hash_preserves_float_bits_and_stream_boundaries ... ok
+test convert::tests::diffuse_map_composes_over_the_colour_and_opacity_map_gives_alpha ... ok
+test convert::tests::diffuse_map_needs_an_enabled_bitmap ... ok
+test convert::tests::faces_split_by_material_id ... ok
+test convert::tests::material_parts_match_full_mesh_triangulation_with_hidden_smoothing_neighbours ... ok
+test convert::tests::no_material_uses_the_wire_colour ... ok
+test convert::tests::orthographic_projection_matches_loom ... ok
+test convert::tests::parallel_material_meshes_match_serial_tangent_calculation ... ok
+test convert::tests::perspective_projection_matches_loom ... ok
+test convert::tests::self_illumination_moves_to_emissive ... ok
+test convert::tests::standard_material_maps_to_pbr ... ok
+test convert::tests::uv_transform_matches_the_map_coordinates ... ok
+test convert::tests::uvs_flip_v_and_hidden_faces_are_left_out ... ok
+test dynamic_geometry::fused_position_tests::actual_ray_317_fused_position_history_bounds_bits ... ignored, actual 317 CPU poses require LOOM_PERF_SCENE
+test dynamic_geometry::fused_position_tests::fused_commit_rejects_later_layout_and_guard_without_partial_history_then_recovers ... ok
+test dynamic_geometry::fused_position_tests::prepared_current_positions_keep_order_bits_bounds_and_reject_nonfinite ... ok
+test dynamic_geometry::tests::actual_ray_dynamic_packing_performance ... ignored, actual Ray GPU packing benchmark requires LOOM_PERF_SCENE
+test dynamic_geometry::tests::cpu_sync_replaces_gpu_pose_even_when_the_last_cpu_hash_matches ... ok
+test dynamic_geometry::tests::device_storage_limit_is_checked_before_allocating_geometry ... ok
+test dynamic_geometry::tests::gpu_committed_storage_matches_cpu_mesh_pbr_prepass_shadows_and_allocator_offsets ... ok
+test dynamic_geometry::tests::gpu_pose_commit_preserves_storage_and_last_committed_history ... ok
+test dynamic_geometry::tests::history_ignores_intermediate_poses_until_the_scene_frame_finishes ... ok
+test dynamic_geometry::tests::packed_attributes_preserve_bits_and_reject_invalid_frames ... ok
+test dynamic_geometry::tests::posed_storage_matches_cpu_mesh_pbr_prepass_shadows_and_allocator_offsets ... ok
+test dynamic_geometry::tests::renderer_gpu_batch_updates_current_pose_and_preserves_resources ... ok
+test dynamic_geometry::tests::renderer_sync_reuses_posed_resources_and_restores_render_material_settings ... ok
+test dynamic_geometry::tests::storage_eligibility_checks_empty_overflow_and_exact_device_boundaries ... ok
+test dynamic_geometry::tests::storage_ineligible_deforming_objects_keep_full_fidelity_standard_rendering ... ok
+test gpu_pose_commit::tests::batch_reads_current_guards_and_reuses_one_staging_buffer ... ok
+test gpu_pose_commit::tests::one_failed_guard_rejects_every_candidate_before_commit ... ok
+test gpu_pose_geometry::descriptor_snapshot_tests::actual_ray_raw_descriptors_match_rebuilt_topology ... ignored, actual descriptor oracle/timing requires LOOM_PERF_SCENE
+test gpu_pose_geometry::descriptor_snapshot_tests::equal_reload_refreshes_retained_allocation_and_preserves_other_guards ... ok
+test gpu_pose_geometry::descriptor_snapshot_tests::exact_raw_snapshot_excludes_positions_and_rejects_changed_inputs ... ok
+test gpu_pose_geometry::mikk_prepare::tests::current_normal_seams_update_in_place_and_all_degenerate_tails_remain ... ok
+test gpu_pose_geometry::mikk_prepare::tests::current_weld_handles_signed_zero_seams_degenerate_and_nonmanifold_edges ... ok
+test gpu_pose_geometry::mikk_prepare::tests::forced_hash_collisions_preserve_full_key_equality_and_invalid_attrs_report_error ... ok
+test gpu_pose_geometry::mikk_probe::actual_current_mikk_groups_measure_gpu_math_and_native_acos ... ignored, actual CPU EvalTspace group fixtures require LOOM_PERF_SCENE
+test gpu_pose_geometry::mikk_recipe::precision_tests::cone_zero_angle_collinear_case_retains_full_risk_flags ... ok
+test gpu_pose_geometry::mikk_recipe::precision_tests::current_recipe_all_any_and_all_position_degenerate_defaults_match_f64 ... ok
+test gpu_pose_geometry::mikk_recipe::precision_tests::current_recipe_handles_interspersed_degenerate_face_order ... ok
+test gpu_pose_geometry::mikk_recipe::precision_tests::final_nonfinite_payload_and_invalid_source_are_guard_rejections ... ok
+test gpu_pose_geometry::mikk_recipe::precision_tests::finite_large_small_and_near_antiparallel_cases_remain_finite_and_accurate ... ok
+test gpu_pose_geometry::mikk_recipe::precision_tests::finite_source_overflow_must_refine_or_reject_before_commit ... ok
+test gpu_pose_geometry::mikk_recipe::precision_tests::gpu_current_recipe_math_preserves_any_orientation_last_owner_and_degenerate_epilogue ... ok
+test gpu_pose_geometry::mikk_recipe::precision_tests::parallel_metadata_rejects_duplicate_writers_without_dropping_inner_members ... ok
+test gpu_pose_geometry::mikk_recipe::precision_tests::parallel_writes_preserve_duplicate_triangles_shared_vertices_any_and_degenerate_cases ... ok
+test gpu_pose_geometry::mikk_recipe::precision_tests::stable_angular_predicates_preserve_opposite_near_opposite_zero_and_any_inputs ... ok
+test gpu_pose_geometry::mikk_recipe::tests::current_recipe_all_any_and_all_position_degenerate_defaults_match_f64 ... ok
+test gpu_pose_geometry::mikk_recipe::tests::current_recipe_handles_interspersed_degenerate_face_order ... ok
+test gpu_pose_geometry::mikk_recipe::tests::gpu_current_recipe_math_preserves_any_orientation_last_owner_and_degenerate_epilogue ... ok
+test gpu_pose_geometry::mikk_recipe::tests::stable_angular_predicates_preserve_opposite_near_opposite_zero_and_any_inputs ... ok
+test gpu_pose_geometry::render_audit::actual_ray_hybrid_gpu_body_lit_image_audit ... ignored, actual Body worst F64 sample closeup at95.71835
+test gpu_pose_geometry::render_audit::actual_ray_hybrid_gpu_complete_tbn_lit_front_image_audit ... ignored, actual complete hybrid GPU tangent normal-mapped lit head images
+test gpu_pose_geometry::render_audit::actual_ray_hybrid_gpu_pants_lit_image_audit ... ignored, actual pants149 CPU boundary artifact versus robustGPU/F64 normal-mapped closeup
+test gpu_pose_geometry::render_audit::actual_ray_stable_gpu_sg_coupled_tbn_image_audit ... ignored, actual normal-mapped GPU posed-geometry images require LOOM_PERF_SCENE
+test gpu_pose_geometry::render_audit::actual_ray_stable_gpu_sg_lit_front_image_audit ... ignored, actual well-lit normal-mapped front head images require LOOM_PERF_SCENE
+test gpu_pose_geometry::tests::actual_ray_current_gpu_weld_and_corrected_edges ... ignored, actual current GPU weld/edge preparation requires LOOM_PERF_SCENE
+test gpu_pose_geometry::tests::actual_ray_gpu_skin_normals_and_material_packing ... ignored, actual Ray GPU posed normals requires LOOM_PERF_SCENE
+test gpu_pose_geometry::tests::actual_ray_hybrid_current_gpu_tangent_diagnostics ... ignored, actual GPU tangent numeric diagnostic; no acceptance claim
+test gpu_pose_geometry::tests::actual_ray_hybrid_current_gpu_tangents ... ignored, actual current hybrid GPU tangents require LOOM_PERF_SCENE
+test gpu_pose_geometry::tests::actual_ray_hybrid_current_gpu_tangents_f64_acceptance ... ignored, independent current F64 full-vertex tangent acceptance requires actual Ray scene
+test gpu_pose_geometry::tests::actual_ray_hybrid_current_gpu_tangents_f64_diagnostics ... ignored, full F64 diagnostic records failures; never an acceptance gate
+test gpu_pose_geometry::tests::actual_ray_origin_relative_sg_accuracy_against_same_position_f64 ... ignored, actual Ray origin-relative GPU normals require LOOM_PERF_SCENE
+test gpu_pose_geometry::tests::current_position_normal_factory_has_no_cpu_tangent_resource ... ok
+test gpu_pose_geometry::tests::gpu_skin_and_posed_newell_sg_normals_preserve_all_twelve_influences ... ok
+test gpu_pose_renderer::material_id_tests::material_ids_cover_boundaries_duplicates_and_hidden_faces ... ok
+test gpu_pose_renderer::material_id_tests::material_ids_cover_every_u16_with_independent_hidden_patterns ... ok
+test gpu_pose_renderer::material_id_tests::material_ids_match_actual_ray_evaluated_meshes ... ignored, actual saved Ray scene requires LOOM_PERF_SCENE
+test gpu_pose_renderer::tests::actual_ray_all_thirteen_parts_keep_current_pose_and_resources ... ignored, actual full Ray scene GPU renderer integration requires LOOM_PERF_SCENE
+test gpu_pose_renderer::tests::actual_ray_fused_317_renderer_history_bounds_and_current_positions ... ignored, full actual fused GPU renderer path requires LOOM_PERF_SCENE and experimental flag
+test gpu_pose_renderer::tests::actual_ray_precise_all_thirteen_parts_keep_current_pose_and_resources ... ignored, actual full Ray scene precise8 renderer integration requires LOOM_PERF_SCENE
+test gpu_pose_renderer::tests::default_selection_on_supported_device_uses_precise_geometry ... ok
+test gpu_pose_renderer::tests::failed_current_readback_withdraws_exported_source_handles ... ok
+test gpu_pose_renderer::tests::parallel_cached_runtime_updates_preserve_sources_and_recover_late_failure ... ok
+test gpu_pose_renderer::tests::parallel_preparation_selection_defaults_on_and_respects_overrides ... ok
+test gpu_pose_renderer::tests::precise_failed_current_readback_withdraws_exported_source_handles ... ok
+test gpu_pose_renderer::tests::precise_selection_on_device_without_f64_keeps_cpu_backend ... ok
+test gpu_pose_renderer::tests::precise_selection_on_low_device_limits_keeps_cpu_backend ... ok
+test gpu_pose_runtime::tests::actual_ray_fast_current_cpu_positions_f64_positive_control ... ignored, positive control characterizes the original fast5 numeric failure on actual CPU-position input
+test gpu_pose_runtime::tests::actual_ray_parallel_native_endpoint_cpu_positions_f64_quality ... ignored, bounded actual native timeline endpoint CPU producer parity
+test gpu_pose_runtime::tests::actual_ray_precise_current_cpu_positions_f64_quality ... ignored, full current CPU-position producer requires LOOM_PERF_SCENE; LOOM_PRECISE_FULL317=1 selects all poses
+test gpu_pose_runtime::tests::actual_ray_runtime_three_current_poses ... ignored, actual current runtime requires LOOM_PERF_SCENE
+test gpu_pose_runtime::tests::actual_ray_source_positions_reservation_matches_legacy_bits ... ignored, requires frozen LOOM_PERF_SCENE; real five-mesh CPU source parity
+test gpu_pose_runtime::tests::cached_runtime_rebuilds_current_guards_and_changed_descriptors ... ok
+test gpu_pose_runtime::tests::fused_positions_are_enabled_by_default ... ok
+test gpu_pose_runtime::tests::source_gpu_buffer_limits_reject_before_resource_creation ... ok
+test gpu_pose_runtime::tests::source_positions_preserves_every_float_bit_and_error_semantics ... ok
+test gpu_pose_runtime::tests::source_positions_reserves_exact_vertex_count ... ok
+test gpu_pose_runtime::tests::stage_batched_math_matches_serial_parts_for_current_poses ... ok
+test gpu_skin::tests::affine_row_roundoff_matches_glam_transform_point3_semantics ... ok
+test gpu_skin::tests::gpu_positions_preserve_twelve_influences_relative_weights_and_missing_bones ... ok
+test gpu_skin::tests::validation_rejects_invalid_data_before_gpu_upload ... ok
+test lights::tests::inverse_square_matches_the_reference_past_the_decay_start ... ok
+test lights::tests::no_decay_matches_at_the_scene_centre ... ok
+test lights::tests::renderer_ignores_what_it_cannot_draw ... ok
+test mikktspace::generated::edge_sort::original_edge_order_including_ties_is_preserved ... ok
+test mikktspace::generated::neighbor_probe::actual_ray_corrected_neighbor_pixels ... ignored, actual textured GPU comparison requires LOOM_PERF_SCENE and LOOM_PROBE_FRAME
+test mikktspace::generated::neighbor_probe::actual_ray_corrected_neighbors_and_edge_incidence ... ignored, actual corrected-neighbor tangent probe requires LOOM_PERF_SCENE
+test mikktspace::generated::neighbor_probe::final_buckets_pair_every_manifold_opposite_edge ... ok
+test mikktspace::structural::tests::actual_ray_structural_compiler_matches_capture_317 ... ignored, requires actual LOOM_PERF_SCENE; full 317-pose structural oracle
+test mikktspace::structural::tests::structural_compiler_matches_capture_without_tangent_emission ... ok
+test mikktspace::tests::actual_all_ray_poses_match_fresh_corrected_mikk ... ignored, release parity/performance test requires LOOM_PERF_SCENE
+test mikktspace::tests::actual_ray_preparation_guard_hit_rates ... ignored, actual preparation hit-rate probe requires LOOM_PERF_SCENE
+test mikktspace::tests::actual_ray_projection_reuse_matches_allocation_baseline_and_times ... ignored, paired actual projection benchmark requires LOOM_PERF_SCENE
+test mikktspace::tests::actual_ray_subgroup_storage_reuse_matches_original_and_times ... ignored, paired actual allocation benchmark requires LOOM_PERF_SCENE
+test mikktspace::tests::actual_ray_weld_validation_matches_current_builder_and_times ... ignored, paired actual weld validation benchmark requires LOOM_PERF_SCENE
+test mikktspace::tests::cpu_group_fixtures_are_bounded_and_do_not_change_tangent_output ... ok
+test mikktspace::tests::neighbor_cache_checks_changed_topology_welding_and_degeneracy ... ok
+test mikktspace::tests::preparation_fixture_retains_degenerate_mapping_and_corrected_neighbors ... ok
+test mikktspace::tests::prepared_group_fixture_records_actual_order_and_pointer_free_membership ... ok
+test mikktspace::tests::prepared_groups_preserve_complete_mikk_results ... ok
+test mikktspace::tests::prepared_groups_support_nested_existing_pool_jobs ... ok
+test mikktspace::tests::previous_weld_partition_requires_bit_proof_and_detects_new_merges ... ok
+test mikktspace::tests::quad_geometry_keeps_original_serial_averaging ... ok
+test prepared_geometry::tests::actual_all_poses_geometry_performance ... ignored, release parity/performance test requires LOOM_PERF_SCENE
+test prepared_geometry::tests::matches_reference_through_pose_and_corner_property_edits ... ok
+test prepared_geometry::tests::ngons_degenerate_normals_and_same_count_topology_changes_match ... ok
+test prepared_geometry::tests::parallel_batch_preserves_input_order_and_returns_reusable_caches ... ok
+test prepared_geometry::tests::saved_scene_geometry_matches_reference_at_multiple_poses ... ok
+
+test result: ok. 91 passed; 0 failed; 38 ignored; 0 measured; 0 filtered out; finished in 32.18s
+

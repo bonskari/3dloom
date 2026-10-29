@@ -1,0 +1,10 @@
+   Compiling loom_scene v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_scene)
+   Compiling loom_commands v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.52s
+     Running tests/loomrig.rs (target/debug/deps/loomrig-1baafaf29ff436be)
+
+running 1 test
+test applying_mapping_preserves_authored_limb_settings_and_keys ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.01s
+

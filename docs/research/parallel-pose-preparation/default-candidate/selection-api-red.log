@@ -1,0 +1,63 @@
+   Compiling loom_bevy v0.1.0 (/home/b1s/dev/github/3dloom/crates/loom_bevy)
+error[E0425]: cannot find function `parallel_preparation_selected` in this scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:341:17
+    |
+  9 | fn parallel_preparation_enabled() -> bool {
+    | ----------------------------------------- similarly named function `parallel_preparation_enabled` defined here
+...
+341 |         assert!(parallel_preparation_selected(None));
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: a function with a similar name exists
+    |
+341 -         assert!(parallel_preparation_selected(None));
+341 +         assert!(parallel_preparation_enabled(None));
+    |
+
+error[E0425]: cannot find function `parallel_preparation_selected` in this scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:342:17
+    |
+  9 | fn parallel_preparation_enabled() -> bool {
+    | ----------------------------------------- similarly named function `parallel_preparation_enabled` defined here
+...
+342 |         assert!(parallel_preparation_selected(Some(std::ffi::OsStr::new("1"))));
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: a function with a similar name exists
+    |
+342 -         assert!(parallel_preparation_selected(Some(std::ffi::OsStr::new("1"))));
+342 +         assert!(parallel_preparation_enabled(Some(std::ffi::OsStr::new("1"))));
+    |
+
+error[E0425]: cannot find function `parallel_preparation_selected` in this scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:343:18
+    |
+  9 | fn parallel_preparation_enabled() -> bool {
+    | ----------------------------------------- similarly named function `parallel_preparation_enabled` defined here
+...
+343 |         assert!(!parallel_preparation_selected(Some(std::ffi::OsStr::new("0"))));
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: a function with a similar name exists
+    |
+343 -         assert!(!parallel_preparation_selected(Some(std::ffi::OsStr::new("0"))));
+343 +         assert!(!parallel_preparation_enabled(Some(std::ffi::OsStr::new("0"))));
+    |
+
+error[E0425]: cannot find function `parallel_preparation_selected` in this scope
+   --> crates/loom_bevy/src/gpu_pose_renderer.rs:344:18
+    |
+  9 | fn parallel_preparation_enabled() -> bool {
+    | ----------------------------------------- similarly named function `parallel_preparation_enabled` defined here
+...
+344 |         assert!(!parallel_preparation_selected(Some(std::ffi::OsStr::new("other"))));
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: a function with a similar name exists
+    |
+344 -         assert!(!parallel_preparation_selected(Some(std::ffi::OsStr::new("other"))));
+344 +         assert!(!parallel_preparation_enabled(Some(std::ffi::OsStr::new("other"))));
+    |
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `loom_bevy` (lib test) due to 4 previous errors

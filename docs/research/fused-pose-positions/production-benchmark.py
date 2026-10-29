@@ -16,7 +16,7 @@ output = Path(sys.argv[1])
 expected_mode = sys.argv[2]
 expected_commit = sys.argv[3]
 expected_parallel = sys.argv[4] if len(sys.argv) > 4 else 'unset'
-assert expected_parallel in ['unset', '1']
+assert expected_parallel in ['unset', '0', '1']
 
 def call(command, **args):
     with socket.socket(socket.AF_UNIX) as sock:
@@ -51,13 +51,14 @@ else:
     assert ('LOOM_EXPERIMENTAL_GPU_POSES=' + expected_mode).encode() in env
 assert not any(e.startswith(b'LOOM_PROFILE_FRAMES=') for e in env)
 assert not any(e.startswith((b'LOOM_EXPERIMENTAL_CPU_EDGE_BATCH=', b'LOOM_EXPERIMENTAL_FUSED_POSE_POSITIONS=')) for e in env), 'Production acceptance requires unset feature overrides'
-if expected_parallel == '1':
-    assert b'LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION=1' in env
+if expected_parallel != 'unset':
+    assert ('LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION=' + expected_parallel).encode() in env
 else:
     assert not any(e.startswith(b'LOOM_EXPERIMENTAL_PARALLEL_POSE_PREPARATION=') for e in env)
 call('input', events=[{'type': 'leave'}])
 before = call('State')
 initial = diag()
+assert initial['playback']['gpu_pose']['parallel_preparation_enabled'] == (expected_parallel != '0'), 'Wrong active preparation configuration'
 assert not initial['modes']['playing'], 'Start from a paused scene'
 assert not before['dirty'], 'Preserve unsaved work before benchmarking'
 scene = Path(before['file'])
@@ -65,6 +66,7 @@ scene_hash = hashlib.sha256(scene.read_bytes()).hexdigest()
 original_shading = initial['viewports']['active_view']['shading']
 original_selection = before['selection']
 emit({'kind': 'start', 'pid': pid, 'commit': ping['commit'], 'mode': expected_mode, 'parallel_preparation': expected_parallel,
+      'parallel_preparation_enabled': initial['playback']['gpu_pose']['parallel_preparation_enabled'],
       'experimental_overrides_unset': not any(e.startswith(b'LOOM_EXPERIMENTAL_') for e in env),
       'rate_clocks': ['client_ipc_wall_seconds', 'app_distinct_submission_seconds'],
       'frame': before['frame'], 'scene_sha256': scene_hash})

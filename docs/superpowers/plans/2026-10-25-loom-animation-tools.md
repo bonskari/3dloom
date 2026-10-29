@@ -41,14 +41,14 @@ Earlier checked items record the initial implementation, not completion of the e
 
 ## Next animation phase: source audit, not completed functionality
 
-The desktop minimum native performance/reliability gate has passed; continue with the remaining animation tasks below. Mac native verification remains pending.
+The initial f8 desktop gate is historical evidence. Current Task9 default promotion and production-unset verification still gate implementation of the remaining animation tasks below. Mac native verification remains pending.
 
 - The generic Set Keys pose buffer (`anim_cmds.rs:553–600`) records node tracks. It does not capture LoomRig `blend` or `pose_offsets`; those require an atomic rig-pose-key operation alongside control transforms. Preserve source bone controllers rather than baking corrections into them.
 - Existing limb blend-key commands, undo, key movement and the separate Animation Editor remain the base. Current clip movement moves member-node keys; rig metadata tracks are independent and must not accidentally move with a source clip.
-- Proposed persistent contact data: a default-empty, typed per-limb contact track with discrete HOLD semantics. Before its first key the state is Free. Plant/Slide use effective IK=1; Free restores the authored blend curve. This is a pending design/implementation, not present behavior.
-- Plant captures the currently solved end-pivot world position and orientation. Slide constrains the authored goal to an explicit plane while retaining tangential movement. The existing world-goal/end-orientation path requires real contact tests before promising this behavior. An end pivot is not an automatically detected foot sole or terrain contact.
+- Pending contact data and behavior follow docs/research/biped-contact-semantics/DESIGN.md. An empty track preserves existing behavior; authored Free keys default to FK/body space. This supersedes the earlier unimplemented restore-old-blend proposal. Preset properties remain editable.
+- Joined planted references and independently moving sliding IK references need shared draw/edit/evaluation semantics. No automatic plane projection is implied. Test capture continuity and orientation before promising contact behavior; an end pivot is not automatically a foot sole or terrain contact.
 - A typed contact lookup must notify `anim::note_animated_read()` when time-dependent, or the IK cache may reuse a static-scene result at another time.
-- Required tests include planted position/orientation under root motion, tilted-plane sliding, exact Free/empty-track compatibility, fractional/backward/random-access time evaluation without a scene-version edit, undo/reload, atomic key collision rejection, clip movement, and explicit nonuniform-scale/shear orientation behavior.
+- Required tests include planted position/orientation under root motion, moving sliding targets and reference-space changes, exact Free/empty-track compatibility, fractional/backward/random-access time evaluation without a scene-version edit, undo/reload, atomic key collision rejection, clip movement, and explicit nonuniform-scale/shear orientation behavior.
 - Limb-shaped controls still need matching draw/pick geometry mapped onto the existing control IDs. The repaired generic bone-axis overlay is skeleton visibility, not completion of Biped-style LoomRig controls.
 
 ## Added user requirements — macOS and touchpads
@@ -65,3 +65,7 @@ User explicitly requested macOS support and confirmed touchpad navigation for bo
 - [ ] Integrate on-top drawing in both shading modes and corresponding control-hit priority before generic bone axes in object selection. Keep `node_at` on surface picking. Existing control IDs route to current gizmo/FK commands; goals/poles/master and IK/FK authoring remain available in separate Animation Editor.
 - [ ] Verify `cargo test -p loom_ui --lib loomrig_overlay -j4 -- --test-threads=1` and focused viewport/helper tests; full UI suite; actual Ray source/skin records and native direct click/edit/Undo; default native throughput remains≥60 in both views. No claim of full Biped/contacts completion from this first visual/selection increment.
 - [ ] Local main commit with evidence; no push. Continue remaining end/body/goal interactions and contact/pose/timeline requirements afterward.
+
+## Next contact phase: source-backed interaction contract
+
+Before implementing contacts, follow docs/research/biped-contact-semantics/DESIGN.md. It supersedes the earlier pending Free=restore-blend and Slide=automatic-plane assumptions: empty tracks remain compatible; Free defaults to FK/body space, and Planted/Sliding presets distinguish joined versus new IK references. Blend/settings remain editable. Contact behavior is not implemented yet; performance delivery still gates this phase.

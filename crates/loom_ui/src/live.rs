@@ -247,6 +247,7 @@ impl LoomApp {
         });
         let active = s.active();
         let gpu_pose = self.gpu.gpu_pose_status().map(|status| json!({
+                "parallel_preparation_enabled": status.parallel_preparation_enabled,
                 "committed_objects": status.committed_objects,
                 "committed_parts": status.committed_parts,
                 "recovered_recipes": status.recovered_recipes,

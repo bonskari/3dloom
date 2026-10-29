@@ -28,3 +28,13 @@ Both ordered pairs used installedd8d3264, full original source, four viewports, 
 Realistic average improved in both comparisons. Wireframe improvement did not repeat. The second on run missed the retained all-active-window60 gate; do not enable by default or claim completed performance acceptance. No repeated testing until a lucky pass.
 
 The counter already counts distinct ready submitted pose times, but the verifier divides deltas by client IPC round-trip wall time. It does not expose an independent timestamp at the event where a ready distinct submission is recorded. Next add/test that diagnostic timestamp and retain both clocks side by side, to quantify timing uncertainty rather than assume IPC explains the shortfall. Never change the pose-count/geometry-ready gates or silently replace archived results to manufacture a pass. No specific cause for the remaining lowest window is established.
+
+## Experiment-specific long reliability completed
+
+Installed95eac04 with explicit parallel flag1 completed30x30second observations/900.720seconds (see exact timestamps in native/stability-on-15m.jsonl), all5objects/13parts, no pose errors/recoveries. Original node records/selection/frame/undo/source bytes were restored; a real271346304byte auto-backup scene JSON matched the source. This is long reliability under possible concurrent correctness work, not quiet FPS certification. Production-default promotion and unset-environment verification follow separately.
+
+## Default candidate promotion — native unset verification pending
+
+After the recorded native comparisons, direct event-clock check and experiment-specific15minute reliability/backup run, source selection now enables parallel preparation when no override exists. Explicit0/other values select serial; explicit1 selects parallel. New selector tests cover all cases; default and explicit-off Bevy suites each91passed/38ignored. UI counter regressions2passed. The RED for the selection helper is API compilation, not a rendering failure. The earlier experiment/default-off sections above are historical checkpoints.
+
+GpuPoseStatus and live diagnostics now expose parallel_preparation_enabled. The benchmark asserts the effective configuration as well as the raw environment; it supports explicit0 comparisons. No production-unset FPS/native result is claimed before building/installing this checkpoint and running that gate. The earlier payload/geometry/history/math/weights remain unchanged.
