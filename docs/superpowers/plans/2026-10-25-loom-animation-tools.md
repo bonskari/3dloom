@@ -127,5 +127,12 @@ Following tasks still required: contact evaluator and no-pop/affine/pole tests; 
 - Store validated rig-owned pose correction keys, with polar-rotation interpolation and full stretch/translation retained; skip the subsequent IK/TRS reconstruction at zero blend. This is the affine matching foundation, not completed ordinary rig-pose-key authoring.
 - Keep matching keys with moved/deleted contact keys, in one metadata Undo transaction. Preserve matching during save/reopen, characterization metadata reuse and selected-animation freezing without residual time dependence.
 - Verify plain/mirrored/nonuniform hierarchies, validation, rotation interpolation, actual Ray four-limb Free activation and source fingerprints. Separate editor authoring, Free FK interaction, effective IK settings, normal pose keys and native performance remain required.
+
+### Effective contact IK settings increment
+
+- SetLimb must change the evaluated contact weight and keep shared anchors/source tracks. Without Auto Key, edit the exact key or both positive interval contributors; with Auto Key, key the sampled target/weight at the current frame and retain neighboring keys. Preserve constant fallback and seed its frame0 baseline when needed.
+- Zero release must preserve the solved affine pose in one Undo transaction, retaining constant data without synthetic times. The separate editor slider must show and edit the contact's effective value.
+- Test solver switching on twisted limbs: preserve solved joint positions and transport axial roll for the two-bone contact HI path, leaving legacy solving unchanged. Cover real Ray settings release and full source fingerprints.
+- The existing legacy Key IK/FK command/timeline still needs contact/ordinary-pose routing. This increment does not satisfy the full pose-key, contact editor or native acceptance gate.
 - [ ] Preserve target/reference identity, independent goal/pole fields, visual helper scale, locks and legacy empty tracks; test affine skeleton frames and parented controller conversions explicitly. Record remaining Free/FK pose-matching and auto-key/pose-key routing until implemented; do not claim them complete from IK target edits.
 - [ ] Add separate Animation Editor contact authoring/properties, native Ray pointer/Undo and visual evidence, actual default ≥60 ready distinct poses/s in both modes, save/reopen and source/material/desk/chair preservation before native delivery. Full goal remains active afterward for remaining rig/pose/timeline/Kimodo/Mac requirements.

@@ -113,6 +113,129 @@ fn point(s: &AppState, id: NodeId, time: f32) -> Vec3 {
 }
 
 #[test]
+fn auto_key_contact_weight_before_a_future_key_keeps_constant_fallback() {
+    let (mut s,_,_) = rigged();
+    let mut track = ContactTrack::constant(reference(ContactSpace::World,Vec3::new(12.,8.,0.)),1.).unwrap();
+    track.insert_key(key(20.,1,0.8)).unwrap();
+    s.scene.loom_rigs[0].limbs[0].contacts = track;
+    s.scene.bump_version();
+    execute(&mut s,Command::SetFrame {frame:10}).unwrap();
+    execute(&mut s,Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s,Command::SetLoomRigLimb {rig:1,limb:"Arm".into(),solver:"limb".into(),blend:0.4}).unwrap();
+    let track = &s.scene.loom_rigs[0].limbs[0].contacts;
+    assert_eq!(track.keys(),&[key(0.,1,1.),key(10.,1,0.4),key(20.,1,0.8)]);
+    assert_eq!(track.sample_blend(-5.).unwrap(),Some(1.));
+    assert!((track.sample_blend(5.).unwrap().unwrap()-0.7).abs()<1e-6);
+}
+
+#[test]
+fn active_contact_solver_switch_preserves_twisted_limb_pose_and_anchor() {
+    let (mut s,_,_) = rigged();
+    let limb = s.scene.loom_rigs[0].limbs[0].clone();
+    s.scene.node_mut(limb.mapping.start).unwrap().transform.rotation.set(Vec3::new(25.,0.,0.));
+    s.scene.node_mut(limb.mapping.middle).unwrap().transform.rotation.set(Vec3::new(-15.,0.,0.));
+    s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::constant(reference(ContactSpace::World,Vec3::new(12.,8.,0.)),1.).unwrap();
+    s.scene.bump_version();
+    let ids = [limb.mapping.start,limb.mapping.middle,limb.mapping.end];
+    let visible = ids.map(|id|s.scene.world_matrix(id));
+    let contacts = s.scene.loom_rigs[0].limbs[0].contacts.clone();
+    execute(&mut s,Command::SetLoomRigLimb {rig:1,limb:"Arm".into(),solver:"hi".into(),blend:1.}).unwrap();
+    assert_eq!(s.scene.loom_rigs[0].limbs[0].contacts,contacts);
+    for (id,expected) in ids.iter().zip(visible) {
+        let actual = s.scene.world_matrix(*id);
+        assert!(actual.abs_diff_eq(expected,0.003),"solver switch changed {id:?}: expected {expected:?}; actual {actual:?}");
+    }
+}
+
+#[test]
+fn auto_key_limb_weight_adds_current_contact_key_without_rewriting_other_keys() {
+    let (mut s,root,_) = rigged();
+    s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+        [(1,reference(ContactSpace::World,Vec3::new(12.,8.,0.)))].into(),
+        vec![key(0.,1,1.),key(20.,1,1.)],
+    ).unwrap();
+    s.scene.bump_version();
+    execute(&mut s,Command::SetFrame {frame:10}).unwrap();
+    execute(&mut s,Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s,Command::SetLoomRigLimb {rig:1,limb:"Arm".into(),solver:"limb".into(),blend:0.4}).unwrap();
+    let track = &s.scene.loom_rigs[0].limbs[0].contacts;
+    assert_eq!(track.keys(),&[key(0.,1,1.),key(10.,1,0.4),key(20.,1,1.)]);
+    assert!((track.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap().blend-0.4).abs()<1e-6);
+}
+
+#[test]
+fn auto_key_contact_weight_retains_interpolated_targets_and_constant_baselines() {
+    for (constant,next_space) in [(true,ContactSpace::Body),(false,ContactSpace::Body),(false,ContactSpace::World)] {
+        let (mut s,root,_) = rigged();
+        s.scene.node_mut(root).unwrap().transform.scale.set(Vec3::new(-2.,3.,0.5));
+        let pose = reference(ContactSpace::Body,Vec3::new(12.,8.,0.));
+        s.scene.loom_rigs[0].limbs[0].contacts = if constant {
+            ContactTrack::constant(pose,1.).unwrap()
+        } else {
+            ContactTrack::new([(1,pose),(2,reference(next_space,Vec3::new(8.,12.,1.)))].into(),vec![key(0.,1,1.),key(20.,2,0.8)]).unwrap()
+        };
+        s.scene.bump_version();
+        execute(&mut s,Command::SetFrame {frame:10}).unwrap();
+        let original = s.scene.loom_rigs[0].limbs[0].contacts.clone();
+        let target = original.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap();
+        execute(&mut s,Command::AutoKeyModeToggle).unwrap();
+        execute(&mut s,Command::SetLoomRigLimb {rig:1,limb:"Arm".into(),solver:"limb".into(),blend:0.4}).unwrap();
+        let track = &s.scene.loom_rigs[0].limbs[0].contacts;
+        let after = track.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap();
+        assert!(after.position.abs_diff_eq(target.position,0.001));
+        assert!(after.pole_position.abs_diff_eq(target.pole_position,0.001));
+        assert!(after.rotation.dot(target.rotation).abs()>1.-1e-5);
+        assert!((after.blend-0.4).abs()<1e-6);
+        for (id,reference) in original.references() {assert_eq!(&track.references()[id],reference);}
+        if constant {
+            assert_eq!(track.sample_blend(0.).unwrap(),Some(1.));
+            assert!((track.sample_blend(5.).unwrap().unwrap()-0.7).abs()<1e-6);
+        } else {
+            assert_eq!(track.keys()[0],original.keys()[0]);
+            assert_eq!(track.keys()[2],original.keys()[1]);
+        }
+    }
+}
+
+#[test]
+fn limb_settings_edit_effective_contact_weight_and_release_fk_without_source_edits() {
+    for constant in [false,true] {
+        for blend in [0.3,0.] {
+            let (mut s,root,_) = rigged();
+            let pose = reference(ContactSpace::World,Vec3::new(12.,8.,0.));
+            s.scene.loom_rigs[0].limbs[0].contacts = if constant {
+                ContactTrack::constant(pose,1.).unwrap()
+            } else {
+                ContactTrack::new([(1,pose)].into(),vec![key(0.,1,1.),key(20.,1,1.)]).unwrap()
+            };
+            s.scene.bump_version();
+            execute(&mut s,Command::SetFrame {frame:10}).unwrap();
+            let limb = s.scene.loom_rigs[0].limbs[0].clone();
+            let ids = [limb.mapping.start,limb.mapping.middle,limb.mapping.end];
+            let visible = ids.map(|id|s.scene.world_matrix(id));
+            let nodes:Vec<_> = s.scene.nodes().map(|n|(n.id,n.transform.clone())).collect();
+            let before = s.scene.loom_rigs.clone();
+            let undo = s.undo.position();
+            execute(&mut s,Command::SetLoomRigLimb {rig:1,limb:"Arm".into(),solver:"limb".into(),blend}).unwrap();
+            let track = &s.scene.loom_rigs[0].limbs[0].contacts;
+            let sampled = track.sample(10.,s.scene.world_matrix(root)).unwrap().unwrap();
+            assert!((sampled.blend-blend).abs()<1e-6,"settings must change the evaluated IK weight");
+            assert_eq!(track.references(),limb.contacts.references(),"weight edits must retain contact anchors");
+            for (id,transform) in nodes {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+            if blend == 0. {
+                for (id,expected) in ids.iter().zip(visible) {
+                    assert!(s.scene.world_matrix(*id).abs_diff_eq(expected,0.001),"release changed {id:?}");
+                }
+                if constant {assert!(s.scene.loom_rigs[0].limbs[0].pose_matches.keys().is_empty());}
+            }
+            assert_eq!(s.undo.position(),undo+1);
+            execute(&mut s,Command::UndoSceneOperation).unwrap();
+            assert_eq!(s.scene.loom_rigs,before);
+        }
+    }
+}
+
+#[test]
 fn creating_free_contact_preserves_the_solved_pose_and_source_tracks() {
     for scale in [Vec3::ONE,Vec3::new(2.,3.,0.5),Vec3::new(-2.,3.,0.5)] {
         let (mut s, root, _) = rigged();
@@ -826,6 +949,16 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
         assert_eq!(source(&s), before, "target editing changed source nodes or materials");
         execute(&mut s, Command::UndoSceneOperation).unwrap();
         assert_eq!(s.scene.loom_rigs, contacts);
+        let release_pose = ids.map(|id|s.scene.world_matrix(id));
+        execute(&mut s,Command::SetLoomRigLimb {
+            rig,limb:name.into(),solver:if limb.solver == loom_scene::ik::IkSolver::HI {"hi"} else {"limb"}.into(),blend:0.,
+        }).unwrap();
+        for (id,expected) in ids.iter().zip(release_pose) {
+            assert!(s.scene.world_matrix(*id).abs_diff_eq(expected,0.003),"{name} settings release changed {id:?}");
+        }
+        assert_eq!(source(&s),before,"settings changed source nodes or materials");
+        execute(&mut s,Command::UndoSceneOperation).unwrap();
+        assert_eq!(s.scene.loom_rigs,contacts);
         let free_pose = s.scene.at_time(40.,||ids.map(|id|s.scene.world_matrix(id)));
         execute(&mut s, Command::CreateLoomRigContactKey {
             rig,limb:name.into(),time:40.,preset:"free".into(),

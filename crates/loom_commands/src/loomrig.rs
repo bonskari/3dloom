@@ -300,6 +300,9 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 .position(|l| l.mapping.name == limb)
                 .ok_or("no limb with that name")?;
             let l = &before[ri].limbs[li];
+            if let Some(result) = crate::loomrig_contacts::set_active_limb(state,ri,li,solver,blend)? {
+                return Ok(result);
+            }
             let ids = [l.mapping.start, l.mapping.middle, l.mapping.end];
             let visible: Vec<_> = ids
                 .iter()

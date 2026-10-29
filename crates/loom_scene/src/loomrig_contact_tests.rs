@@ -124,6 +124,28 @@ fn contact_invalid_data_is_rejected_by_construction_and_deserialization() {
 }
 
 #[test]
+fn contact_weight_edits_follow_active_key_contributors_and_reject_invalid_values() {
+    let mut track = ContactTrack::new(
+        [(1,reference(ContactSpace::World))].into(),
+        vec![key(10.,1,0.2),key(20.,1,0.8),key(30.,1,0.5)],
+    ).unwrap();
+    let original = track.clone();
+    assert_eq!(track.sample_blend(0.).unwrap(),None);
+    assert!(!track.set_blend(0.,0.4).unwrap());
+    assert_eq!(track,original);
+    assert!(track.set_blend(15.,0.4).unwrap());
+    assert_eq!(track.keys(),&[key(10.,1,0.4),key(20.,1,0.4),key(30.,1,0.5)]);
+    assert_eq!(track.sample_blend(15.).unwrap(),Some(0.4));
+    track.set_blend(10.,0.6).unwrap();
+    assert_eq!(track.keys()[1].blend,0.4);
+    let before = track.clone();
+    for (time,blend) in [(f32::NAN,0.4),(10.,f32::INFINITY),(10.,-0.1),(10.,1.1)] {
+        assert!(track.set_blend(time,blend).is_err());assert_eq!(track,before);
+    }
+    assert_eq!(track.references(),original.references());
+}
+
+#[test]
 fn contact_limb_legacy_serialization_omits_empty_track_and_roundtrips_authored_data() {
     use crate::loomrig::{LimbMapping, RigLimb};
     let mut limb = RigLimb {

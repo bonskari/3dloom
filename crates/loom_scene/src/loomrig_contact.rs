@@ -118,6 +118,40 @@ impl ContactTrack {
     pub fn constant_state(&self) -> Option<&ContactState> {
         self.constant.as_ref()
     }
+
+    /// The effective weight, independent of the target's reference frame.
+    pub fn sample_blend(&self, time:f32) -> Result<Option<f32>,String> {
+        let Some(key) = self.active_key(time)? else {return Ok(self.constant.as_ref().map(|state|state.blend))};
+        let next = self.keys.get(self.keys.partition_point(|other|other.time <= time));
+        Ok(Some(match next {
+            Some(next) => {
+                let amount = ((time as f64-key.time as f64)/(next.time as f64-key.time as f64)) as f32;
+                key.blend + (next.blend-key.blend)*amount
+            }
+            None => key.blend,
+        }))
+    }
+
+    /// Edit the active weight contributors without moving shared targets.
+    /// At an exact key only that key changes; between keys both contributors do.
+    pub fn set_blend(&mut self,time:f32,blend:f32) -> Result<bool,String> {
+        if !blend.is_finite() || !(0.0..=1.0).contains(&blend) {
+            return Err("contact blend must be between zero and one".into());
+        }
+        let active = self.active_key(time)?.map(|key|key.time);
+        if let Some(active) = active {
+            let next = self.keys.partition_point(|key|key.time <= time);
+            let index = next-1;
+            self.keys[index].blend = blend;
+            if time > active {
+                if let Some(key) = self.keys.get_mut(next) {key.blend = blend;}
+            }
+            Ok(true)
+        } else if let Some(state) = &mut self.constant {
+            state.blend = blend;
+            Ok(true)
+        } else {Ok(false)}
+    }
     /// Freeze without a key time; retain a shared reference space, or capture
     /// the current world target when interpolating between different spaces.
     pub fn frozen(&self, time: f32, body_frame: glam::Mat4) -> Result<Self, String> {

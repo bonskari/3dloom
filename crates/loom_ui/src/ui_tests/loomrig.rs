@@ -144,6 +144,33 @@ fn second_character_can_be_rigged_and_chain_rows_are_editable() {
 }
 
 #[test]
+fn animation_editor_displays_the_effective_contact_ik_weight() {
+    let mut h = Harness::new();
+    h.screen.max.y = 1800.;
+    let (state,_) = crate::loomrig_overlay::tests::rig();
+    h.app.state = state;
+    h.app.state.scene.loom_rigs[0].limbs[0].contacts = loom_scene::loomrig_contact::ContactTrack::constant(
+        loom_scene::loomrig_contact::ContactReference {
+            space:loom_scene::loomrig_contact::ContactSpace::World,
+            position:Vec3::new(12.,8.,0.),rotation:glam::Quat::IDENTITY,pole_position:Vec3::Z*20.,
+        },0.73,
+    ).unwrap();
+    h.app.state.scene.bump_version();
+    h.app.clip_timeline.open = true;
+    h.app.clip_timeline.tab = 2;
+    h.frames(3);
+    assert!(!h.text_rects("0.73").is_empty(),"IK weight must show the active contact's value, not the base FK weight");
+    let before = h.app.state.scene.loom_rigs.clone();
+    let slider = h.find(egui::accesskit::Role::Slider,"IK weight");
+    h.click(egui::pos2(slider.left()+slider.width()*0.2,slider.center().y));
+    let weight = h.app.state.scene.loom_rigs[0].limbs[0].contacts.sample_blend(0.).unwrap().unwrap();
+    assert!((weight-0.73).abs()>0.1,"pointer interaction must change the effective contact weight");
+    assert_eq!(h.app.state.scene.loom_rigs[0].limbs[0].blend.get(),0.,"contact editing must retain the base curve");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.loom_rigs,before);
+}
+
+#[test]
 fn contact_controller_pointer_drag_updates_target_and_keeps_source_tracks_with_one_undo() {
     for pole in [false, true] {
         let mut h = Harness::new();

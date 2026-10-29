@@ -217,7 +217,10 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         if let Some(limb)=rig.limbs.get(index) {
             ui.horizontal(|ui| {if ui.button("Select Goal").clicked(){select(app,limb.goal);}if ui.button("Select Pole").clicked(){select(app,limb.pole);}});
             ui.label("IK / FK");
-            let mut blend=limb.blend.get();
+            let mut blend=match limb.contacts.sample_blend(app.state.current_frame as f32) {
+                Ok(value)=>value.unwrap_or_else(||limb.blend.get()),
+                Err(error)=>{ui.colored_label(egui::Color32::RED,error);return;}
+            };
             let mut solver=limb.solver;
             let changed=ui.add(egui::Slider::new(&mut blend,0.0..=1.0).text("IK weight")).changed();
             egui::ComboBox::from_id_salt("loomrig_solver").selected_text(solver.label()).show_ui(ui,|ui|{for s in [loom_scene::ik::IkSolver::Limb,loom_scene::ik::IkSolver::HI]{ui.selectable_value(&mut solver,s,s.label());}});

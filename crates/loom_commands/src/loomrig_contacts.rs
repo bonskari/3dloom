@@ -62,6 +62,67 @@ fn capture_fk_match(scene:&Scene, ri:usize, li:usize, time:f32) -> Result<[glam:
     })
 }
 
+pub(crate) fn set_active_limb(
+    state:&mut AppState, ri:usize, li:usize, solver:loom_scene::ik::IkSolver, blend:f32,
+) -> Result<Option<Value>,String> {
+    let old = &state.scene.loom_rigs[ri].limbs[li];
+    let Some(control) = state.scene.contact_control(old.goal)? else {return Ok(None)};
+    let time = state.current_frame as f32;
+    let before = state.scene.loom_rigs.clone();
+    let mut after = before.clone();
+    let limb = &mut after[ri].limbs[li];
+    limb.solver = solver;
+    if state.auto_key {
+        key_contact_weight(&mut limb.contacts,time,blend,&control.sample,state.scene.world_matrix(before[ri].mapping.root))?;
+    } else {
+        limb.contacts.set_blend(time,blend)?;
+    }
+    if blend == 0. && control.sample.blend > 0. {
+        let offsets = capture_fk_match(&state.scene,ri,li,time)?;
+        if limb.contacts.keys().is_empty() && limb.pose_matches.keys().is_empty() {
+            limb.pose_matches = loom_scene::loomrig_pose::RigPoseTrack::constant(offsets)?;
+        } else {
+            let baseline = limb.contacts.keys().iter().rev().find(|key|key.time < time).map(|key|key.time)
+                .or_else(||(time > 0.).then_some(0.));
+            if let Some(baseline) = baseline {
+                if !limb.pose_matches.keys().iter().any(|key|key.time == baseline) {
+                    limb.pose_matches.set_key(loom_scene::loomrig_pose::RigPoseKey {
+                        time:baseline,offsets:limb.pose_matches.sample(baseline)?,
+                    })?;
+                }
+            }
+            limb.pose_matches.set_key(loom_scene::loomrig_pose::RigPoseKey {time,offsets})?;
+        }
+    }
+    if before != after {
+        crate::execute::commit_exact(state,"Set LoomRig Limb",Change::SetLoomRigs {before,after})?;
+    }
+    Ok(Some(json!({})))
+}
+
+fn key_contact_weight(
+    track:&mut loom_scene::loomrig_contact::ContactTrack,time:f32,blend:f32,
+    sample:&loom_scene::loomrig_contact::ContactSample,body_frame:glam::Mat4,
+) -> Result<(),String> {
+    let references = track.active_references(time)?;
+    let reference = if references.len() == 1 {references[0]} else {
+        let id = track.references().last_key_value().and_then(|(id,_)|id.checked_add(1)).ok_or("contact reference IDs exhausted")?;
+        let first_space = &track.references()[&references[0]].space;
+        let space = if references.iter().all(|id|track.references()[id].space == *first_space) {first_space.clone()} else {ContactSpace::World};
+        let pose = ContactReference::capture(space,body_frame,
+            glam::Mat4::from_rotation_translation(sample.rotation,sample.position),sample.pole_position)?;
+        track.insert_reference(id,pose)?;
+        id
+    };
+    if track.active_key(time)?.is_none() && time > 0. {
+        if let Some(state) = track.constant_state().cloned() {
+            track.insert_key(ContactKey {time:0.,reference:state.reference,blend:state.blend})?;
+        }
+    }
+    let key = ContactKey {time,reference,blend};
+    if track.keys().iter().any(|key|key.time == time) {track.update_key(key)} else {track.insert_key(key)}
+}
+
 pub fn execute(state: &mut AppState, command: Command) -> Result<Value, String> {
     let (rig_id, name) = match &command {
         Command::CreateLoomRigContactKey { rig, limb, .. }

@@ -276,13 +276,13 @@ pub fn spline_start(shape: &loom_shape::Shape) -> Option<Vec3> {
     shape.splines.first().and_then(|s| s.knots.first()).map(|k| k.pos)
 }
 
-/// Keep the analytic Limb joint positions while transporting the input axial roll.
+/// Keep two-bone Limb/HI joint positions while transporting the input axial roll.
 /// Contact capture must not replace an imported bone's roll with the solver's
 /// canonical perpendicular frame merely because of a small positional correction.
 /// Legacy chains continue to use `solve` unchanged.
 pub fn solve_preserving_roll(chain: &IkChain, bones: &[IkBone], goal: Vec3) -> Vec<(NodeId, Quat)> {
     let solved = solve(chain, bones, goal, None);
-    if chain.solver != IkSolver::Limb || bones.len() != 2 { return solved; }
+    if !matches!(chain.solver, IkSolver::Limb | IkSolver::HI) || bones.len() != 2 { return solved; }
     let rotations: Vec<_> = solved.iter().map(|(_,rotation)|*rotation).collect();
     let desired = worlds(bones,&rotations);
     let mut result = Vec::with_capacity(bones.len());

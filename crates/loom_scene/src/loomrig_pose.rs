@@ -56,6 +56,10 @@ impl TryFrom<PoseData> for RigPoseTrack {
 }
 
 impl RigPoseTrack {
+    pub fn constant(offsets:[Mat4;3]) -> Result<Self,String> {
+        validate(&offsets)?;
+        Ok(Self {keys:Vec::new(),constant:Some(offsets)})
+    }
     pub fn is_empty(&self) -> bool {
         self.keys.is_empty() && self.constant.is_none()
     }
