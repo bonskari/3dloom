@@ -1,18 +1,22 @@
 name: build
 
-# Only main: every verified commit is fast-forwarded there; building other
-# branches too would only queue main behind them.
+# Each pushed branch publishes its own signed rolling GitHub release so the
+# in-app Update menu can switch between branch releases.
 on:
   push:
-    branches: [main]
+    branches:
+      - '**'
+      - '!agent/**'
+      - '!worktree-agent-*'
+  workflow_dispatch:
 
-# The nightly release step moves the tag and uploads the binaries.
+# The release step moves the branch release tag and uploads signed binaries.
 permissions:
   contents: write
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   release:
@@ -21,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: cargo build --release -p loom_app --bin loom
         env:
-          LOOM_UPDATE_CHANNEL: nightly
+          LOOM_UPDATE_CHANNEL: ${{ github.ref_name }}
       - uses: actions/upload-artifact@v4
         with:
           name: loom-linux-x64
@@ -30,31 +34,40 @@ jobs:
       # Windows: cross-compiled on the same runner (x86_64-pc-windows-gnu, mingw-w64).
       - run: cargo build --release -p loom_app --bin loom --target x86_64-pc-windows-gnu
         env:
-          LOOM_UPDATE_CHANNEL: nightly
+          LOOM_UPDATE_CHANNEL: ${{ github.ref_name }}
       - uses: actions/upload-artifact@v4
         with:
           name: loom-windows-x64
           path: target/x86_64-pc-windows-gnu/release/loom.exe
           retention-days: 14
-      # A rolling "nightly" release with both binaries and the signed update
-      # manifest the programs check on start (see crates/loom_app/src/update.rs).
-      - name: Publish the nightly release
+      # Rolling per-branch release with both binaries and the ed25519-signed
+      # update manifest checked by crates/loom_app/src/update.rs.
+      - name: Publish the branch release
         env:
           GH_TOKEN: ${{ github.token }}
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          BRANCH_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           cp target/x86_64-pc-windows-gnu/release/loom.exe loom-windows-x64.exe
           cp target/release/loom loom-linux-x64
+          if [ "$BRANCH_NAME" = "main" ]; then
+            TAG="nightly"
+            TITLE="3dLoom nightly"
+          else
+            SLUG="$(printf '%s' "$BRANCH_NAME" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//')"
+            TAG="branch-${SLUG}"
+            TITLE="3dLoom (${BRANCH_NAME})"
+          fi
           cat > latest.json <<JSON
-          {"commit":"${GITHUB_SHA}","assets":{"linux-x64":{"name":"loom-linux-x64","sha256":"$(sha256sum loom-linux-x64 | cut -d' ' -f1)"},"windows-x64":{"name":"loom-windows-x64.exe","sha256":"$(sha256sum loom-windows-x64.exe | cut -d' ' -f1)"}}}
+          {"branch":"${BRANCH_NAME}","commit":"${GITHUB_SHA}","assets":{"linux-x64":{"name":"loom-linux-x64","sha256":"$(sha256sum loom-linux-x64 | cut -d' ' -f1)"},"windows-x64":{"name":"loom-windows-x64.exe","sha256":"$(sha256sum loom-windows-x64.exe | cut -d' ' -f1)"}}}
           JSON
           key=$(mktemp)
           trap 'shred -u "$key"' EXIT
           printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key"
           openssl pkeyutl -sign -rawin -inkey "$key" -in latest.json -out latest.json.sig
-          git tag -f nightly
-          git push -f origin nightly
-          gh release view nightly >/dev/null 2>&1 || gh release create nightly --prerelease --title "3dLoom nightly" --notes "Newest build of main."
-          gh release edit nightly --notes "Newest build of main: ${GITHUB_SHA::7}"
-          gh release upload nightly loom-windows-x64.exe loom-linux-x64 latest.json latest.json.sig --clobber
+          git tag -f "$TAG"
+          git push -f origin "$TAG"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --prerelease --title "$TITLE" --notes "Newest build of ${BRANCH_NAME}."
+          gh release edit "$TAG" --title "$TITLE" --notes "Newest build of ${BRANCH_NAME}: ${GITHUB_SHA::7}"
+          gh release upload "$TAG" loom-windows-x64.exe loom-linux-x64 latest.json latest.json.sig --clobber

@@ -66,12 +66,13 @@ fn main() -> eframe::Result<()> {
         socket: unix_socket.as_ref().map(|s| s.path.clone()),
         ..Default::default()
     };
-    // Signed self-update (CI release builds only, see `update::enabled`): a
-    // background check after the window opens feeds the Update menu; nothing
-    // installs until the user picks it.
+    // Signed self-update (interactive runs, see `update::enabled`): a
+    // background check after the window opens feeds the Update menu and branch
+    // selector; nothing installs until the user picks it.
     let exe = update::own_path();
     let update = update::enabled(option_env!("LOOM_UPDATE_CHANNEL"), std::env::var("LOOM_CONTROL_PORT").ok().as_deref(), std::env::var("LOOM_NO_UPDATE").ok().as_deref()).then(|| {
-        let handle = loom_ui::update_menu::new_handle();
+        let initial_branch = update::load_saved_branch(option_env!("LOOM_UPDATE_CHANNEL").unwrap_or(env!("LOOM_BRANCH")));
+        let handle = loom_ui::update_menu::new_handle_for_branch(initial_branch);
         let worker = handle.clone();
         std::thread::spawn(move || update_worker(worker));
         handle
@@ -142,11 +143,15 @@ fn update_worker(h: loom_ui::update_menu::UpdateHandle) {
     use loom_ui::update_menu::UpdateStatus as S;
     let own = env!("LOOM_COMMIT");
     loop {
-        let found = update::check(own);
+        let branch = h.lock().unwrap().branch.clone();
+        update::save_branch(&branch);
+        let branches = update::fetch_branches(&branch);
+        h.lock().unwrap().branches = branches;
+        let found = update::check_branch(own, &branch);
         match &found {
-            Ok(Some((m, _))) => log::info!(target: "loom::update", "update available: {} (running {own})", m.commit),
-            Ok(None) => log::info!(target: "loom::update", "up to date ({own})"),
-            Err(e) => log::warn!(target: "loom::update", "update check failed: {e}"),
+            Ok(Some((m, _))) => log::info!(target: "loom::update", "update available on {branch}: {} (running {own})", m.commit),
+            Ok(None) => log::info!(target: "loom::update", "up to date on {branch} ({own})"),
+            Err(e) => log::warn!(target: "loom::update", "update check for {branch} failed: {e}"),
         }
         let pending = match found {
             Ok(Some((manifest, asset))) => {
@@ -175,12 +180,13 @@ fn update_worker(h: loom_ui::update_menu::UpdateHandle) {
             if s.install_requested {
                 s.install_requested = false;
                 if let Some((manifest, asset)) = pending.as_ref() {
+                    let active_branch = s.branch.clone();
                     s.status = S::Installing { commit: manifest.commit.clone() };
                     drop(s);
-                    let r = update::install(manifest, asset);
+                    let r = update::install_from_branch(&active_branch, manifest, asset);
                     match &r {
-                        Ok(()) => log::info!(target: "loom::update", "installed {}", manifest.commit),
-                        Err(e) => log::warn!(target: "loom::update", "install of {} failed: {e}", manifest.commit),
+                        Ok(()) => log::info!(target: "loom::update", "installed {} ({active_branch})", manifest.commit),
+                        Err(e) => log::warn!(target: "loom::update", "install of {} ({active_branch}) failed: {e}", manifest.commit),
                     }
                     let mut s = h.lock().unwrap();
                     s.status = match r {

@@ -20,6 +20,8 @@ pub enum UpdateStatus {
 /// Shared between the UI and the updater thread.
 #[derive(Debug)]
 pub struct UpdateState {
+    pub branch: String,
+    pub branches: Vec<String>,
     pub status: UpdateStatus,
     pub install_requested: bool,
     pub check_requested: bool,
@@ -29,7 +31,23 @@ pub struct UpdateState {
 pub type UpdateHandle = Arc<Mutex<UpdateState>>;
 
 pub fn new_handle() -> UpdateHandle {
-    Arc::new(Mutex::new(UpdateState { status: UpdateStatus::Checking, install_requested: false, check_requested: false, restart_requested: false }))
+    new_handle_for_branch("main")
+}
+
+pub fn new_handle_for_branch(branch: impl Into<String>) -> UpdateHandle {
+    let branch = branch.into();
+    let mut branches = vec!["main".to_owned()];
+    if !branch.is_empty() && !branches.contains(&branch) {
+        branches.push(branch.clone());
+    }
+    Arc::new(Mutex::new(UpdateState {
+        branch,
+        branches,
+        status: UpdateStatus::Checking,
+        install_requested: false,
+        check_requested: false,
+        restart_requested: false,
+    }))
 }
 
 /// Whether the menu title carries the red dot.
@@ -52,22 +70,42 @@ fn title(news: bool) -> egui::WidgetText {
 }
 
 pub fn show(ui: &mut egui::Ui, handle: &UpdateHandle) {
-    let status = handle.lock().unwrap().status.clone();
+    let (branch, branches, status) = {
+        let s = handle.lock().unwrap();
+        (s.branch.clone(), s.branches.clone(), s.status.clone())
+    };
     ui.menu_button(title(has_news(&status)), |ui| {
         ui.set_min_width(320.0);
+        ui.horizontal(|ui| {
+            ui.label("Branch:");
+            let mut selected = branch.clone();
+            egui::ComboBox::from_id_salt("update_branch_select")
+                .selected_text(&selected)
+                .show_ui(ui, |ui| {
+                    for b in &branches {
+                        if ui.selectable_value(&mut selected, b.clone(), b).clicked() && selected != branch {
+                            let mut s = handle.lock().unwrap();
+                            s.branch = selected.clone();
+                            s.status = UpdateStatus::Checking;
+                            s.check_requested = true;
+                        }
+                    }
+                });
+        });
+        ui.separator();
         match &status {
             UpdateStatus::Checking => {
-                ui.weak("Checking for updates…");
+                ui.weak(format!("Checking {branch} for updates…"));
             }
             UpdateStatus::UpToDate => {
-                ui.label("3dLoom is up to date.");
+                ui.label(format!("3dLoom ({branch}) is up to date."));
                 if ui.button("Check again").clicked() {
                     handle.lock().unwrap().check_requested = true;
                     ui.close_menu();
                 }
             }
             UpdateStatus::Available { commit, changes } => {
-                ui.label(egui::RichText::new(format!("Version {} is available", short(commit))).strong());
+                ui.label(egui::RichText::new(format!("Version {} is available on {branch}", short(commit))).strong());
                 ui.separator();
                 if changes.is_empty() {
                     ui.weak("The list of changes is not available.");
@@ -80,16 +118,16 @@ pub fn show(ui: &mut egui::Ui, handle: &UpdateHandle) {
                     });
                 }
                 ui.separator();
-                if ui.button(format!("Update to {}", short(commit))).clicked() {
+                if ui.button(format!("Update to {} ({branch})", short(commit))).clicked() {
                     handle.lock().unwrap().install_requested = true;
                     ui.close_menu();
                 }
             }
             UpdateStatus::Installing { commit } => {
-                ui.weak(format!("Downloading version {}…", short(commit)));
+                ui.weak(format!("Downloading version {} ({branch})…", short(commit)));
             }
             UpdateStatus::Ready { commit } => {
-                ui.label(format!("Version {} is installed.", short(commit)));
+                ui.label(format!("Version {} ({branch}) is installed.", short(commit)));
                 if ui.button("Restart now").on_hover_text("Unsaved changes are asked about first").clicked() {
                     handle.lock().unwrap().restart_requested = true;
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -122,5 +160,13 @@ mod tests {
         assert!(has_news(&UpdateStatus::Available { commit: "abc".into(), changes: vec![] }));
         assert!(has_news(&UpdateStatus::Ready { commit: "abc".into() }));
         assert!(!has_news(&UpdateStatus::Failed("x".into())));
+    }
+
+    #[test]
+    fn new_handle_seeds_main_and_custom_branch() {
+        let h = new_handle_for_branch("dev");
+        let s = h.lock().unwrap();
+        assert_eq!(s.branch, "dev");
+        assert_eq!(s.branches, vec!["main".to_owned(), "dev".to_owned()]);
     }
 }
