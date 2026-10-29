@@ -42,6 +42,26 @@ fn capture(
     })
 }
 
+fn capture_fk_match(scene:&Scene, ri:usize, li:usize, time:f32) -> Result<[glam::Mat4;3],String> {
+    let limb = &scene.loom_rigs[ri].limbs[li];
+    let ids = [limb.mapping.start,limb.mapping.middle,limb.mapping.end];
+    let visible = scene.at_time(time,||ids.map(|id|scene.local_matrix(id)));
+    let mut probe = scene.clone();
+    let fk = &mut probe.loom_rigs[ri].limbs[li];
+    fk.contacts = Default::default();
+    fk.pose_matches = Default::default();
+    fk.blend = loom_scene::Param::new(0.);
+    probe.bump_version();
+    probe.at_time(time,|| {
+        let mut offsets = [glam::Mat4::IDENTITY;3];
+        for i in 0..3 {
+            offsets[i] = probe.local_matrix(ids[i]).inverse() * visible[i];
+            loom_scene::loomrig_contact::affine_rotation(offsets[i])?;
+        }
+        Ok(offsets)
+    })
+}
+
 pub fn execute(state: &mut AppState, command: Command) -> Result<Value, String> {
     let (rig_id, name) = match &command {
         Command::CreateLoomRigContactKey { rig, limb, .. }
@@ -64,6 +84,9 @@ pub fn execute(state: &mut AppState, command: Command) -> Result<Value, String> 
     let mut after = before.clone();
     let track = &mut after[ri].limbs[li].contacts;
     let mut reference_id = None;
+    let mut free_match = None;
+    let mut moved_match = None;
+    let mut deleted_match = None;
     match command {
         Command::CreateLoomRigContactKey { time, preset, .. } => {
             valid_time(time)?;
@@ -74,6 +97,12 @@ pub fn execute(state: &mut AppState, command: Command) -> Result<Value, String> 
             };
             if track.keys().iter().any(|key| key.time == time) {
                 return Err("contact key time already exists".into());
+            }
+            if preset == "free" {
+                let offsets = capture_fk_match(&state.scene,ri,li,time)?;
+                let baseline = track.keys().iter().rev().find(|key|key.time < time).map(|key|key.time)
+                    .or_else(||(time > 0.).then_some(0.));
+                free_match = Some((time,offsets,baseline));
             }
             let pose = capture(
                 &state.scene,
@@ -133,12 +162,25 @@ pub fn execute(state: &mut AppState, command: Command) -> Result<Value, String> 
             valid_time(from)?;
             valid_time(to)?;
             track.move_key(from, to)?;
+            moved_match = Some((from,to));
         }
         Command::DeleteLoomRigContactKey { time, .. } => {
             valid_time(time)?;
             track.remove_key(time)?;
+            deleted_match = Some(time);
         }
         _ => unreachable!(),
+    }
+    if let Some((from,to)) = moved_match {after[ri].limbs[li].pose_matches.move_key(from,to)?;}
+    if let Some(time) = deleted_match {after[ri].limbs[li].pose_matches.remove_key(time);}
+    if let Some((time,offsets,baseline)) = free_match {
+        let matches = &mut after[ri].limbs[li].pose_matches;
+        if let Some(baseline) = baseline {
+            if !matches.keys().iter().any(|key|key.time == baseline) {
+                matches.set_key(loom_scene::loomrig_pose::RigPoseKey {time:baseline,offsets:matches.sample(baseline)?})?;
+            }
+        }
+        matches.set_key(loom_scene::loomrig_pose::RigPoseKey {time,offsets})?;
     }
     if before != after {
         crate::execute::commit_exact(

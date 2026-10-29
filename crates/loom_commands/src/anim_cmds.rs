@@ -495,6 +495,7 @@ fn delete_selected_animation(state: &mut AppState) -> Result<Value, String> {
                 || rig.bindings.iter().any(|binding|bones.contains(&binding.bone) && ids.contains(&binding.control));
             if selected {
                 limb.contacts = limb.contacts.frozen(t,frame).map_err(|error|format!("LoomRig {} {}: {error}",rig.id,limb.mapping.name))?;
+                limb.pose_matches = limb.pose_matches.frozen(t)?;
                 limb.blend = loom_scene::Param::new(limb.blend.get());
                 for offset in &mut limb.pose_offsets { *offset = loom_scene::Param::new(offset.get()); }
             }

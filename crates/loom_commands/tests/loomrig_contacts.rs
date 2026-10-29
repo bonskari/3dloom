@@ -113,6 +113,81 @@ fn point(s: &AppState, id: NodeId, time: f32) -> Vec3 {
 }
 
 #[test]
+fn creating_free_contact_preserves_the_solved_pose_and_source_tracks() {
+    for scale in [Vec3::ONE,Vec3::new(2.,3.,0.5),Vec3::new(-2.,3.,0.5)] {
+        let (mut s, root, _) = rigged();
+        let mut parent = Node::new("affine parent",ObjectKind::dummy(1.));
+        parent.transform.scale.set(scale);
+        parent.transform.rotation.set(Vec3::new(0.,0.,17.));
+        let parent = s.scene.add_node(parent);
+        s.scene.node_mut(root).unwrap().parent = Some(parent);
+        s.scene.node_mut(root).unwrap().transform.rotation.set(Vec3::new(0.,0.,23.));
+        let limb = s.scene.loom_rigs[0].limbs[0].clone();
+        let target = s.scene.world_matrix(root).transform_point3(Vec3::new(12.,8.,0.));
+        s.scene.loom_rigs[0].limbs[0].contacts = ContactTrack::new(
+            [(1, reference(ContactSpace::World, target))].into(),
+            vec![key(0., 1, 1.)],
+        ).unwrap();
+        s.scene.bump_version();
+        execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+        let ids = [limb.mapping.start, limb.mapping.middle, limb.mapping.end];
+        let before: Vec<_> = ids.iter().map(|id|s.scene.world_matrix(*id)).collect();
+        let source: Vec<_> = s.scene.nodes().map(|n|(n.id,n.transform.clone())).collect();
+        let before_rigs = s.scene.loom_rigs.clone();
+        execute(&mut s, Command::CreateLoomRigContactKey {
+            rig: 1, limb: "Arm".into(), time: 10., preset: "free".into(),
+        }).unwrap();
+        for (id, expected) in ids.iter().zip(&before) {
+            assert!(s.scene.world_matrix(*id).abs_diff_eq(*expected, 0.001), "Free changed {id:?}");
+        }
+        for (id, transform) in source {
+            assert_eq!(s.scene.node(id).unwrap().transform, transform);
+        }
+        assert!(s.scene.contact_errors().is_empty());
+        let authored = s.scene.loom_rigs.clone();
+        execute(&mut s, Command::UndoSceneOperation).unwrap();
+        assert_eq!(s.scene.loom_rigs,before_rigs);
+        execute(&mut s, Command::RedoSceneOperation).unwrap();
+        assert_eq!(s.scene.loom_rigs,authored);
+        execute(&mut s, Command::MoveLoomRigContactKey {rig:1,limb:"Arm".into(),from:10.,to:20.}).unwrap();
+        assert!(s.scene.loom_rigs[0].limbs[0].pose_matches.keys().iter().any(|key|key.time == 20.));
+        s.scene.at_time(20.,|| {
+            for (id,expected) in ids.iter().zip(&before) {
+                assert!(s.scene.world_matrix(*id).abs_diff_eq(*expected,0.001),"moved Free changed {id:?}");
+            }
+        });
+        execute(&mut s, Command::UndoSceneOperation).unwrap();
+        assert_eq!(s.scene.loom_rigs,authored);
+        execute(&mut s, Command::DeleteLoomRigContactKey {rig:1,limb:"Arm".into(),time:10.}).unwrap();
+        assert!(!s.scene.loom_rigs[0].limbs[0].pose_matches.keys().iter().any(|key|key.time == 10.));
+        execute(&mut s, Command::UndoSceneOperation).unwrap();
+        assert_eq!(s.scene.loom_rigs,authored);
+        let path = std::env::temp_dir().join(format!("loom-free-match-{}-{}.loom",std::process::id(),scale.x.to_bits()));
+        execute(&mut s,Command::SaveFileAsCopy {path:Some(path.to_string_lossy().into_owned())}).unwrap();
+        let mut reopened = AppState::new();
+        execute(&mut reopened,Command::OpenFile {path:Some(path.to_string_lossy().into_owned())}).unwrap();
+        std::fs::remove_file(path).unwrap();
+        reopened.scene.at_time(10.,|| {
+            for (id,expected) in ids.iter().zip(&before) {
+                assert!(reopened.scene.world_matrix(*id).abs_diff_eq(*expected,0.001));
+            }
+        });
+        s.selection = [limb.goal].into();
+        execute(&mut s,Command::DeleteSelectedAnimation).unwrap();
+        assert!(s.scene.loom_rigs[0].limbs[0].pose_matches.keys().is_empty());
+        let reads = loom_scene::anim::animated_reads();
+        for time in [-10.,0.,9.5,50.] {
+            s.scene.at_time(time,|| {
+                for (id,expected) in ids.iter().zip(&before) {
+                    assert!(s.scene.world_matrix(*id).abs_diff_eq(*expected,0.001));
+                }
+            });
+        }
+        assert_eq!(loom_scene::anim::animated_reads(),reads);
+    }
+}
+
+#[test]
 fn world_contact_holds_body_contact_follows_root_and_free_releases() {
     for space in [ContactSpace::World, ContactSpace::Body] {
         let (mut s, root, end) = rigged();
@@ -751,6 +826,18 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
         assert_eq!(source(&s), before, "target editing changed source nodes or materials");
         execute(&mut s, Command::UndoSceneOperation).unwrap();
         assert_eq!(s.scene.loom_rigs, contacts);
+        let free_pose = s.scene.at_time(40.,||ids.map(|id|s.scene.world_matrix(id)));
+        execute(&mut s, Command::CreateLoomRigContactKey {
+            rig,limb:name.into(),time:40.,preset:"free".into(),
+        }).unwrap();
+        s.scene.at_time(40.,|| {
+            for (id,expected) in ids.iter().zip(free_pose) {
+                assert!(s.scene.world_matrix(*id).abs_diff_eq(expected,0.003),"{name} Free changed {id:?}");
+            }
+        });
+        assert_eq!(source(&s),before,"Free matching changed source nodes or materials");
+        execute(&mut s, Command::UndoSceneOperation).unwrap();
+        assert_eq!(s.scene.loom_rigs,contacts);
         s.selection = selection;
         execute(&mut s, Command::UndoSceneOperation).unwrap();
         assert_eq!(source(&s), before);

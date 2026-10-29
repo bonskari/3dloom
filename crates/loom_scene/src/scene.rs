@@ -1009,15 +1009,23 @@ impl Scene {
                 }
                 // Matched FK offsets are inputs to IK, so a moved goal
                 // still obeys the chain constraint instead of rotating its result.
+                let matches = match limb.pose_matches.sample(self.time()) {
+                    Ok(matches) => matches,
+                    Err(message) => {
+                        self.contact_errors.borrow_mut().push(crate::loomrig_contact::ContactEvaluationError {
+                            rig:rig.id,limb:limb.mapping.name.clone(),message,
+                        });
+                        continue;
+                    }
+                };
                 for (i, id) in ids.iter().enumerate() {
                     let (scale, q, pos) = self.local_matrix(*id).to_scale_rotation_translation();
+                    let posed = Mat4::from_scale_rotation_translation(
+                        scale,(q * limb.pose_rotation(i)).normalize(),pos,
+                    );
                     self.ik_cache.borrow_mut().2.insert(
                         *id,
-                        Mat4::from_scale_rotation_translation(
-                            scale,
-                            (q * limb.pose_rotation(i)).normalize(),
-                            pos,
-                        ),
+                        if limb.pose_matches.is_empty() {posed} else {posed * matches[i]},
                     );
                 }
                 let Some(goal_node) = self.nodes.get(&limb.goal) else {
@@ -1054,6 +1062,9 @@ impl Scene {
                     }
                 }
                 let blend = contact.as_ref().map_or_else(|| limb.blend.get().clamp(0.0, 1.0), |c| c.blend);
+                // A matched FK pose may carry shear from the solved end frame.
+                // Re-decomposing it through the IK path would discard that shear.
+                if blend == 0. && !limb.pose_matches.is_empty() { continue; }
                 // Solve in the start joint's parent space: bone lengths and
                 // targets must share units even under a scaled scene parent.
                 let solve_frame = self.parent_frame(ids[0]).inverse();

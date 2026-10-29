@@ -103,6 +103,7 @@ fn build(
             solver: IkSolver::Limb,
             blend: loom_scene::Param::new(0.),
             pose_offsets: vec![],
+            pose_matches: Default::default(),
             contacts: Default::default(),
         });
     }

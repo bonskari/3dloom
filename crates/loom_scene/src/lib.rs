@@ -38,5 +38,6 @@ pub use undo::UndoStack;
 
 pub mod loomrig;
 pub mod loomrig_contact;
+pub mod loomrig_pose;
 #[cfg(test)]
 mod loomrig_contact_tests;

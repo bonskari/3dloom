@@ -140,6 +140,7 @@ fn contact_limb_legacy_serialization_omits_empty_track_and_roundtrips_authored_d
         solver: crate::ik::IkSolver::Limb,
         blend: crate::Param::new(0.),
         pose_offsets: vec![],
+        pose_matches: Default::default(),
         contacts: ContactTrack::default(),
     };
     let legacy = serde_json::to_value(&limb).unwrap();
