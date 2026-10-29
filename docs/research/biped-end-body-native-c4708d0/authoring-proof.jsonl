@@ -1,0 +1,5 @@
+{"kind": "native_shape_pointer", "role": "foot", "control": 4986, "only_input_changed": true, "source_nodes_skin_materials_retained": true, "one_gesture_one_undo": true, "full_scene_undo_exact": true}
+{"kind": "native_shape_pointer", "role": "pelvis", "control": 4968, "only_input_changed": true, "source_nodes_skin_materials_retained": true, "one_gesture_one_undo": true, "full_scene_undo_exact": true}
+{"kind": "native_shape_pointer", "role": "master", "control": 4967, "only_input_changed": true, "source_nodes_skin_materials_retained": true, "one_gesture_one_undo": true, "full_scene_undo_exact": true}
+{"kind": "native_shape_pointer", "role": "IK hand", "control": 4987, "only_contact_target_changed": true, "source_nodes_skin_materials_retained": true, "one_gesture_one_undo": true, "full_scene_undo_exact": true}
+{"kind": "restored", "all_four_viewport_pixels_identical": true, "original_source_hash": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935", "nodes_frame_selection_modes_and_history_restored": true}

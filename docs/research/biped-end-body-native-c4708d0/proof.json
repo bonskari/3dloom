@@ -1,0 +1,69 @@
+{
+  "code_commit": "c4708d049792d8322d211b0d59c58626df7cd8cc",
+  "binary_sha256": "1262d68ce836c74e9348700812f42b850d497cbd25c08217c78492cb542270b4",
+  "authoring_pid": 1011867,
+  "current_pid": 1028721,
+  "release_build_seconds": 20.32,
+  "source_sha256": "84fe5289bf2227d474b37e30d04e3267f03a8c0a37be2e30bc8da1117af0f935",
+  "source_verified_control_count": 14,
+  "native_committed_skin_objects": 5,
+  "native_committed_skin_parts": 13,
+  "actual_pointer_roles": {
+    "FK foot": 4986,
+    "pelvis": 4968,
+    "master": 4967,
+    "IK hand": 4987
+  },
+  "source_and_full_scene_undo_preserved": true,
+  "restored_all_four_viewport_pixels_identical": true,
+  "prior_binary_and_four_autobacks_retained": true,
+  "autoback_archive_bytes": 814052858,
+  "first_desktop": [
+    {
+      "kind": "summary",
+      "shading": "Realistic",
+      "active_windows": 16,
+      "active_ready_pose_fps": 62.27120585353078,
+      "min_active_window_fps": 57.213868119533466
+    },
+    {
+      "kind": "summary",
+      "shading": "Wireframe",
+      "active_windows": 17,
+      "active_ready_pose_fps": 89.69389837233449,
+      "min_active_window_fps": 83.16619172916698
+    }
+  ],
+  "paired_previous": [
+    {
+      "kind": "summary",
+      "shading": "Realistic",
+      "active_windows": 18,
+      "active_ready_pose_fps": 66.52040800694378,
+      "min_active_window_fps": 64.40264447468216
+    },
+    {
+      "kind": "summary",
+      "shading": "Wireframe",
+      "active_windows": 18,
+      "active_ready_pose_fps": 94.35437461413638,
+      "min_active_window_fps": 89.32107559784
+    }
+  ],
+  "paired_current": [
+    {
+      "kind": "summary",
+      "shading": "Realistic",
+      "active_windows": 17,
+      "active_ready_pose_fps": 67.02634032253187,
+      "min_active_window_fps": 64.30375164406833
+    },
+    {
+      "kind": "summary",
+      "shading": "Wireframe",
+      "active_windows": 18,
+      "active_ready_pose_fps": 94.6824979095395,
+      "min_active_window_fps": 89.80234405318781
+    }
+  ]
+}
