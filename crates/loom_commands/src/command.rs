@@ -1593,6 +1593,8 @@ commands! {
     SetLoomRigContactPreset => "Set LoomRig Contact Preset", Loom, "Capture the solved limb pose and explicitly create or replace its contact key with a planted, sliding or free preset." { rig:u32, limb:String, time:f32, preset:String };
     KeyLoomRigContact => "Key LoomRig Contact", Loom, "Key the current effective contact target and IK weight at the requested time, retaining neighboring keys and source animation." { rig:u32, limb:String, time:f32 };
     KeyLoomRigPose => "Key LoomRig Pose", Loom, "Record all unlocked rig control transforms and rig-owned pose/contact channels at the current frame. Set Key mode also commits its pending edits using the existing key filters. Original bone tracks are not implicitly keyed." { rig:u32 };
+    MoveLoomRigPoseKey => "Move LoomRig Pose Key", Loom, "Move a full rig pose and its control/contact keys atomically; reject occupied times." {rig:u32,from:f32,to:f32};
+    DeleteLoomRigPoseKey => "Delete LoomRig Pose Key", Loom, "Delete a full rig pose and its control/contact keys in one Undo step." {rig:u32,time:f32};
     EditLoomRigContactKey => "Edit LoomRig Contact Key", Loom, "Edit an existing contact key's blend or shared reference." { rig:u32, limb:String, key:loom_scene::loomrig_contact::ContactKey };
     EditLoomRigContactReference => "Edit LoomRig Contact Reference", Loom, "Edit a shared contact pose in body or world coordinates." { rig:u32, limb:String, reference:u64, pose:loom_scene::loomrig_contact::ContactReference };
     MoveLoomRigContactKey => "Move LoomRig Contact Key", Loom, "Move a contact key without overwriting another key." { rig:u32, limb:String, from:f32, to:f32 };

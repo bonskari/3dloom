@@ -28,6 +28,7 @@ fn control_offsets_drive_existing_bone_without_editing_transform() {
             rest: glam::Mat4::IDENTITY,
         }],
         limbs: vec![],
+        pose_frames: Default::default(),
     });
     scene
         .node_mut(control)
@@ -78,4 +79,23 @@ fn edit_revision_changes_on_edit_but_not_playback() {
     let edited = scene.revision();
     scene.at_time(77., || scene.world_matrix(id));
     assert_eq!(scene.revision(), edited);
+}
+
+#[test]
+fn pose_frames_are_sorted_unique_validated_and_persisted() {
+    use loom_scene::loomrig_pose::RigPoseFrames;
+    let mut frames=RigPoseFrames::default();
+    frames.insert(10.).unwrap();frames.insert(0.).unwrap();frames.insert(10.).unwrap();frames.insert(-0.).unwrap();
+    assert_eq!(frames.times(),&[0.,10.]);
+    assert!(frames.insert(f32::NAN).is_err());
+    assert!(frames.insert(0.00001).is_err());
+    assert!(frames.move_key(10.,0.00001).is_err());
+    assert!(frames.move_key(0.,10.).is_err());
+    assert_eq!(frames.times(),&[0.,10.]);
+    frames.move_key(0.,5.).unwrap();
+    let encoded=serde_json::to_string(&frames).unwrap();
+    assert_eq!(serde_json::from_str::<RigPoseFrames>(&encoded).unwrap(),frames);
+    for invalid in ["[10,0]","[0,0]","[0,-0.0]","[0,0.00001]"] {assert!(serde_json::from_str::<RigPoseFrames>(invalid).is_err());}
+    frames.remove(5.).unwrap();assert_eq!(frames.times(),&[10.]);
+    assert!(frames.remove(5.).is_err());
 }

@@ -138,6 +138,8 @@ pub struct LoomRig {
     pub master: NodeId,
     pub bindings: Vec<ControlBinding>,
     pub limbs: Vec<RigLimb>,
+    #[serde(default, skip_serializing_if = "crate::loomrig_pose::RigPoseFrames::is_empty")]
+    pub pose_frames: crate::loomrig_pose::RigPoseFrames,
 }
 
 impl LoomRig {

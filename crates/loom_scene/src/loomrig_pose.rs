@@ -262,3 +262,41 @@ mod tests {
         assert!(frozen.keys().is_empty());
     }
 }
+
+/// Authored full-rig pose events, distinct from per-limb affine match keys.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<f32>")]
+pub struct RigPoseFrames(Vec<f32>);
+
+impl TryFrom<Vec<f32>> for RigPoseFrames {
+    type Error=String;
+    fn try_from(times:Vec<f32>)->Result<Self,String> {
+        if times.iter().any(|time|!time.is_finite()) || times.windows(2).any(|pair|pair[0]>=pair[1] || pair[1]-pair[0] < crate::anim::SAME_TIME) {
+            return Err("rig pose frames must be finite and strictly increasing".into());
+        }
+        Ok(Self(times))
+    }
+}
+impl RigPoseFrames {
+    pub fn times(&self)->&[f32] {&self.0}
+    pub fn is_empty(&self)->bool {self.0.is_empty()}
+    pub fn insert(&mut self,time:f32)->Result<(),String> {
+        if !time.is_finite() {return Err("rig pose frame must be finite".into());}
+        if self.0.iter().any(|old|*old != time && (*old-time).abs() < crate::anim::SAME_TIME) {return Err("rig pose frame collides with an existing frame".into());}
+        match self.0.binary_search_by(|old|old.partial_cmp(&time).unwrap()) {
+            Ok(_)=>{},Err(index)=>self.0.insert(index,time),
+        }
+        Ok(())
+    }
+    pub fn remove(&mut self,time:f32)->Result<(),String> {
+        let index=self.0.iter().position(|old|*old == time).ok_or("rig pose frame not found")?;
+        self.0.remove(index);Ok(())
+    }
+    pub fn move_key(&mut self,from:f32,to:f32)->Result<(),String> {
+        if !to.is_finite() {return Err("rig pose frame must be finite".into());}
+        if !self.0.contains(&from) {return Err("rig pose frame not found".into());}
+        if from == to {return Ok(());}
+        if self.0.iter().any(|old|*old != from && (*old-to).abs() < crate::anim::SAME_TIME) {return Err("rig pose frame already exists".into());}
+        self.remove(from)?;self.insert(to)
+    }
+}

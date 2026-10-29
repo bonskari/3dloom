@@ -481,6 +481,14 @@ pub fn edit_nodes(state: &mut AppState, label: &str, ids: &[NodeId], choose: imp
     Ok(json!({ "changed":n }))
 }
 
+fn controller_has_key<T>(controller:&loom_scene::param::Controller<T>,time:f32)->bool {
+    match controller {
+        loom_scene::param::Controller::Keys(keys)=>keys.tracks.iter().any(|track|track.key_at(time).is_some()),
+        loom_scene::param::Controller::List(items)=>items.iter().any(|item|controller_has_key(&item.controller,time)),
+        _=>false,
+    }
+}
+
 fn delete_selected_animation(state: &mut AppState) -> Result<Value, String> {
     let t = state.current_frame as f32;
     let ids: Vec<_> = state.selection.iter().copied().collect();
@@ -488,6 +496,21 @@ fn delete_selected_animation(state: &mut AppState) -> Result<Value, String> {
     let before = state.scene.loom_rigs.clone();
     let mut after = before.clone();
     for rig in &mut after {
+        let owned:Vec<_>=rig.bindings.iter().map(|binding|binding.control).chain([rig.master])
+            .chain(rig.limbs.iter().flat_map(|limb|[limb.goal,limb.pole])).collect();
+        if owned.iter().all(|id|ids.contains(id)) {
+            // Locked node tracks survive freezing; retain their actual grouped keys.
+            for time in rig.pose_frames.times().to_vec() {
+                let remaining=owned.iter().filter_map(|id|state.scene.node(*id)).any(|node| {
+                    tracks::node_tracks(node).iter().any(|track| {
+                        track.owner == TrackOwner::Transform
+                            && state.scene.track_data.flags.iter().any(|(key,flags)|*key == track.key() && flags.locked)
+                            && matches!(tracks::read_node(node,track),Some(AnyParam::Vec3(param)) if controller_has_key(&param.controller,time))
+                    })
+                });
+                if !remaining {rig.pose_frames.remove(time)?;}
+            }
+        }
         let frame = state.scene.world_matrix(rig.mapping.root);
         for limb in &mut rig.limbs {
             let bones = [limb.mapping.start,limb.mapping.middle,limb.mapping.end];
@@ -721,6 +744,7 @@ pub(crate) fn key_rig_pose(state:&mut AppState,rig_id:u32) -> Result<Value,Strin
         let capture=current.id == rig_id || (state.set_key_mode && state.key_filters.ik_parameters && current != &before[index]);
         if !capture {continue;}
         let mut keyed=current.clone();
+        if current.id == rig_id {keyed.pose_frames.insert(time)?;}
         for limb in &mut keyed.limbs {
             if !keyable(&limb.blend.controller) || !limb.blend.get_at(time).is_finite() {return Err("rig blend controller cannot be keyed".into());}
             let blend=limb.blend.get_at(time).clamp(0.,1.);

@@ -82,6 +82,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     match cmd {
         C::State => Ok(snapshot(state)),
         C::KeyLoomRigPose {rig} => crate::anim_cmds::key_rig_pose(state,rig),
+        C::MoveLoomRigPoseKey {rig,from,to} => crate::loomrig_pose_keys::edit(state,rig,from,Some(to)),
+        C::DeleteLoomRigPoseKey {rig,time} => crate::loomrig_pose_keys::edit(state,rig,time,None),
         C::MoveAnimationClip { id, start } => crate::animation_clips::move_clip(state, id, start),
         C::TrimAnimationClip { id, start, end } => crate::animation_clips::trim_clip(state, id, start, end),
         c @ (C::CreateLoomRigContactKey { .. } | C::SetLoomRigContactPreset { .. } | C::KeyLoomRigContact { .. } | C::EditLoomRigContactKey { .. } | C::EditLoomRigContactReference { .. } | C::MoveLoomRigContactKey { .. } | C::DeleteLoomRigContactKey { .. }) => crate::loomrig_contacts::execute(state,c),

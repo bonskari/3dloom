@@ -117,6 +117,102 @@ fn point(s: &AppState, id: NodeId, time: f32) -> Vec3 {
 }
 
 #[test]
+fn rig_pose_group_move_delete_and_undo_preserve_source_and_solved_pose() {
+    let (mut s,_,_)=rigged();
+    execute(&mut s,Command::SetLoomRigContactPreset {rig:1,limb:"Arm".into(),time:0.,preset:"free".into()}).unwrap();
+    execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap();
+    execute(&mut s,Command::SetFrame {frame:10}).unwrap();
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    let control=s.scene.loom_rigs[0].bindings[1].control;
+    execute(&mut s,Command::SetTransform {id:control.0,position:None,rotation_deg:Some([0.,0.,12.]),scale:None}).unwrap();
+    execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap();
+    assert_eq!(s.scene.loom_rigs[0].pose_frames.times(),&[0.,10.]);
+    let original_rigs=s.scene.loom_rigs.clone();
+    let original_nodes:Vec<_>=s.scene.nodes().map(|node|(node.id,node.transform.clone())).collect();
+    let sources:Vec<_>=s.scene.nodes().filter(|node|node.object.is_bone()).map(|node|(node.id,node.transform.clone(),s.scene.world_matrix(node.id))).collect();
+    let history=s.undo.position();
+    execute(&mut s,Command::MoveLoomRigPoseKey {rig:1,from:10.,to:25.5}).unwrap();
+    assert_eq!(s.undo.position(),history+1);
+    let rig=&s.scene.loom_rigs[0];
+    assert_eq!(rig.pose_frames.times(),&[0.,25.5]);
+    assert!(rig.limbs[0].contacts.keys().iter().any(|key|key.time == 25.5));
+    assert!(rig.limbs[0].pose_matches.keys().iter().any(|key|key.time == 25.5));
+    for binding in &rig.bindings {
+        for param in [&s.scene.node(binding.control).unwrap().transform.position,&s.scene.node(binding.control).unwrap().transform.rotation,&s.scene.node(binding.control).unwrap().transform.scale] {
+            assert!(param.keys().unwrap().tracks.iter().all(|track|track.key_at(10.).is_none() && track.key_at(25.5).is_some()));
+        }
+    }
+    s.scene.at_time(25.5,|| {for (id,transform,world) in &sources {assert_eq!(&s.scene.node(*id).unwrap().transform,transform);assert!(s.scene.world_matrix(*id).abs_diff_eq(*world,0.001));}});
+    execute(&mut s,Command::DeleteLoomRigPoseKey {rig:1,time:25.5}).unwrap();
+    assert_eq!(s.scene.loom_rigs[0].pose_frames.times(),&[0.]);
+    assert!(!s.scene.loom_rigs[0].limbs[0].contacts.keys().iter().any(|key|key.time == 25.5));
+    assert!(!s.scene.loom_rigs[0].limbs[0].pose_matches.keys().iter().any(|key|key.time == 25.5));
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs[0].pose_frames.times(),&[0.,25.5]);
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs,original_rigs);
+    for (id,transform) in original_nodes {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+}
+
+#[test]
+fn rig_pose_group_edit_rejects_collisions_locks_and_invalid_frames_atomically() {
+    for case in 0..7 {
+        let (mut s,_,_)=rigged();
+        execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap();
+        let control=s.scene.loom_rigs[0].bindings[1].control;
+        if case == 0 {
+            execute(&mut s,Command::SetFrame {frame:20}).unwrap();
+            execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap();
+        } else if case == 1 {
+            loom_scene::anim::with(20.,false,||s.scene.node_mut(control).unwrap().transform.rotation.key_now());
+        } else if case == 2 {
+            let track=loom_scene::tracks::node_tracks(s.scene.node(control).unwrap()).into_iter().find(|track|track.pointer == "/rotation").unwrap();
+            s.scene.track_data.set_flags(track.key(),loom_scene::tracks::TrackFlags {locked:true,..Default::default()});
+        }
+        execute(&mut s,Command::SetFrame {frame:10}).unwrap();execute(&mut s,Command::SetKeyMode).unwrap();
+        execute(&mut s,Command::SetTransform {id:control.0,position:None,rotation_deg:Some([5.,0.,0.]),scale:None}).unwrap();
+        let nodes:Vec<_>=s.scene.nodes().map(|node|(node.id,node.transform.clone())).collect();
+        let rigs=s.scene.loom_rigs.clone();let history=s.undo.position();let baseline=s.set_key_buffer.as_ref().unwrap().position;
+        assert!(execute(&mut s,Command::MoveLoomRigPoseKey {rig:1,from:if case == 3 {99.} else {0.},to:match case {4=>f32::NAN,5=>1e30,6=>-1e30,_=>20.}}).is_err());
+        assert_eq!(s.scene.loom_rigs,rigs);assert_eq!(s.undo.position(),history);assert_eq!(s.set_key_buffer.as_ref().unwrap().position,baseline);
+        for (id,transform) in nodes {assert_eq!(s.scene.node(id).unwrap().transform,transform);}
+    }
+}
+
+#[test]
+fn rig_pose_frames_survive_mapping_and_clear_when_all_rig_animation_is_frozen() {
+    let (mut s,_,_)=rigged();
+    execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap();
+    let mapping=s.scene.loom_rigs[0].mapping.clone();
+    execute(&mut s,Command::SetLoomRigMapping {rig:1,mapping}).unwrap();
+    assert_eq!(s.scene.loom_rigs[0].pose_frames.times(),&[0.]);
+    let rig=s.scene.loom_rigs[0].clone();
+    s.selection=rig.bindings.iter().map(|binding|binding.control).chain([rig.master]).chain(rig.limbs.iter().flat_map(|limb|[limb.goal,limb.pole])).collect();
+    execute(&mut s,Command::DeleteSelectedAnimation).unwrap();
+    assert!(s.scene.loom_rigs[0].pose_frames.is_empty());
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs[0].pose_frames.times(),&[0.]);
+    execute(&mut s,Command::NewSceneKeep {keep:"objects_and_hierarchy".into()}).unwrap();
+    assert!(s.scene.loom_rigs[0].pose_frames.is_empty());
+}
+
+#[test]
+fn rig_pose_freeze_retains_only_markers_with_remaining_locked_channel_keys() {
+    let (mut s,_,_)=rigged();
+    for frame in [0,10] {execute(&mut s,Command::SetFrame {frame}).unwrap();execute(&mut s,Command::KeyLoomRigPose {rig:1}).unwrap();}
+    let rig=s.scene.loom_rigs[0].clone();let control=rig.bindings[1].control;
+    for track in &mut s.scene.node_mut(control).unwrap().transform.rotation.ensure_keys().unwrap().tracks {track.keys.retain(|key|key.time == 0.);}
+    let path=loom_scene::tracks::node_tracks(s.scene.node(control).unwrap()).into_iter().find(|path|path.pointer == "/rotation").unwrap();
+    s.scene.track_data.set_flags(path.key(),loom_scene::tracks::TrackFlags {locked:true,..Default::default()});
+    s.selection=rig.bindings.iter().map(|binding|binding.control).chain([rig.master]).chain(rig.limbs.iter().flat_map(|limb|[limb.goal,limb.pole])).collect();
+    execute(&mut s,Command::DeleteSelectedAnimation).unwrap();
+    assert_eq!(s.scene.loom_rigs[0].pose_frames.times(),&[0.]);
+    assert!(s.scene.node(control).unwrap().transform.rotation.keys().unwrap().tracks.iter().all(|track|track.key_at(0.).is_some()));
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.loom_rigs[0].pose_frames.times(),&[0.,10.]);
+}
+
+#[test]
 fn rig_pose_key_validation_keeps_a_live_buffer_on_error() {
     for protected in [false,true] {
         let (mut s,_,_)=rigged();
@@ -1118,6 +1214,23 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
         for binding in &rig.bindings {
             assert!(keyed.scene.node(binding.control).unwrap().transform.rotation.keys().unwrap().tracks.iter().all(|track|track.key_at(39.).is_some()));
         }
+        let captured=keyed.scene.loom_rigs.clone();
+        let captured_controls:Vec<_>=owned.iter().map(|id|(*id,keyed.scene.node(*id).unwrap().transform.clone())).collect();
+        execute(&mut keyed,Command::MoveLoomRigPoseKey {rig:rig.id,from:39.,to:777.25}).unwrap();
+        assert_eq!(untouched(&keyed),fingerprint,"moving a rig pose changed source data, skin or materials");
+        assert_eq!(keyed.scene.loom_rigs[0].pose_frames.times(),&[777.25]);
+        for binding in &rig.bindings {
+            assert!(keyed.scene.node(binding.control).unwrap().transform.rotation.keys().unwrap().tracks.iter().all(|track|track.key_at(39.).is_none() && track.key_at(777.25).is_some()));
+        }
+        execute(&mut keyed,Command::UndoSceneOperation).unwrap();
+        assert_eq!(keyed.scene.loom_rigs,captured);
+        for (id,transform) in &captured_controls {assert_eq!(&keyed.scene.node(*id).unwrap().transform,transform);}
+        execute(&mut keyed,Command::DeleteLoomRigPoseKey {rig:rig.id,time:39.}).unwrap();
+        assert!(keyed.scene.loom_rigs[0].pose_frames.is_empty());
+        assert_eq!(untouched(&keyed),fingerprint,"deleting a rig pose changed source data, skin or materials");
+        execute(&mut keyed,Command::UndoSceneOperation).unwrap();
+        assert_eq!(keyed.scene.loom_rigs,captured);
+        for (id,transform) in &captured_controls {assert_eq!(&keyed.scene.node(*id).unwrap().transform,transform);}
         execute(&mut keyed,Command::UndoSceneOperation).unwrap();
         assert_eq!(keyed.scene.loom_rigs,metadata);
         for (id,transform) in controls {assert_eq!(keyed.scene.node(id).unwrap().transform,transform);}

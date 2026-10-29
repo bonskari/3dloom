@@ -246,6 +246,37 @@ fn contact_editor_changes_anchor_space_without_moving_affine_world_pose() {
 }
 
 #[test]
+fn full_pose_timeline_moves_deletes_and_rejects_collisions_in_separate_editor() {
+    let mut h=Harness::new();
+    let (state,_)=crate::loomrig_overlay::tests::rig();h.app.state=state;
+    for frame in [0,20] {h.cmd(Command::SetFrame {frame});h.cmd(Command::KeyLoomRigPose {rig:1});}
+    let before=h.app.state.scene.loom_rigs.clone();
+    let nodes:Vec<_>=h.app.state.scene.nodes().map(|node|(node.id,node.transform.clone())).collect();
+    h.app.state.frame_range=(0,100);h.frames(3);
+    assert!(!h.has(egui::accesskit::Role::Button,"LoomRig1 Pose @ 20"));
+    h.app.clip_timeline.open=true;h.app.clip_timeline.tab=0;h.frames(3);
+    let marker=h.find(egui::accesskit::Role::Button,"LoomRig1 Pose @ 20");
+    let undo=h.app.state.undo.position();
+    h.drag(marker.center(),marker.center()+egui::vec2(75.,0.));
+    let moved=h.app.state.scene.loom_rigs[0].pose_frames.times()[1];
+    assert!(moved>20.);assert_eq!(h.app.state.undo.position(),undo+1);
+    let control=h.app.state.scene.loom_rigs[0].bindings[1].control;
+    assert!(h.app.state.scene.node(control).unwrap().transform.rotation.keys().unwrap().tracks.iter().all(|track|track.key_at(moved).is_some() && track.key_at(20.).is_none()));
+    h.cmd(Command::UndoSceneOperation);assert_eq!(h.app.state.scene.loom_rigs,before);
+    for (id,transform) in &nodes {assert_eq!(&h.app.state.scene.node(*id).unwrap().transform,transform);}
+    let marker=h.find(egui::accesskit::Role::Button,"LoomRig1 Pose @ 20");
+    let occupied=h.find(egui::accesskit::Role::Button,"LoomRig1 Pose @ 0");
+    let undo=h.app.state.undo.position();h.drag(marker.center(),occupied.center());
+    assert_eq!(h.app.state.scene.loom_rigs,before);assert_eq!(h.app.state.undo.position(),undo);
+    let marker=h.find(egui::accesskit::Role::Button,"LoomRig1 Pose @ 20");right_click(&mut h,marker.center());h.click_text_anywhere("Delete Rig Pose Key");
+    assert_eq!(h.app.state.scene.loom_rigs[0].pose_frames.times(),&[0.]);
+    assert!(h.app.state.scene.node(control).unwrap().transform.rotation.keys().unwrap().tracks.iter().all(|track|track.key_at(20.).is_none()));
+    h.cmd(Command::UndoSceneOperation);assert_eq!(h.app.state.scene.loom_rigs,before);
+    h.app.clip_timeline.open=false;h.frames(3);
+    assert!(!h.has(egui::accesskit::Role::Button,"LoomRig1 Pose @ 20"));
+}
+
+#[test]
 fn contact_timeline_moves_and_deletes_contact_with_matching_pose_in_one_undo() {
     let mut h = Harness::new();
     let (state,_) = crate::loomrig_overlay::tests::rig();

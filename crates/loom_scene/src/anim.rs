@@ -158,7 +158,7 @@ pub struct FloatTrack {
     pub after: Ort,
 }
 
-const SAME_TIME: f32 = 1e-4;
+pub(crate) const SAME_TIME: f32 = 1e-4;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Side {

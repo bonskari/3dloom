@@ -127,6 +127,7 @@ fn build(
             master,
             bindings,
             limbs,
+            pose_frames: Default::default(),
         },
         changes,
     ))
@@ -258,6 +259,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             new.master = old.master;
             new.name = old.name.clone();
+            new.pose_frames = old.pose_frames.clone();
             for binding in &mut new.bindings {
                 if let Some(id) = reused.get(&binding.control) {
                     binding.control = *id;

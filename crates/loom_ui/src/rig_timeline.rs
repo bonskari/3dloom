@@ -19,13 +19,14 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let span = (app.state.frame_range.1 as f32 - first).max(1.);
     let mut command = None;
     ui.scope(|ui| {
-        egui::CollapsingHeader::new("LoomRig IK / FK Tracks")
+        egui::CollapsingHeader::new("LoomRig Pose / IK / Contact Tracks")
             .default_open(true)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .max_height(104.)
                     .show(ui, |ui| {
                         for rig in &rigs {
+                            if let Some(edit)=pose_row(ui,scene,rig,first,span,app.state.current_frame) {command=Some(edit);}
                             for limb in &rig.limbs {
                               for contact in [false,true] {
                                 if contact && limb.contacts.is_empty() {continue;}
@@ -192,4 +193,47 @@ pub(crate) fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             app.state.status_prompt = e;
         }
     }
+}
+
+/// Full-rig events operate on actual owned-control and rig-channel keys together.
+fn pose_row(ui:&mut egui::Ui,scene:u64,rig:&loom_scene::loomrig::LoomRig,first:f32,span:f32,frame:i32)->Option<Command> {
+    if rig.pose_frames.is_empty() {return None;}
+    let ctx=ui.ctx().clone();
+    let (row,_)=ui.allocate_exact_size(egui::vec2(ui.available_width(),23.),egui::Sense::hover());
+    let ppf=row.width()/span;
+    let x=|time:f32|row.left()+(time-first)*ppf;
+    let painter=ui.painter().with_clip_rect(row);
+    painter.text(row.left_center(),egui::Align2::LEFT_CENTER,format!("{} · Pose",rig.name),egui::FontId::proportional(11.),egui::Color32::LIGHT_GRAY);
+    painter.line_segment([row.left_bottom(),row.right_bottom()],egui::Stroke::new(1.,egui::Color32::from_gray(45)));
+    let mut command=None;
+    for &time in rig.pose_frames.times() {
+        let id=egui::Id::new(("loomrig_pose_key",scene,rig.id,time.to_bits()));
+        let mut drag=ctx.data_mut(|data|data.get_temp::<Drag>(id));
+        let cancelled=ctx.input(|input|input.key_pressed(egui::Key::Escape));
+        if cancelled {drag=None;}
+        let center=egui::pos2(x(drag.as_ref().map_or(time,|drag|drag.to)),row.center().y);
+        let response=ui.interact(egui::Rect::from_center_size(center,egui::vec2(12.,18.)),id,egui::Sense::click_and_drag());
+        response.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,ui.is_enabled(),format!("{} Pose @ {}",rig.name,time)));
+        painter.add(egui::Shape::convex_polygon(vec![center+egui::vec2(0.,-5.),center+egui::vec2(5.,0.),center+egui::vec2(0.,5.),center+egui::vec2(-5.,0.)],egui::Color32::from_rgb(200,150,245),egui::Stroke::NONE));
+        if response.clicked() {command=Some(Command::SetFrame {frame:time.round() as i32});}
+        if !cancelled {
+            if response.drag_started() {
+                if let Some(origin)=ctx.input(|input|input.pointer.press_origin()) {drag=Some(Drag {from:time,to:time,origin:origin.x});}
+            }
+            if let Some(drag)=drag.as_mut() {
+                if let Some(pointer)=response.interact_pointer_pos() {drag.to=drag.from+((pointer.x-drag.origin)/ppf).round();}
+            }
+            if response.drag_stopped() {
+                if let Some(drag)=drag.take() {command=Some(Command::MoveLoomRigPoseKey {rig:rig.id,from:drag.from,to:drag.to});}
+            }
+        }
+        ctx.data_mut(|data| {
+            if let Some(drag)=drag {data.insert_temp(id,drag);} else {data.remove::<Drag>(id);}
+        });
+        response.on_hover_text("Move all rig control, IK/FK, matching and contact keys at this frame. Occupied channels reject the entire move.").context_menu(|ui| {
+            if ui.button("Delete Rig Pose Key").clicked() {command=Some(Command::DeleteLoomRigPoseKey {rig:rig.id,time});ui.close_menu();}
+        });
+    }
+    painter.line_segment([egui::pos2(x(frame as f32),row.top()),egui::pos2(x(frame as f32),row.bottom())],egui::Stroke::new(1.,egui::Color32::WHITE));
+    command
 }
