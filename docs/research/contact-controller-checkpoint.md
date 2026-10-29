@@ -14,3 +14,11 @@ Verification:
 - Read-only review covered the full source diff and the subsequent cycle fix. Declined scopes remain open: shared reference editing semantics across other times, advanced pivot-only/child-compensation modes (explicitly rejected), Free matching, normal pose keys, editor rows, native rendering/input and performance acceptance.
 
 Task14 and the full goal remain incomplete. No installed application replacement, source scene save, public push or native-performance claim is made by this checkpoint. Separate Animation Editor tools and actual Ray interaction/performance verification are still required.
+
+## Follow-up interaction evidence
+
+The real egui pointer-event harness now drags the selected contact goal and pole through the Move gizmo. It verifies one Undo per gesture, unchanged source/helper transform tracks, hand-to-goal agreement, and pole-driven elbow movement without moving the hand target. This is UI input integration evidence, not a physical-device or installed-native-app check.
+
+The full UI library suite passed 448 tests with 2 ignored and no failures in 132.09s (`/tmp/loom-contact-ui-suite.log`).
+
+The opt-in production Ray test also moves each limb's goal and pole together, checks evaluated target/end positions and exact retained source-node/material fingerprints, then undoes the edit before the existing capture/freeze checks. It passed in 42.83s (`/tmp/loom-contact-controller-ray-gesture.log`). Debug command timings were 16.08ms left leg, 20.34ms right leg, 20.05ms left arm and 14.69ms right arm while the UI suite was running concurrently. These are command timings, not FPS or a native interaction-latency acceptance result.

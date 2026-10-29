@@ -735,6 +735,23 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
             before,
             "capture changed a source node, Skin data or materials"
         );
+        let contacts = s.scene.loom_rigs.clone();
+        let goal = s.scene.world_matrix(limb.goal).w_axis.truncate();
+        let pole = s.scene.world_matrix(limb.pole).w_axis.truncate();
+        let start = s.scene.world_matrix(limb.mapping.start).w_axis.truncate();
+        let delta = (start - goal) * 0.001;
+        let selection = s.selection.clone();
+        s.selection = [limb.goal, limb.pole].into();
+        let timer = std::time::Instant::now();
+        execute(&mut s, Command::MoveSelection { delta: delta.to_array(), system: Some(loom_commands::CoordSystem::World) }).unwrap();
+        println!("{name} goal+pole command latency: {:?}", timer.elapsed());
+        assert!(s.scene.world_matrix(limb.goal).w_axis.truncate().distance(goal + delta) < 0.003);
+        assert!(s.scene.world_matrix(limb.pole).w_axis.truncate().distance(pole + delta) < 0.003);
+        assert!(s.scene.world_matrix(limb.mapping.end).w_axis.truncate().distance(goal + delta) < 0.003);
+        assert_eq!(source(&s), before, "target editing changed source nodes or materials");
+        execute(&mut s, Command::UndoSceneOperation).unwrap();
+        assert_eq!(s.scene.loom_rigs, contacts);
+        s.selection = selection;
         execute(&mut s, Command::UndoSceneOperation).unwrap();
         assert_eq!(source(&s), before);
     }

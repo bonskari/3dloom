@@ -144,6 +144,54 @@ fn second_character_can_be_rigged_and_chain_rows_are_editable() {
 }
 
 #[test]
+fn contact_controller_pointer_drag_updates_target_and_keeps_source_tracks_with_one_undo() {
+    for pole in [false, true] {
+        let mut h = Harness::new();
+        let (state, mapping) = crate::loomrig_overlay::tests::rig();
+        h.app.state = state;
+        let goal = h.app.state.scene.loom_rigs[0].limbs[0].goal;
+        let control = if pole {h.app.state.scene.loom_rigs[0].limbs[0].pole} else {goal};
+        let end = mapping.limbs[0].end;
+        h.cmd(Command::CreateLoomRigContactKey {
+            rig: 1, limb: "Arm".into(), time: 0., preset: "planted".into(),
+        });
+        h.cmd(Command::SetTransform {
+            id: goal.0, position: Some([12., 8., 0.]), rotation_deg: None, scale: None,
+        });
+        h.app.state.selection = [control].into();
+        h.app.state.mesh_dirty = true;
+        h.app.sync_after_command();
+        framed(&mut h);
+        h.cmd(Command::SelectAndMove);
+        let source: Vec<_> = h.app.state.scene.nodes().map(|n|(n.id,n.transform.clone())).collect();
+        let before = h.app.state.scene.loom_rigs.clone();
+        let before_end = h.app.state.scene.world_matrix(end).w_axis.truncate();
+        let middle = mapping.limbs[0].middle;
+        let before_middle = h.app.state.scene.world_matrix(middle).w_axis.truncate();
+        let undo = h.app.state.undo.position();
+        let origin = h.screen_of(h.app.state.scene.world_matrix(control).w_axis.truncate());
+        h.drag(origin, origin + egui::vec2(15., -12.));
+        assert_ne!(h.app.state.scene.loom_rigs, before, "pointer input must edit the contact reference");
+        assert_eq!(h.app.state.undo.position(), undo + 1, "one gesture must be one Undo");
+        let target = h.app.state.scene.world_matrix(goal).w_axis.truncate();
+        let actual = h.app.state.scene.world_matrix(end).w_axis.truncate();
+        if pole {
+            assert!(actual.distance(before_end) < 0.001, "pole editing must preserve the hand target");
+            assert!(h.app.state.scene.world_matrix(middle).w_axis.truncate().distance(before_middle) > 0.001);
+        } else {
+            assert!(actual.distance(before_end) > 0.01);
+        }
+        assert!(actual.distance(target) < 0.001, "solved hand must follow the displayed target");
+        for (id, transform) in &source {
+            assert_eq!(&h.app.state.scene.node(*id).unwrap().transform, transform);
+        }
+        h.cmd(Command::UndoSceneOperation);
+        assert_eq!(h.app.state.scene.loom_rigs, before);
+        assert!(h.app.state.scene.world_matrix(end).w_axis.truncate().distance(before_end) < 0.001);
+    }
+}
+
+#[test]
 fn limb_proxy_pointer_rotate_drives_skin_once_and_undo_restores_authored_offset() {
     let mut h = Harness::new();
     let (state, mapping) = crate::loomrig_overlay::tests::rig();
