@@ -73,3 +73,15 @@ Before implementing contacts, follow docs/research/biped-contact-semantics/DESIG
 ## Task9 delivered checkpoint — 4421018
 
 Desktop production-unset64.8022Realistic/92.7629Wireframe ready distinctpose times/s, minimum event windows62.0464/88.6476; bothclient/eventclockgatespassed. Native4viewpixels and FKpointer/rotation/Undo preservedoriginalnodes/selection/frame/sourceSHA. Runtime branch15m/real-backup validation complete. Evidence docs/research/parallel-pose-preparation/production-defaults/VERIFIED.md. First8FKcages completed; remaining fullcontrols/contacts/pose/timeline/Kimodo/Mac requirements stillopen.
+
+## Task 10: typed contact-key data and validated sampling
+
+**Prerequisite:** Task9 production-unset minimum/native delivery (4421018) verified. This task is data/sampling only, not completion of contact authoring or Biped tools.
+**Files:** create `crates/loom_scene/src/loomrig_contact.rs`; expose from `lib.rs`; add default-empty omitted-on-save contact data to `RigLimb` in `loomrig.rs`; update construction in `loom_commands/src/loomrig.rs` only as required by the new field; tests beside the new module plus existing rig compatibility tests.
+
+- [ ] Define typed body/world reference poses, stable shared-reference identities and ordered per-limb contact keys with editable IK blend. Follow `docs/research/biped-contact-semantics/DESIGN.md`; no implicit floor projection. Joined references must survive key movement/deletion without dangling links or silent overwrites.
+- [ ] RED: old empty/default rigs serialize compatibly; new data roundtrips; reject nonfinite/duplicate times, invalid rotations/blends and dangling references; before-first/held/fractional/backward/random-access key lookup; shared-reference edits and atomic key-collision rejection.
+- [ ] GREEN: smallest validated data operations needed by those tests. A nonempty time lookup must register an animated read even before its first key; an empty track must not create time dependence. Do not yet change skeleton evaluation or claim visible planted/sliding behavior.
+- [ ] Verify core Scene tests plus rig-command serialization/undo/mapping preservation tests. Keep original Ray source untouched; local main commit, no push.
+
+Following tasks still required: contact evaluator and no-pop/affine/pole tests; transform/pose-key command routing; direct body/end/goal/pole controls; separate Animation Editor contact rows and clip/key editing; real Ray acceptance, final Kimodo workflow and native Mac verification. Preserve the full objective.
