@@ -9,6 +9,7 @@ struct Entry {
     id: u64,
     label: String,
     change: Change,
+    pose_preview: bool,
 }
 
 /// Change-level undo/redo. Each entry stores the inverse of what was
@@ -20,7 +21,8 @@ pub struct UndoStack {
     limit: usize,
     /// An open interactive transaction (a gizmo drag): inverses collect
     /// here, exempt from the limit, and land as one entry on `end`.
-    open: Option<(String, Vec<Change>)>,
+    open: Option<(String, Vec<Change>, bool)>,
+    recording_pose: bool,
     /// Nested `begin` calls while a transaction is open; `end` closes it
     /// only when the outermost one ends.
     depth: usize,
@@ -32,6 +34,8 @@ pub struct UndoStack {
     saved: Option<usize>,
     /// Entries dropped off the bottom at the limit (`position` stays monotonic).
     trimmed: u64,
+    /// A live Set Key pose must retain every inverse back to its start.
+    retained_position: Option<u64>,
 }
 
 impl UndoStack {
@@ -41,10 +45,12 @@ impl UndoStack {
             redo: Vec::new(),
             limit: limit.max(1),
             open: None,
+            recording_pose: false,
             depth: 0,
             version: 0,
             saved: Some(0),
             trimmed: 0,
+            retained_position: None,
         }
     }
 
@@ -66,16 +72,21 @@ impl UndoStack {
     /// True while the scene matches what was last saved (undoing back to
     /// the saved position counts as clean).
     pub fn is_saved(&self) -> bool {
-        self.saved == Some(self.undo.len()) && self.open.as_ref().is_none_or(|(_, s)| s.is_empty())
+        self.saved == Some(self.undo.len()) && self.open.as_ref().is_none_or(|(_, s, _)| s.is_empty())
     }
 
     /// A new entry on top: a saved position below the top is now unreachable.
-    fn push_entry(&mut self, entry: (String, Change)) {
+    fn push_entry(&mut self, entry: (String, Change), pose_preview:bool) {
         if self.saved.is_some_and(|s| s > self.undo.len()) {
             self.saved = None;
         }
-        self.undo.push(Entry { id: NEXT_ENTRY_ID.fetch_add(1, Ordering::Relaxed), label: entry.0, change: entry.1 });
-        if self.undo.len() > self.limit {
+        self.undo.push(Entry { id: NEXT_ENTRY_ID.fetch_add(1, Ordering::Relaxed), label: entry.0, change: entry.1, pose_preview });
+        self.trim();
+        self.redo.clear();
+    }
+
+    fn trim(&mut self) {
+        while self.undo.len() > self.limit && self.retained_position.is_none_or(|position|self.trimmed < position) {
             self.undo.remove(0);
             self.trimmed += 1;
             self.saved = match self.saved {
@@ -83,19 +94,43 @@ impl UndoStack {
                 Some(s) => Some(s - 1),
             };
         }
-        self.redo.clear();
+    }
+
+    /// Keep a live pose's rollback path; release it after keying or discarding.
+    pub fn retain_from(&mut self, position:Option<u64>) {
+        if let Some(position) = position {
+            for (index,entry) in self.undo.iter_mut().enumerate() {
+                if self.trimmed + (index as u64) < position {entry.pose_preview=false;}
+            }
+        }
+        self.retained_position = position;
+        self.trim();
+    }
+
+    /// Tag only transient Set Key pose edits; explicit key commits stay accepted.
+    pub fn record_pose_edits(&mut self, recording:bool) -> bool {
+        std::mem::replace(&mut self.recording_pose,recording)
+    }
+
+    pub fn undo_is_pose_preview(&self) -> bool {
+        if let Some((_,steps,preview)) = &self.open {
+            if !steps.is_empty() {return *preview;}
+        }
+        self.undo.last().is_none_or(Self::is_pose_preview)
+    }
+
+    pub fn redo_is_pose_preview(&self) -> bool {
+        self.redo.last().is_none_or(Self::is_pose_preview)
+    }
+
+    fn is_pose_preview(entry:&Entry) -> bool {
+        entry.pose_preview || matches!(&entry.change,Change::Group(steps) if steps.is_empty())
     }
 
     /// Preferences > Scene Undo Levels: trims the stack when lowered.
     pub fn set_limit(&mut self, limit: usize) {
         self.limit = limit.max(1);
-        while self.undo.len() > self.limit {
-            self.undo.remove(0);
-            self.saved = match self.saved {
-                Some(0) | None => None,
-                Some(s) => Some(s - 1),
-            };
-        }
+        self.trim();
     }
 
     pub fn limit(&self) -> usize {
@@ -115,11 +150,12 @@ impl UndoStack {
         let inverse = change.inverse(scene);
         change.apply(scene)?;
         self.version += 1;
-        if let Some((_, steps)) = self.open.as_mut() {
+        if let Some((_, steps, preview)) = self.open.as_mut() {
             steps.push(inverse);
+            *preview &= self.recording_pose;
             return Ok(());
         }
-        self.push_entry((label.to_owned(), inverse));
+        self.push_entry((label.to_owned(), inverse),self.recording_pose);
         Ok(())
     }
 
@@ -129,7 +165,7 @@ impl UndoStack {
     pub fn push_marker(&mut self, label: &str) {
         let at_saved = self.saved == Some(self.undo.len());
         self.version += 1;
-        self.push_entry((label.to_owned(), Change::Group(Vec::new())));
+        self.push_entry((label.to_owned(), Change::Group(Vec::new())),false);
         if at_saved {
             self.saved = Some(self.undo.len());
         }
@@ -142,7 +178,7 @@ impl UndoStack {
             self.depth += 1;
             return;
         }
-        self.open = Some((label.to_owned(), Vec::new()));
+        self.open = Some((label.to_owned(), Vec::new(),true));
     }
 
     /// Closes the open transaction, if any, into a single entry.
@@ -151,42 +187,47 @@ impl UndoStack {
             self.depth -= 1;
             return;
         }
-        let Some((label, mut steps)) = self.open.take() else { return };
+        let Some((label, mut steps, preview)) = self.open.take() else { return };
         if steps.is_empty() {
             return;
         }
         // Inverses are collected oldest-first; undoing runs newest-first.
         steps.reverse();
-        self.push_entry((label, Change::Group(steps)));
+        self.push_entry((label, Change::Group(steps)),preview);
+    }
+
+    /// Complete a gesture before establishing or rolling back a pose boundary.
+    pub fn finish_transaction(&mut self) {
+        self.depth = 0;
+        self.end();
     }
 
     pub fn undo(&mut self, scene: &mut Scene) -> Option<String> {
         // A drag whose release was lost must not absorb later commits.
-        self.depth = 0;
-        self.end();
-        let Entry { id, label, change: inverse } = self.undo.pop()?;
+        self.finish_transaction();
+        let Entry { id, label, change: inverse, pose_preview } = self.undo.pop()?;
         self.version += 1;
         let redo = inverse.inverse(scene);
         if let Err(e) = inverse.apply(scene) {
             // Keep the entry so the history is not silently lost.
-            self.undo.push(Entry { id, label: format!("{label} (failed: {e})"), change: inverse });
+            self.undo.push(Entry { id, label: format!("{label} (failed: {e})"), change: inverse,pose_preview });
             return None;
         }
-        self.redo.push(Entry { id, label: label.clone(), change: redo });
+        self.redo.push(Entry { id, label: label.clone(), change: redo,pose_preview });
         Some(label)
     }
 
     pub fn redo(&mut self, scene: &mut Scene) -> Option<String> {
-        self.depth = 0;
-        self.end();
-        let Entry { id, label, change } = self.redo.pop()?;
+        self.finish_transaction();
+        let Entry { id, label, change, pose_preview } = self.redo.pop()?;
         self.version += 1;
         let inverse = change.inverse(scene);
         if let Err(e) = change.apply(scene) {
-            self.redo.push(Entry { id, label: format!("{label} (failed: {e})"), change });
+            self.redo.push(Entry { id, label: format!("{label} (failed: {e})"), change,pose_preview });
             return None;
         }
-        self.undo.push(Entry { id, label: label.clone(), change: inverse });
+        self.undo.push(Entry { id, label: label.clone(), change: inverse,pose_preview });
+        self.trim();
         Some(label)
     }
 
@@ -253,6 +294,28 @@ mod tests {
             .commit("Create Box", Change::AddNode(node), scene)
             .unwrap();
         scene.nodes().next().unwrap().id
+    }
+
+    #[test]
+    fn reducing_limit_preserves_position_and_saved_state_through_redo() {
+        let (mut stack,mut scene) = (UndoStack::new(10),Scene::new());
+        let id = add_box(&mut stack,&mut scene);
+        for i in 1..5 {
+            let before = scene.node(id).unwrap().transform.clone();
+            let mut after = before.clone();after.position.set(Vec3::X*i as f32);
+            stack.commit("Move",Change::SetTransform {id,before,after},&mut scene).unwrap();
+        }
+        stack.mark_saved();
+        let position = stack.position();
+        stack.set_limit(1);
+        assert_eq!(stack.position(),position);
+        assert!(stack.is_saved());
+        stack.undo(&mut scene).unwrap();
+        assert_eq!(stack.position(),position-1);
+        assert!(!stack.is_saved());
+        stack.redo(&mut scene).unwrap();
+        assert_eq!(stack.position(),position);
+        assert!(stack.is_saved());
     }
 
     #[test]

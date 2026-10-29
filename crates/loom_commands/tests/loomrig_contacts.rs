@@ -983,6 +983,26 @@ fn production_ray_contact_capture_preserves_source_data_and_solved_pose() {
             "capture changed a source node, Skin data or materials"
         );
         let contacts = s.scene.loom_rigs.clone();
+        if name == "Left Leg" {
+            let mut preview = AppState::new();
+            preview.scene = s.scene.clone();
+            execute(&mut preview,Command::SetFrame {frame:39}).unwrap();
+            preview.selection = [limb.goal,limb.pole].into();
+            preview.undo.set_limit(2);
+            execute(&mut preview,Command::SetKeyMode).unwrap();
+            let start = preview.scene.world_matrix(limb.mapping.start).w_axis.truncate();
+            let end = preview.scene.world_matrix(limb.mapping.end).w_axis.truncate();
+            for _ in 0..6 {
+                execute(&mut preview,Command::MoveSelection {
+                    delta:((start-end)*0.001).to_array(),system:Some(loom_commands::CoordSystem::World),
+                }).unwrap();
+            }
+            execute(&mut preview,Command::ClearSetKeyModeBuffer).unwrap();
+            assert_eq!(preview.scene.loom_rigs,contacts,"Ray pose rollback lost rig metadata beyond the Undo limit");
+            assert_eq!(source(&preview),before,"Ray pose rollback changed source nodes or materials");
+            for id in ids {assert!(preview.scene.world_matrix(id).abs_diff_eq(s.scene.world_matrix(id),0.003));}
+            assert!(preview.undo.is_saved());
+        }
         let goal = s.scene.world_matrix(limb.goal).w_axis.truncate();
         let pole = s.scene.world_matrix(limb.pole).w_axis.truncate();
         let start = s.scene.world_matrix(limb.mapping.start).w_axis.truncate();

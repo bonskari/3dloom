@@ -72,6 +72,157 @@ fn set_keys_respects_filters() {
 }
 
 #[test]
+fn keying_an_open_pose_drag_finishes_it_before_recording_keys() {
+    let mut s=AppState::new();let id=boxed(&mut s);
+    execute(&mut s,Command::SetKeyMode).unwrap();frame(&mut s,10);
+    s.undo.begin("Move");mv(&mut s,[12.,0.,0.]);
+    execute(&mut s,Command::SetKeys).unwrap();
+    assert!(!s.undo.in_transaction());
+    let keyed=s.scene.node(id).unwrap().transform.clone();
+    s.undo.end(); // A later pointer release must not absorb the accepted key.
+    frame(&mut s,20);
+    assert_eq!(s.scene.node(id).unwrap().transform,keyed);
+    assert!(s.scene.node(id).unwrap().transform.position.is_animated());
+}
+
+#[test]
+fn accepted_mixed_transaction_is_not_discarded_as_a_pose_preview() {
+    let mut s=AppState::new();let id=boxed(&mut s);
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    s.undo.begin("Edit and create");mv(&mut s,[12.,0.,0.]);
+    let other=boxed(&mut s);
+    frame(&mut s,20);
+    s.undo.end();
+    frame(&mut s,30);
+    assert!(s.scene.node(other).is_some(),"accepted structural work must not be rolled back with a preview");
+    assert!((s.scene.world_matrix(id).w_axis.x-12.).abs()<1e-4);
+}
+
+#[test]
+fn setting_the_same_frame_does_not_accept_an_unkeyed_pose() {
+    for playback in [false,true] {
+    let mut s = AppState::new();let id=boxed(&mut s);
+    let original=s.scene.node(id).unwrap().transform.clone();
+    execute(&mut s,Command::SetKeyMode).unwrap();frame(&mut s,10);
+    mv(&mut s,[12.,0.,0.]);
+    if playback {
+        execute(&mut s,Command::PlayAnimation).unwrap();
+        execute(&mut s,Command::TickPlayback {seconds:0.001}).unwrap();
+        assert_eq!(s.current_frame,10);
+    } else {frame(&mut s,10);}
+    execute(&mut s,Command::ClearSetKeyModeBuffer).unwrap();
+    assert_eq!(s.scene.node(id).unwrap().transform,original);
+    }
+}
+
+#[test]
+fn accepted_previous_pose_edits_stay_accepted_through_undo_redo() {
+    let mut s = AppState::new();let id=boxed(&mut s);
+    execute(&mut s,Command::SetKeyMode).unwrap();mv(&mut s,[12.,0.,0.]);
+    boxed(&mut s); // Structural edits accept the current pose as a new baseline.
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    frame(&mut s,20);
+    execute(&mut s,Command::RedoSceneOperation).unwrap();
+    frame(&mut s,30);
+    assert!((s.scene.world_matrix(id).w_axis.x-12.).abs()<1e-4);
+}
+
+#[test]
+fn undoing_selection_before_the_pose_start_rebases_the_buffer() {
+    let mut s=AppState::new();let id=boxed(&mut s);
+    let original=s.scene.node(id).unwrap().transform.clone();
+    execute(&mut s,Command::SelectNone).unwrap();
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    mv(&mut s,[12.,0.,0.]);
+    execute(&mut s,Command::ClearSetKeyModeBuffer).unwrap();
+    assert_eq!(s.scene.node(id).unwrap().transform,original);
+}
+
+#[test]
+fn redone_preview_drag_remains_discardable_after_a_frame_change() {
+    let mut s = AppState::new();
+    let id = boxed(&mut s);
+    let original = s.scene.node(id).unwrap().transform.clone();
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    s.undo.begin("Move");
+    for _ in 0..5 {mv(&mut s,[1.,0.,0.]);}
+    s.undo.end();
+    assert!(s.undo.undo_is_pose_preview());
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    frame(&mut s,20);
+    execute(&mut s,Command::RedoSceneOperation).unwrap();
+    assert!((s.scene.world_matrix(id).w_axis.x-5.).abs()<1e-4);
+    frame(&mut s,30);
+    assert_eq!(s.scene.node(id).unwrap().transform,original);
+}
+
+#[test]
+fn opening_a_file_restarts_pose_baseline_even_with_equal_history_positions() {
+    let mut source = AppState::new();
+    let id = boxed(&mut source);
+    let original = source.scene.node(id).unwrap().transform.clone();
+    let path = std::env::temp_dir().join(format!("loom-pose-baseline-{}.loom",std::process::id()));
+    execute(&mut source,Command::SaveFileAsCopy {path:Some(path.to_string_lossy().into_owned())}).unwrap();
+    let mut s = AppState::new();
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    execute(&mut s,Command::OpenFile {path:Some(path.to_string_lossy().into_owned())}).unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert!(s.set_key_buffer.as_ref().unwrap().versions.contains_key(&id));
+    execute(&mut s,Command::SelectNone).unwrap();
+    execute(&mut s,Command::SetKeys).unwrap();
+    assert_eq!(s.scene.node(id).unwrap().transform,original,"loading must not mark every source track as posed");
+}
+
+#[test]
+fn reducing_undo_limit_during_pose_retains_rollback_then_restores_limit() {
+    let mut s = AppState::new();
+    let id = boxed(&mut s);
+    let original = s.scene.node(id).unwrap().transform.clone();
+    s.undo.mark_saved();
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    for _ in 0..12 {mv(&mut s,[1.,0.,0.]);}
+    s.undo.set_limit(1);
+    execute(&mut s,Command::ClearSetKeyModeBuffer).unwrap();
+    assert_eq!(s.scene.node(id).unwrap().transform,original);
+    assert!(s.undo.is_saved());
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    for _ in 0..4 {mv(&mut s,[1.,0.,0.]);}
+    assert_eq!(s.undo.len(),1,"accepted history must return to its configured limit");
+}
+
+#[test]
+fn accepted_key_redo_survives_frame_changes_in_set_key_mode() {
+    let mut s = AppState::new();
+    let id = boxed(&mut s);
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    frame(&mut s,10);
+    mv(&mut s,[12.,0.,0.]);
+    execute(&mut s,Command::SetKeys).unwrap();
+    let keyed = s.scene.node(id).unwrap().transform.clone();
+    execute(&mut s,Command::UndoSceneOperation).unwrap();
+    frame(&mut s,20);
+    execute(&mut s,Command::RedoSceneOperation).unwrap();
+    assert_eq!(s.scene.node(id).unwrap().transform,keyed);
+    frame(&mut s,30);
+    assert_eq!(s.scene.node(id).unwrap().transform,keyed,"a redone accepted key must not become a disposable pose preview");
+}
+
+#[test]
+fn set_key_buffer_keeps_its_start_beyond_the_normal_undo_limit() {
+    let mut s = AppState::new();
+    let id = boxed(&mut s);
+    s.undo.set_limit(3);
+    let original = s.scene.node(id).unwrap().transform.clone();
+    execute(&mut s,Command::SetKeyMode).unwrap();
+    for _ in 0..12 {mv(&mut s,[1.,0.,0.]);}
+    assert!((s.scene.world_matrix(id).w_axis.x-12.).abs()<1e-4);
+    execute(&mut s,Command::ClearSetKeyModeBuffer).unwrap();
+    assert_eq!(s.scene.node(id).unwrap().transform,original,"discard must restore the entire pose, not only the last few edits");
+}
+
+#[test]
 fn set_key_mode_buffer_is_discarded_on_frame_change_and_kept_by_k() {
     let mut s = AppState::new();
     let b = boxed(&mut s);

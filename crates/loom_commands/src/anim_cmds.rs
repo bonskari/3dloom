@@ -573,20 +573,29 @@ pub fn is_pose_edit(c: &Command) -> bool {
     )
 }
 
+pub fn is_pose_change(c:&Command) -> bool {
+    matches!(c,Command::MoveSelection {..} | Command::RotateSelection {..} | Command::ScaleSelection {..}
+        | Command::SetTransform {..} | Command::SetParameter {..} | Command::SetModifierParameter {..})
+}
+
 /// Starts a Set Key pose at the current history position.
 pub fn start_pose(state: &mut AppState) {
+    state.undo.finish_transaction();
     let versions = state.scene.nodes().map(|n| (n.id, (n.version, n.geom_version))).collect();
+    state.undo.retain_from(Some(state.undo.position()));
     state.set_key_buffer = Some(SetKeyBuffer { position: state.undo.position(), versions });
 }
 
 /// Drops a Set Key pose: undoes back to where it started.
 pub fn discard_pose(state: &mut AppState) {
     let Some(buf) = state.set_key_buffer.take() else { return };
-    while state.undo.position() > buf.position {
+    state.undo.finish_transaction();
+    while state.undo.position() > buf.position && state.undo.undo_is_pose_preview() {
         if state.undo.undo(&mut state.scene).is_none() {
             break;
         }
     }
+    state.undo.retain_from(None);
     state.mesh_dirty = true;
 }
 

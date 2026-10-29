@@ -28,8 +28,12 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     loom_scene::anim::set_default_tangents(state.default_tangent);
     // Set Key mode keeps only pose edits in its buffer: any other edit
     // (creating, deleting, modifiers…) becomes the buffer's new start.
-    let rebases_pose = state.set_key_mode && !crate::anim_cmds::is_pose_edit(&cmd);
+    let accepted_history = matches!(cmd,Command::UndoSceneOperation) && !state.undo.undo_is_pose_preview()
+        || matches!(cmd,Command::RedoSceneOperation) && !state.undo.redo_is_pose_preview();
+    let rebases_pose = state.set_key_mode && (!crate::anim_cmds::is_pose_edit(&cmd) || accepted_history);
+    let pose_recording = state.undo.record_pose_edits(state.set_key_mode && crate::anim_cmds::is_pose_change(&cmd));
     let position = state.undo.position();
+    let pose_scene = state.scene.instance_id();
     // Selection undo: the outermost command records what it did to the selection.
     let outer = crate::sel_undo::enter(state);
     // Undo / Redo restore selections themselves; Open, Reset and Fetch start the history over.
@@ -49,7 +53,8 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         state.axis_constraint = state.constraint_by_tool[sub as usize][t];
     }
     state.constraint_level_sub = sub;
-    if rebases_pose && state.set_key_mode && state.undo.position() != position {
+    let behind_pose_start = state.set_key_buffer.as_ref().is_some_and(|buffer|state.undo.position() < buffer.position);
+    if state.set_key_mode && (behind_pose_start || (rebases_pose && (state.undo.position() != position || state.scene.instance_id() != pose_scene))) {
         crate::anim_cmds::start_pose(state);
     }
     loom_scene::anim::set_animate(animate);
@@ -68,6 +73,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     if let Some(before) = sel_before {
         crate::sel_undo::record(state, before, position);
     }
+    state.undo.record_pose_edits(pose_recording);
     r
 }
 
@@ -3841,8 +3847,9 @@ pub(crate) fn set_frame(state: &mut AppState, frame: i32) -> Result<Value, Strin
 /// Playback may preview between source frames; timeline/key commands stay integer.
 pub(crate) fn set_animation_time(state: &mut AppState, frame: i32, time: f32) -> Result<Value, String> {
     let frame = frame.clamp(state.frame_range.0, state.frame_range.1);
+    let frame_changed = frame != state.current_frame;
     // Set Key mode: a pose not keyed yet is dropped when the frame changes.
-    if state.set_key_mode && frame != state.current_frame {
+    if state.set_key_mode && frame_changed {
         crate::anim_cmds::discard_pose(state);
     }
     let time = time.clamp(state.frame_range.0 as f32, state.frame_range.1 as f32);
@@ -3852,7 +3859,7 @@ pub(crate) fn set_animation_time(state: &mut AppState, frame: i32, time: f32) ->
     }
     state.current_frame = frame;
     state.scene.set_time(time);
-    if state.set_key_mode {
+    if state.set_key_mode && (frame_changed || state.set_key_buffer.is_none()) {
         crate::anim_cmds::start_pose(state);
     }
     Ok(json!({ "frame": state.current_frame }))

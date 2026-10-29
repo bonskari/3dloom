@@ -285,6 +285,7 @@ fn animation_editor_displays_the_effective_contact_ik_weight() {
 
 #[test]
 fn contact_controller_pointer_drag_updates_target_and_keeps_source_tracks_with_one_undo() {
+    for set_key_mode in [false,true] {
     for pole in [false, true] {
         let mut h = Harness::new();
         let (state, mapping) = crate::loomrig_overlay::tests::rig();
@@ -303,6 +304,7 @@ fn contact_controller_pointer_drag_updates_target_and_keeps_source_tracks_with_o
         h.app.sync_after_command();
         framed(&mut h);
         h.cmd(Command::SelectAndMove);
+        if set_key_mode {h.cmd(Command::SetKeyMode);}
         let source: Vec<_> = h.app.state.scene.nodes().map(|n|(n.id,n.transform.clone())).collect();
         let before = h.app.state.scene.loom_rigs.clone();
         let before_end = h.app.state.scene.world_matrix(end).w_axis.truncate();
@@ -313,6 +315,7 @@ fn contact_controller_pointer_drag_updates_target_and_keeps_source_tracks_with_o
         h.drag(origin, origin + egui::vec2(15., -12.));
         assert_ne!(h.app.state.scene.loom_rigs, before, "pointer input must edit the contact reference");
         assert_eq!(h.app.state.undo.position(), undo + 1, "one gesture must be one Undo");
+        assert_eq!(h.app.state.undo.undo_is_pose_preview(),set_key_mode);
         let target = h.app.state.scene.world_matrix(goal).w_axis.truncate();
         let actual = h.app.state.scene.world_matrix(end).w_axis.truncate();
         if pole {
@@ -328,6 +331,13 @@ fn contact_controller_pointer_drag_updates_target_and_keeps_source_tracks_with_o
         h.cmd(Command::UndoSceneOperation);
         assert_eq!(h.app.state.scene.loom_rigs, before);
         assert!(h.app.state.scene.world_matrix(end).w_axis.truncate().distance(before_end) < 0.001);
+        if set_key_mode {
+            h.cmd(Command::SetFrame {frame:20});
+            h.cmd(Command::RedoSceneOperation);
+            h.cmd(Command::SetFrame {frame:30});
+            assert_eq!(h.app.state.scene.loom_rigs,before,"a redone gizmo preview must still be discarded");
+        }
+    }
     }
 }
 
