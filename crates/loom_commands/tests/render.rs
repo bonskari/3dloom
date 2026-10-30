@@ -116,6 +116,39 @@ fn setup(s: &mut AppState, args: serde_json::Value) -> serde_json::Value {
     r
 }
 
+/// The renderer's quality controls: set by name, checked, saved, undone.
+#[test]
+fn renderer_quality_settings_are_checked_saved_and_undoable() {
+    use loom_scene::render::{AaFilter, AoQuality, Tonemapper};
+    let mut s = AppState::new();
+    let args = json!({
+        "filter": "MitchellNetravali", "filter_size": 3.0, "passes": 32, "area_shadows": false,
+        "ambient_occlusion": false, "ao_quality": "Ultra", "ao_radius": 5.0, "reflections": false,
+        "sky_lighting": false, "sky_intensity": 2.0, "ground": 0.25, "tonemapper": "TonyMcMapface", "exposure": -1.5, "dither": false
+    });
+    let r = execute_json(&mut s, &json!({ "cmd": "Bevy Renderer Settings", "args": args }));
+    assert_eq!(r["ok"], true, "{r}");
+    let b = s.scene.render.bevy.clone();
+    assert_eq!((b.filter, b.filter_size, b.passes, b.area_shadows), (AaFilter::MitchellNetravali, 3.0, 32, false));
+    assert_eq!((b.ambient_occlusion, b.ao_quality, b.ao_radius, b.reflections), (false, AoQuality::Ultra, 5.0, false));
+    assert_eq!((b.sky_lighting, b.sky_intensity, b.ground, b.tonemapper, b.exposure, b.dither), (false, 2.0, 0.25, Tonemapper::TonyMcMapface, -1.5, false));
+    for bad in [json!({ "passes": 0 }), json!({ "passes": 65 }), json!({ "filter_size": 0.5 }), json!({ "ground": 2.0 }), json!({ "exposure": 11.0 }), json!({ "filter": "Box" })] {
+        let r = execute_json(&mut s, &json!({ "cmd": "Bevy Renderer Settings", "args": bad }));
+        assert_eq!(r["ok"], false, "{bad} accepted: {r}");
+    }
+    assert_eq!(s.scene.render.bevy, b, "rejected values change nothing");
+
+    let path = std::env::temp_dir().join(format!("loom-render-quality-{}.loom", std::process::id()));
+    execute(&mut s, Command::SaveFileAs { path: Some(path.to_string_lossy().into()) }).unwrap();
+    let mut t = AppState::new();
+    execute(&mut t, Command::OpenFile { path: Some(path.to_string_lossy().into()) }).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(t.scene.render.bevy, b);
+
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.render.bevy, loom_scene::render::BevyRenderSettings::default());
+}
+
 #[test]
 fn render_setup_values_are_one_undo_step_each_and_saved_in_the_file() {
     let mut s = AppState::new();

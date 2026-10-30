@@ -12,7 +12,7 @@ glam        = { workspace = true }
 wgpu        = { workspace = true }
 image       = { workspace = true }
 # Headless: no window, no audio, no winit. Runs on the UI's wgpu device.
-bevy = { version = "0.16", default-features = false, features = ["std", "async_executor", "bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_window", "pbr_specular_textures", "pbr_anisotropy_texture", "experimental_pbr_pcss"] }
+bevy = { version = "0.16", default-features = false, features = ["std", "async_executor", "bevy_render", "bevy_core_pipeline", "bevy_pbr", "bevy_window", "pbr_specular_textures", "pbr_anisotropy_texture", "experimental_pbr_pcss", "tonemapping_luts", "ktx2", "zstd"] }
 
 [dev-dependencies]
 pollster = { workspace = true }

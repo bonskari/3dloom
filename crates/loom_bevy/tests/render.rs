@@ -190,12 +190,19 @@ fn render_buckets(r: &mut BevyRenderer, camera: &ViewCamera, size: u32, tile: u3
             let f = |p: u32| p as f32 / size as f32;
             let sub = [f(bx * tile), f(by * tile), f((bx + 1) * tile), f((by + 1) * tile)];
             // Settle frames for the first bucket only, as the UI does: later
-            // buckets render in the very update that set them.
-            for _ in 0..if bx + by == 0 { 3 } else { 1 } {
+            // buckets render in the very update that set them; every pass.
+            for _ in 0..if bx + by == 0 { 2 } else { 0 } {
                 r.set_render_bucket(camera, 1.0, sub, [tile, tile]).unwrap();
                 r.update();
             }
-            let img = r.read_render().unwrap();
+            let img = loop {
+                r.set_render_bucket(camera, 1.0, sub, [tile, tile]).unwrap();
+                r.update();
+                let img = r.read_render().unwrap();
+                if r.bucket_done() {
+                    break img;
+                }
+            };
             image::imageops::replace(&mut out, &img, (bx * tile) as i64, (by * tile) as i64);
         }
     }

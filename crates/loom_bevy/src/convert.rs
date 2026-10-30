@@ -255,19 +255,24 @@ pub fn material_from_surface(surface: Option<&Surface>, wire_color: [u8; 3]) -> 
             }
             let alpha = m.opacity;
             let s = m.self_illum;
+            // Opacity fades the diffuse colour only: the highlights stay, as
+            // on the reference's glass (premultiplied blending).
             let lit = d * (1.0 - s);
             let glow = Color::srgb(d.x, d.y, d.z).to_linear() * s + Color::srgb(m.self_illum_color.x, m.self_illum_color.y, m.self_illum_color.z).to_linear();
             let two_sided = m.two_sided || sh.shader == Shader::Translucent;
+            let (reflectance, tint) = blinn_reflectance(m);
+            let lit_lin = Color::srgb(lit.x, lit.y, lit.z).to_linear() * alpha;
             let mut out = StandardMaterial {
-                base_color: Color::srgba(lit.x, lit.y, lit.z, alpha),
+                base_color: Color::linear_rgba(lit_lin.red, lit_lin.green, lit_lin.blue, alpha),
                 emissive: bevy::color::LinearRgba::rgb(glow.red, glow.green, glow.blue),
-                perceptual_roughness: (1.0 - m.glossiness / 100.0).clamp(0.0, 1.0),
-                reflectance: (m.specular_level / 100.0 * 0.5).clamp(0.0, 1.0),
-                // Advanced Transparency Type: Filter and Subtractive blend, Additive adds.
+                perceptual_roughness: blinn_roughness(m.glossiness),
+                reflectance,
+                specular_tint: tint,
+                // Advanced Transparency Type: Additive adds; default premultiplied fades diffuse only.
                 alpha_mode: match (alpha < 1.0, m.extended.transparency_type) {
                     (false, _) => AlphaMode::Opaque,
                     (true, 2) => AlphaMode::Add,
-                    (true, _) => AlphaMode::Blend,
+                    (true, _) => AlphaMode::Premultiplied,
                 },
                 ior: m.extended.ior.max(1.0),
                 double_sided: two_sided,
@@ -335,7 +340,7 @@ fn apply_surface_hints(out: &mut StandardMaterial, m: &Surface, lit: glam::Vec3)
         let a = m.opacity;
         out.base_color = Color::srgba(base.x, base.y, base.z, a);
         out.alpha_mode = if a < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque };
-    } else {
+    } else if base != lit {
         out.base_color = Color::srgba(base.x, base.y, base.z, alpha);
     }
     if m.translucency > 0.0 {
@@ -362,6 +367,34 @@ fn apply_surface_hints(out: &mut StandardMaterial, m: &Surface, lit: glam::Vec3)
     }
 }
 
+/// Glossiness 0–100 as perceptual roughness: the Blinn exponent the
+/// viewports shade with, n = 2 · 2^(Glossiness / 10), as the GGX lobe of
+/// the same width (alpha = √(2 / (n + 2))); perceptual roughness is √alpha.
+pub fn blinn_roughness(glossiness: f32) -> f32 {
+    let n = 2.0 * 2f32.powf(glossiness.clamp(0.0, 100.0) / 10.0);
+    (2.0 / (n + 2.0)).sqrt().sqrt()
+}
+
+/// Reflectance and specular tint giving the GGX highlight the Blinn
+/// highlight's peak: Blinn peaks at Specular Colour × Level / 100 times the
+/// light, GGX at F0 / (4 alpha²) (with diffuse white at 1), so F0 = 4 alpha²
+/// × that, per channel (at most 1). Bevy's F0 is 0.16 · reflectance² · tint.
+pub fn blinn_reflectance(s: &Surface) -> (f32, Color) {
+    let alpha = blinn_roughness(s.glossiness).powi(2);
+    let level = (s.specular_level / 100.0).max(0.0);
+    if level <= 0.0 {
+        return (0.0, Color::WHITE);
+    }
+    let colour = Color::srgb(s.specular.x / level, s.specular.y / level, s.specular.z / level).to_linear();
+    let f0 = [colour.red, colour.green, colour.blue].map(|c| (4.0 * alpha * alpha * level * c).clamp(0.0, 1.0));
+    let r = f0.map(|f| (f / 0.16).sqrt());
+    let max = r[0].max(r[1]).max(r[2]);
+    if max <= 0.0 {
+        return (0.0, Color::WHITE);
+    }
+    (max, Color::linear_rgb(r[0] / max, r[1] / max, r[2] / max))
+}
+
 /// A loom viewport camera: its world-to-view and projection matrices.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewCamera {
@@ -377,6 +410,21 @@ impl ViewCamera {
 
     pub fn is_orthographic(&self) -> bool {
         self.projection.w_axis.w == 1.0
+    }
+
+    /// The same view of the world scaled by `s` about the origin: the eye
+    /// moves with it, and the clip planes (and an orthographic extent) scale.
+    pub fn scaled(&self, s: f32) -> Self {
+        if s == 1.0 {
+            return *self;
+        }
+        let up = Mat4::from_scale(Vec3::splat(s));
+        let view = up * self.view * up.inverse();
+        // A point s times further away lands where it did: perspective
+        // keeps x, y and w and moves the planes (P · diag(1, 1, 1, s));
+        // orthographic divides through by s.
+        let projection = if self.is_orthographic() { self.projection * up.inverse() } else { self.projection * Mat4::from_diagonal(bevy::math::Vec4::new(1.0, 1.0, 1.0, s)) };
+        Self { view, projection }
     }
 
     /// Bevy projection with the same field of view / extent and clip
@@ -512,27 +560,49 @@ mod tests {
         lm.glossiness.set(70.0);
         lm.specular_level.set(100.0);
         let m = material_from_loom(Some(&lm), [0, 0, 0]);
-        assert_eq!(m.base_color, Color::srgba(0.8, 0.2, 0.1, 1.0));
-        assert!((m.perceptual_roughness - 0.3).abs() < 1e-6);
-        assert!((m.reflectance - 0.5).abs() < 1e-6);
+        let c = m.base_color.to_srgba();
+        assert!((c.red - 0.8).abs() < 1e-4 && (c.green - 0.2).abs() < 1e-4 && (c.blue - 0.1).abs() < 1e-4 && c.alpha == 1.0, "{c:?}");
+        // Glossiness 70: Blinn exponent 256, GGX alpha √(2/258).
+        assert!((m.perceptual_roughness - (2.0f32 / 258.0).sqrt().sqrt()).abs() < 1e-5);
         assert_eq!(m.alpha_mode, AlphaMode::Opaque);
         assert!(!m.double_sided);
         assert_eq!(m.cull_mode, Some(bevy::render::render_resource::Face::Back));
 
-        // Out-of-range values clamp; opacity below 100 blends; 2-Sided draws both sides.
+        // Out-of-range values clamp; opacity below 100 fades the diffuse
+        // colour only (premultiplied); 2-Sided draws both sides.
         lm.glossiness.set(150.0);
         lm.specular_level.set(999.0);
         lm.opacity.set(40.0);
         lm.two_sided = true;
         let m = material_from_loom(Some(&lm), [0, 0, 0]);
-        assert_eq!(m.perceptual_roughness, 0.0);
-        assert_eq!(m.reflectance, 1.0);
-        assert_eq!(m.alpha_mode, AlphaMode::Blend);
+        assert_eq!(m.perceptual_roughness, blinn_roughness(100.0));
+        assert_eq!(m.alpha_mode, AlphaMode::Premultiplied);
         assert!((m.base_color.alpha() - 0.4).abs() < 1e-6);
+        let lin = m.base_color.to_linear();
+        assert!((lin.red - Color::srgb(0.8, 0.2, 0.1).to_linear().red * 0.4).abs() < 1e-5, "premultiplied: {lin:?}");
         assert!(m.double_sided && m.cull_mode.is_none());
         // Specular Level 0: no specular reflection.
         lm.specular_level.set(0.0);
         assert_eq!(material_from_loom(Some(&lm), [0, 0, 0]).reflectance, 0.0);
+    }
+
+    /// The GGX highlight peaks where the Blinn highlight does: F0 / (4 alpha²)
+    /// = Specular Level / 100 (white specular colour), capped at F0 = 1.
+    #[test]
+    fn blinn_highlights_keep_their_peak() {
+        for (gloss, level) in [(30.0, 50.0), (50.0, 100.0), (80.0, 300.0), (10.0, 5.0)] {
+            let mut lm = LoomMaterial::new("m");
+            lm.glossiness.set(gloss);
+            lm.specular_level.set(level);
+            let m = material_from_loom(Some(&lm), [0, 0, 0]);
+            let alpha = m.perceptual_roughness.powi(2);
+            let f0 = 0.16 * m.reflectance * m.reflectance;
+            let peak = f0 / (4.0 * alpha * alpha);
+            let want = (level / 100.0).min(1.0 / (4.0 * alpha * alpha));
+            assert!((peak - want).abs() / want < 1e-3, "gloss {gloss} level {level}: {peak} vs {want}");
+        }
+        // Rougher surfaces have the wider lobe.
+        assert!(blinn_roughness(10.0) > blinn_roughness(50.0) && blinn_roughness(50.0) > blinn_roughness(90.0));
     }
 
     #[test]

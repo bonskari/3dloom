@@ -3053,13 +3053,51 @@ fn render_setup_dialog_sets_the_output_size_and_renderer() {
     assert!(h.app.state.scene.render.force_two_sided);
     click_text(&mut h, "Renderer", win, 0.0);
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
-    for label in ["Antialiasing (4x MSAA)", "Supersampling:", "Shadows", "Map Size:", "Background:", "Ambient:"] {
+    for label in [
+        "Antialiasing", "Filter:", "Filter Size:", "Supersampling:", "Passes:", "Shadows", "Map Size:", "Area Shadows", "Ambient Occlusion", "Quality:", "Radius:", "Reflections", "Sky Lighting", "Intensity:", "Ground:", "Tone Mapping:", "Exposure:", "Dither",
+        "Background:", "Ambient:",
+    ] {
         assert!(h.text_rect(label, win).is_some(), "{label:?} in the Renderer panel");
     }
     click_text(&mut h, "Shadows", win, 0.0);
     assert!(!h.app.state.scene.render.bevy.shadows);
     h.cmd(Command::UndoSceneOperation);
     assert!(h.app.state.scene.render.bevy.shadows, "each change is an undo step");
+}
+
+/// The Renderer panel's quality controls: the antialiasing filter and tone
+/// mapping from their lists, Passes by dragging its spinner (one undo
+/// step), Ambient Occlusion and Reflections by their check boxes.
+#[test]
+fn render_setup_quality_controls_change_the_scene_settings() {
+    use loom_scene::render::{AaFilter, Tonemapper};
+    let mut h = Harness::new();
+    h.key(egui::Key::F10);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Renderer", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    // Filter: Area -> Mitchell-Netravali.
+    click_text(&mut h, "Area", win, 0.0);
+    click_text(&mut h, "Mitchell-Netravali", h.ctx.screen_rect(), 0.0);
+    assert_eq!(h.app.state.scene.render.bevy.filter, AaFilter::MitchellNetravali);
+    // Tone Mapping: AgX -> ACES Filmic.
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "AgX", win, 0.0);
+    click_text(&mut h, "ACES Filmic", h.ctx.screen_rect(), 0.0);
+    assert_eq!(h.app.state.scene.render.bevy.tonemapper, Tonemapper::Aces);
+    // Passes: a drag right raises it, as one undo step.
+    let before = h.app.state.scene.render.bevy.passes;
+    let spin = h.spinner_after("Passes:");
+    h.drag(spin.center(), spin.center() + egui::vec2(60.0, 0.0));
+    let after = h.app.state.scene.render.bevy.passes;
+    assert!(after > before, "Passes {before} -> {after}");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.render.bevy.passes, before, "the drag is one undo step");
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Ambient Occlusion", win, 0.0);
+    click_text(&mut h, "Reflections", win, 0.0);
+    let b = &h.app.state.scene.render.bevy;
+    assert!(!b.ambient_occlusion && !b.reflections);
 }
 
 /// Renders until the render in progress ends (at most `frames` frames).
@@ -3088,9 +3126,9 @@ fn a_render_runs_in_buckets_into_the_window_and_saves_its_file() {
     h.mods = egui::Modifiers::SHIFT;
     h.key(egui::Key::Q);
     h.mods = egui::Modifiers::NONE;
-    // 600 x 300 is 3 x 2 buckets: the UI keeps running between them.
+    // 600 x 300 renders whole, in 16 passes: the UI keeps running between them.
     let p = h.app.state.rendered.progress.expect("rendering");
-    assert_eq!(p.total, 6);
+    assert_eq!(p.total, 16);
     assert!(p.done < p.total, "not done in the frame it started");
     finish_render(&mut h, 60);
     assert_eq!(h.app.last_error, None);

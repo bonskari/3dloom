@@ -77,7 +77,7 @@ pub struct ClonedFrame {
 /// A render in progress (set by the UI's renderer every frame it works).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderProgress {
-    /// Buckets finished and in total.
+    /// Bucket passes finished and in total.
     pub done: u32,
     pub total: u32,
     pub paused: bool,
@@ -347,11 +347,78 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Render Setup", s)?;
             Ok(settings_json(&state.scene.render))
         }
-        C::BevyRendererSettings { antialiasing, supersampling, shadows, shadow_map_size, background, ambient } => {
+        C::BevyRendererSettings {
+            antialiasing,
+            filter,
+            filter_size,
+            supersampling,
+            passes,
+            shadows,
+            shadow_map_size,
+            area_shadows,
+            background,
+            ambient,
+            ambient_occlusion,
+            ao_quality,
+            ao_radius,
+            reflections,
+            sky_lighting,
+            sky_intensity,
+            ground,
+            tonemapper,
+            exposure,
+            dither,
+        } => {
             let mut s = state.scene.render.clone();
             let b = &mut s.bevy;
+            let ranged = |name: &str, v: f32, lo: f32, hi: f32| if v.is_finite() && (lo..=hi).contains(&v) { Ok(v) } else { Err(format!("{name} {v}: {lo} to {hi}")) };
             if let Some(v) = antialiasing {
                 b.antialiasing = v;
+            }
+            if let Some(v) = filter {
+                b.filter = v;
+            }
+            if let Some(v) = filter_size {
+                b.filter_size = ranged("filter size", v, 1.0, 10.0)?;
+            }
+            if let Some(v) = passes {
+                if !(1..=64).contains(&v) {
+                    return Err(format!("passes {v}: 1 to 64"));
+                }
+                b.passes = v;
+            }
+            if let Some(v) = area_shadows {
+                b.area_shadows = v;
+            }
+            if let Some(v) = ambient_occlusion {
+                b.ambient_occlusion = v;
+            }
+            if let Some(v) = ao_quality {
+                b.ao_quality = v;
+            }
+            if let Some(v) = ao_radius {
+                b.ao_radius = ranged("AO radius", v, 0.001, 1.0e6)?;
+            }
+            if let Some(v) = reflections {
+                b.reflections = v;
+            }
+            if let Some(v) = sky_lighting {
+                b.sky_lighting = v;
+            }
+            if let Some(v) = sky_intensity {
+                b.sky_intensity = ranged("sky intensity", v, 0.0, 10.0)?;
+            }
+            if let Some(v) = ground {
+                b.ground = ranged("ground", v, 0.0, 1.0)?;
+            }
+            if let Some(v) = tonemapper {
+                b.tonemapper = v;
+            }
+            if let Some(v) = exposure {
+                b.exposure = ranged("exposure", v, -10.0, 10.0)?;
+            }
+            if let Some(v) = dither {
+                b.dither = v;
             }
             if let Some(v) = supersampling {
                 if !(1..=4).contains(&v) {

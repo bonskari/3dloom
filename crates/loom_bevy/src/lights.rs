@@ -164,6 +164,43 @@ pub(crate) fn directional(s: &LightSample) -> DirectionalLight {
     }
 }
 
+/// Moves a light to point `d` (on the unit disk) of its Source Radius disk,
+/// the disk facing the scene: a spot or directional light across its beam,
+/// an omni across the line to `centre`. A directional light keeps aiming
+/// at its target, so its rays turn by up to Source Radius / target distance.
+pub(crate) fn move_over_source(s: &mut LightSample, d: [f32; 2], centre: Vec3) {
+    let axis = match s.emitter {
+        Emitter::Point => (centre - Vec3::from(s.position.to_array())).normalize_or(Vec3::NEG_Z),
+        _ => Vec3::from(s.direction.to_array()).normalize_or(Vec3::NEG_Z),
+    };
+    let u = axis.any_orthonormal_vector();
+    let v = axis.cross(u);
+    let offset = (u * d[0] + v * d[1]) * s.source_radius;
+    let target = s.position + s.direction * s.target_distance;
+    s.position += glam::Vec3::from(offset.to_array());
+    if s.emitter == Emitter::Directional {
+        s.direction = (target - s.position).normalize_or(s.direction);
+    }
+}
+
+/// A point light in a world `scale` times the scene's size: the same light
+/// at every scaled point (power by scale², range, radius and bias by scale).
+pub(crate) fn scaled_point(mut l: PointLight, scale: f32) -> PointLight {
+    l.intensity *= scale * scale;
+    l.range *= scale;
+    l.radius *= scale;
+    l.shadow_depth_bias *= scale;
+    l
+}
+
+pub(crate) fn scaled_spot(mut l: SpotLight, scale: f32) -> SpotLight {
+    l.intensity *= scale * scale;
+    l.range *= scale;
+    l.radius *= scale;
+    l.shadow_depth_bias *= scale;
+    l
+}
+
 /// The ambient colour and brightness of skylights and Ambient Only lights.
 pub(crate) fn ambient(samples: &[LightSample]) -> (Color, f32) {
     let sum: glam::Vec3 = samples.iter().filter(|s| s.emitter == Emitter::Ambient).map(|s| s.color).sum();
