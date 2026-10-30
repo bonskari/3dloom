@@ -63,6 +63,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
+        c if crate::material_library::handles(&c) => crate::material_library::execute(state, c),
         c if crate::display::handles(&c) => crate::display::execute(state, c),
         c if crate::render::handles(&c) => crate::render::execute(state, c),
         c if crate::bake::handles(&c) => crate::bake::execute(state, c),
@@ -78,7 +79,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if c.group() == crate::Group::UnwrapUVW => crate::unwrap::execute(state, c),
         c if c.group() == crate::Group::Skin => crate::skin::execute(state, c),
         c @ (C::SkinAddBones { .. } | C::SkinRemoveBone { .. } | C::SkinSelectBone { .. } | C::SkinSelectVertices { .. } | C::SkinSetVertexWeight { .. } | C::SkinSetEnvelope { .. } | C::SkinSetCustomWeight { .. } | C::SkinNormalize | C::SkinRigidToggle | C::SkinBakeSelectedVerts | C::MirrorModeSkin | C::PasteGreenToBlue | C::PasteBlueToGreen | C::MirrorPaste | C::SkinAddGizmo { .. } | C::SkinRemoveGizmo | C::SkinSelectGizmo { .. } | C::SkinAddGizmoKey | C::SkinSetGizmoKey { .. } | C::SkinSetGizmoDelta { .. } | C::SkinSetGizmoOption { .. } | C::SkinSetVertexWeights { .. } | C::SkinSetScaleWeight { .. } | C::SkinSetPasteTolerance { .. } | C::SkinSelectBoneByName { .. } | C::SkinEnvelopeVisibility | C::SkinPaintWeightsToggle | C::SkinPaintStroke { .. } | C::SkinSetPainterOption { .. } | C::SkinPainterOptionsDialog) => crate::skin::execute(state, c),
-        c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin) => crate::morph::execute(state, c),
+        c if crate::skin::handles(&c) => crate::skin::execute(state, c),
+        c @ (C::MorpherModifier | C::MorpherPickTarget { .. } | C::MorpherCaptureCurrentState { .. } | C::MorpherSetChannel { .. } | C::MorpherRenameChannel { .. } | C::MorpherDeleteChannel { .. } | C::MorpherAddProgressiveTarget { .. } | C::MorpherSetProgressivePercent { .. } | C::MorpherReload | C::MorpherExtractTarget { .. } | C::MorpherSetGlobal { .. } | C::SkinMorphAddBones { .. } | C::SkinMorphRemoveBone { .. } | C::SkinMorphCreateMorph { .. } | C::SkinMorphSetVertexDelta { .. } | C::SkinMorphSetMorph { .. } | C::SkinMorphRenameMorph { .. } | C::SkinMorphDeleteMorph { .. } | C::SkinMorphReload { .. } | C::SkinWrapAddBase { .. } | C::SkinWrapRemoveBase { .. } | C::SkinWrapSetOption { .. } | C::SkinWrapReset | C::SkinWrapConvertToSkin | C::SkinMorphSelect { .. } | C::SkinMorphPickBone | C::SkinMorphSelectPoints { .. } | C::SkinMorphSelectionTool { .. } | C::SkinMorphSetOption { .. } | C::SkinMorphSetCurve { .. } | C::SkinMorphResetGraph | C::SkinMorphEdit { .. } | C::SkinMorphClearVerts { .. } | C::SkinMorphRemoveVerts { .. } | C::SkinMorphSetJointType { .. } | C::SkinMorphSetExternal { .. } | C::SkinMorphPickExternal | C::SkinMorphReloadTarget { .. } | C::SkinMorphPasteMirror { .. } | C::SkinWrapPickControl | C::SkinWrapSelectControlVerts { .. } | C::SkinWrapSetLocal { .. } | C::SkinWrapMirrorSelected | C::SkinWrapBakeControlVerts | C::SkinWrapRetrieveControlVerts | C::SkinWrapPatchPick { .. } | C::SkinWrapPatchSetSampleRate { .. } | C::SkinWrapPatchResample) => crate::morph::execute(state, c),
         C::NewScene => {
             let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
             if ids.is_empty() {
@@ -806,7 +808,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             frame_all(state, bounds)
         }
         C::ZoomExtentsSelected => {
-            let bounds = state.selection_bounds().or_else(|| state.scene_bounds());
+            // At the Skin's Envelope level: the selected vertices, else the current envelope.
+            let bounds = crate::skin::focus_bounds(state).or_else(|| state.selection_bounds()).or_else(|| state.scene_bounds());
             frame(state, bounds)
         }
         C::ZoomViewportIn => zoom(state, 0.8),
@@ -1570,6 +1573,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Some(PickMode::SplineBind) => crate::spline::bind_at(state, Vec3::from(point)),
             Some(PickMode::TrimExtendModifier) => crate::spline::trim_extend_click(state, point),
             Some(PickMode::MeasureDistanceA | PickMode::MeasureDistanceB) => crate::helpers::measure_pick(state, Vec3::from(point)),
+            Some(PickMode::BipedFootstep) => crate::biped_footsteps::execute(state, C::BipedAppendFootstep { position: Some(point), left: None }),
             Some(PickMode::WorkingPivotView) => {
                 state.pick_mode = None;
                 state.working_pivot.origin = Vec3::from(point);
@@ -2709,9 +2713,17 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.pick_mode = None;
                     return crate::stack::execute(state, C::UvwMapAcquire { node: id.0 });
                 }
-                Some(PickMode::UvwMapNormal | PickMode::UvwMapRegionA | PickMode::UvwMapRegionB) => return Err("pick a surface point, not an object".into()),
+                Some(PickMode::UvwMapNormal | PickMode::UvwMapRegionA | PickMode::UvwMapRegionB | PickMode::BipedFootstep) => return Err("pick a surface point, not an object".into()),
                 Some(PickMode::SeamPointA | PickMode::SeamPointB) => return Err("Point To Point Seam picks a vertex, not an object".into()),
                 Some(PickMode::TvTargetWeldSource | PickMode::TvTargetWeldTarget) => return Err("Target Weld picks a texture vertex in the Edit UVWs window".into()),
+                // Pick Bone / Add keep picking until right-click or the button again.
+                Some(PickMode::SkinMorphBone) => return crate::morph::execute(state, C::SkinMorphAddBones { ids: vec![id.0] }),
+                Some(PickMode::SkinWrapControl) => return crate::morph::execute(state, C::SkinWrapAddBase { id: id.0 }),
+                Some(PickMode::SkinMorphExternal) => {
+                    state.pick_mode = None;
+                    let morph = state.skin_morph_current.ok_or("no morph is highlighted")? as u32;
+                    return crate::morph::execute(state, C::SkinMorphSetExternal { morph, node: Some(id.0) });
+                }
                 Some(PickMode::ModifierNode) => {
                     let Some(index) = state.selection.iter().next().and_then(|n| state.scene.node(*n)).and_then(|n| n.active_entry) else { return Err("no active stack entry".into()) };
                     state.pick_mode = None;
@@ -2720,6 +2732,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Some(PickMode::Constraint(kind)) => {
                     state.pick_mode = None;
                     return crate::motion::pick_constraint(state, kind, id);
+                }
+                Some(PickMode::BipedXtraParent) => {
+                    state.pick_mode = None;
+                    let (root, name, reorient) = state.biped_xtra_pick.take().ok_or("no Xtra to pick a parent for")?;
+                    return crate::biped::set_xtra(state, root, &name, None, None, Some(id.0), reorient);
                 }
                 Some(PickMode::PickMaterial) => {
                     state.pick_mode = None;
@@ -3260,7 +3277,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({ "edges": state.active().edged_faces, "vertices": state.show_vertices }))
         }
-        c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. }) => crate::biped::execute(state, c),
+        c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. } | C::BipedCreateXtra { .. } | C::BipedDeleteXtra { .. } | C::BipedCreateOppositeXtra { .. } | C::BipedSetXtra { .. } | C::BipedPickXtraParent { .. } | C::BipedSaveFile { .. } | C::BipedLoadFile { .. }) => crate::biped::execute(state, c),
+        c @ (C::BipedFootstepMode { .. } | C::BipedFootstepCreation { .. } | C::BipedCreateMultipleFootsteps { .. } | C::BipedAppendFootstep { .. } | C::BipedActivateFootsteps | C::BipedDeactivateFootsteps | C::BipedDeleteFootsteps) => crate::biped_footsteps::execute(state, c),
         c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
         c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. }) => crate::extras::execute(state, c),
@@ -4334,11 +4352,27 @@ fn with_system(state: &mut AppState, system: Option<CoordSystem>) -> CoordSystem
 type MatrixFor<'a> = &'a dyn Fn(&AppState, Option<NodeId>) -> (Mat4, Vec3);
 
 fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: MatrixFor) -> Result<Value, String> {
+    // Skin > Edit Envelopes: the transform tools move envelope end points / lattice points only.
+    if state.skin_active() && matches!(label, "Move" | "Rotate" | "Scale") {
+        let (m, _) = matrix_for(state, None);
+        if let Some(r) = crate::skin::transform(state, label, m) {
+            return r;
+        }
+    }
     if let Some((id, _)) = crate::normals::normal_level(state) {
         let (m, _) = matrix_for(state, Some(id));
         if let Some(r) = crate::normals::transform(state, label, m) {
             return r;
         }
+    }
+    // Skin Morph Points: the tools shape the morph (Edit mode, or on the fly
+    // with Beginner Mode off); Skin Wrap Control Vertices: nothing moves.
+    if let Some((id, _)) = crate::morph::points_level(state) {
+        let (m, _) = matrix_for(state, Some(id));
+        return crate::morph::transform_points(state, label, m);
+    }
+    if crate::morph::control_vertex_level(state).is_some() {
+        return Ok(json!({}));
     }
     let mut changes = Vec::new();
     // A modifier gizmo level (XForm Gizmo / Center): the tools move the gizmo.
@@ -5128,6 +5162,7 @@ fn snapshot(state: &AppState) -> Value {
         "morpher": crate::morph::morpher_status(state),
         "skin_morph": crate::morph::skin_morph_status(state),
         "skin_wrap": crate::morph::skin_wrap_status(state),
+        "skin_wrap_patch": crate::morph::skin_wrap_patch_status(state),
         "file": state.file.as_ref().map(|p| p.to_string_lossy().into_owned()),
         "dirty": state.dirty(),
         "ik_chains": state.scene.ik_chains.iter().map(|c| json!({ "id": c.id, "name": c.name, "solver": c.solver.label(), "start": c.start.0, "end": c.end.0, "goal": c.goal.0, "enabled": c.enabled, "swivel": c.swivel_deg, "spline": c.spline.map(|s| s.0) })).collect::<Vec<_>>(),

@@ -345,6 +345,12 @@ pub enum Dialog {
     /// current level into the compound type at `MaterialKind::TYPES[kind]`
     /// (a map: `MapType::ALL[kind]`).
     ReplaceMaterial { kind: u8, map: bool },
+    /// Material/Map Browser, Mtl Library > File > Open / Merge / Save As: a library file.
+    OpenMaterialLibrary,
+    MergeMaterialLibrary,
+    SaveMaterialLibrary,
+    /// Material Editor > Put to Library: the name to put the material under.
+    PutToLibrary,
     /// Material Editor Options.
     MaterialEditorOptions,
     /// Bitmap Parameters > View Image: Specify Cropping/Placement.
@@ -442,6 +448,15 @@ pub enum Dialog {
     WeightTool,
     /// Skin > Weight Properties > Painter Options.
     PainterOptions,
+    /// Skin > Envelope Properties > Paste to Multiple Bones: pick the bones.
+    PasteToMultipleBones,
+    /// Skin > Advanced Parameters > Save / Load: the envelope file (.env).
+    SkinSaveEnvelopes,
+    SkinLoadEnvelopes,
+    /// Skin > Load Envelopes: match the file's bones to the current ones.
+    LoadEnvelopes,
+    /// Skin > Gizmo Parameters > Edit Angle Keys Curves.
+    AngleKeysCurves,
     /// Display > Show Map in Viewport > Bitmap: pick the image file.
     PickTexture,
     /// UVW Map > Bitmap Fit: pick the image whose aspect the gizmo takes.
@@ -456,6 +471,11 @@ pub enum Dialog {
     NormalMapping,
     UnfoldMapping,
     PeltMap,
+    /// Biped > Footstep Creation > Create Multiple Footsteps.
+    BipedMultipleFootsteps,
+    /// Biped rollout > Save File / Load File of a figure (.fig) in Figure Mode.
+    BipedSaveFig,
+    BipedLoadFig,
     /// Unwrap UVW > Save / Load (.uvw) file pickers.
     SaveUvw,
     LoadUvw,

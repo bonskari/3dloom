@@ -15,8 +15,13 @@ mod mesh_patch;
 mod widgets;
 mod ribbon;
 mod precision;
+mod skin2;
+mod skin_wrap;
+mod biped;
 mod lightcam2;
 mod bake;
+mod maps2;
+mod materials2;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
@@ -1428,6 +1433,10 @@ fn skinned_cylinder(h: &mut Harness) -> (loom_scene::NodeId, Vec<u64>) {
     h.app.panel_tab = crate::Tab::Modify;
     framed(h);
     assert!(h.app.state.skin_active());
+    // Select > Vertices starts off, as in the reference: tick it to pick vertices.
+    assert!(!h.app.state.skin_filter_vertices);
+    h.click(panel_text(h, "Vertices"));
+    assert!(h.app.state.skin_filter_vertices);
     (arm, bones)
 }
 
@@ -2348,7 +2357,7 @@ fn multi_sub_from_the_type_button_colours_faces_by_material_id() {
     h.frames(12);
     h.click(window_text(&h, "Material/Map Browser", "OK"));
     h.frames(2);
-    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ReplaceMaterial { kind: 1, map: false }));
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ReplaceMaterial { kind: loom_scene::material::MaterialKind::TYPES.iter().position(|t| *t == "Multi/Sub-Object").unwrap() as u8, map: false }));
     h.click(window_text(&h, "Replace Material", "Keep old material as sub-material?"));
     h.frames(12);
     h.click(window_text(&h, "Replace Material", "OK"));

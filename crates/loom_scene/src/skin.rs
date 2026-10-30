@@ -1,15 +1,26 @@
 //! The Skin modifier: bones with envelopes, per-vertex weights (from the
 //! envelopes or set by hand), linear blend skinning against the bind pose,
-//! mirror settings, Joint Angle / Bulge Angle gizmos.
+//! mirror settings, Joint Angle / Bulge Angle / Morph Angle gizmos.
+//!
+//! On a patch object the weighted points are the lattice's vertices
+//! followed by its handles (the order of `PatchMesh::cage`); the deformed
+//! lattice flows up and is tessellated again.
 
 use crate::modifier::{EvalCtx, StackValue};
-use crate::{NodeId, Scene, Transform};
-use glam::{Mat4, Vec3};
+use crate::{NodeId, Param, Scene, Transform};
+use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+/// Animatable Envelopes: the radii as keyable parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnvelopeKeys {
+    pub inner: [Param<f32>; 2],
+    pub outer: [Param<f32>; 2],
+}
+
 /// A capsule in the bone's bind-pose local frame: radius `inner` → weight 1,
-/// `outer` → 0, interpolated along the start→end segment.
+/// `outer` → 0, interpolated along the start→end segment (or along `path`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Envelope {
     pub start: Vec3,
@@ -21,29 +32,150 @@ pub struct Envelope {
     pub falloff: u32,
     /// Abs. Effect: the weight the envelope gives inside the inner radius.
     pub abs_effect: f32,
+    /// Squash multiplier for a bone that stretches with Stretch = Squash.
     pub squash: f32,
+    /// Relative (on) or Absolute (off): a relative envelope gives full
+    /// weight only inside its inner radius; between the radii its weights
+    /// are not scaled up to 1, so the rest of the vertex stays put.
+    #[serde(default)]
+    pub relative: bool,
+    /// A spline bone's envelope follows the curve: points in the bone's
+    /// frame (empty = the straight start → end segment).
+    #[serde(default)]
+    pub path: Vec<Vec3>,
+    /// Animatable Envelopes: keyed radii (None = the plain values).
+    #[serde(default)]
+    pub keys: Option<Box<EnvelopeKeys>>,
 }
 
 impl Default for Envelope {
     fn default() -> Self {
-        Self { start: Vec3::ZERO, end: Vec3::X * 10.0, inner: [2.5, 2.5], outer: [5.0, 5.0], falloff: 0, abs_effect: 1.0, squash: 1.0 }
+        Self { start: Vec3::ZERO, end: Vec3::X * 10.0, inner: [2.5, 2.5], outer: [5.0, 5.0], falloff: 0, abs_effect: 1.0, squash: 1.0, relative: false, path: Vec::new(), keys: None }
     }
 }
 
-/// Envelope weight of a point in the bone's bind-pose local frame.
-pub fn envelope_weight(e: &Envelope, p: Vec3) -> f32 {
-    let seg = e.end - e.start;
-    let len2 = seg.length_squared();
-    let u = if len2 < 1e-12 { 0.0 } else { ((p - e.start).dot(seg) / len2).clamp(0.0, 1.0) };
-    let closest = e.start + seg * u;
+impl Envelope {
+    /// Inner and outer radii at the ends, at the ambient time.
+    pub fn radii(&self) -> ([f32; 2], [f32; 2]) {
+        match &self.keys {
+            Some(k) => ([k.inner[0].get(), k.inner[1].get()], [k.outer[0].get(), k.outer[1].get()]),
+            None => (self.inner, self.outer),
+        }
+    }
+
+    /// The axis as a polyline: the path, or start → end.
+    fn axis(&self) -> Vec<Vec3> {
+        if self.path.len() >= 2 {
+            self.path.clone()
+        } else {
+            vec![self.start, self.end]
+        }
+    }
+
+    /// The closest point of the axis to `p`: (u 0..1 by length along the axis, the point).
+    pub fn closest(&self, p: Vec3) -> (f32, Vec3) {
+        if self.path.len() < 2 {
+            let seg = self.end - self.start;
+            let len2 = seg.length_squared();
+            let u = if len2 < 1e-12 { 0.0 } else { ((p - self.start).dot(seg) / len2).clamp(0.0, 1.0) };
+            return (u, self.start + seg * u);
+        }
+        let pts = &self.path;
+        let total: f32 = pts.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>().max(1e-12);
+        let mut best = (f32::INFINITY, 0.0, pts[0]);
+        let mut run = 0.0;
+        for w in pts.windows(2) {
+            let seg = w[1] - w[0];
+            let len = seg.length();
+            let t = if len < 1e-9 { 0.0 } else { ((p - w[0]).dot(seg) / (len * len)).clamp(0.0, 1.0) };
+            let q = w[0] + seg * t;
+            let d = q.distance_squared(p);
+            if d < best.0 {
+                best = (d, (run + len * t) / total, q);
+            }
+            run += len;
+        }
+        (best.1, best.2)
+    }
+
+    /// The axis point `u` (0..1 by length) along the envelope.
+    pub fn axis_point(&self, u: f32) -> Vec3 {
+        let pts = self.axis();
+        let total: f32 = pts.windows(2).map(|w| w[0].distance(w[1])).sum();
+        let mut want = u.clamp(0.0, 1.0) * total;
+        for w in pts.windows(2) {
+            let len = w[0].distance(w[1]);
+            if want <= len || len <= 0.0 {
+                return if len <= 0.0 { w[0] } else { w[0].lerp(w[1], want / len) };
+            }
+            want -= len;
+        }
+        *pts.last().unwrap_or(&self.end)
+    }
+
+    /// The axis direction at `u` (start → end for a straight envelope).
+    pub fn axis_direction(&self, u: f32) -> Vec3 {
+        let a = self.axis_point((u - 0.01).max(0.0));
+        let b = self.axis_point((u + 0.01).min(1.0));
+        (b - a).normalize_or(Vec3::X)
+    }
+
+    /// Moves the envelope with its axis: Animatable Envelopes keep their keys.
+    pub fn set_radius(&mut self, end: usize, outer: bool, r: f32) {
+        let r = r.max(0.0);
+        if let Some(k) = &mut self.keys {
+            if outer {
+                k.outer[end].set(r);
+            } else {
+                k.inner[end].set(r);
+            }
+        }
+        if outer {
+            self.outer[end] = r;
+        } else {
+            self.inner[end] = r;
+        }
+    }
+}
+
+/// Inner and outer radius at `u`: the end radii and the cross sections
+/// (u, inner, outer) between them, linearly.
+pub fn radius_profile(e: &Envelope, sections: &[(f32, f32, f32)], u: f32) -> (f32, f32) {
+    let (i, o) = e.radii();
+    let mut pts: Vec<(f32, f32, f32)> = Vec::with_capacity(sections.len() + 2);
+    pts.push((0.0, i[0], o[0]));
+    let mut mid: Vec<(f32, f32, f32)> = sections.iter().copied().filter(|s| s.0 > 0.0 && s.0 < 1.0).collect();
+    mid.sort_by(|a, b| a.0.total_cmp(&b.0));
+    pts.extend(mid);
+    pts.push((1.0, i[1], o[1]));
+    for w in pts.windows(2) {
+        if u <= w[1].0 {
+            let t = if w[1].0 - w[0].0 < 1e-9 { 0.0 } else { (u - w[0].0) / (w[1].0 - w[0].0) };
+            return (w[0].1 + (w[1].1 - w[0].1) * t, w[0].2 + (w[1].2 - w[0].2) * t);
+        }
+    }
+    (i[1], o[1])
+}
+
+/// What an envelope gives a point: its weight and whether the point lies
+/// within the inner radius.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EnvelopeSample {
+    pub weight: f32,
+    pub inside_inner: bool,
+}
+
+/// Envelope weight of a point in the bone's bind-pose local frame, with
+/// the bone's cross sections shaping the radii.
+pub fn envelope_sample(e: &Envelope, sections: &[(f32, f32, f32)], p: Vec3) -> EnvelopeSample {
+    let (u, closest) = e.closest(p);
     let d = p.distance(closest);
-    let inner = e.inner[0] + (e.inner[1] - e.inner[0]) * u;
-    let outer = e.outer[0] + (e.outer[1] - e.outer[0]) * u;
+    let (inner, outer) = radius_profile(e, sections, u);
     if d <= inner {
-        return e.abs_effect.max(0.0);
+        return EnvelopeSample { weight: e.abs_effect.max(0.0), inside_inner: true };
     }
     if d >= outer || outer <= inner {
-        return 0.0;
+        return EnvelopeSample { weight: 0.0, inside_inner: false };
     }
     let t = (d - inner) / (outer - inner);
     let w = match e.falloff {
@@ -52,7 +184,12 @@ pub fn envelope_weight(e: &Envelope, p: Vec3) -> f32 {
         3 => 1.0 - t * t,
         _ => 1.0 - t,
     };
-    (w * e.abs_effect).max(0.0)
+    EnvelopeSample { weight: (w * e.abs_effect).max(0.0), inside_inner: false }
+}
+
+/// Envelope weight of a point in the bone's bind-pose local frame.
+pub fn envelope_weight(e: &Envelope, p: Vec3) -> f32 {
+    envelope_sample(e, &[], p).weight
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -61,7 +198,7 @@ pub struct SkinBone {
     /// Inverse of the bone's world matrix at bind time.
     pub bind_inverse: Mat4,
     pub envelope: Envelope,
-    /// Extra cross sections: (u along the envelope, inner, outer).
+    /// Extra cross sections: (u along the envelope, inner, outer), sorted by u.
     #[serde(default)]
     pub cross_sections: Vec<(f32, f32, f32)>,
     #[serde(default = "yes")]
@@ -69,6 +206,17 @@ pub struct SkinBone {
     /// Envelope Visibility: the envelope stays drawn while another bone is current.
     #[serde(default)]
     pub envelope_visible: bool,
+}
+
+impl SkinBone {
+    /// The cross sections of the envelope, ends included: (u, inner, outer).
+    pub fn sections(&self) -> Vec<(f32, f32, f32)> {
+        let (i, o) = self.envelope.radii();
+        let mut out = vec![(0.0, i[0], o[0])];
+        out.extend(self.cross_sections.iter().copied());
+        out.push((1.0, i[1], o[1]));
+        out
+    }
 }
 
 fn yes() -> bool {
@@ -86,11 +234,14 @@ pub struct SkinDisplay {
     pub cross_sections_on_top: bool,
     pub envelope_on_top: bool,
     pub show_hidden_vertices: bool,
+    /// Show All Vertices: a tick at every vertex (and every patch handle).
+    #[serde(default)]
+    pub all_vertices: bool,
 }
 
 impl Default for SkinDisplay {
     fn default() -> Self {
-        Self { colored_vertices: true, colored_faces: false, color_all_weights: false, all_envelopes: false, all_gizmos: false, no_envelopes: false, cross_sections_on_top: true, envelope_on_top: true, show_hidden_vertices: false }
+        Self { colored_vertices: true, colored_faces: false, color_all_weights: false, all_envelopes: false, all_gizmos: false, no_envelopes: false, cross_sections_on_top: true, envelope_on_top: true, show_hidden_vertices: false, all_vertices: false }
     }
 }
 
@@ -101,27 +252,103 @@ pub struct SkinMirror {
     pub offset: f32,
     pub threshold: f32,
     pub mode: bool,
+    /// Display Projection: 0 Default Display, 1 Positive, 2 Negative, 3 None.
+    #[serde(default)]
+    pub projection: u32,
+    /// Manual Update: the side colours change only on Update.
+    #[serde(default)]
+    pub manual_update: bool,
 }
 
 impl Default for SkinMirror {
     fn default() -> Self {
-        Self { plane: 0, offset: 0.0, threshold: 0.5, mode: false }
+        Self { plane: 0, offset: 0.0, threshold: 0.5, mode: false, projection: 0, manual_update: false }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum GizmoKind {
+    #[default]
     JointAngle,
     BulgeAngle,
+    MorphAngle,
 }
 
-/// One angle key of a gizmo: Joint Angle keeps per-vertex deltas in the
-/// child bone's frame, Bulge Angle a radial scale.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+impl GizmoKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            GizmoKind::JointAngle => "Joint Angle Deformer",
+            GizmoKind::BulgeAngle => "Bulge Angle Deformer",
+            GizmoKind::MorphAngle => "Morph Angle Deformer",
+        }
+    }
+}
+
+/// One angle key of a gizmo: per-vertex deltas in the child bone's frame
+/// (Joint Angle, Morph Angle targets), a radial bulge scale (Bulge Angle)
+/// and the lattice's control point offsets at this angle.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct GizmoKey {
     pub angle_deg: f32,
     pub deltas: Vec<(u32, Vec3)>,
     pub bulge: f32,
+    /// Morph Angle target name.
+    #[serde(default)]
+    pub name: String,
+    /// Edit Lattice: per control point offset in the lattice bone's frame (empty = none).
+    #[serde(default)]
+    pub lattice: Vec<Vec3>,
+}
+
+/// The lattice of a Joint Angle / Bulge Angle gizmo: a box in the bind
+/// frame of its bone (the child bone for Joint, the parent for Bulge),
+/// `dims` points along X (the bone axis), Y and Z, turned by Twist about
+/// the box's own X axis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GizmoLattice {
+    pub dims: [u32; 3],
+    pub lo: Vec3,
+    pub hi: Vec3,
+}
+
+impl GizmoLattice {
+    pub const DIMS: [u32; 3] = [3, 3, 3];
+
+    /// The box around `pts` (bone-frame points), padded a little.
+    pub fn around(pts: &[Vec3]) -> Option<Self> {
+        let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+        for p in pts {
+            lo = lo.min(*p);
+            hi = hi.max(*p);
+        }
+        if !lo.is_finite() {
+            return None;
+        }
+        let pad = ((hi - lo).max_element() * 0.05).max(1e-3);
+        Some(Self { dims: Self::DIMS, lo: lo - Vec3::splat(pad), hi: hi + Vec3::splat(pad) })
+    }
+
+    pub fn count(&self) -> usize {
+        self.dims.iter().map(|d| d.max(&2)).product::<u32>() as usize
+    }
+
+    /// Box frame → bone frame (Twist turns the box about its centre line along X).
+    pub fn frame(&self, twist_deg: f32) -> Mat4 {
+        let c = (self.lo + self.hi) * 0.5;
+        Mat4::from_translation(Vec3::new(0.0, c.y, c.z)) * Mat4::from_quat(Quat::from_rotation_x(twist_deg.to_radians())) * Mat4::from_translation(Vec3::new(0.0, -c.y, -c.z))
+    }
+
+    /// Rest control points in the bone frame.
+    pub fn rest_points(&self, twist_deg: f32) -> Vec<Vec3> {
+        let f = self.frame(twist_deg);
+        loom_mesh::ffd::rest_points(self.dims, false).into_iter().map(|u| f.transform_point3(self.lo + (self.hi - self.lo) * u)).collect()
+    }
+
+    /// Unit coordinates of a bone-frame point in the (twisted) box.
+    pub fn unit(&self, p: Vec3, twist_deg: f32) -> Vec3 {
+        let q = self.frame(twist_deg).inverse().transform_point3(p);
+        (q - self.lo) / (self.hi - self.lo).max(Vec3::splat(1e-6))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -134,9 +361,40 @@ pub struct SkinGizmo {
     pub keys: Vec<GizmoKey>,
     pub influence: f32,
     pub enabled: bool,
+    /// Name field.
+    #[serde(default)]
+    pub name: String,
+    /// The vertices selected when the gizmo was added (empty = every vertex of the bones).
+    #[serde(default)]
+    pub vertices: Vec<u32>,
+    /// Twist: the lattice's turn about the bone axis (degrees).
+    #[serde(default)]
+    pub twist: f32,
+    /// Use Bounding Volume: every vertex inside the lattice deforms, not only `vertices`.
+    #[serde(default)]
+    pub bounding_volume: bool,
+    #[serde(default)]
+    pub lattice: Option<GizmoLattice>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+impl Default for SkinGizmo {
+    fn default() -> Self {
+        Self { kind: GizmoKind::JointAngle, bone: 0, parent_bone: 0, keys: Vec::new(), influence: 1.0, enabled: true, name: String::new(), vertices: Vec::new(), twist: 0.0, bounding_volume: false, lattice: None }
+    }
+}
+
+impl SkinGizmo {
+    /// The bone whose bind frame holds the lattice: the child for Joint, the parent for Bulge.
+    pub fn lattice_bone(&self) -> usize {
+        if self.kind == GizmoKind::BulgeAngle {
+            self.parent_bone
+        } else {
+            self.bone
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SkinData {
     pub bones: Vec<SkinBone>,
     /// The object's world matrix at bind time.
@@ -158,19 +416,102 @@ pub struct SkinData {
     pub display: SkinDisplay,
     pub mirror: SkinMirror,
     pub gizmos: Vec<SkinGizmo>,
+    /// Rigid Handles: the handles of these patch vertices follow the vertex's strongest bone.
+    #[serde(default)]
+    pub rigid_handles: Vec<bool>,
+    /// Rigid Vertices (All): every vertex follows its strongest bone only.
+    #[serde(default)]
+    pub rigid_all: bool,
+    /// Rigid Patch Handles (All): handles take their vertex's weights.
+    #[serde(default)]
+    pub rigid_patch_handles_all: bool,
+    /// Back Transform Vertices: the result comes back through the object's
+    /// current matrix, so a mesh linked to its bones does not move twice.
+    #[serde(default = "yes")]
+    pub back_transform: bool,
+    /// Ref. Frame: the frame whose pose becomes the bind pose when Always Deform comes back on.
+    #[serde(default)]
+    pub ref_frame: f32,
+    /// Ignore Bone Scale: a scaled bone moves the skin as if unscaled.
+    #[serde(default)]
+    pub ignore_bone_scale: bool,
+    /// Fast Updates: the viewports show rigid deformation without gizmos (renders stay full).
+    #[serde(default)]
+    pub fast_updates: bool,
+    /// Update on mouse up: envelope drags apply when the button comes up.
+    #[serde(default)]
+    pub update_on_mouse_up: bool,
+    /// Animatable Envelopes: envelope radii key under Auto Key.
+    #[serde(default)]
+    pub animatable_envelopes: bool,
+    /// Remove Zero Limit: Remove Zero Weights strips weights below this.
+    #[serde(default)]
+    pub remove_zero_limit: f32,
+    /// Weight Table > Vertex Sets: named vertex sets.
+    #[serde(default)]
+    pub vertex_sets: Vec<(String, Vec<u32>)>,
+}
+
+impl Default for SkinData {
+    fn default() -> Self {
+        Self {
+            bones: Vec::new(),
+            mesh_bind: Mat4::IDENTITY,
+            weights: Vec::new(),
+            explicit: Vec::new(),
+            rigid: Vec::new(),
+            excluded: Vec::new(),
+            bone_affect_limit: 20,
+            always_deform: true,
+            weight_all_vertices: true,
+            skin_pose: None,
+            display: SkinDisplay::default(),
+            mirror: SkinMirror::default(),
+            gizmos: Vec::new(),
+            rigid_handles: Vec::new(),
+            rigid_all: false,
+            rigid_patch_handles_all: false,
+            back_transform: true,
+            ref_frame: 0.0,
+            ignore_bone_scale: false,
+            fast_updates: false,
+            update_on_mouse_up: false,
+            animatable_envelopes: false,
+            remove_zero_limit: 0.0,
+            vertex_sets: Vec::new(),
+        }
+    }
 }
 
 fn twenty() -> u32 {
     20
 }
 
-/// The bone's envelope from its length: inner a quarter, outer half.
+/// The bone's envelope from its shape: a bone along its axis, a spline
+/// along its curve, any other object along the longest side of its box;
+/// inner radius a quarter of the length, outer half.
 fn default_envelope(scene: &Scene, bone: NodeId) -> Envelope {
-    let len = scene.node(bone).and_then(|n| n.object.bone_length()).unwrap_or_else(|| {
-        scene.node(bone).map(|n| { let (lo, hi) = n.object.mesh().aabb(); (hi - lo).max_element().max(1.0) }).unwrap_or(10.0)
-    });
-    let dir = scene.node(bone).and_then(|n| n.object.bone_axis()).unwrap_or(Vec3::X);
-    Envelope { start: Vec3::ZERO, end: dir * len, inner: [len * 0.25; 2], outer: [len * 0.5; 2], falloff: 0, abs_effect: 1.0, squash: 1.0 }
+    let Some(n) = scene.node(bone) else { return Envelope::default() };
+    if let Some(len) = n.object.bone_length() {
+        let dir = n.object.bone_axis().unwrap_or(Vec3::X);
+        return Envelope { start: Vec3::ZERO, end: dir * len, inner: [len * 0.25; 2], outer: [len * 0.5; 2], ..Envelope::default() };
+    }
+    // Object space → the node's own frame (the envelope lives in the bone's frame).
+    let to_node = scene.world_matrix(bone).inverse() * scene.object_matrix(bone);
+    if let Some(shape) = n.object.shape() {
+        if let Some(line) = shape.polylines().into_iter().find(|l| l.len() >= 2) {
+            let path: Vec<Vec3> = line.iter().map(|p| to_node.transform_point3(*p)).collect();
+            let len: f32 = path.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>().max(1e-3);
+            return Envelope { start: path[0], end: *path.last().unwrap(), inner: [len * 0.25; 2], outer: [len * 0.5; 2], path, ..Envelope::default() };
+        }
+    }
+    let (lo, hi) = n.object.mesh().aabb();
+    let size = hi - lo;
+    let axis = if size.x >= size.y && size.x >= size.z { Vec3::X } else if size.y >= size.z { Vec3::Y } else { Vec3::Z };
+    let len = (size * axis).length().max(1.0);
+    let c = (lo + hi) * 0.5;
+    let (a, b) = (c - axis * len * 0.5, c + axis * len * 0.5);
+    Envelope { start: to_node.transform_point3(a), end: to_node.transform_point3(b), inner: [len * 0.25; 2], outer: [len * 0.5; 2], ..Envelope::default() }
 }
 
 impl SkinData {
@@ -182,7 +523,7 @@ impl SkinData {
 
     /// Binds against `mesh`, the mesh flowing into the Skin.
     pub fn bind_mesh(scene: &Scene, node: NodeId, bones: &[NodeId], mesh: &loom_mesh::Mesh) -> Self {
-        let mut data = Self { mesh_bind: scene.object_matrix(node), bone_affect_limit: 20, always_deform: true, weight_all_vertices: true, ..Default::default() };
+        let mut data = Self { mesh_bind: scene.object_matrix(node), ..Default::default() };
         for b in bones {
             data.add_bone(scene, *b);
         }
@@ -199,7 +540,7 @@ impl SkinData {
     /// `mesh_bind` is the mesh node's world matrix at bind, so the skin lives in
     /// world space like a Skin made in the app (bind_inverse = geometry_to_bone · mesh_bind⁻¹).
     pub fn from_file(bones: &[(NodeId, Mat4, Envelope)], mesh_bind: Mat4, weights: Vec<Vec<(u32, f32)>>) -> Self {
-        let mut data = Self { mesh_bind, bone_affect_limit: 20, always_deform: true, weight_all_vertices: true, ..Default::default() };
+        let mut data = Self { mesh_bind, ..Default::default() };
         let to_mesh = mesh_bind.inverse();
         for (node, geometry_to_bone, envelope) in bones {
             data.bones.push(SkinBone { node: *node, bind_inverse: *geometry_to_bone * to_mesh, envelope: envelope.clone(), cross_sections: Vec::new(), enabled: true, envelope_visible: false });
@@ -254,6 +595,7 @@ impl SkinData {
         self.weights.resize(n, Vec::new());
         self.explicit.resize(n, false);
         self.rigid.resize(n, false);
+        self.rigid_handles.resize(n, false);
     }
 
     /// Every vertex becomes hand-weighted with what the envelopes give now.
@@ -266,36 +608,40 @@ impl SkinData {
         }
     }
 
-    /// Envelope weights of a bind-pose world point, limited and normalised.
+    fn reaches(&self, i: usize, b: &SkinBone, vertex: Option<u32>) -> bool {
+        b.enabled && vertex.is_none_or(|v| !self.excluded.get(i).is_some_and(|x| x.contains(&v)))
+    }
+
+    /// Envelope weights of a bind-pose world point, limited; normalised
+    /// unless only Relative envelopes reach it with less than full weight
+    /// (the rest of the vertex then stays at its rest position).
     pub fn envelope_weights(&self, p_world: Vec3, vertex: Option<u32>) -> Vec<(u32, f32)> {
-        let mut w: Vec<(u32, f32)> = self
+        let samples: Vec<(u32, EnvelopeSample, bool)> = self
             .bones
             .iter()
             .enumerate()
-            .filter(|(i, b)| b.enabled && vertex.is_none_or(|v| !self.excluded.get(*i).is_some_and(|x| x.contains(&v))))
+            .filter(|(i, b)| self.reaches(*i, b, vertex))
             .filter_map(|(i, b)| {
                 let local = b.bind_inverse.transform_point3(p_world);
-                let mut e = envelope_weight(&b.envelope, local);
-                for (u, inner, outer) in &b.cross_sections {
-                    let cs = Envelope { start: b.envelope.start.lerp(b.envelope.end, *u), end: b.envelope.start.lerp(b.envelope.end, *u), inner: [*inner; 2], outer: [*outer; 2], ..b.envelope.clone() };
-                    e = e.max(envelope_weight(&cs, local));
-                }
-                (e > 1e-6).then_some((i as u32, e))
+                let s = envelope_sample(&b.envelope, &b.cross_sections, local);
+                (s.weight > 1e-6).then_some((i as u32, s, b.envelope.relative))
             })
             .collect();
+        // A point inside a Relative envelope's inner radius is locked to the bones whose inner radius it is in.
+        let locked: Vec<(u32, f32)> = samples.iter().filter(|(_, s, rel)| *rel && s.inside_inner).map(|(b, s, _)| (*b, s.weight)).collect();
+        let mut w: Vec<(u32, f32)> = if locked.is_empty() { samples.iter().map(|(b, s, _)| (*b, s.weight)).collect() } else { locked.clone() };
+        let all_relative = !samples.is_empty() && locked.is_empty() && samples.iter().all(|(_, _, rel)| *rel);
         if w.is_empty() && self.weight_all_vertices {
             // Weight All Vertices: a vertex outside every envelope goes fully to the nearest bone.
             let nearest = self
                 .bones
                 .iter()
                 .enumerate()
-                .filter(|(i, b)| b.enabled && vertex.is_none_or(|v| !self.excluded.get(*i).is_some_and(|x| x.contains(&v))))
+                .filter(|(i, b)| self.reaches(*i, b, vertex))
                 .map(|(i, b)| {
                     let local = b.bind_inverse.transform_point3(p_world);
-                    let seg = b.envelope.end - b.envelope.start;
-                    let u = if seg.length_squared() < 1e-12 { 0.0 } else { ((local - b.envelope.start).dot(seg) / seg.length_squared()).clamp(0.0, 1.0) };
+                    let (_, closest) = b.envelope.closest(local);
                     // Distance in world units (the bind matrix may scale).
-                    let closest = b.envelope.start + seg * u;
                     let d = (b.bind_inverse.inverse().transform_point3(closest) - p_world).length();
                     (i, d)
                 })
@@ -304,24 +650,32 @@ impl SkinData {
                 w.push((i as u32, 1.0));
             }
         }
-        limit_and_normalize(&mut w, self.bone_affect_limit);
+        limit(&mut w, self.bone_affect_limit);
+        if all_relative && w.iter().map(|(_, x)| *x).sum::<f32>() < 1.0 {
+            w.retain(|(_, x)| *x > 1e-7);
+            w.sort_by_key(|(b, _)| *b);
+        } else {
+            normalize(&mut w);
+        }
         w
     }
 
-    /// The weights a vertex uses: its own when hand-set, else the envelopes'.
+    /// The weights a vertex uses: its own when hand-set, else the envelopes';
+    /// Rigid (per vertex or Rigid Vertices (All)) keeps the strongest bone only.
     pub fn vertex_weights(&self, i: usize, p_world: Vec3) -> Vec<(u32, f32)> {
-        if self.explicit.get(i).copied().unwrap_or(false) {
+        let w = if self.explicit.get(i).copied().unwrap_or(false) {
             let mut w = self.weights.get(i).cloned().unwrap_or_default();
             w.retain(|(b, _)| (*b as usize) < self.bones.len());
-            if self.rigid.get(i).copied().unwrap_or(false) {
-                if let Some(best) = w.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)) {
-                    return vec![(best.0, 1.0)];
-                }
-            }
-            limit_and_normalize(&mut w, self.bone_affect_limit);
-            return w;
+            limit(&mut w, self.bone_affect_limit);
+            normalize(&mut w);
+            w
+        } else {
+            self.envelope_weights(p_world, Some(i as u32))
+        };
+        if self.rigid_all || self.rigid.get(i).copied().unwrap_or(false) {
+            return strongest(&w);
         }
-        self.envelope_weights(p_world, Some(i as u32))
+        w
     }
 
     /// Sets the bone's weight on a vertex (Abs. Effect / Weight Tool): the
@@ -344,6 +698,26 @@ impl SkinData {
         self.weights[vertex] = out;
         self.explicit[vertex] = true;
     }
+
+    /// The weights a point uses on a patch: a handle (index ≥ the vertex
+    /// count) takes its vertex's weights with Rigid Patch Handles (All), or
+    /// that vertex's strongest bone with Rigid Handles on the vertex.
+    pub fn point_weights(&self, i: usize, p_world: Vec3, handle_owner: Option<(usize, Vec3)>) -> Vec<(u32, f32)> {
+        if let Some((k, k_world)) = handle_owner {
+            if self.rigid_patch_handles_all {
+                return self.vertex_weights(k, k_world);
+            }
+            if self.rigid_handles.get(k).copied().unwrap_or(false) {
+                return strongest(&self.vertex_weights(k, k_world));
+            }
+        }
+        self.vertex_weights(i, p_world)
+    }
+}
+
+/// The strongest bone alone, at full weight.
+pub fn strongest(w: &[(u32, f32)]) -> Vec<(u32, f32)> {
+    w.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1)).map(|b| vec![(b.0, 1.0)]).unwrap_or_default()
 }
 
 pub fn normalize(w: &mut Vec<(u32, f32)>) {
@@ -357,44 +731,104 @@ pub fn normalize(w: &mut Vec<(u32, f32)>) {
     w.sort_by_key(|(b, _)| *b);
 }
 
-fn limit_and_normalize(w: &mut Vec<(u32, f32)>, limit: u32) {
+fn limit(w: &mut Vec<(u32, f32)>, limit: u32) {
     let limit = limit.max(1) as usize;
     if w.len() > limit {
         w.sort_by(|a, b| b.1.total_cmp(&a.1));
         w.truncate(limit);
     }
-    normalize(w);
+}
+
+/// The patch handle → its vertex (the edge end it belongs to), for every handle.
+pub fn handle_owners(patch: &loom_mesh::patch::PatchMesh) -> Vec<Option<usize>> {
+    let mut out = vec![None; patch.vecs.len()];
+    for e in &patch.edges {
+        for s in 0..2 {
+            if let Some(o) = out.get_mut(e.vec[s] as usize) {
+                *o = Some(e.v[s] as usize);
+            }
+        }
+    }
+    out
+}
+
+/// The points a Skin weights in a stack value: a patch's vertices then
+/// handles, else the mesh's vertices.
+pub fn weighted_points(v: &StackValue) -> Vec<Vec3> {
+    match &v.patch {
+        Some(p) => p.verts.iter().chain(p.vecs.iter()).copied().collect(),
+        None => v.mesh.vertices().iter().map(|x| x.position).collect(),
+    }
+}
+
+/// A matrix without its scale (Ignore Bone Scale).
+fn unscaled(m: Mat4) -> Mat4 {
+    let (_, r, t) = m.to_scale_rotation_translation();
+    Mat4::from_rotation_translation(r, t)
+}
+
+/// Each bone's world → world matrix now: current world × bind inverse,
+/// unscaled with Ignore Bone Scale, with the envelope's Squash applied
+/// across a bone that stretches with Stretch = Squash.
+pub fn bone_matrices(data: &SkinData, ctx: &EvalCtx<'_>) -> Vec<Option<Mat4>> {
+    data.bones
+        .iter()
+        .map(|b| {
+            let w = ctx.node_world_matrix(b.node)?;
+            let bind = b.bind_inverse.inverse();
+            let (w, bind) = if data.ignore_bone_scale { (unscaled(w), unscaled(bind)) } else { (w, bind) };
+            let mut m = w * bind.inverse();
+            if ctx.bone_squashes.is_some_and(|f| f(b.node)) {
+                // Stretch along the bone axis relative to the bind pose; Squash scales across it by s^(-squash/2).
+                let axis = (b.envelope.end - b.envelope.start).normalize_or(Vec3::X);
+                let s = w.transform_vector3(axis).length() / bind.transform_vector3(axis).length().max(1e-9);
+                if (s - 1.0).abs() > 1e-5 {
+                    let k = s.powf(-0.5 * b.envelope.squash);
+                    let across = Mat4::from_cols_array_2d(&{
+                        // k·I + (1 − k)·a·aᵀ: scale k across the axis, 1 along it (bone frame).
+                        let a = axis;
+                        let c = |i: usize, j: usize| (if i == j { k } else { 0.0 }) + (1.0 - k) * a[i] * a[j];
+                        [[c(0, 0), c(0, 1), c(0, 2), 0.0], [c(1, 0), c(1, 1), c(1, 2), 0.0], [c(2, 0), c(2, 1), c(2, 2), 0.0], [0.0, 0.0, 0.0, 1.0]]
+                    });
+                    m = w * across * bind.inverse();
+                }
+            }
+            Some(m)
+        })
+        .collect()
 }
 
 /// Linear blend skinning of the stack value against the bind pose.
 pub fn apply(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<StackValue, String> {
-    let n = v.mesh.vertex_count();
+    let positions = weighted_points(&v);
+    let n = positions.len();
     let mut data = std::borrow::Cow::Borrowed(data);
     if data.weights.len() != n {
         let d = data.to_mut();
         let kept = d.weights.len().min(n);
-        let dropped = d.weights.len().saturating_sub(n);
         d.resize(n);
-        v.warnings.push(format!("Topology changed below Skin: {} vertices keep their weights, {} re-weighted from envelopes", kept, n.saturating_sub(kept) + dropped.min(0)));
+        v.warnings.push(format!("Topology changed below Skin: {} vertices keep their weights, {} re-weighted from envelopes", kept, n.saturating_sub(kept)));
     }
-    if data.bones.is_empty() {
+    // Always Deform off: no deformation until it is turned on again (which binds anew).
+    if data.bones.is_empty() || !data.always_deform {
         return Ok(v);
     }
-    // Bone matrices: current world × bind inverse (world → world).
-    let mats: Vec<Option<Mat4>> = data.bones.iter().map(|b| ctx.node_world_matrix(b.node).map(|w| w * b.bind_inverse)).collect();
-    if !data.always_deform && mats.iter().any(|m| m.is_none()) {
-        return Ok(v);
-    }
+    let fast = data.fast_updates && !crate::anim::rendering();
+    let mats = bone_matrices(&data, ctx);
     let mesh_bind = data.mesh_bind;
-    let positions: Vec<Vec3> = v.mesh.vertices().iter().map(|vx| vx.position).collect();
+    let back = if data.back_transform { ctx.object_inverse } else { mesh_bind.inverse() };
+    let nv = v.patch.as_ref().map_or(n, |p| p.verts.len());
+    let owners = v.patch.as_ref().map(handle_owners).unwrap_or_default();
     let mut out = positions.clone();
     for (i, p) in positions.iter().enumerate() {
         let p_world = mesh_bind.transform_point3(*p);
-        let w = data.vertex_weights(i, p_world);
-        if w.is_empty() {
-            if !data.always_deform {
-                return Ok(v);
-            }
+        let owner = if i >= nv { owners.get(i - nv).copied().flatten().map(|k| (k, mesh_bind.transform_point3(positions[k]))) } else { None };
+        let mut w = data.point_weights(i, p_world, owner);
+        if fast {
+            w = strongest(&w);
+        }
+        let sum: f32 = w.iter().map(|(_, x)| *x).sum();
+        if sum <= 1e-6 {
             continue;
         }
         let mut acc = Vec3::ZERO;
@@ -406,13 +840,29 @@ pub fn apply(data: &SkinData, mut v: StackValue, ctx: &EvalCtx<'_>) -> Result<St
             }
         }
         if total > 1e-6 {
-            out[i] = ctx.object_inverse.transform_point3(acc / total);
+            // A Relative vertex with less than full weight keeps the rest at its own (undeformed) place.
+            let k = sum.min(1.0);
+            let world = acc / total * k + ctx.object_world.transform_point3(*p) * (1.0 - k);
+            out[i] = back.transform_point3(world);
         }
     }
-    // Gizmos: Joint Angle deltas and Bulge Angle scaling driven by the bones' current angles.
-    gizmos::apply(&data, ctx, &positions, &mut out);
-    for (vx, p) in v.mesh.vertices_mut().iter_mut().zip(out) {
-        vx.position = p;
+    if !fast {
+        // Gizmos: Joint Angle / Bulge Angle lattices and deltas, Morph Angle targets, driven by the bones' current angles.
+        gizmos::apply(&data, ctx, &positions, &mut out);
+    }
+    match &mut v.patch {
+        Some(patch) => {
+            let (verts, vecs) = out.split_at(nv);
+            patch.verts = verts.to_vec();
+            patch.vecs = vecs.to_vec();
+            let (steps, interior) = v.patch_steps.unwrap_or((5, false));
+            v.mesh = patch.tessellate(steps, interior);
+        }
+        None => {
+            for (vx, p) in v.mesh.vertices_mut().iter_mut().zip(out) {
+                vx.position = p;
+            }
+        }
     }
     Ok(v)
 }
@@ -433,12 +883,17 @@ pub fn mirrored_bone_name(name: &str) -> Option<String> {
     None
 }
 
+/// The bones' bind bases in the object's space.
+pub fn bone_bases(data: &SkinData) -> Vec<Vec3> {
+    let to_obj = data.mesh_bind.inverse();
+    data.bones.iter().map(|b| to_obj.transform_point3(b.bind_inverse.inverse().transform_point3(Vec3::ZERO))).collect()
+}
+
 /// Mirror Mode: the bone across the plane for each bone (by its bind base
 /// within `threshold`, else by name), as indices; a bone with no partner maps to itself.
 pub fn mirror_bone_pairs(data: &SkinData, names: &[String], plane: u32, offset: f32, threshold: f32) -> Vec<usize> {
     let a = (plane.min(2)) as usize;
-    let to_obj = data.mesh_bind.inverse();
-    let bases: Vec<Vec3> = data.bones.iter().map(|b| to_obj.transform_point3(b.bind_inverse.inverse().transform_point3(Vec3::ZERO))).collect();
+    let bases = bone_bases(data);
     let mirror = |mut p: Vec3| {
         p[a] = 2.0 * offset - p[a];
         p
@@ -455,6 +910,85 @@ pub fn mirror_bone_pairs(data: &SkinData, names: &[String], plane: u32, offset: 
                 .unwrap_or(i)
         })
         .collect()
+}
+
+/// Mirror Mode side of a point: -1 green (negative side), 1 blue (positive),
+/// 0 red (on the plane, or without a mirrored partner within the threshold).
+pub fn mirror_sides(points: &[Vec3], plane: u32, offset: f32, threshold: f32) -> Vec<i8> {
+    let a = plane.min(2) as usize;
+    points
+        .iter()
+        .map(|p| {
+            let d = p[a] - offset;
+            if d.abs() <= 1e-6 {
+                return 0;
+            }
+            let mut m = *p;
+            m[a] = 2.0 * offset - m[a];
+            let paired = points.iter().any(|q| (q[a] - offset) * d < 0.0 && q.distance(m) <= threshold);
+            if !paired {
+                0
+            } else if d < 0.0 {
+                -1
+            } else {
+                1
+            }
+        })
+        .collect()
+}
+
+/// Mirror Mode side of each bone (by its bind base): -1 green, 1 blue, 0 red.
+pub fn bone_sides(data: &SkinData, names: &[String]) -> Vec<i8> {
+    let m = &data.mirror;
+    let a = m.plane.min(2) as usize;
+    let pairs = mirror_bone_pairs(data, names, m.plane, m.offset, m.threshold);
+    bone_bases(data)
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            if pairs[i] == i {
+                0
+            } else if p[a] < m.offset {
+                -1
+            } else {
+                1
+            }
+        })
+        .collect()
+}
+
+/// Mirror Mode > Paste Green to Blue Bones / Blue to Green Bones: each
+/// source-side bone's envelope (mirrored across the plane) lands on its
+/// partner. Returns the count pasted.
+pub fn mirror_envelopes(data: &mut SkinData, names: &[String], green_to_blue: bool) -> usize {
+    let sides = bone_sides(data, names);
+    let m = data.mirror.clone();
+    let pairs = mirror_bone_pairs(data, names, m.plane, m.offset, m.threshold);
+    let a = m.plane.min(2) as usize;
+    let mesh_bind = data.mesh_bind;
+    let flip = |p: Vec3| {
+        let mut q = mesh_bind.inverse().transform_point3(p);
+        q[a] = 2.0 * m.offset - q[a];
+        mesh_bind.transform_point3(q)
+    };
+    let src = if green_to_blue { -1 } else { 1 };
+    let mut pasted = 0;
+    let before = data.bones.clone();
+    for (i, b) in before.iter().enumerate() {
+        let j = pairs[i];
+        if sides[i] != src || j == i {
+            continue;
+        }
+        // Envelope end points: source bone frame → world → mirrored → target bone frame.
+        let to_world = b.bind_inverse.inverse();
+        let target_inv = before[j].bind_inverse;
+        let map = |p: Vec3| target_inv.transform_point3(flip(to_world.transform_point3(p)));
+        let e = &mut data.bones[j];
+        e.envelope = Envelope { start: map(b.envelope.start), end: map(b.envelope.end), path: b.envelope.path.iter().map(|p| map(*p)).collect(), ..b.envelope.clone() };
+        e.cross_sections = b.cross_sections.clone();
+        pasted += 1;
+    }
+    pasted
 }
 
 /// Mirror Mode > Paste Green to Blue / Blue to Green: weights of the vertices on
@@ -532,47 +1066,103 @@ pub mod gizmos {
         Vec::new()
     }
 
+    /// The lattice offsets (bone frame) of a gizmo at an angle, blended between keys.
+    pub fn lattice_offsets(g: &SkinGizmo, blend: &[(f32, usize)]) -> Option<Vec<Vec3>> {
+        let lat = g.lattice.as_ref()?;
+        let n = lat.count();
+        let mut out = vec![Vec3::ZERO; n];
+        let mut any = false;
+        for (w, k) in blend {
+            let key = &g.keys[*k];
+            if key.lattice.len() == n {
+                any = true;
+                for (o, d) in out.iter_mut().zip(&key.lattice) {
+                    *o += *d * *w;
+                }
+            }
+        }
+        any.then_some(out)
+    }
+
+    /// Whether vertex `i` belongs to the gizmo: its stored vertices, or (with
+    /// none stored) every vertex its bones weight; Bulge Angle only the parent bone's.
+    fn member(data: &SkinData, g: &SkinGizmo, i: usize, w: &[(u32, f32)]) -> bool {
+        if !g.vertices.is_empty() {
+            return g.vertices.binary_search(&(i as u32)).is_ok() || g.vertices.contains(&(i as u32));
+        }
+        let on = |b: usize| w.iter().any(|(x, y)| *x as usize == b && *y > 0.0);
+        let _ = data;
+        match g.kind {
+            GizmoKind::BulgeAngle => on(g.parent_bone),
+            _ => on(g.bone) || on(g.parent_bone),
+        }
+    }
+
     pub fn apply(data: &SkinData, ctx: &EvalCtx<'_>, rest: &[Vec3], out: &mut [Vec3]) {
         for g in data.gizmos.iter().filter(|g| g.enabled && !g.keys.is_empty()) {
             let Some(angle) = bone_angle(data, ctx, g.bone, g.parent_bone) else { continue };
             let blend = key_blend(&g.keys, angle);
             let Some(bone) = data.bones.get(g.bone) else { continue };
             let Some(bw) = ctx.node_world_matrix(bone.node) else { continue };
-            match g.kind {
-                GizmoKind::JointAngle => {
-                    for (w, k) in &blend {
-                        for (vi, delta) in &g.keys[*k].deltas {
-                            if let Some(p) = out.get_mut(*vi as usize) {
-                                let world = bw.transform_vector3(*delta) * *w * g.influence;
-                                *p += ctx.object_inverse.transform_vector3(world);
-                            }
+            // Joint Angle deltas and Morph Angle targets: per-vertex deltas in the child bone's frame.
+            if matches!(g.kind, GizmoKind::JointAngle | GizmoKind::MorphAngle) {
+                for (w, k) in &blend {
+                    for (vi, delta) in &g.keys[*k].deltas {
+                        if let Some(p) = out.get_mut(*vi as usize) {
+                            let world = bw.transform_vector3(*delta) * *w * g.influence;
+                            *p += ctx.object_inverse.transform_vector3(world);
                         }
                     }
                 }
-                GizmoKind::BulgeAngle => {
-                    let bulge: f32 = blend.iter().map(|(w, k)| w * g.keys[*k].bulge).sum::<f32>() * g.influence;
-                    if bulge.abs() < 1e-6 {
-                        continue;
-                    }
-                    // Vertices weighted to both bones bulge away from the child bone's axis.
-                    let axis_o = bw.transform_point3(Vec3::ZERO);
-                    let axis_d = bw.transform_vector3(Vec3::X).normalize_or_zero();
+            }
+            // Edit Lattice: the lattice's offsets at this angle move the vertices inside it (FFD weights).
+            if let (Some(lat), Some(offsets)) = (g.lattice.as_ref(), lattice_offsets(g, &blend)) {
+                let lb = g.lattice_bone();
+                if let (Some(lbone), Some(lw)) = (data.bones.get(lb), data.bones.get(lb).and_then(|b| ctx.node_world_matrix(b.node))) {
                     for (i, p) in out.iter_mut().enumerate() {
                         let pw = data.mesh_bind.transform_point3(rest[i]);
-                        let w = data.vertex_weights(i, pw);
-                        let wb = w.iter().find(|(b, _)| *b as usize == g.bone).map(|x| x.1).unwrap_or(0.0);
-                        let wp = w.iter().find(|(b, _)| *b as usize == g.parent_bone).map(|x| x.1).unwrap_or(0.0);
-                        let share = (wb.min(wp) * 2.0).min(1.0);
-                        if share < 0.05 {
+                        let local = lbone.bind_inverse.transform_point3(pw);
+                        let u = lat.unit(local, g.twist);
+                        let inside = (0.0..=1.0).contains(&u.x) && (0.0..=1.0).contains(&u.y) && (0.0..=1.0).contains(&u.z);
+                        let take = if g.bounding_volume { inside } else { inside && member(data, g, i, &data.vertex_weights(i, pw)) };
+                        if !take {
                             continue;
                         }
-                        let world = ctx.object_world.transform_point3(*p);
-                        let along = (world - axis_o).dot(axis_d);
-                        let foot = axis_o + axis_d * along;
-                        let radial = world - foot;
-                        let moved = foot + radial * (1.0 + bulge * share);
-                        *p = ctx.object_inverse.transform_point3(moved);
+                        let fw = loom_mesh::ffd::weights(lat.dims, false, u);
+                        let d: Vec3 = fw.iter().zip(&offsets).map(|(w, o)| *o * *w).sum();
+                        if d.length_squared() > 0.0 {
+                            let twisted = lat.frame(g.twist).transform_vector3(d);
+                            *p += ctx.object_inverse.transform_vector3(lw.transform_vector3(twisted) * g.influence);
+                        }
                     }
+                }
+            }
+            if g.kind == GizmoKind::BulgeAngle {
+                let bulge: f32 = blend.iter().map(|(w, k)| w * g.keys[*k].bulge).sum::<f32>() * g.influence;
+                if bulge.abs() < 1e-6 {
+                    continue;
+                }
+                // Vertices weighted to both bones bulge away from the child bone's axis.
+                let axis_o = bw.transform_point3(Vec3::ZERO);
+                let axis_d = bw.transform_vector3(Vec3::X).normalize_or_zero();
+                for (i, p) in out.iter_mut().enumerate() {
+                    if !g.vertices.is_empty() && !g.vertices.contains(&(i as u32)) {
+                        continue;
+                    }
+                    let pw = data.mesh_bind.transform_point3(rest[i]);
+                    let w = data.vertex_weights(i, pw);
+                    let wb = w.iter().find(|(b, _)| *b as usize == g.bone).map(|x| x.1).unwrap_or(0.0);
+                    let wp = w.iter().find(|(b, _)| *b as usize == g.parent_bone).map(|x| x.1).unwrap_or(0.0);
+                    let share = (wb.min(wp) * 2.0).min(1.0);
+                    if share < 0.05 {
+                        continue;
+                    }
+                    let world = ctx.object_world.transform_point3(*p);
+                    let along = (world - axis_o).dot(axis_d);
+                    let foot = axis_o + axis_d * along;
+                    let radial = world - foot;
+                    let moved = foot + radial * (1.0 + bulge * share);
+                    *p = ctx.object_inverse.transform_point3(moved);
                 }
             }
         }

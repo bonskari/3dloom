@@ -490,6 +490,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             }
                         }
                     }
+                    // Skin > Edit Envelopes: dragging an envelope end point or a cross-section ring.
+                    crate::skin_view::drag(app, &ctx, &pointer, response.hovered(), p, &projection);
                     // Skin > Paint Weights brush.
                     crate::poly_modes::skin_paint(app, &ctx, &painter, &pointer, response.hovered(), p, rect, view, proj, &projection);
                     // Paint Deformation brush: LMB paints on the selected poly (Ctrl inverts, Shift relaxes).
@@ -592,6 +594,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && !app.poly_dragging
                         && app.state.paint_deform.is_none()
                         && !app.state.vertex_paint_brush
+                        // Skin > Edit Envelopes: clicks pick vertices and envelopes, the object stays.
+                        && !loom_commands::skin::picks_vertices(&app.state)
                     {
                         let object_level = app.state.selection_mode == SelectionMode::Object;
                         // Sub-objects (not splines, whose knots have their own drags; no Shift clone).
@@ -882,7 +886,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             let special = app.state.pick_mode.is_none()
                                 && (crate::poly_modes::normals_pick(app, &projection, None, p, mods)
                                     || crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods)
-                                    || crate::poly_modes::skin_pick(app, &projection, None, p, mods));
+                                    || crate::poly_modes::skin_pick(app, &projection, None, p, mods)
+                                    || crate::morph_view::pick(app, &projection, None, p, mods));
                             if !special {
                                 let picked = picks_at(app, p, rect, view, proj, view_proj);
                                 apply_picks(app, picked, mods);
@@ -909,7 +914,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             } else if let Some(start) = app.drag_select_start.take() {
                                 let drag_px = (start - p).length();
                                 if drag_px < 4.0 {
-                                    if matches!(app.state.pick_mode, Some(loom_commands::PickMode::SpacingPointA | loom_commands::PickMode::SpacingPointB | loom_commands::PickMode::MeasureDistanceA | loom_commands::PickMode::MeasureDistanceB)) {
+                                    if matches!(app.state.pick_mode, Some(loom_commands::PickMode::SpacingPointA | loom_commands::PickMode::SpacingPointB | loom_commands::PickMode::MeasureDistanceA | loom_commands::PickMode::MeasureDistanceB | loom_commands::PickMode::BipedFootstep)) {
                                         // Spacing Tool > Pick Points, Measure Distance: the snap point, else the construction plane.
                                         let point = snap_at(app, index, &projection, p, None, false).map(|h| h.point).or_else(|| creation_anchor(app, index, p, rect, view, proj).map(|(a, _)| a));
                                         if let Some(pt) = point {
@@ -952,6 +957,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::vertex_paint_face_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::skin_pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_none() && crate::poly_modes::ffd_pick(app, &projection, None, p, mods) {
+                                    } else if app.state.pick_mode.is_none() && crate::morph_view::pick(app, &projection, None, p, mods) {
                                     } else if app.state.pick_mode.is_some() && !matches!(app.state.pick_mode, Some(loom_commands::PickMode::SplineFillet | loom_commands::PickMode::SplineChamfer)) {
                                         if let Some(Pick::Object(i)) = pick_object(app, p, rect, view, proj) {
                                             let id = app.world_meshes()[i].0;
@@ -980,7 +986,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                     }
                                 } else {
                                     let region = drag_region(app, start, p);
-                                    if !crate::poly_modes::normals_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::vertex_paint_face_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::skin_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::ffd_pick(app, &projection, Some(&region), p, mods) {
+                                    if !crate::poly_modes::normals_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::vertex_paint_face_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::skin_pick(app, &projection, Some(&region), p, mods) && !crate::poly_modes::ffd_pick(app, &projection, Some(&region), p, mods) && !crate::morph_view::pick(app, &projection, Some(&region), p, mods) {
                                         // Auto Window/Crossing by Direction: left-to-right = Window, right-to-left = Crossing.
                                         let window = if app.state.prefs.auto_window_crossing { p.x >= start.x } else { app.state.window_selection };
                                         let items = region_select_mode(app, &region, rect, view_proj, window);
@@ -3000,7 +3006,7 @@ fn distance_to_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     p.distance(a + ab * t)
 }
 
-fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
+pub(crate) fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
     let eps = 1e-6;
     let edge1 = b - a;
     let edge2 = c - a;

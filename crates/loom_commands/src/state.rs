@@ -295,6 +295,10 @@ pub enum PickMode {
     WorkingPivotSurface,
     /// Protractor > Pick Object 1 / 2: the clicked object.
     ProtractorObject(u8),
+    /// Biped Structure > Xtras > Pick Parent: the clicked part becomes the tail's parent.
+    BipedXtraParent,
+    /// Biped Footstep Creation > Create Footsteps (append): each click places a footstep.
+    BipedFootstep,
     /// Tools > Measure Distance: first and second point.
     MeasureDistanceA,
     MeasureDistanceB,
@@ -304,6 +308,12 @@ pub enum PickMode {
     PlaceHighlight,
     /// Spacing Tool > Pick Path: the clicked shape is the path.
     SpacingPath,
+    /// Skin Morph > Pick Bone: each clicked bone joins the list.
+    SkinMorphBone,
+    /// Skin Morph > External Mesh: the clicked object becomes the current morph's target.
+    SkinMorphExternal,
+    /// Skin Wrap > Add: each clicked object becomes a control object.
+    SkinWrapControl,
 }
 
 /// Paint Deformation brushes.
@@ -1471,6 +1481,8 @@ pub struct AppState {
     pub material_editor_open: bool,
     /// Material Editor > Material/Map Navigator: its own modeless window.
     pub material_navigator_open: bool,
+    /// The Material Editor's current material library (Put to Library, Mtl Library).
+    pub material_library: crate::material_library::MaterialLibraryState,
     /// Bumped by Reload Bitmaps: the viewports read their image files again.
     pub bitmap_generation: u64,
     /// Display panel and viewport display settings (Display Color, statistics, Object Color dialog...).
@@ -1565,6 +1577,8 @@ pub struct AppState {
     pub poly_drag: Option<PolyDrag>,
     /// The last geometry operation, for Repeat Last Operation (;).
     pub last_poly_op: Option<crate::command::Command>,
+    /// Biped Xtras > Pick Parent: the biped, the tail and Reorient to Parent.
+    pub biped_xtra_pick: Option<(NodeId, String, bool)>,
     /// Target Weld / Edit Triangulation first pick.
     pub pick_source: Option<(NodeId, u32)>,
     /// Create (polygon level): vertices picked so far.
@@ -1689,9 +1703,13 @@ pub struct AppState {
     pub skin_clipboard_weights: Vec<(Vec3, Vec<(NodeId, f32)>)>,
     /// Skin > Gizmos: the current gizmo index.
     pub skin_gizmo: Option<usize>,
+    /// Skin: cross section and lattice selections, pick modes, buffers, the Load Envelopes file.
+    pub skin_ui: crate::skin::SkinUi,
     /// Morpher > Channel List: the current channel; Skin Morph: the current morph.
     pub morph_channel: usize,
     pub skin_morph_current: Option<usize>,
+    /// Skin Morph list: the highlighted bone (Create Morph acts on it).
+    pub skin_morph_bone: Option<NodeId>,
     /// Systems > Bones > IK Chain Assignment: new chains get an HI solver.
     pub bones_ik_chain: bool,
     pub current_frame: i32,
@@ -1812,6 +1830,7 @@ impl AppState {
             dialog: None,
             material_editor_open: false,
             material_navigator_open: false,
+            material_library: Default::default(),
             bitmap_generation: 0,
             display: Default::default(),
             dialog_purpose: DialogPurpose::Select,
@@ -1875,6 +1894,7 @@ impl AppState {
             full_interactivity: true,
             preserve_uvs: false,
             pick_point_a: None,
+            biped_xtra_pick: None,
             paint_deform: None,
             branches: false,
             soft_cache: Default::default(),
@@ -1929,7 +1949,7 @@ impl AppState {
             skin_paste_tolerance: 0.1,
             skin_paint: false,
             skin_painter: crate::skin::Painter::default(),
-            skin_filter_vertices: true,
+            skin_filter_vertices: false,
             skin_filter_envelopes: true,
             skin_filter_cross_sections: true,
             skin_backface_cull: false,
@@ -1937,8 +1957,10 @@ impl AppState {
             skin_clipboard_envelope: None,
             skin_clipboard_weights: Vec::new(),
             skin_gizmo: None,
+            skin_ui: crate::skin::SkinUi::default(),
             morph_channel: 0,
             skin_morph_current: None,
+            skin_morph_bone: None,
             bones_ik_chain: false,
             current_frame: 0,
             frame_range: (0, 100),
@@ -2400,6 +2422,9 @@ impl AppState {
         }
         if self.edit_working_pivot {
             return self.working_pivot.origin;
+        }
+        if let Some(p) = crate::skin::pivot(self) {
+            return p;
         }
         self.selection_bounds()
             .map(|(a, b)| (a + b) * 0.5)

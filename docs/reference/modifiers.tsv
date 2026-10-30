@@ -103,7 +103,7 @@ Edit Patch	OSM	in
 Patch Select	OSM	out	not in Loom yet (patches: Editable Patch, Edit Patch, Patch Grids only)
 PatchDeform	OSM	out	not in Loom yet (patches: Editable Patch, Edit Patch, Patch Grids only)
 Turn To Patch	OSM	out	not in Loom yet (patches: Editable Patch, Edit Patch, Patch Grids only)
-Skin Wrap Patch	OSM	out	not in Loom yet (patches: Editable Patch, Edit Patch, Patch Grids only)
+Skin Wrap Patch	OSM	in	
 Disp Approx	OSM	out	render-time displacement approximation (spec: never render)
 FFD Select	OSM	out	selects control points of FFD space warps (Loom has no space warps; its FFD modifiers select points at their own Control Points level)
 LS Mesh	OSM	out	lighting analysis (render; spec: never)

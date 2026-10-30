@@ -11,19 +11,21 @@
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::{BrowserFor, Command, Dialog};
-use loom_scene::material::{map_at, resolve_level, Level, Map, MapType, MaterialKind, NavStep, SampleType, StandardMaterial, Surface, Surfaces, MAP_CHANNELS, MAP_SLOTS, SLOT_COUNT};
+use loom_scene::material::{map_at, resolve_level, Level, Map, MapType, MaterialKind, NavStep, SampleType, StandardMaterial, Surface, Surfaces, MAP_CHANNELS, SLOT_COUNT};
 use loom_scene::MaterialId;
+
+mod map_rollouts;
 
 /// A sample slot being dragged (onto another slot, an object or selected polygons).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SlotDrag(pub usize);
 
-/// A map button being dragged onto another (its `MAP_SLOTS` index).
+/// A map button being dragged onto another (its `slot_index`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MapDrag(u8);
 
 fn slot_index_of(name: &str) -> u8 {
-    MAP_SLOTS.iter().position(|s| *s == name).unwrap_or(0) as u8
+    loom_scene::map_params::slot_index(name)
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +36,7 @@ fn slot_index_of(name: &str) -> u8 {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sample {
     Surfaces(Surfaces),
-    Map(Map),
+    Map(Box<Map>),
 }
 
 /// How a preview is drawn: the sample object, its rotation (Drag/Rotate),
@@ -68,8 +70,8 @@ impl PreviewSetup {
 }
 
 /// Where a view ray through the preview's pixel (u, v in -1–1) hits the
-/// sample object: (normal, map UV), in the object's frame before rotation.
-fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, [f32; 2])> {
+/// sample object: (point, normal, map UV), in the object's frame before rotation.
+fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, glam::Vec3, [f32; 2])> {
     use std::f32::consts::PI;
     match kind {
         SampleType::Sphere => {
@@ -82,7 +84,7 @@ fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, [f
             }
             let p = o + d * (-b - disc.sqrt());
             let n = p.normalize();
-            Some((n, [0.5 + n.x.atan2(n.z) / (2.0 * PI), 0.5 + n.y.asin() / PI]))
+            Some((p, n, [0.5 + n.x.atan2(n.z) / (2.0 * PI), 0.5 + n.y.asin() / PI]))
         }
         SampleType::Cylinder => {
             let (r, h) = (0.62, 0.72);
@@ -112,7 +114,7 @@ fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, [f
                     }
                 }
             }
-            best.map(|(_, n, uv)| (n, uv))
+            best.map(|(t, n, uv)| (o + d * t, n, uv))
         }
         SampleType::Cube => {
             let h = 0.58;
@@ -133,38 +135,116 @@ fn hit(kind: SampleType, o: glam::Vec3, d: glam::Vec3) -> Option<(glam::Vec3, [f
                     }
                 }
             }
-            best.map(|(_, n, uv)| (n, uv))
+            best.map(|(t, n, uv)| (o + d * t, n, uv))
         }
     }
 }
 
-/// One surface Blinn-shaded under the sample lights at `n` (view along -Z), with its diffuse map at `uv`.
-fn shade(s: &Surface, n: glam::Vec3, uv: [f32; 2], setup: &PreviewSetup, images: &loom_scene::maps::Images) -> (glam::Vec3, f32) {
-    let mut d = s.diffuse;
-    if let Some(m) = &s.diffuse_map {
-        let t = loom_scene::maps::eval(m, uv, images);
-        d = d.lerp(glam::Vec3::new(t[0], t[1], t[2]), t[3] * (m.amount / 100.0).clamp(0.0, 1.0));
-    }
-    let view = glam::Vec3::Z;
-    let exponent = 2.0 * 2f32.powf(s.glossiness / 10.0);
-    let mut lit = s.ambient * setup.ambient + d * 0.08;
-    let mut spec = glam::Vec3::ZERO;
+/// The sample lights: (direction, colour), the top light first.
+fn sample_lights(setup: &PreviewSetup) -> Vec<(glam::Vec3, glam::Vec3)> {
     let mut lights = vec![(glam::Vec3::new(-0.5, 0.6, 0.65).normalize(), setup.top)];
     if let Some(b) = setup.back {
         lights.push((glam::Vec3::new(0.7, -0.3, -0.65).normalize(), b * 0.6));
     }
-    for (l, c) in lights {
-        let diff = n.dot(l).max(0.0);
-        lit += d * c * diff;
-        let h = (l + view).normalize();
-        spec += s.specular * c * n.dot(h).max(0.0).powf(exponent) * if diff > 0.0 { 1.0 } else { 0.0 };
+    lights
+}
+
+/// An anisotropic (Ward) highlight at `n` with tangent `t` turned by
+/// `orientation` degrees: Glossiness sets its size, Anisotropy 0–100 narrows it one way.
+fn ward(n: glam::Vec3, t: glam::Vec3, h: glam::Vec3, glossiness: f32, anisotropy: f32, orientation: f32) -> f32 {
+    let exponent = 2.0 * 2f32.powf(glossiness / 10.0);
+    let a = (2.0 / (exponent + 2.0)).sqrt();
+    let (ax, ay) = (a * (1.0 - 0.95 * anisotropy / 100.0).max(0.02), a);
+    let t = glam::Quat::from_axis_angle(n, orientation.to_radians()) * t;
+    let b = n.cross(t);
+    let nh = n.dot(h).max(1e-4);
+    (-((h.dot(t) / ax).powi(2) + (h.dot(b) / ay).powi(2)) / (nh * nh)).exp()
+}
+
+/// One surface shaded by its shader under the sample lights at the shaded
+/// point `ctx` (view along -Z; `up` the sample object's axis, for
+/// anisotropic highlights), its maps evaluated there.
+fn shade(s: &Surface, ctx: &loom_scene::maps::Ctx, up: glam::Vec3, setup: &PreviewSetup, images: &loom_scene::maps::Images) -> (glam::Vec3, f32) {
+    use loom_scene::material::Shader;
+    let n = ctx.normal;
+    let sh = &s.shading;
+    let mut d = s.diffuse;
+    if let Some(m) = &s.diffuse_map {
+        let t = loom_scene::maps::eval_ctx(m, ctx, images);
+        d = d.lerp(glam::Vec3::new(t[0], t[1], t[2]), t[3] * (m.amount / 100.0).clamp(0.0, 1.0));
     }
-    let c = lit * (1.0 - s.self_illum) + d * s.self_illum + spec;
+    if sh.shader.has_diffuse_level() {
+        d *= sh.diffuse_level / 100.0;
+    }
+    let view = glam::Vec3::Z;
+    let blinn = |g: f32| 2.0 * 2f32.powf(g / 10.0);
+    let exponent = blinn(s.glossiness);
+    let level = s.specular_level / 100.0;
+    // The highlight colour and how much the diffuse keeps.
+    let (spec_color, diffuse_k) = match sh.shader {
+        Shader::Metal => (d * level, 1.0 - 0.75 * level.min(1.0)),
+        Shader::Strauss => {
+            let (g, m) = (s.glossiness / 100.0, sh.metalness / 100.0);
+            (glam::Vec3::ONE.lerp(d, m) * (0.1 + 0.9 * g), (1.0 - m * g) * (1.0 - g * g * g))
+        }
+        _ => (s.specular, 1.0),
+    };
+    let tangent = up.cross(n).try_normalize().unwrap_or(glam::Vec3::X);
+    let sigma2 = (sh.roughness / 100.0).powi(2);
+    let mut lit = s.ambient * setup.ambient + d * 0.08;
+    let mut spec = glam::Vec3::ZERO;
+    let lights = sample_lights(setup);
+    let highlight = |n: glam::Vec3, l: glam::Vec3| -> glam::Vec3 {
+        let h = (l + view).normalize();
+        match sh.shader {
+            // Phong: the reflected light against the view, a wider highlight than Blinn's.
+            Shader::Phong => spec_color * (2.0 * n.dot(l) * n - l).dot(view).max(0.0).powf(exponent),
+            Shader::Anisotropic => spec_color * ward(n, tangent, h, s.glossiness, sh.anisotropy, sh.orientation),
+            Shader::MultiLayer => {
+                spec_color * ward(n, tangent, h, s.glossiness, sh.anisotropy, sh.orientation)
+                    + sh.specular2 * (sh.level2 / 100.0) * ward(n, tangent, h, sh.glossiness2, sh.anisotropy2, sh.orientation2)
+            }
+            _ => spec_color * n.dot(h).max(0.0).powf(exponent),
+        }
+    };
+    for (l, c) in lights {
+        let ndl = n.dot(l);
+        let diff = if sh.shader.has_roughness() && sigma2 > 0.0 {
+            // Oren-Nayar: rough surfaces flatten and darken.
+            let (a, b) = (1.0 - 0.5 * sigma2 / (sigma2 + 0.33), 0.45 * sigma2 / (sigma2 + 0.09));
+            let (ti, tr) = (ndl.clamp(-1.0, 1.0).acos(), n.dot(view).clamp(-1.0, 1.0).acos());
+            let pl = (l - n * ndl).normalize_or_zero();
+            let pv = (view - n * n.dot(view)).normalize_or_zero();
+            let cos_phi = pl.dot(pv).max(0.0);
+            ndl.max(0.0) * (a + b * cos_phi * ti.max(tr).sin() * ti.min(tr).tan())
+        } else {
+            ndl.max(0.0)
+        };
+        lit += d * c * diff * diffuse_k;
+        if sh.shader == Shader::Translucent {
+            // Light from behind scatters through in the Translucent colour times the Filter colour.
+            lit += sh.translucent_color * s.extended.filter_color * c * (-ndl).max(0.0);
+            if sh.backside_specular && ndl < 0.0 {
+                spec += highlight(-n, l) * c;
+            }
+        }
+        if ndl > 0.0 {
+            spec += highlight(n, l) * c;
+        }
+    }
+    let c = lit * (1.0 - s.self_illum) + d * s.self_illum + s.self_illum_color + spec;
     let mut a = s.opacity;
     if let Some(m) = &s.opacity_map {
-        let t = loom_scene::maps::eval(m, uv, images);
+        let t = loom_scene::maps::eval_ctx(m, ctx, images);
         let lum = (t[0] + t[1] + t[2]) / 3.0;
         a += (lum - a) * (m.amount / 100.0).clamp(0.0, 1.0);
+    }
+    // Advanced Transparency falloff: In clears the facing middle, Out the edges.
+    let e = &s.extended;
+    if e.falloff_amount > 0.0 && a < 1.0 {
+        let facing = n.dot(view).abs();
+        let extreme = 1.0 - e.falloff_amount / 100.0;
+        a = if e.falloff_out { extreme + (a - extreme) * facing } else { a + (extreme - a) * facing };
     }
     (c, a)
 }
@@ -196,9 +276,24 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                     let d = inv * glam::Vec3::new(0.0, 0.0, -1.0);
                     match hit(setup.kind, o, d) {
                         None => bg,
-                        Some((n_local, uv)) => {
+                        Some((p_local, n_local, uv)) => {
                             let n = rot * n_local;
                             let uv = [uv[0] * setup.uv_tiling, uv[1] * setup.uv_tiling];
+                            // The sample object is 100 units across (`maps::UV_UNITS`), viewed down -Z.
+                            let scale = loom_scene::maps::UV_UNITS / 2.0;
+                            let light = sample_lights(setup).first().map_or(1.0, |(l, _)| n.dot(*l).max(0.0));
+                            let ctx = loom_scene::maps::Ctx {
+                                uv,
+                                p_obj: p_local * scale,
+                                p_world: rot * p_local * scale,
+                                normal: n,
+                                view: glam::Vec3::Z,
+                                cam_x: glam::Vec3::X,
+                                cam_y: glam::Vec3::Y,
+                                obj_axes: rot,
+                                dist: (3.0 - (rot * p_local).z) * scale,
+                                light,
+                            };
                             let s = match surfaces {
                                 Surfaces::Single(s) => std::borrow::Cow::Borrowed(s.as_ref()),
                                 Surfaces::PerId(list) => {
@@ -212,7 +307,7 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                                     }
                                 }
                             };
-                            let (c, a) = shade(&s, n, uv, setup, images);
+                            let (c, a) = shade(&s, &ctx, rot * glam::Vec3::Y, setup, images);
                             bg.lerp(c, a)
                         }
                     }
@@ -232,7 +327,7 @@ fn sample_images(app: &mut LoomApp, sample: &Sample) -> loom_scene::maps::Images
         maps.extend(s.opacity_map.iter().cloned());
     };
     match sample {
-        Sample::Map(m) => maps.push(m.clone()),
+        Sample::Map(m) => maps.push((**m).clone()),
         Sample::Surfaces(Surfaces::Single(s)) => add(s),
         Sample::Surfaces(Surfaces::PerId(l)) => l.values().for_each(add),
     }
@@ -281,7 +376,7 @@ fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
                 Level::Map { owner, maps } => {
                     if let Some(map) = app.state.scene.materials.get(&owner).and_then(|o| map_at(o, &maps)) {
                         if ed.options.maps_as_2d {
-                            return Sample::Map(map.clone());
+                            return Sample::Map(Box::new(map.clone()));
                         }
                         let mut s = Surface::from_standard(&StandardMaterial::new(""));
                         s.diffuse_map = Some(Map { amount: 100.0, ..map.clone() });
@@ -425,6 +520,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 MaterialKind::MultiSub(_) => multi_sub_rollout(ui, app, &m),
                 MaterialKind::Blend(_) => blend_rollout(ui, app, &m),
                 MaterialKind::Shell(_) => shell_rollout(ui, app, &m),
+                MaterialKind::Raytrace(_) => raytrace_rollouts(ui, app, &m),
+                MaterialKind::Architectural(_) => architectural_rollouts(ui, app, &m),
+                MaterialKind::DoubleSided(_) | MaterialKind::TopBottom(_) | MaterialKind::Shellac(_) => two_material_rollout(ui, app, &m),
+                MaterialKind::Composite(_) => composite_rollout(ui, app, &m),
+                MaterialKind::MatteShadow(_) => matte_shadow_rollout(ui, app, &m),
+                MaterialKind::InkPaint(_) => ink_paint_rollouts(ui, app, &m),
             }
         } else if let Some(map) = map_at(&m, &maps).cloned() {
             map_rollouts(ui, app, &map);
@@ -480,6 +581,10 @@ fn menu(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.button("Change Material/Map Type...").clicked() {
                 let at_map = app.state.scene.material_editor.path.iter().any(|s| matches!(s, NavStep::Map(_)));
                 app.state.dialog = Some(Dialog::MaterialBrowser(if at_map { BrowserFor::MapType } else { BrowserFor::MaterialType }));
+                ui.close_menu();
+            }
+            ui.separator();
+            if workflow_buttons(ui, app) {
                 ui.close_menu();
             }
         });
@@ -612,6 +717,12 @@ fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: 
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("material_magnify"), Some(slot)));
             ui.close_menu();
         }
+        let used = app.state.scene.material_editor.slots[slot].is_some_and(|id| app.state.scene.nodes().any(|n| n.material == Some(id)));
+        if ui.add_enabled(used, egui::Button::new("Select By Material")).clicked() {
+            let _ = app.dispatch(Command::MaterialEditorSlot { slot: slot as u32 });
+            select_by_material(app);
+            ui.close_menu();
+        }
         ui.separator();
         let shown = app.state.scene.material_editor.options.slots_shown;
         for (label, n) in [("3 X 2 Sample Windows", 6u32), ("5 X 3 Sample Windows", 15), ("6 X 4 Sample Windows", 24)] {
@@ -709,7 +820,78 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         if ui.add_enabled(below_top, egui::Button::new("Go Forward to Sibling")).clicked() {
             let _ = app.dispatch(Command::MaterialEditorGoForwardToSibling);
         }
+        workflow_buttons(ui, app);
     });
+}
+
+/// Put Material to Scene, Make Material Copy, Make Unique, Put to Library,
+/// Select By Material (toolbar and Material menu alike).
+fn workflow_buttons(ui: &mut egui::Ui, app: &mut LoomApp) -> bool {
+    let ed = &app.state.scene.material_editor;
+    let top = ed.slots[ed.active].filter(|id| app.state.scene.materials.contains_key(id));
+    let at_sub = matches!(ed.path.last(), Some(NavStep::Sub(_)));
+    let used = top.is_some_and(|id| app.state.scene.nodes().any(|n| n.material == Some(id)));
+    let mut clicked = false;
+    if ui.add_enabled(top.is_some(), egui::Button::new("Put Material to Scene")).on_hover_text("Objects using a material of this name get this one").clicked() {
+        let _ = app.dispatch(Command::PutMaterialToScene);
+        clicked = true;
+    }
+    if ui.add_enabled(used, egui::Button::new("Make Material Copy")).on_hover_text("The slot gets a copy no object uses").clicked() {
+        let _ = app.dispatch(Command::MakeMaterialCopy);
+        clicked = true;
+    }
+    if ui.add_enabled(at_sub, egui::Button::new("Make Unique")).on_hover_text("This sub-material gets a copy of its own").clicked() {
+        let _ = app.dispatch(Command::MaterialMakeUnique);
+        clicked = true;
+    }
+    if ui.button("Put to Library").clicked() {
+        app.state.dialog = Some(Dialog::PutToLibrary);
+        clicked = true;
+    }
+    if ui.add_enabled(used, egui::Button::new("Select By Material")).clicked() {
+        select_by_material(app);
+        clicked = true;
+    }
+    clicked
+}
+
+/// Select By Material: the objects using the slot's material are selected
+/// and Select From Scene opens with them highlighted.
+fn select_by_material(app: &mut LoomApp) {
+    if app.dispatch(Command::SelectByMaterial).is_ok() {
+        let _ = app.dispatch(Command::SelectByName);
+    }
+}
+
+/// Put to Library: the name, then OK puts the slot's material into the current library.
+pub fn put_to_library(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("put_to_library_name");
+    let mut name: String = ctx.data(|d| d.get_temp(id)).unwrap_or_else(|| app.state.scene.slot_material(app.state.scene.material_editor.active).name);
+    let mut done = None;
+    egui::Window::new("Put to Library").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Name:");
+            ui.text_edit_singleline(&mut name);
+        });
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                done = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                done = Some(false);
+            }
+        });
+    });
+    match done {
+        Some(ok) => {
+            if ok {
+                let _ = app.dispatch(Command::PutToLibrary { name: Some(name) });
+            }
+            ctx.data_mut(|d| d.remove::<String>(id));
+            *open = false;
+        }
+        None => ctx.data_mut(|d| d.insert_temp(id, name)),
+    }
 }
 
 /// Eyedropper, the name field and the Type button.
@@ -744,47 +926,187 @@ fn name_row(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, maps: &[
 // Rollouts per level
 // ---------------------------------------------------------------------------
 
+/// A colour swatch of the material at the current level (`which` as Set Material Color names it).
+fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
+    let mut rgb = rgb_of(c);
+    if ui.color_edit_button_srgb(&mut rgb).on_hover_text(which).changed() {
+        let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: which.into(), rgb });
+    }
+}
+
+/// The highlight curve graph: intensity across the highlight for each lobe
+/// (Specular Level the height, Glossiness the width; an anisotropic lobe's
+/// narrow axis in white).
+fn highlight_graph(ui: &mut egui::Ui, lobes: &[(f32, f32, f32)]) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(120.0, 46.0), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 0.0, egui::Color32::from_gray(30));
+    for (i, (level, gloss, aniso)) in lobes.iter().enumerate() {
+        let exponent = 2.0 * 2f32.powf(gloss / 10.0);
+        for (narrow, color) in [(false, egui::Color32::from_gray(150)), (true, egui::Color32::WHITE)] {
+            if narrow && *aniso <= 0.0 {
+                continue;
+            }
+            let w = if narrow { 1.0 - 0.95 * aniso / 100.0 } else { 1.0 };
+            let pts: Vec<egui::Pos2> = (0..=60)
+                .map(|k| {
+                    let x = k as f32 / 60.0 * 2.0 - 1.0;
+                    let a = (x / w.max(0.05)).clamp(-1.0, 1.0) * std::f32::consts::FRAC_PI_2;
+                    let y = (level / 100.0) * a.cos().max(0.0).powf(exponent / 8.0);
+                    egui::pos2(rect.center().x + x * rect.width() / 2.0, rect.bottom() - 2.0 - y.min(1.2) / 1.2 * (rect.height() - 4.0))
+                })
+                .collect();
+            p.add(egui::Shape::line(pts, egui::Stroke::new(1.0_f32, if i == 0 { color } else { egui::Color32::from_rgb(200, 200, 90) })));
+        }
+    }
+}
+
 fn standard_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    use loom_scene::material::Shader;
+    let sh = m.shading.clone();
     crate::command_panel::rollout(ui, "Shader Basic Parameters", true, |ui| {
         ui.horizontal(|ui| {
-            ui.label("Blinn");
+            egui::ComboBox::from_id_salt("material_shader").width(130.0).selected_text(sh.shader.label()).show_ui(ui, |ui| {
+                for s in Shader::ALL {
+                    if ui.selectable_label(sh.shader == s, s.label()).clicked() {
+                        let _ = app.dispatch(Command::SetShader { shader: s.label().into() });
+                    }
+                }
+            });
             check(ui, app, "Wire", "Wire", m.wire);
             check(ui, app, "2-Sided", "2-Sided", m.two_sided);
             check(ui, app, "Faceted", "Faceted", m.faceted);
         });
     });
-    crate::command_panel::rollout(ui, "Blinn Basic Parameters", true, |ui| {
+    let title = format!("{} Basic Parameters", sh.shader.label().trim_end_matches(" Shader"));
+    crate::command_panel::rollout(ui, &title, true, |ui| {
         egui::Grid::new("blinn_colours").num_columns(3).show(ui, |ui| {
-            for (label, c, channel) in [("Ambient", m.ambient.get(), "Ambient Color"), ("Diffuse", m.diffuse.get(), "Diffuse Color"), ("Specular", m.specular.get(), "Specular Color")] {
+            // Strauss has only Color; Metal makes its own specular colour.
+            let rows: &[(&str, &str, &str)] = match sh.shader {
+                Shader::Strauss => &[("Color", "Diffuse", "Diffuse Color")],
+                Shader::Metal => &[("Ambient", "Ambient", "Ambient Color"), ("Diffuse", "Diffuse", "Diffuse Color")],
+                Shader::MultiLayer => &[("Ambient", "Ambient", "Ambient Color"), ("Diffuse", "Diffuse", "Diffuse Color")],
+                _ => &[("Ambient", "Ambient", "Ambient Color"), ("Diffuse", "Diffuse", "Diffuse Color"), ("Specular", "Specular", "Specular Color")],
+            };
+            for (label, which, channel) in rows {
+                let c = match *which {
+                    "Ambient" => m.ambient.get(),
+                    "Diffuse" => m.diffuse.get(),
+                    _ => m.specular.get(),
+                };
                 ui.label(format!("{label}:"));
-                let mut rgb = rgb_of(c);
-                if ui.color_edit_button_srgb(&mut rgb).changed() {
-                    let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: label.into(), rgb });
-                }
+                swatch(ui, app, which, c);
                 map_button(ui, app, channel, m.map(channel), true);
                 ui.end_row();
             }
         });
-        check(ui, app, "Lock Ambient and Diffuse", "Ambient/Diffuse Lock", m.ambient_locked);
-        ui.horizontal(|ui| {
-            spinner(ui, app, "Self-Illumination", m.self_illum.get(), 0.0..=100.0, 0);
-            map_button(ui, app, "Self-Illumination", m.map("Self-Illumination"), true);
-        });
+        if sh.shader != Shader::Strauss {
+            ui.horizontal(|ui| {
+                check(ui, app, "Lock Ambient and Diffuse", "Ambient/Diffuse Lock", m.ambient_locked);
+                if !matches!(sh.shader, Shader::Metal | Shader::MultiLayer) {
+                    check(ui, app, "Lock Diffuse and Specular", "Diffuse/Specular Lock", sh.diffuse_specular_locked);
+                }
+            });
+        }
+        if sh.shader.has_diffuse_level() || sh.shader.has_roughness() {
+            ui.label(egui::RichText::new("Advanced Diffuse").strong());
+            if sh.shader.has_diffuse_level() {
+                spinner(ui, app, "Diffuse Level", sh.diffuse_level, 0.0..=400.0, 0);
+            }
+            if sh.shader.has_roughness() {
+                spinner(ui, app, "Roughness", sh.roughness, 0.0..=100.0, 0);
+            }
+        }
+        if sh.shader != Shader::Strauss {
+            ui.label(egui::RichText::new("Self-Illumination").strong());
+            ui.horizontal(|ui| {
+                check(ui, app, "Color", "Self-Illum Color On", sh.self_illum_color_on);
+                if sh.self_illum_color_on {
+                    swatch(ui, app, "Self-Illum Color", sh.self_illum_color);
+                } else {
+                    spinner(ui, app, "Self-Illumination", m.self_illum.get(), 0.0..=100.0, 0);
+                }
+                map_button(ui, app, "Self-Illumination", m.map("Self-Illumination"), true);
+            });
+        }
         ui.horizontal(|ui| {
             spinner(ui, app, "Opacity", m.opacity.get(), 0.0..=100.0, 0);
             map_button(ui, app, "Opacity", m.map("Opacity"), true);
         });
-        ui.label(egui::RichText::new("Specular Highlights").strong());
+        if sh.shader == Shader::Translucent {
+            ui.label(egui::RichText::new("Translucency").strong());
+            egui::Grid::new("translucency").num_columns(3).show(ui, |ui| {
+                ui.label("Translucent Clr:");
+                swatch(ui, app, "Translucent Color", sh.translucent_color);
+                ui.label("");
+                ui.end_row();
+                ui.label("Filter Color:");
+                swatch(ui, app, "Filter Color", m.extended.filter_color);
+                map_button(ui, app, "Filter Color", m.map("Filter Color"), true);
+                ui.end_row();
+            });
+        }
+        let first = if sh.shader == Shader::MultiLayer { "First Specular Layer" } else { "Specular Highlights" };
+        ui.label(egui::RichText::new(first).strong());
         ui.horizontal(|ui| {
-            spinner(ui, app, "Specular Level", m.specular_level.get(), 0.0..=999.0, 0);
-            map_button(ui, app, "Specular Level", m.map("Specular Level"), true);
+            ui.vertical(|ui| {
+                if sh.shader == Shader::MultiLayer {
+                    ui.horizontal(|ui| {
+                        ui.label("Color:");
+                        swatch(ui, app, "Specular", m.specular.get());
+                        map_button(ui, app, "Specular Color", m.map("Specular Color"), true);
+                    });
+                }
+                if sh.shader != Shader::Strauss {
+                    ui.horizontal(|ui| {
+                        let label = if sh.shader == Shader::MultiLayer { "Level" } else { "Specular Level" };
+                        spinner_with(ui, app, label, m.specular_level.get(), 0.0..=999.0, 0, |v| Command::SetMaterialParameter { slot: None, name: "Specular Level".into(), value: v });
+                        map_button(ui, app, "Specular Level", m.map("Specular Level"), true);
+                    });
+                }
+                ui.horizontal(|ui| {
+                    spinner(ui, app, "Glossiness", m.glossiness.get(), 0.0..=100.0, 0);
+                    map_button(ui, app, "Glossiness", m.map("Glossiness"), true);
+                });
+                match sh.shader {
+                    Shader::Strauss => spinner(ui, app, "Metalness", sh.metalness, 0.0..=100.0, 0),
+                    Shader::Anisotropic | Shader::MultiLayer => {
+                        spinner(ui, app, "Anisotropy", sh.anisotropy, 0.0..=100.0, 0);
+                        spinner(ui, app, "Orientation", sh.orientation, 0.0..=9999.0, 0);
+                    }
+                    Shader::Metal => {}
+                    _ => spinner(ui, app, "Soften", m.soften.get(), 0.0..=1.0, 2),
+                }
+                if sh.shader == Shader::Translucent {
+                    check(ui, app, "Backside specular", "Backside Specular", sh.backside_specular);
+                }
+            });
+            let level = if sh.shader == Shader::Strauss { 50.0 + sh.metalness / 2.0 } else { m.specular_level.get() };
+            let aniso = if matches!(sh.shader, Shader::Anisotropic | Shader::MultiLayer) { sh.anisotropy } else { 0.0 };
+            let mut lobes = vec![(level, m.glossiness.get(), aniso)];
+            if sh.shader == Shader::MultiLayer {
+                lobes.push((sh.level2, sh.glossiness2, sh.anisotropy2));
+            }
+            highlight_graph(ui, &lobes);
         });
-        ui.horizontal(|ui| {
-            spinner(ui, app, "Glossiness", m.glossiness.get(), 0.0..=100.0, 0);
-            map_button(ui, app, "Glossiness", m.map("Glossiness"), true);
-        });
-        spinner(ui, app, "Soften", m.soften.get(), 0.0..=1.0, 2);
+        if sh.shader == Shader::MultiLayer {
+            ui.label(egui::RichText::new("Second Specular Layer").strong());
+            ui.horizontal(|ui| {
+                ui.label("Color:");
+                swatch(ui, app, "Specular 2", sh.specular2);
+            });
+            spinner(ui, app, "Level 2", sh.level2, 0.0..=999.0, 0);
+            spinner(ui, app, "Glossiness 2", sh.glossiness2, 0.0..=100.0, 0);
+            spinner(ui, app, "Anisotropy 2", sh.anisotropy2, 0.0..=100.0, 0);
+            spinner(ui, app, "Orientation 2", sh.orientation2, 0.0..=9999.0, 0);
+        }
     });
+    extended_rollout(ui, app, m);
+    maps_rollout(ui, app, m);
+}
+
+/// The Maps rollout: each channel's check box, Amount and map button.
+fn maps_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
     crate::command_panel::rollout(ui, "Maps", false, |ui| {
         egui::Grid::new("material_maps").num_columns(4).show(ui, |ui| {
             ui.label("");
@@ -821,6 +1143,363 @@ fn standard_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
     });
 }
 
+/// Extended Parameters: Advanced Transparency (blank for the Translucent
+/// shader), Index of Refraction, Wire size, Reflection Dimming.
+fn extended_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    let e = m.extended.clone();
+    let translucent = m.shading.shader == loom_scene::material::Shader::Translucent;
+    crate::command_panel::rollout(ui, "Extended Parameters", false, |ui| {
+        let set = |app: &mut LoomApp, name: &str, v: f64| {
+            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: name.into(), value: v });
+        };
+        ui.label(egui::RichText::new("Advanced Transparency").strong());
+        if !translucent {
+            ui.horizontal(|ui| {
+                ui.label("Falloff:");
+                if ui.radio(!e.falloff_out, "In").clicked() {
+                    set(app, "Falloff Out", 0.0);
+                }
+                if ui.radio(e.falloff_out, "Out").clicked() {
+                    set(app, "Falloff Out", 1.0);
+                }
+                spinner_with(ui, app, "Amt:", e.falloff_amount, 0.0..=100.0, 0, |v| Command::SetMaterialParameter { slot: None, name: "Falloff Amount".into(), value: v });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Type:");
+                for (i, label) in ["Filter", "Subtractive", "Additive"].iter().enumerate() {
+                    if ui.radio(e.transparency_type == i as u8, *label).clicked() {
+                        set(app, "Transparency Type", i as f64);
+                    }
+                    if i == 0 {
+                        swatch(ui, app, "Filter Color", e.filter_color);
+                        map_button(ui, app, "Filter Color", m.map("Filter Color"), true);
+                    }
+                }
+            });
+        }
+        spinner(ui, app, "Index of Refraction", e.ior, 0.01..=10.0, 3);
+        ui.label(egui::RichText::new("Wire").strong());
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Wire Size", e.wire_size, 0.0..=10000.0, 1);
+            ui.label("In:");
+            if ui.radio(!e.wire_units, "Pixels").clicked() {
+                set(app, "Wire Units", 0.0);
+            }
+            if ui.radio(e.wire_units, "Units").clicked() {
+                set(app, "Wire Units", 1.0);
+            }
+        });
+        if m.shading.shader != loom_scene::material::Shader::Strauss {
+            ui.label(egui::RichText::new("Reflection Dimming").strong());
+            ui.horizontal(|ui| {
+                check(ui, app, "Apply", "Reflection Dimming", e.reflection_dimming);
+                spinner(ui, app, "Dim Level", e.dim_level, 0.0..=1.0, 2);
+                spinner(ui, app, "Refl. Level", e.refl_level, 0.1..=10.0, 2);
+            });
+        }
+    });
+}
+
+/// A sub-material button (list position `index`) with its on/off check box (`on` = None: no check box).
+fn sub_button(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, index: usize, id: Option<MaterialId>, on: Option<(bool, &str)>) {
+    ui.label(label);
+    if ui.add(egui::Button::new(material_label(app, id)).min_size(egui::vec2(150.0, 0.0))).clicked() {
+        let _ = app.dispatch(Command::MaterialEditorGoToSub { index: index as u32 });
+    }
+    if let Some((enabled, name)) = on {
+        let mut v = enabled;
+        if ui.checkbox(&mut v, "").changed() {
+            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: name.into(), value: if v { 1.0 } else { 0.0 } });
+        }
+    }
+    ui.end_row();
+}
+
+/// A colour row: label, swatch, and the map button of `channel` if any.
+fn color_line(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, label: &str, which: &str, c: glam::Vec3, channel: Option<&str>) {
+    ui.label(label);
+    swatch(ui, app, which, c);
+    match channel {
+        Some(ch) => map_button(ui, app, ch, m.map(ch), true),
+        None => {
+            ui.label("");
+        }
+    }
+    ui.end_row();
+}
+
+/// Raytrace Basic Parameters (with the shader's highlight), Extended Parameters and Maps.
+fn raytrace_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    use loom_scene::material::Shader;
+    let MaterialKind::Raytrace(r) = &m.kind else { return };
+    let r = (**r).clone();
+    let sh = m.shading.shader;
+    crate::command_panel::rollout(ui, "Raytrace Basic Parameters", true, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Shading:");
+            egui::ComboBox::from_id_salt("raytrace_shader").width(120.0).selected_text(sh.label()).show_ui(ui, |ui| {
+                for s in [Shader::Anisotropic, Shader::Blinn, Shader::Metal, Shader::OrenNayarBlinn, Shader::Phong] {
+                    if ui.selectable_label(sh == s, s.label()).clicked() {
+                        let _ = app.dispatch(Command::SetShader { shader: s.label().into() });
+                    }
+                }
+            });
+            check(ui, app, "2-Sided", "2-Sided", m.two_sided);
+            check(ui, app, "Wire", "Wire", m.wire);
+            check(ui, app, "Faceted", "Faceted", m.faceted);
+        });
+        egui::Grid::new("raytrace_colours").num_columns(3).show(ui, |ui| {
+            color_line(ui, app, m, "Ambient:", "Ambient", r.ambient, Some("Ambient Color"));
+            color_line(ui, app, m, "Diffuse:", "Diffuse", m.diffuse.get(), Some("Diffuse Color"));
+            color_line(ui, app, m, "Reflect:", "Reflect", r.reflect, Some("Reflection"));
+            color_line(ui, app, m, "Luminosity:", "Luminosity", r.luminosity, Some("Self-Illumination"));
+            color_line(ui, app, m, "Transparency:", "Transparency", r.transparency, Some("Refraction"));
+        });
+        check(ui, app, "Fresnel", "Fresnel", r.fresnel);
+        spinner(ui, app, "Index of Refr.", r.ior, 0.001..=10.0, 2);
+        ui.label(egui::RichText::new("Specular Highlight").strong());
+        egui::Grid::new("raytrace_spec").num_columns(3).show(ui, |ui| {
+            color_line(ui, app, m, "Specular Color:", "Specular", m.specular.get(), Some("Specular Color"));
+        });
+        spinner(ui, app, "Specular Level", m.specular_level.get(), 0.0..=999.0, 0);
+        spinner(ui, app, "Glossiness", m.glossiness.get(), 0.0..=100.0, 0);
+        match sh {
+            Shader::Anisotropic => {
+                spinner(ui, app, "Anisotropy", m.shading.anisotropy, 0.0..=100.0, 0);
+                spinner(ui, app, "Orientation", m.shading.orientation, 0.0..=9999.0, 0);
+            }
+            Shader::OrenNayarBlinn => {
+                spinner(ui, app, "Diffuse Level", m.shading.diffuse_level, 0.0..=400.0, 0);
+                spinner(ui, app, "Roughness", m.shading.roughness, 0.0..=100.0, 0);
+            }
+            _ => spinner(ui, app, "Soften", m.soften.get(), 0.0..=1.0, 2),
+        }
+    });
+    crate::command_panel::rollout(ui, "Extended Parameters", false, |ui| {
+        egui::Grid::new("raytrace_ext").num_columns(3).show(ui, |ui| {
+            color_line(ui, app, m, "Extra Lighting:", "Extra Lighting", r.extra_lighting, None);
+            color_line(ui, app, m, "Translucency:", "Translucency", r.translucency, None);
+            color_line(ui, app, m, "Fluorescence:", "Fluorescence", r.fluorescence, None);
+        });
+        spinner(ui, app, "Fluorescence Bias", r.fluorescence_bias, 0.0..=1.0, 2);
+    });
+    maps_rollout(ui, app, m);
+}
+
+/// Architectural: Templates, Physical Qualities, Special Effects.
+fn architectural_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    use loom_scene::material_types::ARCH_TEMPLATES;
+    let MaterialKind::Architectural(a) = &m.kind else { return };
+    let a = (**a).clone();
+    crate::command_panel::rollout(ui, "Templates", true, |ui| {
+        let current = ARCH_TEMPLATES.get(a.template as usize).map_or("User Defined", |t| t.0);
+        egui::ComboBox::from_id_salt("arch_template").width(200.0).selected_text(current).show_ui(ui, |ui| {
+            for (i, t) in ARCH_TEMPLATES.iter().enumerate() {
+                if ui.selectable_label(a.template as usize == i, t.0).clicked() {
+                    let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Template".into(), value: i as f64 });
+                }
+            }
+        });
+    });
+    crate::command_panel::rollout(ui, "Physical Qualities", true, |ui| {
+        egui::Grid::new("arch_physical").num_columns(3).show(ui, |ui| {
+            color_line(ui, app, m, "Diffuse Color:", "Diffuse", m.diffuse.get(), Some("Diffuse Color"));
+        });
+        for (label, value, max, channel) in [("Shininess", a.shininess, 100.0, "Glossiness"), ("Transparency", a.transparency, 100.0, "Opacity"), ("Translucency", a.translucency, 100.0, "Filter Color")] {
+            ui.horizontal(|ui| {
+                spinner(ui, app, label, value, 0.0..=max, 1);
+                map_button(ui, app, channel, m.map(channel), true);
+            });
+        }
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Index of Refraction", a.ior, 1.0..=2.5, 2);
+            map_button(ui, app, "Refraction", m.map("Refraction"), true);
+        });
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Luminance cd/m2", a.luminance, 0.0..=1.0e7, 1);
+            map_button(ui, app, "Self-Illumination", m.map("Self-Illumination"), true);
+        });
+        ui.horizontal(|ui| {
+            check(ui, app, "2-Sided", "2-Sided", m.two_sided);
+            check(ui, app, "Raw Diffuse Texture", "Raw Diffuse Texture", a.raw_diffuse);
+        });
+    });
+    crate::command_panel::rollout(ui, "Special Effects", false, |ui| {
+        egui::Grid::new("arch_effects").num_columns(2).show(ui, |ui| {
+            for ch in ["Bump", "Displacement"] {
+                ui.label(format!("{ch}:"));
+                map_button(ui, app, ch, m.map(ch), false);
+                ui.end_row();
+            }
+        });
+    });
+}
+
+/// Double Sided, Top/Bottom and Shellac: two sub-materials and their values.
+fn two_material_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    match &m.kind {
+        MaterialKind::DoubleSided(d) => {
+            let d = (**d).clone();
+            crate::command_panel::rollout(ui, "Double Sided Basic Parameters", true, |ui| {
+                spinner(ui, app, "Translucency", d.translucency, 0.0..=100.0, 1);
+                egui::Grid::new("double_sided_rows").num_columns(3).show(ui, |ui| {
+                    sub_button(ui, app, "Facing Material:", 0, d.materials[0], Some((d.enabled[0], "Facing Material On")));
+                    sub_button(ui, app, "Back Material:", 1, d.materials[1], Some((d.enabled[1], "Back Material On")));
+                });
+            });
+        }
+        MaterialKind::TopBottom(t) => {
+            let t = (**t).clone();
+            crate::command_panel::rollout(ui, "Top/Bottom Basic Parameters", true, |ui| {
+                egui::Grid::new("top_bottom_rows").num_columns(3).show(ui, |ui| {
+                    sub_button(ui, app, "Top Material:", 0, t.materials[0], Some((t.enabled[0], "Top Material On")));
+                    sub_button(ui, app, "Bottom Material:", 1, t.materials[1], Some((t.enabled[1], "Bottom Material On")));
+                });
+                if ui.button("Swap").clicked() {
+                    let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Swap".into(), value: 1.0 });
+                }
+                ui.horizontal(|ui| {
+                    ui.label("Coordinates:");
+                    if ui.radio(!t.local, "World").clicked() {
+                        let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Local".into(), value: 0.0 });
+                    }
+                    if ui.radio(t.local, "Local").clicked() {
+                        let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Local".into(), value: 1.0 });
+                    }
+                });
+                spinner(ui, app, "Blend", t.blend, 0.0..=100.0, 0);
+                spinner(ui, app, "Position", t.position, 0.0..=100.0, 0);
+            });
+        }
+        MaterialKind::Shellac(sh) => {
+            let sh = (**sh).clone();
+            crate::command_panel::rollout(ui, "Shellac Basic Parameters", true, |ui| {
+                egui::Grid::new("shellac_rows").num_columns(2).show(ui, |ui| {
+                    sub_button(ui, app, "Base Material:", 0, sh.materials[0], None);
+                    sub_button(ui, app, "Shellac Material:", 1, sh.materials[1], None);
+                });
+                spinner(ui, app, "Shellac Color Blend", sh.blend, 0.0..=1000.0, 1);
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Composite Basic Parameters: Base Material and Mat 1–9 with their A/S/M mode and Amount.
+fn composite_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    let MaterialKind::Composite(c) = &m.kind else { return };
+    let c = (**c).clone();
+    crate::command_panel::rollout(ui, "Composite Basic Parameters", true, |ui| {
+        egui::Grid::new("composite_base").num_columns(2).show(ui, |ui| {
+            sub_button(ui, app, "Base Material:", 0, c.base, None);
+        });
+        egui::Grid::new("composite_rows").num_columns(5).show(ui, |ui| {
+            for (i, l) in c.layers.iter().enumerate() {
+                let n = i + 1;
+                let mut on = l.enabled;
+                if ui.checkbox(&mut on, format!("Mat.{n}:")).changed() {
+                    let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: format!("Mat {n} On"), value: if on { 1.0 } else { 0.0 } });
+                }
+                if ui.add(egui::Button::new(material_label(app, l.material)).min_size(egui::vec2(130.0, 0.0))).clicked() {
+                    let _ = app.dispatch(Command::MaterialEditorGoToSub { index: n as u32 });
+                }
+                ui.horizontal(|ui| {
+                    for (k, label) in ["A", "S", "M"].iter().enumerate() {
+                        if ui.selectable_label(l.mode == k as u8, *label).on_hover_text(["Additive", "Subtractive", "Mix"][k]).clicked() {
+                            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: format!("Mat {n} Mode"), value: k as f64 });
+                        }
+                    }
+                });
+                let max = if l.mode == 2 { 100.0 } else { 200.0 };
+                let name = format!("Mat {n} Amount");
+                spinner_with(ui, app, "", l.amount, 0.0..=max, 1, move |v| Command::SetMaterialParameter { slot: None, name: name.clone(), value: v });
+                ui.end_row();
+            }
+        });
+    });
+}
+
+/// Matte/Shadow Basic Parameters.
+fn matte_shadow_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    let MaterialKind::MatteShadow(ms) = &m.kind else { return };
+    let ms = (**ms).clone();
+    crate::command_panel::rollout(ui, "Matte/Shadow Basic Parameters", true, |ui| {
+        ui.label(egui::RichText::new("Matte").strong());
+        check(ui, app, "Opaque Alpha", "Opaque Alpha", ms.opaque_alpha);
+        ui.label(egui::RichText::new("Atmosphere").strong());
+        check(ui, app, "Apply Atmosphere", "Apply Atmosphere", ms.apply_atmosphere);
+        ui.label(egui::RichText::new("Shadow").strong());
+        ui.horizontal(|ui| {
+            check(ui, app, "Receive Shadows", "Receive Shadows", ms.receive_shadows);
+            check(ui, app, "Affect Alpha", "Affect Alpha", ms.affect_alpha);
+        });
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Shadow Brightness", ms.shadow_brightness, 0.0..=1.0, 2);
+            ui.label("Color:");
+            swatch(ui, app, "Color", ms.color);
+        });
+        ui.label(egui::RichText::new("Reflection").strong());
+        ui.horizontal(|ui| {
+            spinner(ui, app, "Amount", ms.reflection_amount, 0.0..=100.0, 1);
+            ui.label("Map:");
+            map_button(ui, app, "Reflection", m.map("Reflection"), false);
+        });
+    });
+}
+
+/// Ink 'n Paint: Paint Controls and Ink Controls.
+fn ink_paint_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
+    let MaterialKind::InkPaint(ink) = &m.kind else { return };
+    let ink = (**ink).clone();
+    crate::command_panel::rollout(ui, "Paint Controls", true, |ui| {
+        ui.horizontal(|ui| {
+            check(ui, app, "Lighted", "Lighted On", ink.lighted_on);
+            swatch(ui, app, "Lighted", ink.lighted);
+            map_button(ui, app, "Diffuse Color", m.map("Diffuse Color"), true);
+        });
+        let levels = ink.paint_levels as f32;
+        spinner_with(ui, app, "Paint Levels", levels, 1.0..=255.0, 0, |v| Command::SetMaterialParameter { slot: None, name: "Paint Levels".into(), value: v });
+        ui.horizontal(|ui| {
+            check(ui, app, "Shaded", "Shaded On", ink.shaded_on);
+            if ink.shaded_on {
+                spinner_with(ui, app, "", ink.shaded_percent, 0.0..=100.0, 1, |v| Command::SetMaterialParameter { slot: None, name: "Shaded Percent".into(), value: v });
+            } else {
+                swatch(ui, app, "Shaded", ink.shaded);
+            }
+        });
+        ui.horizontal(|ui| {
+            check(ui, app, "Highlight", "Highlight On", ink.highlight_on);
+            swatch(ui, app, "Highlight", ink.highlight);
+        });
+        spinner(ui, app, "Glossiness", ink.glossiness, 0.0..=100.0, 1);
+    });
+    crate::command_panel::rollout(ui, "Ink Controls", true, |ui| {
+        ui.horizontal(|ui| {
+            check(ui, app, "Ink", "Ink", ink.ink);
+            let q = ink.ink_quality as f32;
+            spinner_with(ui, app, "Ink Quality", q, 1.0..=3.0, 0, |v| Command::SetMaterialParameter { slot: None, name: "Ink Quality".into(), value: v });
+        });
+        ui.horizontal(|ui| {
+            check(ui, app, "Variable Width", "Variable Width", ink.variable_width);
+            if ink.variable_width {
+                spinner(ui, app, "Ink Min", ink.ink_min, 0.0..=1000.0, 1);
+                spinner(ui, app, "Ink Max", ink.ink_max, 0.0..=1000.0, 1);
+            } else {
+                spinner(ui, app, "Ink Width", ink.ink_width, 0.0..=1000.0, 1);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Ink Color:");
+            swatch(ui, app, "Ink Color", ink.ink_color);
+        });
+        ui.horizontal_wrapped(|ui| {
+            for (label, on) in [("Outline", ink.outline), ("Overlap", ink.overlap), ("Underlap", ink.underlap), ("SmGroup", ink.smgroup), ("Mat ID", ink.mat_id)] {
+                check(ui, app, label, label, on);
+            }
+        });
+    });
+}
+
 fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
     let MaterialKind::MultiSub(list) = &m.kind else { return };
     let list = list.clone();
@@ -845,8 +1524,18 @@ fn multi_sub_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
         }
         egui::ScrollArea::vertical().id_salt("multi_sub_list").max_height(10.0 * 24.0).show(ui, |ui| {
             egui::Grid::new("multi_sub_rows").num_columns(6).spacing([6.0, 3.0]).show(ui, |ui| {
-                for h in ["", "ID", "Name", "Sub-Material", "", "On/Off"] {
-                    ui.label(egui::RichText::new(h).small());
+                // The ID / Name / Sub-Material headers sort the list.
+                for (h, sort) in [("", None), ("ID", Some("ID")), ("Name", Some("Name")), ("Sub-Material", Some("Sub")), ("", None), ("On/Off", None)] {
+                    match sort {
+                        Some(by) => {
+                            if ui.small_button(h).on_hover_text(format!("Sort by {h}")).clicked() {
+                                let _ = app.dispatch(Command::MultiSubSort { by: by.into() });
+                            }
+                        }
+                        None => {
+                            ui.label(egui::RichText::new(h).small());
+                        }
+                    }
                 }
                 ui.end_row();
                 for (i, s) in list.iter().enumerate() {
@@ -985,26 +1674,30 @@ fn blend_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
 }
 
 fn color_row(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map, i: usize) {
-    let slot = map.kind.color_slots()[i];
-    ui.label(slot);
-    if slot != "Mix Amount" {
-        let mut rgb = rgb_of(map.colors[i]);
+    let slot = map.slot_names()[i].clone();
+    ui.label(&slot);
+    if map.slot_has_color(i) {
+        let mut rgb = rgb_of(map.color(i));
         if ui.color_edit_button_srgb(&mut rgb).changed() {
-            let _ = app.dispatch(Command::SetMapColor { which: slot.into(), rgb });
+            let _ = app.dispatch(Command::SetMapColor { which: slot.clone(), rgb });
         }
     } else {
         ui.label("");
     }
-    map_button(ui, app, slot, map.sub_maps[i].as_deref(), false);
-    let mut on = map.sub_maps[i].as_ref().is_some_and(|s| s.enabled);
-    if ui.add_enabled(map.sub_maps[i].is_some(), egui::Checkbox::new(&mut on, "")).changed() {
-        let _ = app.dispatch(Command::SetMapParameter { name: format!("{slot} Map On"), value: if on { 1.0 } else { 0.0 } });
+    if map.slot_has_map(i) {
+        map_button(ui, app, &slot, map.sub_map(i), false);
+        let mut on = map.sub_map(i).is_some_and(|s| s.enabled);
+        if ui.add_enabled(map.sub_map(i).is_some(), egui::Checkbox::new(&mut on, "")).changed() {
+            let _ = app.dispatch(Command::SetMapParameter { name: format!("{slot} Map On"), value: if on { 1.0 } else { 0.0 } });
+        }
     }
     ui.end_row();
 }
 
 fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
-    if map.kind != MapType::Mix {
+    if map.kind.is_3d() {
+        map_rollouts::coords3(ui, app, map);
+    } else if map.kind.has_2d_coords() {
         crate::command_panel::rollout(ui, "Coordinates", true, |ui| {
             let c = &map.coords;
             ui.label("Texture: Explicit Map Channel");
@@ -1131,6 +1824,7 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
             });
             let masked = map.sub_maps[2].as_ref().is_some_and(|m| m.enabled);
             ui.add_enabled_ui(!masked, |ui| map_spinner(ui, app, "Mix Amount:", "Mix Amount", map.params.mix_amount, 0.0..=100.0, 1));
+            map_rollouts::mixing_curve(ui, app, map);
         }),
         MapType::NormalBump => crate::command_panel::rollout(ui, "Parameters", true, |ui| {
             ui.horizontal(|ui| {
@@ -1147,6 +1841,10 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                 map_check(ui, app, "Flip Green (Y)", "Flip Green (Y)", map.params.flip_green);
             });
         }),
+        _ => map_rollouts::parameters(ui, app, map),
+    }
+    if map.kind.has_output() {
+        map_rollouts::output(ui, app, map);
     }
 }
 
@@ -1166,14 +1864,17 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
     let wants_map = matches!(for_, BrowserFor::Map(_) | BrowserFor::MapType);
     let mut picked: Option<String> = None;
     let mut cancel = false;
+    let icons_id = egui::Id::new("material_browser_icons");
+    let mut icons: bool = ctx.data(|d| d.get_temp(icons_id)).unwrap_or(false);
     egui::Window::new("Material/Map Browser").open(open).collapsible(false).resizable(false).default_width(360.0).show(ctx, |ui| {
         ui.label(egui::RichText::new("Browse From:").strong());
         ui.horizontal_wrapped(|ui| {
-            for (i, label) in ["Mtl Editor", "Active Slot", "Selected", "Scene", "New"].iter().enumerate() {
+            // 5 Mtl Library comes first, as in the reference.
+            for (i, label) in [(5u8, "Mtl Library"), (0, "Mtl Editor"), (1, "Active Slot"), (2, "Selected"), (3, "Scene"), (4, "New")] {
                 // Maps and material types come only from New; Get Material only from existing materials.
                 let enabled = if for_ == BrowserFor::GetMaterial { i != 4 } else { i == 4 };
-                if ui.add_enabled(enabled, egui::RadioButton::new(from == i as u8, *label)).clicked() {
-                    from = i as u8;
+                if ui.add_enabled(enabled, egui::RadioButton::new(from == i, label)).clicked() {
+                    from = i;
                     selected = None;
                 }
             }
@@ -1183,7 +1884,14 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
             let (mut materials, mut maps) = (!wants_map, wants_map);
             ui.add_enabled(false, egui::Checkbox::new(&mut materials, "Materials"));
             ui.add_enabled(false, egui::Checkbox::new(&mut maps, "Maps"));
+            ui.separator();
+            ui.label(egui::RichText::new("View:").strong());
+            ui.radio_value(&mut icons, false, "List");
+            ui.radio_value(&mut icons, true, "List + Icons");
         });
+        if from == 5 {
+            library_file_row(ui, app, selected.as_deref());
+        }
         ui.separator();
         let entries: Vec<(String, String)> = if from == 4 {
             if wants_map {
@@ -1191,6 +1899,8 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
             } else {
                 MaterialKind::TYPES.iter().map(|t| (t.to_string(), t.to_string())).collect()
             }
+        } else if from == 5 {
+            app.state.material_library.entries.iter().map(|e| (format!("lib:{}", e.name), format!("{} [{}]", e.name, e.material().map_or("?", |m| m.kind.label())))).collect()
         } else {
             browse_materials(app, from)
         };
@@ -1199,7 +1909,18 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
                 ui.weak("(none)");
             }
             for (key, label) in &entries {
-                let r = ui.selectable_label(selected.as_deref() == Some(key.as_str()), label);
+                let r = ui
+                    .horizontal(|ui| {
+                        if icons && from != 4 {
+                            if let Some(sample) = browser_sample(app, key) {
+                                let setup = PreviewSetup::from_options(&app.state.scene.material_editor.options, SampleType::Sphere, (0.0, 0.0));
+                                let tex = preview_texture(ui.ctx(), app, egui::Id::new(("material_browser_icon", key.clone())), &sample, 24, &setup);
+                                ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(24.0, 24.0)));
+                            }
+                        }
+                        ui.selectable_label(selected.as_deref() == Some(key.as_str()), label)
+                    })
+                    .inner;
                 if r.clicked() {
                     selected = Some(key.clone());
                 }
@@ -1221,6 +1942,7 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
     ctx.data_mut(|d| {
         d.insert_temp(from_id, from);
         d.insert_temp(sel_id, selected.clone());
+        d.insert_temp(icons_id, icons);
     });
     if cancel {
         *open = false;
@@ -1230,8 +1952,9 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
     *open = false;
     match for_ {
         BrowserFor::MaterialType => {
-            let kind = MaterialKind::TYPES.iter().position(|t| *t == choice).unwrap_or(2) as u8;
-            if choice == "Standard" {
+            let kind = MaterialKind::TYPES.iter().position(|t| *t == choice).unwrap_or(0) as u8;
+            // Only a compound type can keep the old material as a sub-material.
+            if matches!(choice.as_str(), "Standard" | "Raytrace" | "Architectural" | "Matte/Shadow" | "Ink 'n Paint") {
                 let _ = app.dispatch(Command::SetMaterialType { kind: choice, keep_old: None });
                 app.state.dialog = None;
             } else {
@@ -1251,8 +1974,8 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
             }
         }
         BrowserFor::Map(i) => {
-            let slot = MAP_SLOTS.get(i as usize).copied().unwrap_or("Diffuse Color");
-            let ok = app.dispatch(Command::NewMap { map: slot.into(), kind: choice.clone() }).is_ok();
+            let slot = loom_scene::map_params::slot_name(i);
+            let ok = app.dispatch(Command::NewMap { map: slot, kind: choice.clone() }).is_ok();
             // A new Bitmap asks for its image file next, as in the reference.
             if ok && choice == "Bitmap" {
                 *open = true;
@@ -1262,12 +1985,60 @@ pub fn browser(ctx: &egui::Context, app: &mut LoomApp, for_: BrowserFor, open: &
             }
         }
         BrowserFor::GetMaterial => {
-            if let Ok(id) = choice.parse::<u32>() {
+            if let Some(name) = choice.strip_prefix("lib:") {
+                let _ = app.dispatch(Command::GetFromLibrary { name: name.into() });
+            } else if let Ok(id) = choice.parse::<u32>() {
                 let _ = app.dispatch(Command::GetMaterial { material: id });
             }
             app.state.dialog = None;
         }
     }
+}
+
+/// The sample a Browser row shows (List + Icons): a scene or library material.
+fn browser_sample(app: &LoomApp, key: &str) -> Option<Sample> {
+    if let Some(name) = key.strip_prefix("lib:") {
+        let e = app.state.material_library.entries.iter().find(|e| e.name == name)?;
+        let s = loom_scene::material::surfaces(&e.materials, e.root)?;
+        return Some(Sample::Surfaces(s));
+    }
+    let id = MaterialId(key.parse().ok()?);
+    Some(Sample::Surfaces(loom_scene::material::surfaces(&app.state.scene.materials, id)?))
+}
+
+/// Mtl Library > File: Open, Merge, Save, Save As, New, and Delete for the selected material.
+fn library_file_row(ui: &mut egui::Ui, app: &mut LoomApp, selected: Option<&str>) {
+    let lib = &app.state.material_library;
+    let title = match &lib.path {
+        Some(p) => format!("{}{}", std::path::Path::new(p).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(), if lib.dirty { " *" } else { "" }),
+        None => format!("(unsaved library){}", if lib.dirty { " *" } else { "" }),
+    };
+    let has_path = lib.path.is_some();
+    ui.label(egui::RichText::new(title).italics());
+    ui.horizontal_wrapped(|ui| {
+        ui.label(egui::RichText::new("File:").strong());
+        if ui.button("Open...").clicked() {
+            app.state.dialog = Some(Dialog::OpenMaterialLibrary);
+        }
+        if ui.button("Merge...").clicked() {
+            app.state.dialog = Some(Dialog::MergeMaterialLibrary);
+        }
+        if ui.add_enabled(has_path, egui::Button::new("Save")).clicked() {
+            let _ = app.dispatch(Command::SaveMaterialLibrary { path: None });
+        }
+        if ui.button("Save As...").clicked() {
+            app.state.dialog = Some(Dialog::SaveMaterialLibrary);
+        }
+        if ui.button("New").clicked() {
+            let _ = app.dispatch(Command::NewMaterialLibrary);
+        }
+        let name = selected.and_then(|s| s.strip_prefix("lib:"));
+        if ui.add_enabled(name.is_some(), egui::Button::new("Delete from Library")).clicked() {
+            if let Some(n) = name {
+                let _ = app.dispatch(Command::DeleteFromLibrary { name: n.into() });
+            }
+        }
+    });
 }
 
 /// Materials to browse: (id, label) from the editor's slots, the active
@@ -1520,7 +2291,7 @@ pub fn copy_map(ctx: &egui::Context, app: &mut LoomApp, from: u8, to: u8, open: 
     ctx.data_mut(|d| d.insert_temp(id, swap));
     match done {
         Some(true) => {
-            let name = |i: u8| MAP_SLOTS.get(i as usize).copied().unwrap_or("").to_owned();
+            let name = loom_scene::map_params::slot_name;
             let _ = app.dispatch(Command::CopyMap { from: name(from), to: name(to), swap });
             *open = false;
         }
@@ -1539,10 +2310,10 @@ pub fn navigator(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         Some(top) => {
             fn walk_map(map: &Map, slot: &str, depth: usize, path: Vec<String>, rows: &mut Vec<(usize, String, Vec<String>)>) {
                 rows.push((depth, format!("{slot}: {} ({})", if map.name.is_empty() { "Map" } else { &map.name }, map.kind.label()), path.clone()));
-                for (i, s) in map.kind.color_slots().iter().enumerate() {
-                    if let Some(sub) = &map.sub_maps[i] {
+                for (i, s) in map.slot_names().iter().enumerate() {
+                    if let Some(sub) = map.sub_map(i) {
                         let mut p = path.clone();
-                        p.push((*s).to_owned());
+                        p.push(s.clone());
                         walk_map(sub, s, depth + 1, p, rows);
                     }
                 }
@@ -1615,6 +2386,72 @@ mod tests {
     }
 
     #[test]
+    fn each_shader_shades_the_sample_its_own_way() {
+        use loom_scene::material::Shader;
+        let size = 64;
+        let images = loom_scene::maps::Images::new();
+        // The top light only: one highlight.
+        let mut lights = setup(SampleType::Sphere);
+        lights.back = None;
+        let px = |m: &StandardMaterial| preview_pixels(&Sample::Surfaces(Surfaces::Single(Box::new(Surface::from_standard(m)))), size, &lights, &images);
+        let mut m = StandardMaterial::slot_default(0);
+        m.diffuse.set(glam::Vec3::new(0.8, 0.0, 0.0));
+        m.ambient.set(glam::Vec3::new(0.8, 0.0, 0.0));
+        m.specular_level.set(150.0);
+        m.glossiness.set(40.0);
+        // Over the sphere only (red, or a highlight), not the grey background.
+        let brightest_g = |p: &[egui::Color32]| p.iter().filter(|c| c.r() as i32 > c.g() as i32 + 40 || c.g() > 200).map(|c| c.g()).max().unwrap_or(0);
+        assert!(brightest_g(&px(&m)) > 200, "Blinn: a white highlight on red");
+        m.shading.shader = Shader::Metal;
+        assert!(brightest_g(&px(&m)) < 40, "Metal: the highlight is the diffuse colour");
+        // Anisotropic: the highlight is long one way; turning it 90° swaps its extent.
+        let extent = |p: &[egui::Color32]| {
+            let hot: Vec<(usize, usize)> = (0..size * size).filter(|i| p[*i].g() > 120).map(|i| (i % size, i / size)).collect();
+            let w = hot.iter().map(|h| h.0).max().unwrap() - hot.iter().map(|h| h.0).min().unwrap();
+            let h = hot.iter().map(|h| h.1).max().unwrap() - hot.iter().map(|h| h.1).min().unwrap();
+            (w as f32 + 1.0, h as f32 + 1.0)
+        };
+        m.shading.shader = Shader::Anisotropic;
+        m.shading.anisotropy = 90.0;
+        let (w0, h0) = extent(&px(&m));
+        m.shading.orientation = 90.0;
+        let (w1, h1) = extent(&px(&m));
+        assert!((w0 / h0 - w1 / h1).abs() > 0.5, "orientation turns the highlight: {w0}x{h0} vs {w1}x{h1}");
+        // Oren-Nayar-Blinn Roughness darkens.
+        let sum_r = |p: &[egui::Color32]| p.iter().map(|c| c.r() as u32).sum::<u32>();
+        m.specular_level.set(0.0);
+        m.shading.shader = Shader::OrenNayarBlinn;
+        let smooth = sum_r(&px(&m));
+        m.shading.roughness = 100.0;
+        assert!(sum_r(&px(&m)) < smooth, "rough is darker");
+        // Translucent: light from behind comes through in the Translucent colour.
+        m.shading.shader = Shader::Translucent;
+        m.diffuse.set(glam::Vec3::ZERO);
+        m.ambient.set(glam::Vec3::ZERO);
+        let sum_g = |p: &[egui::Color32]| p.iter().map(|c| c.g() as u32).sum::<u32>();
+        let dark = sum_g(&px(&m));
+        m.shading.translucent_color = glam::Vec3::Y;
+        m.extended.filter_color = glam::Vec3::ONE;
+        assert!(sum_g(&px(&m)) > dark + 500, "translucent green");
+    }
+
+    #[test]
+    fn opacity_falloff_in_clears_the_facing_middle() {
+        let size = 32;
+        let images = loom_scene::maps::Images::new();
+        let mut m = StandardMaterial::slot_default(0);
+        m.diffuse.set(glam::Vec3::ONE);
+        m.ambient.set(glam::Vec3::ONE);
+        m.opacity.set(60.0);
+        let px = |m: &StandardMaterial| preview_pixels(&Sample::Surfaces(Surfaces::Single(Box::new(Surface::from_standard(m)))), size, &setup(SampleType::Sphere), &images);
+        let bg = px(&m)[0];
+        let before = px(&m)[size * (size / 2) + size / 2];
+        m.extended.falloff_amount = 100.0;
+        let after = px(&m)[size * (size / 2) + size / 2];
+        assert!((after.r() as i32 - bg.r() as i32).abs() < (before.r() as i32 - bg.r() as i32).abs(), "the middle shows more background: {before:?} {after:?} {bg:?}");
+    }
+
+    #[test]
     fn sample_types_have_their_silhouettes() {
         let size = 40;
         let m = StandardMaterial::slot_default(0);
@@ -1635,7 +2472,7 @@ mod tests {
     fn a_map_level_shows_the_map_flat() {
         let images = loom_scene::maps::Images::new();
         let checker = Map::new(MapType::Checker, 100.0);
-        let px = preview_pixels(&Sample::Map(checker), 8, &setup(SampleType::Sphere), &images);
+        let px = preview_pixels(&Sample::Map(Box::new(checker)), 8, &setup(SampleType::Sphere), &images);
         // Bottom-left check black, bottom-right white.
         assert_eq!(px[7 * 8], egui::Color32::from_rgb(0, 0, 0));
         assert_eq!(px[7 * 8 + 7], egui::Color32::from_rgb(255, 255, 255));

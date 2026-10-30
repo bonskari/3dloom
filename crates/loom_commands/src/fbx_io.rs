@@ -202,7 +202,7 @@ pub fn import(state: &mut AppState, path: &Path) -> Result<Vec<NodeId>, String> 
                     Some(bid) => {
                         let (len, axis) = match doc.nodes[*bi].kind { FbxKind::Bone { length, .. } => (length.max(0.001), loom_scene::node::bone_axis_dir(bone_axis[*bi])), _ => (1.0, glam::Vec3::X) };
                         remap.push(Some(bones.len() as u32));
-                        bones.push((*bid, *g2b, loom_scene::skin::Envelope { start: glam::Vec3::ZERO, end: axis * len, inner: [len * 0.25; 2], outer: [len * 0.5; 2], falloff: 0, abs_effect: 1.0, squash: 1.0 }));
+                        bones.push((*bid, *g2b, loom_scene::skin::Envelope { start: glam::Vec3::ZERO, end: axis * len, inner: [len * 0.25; 2], outer: [len * 0.5; 2], falloff: 0, abs_effect: 1.0, squash: 1.0, ..Default::default() }));
                     }
                     None => remap.push(None),
                 }
