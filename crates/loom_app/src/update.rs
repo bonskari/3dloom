@@ -81,10 +81,13 @@ pub fn release_url_for_branch(branch: &str) -> String {
     format!("{RELEASES_DOWNLOAD_BASE}/{}", release_tag(branch))
 }
 
+/// Default update branches always shown in the in-app selector.
+pub const DEFAULT_BRANCHES: [&str; 2] = ["main", "experimental"];
+
 /// Parses GitHub Releases API JSON and returns branches that publish a signed
-/// `latest.json` + `latest.json.sig`, always starting with `main`.
+/// `latest.json` + `latest.json.sig`, always starting with `main` and `experimental`.
 pub fn parse_release_branches(body: &[u8]) -> Vec<String> {
-    let mut out = vec!["main".to_owned()];
+    let mut out: Vec<String> = DEFAULT_BRANCHES.iter().map(|&b| b.to_owned()).collect();
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
         return out;
     };
@@ -118,12 +121,12 @@ pub fn parse_release_branches(body: &[u8]) -> Vec<String> {
     out
 }
 
-/// Queries GitHub Releases for available signed branches, ensuring `current` and
-/// `main` are always present.
+/// Queries GitHub Releases for available signed branches, ensuring `current`,
+/// `main`, and `experimental` are always present.
 pub fn fetch_branches(current: &str) -> Vec<String> {
     let mut branches = match fetch(RELEASES_API_URL, 10) {
         Ok(body) => parse_release_branches(&body),
-        Err(_) => vec!["main".to_owned()],
+        Err(_) => DEFAULT_BRANCHES.iter().map(|&b| b.to_owned()).collect(),
     };
     let current = normalize_branch(current);
     if !branches.contains(&current) {
@@ -349,15 +352,16 @@ mod tests {
     fn release_tag_and_discovery_map_branches_cleanly() {
         assert_eq!(release_tag("main"), "nightly");
         assert_eq!(release_tag("nightly"), "nightly");
+        assert_eq!(release_tag("experimental"), "branch-experimental");
         assert_eq!(release_tag("dev"), "branch-dev");
         assert_eq!(release_tag("feat/ik-contacts"), "branch-feat-ik-contacts");
         let api = br#"[
             {"tag_name":"nightly","name":"3dLoom nightly","assets":[{"name":"latest.json"},{"name":"latest.json.sig"}]},
-            {"tag_name":"branch-dev","name":"3dLoom (dev)","assets":[{"name":"latest.json"},{"name":"latest.json.sig"}]},
-            {"tag_name":"branch-feat-ik","name":"3dLoom (feat/ik)","assets":[{"name":"latest.json"},{"name":"latest.json.sig"}]},
+            {"tag_name":"branch-experimental","name":"3dLoom (experimental)","assets":[{"name":"latest.json"},{"name":"latest.json.sig"}]},
             {"tag_name":"v1.0","name":"Unsigned release","assets":[{"name":"loom-linux-x64"}]}
         ]"#;
-        assert_eq!(parse_release_branches(api), vec!["main", "dev", "feat/ik"]);
+        assert_eq!(parse_release_branches(api), vec!["main", "experimental"]);
+        assert_eq!(parse_release_branches(b"[]"), vec!["main", "experimental"]);
     }
 
     #[test]

@@ -36,7 +36,7 @@ pub fn new_handle() -> UpdateHandle {
 
 pub fn new_handle_for_branch(branch: impl Into<String>) -> UpdateHandle {
     let branch = branch.into();
-    let mut branches = vec!["main".to_owned()];
+    let mut branches = vec!["main".to_owned(), "experimental".to_owned()];
     if !branch.is_empty() && !branches.contains(&branch) {
         branches.push(branch.clone());
     }
@@ -163,10 +163,10 @@ mod tests {
     }
 
     #[test]
-    fn new_handle_seeds_main_and_custom_branch() {
-        let h = new_handle_for_branch("dev");
+    fn new_handle_seeds_main_and_experimental_branch() {
+        let h = new_handle_for_branch("main");
         let s = h.lock().unwrap();
-        assert_eq!(s.branch, "dev");
-        assert_eq!(s.branches, vec!["main".to_owned(), "dev".to_owned()]);
+        assert_eq!(s.branch, "main");
+        assert_eq!(s.branches, vec!["main".to_owned(), "experimental".to_owned()]);
     }
 }
