@@ -4,7 +4,7 @@ use glam::Vec3;
 use loom_fbx::{FbxDocument, FbxKind, FbxNode, WriteAxes, WriteOpts};
 
 fn node(name: &str, mesh: loom_mesh::Mesh, translation: Vec3) -> FbxNode {
-    FbxNode { name: name.into(), parent: None, translation, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind: FbxKind::Mesh { mesh, materials: vec![] }, skin: None, blend_shapes: Vec::new() }
+    FbxNode { name: name.into(), parent: None, translation, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind: FbxKind::Mesh { mesh, materials: vec![] }, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() }
 }
 
 #[test]

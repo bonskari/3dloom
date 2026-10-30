@@ -1903,6 +1903,14 @@ fn object_hits(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj:
     for (i, (id, _)) in app.world_meshes().iter().enumerate() {
         let mesh = app.drawn_mesh(i);
         if mesh.face_count() == 0 {
+            // A line-drawn Dummy picks by its drawn lines.
+            if app.state.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Dummy { .. })) {
+                let upp = crate::helper_overlay::units_per_px(view_proj, rect);
+                let t = loom_commands::helpers::helper_lines(&app.state, *id, &upp).into_iter().filter_map(|(a, b, _)| segment_hit(a, b, p, rect, view_proj, origin, dir)).min_by(f32::total_cmp);
+                if let Some(t) = t {
+                    hits.push((true, t, i));
+                }
+            }
             continue;
         }
         let t = if wire { edge_hit(mesh, p, rect, view_proj, origin, dir) } else { loom_render::pick::ray_mesh(origin, dir, mesh) };
@@ -1925,17 +1933,21 @@ fn edge_hit(mesh: &Mesh, p: egui::Pos2, rect: egui::Rect, view_proj: Mat4, origi
         }
         let Some((va, vb)) = mesh.edge_vertices(e) else { continue };
         let (Some(wa), Some(wb)) = (mesh.vertex_position(va), mesh.vertex_position(vb)) else { continue };
-        let (Some(a), Some(b)) = (project_world_to_screen(wa, view_proj, rect), project_world_to_screen(wb, view_proj, rect)) else { continue };
-        let ab = b - a;
-        let s = if ab.length_sq() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
-        if (a + ab * s).distance(p) <= 4.0 {
-            let t = (wa + (wb - wa) * s - origin).dot(dir);
+        if let Some(t) = segment_hit(wa, wb, p, rect, view_proj, origin, dir) {
             if best.is_none_or(|bt| t < bt) {
                 best = Some(t);
             }
         }
     }
     best
+}
+
+/// The distance along the ray of a world segment drawn within 4 px of `p`.
+fn segment_hit(wa: Vec3, wb: Vec3, p: egui::Pos2, rect: egui::Rect, view_proj: Mat4, origin: Vec3, dir: Vec3) -> Option<f32> {
+    let (a, b) = (project_world_to_screen(wa, view_proj, rect)?, project_world_to_screen(wb, view_proj, rect)?);
+    let ab = b - a;
+    let s = if ab.length_sq() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+    ((a + ab * s).distance(p) <= 4.0).then(|| (wa + (wb - wa) * s - origin).dot(dir))
 }
 
 /// A repeat click within 2 px of the last object click picks the next object

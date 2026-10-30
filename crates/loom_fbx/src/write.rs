@@ -152,18 +152,21 @@ fn model(id: i64, n: &FbxNode, class: &str, axes: WriteAxes, factor: f32) -> Rec
     let r = fbx_rotation(n.rotation_deg, axes, class, root);
     let s = n.scale;
     let v3 = |name: &str, v: Vec3| p(name, name, "", "A", vec![Prop::F64(v.x as f64), Prop::F64(v.y as f64), Prop::F64(v.z as f64)]);
+    let mut props = Record::new("Properties70")
+        .child(p("RotationActive", "bool", "", "", vec![Prop::I32(1)]))
+        .child(p("InheritType", "enum", "", "", vec![Prop::I32(1)]))
+        .child(p("RotationOrder", "enum", "", "", vec![Prop::I32(0)]))
+        .child(p("DefaultAttributeIndex", "int", "Integer", "", vec![Prop::I32(0)]))
+        .child(v3("Lcl Translation", t))
+        .child(v3("Lcl Rotation", r))
+        .child(v3("Lcl Scaling", s));
+    // User-defined properties: flag "U".
+    for (k, v) in &n.user_props {
+        props = props.child(p(k, "KString", "", "U", vec![Prop::Str(v.clone())]));
+    }
     Record::with("Model", vec![Prop::I64(id), object_name(&n.name, "Model"), Prop::Str(class.into())])
         .child(Record::leaf("Version", vec![Prop::I32(232)]))
-        .child(
-            Record::new("Properties70")
-                .child(p("RotationActive", "bool", "", "", vec![Prop::I32(1)]))
-                .child(p("InheritType", "enum", "", "", vec![Prop::I32(1)]))
-                .child(p("RotationOrder", "enum", "", "", vec![Prop::I32(0)]))
-                .child(p("DefaultAttributeIndex", "int", "Integer", "", vec![Prop::I32(0)]))
-                .child(v3("Lcl Translation", t))
-                .child(v3("Lcl Rotation", r))
-                .child(v3("Lcl Scaling", s)),
-        )
+        .child(props)
         .child(Record::leaf("Shading", vec![Prop::Bool(true)]))
         .child(Record::leaf("Culling", vec![Prop::Str("CullingOff".into())]))
 }
@@ -928,7 +931,7 @@ pub fn write_raw_faces(positions: &[Vec3], faces: &[Vec<u32>], normals: Option<&
             indices.push(if i + 1 == f.len() { -(*v as i32 + 1) } else { *v as i32 });
         }
     }
-    let node = FbxNode { name: "Raw".into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind: FbxKind::Empty, skin: None, blend_shapes: Vec::new() };
+    let node = FbxNode { name: "Raw".into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind: FbxKind::Empty, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() };
     let opts = WriteOpts::default();
     let mut geometry = Record::with("Geometry", vec![Prop::I64(1002), object_name("Raw", "Geometry"), Prop::Str("Mesh".into())])
         .child(Record::leaf("Vertices", vec![Prop::ArrF64(vertices)]))

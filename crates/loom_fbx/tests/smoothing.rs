@@ -99,7 +99,7 @@ fn blender_smoothing_groups_shade_like_blender() {
 }
 
 fn node(name: &str, mesh: Mesh) -> FbxNode {
-    FbxNode { name: name.into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind: FbxKind::Mesh { mesh, materials: vec![] }, skin: None, blend_shapes: Vec::new() }
+    FbxNode { name: name.into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind: FbxKind::Mesh { mesh, materials: vec![] }, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() }
 }
 
 #[test]

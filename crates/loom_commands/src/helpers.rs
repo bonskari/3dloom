@@ -221,6 +221,22 @@ pub fn helper_lines(state: &AppState, id: NodeId, units_per_px: &dyn Fn(Vec3) ->
                 }
             }
         }
+        ObjectKind::Dummy { display, constant_screen_size, axis_tripod, .. } => {
+            let h = node.object.dummy_extents().unwrap_or(Vec3::ONE) * 0.5;
+            let origin = world.w_axis.truncate();
+            let (_, rot, _) = world.to_scale_rotation_translation();
+            // Constant Screen Size: Size is pixels, the marker ignores object scale.
+            let screen = constant_screen_size.get().then(|| units_per_px(origin));
+            let at = |p: Vec3| match screen {
+                Some(px) => origin + rot * (p * px),
+                None => world.transform_point3(p),
+            };
+            let mut local = dummy_lines(display.get(), h, screen.is_some());
+            if axis_tripod.get() && display.get() != 3 {
+                local.extend([Vec3::X, Vec3::Y, Vec3::Z].into_iter().enumerate().map(|(i, ax)| (Vec3::ZERO, ax * h, LineKind::Axis(i as u8))));
+            }
+            out.extend(local.into_iter().map(|(a, b, k)| (at(a), at(b), k)));
+        }
         ObjectKind::Tape { .. } => {
             if let Some((a, b)) = tape_ends(state, id) {
                 out.push((a, b, LineKind::Wire));
@@ -273,10 +289,84 @@ pub fn helper_lines(state: &AppState, id: NodeId, units_per_px: &dyn Fn(Vec3) ->
     out
 }
 
-/// Text labels a helper draws: the compass rose's N / E / S / W, a biped's footstep numbers.
+/// A Dummy's lines in its own frame for Display Type `display` with half
+/// extents `h`. The Box type draws as its mesh unless `screen_sized`.
+fn dummy_lines(display: u32, h: Vec3, screen_sized: bool) -> Vec<(Vec3, Vec3, LineKind)> {
+    let w = LineKind::Wire;
+    let mut out = Vec::new();
+    let poly = |out: &mut Vec<(Vec3, Vec3, LineKind)>, pts: &[Vec3]| {
+        for i in 0..pts.len() {
+            out.push((pts[i], pts[(i + 1) % pts.len()], w));
+        }
+    };
+    let ring = |a: Vec3, b: Vec3| (0..32).map(move |i| {
+        let t = i as f32 / 32.0 * std::f32::consts::TAU;
+        a * t.cos() + b * t.sin()
+    });
+    match display {
+        0 if screen_sized => {
+            let c = |i: u32| Vec3::new(if i & 1 == 0 { -h.x } else { h.x }, if i & 2 == 0 { -h.y } else { h.y }, if i & 4 == 0 { -h.z } else { h.z });
+            for i in 0..8u32 {
+                for bit in [1u32, 2, 4] {
+                    if i & bit == 0 {
+                        out.push((c(i), c(i | bit), w));
+                    }
+                }
+            }
+        }
+        0 => {}
+        // Sphere: the three great circles.
+        1 => {
+            for (a, b) in [(Vec3::X * h.x, Vec3::Y * h.y), (Vec3::Y * h.y, Vec3::Z * h.z), (Vec3::Z * h.z, Vec3::X * h.x)] {
+                poly(&mut out, &ring(a, b).collect::<Vec<_>>());
+            }
+        }
+        2 => {
+            for ax in [Vec3::X, Vec3::Y, Vec3::Z] {
+                out.push((-ax * h, ax * h, w));
+            }
+        }
+        // Axis: an RGB tripod (labelled X / Y / Z).
+        3 => out.extend([Vec3::X, Vec3::Y, Vec3::Z].into_iter().enumerate().map(|(i, ax)| (Vec3::ZERO, ax * h, LineKind::Axis(i as u8)))),
+        4 => poly(&mut out, &ring(Vec3::X * h.x, Vec3::Y * h.y).collect::<Vec<_>>()),
+        // Diamond: an octahedron.
+        5 => {
+            let tips = [Vec3::X * h.x, Vec3::Y * h.y, -Vec3::X * h.x, -Vec3::Y * h.y];
+            poly(&mut out, &tips);
+            for t in tips {
+                out.push((t, Vec3::Z * h.z, w));
+                out.push((t, -Vec3::Z * h.z, w));
+            }
+        }
+        // Arrow: a flat arrow along +X.
+        6 => {
+            let (x, y) = (h.x, h.y);
+            poly(&mut out, &[Vec3::new(-x, -y * 0.3, 0.0), Vec3::new(x * 0.2, -y * 0.3, 0.0), Vec3::new(x * 0.2, -y, 0.0), Vec3::new(x, 0.0, 0.0), Vec3::new(x * 0.2, y, 0.0), Vec3::new(x * 0.2, y * 0.3, 0.0), Vec3::new(-x, y * 0.3, 0.0)]);
+        }
+        7 => poly(&mut out, &[Vec3::new(-h.x, -h.y, 0.0), Vec3::new(h.x, -h.y, 0.0), Vec3::new(h.x, h.y, 0.0), Vec3::new(-h.x, h.y, 0.0)]),
+        _ => poly(&mut out, &[Vec3::new(-h.x, -h.y, 0.0), Vec3::new(h.x, -h.y, 0.0), Vec3::new(0.0, h.y, 0.0)]),
+    }
+    out
+}
+
+/// Text labels a helper draws: the compass rose's N / E / S / W, a biped's
+/// footstep numbers, a Dummy's name (Show Name) and its axis letters.
 pub fn helper_labels(state: &AppState, id: NodeId) -> Vec<(Vec3, String)> {
     let Some(node) = state.scene.node(id) else { return Vec::new() };
     match &node.object {
+        ObjectKind::Dummy { display, show_name, constant_screen_size, .. } => {
+            let world = state.scene.world_matrix(id);
+            let mut out = Vec::new();
+            if show_name.get() {
+                out.push((world.w_axis.truncate(), node.name.clone()));
+            }
+            // Axis letters at the tripod tips (a screen-sized tripod has no fixed world tips).
+            if display.get() == 3 && !constant_screen_size.get() {
+                let h = node.object.dummy_extents().unwrap_or(Vec3::ONE) * 0.5;
+                out.extend([(Vec3::X * h.x, "X"), (Vec3::Y * h.y, "Y"), (Vec3::Z * h.z, "Z")].map(|(p, l)| (world.transform_point3(p * 1.1), l.to_owned())));
+            }
+            out
+        }
         ObjectKind::Compass { show_rose, radius } if show_rose.get() => {
             let world = state.scene.world_matrix(id);
             let r = radius.get() * 1.15;
