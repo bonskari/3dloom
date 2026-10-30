@@ -2,7 +2,8 @@
 //! UI's wgpu device. A Realistic viewport shows Bevy's image as its
 //! background; the overlays are painted over it as in the other modes.
 //! A Render works through the frame in buckets, one per UI frame, into the
-//! Rendered Frame Window's image, so the UI keeps running while it renders.
+//! Rendered Frame Window's image, so the UI keeps running while it renders;
+//! the Environment's rendering effects apply to the finished image.
 
 use crate::LoomApp;
 use eframe::egui;
@@ -21,6 +22,8 @@ pub struct BevyView {
     bitmap_generation: u64,
     /// Egui texture per viewport, with the Bevy view generation it shows.
     textures: HashMap<u32, (u64, egui::TextureId)>,
+    /// The environment the Exposure Control preview was rendered with.
+    preview_env: Option<loom_bevy::environment::EnvSettings>,
 }
 
 /// The GPU state the app was created with: Bevy's renderer starts on it
@@ -85,6 +88,10 @@ pub struct RenderJob {
     started: std::time::Instant,
     /// A bucket was set up for this frame's update.
     queued: bool,
+    /// The environment the render uses (its image effects apply at the end).
+    env: loom_bevy::environment::EnvSettings,
+    /// Exposure Control > Render Preview renders into this, not the window.
+    preview: Option<image::RgbaImage>,
 }
 
 impl RenderJob {
@@ -143,7 +150,7 @@ impl LoomApp {
             self.gpu = if loom_bevy::supported(&rs.adapter) {
                 let rs = rs.clone();
                 let renderer = loom_bevy::BevyRenderer::new(rs.adapter.clone(), rs.device.clone(), rs.queue.clone());
-                Gpu::Running(Box::new(BevyView { renderer, render_state: rs, synced: None, bitmap_generation: 0, textures: HashMap::new() }))
+                Gpu::Running(Box::new(BevyView { renderer, render_state: rs, synced: None, bitmap_generation: 0, textures: HashMap::new(), preview_env: None }))
             } else {
                 self.last_error = Some("Realistic shading needs a Vulkan, Metal or DirectX 12 GPU".into());
                 Gpu::Failed
@@ -232,7 +239,9 @@ impl LoomApp {
     /// pixels and returns the texture to draw (None on the first frame of a
     /// view, before Bevy made its image). Only called when `realistic_available`.
     pub(crate) fn realistic_texture(&mut self, index: usize, size: [u32; 2], view: Mat4, projection: Mat4) -> Option<egui::TextureId> {
+        let view_env = self.view_env(index);
         let b = self.bevy()?;
+        b.renderer.set_view_environment(index as u32, view_env);
         let camera = loom_bevy::ViewCamera { view, projection };
         // Cleared to transparent: the viewport background shows through.
         b.renderer.set_view(index as u32, size, &camera, [0.0; 4], true);
@@ -247,13 +256,24 @@ impl LoomApp {
             self.run_bake(req);
             ctx.request_repaint();
         }
-        if let Some(req) = self.state.pending_render.take() {
-            if let Err(e) = self.start_render(req) {
-                self.last_error = Some(format!("Render: {e}"));
+        if self.render_job.is_none() {
+            if let Some(req) = self.state.pending_render.take() {
+                if let Err(e) = self.start_render(req) {
+                    self.last_error = Some(format!("Render: {e}"));
+                }
             }
         }
         if matches!(self.gpu, Gpu::Running(_)) {
             self.sync_bevy();
+            let env = self.environment();
+            // The Exposure Control preview follows changes to the environment.
+            let stale = matches!(&self.gpu, Gpu::Running(b) if b.preview_env.as_ref().is_some_and(|p| *p != env));
+            if stale && self.state.environment_ui.preview.is_some() && self.render_job.is_none() && self.state.pending_render.is_none() {
+                let _ = self.dispatch(loom_commands::Command::ExposureRenderPreview);
+            }
+            if let Gpu::Running(b) = &mut self.gpu {
+                b.renderer.set_environment(&env);
+            }
             self.queue_bucket();
             let Gpu::Running(b) = &mut self.gpu else { return };
             b.renderer.update();
@@ -285,6 +305,40 @@ impl LoomApp {
         }
     }
 
+    /// The scene's environment at the current frame, as the renderer takes it.
+    pub(crate) fn environment(&self) -> loom_bevy::environment::EnvSettings {
+        loom_bevy::environment::EnvSettings::from_scene(&self.state.scene.environment, self.state.current_frame as f32)
+    }
+
+    /// Viewport `index`'s part of the environment: a camera view's
+    /// Environment Ranges, and the distance Depth of Field focuses at (the
+    /// focal node's depth, else the camera's target distance).
+    pub(crate) fn view_env(&self, index: usize) -> loom_bevy::environment::ViewEnv {
+        let scene = &self.state.scene;
+        let Some(vp) = self.state.viewports.get(index) else { return Default::default() };
+        let ranges = match vp.kind {
+            loom_commands::ViewKind::Camera(id) => match scene.node(id).map(|n| &n.object) {
+                Some(loom_scene::ObjectKind::Camera { near_range, far_range, .. }) => Some([near_range.get(), far_range.get()]),
+                _ => None,
+            },
+            _ => None,
+        };
+        let dof = scene.environment.effects.iter().filter(|e| e.active).find_map(|e| match &e.kind {
+            loom_scene::environment::EffectKind::DepthOfField(d) => Some(d),
+            _ => None,
+        });
+        let focus = dof.map(|d| {
+            let cam = self.camera_for(index);
+            let world = cam.view_matrix().inverse();
+            let (eye, forward) = (world.w_axis.truncate(), -world.z_axis.truncate().normalize_or_zero());
+            match d.focal_node.filter(|n| scene.node(*n).is_some()) {
+                Some(n) => (scene.world_matrix(n).w_axis.truncate() - eye).dot(forward).max(0.0),
+                None => cam.orbit.distance,
+            }
+        });
+        loom_bevy::environment::ViewEnv { ranges, focus }
+    }
+
     fn start_render(&mut self, req: loom_commands::RenderRequest) -> Result<(), String> {
         if self.bevy().is_none() {
             return Err("no GPU renderer".into());
@@ -294,6 +348,8 @@ impl LoomApp {
             loom_scene::anim::with_rendering(|| self.rebuild_world_meshes());
         }
         self.sync_bevy_for(true);
+        let env = self.environment();
+        let view = self.view_env(req.viewport);
         let s = req.settings.clone();
         let hidden = if s.render_hidden { self.hidden_meshes() } else { Vec::new() };
         let scene = &self.state.scene;
@@ -306,38 +362,48 @@ impl LoomApp {
             msaa: s.bevy.antialiasing,
             shadows: s.bevy.shadows,
             shadow_map_size: s.bevy.shadow_map_size,
-            background: s.bevy.background,
-            ambient: s.bevy.ambient,
+            background: if env.background != [0.0; 3] { env.background } else { s.bevy.background },
+            ambient: if env.ambient != [0.0; 3] { env.ambient } else { s.bevy.ambient },
             force_two_sided: s.force_two_sided,
             selected_only,
             hidden: s.render_hidden,
             quality: s.bevy.clone(),
+            atmospherics: s.atmospherics,
+            effects: s.effects,
+            view,
         };
         let aspect = s.image_aspect();
         let cam = self.camera_for(req.viewport);
         let camera = loom_bevy::ViewCamera { view: cam.view_matrix(), projection: cam.projection_matrix(aspect) };
         let Gpu::Running(b) = &mut self.gpu else { return Err("no GPU renderer".into()) };
+        b.renderer.set_environment(&env);
         b.renderer.sync_hidden(&hidden_objects);
         b.renderer.begin_render(options);
+        if req.preview {
+            b.preview_env = Some(env.clone());
+        }
 
         let (full, origin, out, mask) = render_geometry(&s);
-        // Iterative Region / Selected keep the rest of the window's image;
-        // everything else starts from a cleared frame.
-        let keep = req.iterative && matches!(s.area, RenderArea::Region | RenderArea::Selected);
-        let base = match &self.state.rendered.image {
-            Some(img) if keep && img.dimensions() == (out[0], out[1]) => (**img).clone(),
-            _ => cleared(out, s.bevy.background),
-        };
-        self.state.rendered.set_image(Some(Arc::new(base)));
         let area = mask.unwrap_or([0, 0, out[0], out[1]]);
         let bucket = bucket_size(area, s.bevy.supersampling.clamp(1, 4));
         let list = buckets(area, bucket);
-        let passes = s.bevy.passes.clamp(1, 64);
-        self.state.rendered.progress = Some(loom_commands::render::RenderProgress { done: 0, total: list.len() as u32 * passes, paused: false });
-        self.state.rendered.cancel = false;
-        self.state.rendered.open = true;
-        self.state.status_prompt = format!("Rendering {}x{}...", out[0], out[1]);
-        self.render_job = Some(RenderJob { req, camera, aspect, full, origin, out, buckets: list, bucket, next: 0, passes, pass: 0, warmup: WARMUP, misses: 0, mask, started: std::time::Instant::now(), queued: false });
+        let passes = if req.preview { 1 } else { s.bevy.passes.clamp(1, 64) };
+        let preview = req.preview.then(|| cleared(out, env.background));
+        if preview.is_none() {
+            // Iterative Region / Selected keep the rest of the window's image;
+            // everything else starts from a cleared frame.
+            let keep = req.iterative && matches!(s.area, RenderArea::Region | RenderArea::Selected);
+            let base = match &self.state.rendered.image {
+                Some(img) if keep && img.dimensions() == (out[0], out[1]) => (**img).clone(),
+                _ => cleared(out, env.background),
+            };
+            self.state.rendered.set_image(Some(Arc::new(base)));
+            self.state.rendered.progress = Some(loom_commands::render::RenderProgress { done: 0, total: list.len() as u32 * passes, paused: false });
+            self.state.rendered.cancel = false;
+            self.state.rendered.open = true;
+            self.state.status_prompt = format!("Rendering {}x{}...", out[0], out[1]);
+        }
+        self.render_job = Some(RenderJob { req, camera, aspect, full, origin, out, buckets: list, bucket, next: 0, passes, pass: 0, warmup: WARMUP, misses: 0, mask, started: std::time::Instant::now(), queued: false, env, preview });
         Ok(())
     }
 
@@ -393,16 +459,20 @@ impl LoomApp {
         // Every pass shows; the bucket is done once all its passes are in.
         let done = b.renderer.bucket_done();
         let [bx, by] = job.buckets[job.next];
-        let side = job.bucket;
-        let (out, mask) = (job.out, job.mask);
+        let (out, mask, side) = (job.out, job.mask, job.bucket);
         let composite = job.req.settings.area == RenderArea::Selected;
-        let bg = job.req.settings.bevy.background;
+        let bg = job.env.background;
         let frame = &mut self.state.rendered;
-        let img = frame.image.get_or_insert_with(|| Arc::new(cleared(out, bg)));
-        if img.dimensions() != (out[0], out[1]) {
-            *img = Arc::new(cleared(out, bg));
-        }
-        let img = Arc::make_mut(img);
+        let img: &mut image::RgbaImage = match job.preview.as_mut() {
+            Some(p) => p,
+            None => {
+                let img = frame.image.get_or_insert_with(|| Arc::new(cleared(out, bg)));
+                if img.dimensions() != (out[0], out[1]) {
+                    *img = Arc::new(cleared(out, bg));
+                }
+                Arc::make_mut(img)
+            }
+        };
         let [x0, y0, x1, y1] = mask.unwrap_or([0, 0, out[0], out[1]]);
         let (w, h) = ((bx + side).min(x1) - bx, (by + side).min(y1) - by);
         for y in 0..h {
@@ -422,6 +492,13 @@ impl LoomApp {
                     s
                 };
             }
+        }
+        if job.preview.is_some() {
+            job.next += 1;
+            if job.next >= job.buckets.len() {
+                self.finish_render(Ok(()));
+            }
+            return;
         }
         frame.version += 1;
         let r = [bx, by, w, h];
@@ -506,10 +583,28 @@ impl LoomApp {
     }
 
     fn finish_render(&mut self, result: Result<(), String>) {
-        let Some(job) = self.render_job.take() else { return };
+        let Some(mut job) = self.render_job.take() else { return };
         if let Gpu::Running(b) = &mut self.gpu {
             b.renderer.end_render();
             b.renderer.sync_hidden(&[]);
+        }
+        let effects = if job.req.settings.effects { job.env.effects.clone() } else { Vec::new() };
+        if let Some(mut img) = job.preview.take() {
+            if result.is_ok() {
+                loom_bevy::effects::apply(&mut img, &effects);
+                let ui = &mut self.state.environment_ui;
+                ui.preview = Some(Arc::new(img));
+                ui.preview_version += 1;
+            }
+            return;
+        }
+        if result.is_ok() && !effects.is_empty() {
+            // Rendering effects work on the finished frame.
+            if let Some(img) = self.state.rendered.image.as_mut() {
+                loom_bevy::effects::apply(Arc::make_mut(img), &effects);
+                self.state.rendered.version += 1;
+                self.state.rendered.dirty = None;
+            }
         }
         self.state.rendered.progress = None;
         self.state.rendered.cancel = false;

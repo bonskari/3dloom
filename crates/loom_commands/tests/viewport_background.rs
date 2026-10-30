@@ -8,7 +8,7 @@ use loom_commands::viewport::BackgroundAspect;
 use loom_commands::{execute, AppState, Command};
 
 fn set(s: &mut AppState, path: Option<&str>, aspect: Option<&str>, display: Option<bool>, all_views: Option<bool>) {
-    execute(s, Command::SetViewportBackground { path: path.map(str::to_owned), aspect: aspect.map(str::to_owned), lock: None, display, all_views }).unwrap();
+    execute(s, Command::SetViewportBackground { path: path.map(str::to_owned), use_environment: None, aspect: aspect.map(str::to_owned), lock: None, display, all_views }).unwrap();
 }
 
 #[test]
@@ -27,7 +27,7 @@ fn aspect_and_display_apply_to_the_active_view_or_all() {
     }
     set(&mut s, None, None, Some(false), None);
     assert!(!s.viewports[1].background_display && s.viewports[1].background.is_some(), "Display Background off keeps the file");
-    assert!(execute(&mut s, Command::SetViewportBackground { path: None, aspect: Some("Sideways".into()), lock: None, display: None, all_views: None }).is_err());
+    assert!(execute(&mut s, Command::SetViewportBackground { path: None, use_environment: None, aspect: Some("Sideways".into()), lock: None, display: None, all_views: None }).is_err());
 }
 
 #[test]

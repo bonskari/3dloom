@@ -73,6 +73,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::material_library::handles(&c) => crate::material_library::execute(state, c),
         c if crate::display::handles(&c) => crate::display::execute(state, c),
         c if crate::render::handles(&c) => crate::render::execute(state, c),
+        c if crate::environment::handles(&c) => crate::environment::execute(state, c),
         c if crate::bake::handles(&c) => crate::bake::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
@@ -1104,7 +1105,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(Dialog::ViewportBackground);
             Ok(json!({}))
         }
-        C::SetViewportBackground { path, aspect, lock, display, all_views } => {
+        C::SetViewportBackground { path, use_environment, aspect, lock, display, all_views } => {
             let aspect = match aspect {
                 Some(a) => Some(crate::viewport::BackgroundAspect::from_label(&a).ok_or_else(|| format!("unknown aspect ratio `{a}` (Match Viewport, Match Bitmap, Match Rendering Output)"))?),
                 None => None,
@@ -1118,6 +1119,9 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     vp.background = (!p.is_empty()).then(|| p.clone());
                     vp.background_version += 1;
                     vp.background_display = true;
+                }
+                if let Some(u) = use_environment {
+                    vp.background_use_environment = u;
                 }
                 if let Some(a) = aspect {
                     vp.background_aspect = a;
@@ -5286,6 +5290,7 @@ fn snapshot(state: &AppState) -> Value {
         "dialog": state.dialog.map(|d| format!("{d:?}")),
         "material_editor": state.material_editor_open,
         "rendered_frame": crate::render::state_json(state),
+        "environment": crate::environment::state_json(state),
         "pick_mode": state.pick_mode.map(|p| format!("{p:?}")),
         "poly_drag": state.poly_drag.map(|p| format!("{p:?}")),
         "poly_settings": serde_json::to_value(state.poly_settings).unwrap_or(Value::Null),

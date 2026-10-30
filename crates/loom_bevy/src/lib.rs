@@ -2,12 +2,17 @@
 //! shadows and ambient light. Bevy runs headless on the UI's own wgpu device
 //! and renders each Realistic viewport into an image the UI draws as the
 //! viewport background, and renders the active view to a PNG for Render.
+//! The scene's Environment (background, global lighting, exposure control,
+//! atmospheres, Depth of Field) applies to both; see [`environment`].
 
 pub mod bake;
 pub mod convert;
+pub mod effects;
+pub mod environment;
 pub mod lights;
 pub mod look;
 pub mod quality;
+mod post;
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,7 +23,10 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::entity::Entity;
 use bevy::image::{Image, ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Vec3;
-use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, DirectionalLightShadowMap, MeshMaterial3d, PointLightShadowMap, StandardMaterial};
+use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight, DirectionalLightShadowMap, FogVolume, MeshMaterial3d, PointLightShadowMap, StandardMaterial, VolumetricFog, VolumetricLight};
+use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
+use environment::{EnvSettings, Fog, ViewEnv};
+use loom_scene::environment::{EnvMapping, ExposureKind, LayerFalloff};
 use bevy::render::camera::{Camera, ClearColorConfig, RenderTarget};
 use bevy::render::mesh::{Mesh, Mesh3d};
 use bevy::render::render_asset::RenderAssets;
@@ -54,7 +62,7 @@ const LIGHT_LAYER: usize = 4;
 /// to Camera off) with the default key light: only that light is on this
 /// layer. Kept far above the per-light layers.
 const SHADOW_ONLY_LAYER: usize = 1023;
-/// Brightness of the ambient light that the Render Setup colour tints.
+/// Brightness of the ambient light at the Environment's Ambient white.
 const AMBIENT_BRIGHTNESS: f32 = 250.0;
 
 /// Render Setup values a render uses (the Bevy renderer panel and the
@@ -64,7 +72,6 @@ pub struct RenderOptions {
     pub msaa: bool,
     pub shadows: bool,
     pub shadow_map_size: u32,
-    /// sRGB 0–1; the background's alpha is 0.
     pub background: [f32; 3],
     pub ambient: [f32; 3],
     pub force_two_sided: bool,
@@ -76,11 +83,37 @@ pub struct RenderOptions {
     /// passes, area shadows, ambient occlusion, reflections, sky lighting
     /// and exposure control (its shadows, map size and colours are the fields above).
     pub quality: loom_scene::render::BevyRenderSettings,
+    /// Options > Atmospherics / Effects: the environment's atmospheres and
+    /// Depth of Field apply to the render.
+    pub atmospherics: bool,
+    pub effects: bool,
+    /// The rendered view's environment ranges and focus.
+    pub view: ViewEnv,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        Self { msaa: true, shadows: true, shadow_map_size: 4096, background: [0.0; 3], ambient: [1.0; 3], force_two_sided: false, selected_only: None, hidden: false, quality: Default::default() }
+        Self {
+            msaa: true,
+            shadows: true,
+            shadow_map_size: 4096,
+            background: [0.0; 3],
+            ambient: [0.0; 3],
+            force_two_sided: false,
+            selected_only: None,
+            hidden: false,
+            quality: loom_scene::render::BevyRenderSettings {
+                passes: 1,
+                area_shadows: false,
+                ambient_occlusion: false,
+                reflections: false,
+                sky_lighting: false,
+                ..Default::default()
+            },
+            atmospherics: true,
+            effects: true,
+            view: ViewEnv::default(),
+        }
     }
 }
 
@@ -164,9 +197,22 @@ struct View {
 
 /// Slot of the offline Render camera.
 const RENDER_SLOT: u32 = u32::MAX;
+/// Slot of the camera that meters a view for Automatic / Linear exposure.
+const METER_SLOT: u32 = u32::MAX - 2;
+/// Metering image size, and the stops it renders under so highlights do not clip.
+const METER_SIZE: u32 = 64;
+const METER_STOPS: f32 = 4.0;
 /// Key light: from the front right and above (world Z up), so the default
 /// Perspective view (from the front left) sees the shadows fall beside objects.
 const KEY_LIGHT_FROM: Vec3 = Vec3::new(0.8, -0.45, 1.0);
+/// The default key light's illuminance (lux) at Global Lighting Level 1.
+const KEY_LIGHT_LUX: f32 = 3000.0;
+/// The reference's default lighting is two lights: the key above the scene
+/// and a fill from below on the other side, so with the default black
+/// ambient nothing is left unlit. The fill is as much weaker as loom's
+/// two-light viewport default (0.35 against 0.75) and casts no shadows.
+const FILL_LIGHT_FROM: Vec3 = Vec3::new(-0.8, 0.45, -1.0);
+const FILL_LIGHT_LUX: f32 = KEY_LIGHT_LUX * 0.35 / 0.75;
 
 /// The device a shared Bevy renderer needs: the adapter's features (less
 /// the ones Bevy itself leaves off) and its limits, as Bevy asks for them
@@ -179,6 +225,26 @@ pub fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'sta
     features -= wgpu::Features::EXPERIMENTAL_RAY_QUERY;
     features -= wgpu::Features::EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE;
     wgpu::DeviceDescriptor { label: Some("3dLoom device"), required_features: features, required_limits: adapter.limits(), memory_hints: wgpu::MemoryHints::default() }
+}
+
+/// For test binaries: ends the process with a failure (exit 101), naming
+/// its threads, once it has run `limit` (`LOOM_TEST_WATCHDOG_SECS`
+/// overrides it), so a test stuck in the GPU driver fails instead of
+/// holding its build slot. Armed once per process; later calls do nothing.
+#[doc(hidden)]
+pub fn test_watchdog(limit: std::time::Duration) {
+    static ARMED: std::sync::Once = std::sync::Once::new();
+    ARMED.call_once(|| {
+        let limit = std::env::var("LOOM_TEST_WATCHDOG_SECS").ok().and_then(|s| s.parse().ok()).map(std::time::Duration::from_secs).unwrap_or(limit);
+        let _ = std::thread::Builder::new().name("test watchdog".into()).spawn(move || {
+            std::thread::sleep(limit);
+            let threads = std::fs::read_dir("/proc/self/task")
+                .map(|d| d.filter_map(|e| e.ok()).filter_map(|e| std::fs::read_to_string(e.path().join("comm")).ok()).map(|s| s.trim().to_owned()).collect::<Vec<_>>().join(", "))
+                .unwrap_or_default();
+            eprintln!("test watchdog: the test binary still runs after {limit:?}; threads: {threads}");
+            std::process::exit(101);
+        });
+    });
 }
 
 /// Whether Bevy can run on `adapter` (not on the GL fallback).
@@ -198,6 +264,8 @@ pub struct BevyRenderer {
     images: loom_scene::maps::Images,
     /// The default key light, while the scene has no light that is on.
     light: Option<Entity>,
+    /// The default fill light, with the key light.
+    fill: Option<Entity>,
     /// The scene's lights (from `sync_lights`) and their Bevy entities by node id.
     samples: Vec<loom_scene::light::LightSample>,
     scene_lights: HashMap<u64, lights::Synced>,
@@ -213,6 +281,18 @@ pub struct BevyRenderer {
     scale: f32,
     /// The pass the lights are placed for (their Source Radius jitter).
     light_pass: u32,
+    /// The scene's environment, the views' own parts of it and the map.
+    env: EnvSettings,
+    view_envs: HashMap<u32, ViewEnv>,
+    env_map: Option<Handle<Image>>,
+    /// The fog volumes Volume Light scatters in.
+    volumes: Vec<Entity>,
+    /// Automatic / Linear exposure: stops each view's metering found.
+    metered: HashMap<u32, f32>,
+    /// The view the metering camera looks through this frame.
+    meter: Option<u32>,
+    /// The next viewport to meter (they take turns).
+    meter_next: u32,
 }
 
 struct ActiveRender {
@@ -225,6 +305,8 @@ struct ActiveRender {
     camera_ready: bool,
     /// The bucket's passes so far.
     accum: Option<quality::Accum>,
+    /// The part of the frame the current bucket shows (u0, v0, u1, v1).
+    frame: [f32; 4],
 }
 
 impl BevyRenderer {
@@ -248,6 +330,7 @@ impl BevyRenderer {
                 .set(WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, close_when_requested: false })
                 .set(RenderPlugin { render_creation: RenderCreation::Manual(resources), synchronous_pipeline_compilation: true, ..Default::default() }),
         );
+        app.add_plugins(post::EnvPassPlugin);
         app.add_plugins(bake::BakePlugin);
         app.add_plugins(look::LookPlugin);
         while app.plugins_state() == PluginsState::Adding {
@@ -255,17 +338,44 @@ impl BevyRenderer {
         }
         app.finish();
         app.cleanup();
-        app.insert_resource(AmbientLight { color: Color::WHITE, brightness: AMBIENT_BRIGHTNESS, affects_lightmapped_meshes: true });
+        // The default Environment's ambient is black.
+        app.insert_resource(AmbientLight { color: Color::WHITE, brightness: 0.0, affects_lightmapped_meshes: true });
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         let light = Some(Self::spawn_key_light(&mut app));
-        Self { app, device, queue, objects: HashMap::new(), views: HashMap::new(), textures: HashMap::new(), images: Default::default(), light, samples: Vec::new(), scene_lights: HashMap::new(), bounds: None, settle: 3, hidden: HashMap::new(), render: None, scale: 1.0, light_pass: 0 }
+        let fill = Some(Self::spawn_fill_light(&mut app));
+        Self {
+            app,
+            device,
+            queue,
+            objects: HashMap::new(),
+            views: HashMap::new(),
+            textures: HashMap::new(),
+            images: Default::default(),
+            light,
+            fill,
+            samples: Vec::new(),
+            scene_lights: HashMap::new(),
+            bounds: None,
+            settle: 3,
+            hidden: HashMap::new(),
+            render: None,
+            scale: 1.0,
+            light_pass: 0,
+            env: EnvSettings::default(),
+            view_envs: HashMap::new(),
+            env_map: None,
+            volumes: Vec::new(),
+            metered: HashMap::new(),
+            meter: None,
+            meter_next: 0,
+        }
     }
 
-    /// Default lighting: a key light with shadows.
+    /// Default lighting: the key light, with shadows.
     fn spawn_key_light(app: &mut App) -> Entity {
         app.world_mut()
             .spawn((
-                DirectionalLight { illuminance: 3000.0, shadows_enabled: true, ..Default::default() },
+                DirectionalLight { illuminance: KEY_LIGHT_LUX, shadows_enabled: true, ..Default::default() },
                 Transform::from_translation(KEY_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
                 // The key light lights (and shadows) every layer.
                 RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER, bake::BAKE_KEY_LAYER]),
@@ -273,9 +383,20 @@ impl BevyRenderer {
             .id()
     }
 
+    /// Default lighting: the fill light, from below on the other side.
+    fn spawn_fill_light(app: &mut App) -> Entity {
+        app.world_mut()
+            .spawn((
+                DirectionalLight { illuminance: FILL_LIGHT_LUX, shadows_enabled: false, ..Default::default() },
+                Transform::from_translation(FILL_LIGHT_FROM).looking_at(Vec3::ZERO, Vec3::Z),
+                RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, SHADOW_ONLY_LAYER, bake::BAKE_KEY_LAYER]),
+            ))
+            .id()
+    }
+
     /// Brings the Bevy lights in line with the scene's lights (call after
-    /// `sync`, which measures the scene). With none, the default key light
-    /// lights the scene; otherwise the scene lights replace it. A render's
+    /// `sync`, which measures the scene). With none, the default key and fill
+    /// lights light the scene; otherwise the scene lights replace it. A render's
     /// Render Setup options (shadows, shadow map size, ambient) apply on top.
     pub fn sync_lights(&mut self, samples: &[loom_scene::light::LightSample]) {
         let relayer = samples.iter().map(|s| (s.id, &s.exclusion)).ne(self.samples.iter().map(|s| (s.id, &s.exclusion)));
@@ -293,21 +414,42 @@ impl BevyRenderer {
         let (centre, radius) = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
         let options = self.render.as_ref().map(|r| r.options.clone());
         let shadows = options.as_ref().is_none_or(|o| o.shadows);
-        let tint = options.as_ref().map_or([1.0; 3], |o| o.ambient);
+        // Global Lighting: Ambient is the ambient light's colour; Tint and
+        // Level multiply every other light.
+        let tint = if self.env.ambient != [0.0; 3] { self.env.ambient } else { options.as_ref().map_or(self.env.ambient, |o| o.ambient) };
+        let light_tint = Color::srgb(self.env.tint[0], self.env.tint[1], self.env.tint[2]).to_linear();
+        let light_tint = glam::Vec3::new(light_tint.red, light_tint.green, light_tint.blue) * self.env.level.max(0.0);
         if self.samples.is_empty() {
             if self.light.is_none() {
                 self.light = Some(Self::spawn_key_light(&mut self.app));
             }
-        } else if let Some(e) = self.light.take() {
-            self.app.world_mut().despawn(e);
-        }
-        if let Some(e) = self.light {
-            if let Some(mut l) = self.app.world_mut().get_mut::<DirectionalLight>(e) {
-                l.shadows_enabled = shadows;
+            if self.fill.is_none() {
+                self.fill = Some(Self::spawn_fill_light(&mut self.app));
+            }
+        } else {
+            for e in [self.light.take(), self.fill.take()].into_iter().flatten() {
+                self.app.world_mut().despawn(e);
             }
         }
-        let (color, b) = self.ambient_light(tint);
-        self.app.insert_resource(AmbientLight { color, brightness: b, affects_lightmapped_meshes: true });
+        let b = light_tint.max_element();
+        let color = if b > 0.0 { Color::linear_rgb(light_tint.x / b, light_tint.y / b, light_tint.z / b) } else { Color::BLACK };
+        for (e, lux, key) in [(self.light, KEY_LIGHT_LUX, true), (self.fill, FILL_LIGHT_LUX, false)] {
+            let Some(e) = e else { continue };
+            if let Some(mut l) = self.app.world_mut().get_mut::<DirectionalLight>(e) {
+                l.shadows_enabled = key && shadows;
+                l.illuminance = lux * b;
+                l.color = color;
+            }
+        }
+        // The Environment's ambient colour (sRGB), plus the skylights and Ambient Only lights.
+        let t = Color::srgb(tint[0], tint[1], tint[2]).to_linear();
+        let (sky_color, sky) = lights::ambient(&self.samples);
+        let sky_color = sky_color.to_linear();
+        // Skylights are lights: Tint and Level apply to them too.
+        let sum = Vec3::new(t.red, t.green, t.blue) * AMBIENT_BRIGHTNESS + Vec3::new(sky_color.red, sky_color.green, sky_color.blue) * Vec3::from(light_tint.to_array()) * sky;
+        let b = sum.max_element();
+        let color = if b > 0.0 { Color::linear_rgb(sum.x / b, sum.y / b, sum.z / b) } else { Color::BLACK };
+        self.app.insert_resource(AmbientLight { color, brightness: b.max(0.0), affects_lightmapped_meshes: true });
         let mut seen = HashSet::new();
         let mut map_size = 0usize;
         let samples = self.samples.clone();
@@ -336,6 +478,7 @@ impl BevyRenderer {
             };
             let mut s = s.clone();
             s.shadows &= shadows;
+            s.color *= light_tint;
             if let (Some(d), true) = (area, s.source_radius > 0.0) {
                 lights::move_over_source(&mut s, d, centre);
                 s.source_radius = 0.0;
@@ -394,6 +537,224 @@ impl BevyRenderer {
         }
         if map_size > 0 {
             self.app.insert_resource(PointLightShadowMap { size: map_size.clamp(128, 8192) });
+        }
+        self.apply_volume_lights();
+    }
+
+    /// Volume Light of directional lights: Bevy's volumetric fog in a fog
+    /// volume around the scene (it follows their shadow maps). Omni and spot
+    /// lights are marched by the environment pass ([`volume_light_uniform`]):
+    /// Bevy looks those up by where a ray enters the fog, which misses a
+    /// cone seen from the side.
+    fn apply_volume_lights(&mut self) {
+        let atmospherics = self.render.as_ref().is_none_or(|r| r.options.atmospherics);
+        let lights: Vec<environment::VolumeLight> = if atmospherics { self.env.volume_lights.clone() } else { Vec::new() };
+        let (centre, radius) = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
+        let mut volumes = Vec::new();
+        let mut lit = HashSet::new();
+        for l in &lights {
+            for id in &l.lights {
+                let Some(s) = self.samples.iter().find(|s| s.id.0 == *id) else { continue };
+                if lights::kind(s) != Some(lights::Kind::Directional) {
+                    continue;
+                }
+                lit.insert(*id);
+                let fog = FogVolume {
+                    fog_color: Color::srgb(l.color[0], l.color[1], l.color[2]),
+                    density_factor: environment::volume_light_density(l.density, radius * 2.0),
+                    absorption: 0.0,
+                    scattering: 0.5,
+                    scattering_asymmetry: 0.0,
+                    ..Default::default()
+                };
+                volumes.push((fog, Transform::from_translation(centre).with_scale(Vec3::splat(radius * 2.2))));
+            }
+        }
+        let entities: Vec<(u64, Entity)> = self.scene_lights.iter().map(|(id, l)| (*id, l.entity)).collect();
+        for (id, e) in entities {
+            let mut e = self.app.world_mut().entity_mut(e);
+            if lit.contains(&id) {
+                e.insert(VolumetricLight);
+            } else {
+                e.remove::<VolumetricLight>();
+            }
+        }
+        for e in self.volumes.drain(..) {
+            self.app.world_mut().despawn(e);
+        }
+        // Every camera's layers see the fog.
+        let layers = RenderLayers::from_layers(&[VIEWPORT_LAYER, RENDER_LAYER, SELECTED_LAYER, HIDDEN_LAYER, LIGHT_LAYER]);
+        for (fog, t) in volumes {
+            let e = self.app.world_mut().spawn((fog, t, layers.clone())).id();
+            self.volumes.push(e);
+        }
+    }
+
+    /// The environment pass's Volume Light entries for `env`: up to four
+    /// omni / spot lights, their in-scattering colour in the units the
+    /// main pass lights surfaces with (Bevy's exposure and 1/π), so a
+    /// density of 100% seen through a tenth of the scene's diameter glows
+    /// about as bright as a white surface the light lights there.
+    fn volume_light_uniform(&self, env: &EnvSettings) -> [[bevy::math::Vec4; 4]; 4] {
+        use bevy::math::Vec4;
+        let mut out = [[Vec4::ZERO; 4]; 4];
+        let (centre, radius) = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
+        let tint = Color::srgb(env.tint[0], env.tint[1], env.tint[2]).to_linear();
+        let tint = glam::Vec3::new(tint.red, tint.green, tint.blue) * env.level.max(0.0);
+        let mut n = 0;
+        for l in &env.volume_lights {
+            let fog = linear(l.color);
+            let sigma = l.density.max(0.0) / 100.0 * 5.0 / radius.max(1e-3);
+            for id in &l.lights {
+                let Some(s) = self.samples.iter().find(|s| s.id.0 == *id) else { continue };
+                let kind = match lights::kind(s) {
+                    Some(lights::Kind::Point) => 1.0,
+                    Some(lights::Kind::Spot) => 2.0,
+                    _ => continue,
+                };
+                if n == 4 {
+                    return out;
+                }
+                let mut s = s.clone();
+                s.color *= tint;
+                let pos = Vec3::from(s.position.to_array());
+                let d = (pos - centre).length();
+                let c = s.color.max(glam::Vec3::ZERO);
+                let b = c.max_element();
+                let intensity = lights::lumens(&s, d) / (4.0 * std::f32::consts::PI);
+                let k = if b > 0.0 { sigma * intensity / std::f32::consts::PI * lights::EXPOSURE / b } else { 0.0 };
+                let (cos_outer, cos_inner) = match s.emitter {
+                    loom_scene::light::Emitter::Spot { hotspot, falloff } if kind == 2.0 => ((falloff * 0.5).to_radians().cos(), (hotspot.min(falloff) * 0.5).to_radians().cos()),
+                    _ => (-1.0, -1.0),
+                };
+                out[0][n] = pos.extend(kind);
+                out[1][n] = Vec3::from(s.direction.to_array()).normalize_or(Vec3::NEG_Z).extend(cos_outer);
+                out[2][n] = Vec4::new(fog.x * c.x * k, fog.y * c.y * k, fog.z * c.z * k, cos_inner.max(cos_outer + 1e-4));
+                // Marched as far as the light reaches, within the scene.
+                out[3][n] = Vec4::new(lights::range(&s, d, radius).min(d + radius), 0.0, 0.0, 0.0);
+                n += 1;
+            }
+        }
+        out
+    }
+
+    /// Applies the scene's environment (Environment and Effects at the
+    /// current time) to the lights and every view.
+    pub fn set_environment(&mut self, env: &EnvSettings) {
+        if *env == self.env {
+            return;
+        }
+        let map_changed = env.map != self.env.map;
+        self.env = env.clone();
+        if map_changed {
+            self.env_map = env.map.as_ref().and_then(|(p, _)| self.env_texture(p));
+        }
+        if !env.exposure.is_some_and(|x| x.meters()) {
+            self.metered.clear();
+        }
+        self.apply_lights();
+        let slots: Vec<u32> = self.views.keys().copied().collect();
+        for slot in slots {
+            self.apply_view_env(slot);
+        }
+        self.settle = self.settle.max(3);
+    }
+
+    /// The environment ranges and focus of viewport `slot`.
+    pub fn set_view_environment(&mut self, slot: u32, view: ViewEnv) {
+        if self.view_envs.insert(slot, view) != Some(view) && self.views.contains_key(&slot) {
+            self.apply_view_env(slot);
+        }
+    }
+
+    /// The environment as view `slot` uses it: a render leaves out what
+    /// Render Setup turned off; the metering camera has no Depth of Field.
+    fn env_for(&self, slot: u32) -> EnvSettings {
+        let mut env = self.env.clone();
+        if slot == RENDER_SLOT || slot == METER_SLOT {
+            if let Some(o) = self.render.as_ref().map(|r| &r.options) {
+                if env.background == [0.0; 3] && o.background != [0.0; 3] {
+                    env.background = o.background;
+                }
+                if !o.atmospherics {
+                    env = env.without_atmospherics();
+                }
+                if !o.effects {
+                    env = env.without_effects();
+                }
+            }
+        }
+        if slot == METER_SLOT {
+            env.depth_of_field = None;
+        }
+        env
+    }
+
+    /// Exposure, the environment pass and volumetric fog on view `slot`'s camera.
+    fn apply_view_env(&mut self, slot: u32) {
+        // Render To Texture bakes in texture space: no environment there.
+        if slot == bake::BAKE_SLOT {
+            return;
+        }
+        let Some(v) = self.views.get(&slot) else { return };
+        let entity = v.camera;
+        let env = self.env_for(slot);
+        let metered_slot = if slot == METER_SLOT { self.meter.unwrap_or(slot) } else { slot };
+        let view = if slot == RENDER_SLOT || (slot == METER_SLOT && self.meter == Some(RENDER_SLOT)) {
+            self.render.as_ref().map(|r| r.options.view).unwrap_or_default()
+        } else {
+            self.view_envs.get(&metered_slot).copied().unwrap_or_default()
+        };
+        let render = slot == RENDER_SLOT;
+        let frame = if render { self.render.as_ref().map_or([0.0, 0.0, 1.0, 1.0], |r| r.frame) } else { [0.0, 0.0, 1.0, 1.0] };
+        let world = self.app.world();
+        let Some(t) = world.get::<Transform>(entity).copied() else { return };
+        let bounds = self.bounds.unwrap_or((Vec3::ZERO, 1.0));
+        let mut uniform = env_uniform(&env, view, &t, bounds, render, frame);
+        [uniform.vlight_pos, uniform.vlight_dir, uniform.vlight_color, uniform.vlight_range] = self.volume_light_uniform(&env);
+        let metered = self.metered.get(&slot).copied().unwrap_or(0.0);
+        let (mut tonemapping, grading, mut hdr) = if slot == METER_SLOT {
+            (Tonemapping::None, ColorGrading { global: ColorGradingGlobal { exposure: -METER_STOPS, ..Default::default() }, ..Default::default() }, false)
+        } else {
+            exposure_components(env.exposure.as_ref(), metered)
+        };
+        if render {
+            if let Some(r) = self.render.as_ref() {
+                if env.exposure.is_none() {
+                    use loom_scene::render::Tonemapper;
+                    tonemapping = match r.options.quality.tonemapper {
+                        Tonemapper::None => Tonemapping::None,
+                        Tonemapper::Reinhard => Tonemapping::Reinhard,
+                        Tonemapper::Aces => Tonemapping::AcesFitted,
+                        Tonemapper::AgX => Tonemapping::AgX,
+                        Tonemapper::TonyMcMapface => Tonemapping::TonyMcMapface,
+                        Tonemapper::BlenderFilmic => Tonemapping::BlenderFilmic,
+                    };
+                }
+                if r.options.screen_space() || r.options.quality.exposure != 0.0 {
+                    hdr = true;
+                }
+            }
+        }
+        // HDR with no tonemapping curve (Linear, Process Background): Bevy
+        // skips tonemapping and its grading, so the pass applies the exposure.
+        if let (true, Tonemapping::None, Some(x)) = (hdr, tonemapping, env.exposure.as_ref()) {
+            let stops = x.stops() + if x.meters() { metered } else { 0.0 };
+            uniform.grade = bevy::math::Vec4::new(2f32.powf(stops), x.contrast / 50.0, 1.0, 0.0);
+        }
+        let map = (render && env.map.is_some()).then(|| self.env_map.clone()).flatten();
+        let volumetric = !env.volume_lights.is_empty() && !self.volumes.is_empty();
+        let mut e = self.app.world_mut().entity_mut(entity);
+        e.insert((tonemapping, grading, post::EnvPass { uniform, map }));
+        if volumetric {
+            e.insert(VolumetricFog { ambient_intensity: 0.0, step_count: 64, ..Default::default() });
+        } else {
+            e.remove::<VolumetricFog>();
+        }
+        if let Some(mut cam) = e.get_mut::<Camera>() {
+            if cam.hdr != hdr {
+                cam.hdr = hdr;
+            }
         }
     }
 
@@ -754,6 +1115,13 @@ impl BevyRenderer {
         loom_scene::maps::bake(map, &self.images).map(std::sync::Arc::new)
     }
 
+    /// The environment map's bitmap (None when it cannot be read).
+    fn env_texture(&mut self, path: &str) -> Option<Handle<Image>> {
+        let img = image::open(path).ok()?.to_rgba8();
+        let (width, height) = img.dimensions();
+        self.texture_from(&format!("env:{path}"), TextureFormat::Rgba8UnormSrgb, [false; 2], || loom_scene::maps::Image { width, height, rgba: img.into_raw() })
+    }
+
     /// An image as a Bevy texture, made once per key; decal axes clamp.
     fn texture_from(&mut self, key: &str, format: TextureFormat, decal: [bool; 2], make: impl FnOnce() -> loom_scene::maps::Image) -> Option<Handle<Image>> {
         if let Some(t) = self.textures.get(key) {
@@ -788,6 +1156,38 @@ impl BevyRenderer {
         let aspect = size[0].max(1) as f32 / size[1].max(1) as f32;
         let camera = camera.scaled(self.scale);
         self.place_view(slot, size, camera.bevy_projection(aspect), camera.view, clear, msaa, RenderLayers::layer(VIEWPORT_LAYER));
+        // Automatic / Linear exposure: the viewports take turns being metered.
+        if self.meter.is_none() && self.env.exposure.is_some_and(|x| x.meters()) && slot >= self.meter_next {
+            self.meter_next = slot + 1;
+            self.place_meter(slot, camera.bevy_projection(aspect), camera.view, RenderLayers::layer(VIEWPORT_LAYER));
+        }
+    }
+
+    /// Points the metering camera at view `slot`'s camera for this frame.
+    fn place_meter(&mut self, slot: u32, projection: Projection, view: bevy::math::Mat4, layers: RenderLayers) {
+        self.meter = Some(slot);
+        self.place_view(METER_SLOT, [METER_SIZE; 2], projection, view, [0.0; 4], false, layers);
+    }
+
+    /// After an update: the metered view's exposure from the metering image.
+    fn read_meter(&mut self) {
+        let Some(slot) = self.meter.take() else { return };
+        let Ok(img) = self.read_back(METER_SLOT) else { return };
+        let kind = self.env.exposure.map_or(ExposureKind::None, |x| x.kind);
+        let scale = 2f32.powf(METER_STOPS);
+        let lum: Vec<f32> = img
+            .pixels()
+            .filter(|p| p.0[3] > 0)
+            .map(|p| {
+                let c = [0, 1, 2].map(|i| environment::srgb_to_linear(p.0[i] as f32 / 255.0) * scale);
+                0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+            })
+            .collect();
+        let stops = metering_stops(&lum, kind);
+        if self.metered.insert(slot, stops) != Some(stops) {
+            self.apply_view_env(slot);
+            self.settle = self.settle.max(2);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -808,12 +1208,9 @@ impl BevyRenderer {
                     v.generation += 1;
                 }
                 None => {
-                    // The render camera works in HDR: its exposure control tone maps.
-                    let entity = self
-                        .app
-                        .world_mut()
-                        .spawn((Camera3d::default(), Tonemapping::AcesFitted, Camera { order: slot.min(1 << 20) as isize, hdr: slot == RENDER_SLOT, ..Default::default() }))
-                        .id();
+                    // The environment pass reads the depth buffer.
+                    let camera_3d = Camera3d { depth_texture_usages: (TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING).into(), ..Default::default() };
+                    let entity = self.app.world_mut().spawn((camera_3d, Tonemapping::AcesFitted, Camera { order: slot.min(1 << 20) as isize, ..Default::default() })).id();
                     self.views.insert(slot, View { camera: entity, image: image.clone(), size, msaa, used: false, generation: 0 });
                 }
             }
@@ -839,6 +1236,7 @@ impl BevyRenderer {
         }
         // Every view sees the scene lights' layer.
         e.insert((projection, Transform::from_matrix(view.inverse()), if msaa { Msaa::Sample4 } else { Msaa::Off }, layers.with(LIGHT_LAYER)));
+        self.apply_view_env(slot);
     }
 
     /// Gives the render camera the render's quality settings: exposure
@@ -853,6 +1251,7 @@ impl BevyRenderer {
         let o = r.options.clone();
         let q = &o.quality;
         let entity = v.camera;
+        let has_env_exposure = self.env.exposure.is_some();
         let tonemapping = match q.tonemapper {
             Tonemapper::None => Tonemapping::None,
             Tonemapper::Reinhard => Tonemapping::Reinhard,
@@ -863,7 +1262,8 @@ impl BevyRenderer {
         };
         // The sky dome: the ambient light's colour and brightness, from a dome.
         let sky = q.sky_lighting.then(|| {
-            let (color, brightness) = self.ambient_light(o.ambient);
+            let tint = if self.env.ambient != [0.0; 3] { self.env.ambient } else { o.ambient };
+            let (color, brightness) = self.ambient_light(tint);
             let c = color.to_linear();
             let (d, s) = quality::sky_maps([c.red, c.green, c.blue], q.ground);
             let mut images = self.app.world_mut().resource_mut::<Assets<Image>>();
@@ -871,13 +1271,15 @@ impl BevyRenderer {
         });
         let world = self.app.world_mut();
         let mut e = world.entity_mut(entity);
-        e.insert((
-            tonemapping,
-            if q.dither { DebandDither::Enabled } else { DebandDither::Disabled },
-            Exposure { ev100: Exposure::default().ev100 - q.exposure },
-            // A filter that changes with every frame adds up over the passes.
-            if o.passes() > 1 { ShadowFilteringMethod::Temporal } else { ShadowFilteringMethod::Gaussian },
-        ));
+        if !has_env_exposure {
+            e.insert((
+                tonemapping,
+                if q.dither { DebandDither::Enabled } else { DebandDither::Disabled },
+                Exposure { ev100: Exposure::default().ev100 - q.exposure },
+            ));
+        }
+        // A filter that changes with every frame adds up over the passes.
+        e.insert(if o.passes() > 1 { ShadowFilteringMethod::Temporal } else { ShadowFilteringMethod::Gaussian });
         if q.ambient_occlusion {
             let quality_level = match q.ao_quality {
                 AoQuality::Low => ScreenSpaceAmbientOcclusionQualityLevel::Low,
@@ -922,7 +1324,9 @@ impl BevyRenderer {
         }
         self.scale = options.world_scale();
         self.light_pass = 0;
-        self.render = Some(ActiveRender { options, two_sided, deferred, camera_ready: false, accum: None });
+        self.render = Some(ActiveRender { options, two_sided, deferred, camera_ready: false, accum: None, frame: [0.0, 0.0, 1.0, 1.0] });
+        self.metered.remove(&RENDER_SLOT);
+        self.meter = None;
         self.rescale();
         self.apply_lights();
         self.relayer();
@@ -960,7 +1364,11 @@ impl BevyRenderer {
         let q = &o.quality;
         let size = [size[0].max(1), size[1].max(1)];
         let radius = if q.antialiasing { q.filter_size.clamp(1.0, 10.0) * 0.5 } else { 0.5 };
-        let margin = radius.ceil() as u32 + 1 + if o.screen_space() { 16 } else { 0 };
+        let margin = if o.passes() > 1 || o.screen_space() || q.supersampling > 1 {
+            radius.ceil() as u32 + 1 + if o.screen_space() { 16 } else { 0 }
+        } else {
+            0
+        };
         if r.accum.as_ref().is_none_or(|a| a.key != (sub, size)) {
             r.accum = Some(quality::Accum::new((sub, size), margin, q.supersampling.clamp(1, 4)));
         }
@@ -980,16 +1388,22 @@ impl BevyRenderer {
             None if o.hidden => RenderLayers::from_layers(&[RENDER_LAYER, HIDDEN_LAYER]),
             None => RenderLayers::layer(RENDER_LAYER),
         };
-        // Cleared to nothing: the background goes under the passes once they
-        // are added up, so tone mapping never touches its colour.
+        if let Some(r) = self.render.as_mut() {
+            r.frame = sub;
+        }
+        // Cleared to transparent black: the environment pass draws the background.
         let clear = [0.0; 4];
         let camera = camera.scaled(self.scale);
-        self.place_view(RENDER_SLOT, internal, Projection::custom(BucketProjection::new(&camera, aspect, sub)), camera.view, clear, o.msaa, layers);
+        self.place_view(RENDER_SLOT, internal, Projection::custom(BucketProjection::new(&camera, aspect, sub)), camera.view, clear, o.msaa, layers.clone());
         if self.render.as_ref().is_some_and(|r| !r.camera_ready) {
             self.setup_render_camera();
             if let Some(r) = self.render.as_mut() {
                 r.camera_ready = true;
             }
+        }
+        // Automatic / Linear exposure meters the whole frame once per render.
+        if self.env.exposure.is_some_and(|x| x.meters()) && !self.metered.contains_key(&RENDER_SLOT) && self.meter.is_none() {
+            self.place_meter(RENDER_SLOT, camera.bevy_projection(aspect), camera.view, layers);
         }
         Ok(())
     }
@@ -999,11 +1413,11 @@ impl BevyRenderer {
     pub fn read_render(&mut self) -> Result<image::RgbaImage, String> {
         let img = self.read_back(RENDER_SLOT)?;
         let r = self.render.as_mut().ok_or("no render started")?;
-        let (q, passes, bg) = (r.options.quality.clone(), r.options.passes(), r.options.background);
+        let (q, passes) = (r.options.quality.clone(), r.options.passes());
         let a = r.accum.as_mut().ok_or("no bucket set")?;
         let (j, filter, size) = if q.antialiasing { (quality::jitter(a.pass, passes), q.filter, q.filter_size.clamp(1.0, 10.0)) } else { ([0.0; 2], loom_scene::render::AaFilter::Area, 1.0) };
         a.add(&img, j, filter, size)?;
-        Ok(a.image(bg))
+        Ok(a.image([0.0; 3]))
     }
 
     /// Whether the bucket has all its passes.
@@ -1016,6 +1430,7 @@ impl BevyRenderer {
         if let Some(v) = self.views.remove(&RENDER_SLOT) {
             self.app.world_mut().despawn(v.camera);
         }
+        self.metered.remove(&RENDER_SLOT);
         let Some(r) = self.render.take() else { return };
         self.scale = 1.0;
         self.light_pass = 0;
@@ -1080,6 +1495,10 @@ impl BevyRenderer {
         }
         self.fit_shadows();
         self.app.update();
+        self.read_meter();
+        if !self.views.iter().any(|(s, v)| v.used && *s >= self.meter_next && *s < METER_SLOT) {
+            self.meter_next = 0;
+        }
         for v in self.views.values_mut() {
             v.used = false;
         }
@@ -1172,4 +1591,93 @@ impl BevyRenderer {
         buffer.unmap();
         image::RgbaImage::from_raw(w, h, pixels).ok_or_else(|| "readback size mismatch".to_owned())
     }
+}
+
+/// Stops that bring the metered luminances (linear, of the geometry only)
+/// to mid grey: Linear uses their average, Automatic their log average.
+pub fn metering_stops(lum: &[f32], kind: ExposureKind) -> f32 {
+    if lum.is_empty() {
+        return 0.0;
+    }
+    let avg = match kind {
+        ExposureKind::Automatic => (lum.iter().map(|l| (l + 1e-4).ln()).sum::<f32>() / lum.len() as f32).exp(),
+        _ => lum.iter().sum::<f32>() / lum.len() as f32,
+    };
+    (0.18 / avg.max(1e-5)).log2().clamp(-10.0, 10.0)
+}
+
+/// Tonemapping, colour grading and HDR of a view under `exposure` (None:
+/// no exposure control) with `metered` stops from metering.
+fn exposure_components(exposure: Option<&environment::Exposure>, metered: f32) -> (Tonemapping, ColorGrading, bool) {
+    let Some(x) = exposure else { return (Tonemapping::AcesFitted, ColorGrading::default(), false) };
+    let tonemapping = match x.kind {
+        // Linear maps light evenly to the display range.
+        ExposureKind::Linear => Tonemapping::None,
+        // Logarithmic compresses the highlights by luminance.
+        ExposureKind::Logarithmic => Tonemapping::ReinhardLuminance,
+        _ => Tonemapping::AcesFitted,
+    };
+    let stops = x.stops() + if x.meters() { metered } else { 0.0 };
+    let section = |gamma: f32| ColorGradingSection { contrast: x.contrast / 50.0, gamma, ..Default::default() };
+    let mid_gamma = if x.kind == ExposureKind::Logarithmic { x.mid_tones.max(0.01) } else { 1.0 };
+    let grading = ColorGrading { global: ColorGradingGlobal { exposure: stops, ..Default::default() }, shadows: section(1.0), midtones: section(mid_gamma), highlights: section(1.0) };
+    (tonemapping, grading, x.process_background)
+}
+
+fn linear(c: [f32; 3]) -> bevy::math::Vec4 {
+    bevy::math::Vec4::new(environment::srgb_to_linear(c[0]), environment::srgb_to_linear(c[1]), environment::srgb_to_linear(c[2]), 0.0)
+}
+
+/// The environment pass uniform of a view: its camera `cam`, the scene
+/// `bounds` (centre, radius) for fog ranges and volume fog, whether it draws
+/// the background (renders; viewports show their own), the frame part.
+fn env_uniform(env: &EnvSettings, view: ViewEnv, cam: &Transform, (centre, radius): (Vec3, f32), draw_background: bool, frame: [f32; 4]) -> post::EnvUniform {
+    use bevy::math::Vec4;
+    let mut u = post::EnvUniform { frame: Vec4::from_array(frame), ..Default::default() };
+    if draw_background {
+        u.background = linear(env.background).with_w(1.0);
+        if let Some((_, mapping)) = &env.map {
+            let m = match mapping {
+                EnvMapping::Screen => 0.0,
+                EnvMapping::Spherical => 1.0,
+                EnvMapping::Cylindrical => 2.0,
+                EnvMapping::ShrinkWrap => 3.0,
+            };
+            u.map = Vec4::new(1.0, m, 0.0, 0.0);
+        }
+    }
+    // Standard fog without the camera's Environment Ranges: the scene's near and far side.
+    let d = (centre - cam.translation).dot(cam.forward().as_vec3());
+    let [near_d, far_d] = view.ranges.unwrap_or([(d - radius).max(0.0), (d + radius).max(1e-3)]);
+    for (i, f) in env.fogs.iter().take(environment::MAX_FOGS).enumerate() {
+        let flag = |b: bool| if b { 1.0 } else { 0.0 };
+        match *f {
+            Fog::Standard { color, near, far, exponential, fog_background } => {
+                u.fog_color[i] = linear(color).with_w(1.0);
+                u.fog_a[i] = Vec4::new(near_d, far_d.max(near_d + 1e-3), near.clamp(0.0, 1.0), far.clamp(0.0, 1.0));
+                u.fog_b[i] = Vec4::new(flag(fog_background), flag(exponential), 0.0, 0.0);
+            }
+            Fog::Layered { color, bottom, top, density, falloff, fog_background } => {
+                let fall = match falloff {
+                    LayerFalloff::None => 0.0,
+                    LayerFalloff::Top => 1.0,
+                    LayerFalloff::Bottom => 2.0,
+                };
+                u.fog_color[i] = linear(color).with_w(2.0);
+                u.fog_a[i] = Vec4::new(bottom, top, environment::layer_extinction(density, bottom, top), fall);
+                u.fog_b[i] = Vec4::new(flag(fog_background), 0.0, 0.0, 0.0);
+            }
+            Fog::Volume { color, density, fog_background } => {
+                u.fog_color[i] = linear(color).with_w(3.0);
+                // The fog fills a sphere a little larger than the scene's bounds.
+                u.fog_a[i] = Vec4::new(environment::volume_extinction(density, radius), centre.x, centre.y, centre.z);
+                u.fog_b[i] = Vec4::new(flag(fog_background), 0.0, radius * 1.1, 0.0);
+            }
+        }
+    }
+    if let (Some(dof), Some(focus)) = (env.depth_of_field, view.focus) {
+        u.dof = Vec4::new(1.0, focus, dof.focal_range.max(0.0), dof.focal_limit.max(dof.focal_range + 1e-3));
+        u.dof_loss = Vec4::new(dof.horiz_loss.max(0.0), dof.vert_loss.max(0.0), 0.0, 0.0);
+    }
+    u
 }

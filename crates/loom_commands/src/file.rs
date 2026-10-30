@@ -51,6 +51,8 @@ pub struct ViewportSave {
     pub disable_textures: bool,
     #[serde(default)]
     pub force_two_sided: bool,
+    #[serde(default)]
+    pub background_use_environment: bool,
 }
 
 fn yes() -> bool {
@@ -92,6 +94,7 @@ impl ViewportSave {
             transparency: v.transparency,
             disable_textures: v.disable_textures,
             force_two_sided: v.force_two_sided,
+            background_use_environment: v.background_use_environment,
         }
     }
 
@@ -121,6 +124,7 @@ impl ViewportSave {
         v.transparency = self.transparency;
         v.disable_textures = self.disable_textures;
         v.force_two_sided = self.force_two_sided;
+        v.background_use_environment = self.background_use_environment;
         v
     }
 }
@@ -318,6 +322,28 @@ pub fn write(path: &Path, doc: &Document) -> Result<(), String> {
     })
 }
 
+/// Files from before the Environment dialog kept the background and ambient
+/// colours in Render Setup's Renderer panel: they become the Environment's.
+fn legacy_environment(value: &mut Value) {
+    let Some(scene) = value.get_mut("scene").and_then(Value::as_object_mut) else { return };
+    if scene.contains_key("environment") {
+        return;
+    }
+    let bevy = scene.get("render").and_then(|r| r.get("bevy"));
+    let colour = |k: &str| bevy.and_then(|b| b.get(k)).and_then(|c| serde_json::from_value::<[f32; 3]>(c.clone()).ok());
+    let (bg, ambient) = (colour("background"), colour("ambient"));
+    let mut env = loom_scene::environment::Environment::default();
+    if let Some(c) = bg {
+        env.background = loom_scene::Param::new(Vec3::from(c));
+    }
+    if let Some(c) = ambient {
+        env.ambient = loom_scene::Param::new(Vec3::from(c));
+    }
+    if let Ok(v) = serde_json::to_value(env) {
+        scene.insert("environment".into(), v);
+    }
+}
+
 /// Reads a `.loom` file. A `format` newer than [`FORMAT`] is refused.
 pub fn read(path: &Path) -> Result<Document, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -326,6 +352,8 @@ pub fn read(path: &Path) -> Result<Document, String> {
     if format > FORMAT as u64 {
         return Err(format!("{}: format {format} is newer than this program's {FORMAT}", path.display()));
     }
+    let mut value = value;
+    legacy_environment(&mut value);
     let mut doc: Document = serde_json::from_value(value).map_err(|e| format!("{}: {e}", path.display()))?;
     let ids: Vec<NodeId> = doc.scene.nodes().map(|n| n.id).collect();
     for id in ids {

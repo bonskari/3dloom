@@ -28,13 +28,15 @@ struct Setup {
     lock_pixel_aspect: Option<bool>,
     render_hidden: Option<bool>,
     force_two_sided: Option<bool>,
+    atmospherics: Option<bool>,
+    effects: Option<bool>,
     save_file: Option<bool>,
 }
 
 impl Setup {
     fn cmd(self) -> Command {
-        let Setup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, save_file } = self;
-        Command::RenderSetup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, save_file, output: None }
+        let Setup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, atmospherics, effects, save_file } = self;
+        Command::RenderSetup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, atmospherics, effects, save_file, output: None }
     }
 }
 
@@ -178,6 +180,16 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Options").strong());
+    ui.horizontal(|ui| {
+        let mut atmospherics = s.atmospherics;
+        if ui.checkbox(&mut atmospherics, "Atmospherics").on_hover_text("Render the Environment's atmospheric effects").changed() {
+            run(app, Setup { atmospherics: Some(atmospherics), ..Default::default() }.cmd());
+        }
+        let mut effects = s.effects;
+        if ui.checkbox(&mut effects, "Effects").on_hover_text("Apply the rendering effects").changed() {
+            run(app, Setup { effects: Some(effects), ..Default::default() }.cmd());
+        }
+    });
     ui.horizontal(|ui| {
         let mut hidden = s.render_hidden;
         if ui.checkbox(&mut hidden, "Render Hidden Geometry").changed() {

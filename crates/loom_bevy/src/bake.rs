@@ -27,7 +27,7 @@ pub(crate) const BAKE_LAYER: usize = 1022;
 /// The default key light is on this layer too, so a bake with direct light sees it.
 pub(crate) const BAKE_KEY_LAYER: usize = 1021;
 /// Slot of the bake camera.
-const BAKE_SLOT: u32 = u32::MAX - 1;
+pub(crate) const BAKE_SLOT: u32 = u32::MAX - 1;
 /// Frames a bake renders before it is read (new pipelines, the target image and the shadow maps settle).
 const BAKE_FRAMES: usize = 4;
 

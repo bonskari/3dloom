@@ -11,6 +11,7 @@ mod icons;
 mod transforms;
 mod menus;
 mod display;
+mod environment;
 mod mesh_patch;
 mod widgets;
 mod ribbon;
@@ -57,6 +58,8 @@ struct Harness {
 
 impl Harness {
     fn new() -> Self {
+        // A test stuck (e.g. in the GPU driver) fails the binary instead of hanging it.
+        loom_bevy::test_watchdog(std::time::Duration::from_secs(1800));
         let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0, cursor: egui::CursorIcon::Default };
         h.ctx.enable_accesskit();
         h.frames(3);
@@ -66,7 +69,10 @@ impl Harness {
     /// The app on a real GPU (Realistic viewports and Render run), or None
     /// on a machine without a Vulkan / Metal / DirectX 12 adapter.
     fn with_gpu() -> Option<Self> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        // No GL backend: an EGL context torn down while another test thread uses or
+        // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
+        // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
         let rs = pollster::block_on(egui_wgpu::RenderState::create(&crate::wgpu_configuration(), &instance, None, None, 1, false)).ok()?;
         if !loom_bevy::supported(&rs.adapter) {
             return None;
@@ -3189,10 +3195,10 @@ fn an_iterative_region_render_keeps_the_rest_of_the_window() {
     // An empty scene: every pixel is background, so the region shows exactly.
     maximized(&mut h);
     h.app.dispatch_json(&serde_json::json!({ "cmd": "Render SetUp...", "args": { "width": 320, "height": 240 } }));
-    h.app.dispatch_json(&serde_json::json!({ "cmd": "Bevy Renderer Settings", "args": { "background": [0.0, 0.0, 1.0] } }));
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Environment Settings", "args": { "background": [0.0, 0.0, 1.0] } }));
     h.cmd(Command::Render { path: None, width: None, height: None });
     finish_render(&mut h, 60);
-    h.app.dispatch_json(&serde_json::json!({ "cmd": "Bevy Renderer Settings", "args": { "background": [0.0, 1.0, 0.0] } }));
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Environment Settings", "args": { "background": [0.0, 1.0, 0.0] } }));
     h.app.dispatch_json(&serde_json::json!({ "cmd": "Area to Render", "args": { "area": "Region", "region": [0.0, 0.0, 0.25, 0.25] } }));
     h.cmd(Command::RenderIterative);
     finish_render(&mut h, 60);
@@ -3271,7 +3277,7 @@ fn autogrid_tripod_follows_the_cursor_over_surfaces() {
 fn viewport_background_dialog_sets_aspect_and_picks_the_viewport() {
     let mut h = Harness::new();
     h.cmd(Command::ActiveViewport { index: 1 }); // Front
-    h.cmd(Command::SetViewportBackground { path: Some("/tmp/ref.png".into()), aspect: None, lock: None, display: None, all_views: None });
+    h.cmd(Command::SetViewportBackground { path: Some("/tmp/ref.png".into()), use_environment: None, aspect: None, lock: None, display: None, all_views: None });
     h.cmd(Command::ViewportBackground);
     let screen = h.ctx.screen_rect();
     click_text(&mut h, "Match Bitmap", screen, 0.0);

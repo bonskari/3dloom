@@ -56,6 +56,9 @@ pub struct Scene {
     /// Render Setup (saved with the scene, as the reference does).
     #[serde(default)]
     pub render: crate::render::RenderSettings,
+    /// Rendering > Environment and Effects (saved with the scene).
+    #[serde(default)]
+    pub environment: crate::environment::Environment,
     /// File > XRef Scene / XRef Objects: the referenced files and the nodes they put here.
     #[serde(default)]
     pub xrefs: Vec<XrefRecord>,
@@ -154,6 +157,7 @@ impl Scene {
             materials: Default::default(),
             material_editor: Default::default(),
             render: Default::default(),
+            environment: Default::default(),
             xrefs: Vec::new(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),

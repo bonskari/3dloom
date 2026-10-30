@@ -290,7 +290,10 @@ pub fn viewport_controls(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, lock_
 pub fn render_buttons(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, setup_button: bool) {
     ui.horizontal(|ui| {
         if setup_button && ui.button("Render Setup...").clicked() {
-            let _ = app.dispatch(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
+            let _ = app.dispatch(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
+        }
+        if setup_button && ui.button("Environment and Effects").on_hover_text("Environment and Effects dialog (8)").clicked() {
+            let _ = app.dispatch(Command::EnvironmentDialogToggle);
         }
         let iterative = app.state.rendered.iterative;
         egui::ComboBox::from_id_salt(salt).selected_text(if iterative { "Iterative" } else { "Production" }).show_ui(ui, |ui| {

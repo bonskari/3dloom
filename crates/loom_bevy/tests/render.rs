@@ -5,7 +5,11 @@ use glam::{Mat4, Vec3};
 use loom_bevy::{BevyRenderer, SceneObject, ViewCamera};
 
 fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    // No GL backend: an EGL context torn down while another test thread uses or
+    // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
+    // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
+    loom_bevy::test_watchdog(std::time::Duration::from_secs(600));
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
     if !loom_bevy::supported(&adapter) {
         return None;
@@ -102,7 +106,7 @@ fn bucketed(r: &mut BevyRenderer, camera: &ViewCamera, (w, h): (u32, u32), optio
 /// replaces the default key light and lights only inside its cone (also
 /// in a bucketed render); a box under it shadows the plane unless it is
 /// excluded from shadow casting or Render Setup turns shadows off; the
-/// Render Setup ambient colour adds to the scene lights.
+/// Environment's ambient colour adds to the scene lights.
 #[test]
 fn a_red_spot_lights_a_plane_only_inside_its_cone() {
     let Some((adapter, device, queue)) = gpu() else {
@@ -143,7 +147,9 @@ fn a_red_spot_lights_a_plane_only_inside_its_cone() {
         img.get_pixel(x, y).0
     };
     // No ambient light: what the spot lights is all there is.
-    let dark = || RenderOptions { ambient: [0.0; 3], ..Default::default() };
+    let ambient = |c: [f32; 3]| loom_bevy::environment::EnvSettings { ambient: c, ..Default::default() };
+    r.set_environment(&ambient([0.0; 3]));
+    let dark = RenderOptions::default;
     let (inside_p, outside_p) = (Vec3::new(0.0, 10.0, 0.0), Vec3::new(-20.0, 100.0, 0.0));
 
     r.sync(&objects(false));
@@ -155,10 +161,12 @@ fn a_red_spot_lights_a_plane_only_inside_its_cone() {
         assert!(inside[0] > 80 && inside[1] < 30 && inside[2] < 30, "{buckets} buckets: red inside the cone: {inside:?}");
         assert!(outside[0] < 15 && outside[1] < 15 && outside[2] < 15, "{buckets} buckets: dark outside the cone: {outside:?}");
     }
-    // The Render Setup ambient colour adds to the scene lights.
-    let img = bucketed(&mut r, &camera, size, RenderOptions { ambient: [0.0, 0.0, 1.0], ..Default::default() }, 1);
+    // The Environment's ambient colour adds to the scene lights.
+    r.set_environment(&ambient([0.0, 0.0, 1.0]));
+    let img = bucketed(&mut r, &camera, size, RenderOptions::default(), 1);
     let outside = at(&img, outside_p);
     assert!(outside[2] > 40 && outside[0] < 15, "a blue ambient light outside the cone: {outside:?}");
+    r.set_environment(&ambient([0.0; 3]));
 
     // A box above the centre shadows it ...
     r.sync(&objects(true));
@@ -279,8 +287,9 @@ fn render_layers_pick_what_a_render_shows() {
     r.sync_hidden(&[]);
     let selected = shot(&mut r, loom_bevy::RenderOptions { selected_only: Some(vec![4]), ..Default::default() });
     assert!(count(&selected, 2) > 50 && count(&selected, 0) == 0, "Selected renders only the selection");
-    // The background colour comes with alpha 0.
-    let bg = shot(&mut r, loom_bevy::RenderOptions { background: [0.0, 0.0, 1.0], ..Default::default() });
+    // The Environment's background colour comes with alpha 0.
+    r.set_environment(&loom_bevy::environment::EnvSettings { background: [0.0, 0.0, 1.0], ..Default::default() });
+    let bg = shot(&mut r, Default::default());
     assert_eq!(bg.get_pixel(0, 0).0, [0, 0, 255, 0]);
 }
 

@@ -258,7 +258,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             // Labels: [+] [Top] [Wireframe], each opening its menu.
             // Perspective views get a vertical gradient; axis views stay flat.
             // Painted first: everything else, the labels included, goes over it.
-            if !(app.state.viewports[index].background.is_some() && app.state.viewports[index].background_display) && !app.state.viewports[index].is_orthographic() {
+            let env_background = app.state.viewports[index].background_use_environment && app.state.viewports[index].background_display;
+            if !((app.state.viewports[index].background.is_some() || env_background) && app.state.viewports[index].background_display) && !app.state.viewports[index].is_orthographic() {
                 draw_background_gradient(&painter, rect, app.color("Perspective Background Top"), app.color("Perspective Background Bottom"));
             }
             let over_label = draw_labels(ui, app, index, rect);
@@ -1242,7 +1243,18 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             };
             // Viewport background image: fitted by its Aspect Ratio and, with
             // Lock Zoom/Pan, zoomed and panned with the scene since the lock.
-            if let Some(path) = app.state.viewports[index].background.clone().filter(|_| app.state.viewports[index].background_display) {
+            if env_background {
+                // Use Environment Background: the Environment's colour, or
+                // its map (Use Map on) stretched over the view.
+                let env = &app.state.scene.environment;
+                let c = env.background.get().to_array().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(c[0], c[1], c[2]));
+                if let Some(path) = env.map().map(str::to_owned) {
+                    if let Some(tex) = app.background_texture(&ctx, &path, 0) {
+                        painter.image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    }
+                }
+            } else if let Some(path) = app.state.viewports[index].background.clone().filter(|_| app.state.viewports[index].background_display) {
                 let version = app.state.viewports[index].background_version;
                 if let Some(tex) = app.background_texture(&ctx, &path, version) {
                     let target = background_rect(&app.state.viewports[index], rect, tex.size(), (app.state.scene.render.width, app.state.scene.render.height), view_proj);

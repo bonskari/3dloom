@@ -22,6 +22,8 @@ use loom_scene::light::{Emitter, LightSample};
 pub const LUX_PER_MULTIPLIER: f32 = std::f32::consts::PI * 1.2 * TWO_POW_EV100;
 /// 2^9.7, Bevy's default EV100.
 const TWO_POW_EV100: f32 = 831.746_5;
+/// What Bevy's default exposure (EV100 9.7) scales light by.
+pub const EXPOSURE: f32 = 1.0 / (1.2 * TWO_POW_EV100);
 /// AmbientLight brightness (cd/m²) of an ambient multiplier 1.
 pub const AMBIENT_PER_MULTIPLIER: f32 = 1.2 * TWO_POW_EV100;
 

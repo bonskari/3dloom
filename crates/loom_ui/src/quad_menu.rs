@@ -419,7 +419,7 @@ pub fn render_quadrants(app: &LoomApp) -> Quadrants {
     let s = &app.state;
     let render = vec![
         e("Render", Command::Render { path: None, width: None, height: None }),
-        e("Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None }),
+        e("Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None }),
         e("Rendered Frame Window...", Command::RenderedFrameWindow),
         e("Material Editor...", Command::MaterialEditorToggle),
     ];

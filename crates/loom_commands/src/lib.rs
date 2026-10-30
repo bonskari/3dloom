@@ -7,6 +7,7 @@ mod material;
 pub mod material_library;
 pub mod display;
 pub mod render;
+pub mod environment;
 pub mod bake;
 pub mod execute;
 pub mod poly;

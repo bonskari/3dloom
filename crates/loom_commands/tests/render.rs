@@ -79,7 +79,7 @@ fn a_second_render_waits_for_the_first() {
 #[test]
 fn production_saves_the_render_output_file_only_with_save_file() {
     let mut s = AppState::new();
-    assert!(execute(&mut s, Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: Some(true), output: None }).is_err(), "Save File needs a file");
+    assert!(execute(&mut s, Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: Some(true), output: None }).is_err(), "Save File needs a file");
     let r = execute_json(&mut s, &json!({ "cmd": "Render SetUp...", "args": { "output": "/tmp/loom-out.png" } }));
     assert_eq!(r["ok"], true, "{r}");
     assert!(s.scene.render.save_file, "choosing Files turns Save File on");
@@ -152,17 +152,17 @@ fn renderer_quality_settings_are_checked_saved_and_undoable() {
 #[test]
 fn render_setup_values_are_one_undo_step_each_and_saved_in_the_file() {
     let mut s = AppState::new();
-    execute(&mut s, Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None }).unwrap();
+    execute(&mut s, Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None }).unwrap();
     assert_eq!(s.dialog, Some(Dialog::RenderSetup));
     setup(&mut s, json!({ "width": 800, "height": 600 }));
     setup(&mut s, json!({ "render_hidden": true, "force_two_sided": true }));
-    let r = execute_json(&mut s, &json!({ "cmd": "Bevy Renderer Settings", "args": { "antialiasing": false, "supersampling": 2, "shadows": false, "shadow_map_size": 1024, "background": [0.2, 0.3, 0.4], "ambient": [0.5, 0.5, 0.5] } }));
+    let r = execute_json(&mut s, &json!({ "cmd": "Bevy Renderer Settings", "args": { "antialiasing": false, "supersampling": 2, "shadows": false, "shadow_map_size": 1024 } }));
     assert_eq!(r["ok"], true, "{r}");
     let r = execute_json(&mut s, &json!({ "cmd": "Area to Render", "args": { "area": "Region", "region": [0.1, 0.2, 0.5, 0.6] } }));
     assert_eq!(r["ok"], true, "{r}");
     let saved = s.scene.render.clone();
     assert_eq!((saved.width, saved.height, saved.render_hidden, saved.force_two_sided), (800, 600, true, true));
-    assert_eq!((saved.bevy.supersampling, saved.bevy.shadow_map_size, saved.bevy.background), (2, 1024, [0.2, 0.3, 0.4]));
+    assert_eq!((saved.bevy.supersampling, saved.bevy.shadow_map_size), (2, 1024));
     assert_eq!((saved.area, saved.region), (RenderArea::Region, [0.1, 0.2, 0.5, 0.6]));
 
     let path = std::env::temp_dir().join(format!("loom-render-settings-{}.loom", std::process::id()));
