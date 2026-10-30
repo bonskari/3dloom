@@ -2706,6 +2706,7 @@ pub enum TvMode {
     ScaleVertical,
     Freeform,
     Pan,
+    Tweak,
 }
 
 /// Edit UVWs > sub-object level of the texture coordinates.
@@ -2806,6 +2807,9 @@ pub struct UvEditor {
     /// Spline Map: 0 Circular, 1 Planar (Normalize Map comes from the modifier).
     #[serde(default)]
     pub spline_map_mapping: u32,
+    /// Peel > LSCM Interactive (Peel Mode) toggle.
+    #[serde(default)]
+    pub lscm_interactive: bool,
     // Options dialog.
     pub weld_threshold: f32,
     pub constant_update: bool,
@@ -2914,6 +2918,7 @@ impl Default for UvEditor {
             sketch_show_order: false,
             sketch_interactive: false,
             spline_map_mapping: 0,
+            lscm_interactive: false,
             weld_threshold: 0.01,
             constant_update: false,
             grid_size: 0.1,

@@ -186,6 +186,33 @@ fn seams_from_edge_selection_and_point_to_point() {
 }
 
 #[test]
+fn lscm_tweak_and_pelt_stretcher_commands() {
+    assert!(DEFERRED_UNWRAP.is_empty(), "no Unwrap UVW chart actions remain deferred");
+    let mut s = AppState::new();
+    let a = unwrap(&mut s);
+    execute(&mut s, Command::EditUvws).unwrap();
+    execute(&mut s, Command::TweakUvw).unwrap();
+    assert_eq!(s.uv_editor.mode, loom_commands::TvMode::Tweak);
+    execute(&mut s, Command::TweakUvw).unwrap();
+    assert_eq!(s.uv_editor.mode, loom_commands::TvMode::Move);
+
+    execute(&mut s, Command::SelectTvFaces { faces: vec![0, 1, 2], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::PeltDialogSnapSeams).unwrap();
+    execute(&mut s, Command::PeltDialogSelectStretcher).unwrap();
+    assert!(!data(&s, a).tv_selection.is_empty(), "stretcher boundary loop selected");
+    execute(&mut s, Command::PeltDialogMirrorStretcher).unwrap();
+    execute(&mut s, Command::PeltDialogStraightenStretcher).unwrap();
+
+    execute(&mut s, Command::LscmReset).unwrap();
+    execute(&mut s, Command::LscmSolve).unwrap();
+    execute(&mut s, Command::LscmInteractive).unwrap();
+    assert!(s.uv_editor.lscm_interactive);
+    execute(&mut s, Command::SelectTv { ids: vec![0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::MoveTv { delta: [0.1, 0.05] }).unwrap();
+    assert!(data(&s, a).pins.contains(&0), "LSCM interactive auto-pins moved vertices");
+}
+
+#[test]
 fn every_chart_row_is_a_command_or_deferred() {
     let registered: std::collections::HashSet<&str> = loom_commands::registry().iter().map(|i| i.name).collect();
     let deferred: std::collections::HashSet<&str> = DEFERRED_UNWRAP.iter().map(|(n, _)| *n).collect();

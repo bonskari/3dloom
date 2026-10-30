@@ -64,6 +64,7 @@ fn edit(state: &mut AppState, label: &str, f: impl FnOnce(&mut Mesh, u32, &mut U
     let fro_c = corners_of(&before, &data.frozen_tvs);
     let before_count = before.verts.len();
     f(&mut mesh, ch, &mut data)?;
+    let pin_c_after = corners_of(&before, &data.pins);
     data.take_edits(&mesh);
     if !data.topology_matches(&e.input) {
         // The working mesh already carried the old edits onto this topology.
@@ -73,7 +74,9 @@ fn edit(state: &mut AppState, label: &str, f: impl FnOnce(&mut Mesh, u32, &mut U
     if after.verts.len() != before_count || after != before {
         let tvs_of = |cs: &[usize]| -> BTreeSet<u32> { cs.iter().filter_map(|i| after.corners.get(*i).copied()).collect() };
         data.tv_selection = tvs_of(&sel_c);
-        data.pins = tvs_of(&pin_c);
+        let mut pins = tvs_of(&pin_c);
+        pins.extend(tvs_of(&pin_c_after));
+        data.pins = pins;
         data.hidden_tvs = tvs_of(&hid_c);
         data.frozen_tvs = tvs_of(&fro_c);
         data.tv_edge_selection = uw::edges_of_tvs(&mesh, ch, &data.tv_selection).into_iter().collect();
@@ -281,6 +284,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         C::ScaleVertical => ed(state, &|e| e.mode = TvMode::ScaleVertical),
         C::FreeformMode => ed(state, &|e| e.mode = TvMode::Freeform),
         C::Pan => ed(state, &|e| e.mode = TvMode::Pan),
+        C::TweakUvw => ed(state, &|e| e.mode = if e.mode == TvMode::Tweak { TvMode::Move } else { TvMode::Tweak }),
         C::FilterSelectedPolygons => ed(state, &|e| e.filter_selected_polygons = !e.filter_selected_polygons),
         C::IgnoreBackPolygons => edit_data(state, "Ignore Backfacing", |_, _, d| { d.ignore_backfacing.set(!d.ignore_backfacing.get()); Ok(()) }),
         C::GeomElementSelectMode => edit_data(state, "Select By Element", |_, _, d| { d.select_by_element.set(!d.select_by_element.get()); Ok(()) }),
@@ -774,14 +778,22 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if state.uv_editor.lock_selected {
                 return Err("the selected vertices are locked".into());
             }
-            let auto_pin = state.uv_editor.auto_pin_moved;
+            let auto_pin = state.uv_editor.auto_pin_moved || state.uv_editor.lscm_interactive;
+            let lscm_live = state.uv_editor.lscm_interactive;
             let ed_ = state.uv_editor.clone();
             edit(state, "Move", |mesh, ch, d| {
                 let w = ed_.soft_selection.then(|| if ed_.soft_edge_distance { uw::soft_weights_edges(mesh, ch, &d.tv_selection, ed_.soft_edge_range) } else { uw::soft_weights(mesh, ch, &d.tv_selection, ed_.soft_falloff) });
                 let sel: BTreeSet<u32> = d.tv_selection.iter().copied().filter(|t| !d.frozen_tvs.contains(t)).collect();
                 uw::move_tvs(mesh, ch, &sel, w.as_ref(), Vec2::from(delta));
                 if auto_pin {
-                    d.pins.extend(sel);
+                    d.pins.extend(sel.iter().copied());
+                }
+                if lscm_live {
+                    let faces = target_faces(mesh, ch, d);
+                    let mut fixed = d.pins.clone();
+                    fixed.extend(sel);
+                    fixed.extend(d.frozen_tvs.iter().copied());
+                    uw::lscm_peel(mesh, ch, &faces, &d.seams, &fixed, false);
                 }
                 Ok(())
             })
@@ -1014,6 +1026,54 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             d.tv_selection = uw::tvs_of_faces(mesh, ch, &faces);
             Ok(())
         }),
+        C::PeltDialogSelectStretcher => edit_data(state, "Select Stretcher", |mesh, ch, d| {
+            let faces = target_faces(mesh, ch, d);
+            d.tv_selection = uw::pelt_boundary_loops(mesh, ch, &faces).into_iter().flatten().collect();
+            d.tv_edge_selection = uw::edges_of_tvs(mesh, ch, &d.tv_selection).into_iter().collect();
+            Ok(())
+        }),
+        C::PeltDialogMirrorStretcher => edit(state, "Mirror Stretcher", |mesh, ch, d| {
+            let faces = target_faces(mesh, ch, d);
+            for lp in uw::pelt_boundary_loops(mesh, ch, &faces) {
+                let set: BTreeSet<u32> = lp.into_iter().collect();
+                uw::mirror_tvs(mesh, ch, &set, true);
+            }
+            Ok(())
+        }),
+        C::PeltDialogStraightenStretcher => edit(state, "Straighten Stretcher", |mesh, ch, d| {
+            let faces = target_faces(mesh, ch, d);
+            uw::pelt_straighten_stretcher(mesh, ch, &faces);
+            Ok(())
+        }),
+        C::PeltDialogSnapSeams => edit(state, "Snap to Seams", |mesh, ch, d| {
+            let faces = target_faces(mesh, ch, d);
+            uw::pelt_snap_seams(mesh, ch, &faces, &d.seams);
+            Ok(())
+        }),
+        C::LscmInteractive => {
+            state.uv_editor.lscm_interactive = !state.uv_editor.lscm_interactive;
+            if state.uv_editor.lscm_interactive && entry(state).is_ok() {
+                edit(state, "LSCM Interactive", |mesh, ch, d| {
+                    let faces = target_faces(mesh, ch, d);
+                    let mut fixed = d.pins.clone();
+                    fixed.extend(d.frozen_tvs.iter().copied());
+                    uw::lscm_peel(mesh, ch, &faces, &d.seams, &fixed, false);
+                    Ok(())
+                })
+            } else {
+                Ok(status(state))
+            }
+        }
+        C::LscmSolve | C::LscmReset => {
+            let reset = matches!(cmd, C::LscmReset);
+            edit(state, cmd.name(), |mesh, ch, d| {
+                let faces = target_faces(mesh, ch, d);
+                let mut fixed = d.pins.clone();
+                fixed.extend(d.frozen_tvs.iter().copied());
+                uw::lscm_peel(mesh, ch, &faces, &d.seams, &fixed, reset);
+                Ok(())
+            })
+        }
         C::PeltEditSeams => ed(state, &|e| e.edit_seams = !e.edit_seams),
         C::PeltExpandSelectionToSeams => {
             let e = entry(state)?;

@@ -181,6 +181,18 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, open: &mut b
                     if ui.button("Select Pelt UVs").clicked() {
                         let _ = app.dispatch(Command::PeltDialogSelectPeltUvs);
                     }
+                    if ui.button("Select Stretcher").clicked() {
+                        let _ = app.dispatch(Command::PeltDialogSelectStretcher);
+                    }
+                    if ui.button("Snap to Seams").clicked() {
+                        let _ = app.dispatch(Command::PeltDialogSnapSeams);
+                    }
+                    if ui.button("Straighten Stretcher").clicked() {
+                        let _ = app.dispatch(Command::PeltDialogStraightenStretcher);
+                    }
+                    if ui.button("Mirror Stretcher").clicked() {
+                        let _ = app.dispatch(Command::PeltDialogMirrorStretcher);
+                    }
                 });
                 buttons(ui, app, Some(Command::PeltMap), &mut done);
             });

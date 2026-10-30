@@ -188,6 +188,11 @@ fn menus(ui: &mut egui::Ui, app: &mut LoomApp) {
             item(ui, app, "Relax...", Command::RelaxDialog);
             item(ui, app, "Rescale Elements", Command::Rescale);
             ui.separator();
+            toggle_item(ui, app, "LSCM Interactive (Peel Mode)", e.lscm_interactive, Command::LscmInteractive);
+            item(ui, app, "LSCM Solve (Quick Peel)", Command::LscmSolve);
+            item(ui, app, "LSCM Reset (Reset Peel)", Command::LscmReset);
+            toggle_item(ui, app, "Tweak UVW", e.mode == TvMode::Tweak, Command::TweakUvw);
+            ui.separator();
             item(ui, app, "Align Horizontal", Command::AlignSelectionHorizontal);
             item(ui, app, "Align Vertical", Command::AlignSelectionVertical);
             item(ui, app, "Linear Align", Command::LinearAlign);
@@ -255,6 +260,7 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         mode(ui, app, icons::UV_SCALE_HORIZONTAL, "Scale Horizontal", TvMode::ScaleHorizontal, Command::ScaleHorizontal);
         mode(ui, app, icons::UV_SCALE_VERTICAL, "Scale Vertical", TvMode::ScaleVertical, Command::ScaleVertical);
         mode(ui, app, icons::UV_FREEFORM, "Freeform Mode", TvMode::Freeform, Command::FreeformMode);
+        mode(ui, app, icons::MOVE, "Tweak UVW", TvMode::Tweak, Command::TweakUvw);
         mode(ui, app, icons::PAN, "Pan", TvMode::Pan, Command::Pan);
         ui.separator();
         let mirror = ui.menu_button(egui::RichText::new(icons::MIRROR).size(icons::SIZE), |ui| {
@@ -704,6 +710,10 @@ fn interact(ui: &mut egui::Ui, app: &mut LoomApp, response: &egui::Response, vie
                 };
                 if e.sync_selection && e.level == TvLevel::Face {
                     let _ = app.dispatch(Command::SyncTextureSelectionToViewport);
+                }
+                if e.mode == TvMode::Tweak && !add && !subtract {
+                    app.uv_drag = Some(UvDrag::Transform { start: p, last: p, pivot: p });
+                    app.state.undo.begin("Tweak");
                 }
             }
             None => app.uv_drag = Some(UvDrag::Region { start: p, add, subtract }),
