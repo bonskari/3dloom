@@ -82,7 +82,15 @@ pub const MAX_SPOT_ANGLE: f32 = 179.5;
 /// Distance to the invisible target of a new free light.
 pub const DEFAULT_TARGET_DISTANCE: f32 = 240.0;
 /// Shadow types of the General Parameters list.
-pub const SHADOW_TYPES: [&str; 2] = ["Shadow Map", "Ray Traced Shadows"];
+pub const SHADOW_TYPES: [&str; 4] = ["Shadow Map", "Ray Traced Shadows", "Adv. Ray Traced", "Area Shadows"];
+pub const SHADOW_MAP: u32 = 0;
+pub const RAY_TRACED: u32 = 1;
+pub const ADV_RAY_TRACED: u32 = 2;
+pub const AREA_SHADOWS: u32 = 3;
+/// Area Shadows > Basic Options > Mode.
+pub const AREA_MODES: [&str; 5] = ["Simple", "Rectangle Light", "Disc Light", "Box Light", "Sphere Light"];
+/// Advanced Ray-Traced Params > Basic Options > Mode.
+pub const ADV_RT_MODES: [&str; 3] = ["Simple", "1-Pass Antialias", "2-Pass Antialias"];
 pub const DECAY_TYPES: [&str; 3] = ["None", "Inverse", "Inverse Square"];
 
 fn p<T: crate::param::Animatable>(v: T) -> Param<T> {
@@ -148,6 +156,34 @@ pub struct LightObject {
     /// Size of the emitting sphere: highlight size and shadow softness.
     pub source_radius: Param<f32>,
     pub shadow_normal_bias: Param<f32>,
+    // Shadow Parameters (rest)
+    /// Blend the light's colour into the shadow colour.
+    pub light_affects_shadow_color: Param<bool>,
+    /// Shadow Parameters > Map: the bitmap the shadow colour comes from (kept; no renderer reads it).
+    pub shadow_map_on: Param<bool>,
+    pub shadow_map_path: Option<String>,
+    pub atmosphere_shadows: Param<bool>,
+    pub atmosphere_opacity: Param<f32>,
+    pub atmosphere_color_amount: Param<f32>,
+    // Shadow Map Params (rest)
+    /// Bias in scene units (else normalised to the scene's extents).
+    pub absolute_bias: Param<bool>,
+    pub two_sided_shadows: Param<bool>,
+    // Ray-Traced Shadow Params
+    pub max_quadtree_depth: Param<u32>,
+    // Advanced Ray-Traced / Area Shadows
+    /// Index into [`ADV_RT_MODES`].
+    pub adv_rt_mode: Param<u32>,
+    /// Index into [`AREA_MODES`].
+    pub area_mode: Param<u32>,
+    pub area_length: Param<f32>,
+    pub area_width: Param<f32>,
+    pub area_height: Param<f32>,
+    pub shadow_integrity: Param<u32>,
+    pub shadow_quality: Param<u32>,
+    pub shadow_spread: Param<f32>,
+    pub area_bias: Param<f32>,
+    pub jitter: Param<f32>,
     /// Create > Lights > Photometric (Target / Free Light): physical intensity,
     /// colour temperature and distribution. `light_type` then follows the
     /// distribution (Spot for Spotlight, Omni otherwise).
@@ -212,6 +248,25 @@ impl LightObject {
             ray_bias: p(0.005),
             source_radius: p(0.0),
             shadow_normal_bias: p(1.8),
+            light_affects_shadow_color: p(false),
+            shadow_map_on: p(false),
+            shadow_map_path: None,
+            atmosphere_shadows: p(false),
+            atmosphere_opacity: p(100.0),
+            atmosphere_color_amount: p(100.0),
+            absolute_bias: p(false),
+            two_sided_shadows: p(true),
+            max_quadtree_depth: p(7),
+            adv_rt_mode: p(2),
+            area_mode: p(1),
+            area_length: p(10.0),
+            area_width: p(10.0),
+            area_height: p(10.0),
+            shadow_integrity: p(2),
+            shadow_quality: p(5),
+            shadow_spread: p(1.0),
+            area_bias: p(0.5),
+            jitter: p(1.0),
             photometric: None,
             sun: None,
         }
@@ -309,7 +364,52 @@ impl LightObject {
             ("Source Radius", f(&self.source_radius)), ("Shadow Normal Bias", f(&self.shadow_normal_bias)),
             ("Target Distance", f(&self.target_distance)),
         ]);
+        v.extend(self.shadow_parameters());
         v
+    }
+
+    /// The shadow rollouts' parameters every shadow-casting light shares.
+    fn shadow_parameters(&self) -> Vec<(&'static str, ParamValue)> {
+        use ParamValue::*;
+        let f = |x: &Param<f32>| Float(x.get());
+        let i = |x: &Param<u32>| Int(x.get());
+        let b = |x: &Param<bool>| Bool(x.get());
+        vec![
+            ("Light Affects Shadow Color", b(&self.light_affects_shadow_color)), ("Shadow Map On", b(&self.shadow_map_on)),
+            ("Atmosphere Shadows", b(&self.atmosphere_shadows)), ("Atmosphere Opacity", f(&self.atmosphere_opacity)), ("Atmosphere Color Amount", f(&self.atmosphere_color_amount)),
+            ("Absolute Map Bias", b(&self.absolute_bias)), ("2-Sided Shadows", b(&self.two_sided_shadows)), ("Max Quadtree Depth", i(&self.max_quadtree_depth)),
+            ("Adv RT Mode", i(&self.adv_rt_mode)), ("Area Mode", i(&self.area_mode)),
+            ("Area Length", f(&self.area_length)), ("Area Width", f(&self.area_width)), ("Area Height", f(&self.area_height)),
+            ("Shadow Integrity", i(&self.shadow_integrity)), ("Shadow Quality", i(&self.shadow_quality)), ("Shadow Spread", f(&self.shadow_spread)),
+            ("Shadow Bias", f(&self.area_bias)), ("Jitter Amount", f(&self.jitter)),
+        ]
+    }
+
+    /// Area Shadows: the radius of a sphere the size of the area light
+    /// (the renderers' soft-shadow source); 0 for Simple and the other shadow types.
+    pub fn area_radius(&self) -> f32 {
+        if self.shadow_type.get() != AREA_SHADOWS {
+            return 0.0;
+        }
+        let (l, w, h) = (self.area_length.get().max(0.0), self.area_width.get().max(0.0), self.area_height.get().max(0.0));
+        match self.area_mode.get() {
+            1 => (l * w / std::f32::consts::PI).sqrt(),
+            2 | 4 => l * 0.5,
+            3 => (3.0 * l * w * h / (4.0 * std::f32::consts::PI)).cbrt(),
+            _ => 0.0,
+        }
+    }
+
+    /// What a shadow lets through of the light, per channel: 1 - density ×
+    /// (1 - shadow colour), the colour times the light's with Light Affects
+    /// Shadow Color (density 1 and black: nothing). Linear.
+    pub fn shadow_transmission(&self) -> Vec3 {
+        let mut c = srgb_to_linear(self.shadow_color.get());
+        if self.light_affects_shadow_color.get() {
+            c *= srgb_to_linear(self.color.get());
+        }
+        let d = self.shadow_density.get().clamp(0.0, 1.0);
+        (Vec3::ONE - (Vec3::ONE - c) * d).clamp(Vec3::ZERO, Vec3::ONE)
     }
 
     /// Sets a parameter by its rollout name, keeping the reference's limits
@@ -382,6 +482,24 @@ impl LightObject {
             "Source Radius" => self.source_radius.set(v.max(0.0)),
             "Shadow Normal Bias" => self.shadow_normal_bias.set(v.max(0.0)),
             "Target Distance" => self.target_distance.set(v.max(0.001)),
+            "Light Affects Shadow Color" => self.light_affects_shadow_color.set(b),
+            "Shadow Map On" => self.shadow_map_on.set(b),
+            "Atmosphere Shadows" => self.atmosphere_shadows.set(b),
+            "Atmosphere Opacity" => self.atmosphere_opacity.set(v.clamp(0.0, 100.0)),
+            "Atmosphere Color Amount" => self.atmosphere_color_amount.set(v.clamp(0.0, 100.0)),
+            "Absolute Map Bias" => self.absolute_bias.set(b),
+            "2-Sided Shadows" => self.two_sided_shadows.set(b),
+            "Max Quadtree Depth" => self.max_quadtree_depth.set(u.clamp(1, 10)),
+            "Adv RT Mode" => self.adv_rt_mode.set(u.min(2)),
+            "Area Mode" => self.area_mode.set(u.min(4)),
+            "Area Length" => self.area_length.set(v.max(0.0)),
+            "Area Width" => self.area_width.set(v.max(0.0)),
+            "Area Height" => self.area_height.set(v.max(0.0)),
+            "Shadow Integrity" => self.shadow_integrity.set(u.clamp(1, 15)),
+            "Shadow Quality" => self.shadow_quality.set(u.clamp(1, 15)),
+            "Shadow Spread" => self.shadow_spread.set(v.max(0.0)),
+            "Shadow Bias" => self.area_bias.set(v.max(0.0)),
+            "Jitter Amount" => self.jitter.set(v.max(0.0)),
             _ => return Err(format!("{} has no parameter `{name}`", self.stack_name())),
         }
         Ok(())
@@ -392,6 +510,8 @@ impl LightObject {
             "Shadow Type" => Some(&SHADOW_TYPES),
             "Decay Type" => Some(&DECAY_TYPES),
             "Distribution" => Some(&DISTRIBUTIONS),
+            "Area Mode" => Some(&AREA_MODES),
+            "Adv RT Mode" => Some(&ADV_RT_MODES),
             "Lamp" => Some(&LAMP_NAMES),
             "Intensity Unit" => Some(&INTENSITY_UNITS),
             "Light Shape" => Some(&LIGHT_SHAPES),
@@ -657,7 +777,10 @@ impl LightObject {
             ("Render Shape", b(&ph.render_shape)),
             ("Map Bias", f(&self.map_bias)), ("Map Size", i(&self.map_size)), ("Sample Range", f(&self.sample_range)),
             ("Shadow Normal Bias", f(&self.shadow_normal_bias)), ("Target Distance", f(&self.target_distance)),
+            ("Shadow Color R", Float(self.shadow_color.get().x)), ("Shadow Color G", Float(self.shadow_color.get().y)), ("Shadow Color B", Float(self.shadow_color.get().z)),
+            ("Shadow Density", f(&self.shadow_density)),
         ]);
+        v.extend(self.shadow_parameters());
         v
     }
 
@@ -897,6 +1020,11 @@ pub struct LightSample {
     pub sample_range: f32,
     pub source_radius: f32,
     pub shadow_normal_bias: f32,
+    /// Map Bias in scene units (Absolute Map Bias), else relative.
+    pub absolute_bias: bool,
+    /// What the light's shadows let through, per channel (1 = no shadow,
+    /// 0 = full shadow): shadow colour and density.
+    pub shadow_transmission: Vec3,
     /// Distance to the target (or Target Distance of a free light).
     pub target_distance: f32,
     pub exclusion: Exclusion,
@@ -999,6 +1127,8 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
                 sample_range: l.sample_range.get(),
                 source_radius: if shape_radius > 0.0 { shape_radius } else { l.source_radius.get() },
                 shadow_normal_bias: l.shadow_normal_bias.get(),
+                absolute_bias: l.absolute_bias.get(),
+                shadow_transmission: l.shadow_transmission(),
                 target_distance: target_distance(scene, n.id).unwrap_or(DEFAULT_TARGET_DISTANCE),
                 exclusion: l.exclusion.clone(),
             });
@@ -1018,8 +1148,11 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             map_size: l.map_size.get(),
             map_bias: l.map_bias.get(),
             sample_range: l.sample_range.get(),
-            source_radius: l.source_radius.get(),
+            // Area Shadows: the area light's size softens the shadows.
+            source_radius: if l.area_radius() > 0.0 { l.area_radius() } else { l.source_radius.get() },
             shadow_normal_bias: l.shadow_normal_bias.get(),
+            absolute_bias: l.absolute_bias.get(),
+            shadow_transmission: l.shadow_transmission(),
             target_distance: target_distance(scene, n.id).unwrap_or(DEFAULT_TARGET_DISTANCE),
             exclusion: l.exclusion.clone(),
         });
@@ -1048,6 +1181,8 @@ pub fn default_lights(count: u32, eye_to_world: Mat4) -> Vec<LightSample> {
         sample_range: 4.0,
         source_radius: 0.0,
         shadow_normal_bias: 1.8,
+        absolute_bias: false,
+        shadow_transmission: Vec3::ZERO,
         target_distance: DEFAULT_TARGET_DISTANCE,
         exclusion: Exclusion::default(),
     };
@@ -1125,6 +1260,33 @@ mod tests {
         assert!((v - 1500.0).abs() < 1e-2, "the lux value is kept when the distance changes: {v}");
         l.set_parameter("Distribution", 2.0).unwrap();
         assert_eq!(l.light_type, LightType::Spot);
+    }
+
+    #[test]
+    fn shadow_colour_density_and_area_lights_reach_the_sample() {
+        let mut l = LightObject::new(LightType::Spot);
+        assert_eq!(l.shadow_transmission(), Vec3::ZERO, "black shadows at density 1 stop all light");
+        l.set_parameter("Shadow Density", 0.25).unwrap();
+        assert!((l.shadow_transmission() - Vec3::splat(0.75)).length() < 1e-6);
+        l.set_parameter("Shadow Density", 1.0).unwrap();
+        l.set_parameter("Shadow Color G", 1.0).unwrap();
+        assert_eq!(l.shadow_transmission(), Vec3::new(0.0, 1.0, 0.0), "a green shadow lets green through");
+        l.set_parameter("Color R", 0.0).unwrap();
+        l.set_parameter("Light Affects Shadow Color", 1.0).unwrap();
+        assert_eq!(l.shadow_transmission(), Vec3::new(0.0, 1.0, 0.0));
+        l.set_parameter("Color G", 0.0).unwrap();
+        assert_eq!(l.shadow_transmission(), Vec3::ZERO, "the light's colour multiplies the shadow colour");
+        assert_eq!(l.area_radius(), 0.0, "Shadow Map: a point source");
+        l.set_parameter("Shadow Type", AREA_SHADOWS as f64).unwrap();
+        l.set_parameter("Area Length", 20.0).unwrap();
+        l.set_parameter("Area Width", 20.0).unwrap();
+        assert!((l.area_radius() - (400.0 / std::f32::consts::PI).sqrt()).abs() < 1e-4, "Rectangle Light: equal area");
+        l.set_parameter("Area Mode", 4.0).unwrap();
+        assert_eq!(l.area_radius(), 10.0, "Sphere Light: half its length");
+        l.set_parameter("Area Mode", 0.0).unwrap();
+        assert_eq!(l.area_radius(), 0.0, "Simple: a point");
+        assert_eq!(l.choices("Area Mode").unwrap().len(), 5);
+        assert_eq!(SHADOW_TYPES.len(), 4);
     }
 
     #[test]

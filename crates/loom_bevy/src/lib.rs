@@ -282,30 +282,53 @@ impl BevyRenderer {
             seen.insert(s.id.0);
             let centre_distance = (Vec3::from(s.position.to_array()) - centre).length();
             let world = self.app.world_mut();
-            let entity = match self.scene_lights.get(&s.id.0) {
-                Some(l) if l.kind == kind => l.entity,
+            let (entity, old_fill) = match self.scene_lights.get(&s.id.0) {
+                Some(l) if l.kind == kind => (l.entity, l.fill),
                 other => {
                     if let Some(l) = other {
                         world.despawn(l.entity);
+                        if let Some(f) = l.fill {
+                            world.despawn(f);
+                        }
                     }
                     let e = world.spawn(Transform::IDENTITY).id();
-                    self.scene_lights.insert(s.id.0, lights::Synced { entity: e, kind });
-                    e
+                    self.scene_lights.insert(s.id.0, lights::Synced { entity: e, kind, fill: None });
+                    (e, None)
                 }
             };
             let mut s = s.clone();
             s.shadows &= shadows;
-            let mut e = world.entity_mut(entity);
-            e.insert((lights::transform(&s), RenderLayers::from_layers(&[LIGHT_LAYER, LIGHT_LAYER + 1 + i])));
-            match kind {
-                lights::Kind::Point => {
-                    e.insert(lights::point(&s, centre_distance, radius));
+            // Shadow colour / density: the part shadows let through is a second, unshadowed light.
+            let (main, fill) = match lights::shadow_split(&s) {
+                Some((stopped, through)) => (stopped, Some(through)),
+                None => (s.clone(), None),
+            };
+            let layers = RenderLayers::from_layers(&[LIGHT_LAYER, LIGHT_LAYER + 1 + i]);
+            let fill_entity = match (fill.is_some(), old_fill) {
+                (true, Some(f)) => Some(f),
+                (true, None) => Some(world.spawn(Transform::IDENTITY).id()),
+                (false, Some(f)) => {
+                    world.despawn(f);
+                    None
                 }
-                lights::Kind::Spot => {
-                    e.insert(lights::spot(&s, centre_distance, radius));
-                }
-                lights::Kind::Directional => {
-                    e.insert(lights::directional(&s));
+                (false, None) => None,
+            };
+            if let Some(l) = self.scene_lights.get_mut(&s.id.0) {
+                l.fill = fill_entity;
+            }
+            for (entity, part) in std::iter::once((entity, &main)).chain(fill_entity.zip(fill.as_ref())) {
+                let mut e = world.entity_mut(entity);
+                e.insert((lights::transform(part), layers.clone()));
+                match kind {
+                    lights::Kind::Point => {
+                        e.insert(lights::point(part, centre_distance, radius));
+                    }
+                    lights::Kind::Spot => {
+                        e.insert(lights::spot(part, centre_distance, radius));
+                    }
+                    lights::Kind::Directional => {
+                        e.insert(lights::directional(part));
+                    }
                 }
             }
             if s.shadows && kind != lights::Kind::Directional {
@@ -316,6 +339,9 @@ impl BevyRenderer {
         for id in gone {
             if let Some(l) = self.scene_lights.remove(&id) {
                 self.app.world_mut().despawn(l.entity);
+                if let Some(f) = l.fill {
+                    self.app.world_mut().despawn(f);
+                }
             }
         }
         if map_size > 0 {

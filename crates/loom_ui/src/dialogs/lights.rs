@@ -118,7 +118,7 @@ fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &
         return;
     }
     let st = l.shadow_type.get();
-    egui::ComboBox::from_id_salt(("lister_shadow_type", id.0)).selected_text(SHADOW_TYPES[st.min(1) as usize]).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(("lister_shadow_type", id.0)).selected_text(SHADOW_TYPES[(st as usize).min(SHADOW_TYPES.len() - 1)]).show_ui(ui, |ui| {
         for (i, t) in SHADOW_TYPES.iter().enumerate() {
             if ui.selectable_label(st == i as u32, *t).clicked() && st != i as u32 {
                 set(app, id, "Shadow Type", i as f64);

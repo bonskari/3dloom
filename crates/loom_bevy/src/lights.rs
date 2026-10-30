@@ -30,7 +30,9 @@ pub const AMBIENT_PER_MULTIPLIER: f32 = 1.2 * TWO_POW_EV100;
 pub fn supports(param: &str) -> bool {
     !matches!(
         param,
-        "Near Use" | "Rectangle" | "Aspect" | "Contrast" | "Soften Diffuse Edge" | "Affect Diffuse" | "Affect Specular" | "Projector" | "Shadow Color" | "Shadow Density" | "Sample Range" | "Use Scene Environment" | "Rays per Sample" | "Ray Bias" | "Render Shape"
+        "Near Use" | "Rectangle" | "Aspect" | "Contrast" | "Soften Diffuse Edge" | "Affect Diffuse" | "Affect Specular" | "Projector" | "Sample Range" | "Use Scene Environment" | "Rays per Sample" | "Ray Bias" | "Render Shape"
+            | "Shadow Map On" | "Atmosphere Shadows" | "Atmosphere Opacity" | "Atmosphere Color Amount" | "2-Sided Shadows" | "Max Quadtree Depth" | "Adv RT Mode"
+            | "Shadow Integrity" | "Shadow Quality" | "Shadow Spread" | "Shadow Bias" | "Jitter Amount"
     )
 }
 
@@ -89,6 +91,29 @@ pub(crate) fn transform(s: &LightSample) -> Transform {
     Transform::from_translation(Vec3::from(s.position.to_array())).looking_to(Vec3::from(s.direction.to_array()), up)
 }
 
+/// Shadow depth bias: Absolute Map Bias is in scene units; otherwise Map
+/// Bias scales the renderer's default (1 = the default bias).
+fn depth_bias(s: &LightSample, default: f32) -> f32 {
+    if s.absolute_bias { s.map_bias.max(0.0) } else { default * s.map_bias }
+}
+
+/// A light whose shadows let some light through (shadow colour, density)
+/// renders as two lights: the part shadows stop, with shadows, and the part
+/// they let through, without. Lit points get both (the whole light);
+/// shadowed points only the second. None when shadows stop all of it.
+pub fn shadow_split(s: &LightSample) -> Option<(LightSample, LightSample)> {
+    let t = s.shadow_transmission.clamp(glam::Vec3::ZERO, glam::Vec3::ONE);
+    if !s.shadows || t.max_element() <= 1e-4 {
+        return None;
+    }
+    let mut stopped = s.clone();
+    stopped.color = s.color * (glam::Vec3::ONE - t);
+    let mut through = s.clone();
+    through.color = s.color * t;
+    through.shadows = false;
+    Some((stopped, through))
+}
+
 pub(crate) fn point(s: &LightSample, centre_distance: f32, scene_radius: f32) -> PointLight {
     let (color, _) = split(s.color);
     PointLight {
@@ -97,7 +122,9 @@ pub(crate) fn point(s: &LightSample, centre_distance: f32, scene_radius: f32) ->
         range: range(s, centre_distance, scene_radius),
         radius: s.source_radius,
         shadows_enabled: s.shadows,
-        shadow_depth_bias: PointLight::DEFAULT_SHADOW_DEPTH_BIAS * s.map_bias,
+        // Soft shadows from the light's size (Area Shadows, a photometric shape, Source Radius).
+        soft_shadows_enabled: s.source_radius > 0.0,
+        shadow_depth_bias: depth_bias(s, PointLight::DEFAULT_SHADOW_DEPTH_BIAS),
         shadow_normal_bias: s.shadow_normal_bias,
         ..Default::default()
     }
@@ -113,7 +140,8 @@ pub(crate) fn spot(s: &LightSample, centre_distance: f32, scene_radius: f32) -> 
         range: range(s, centre_distance, scene_radius),
         radius: s.source_radius,
         shadows_enabled: s.shadows,
-        shadow_depth_bias: SpotLight::DEFAULT_SHADOW_DEPTH_BIAS * s.map_bias,
+        soft_shadows_enabled: s.source_radius > 0.0,
+        shadow_depth_bias: depth_bias(s, SpotLight::DEFAULT_SHADOW_DEPTH_BIAS),
         shadow_normal_bias: s.shadow_normal_bias,
         inner_angle: (hotspot * 0.5).to_radians().min(outer),
         outer_angle: outer,
@@ -127,7 +155,10 @@ pub(crate) fn directional(s: &LightSample) -> DirectionalLight {
         color,
         illuminance: LUX_PER_MULTIPLIER * b,
         shadows_enabled: s.shadows,
-        shadow_depth_bias: DirectionalLight::DEFAULT_SHADOW_DEPTH_BIAS * s.map_bias,
+        // A directional light's softness: the angle a source of the light's
+        // radius spans seen from its target distance.
+        soft_shadow_size: (s.source_radius > 0.0).then(|| 2.0 * (s.source_radius / s.target_distance.max(1e-3)).atan()),
+        shadow_depth_bias: depth_bias(s, DirectionalLight::DEFAULT_SHADOW_DEPTH_BIAS),
         shadow_normal_bias: s.shadow_normal_bias,
         ..Default::default()
     }
@@ -144,6 +175,8 @@ pub(crate) fn ambient(samples: &[LightSample]) -> (Color, f32) {
 pub(crate) struct Synced {
     pub entity: Entity,
     pub kind: Kind,
+    /// The unshadowed part of a light whose shadows let light through.
+    pub fill: Option<Entity>,
 }
 
 #[cfg(test)]
@@ -176,6 +209,25 @@ mod tests {
         let lm = lumens(&s, 40.0);
         let e = lm / (4.0 * std::f32::consts::PI * 40.0 * 40.0);
         assert!((e - LUX_PER_MULTIPLIER).abs() / LUX_PER_MULTIPLIER < 1e-4);
+    }
+
+    #[test]
+    fn shadow_colour_and_density_split_the_light() {
+        let mut s = sample();
+        s.shadows = true;
+        s.color = glam::Vec3::splat(2.0);
+        s.shadow_transmission = glam::Vec3::ZERO;
+        assert!(shadow_split(&s).is_none(), "black shadows at density 1 stop the whole light");
+        s.shadow_transmission = glam::Vec3::new(0.5, 0.0, 0.0);
+        let (stopped, through) = shadow_split(&s).unwrap();
+        assert_eq!(stopped.color + through.color, s.color, "lit points get the whole light");
+        assert_eq!(through.color, glam::Vec3::new(1.0, 0.0, 0.0), "shadowed points get the transmitted part");
+        assert!(stopped.shadows && !through.shadows);
+        s.absolute_bias = true;
+        s.map_bias = 0.3;
+        assert_eq!(depth_bias(&s, 0.02), 0.3);
+        s.absolute_bias = false;
+        assert!((depth_bias(&s, 0.02) - 0.006).abs() < 1e-6);
     }
 
     #[test]
