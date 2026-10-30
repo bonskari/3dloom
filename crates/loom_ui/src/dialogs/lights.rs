@@ -35,7 +35,8 @@ struct ListerState {
 pub fn light_lister(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let key = egui::Id::new("light_lister_state");
     let mut st: ListerState = ctx.data(|d| d.get_temp(key)).unwrap_or_default();
-    egui::Window::new("Light Lister").open(open).resizable(true).default_width(760.0).show(ctx, |ui| {
+    let window = egui::Window::new("Light Lister").resizable(true).default_width(760.0);
+    crate::os_window::OsWindow::new("Light Lister", "Light Lister", [780.0, 360.0]).show(ctx, open, window, |ui| {
         ui.horizontal(|ui| {
             ui.label("Configuration:");
             ui.radio_value(&mut st.selected_only, false, "All Lights");

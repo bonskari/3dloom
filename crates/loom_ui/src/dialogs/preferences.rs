@@ -73,6 +73,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         check(ui, app, "Spinner Use Snap", "Use Snap");
                         check(ui, app, "Spinner Wrap Cursor", "Wrap Cursor near Spinner");
                     });
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Windows").strong());
+                        check(ui, app, "Floating Windows as OS Windows", "Floating windows as separate OS windows");
+                    });
                 });
             }
             Tab::Files => {

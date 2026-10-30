@@ -97,7 +97,8 @@ fn spin_f32(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::R
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let panel_id = egui::Id::new("render_setup_panel");
     let mut panel: Panel = ctx.data(|d| d.get_temp(panel_id)).unwrap_or_default();
-    egui::Window::new("Render Setup").open(open).resizable(false).default_width(420.0).show(ctx, |ui| {
+    let window = egui::Window::new("Render Setup").resizable(false).default_width(420.0);
+    crate::os_window::OsWindow::new("Render Setup", "Render Setup", [440.0, 560.0]).fixed().show(ctx, open, window, |ui| {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut panel, Panel::Common, "Common");
             ui.selectable_value(&mut panel, Panel::Renderer, "Renderer");

@@ -830,6 +830,12 @@ pub struct Prefs {
     /// Preferences > Viewports > Grid Nudge Distance (Nudge Grid Up / Down, default 1.0).
     #[serde(default = "default_nudge")]
     pub grid_nudge_distance: f32,
+    /// Preferences > General > Floating windows as separate OS windows: the
+    /// Material Editor, Track View and the other modeless floaters open as
+    /// windows of their own that can leave the main window (default on; the
+    /// UI falls back to in-app windows where the backend can't).
+    #[serde(default = "default_true")]
+    pub floating_os_windows: bool,
 }
 
 fn default_nudge() -> f32 {
@@ -859,20 +865,21 @@ impl Default for Prefs {
             local_center_during_animate: true,
             recent_files_count: 10,
             grid_nudge_distance: 1.0,
+            floating_os_windows: true,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 32] = [
+    pub const NAMES: [&'static str; 33] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
         "Transform Gizmos", "Show Axis Labels", "Allow Multiple Gizmos", "Gizmo Size", "Move Plane Handle Size", "Move Plane Handle Offset",
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
         "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
-        "Grid Nudge Distance",
+        "Grid Nudge Distance", "Floating Windows as OS Windows",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -896,6 +903,7 @@ impl Prefs {
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
             "Recent Files in File Menu" => self.recent_files_count as f64,
             "Grid Nudge Distance" => self.grid_nudge_distance as f64,
+            "Floating Windows as OS Windows" => b(self.floating_os_windows),
             "Transform Gizmos" => b(self.gizmos.enabled),
             "Show Axis Labels" => b(self.gizmos.show_axis_labels),
             "Allow Multiple Gizmos" => b(self.gizmos.allow_multiple),
@@ -937,6 +945,7 @@ impl Prefs {
             "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
             "Grid Nudge Distance" => self.grid_nudge_distance = f.max(0.0),
+            "Floating Windows as OS Windows" => self.floating_os_windows = on,
             "Transform Gizmos" => self.gizmos.enabled = on,
             "Show Axis Labels" => self.gizmos.show_axis_labels = on,
             "Allow Multiple Gizmos" => self.gizmos.allow_multiple = on,

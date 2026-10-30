@@ -506,8 +506,8 @@ fn material_label(app: &LoomApp, id: Option<MaterialId>) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
-    let window = egui::Window::new("Material Editor").id(egui::Id::new("Material Editor")).open(open).resizable(true).default_pos([16.0, 40.0]).default_width(400.0).default_height(740.0).vscroll(true);
-    let r = window.show(ctx, |ui| {
+    let window = egui::Window::new("Material Editor").id(egui::Id::new("Material Editor")).resizable(true).default_pos([16.0, 40.0]).default_width(400.0).default_height(740.0).vscroll(true);
+    let r = crate::os_window::OsWindow::new("Material Editor", "Material Editor", [400.0, 740.0]).scroll().show(ctx, open, window, |ui| {
         menu(ui, app);
         slots(ui, app);
         ui.separator();
@@ -530,16 +530,25 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         } else if let Some(map) = map_at(&m, &maps).cloned() {
             map_rollouts(ui, app, &map);
         }
+        // In an OS window of its own the editor sees the release of a drag
+        // that began in it (outside its window, in the main window).
+        let ctx = ui.ctx().clone();
+        if ctx.viewport_id() != egui::ViewportId::ROOT {
+            drop_outside(&ctx, app, Some(ctx.screen_rect()));
+        }
     });
     // A sample slot dropped outside the editor: onto an object or its selected polygons.
-    let editor = r.as_ref().map(|r| r.response.rect);
+    drop_outside(ctx, app, r.as_ref().map(|r| r.rect));
+}
+
+fn drop_outside(ctx: &egui::Context, app: &mut LoomApp, editor: Option<egui::Rect>) {
     if let Some(drag) = egui::DragAndDrop::payload::<SlotDrag>(ctx) {
         let released = ctx.input(|i| i.pointer.any_released());
         let pos = ctx.input(|i| i.pointer.interact_pos().or(i.pointer.latest_pos()));
         if let (true, Some(p)) = (released, pos) {
             if !editor.is_some_and(|e| e.contains(p)) {
                 egui::DragAndDrop::clear_payload(ctx);
-                drop_on_viewport(app, drag.0, p);
+                drop_on_viewport(app, drag.0, crate::os_window::to_main(ctx, p));
             }
         }
     }
@@ -2344,7 +2353,8 @@ pub fn navigator(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         NavStep::Map(m) => m.clone(),
     }).collect();
     let title = app.state.scene.slot_material(ed.active).name;
-    egui::Window::new("Material/Map Navigator").id(egui::Id::new("Material/Map Navigator")).open(open).resizable(true).default_width(280.0).show(ctx, |ui| {
+    let window = egui::Window::new("Material/Map Navigator").id(egui::Id::new("Material/Map Navigator")).resizable(true).default_width(280.0);
+    crate::os_window::OsWindow::new("Material/Map Navigator", "Material/Map Navigator", [280.0, 420.0]).show(ctx, open, window, |ui| {
         ui.label(egui::RichText::new(title).strong());
         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
             for (depth, label, path) in rows {

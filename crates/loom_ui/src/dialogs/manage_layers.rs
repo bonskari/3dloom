@@ -21,7 +21,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let members = |layer: u32| -> Vec<(u64, String)> { app.state.scene.nodes().filter(|n| n.layer == layer).map(|n| (n.id.0, n.name.clone())).collect() };
     let objects: Vec<Vec<(u64, String)>> = layers.iter().map(|l| members(l.id)).collect();
     // The window id stays put while the title follows the current layer.
-    egui::Window::new(format!("Layer: {current_name}")).id(id.with("window")).open(open).default_width(460.0).show(ctx, |ui| {
+    let window = egui::Window::new(format!("Layer: {current_name}")).id(id.with("window")).default_width(460.0);
+    crate::os_window::OsWindow::new("Layer Manager", format!("Layer: {current_name}"), [480.0, 420.0]).show(ctx, open, window, |ui| {
         ui.horizontal(|ui| {
             if ui.button("Create New Layer").on_hover_text("Create a layer (becomes current; the selection moves onto it)").clicked() {
                 let _ = app.dispatch(Command::CreateLayer { name: None });
