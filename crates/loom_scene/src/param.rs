@@ -107,11 +107,11 @@ impl KeyedTracks {
     }
 
     pub fn comps_at(&self, t: f32) -> Vec<f32> {
-        self.tracks.iter().zip(&self.rest).map(|(tr, r)| tr.eval(t).unwrap_or(*r)).collect()
+        self.tracks.iter().zip(&self.rest).map(|(tr, r)| tr.eval_or_rest(t, *r)).collect()
     }
 
     pub fn has_keys(&self) -> bool {
-        self.tracks.iter().any(|t| !t.keys.is_empty())
+        self.tracks.iter().any(|t| !t.keys.is_empty() || t.ease_curve.is_some() || t.multiplier_curve.is_some() || t.limit_enabled)
     }
 }
 

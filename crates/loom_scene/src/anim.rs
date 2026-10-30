@@ -143,6 +143,10 @@ impl Default for Key {
     }
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// A float curve: sorted keys plus the out-of-range types at both ends.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default)]
@@ -151,6 +155,22 @@ pub struct FloatTrack {
     pub keys: Vec<Key>,
     pub before: Ort,
     pub after: Ort,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ease_curve: Option<Box<FloatTrack>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multiplier_curve: Option<Box<FloatTrack>>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ease_multiplier_disabled: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub limit_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lower_limit: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upper_limit: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range_override: Option<(f32, f32)>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub respect_range: bool,
 }
 
 const SAME_TIME: f32 = 1e-4;
@@ -194,7 +214,65 @@ impl FloatTrack {
     }
 
     /// The value at `t`, or None for a track without keys.
-    pub fn eval(&self, t: f32) -> Option<f32> {
+    pub fn eval(&self, mut t: f32) -> Option<f32> {
+        if !self.ease_multiplier_disabled {
+            if let Some(ease) = &self.ease_curve {
+                t = ease.eval(t).unwrap_or(t);
+            }
+        }
+        if self.respect_range {
+            if let Some((r0, r1)) = self.range_override {
+                t = t.clamp(r0, r1);
+            } else if self.keys.len() >= 2 {
+                t = t.clamp(self.keys[0].time, self.keys[self.keys.len() - 1].time);
+            }
+        }
+        let mut v = self.eval_raw(t)?;
+        if !self.ease_multiplier_disabled {
+            if let Some(mult) = &self.multiplier_curve {
+                v *= mult.eval(t).unwrap_or(1.0);
+            }
+        }
+        if self.limit_enabled {
+            if let Some(lo) = self.lower_limit {
+                v = v.max(lo);
+            }
+            if let Some(hi) = self.upper_limit {
+                v = v.min(hi);
+            }
+        }
+        Some(v)
+    }
+
+    /// Evaluates the track at `t`, falling back to `rest` when there are no keys,
+    /// while still applying any active multiplier curve and limits.
+    pub fn eval_or_rest(&self, mut t: f32, rest: f32) -> f32 {
+        if !self.keys.is_empty() {
+            return self.eval(t).unwrap_or(rest);
+        }
+        if !self.ease_multiplier_disabled {
+            if let Some(ease) = &self.ease_curve {
+                t = ease.eval(t).unwrap_or(t);
+            }
+        }
+        let mut v = rest;
+        if !self.ease_multiplier_disabled {
+            if let Some(mult) = &self.multiplier_curve {
+                v *= mult.eval(t).unwrap_or(1.0);
+            }
+        }
+        if self.limit_enabled {
+            if let Some(lo) = self.lower_limit {
+                v = v.max(lo);
+            }
+            if let Some(hi) = self.upper_limit {
+                v = v.min(hi);
+            }
+        }
+        v
+    }
+
+    fn eval_raw(&self, t: f32) -> Option<f32> {
         let n = self.keys.len();
         if n == 0 {
             return None;

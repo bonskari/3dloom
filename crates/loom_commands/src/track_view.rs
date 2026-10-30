@@ -53,6 +53,8 @@ pub enum TvTool {
     SelectTime,
     InsertTime,
     ScaleTime,
+    Retime,
+    RetimeAll,
 }
 
 /// One selected key: its track, the component (X/Y/Z) and its frame.
@@ -89,13 +91,14 @@ pub struct TvFilters {
     pub visible_objects: bool,
     pub keyable_only: bool,
     pub unlocked_only: bool,
+    pub active_layer_only: bool,
     /// The tracks highlighted when Selected Tracks was turned on.
     pub selected_snapshot: Vec<TrackKey>,
 }
 
 impl Default for TvFilters {
     fn default() -> Self {
-        Self { transforms: true, base_objects: true, modified_objects: true, note_tracks: true, visibility_tracks: true, controller_types: false, animated_only: false, selected_objects: false, selected_tracks: false, visible_objects: true, keyable_only: false, unlocked_only: false, selected_snapshot: Vec::new() }
+        Self { transforms: true, base_objects: true, modified_objects: true, note_tracks: true, visibility_tracks: true, controller_types: false, animated_only: false, selected_objects: false, selected_tracks: false, visible_objects: true, keyable_only: false, unlocked_only: false, active_layer_only: false, selected_snapshot: Vec::new() }
     }
 }
 
@@ -138,6 +141,12 @@ pub struct TrackViewState {
     pub manual_navigation: bool,
     pub auto_expand_animated: bool,
     pub auto_expand_keyable: bool,
+    pub auto_expand_unlocked: bool,
+    pub auto_expand_limits: bool,
+    pub position_ranges: bool,
+    /// 0 = Parameter curve, 1 = Ease curve, 2 = Multiplier curve.
+    pub ort_target: u8,
+    pub limit_clip: Option<(bool, Option<f32>, Option<f32>)>,
     pub soft: bool,
     pub soft_range: f32,
     pub soft_falloff: f32,
@@ -186,6 +195,11 @@ impl Default for TrackViewState {
             manual_navigation: false,
             auto_expand_animated: false,
             auto_expand_keyable: false,
+            auto_expand_unlocked: false,
+            auto_expand_limits: false,
+            position_ranges: false,
+            ort_target: 0,
+            limit_clip: None,
             soft: false,
             soft_range: 20.0,
             soft_falloff: 1.0,
@@ -259,6 +273,9 @@ pub fn tree(state: &AppState) -> Vec<TvItem> {
             continue;
         }
         if f.selected_objects && !state.selection.contains(&id) {
+            continue;
+        }
+        if f.active_layer_only && n.layer != state.scene.current_layer {
             continue;
         }
         let all = tracks::node_tracks(n);
@@ -463,6 +480,23 @@ fn edit_highlighted(state: &mut AppState, label: &str, mut f: impl FnMut(&mut Ke
     edit_nodes(state, label, &nodes, |t| paths.contains(t), |_, p| {
         if let Some(k) = p.keys().is_some_and(|k| k.has_keys()).then_some(()).and_then(|_| p.ensure_keys()) {
             f(k);
+        }
+    })
+}
+
+/// Edits every highlighted track, converting constant tracks to keyed tracks if needed.
+fn edit_highlighted_all(state: &mut AppState, label: &str, mut f: impl FnMut(&mut KeyedTracks, f32)) -> Result<Value, String> {
+    let paths = highlighted_tracks(state);
+    if paths.is_empty() {
+        return Err("highlight tracks in the Track View hierarchy first".into());
+    }
+    let now = state.current_frame as f32;
+    let mut nodes: Vec<NodeId> = paths.iter().map(|t| t.node).collect();
+    nodes.sort();
+    nodes.dedup();
+    edit_nodes(state, label, &nodes, |t| paths.contains(t), |_, p| {
+        if let Some(k) = p.ensure_keys() {
+            f(k, now);
         }
     })
 }
@@ -795,8 +829,10 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::SetTangentsToAuto => edit_selected(state, "Set Tangents to Auto", |tr, idx| tangent_set(tr, idx, TangentType::Auto, "both")),
         C::SetTangentsToFast => edit_selected(state, "Set Tangents to Fast", |tr, idx| tangent_set(tr, idx, TangentType::Fast, "both")),
-        C::SetTangentsToLinear => edit_selected(state, "Set Tangents to Linear", |tr, idx| tangent_set(tr, idx, TangentType::Linear, "both")),
+        C::SetTangentsToLinear | C::Linear => edit_selected(state, "Set Tangents to Linear", |tr, idx| tangent_set(tr, idx, TangentType::Linear, "both")),
         C::SetTangentsToSlow => edit_selected(state, "Set Tangents to Slow", |tr, idx| tangent_set(tr, idx, TangentType::Slow, "both")),
+        C::EaseIn => edit_selected(state, "Ease In", |tr, idx| tangent_set(tr, idx, TangentType::Slow, "in")),
+        C::EaseOut => edit_selected(state, "Ease Out", |tr, idx| tangent_set(tr, idx, TangentType::Slow, "out")),
         C::SetTangentsToSmooth => edit_selected(state, "Set Tangents to Smooth", |tr, idx| tangent_set(tr, idx, TangentType::Smooth, "both")),
         C::SetTangentsToStepped => edit_selected(state, "Set Tangents to Stepped", |tr, idx| tangent_set(tr, idx, TangentType::Step, "both")),
         C::SetTangentsToSpline => edit_selected(state, "Set Tangents to Spline", |tr, idx| {
@@ -893,13 +929,168 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             idx.iter().map(|i| tr.keys[*i].time).collect()
         }),
-        C::TrackViewSetOrt { before, after } => edit_highlighted(state, "Parameter Curve Out-of-Range Types", |k| {
+        C::TrackViewSetOrt { before, after } => {
+            let target = state.track_view.ort_target;
+            edit_highlighted(state, "Parameter Curve Out-of-Range Types", |k| {
+                for tr in &mut k.tracks {
+                    match target {
+                        1 => {
+                            if let Some(ease) = &mut tr.ease_curve {
+                                ease.before = before;
+                                ease.after = after;
+                            } else {
+                                tr.before = before;
+                                tr.after = after;
+                            }
+                        }
+                        2 => {
+                            if let Some(mult) = &mut tr.multiplier_curve {
+                                mult.before = before;
+                                mult.after = after;
+                            } else {
+                                tr.before = before;
+                                tr.after = after;
+                            }
+                        }
+                        _ => {
+                            tr.before = before;
+                            tr.after = after;
+                        }
+                    }
+                }
+            })
+        }
+        C::ParameterCurveOutOfRangeTypes => {
+            state.track_view.ort_target = 0;
+            open_dialog(state, Dialog::OutOfRangeTypes)
+        }
+        C::EaseCurveOutOfRangeTypes => {
+            state.track_view.ort_target = 1;
+            open_dialog(state, Dialog::OutOfRangeTypes)
+        }
+        C::MultiplierCurveOutOfRangeTypes => {
+            state.track_view.ort_target = 2;
+            open_dialog(state, Dialog::OutOfRangeTypes)
+        }
+        C::ApplyEaseCurve => {
+            let (s, e) = (state.frame_range.0 as f32, state.frame_range.1 as f32);
+            edit_highlighted_all(state, "Apply Ease Curve", |k, _| {
+                for tr in &mut k.tracks {
+                    let mut ease = FloatTrack::new(loom_scene::anim::Interp::Bezier);
+                    ease.set_key(s, s, (TangentType::Linear, TangentType::Linear));
+                    ease.set_key(e, e, (TangentType::Linear, TangentType::Linear));
+                    tr.ease_curve = Some(Box::new(ease));
+                    tr.ease_multiplier_disabled = false;
+                }
+            })
+        }
+        C::ApplyMultiplierCurve => {
+            let (s, e) = (state.frame_range.0 as f32, state.frame_range.1 as f32);
+            edit_highlighted_all(state, "Apply Multiplier Curve", |k, _| {
+                for tr in &mut k.tracks {
+                    let mut mult = FloatTrack::new(loom_scene::anim::Interp::Bezier);
+                    mult.set_key(s, 1.0, (TangentType::Auto, TangentType::Auto));
+                    mult.set_key(e, 1.0, (TangentType::Auto, TangentType::Auto));
+                    tr.multiplier_curve = Some(Box::new(mult));
+                    tr.ease_multiplier_disabled = false;
+                }
+            })
+        }
+        C::DeleteEaseMultiplierCurve => edit_highlighted_all(state, "Delete Ease/Multiplier Curve", |k, _| {
             for tr in &mut k.tracks {
-                tr.before = before;
-                tr.after = after;
+                tr.ease_curve = None;
+                tr.multiplier_curve = None;
+                tr.ease_multiplier_disabled = false;
             }
         }),
-        C::ParameterCurveOutOfRangeTypes => open_dialog(state, Dialog::OutOfRangeTypes),
+        C::EaseMultiplierCurveEnableToggle => edit_highlighted_all(state, "Ease/Multiplier Curve Enable Toggle", |k, _| {
+            for tr in &mut k.tracks {
+                tr.ease_multiplier_disabled = !tr.ease_multiplier_disabled;
+            }
+        }),
+        C::CopyLimitOnly => {
+            let paths = highlighted_tracks(state);
+            let Some(first) = paths.first() else { return Err("highlight a track first".into()) };
+            let p = tracks::read(&state.scene, first).ok_or("no such track")?;
+            let lim = p.keys().and_then(|k| k.tracks.first()).map(|tr| (tr.limit_enabled, tr.lower_limit, tr.upper_limit)).unwrap_or((false, None, None));
+            state.track_view.limit_clip = Some(lim);
+            Ok(json!({ "limit_enabled": lim.0, "lower_limit": lim.1, "upper_limit": lim.2 }))
+        }
+        C::PasteLimitOnly => {
+            let (en, lo, hi) = state.track_view.limit_clip.ok_or("copy a limit first (Copy Limit Only)")?;
+            edit_highlighted_all(state, "Paste Limit Only", |k, _| {
+                for tr in &mut k.tracks {
+                    tr.limit_enabled = en;
+                    tr.lower_limit = lo;
+                    tr.upper_limit = hi;
+                }
+            })
+        }
+        C::RemoveLimit => edit_highlighted_all(state, "Remove Limit", |k, _| {
+            for tr in &mut k.tracks {
+                tr.limit_enabled = false;
+                tr.lower_limit = None;
+                tr.upper_limit = None;
+            }
+        }),
+        C::SetLowerLimit => edit_highlighted_all(state, "Set Lower Limit", |k, now| {
+            let cur = k.comps_at(now);
+            for (tr, v) in k.tracks.iter_mut().zip(cur) {
+                tr.lower_limit = Some(v);
+                tr.limit_enabled = true;
+            }
+        }),
+        C::SetUpperLimit => edit_highlighted_all(state, "Set Upper Limit", |k, now| {
+            let cur = k.comps_at(now);
+            for (tr, v) in k.tracks.iter_mut().zip(cur) {
+                tr.upper_limit = Some(v);
+                tr.limit_enabled = true;
+            }
+        }),
+        C::ToggleLimit => edit_highlighted_all(state, "Toggle Limit", |k, _| {
+            let to = k.tracks.first().map(|tr| !tr.limit_enabled).unwrap_or(true);
+            for tr in &mut k.tracks {
+                tr.limit_enabled = to;
+            }
+        }),
+        C::RespectAnimationRange | C::IgnoreAnimationRange => {
+            let respect = matches!(cmd, C::RespectAnimationRange);
+            let range = (state.frame_range.0 as f32, state.frame_range.1 as f32);
+            edit_highlighted_all(state, if respect { "Respect Animation Range" } else { "Ignore Animation Range" }, |k, _| {
+                for tr in &mut k.tracks {
+                    tr.respect_range = respect;
+                    if respect && tr.range_override.is_none() && tr.keys.len() < 2 {
+                        tr.range_override = Some(range);
+                    }
+                }
+            })
+        }
+        C::PositionRangesMode => {
+            state.track_view.mode = TvMode::DopeSheet;
+            state.track_view.dope = DopeMode::EditRanges;
+            toggle(&mut state.track_view.position_ranges, "position_ranges")
+        }
+        C::RetimeTool => set_tool(state, TvTool::Retime),
+        C::RetimeAllTool => set_tool(state, TvTool::RetimeAll),
+        C::RetimeMoveLeft | C::RetimeMoveRight => {
+            let dt = if matches!(cmd, C::RetimeMoveLeft) { -1.0 } else { 1.0 };
+            if !state.track_view.selected_keys.is_empty() {
+                let soft = state.track_view.soft.then_some((state.track_view.soft_range, state.track_view.soft_falloff));
+                edit_selected(state, cmd.name(), |tr, idx| move_keys(tr, idx, dt, 0.0, false, soft))
+            } else {
+                let now = state.current_frame as f32;
+                edit_highlighted(state, cmd.name(), |k| {
+                    for tr in &mut k.tracks {
+                        for key in &mut tr.keys {
+                            if key.time >= now - SAME {
+                                key.time += dt;
+                            }
+                        }
+                        tr.sort();
+                    }
+                })
+            }
+        }
         C::TrackViewReduceKeys { threshold } => edit_highlighted(state, "Reduce Keys", |k| {
             for tr in &mut k.tracks {
                 reduce(tr, threshold.max(0.0));
@@ -1004,21 +1195,51 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::ExcludeLeftEndPointToggle => toggle(&mut state.track_view.exclude_left, "exclude_left"),
         C::ExcludeRightEndPointToggle => toggle(&mut state.track_view.exclude_right, "exclude_right"),
-        C::TrackViewMoveRange { dt } => edit_highlighted(state, "Move Range", |k| {
-            for tr in &mut k.tracks {
-                for key in &mut tr.keys {
-                    key.time += dt;
+        C::TrackViewMoveRange { dt } => {
+            let decoupled = state.track_view.position_ranges;
+            let default_range = (state.frame_range.0 as f32, state.frame_range.1 as f32);
+            edit_highlighted(state, "Move Range", |k| {
+                for tr in &mut k.tracks {
+                    if decoupled {
+                        let (r0, r1) = tr.range_override.unwrap_or_else(|| {
+                            if tr.keys.len() >= 2 {
+                                (tr.keys[0].time, tr.keys[tr.keys.len() - 1].time)
+                            } else {
+                                default_range
+                            }
+                        });
+                        tr.range_override = Some((r0 + dt, r1 + dt));
+                    } else {
+                        for key in &mut tr.keys {
+                            key.time += dt;
+                        }
+                    }
                 }
-            }
-        }),
-        C::TrackViewScaleRange { factor, origin } => edit_highlighted(state, "Scale Range", |k| {
-            for tr in &mut k.tracks {
-                for key in &mut tr.keys {
-                    key.time = origin + (key.time - origin) * factor;
+            })
+        }
+        C::TrackViewScaleRange { factor, origin } => {
+            let decoupled = state.track_view.position_ranges;
+            let default_range = (state.frame_range.0 as f32, state.frame_range.1 as f32);
+            edit_highlighted(state, "Scale Range", |k| {
+                for tr in &mut k.tracks {
+                    if decoupled {
+                        let (r0, r1) = tr.range_override.unwrap_or_else(|| {
+                            if tr.keys.len() >= 2 {
+                                (tr.keys[0].time, tr.keys[tr.keys.len() - 1].time)
+                            } else {
+                                default_range
+                            }
+                        });
+                        tr.range_override = Some((origin + (r0 - origin) * factor, origin + (r1 - origin) * factor));
+                    } else {
+                        for key in &mut tr.keys {
+                            key.time = origin + (key.time - origin) * factor;
+                        }
+                        tr.sort();
+                    }
                 }
-                tr.sort();
-            }
-        }),
+            })
+        }
         C::AddNoteTrack => {
             let items = state.track_view.highlighted.clone();
             if items.is_empty() {
@@ -1259,6 +1480,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::FilterSelectedObjectsToggle => toggle(&mut state.track_view.filters.selected_objects, "selected_objects"),
         C::FilterUnlockedAttributesToggle | C::UnlockedAttributesToggle => toggle(&mut state.track_view.filters.unlocked_only, "unlocked_only"),
         C::FilterVisibleObjectsToggle => toggle(&mut state.track_view.filters.visible_objects, "visible_objects"),
+        C::FilterActiveLayerToggle => toggle(&mut state.track_view.filters.active_layer_only, "active_layer_only"),
         C::FilterSelectedTracksToggle => {
             let snap: Vec<TrackKey> = highlighted_tracks(state).iter().map(|t| t.key()).collect();
             let f = &mut state.track_view.filters;
@@ -1303,6 +1525,8 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::AutoExpandAnimated => toggle(&mut state.track_view.auto_expand_animated, "auto_expand_animated"),
         C::AutoExpandKeyable => toggle(&mut state.track_view.auto_expand_keyable, "auto_expand_keyable"),
+        C::AutoExpandUnlocked => toggle(&mut state.track_view.auto_expand_unlocked, "auto_expand_unlocked"),
+        C::AutoExpandLimits => toggle(&mut state.track_view.auto_expand_limits, "auto_expand_limits"),
         C::FreezeNonselectedCurves => toggle(&mut state.track_view.freeze_nonselected, "freeze_nonselected"),
         C::ShowKeysOnFrozenCurves => toggle(&mut state.track_view.keys_on_frozen, "keys_on_frozen"),
         C::ShowSelectedKeyStats => toggle(&mut state.track_view.key_stats, "key_stats"),
