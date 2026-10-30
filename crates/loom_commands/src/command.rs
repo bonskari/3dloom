@@ -1376,6 +1376,31 @@ commands! {
     ZoomSelectedObject => "Zoom Selected Object", TrackView, "Scroll the hierarchy to the selected object.";
     ZoomTime => "Zoom Time", TrackView, "Zoom mode: time only.";
     ZoomValues => "Zoom Values", TrackView, "Zoom mode: values only (Curve Editor).";
+    ApplyEaseCurve => "Apply Ease Curve", TrackView, "Curves > Apply Ease Curve: add a time-warping Ease Curve to the highlighted tracks.";
+    ApplyMultiplierCurve => "Apply Multiplier Curve", TrackView, "Curves > Apply Multiplier Curve: add a value-scaling Multiplier Curve to the highlighted tracks.";
+    DeleteEaseMultiplierCurve => "Delete Ease/Multiplier Curve", TrackView, "Curves > Delete Ease/Multiplier Curve: remove Ease and Multiplier curves from the highlighted tracks.";
+    EaseCurveOutOfRangeTypes => "Ease Curve Out-of-Range Types", TrackView, "Curves > Ease Curve Out-of-Range Types: open Out-of-Range Types for the highlighted tracks' Ease Curves.";
+    MultiplierCurveOutOfRangeTypes => "Multiplier Curve Out-of-Range Types", TrackView, "Curves > Multiplier Curve Out-of-Range Types: open Out-of-Range Types for the highlighted tracks' Multiplier Curves.";
+    EaseMultiplierCurveEnableToggle => "Ease/Multiplier Curve Enable Toggle", TrackView, "Curves > On/Off Ease/Multiplier Curve: toggle Ease and Multiplier Curves on the highlighted tracks.";
+    EaseIn => "Ease In", TrackView, "Set the selected keys' In tangent to Slow (ease in).";
+    EaseOut => "Ease Out", TrackView, "Set the selected keys' Out tangent to Slow (ease out).";
+    Linear => "Linear", TrackView, "Set the selected keys' In and Out tangents to Linear.";
+    RetimeTool => "Retime Tool", TrackView, "Retime Tool mode: scale or shift timing on the active curve.";
+    RetimeAllTool => "Retime All Tool", TrackView, "Retime All Tool mode: retime all visible tracks together.";
+    RetimeMoveLeft => "Retime Move Left", TrackView, "Move the selected keys (or keys from the current frame) one frame earlier.";
+    RetimeMoveRight => "Retime Move Right", TrackView, "Move the selected keys (or keys from the current frame) one frame later.";
+    AutoExpandUnlocked => "Auto Expand - Unlocked", TrackView, "Options > Auto Expand > Unlocked.";
+    AutoExpandLimits => "Auto Expand Limits", TrackView, "Options > Auto Expand > Limits.";
+    CopyLimitOnly => "Copy Limit Only", TrackView, "Controller > Limit > Copy Limit Only: copy the highlighted track's upper and lower limits.";
+    PasteLimitOnly => "Paste Limit Only", TrackView, "Controller > Limit > Paste Limit Only: paste the copied limits onto the highlighted tracks.";
+    RemoveLimit => "Remove Limit", TrackView, "Controller > Limit > Remove Limit: clear upper and lower limits on the highlighted tracks.";
+    SetLowerLimit => "Set Lower Limit", TrackView, "Controller > Limit > Set Lower Limit: set the lower limit of the highlighted tracks to their current value.";
+    SetUpperLimit => "Set Upper Limit", TrackView, "Controller > Limit > Set Upper Limit: set the upper limit of the highlighted tracks to their current value.";
+    ToggleLimit => "Toggle Limit", TrackView, "Controller > Limit > Toggle Limit: enable or disable limits on the highlighted tracks.";
+    FilterActiveLayerToggle => "Filter - Active Layer Toggle", TrackView, "Show only objects on the active layer.";
+    PositionRangesMode => "Position Ranges Mode", TrackView, "Dope Sheet > Position Ranges: decouple range bars from the keys.";
+    RespectAnimationRange => "Respect Animation Range", TrackView, "Controller > Respect Animation Range: clamp track evaluation to its animation range.";
+    IgnoreAnimationRange => "Ignore Animation Range", TrackView, "Controller > Ignore Animation Range: evaluate the track across all time.";
     // --- Track View window and agent API ---
     TrackViewFloater => "Track View Floater", MainUI, "Open the Track View (Curve Editor).";
     OpenCurveEditor => "Open Curve Editor", Loom, "Graph Editors > Track View - Curve Editor.";
@@ -1949,33 +1974,7 @@ pub const UNWRAP_ALIASES: &[(&str, &str)] = &[
 ];
 
 /// Track View chart rows Loom does not implement, with the reason.
-pub const DEFERRED_TRACK_VIEW: &[(&str, &str)] = &[
-    ("Apply Ease Curve", "spec 6.6: Ease and Multiplier Curves out"),
-    ("Apply Multiplier Curve", "spec 6.6: Ease and Multiplier Curves out"),
-    ("Delete Ease/Multiplier Curve", "spec 6.6: Ease and Multiplier Curves out"),
-    ("Ease Curve Out-of-Range Types", "spec 6.6: Ease and Multiplier Curves out"),
-    ("Multiplier Curve Out-of-Range Types", "spec 6.6: Ease and Multiplier Curves out"),
-    ("Ease/Multiplier Curve Enable Toggle", "spec 6.6: Ease and Multiplier Curves out"),
-    ("Ease In", "not in the 2012 reference: no 2010 behaviour to match"),
-    ("Ease Out", "not in the 2012 reference: no 2010 behaviour to match"),
-    ("Linear", "not in the 2012 reference: no 2010 behaviour to match"),
-    ("Retime Tool", "Retime tools are after 2012: no 2010 behaviour to match"),
-    ("Retime All Tool", "Retime tools are after 2012: no 2010 behaviour to match"),
-    ("Retime Move Left", "Retime tools are after 2012: no 2010 behaviour to match"),
-    ("Retime Move Right", "Retime tools are after 2012: no 2010 behaviour to match"),
-    ("Auto Expand - Unlocked", "not in the 2012 reference: no 2010 behaviour to match"),
-    ("Auto Expand Limits", "Limit controller: not in the spec 6.6 controller list"),
-    ("Copy Limit Only", "Limit controller: not in the spec 6.6 controller list"),
-    ("Paste Limit Only", "Limit controller: not in the spec 6.6 controller list"),
-    ("Remove Limit", "Limit controller: not in the spec 6.6 controller list"),
-    ("Set Lower Limit", "Limit controller: not in the spec 6.6 controller list"),
-    ("Set Upper Limit", "Limit controller: not in the spec 6.6 controller list"),
-    ("Toggle Limit", "Limit controller: not in the spec 6.6 controller list"),
-    ("Filter - Active Layer Toggle", "animation layers: not in spec 6.6"),
-    ("Position Ranges Mode", "decoupled ranges: Loom ranges always span the keys"),
-    ("Respect Animation Range", "parametric controller ranges: Loom Noise / List act over all time"),
-    ("Ignore Animation Range", "parametric controller ranges: Loom Noise / List act over all time"),
-];
+pub const DEFERRED_TRACK_VIEW: &[(&str, &str)] = &[];
 
 /// Edit Normals rows whose chart names are taken by other groups' commands.
 pub const EDIT_NORMALS_ALIASES: &[(&str, &str)] = &[

@@ -279,3 +279,70 @@ fn normalize_time_and_constant_velocity() {
     assert!((p.get_at(15.0).x - 5.0).abs() < 1e-4, "{}", p.get_at(15.0).x);
     assert!(s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].keys[1].constant_velocity);
 }
+
+#[test]
+fn ease_multiplier_limits_retime_and_range_modes() {
+    assert!(loom_commands::command::DEFERRED_TRACK_VIEW.is_empty());
+    let mut s = AppState::new();
+    let b = keyed_box(&mut s);
+    let px = format!("{}:Position", b.0);
+    let py = format!("{}:Rotation", b.0);
+    execute(&mut s, Command::TrackViewHighlight { items: vec![px.clone()], op: SelectOp::Replace }).unwrap();
+
+    // Apply Ease & Multiplier curves, toggle enable, and delete.
+    execute(&mut s, Command::ApplyEaseCurve).unwrap();
+    execute(&mut s, Command::ApplyMultiplierCurve).unwrap();
+    {
+        let tr = &s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0];
+        assert!(tr.ease_curve.is_some());
+        assert!(tr.multiplier_curve.is_some());
+    }
+    execute(&mut s, Command::EaseMultiplierCurveEnableToggle).unwrap();
+    assert!(s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].ease_multiplier_disabled);
+    execute(&mut s, Command::DeleteEaseMultiplierCurve).unwrap();
+    {
+        let tr = &s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0];
+        assert!(tr.ease_curve.is_none() && tr.multiplier_curve.is_none());
+    }
+
+    // Limits: set lower/upper, copy/paste limit only, remove limit.
+    execute(&mut s, Command::SetFrame { frame: 2 }).unwrap();
+    execute(&mut s, Command::SetLowerLimit).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 8 }).unwrap();
+    execute(&mut s, Command::SetUpperLimit).unwrap();
+    let lo = s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].lower_limit.unwrap();
+    let hi = s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].upper_limit.unwrap();
+    assert!(lo > 0.0 && hi < 10.0 && lo < hi);
+    let pos_at_0 = s.scene.node(b).unwrap().transform.position.get_at(0.0).x;
+    let pos_at_10 = s.scene.node(b).unwrap().transform.position.get_at(10.0).x;
+    assert!((pos_at_0 - lo).abs() < 1e-4);
+    assert!((pos_at_10 - hi).abs() < 1e-4);
+    execute(&mut s, Command::CopyLimitOnly).unwrap();
+    execute(&mut s, Command::TrackViewHighlight { items: vec![py.clone()], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::PasteLimitOnly).unwrap();
+    assert_eq!(s.scene.node(b).unwrap().transform.rotation.keys().unwrap().tracks[0].lower_limit, Some(lo));
+    assert_eq!(s.scene.node(b).unwrap().transform.rotation.keys().unwrap().tracks[0].upper_limit, Some(hi));
+    execute(&mut s, Command::TrackViewHighlight { items: vec![px.clone()], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::RemoveLimit).unwrap();
+    assert!(!s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].limit_enabled);
+
+    // Retime Move Right / Left and EaseIn / EaseOut / Linear tangents.
+    select(&mut s, b, &[10.0]);
+    execute(&mut s, Command::RetimeMoveRight).unwrap();
+    assert!((xkeys(&s, b)[1].0 - 11.0).abs() < 1e-4);
+    execute(&mut s, Command::RetimeMoveLeft).unwrap();
+    assert!((xkeys(&s, b)[1].0 - 10.0).abs() < 1e-4);
+    execute(&mut s, Command::EaseIn).unwrap();
+    execute(&mut s, Command::EaseOut).unwrap();
+    execute(&mut s, Command::Linear).unwrap();
+
+    // Respect / Ignore Animation Range and Position Ranges Mode.
+    execute(&mut s, Command::TrackViewHighlight { items: vec![px], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::IgnoreAnimationRange).unwrap();
+    assert!(!s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].respect_range);
+    execute(&mut s, Command::RespectAnimationRange).unwrap();
+    assert!(s.scene.node(b).unwrap().transform.position.keys().unwrap().tracks[0].respect_range);
+    execute(&mut s, Command::PositionRangesMode).unwrap();
+    assert!(s.track_view.position_ranges);
+}
+

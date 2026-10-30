@@ -177,7 +177,27 @@ fn menus(ui: &mut egui::Ui, app: &mut LoomApp) {
             item(ui, app, "Make Unique", Command::MakeControllerUnique);
             ui.separator();
             item(ui, app, "Out of Range Types...", Command::ParameterCurveOutOfRangeTypes);
+            item(ui, app, "Respect Animation Range", Command::RespectAnimationRange);
+            item(ui, app, "Ignore Animation Range", Command::IgnoreAnimationRange);
+            ui.menu_button("Limits", |ui| {
+                item(ui, app, "Toggle Limit", Command::ToggleLimit);
+                item(ui, app, "Set Lower Limit", Command::SetLowerLimit);
+                item(ui, app, "Set Upper Limit", Command::SetUpperLimit);
+                item(ui, app, "Remove Limit", Command::RemoveLimit);
+                ui.separator();
+                item(ui, app, "Copy Limit Only", Command::CopyLimitOnly);
+                item(ui, app, "Paste Limit Only", Command::PasteLimitOnly);
+            });
             item(ui, app, "Properties...", Command::PropertiesTrackView);
+        });
+        ui.menu_button("Curves", |ui| {
+            item(ui, app, "Apply Ease Curve", Command::ApplyEaseCurve);
+            item(ui, app, "Apply Multiplier Curve", Command::ApplyMultiplierCurve);
+            item(ui, app, "Delete Ease/Multiplier Curve", Command::DeleteEaseMultiplierCurve);
+            item(ui, app, "On/Off Ease/Multiplier Curve", Command::EaseMultiplierCurveEnableToggle);
+            ui.separator();
+            item(ui, app, "Ease Curve Out-of-Range Types...", Command::EaseCurveOutOfRangeTypes);
+            item(ui, app, "Multiplier Curve Out-of-Range Types...", Command::MultiplierCurveOutOfRangeTypes);
         });
         ui.menu_button("Tracks", |ui| {
             ui.menu_button("Note Track", |ui| {
@@ -205,6 +225,14 @@ fn menus(ui: &mut egui::Ui, app: &mut LoomApp) {
             if curve {
                 item(ui, app, "Region Tool", Command::RegionKeysTool);
                 item(ui, app, "Draw Curves", Command::DrawCurves);
+                item(ui, app, "Retime Tool", Command::RetimeTool);
+                item(ui, app, "Retime All Tool", Command::RetimeAllTool);
+                item(ui, app, "Retime Move Left", Command::RetimeMoveLeft);
+                item(ui, app, "Retime Move Right", Command::RetimeMoveRight);
+                ui.separator();
+                item(ui, app, "Ease In", Command::EaseIn);
+                item(ui, app, "Ease Out", Command::EaseOut);
+                item(ui, app, "Linear", Command::Linear);
             }
             ui.separator();
             check(ui, app, "Use Soft Select", tv.soft, Command::TrackViewOption { name: "Use Soft Select".into(), on: !tv.soft });
@@ -225,6 +253,7 @@ fn menus(ui: &mut egui::Ui, app: &mut LoomApp) {
                 item(ui, app, "Scale", Command::ScaleTime);
                 item(ui, app, "Delete", Command::TrackViewDeleteTime);
                 ui.separator();
+                check(ui, app, "Position Ranges", tv.position_ranges, Command::PositionRangesMode);
                 check(ui, app, "Exclude Left End Point", tv.exclude_left, Command::ExcludeLeftEndPointToggle);
                 check(ui, app, "Exclude Right End Point", tv.exclude_right, Command::ExcludeRightEndPointToggle);
             });
@@ -235,7 +264,10 @@ fn menus(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.menu_button("Auto Expand", |ui| {
                 check(ui, app, "Animated", tv.auto_expand_animated, Command::AutoExpandAnimated);
                 check(ui, app, "Keyable", tv.auto_expand_keyable, Command::AutoExpandKeyable);
+                check(ui, app, "Unlocked", tv.auto_expand_unlocked, Command::AutoExpandUnlocked);
+                check(ui, app, "Limits", tv.auto_expand_limits, Command::AutoExpandLimits);
             });
+            check(ui, app, "Filter Active Layer", tv.filters.active_layer_only, Command::FilterActiveLayerToggle);
             check(ui, app, "Modify Subtree", tv.modify_subtree, Command::ModifySubtreeToggle);
             check(ui, app, "Manual Navigation", tv.manual_navigation, Command::TrackViewOption { name: "Manual Navigation".into(), on: !tv.manual_navigation });
         });
