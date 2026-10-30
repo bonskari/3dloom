@@ -51,6 +51,8 @@ pub mod live;
 pub mod anim_cmds;
 pub mod controllers;
 pub mod track_view;
+pub mod explorer;
+pub mod schematic;
 pub mod motion;
 pub mod normals;
 pub mod vertex_paint;

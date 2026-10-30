@@ -631,6 +631,8 @@ pub enum Dialog {
     GroupName,
     /// Layer Manager > Layer Properties of `layer`.
     LayerProperties { layer: u32 },
+    /// Tools > Manage Scene Explorer.
+    ManageSceneExplorer,
 }
 
 /// What the Material/Map Browser is choosing.

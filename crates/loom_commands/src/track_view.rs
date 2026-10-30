@@ -308,7 +308,7 @@ pub fn tree(state: &AppState) -> Vec<TvItem> {
     out
 }
 
-fn controller_name(n: &loom_scene::Node, t: &TrackPath, p: &AnyParam) -> String {
+pub(crate) fn controller_name(n: &loom_scene::Node, t: &TrackPath, p: &AnyParam) -> String {
     match (t.owner, t.pointer.as_str()) {
         (TrackOwner::Transform, "/position") => n.constraints.position_name().map(str::to_owned).unwrap_or_else(|| p.controller_name(Role::Position)),
         (TrackOwner::Transform, "/rotation") => n.constraints.rotation_name().map(str::to_owned).unwrap_or_else(|| p.controller_name(Role::Rotation)),

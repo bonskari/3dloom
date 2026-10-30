@@ -25,6 +25,7 @@ mod track_bar;
 mod skin2;
 mod skin_wrap;
 mod biped;
+mod explorer;
 mod lightcam2;
 mod bake;
 mod maps2;

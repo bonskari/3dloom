@@ -37,6 +37,8 @@ pub mod shortcuts;
 pub mod viewports;
 pub mod uv_editor;
 pub mod track_view;
+pub mod scene_explorer;
+pub mod schematic_view;
 pub mod update_menu;
 pub mod os_window;
 #[cfg(test)]
@@ -1480,6 +1482,7 @@ impl LoomApp {
         }
         // The menu bar's keyboard accelerators take their keys before the shortcuts see them.
         menubar::keyboard(ctx, self);
+        scene_explorer::pre_hotkeys(ctx, self);
         hotkeys::handle(ctx, self);
         // A drag that began outside the viewports is a spinner (or other
         // panel control) drag: Update During Spinner Drag decides whether the
@@ -1555,6 +1558,8 @@ impl LoomApp {
         command_panel::utilities::measure_floater(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
+        scene_explorer::show(ctx, self);
+        schematic_view::show(ctx, self);
         rendered_frame::show(ctx, self);
         self.os_window_rects = os_window::rects(ctx);
         self.finish_realistic_frame(ctx);

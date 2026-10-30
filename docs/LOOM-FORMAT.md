@@ -121,7 +121,12 @@ Default In / Out Tangents for new keys), and `display` (Display Color
 `wireframe_color` / `shaded_color`, `hide_frozen`, `hide_bones`, the
 Statistics panel `statistics`, `display_selected_edged`, the Safe Frames
 panel `safe_frames`, and the Object Color dialog's `assign_random_colors`,
-`current_color`, `custom_colors`).
+`current_color`, `custom_colors`), `scene_explorers` (every Scene
+Explorer, open or closed: name, columns, sort, display-type filters,
+options, collapsed rows; the most recent and the default setup) and
+`schematic_views` (every Schematic View: name, Hierarchy / References
+mode, options, shown entity types, free box positions, collapsed boxes,
+pan and zoom).
 
 Animation clips (Animation > Save / Load Animation) are their own JSON
 files, `.lxaf`: `{format: "loom-animation", version, fps, range, nodes:

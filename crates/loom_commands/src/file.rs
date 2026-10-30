@@ -165,6 +165,10 @@ pub struct SceneSettings {
     pub degradation: crate::viewport::Degradation,
     /// Time Configuration > Time Display and Key Steps.
     pub time_config: crate::time_display::TimeConfig,
+    /// The Scene Explorers (Tools menu), open or closed.
+    pub scene_explorers: crate::explorer::Explorers,
+    /// The Schematic Views (Graph Editors menu), open or closed.
+    pub schematic_views: crate::schematic::Schematics,
 }
 
 /// File > File Properties: the Summary fields, the Summary Info
@@ -251,6 +255,8 @@ impl SceneSettings {
             time_tags: s.time_tags.clone(),
             degradation: s.degradation.clone(),
             time_config: s.time_config,
+            scene_explorers: s.explorers.clone(),
+            schematic_views: s.schematics.clone(),
         }
     }
 
@@ -284,6 +290,8 @@ impl SceneSettings {
         s.time_tags = self.time_tags.clone();
         s.degradation = self.degradation.clone();
         s.time_config = self.time_config;
+        s.explorers = self.scene_explorers.clone();
+        s.schematics = self.schematic_views.clone();
         s.scene.set_time(s.current_frame as f32);
     }
 }
