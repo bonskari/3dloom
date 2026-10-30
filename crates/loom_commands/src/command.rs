@@ -595,6 +595,14 @@ commands! {
     PeltDialogRelaxSimulationLight => "Pelt Dialog Relax Simulation Light", UnwrapUVW, "Pelt dialog > Relax (Light): a few relax iterations.";
     PeltDialogRelaxSimulationHeavy => "Pelt Dialog Relax Simulation Heavy", UnwrapUVW, "Pelt dialog > Relax (Heavy): many relax iterations.";
     PeltDialogSelectPeltUvs => "Pelt Dialog Select Pelt UV's", UnwrapUVW, "Pelt dialog > Select Pelt UVs: the pelted faces' tvs.";
+    PeltDialogMirrorStretcher => "Pelt Dialog Mirror Stretcher", UnwrapUVW, "Pelt dialog > Mirror Stretcher: mirror the outer boundary loop horizontally.";
+    PeltDialogStraightenStretcher => "Pelt Dialog Straighten Stretcher", UnwrapUVW, "Pelt dialog > Straighten Stretcher: space the outer boundary loop evenly on its circle.";
+    PeltDialogSelectStretcher => "Pelt Dialog Select Stretcher", UnwrapUVW, "Pelt dialog > Select Stretcher: select the outer boundary loop texture vertices.";
+    PeltDialogSnapSeams => "Pelt Dialog Snap Seams", UnwrapUVW, "Pelt dialog > Snap to Seams: cut along seams and snap the outer boundary to the stretcher circle.";
+    LscmInteractive => "LSCM Interactive", UnwrapUVW, "Peel > Peel Mode: continuous LSCM relaxation with pinned and moved vertices anchored.";
+    LscmReset => "LSCM Reset", UnwrapUVW, "Peel > Reset Peel: cut along seams, unfold and solve LSCM from scratch.";
+    LscmSolve => "LSCM Solve", UnwrapUVW, "Peel > Quick Peel: cut along seams and solve Least-Squares Conformal Mapping.";
+    TweakUvw => "Tweak UVW", UnwrapUVW, "Edit UVWs > Tweak tool: drag any vertex, edge or face directly without selecting first.";
     PeltEditSeams => "Pelt Edit Seams", UnwrapUVW, "Map Parameters > Edit Seams toggle: viewport edges clicked become seams.";
     PeltExpandSelectionToSeams => "Pelt Expand Selection To Seams", UnwrapUVW, "Map Parameters > Exp. Face Sel To Seams: the face selection grows up to the seams.";
     PeltSeamToEdgeSelAdd => "Pelt Seam to Edge Sel(Add)", UnwrapUVW, "The seams join the viewport edge selection.";
@@ -1928,16 +1936,7 @@ pub const DEFERRED_POLY: &[(&str, &str)] = &[];
 /// Chart "Unwrap UVW" rows this program does not implement: 2012+ tools
 /// (LSCM, Tweak, Sketch's redesign), Paint Select, Spline Map and the
 /// pelt stretcher springs (the pelt here relaxes a boundary circle).
-pub const DEFERRED_UNWRAP: &[(&str, &str)] = &[
-    ("LSCM Interactive", "not in 2010"),
-    ("LSCM Reset", "not in 2010"),
-    ("LSCM Solve", "not in 2010"),
-    ("Tweak UVW", "not in 2010"),
-    ("Pelt Dialog Mirror Stretcher", "no stretcher"),
-    ("Pelt Dialog Straighten Stretcher", "no stretcher"),
-    ("Pelt Dialog Select Stretcher", "no stretcher"),
-    ("Pelt Dialog Snap Seams", "no stretcher"),
-];
+pub const DEFERRED_UNWRAP: &[(&str, &str)] = &[];
 
 /// Chart "Unwrap UVW" rows whose names collide with Main UI / Editable
 /// Poly actions: registered with an "(Unwrap)" suffix.

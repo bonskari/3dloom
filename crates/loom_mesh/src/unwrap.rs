@@ -977,14 +977,11 @@ fn unfold_component(mesh: &mut Mesh, ch: u32, comp: &[FaceId], walk: UnfoldWalk)
     }
 }
 
-/// Pelt Mapping: the faces cut at `seams` (geometry vertex pairs) spread
-/// their boundary on a circle and the inside relaxes harmonically.
-pub fn pelt(mesh: &mut Mesh, ch: u32, faces: &[FaceId], seams: &BTreeSet<(u32, u32)>, iterations: u32, pins: &BTreeSet<u32>) {
+/// Cut `faces` along `seams` (geometry vertex pairs) and along the outer boundary of `faces`.
+pub fn cut_at_seams(mesh: &mut Mesh, ch: u32, faces: &[FaceId], seams: &BTreeSet<(u32, u32)>) {
     mesh.ensure_map(ch);
-    // Cut: every seam edge and the faces' outer boundary.
     let set: HashSet<FaceId> = faces.iter().copied().collect();
     let mut cuts: HashSet<HalfEdgeId> = HashSet::new();
-    let mut tvs = BTreeSet::new();
     for f in faces {
         let Some(corners) = mesh.face_corners(*f) else { continue };
         for he in corners {
@@ -995,21 +992,14 @@ pub fn pelt(mesh: &mut Mesh, ch: u32, faces: &[FaceId], seams: &BTreeSet<(u32, u
             let is_seam = seams.contains(&(a.min(b), a.max(b)));
             if is_seam || twin_face.is_none_or(|o| !set.contains(&o)) {
                 cuts.insert(mesh.canonical_edge_id(he).unwrap_or(he));
-                tvs.insert(corner_tv(mesh, ch, he).unwrap_or(0));
-                tvs.insert(corner_tv(mesh, ch, h.next).unwrap_or(0));
             }
         }
     }
     let all_tvs = tvs_of_faces(mesh, ch, faces);
     split_at(mesh, ch, &all_tvs, &cuts);
-    for comp in clusters(mesh, ch, faces) {
-        pelt_component(mesh, ch, &comp, iterations, pins);
-    }
 }
 
-fn pelt_component(mesh: &mut Mesh, ch: u32, comp: &[FaceId], iterations: u32, pins: &BTreeSet<u32>) {
-    let tvf = tv_faces(mesh, ch);
-    // Boundary tv edges of the component (used by one face) → loops.
+fn outer_boundary_loop(tvf: &[Vec<u32>], comp: &[FaceId]) -> Option<Vec<u32>> {
     let mut count: HashMap<(u32, u32), u32> = HashMap::new();
     let mut directed: Vec<(u32, u32)> = Vec::new();
     for f in comp {
@@ -1022,10 +1012,9 @@ fn pelt_component(mesh: &mut Mesh, ch: u32, comp: &[FaceId], iterations: u32, pi
     }
     let boundary: Vec<(u32, u32)> = directed.into_iter().filter(|(a, b)| count.get(&(*a.min(b), *a.max(b))) == Some(&1)).collect();
     if boundary.is_empty() {
-        return;
+        return None;
     }
     let mut next: HashMap<u32, u32> = boundary.iter().map(|(a, b)| (*a, *b)).collect();
-    // Longest loop by 3D length (approximated by count) becomes the circle.
     let mut loops: Vec<Vec<u32>> = Vec::new();
     while let Some((&start, _)) = next.iter().next() {
         let mut lp = vec![start];
@@ -1040,7 +1029,95 @@ fn pelt_component(mesh: &mut Mesh, ch: u32, comp: &[FaceId], iterations: u32, pi
         loops.push(lp);
     }
     loops.sort_by_key(|l| std::cmp::Reverse(l.len()));
-    let outer = &loops[0];
+    loops.into_iter().next()
+}
+
+/// Outer boundary TV loop for each UV cluster of `faces`.
+pub fn pelt_boundary_loops(mesh: &Mesh, ch: u32, faces: &[FaceId]) -> Vec<Vec<u32>> {
+    let tvf = tv_faces(mesh, ch);
+    clusters(mesh, ch, faces)
+        .into_iter()
+        .filter_map(|comp| outer_boundary_loop(&tvf, &comp))
+        .collect()
+}
+
+/// Pelt Mapping: the faces cut at `seams` (geometry vertex pairs) spread
+/// their boundary on a circle and the inside relaxes harmonically.
+pub fn pelt(mesh: &mut Mesh, ch: u32, faces: &[FaceId], seams: &BTreeSet<(u32, u32)>, iterations: u32, pins: &BTreeSet<u32>) {
+    cut_at_seams(mesh, ch, faces, seams);
+    for comp in clusters(mesh, ch, faces) {
+        pelt_component(mesh, ch, &comp, iterations, pins);
+    }
+}
+
+/// Place the outer boundary loop of each cluster of `faces` onto a clean circle around its bounds.
+pub fn pelt_straighten_stretcher(mesh: &mut Mesh, ch: u32, faces: &[FaceId]) {
+    mesh.ensure_map(ch);
+    let tvf = tv_faces(mesh, ch);
+    for comp in clusters(mesh, ch, faces) {
+        let Some(outer) = outer_boundary_loop(&tvf, &comp) else { continue };
+        let tvs: BTreeSet<u32> = comp.iter().flat_map(|f| tvf[f.0 as usize].iter().copied()).collect();
+        let (lo, hi) = bounds(mesh, ch, Some(&tvs));
+        let r = (hi - lo).max_element().max(1e-6) * 0.5;
+        let c = (lo + hi) * 0.5;
+        let m = mesh.map_mut(ch).expect("channel");
+        let n = outer.len();
+        for (i, t) in outer.iter().enumerate() {
+            let a = i as f32 / n as f32 * std::f32::consts::TAU;
+            m.verts[*t as usize] = Vec3::new(c.x + r * a.cos(), c.y + r * a.sin(), m.verts[*t as usize].z);
+        }
+    }
+}
+
+/// Cut `faces` along `seams` and snap the outer boundary loop of each cluster to its stretcher circle.
+pub fn pelt_snap_seams(mesh: &mut Mesh, ch: u32, faces: &[FaceId], seams: &BTreeSet<(u32, u32)>) {
+    cut_at_seams(mesh, ch, faces, seams);
+    pelt_straighten_stretcher(mesh, ch, faces);
+}
+
+/// LSCM / Peel mapping: cut along `seams`, optionally reset each cluster via unfold,
+/// and solve conformal relaxation keeping `pins` (or two farthest boundary anchors per cluster) fixed.
+pub fn lscm_peel(mesh: &mut Mesh, ch: u32, faces: &[FaceId], seams: &BTreeSet<(u32, u32)>, pins: &BTreeSet<u32>, reset: bool) {
+    cut_at_seams(mesh, ch, faces, seams);
+    let comps = clusters(mesh, ch, faces);
+    let mut any_pinned = false;
+    for comp in &comps {
+        let comp_tvs = tvs_of_faces(mesh, ch, comp);
+        let pinned_in_comp: Vec<u32> = comp_tvs.iter().copied().filter(|t| pins.contains(t)).collect();
+        if !pinned_in_comp.is_empty() {
+            any_pinned = true;
+        }
+        if reset && pinned_in_comp.is_empty() {
+            unfold_component(mesh, ch, comp, UnfoldWalk::Closest);
+        }
+        let tvf = tv_faces(mesh, ch);
+        let mut anchors: BTreeSet<u32> = pinned_in_comp.into_iter().collect();
+        if anchors.len() < 2 {
+            // Anchor two diametrically opposite boundary vertices (or the two furthest UV vertices) so conformal relax doesn't collapse.
+            if let Some(outer) = outer_boundary_loop(&tvf, comp) {
+                if !outer.is_empty() {
+                    anchors.insert(outer[0]);
+                    if outer.len() > 1 {
+                        anchors.insert(outer[outer.len() / 2]);
+                    }
+                }
+            }
+        }
+        let free: BTreeSet<u32> = comp_tvs.into_iter().filter(|t| !anchors.contains(t)).collect();
+        if !free.is_empty() {
+            relax(mesh, ch, Some(&free), 40, 0.5, 0.0, RelaxBy::FaceAngles, false);
+        }
+    }
+    if reset && !any_pinned {
+        pack(mesh, ch, faces, PackMethod::Recursive, 0.02, true, true, true);
+    }
+}
+
+fn pelt_component(mesh: &mut Mesh, ch: u32, comp: &[FaceId], iterations: u32, pins: &BTreeSet<u32>) {
+    let tvf = tv_faces(mesh, ch);
+    let Some(outer) = outer_boundary_loop(&tvf, comp) else {
+        return;
+    };
     let tvs: BTreeSet<u32> = comp.iter().flat_map(|f| tvf[f.0 as usize].iter().copied()).collect();
     let (lo, hi) = bounds(mesh, ch, Some(&tvs));
     let r = (hi - lo).max_element().max(1e-6) * 0.5;
