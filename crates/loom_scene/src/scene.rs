@@ -1195,7 +1195,7 @@ impl Scene {
             if ids.len() < 2 || !self.nodes.contains_key(&chain.goal) {
                 continue;
             }
-            let bones: Vec<crate::ik::IkBone> = ids[..ids.len() - 1]
+            let mut bones: Vec<crate::ik::IkBone> = ids[..ids.len() - 1]
                 .iter()
                 .enumerate()
                 .map(|(k, id)| {
@@ -1206,6 +1206,23 @@ impl Scene {
                 .collect();
             let goal = self.world_matrix(chain.goal).transform_point3(Vec3::ZERO);
             let spline = chain.spline.and_then(|s| self.nodes.get(&s).and_then(|n| n.object.shape().map(|sh| sh.transformed(self.world_matrix(s)))));
+            if chain.solver == crate::ik::IkSolver::HD && now > 0.0 {
+                // History-Dependent solver steps from frame 0 along the goal's trajectory.
+                if let Some(gnode) = self.nodes.get(&chain.goal) {
+                    if gnode.transform.position.is_animated() {
+                        let gparent = self.parent_frame(chain.goal);
+                        let steps = (now.floor() as i32).clamp(1, 120);
+                        for step in 0..steps {
+                            let t = step as f32 * (now / steps as f32);
+                            let gpos = gparent.transform_point3(gnode.transform.position.get_at(t));
+                            let prev = crate::ik::solve(chain, &bones, gpos, None);
+                            for (b, (_, q)) in bones.iter_mut().zip(prev) {
+                                b.rotation = q;
+                            }
+                        }
+                    }
+                }
+            }
             let solved = crate::ik::solve(chain, &bones, goal, spline.as_ref());
             // Spline IK: the root bone's base sits on the shape's first knot.
             let root_pos = spline.as_ref().and_then(crate::ik::spline_start).map(|p| bones[0].parent_frame.inverse().transform_point3(p));

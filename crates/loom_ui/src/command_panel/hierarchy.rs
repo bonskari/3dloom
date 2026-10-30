@@ -170,7 +170,7 @@ fn ik(ui: &mut egui::Ui, app: &mut LoomApp) {
         let w = ui.available_width();
         let Some(c) = chain.as_ref() else {
             ui.label("Select bones, then assign a solver:");
-            for (label, cmd) in [("HI Solver", Command::HistoryIndependentIkSolver), ("IK Limb Solver", Command::IkLimbSolver), ("Spline IK Solver", Command::SplineIkSolver)] {
+            for (label, cmd) in [("HI Solver", Command::HistoryIndependentIkSolver), ("HD Solver", Command::HistoryDependentIkSolver), ("IK Limb Solver", Command::IkLimbSolver), ("Spline IK Solver", Command::SplineIkSolver)] {
                 if ui.add_sized([w, 22.0], egui::Button::new(label)).clicked() {
                     let _ = app.dispatch(cmd);
                 }
@@ -180,12 +180,12 @@ fn ik(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.label(&c.name);
         let mut solver = c.solver;
         egui::ComboBox::from_id_salt("ik_solver").selected_text(solver.label()).show_ui(ui, |ui| {
-            for s in [IkSolver::HI, IkSolver::Limb, IkSolver::Spline] {
+            for s in [IkSolver::HI, IkSolver::HD, IkSolver::Limb, IkSolver::Spline] {
                 ui.selectable_value(&mut solver, s, s.label());
             }
         });
         if solver != c.solver {
-            let v = match solver { IkSolver::HI => 0.0, IkSolver::Limb => 1.0, IkSolver::Spline => 2.0 };
+            let v = match solver { IkSolver::HI => 0.0, IkSolver::Limb => 1.0, IkSolver::Spline => 2.0, IkSolver::HD => 3.0 };
             let _ = app.dispatch(Command::SetIkChainParameter { chain: c.id, name: "Solver".into(), value: v });
         }
         if ui.add_sized([w, 22.0], egui::SelectableLabel::new(c.enabled, "Enabled")).clicked() {

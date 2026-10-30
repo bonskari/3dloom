@@ -420,6 +420,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 ui.separator();
                 ui.menu_button("IK Solvers", |ui| {
                     item(ui, app, "HI Solver", "History-Independent IK Solver");
+                    item(ui, app, "HD Solver", "History-Dependent IK Solver");
                     item(ui, app, "IK Limb Solver", "IK Limb Solver");
                     item(ui, app, "Spline IK Solver", "Spline IK Solver");
                 });

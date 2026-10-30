@@ -382,6 +382,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::Dummy => execute(state, C::CreateHelper { kind: "dummy".into(), position: [0.0; 3], size: 10.0 }),
         C::HistoryIndependentIkSolver => chain_from_selection(state, IkSolver::HI),
+        C::HistoryDependentIkSolver => chain_from_selection(state, IkSolver::HD),
         C::IkLimbSolver => chain_from_selection(state, IkSolver::Limb),
         C::SplineIkSolver => chain_from_selection(state, IkSolver::Spline),
         C::BonesIkChain => {
@@ -389,7 +390,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({ "bones_ik_chain": state.bones_ik_chain }))
         }
         C::CreateIkChain { start, end, solver, name } => {
-            let solver = IkSolver::parse(&solver).ok_or_else(|| format!("unknown solver {solver:?} (hi, limb, spline)"))?;
+            let solver = IkSolver::parse(&solver).ok_or_else(|| format!("unknown solver {solver:?} (hi, hd, limb, spline)"))?;
             let goal = create_ik_chain(state, NodeId(start), NodeId(end), solver, name)?;
             Ok(json!({ "goal": goal.0, "chain": state.scene.ik_chains.last().map(|c| c.id) }))
         }
@@ -410,7 +411,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 "Swivel Angle" => c.swivel_deg = value as f32,
                 "Threshold" => c.threshold = (value as f32).max(0.001),
                 "Iterations" => c.iterations = (value.round().max(1.0)) as u32,
-                "Solver" => c.solver = match value as i32 { 1 => IkSolver::Limb, 2 => IkSolver::Spline, _ => IkSolver::HI },
+                "Solver" => c.solver = match value as i32 { 1 => IkSolver::Limb, 2 => IkSolver::Spline, 3 => IkSolver::HD, _ => IkSolver::HI },
                 other => return Err(format!("IK chain has no parameter {other:?}")),
             }
             set_chains(state, "IK Chain Parameter", after)?;

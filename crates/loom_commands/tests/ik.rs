@@ -34,9 +34,24 @@ fn hi_chain_moves_bones_when_the_goal_moves_and_fk_snap_bakes_it() {
     assert!(s.scene.ik_chains[0].enabled);
     let r = execute(&mut s, Command::State).unwrap();
     assert_eq!(r["ik_chains"].as_array().unwrap().len(), 1);
-    for name in ["History-Independent IK Solver", "IK Limb Solver", "Spline IK Solver", "IK Solver Toggle", "IK Chain FK Snap", "IK Chain IK Snap", "IK Chain Snap Action", "IK Terminator Toggle", "Bones IK Chain"] {
+    for name in ["History-Independent IK Solver", "History-Dependent IK Solver", "IK Limb Solver", "Spline IK Solver", "IK Solver Toggle", "IK Chain FK Snap", "IK Chain IK Snap", "IK Chain Snap Action", "IK Terminator Toggle", "Bones IK Chain"] {
         assert!(loom_commands::registry().iter().any(|i| i.name == name), "{name} missing");
     }
+}
+
+#[test]
+fn hd_ik_solver_solves_frame_by_frame_trajectory() {
+    let mut s = AppState::new();
+    let r = execute(&mut s, Command::CreateBoneChain { points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0], [21.0, 0.0, 0.0]], name: None }).unwrap();
+    let ids: Vec<u64> = serde_json::from_value(r["nodes"].clone()).unwrap();
+    execute(&mut s, Command::SelectNodes { ids: vec![ids[0], ids[2]], op: SelectOp::Replace }).unwrap();
+    let r = execute(&mut s, Command::HistoryDependentIkSolver).unwrap();
+    let goal = NodeId(r["goal"].as_u64().unwrap());
+    assert_eq!(s.scene.ik_chains[0].solver, loom_scene::ik::IkSolver::HD);
+    execute(&mut s, Command::SelectNodes { ids: vec![goal.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::MoveSelection { delta: [-4.0, 8.0, 0.0], system: None }).unwrap();
+    let tip = s.scene.world_matrix(NodeId(ids[2])).transform_point3(glam::Vec3::ZERO);
+    assert!((tip - glam::Vec3::new(16.0, 8.0, 0.0)).length() < 0.25, "HD solver reaches goal: {tip:?}");
 }
 
 #[test]
