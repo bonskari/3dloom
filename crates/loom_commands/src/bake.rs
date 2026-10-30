@@ -11,7 +11,7 @@ use glam::Mat3;
 use loom_bake::{Bvh, NormalOptions, Projection, Triangle};
 use loom_scene::bake::{BakeElement, BakeObjects, BakeSettings, ElementKind, NormalSpace, ProjectionData, AUTO_UNWRAP_NAME};
 use loom_scene::material::{default_amount, next_material_id, Map, MaterialId, MaterialLibrary, MaterialKind, Shell, ShellView, StandardMaterial};
-use loom_scene::{Change, Modifier, ModifierSlot, Node, NodeId, ObjectKind};
+use loom_scene::{Change, Modifier, ModifierSlot, Node, NodeId};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

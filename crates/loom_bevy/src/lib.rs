@@ -1243,7 +1243,7 @@ impl BevyRenderer {
     /// control, ambient occlusion, reflections and the sky dome.
     fn setup_render_camera(&mut self) {
         use bevy::core_pipeline::tonemapping::DebandDither;
-        use bevy::pbr::{EnvironmentMapLight, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceReflections, ShadowFilteringMethod};
+        use bevy::pbr::{prelude::EnvironmentMapLight, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceReflections, ShadowFilteringMethod};
         use bevy::render::camera::Exposure;
         use loom_scene::render::{AoQuality, Tonemapper};
         let Some(r) = self.render.as_ref() else { return };

@@ -156,7 +156,7 @@ pub fn shading_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
             label: "Viewport Background".into(),
             checked: false,
             action: Action::Submenu(vec![
-                check("Show Background", vp.background.is_some() && vp.background_display, Command::SetViewportBackground { path: None, display: Some(!(vp.background.is_some() && vp.background_display)), aspect: None, all_views: None, lock: None }),
+                check("Show Background", vp.background.is_some() && vp.background_display, Command::SetViewportBackground { path: None, display: Some(!(vp.background.is_some() && vp.background_display)), aspect: None, all_views: None, lock: None, use_environment: None }),
                 item("Viewport Background...", Command::ViewportBackground),
                 item("Update Background Image", Command::UpdateBackgroundImage),
                 item("Reset Background Transform", Command::ResetBackgroundTransform),

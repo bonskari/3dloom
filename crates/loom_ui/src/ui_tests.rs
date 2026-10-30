@@ -3092,12 +3092,12 @@ fn render_setup_quality_controls_change_the_scene_settings() {
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
     // Filter: Area -> Mitchell-Netravali.
     click_text(&mut h, "Area", win, 0.0);
-    click_text(&mut h, "Mitchell-Netravali", h.ctx.screen_rect(), 0.0);
+    click_text(&mut h, "Mitchell-Netravali", SCREEN, 0.0);
     assert_eq!(h.app.state.scene.render.bevy.filter, AaFilter::MitchellNetravali);
     // Tone Mapping: AgX -> ACES Filmic.
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
     click_text(&mut h, "AgX", win, 0.0);
-    click_text(&mut h, "ACES Filmic", h.ctx.screen_rect(), 0.0);
+    click_text(&mut h, "ACES Filmic", SCREEN, 0.0);
     assert_eq!(h.app.state.scene.render.bevy.tonemapper, Tonemapper::Aces);
     // Passes: a drag right raises it, as one undo step.
     let before = h.app.state.scene.render.bevy.passes;
@@ -3923,7 +3923,7 @@ fn fbx_import_options_cancel_and_cameras_off() {
     assert_eq!(h.app.state.scene.len(), 0, "Cancel imports nothing");
     h.cmd(Command::ImportFile { path: None });
     choose_file(&mut h, &path, "Open");
-    let win = options_rect(&h, "fbx_import_options");
+    let _win = options_rect(&h, "fbx_import_options");
     click_option(&mut h, "Cameras", "fbx_import_options");
     assert!(!h.app.state.exchange.fbx_import.cameras);
     click_option(&mut h, "OK", "fbx_import_options");
