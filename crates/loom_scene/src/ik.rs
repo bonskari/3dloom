@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub enum IkSolver {
     #[default]
     HI,
+    HD,
     Limb,
     Spline,
 }
@@ -19,13 +20,15 @@ impl IkSolver {
     pub fn label(self) -> &'static str {
         match self {
             IkSolver::HI => "HI Solver",
+            IkSolver::HD => "HD Solver",
             IkSolver::Limb => "IK Limb Solver",
             IkSolver::Spline => "Spline IK Solver",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
-            "hi" | "hi solver" => Some(IkSolver::HI),
+            "hi" | "hi solver" | "history-independent" | "history-independent ik solver" => Some(IkSolver::HI),
+            "hd" | "hd solver" | "history-dependent" | "history-dependent ik solver" => Some(IkSolver::HD),
             "limb" | "ik limb" | "ik limb solver" => Some(IkSolver::Limb),
             "spline" | "spline ik" | "spline ik solver" => Some(IkSolver::Spline),
             _ => None,
@@ -137,7 +140,8 @@ pub fn solve(chain: &IkChain, bones: &[IkBone], goal_world: Vec3, spline: Option
     }
     let mut q: Vec<Quat> = bones.iter().map(|b| b.rotation.normalize()).collect();
     match chain.solver {
-        IkSolver::HI => {
+        IkSolver::HI | IkSolver::HD => {
+            let hd = chain.solver == IkSolver::HD;
             let iterations = chain.iterations.max(1);
             'outer: for _ in 0..iterations {
                 for i in (0..n).rev() {
@@ -153,6 +157,13 @@ pub fn solve(chain: &IkChain, bones: &[IkBone], goal_world: Vec3, spline: Option
                         continue;
                     }
                     let r = Quat::from_rotation_arc(a, b);
+                    let r = if hd {
+                        // History-Dependent solver: root-to-tip joint damping so end bones absorb motion first.
+                        let weight = ((i + 1) as f32 / n as f32).clamp(0.15, 1.0);
+                        Quat::IDENTITY.slerp(r, weight)
+                    } else {
+                        r
+                    };
                     let parent_rot = rot_of(if i == 0 { bones[0].parent_frame } else { ws[i - 1] });
                     q[i] = (parent_rot.inverse() * r * rot_of(ws[i])).normalize();
                 }

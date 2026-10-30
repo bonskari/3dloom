@@ -1702,6 +1702,7 @@ commands! {
     MeasureDistance => "Measure Distance", Loom, "Tools > Measure Distance: click two points; the status bar shows the distance and the X / Y / Z deltas.";
     Dummy => "Dummy", MainUI, "Create a Dummy helper at the origin (Dummy create mode).";
     HistoryIndependentIkSolver => "History-Independent IK Solver", MainUI, "Animation > IK Solvers > HI Solver: an IK chain from the first selected bone to the last, with a goal at the end joint.";
+    HistoryDependentIkSolver => "History-Dependent IK Solver", MainUI, "Animation > IK Solvers > HD Solver: a history-dependent IK chain from the first selected bone to the last, with a goal at the end joint.";
     IkLimbSolver => "IK Limb Solver", MainUI, "Animation > IK Solvers > IK Limb Solver: a two-bone chain on the selected bones.";
     SplineIkSolver => "Spline IK Solver", MainUI, "Animation > IK Solvers > Spline IK Solver: the selected bones follow a shape (Pick Spline IK Shape).";
     BonesIkChain => "Bones IK Chain", MainUI, "Systems > Bones with IK Chain Assignment: toggles creating an HI chain on every new bone chain.";
@@ -2152,6 +2153,4 @@ pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
 ];
 
 /// Actions that later plans implement; each names its plan.
-pub const DEFERRED: &[(&str, &str)] = &[
-    ("History-Dependent IK Solver", "spec: HD Solver out of scope"),
-    ];
+pub const DEFERRED: &[(&str, &str)] = &[];
