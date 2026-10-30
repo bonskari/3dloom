@@ -229,13 +229,27 @@ impl DragState {
 }
 
 pub const HIT_PX: f32 = 8.0;
-pub const HOVER: egui::Color32 = egui::Color32::from_rgb(255, 255, 0);
+thread_local! {
+    /// X, Y, Z and the active (hovered) axis colour (Customize User Interface > Colors > Gizmos), set each frame.
+    static COLORS: std::cell::Cell<[egui::Color32; 4]> = const { std::cell::Cell::new([egui::Color32::from_rgb(230, 60, 60), egui::Color32::from_rgb(70, 200, 70), egui::Color32::from_rgb(70, 110, 255), egui::Color32::from_rgb(255, 255, 0)]) };
+}
+
+/// The gizmo colours for this frame: X, Y, Z, active axis.
+pub fn set_colors(c: [egui::Color32; 4]) {
+    COLORS.with(|cell| cell.set(c));
+}
+
+/// The colour of the axis or plane under the pointer.
+pub fn hover() -> egui::Color32 {
+    COLORS.with(|c| c.get()[3])
+}
 
 pub fn axis_color(a: Axis) -> egui::Color32 {
+    let c = COLORS.with(|c| c.get());
     match a {
-        Axis::X => egui::Color32::from_rgb(230, 60, 60),
-        Axis::Y => egui::Color32::from_rgb(70, 200, 70),
-        Axis::Z => egui::Color32::from_rgb(70, 110, 255),
+        Axis::X => c[0],
+        Axis::Y => c[1],
+        Axis::Z => c[2],
     }
 }
 

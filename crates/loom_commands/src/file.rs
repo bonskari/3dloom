@@ -45,6 +45,12 @@ pub struct ViewportSave {
     pub background_aspect: crate::viewport::BackgroundAspect,
     #[serde(default = "yes")]
     pub background_display: bool,
+    #[serde(default)]
+    pub transparency: crate::viewport::Transparency,
+    #[serde(default)]
+    pub disable_textures: bool,
+    #[serde(default)]
+    pub force_two_sided: bool,
 }
 
 fn yes() -> bool {
@@ -60,7 +66,7 @@ fn default_clip() -> (f32, f32) {
 }
 
 impl ViewportSave {
-    fn from_viewport(v: &Viewport) -> Self {
+    pub(crate) fn from_viewport(v: &Viewport) -> Self {
         Self {
             kind: v.kind,
             target: v.camera.target.to_array(),
@@ -83,10 +89,13 @@ impl ViewportSave {
             background_anchor: v.background_anchor.map(|(t, d)| (t.to_array(), d)),
             background_aspect: v.background_aspect,
             background_display: v.background_display,
+            transparency: v.transparency,
+            disable_textures: v.disable_textures,
+            force_two_sided: v.force_two_sided,
         }
     }
 
-    fn to_viewport(&self) -> Viewport {
+    pub(crate) fn to_viewport(&self) -> Viewport {
         let mut v = Viewport::new(self.kind);
         v.camera.target = Vec3::from_array(self.target);
         v.camera.distance = self.distance;
@@ -109,6 +118,9 @@ impl ViewportSave {
         v.background_anchor = self.background_locked.then(|| self.background_anchor.map(|(t, d)| (Vec3::from_array(t), d)).unwrap_or((v.camera.target, v.camera.distance)));
         v.background_aspect = self.background_aspect;
         v.background_display = self.background_display;
+        v.transparency = self.transparency;
+        v.disable_textures = self.disable_textures;
+        v.force_two_sided = self.force_two_sided;
         v
     }
 }
@@ -143,6 +155,12 @@ pub struct SceneSettings {
     pub saved_views: BTreeMap<String, crate::state::SavedView>,
     /// File > File Properties and the Summary Info description.
     pub file_properties: FileProperties,
+    /// The status bar's time tags.
+    pub time_tags: Vec<crate::time_tags::TimeTag>,
+    /// Viewport Configuration > Adaptive Degradation.
+    pub degradation: crate::viewport::Degradation,
+    /// Time Configuration > Time Display and Key Steps.
+    pub time_config: crate::time_display::TimeConfig,
 }
 
 /// File > File Properties: the Summary fields, the Summary Info
@@ -226,6 +244,9 @@ impl SceneSettings {
             home_view: s.home_view,
             saved_views: s.saved_views.clone(),
             file_properties: s.file_properties.clone(),
+            time_tags: s.time_tags.clone(),
+            degradation: s.degradation.clone(),
+            time_config: s.time_config,
         }
     }
 
@@ -256,6 +277,9 @@ impl SceneSettings {
         s.home_view = self.home_view;
         s.saved_views = self.saved_views.clone();
         s.file_properties = self.file_properties.clone();
+        s.time_tags = self.time_tags.clone();
+        s.degradation = self.degradation.clone();
+        s.time_config = self.time_config;
         s.scene.set_time(s.current_frame as f32);
     }
 }

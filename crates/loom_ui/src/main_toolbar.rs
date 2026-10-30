@@ -128,267 +128,283 @@ fn named_selection_sets(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.ctx().data_mut(|d| d.insert_temp(text_id, text));
 }
 
-pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
+/// The Main Toolbar where it is docked (`edges`: the docks drawn in this pass).
+pub fn show(ctx: &egui::Context, app: &mut LoomApp, edges: &[loom_commands::ui_custom::Dock]) {
     if app.state.expert_mode || !app.state.show_main_toolbar {
         return;
     }
-    egui::TopBottomPanel::top("main_toolbar").show(ctx, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for it in ITEMS.iter().filter(|i| i.since == Plan::Now) {
-                match it.name {
-                    "Undo" => {
-                        if Icon::new(icons::UNDO, "Undo Scene Operation").enabled(app.state.undo.can_undo()).show(ui, &app.state).clicked() {
-                            app.dispatch_named("Undo Scene Operation");
-                        }
-                    }
-                    "Redo" => {
-                        if Icon::new(icons::REDO, "Redo Scene Operation").enabled(app.state.undo.can_redo()).show(ui, &app.state).clicked() {
-                            app.dispatch_named("Redo Scene Operation");
-                        }
-                        ui.separator();
-                    }
-                    "Select and Link" => tool_button(ui, app, icons::LINK, app.state.pick_mode == Some(loom_commands::PickMode::Link), "Select and Link"),
-                    "Unlink Selection" => {
-                        if Icon::new(icons::UNLINK, "Unlink Selection").show(ui, &app.state).clicked() {
-                            let _ = app.dispatch(Command::UnlinkSelection);
-                        }
-                        ui.separator();
-                    }
-                    "Selection Filter" => {
-                        let cur = app.state.selection_filter;
-                        egui::ComboBox::from_id_salt("selection_filter").selected_text(cur.label()).width(60.0).show_ui(ui, |ui| {
-                            for f in SelectionFilter::ALL {
-                                if ui.selectable_label(cur == f, f.label()).clicked() {
-                                    let _ = app.dispatch(Command::SelectionFilter { filter: f });
-                                }
-                            }
-                        });
-                    }
-                    "Select Object" => tool_button(ui, app, icons::SELECT_OBJECT, app.state.active_tool == Tool::Select && app.state.pick_mode.is_none(), "Select Object"),
-                    "Select From Scene" => {
-                        if Icon::new(icons::SELECT_BY_NAME, "Select By Name").tip("Select From Scene").show(ui, &app.state).clicked() {
-                            let _ = app.dispatch(Command::SelectByName);
-                        }
-                    }
-                    "Selection Region" => {
-                        let cur = app.state.selection_region;
-                        let glyph = |r: SelectionRegion| match r {
-                            SelectionRegion::Rectangular => icons::REGION_RECTANGULAR,
-                            SelectionRegion::Circular => icons::REGION_CIRCULAR,
-                            SelectionRegion::Fence => icons::REGION_FENCE,
-                            SelectionRegion::Lasso => icons::REGION_LASSO,
-                            SelectionRegion::Paint => icons::REGION_PAINT,
-                        };
-                        let region = egui::ComboBox::from_id_salt("selection_region").selected_text(egui::RichText::new(glyph(cur)).size(icons::SIZE)).width(34.0).show_ui(ui, |ui| {
-                            for r in SelectionRegion::ALL {
-                                if ui.selectable_label(cur == r, icons::labeled(glyph(r), r.label())).clicked() {
-                                    let _ = app.dispatch(Command::SelectionRegion { shape: r });
-                                }
-                            }
-                        });
-                        icons::named(&region.response, egui::WidgetType::ComboBox, cur.label());
-                        // Right-click Paint Selection Region: Preferences (the brush size lives there).
-                        if cur == SelectionRegion::Paint && region.response.secondary_clicked() {
-                            let _ = app.dispatch(Command::Preferences);
-                        }
-                    }
-                    "Window/Crossing Selection Toggle" => {
-                        let w = app.state.window_selection;
-                        let glyph = if w { icons::WINDOW } else { icons::CROSSING };
-                        if Icon::new(glyph, "Window/Crossing Selection Toggle").tip(if w { "Window Selection" } else { "Crossing Selection" }).on(w).show(ui, &app.state).clicked() {
-                            let _ = app.dispatch(Command::WindowCrossingSelectionToggle);
-                        }
-                        ui.separator();
-                    }
-                    "Select and Move" => transform_button(ui, app, icons::MOVE, "Select and Move", Tool::Move, "Select and Move"),
-                    "Select and Rotate" => transform_button(ui, app, icons::ROTATE, "Select and Rotate", Tool::Rotate, "Select and Rotate"),
-                    "Select and Scale" => {
-                        // Scale flyout: Uniform / Non-Uniform / Squash (Ctrl+E cycles).
-                        let kind = app.state.scale_kind;
-                        let glyph = |k: ScaleKind| match k { ScaleKind::Uniform => icons::SCALE, ScaleKind::NonUniform => icons::SCALE_NON_UNIFORM, ScaleKind::Squash => icons::SQUASH };
-                        transform_button(ui, app, glyph(kind), kind.label(), Tool::Scale, "Select and Scale");
-                        egui::ComboBox::from_id_salt("scale_kind").selected_text("").width(14.0).show_ui(ui, |ui| {
-                            for k in ScaleKind::ALL {
-                                if ui.selectable_label(kind == k, k.label()).clicked() {
-                                    let _ = app.dispatch(Command::ScaleType { kind: k });
-                                }
-                            }
-                        });
-                    }
-                    "Reference Coordinate System" => {
-                        let cur = app.state.coord_system;
-                        let name = |app: &LoomApp, id: loom_scene::NodeId| app.state.scene.node(id).map(|n| n.name.clone());
-                        // Pick shows the picked object's name; the four most recent picks stay in the list.
-                        let shown = match (cur, app.state.pick_coord_node) {
-                            (CoordSystem::Pick, Some(id)) => name(app, id).unwrap_or_else(|| cur.label().to_owned()),
-                            _ => cur.label().to_owned(),
-                        };
-                        let recent: Vec<(loom_scene::NodeId, String)> = app.state.pick_coord_recent.iter().filter_map(|id| Some((*id, name(app, *id)?))).collect();
-                        egui::ComboBox::from_id_salt("coord_system").selected_text(shown).width(70.0).show_ui(ui, |ui| {
-                            for c in CoordSystem::ALL {
-                                if ui.selectable_label(cur == c && (c != CoordSystem::Pick || app.state.pick_coord_node.is_none()), c.label()).clicked() {
-                                    let _ = app.dispatch(Command::ReferenceCoordinateSystem { system: c });
-                                }
-                            }
-                            for (id, n) in recent {
-                                if ui.selectable_label(cur == CoordSystem::Pick && app.state.pick_coord_node == Some(id), n).clicked() {
-                                    let _ = app.dispatch(Command::PickCoordinateSystem { id: id.0 });
-                                }
-                            }
-                        });
-                    }
-                    "Use Center" => {
-                        let cur = app.state.center_mode;
-                        // Auto Key + Rotate/Scale: each pivot, the flyout is unavailable.
-                        let forced = loom_commands::transform::animate_forces_pivot(&app.state) && matches!(app.state.active_tool, Tool::Rotate | Tool::Scale);
-                        let shown = if forced { CenterMode::PivotPoint } else { cur };
-                        let glyph = |m: CenterMode| match m { CenterMode::PivotPoint => icons::PIVOT_CENTER, CenterMode::Selection => icons::SELECTION_CENTER, CenterMode::TransformCoordinate => icons::COORDINATE_CENTER };
-                        ui.add_enabled_ui(!forced, |ui| {
-                            let r = egui::ComboBox::from_id_salt("use_center").selected_text(egui::RichText::new(glyph(shown)).size(icons::SIZE)).width(34.0).show_ui(ui, |ui| {
-                                for m in CenterMode::ALL {
-                                    // Local uses each object's own centre: Use Transform Center is unavailable.
-                                    let off = m == CenterMode::TransformCoordinate && app.state.coord_system == CoordSystem::Local;
-                                    if ui.add_enabled(!off, egui::SelectableLabel::new(cur == m, icons::labeled(glyph(m), m.label()))).clicked() {
-                                        let _ = app.dispatch(Command::UseCenter { mode: m });
-                                    }
-                                }
-                            });
-                            icons::named(&r.response, egui::WidgetType::ComboBox, shown.label());
-                        });
-                        ui.separator();
-                    }
-                    "Select and Manipulate" => tool_button(ui, app, icons::MANIPULATE, app.state.manipulate, "Select and Manipulate"),
-                    "Keyboard Shortcut Override Toggle" => {
-                        tool_button(ui, app, icons::KEYBOARD_OVERRIDE, app.state.keyboard_override, "Keyboard Shortcut Override Toggle");
-                        ui.separator();
-                    }
-                    "Snaps Toggle" => {
-                        // Flyout: 2D / 2.5D / 3D (Alt+S cycles); right-click opens Grid and Snap Settings.
-                        let mode = app.state.snaps.mode;
-                        // The magnet carries the mode's number, as the reference's 2 / 2.5 / 3 icons do.
-                        let glyph = format!("{}{}", icons::SNAP, mode.label().trim_end_matches('D'));
-                        let r = Icon::new(&glyph, "Snaps Toggle").on(app.state.snaps_on).hint("right-click: Grid and Snap Settings").show(ui, &app.state);
-                        if r.clicked() {
-                            app.dispatch_named("Snaps Toggle");
-                        }
-                        if r.secondary_clicked() {
-                            let _ = app.dispatch(Command::GridAndSnapSettings);
-                        }
-                        egui::ComboBox::from_id_salt("snap_mode").selected_text("").width(14.0).show_ui(ui, |ui| {
-                            for m in [loom_commands::snap::SnapMode::Snap2D, loom_commands::snap::SnapMode::Snap25D, loom_commands::snap::SnapMode::Snap3D] {
-                                if ui.selectable_label(mode == m, format!("{} Snap", m.label())).clicked() {
-                                    let _ = app.dispatch(Command::SnapSettings { mode: Some(m), marker_display: None, marker_size: None, preview_radius_px: None, radius_px: None, angle_deg: None, percent: None, use_axis_constraints: None, show_rubber_band: None });
-                                }
-                            }
-                        });
-                    }
-                    "Angle Snap Toggle" => snap_button(ui, app, icons::ANGLE_SNAP, app.state.angle_snap_on, "Angle Snap Toggle"),
-                    "Percent Snap Toggle" => snap_button(ui, app, icons::PERCENT_SNAP, app.state.percent_snap_on, "Percent Snap Toggle"),
-                    "Spinner Snap Toggle" => {
-                        // Right-click opens Preferences > General (the Spinners group), as in the reference.
-                        let r = Icon::new(icons::SPINNER_SNAP, "Spinner Snap Toggle").on(app.state.prefs.spinner_snap).hint("right-click: Preferences").show(ui, &app.state);
-                        if r.clicked() {
-                            app.dispatch_named("Spinner Snap Toggle");
-                        }
-                        if r.secondary_clicked() {
-                            crate::dialogs::preferences::open_on_general(ui.ctx());
-                            let _ = app.dispatch(Command::Preferences);
-                        }
-                        ui.separator();
-                    }
-                    "Manage Layers" => {
-                        if Icon::new(icons::LAYERS, Command::LayerManager.name()).tip("Manage Layers (Layer Manager)").on(app.state.dialog == Some(loom_commands::Dialog::LayerManager)).show(ui, &app.state).clicked() {
-                            let _ = app.dispatch(Command::LayerManager);
-                        }
-                    }
-                    "Graphite Modeling Tools" => {
-                        if Icon::new(icons::GRAPHITE, Command::ShowRibbonToggle.name()).tip("Graphite Modeling Tools (show / hide the ribbon)").on(app.state.show_ribbon).show(ui, &app.state).clicked() {
-                            let _ = app.dispatch(Command::ShowRibbonToggle);
-                        }
-                    }
-                    "Mirror" => {
-                        if Icon::new(icons::MIRROR, "Mirror").show(ui, &app.state).clicked() {
-                            let _ = app.dispatch(Command::Mirror);
-                        }
-                    }
-                    "Align" => {
-                        // Align flyout: Align, Quick Align, Normal Align, Align Camera, Align to View.
-                        let r = Icon::new(icons::ALIGN, "Align").hint("right-click: Align flyout").show(ui, &app.state);
-                        if r.clicked() {
-                            app.dispatch_named("Align");
-                        }
-                        let popup = ui.id().with("align_flyout");
-                        if r.secondary_clicked() {
-                            ui.memory_mut(|m| m.toggle_popup(popup));
-                        }
-                        egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
-                            ui.set_min_width(140.0);
-                            for (g, l, a) in [(icons::ALIGN, "Align", "Align"), (icons::QUICK_ALIGN, "Quick Align", "Quick Align"), (icons::NORMAL_ALIGN, "Normal Align", "Normal Align "), (icons::ALIGN_CAMERA, "Align Camera", "Align Camera"), (icons::ALIGN_TO_VIEW, "Align to View", "Align to View Dialog")] {
-                                if ui.add(menu_widget(&app.state, &icons::labeled(g, l), a)).on_hover_name(&app.state, a).clicked() {
-                                    app.dispatch_named(a);
-                                }
-                            }
-                        });
-                        ui.separator();
-                    }
-                    "Edit Named Selection Sets" => {
-                        if Icon::new(icons::NAMED_SETS, "Edit Named Selection Sets").show(ui, &app.state).clicked() {
-                            let _ = app.dispatch(Command::EditNamedSelectionSets);
-                        }
-                    }
-                    "Named Selection Sets" => named_selection_sets(ui, app),
-                    "Render Setup" => {
-                        ui.separator();
-                        if Icon::new(icons::RENDER_SETUP, "Render SetUp...").tip("Render Setup").show(ui, &app.state).clicked() {
-                            app.dispatch_named("Render SetUp...");
-                        }
-                    }
-                    "Rendered Frame Window" => {
-                        if Icon::new(icons::RENDERED_FRAME_WINDOW, "Rendered Frame Window").on(app.state.rendered.open).show(ui, &app.state).clicked() {
-                            app.dispatch_named("Rendered Frame Window");
-                        }
-                    }
-                    "Render Production" => {
-                        // Render flyout: Production / Iterative (right-click).
-                        let iterative = app.state.rendered.iterative;
-                        let action = if iterative { "Render Iterative" } else { "Render" };
-                        let icon = Icon::new(icons::RENDER, action).tip(if iterative { "Render Iterative" } else { "Render Production" }).hint("right-click: Render flyout");
-                        let r = if iterative { icon.color(icons::SUB_OBJECT_VARIANT) } else { icon }.show(ui, &app.state);
-                        if r.clicked() {
-                            app.dispatch_named(action);
-                        }
-                        let popup = ui.id().with("render_flyout");
-                        if r.secondary_clicked() {
-                            ui.memory_mut(|m| m.toggle_popup(popup));
-                        }
-                        egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
-                            ui.set_min_width(140.0);
-                            for (l, it) in [("Render Production", false), ("Render Iterative", true)] {
-                                if ui.add(menu_widget(&app.state, &icons::labeled(icons::RENDER, l), if it { "Render Iterative" } else { "Render" })).clicked() {
-                                    let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
-                                    app.dispatch_named(if it { "Render Iterative" } else { "Render" });
-                                }
-                            }
-                        });
-                    }
-                    "Curve Editor" => {
-                        ui.separator();
-                        if Icon::new(icons::CURVE_EDITOR, Command::TrackViewFloater.name()).tip("Curve Editor (Open)").on(app.state.track_view.open && app.state.track_view.mode == loom_commands::track_view::TvMode::CurveEditor).show(ui, &app.state).clicked() {
-                            let _ = app.dispatch(Command::TrackViewFloater);
-                        }
-                    }
-                    "Material Editor" => {
-                        let r = Icon::new(icons::MATERIAL_EDITOR, Command::MaterialEditorToggle.name()).tip("Material Editor").on(app.state.material_editor_open).show(ui, &app.state);
-                        if r.clicked() {
-                            let _ = app.dispatch(Command::MaterialEditorToggle);
-                        }
-                    }
-                    _ => {}
+    let _ = crate::toolbars::host(ctx, app, "Main Toolbar", edges, contents);
+}
+
+/// The Main Toolbar's buttons, laid out by the dock's row or column.
+fn contents(ui: &mut egui::Ui, app: &mut LoomApp) {
+    for it in ITEMS.iter().filter(|i| i.since == Plan::Now) {
+        match it.name {
+            "Undo" => {
+                if Icon::new(icons::UNDO, "Undo Scene Operation").enabled(app.state.undo.can_undo()).show(ui, &app.state).clicked() {
+                    app.dispatch_named("Undo Scene Operation");
                 }
             }
-        });
-    });
+            "Redo" => {
+                if Icon::new(icons::REDO, "Redo Scene Operation").enabled(app.state.undo.can_redo()).show(ui, &app.state).clicked() {
+                    app.dispatch_named("Redo Scene Operation");
+                }
+                ui.separator();
+            }
+            "Select and Link" => tool_button(ui, app, icons::LINK, app.state.pick_mode == Some(loom_commands::PickMode::Link), "Select and Link"),
+            "Unlink Selection" => {
+                if Icon::new(icons::UNLINK, "Unlink Selection").show(ui, &app.state).clicked() {
+                    let _ = app.dispatch(Command::UnlinkSelection);
+                }
+                ui.separator();
+            }
+            "Selection Filter" => {
+                let cur = app.state.selection_filter;
+                egui::ComboBox::from_id_salt("selection_filter").selected_text(cur.label()).width(60.0).show_ui(ui, |ui| {
+                    for f in SelectionFilter::ALL {
+                        if ui.selectable_label(cur == f, f.label()).clicked() {
+                            let _ = app.dispatch(Command::SelectionFilter { filter: f });
+                        }
+                    }
+                });
+            }
+            "Select Object" => tool_button(ui, app, icons::SELECT_OBJECT, app.state.active_tool == Tool::Select && app.state.pick_mode.is_none(), "Select Object"),
+            "Select From Scene" => {
+                if Icon::new(icons::SELECT_BY_NAME, "Select By Name").tip("Select From Scene").show(ui, &app.state).clicked() {
+                    let _ = app.dispatch(Command::SelectByName);
+                }
+            }
+            "Selection Region" => {
+                let cur = app.state.selection_region;
+                let glyph = |r: SelectionRegion| match r {
+                    SelectionRegion::Rectangular => icons::REGION_RECTANGULAR,
+                    SelectionRegion::Circular => icons::REGION_CIRCULAR,
+                    SelectionRegion::Fence => icons::REGION_FENCE,
+                    SelectionRegion::Lasso => icons::REGION_LASSO,
+                    SelectionRegion::Paint => icons::REGION_PAINT,
+                };
+                let region = egui::ComboBox::from_id_salt("selection_region").selected_text(egui::RichText::new(glyph(cur)).size(icons::SIZE)).width(34.0).show_ui(ui, |ui| {
+                    for r in SelectionRegion::ALL {
+                        if ui.selectable_label(cur == r, icons::labeled(glyph(r), r.label())).clicked() {
+                            let _ = app.dispatch(Command::SelectionRegion { shape: r });
+                        }
+                    }
+                });
+                icons::named(&region.response, egui::WidgetType::ComboBox, cur.label());
+                // Right-click Paint Selection Region: Preferences (the brush size lives there).
+                if cur == SelectionRegion::Paint && region.response.secondary_clicked() {
+                    let _ = app.dispatch(Command::Preferences);
+                }
+            }
+            "Window/Crossing Selection Toggle" => {
+                let w = app.state.window_selection;
+                let glyph = if w { icons::WINDOW } else { icons::CROSSING };
+                if Icon::new(glyph, "Window/Crossing Selection Toggle").tip(if w { "Window Selection" } else { "Crossing Selection" }).on(w).show(ui, &app.state).clicked() {
+                    let _ = app.dispatch(Command::WindowCrossingSelectionToggle);
+                }
+                ui.separator();
+            }
+            "Select and Move" => transform_button(ui, app, icons::MOVE, "Select and Move", Tool::Move, "Select and Move"),
+            "Select and Rotate" => transform_button(ui, app, icons::ROTATE, "Select and Rotate", Tool::Rotate, "Select and Rotate"),
+            "Select and Scale" => {
+                // Scale flyout: Uniform / Non-Uniform / Squash (Ctrl+E cycles).
+                let kind = app.state.scale_kind;
+                let glyph = |k: ScaleKind| match k { ScaleKind::Uniform => icons::SCALE, ScaleKind::NonUniform => icons::SCALE_NON_UNIFORM, ScaleKind::Squash => icons::SQUASH };
+                transform_button(ui, app, glyph(kind), kind.label(), Tool::Scale, "Select and Scale");
+                egui::ComboBox::from_id_salt("scale_kind").selected_text("").width(14.0).show_ui(ui, |ui| {
+                    for k in ScaleKind::ALL {
+                        if ui.selectable_label(kind == k, k.label()).clicked() {
+                            let _ = app.dispatch(Command::ScaleType { kind: k });
+                        }
+                    }
+                });
+            }
+            "Reference Coordinate System" => {
+                let cur = app.state.coord_system;
+                let name = |app: &LoomApp, id: loom_scene::NodeId| app.state.scene.node(id).map(|n| n.name.clone());
+                // Pick shows the picked object's name; the four most recent picks stay in the list.
+                let shown = match (cur, app.state.pick_coord_node) {
+                    (CoordSystem::Pick, Some(id)) => name(app, id).unwrap_or_else(|| cur.label().to_owned()),
+                    _ => cur.label().to_owned(),
+                };
+                let recent: Vec<(loom_scene::NodeId, String)> = app.state.pick_coord_recent.iter().filter_map(|id| Some((*id, name(app, *id)?))).collect();
+                egui::ComboBox::from_id_salt("coord_system").selected_text(shown).width(70.0).show_ui(ui, |ui| {
+                    for c in CoordSystem::ALL {
+                        if ui.selectable_label(cur == c && (c != CoordSystem::Pick || app.state.pick_coord_node.is_none()), c.label()).clicked() {
+                            let _ = app.dispatch(Command::ReferenceCoordinateSystem { system: c });
+                        }
+                    }
+                    for (id, n) in recent {
+                        if ui.selectable_label(cur == CoordSystem::Pick && app.state.pick_coord_node == Some(id), n).clicked() {
+                            let _ = app.dispatch(Command::PickCoordinateSystem { id: id.0 });
+                        }
+                    }
+                });
+            }
+            "Use Center" => {
+                let cur = app.state.center_mode;
+                // Auto Key + Rotate/Scale: each pivot, the flyout is unavailable.
+                let forced = loom_commands::transform::animate_forces_pivot(&app.state) && matches!(app.state.active_tool, Tool::Rotate | Tool::Scale);
+                let shown = if forced { CenterMode::PivotPoint } else { cur };
+                let glyph = |m: CenterMode| match m { CenterMode::PivotPoint => icons::PIVOT_CENTER, CenterMode::Selection => icons::SELECTION_CENTER, CenterMode::TransformCoordinate => icons::COORDINATE_CENTER };
+                ui.add_enabled_ui(!forced, |ui| {
+                    let r = egui::ComboBox::from_id_salt("use_center").selected_text(egui::RichText::new(glyph(shown)).size(icons::SIZE)).width(34.0).show_ui(ui, |ui| {
+                        for m in CenterMode::ALL {
+                            // Local uses each object's own centre: Use Transform Center is unavailable.
+                            let off = m == CenterMode::TransformCoordinate && app.state.coord_system == CoordSystem::Local;
+                            if ui.add_enabled(!off, egui::SelectableLabel::new(cur == m, icons::labeled(glyph(m), m.label()))).clicked() {
+                                let _ = app.dispatch(Command::UseCenter { mode: m });
+                            }
+                        }
+                    });
+                    icons::named(&r.response, egui::WidgetType::ComboBox, shown.label());
+                });
+                ui.separator();
+            }
+            "Select and Manipulate" => tool_button(ui, app, icons::MANIPULATE, app.state.manipulate, "Select and Manipulate"),
+            "Keyboard Shortcut Override Toggle" => {
+                tool_button(ui, app, icons::KEYBOARD_OVERRIDE, app.state.keyboard_override, "Keyboard Shortcut Override Toggle");
+                ui.separator();
+            }
+            "Snaps Toggle" => {
+                // Flyout: 2D / 2.5D / 3D (Alt+S cycles); right-click opens Grid and Snap Settings.
+                let mode = app.state.snaps.mode;
+                // The magnet carries the mode's number, as the reference's 2 / 2.5 / 3 icons do.
+                let glyph = format!("{}{}", icons::SNAP, mode.label().trim_end_matches('D'));
+                let r = Icon::new(&glyph, "Snaps Toggle").on(app.state.snaps_on).hint("right-click: Grid and Snap Settings").show(ui, &app.state);
+                if r.clicked() {
+                    app.dispatch_named("Snaps Toggle");
+                }
+                if r.secondary_clicked() {
+                    let _ = app.dispatch(Command::GridAndSnapSettings);
+                }
+                egui::ComboBox::from_id_salt("snap_mode").selected_text("").width(14.0).show_ui(ui, |ui| {
+                    for m in [loom_commands::snap::SnapMode::Snap2D, loom_commands::snap::SnapMode::Snap25D, loom_commands::snap::SnapMode::Snap3D] {
+                        if ui.selectable_label(mode == m, format!("{} Snap", m.label())).clicked() {
+                            let _ = app.dispatch(Command::SnapSettings { mode: Some(m), marker_display: None, marker_size: None, preview_radius_px: None, radius_px: None, angle_deg: None, percent: None, use_axis_constraints: None, show_rubber_band: None });
+                        }
+                    }
+                });
+            }
+            "Angle Snap Toggle" => snap_button(ui, app, icons::ANGLE_SNAP, app.state.angle_snap_on, "Angle Snap Toggle"),
+            "Percent Snap Toggle" => snap_button(ui, app, icons::PERCENT_SNAP, app.state.percent_snap_on, "Percent Snap Toggle"),
+            "Spinner Snap Toggle" => {
+                // Right-click opens Preferences > General (the Spinners group), as in the reference.
+                let r = Icon::new(icons::SPINNER_SNAP, "Spinner Snap Toggle").on(app.state.prefs.spinner_snap).hint("right-click: Preferences").show(ui, &app.state);
+                if r.clicked() {
+                    app.dispatch_named("Spinner Snap Toggle");
+                }
+                if r.secondary_clicked() {
+                    crate::dialogs::preferences::open_on_general(ui.ctx());
+                    let _ = app.dispatch(Command::Preferences);
+                }
+                ui.separator();
+            }
+            "Manage Layers" => {
+                if Icon::new(icons::LAYERS, Command::LayerManager.name()).tip("Manage Layers (Layer Manager)").on(app.state.dialog == Some(loom_commands::Dialog::LayerManager)).show(ui, &app.state).clicked() {
+                    let _ = app.dispatch(Command::LayerManager);
+                }
+            }
+            "Graphite Modeling Tools" => {
+                if Icon::new(icons::GRAPHITE, Command::ShowRibbonToggle.name()).tip("Graphite Modeling Tools (show / hide the ribbon)").on(app.state.show_ribbon).show(ui, &app.state).clicked() {
+                    let _ = app.dispatch(Command::ShowRibbonToggle);
+                }
+            }
+            "Mirror" => {
+                if Icon::new(icons::MIRROR, "Mirror").show(ui, &app.state).clicked() {
+                    let _ = app.dispatch(Command::Mirror);
+                }
+            }
+            "Align" => {
+                // Align flyout: Align, Quick Align, Normal Align, Align Camera, Align to View.
+                let r = Icon::new(icons::ALIGN, "Align").hint("hold or right-click: Align flyout").show(ui, &app.state);
+                let (open_now, held) = icons::hold_opens(ui, &r);
+                if r.clicked() && !held {
+                    app.dispatch_named("Align");
+                }
+                let popup = ui.id().with("align_flyout");
+                if r.secondary_clicked() {
+                    ui.memory_mut(|m| m.toggle_popup(popup));
+                }
+                if open_now {
+                    ui.memory_mut(|m| m.open_popup(popup));
+                }
+                egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+                    ui.set_min_width(140.0);
+                    // A held press released over an entry picks it.
+                    let release = held && ui.input(|i| i.pointer.any_released());
+                    for (g, l, a) in [(icons::ALIGN, "Align", "Align"), (icons::QUICK_ALIGN, "Quick Align", "Quick Align"), (icons::NORMAL_ALIGN, "Normal Align", "Normal Align "), (icons::ALIGN_CAMERA, "Align Camera", "Align Camera"), (icons::ALIGN_TO_VIEW, "Align to View", "Align to View Dialog")] {
+                        let e = ui.add(menu_widget(&app.state, &icons::labeled(g, l), a)).on_hover_name(&app.state, a);
+                        if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
+                            ui.memory_mut(|m| m.close_popup());
+                            app.dispatch_named(a);
+                        }
+                    }
+                });
+                ui.separator();
+            }
+            "Edit Named Selection Sets" => {
+                if Icon::new(icons::NAMED_SETS, "Edit Named Selection Sets").show(ui, &app.state).clicked() {
+                    let _ = app.dispatch(Command::EditNamedSelectionSets);
+                }
+            }
+            "Named Selection Sets" => named_selection_sets(ui, app),
+            "Render Setup" => {
+                ui.separator();
+                if Icon::new(icons::RENDER_SETUP, "Render SetUp...").tip("Render Setup").show(ui, &app.state).clicked() {
+                    app.dispatch_named("Render SetUp...");
+                }
+            }
+            "Rendered Frame Window" => {
+                if Icon::new(icons::RENDERED_FRAME_WINDOW, "Rendered Frame Window").on(app.state.rendered.open).show(ui, &app.state).clicked() {
+                    app.dispatch_named("Rendered Frame Window");
+                }
+            }
+            "Render Production" => {
+                // Render flyout: Production / Iterative (right-click).
+                let iterative = app.state.rendered.iterative;
+                let action = if iterative { "Render Iterative" } else { "Render" };
+                let icon = Icon::new(icons::RENDER, action).tip(if iterative { "Render Iterative" } else { "Render Production" }).hint("hold or right-click: Render flyout");
+                let r = if iterative { icon.color(icons::SUB_OBJECT_VARIANT) } else { icon }.show(ui, &app.state);
+                let (open_now, held) = icons::hold_opens(ui, &r);
+                if r.clicked() && !held {
+                    app.dispatch_named(action);
+                }
+                let popup = ui.id().with("render_flyout");
+                if r.secondary_clicked() {
+                    ui.memory_mut(|m| m.toggle_popup(popup));
+                }
+                if open_now {
+                    ui.memory_mut(|m| m.open_popup(popup));
+                }
+                egui::popup::popup_below_widget(ui, popup, &r, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+                    ui.set_min_width(140.0);
+                    let release = held && ui.input(|i| i.pointer.any_released());
+                    for (l, it) in [("Render Production", false), ("Render Iterative", true)] {
+                        let e = ui.add(menu_widget(&app.state, &icons::labeled(icons::RENDER, l), if it { "Render Iterative" } else { "Render" }));
+                        if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
+                            ui.memory_mut(|m| m.close_popup());
+                            let _ = app.dispatch(Command::RenderViewport { viewport: None, lock: None, iterative: Some(it) });
+                            app.dispatch_named(if it { "Render Iterative" } else { "Render" });
+                        }
+                    }
+                });
+            }
+            "Curve Editor" => {
+                ui.separator();
+                if Icon::new(icons::CURVE_EDITOR, Command::TrackViewFloater.name()).tip("Curve Editor (Open)").on(app.state.track_view.open && app.state.track_view.mode == loom_commands::track_view::TvMode::CurveEditor).show(ui, &app.state).clicked() {
+                    let _ = app.dispatch(Command::TrackViewFloater);
+                }
+            }
+            "Material Editor" => {
+                let r = Icon::new(icons::MATERIAL_EDITOR, Command::MaterialEditorToggle.name()).tip("Material Editor").on(app.state.material_editor_open).show(ui, &app.state);
+                if r.clicked() {
+                    let _ = app.dispatch(Command::MaterialEditorToggle);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]

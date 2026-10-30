@@ -10,6 +10,59 @@ use loom_commands::AppState;
 /// The icon font's name in the font definitions.
 pub const FONT: &str = "phosphor";
 
+thread_local! {
+    /// Icon button glyph size (Preferences > Large Toolbar Buttons), set each frame.
+    static ICON_SIZE: std::cell::Cell<f32> = const { std::cell::Cell::new(SIZE) };
+    /// Flyout Time in seconds (Preferences), set each frame.
+    static FLYOUT_TIME: std::cell::Cell<f64> = const { std::cell::Cell::new(0.3) };
+}
+
+/// The icon button glyph size this frame.
+pub fn size() -> f32 {
+    ICON_SIZE.with(|s| s.get())
+}
+
+/// Preferences > General > UI Display: Large Toolbar Buttons and Flyout Time.
+pub fn set_prefs(large: bool, flyout_ms: f32) {
+    ICON_SIZE.with(|s| s.set(if large { 24.0 } else { SIZE }));
+    FLYOUT_TIME.with(|t| t.set(flyout_ms as f64 / 1000.0));
+}
+
+/// A flyout button's click-and-hold: true on the frame the press has lasted
+/// the Flyout Time (the flyout opens then); `took` tells whether that press
+/// opened it, so its release does not also run the button.
+pub fn hold_opens(ui: &egui::Ui, r: &egui::Response) -> (bool, bool) {
+    let start_id = r.id.with("hold_start");
+    let took_id = r.id.with("hold_took");
+    let now = ui.input(|i| i.time);
+    let took: bool = ui.ctx().data(|d| d.get_temp(took_id)).unwrap_or(false);
+    if r.is_pointer_button_down_on() && !r.dragged() {
+        let start: f64 = ui.ctx().data_mut(|d| *d.get_temp_mut_or_insert_with(start_id, || now));
+        if took {
+            return (false, true);
+        }
+        if now - start >= FLYOUT_TIME.with(|t| t.get()) {
+            ui.ctx().data_mut(|d| d.insert_temp(took_id, true));
+            return (true, true);
+        }
+        ui.ctx().request_repaint();
+        (false, false)
+    } else if took && ui.input(|i| i.pointer.any_down()) {
+        // Still held after moving off the button toward the strip.
+        (false, true)
+    } else {
+        // The release frame still reports the hold, so its click is ignored.
+        ui.ctx().data_mut(|d| {
+            d.remove::<f64>(start_id);
+            d.remove::<bool>(took_id);
+        });
+        (false, took)
+    }
+}
+
+/// egui memory: the tooltip of the button under the pointer, which the prompt line shows.
+pub const PROMPT_TIP: &str = "prompt_line_tooltip";
+
 /// Glyph size of an icon button (the reference toolbars use about 16 px icons).
 pub const SIZE: f32 = 16.0;
 
@@ -348,13 +401,16 @@ impl<'a> Icon<'a> {
     pub fn show(self, ui: &mut egui::Ui, state: &AppState) -> egui::Response {
         let mut text = match self.label {
             Some(l) => egui::RichText::new(format!("{}  {l}", self.glyph)),
-            None => egui::RichText::new(self.glyph).size(SIZE),
+            None => egui::RichText::new(self.glyph).size(size()),
         };
         if let Some(c) = self.color {
             text = text.color(c);
         }
         let hover = self.hover_text(state);
         let r = ui.add_enabled(self.enabled, egui::Button::new(text).selected(self.on));
+        if r.hovered() {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(PROMPT_TIP), hover.clone()));
+        }
         // Screen readers (and the UI tests) know the button by its name, not its glyph.
         let name = self.text.unwrap_or(self.action);
         r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, self.enabled, self.on, name));
@@ -372,6 +428,127 @@ pub fn small(ui: &mut egui::Ui, glyph: &str, name: &str) -> egui::Response {
     let r = ui.small_button(glyph);
     named(&r, egui::WidgetType::Button, name);
     r.on_hover_text(name)
+}
+
+/// The icons actions have where the program shows them on a button: the
+/// Customize User Interface Action lists show them, and an action dropped on
+/// a toolbar becomes this icon (actions without one become text buttons).
+pub const ACTION_ICONS: &[(&str, &str)] = &[
+    ("Undo Scene Operation", UNDO),
+    ("Redo Scene Operation", REDO),
+    ("Select and Link", LINK),
+    ("Unlink Selection", UNLINK),
+    ("Select Object", SELECT_OBJECT),
+    ("Select By Name", SELECT_BY_NAME),
+    ("Window/Crossing Selection Toggle", CROSSING),
+    ("Select and Move", MOVE),
+    ("Select and Rotate", ROTATE),
+    ("Select and Scale", SCALE),
+    ("Select and Manipulate", MANIPULATE),
+    ("Keyboard Shortcut Override Toggle", KEYBOARD_OVERRIDE),
+    ("Snaps Toggle", SNAP),
+    ("Angle Snap Toggle", ANGLE_SNAP),
+    ("Percent Snap Toggle", PERCENT_SNAP),
+    ("Spinner Snap Toggle", SPINNER_SNAP),
+    ("Edit Named Selection Sets", NAMED_SETS),
+    ("Mirror", MIRROR),
+    ("Align", ALIGN),
+    ("Quick Align", QUICK_ALIGN),
+    ("Normal Align ", NORMAL_ALIGN),
+    ("Align Camera", ALIGN_CAMERA),
+    ("Align to View Dialog", ALIGN_TO_VIEW),
+    ("Layer Manager", LAYERS),
+    ("Show Ribbon Toggle", GRAPHITE),
+    ("Track View Floater", CURVE_EDITOR),
+    ("Material Editor Toggle", MATERIAL_EDITOR),
+    ("Render SetUp...", RENDER_SETUP),
+    ("Rendered Frame Window", RENDERED_FRAME_WINDOW),
+    ("Render", RENDER),
+    ("New Scene", NEW_SCENE),
+    ("Open File", OPEN_FILE),
+    ("Save File", SAVE_FILE),
+    ("Selection Lock Toggle", LOCKED),
+    ("Set Keys", SET_KEYS),
+    ("Next/Previous Key Mode Toggle", KEY_MODE),
+    ("Time Configuration", TIME_CONFIGURATION),
+    ("Go to Start Frame", GO_TO_START),
+    ("Backup Time One Unit", PREVIOUS_FRAME),
+    ("Play Animation", PLAY),
+    ("Forward Time One Unit", NEXT_FRAME),
+    ("Go to End Frame", GO_TO_END),
+    ("Zoom Mode", ZOOM),
+    ("Zoom All", ZOOM_ALL),
+    ("Zoom Extents", ZOOM_EXTENTS),
+    ("Zoom Extents All", ZOOM_EXTENTS_ALL),
+    ("Zoom Region Mode", ZOOM_REGION),
+    ("Field-of-View Mode", FIELD_OF_VIEW),
+    ("Pan View", PAN),
+    ("Orbit View Mode", ORBIT),
+    ("Maximize Viewport Toggle", MAXIMIZE),
+    ("Hide Selection", HIDE),
+    ("Unhide All", UNHIDE_ALL),
+    ("Freeze Selection", FREEZE),
+    ("Unfreeze All", UNFREEZE_ALL),
+    ("Repeat Last Operation", REPEAT_LAST),
+    ("Quickslice Mode", QUICKSLICE),
+    ("Swift Loop Mode", SWIFT_LOOP),
+    ("Cut", CUT),
+    ("Grow Selection", GROW),
+    ("Shrink Selection", SHRINK),
+    ("Select Edge Loop", LOOP),
+    ("Select Edge Ring", RING),
+    ("Relax", RELAX),
+    ("Create", CREATE),
+    ("Attach", ATTACH),
+    ("Detach", DETACH),
+    ("Slice Plane Mode", SLICE_PLANE),
+    ("Extrude Mode", EXTRUDE),
+    ("Chamfer Mode", CHAMFER),
+    ("Weld Settings", WELD),
+    ("Remove", REMOVE),
+    ("Break", BREAK),
+    ("Target Weld Mode", TARGET_WELD),
+    ("Bridge Settings", BRIDGE),
+    ("Split Edges", SPLIT),
+    ("Insert Vertex Mode", INSERT_VERTEX),
+    ("Connect", CONNECT),
+    ("Cap", CAP),
+    ("Bevel Mode", BEVEL),
+    ("Inset Mode", INSET),
+    ("Outline Mode", OUTLINE),
+    ("Hinge from Edge Mode", HINGE),
+    ("Flip Normals", FLIP),
+    ("MeshSmooth", MSMOOTH),
+    ("Tessellate", TESSELLATE),
+    ("Make Planar", MAKE_PLANAR),
+    ("Convert to Editable Poly", CONVERT_TO_POLY),
+];
+
+/// The icon an action shows on a button, if it has one.
+pub fn for_action(action: &str) -> Option<&'static str> {
+    ACTION_ICONS.iter().find(|(a, _)| *a == action).map(|(_, g)| *g)
+}
+
+/// Edit Button Appearance > Image Button: the icons to choose from, by name.
+pub const GALLERY: &[(&str, &str)] = &[
+    ("Undo", UNDO), ("Redo", REDO), ("Link", LINK), ("Unlink", UNLINK), ("Select", SELECT_OBJECT), ("Select By Name", SELECT_BY_NAME),
+    ("Move", MOVE), ("Rotate", ROTATE), ("Scale", SCALE), ("Manipulate", MANIPULATE), ("Keyboard", KEYBOARD_OVERRIDE), ("Snap", SNAP),
+    ("Angle Snap", ANGLE_SNAP), ("Percent Snap", PERCENT_SNAP), ("Spinner Snap", SPINNER_SNAP), ("Named Sets", NAMED_SETS), ("Mirror", MIRROR),
+    ("Align", ALIGN), ("Quick Align", QUICK_ALIGN), ("Normal Align", NORMAL_ALIGN), ("Camera", ALIGN_CAMERA), ("View", ALIGN_TO_VIEW),
+    ("Layers", LAYERS), ("Ribbon", GRAPHITE), ("Curve Editor", CURVE_EDITOR), ("Material Editor", MATERIAL_EDITOR), ("Render Setup", RENDER_SETUP),
+    ("Frame Window", RENDERED_FRAME_WINDOW), ("Render", RENDER), ("New", NEW_SCENE), ("Open", OPEN_FILE), ("Save", SAVE_FILE),
+    ("Geometry", GEOMETRY), ("Shapes", SHAPES), ("Lights", LIGHTS), ("Cameras", CAMERAS), ("Helpers", HELPERS), ("Systems", SYSTEMS),
+    ("Pin", PIN_STACK), ("Settings", SETTINGS), ("Lock", LOCKED), ("Key", SET_KEYS), ("Clock", TIME_CONFIGURATION), ("Play", PLAY),
+    ("Zoom", ZOOM), ("Zoom All", ZOOM_ALL), ("Zoom Extents", ZOOM_EXTENTS), ("Zoom Region", ZOOM_REGION), ("Pan", PAN), ("Orbit", ORBIT),
+    ("Maximize", MAXIMIZE), ("Hide", HIDE), ("Unhide", UNHIDE_ALL), ("Freeze", FREEZE), ("Unfreeze", UNFREEZE_ALL), ("Repeat", REPEAT_LAST),
+    ("Cut", CUT), ("Grow", GROW), ("Shrink", SHRINK), ("Loop", LOOP), ("Ring", RING), ("Relax", RELAX), ("Create", CREATE), ("Attach", ATTACH),
+    ("Detach", DETACH), ("Extrude", EXTRUDE), ("Chamfer", CHAMFER), ("Weld", WELD), ("Bridge", BRIDGE), ("Connect", CONNECT), ("Bevel", BEVEL),
+    ("Inset", INSET), ("Outline", OUTLINE), ("Flip", FLIP), ("Smooth", MSMOOTH), ("Tessellate", TESSELLATE), ("Bone", KIND_BONE), ("Group", KIND_GROUP),
+];
+
+/// A gallery icon by its name.
+pub fn by_name(name: &str) -> Option<&'static str> {
+    GALLERY.iter().find(|(n, _)| *n == name).map(|(_, g)| *g)
 }
 
 /// A menu or list row: the icon, then its name.

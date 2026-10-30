@@ -42,6 +42,10 @@ pub fn open_on_general(ctx: &egui::Context) {
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let tab_id = egui::Id::new("preferences_tab");
     let mut tab: Tab = ctx.data(|d| d.get_temp(tab_id)).unwrap_or_default();
+    // The values when the dialog opened: Cancel puts them back.
+    let snapshot_id = egui::Id::new("preferences_snapshot");
+    let snapshot: loom_commands::Prefs = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(snapshot_id, || app.state.prefs.clone()).clone());
+    let mut done = false;
     egui::Window::new("Preference Settings").open(open).resizable(false).default_width(560.0).show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut tab, Tab::General, "General");
@@ -67,6 +71,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         check(ui, app, "Keep Creating", "Keep Creating");
                     });
                     ui.group(|ui| {
+                        ui.label(egui::RichText::new("UI Display").strong());
+                        check(ui, app, "Topology Dependence Warning", "Topology Dependence Warning");
+                        check(ui, app, "Large Toolbar Buttons", "Large Toolbar Buttons");
+                        ui.horizontal(|ui| number(ui, app, "Flyout Time", "Flyout Time (ms):", 0.0..=2000.0, 0));
+                    });
+                    ui.group(|ui| {
                         ui.label(egui::RichText::new("Spinners").strong());
                         ui.horizontal(|ui| number(ui, app, "Spinner Precision", "Precision:", 0.0..=10.0, 0));
                         ui.horizontal(|ui| number(ui, app, "Spinner Snap", "Snap:", 0.001..=1000.0, 3));
@@ -82,7 +92,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             Tab::Files => {
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("File Handling").strong());
+                    check(ui, app, "Backup on Save", "Backup on Save");
+                    check(ui, app, "Increment on Save", "Increment on Save");
                     ui.horizontal(|ui| number(ui, app, "Recent Files in File Menu", "Recent Files in File Menu:", 0.0..=50.0, 0));
+                });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Import Options").strong());
+                    check(ui, app, "Zoom Extents on Import", "Zoom Extents on Import");
                 });
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("Auto Backup").strong());
@@ -115,7 +131,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.label(egui::RichText::new("Viewport Parameters").strong());
                     check(ui, app, "Viewport Tooltips", "Viewport tooltips");
                     check(ui, app, "Show Cross Hair Cursor", "Show cross hair cursor");
+                    check(ui, app, "Display World Axis", "Display World Axis");
+                    check(ui, app, "Mask Viewport to Safe Region", "Mask Viewport to Safe Region");
                     ui.horizontal(|ui| number(ui, app, "Grid Nudge Distance", "Grid Nudge Distance:", 0.0..=10_000.0, 3));
+                });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Mouse Control").strong());
+                    ui.label("Zoom About Mouse Point:");
+                    ui.horizontal(|ui| {
+                        check(ui, app, "Zoom About Mouse Point Orthographic", "Orthographic");
+                        check(ui, app, "Zoom About Mouse Point Perspective", "Perspective");
+                    });
+                    check(ui, app, "Right Click Menu over Selected Only", "Right Click Menu over Selected Only");
+                    ui.horizontal(|ui| number(ui, app, "Wheel Zoom Increment", "Wheel Zoom Increment:", 0.1..=10.0, 2));
                 });
             }
             Tab::Gizmos => {
@@ -154,9 +182,31 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 });
             }
         }
-        if ui.button("OK").clicked() {
-            let _ = app.dispatch(Command::CloseDialog);
-        }
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                // Every preference back to its value when the dialog opened.
+                for name in loom_commands::Prefs::NAMES.iter().chain(["Viewport Orbit Snap Angle"].iter()) {
+                    if let (Some(was), Some(now)) = (snapshot.get(name), app.state.prefs.get(name)) {
+                        if was != now {
+                            set(app, name, was);
+                        }
+                    }
+                }
+                if app.state.prefs.auto_backup_name != snapshot.auto_backup_name {
+                    let _ = app.dispatch(Command::SetAutoBackupName { name: snapshot.auto_backup_name.clone() });
+                }
+                done = true;
+            }
+        });
     });
+    if done || !*open {
+        ctx.data_mut(|d| d.remove::<loom_commands::Prefs>(snapshot_id));
+    }
+    if done {
+        let _ = app.dispatch(Command::CloseDialog);
+    }
     ctx.data_mut(|d| d.insert_temp(tab_id, tab));
 }

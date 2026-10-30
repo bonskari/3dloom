@@ -62,6 +62,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::State => Ok(snapshot(state)),
         C::SplineSelectSet { level, ids, op } => spline_select_set(state, level, ids, op),
         c if crate::anim_cmds::handles(&c) => crate::anim_cmds::execute(state, c),
+        c if crate::ui_custom::handles(&c) => crate::ui_custom::execute(state, c),
+        c if crate::time_tags::handles(&c) => crate::time_tags::execute(state, c),
+        c if crate::time_display::handles(&c) => crate::time_display::execute(state, c),
+        c if crate::rename_objects::handles(&c) => crate::rename_objects::execute(state, c),
+        c if crate::viewport_config::handles(&c) => crate::viewport_config::execute(state, c),
+        c if crate::paths::handles(&c) => crate::paths::execute(state, c),
+        c if crate::switcher::handles(&c) => crate::switcher::execute(state, c),
         c if crate::material::handles(&c) => crate::material::execute(state, c),
         c if crate::material_library::handles(&c) => crate::material_library::execute(state, c),
         c if crate::display::handles(&c) => crate::display::execute(state, c),
@@ -141,6 +148,24 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             };
             let path = std::path::PathBuf::from(path);
             let (doc, warnings) = crate::file::read_any(&path)?;
+            // A file in other system units: the Units Mismatch dialog asks (Respect System Units in Files).
+            let file_metres = doc.settings.units.system_scale as f64 * doc.settings.units.system_unit.metres();
+            let ours = &state.default_units;
+            let our_metres = ours.system_scale as f64 * ours.system_unit.metres();
+            if !crate::max_io::is_max(&path) && (file_metres / our_metres - 1.0).abs() > 1e-6 {
+                if ours.respect_system_units {
+                    state.units_mismatch = Some(path.clone());
+                    state.dialog = Some(Dlg::UnitsMismatch);
+                    return Ok(json!({ "dialog": "UnitsMismatch", "file_unit": doc.settings.units.system_unit.label(), "file_scale": doc.settings.units.system_scale }));
+                }
+                // Not respected: the file's numbers in our system units.
+                let (unit, scale) = (ours.system_unit, ours.system_scale);
+                crate::settings::note_recent(state, &path);
+                load_document(state, doc, Some(path));
+                state.units.system_unit = unit;
+                state.units.system_scale = scale;
+                return Ok(json!({ "nodes": state.scene.len() }));
+            }
             crate::settings::note_recent(state, &path);
             // A .max scene opens untitled: Save asks for a .loom file (there is no .max writer).
             let max = crate::max_io::is_max(&path);
@@ -155,15 +180,38 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({ "nodes": state.scene.len(), "missing": missing }))
         }
+        C::UnitsMismatchReply { rescale } => {
+            let path = state.units_mismatch.take().ok_or("no Units Mismatch is waiting")?;
+            if state.dialog == Some(Dlg::UnitsMismatch) {
+                state.dialog = None;
+            }
+            let doc = crate::file::read(&path)?;
+            let file_metres = doc.settings.units.system_scale as f64 * doc.settings.units.system_unit.metres();
+            let ours = state.default_units.clone();
+            let our_metres = ours.system_scale as f64 * ours.system_unit.metres();
+            crate::settings::note_recent(state, &path);
+            load_document(state, doc, Some(path));
+            if rescale {
+                // Rescale the file's objects to the system unit scale.
+                state.units.system_unit = ours.system_unit;
+                state.units.system_scale = ours.system_scale;
+                execute(state, C::RescaleWorldUnits { factor: (file_metres / our_metres) as f32 })?;
+            }
+            // Adopt: the scene keeps the file's unit scale (new scenes keep the user's).
+            Ok(json!({ "nodes": state.scene.len(), "rescaled": rescale }))
+        }
         C::SaveFile { path } => {
             let target = match (path, state.file.clone()) {
                 (Some(p), _) => std::path::PathBuf::from(p),
+                // Preferences > Files > Increment on Save: the next numbered name.
+                (None, Some(_)) if state.prefs.increment_on_save => return execute(state, C::SaveIncremental),
                 (None, Some(f)) => f,
                 (None, None) => {
                     state.dialog = Some(Dlg::SaveFileAs);
                     return Ok(json!({ "dialog": "SaveFileAs" }));
                 }
             };
+            backup_previous(state, &target)?;
             save_to(state, &target)?;
             crate::settings::note_recent(state, &target);
             state.file = Some(target.clone());
@@ -219,6 +267,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.current_frame = fresh.current_frame;
             state.named_sets.clear();
             state.named_sub_selections.clear();
+            state.time_tags.clear();
+            state.time_config = Default::default();
+            if state.use_viewport_defaults {
+                crate::viewport_config::apply_defaults(state);
+            }
             state.undo = loom_scene::UndoStack::new(state.undo.limit());
             state.autosave.last_version = None;
             clear_selection(state);
@@ -287,23 +340,25 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Ok(json!({ "dialog": "ImportFile" }));
             };
             let path = std::path::PathBuf::from(path);
-            if crate::max_io::is_max(&path) {
-                return crate::max_io::import(state, &path);
+            let before = state.scene.len();
+            let r = if crate::max_io::is_max(&path) {
+                crate::max_io::import(state, &path)
+            } else if crate::fbx_io::is_fbx(&path) {
+                crate::fbx_io::import(state, &path).map(|ids| json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
+            } else if crate::geom_io::is_3ds(&path) {
+                crate::geom_io::import_3ds(state, &path)
+            } else if crate::geom_io::is_stl(&path) {
+                crate::geom_io::import_stl(state, &path)
+            } else if crate::geom_io::is_dxf(&path) {
+                crate::geom_io::import_dxf(state, &path)
+            } else {
+                crate::obj_io::import(state, &path)
+            }?;
+            // Preferences > Files > Zoom Extents on Import.
+            if state.prefs.zoom_extents_on_import && state.scene.len() > before {
+                execute(state, C::ZoomExtentsAll)?;
             }
-            if crate::fbx_io::is_fbx(&path) {
-                let ids = crate::fbx_io::import(state, &path)?;
-                return Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }));
-            }
-            if crate::geom_io::is_3ds(&path) {
-                return crate::geom_io::import_3ds(state, &path);
-            }
-            if crate::geom_io::is_stl(&path) {
-                return crate::geom_io::import_stl(state, &path);
-            }
-            if crate::geom_io::is_dxf(&path) {
-                return crate::geom_io::import_dxf(state, &path);
-            }
-            crate::obj_io::import(state, &path)
+            Ok(r)
         }
         C::ExportFile { path } => {
             let Some(path) = path else {
@@ -853,8 +908,24 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::ViewCubeToggle => toggle(&mut state.viewcube.show, "viewcube"),
-        C::SetViewCubeOptions { show, all_views, size, inactive_opacity, compass } => {
+        C::SetCurrentViewAsFront => {
+            // Front looks along +Y (yaw -90 degrees); the view's yaw from there is the new north.
+            let yaw = state.active().camera.yaw;
+            let front = ViewKind::Front.angles().map(|a| a.0).unwrap_or(-std::f32::consts::FRAC_PI_2);
+            state.viewcube.north = loom_input::camera_control::wrap_angle(yaw - front).to_degrees();
+            Ok(json!({ "north": state.viewcube.north }))
+        }
+        C::ResetFront => {
+            state.viewcube.north = 0.0;
+            Ok(json!({ "north": 0.0 }))
+        }
+        C::SetViewCubeOptions { show, all_views, size, inactive_opacity, compass, snap_to_closest, fit_to_view, animated, keep_upright, north } => {
             let v = &mut state.viewcube;
+            if let Some(b) = snap_to_closest { v.snap_to_closest = b; }
+            if let Some(b) = fit_to_view { v.fit_to_view = b; }
+            if let Some(b) = animated { v.animated = b; }
+            if let Some(b) = keep_upright { v.keep_upright = b; }
+            if let Some(n) = north { v.north = loom_input::camera_control::wrap_angle(n.to_radians()).to_degrees(); }
             if let Some(b) = show { v.show = b; }
             if let Some(b) = all_views { v.all_views = b; }
             if let Some(n) = size { v.size = n.min(3) as u8; }
@@ -964,6 +1035,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ShowMainToolbarToggle => toggle(&mut state.show_main_toolbar, "main_toolbar"),
         C::LockUserInterfaceToggle => toggle(&mut state.ui_locked, "ui_locked"),
         C::ExpertModeToggle => toggle(&mut state.expert_mode, "expert_mode"),
+        C::DisplayFloater => toggle(&mut state.display_floater, "display_floater"),
         C::DisplayAsSeeThroughToggle => {
             let ids = selected_ids(state);
             if ids.is_empty() {
@@ -1676,7 +1748,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(Dlg::UnitsSetup);
             Ok(json!({}))
         }
-        C::SetUnits { system_unit, system_scale, display, custom_name, custom_value, custom_unit } => {
+        C::SetUnits { system_unit, system_scale, display, custom_name, custom_value, custom_unit, fraction, default_feet, respect_system_units } => {
             use crate::state::{DisplayUnits, SystemUnit};
             if let Some(u) = system_unit {
                 state.units.system_unit = SystemUnit::parse(&u).ok_or_else(|| format!("unknown system unit {u:?}"))?;
@@ -1686,14 +1758,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             if let Some(d) = display {
                 state.units.display = match d.as_str() {
-                    "Generic" => DisplayUnits::Generic,
-                    "Millimeters" => DisplayUnits::Millimeters,
-                    "Centimeters" => DisplayUnits::Centimeters,
-                    "Meters" => DisplayUnits::Meters,
-                    "Kilometers" => DisplayUnits::Kilometers,
-                    "Decimal Inches" => DisplayUnits::DecimalInches,
-                    "Decimal Feet" => DisplayUnits::DecimalFeet,
-                    "Feet w/ Decimal Inches" => DisplayUnits::FeetDecimalInches,
+                    n if DisplayUnits::by_name(n).is_some() => DisplayUnits::by_name(n).expect("checked"),
                     "Custom" => {
                         let (name, value, unit) = match &state.units.display {
                             DisplayUnits::Custom { name, value, unit } => (name.clone(), *value, *unit),
@@ -1711,6 +1776,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 if let Some(n) = custom_name { *name = n; }
                 if let Some(v) = custom_value { *value = v.max(1e-6); }
                 if let Some(u) = custom_unit { *unit = SystemUnit::parse(&u).ok_or_else(|| format!("unknown custom unit {u:?}"))?; }
+            }
+            if let Some(f) = fraction {
+                if !DisplayUnits::FRACTIONS.contains(&f) {
+                    return Err(format!("fraction 1/{f}: one of {:?}", DisplayUnits::FRACTIONS));
+                }
+                state.units.fraction = f;
+            }
+            if let Some(f) = default_feet {
+                state.units.default_feet = f;
+            }
+            if let Some(r) = respect_system_units {
+                state.units.respect_system_units = r;
             }
             state.default_units = state.units.clone();
             Ok(json!({ "display": state.units.display.label(), "example": state.format_units(1.0) }))
@@ -1752,13 +1829,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             back_to_keyboard_panel(state);
             Ok(json!({ "path": path, "groups": rows.len() }))
         }
-        C::SaveCustomUiScheme { path } => {
+        C::SaveCustomUiScheme { path, parts } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::SaveCustomUiScheme);
                 return Ok(json!({ "dialog": "SaveCustomUiScheme" }));
             };
-            write_text(&path, &crate::settings::scheme_to_text(state))?;
-            Ok(json!({ "path": path }))
+            let parts: Vec<String> = parts.unwrap_or_else(|| crate::settings::SCHEME_PARTS.iter().map(|p| (*p).to_owned()).collect());
+            if let Some(bad) = parts.iter().find(|p| !crate::settings::SCHEME_PARTS.contains(&p.as_str())) {
+                return Err(format!("unknown scheme part {bad:?} ({})", crate::settings::SCHEME_PARTS.join(", ")));
+            }
+            let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+            write_text(&path, &crate::settings::scheme_parts_to_text(state, &parts))?;
+            Ok(json!({ "path": path, "parts": parts }))
         }
         C::LoadCustomUiScheme { path } => {
             let Some(path) = path else {
@@ -1772,6 +1854,11 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::RevertToStartupUi => {
             let ui = state.startup_ui;
             ui.apply(state);
+            let start = state.startup_custom.clone();
+            let c = &mut state.ui_custom;
+            (c.toolbars, c.docks, c.float_pos, c.shown, c.looks, c.colors) = (start.toolbars, start.docks, start.float_pos, start.shown, start.looks, start.colors);
+            state.grid_dirty = true;
+            state.mesh_dirty = true;
             Ok(json!({}))
         }
         C::ShowCommandPanelToggle => toggle(&mut state.show_command_panel, "show_command_panel"),
@@ -3005,6 +3092,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.prefs.gizmos.size = (state.prefs.gizmos.size - 2.0).max(1.0);
             Ok(json!({ "size": state.prefs.gizmos.size }))
         }
+        C::SetAxisConstraint { constraint } => {
+            state.axis_constraint = match constraint.to_ascii_uppercase().as_str() {
+                "X" => AxisConstraint::X,
+                "Y" => AxisConstraint::Y,
+                "Z" => AxisConstraint::Z,
+                "XY" => AxisConstraint::XY,
+                "YZ" => AxisConstraint::YZ,
+                "ZX" => AxisConstraint::ZX,
+                _ => return Err(format!("unknown axis constraint {constraint:?} (X, Y, Z, XY, YZ, ZX)")),
+            };
+            Ok(json!({ "constraint": format!("{:?}", state.axis_constraint) }))
+        }
         C::TransformGizmoPlaneConstraintCycle => {
             state.axis_constraint = match state.axis_constraint {
                 AxisConstraint::XY => AxisConstraint::YZ,
@@ -3650,6 +3749,20 @@ pub(crate) fn unique_name(name: &str, taken: &std::collections::BTreeSet<String>
     (1..).map(|n| format!("{base}{n:03}")).find(|c| !taken.contains(c)).expect("a free name exists")
 }
 
+/// Preferences > Files > Backup on Save: the file about to be overwritten is
+/// kept as `<name>.bak.loom` in the autoback folder.
+fn backup_previous(state: &AppState, path: &std::path::Path) -> Result<(), String> {
+    if !state.prefs.backup_on_save || !path.is_file() {
+        return Ok(());
+    }
+    let dir = crate::autosave::autoback_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "scene".into());
+    let bak = dir.join(format!("{stem}.bak.loom"));
+    std::fs::copy(path, &bak).map_err(|e| format!("{}: {e}", bak.display()))?;
+    Ok(())
+}
+
 fn save_to(state: &AppState, path: &std::path::Path) -> Result<(), String> {
     let doc = crate::file::Document {
         format: crate::file::FORMAT,
@@ -3758,7 +3871,7 @@ fn back_to_keyboard_panel(state: &mut AppState) {
 }
 
 /// Writes a settings-style text file, making its folder first.
-fn write_text(path: &str, text: &str) -> Result<(), String> {
+pub(crate) fn write_text(path: &str, text: &str) -> Result<(), String> {
     let path = std::path::Path::new(path);
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;

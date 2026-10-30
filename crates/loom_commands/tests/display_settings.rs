@@ -74,7 +74,7 @@ fn object_color_dialog_colours_the_selection_and_sets_the_colour_for_new_objects
 fn statistics_and_safe_frame_options_are_kept_in_the_scene_file() {
     let mut s = AppState::new();
     execute(&mut s, Command::SetStatistics { polygons: Some(false), triangles: None, edges: None, vertices: None, fps: Some(false), scope: Some("Total + Selection".into()), default_settings: None }).unwrap();
-    execute(&mut s, Command::SetSafeFrames { live_area: None, action_safe: None, title_safe: None, user_safe: Some(true), grid: Some(true), action: Some([5.0, 6.0]), title: None, user: Some([120.0, 30.0]), grid_4x3: Some(false) }).unwrap();
+    execute(&mut s, Command::SetSafeFrames { live_area: None, action_safe: None, title_safe: None, user_safe: Some(true), grid: Some(true), action: Some([5.0, 6.0]), title: None, user: Some([120.0, 30.0]), grid_4x3: Some(false), lock: None, region: None, default_settings: None }).unwrap();
     assert_eq!(s.display.safe_frames.user, [99.0, 30.0], "a frame keeps at least 1 % of the live area");
     execute(&mut s, Command::DisplaySelectedEdgedFacesToggle).unwrap();
     let path = std::env::temp_dir().join("loom-display-settings.loom");

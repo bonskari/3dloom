@@ -30,17 +30,26 @@ fn flyout_icon<'a>(glyph: &'a str, color: Option<egui::Color32>, hover: &'a str,
 
 fn flyout<const N: usize>(ui: &mut egui::Ui, app: &mut LoomApp, id: &str, current: usize, items: [FlyoutItem; N]) {
     let (glyph, color, hover, cmd) = &items[current];
-    let resp = flyout_icon(glyph, *color, hover, cmd).hint("right-click: flyout").show(ui, &app.state);
-    if resp.clicked() {
+    let resp = flyout_icon(glyph, *color, hover, cmd).hint("hold or right-click: flyout").show(ui, &app.state);
+    // Click-and-hold for the Flyout Time opens the strip (its release runs nothing).
+    let (open_now, held) = icons::hold_opens(ui, &resp);
+    if resp.clicked() && !held {
         let _ = app.dispatch(cmd.clone());
     }
     let popup = ui.id().with(id);
     if resp.secondary_clicked() || resp.long_touched() {
         ui.memory_mut(|m| m.toggle_popup(popup));
     }
+    if open_now {
+        ui.memory_mut(|m| m.open_popup(popup));
+    }
     egui::popup::popup_above_or_below_widget(ui, popup, &resp, egui::AboveOrBelow::Above, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+        // A held press released over an entry picks it.
+        let release = held && ui.input(|i| i.pointer.any_released());
         for (g, color, t, c) in &items {
-            if flyout_icon(g, *color, t, c).show(ui, &app.state).clicked() {
+            let e = flyout_icon(g, *color, t, c).show(ui, &app.state);
+            if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
+                ui.memory_mut(|m| m.close_popup());
                 let _ = app.dispatch(c.clone());
             }
         }
@@ -57,6 +66,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         });
         return;
     }
+    RED.with(|c| c.set(app.color("Auto Key Background")));
     egui::TopBottomPanel::bottom("statusbar").show(ctx, |ui| {
         // The status bar is two rows: selection / lock / coordinates / grid over
         // the prompt line, then the animation and viewport navigation blocks.
@@ -64,18 +74,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    let s = &app.state;
-                    let n = s.selection.len();
-                    let label = match (s.selection_mode, n) {
-                        (SelectionMode::Object, 0) => "None Selected".to_owned(),
-                        (SelectionMode::Object, 1) => {
-                            let id = s.selection.iter().next().unwrap();
-                            s.scene.node(*id).map(|n| n.name.clone()).unwrap_or_default()
-                        }
-                        (SelectionMode::Object, n) => format!("{n} Objects Selected"),
-                        (mode, _) => format!("{} {} Selected", s.sub_selection.len(), s.level_label(mode)),
-                    };
-                    ui.label(label);
+                    ui.label(selection_status(&app.state));
                     ui.separator();
                     // Selection Lock Toggle (Space).
                     let locked = app.state.selection_locked;
@@ -89,11 +88,28 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                     }
                     coordinate_fields(ui, app);
                     ui.separator();
-                    ui.label(format!("Grid = {}", app.state.home_grid.spacing));
+                    ui.label(format!("Grid = {}", app.state.format_units(app.state.grid_spacing())));
+                    ui.separator();
+                    // Adaptive Degradation: gold while on, aqua while it degrades the views.
+                    let d = &app.state.degradation;
+                    let fill = if app.degrading { egui::Color32::from_rgb(60, 200, 210) } else if d.on { egui::Color32::from_rgb(210, 170, 40) } else { egui::Color32::from_gray(70) };
+                    let text = egui::RichText::new("AD").color(if d.on { egui::Color32::BLACK } else { egui::Color32::WHITE });
+                    let r = ui.add(egui::Button::new(text).fill(fill));
+                    icons::named(&r, egui::WidgetType::Button, Command::AdaptiveDegradationToggle.name());
+                    let r = r.on_hover_name(&app.state, Command::AdaptiveDegradationToggle.name());
+                    if r.clicked() {
+                        let _ = app.dispatch(Command::AdaptiveDegradationToggle);
+                    }
+                    if r.secondary_clicked() {
+                        let _ = app.dispatch(Command::ConfigureViewports { panel: Some("Adaptive Degradation".into()) });
+                    }
                 });
                 ui.horizontal(|ui| {
                     let s = &app.state;
+                    // Tooltips show on the prompt line as the pointer passes over buttons.
+                    let hovered: Option<String> = ui.ctx().data(|d| d.get_temp(egui::Id::new("prompt_line_tooltip_last")));
                     let prompt = match (&app.create, s.pick_mode, s.nav_mode) {
+                        _ if hovered.is_some() => hovered.unwrap_or_default(),
                         (Some(c), _, _) => c.prompt().to_owned(),
                         (None, Some(_), _) => "Click an object".to_owned(),
                         (None, None, NavMode::None) => s.status_prompt.clone(),
@@ -202,7 +218,15 @@ fn camera_controls(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId)
             ]);
         });
         ui.horizontal(|ui| {
-            nav(ui, app, icons::FIELD_OF_VIEW, "Field-of-View", NavMode::Fov, Command::FieldOfViewMode);
+            // Right-click: Viewport Configuration (its Field Of View spinner).
+            let on = app.state.nav_mode == NavMode::Fov;
+            let r = Icon::new(icons::FIELD_OF_VIEW, Command::FieldOfViewMode.name()).tip("Field-of-View").on(on).hint("right-click: Viewport Configuration").show(ui, &app.state);
+            if r.clicked() {
+                let _ = app.dispatch(Command::FieldOfViewMode);
+            }
+            if r.secondary_clicked() {
+                let _ = app.dispatch(Command::ConfigureViewports { panel: Some("Rendering Method".into()) });
+            }
             nav(ui, app, icons::TRUCK, "Truck Camera Mode", NavMode::TruckCamera, Command::TruckCameraMode);
             let current = usize::from(app.state.nav_mode == NavMode::PanCamera);
             flyout(ui, app, "orbit_camera", current, [
@@ -215,6 +239,34 @@ fn camera_controls(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId)
             }
         });
     });
+}
+
+/// The status line: "None Selected", the count and type when every selected
+/// object is of one type ("2 Cameras Selected"), else "6 Objects Selected";
+/// at a sub-object level the sub-objects.
+pub fn selection_status(s: &loom_commands::AppState) -> String {
+    let n = s.selection.len();
+    if s.selection_mode != SelectionMode::Object {
+        return format!("{} {} Selected", s.sub_selection.len(), s.level_label(s.selection_mode));
+    }
+    if n == 0 {
+        return "None Selected".to_owned();
+    }
+    let kind = |id: &loom_scene::NodeId| {
+        let o = s.scene.node(*id).map(|n| &n.object);
+        match o {
+            Some(loom_scene::ObjectKind::Camera { .. }) => "Camera",
+            Some(loom_scene::ObjectKind::Light(_)) => "Light",
+            Some(loom_scene::ObjectKind::Group { .. }) => "Group",
+            Some(o) if o.is_shape() => "Shape",
+            Some(o) if o.is_bone() => "Bone",
+            Some(o) if o.is_helper() => "Helper",
+            _ => "Object",
+        }
+    };
+    let kinds: std::collections::BTreeSet<&str> = s.selection.iter().map(kind).collect();
+    let k = if kinds.len() == 1 { *kinds.iter().next().expect("one kind") } else { "Object" };
+    format!("{n} {k}{} Selected", if n == 1 { "" } else { "s" })
 }
 
 /// Light viewport controls: Dolly Light flyout (target lights also Dolly
@@ -259,8 +311,38 @@ fn light_controls(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) 
 }
 
 /// X/Y/Z Transform Type-In fields: position, rotation degrees or scale
-/// percent for the active transform, absolute or offset.
+/// percent for the active transform, absolute or offset. Moving over the
+/// active viewport with nothing selected, or while creating, they show the
+/// cursor's world position; during a transform drag, the drag's offset.
 fn coordinate_fields(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let readout = if let Some(d) = app.transform_drag {
+        Some(match app.state.active_tool {
+            Tool::Rotate => (d.rotate_deg, false),
+            Tool::Scale => (d.factors * 100.0, false),
+            _ => (d.offset, true),
+        })
+    } else if app.state.selection.is_empty() || app.create.is_some() {
+        let p = ui.ctx().input(|i| i.pointer.hover_pos());
+        p.and_then(|p| crate::viewport_widget::cursor_world(app, p)).map(|w| (w, true))
+    } else {
+        None
+    };
+    if readout.is_some() || app.state.selection.is_empty() {
+        // Read only: the cursor or the drag (blank with nothing to show).
+        ui.add_enabled_ui(false, |ui| {
+            for (i, label) in ["X:", "Y:", "Z:"].iter().enumerate() {
+                ui.label(*label);
+                let text = match readout {
+                    Some((v, true)) => app.state.format_units(v[i]),
+                    Some((v, false)) => format!("{:.*}", app.state.prefs.spinner_precision, v[i]),
+                    None => String::new(),
+                };
+                let mut t = text;
+                ui.add(egui::TextEdit::singleline(&mut t).desired_width(64.0));
+            }
+        });
+        return;
+    }
     let has = !app.state.selection.is_empty();
     let offset = app.state.offset_mode;
     let tool = app.state.active_tool;
@@ -290,7 +372,12 @@ fn coordinate_fields(ui: &mut egui::Ui, app: &mut LoomApp) {
 }
 
 fn red(on: bool) -> egui::Color32 {
-    if on { egui::Color32::from_rgb(200, 50, 50) } else { egui::Color32::from_gray(70) }
+    if on { RED.with(|c| c.get()) } else { egui::Color32::from_gray(70) }
+}
+
+thread_local! {
+    /// Auto Key Background (Customize User Interface > Colors), set each frame.
+    static RED: std::cell::Cell<egui::Color32> = const { std::cell::Cell::new(egui::Color32::from_rgb(200, 50, 50)) };
 }
 
 /// The animation controls: the big Set Keys button, Auto Key over
@@ -329,13 +416,134 @@ fn animation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
             let r = Icon::new(icons::KEY_MODE, Command::NextPreviousKeyModeToggle.name()).tip("Key Mode Toggle").on(key_mode).show(ui, &app.state);
             time_control(app, r, Command::NextPreviousKeyModeToggle);
             let mut frame = app.state.current_frame;
-            if ui.add(crate::spinner::spin(ui, &mut frame, app.state.frame_range.0..=app.state.frame_range.1)).on_hover_text("Current Frame (Go To Frame)").changed() {
+            let (fps, mode) = (app.state.fps, app.state.time_config.display);
+            let field = crate::spinner::spin(ui, &mut frame, app.state.frame_range.0..=app.state.frame_range.1)
+                .custom_formatter(move |v, _| loom_commands::time_display::format(v.round() as i32, fps, mode))
+                .custom_parser(move |t| loom_commands::time_display::parse(t, fps, mode));
+            if ui.add(field).on_hover_text("Current Frame (Go To Frame)").changed() {
                 let _ = app.dispatch(Command::SetFrame { frame });
             }
             let r = Icon::new(icons::TIME_CONFIGURATION, Command::TimeConfiguration.name()).tip("Time Configuration").show(ui, &app.state);
             time_control(app, r, Command::TimeConfiguration);
         });
     });
+    time_tag_box(ui, app);
+}
+
+/// The Add / Edit Time Tag dialog being filled in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TagDialog {
+    /// Edit: the tag being edited (None: Add Time Tag).
+    pub editing: Option<String>,
+    pub name: String,
+    pub time: i32,
+    pub lock: bool,
+    pub relative_to: String,
+}
+
+/// The Time Tag box: the tag at the current frame; its list has Add Tag,
+/// Edit Tag and every tag (a click jumps to it).
+fn time_tag_box(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let tags = app.state.time_tags.clone();
+    let frame = app.state.current_frame;
+    let here = tags.iter().find(|t| loom_commands::time_tags::tag_time(&tags, &t.name) == Some(frame)).map(|t| t.name.clone()).unwrap_or_default();
+    let r = egui::ComboBox::from_id_salt("time_tag_box").selected_text(here).width(90.0).show_ui(ui, |ui| {
+        if ui.button("Add Tag").clicked() {
+            app.tag_dialog = Some(TagDialog { editing: None, name: format!("Tag {}", tags.len() + 1), time: frame, lock: false, relative_to: String::new() });
+            ui.close_menu();
+        }
+        if ui.add_enabled(!tags.is_empty(), egui::Button::new("Edit Tag")).clicked() {
+            let t = tags.iter().find(|t| loom_commands::time_tags::tag_time(&tags, &t.name) == Some(frame)).or(tags.first()).cloned();
+            if let Some(t) = t {
+                let time = loom_commands::time_tags::tag_time(&tags, &t.name).unwrap_or(t.time);
+                app.tag_dialog = Some(TagDialog { editing: Some(t.name.clone()), name: t.name.clone(), time, lock: t.locked, relative_to: t.relative_to.clone().unwrap_or_default() });
+            }
+            ui.close_menu();
+        }
+        if !tags.is_empty() {
+            ui.separator();
+        }
+        for t in &tags {
+            let f = loom_commands::time_tags::tag_time(&tags, &t.name).unwrap_or(t.time);
+            if ui.selectable_label(f == frame, format!("{}  ({f})", t.name)).clicked() {
+                let _ = app.dispatch(Command::GoToTimeTag { name: t.name.clone() });
+            }
+        }
+    });
+    icons::named(&r.response, egui::WidgetType::ComboBox, "Time Tag");
+    r.response.on_hover_text("Time Tag");
+    tag_dialog(ui.ctx(), app);
+}
+
+/// Add Time Tag / Edit Time Tag: Name, Time, Lock Time, Relative To (and Delete when editing).
+fn tag_dialog(ctx: &egui::Context, app: &mut LoomApp) {
+    let Some(mut d) = app.tag_dialog.clone() else { return };
+    let tags = app.state.time_tags.clone();
+    let title = if d.editing.is_some() { "Edit Time Tag" } else { "Add Time Tag" };
+    let mut open = true;
+    let mut done = false;
+    egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        if let Some(editing) = d.editing.clone() {
+            ui.horizontal(|ui| {
+                ui.label("Tag:");
+                egui::ComboBox::from_id_salt("edit_tag_pick").selected_text(editing.clone()).show_ui(ui, |ui| {
+                    for t in &tags {
+                        if ui.selectable_label(t.name == editing, &t.name).clicked() {
+                            let time = loom_commands::time_tags::tag_time(&tags, &t.name).unwrap_or(t.time);
+                            d = TagDialog { editing: Some(t.name.clone()), name: t.name.clone(), time, lock: t.locked, relative_to: t.relative_to.clone().unwrap_or_default() };
+                        }
+                    }
+                });
+            });
+        }
+        ui.horizontal(|ui| {
+            ui.label("Name:");
+            ui.add(egui::TextEdit::singleline(&mut d.name).desired_width(140.0));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Time:");
+            ui.add_enabled(!(d.lock && d.editing.is_some()), crate::spinner::spin(ui, &mut d.time, ..));
+        });
+        ui.checkbox(&mut d.lock, "Lock Time");
+        ui.horizontal(|ui| {
+            ui.label("Relative To:");
+            let shown = if d.relative_to.is_empty() { "None".to_owned() } else { d.relative_to.clone() };
+            egui::ComboBox::from_id_salt("tag_relative_to").selected_text(shown).show_ui(ui, |ui| {
+                ui.selectable_value(&mut d.relative_to, String::new(), "None");
+                for t in tags.iter().filter(|t| Some(&t.name) != d.editing.as_ref()) {
+                    ui.selectable_value(&mut d.relative_to, t.name.clone(), &t.name);
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                let r = match &d.editing {
+                    None => app.dispatch(Command::AddTimeTag { name: d.name.clone(), time: Some(d.time), lock: Some(d.lock), relative_to: (!d.relative_to.is_empty()).then(|| d.relative_to.clone()) }),
+                    Some(name) => {
+                        let old_time = loom_commands::time_tags::tag_time(&tags, name);
+                        // Unlock first so a new time can apply, lock last.
+                        let _ = app.dispatch(Command::EditTimeTag { name: name.clone(), new_name: None, time: None, lock: Some(false), relative_to: Some(d.relative_to.clone()) });
+                        let moved = (old_time != Some(d.time)).then_some(d.time);
+                        let r = app.dispatch(Command::EditTimeTag { name: name.clone(), new_name: Some(d.name.clone()), time: moved, lock: Some(d.lock), relative_to: None });
+                        r
+                    }
+                };
+                if r.is_ok() {
+                    done = true;
+                }
+            }
+            if d.editing.is_some() && ui.button("Delete").clicked() {
+                if let Some(name) = d.editing.clone() {
+                    let _ = app.dispatch(Command::DeleteTimeTag { name });
+                }
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                done = true;
+            }
+        });
+    });
+    app.tag_dialog = (open && !done).then_some(d);
 }
 
 /// Selection List: which objects Set Keys keys ("Selected" or a named set).

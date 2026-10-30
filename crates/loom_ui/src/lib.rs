@@ -24,6 +24,7 @@ mod menubar;
 mod statusbar;
 pub mod spinner;
 pub mod tools;
+pub mod toolbars;
 pub mod viewport_gizmo;
 mod viewport_widget;
 pub mod poly_modes;
@@ -375,6 +376,14 @@ pub struct LoomApp {
     /// `state.bitmap_generation` the caches were filled at (Reload clears them).
     pub bitmap_generation: u64,
     pub last_error: Option<String>,
+    /// Edit Button Appearance is open for this action.
+    pub button_look: Option<String>,
+    /// Adaptive Degradation is degrading the views this frame.
+    pub degrading: bool,
+    /// Grab Viewport: the screenshot asked for, and the viewport rect (points) to cut from it.
+    pub grab_pending: Option<(usize, egui::Rect)>,
+    /// The Add / Edit Time Tag dialog.
+    pub tag_dialog: Option<statusbar::TagDialog>,
     /// The last raw input events (live diagnostics).
     pub input_log: live::InputLog,
 }
@@ -397,6 +406,9 @@ impl LoomApp {
         if let Some(path) = loom_commands::settings::settings_path() {
             app.use_settings_file(path);
         }
+        // Viewport Configuration > Save as Default: the startup views.
+        app.state.use_viewport_defaults = true;
+        loom_commands::viewport_config::apply_defaults(&mut app.state);
         // A session starts from the startup scene when there is one.
         if let Err(e) = loom_commands::assets::load_startup_scene(&mut app.state) {
             app.last_error = Some(e);
@@ -556,6 +568,10 @@ impl LoomApp {
             quad_last: None,
             background_textures: std::collections::HashMap::new(),
             last_error: None,
+            button_look: None,
+            degrading: false,
+            grab_pending: None,
+            tag_dialog: None,
             input_log: Default::default(),
         }
     }
@@ -612,7 +628,7 @@ impl LoomApp {
                 }
             }
             let dependent = self.state.scene.node(id).is_some_and(|n| n.modifiers.iter().any(|s| s.modifier.topology_dependent()));
-            if dependent && self.topology_ack != Some(id) {
+            if dependent && self.state.prefs.topology_warning && self.topology_ack != Some(id) {
                 self.pending_topology = Some(cmd);
                 self.state.dialog = Some(loom_commands::Dialog::TopologyWarning);
                 return Ok(serde_json::json!({ "asked": "topology warning" }));
@@ -791,7 +807,7 @@ impl LoomApp {
             }
             let gray = n.frozen && d.show_frozen_in_gray;
             let color = if gray {
-                [0.35, 0.35, 0.35]
+                self.color_f32("Frozen")
             } else {
                 let c = self.state.scene.display_color(n);
                 [srgb(c[0]), srgb(c[1]), srgb(c[2])]
@@ -856,6 +872,7 @@ impl LoomApp {
                 wire_color,
                 diagonals: !d.edges_only,
                 unlit,
+                selection_color: self.color_f32("Selection"),
                 sub: sub.map(std::sync::Arc::new),
                 ..base
             });
@@ -932,7 +949,7 @@ impl LoomApp {
         if let Some(i) = index.get(&key) {
             return loom_render::TextureSel::Bitmap(*i);
         }
-        match load_bitmap(&mut self.bitmap_cache, path) {
+        match load_bitmap(&mut self.bitmap_cache, &self.state.paths, path) {
             Some(bm) => {
                 bitmaps.push((key.clone(), bm));
                 index.insert(key, bitmaps.len() as u32 - 1);
@@ -982,7 +999,8 @@ impl LoomApp {
     pub fn map_images(&mut self, map: &loom_scene::Map) -> loom_scene::maps::Images {
         let mut images = loom_scene::maps::Images::new();
         let cache = &mut self.bitmap_cache;
-        loom_scene::maps::load_images(map, &mut images, &mut |path| load_bitmap(cache, path).map(|b| std::sync::Arc::new(loom_scene::maps::Image { width: b.width, height: b.height, rgba: b.rgba.clone() })));
+        let paths = &self.state.paths;
+        loom_scene::maps::load_images(map, &mut images, &mut |path| load_bitmap(cache, paths, path).map(|b| std::sync::Arc::new(loom_scene::maps::Image { width: b.width, height: b.height, rgba: b.rgba.clone() })));
         images
     }
 
@@ -1270,7 +1288,8 @@ impl LoomApp {
         if let Some(t) = self.background_textures.get(&key) {
             return t.clone();
         }
-        let loaded = image::open(path).ok().map(|img| {
+        let found = self.state.paths.resolve_bitmap(path).unwrap_or_else(|| std::path::PathBuf::from(path));
+        let loaded = image::open(found).ok().map(|img| {
             let rgba = img.to_rgba8();
             let size = [rgba.width() as usize, rgba.height() as usize];
             let ci = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
@@ -1281,6 +1300,95 @@ impl LoomApp {
         }
         self.background_textures.insert(key, loaded.clone());
         loaded
+    }
+
+    /// Grab Viewport: asks the window for a screenshot, then cuts the
+    /// viewport out of it into the Rendered Frame Window (and the Viewport
+    /// Captures folder, when one is set).
+    fn grab_viewport(&mut self, ctx: &egui::Context) {
+        if let Some(index) = self.state.grab_request.take() {
+            if let Some(rect) = self.viewport_rects.get(index).copied() {
+                self.grab_pending = Some((index, rect));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(index)));
+            }
+        }
+        let Some((index, rect)) = self.grab_pending else { return };
+        let shot = ctx.input(|i| i.events.iter().find_map(|e| match e {
+            egui::Event::Screenshot { image, .. } => Some(image.clone()),
+            _ => None,
+        }));
+        let Some(image) = shot else { return };
+        self.grab_pending = None;
+        let ppp = ctx.pixels_per_point();
+        let [w, h] = image.size;
+        let x0 = ((rect.min.x * ppp).round().max(0.0) as usize).min(w);
+        let y0 = ((rect.min.y * ppp).round().max(0.0) as usize).min(h);
+        let x1 = ((rect.max.x * ppp).round().max(0.0) as usize).clamp(x0, w);
+        let y1 = ((rect.max.y * ppp).round().max(0.0) as usize).clamp(y0, h);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let mut out = image::RgbaImage::new((x1 - x0) as u32, (y1 - y0) as u32);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let c = image.pixels[y * w + x].to_srgba_unmultiplied();
+                out.put_pixel((x - x0) as u32, (y - y0) as u32, image::Rgba(c));
+            }
+        }
+        let label = if index < self.state.viewports.len() { self.state.view_label(index) } else { String::new() };
+        if let Some(dir) = self.state.paths.dir("Viewport Captures").map(|d| d.to_path_buf()) {
+            let n = (1..).find(|n| !dir.join(format!("{label}_{n:03}.png")).exists()).unwrap_or(1);
+            let path = dir.join(format!("{label}_{n:03}.png"));
+            if let Err(e) = out.save(&path) {
+                self.last_error = Some(format!("{}: {e}", path.display()));
+            }
+        }
+        self.state.rendered.set_image(Some(std::sync::Arc::new(out)));
+        self.state.rendered.title = format!("Grab Viewport: {label}");
+        self.state.rendered.open = true;
+    }
+
+    /// A Customize User Interface > Colors element's colour.
+    pub fn color(&self, element: &str) -> egui::Color32 {
+        let c = self.state.ui_custom.colors.get(element);
+        egui::Color32::from_rgb(c[0], c[1], c[2])
+    }
+
+    /// An element's colour as the line and mesh buffers take it (0–1 per channel).
+    pub fn color_f32(&self, element: &str) -> [f32; 3] {
+        let c = self.state.ui_custom.colors.get(element);
+        [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0]
+    }
+
+    /// The UI's colours: the scheme picked in Customize User Interface > Colors
+    /// (Dark, Light, or the Custom Colors UI Appearance on the dark scheme).
+    fn apply_ui_scheme(&self, ctx: &egui::Context) {
+        let colors = &self.state.ui_custom.colors;
+        let id = egui::Id::new("ui_scheme_applied");
+        if ctx.data(|d| d.get_temp::<loom_commands::ui_custom::UiColors>(id)).as_ref() == Some(colors) {
+            return;
+        }
+        let mut v = if colors.scheme == "Light" { egui::Visuals::light() } else { egui::Visuals::dark() };
+        if colors.scheme == "Custom Colors" {
+            let c = |n: &str| {
+                let c = colors.appearance(n);
+                egui::Color32::from_rgb(c[0], c[1], c[2])
+            };
+            v.panel_fill = c("Panel Background");
+            v.window_fill = c("Window Background");
+            v.override_text_color = Some(c("Text"));
+            v.widgets.inactive.weak_bg_fill = c("Button");
+            v.widgets.inactive.bg_fill = c("Button");
+            v.widgets.hovered.weak_bg_fill = c("Button Hovered");
+            v.widgets.hovered.bg_fill = c("Button Hovered");
+            v.widgets.active.weak_bg_fill = c("Button Pressed");
+            v.widgets.active.bg_fill = c("Button Pressed");
+            v.selection.bg_fill = c("Selection Highlight");
+            v.hyperlink_color = c("Hyperlink");
+            v.extreme_bg_color = c("Text Field Background");
+        }
+        ctx.set_visuals(v);
+        ctx.data_mut(|d| d.insert_temp(id, colors.clone()));
     }
 
     pub fn has_selection(&self) -> bool {
@@ -1318,6 +1426,16 @@ impl LoomApp {
     /// regression tests call it directly with synthetic input).
     pub fn frame(&mut self, ctx: &egui::Context) {
         icons::install(ctx);
+        let tip = ctx.data_mut(|d| d.remove_temp::<String>(egui::Id::new(icons::PROMPT_TIP)));
+        if let Some(t) = tip.filter(|_| ctx.input(|i| i.pointer.hover_pos().is_some())) {
+            // Last frame's hovered button; the status bar draws before the toolbars that set it.
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("prompt_line_tooltip_last"), t));
+        } else {
+            ctx.data_mut(|d| d.remove::<String>(egui::Id::new("prompt_line_tooltip_last")));
+        }
+        self.apply_ui_scheme(ctx);
+        icons::set_prefs(self.state.prefs.large_toolbar_buttons, self.state.prefs.flyout_time_ms);
+        gizmo::set_colors([self.color("X Axis"), self.color("Y Axis"), self.color("Z Axis"), self.color("Active Axis")]);
         spinner::set_wrap_cursor(ctx, self.state.prefs.spinner_wrap_cursor);
         ctx.input(|i| self.input_log.record(&i.raw, i.time));
         if ctx.input(|i| i.viewport().close_requested()) && self.state.dirty() && !self.state.exit_requested {
@@ -1360,6 +1478,8 @@ impl LoomApp {
         if self.state.rendered.progress.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             let _ = self.dispatch(Command::CancelRender);
         }
+        // The menu bar's keyboard accelerators take their keys before the shortcuts see them.
+        menubar::keyboard(ctx, self);
         hotkeys::handle(ctx, self);
         // A drag that began outside the viewports is a spinner (or other
         // panel control) drag: Update During Spinner Drag decides whether the
@@ -1404,18 +1524,23 @@ impl LoomApp {
             self.camera_controller.set_mode(self.state.nav_mode);
         }
         menubar::show(ctx, self);
-        main_toolbar::show(ctx, self);
-        layers_toolbar::show(ctx, self);
+        use loom_commands::ui_custom::Dock;
+        toolbars::show_edges(ctx, self, &[Dock::Top, Dock::Float]);
         ribbon::show(ctx, self);
+        menubar::quick_access_below(ctx, self);
         // Bottom panels first so they span the full width under the Command Panel.
         statusbar::show(ctx, self);
         time_slider::show(ctx, self);
+        toolbars::show_edges(ctx, self, &[Dock::Bottom]);
         command_panel::show(ctx, self);
+        // Toolbars docked at the sides sit inside the Command Panel.
+        toolbars::show_edges(ctx, self, &[Dock::Left, Dock::Right]);
         if self.end_result_key() != self.shown_end_result_key {
             // A tab switch changes what Show End Result off shows.
             self.sync_after_command();
         }
         viewports::show(ctx, self);
+        quad_menu::open_requested(ctx, self);
         if let Some(open) = self.quad_menu {
             if quad_menu::show(ctx, self, open) {
                 self.quad_menu = None;
@@ -1423,6 +1548,10 @@ impl LoomApp {
         }
         os_window::begin(ctx, self.state.prefs.floating_os_windows, &self.os_window_rects);
         dialogs::show(ctx, self);
+        dialogs::display_floater::show(ctx, self);
+        self.grab_viewport(ctx);
+        menubar::help_windows(ctx, self);
+        toolbars::button_appearance(ctx, self);
         command_panel::utilities::measure_floater(ctx, self);
         uv_editor::show(ctx, self);
         track_view::show(ctx, self);
@@ -1459,11 +1588,13 @@ pub(crate) fn draws_see_through(n: &loom_scene::Node) -> bool {
     n.display.see_through || (n.object.is_helper() && !matches!(n.object, loom_scene::ObjectKind::Camera { .. }))
 }
 
-fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>, path: &str) -> Option<std::sync::Arc<loom_render::Bitmap>> {
+fn load_bitmap(cache: &mut std::collections::HashMap<String, Option<std::sync::Arc<loom_render::Bitmap>>>, paths: &loom_commands::paths::UserPaths, path: &str) -> Option<std::sync::Arc<loom_render::Bitmap>> {
     cache
         .entry(path.to_owned())
         .or_insert_with(|| {
-            image::open(path).ok().map(|img| {
+            // Configure User Paths > External Files: a bitmap not at its path is looked for by name.
+            let found = paths.resolve_bitmap(path).unwrap_or_else(|| std::path::PathBuf::from(path));
+            image::open(found).ok().map(|img| {
                 // GPU textures are capped at 8192 px a side (the common wgpu limit): larger maps shrink.
                 let max = 8192u32;
                 let img = if img.width() > max || img.height() > max { img.thumbnail(max, max) } else { img };
@@ -1486,8 +1617,9 @@ fn modifier_usage_path() -> Option<std::path::PathBuf> {
 pub fn length_drag_value<'a>(ui: &egui::Ui, units: &loom_commands::UnitsSetup, decimals: usize, value: &'a mut f32, range: impl std::ops::RangeBounds<f32>, speed: f64) -> egui::DragValue<'a> {
     let (factor, suffix) = units.display_factor();
     let units = units.clone();
+    let current = *value as f64;
     spinner::spin(ui, value, range)
         .speed(speed)
         .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
-        .custom_parser(move |text| units.parse(text))
+        .custom_parser(move |text| spinner::typed(text, current, &|s| units.parse(s)))
 }

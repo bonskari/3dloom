@@ -27,6 +27,12 @@ pub struct Last {
 #[derive(Debug, Clone)]
 pub enum Action {
     Command(Command),
+    /// An action the user added (Customize User Interface > Quads), by name.
+    Named(String),
+    /// A menu the user added: a submenu with that menu's entries.
+    Menu(loom_commands::ui_custom::CustomItem),
+    /// A separator line the user added.
+    Separator,
     Submenu(Vec<Entry>),
     /// Greyed out, with the reason as tooltip.
     Disabled(String),
@@ -44,9 +50,35 @@ pub enum QuadKind {
     Create,
     Animation,
     Render,
+    /// A quad set the user made (index into `UiCustom::quad_sets`), opened by its Quad Shortcut.
+    User(u16),
 }
 
 impl QuadKind {
+    /// The quad set's name in the Quads panel.
+    pub fn set_name(self, app: &LoomApp) -> String {
+        match self {
+            QuadKind::Default => "Default Viewport Quad".into(),
+            QuadKind::Snaps => "Snap".into(),
+            QuadKind::Create => "Modeling".into(),
+            QuadKind::Animation => "Animation".into(),
+            QuadKind::Render => "Lighting | Render".into(),
+            QuadKind::User(i) => app.state.ui_custom.quad_sets().get(i as usize).cloned().unwrap_or_default(),
+        }
+    }
+
+    /// The quad kind of a set by its name.
+    pub fn of_set(app: &LoomApp, set: &str) -> Option<QuadKind> {
+        Some(match set {
+            "Default Viewport Quad" => QuadKind::Default,
+            "Snap" => QuadKind::Snaps,
+            "Modeling" => QuadKind::Create,
+            "Animation" => QuadKind::Animation,
+            "Lighting | Render" => QuadKind::Render,
+            _ => QuadKind::User(app.state.ui_custom.quad_sets().iter().position(|s| s == set)? as u16),
+        })
+    }
+
     /// The quad a right-click with these modifiers opens.
     pub fn for_modifiers(m: loom_input::Modifiers) -> Self {
         if m.shift {
@@ -67,6 +99,23 @@ impl QuadKind {
 pub struct Quadrant {
     pub title: &'static str,
     pub items: Vec<Entry>,
+    /// The label the user gave the quadrant (Quads panel > Label), shown instead of the title.
+    pub label: Option<String>,
+}
+
+impl Quadrant {
+    pub fn new(title: &'static str, items: Vec<Entry>) -> Self {
+        Quadrant { title, items, label: None }
+    }
+    /// What the quadrant's title bar shows.
+    pub fn shown_title(&self) -> &str {
+        self.label.as_deref().unwrap_or(self.title)
+    }
+}
+
+/// A label without its check mark or current-level marker.
+pub fn plain_label(label: &str) -> &str {
+    label.trim_start_matches(['\u{2714}', ' ', '>']).trim()
 }
 
 pub struct Quadrants {
@@ -107,6 +156,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             e("Hide Unselected", Command::HideUnselected),
             e("Hide Selection", Command::HideSelection),
         ],
+        label: None,
     };
     let type_in = Command::TransformTypeInDialogToggle;
     let mut transform_items = vec![
@@ -138,7 +188,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             },
         ]);
     }
-    let transform = Quadrant { title: "transform", items: transform_items };
+    let transform = Quadrant::new("transform", transform_items);
     let poly_selected = s
         .selection
         .iter()
@@ -159,7 +209,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             let label = if current == lvl { format!("> {l}") } else { (*l).to_owned() };
             t1.push(e(&label, Command::ModifierSubobjectLevel { index: index as u32, level: lvl }));
         }
-        (Some(Quadrant { title: "tools 1", items: t1 }), Some(Quadrant { title: "tools 2", items: vec![e(&format!("Collapse To {name}"), Command::CollapseTo { index: index as u32 }), e("Make Unique", Command::MakeUnique), e("Delete Modifier", Command::DeleteModifier { index: index as u32 })] }))
+        (Some(Quadrant::new("tools 1", t1)), Some(Quadrant::new("tools 2", vec![e(&format!("Collapse To {name}"), Command::CollapseTo { index: index as u32 }), e("Make Unique", Command::MakeUnique), e("Delete Modifier", Command::DeleteModifier { index: index as u32 })])))
     } else if spline_selected {
         let level = s.selection_mode;
         let sub = level != SelectionMode::Object;
@@ -198,7 +248,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             SelectionMode::Object => Vec::new(),
         };
         t2.extend(ops);
-        (Some(Quadrant { title: "tools 1", items: t1 }), Some(Quadrant { title: "tools 2", items: t2 }))
+        (Some(Quadrant::new("tools 1", t1)), Some(Quadrant::new("tools 2", t2)))
     } else if s.patch_selected() || s.tri_mesh_selected() {
         // Editable Mesh / Patch: their own five levels (two share a selection mode) and tools.
         let patch = s.patch_selected();
@@ -233,7 +283,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             let sub = current > 0;
             vec![e("Attach", Command::Attach), if sub { e("Detach", Command::Detach) } else { off("Detach", "needs a sub-object selection") }, e("Explode", Command::MeshExplode { name: None })]
         };
-        (Some(Quadrant { title: "tools 1", items: t1 }), Some(Quadrant { title: "tools 2", items: t2 }))
+        (Some(Quadrant::new("tools 1", t1)), Some(Quadrant::new("tools 2", t2)))
     } else if poly_selected {
         let level = s.selection_mode;
         let sub = level != SelectionMode::Object;
@@ -308,17 +358,17 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             SelectionMode::Object => Vec::new(),
         };
         t2.extend(ops);
-        (Some(Quadrant { title: "tools 1", items: t1 }), Some(Quadrant { title: "tools 2", items: t2 }))
+        (Some(Quadrant::new("tools 1", t1)), Some(Quadrant::new("tools 2", t2)))
     } else if s.selection.iter().any(|id| s.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Grid { .. }))) {
         // A selected grid object: tools 1 activates it or the home grid.
-        (Some(Quadrant { title: "tools 1", items: vec![e("Activate Grid", Command::ActivateGridObject), e("Activate Home Grid", Command::ActivateHomeGrid), e("Align Grid to View", Command::AlignGridToView)] }), None)
+        (Some(Quadrant::new("tools 1", vec![e("Activate Grid", Command::ActivateGridObject), e("Activate Home Grid", Command::ActivateHomeGrid), e("Align Grid to View", Command::AlignGridToView)])), None)
     } else if s.selection.iter().any(|id| match s.scene.node(*id).map(|n| &n.object) {
         Some(loom_scene::ObjectKind::Camera { target, .. }) => target.is_some_and(|t| s.scene.node(t).is_some()),
         Some(loom_scene::ObjectKind::Light(l)) => l.target.is_some_and(|t| s.scene.node(t).is_some()),
         _ => false,
     }) {
         // A target camera or light: tools 1 selects its target.
-        (Some(Quadrant { title: "tools 1", items: vec![e("Select Target", Command::SelectTarget)] }), None)
+        (Some(Quadrant::new("tools 1", vec![e("Select Target", Command::SelectTarget)])), None)
     } else {
         (None, None)
     };
@@ -332,8 +382,8 @@ pub fn create_quadrants(app: &LoomApp) -> Quadrants {
     let prims: Vec<Entry> = loom_commands::PrimitiveKind::ALL.iter().map(|k| Entry { label: k.label().to_owned(), action: Action::Primitive(*k), settings: None }).collect();
     let tools = quadrants(app);
     Quadrants {
-        display: Quadrant { title: "standard primitives", items: prims },
-        transform: Quadrant { title: "cameras", items: vec![e("Target Camera", Command::CreateCamera { target: true }), e("Free Camera", Command::CreateCamera { target: false })] },
+        display: Quadrant::new("standard primitives", prims),
+        transform: Quadrant::new("cameras", vec![e("Target Camera", Command::CreateCamera { target: true }), e("Free Camera", Command::CreateCamera { target: false })]),
         tools1: tools.tools1,
         tools2: tools.tools2,
     }
@@ -359,8 +409,8 @@ pub fn animation_quadrants(app: &LoomApp) -> Quadrants {
         e("Freeze Position", Command::FreezePosition),
         e("Position to Zero", Command::PositionToZero),
     ];
-    let pose = if s.selection.is_empty() { None } else { Some(Quadrant { title: "pose", items: pose }) };
-    Quadrants { display: Quadrant { title: "set", items: set }, transform: Quadrant { title: "coordinates", items: coordinates }, tools1: pose, tools2: None }
+    let pose = if s.selection.is_empty() { None } else { Some(Quadrant::new("pose", pose)) };
+    Quadrants { display: Quadrant::new("set", set), transform: Quadrant::new("coordinates", coordinates), tools1: pose, tools2: None }
 }
 
 /// Ctrl+Alt+right-click: the lighting and render quad. Render (upper
@@ -385,8 +435,8 @@ pub fn render_quadrants(app: &LoomApp) -> Quadrants {
             .collect()
     });
     Quadrants {
-        display: Quadrant { title: "render", items: render },
-        transform: Quadrant { title: "object properties", items: properties.unwrap_or_default() },
+        display: Quadrant::new("render", render),
+        transform: Quadrant::new("object properties", properties.unwrap_or_default()),
         tools1: None,
         tools2: None,
     }
@@ -418,9 +468,9 @@ pub fn snap_quadrants(app: &LoomApp) -> Quadrants {
         check("Snaps Use Axis Constraints", s.use_axis_constraints, Command::EnableAxisConstraintsInSnapsToggle),
     ];
     Quadrants {
-        display: Quadrant { title: "snap override", items: override_items },
-        transform: Quadrant { title: "snap options", items: options },
-        tools1: Some(Quadrant { title: "snap toggles", items: toggles }),
+        display: Quadrant::new("snap override", override_items),
+        transform: Quadrant::new("snap options", options),
+        tools1: Some(Quadrant::new("snap toggles", toggles)),
         tools2: None,
     }
 }
@@ -432,36 +482,72 @@ pub struct Open {
     pub viewport: usize,
     /// The press that opened the menu must not also close it.
     pub armed: bool,
-    /// Which quad: plain, Shift = snaps, Ctrl = modeling, Alt = animation, Ctrl+Alt = render.
+    /// Which quad: plain, Shift = snaps, Ctrl = modeling, Alt = animation, Ctrl+Alt = render, or a user set.
     pub kind: QuadKind,
+    /// Seconds (egui time) the menu opened at, for the open animation; None until first drawn.
+    pub opened: Option<f64>,
+    /// Where the right-click was, when the menu was moved to fit the screen (Return Cursor After Repositioned).
+    pub origin: Option<egui::Pos2>,
 }
 
 impl Open {
     pub fn new(at: egui::Pos2, viewport: usize) -> Self {
-        Self { at, viewport, armed: false, kind: QuadKind::Default }
+        Self { at, viewport, armed: false, kind: QuadKind::Default, opened: None, origin: None }
     }
 }
 
 /// Room right of an item for its settings icon.
 const SETTINGS_W: f32 = 22.0;
 
-/// Full-width, left-aligned rows so every entry of a quadrant lines up.
-fn row(ui: &mut egui::Ui, label: &str, enabled: bool, last: bool) -> egui::Response {
-    let w = ui.available_width() - SETTINGS_W;
-    left(ui, w, |ui| ui.add_enabled(enabled, egui::Button::new(label).min_size(egui::vec2(w, 20.0)).frame(false).selected(last)))
+/// How a quadrant is drawn (Advanced Quad Menu Options for its corner).
+#[derive(Clone)]
+struct Look {
+    title: egui::Color32,
+    title_bg: egui::Color32,
+    background: egui::Color32,
+    text: egui::Color32,
+    highlight: egui::Color32,
+    disabled: egui::Color32,
+    border: egui::Color32,
+    title_font: egui::FontId,
+    menu_font: egui::FontId,
+    margin: f32,
+    /// Text toward the menu's centre (Mirror Quads on a left quadrant).
+    right_align: bool,
+    width: f32,
 }
 
-/// A button `width` wide whose label sits at its left (a top-down child
-/// layout: buttons place their text by the layout's horizontal alignment).
-fn left(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> egui::Response) -> egui::Response {
-    ui.allocate_ui_with_layout(egui::vec2(width, 20.0), egui::Layout::top_down(egui::Align::Min), add).inner
+fn rgb(c: [u8; 3]) -> egui::Color32 {
+    egui::Color32::from_rgb(c[0], c[1], c[2])
+}
+
+fn font(family: &str, size: f32) -> egui::FontId {
+    egui::FontId::new(size, if family == "Monospace" { egui::FontFamily::Monospace } else { egui::FontFamily::Proportional })
+}
+
+/// Full-width rows aligned as the look says, so every entry of a quadrant lines up.
+fn row(ui: &mut egui::Ui, look: &Look, label: &str, enabled: bool, last: bool) -> egui::Response {
+    let w = ui.available_width() - SETTINGS_W;
+    let text = egui::RichText::new(label).font(look.menu_font.clone()).color(if enabled { look.text } else { look.disabled });
+    aligned(ui, look, w, |ui| ui.add_enabled(enabled, egui::Button::new(text).min_size(egui::vec2(w, 20.0)).frame(false).selected(last)))
+}
+
+/// A button `width` wide whose label sits at its left (or right): a top-down
+/// child layout places button text by the layout's horizontal alignment.
+fn aligned(ui: &mut egui::Ui, look: &Look, width: f32, add: impl FnOnce(&mut egui::Ui) -> egui::Response) -> egui::Response {
+    let align = if look.right_align { egui::Align::Max } else { egui::Align::Min };
+    ui.allocate_ui_with_layout(egui::vec2(width, 20.0), egui::Layout::top_down(align), add).inner
 }
 
 /// A command row: its chord right-aligned and in the hover text; `last`
 /// highlights the quad's last command.
-fn cmd_row(ui: &mut egui::Ui, state: &loom_commands::AppState, label: &str, cmd: &Command, width: f32, last: bool) -> egui::Response {
-    let action = crate::shortcuts::action_of(cmd);
-    let r = left(ui, width, |ui| ui.add(crate::shortcuts::menu_widget(state, label, action).min_size(egui::vec2(width, 20.0)).frame(false).selected(last)));
+fn cmd_row(ui: &mut egui::Ui, state: &loom_commands::AppState, look: &Look, label: &str, action: &str, width: f32, last: bool) -> egui::Response {
+    let text = egui::RichText::new(label).font(look.menu_font.clone()).color(look.text);
+    let mut b = egui::Button::new(text).min_size(egui::vec2(width, 20.0)).frame(false).selected(last);
+    if let Some(c) = crate::shortcuts::chord(state, action) {
+        b = b.shortcut_text(c.clone());
+    }
+    let r = aligned(ui, look, width, |ui| ui.add(b));
     match crate::shortcuts::chord(state, action) {
         Some(c) => r.on_hover_text(format!("{label} ({c})")),
         None => r,
@@ -475,13 +561,17 @@ fn run(app: &mut LoomApp, action: &Action) -> bool {
             let _ = app.dispatch(cmd.clone());
             true
         }
+        Action::Named(name) => {
+            app.dispatch_named(name);
+            true
+        }
         Action::Primitive(kind) => {
             app.create_kind = Some(crate::CreateKind::Primitive(*kind));
             app.create_category = crate::Category::Geometry;
             app.panel_tab = crate::Tab::Create;
             true
         }
-        Action::Submenu(_) | Action::Disabled(_) => false,
+        Action::Submenu(_) | Action::Disabled(_) | Action::Menu(_) | Action::Separator => false,
     }
 }
 
@@ -498,56 +588,92 @@ fn run_settings(app: &mut LoomApp, item: &Entry, settings: &Command) {
     }
 }
 
-fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadrant, close: &mut bool) {
-    ui.spacing_mut().item_spacing.y = 1.0;
-    ui.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
-    ui.style_mut().visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-    // The last command picked from this quadrant: the title repeats it.
+/// The quadrant's title bar; a click repeats the quadrant's last command.
+fn title_bar(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadrant, look: &Look, close: &mut bool) {
     let last = app.quad_last.clone().filter(|l| l.kind == kind && l.quadrant == q.title);
-    let title = egui::Button::new(egui::RichText::new(q.title).small().color(egui::Color32::from_rgb(255, 200, 80))).frame(false);
-    let title = ui.add(title);
+    let text = egui::RichText::new(q.shown_title()).font(look.title_font.clone()).color(look.title);
+    let w = ui.available_width();
+    let title = egui::Frame::NONE.fill(look.title_bg).show(ui, |ui| aligned(ui, look, w, |ui| ui.add(egui::Button::new(text).frame(false)))).inner;
     if let Some(l) = &last {
-        if title.on_hover_text(format!("Repeat {}", l.label.trim_start_matches(['✔', ' ']))).clicked() && run(app, &l.action) {
+        if title.on_hover_text(format!("Repeat {}", l.label.trim_start_matches(['\u{2714}', ' ']))).clicked() && run(app, &l.action) {
             *close = true;
         }
     }
+}
+
+fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadrant, look: &Look, close: &mut bool, picked_cmd: &mut bool) {
+    ui.spacing_mut().item_spacing.y = look.margin;
+    ui.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
+    let v = ui.visuals_mut();
+    v.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+    v.widgets.inactive.fg_stroke.color = look.text;
+    v.widgets.hovered.fg_stroke.color = look.highlight;
+    v.widgets.active.fg_stroke.color = look.highlight;
+    v.widgets.noninteractive.fg_stroke.color = look.text;
+    // The last command picked from this quadrant: the title repeats it.
+    let last = app.quad_last.clone().filter(|l| l.kind == kind && l.quadrant == q.title);
+    title_bar(ui, app, kind, q, look, close);
     ui.separator();
     let picked = |label: &str| last.as_ref().is_some_and(|l| l.label == label);
     for item in &q.items {
+        if matches!(item.action, Action::Separator) {
+            ui.separator();
+            continue;
+        }
         let width = ui.available_width() - SETTINGS_W;
         // Cross-aligned to the left (not ui.horizontal's centre): button labels stay left-aligned.
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             match &item.action {
                 Action::Command(cmd) => {
-                    if cmd_row(ui, &app.state, &item.label, cmd, width, picked(&item.label)).clicked() {
+                    if cmd_row(ui, &app.state, look, &item.label, crate::shortcuts::action_of(cmd), width, picked(&item.label)).clicked() {
                         run(app, &item.action);
                         app.quad_last = Some(Last { kind, quadrant: q.title, label: item.label.clone(), action: item.action.clone() });
                         *close = true;
+                        *picked_cmd = true;
                     }
                 }
+                Action::Named(name) => {
+                    if cmd_row(ui, &app.state, look, &item.label, name, width, picked(&item.label)).clicked() {
+                        run(app, &item.action);
+                        app.quad_last = Some(Last { kind, quadrant: q.title, label: item.label.clone(), action: item.action.clone() });
+                        *close = true;
+                        *picked_cmd = true;
+                    }
+                }
+                Action::Menu(custom) => {
+                    // A menu the user put in the quadrant: its entries in a submenu.
+                    let before = app.state.undo.version();
+                    crate::menubar::custom_items(ui, app, std::slice::from_ref(custom));
+                    if app.state.undo.version() != before {
+                        *close = true;
+                    }
+                }
+                Action::Separator => {}
                 Action::Submenu(children) => {
                     ui.menu_button(format!("{}  {}", item.label, crate::icons::SUBMENU), |ui| {
                         ui.set_min_width(170.0);
                         for c in children {
                             if let Action::Command(cmd) = &c.action {
-                                if cmd_row(ui, &app.state, &c.label, cmd, ui.available_width(), false).clicked() {
+                                if cmd_row(ui, &app.state, look, &c.label, crate::shortcuts::action_of(cmd), ui.available_width(), false).clicked() {
                                     run(app, &c.action);
                                     app.quad_last = Some(Last { kind, quadrant: q.title, label: c.label.clone(), action: c.action.clone() });
                                     ui.close_menu();
+                                    *picked_cmd = true;
                                 }
                             }
                         }
                     });
                 }
                 Action::Disabled(why) => {
-                    row(ui, &item.label, false, false).on_disabled_hover_text(why);
+                    row(ui, look, &item.label, false, false).on_disabled_hover_text(why);
                 }
                 Action::Primitive(_) => {
-                    if row(ui, &item.label, true, picked(&item.label)).clicked() {
+                    if row(ui, look, &item.label, true, picked(&item.label)).clicked() {
                         run(app, &item.action);
                         app.quad_last = Some(Last { kind, quadrant: q.title, label: item.label.clone(), action: item.action.clone() });
                         *close = true;
+                        *picked_cmd = true;
                     }
                 }
             }
@@ -561,54 +687,202 @@ fn quadrant_ui(ui: &mut egui::Ui, app: &mut LoomApp, kind: QuadKind, q: &Quadran
     }
 }
 
-/// Draws the four quadrants around `open.at`. Returns true when it should close.
-pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: Open) -> bool {
-    let q = match open.kind {
+/// The program's quadrants of quad `kind` (a user set has none of its own).
+pub fn program_quadrants(app: &LoomApp, kind: QuadKind) -> Quadrants {
+    match kind {
         QuadKind::Snaps => snap_quadrants(app),
         QuadKind::Create => create_quadrants(app),
         QuadKind::Animation => animation_quadrants(app),
         QuadKind::Render => render_quadrants(app),
         QuadKind::Default => quadrants(app),
+        QuadKind::User(_) => Quadrants { display: Quadrant::new("", Vec::new()), transform: Quadrant::new("", Vec::new()), tools1: None, tools2: None },
+    }
+}
+
+/// The quadrants as the user customized them: their labels, without the
+/// entries deleted in the Quads panel, with the added entries at the end.
+pub fn customized_quadrants(app: &LoomApp, kind: QuadKind) -> Quadrants {
+    let mut q = program_quadrants(app, kind);
+    let set = kind.set_name(app);
+    let custom = app.state.ui_custom.quad(&set);
+    let apply = |quad: &mut Quadrant, i: usize| {
+        if !custom.labels[i].is_empty() {
+            quad.label = Some(custom.labels[i].clone());
+        } else if quad.title.is_empty() {
+            quad.label = Some(loom_commands::ui_custom::QUADRANTS[i].to_lowercase());
+        }
+        quad.items.retain(|e| !custom.hidden[i].iter().any(|h| h == plain_label(&e.label)));
+        for it in &custom.items[i] {
+            let action = if it.is_separator() {
+                Action::Separator
+            } else if it.menu().is_some() {
+                Action::Menu(it.clone())
+            } else {
+                Action::Named(it.item.clone())
+            };
+            let label = loom_commands::ui_custom::accelerator(it.label()).0.trim().to_owned();
+            quad.items.push(Entry { label, action, settings: None });
+        }
     };
-    let mut close = false;
+    apply(&mut q.display, 0);
+    apply(&mut q.transform, 1);
+    for (slot, i) in [(&mut q.tools1, 2usize), (&mut q.tools2, 3)] {
+        let mut quad = slot.take().unwrap_or_else(|| Quadrant::new("", Vec::new()));
+        if quad.title.is_empty() {
+            quad.title = if i == 2 { "tools 1" } else { "tools 2" };
+        }
+        apply(&mut quad, i);
+        // A quadrant with nothing in it stays hidden, as before.
+        *slot = (!quad.items.is_empty()).then_some(quad);
+    }
+    if q.display.title.is_empty() {
+        q.display.title = "display";
+    }
+    if q.transform.title.is_empty() {
+        q.transform.title = "transform";
+    }
+    q
+}
+
+/// The quadrant under the pointer, relative to the menu's centre (0 upper
+/// right, 1 lower right, 2 upper left, 3 lower left).
+fn quadrant_at(center: egui::Pos2, p: egui::Pos2) -> usize {
+    match (p.x >= center.x, p.y < center.y) {
+        (true, true) => 0,
+        (true, false) => 1,
+        (false, true) => 2,
+        (false, false) => 3,
+    }
+}
+
+/// Draws the four quadrants around `open.at`. Returns true when it should close.
+pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: Open) -> bool {
+    let q = customized_quadrants(app, open.kind);
+    let set = open.kind.set_name(app);
+    let show_all = app.state.ui_custom.quad(&set).show_all;
+    let o = app.state.ui_custom.quad_options.clone();
+    let now = ctx.input(|i| i.time);
+    let opened = open.opened.unwrap_or(now);
+    // Quadrant width: each fits its widest entry; Uniform Quad Width makes them all the widest one's.
+    let menu_font = font(&o.menu_font, o.menu_size);
+    let title_font = font(&o.title_font, o.title_size);
+    let text_w = |s: &str, f: &egui::FontId| ctx.fonts(|fonts| fonts.layout_no_wrap(s.to_owned(), f.clone(), egui::Color32::WHITE).size().x);
+    let quads: [Option<&Quadrant>; 4] = [Some(&q.display), Some(&q.transform), q.tools1.as_ref(), q.tools2.as_ref()];
+    let widths: Vec<f32> = quads
+        .iter()
+        .map(|quad| {
+            quad.map(|quad| {
+                let items = quad.items.iter().map(|e| text_w(&e.label, &menu_font) + 60.0).fold(0.0f32, f32::max);
+                items.max(text_w(quad.shown_title(), &title_font) + 20.0).max(120.0) + SETTINGS_W
+            })
+            .unwrap_or(0.0)
+        })
+        .collect();
+    let widest = widths.iter().copied().fold(0.0f32, f32::max).max(170.0 + SETTINGS_W);
+    let width = |i: usize| if o.uniform_width { widest } else { widths[i].max(120.0 + SETTINGS_W) };
     let gap = 4.0;
-    let mut any_hover = false;
-    let mut place = |ctx: &egui::Context, app: &mut LoomApp, id: &str, quad: &Quadrant, pivot: egui::Align2| {
-        if quad.items.is_empty() {
+    // Reposition When Off Screen: the menu moves so every quadrant fits (heights from the last frame).
+    let mut at = open.at;
+    if o.reposition_off_screen {
+        let screen = ctx.screen_rect();
+        let h = |id: &str| ctx.memory(|m| m.area_rect(egui::Id::new(("quad", id)))).map(|r| r.height()).unwrap_or(0.0);
+        let up = h("display").max(h("tools1")) + gap;
+        let down = h("transform").max(h("tools2")) + gap;
+        let left = if q.tools1.is_some() || q.tools2.is_some() { width(2).max(width(3)) + gap } else { 0.0 };
+        let right = width(0).max(width(1)) + gap;
+        at.x = at.x.clamp(screen.min.x + left, (screen.max.x - right).max(screen.min.x + left));
+        at.y = at.y.clamp(screen.min.y + up, (screen.max.y - down).max(screen.min.y + up));
+    }
+    if open.opened.is_none() {
+        // First frame: remember the time; a moved menu takes the cursor along when asked to.
+        let moved = (at - open.at).length() > 0.5;
+        if let Some(m) = app.quad_menu.as_mut() {
+            m.opened = Some(now);
+            if moved {
+                m.origin = Some(open.at);
+                m.at = at;
+            }
+        }
+        if moved && o.move_cursor_when_repositioned {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CursorPosition(at));
+        }
+    }
+    // Animation: Fade ramps the opacity, Stretch opens one quadrant after another clockwise.
+    let total = (o.steps.max(1) as f64) * (o.pause as f64) / 1000.0;
+    let t = if total > 0.0 { ((now - opened) / total).clamp(0.0, 1.0) as f32 } else { 1.0 };
+    if t < 1.0 && o.animation != "None" {
+        ctx.request_repaint();
+    }
+    let fade = if o.animation == "Fade" { t } else { 1.0 };
+    let stretch_order = [0usize, 1, 3, 2];
+    let stretched = |i: usize| o.animation != "Stretch" || t >= stretch_order.iter().position(|q| *q == i).unwrap_or(0) as f32 / 4.0;
+    let pointer = ctx.input(|i| i.pointer.hover_pos());
+    // Show All Quads off: only the quadrant toward the pointer (the starting quadrant until it moves).
+    let active = pointer.filter(|p| (*p - at).length() > gap).map(|p| quadrant_at(at, p)).unwrap_or(o.starting_quadrant.min(3) as usize);
+    let mut close = false;
+    let mut picked_cmd = false;
+    let mut place = |ctx: &egui::Context, app: &mut LoomApp, i: usize, id: &str, quad: &Quadrant, pivot: egui::Align2| {
+        if quad.items.is_empty() || !stretched(i) {
             return; // a quadrant with nothing to show is hidden
         }
+        let full = show_all || i == active;
+        let look = Look {
+            title: rgb(o.color("Title Bar Text", i)),
+            title_bg: rgb(o.color("Title Bar Background", i)),
+            background: rgb(o.color("Background", i)),
+            text: rgb(o.color("Text", i)),
+            highlight: rgb(o.color("Highlighted Text", i)),
+            disabled: rgb(o.color("Disabled Text", i)),
+            border: rgb(o.color("Border", i)),
+            title_font: title_font.clone(),
+            menu_font: menu_font.clone(),
+            margin: o.vertical_margins,
+            right_align: o.mirror && i >= 2,
+            width: width(i),
+        };
         let area = egui::Area::new(egui::Id::new(("quad", id)))
             .order(egui::Order::Foreground)
             .pivot(pivot)
-            .fixed_pos(open.at + match pivot {
+            .fixed_pos(at + match pivot {
                 egui::Align2::RIGHT_BOTTOM => egui::vec2(-gap, -gap),
                 egui::Align2::LEFT_BOTTOM => egui::vec2(gap, -gap),
                 egui::Align2::RIGHT_TOP => egui::vec2(-gap, gap),
                 _ => egui::vec2(gap, gap),
             });
-        let r = area.show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_min_width(170.0 + SETTINGS_W);
-                ui.set_max_width(170.0 + SETTINGS_W);
-                quadrant_ui(ui, app, open.kind, quad, &mut close);
+        area.show(ctx, |ui| {
+            ui.set_opacity((o.opacity / 100.0).clamp(0.1, 1.0) * fade);
+            let frame = egui::Frame::popup(ui.style()).fill(look.background).stroke(egui::Stroke::new(1.0_f32, look.border));
+            frame.show(ui, |ui| {
+                ui.set_min_width(look.width);
+                ui.set_max_width(look.width);
+                if full {
+                    quadrant_ui(ui, app, open.kind, quad, &look, &mut close, &mut picked_cmd);
+                } else {
+                    // Only the title shows; pointing toward it opens it.
+                    title_bar(ui, app, open.kind, quad, &look, &mut close);
+                }
             });
         });
-        any_hover |= r.response.contains_pointer();
     };
     // Display upper-right, transform lower-right, tools 1 upper-left, tools 2 lower-left.
-    place(ctx, app, "display", &q.display, egui::Align2::LEFT_BOTTOM);
-    place(ctx, app, "transform", &q.transform, egui::Align2::LEFT_TOP);
+    place(ctx, app, 0, "display", &q.display, egui::Align2::LEFT_BOTTOM);
+    place(ctx, app, 1, "transform", &q.transform, egui::Align2::LEFT_TOP);
     if let Some(t1) = &q.tools1 {
-        place(ctx, app, "tools1", t1, egui::Align2::RIGHT_BOTTOM);
+        place(ctx, app, 2, "tools1", t1, egui::Align2::RIGHT_BOTTOM);
     }
     if let Some(t2) = &q.tools2 {
-        place(ctx, app, "tools2", t2, egui::Align2::RIGHT_TOP);
+        place(ctx, app, 3, "tools2", t2, egui::Align2::RIGHT_TOP);
+    }
+    // Return Cursor After Repositioned: the cursor goes back where the right-click was.
+    if picked_cmd && o.return_cursor_after {
+        if let Some(origin) = app.quad_menu.and_then(|m| m.origin) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CursorPosition(origin));
+        }
     }
     // Submenus are their own areas, so test "over any menu area" rather than our panels
     // (not "over any area": the panels and the viewports' central panel count as areas too).
     let over_menu = ctx.input(|i| i.pointer.interact_pos()).and_then(|p| ctx.layer_id_at(p)).is_some_and(|l| l.order == egui::Order::Foreground);
     let clicked_outside = open.armed && ctx.input(|i| i.pointer.any_pressed()) && !over_menu;
-    let _ = any_hover;
     let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     if !open.armed {
         if let Some(o) = app.quad_menu.as_mut() {
@@ -616,6 +890,18 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: Open) -> bool {
         }
     }
     close || clicked_outside || escape
+}
+
+/// A Quad Shortcut or Show Quad Menu opens that set at the pointer, in the
+/// viewport under it (the active one when the pointer is elsewhere).
+pub fn open_requested(ctx: &egui::Context, app: &mut LoomApp) {
+    let Some(set) = app.state.quad_request.take() else { return };
+    let Some(kind) = QuadKind::of_set(app, &set) else { return };
+    let p = ctx.input(|i| i.pointer.hover_pos()).unwrap_or_else(|| app.viewport_rects.get(app.state.active_viewport).map(|r| r.center()).unwrap_or(egui::pos2(400.0, 300.0)));
+    let viewport = app.viewport_rects.iter().position(|r| r.contains(p)).unwrap_or(app.state.active_viewport);
+    let mut open = Open::new(p, viewport);
+    open.kind = kind;
+    app.quad_menu = Some(open);
 }
 
 #[cfg(test)]

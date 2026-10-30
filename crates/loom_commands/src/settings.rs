@@ -78,6 +78,10 @@ pub struct Settings {
     pub project_folder: Option<PathBuf>,
     /// FBX / OBJ import and export options and saved presets.
     pub exchange: crate::exchange::ExchangeOptions,
+    /// Toolbars, quad menus, menus, colours and the rollout order.
+    pub custom: crate::ui_custom::UiCustom,
+    /// Configure User Paths.
+    pub paths: crate::paths::UserPaths,
     /// Where the floating OS windows were left (the UI fills it in): by
     /// window, the outer position and the inner size, `[x, y, w, h]`.
     pub windows: BTreeMap<String, [f32; 4]>,
@@ -99,6 +103,8 @@ impl Settings {
             recent_files: state.recent_files.clone(),
             last_folder: None,
             exchange: state.exchange.clone(),
+            custom: state.ui_custom.clone(),
+            paths: state.paths.clone(),
             project_folder: state.project_folder.clone(),
             windows: BTreeMap::new(),
         }
@@ -121,6 +127,9 @@ impl Settings {
         state.recent_files = self.recent_files.clone();
         state.recent_files.truncate(state.prefs.recent_files_count);
         state.exchange = self.exchange.clone();
+        state.ui_custom = self.custom.clone();
+        state.paths = self.paths.clone();
+        state.startup_custom = self.custom.clone();
         state.project_folder = self.project_folder.clone();
     }
 
@@ -134,19 +143,52 @@ impl Settings {
     }
 }
 
-/// Customize > Save / Load Custom UI Scheme: a `.ui` file with the Show UI
-/// toggles and every shortcut group.
+/// Customize > Save / Load Custom UI Scheme: a `.ui` file with the parts
+/// the Custom Scheme dialog ticked: Interface Layout (Show UI toggles,
+/// toolbars, docking, rollout order), Keyboard, Menus (menus and quad
+/// menus), Quad Options and Colors. A part left out is not changed on load.
 #[derive(Serialize, Deserialize)]
 struct UiScheme {
     format: String,
-    ui: UiLayout,
-    shortcuts: BTreeMap<String, GroupRows>,
+    #[serde(default)]
+    ui: Option<UiLayout>,
+    #[serde(default)]
+    shortcuts: Option<BTreeMap<String, GroupRows>>,
+    #[serde(default)]
+    toolbars: Option<crate::ui_custom::UiCustom>,
+    #[serde(default)]
+    menus: Option<crate::ui_custom::UiCustom>,
+    #[serde(default)]
+    quad_options: Option<crate::ui_custom::QuadOptions>,
+    #[serde(default)]
+    colors: Option<crate::ui_custom::UiColors>,
 }
 
 const SCHEME_FORMAT: &str = "3dloom-ui-scheme-1";
 
+/// The Custom Scheme dialog's parts.
+pub const SCHEME_PARTS: [&str; 5] = ["Interface Layout", "Keyboard", "Menus", "Quad Options", "Colors"];
+
 pub fn scheme_to_text(state: &AppState) -> String {
-    serde_json::to_string_pretty(&UiScheme { format: SCHEME_FORMAT.into(), ui: UiLayout::of(state), shortcuts: state.custom_keys.all_rows() }).expect("plain data")
+    scheme_parts_to_text(state, &SCHEME_PARTS)
+}
+
+/// A scheme with only `parts` (names from `SCHEME_PARTS`).
+pub fn scheme_parts_to_text(state: &AppState, parts: &[&str]) -> String {
+    let has = |p: &str| parts.contains(&p);
+    let c = &state.ui_custom;
+    let layout = crate::ui_custom::UiCustom { toolbars: c.toolbars.clone(), docks: c.docks.clone(), float_pos: c.float_pos.clone(), shown: c.shown.clone(), looks: c.looks.clone(), rollout_order: c.rollout_order.clone(), quick_access: c.quick_access.clone(), quick_access_hidden: c.quick_access_hidden.clone(), quick_access_below: c.quick_access_below, menu_bar_hidden: c.menu_bar_hidden, ..Default::default() };
+    let menus = crate::ui_custom::UiCustom { menus: c.menus.clone(), quads: c.quads.clone(), ..Default::default() };
+    let s = UiScheme {
+        format: SCHEME_FORMAT.into(),
+        ui: has("Interface Layout").then(|| UiLayout::of(state)),
+        shortcuts: has("Keyboard").then(|| state.custom_keys.all_rows()),
+        toolbars: has("Interface Layout").then_some(layout),
+        menus: has("Menus").then_some(menus),
+        quad_options: has("Quad Options").then(|| c.quad_options.clone()),
+        colors: has("Colors").then(|| c.colors.clone()),
+    };
+    serde_json::to_string_pretty(&s).expect("plain data")
 }
 
 pub fn apply_scheme_text(state: &mut AppState, text: &str) -> Result<(), String> {
@@ -154,10 +196,30 @@ pub fn apply_scheme_text(state: &mut AppState, text: &str) -> Result<(), String>
     if s.format != SCHEME_FORMAT {
         return Err(format!("unknown UI scheme format {:?}", s.format));
     }
-    let mut keys = state.custom_keys.clone();
-    keys.set_rows(&s.shortcuts)?;
-    state.custom_keys = keys;
-    s.ui.apply(state);
+    if let Some(rows) = &s.shortcuts {
+        let mut keys = state.custom_keys.clone();
+        keys.set_rows(rows)?;
+        state.custom_keys = keys;
+    }
+    if let Some(ui) = s.ui {
+        ui.apply(state);
+    }
+    let c = &mut state.ui_custom;
+    if let Some(t) = s.toolbars {
+        (c.toolbars, c.docks, c.float_pos, c.shown, c.looks, c.rollout_order) = (t.toolbars, t.docks, t.float_pos, t.shown, t.looks, t.rollout_order);
+        (c.quick_access, c.quick_access_hidden, c.quick_access_below, c.menu_bar_hidden) = (t.quick_access, t.quick_access_hidden, t.quick_access_below, t.menu_bar_hidden);
+    }
+    if let Some(m) = s.menus {
+        (c.menus, c.quads) = (m.menus, m.quads);
+    }
+    if let Some(q) = s.quad_options {
+        c.quad_options = q;
+    }
+    if let Some(col) = s.colors {
+        c.colors = col;
+    }
+    state.grid_dirty = true;
+    state.mesh_dirty = true;
     Ok(())
 }
 

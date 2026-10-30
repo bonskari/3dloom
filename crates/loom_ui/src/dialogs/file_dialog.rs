@@ -42,7 +42,23 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
         Dialog::ExportFile | Dialog::ExportSelected | Dialog::ArchiveFile => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
         _ => String::new(),
     };
-    // Set Project Folder: each kind of file starts in its project folder.
+    // Configure User Paths > File I/O: the folder of this kind of file.
+    let entry = match dialog {
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::MergeFile | Dialog::SaveSelected => Some("Scenes"),
+        Dialog::ImportFile => Some("Import"),
+        Dialog::ExportFile | Dialog::ExportSelected => Some("Export"),
+        Dialog::ArchiveFile => Some("Archives"),
+        Dialog::SaveAnimation | Dialog::LoadAnimation => Some("Animations"),
+        Dialog::RenderFile | Dialog::SaveRenderedImage => Some("Render Output"),
+        _ => None,
+    };
+    if let Some(d) = entry.and_then(|e| app.state.paths.dir(e)) {
+        let keep_scene_folder = matches!(dialog, Dialog::SaveFileAs | Dialog::SaveFileAsCopy) && app.state.file.is_some();
+        if !keep_scene_folder {
+            return (d.to_path_buf(), name);
+        }
+    }
+    // Otherwise Set Project Folder: each kind of file starts in its project folder.
     let kind = match dialog {
         Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::ReplaceFile => "scenes",
         Dialog::ImportFile => "import",
@@ -126,6 +142,19 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::SaveShortcuts => ("Save Shortcut File As", "kbd", "Save"),
         Dialog::LoadShortcuts => ("Load Shortcut File", "kbd", "Open"),
         Dialog::SaveCustomUiScheme => ("Save Custom UI Scheme", "ui", "Save"),
+        Dialog::UiFile { kind, save } => {
+            use loom_commands::UiFileKind as K;
+            match (kind, save) {
+                (K::Toolbars, true) => ("Save UI File As", "cui", "Save"),
+                (K::Toolbars, false) => ("Load UI File", "cui", "Open"),
+                (K::Menus, true) => ("Save Menu File As", "mnu", "Save"),
+                (K::Menus, false) => ("Load Menu File", "mnu", "Open"),
+                (K::Colors, true) => ("Save Color File As", "clr", "Save"),
+                (K::Colors, false) => ("Load Color File", "clr", "Open"),
+                (K::QuadOptions, true) => ("Save Quad Options File As", "qop", "Save"),
+                (K::QuadOptions, false) => ("Load Quad Options File", "qop", "Open"),
+            }
+        }
         Dialog::LoadCustomUiScheme => ("Load Custom UI Scheme", "ui", "Open"),
         Dialog::SaveAnimation => ("Save Animation", "lxaf", "Save"),
         Dialog::LoadAnimation => ("Load Animation", "lxaf", "Open"),
@@ -170,8 +199,22 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::BipedLoadFig => Command::BipedLoadFile { path: Some(p) },
         Dialog::SaveShortcuts => Command::SaveShortcuts { path: Some(p) },
         Dialog::LoadShortcuts => Command::LoadShortcuts { path: Some(p) },
-        Dialog::SaveCustomUiScheme => Command::SaveCustomUiScheme { path: Some(p) },
+        Dialog::SaveCustomUiScheme => Command::SaveCustomUiScheme { path: Some(p), parts: None },
         Dialog::LoadCustomUiScheme => Command::LoadCustomUiScheme { path: Some(p) },
+        Dialog::UiFile { kind, save } => {
+            use loom_commands::UiFileKind as K;
+            let path = Some(p);
+            match (kind, save) {
+                (K::Toolbars, true) => Command::SaveToolbars { path },
+                (K::Toolbars, false) => Command::LoadToolbars { path },
+                (K::Menus, true) => Command::SaveMenus { path },
+                (K::Menus, false) => Command::LoadMenus { path },
+                (K::Colors, true) => Command::SaveUiColors { path },
+                (K::Colors, false) => Command::LoadUiColors { path },
+                (K::QuadOptions, true) => Command::SaveQuadOptions { path },
+                (K::QuadOptions, false) => Command::LoadQuadOptions { path },
+            }
+        }
         Dialog::SaveAnimation => Command::SaveAnimation { path: Some(p) },
         Dialog::LoadAnimation => Command::LoadAnimation { path: Some(p), offset: None },
         Dialog::SkinSaveEnvelopes => Command::SkinSaveEnvelopes { path: Some(p) },

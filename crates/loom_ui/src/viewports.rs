@@ -32,11 +32,15 @@ pub fn cell_rects(app: &LoomApp, panel: egui::Rect) -> Vec<egui::Rect> {
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let animating = ctx.input(|i| app.update_view_animation(i.stable_dt.clamp(0.001, 0.1)));
+    // Adaptive Degradation: navigating (or dragging a transform) slower than Maintain FPS.
+    let navigating = app.camera_controller.is_dragging() || app.transform_drag.is_some() || app.camera_nav_open;
+    let dt = ctx.input(|i| i.stable_dt);
+    app.degrading = app.state.degradation.on && navigating && dt > 1.0 / app.state.degradation.maintain_fps.max(1.0);
     if animating {
         ctx.request_repaint();
     }
     egui::CentralPanel::default()
-        .frame(egui::Frame::central_panel(&ctx.style()).fill(egui::Color32::from_rgb(80, 80, 80)).inner_margin(0.0))
+        .frame(egui::Frame::central_panel(&ctx.style()).fill(app.color("Viewport Background")).inner_margin(0.0))
         .show(ctx, |ui| {
             let panel = ui.available_rect_before_wrap();
             let rects = cell_rects(app, panel);
@@ -50,7 +54,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             if let Some(active) = rects.get(app.state.active_viewport) {
                 if active.width() >= 1.0 {
                     // Auto Key draws the active viewport's frame red.
-                    let c = if app.state.auto_key { egui::Color32::from_rgb(220, 30, 30) } else { ACTIVE_FRAME };
+                    let c = if app.state.auto_key { egui::Color32::from_rgb(220, 30, 30) } else { app.color("Active Viewport Border") };
                     ui.painter().rect_stroke(*active, 0.0, egui::Stroke::new(if app.state.auto_key { 3.0 } else { 1.5 }, c), egui::StrokeKind::Middle);
                 }
             }

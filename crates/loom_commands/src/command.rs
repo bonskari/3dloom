@@ -244,6 +244,11 @@ impl ArgSchema for loom_scene::anim::TangentType {
         json!({"type":"string","enum":["Auto","Smooth","Linear","Step","Fast","Slow","Custom"]})
     }
 }
+impl ArgSchema for crate::time_display::TimeDisplay {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Frames","SMPTE","FrameTicks","MmSsTicks"]})
+    }
+}
 impl ArgSchema for crate::anim_cmds::TrackBarFilter {
     fn schema() -> Value {
         json!({"type":"string","enum":["AllKeys","AllTransformKeys","CurrentTransform","Object","Material"]})
@@ -413,6 +418,7 @@ commands! {
     RedoSceneOperation => "Redo Scene Operation", MainUI, "Redo the last undone scene change (Ctrl+Y).";
     UndoViewportOperation => "Undo Viewport Operation", MainUI, "Undo the last viewport change (Shift+Z).";
     RedoViewportOperation => "Redo Viewport Operation", MainUI, "Redo the last undone viewport change (Shift+Y).";
+    UnitsMismatchReply => "Units Mismatch Reply", Loom, "Units Mismatch dialog (opening a file of other system units): `rescale` the file's objects to the system unit scale, or adopt the file's unit scale." { rescale: bool };
     OpenFile => "Open File", MainUI, "Open a .loom scene, or a .max scene read as Import reads it (opened untitled; what it leaves out goes to the Import Summary) (Ctrl+O); without `path` the Open dialog shows. Replaces the scene and clears undo." { path: Option<String> };
     SaveFile => "Save File", MainUI, "Save the scene to its file (Ctrl+S), to `path`, or through the Save As dialog when it has none." { path: Option<String> };
     SaveFileAs => "Save File As", MainUI, "Save the scene to `path` and make that the current file; without `path` the Save As dialog shows." { path: Option<String> };
@@ -880,6 +886,7 @@ commands! {
     SetCustomFileProperty => "Set Custom File Property", Loom, "File Properties > Custom: add or change a named property; no `value` deletes it." { name: String, value: Option<String> };
     ShowRibbonToggle => "Show Ribbon Toggle", Loom, "Show or hide the Graphite Modeling Tools ribbon (Main Toolbar button, Customize > Show UI > Show Ribbon).";
     LockUserInterfaceToggle => "Lock User Interface Toggle", MainUI, "Lock or unlock the UI layout (Alt+0).";
+    DisplayFloater => "Display Floater", MainUI, "Open or close Tools > Display Floater (Hide/Freeze and Object Level tabs).";
     ExpertModeToggle => "Expert Mode Toggle", MainUI, "Toggle Expert Mode: only the viewports are shown (Ctrl+X).";
     DisplayAsSeeThroughToggle => "Display as See-Through Toggle", MainUI, "Toggle see-through display of the selected objects (Alt+X).";
     HideCamerasToggle => "Hide Cameras Toggle", MainUI, "Hide or show all cameras (Shift+C).";
@@ -894,7 +901,9 @@ commands! {
     SelectByName => "Select By Name", MainUI, "Open the Select From Scene dialog (H).";
     CameraView => "Camera View", MainUI, "Switch the active viewport to the selected or only camera (C); with several cameras and none selected, open the Select Camera list.";
     ViewCubeToggle => "Show the ViewCube Toggle", MainUI, "Show or hide the ViewCube (Alt+Ctrl+V).";
-    SetViewCubeOptions => "Set ViewCube Options", Loom, "Viewport Configuration > ViewCube: show it, in all views or the active one only, size (0 Large, 1 Normal, 2 Small, 3 Tiny), inactive opacity 0-100, compass." { show: Option<bool>, all_views: Option<bool>, size: Option<u32>, inactive_opacity: Option<f32>, compass: Option<bool> };
+    SetViewCubeOptions => "Set ViewCube Options", Loom, "Viewport Configuration > ViewCube: show it, in all views or the active one only, size (0 Large, 1 Normal, 2 Small, 3 Tiny), inactive opacity 0-100, compass; Snap to Closest View, Fit-to-View on View Change, Animated Transitions, Keep Scene Upright, Angle of North (degrees)." { show: Option<bool>, all_views: Option<bool>, size: Option<u32>, inactive_opacity: Option<f32>, compass: Option<bool> , snap_to_closest: Option<bool>, fit_to_view: Option<bool>, animated: Option<bool>, keep_upright: Option<bool>, north: Option<f32> };
+    SetCurrentViewAsFront => "Set Current View as Front", Loom, "ViewCube menu: the cube's Front face turns to the active view's direction (Angle of North).";
+    ResetFront => "Reset Front", Loom, "ViewCube menu: the cube's Front face back to the world's front (Angle of North 0).";
     SetCurrentViewAsHome => "Set Current View as Home", MainUI, "ViewCube menu: the active view becomes the Home view (saved with the scene).";
     SaveActiveView => "Save Active View", MainUI, "Views > Save Active <View> View: store the active view (one slot per view: Top, Front, Perspective...).";
     RestoreActiveView => "Restore Active View", MainUI, "Views > Restore Active <View> View: bring back the view saved for the active view's kind.";
@@ -918,6 +927,12 @@ commands! {
     ShadeSelectedFacesToggle => "Viewport Selection Shade Selected Faces Toggle", MainUI, "Shade selected faces red in the viewports (F2).";
     SelectionBracketToggle => "Viewport Selection Show Selection Bracket Toggle", MainUI, "Show or hide selection brackets (J).";
     TimeConfiguration => "Time Configuration", Loom, "Open the Time Configuration dialog.";
+    SetTimeDisplay => "Set Time Display", Loom, "Time Configuration > Time Display: Frames, SMPTE, FrameTicks or MmSsTicks (the time slider, track bar and time fields)." { mode: crate::time_display::TimeDisplay };
+    SetKeySteps => "Set Key Steps", Loom, "Time Configuration > Key Steps: Use TrackBar, Selected Objects Only, Use Current Transform, Position / Rotation / Scale (the keys Key Mode steps between)." { use_track_bar: Option<bool>, selected_only: Option<bool>, use_current_transform: Option<bool>, position: Option<bool>, rotation: Option<bool>, scale: Option<bool> };
+    AddTimeTag => "Add Time Tag", Loom, "Time Tag box > Add Tag: tag frame `time` (the current frame when omitted) as `name`; `lock` keeps its frame; `relative_to` makes it follow another tag at the present offset." { name: String, time: Option<i32>, lock: Option<bool>, relative_to: Option<String> };
+    EditTimeTag => "Edit Time Tag", Loom, "Edit Time Tag dialog: rename, move (`time`, unless locked), Lock Time, Relative To another tag (empty: none)." { name: String, new_name: Option<String>, time: Option<i32>, lock: Option<bool>, relative_to: Option<String> };
+    DeleteTimeTag => "Delete Time Tag", Loom, "Edit Time Tag > Delete; tags relative to it keep their frames." { name: String };
+    GoToTimeTag => "Go To Time Tag", Loom, "Time Tag box: jump the time slider to the tag's frame." { name: String };
     SetFrame => "Set Frame", Loom, "Jump the time slider to a frame (clamped to the active time segment)." { frame: i32 };
     SetTimeConfiguration => "Set Time Configuration", Loom, "Time Configuration dialog: active time segment start/end and frame rate." { start: Option<i32>, end: Option<i32>, fps: Option<f32> };
     SetFov => "Set FOV", Loom, "Set the perspective field of view in degrees (Field-of-View button)." { degrees: f32 };
@@ -929,6 +944,12 @@ commands! {
     ViewportLayout => "Viewport Layout", Loom, "Set one of the 14 Viewport Configuration layouts." { layout: crate::viewport::ViewportLayout };
     ActiveViewport => "Active Viewport", Loom, "Activate a viewport by index." { index: u32 };
     ViewportView => "Viewport View", Loom, "Set the point of view of a viewport by index." { index: u32, kind: crate::state::ViewKind };
+    SetViewportRendering => "Set Viewport Rendering", Loom, "Viewport Configuration > Rendering Method with Apply To (`apply_to`: Active Only, All Viewports or All But Active; default Active Only): Rendering Level (`shading`: Smooth + Highlights, Smooth, Facets + Highlights, Facets, Flat, Hidden Line, Wireframe, Bounding Box, Realistic), Edged Faces, Transparency (None, Simple, Best), Disable Textures, Force 2-Sided." { apply_to: Option<String>, shading: Option<String>, edged_faces: Option<bool>, transparency: Option<String>, disable_textures: Option<bool>, force_two_sided: Option<bool> };
+    AdaptiveDegradationToggle => "Adaptive Degradation Toggle", MainUI, "Turn Adaptive Degradation on or off (O): while a view is navigated and the frame rate drops under Maintain FPS, views draw at a simpler level.";
+    SetAdaptiveDegradation => "Set Adaptive Degradation", Loom, "Viewport Configuration > Adaptive Degradation: the General (inactive views) and Active levels views drop to, Maintain FPS, Never Degrade Selected, Degrade to Default Lighting." { general: Option<String>, active: Option<String>, maintain_fps: Option<f32>, never_degrade_selected: Option<bool>, degrade_to_default_lighting: Option<bool> };
+    SetViewportLighting => "Set Viewport Lighting", Loom, "Viewport Configuration > Lighting and Shadows with Apply To (Active Only, All Viewports, All But Active): Illuminate with Scene Lights (`scene_lights`) or the default lights, 1 or 2 default lights, Enable Hardware Shading (`hardware`: the views show Realistic, off: back to Smooth + Highlights)." { apply_to: Option<String>, scene_lights: Option<bool>, default_lights: Option<u32>, hardware: Option<bool> };
+    SetRenderRegions => "Set Render Regions", Loom, "Viewport Configuration > Regions: the Sub Region and Blowup Region rectangles [x0, y0, x1, y1] as fractions of the render output (y down)." { region: Option<[f32; 4]>, blowup: Option<[f32; 4]> };
+    SaveViewportDefaults => "Save Viewport Defaults", Loom, "Viewport Configuration > Save as Default: new and reset scenes start with this viewport configuration (layout, views, rendering levels, options; saved in the config folder).";
     ViewportShading => "Viewport Shading", Loom, "Set the active viewport's shading mode and edged faces." { shading: crate::viewport::Shading, edged_faces: Option<bool> };
     SetSplits => "Set Splits", Loom, "Move the viewport layout splitters (fractions 0.05–0.95)." { x: Option<f32>, y: Option<f32> };
     SetViewportBackground => "Set Viewport Background", Loom, "Viewport Background dialog OK: the image file (omitted = keep, empty = remove), Aspect Ratio (Match Viewport, Match Bitmap, Match Rendering Output), Lock Zoom/Pan, Display Background, for the active viewport or all of them." { path: Option<String>, aspect: Option<String>, lock: Option<bool>, display: Option<bool>, all_views: Option<bool> };
@@ -967,16 +988,73 @@ commands! {
     PaintSelectionSizeDown => "Paint Selection Size Down", MainUI, "Paint Selection Region: a smaller brush.";
     SetPreference => "Set Preference", Loom, "Set a Preferences value by name (booleans as 0/1): Auto Backup Enable, Auto Backup Count, Auto Backup Interval (minutes), Scene Undo Levels, Reference Coordinate System Constant, Auto Window/Crossing by Direction, Paint Selection Brush Size, Spinner Precision, Spinner Snap, Spinner Use Snap, Spinner Wrap Cursor, Viewport Tooltips, Show Cross Hair Cursor, Transform Gizmos, Show Axis Labels, Allow Multiple Gizmos, Gizmo Size, Move Plane Handle Size, Move Plane Handle Offset, Center Box Handle, Rotate Free Rotation, Rotate Show Tripod, Rotate Screen Handle, Rotate Show Pie Slice, Rotate Angle Data, Scale Size, Rotation Increment, Viewport Orbit Snap Angle, Space Locks Selection, Recent Files in File Menu, Keep Creating." { name: String, value: f64 };
     UnitsSetup => "Units Setup", Loom, "Open Customize > Units Setup.";
-    SetUnits => "Set Units", Loom, "Units Setup: `system_unit` Inches/Feet/Millimeters/Centimeters/Meters/Kilometers, `system_scale` units per system unit, `display` Generic / Millimeters / Centimeters / Meters / Kilometers / Decimal Inches / Decimal Feet / Feet w/ Decimal Inches / Custom (with custom_name, custom_value, custom_unit)." { system_unit: Option<String>, system_scale: Option<f32>, display: Option<String>, custom_name: Option<String>, custom_value: Option<f32>, custom_unit: Option<String> };
+    SetUnits => "Set Units", Loom, "Units Setup: `system_unit` Inches/Feet/Millimeters/Centimeters/Meters/Kilometers, `system_scale` units per system unit, `display` Generic / Millimeters / Centimeters / Meters / Kilometers / Fractional Inches / Decimal Inches / Fractional Feet / Decimal Feet / Feet w/ Fractional Inches / Feet w/ Decimal Inches / Custom (with custom_name, custom_value, custom_unit); `fraction` the fractional units' denominator (1, 2, 4, 8, 10, 16, 32, 64, 100); `default_feet` whether a bare number in Feet w/ Inches is feet; System Unit Setup > Respect System Units in Files." { system_unit: Option<String>, system_scale: Option<f32>, display: Option<String>, custom_name: Option<String>, custom_value: Option<f32>, custom_unit: Option<String> , fraction: Option<u32>, default_feet: Option<bool>, respect_system_units: Option<bool> };
+    GrabViewport => "Grab Viewport", Loom, "Tools > Grab Viewport ([+] > Create Preview > Still Image): the active viewport's picture goes to the Rendered Frame Window (save it from there); with a Viewport Captures folder it is also written there.";
+    CustomUiDefaultsSwitcher => "Custom UI and Defaults Switcher", Loom, "Open Customize > Custom UI and Defaults Switcher (defaults sets and UI schemes).";
+    SwitchUiScheme => "Switch UI Scheme", Loom, "Custom UI and Defaults Switcher > Set: the UI scheme Default UI, Modular Toolbars UI (the hidden toolbars docked under the main toolbar), or a .ui scheme saved in the config folder's ui folder." { name: String };
+    SwitchDefaults => "Switch Defaults", Loom, "Custom UI and Defaults Switcher > Set: the defaults set for tool options: Default (the program's preferences and units) or a set saved with Save Defaults Set." { name: String };
+    SaveDefaultsSet => "Save Defaults Set", Loom, "Custom UI and Defaults Switcher: save the current preferences and units as a defaults set named `name` (config folder, defaults)." { name: String };
+    ConfigureUserPaths => "Configure User Paths", Loom, "Open Customize > Configure User Paths (File I/O folders, External Files bitmap folders).";
+    SetUserPath => "Set User Path", Loom, "Configure User Paths > File I/O: the folder of `name` (Animations, Archives, Auto Backup, Export, Import, Render Output, Scenes, Viewport Captures) the file dialogs and Auto Backup use; empty: the program's choice." { name: String, path: String };
+    SetBitmapPaths => "Set Bitmap Paths", Loom, "Configure User Paths > External Files: the folders, in search order, where a bitmap missing from its path is looked for by name." { paths: Vec<String> };
     CustomizeUserInterface => "Customize User Interface", Loom, "Open Customize > Customize User Interface (Keyboard panel).";
     AssignShortcut => "Assign Shortcut", Loom, "Customize User Interface > Keyboard > Assign: bind `chord` (chart spelling, e.g. Alt+Ctrl+Z, NumPad +) to `action` in `group` (Main UI, Editable Poly, Edit Poly, Editable Spline, FFD, Unwrap UVW, Skin, Track View, Edit Normals); the action that had the chord there loses it. Saved in the settings file." { group: String, action: String, chord: String };
     RemoveShortcut => "Remove Shortcut", Loom, "Customize User Interface > Keyboard > Remove: unbind every shortcut of `action` in `group`." { group: String, action: String };
     ResetShortcuts => "Reset Shortcuts", Loom, "Customize User Interface > Keyboard > Reset: every group back to the default shortcuts.";
     SaveShortcuts => "Save Shortcuts", Loom, "Customize User Interface > Keyboard > Save: write every group's shortcuts to a .kbd file (3dLoom's own JSON format); without `path` the Save dialog shows." { path: Option<String> };
     LoadShortcuts => "Load Shortcuts", Loom, "Customize User Interface > Keyboard > Load: read shortcuts written by Save Shortcuts; the groups in the file replace the current ones. Without `path` the Open dialog shows." { path: Option<String> };
-    LoadCustomUiScheme => "Load Custom UI Scheme", MainUI, "Customize > Load Custom UI Scheme: apply a .ui file written by Save Custom UI Scheme (Show UI toggles and shortcuts); without `path` the Open dialog shows." { path: Option<String> };
-    SaveCustomUiScheme => "Save Custom UI Scheme", MainUI, "Customize > Save Custom UI Scheme: write the Show UI toggles and shortcuts to a .ui file; without `path` the Save dialog shows." { path: Option<String> };
-    RevertToStartupUi => "Revert to Startup UI", MainUI, "Customize > Revert to Startup Layout: the Show UI toggles as they were when 3dLoom started.";
+    LoadCustomUiScheme => "Load Custom UI Scheme", MainUI, "Customize > Load Custom UI Scheme: apply a .ui file written by Save Custom UI Scheme (the parts it holds: layout and toolbars, shortcuts, menus and quads, quad options, colours); without `path` the Open dialog shows." { path: Option<String> };
+    SaveCustomUiScheme => "Save Custom UI Scheme", MainUI, "Customize > Save Custom UI Scheme: write a .ui file with the Custom Scheme `parts` (Interface Layout, Keyboard, Menus, Quad Options, Colors; all when omitted); without `path` the Save dialog shows." { path: Option<String>, parts: Option<Vec<String>> };
+    RevertToStartupUi => "Revert to Startup UI", MainUI, "Customize > Revert to Startup Layout: the Show UI toggles, toolbars, docking and colours as they were when 3dLoom started.";
+    NewToolbar => "New Toolbar", Loom, "Customize User Interface > Toolbars > New: a new, empty floating toolbar named `name`." { name: String };
+    DeleteToolbar => "Delete Toolbar", Loom, "Customize User Interface > Toolbars > Delete: remove a toolbar the user made." { name: String };
+    RenameToolbar => "Rename Toolbar", Loom, "Customize User Interface > Toolbars > Rename: rename a toolbar the user made to `to`." { name: String, to: String };
+    ShowToolbar => "Show Toolbar", Loom, "Show (`on` true), hide (false) or toggle (omitted) a toolbar: Command Panel, Main Toolbar, Axis Constraints, Layers, Extras, Snaps or one of the user's toolbars (the toolbar right-click menu, Toolbars panel > Hide)." { name: String, on: Option<bool> };
+    DockToolbar => "Dock Toolbar", Loom, "The toolbar right-click menu: dock a toolbar (or the command panel: Left / Right / Float) Top, Bottom, Left, Right, or Float it; `pos` is the floating window's top-left corner." { name: String, dock: String, pos: Option<[f32; 2]> };
+    AddToolbarButton => "Add Toolbar Button", Loom, "Toolbars panel: drop `action` (or \"-\" for a separator) onto a user toolbar at `index` (end when omitted)." { toolbar: String, action: String, index: Option<u32> };
+    RemoveToolbarButton => "Remove Toolbar Button", Loom, "A user toolbar button's right-click > Delete Button." { toolbar: String, index: u32 };
+    MoveToolbarButton => "Move Toolbar Button", Loom, "Alt+drag (move) or Ctrl+drag (`copy`) a button from one user toolbar onto another (or the same one) at `to_index`." { toolbar: String, index: u32, to_toolbar: String, to_index: Option<u32>, copy: bool };
+    SetButtonAppearance => "Set Button Appearance", Loom, "Edit Button Appearance for `action` on the user's toolbars: Image Button (`image`) with `icon`, or Text Button with `text`; `tooltip`. Empty strings go back to the action's own." { action: String, image: Option<bool>, text: Option<String>, icon: Option<String>, tooltip: Option<String> };
+    SaveToolbars => "Save Toolbars", Loom, "Toolbars panel > Save: the user's toolbars, docking and button looks to a .cui file (3dLoom's own JSON); without `path` the Save dialog shows." { path: Option<String> };
+    LoadToolbars => "Load Toolbars", Loom, "Toolbars panel > Load: read a .cui file written by Save Toolbars; without `path` the Open dialog shows." { path: Option<String> };
+    ResetToolbars => "Reset Toolbars", Loom, "Toolbars panel > Reset: no user toolbars, every toolbar and the command panel back in its own place.";
+    NewQuadSet => "New Quad Set", Loom, "Quads panel > New: a quad set named `name` (open it with Show Quad Menu, e.g. from a Quad Shortcut)." { name: String };
+    DeleteQuadSet => "Delete Quad Set", Loom, "Quads panel > Delete: remove a quad set the user made." { name: String };
+    RenameQuadSet => "Rename Quad Set", Loom, "Quads panel > Rename: rename a quad set the user made." { name: String, to: String };
+    SetQuadLabel => "Set Quad Label", Loom, "Quads panel > Label: the title of `quadrant` (0 upper right, 1 lower right, 2 upper left, 3 lower left) of quad set `set`; empty restores the program's." { set: String, quadrant: u32, label: String };
+    AddQuadItem => "Add Quad Item", Loom, "Quads panel: drop an action, a separator (\"-\") or a menu (\"menu:<name>\") into a quadrant at `index` (end when omitted)." { set: String, quadrant: u32, item: String, index: Option<u32> };
+    RemoveQuadItem => "Remove Quad Item", Loom, "Quads panel > Delete Menu Item for an entry the user added." { set: String, quadrant: u32, index: u32 };
+    HideQuadItem => "Hide Quad Item", Loom, "Quads panel > Delete Menu Item for one of the program's entries (by its label), or bring it back (`hidden` false)." { set: String, quadrant: u32, label: String, hidden: bool };
+    RenameQuadItem => "Rename Quad Item", Loom, "Quads panel > Edit Menu Item Name for an entry the user added (empty: its own name)." { set: String, quadrant: u32, index: u32, name: String };
+    SetShowAllQuads => "Set Show All Quads", Loom, "Quads panel > Show All Quads: off shows only the quadrant under the pointer." { set: String, on: bool };
+    SetQuadShortcut => "Set Quad Shortcut", Loom, "Quads panel > Quad Shortcut: the chord (chart spelling, e.g. Shift+Alt+Q) that opens quad set `set` at the pointer; empty removes it." { set: String, chord: String };
+    ShowQuadMenu => "Show Quad Menu", Loom, "Open quad set `set` at the pointer in the viewport under it (what a Quad Shortcut does)." { set: String };
+    SetQuadOption => "Set Quad Option", Loom, "Advanced Quad Menu Options: Starting Quadrant, Uniform Quad Width, Mirror Quads, Vertical Margins, Opacity Amount, Reposition Quad When Off Screen, Move Cursor When Repositioned, Return Cursor After Repositioned, Title Font, Title Size, Menu Font, Menu Size, Animation Type (None / Stretch / Fade), Steps, Pause." { name: String, value: String };
+    SetQuadColor => "Set Quad Color", Loom, "Advanced Quad Menu Options > Colors: `element` (Title Bar Background, Title Bar Text, Background, Text, Highlighted Text, Disabled Text, Border) in `quadrant`; locked elements set all four quadrants." { element: String, quadrant: u32, color: Option<[u8; 3]>, locked: Option<bool> };
+    SaveQuadOptions => "Save Quad Options", Loom, "Advanced Quad Menu Options > Save: a .qop file (3dLoom's JSON); without `path` the Save dialog shows." { path: Option<String> };
+    LoadQuadOptions => "Load Quad Options", Loom, "Advanced Quad Menu Options > Load a .qop file; without `path` the Open dialog shows." { path: Option<String> };
+    ResetQuadOptions => "Reset Quad Options", Loom, "Advanced Quad Menu Options > Reset to Startup: the program's quad menu options.";
+    NewMenu => "New Menu", Loom, "Menus panel > New: an empty menu named `name` (put it on the menu bar, in another menu or in a quad)." { name: String };
+    DeleteMenu => "Delete Menu", Loom, "Menus panel > Delete: remove a menu the user made, and the entries that open it." { name: String };
+    RenameMenu => "Rename Menu", Loom, "Menus panel > Rename: the title of a menu; & before a letter makes it the Alt accelerator; empty restores the program's." { menu: String, title: String };
+    AddMenuItem => "Add Menu Item", Loom, "Menus panel: drop an action, a separator (\"-\") or a menu (\"menu:<name>\") into `menu` at `index` among its added entries (end when omitted)." { menu: String, item: String, index: Option<u32> };
+    RemoveMenuItem => "Remove Menu Item", Loom, "Menus panel > Delete Menu Item for an entry the user added." { menu: String, index: u32 };
+    HideMenuItem => "Hide Menu Item", Loom, "Menus panel > Delete Menu Item for one of a program menu's own entries (by its label), or bring it back (`hidden` false)." { menu: String, label: String, hidden: bool };
+    RenameMenuItem => "Rename Menu Item", Loom, "Menus panel > Edit Menu Item Name for an entry the user added; & marks its accelerator; empty: its own name." { menu: String, index: u32, name: String };
+    SetMenuOnBar => "Set Menu On Bar", Loom, "Show a menu the user made on the menu bar (before Help) or take it off." { menu: String, on: bool };
+    SaveMenus => "Save Menus", Loom, "Menus / Quads panel > Save: the menu and quad menu edits to a .mnu file (3dLoom's JSON); without `path` the Save dialog shows." { path: Option<String> };
+    LoadMenus => "Load Menus", Loom, "Menus / Quads panel > Load a .mnu file; without `path` the Open dialog shows." { path: Option<String> };
+    ResetMenus => "Reset Menus", Loom, "Menus / Quads panel > Reset: the program's menus and quad menus.";
+    SetUiColor => "Set UI Color", Loom, "Colors panel: set an element's colour (Viewport Background, Perspective Background Top / Bottom, Active Viewport Border, Viewport Label Text, Viewport Statistics Text, Home Grid, Home Grid Major Lines, Home Grid World Axes, Selection, Frozen, X / Y / Z Axis, Active Axis, Position / Rotation / Scale / Other / Selected Keys, Auto Key Background) or a UI Appearance colour of the Custom Colors scheme." { element: String, color: [u8; 3] };
+    SetColorScheme => "Set Color Scheme", Loom, "Colors panel > Scheme: Dark, Light or Custom Colors (the UI Appearance colours)." { scheme: String };
+    ResetUiColors => "Reset UI Colors", Loom, "Colors panel > Reset: the program's colours.";
+    SaveUiColors => "Save UI Colors", Loom, "Colors panel > Save: a .clr file (3dLoom's JSON); without `path` the Save dialog shows." { path: Option<String> };
+    LoadUiColors => "Load UI Colors", Loom, "Colors panel > Load a .clr file; without `path` the Open dialog shows." { path: Option<String> };
+    SetQuickAccess => "Set Quick Access", Loom, "The Quick Access toolbar's buttons in order (action names, \"-\" for a separator): Customize User Interface > Toolbars > Quick Access, Add Separator." { items: Vec<String> };
+    ShowQuickAccessItem => "Show Quick Access Item", Loom, "Customize Quick Access Toolbar drop-down / Remove from Quick Access Toolbar: show or hide one of its buttons." { action: String, on: bool };
+    SetQuickAccessBelowRibbon => "Set Quick Access Below Ribbon", Loom, "Customize Quick Access Toolbar > Show Below / Above the Ribbon." { on: bool };
+    ShowMenuBarToggle => "Show Menu Bar Toggle", Loom, "Customize Quick Access Toolbar > Hide / Show Menu Bar.";
+    SetRolloutOrder => "Set Rollout Order", Loom, "The command panel's rollout order for `panel` (as rollout titles; dragging a rollout title sets it); empty restores the program's order." { panel: String, order: Vec<String> };
     ShowCommandPanelToggle => "Show Command Panel Toggle", MainUI, "Customize > Show UI > Show Command Panel: show or hide the command panel.";
     SelectAndManipulate => "Select and Manipulate", MainUI, "Toggle manipulators: drag the radius / height handles of primitives in viewports.";
     Manipulate => "Manipulate", Loom, "Add `delta` to a float parameter of a node (what a manipulator drag does)." { id: u64, name: String, delta: f64 };
@@ -1848,7 +1926,7 @@ commands! {
     HideBoneObjectsToggle => "Hide Bone Objects Toggle", Loom, "Display > Hide by Category > Bone Objects.";
     SetStatistics => "Set Statistics", Loom, "Viewport Configuration > Statistics: Polygon / Triangle / Edge / Vertex Count, Frames Per Second, scope Total, Selection or Total + Selection; default_settings restores the defaults first." { polygons: Option<bool>, triangles: Option<bool>, edges: Option<bool>, vertices: Option<bool>, fps: Option<bool>, scope: Option<String>, default_settings: Option<bool> };
     DisplaySelectedEdgedFacesToggle => "Display Selected with Edged Faces Toggle", Loom, "Viewport Configuration > Rendering Method: shaded viewports draw the edges of selected objects.";
-    SetSafeFrames => "Set Safe Frames", Loom, "Viewport Configuration > Safe Frames: Live Area, Action / Title / User Safe (insets in percent, horizontal and vertical), 12-Field Grid (4x3 or 12x9)." { live_area: Option<bool>, action_safe: Option<bool>, title_safe: Option<bool>, user_safe: Option<bool>, grid: Option<bool>, action: Option<[f32; 2]>, title: Option<[f32; 2]>, user: Option<[f32; 2]>, grid_4x3: Option<bool> };
+    SetSafeFrames => "Set Safe Frames", Loom, "Viewport Configuration > Safe Frames: Live Area, Action / Title / User Safe (insets in percent, horizontal and vertical), 12-Field Grid (4x3 or 12x9)." { live_area: Option<bool>, action_safe: Option<bool>, title_safe: Option<bool>, user_safe: Option<bool>, grid: Option<bool>, action: Option<[f32; 2]>, title: Option<[f32; 2]>, user: Option<[f32; 2]>, grid_4x3: Option<bool> , lock: Option<Vec<bool>>, region: Option<bool>, default_settings: Option<bool> };
     ObjectColorDialog => "Object Color Dialog", Loom, "Open the Object Color dialog (the object colour swatch).";
     SetObjectColor => "Set Object Color", Loom, "Object Color dialog OK: colour the selection (one undo step); the colour becomes the current colour for new objects." { rgb: [u8; 3] };
     SetAssignRandomColors => "Set Assign Random Colors", Loom, "Object Color dialog > Assign Random Colors: new objects get palette colours in turn; off, the current colour." { on: bool };
@@ -1881,6 +1959,7 @@ commands! {
     TransformGizmoSizeUp => "Transform Gizmo Size Up", MainUI, "Grow the transform gizmo by 2 % of the viewport (=).";
     TransformGizmoSizeDown => "Transform Gizmo Size Down", MainUI, "Shrink the transform gizmo by 2 % of the viewport (-).";
     TransformGizmoPlaneConstraintCycle => "Transform Gizmo Plane Constraint Cycle", MainUI, "Cycle the plane constraint XY, YZ, ZX (F8).";
+    SetAxisConstraint => "Set Axis Constraint", Loom, "Axis Constraints toolbar: restrict transforms to X, Y, Z, or the XY, YZ or ZX plane." { constraint: String };
     PickCoordinateSystem => "Pick Coordinate System", Loom, "Use a node's coordinate system as the reference coordinate system (Pick)." { id: u64 };
     SelectionMode => "Selection Mode", Loom, "Set object or sub-object selection level; clears the selection." { mode: crate::state::SelectionMode };
     SelectNodes => "Select Nodes", Loom, "Select nodes by id." { ids: Vec<u64>, op: SelectOp };
@@ -1904,6 +1983,8 @@ commands! {
     DeletePolygons => "Delete Polygons", Loom, "Delete the selected polygons; `delete_isolated` also deletes the vertices left with no polygon (the answer to the Delete prompt)." { delete_isolated: bool };
     Collapse => "Collapse", Loom, "Collapse the selected sub-objects to their centre.";
     ConnectEdgeRing => "Connect Edge Ring", Loom, "Connect the selected edge ring with a new loop.";
+    RenameObjectsDialog => "Rename Objects", Loom, "Open Tools > Rename Objects.";
+    RenameObjects => "Rename Objects Apply", Loom, "Tools > Rename Objects: rename `ids` (the selection when omitted): Base Name replaces the name, Remove First / Last drop characters, Prefix and Suffix are added, Base Number (+ Step per object) is appended." { ids: Option<Vec<u64>>, base_name: Option<String>, prefix: Option<String>, remove_first: Option<u32>, suffix: Option<String>, remove_last: Option<u32>, base_number: Option<i32>, step: Option<i32> };
     Rename => "Rename", Loom, "Rename a node." { id: u64, name: String };
     SetParent => "Set Parent", Loom, "Link a node to a parent (null unlinks), keeping its world transform." { id: u64, parent: Option<u64> };
     Orbit => "Orbit", Loom, "Set the orbit camera (degrees for angles; roll turns the view about its line of sight)." { yaw: Option<f32>, pitch: Option<f32>, distance: Option<f32>, target: Option<[f32; 3]>, roll: Option<f32> };
@@ -1997,7 +2078,6 @@ pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
     ("Hide Particle Systems Toggle", "3"),
     ("Hide Space Warps Toggle", "3"),
     ("Sound Toggle", "3"),
-    ("Adaptive Degradation Toggle", "3"),
     // Legacy OpenGL-driver-only feature, not in the spec's viewport list.
     ("Virtual Viewport Pan Down", "6.1"),
     ("Virtual Viewport Pan Left", "6.1"),

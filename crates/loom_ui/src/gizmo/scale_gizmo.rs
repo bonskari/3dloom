@@ -127,7 +127,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
         for at in [INNER, OUTER] {
             let (Some(a), Some(b)) = (corner(sl, p, ua, at), corner(sl, p, va, at)) else { continue };
             if active || uniform_active {
-                painter.line_segment([a, b], egui::Stroke::new(1.5_f32, HOVER));
+                painter.line_segment([a, b], egui::Stroke::new(1.5_f32, hover()));
             } else {
                 let m = egui::pos2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
                 painter.line_segment([a, m], egui::Stroke::new(1.5_f32, axis_color(ua)));
@@ -138,22 +138,22 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
     for a in [Axis::X, Axis::Y, Axis::Z] {
         let Some((s, e)) = axis_segment(sl, p, a, 0.0, 1.0) else { continue };
         let involved = involves(hl, a);
-        let color = if involved && !uniform_active { HOVER } else { axis_color(a) };
+        let color = if involved && !uniform_active { hover() } else { axis_color(a) };
         let width = if hl == Some(Handle::Axis(a)) { 3.0_f32 } else { 2.0 };
         painter.line_segment([s, e], egui::Stroke::new(width, color));
         if uniform_active {
             if let Some((s, m)) = axis_segment(sl, p, a, 0.0, INNER) {
-                painter.line_segment([s, m], egui::Stroke::new(width, HOVER));
+                painter.line_segment([s, m], egui::Stroke::new(width, hover()));
             }
         }
         painter.rect_filled(egui::Rect::from_center_size(e, egui::vec2(END_BOX_PX, END_BOX_PX)), 0.0, axis_color(a));
         if l.axis_labels {
             let d = pos_sub(e, s).normalize_or_zero();
-            let label = if involved { HOVER } else { axis_color(a) };
+            let label = if involved { hover() } else { axis_color(a) };
             painter.text(egui::pos2(e.x + d.x * 10.0, e.y + d.y * 10.0), egui::Align2::CENTER_CENTER, a.label(), egui::FontId::proportional(11.0), label);
         }
     }
     if let (Some(d), Some(o)) = (drag, p.screen(l.origin)) {
-        painter.text(egui::pos2(o.x + 14.0, o.y + 14.0), egui::Align2::LEFT_TOP, format!("{:.1}%", d.factor * 100.0), egui::FontId::proportional(11.0), HOVER);
+        painter.text(egui::pos2(o.x + 14.0, o.y + 14.0), egui::Align2::LEFT_TOP, format!("{:.1}%", d.factor * 100.0), egui::FontId::proportional(11.0), hover());
     }
 }

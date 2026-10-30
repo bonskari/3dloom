@@ -22,6 +22,12 @@ pub struct TrackBarState {
     pub right_drag_from: Option<i32>,
     /// The Mini Curve Editor replaces the track bar.
     pub mini_curve_editor: bool,
+    /// A drag on empty track bar: the frame it started on (it selects the keys it spans).
+    pub region_from: Option<f32>,
+    /// Ctrl+Alt drag: the button, the active segment when it started and the start frame.
+    pub segment_drag: Option<(egui::PointerButton, (i32, i32), f32)>,
+    /// The pointer is over the track bar (Delete removes its selected keys).
+    pub hovered: bool,
 }
 
 /// Create Key: copy the pose at Source Time to keys at Destination Time.
@@ -80,11 +86,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(avail, 18.0), egui::Sense::click_and_drag());
             let painter = ui.painter_at(rect);
             // Auto Key turns the slider red.
-            let bg = if app.state.auto_key { egui::Color32::from_rgb(130, 40, 40) } else { egui::Color32::from_gray(60) };
+            let bg = if app.state.auto_key { app.color("Auto Key Background").gamma_multiply(0.65) } else { egui::Color32::from_gray(60) };
             painter.rect_filled(rect, 2.0, bg);
             let thumb = thumb_rect(rect, frame, (start, end));
             painter.rect_filled(thumb, 2.0, egui::Color32::from_gray(120));
-            painter.text(thumb.center(), egui::Align2::CENTER_CENTER, format!("{frame} / {end}"), egui::FontId::proportional(12.0), egui::Color32::WHITE);
+            // The label stays whole inside the slider even when it is wider than the thumb.
+            let label = {
+                let (fps, mode) = (app.state.fps, app.state.time_config.display);
+                let f = |x| loom_commands::time_display::format(x, fps, mode);
+                format!("{} / {}", f(frame), f(end))
+            };
+            let galley = painter.layout_no_wrap(label, egui::FontId::proportional(12.0), egui::Color32::WHITE);
+            let half = galley.size().x / 2.0 + 2.0;
+            let cx = thumb.center().x.clamp(rect.min.x + half, (rect.max.x - half).max(rect.min.x + half));
+            painter.galley(egui::pos2(cx - galley.size().x / 2.0, thumb.center().y - galley.size().y / 2.0), galley, egui::Color32::WHITE);
             if resp.dragged() || resp.clicked() {
                 if let Some(p) = resp.interact_pointer_pos() {
                     let f = frame_at(rect, p.x, (start, end));
@@ -176,21 +191,48 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
     while f <= end {
         let x = x_of(f as f32);
         painter.line_segment([egui::pos2(x, rect.max.y - 4.0), egui::pos2(x, rect.max.y)], egui::Stroke::new(1.0_f32, egui::Color32::from_gray(150)));
-        painter.text(egui::pos2(x + 2.0, rect.min.y), egui::Align2::LEFT_TOP, f.to_string(), egui::FontId::proportional(10.0), egui::Color32::from_gray(190));
+        painter.text(egui::pos2(x + 2.0, rect.min.y), egui::Align2::LEFT_TOP, loom_commands::time_display::format(f, app.state.fps, app.state.time_config.display), egui::FontId::proportional(10.0), egui::Color32::from_gray(190));
         f += step;
     }
     let x = x_of(frame as f32);
     painter.line_segment([egui::pos2(x, rect.min.y), egui::pos2(x, rect.max.y)], egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(100, 170, 255)));
-    // The selection's keys (by the track bar filter).
-    let times = loom_commands::anim_cmds::selection_key_times(&app.state);
+    // A region drag on empty track bar: the span it selects.
+    if let (Some(a), Some(p)) = (app.track_bar.region_from, resp.interact_pointer_pos()) {
+        let r = egui::Rect::from_x_y_ranges(x_of(a).min(p.x)..=x_of(a).max(p.x), rect.y_range());
+        painter.rect_filled(r, 0.0, egui::Color32::from_white_alpha(30));
+        painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_gray(200)), egui::StrokeKind::Inside);
+    }
+    // The selection's keys (by the track bar filter), coloured by what they key:
+    // position, rotation and scale keys apart from the others.
+    let kinds = loom_commands::anim_cmds::selection_key_kinds(&app.state);
+    let times: Vec<f32> = kinds.iter().map(|(t, _)| *t).collect();
     let mut tb = app.track_bar.clone();
     tb.selected.retain(|s| times.iter().any(|t| (*t - *s as f32).abs() < 0.5));
+    tb.hovered = resp.hovered();
+    // A right-click during a key drag cancels it: the keys stay where they were.
+    if tb.drag_from.is_some() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)) {
+        tb.drag_from = None;
+    }
     let drag_dt = tb.drag_from.zip(resp.interact_pointer_pos()).map(|(a, p)| (f_of(p.x) - a).round()).unwrap_or(0.0);
-    for t in &times {
+    for (t, k) in &kinds {
         let sel = tb.selected.iter().any(|s| (*t - *s as f32).abs() < 0.5);
         let shown = if sel && resp.dragged() { *t + drag_dt } else { *t };
+        if shown != *t {
+            // A ghost line where a moving key was.
+            let gx = x_of(*t);
+            painter.line_segment([egui::pos2(gx, rect.min.y + 2.0), egui::pos2(gx, rect.max.y - 1.0)], egui::Stroke::new(1.0_f32, egui::Color32::from_gray(160)));
+        }
         let r = egui::Rect::from_center_size(egui::pos2(x_of(shown), rect.center().y + 2.0), egui::vec2(5.0, 11.0));
-        painter.rect_filled(r, 0.0, if sel { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 60, 60) });
+        if sel {
+            painter.rect_filled(r, 0.0, app.color("Selected Keys"));
+            continue;
+        }
+        // A key of several kinds shows a band of each colour.
+        let bands: Vec<egui::Color32> = [(k.position, "Position Keys"), (k.rotation, "Rotation Keys"), (k.scale, "Scale Keys"), (k.other, "Other Keys")].iter().filter(|(on, _)| *on).map(|(_, e)| app.color(e)).collect();
+        let h = r.height() / bands.len().max(1) as f32;
+        for (i, c) in bands.iter().enumerate() {
+            painter.rect_filled(egui::Rect::from_min_size(egui::pos2(r.min.x, r.min.y + i as f32 * h), egui::vec2(r.width(), h)), 0.0, *c);
+        }
     }
     let key_at = |x: f32| times.iter().copied().find(|t| (x_of(*t) - x).abs() < 4.0);
     if resp.clicked() {
@@ -210,7 +252,12 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         }
     }
-    if resp.drag_started() {
+    let ctrl_alt = ui.input(|i| i.modifiers.ctrl && i.modifiers.alt);
+    if resp.drag_started() && ctrl_alt {
+        // Ctrl+Alt drag: left moves the active segment's start, right its end, middle both.
+        let button = [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle].into_iter().find(|b| resp.dragged_by(*b)).unwrap_or(egui::PointerButton::Primary);
+        tb.segment_drag = resp.interact_pointer_pos().map(|p| (button, (start, end), f_of(p.x)));
+    } else if resp.drag_started() {
         if let Some(p) = resp.interact_pointer_pos() {
             if let Some(t) = key_at(p.x) {
                 let ft = t.round() as i32;
@@ -221,10 +268,39 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
             } else {
                 // A drag on empty track bar selects the keys it spans.
                 tb.drag_from = None;
+                tb.region_from = Some(f_of(p.x));
             }
         }
     }
+    if let (Some((button, (s0, e0), from)), Some(p)) = (tb.segment_drag, resp.interact_pointer_pos()) {
+        // The frame scale stays the one the drag started with.
+        let d = ((p.x - rect.min.x) / rect.width() * (e0 - s0).max(1) as f32 + s0 as f32 - from).round() as i32;
+        let (ns, ne) = match button {
+            egui::PointerButton::Primary => ((s0 + d).min(e0 - 1), e0),
+            egui::PointerButton::Secondary => (s0, (e0 + d).max(s0 + 1)),
+            _ => (s0 + d, e0 + d),
+        };
+        if (ns, ne) != (start, end) {
+            run(app, Command::SetTimeConfiguration { start: Some(ns), end: Some(ne), fps: None });
+        }
+    }
+    if resp.drag_stopped() && tb.segment_drag.take().is_some() {
+        tb.drag_from = None;
+        tb.region_from = None;
+    }
     if resp.drag_stopped() {
+        if let (Some(a), Some(p)) = (tb.region_from.take(), resp.interact_pointer_pos()) {
+            let (lo, hi) = (a.min(f_of(p.x)), a.max(f_of(p.x)));
+            if !ui.input(|i| i.modifiers.ctrl) {
+                tb.selected.clear();
+            }
+            for t in times.iter().filter(|t| **t >= lo - 0.5 && **t <= hi + 0.5) {
+                let ft = t.round() as i32;
+                if !tb.selected.contains(&ft) {
+                    tb.selected.push(ft);
+                }
+            }
+        }
         if tb.drag_from.take().is_some() && drag_dt != 0.0 && !tb.selected.is_empty() {
             let copy = ui.input(|i| i.modifiers.shift);
             let d = drag_dt as i32;
@@ -239,7 +315,7 @@ fn track_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         }
     }
-    if resp.secondary_clicked() {
+    if resp.secondary_clicked() && !ctrl_alt {
         tb.menu_frame = resp.interact_pointer_pos().map(|p| key_at(p.x).map(|t| t.round() as i32).unwrap_or_else(|| f_of(p.x).round() as i32));
     }
     let menu_frame = tb.menu_frame;

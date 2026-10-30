@@ -70,7 +70,8 @@ pub fn tick(state: &mut AppState, now: Instant) -> Result<Option<PathBuf>, Strin
 pub fn backup_now(state: &mut AppState) -> Result<PathBuf, String> {
     let count = state.prefs.auto_backup_count.max(1);
     let index = state.autosave.next_index.clamp(1, count);
-    let dir = autoback_dir();
+    // Configure User Paths > Auto Backup, else the data folder's.
+    let dir = state.paths.dir("Auto Backup").map(|d| d.to_path_buf()).unwrap_or_else(autoback_dir);
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = dir.join(format!("{}{index:02}.loom", state.prefs.auto_backup_name));
     let doc = crate::file::Document {

@@ -260,3 +260,58 @@ fn set_keys_keys_the_selection_list_set() {
     execute(&mut s, Command::SetKeys).unwrap();
     assert!(pos_keys(&s, a).iter().any(|t| t.contains(&8.0)), "back to Selected");
 }
+
+fn key_steps(s: &mut AppState, track_bar: bool, selected_only: bool, current: bool, prs: [bool; 3]) {
+    execute(s, Command::SetKeySteps { use_track_bar: Some(track_bar), selected_only: Some(selected_only), use_current_transform: Some(current), position: Some(prs[0]), rotation: Some(prs[1]), scale: Some(prs[2]) }).unwrap();
+}
+
+fn next_from(s: &mut AppState, f: i32) -> i32 {
+    frame(s, f);
+    execute(s, Command::GoToNextKey).unwrap();
+    s.current_frame
+}
+
+#[test]
+fn key_steps_pick_the_keys_key_mode_steps_between() {
+    let mut s = AppState::new();
+    let _b = auto_keyed_box(&mut s); // position keys at 10 and 30
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    frame(&mut s, 20);
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 30.0, system: None }).unwrap();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    assert_eq!(next_from(&mut s, 0), 10, "Use TrackBar (default): every key");
+    // Use Current Transform: the Rotate tool steps over rotation keys only.
+    key_steps(&mut s, false, true, true, [true; 3]);
+    execute(&mut s, Command::SelectAndRotate).unwrap();
+    assert_eq!(next_from(&mut s, 0), 20);
+    execute(&mut s, Command::SelectAndMove).unwrap();
+    assert_eq!(next_from(&mut s, 10), 30, "the Move tool skips the rotation key at 20");
+    // Position / Rotation / Scale toggles when Use Current Transform is off.
+    key_steps(&mut s, false, true, false, [false, true, false]);
+    assert_eq!(next_from(&mut s, 0), 20);
+    // Selected Objects Only off: the keys of unselected objects count too.
+    execute(&mut s, Command::SelectNone).unwrap();
+    assert_eq!(next_from(&mut s, 0), 0, "nothing selected: nowhere to go");
+    key_steps(&mut s, false, false, false, [true, false, false]);
+    assert_eq!(next_from(&mut s, 0), 10);
+}
+
+#[test]
+fn time_display_and_key_steps_are_saved_with_the_scene() {
+    use loom_commands::time_display::TimeDisplay;
+    let dir = std::env::temp_dir().join("loom-time-display-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("t.loom").to_string_lossy().into_owned();
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetTimeDisplay { mode: TimeDisplay::Smpte }).unwrap();
+    key_steps(&mut s, false, false, true, [true, false, true]);
+    execute(&mut s, Command::SaveFileAs { path: Some(path.clone()) }).unwrap();
+    let mut t = AppState::new();
+    execute(&mut t, Command::OpenFile { path: Some(path) }).unwrap();
+    assert_eq!(t.time_config, s.time_config);
+    let r = execute(&mut t, Command::SetTimeDisplay { mode: TimeDisplay::MmSsTicks }).unwrap();
+    assert_eq!(r["display"], "MmSsTicks");
+    execute(&mut t, Command::ResetFile).unwrap();
+    assert_eq!(t.time_config, Default::default(), "Reset puts the defaults back");
+}
