@@ -798,7 +798,7 @@ fn side_toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
 
 /// The toolbar below the slots.
 fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
-    let (_, m, maps) = current_level(app);
+    let (_, m, _) = current_level(app);
     let below_top = !app.state.scene.material_editor.path.is_empty();
     ui.horizontal_wrapped(|ui| {
         if ui.button("Get Material").on_hover_text("Get Material: the Material/Map Browser").clicked() {
@@ -811,7 +811,7 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
             let _ = app.dispatch(Command::ResetMaterial { slot: None });
         }
         let shown = m.show_map_in_viewport;
-        if ui.add_enabled(maps.is_empty(), egui::Button::new("Show Map in Viewport").selected(shown)).on_hover_text("Show Standard Map in Viewport").clicked() {
+        if ui.add(egui::Button::new("Show Map in Viewport").selected(shown)).on_hover_text("Show Standard Map in Viewport").clicked() {
             let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Show Map in Viewport".into(), value: if shown { 0.0 } else { 1.0 } });
         }
         if ui.add_enabled(below_top, egui::Button::new("Go to Parent")).clicked() {

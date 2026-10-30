@@ -4027,3 +4027,79 @@ fn a_checker_sub_material_shows_checks_in_the_viewport() {
     }
 }
 mod scene;
+
+/// The user's case: an imported skinned FBX character, a Bitmap on the
+/// Diffuse map of the material assigned to it, Show Map in Viewport clicked
+/// at the map's level: the posed mesh in the shaded viewport shows the bitmap with varying UVs.
+#[test]
+fn a_bitmap_on_an_imported_skinned_character_shows_in_the_viewport() {
+    let mut h = Harness::new();
+    let png = std::env::temp_dir().join(format!("loom-shadedtex-{}.png", std::process::id()));
+    image::RgbaImage::from_fn(8, 8, |x, y| if (x + y) % 2 == 0 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) }).save(&png).unwrap();
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loom_fbx/tests/fixtures/sitting_idle.fbx");
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::ImportFile { path: Some(path.into()) });
+    let skinned = h.app.state.scene.nodes().find(|n| !n.modifiers.is_empty()).expect("the skinned mesh").id;
+    h.cmd(Command::SelectNodes { ids: vec![skinned.0], op: loom_commands::SelectOp::Replace });
+    for c in [
+        Command::MaterialEditorToggle,
+        Command::AssignMaterialToSelection,
+        Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() },
+        Command::SetMapBitmap { path: png.to_string_lossy().into() },
+        Command::AssignMaterialToSelection,
+    ] {
+        h.cmd(c);
+    }
+    h.frames(2);
+    let i = h.app.world_meshes().iter().position(|(n, _)| *n == skinned).unwrap();
+    // At the Bitmap's level, as the reference's steps go: Show Standard Map in Viewport.
+    assert!(!h.app.state.scene.material_editor.path.is_empty(), "the editor is at the map level");
+    click_in_editor(&mut h, "Show Map in Viewport", 0.0);
+    h.frames(2);
+    let style = h.app.world_styles[i].clone();
+    let loom_render::TextureSel::Bitmap(t) = style.texture else { panic!("the bitmap shows: {:?}", style.texture) };
+    let mesh = h.app.world_display()[i].clone();
+    let (verts, _, _) = loom_render::triangulate_styled(&mesh, &style);
+    assert!(verts.iter().any(|v| v.uv != verts[0].uv), "the posed mesh keeps its UVs");
+    let upload = h.app.pending_upload.lock().unwrap().clone();
+    let bitmaps = upload.map(|u| u.2).unwrap_or_default();
+    let bm = &bitmaps.get(t as usize).expect("the bitmap is uploaded").1;
+    assert_eq!((bm.width, bm.height), (8, 8));
+}
+
+/// An FBX whose material has a diffuse bitmap (external file, or embedded in
+/// the .fbx) imports with Show Map in Viewport on, and its box shows the
+/// bitmap in the shaded viewport with varying UVs.
+#[test]
+fn an_imported_fbx_with_a_diffuse_bitmap_shows_it_in_the_viewport() {
+    for embed in [false, true] {
+        let mut h = Harness::new();
+        let dir = std::env::temp_dir().join(format!("loom-shadedtex-fbx-{}-{embed}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("checks.png");
+        image::RgbaImage::from_fn(8, 8, |x, y| if (x + y) % 2 == 0 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) }).save(&png).unwrap();
+        poly_box(&mut h);
+        h.cmd(Command::DropBitmap { path: png.to_string_lossy().into(), node: None });
+        h.cmd(Command::SetExchangeOption { dialog: "fbx_export".into(), name: "embed_media".into(), value: serde_json::json!(embed) });
+        let fbx = dir.join("box.fbx");
+        h.cmd(Command::ExportFile { path: Some(fbx.to_string_lossy().into()) });
+        assert!(fbx.exists());
+        if embed {
+            std::fs::remove_file(&png).unwrap();
+        }
+        h.cmd(Command::NewScene);
+        h.cmd(Command::ImportFile { path: Some(fbx.to_string_lossy().into()) });
+        h.frames(2);
+        let scene = &h.app.state.scene;
+        let i = h.app.world_meshes().iter().position(|(n, _)| scene.node(*n).is_some_and(|n| n.material.is_some())).expect("the imported box has its material");
+        let style = h.app.world_styles[i].clone();
+        let loom_render::TextureSel::Bitmap(t) = style.texture else { panic!("embed {embed}: the bitmap shows: {:?} {:?}", style.texture, h.app.last_error) };
+        let (verts, _, _) = loom_render::triangulate_styled(&h.app.world_display()[i], &style);
+        assert!(verts.iter().any(|v| v.uv != verts[0].uv), "the box keeps its UVs");
+        let upload = h.app.pending_upload.lock().unwrap().clone();
+        let bitmaps = upload.map(|u| u.2).unwrap_or_default();
+        let bm = &bitmaps.get(t as usize).expect("the bitmap is uploaded").1;
+        assert_eq!((bm.width, bm.height, &bm.rgba[..4]), (8, 8, &[255, 0, 0, 255][..]));
+    }
+}
