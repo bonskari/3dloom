@@ -5,9 +5,8 @@ name: build
 on:
   push:
     branches:
-      - '**'
-      - '!agent/**'
-      - '!worktree-agent-*'
+      - main
+      - experimental
   workflow_dispatch:
 
 # The release step moves the branch release tag and uploads signed binaries.
