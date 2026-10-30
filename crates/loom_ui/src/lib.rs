@@ -3,6 +3,7 @@
 
 mod camera_overlay;
 mod command_panel;
+pub mod cursor;
 pub mod create_tool;
 pub mod dialogs;
 pub mod gizmo;
@@ -350,6 +351,8 @@ pub struct LoomApp {
     /// A camera viewport control drag is open as one scene undo step.
     pub camera_nav_open: bool,
     pub drag_select_start: Option<egui::Pos2>,
+    /// What the pointer is over in the hovered viewport this frame (for the cursor).
+    pub viewport_hover: Option<cursor::ViewportHover>,
     /// Alt+LMB press not yet moved 4 px: a click subtracts from the selection, a drag orbits.
     pub alt_click: Option<egui::Pos2>,
     /// The last object click: where, the objects under it front to back, and
@@ -539,6 +542,7 @@ impl LoomApp {
             cube_menu: None,
             camera_nav_open: false,
             drag_select_start: None,
+            viewport_hover: None,
             alt_click: None,
             pick_cycle: None,
             region_points: Vec::new(),
@@ -1414,6 +1418,7 @@ impl LoomApp {
         track_view::show(ctx, self);
         rendered_frame::show(ctx, self);
         self.finish_realistic_frame(ctx);
+        cursor::apply(ctx, self);
     }
 }
 

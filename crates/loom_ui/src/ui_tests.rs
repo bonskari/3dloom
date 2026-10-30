@@ -22,6 +22,7 @@ mod lightcam2;
 mod bake;
 mod maps2;
 mod materials2;
+mod cursors;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
@@ -42,11 +43,13 @@ struct Harness {
     textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
     /// Seconds between frames (a loaded machine draws fewer per second).
     frame_time: f64,
+    /// The last frame's mouse cursor.
+    cursor: egui::CursorIcon,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0 };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0, cursor: egui::CursorIcon::Default };
         h.ctx.enable_accesskit();
         h.frames(3);
         h
@@ -72,6 +75,7 @@ impl Harness {
         self.app.raw_input_hook(&self.ctx, &mut input);
         let app = &mut self.app;
         let out = self.ctx.run(input, |ctx| app.frame(ctx));
+        self.cursor = out.platform_output.cursor_icon;
         self.commands.extend(out.platform_output.commands);
         self.textures.extend(out.textures_delta.set);
         self.shapes = out.shapes;
@@ -324,7 +328,7 @@ fn edit_poly_modifier_polygons_pick_and_levels_stay_in_step() {
 }
 
 #[test]
-fn alt_click_removes_and_alt_drag_orbits() {
+fn alt_click_removes_and_alt_drag_region_removes() {
     let mut h = Harness::new();
     poly_box(&mut h);
     let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
@@ -334,16 +338,13 @@ fn alt_click_removes_and_alt_drag_orbits() {
     h.mods = egui::Modifiers::NONE;
     h.click(p);
     assert_eq!(h.app.state.selection.len(), 1);
-    let yaw = h.app.state.active().camera.yaw;
+    // Alt+drag is a region that removes what it crosses, as in the reference; the view stays.
+    let (yaw, pitch) = (h.app.state.active().camera.yaw, h.app.state.active().camera.pitch);
     h.mods = egui::Modifiers::ALT;
-    h.drag(p, p + egui::vec2(120.0, 0.0));
+    h.drag(p + egui::vec2(-60.0, -60.0), p + egui::vec2(60.0, 60.0));
     h.mods = egui::Modifiers::NONE;
-    assert_ne!(h.app.state.active().camera.yaw, yaw, "Alt+drag orbits");
-    assert_eq!(h.app.state.selection.len(), 1, "and keeps the selection");
-    // A plain drag afterwards is a selection drag again, not a stuck orbit.
-    let yaw = h.app.state.active().camera.yaw;
-    h.drag(p + egui::vec2(-200.0, -150.0), p + egui::vec2(-180.0, -130.0));
-    assert_eq!(h.app.state.active().camera.yaw, yaw);
+    assert!(h.app.state.selection.is_empty(), "Alt+region removes the box");
+    assert_eq!((h.app.state.active().camera.yaw, h.app.state.active().camera.pitch), (yaw, pitch), "and doesn't orbit");
 }
 
 #[test]
@@ -1229,14 +1230,15 @@ fn diagnostics_show_a_held_alt_press_until_reset_interaction() {
 }
 
 #[test]
-fn injected_alt_drag_orbits_like_a_mouse() {
+fn injected_alt_drag_removes_like_a_mouse() {
     let mut h = Harness::new();
     poly_box(&mut h);
     let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));
     let yaw = h.app.state.active().camera.yaw;
     inject(&mut h, serde_json::json!([{ "type": "drag", "from": [p.x, p.y], "to": [p.x + 120.0, p.y], "mods": ["alt"] }]));
-    assert_ne!(h.app.state.active().camera.yaw, yaw, "the injected Alt+drag orbits");
-    assert_eq!(h.app.state.selection.len(), 1, "and keeps the selection");
+    assert_eq!(h.app.state.active().camera.yaw, yaw, "the injected Alt+drag does not orbit");
+    assert!(h.app.state.selection.is_empty(), "it is a region that removes the box from the selection");
+    h.cmd(Command::SelectAll);
     // Held modifiers and keys: Ctrl+A selects all, after a new box.
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [50.0, 0.0, 0.0], size: [10.0; 3] });
     inject(&mut h, serde_json::json!([{ "type": "modifiers", "mods": ["ctrl"] }, { "type": "key", "key": "A", "mods": ["ctrl"] }, { "type": "modifiers", "mods": [] }]));
@@ -1797,12 +1799,12 @@ fn viewport_navigation_orbits_pans_and_zooms() {
     h.run(vec![egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: egui::vec2(0.0, 3.0), modifiers: egui::Modifiers::NONE }]);
     h.frames(1);
     assert_ne!(camera(&h).2, before.2, "the wheel zooms");
-    // Alt+LMB drag orbits.
+    // Alt+LMB drag is a removing region, not navigation.
     let before = camera(&h);
     h.mods = egui::Modifiers::ALT;
     h.drag(c, c + egui::vec2(-100.0, 50.0));
     h.mods = egui::Modifiers::NONE;
-    assert_ne!(camera(&h).0, before.0, "Alt+LMB drag orbits");
+    assert_eq!(camera(&h), before, "Alt+LMB drag does not orbit");
 }
 
 /// A button pressed with `mods` at `a`, moved to `b`, then the window loses the
@@ -1831,7 +1833,7 @@ fn press_then_lose_focus(h: &mut Harness, button: egui::PointerButton, mods: egu
 }
 
 /// After the lost release: hovering does not navigate, and Alt+MMB, MMB,
-/// Alt+LMB drag and Alt+click work as before.
+/// Alt+LMB drag (a removing region) and Alt+click work as before.
 fn navigation_works_again(h: &mut Harness, c: egui::Pos2, label: &str) {
     let before = camera(h);
     hover_to(h, c, c + egui::vec2(60.0, 40.0));
@@ -1849,7 +1851,7 @@ fn navigation_works_again(h: &mut Harness, c: egui::Pos2, label: &str) {
     h.mods = egui::Modifiers::ALT;
     h.drag(c, c + egui::vec2(-100.0, 30.0));
     h.mods = egui::Modifiers::NONE;
-    assert_ne!(camera(h).0, before.0, "{label}: Alt+LMB drag orbits");
+    assert_eq!(camera(h), before, "{label}: Alt+LMB drag does not orbit");
     // Alt+click on the box removes it from the selection.
     h.cmd(Command::ZoomExtentsAll);
     let p = h.screen_of(Vec3::new(0.0, 0.0, 15.0));

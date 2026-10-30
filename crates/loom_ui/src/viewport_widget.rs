@@ -669,17 +669,14 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
 
                     // Left mouse button:
-                    //   Alt+LMB → click subtracts from the selection, drag orbits like Alt+MMB.
+                    //   Alt+LMB → click or region removes from the selection (as in the reference).
                     //   LMB without Alt → click-pick on release if drag was minimal,
                     //                     marquee area-select otherwise.
                     if let Some(start) = app.alt_click {
                         if pointer.button_down(egui::PointerButton::Primary) && start.distance(p) >= 4.0 {
                             app.alt_click = None;
-                            if !mods.ctrl && app.state.viewports[index].kind.angles().is_some() {
-                                let _ = app.dispatch(Command::ViewportView { index: index as u32, kind: loom_commands::ViewKind::Orthographic });
-                            }
-                            app.state.record_view_as("Orbit");
-                            nav_event(app, index, rect, InputEvent::MouseDown { button: MouseButton::Left, pos: Vec2::new(start.x, start.y), mods });
+                            app.drag_select_start = Some(start);
+                            app.region_points.clear();
                         }
                     }
                     if app.transform_drag.is_none()
@@ -1303,10 +1300,25 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             }
             draw_trajectories(&painter, app, view_proj, rect);
             draw_links(&painter, app, view_proj, rect);
+            let mut gizmo_hover = None;
             if is_active && app.has_selection() {
                 let layout = gizmo::layout_for(app, index, rect.height());
                 let hovered = hover_pos.and_then(|p| gizmo::hit(app, &layout, &projection, p));
                 gizmo::draw(&painter, app, &layout, &projection, hovered, app.transform_drag.as_ref());
+                gizmo_hover = hovered;
+            }
+            // What the pointer is over, for this frame's cursor (crate::cursor).
+            if response.hovered() && !over_label && !over_cube {
+                let idle = app.transform_drag.is_none() && !app.camera_controller.is_dragging() && app.state.nav_mode == loom_input::NavMode::None && app.state.pick_mode.is_none() && app.drag_select_start.is_none();
+                let (mut object, mut sub_object) = (false, false);
+                if let Some(p) = hover_pos.filter(|p| idle && gizmo_hover.is_none() && rect.contains(*p)) {
+                    if app.state.selection_mode == SelectionMode::Object {
+                        object = pick_object(app, p, rect, view, proj).is_some();
+                    } else {
+                        sub_object = matches!(pick_at(app, p, rect, view, proj, view_proj), Some(Pick::SubObject { .. }));
+                    }
+                }
+                app.viewport_hover = Some(crate::cursor::ViewportHover { gizmo: gizmo_hover, object, sub_object });
             }
             if is_active {
                 crate::poly_modes::draw(&painter, app, &projection, hover_pos.filter(|h| rect.contains(*h)));
