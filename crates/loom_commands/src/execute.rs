@@ -3083,6 +3083,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         Some(e) if is_border_edge(&mesh, e) => vec![SubObjectId::Edge(e)],
                         _ => vec![],
                     },
+                    // An edge is one id whichever half was given.
+                    SelectionMode::Edge => mesh.canonical_edge_id(HalfEdgeId(raw)).map(SubObjectId::Edge).into_iter().collect(),
                     _ => vec![sub_id(mode, raw)],
                 };
                 for id in expanded {

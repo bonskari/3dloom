@@ -482,6 +482,30 @@ fn chamfer_mode_drag_on_an_edge_chamfers_it() {
 }
 
 #[test]
+fn chamfer_mode_drag_on_all_box_edges_keeps_a_clean_solid() {
+    let mut h = Harness::new();
+    let id = poly_scene(&mut h);
+    h.key(egui::Key::Num2);
+    h.mods = egui::Modifiers::CTRL;
+    h.key(egui::Key::A);
+    h.mods = egui::Modifiers::NONE;
+    assert_eq!(h.sub_count(), 12, "a box has twelve edges");
+    let p = h.screen_of(Vec3::new(15.0, 0.0, 30.0));
+    h.mods = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+    h.key(egui::Key::C);
+    h.mods = egui::Modifiers::NONE;
+    h.drag(p, p + egui::vec2(0.0, -30.0));
+    let mesh = h.app.state.scene.node(id).unwrap().object.mesh().clone();
+    assert_eq!(mesh.face_count(), 26, "6 shrunk faces, 12 strips, 8 corner triangles");
+    mesh.check_invariants().unwrap();
+    for f in 0..mesh.face_count() as u32 {
+        let pts: Vec<Vec3> = mesh.face_vertex_ids(loom_mesh::FaceId(f)).unwrap().iter().map(|v| mesh.vertex_position(*v).unwrap()).collect();
+        let n = (pts[1] - pts[0]).cross(pts[2] - pts[0]).normalize();
+        assert!(pts.iter().all(|q| (*q - pts[0]).dot(n).abs() < 1e-3), "face {f} is planar: {pts:?}");
+    }
+}
+
+#[test]
 fn grid_snap_moves_onto_grid_points() {
     let mut h = Harness::new();
     let id = box_scene(&mut h);
