@@ -90,6 +90,35 @@ pub struct RenderOptions {
     pub effects: bool,
     /// The rendered view's environment ranges and focus.
     pub view: ViewEnv,
+    /// A Render Element: every material draws only that part of its shading.
+    pub element: Option<ElementLook>,
+}
+
+/// What a lit Render Element keeps of each material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElementLook {
+    /// The lit diffuse colour (no highlights or self-illumination).
+    Diffuse,
+    /// The highlights only.
+    Specular,
+    /// The light reaching the surfaces (a white material).
+    Lighting,
+    /// The self-illumination only.
+    SelfIllumination,
+}
+
+impl ElementLook {
+    /// The material `m` with only this part of its shading.
+    pub fn apply(self, m: &StandardMaterial) -> StandardMaterial {
+        use bevy::color::LinearRgba;
+        let no_glow = |m: StandardMaterial| StandardMaterial { emissive: LinearRgba::BLACK, emissive_texture: None, ..m };
+        match self {
+            ElementLook::Diffuse => no_glow(StandardMaterial { reflectance: 0.0, specular_texture: None, ..m.clone() }),
+            ElementLook::Specular => no_glow(StandardMaterial { base_color: Color::BLACK.with_alpha(m.base_color.alpha()), base_color_texture: None, ..m.clone() }),
+            ElementLook::Lighting => StandardMaterial { base_color: Color::WHITE.with_alpha(m.base_color.alpha()), base_color_texture: None, perceptual_roughness: 1.0, metallic: 0.0, reflectance: 0.0, specular_texture: None, emissive: LinearRgba::BLACK, emissive_texture: None, ..m.clone() },
+            ElementLook::SelfIllumination => StandardMaterial { base_color: Color::BLACK.with_alpha(m.base_color.alpha()), base_color_texture: None, reflectance: 0.0, specular_texture: None, metallic: 0.0, ..m.clone() },
+        }
+    }
 }
 
 impl Default for RenderOptions {
@@ -114,6 +143,7 @@ impl Default for RenderOptions {
             atmospherics: true,
             effects: true,
             view: ViewEnv::default(),
+            element: None,
         }
     }
 }
@@ -305,6 +335,8 @@ struct ActiveRender {
     ao: Option<std::sync::Arc<loom_bake::Bvh>>,
     /// The part of the frame the current bucket shows (u0, v0, u1, v1).
     frame: [f32; 4],
+    /// Materials a Render Element changed, with their own values.
+    element: Vec<(Handle<look::LoomMaterial>, StandardMaterial)>,
 }
 
 impl BevyRenderer {
@@ -1301,10 +1333,14 @@ impl BevyRenderer {
         let handles: Vec<Handle<look::LoomMaterial>> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
         let world = self.app.world_mut();
         world.insert_resource(DirectionalLightShadowMap { size: options.shadow_map_size.clamp(512, 8192) as usize });
-        let (mut two_sided, mut deferred) = (Vec::new(), Vec::new());
+        let (mut two_sided, mut deferred, mut element) = (Vec::new(), Vec::new(), Vec::new());
         let mut mats = world.resource_mut::<Assets<look::LoomMaterial>>();
         for h in handles {
             let Some(m) = mats.get_mut(&h) else { continue };
+            if let Some(look) = options.element {
+                element.push((h.clone(), m.base.clone()));
+                m.base = look.apply(&m.base);
+            }
             if options.force_two_sided {
                 two_sided.push((h.clone(), m.base.double_sided, m.base.cull_mode));
                 m.base.double_sided = true;
@@ -1318,7 +1354,7 @@ impl BevyRenderer {
         }
         self.scale = options.world_scale();
         self.light_pass = 0;
-        self.render = Some(ActiveRender { options, two_sided, deferred, camera_ready: false, accum: None, ao: None, frame: [0.0, 0.0, 1.0, 1.0] });
+        self.render = Some(ActiveRender { options, two_sided, deferred, camera_ready: false, accum: None, ao: None, frame: [0.0, 0.0, 1.0, 1.0], element });
         self.metered.remove(&RENDER_SLOT);
         self.meter = None;
         self.rescale();
@@ -1492,6 +1528,12 @@ impl BevyRenderer {
                 m.base.opaque_render_method = method;
             }
         }
+        // A Render Element's materials: saved before any change above, they go back whole.
+        for (h, base) in r.element {
+            if let Some(m) = mats.get_mut(&h) {
+                m.base = base;
+            }
+        }
         if r.options.selected_only.is_some() {
             self.relayer();
         }
@@ -1573,12 +1615,17 @@ impl BevyRenderer {
 
     /// Renders `camera` at `width` x `height` with `options`, every pass.
     pub fn render_with(&mut self, width: u32, height: u32, camera: &ViewCamera, options: RenderOptions) -> Result<image::RgbaImage, String> {
+        self.render_frame_with([width, height], camera, width as f32 / height.max(1) as f32, [0.0, 0.0, 1.0, 1.0], options)
+    }
+
+    /// Renders the part `whole` (u0, v0, u1, v1) of `camera`'s frame at
+    /// image aspect `aspect` into a `size` image with `options`, every pass.
+    pub fn render_frame_with(&mut self, size: [u32; 2], camera: &ViewCamera, aspect: f32, whole: [f32; 4], options: RenderOptions) -> Result<image::RgbaImage, String> {
+        let [width, height] = size;
         if width == 0 || height == 0 {
             return Err(format!("render size {width}x{height}"));
         }
         self.begin_render(options);
-        let aspect = width as f32 / height as f32;
-        let whole = [0.0, 0.0, 1.0, 1.0];
         // A few frames: new pipelines, the target image and the shadow map settle first.
         for _ in 0..3 {
             self.set_render_bucket(camera, aspect, whole, [width, height])?;

@@ -315,6 +315,73 @@ mod quality_tests {
     }
 }
 
+/// Render Elements: the kinds of image a render can also write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ElementKind {
+    Alpha,
+    Background,
+    Diffuse,
+    Lighting,
+    SelfIllumination,
+    Shadow,
+    Specular,
+    ZDepth,
+}
+
+impl ElementKind {
+    pub const ALL: [ElementKind; 8] = [ElementKind::Alpha, ElementKind::Background, ElementKind::Diffuse, ElementKind::Lighting, ElementKind::SelfIllumination, ElementKind::Shadow, ElementKind::Specular, ElementKind::ZDepth];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ElementKind::Alpha => "Alpha",
+            ElementKind::Background => "Background",
+            ElementKind::Diffuse => "Diffuse",
+            ElementKind::Lighting => "Lighting",
+            ElementKind::SelfIllumination => "Self-Illumination",
+            ElementKind::Shadow => "Shadow",
+            ElementKind::Specular => "Specular",
+            ElementKind::ZDepth => "Z Depth",
+        }
+    }
+}
+
+/// One entry of the Render Elements list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RenderElement {
+    pub kind: ElementKind,
+    pub name: String,
+    pub enabled: bool,
+    /// Its output file; None: the Render Output file's name with `_<name>`.
+    pub path: Option<String>,
+    /// Z Depth: the depth that is white and the one that is black.
+    pub z_min: f32,
+    pub z_max: f32,
+}
+
+impl Default for RenderElement {
+    fn default() -> Self {
+        Self { kind: ElementKind::Diffuse, name: "Diffuse".into(), enabled: true, path: None, z_min: 100.0, z_max: 300.0 }
+    }
+}
+
+impl RenderElement {
+    /// The file the element writes for a render saved to `output`.
+    pub fn output_path(&self, output: Option<&str>) -> Option<String> {
+        if let Some(p) = &self.path {
+            return Some(p.clone());
+        }
+        let out = std::path::Path::new(output?);
+        let stem = out.file_stem()?.to_string_lossy();
+        let name = self.name.replace([' ', '/', '\\'], "");
+        let file = match out.extension() {
+            Some(e) => format!("{stem}_{name}.{}", e.to_string_lossy()),
+            None => format!("{stem}_{name}"),
+        };
+        Some(out.with_file_name(file).to_string_lossy().into_owned())
+    }
+}
+
 /// Common > Time Output: which frames a Render renders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum TimeOutput {
@@ -429,6 +496,15 @@ pub struct RenderSettings {
     /// threshold (0-255; the background stays black for keying).
     pub super_black: bool,
     pub super_black_threshold: u8,
+    /// Renderer > Options: Force Wireframe draws every surface as its
+    /// polygon edges, Wire Thickness pixels wide.
+    pub force_wireframe: bool,
+    pub wire_thickness: f32,
+    /// Render Elements: the list, Elements Active (they render) and
+    /// Display Elements (each shows in its own window).
+    pub elements: Vec<RenderElement>,
+    pub elements_active: bool,
+    pub display_elements: bool,
     /// Render To Texture.
     pub bake: crate::bake::BakeSettings,
 }
@@ -461,6 +537,11 @@ impl Default for RenderSettings {
             video_color_check: false,
             super_black: false,
             super_black_threshold: 15,
+            force_wireframe: false,
+            wire_thickness: 1.0,
+            elements: Vec::new(),
+            elements_active: true,
+            display_elements: true,
             bake: crate::bake::BakeSettings::default(),
         }
     }

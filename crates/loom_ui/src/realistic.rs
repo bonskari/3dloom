@@ -66,6 +66,8 @@ const WARMUP: u32 = 3;
 /// A render in progress.
 pub struct RenderJob {
     req: loom_commands::RenderRequest,
+    /// What the renderer was given (the Render Elements render with it again).
+    options: loom_bevy::RenderOptions,
     camera: loom_bevy::ViewCamera,
     aspect: f32,
     /// The frame the view spans, in output pixels (larger than the output for Blowup).
@@ -373,6 +375,7 @@ impl LoomApp {
             atmospherics: s.atmospherics,
             effects: s.effects,
             view,
+            element: None,
         };
         let aspect = s.image_aspect();
         let cam = self.camera_for(req.viewport);
@@ -380,7 +383,7 @@ impl LoomApp {
         let Gpu::Running(b) = &mut self.gpu else { return Err("no GPU renderer".into()) };
         b.renderer.set_environment(&env);
         b.renderer.sync_hidden(&hidden_objects);
-        b.renderer.begin_render(options);
+        b.renderer.begin_render(options.clone());
         if req.preview {
             b.preview_env = Some(env.clone());
         }
@@ -405,7 +408,7 @@ impl LoomApp {
             self.state.rendered.open = true;
             self.state.status_prompt = format!("Rendering {}x{}...", out[0], out[1]);
         }
-        self.render_job = Some(RenderJob { req, camera, aspect, full, origin, out, buckets: list, bucket, next: 0, passes, pass: 0, warmup: WARMUP, misses: 0, mask, started: std::time::Instant::now(), queued: false, env, preview });
+        self.render_job = Some(RenderJob { req, camera, aspect, full, origin, out, buckets: list, bucket, next: 0, passes, pass: 0, warmup: WARMUP, misses: 0, mask, started: std::time::Instant::now(), queued: false, env, preview, options });
         Ok(())
     }
 
@@ -585,13 +588,172 @@ impl LoomApp {
         self.state.status_prompt = format!("Render To Texture: {done} map(s) rendered in {:.1} s", started.elapsed().as_secs_f32());
     }
 
+    /// The render's geometry for the CPU passes (Force Wireframe, Z Depth):
+    /// the triangles of what the camera sees in renders, with polygon edges,
+    /// and each triangle's material diffuse colour (sRGB 0-1).
+    fn camera_triangles(&self, options: &loom_bevy::RenderOptions) -> (Vec<loom_bake::gbuffer::EdgeTri>, Vec<[f32; 3]>) {
+        let scene = &self.state.scene;
+        let hidden = if options.hidden { self.hidden_meshes() } else { Vec::new() };
+        let mut meshes: Vec<(loom_scene::NodeId, &loom_mesh::Mesh)> = (0..self.world_meshes().len()).map(|i| (self.world_meshes()[i].0, self.drawn_mesh(i))).collect();
+        meshes.extend(hidden.iter().map(|(id, m)| (*id, m)));
+        let (mut tris, mut colors) = (Vec::new(), Vec::new());
+        for (id, mesh) in meshes {
+            let Some(n) = scene.node(id) else { continue };
+            let flags = render_flags(scene, id);
+            if self.is_light_proxy(id) || !scene.renders(n) || !flags.visible_to_camera || flags.visibility <= 0.0 {
+                continue;
+            }
+            if options.selected_only.as_ref().is_some_and(|sel| !sel.contains(&id.0)) {
+                continue;
+            }
+            let surfaces = scene.node_surfaces_for(id, loom_scene::material::ShellView::Render);
+            let wire = scene.display_color(n).map(|c| c as f32 / 255.0);
+            for t in loom_bake::gbuffer::edge_triangles(mesh) {
+                colors.push(surfaces.as_ref().map_or(wire, |s| s.for_face(t.tri.material_id).diffuse.to_array()));
+                tris.push(t);
+            }
+        }
+        (tris, colors)
+    }
+
+    /// The camera view of a job for the CPU passes.
+    fn gbuffer_view(job: &RenderJob) -> loom_bake::gbuffer::View {
+        let rect = [job.origin[0] / job.full[0], job.origin[1] / job.full[1], (job.origin[0] + job.out[0] as f32) / job.full[0], (job.origin[1] + job.out[1] as f32) / job.full[1]];
+        loom_bake::gbuffer::View { view: job.camera.view, clip_from_view: job.camera.projection, rect, size: job.out }
+    }
+
+    /// Force Wireframe: the finished frame becomes the polygon edges of what
+    /// the camera sees, Wire Thickness pixels wide, each in its material's
+    /// diffuse colour, over the background (a Region changes only its rectangle).
+    fn force_wireframe(&mut self, job: &RenderJob) {
+        let s = &job.req.settings;
+        let (tris, colors) = self.camera_triangles(&job.options);
+        let bvh = loom_bake::Bvh::new(tris.iter().map(|t| t.tri).collect());
+        let ss = if s.bevy.antialiasing { 3 } else { 1 };
+        let cov = loom_bake::gbuffer::wire_coverage(&bvh, &tris, &Self::gbuffer_view(job), s.wire_thickness, ss, s.force_two_sided, |i| colors[i as usize]);
+        let bg = job.env.background;
+        let [x0, y0, x1, y1] = job.mask.unwrap_or([0, 0, job.out[0], job.out[1]]);
+        let Some(img) = self.state.rendered.image.as_mut() else { return };
+        let img = Arc::make_mut(img);
+        for y in y0..y1.min(img.height()) {
+            for x in x0..x1.min(img.width()) {
+                let (c, sum) = cov[(y * job.out[0] + x) as usize];
+                // `sum` is the wires' colour already weighted by their coverage.
+                let px = |k: usize| ((sum[k] + bg[k] * (1.0 - c)).clamp(0.0, 1.0) * 255.0).round() as u8;
+                img.put_pixel(x, y, image::Rgba([px(0), px(1), px(2), (c * 255.0).round() as u8]));
+            }
+        }
+        self.state.rendered.version += 1;
+        self.state.rendered.dirty = None;
+    }
+
+    /// Render Elements: each enabled element of a finished Production frame,
+    /// rendered again with only its part of the shading (or computed: Alpha,
+    /// Z Depth), saved to its file and shown in its own window.
+    fn render_elements(&mut self, job: &RenderJob) {
+        use loom_commands::render::{message, MessageLevel};
+        use loom_scene::render::ElementKind;
+        let s = job.req.settings.clone();
+        let Some(main) = self.state.rendered.image.clone() else { return };
+        // The unnumbered output (a sequence numbers each element's file too).
+        let numbering = self.state.rendered.sequence.as_ref().map(|q| (q.request.save_path.clone(), s.file_number(q.frames[q.index], q.first)));
+        let base = match &numbering {
+            Some((p, _)) => p.clone(),
+            None => job.req.save_path.clone(),
+        };
+        let rect = Self::gbuffer_view(job).rect;
+        let premultiplied = |mut img: image::RgbaImage| {
+            // A lit element is black where nothing is.
+            for p in img.pixels_mut() {
+                let a = p.0[3] as f32 / 255.0;
+                for c in &mut p.0[..3] {
+                    *c = (*c as f32 * a).round() as u8;
+                }
+            }
+            img
+        };
+        // The frame again with only the element's part of the shading.
+        fn again(g: &mut Gpu, job: &RenderJob, rect: [f32; 4], look: Option<loom_bevy::ElementLook>, edit: &dyn Fn(&mut loom_bevy::RenderOptions)) -> Result<image::RgbaImage, String> {
+            let mut o = job.options.clone();
+            o.element = look;
+            edit(&mut o);
+            let Gpu::Running(b) = g else { return Err("no GPU renderer".into()) };
+            b.renderer.render_frame_with(job.out, &job.camera, job.aspect, rect, o)
+        }
+        for e in s.elements.iter().filter(|e| e.enabled) {
+            let mut gpu = |look, edit: &dyn Fn(&mut loom_bevy::RenderOptions)| again(&mut self.gpu, job, rect, look, edit);
+            let img = match e.kind {
+                ElementKind::Alpha => Ok(image::RgbaImage::from_fn(main.width(), main.height(), |x, y| {
+                    let a = main.get_pixel(x, y).0[3];
+                    image::Rgba([a, a, a, 255])
+                })),
+                ElementKind::Background => gpu(None, &|o| o.selected_only = Some(Vec::new())).map(|mut img| {
+                    for p in img.pixels_mut() {
+                        p.0[3] = 255;
+                    }
+                    img
+                }),
+                ElementKind::Diffuse => gpu(Some(loom_bevy::ElementLook::Diffuse), &|_| {}).map(premultiplied),
+                ElementKind::Specular => gpu(Some(loom_bevy::ElementLook::Specular), &|_| {}).map(premultiplied),
+                ElementKind::Lighting => gpu(Some(loom_bevy::ElementLook::Lighting), &|_| {}).map(premultiplied),
+                ElementKind::SelfIllumination => gpu(Some(loom_bevy::ElementLook::SelfIllumination), &|_| {}).map(premultiplied),
+                ElementKind::Shadow => gpu(Some(loom_bevy::ElementLook::Lighting), &|_| {}).and_then(|lit| {
+                    let open = gpu(Some(loom_bevy::ElementLook::Lighting), &|o| o.shadows = false)?;
+                    Ok(loom_bevy::bake::shadow_ratio(&lit, &open))
+                }),
+                ElementKind::ZDepth => {
+                    let (tris, _) = self.camera_triangles(&job.options);
+                    let bvh = loom_bake::Bvh::new(tris.into_iter().map(|t| t.tri).collect());
+                    let depth = loom_bake::gbuffer::depth(&bvh, &Self::gbuffer_view(job));
+                    Ok(loom_bake::gbuffer::depth_image(&depth, job.out, e.z_min, e.z_max))
+                }
+            };
+            let img = match img {
+                Ok(i) => i,
+                Err(err) => {
+                    message(&mut self.state, MessageLevel::Error, format!("Render element {}: {err}", e.name));
+                    continue;
+                }
+            };
+            let path = e.output_path(base.as_deref()).map(|p| match &numbering {
+                Some((_, n)) => loom_scene::render::numbered_path(&p, *n),
+                None => p,
+            });
+            if let Some(p) = &path {
+                match loom_commands::render::save_image(&img, p) {
+                    Ok(()) => message(&mut self.state, MessageLevel::Info, format!("Render element {} saved to {p}", e.name)),
+                    Err(err) => message(&mut self.state, MessageLevel::Error, format!("Render element {}: {err}", e.name)),
+                }
+            }
+            if s.display_elements {
+                let r = &mut self.state.rendered;
+                // One window per element, its image replaced by each render.
+                match r.clones.iter_mut().find(|c| c.title == e.name) {
+                    Some(c) => c.image = Arc::new(img),
+                    None => {
+                        r.next_clone += 1;
+                        let id = r.next_clone;
+                        r.clones.push(loom_commands::render::ClonedFrame { id, title: e.name.clone(), image: Arc::new(img), channels: Default::default() });
+                    }
+                }
+            }
+        }
+    }
+
     fn finish_render(&mut self, result: Result<(), String>) {
         let Some(mut job) = self.render_job.take() else { return };
         if let Gpu::Running(b) = &mut self.gpu {
             b.renderer.end_render();
-            b.renderer.sync_hidden(&[]);
         }
         let effects = if job.req.settings.effects { job.env.effects.clone() } else { Vec::new() };
+        if job.preview.is_some() {
+            if let Gpu::Running(b) = &mut self.gpu {
+                b.renderer.sync_hidden(&[]);
+            }
+        }
+        if result.is_ok() && job.preview.is_none() && job.req.settings.force_wireframe {
+            self.force_wireframe(&job);
+        }
         if let Some(mut img) = job.preview.take() {
             if result.is_ok() {
                 loom_bevy::effects::apply(&mut img, &effects);
@@ -661,6 +823,10 @@ impl LoomApp {
                     }
                     None => message(&mut self.state, MessageLevel::Info, text),
                 }
+                let s = &job.req.settings;
+                if !job.req.iterative && s.elements_active && s.elements.iter().any(|e| e.enabled) {
+                    self.render_elements(&job);
+                }
             }
             Err(e) if e == "cancelled" => {
                 self.state.status_prompt = format!("Render cancelled after {secs:.1} s");
@@ -670,6 +836,9 @@ impl LoomApp {
                 message(&mut self.state, MessageLevel::Error, format!("Frame {frame}: {e}"));
                 self.last_error = Some(format!("Render: {e}"));
             }
+        }
+        if let Gpu::Running(b) = &mut self.gpu {
+            b.renderer.sync_hidden(&[]);
         }
         if ok {
             // A Time Output sequence: the next frame (its meshes rebuilt at that frame).

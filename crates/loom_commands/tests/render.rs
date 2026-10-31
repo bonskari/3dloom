@@ -372,10 +372,10 @@ fn video_color_check_and_super_black_change_the_right_pixels() {
     super_black(&mut img, 15);
     assert_eq!((img.get_pixel(0, 0).0, img.get_pixel(1, 0).0), ([0, 0, 0, 0], [15, 40, 15, 255]));
     let mut s = AppState::new();
-    execute(&mut s, Command::RenderOptions { video_color_check: Some(true), super_black: Some(true), super_black_threshold: Some(20) }).unwrap();
+    execute(&mut s, Command::RenderOptions { video_color_check: Some(true), super_black: Some(true), super_black_threshold: Some(20), force_wireframe: None, wire_thickness: None }).unwrap();
     assert!(s.scene.render.video_color_check && s.scene.render.super_black);
     assert_eq!(s.scene.render.super_black_threshold, 20);
-    assert!(execute(&mut s, Command::RenderOptions { video_color_check: None, super_black: None, super_black_threshold: Some(300) }).is_err());
+    assert!(execute(&mut s, Command::RenderOptions { video_color_check: None, super_black: None, super_black_threshold: Some(300), force_wireframe: None, wire_thickness: None }).is_err());
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert!(!s.scene.render.super_black);
 }
@@ -394,6 +394,39 @@ fn render_message_window_logs_warnings() {
     assert!(s.rendered.messages.is_empty());
     execute(&mut s, Command::RenderMessageWindow).unwrap();
     assert!(!s.rendered.messages_open);
+}
+
+/// Render Elements: added, named, given files and Z range, deleted, all undoable;
+/// an element's file defaults to the Render Output's with _<name>.
+#[test]
+fn render_elements_list_is_edited_by_commands() {
+    use loom_scene::render::ElementKind;
+    let mut s = AppState::new();
+    execute(&mut s, Command::AddRenderElement { kind: ElementKind::ZDepth, name: None }).unwrap();
+    execute(&mut s, Command::AddRenderElement { kind: ElementKind::Diffuse, name: Some("Diffuse Pass".into()) }).unwrap();
+    let e = &s.scene.render.elements;
+    assert_eq!((e[0].name.as_str(), e[1].name.as_str()), ("Z Depth", "Diffuse Pass"));
+    assert_eq!(e[1].output_path(Some("/r/shot.png")).as_deref(), Some("/r/shot_DiffusePass.png"));
+    assert_eq!(e[1].output_path(None), None);
+    execute(&mut s, Command::RenderElementParameters { index: 0, name: None, enabled: Some(false), path: Some("/r/z.exr".into()), z_min: Some(5.0), z_max: Some(50.0) }).unwrap();
+    let z = &s.scene.render.elements[0];
+    assert_eq!((z.enabled, z.path.as_deref(), z.z_min, z.z_max), (false, Some("/r/z.exr"), 5.0, 50.0));
+    assert!(execute(&mut s, Command::RenderElementParameters { index: 0, name: None, enabled: None, path: None, z_min: Some(60.0), z_max: None }).is_err(), "Z Max must stay beyond Z Min");
+    assert!(execute(&mut s, Command::RenderElementParameters { index: 5, name: None, enabled: None, path: None, z_min: None, z_max: None }).is_err());
+    execute(&mut s, Command::RenderElements { active: Some(false), display: Some(false) }).unwrap();
+    assert!(!s.scene.render.elements_active && !s.scene.render.display_elements);
+    execute(&mut s, Command::DeleteRenderElement { index: 0 }).unwrap();
+    assert_eq!(s.scene.render.elements.len(), 1);
+    for _ in 0..2 {
+        execute(&mut s, Command::UndoSceneOperation).unwrap();
+    }
+    assert_eq!(s.scene.render.elements.len(), 2);
+    assert!(s.scene.render.elements_active);
+    let r = execute_json(&mut s, &json!({ "cmd": "Render Options", "args": { "force_wireframe": true, "wire_thickness": 2.5 } }));
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(s.scene.render.force_wireframe && s.scene.render.wire_thickness == 2.5);
+    let r = execute_json(&mut s, &json!({ "cmd": "Render Options", "args": { "wire_thickness": 0.0 } }));
+    assert_eq!(r["ok"], false);
 }
 
 fn time_output(s: &mut AppState, t: Option<loom_scene::render::TimeOutput>, range: Option<[i32; 2]>, frames: Option<&str>, base: Option<i32>, skip: Option<bool>, ifl: Option<bool>) -> Result<serde_json::Value, String> {

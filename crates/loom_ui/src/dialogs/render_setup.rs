@@ -13,6 +13,7 @@ pub enum Panel {
     #[default]
     Common,
     Renderer,
+    Elements,
 }
 
 const PRESETS: [(u32, u32); 4] = [(320, 240), (640, 480), (1280, 720), (1920, 1080)];
@@ -104,11 +105,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut panel, Panel::Common, "Common");
             ui.selectable_value(&mut panel, Panel::Renderer, "Renderer");
+            ui.selectable_value(&mut panel, Panel::Elements, "Render Elements");
         });
         ui.separator();
         match panel {
             Panel::Common => common(ui, app),
             Panel::Renderer => renderer(ui, app),
+            Panel::Elements => elements(ui, app),
         }
         ui.separator();
         crate::rendered_frame::viewport_controls(ui, app, "render_setup_viewport", "Lock View");
@@ -283,7 +286,7 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.horizontal(|ui| {
-        let options = |video_color_check, super_black| Command::RenderOptions { video_color_check, super_black, super_black_threshold: None };
+        let options = |video_color_check, super_black| Command::RenderOptions { video_color_check, super_black, super_black_threshold: None, force_wireframe: None, wire_thickness: None };
         let mut check = s.video_color_check;
         if ui.checkbox(&mut check, "Video Color Check").on_hover_text("Pixels beyond the NTSC limit render black").changed() {
             run(app, options(Some(check), None));
@@ -357,6 +360,22 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
         merge_drag(app, &r);
         if r.changed() {
             run(app, Bevy { passes: Some(passes), ..Default::default() }.cmd());
+        }
+    });
+    ui.horizontal(|ui| {
+        let s = &app.state.scene.render;
+        let (wire, thickness) = (s.force_wireframe, s.wire_thickness);
+        let options = |force_wireframe, wire_thickness| Command::RenderOptions { video_color_check: None, super_black: None, super_black_threshold: None, force_wireframe, wire_thickness };
+        let mut on = wire;
+        if ui.checkbox(&mut on, "Force Wireframe").on_hover_text("Every surface renders as its polygon edges").changed() {
+            run(app, options(Some(on), None));
+        }
+        ui.label("Wire Thickness:");
+        let mut t = thickness;
+        let r = ui.add_enabled(wire, crate::spinner::spin(ui, &mut t, 0.1..=100.0f32).speed(0.05).max_decimals(2));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, options(None, Some(t)));
         }
     });
     ui.label(egui::RichText::new("Shadow Options").strong());
@@ -448,4 +467,114 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
             run(app, Bevy { ambient: Some(to_f(amb)), ..Default::default() }.cmd());
         }
     });
+}
+
+/// Render Element Parameters for the selected entry; omitted fields keep their value.
+fn element_cmd(index: usize, f: impl FnOnce(&mut (Option<String>, Option<bool>, Option<String>, Option<f32>, Option<f32>))) -> Command {
+    let mut a = (None, None, None, None, None);
+    f(&mut a);
+    Command::RenderElementParameters { index: index as u32, name: a.0, enabled: a.1, path: a.2, z_min: a.3, z_max: a.4 }
+}
+
+/// A text field applied when it loses focus.
+fn text_field(ui: &mut egui::Ui, id: egui::Id, value: &str, width: f32) -> Option<String> {
+    let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| value.to_owned());
+    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(width));
+    if r.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(id));
+        return (text != value).then_some(text);
+    }
+    if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text));
+    }
+    None
+}
+
+/// Render Elements panel: Elements Active, Display Elements, Add / Delete,
+/// the list, and the selected element's parameters.
+fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
+    use loom_scene::render::ElementKind;
+    let s = app.state.scene.render.clone();
+    let sel_id = egui::Id::new("render_elements_selected");
+    let mut sel: usize = ui.data(|d| d.get_temp(sel_id)).unwrap_or(0);
+    ui.horizontal(|ui| {
+        let mut active = s.elements_active;
+        if ui.checkbox(&mut active, "Elements Active").changed() {
+            run(app, Command::RenderElements { active: Some(active), display: None });
+        }
+        let mut display = s.display_elements;
+        if ui.checkbox(&mut display, "Display Elements").changed() {
+            run(app, Command::RenderElements { active: None, display: Some(display) });
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.menu_button("Add...", |ui| {
+            for k in ElementKind::ALL {
+                if ui.button(k.label()).clicked() {
+                    if let Ok(r) = app.dispatch(Command::AddRenderElement { kind: k, name: None }) {
+                        sel = r["index"].as_u64().unwrap_or(0) as usize;
+                    }
+                    ui.close_menu();
+                }
+            }
+        });
+        if ui.add_enabled(sel < s.elements.len(), egui::Button::new("Delete")).clicked() {
+            run(app, Command::DeleteRenderElement { index: sel as u32 });
+        }
+    });
+    egui::Grid::new("render_elements_list").num_columns(3).striped(true).show(ui, |ui| {
+        ui.strong("Name");
+        ui.strong("Enabled");
+        ui.strong("Path");
+        ui.end_row();
+        for (i, e) in s.elements.iter().enumerate() {
+            if ui.selectable_label(i == sel, &e.name).clicked() {
+                sel = i;
+            }
+            ui.label(if e.enabled { "On" } else { "Off" });
+            ui.label(e.output_path(s.output_path.as_deref()).unwrap_or_default());
+            ui.end_row();
+        }
+    });
+    if let Some(e) = s.elements.get(sel) {
+        ui.separator();
+        ui.label(egui::RichText::new("Selected Element Parameters").strong());
+        ui.horizontal(|ui| {
+            let mut on = e.enabled;
+            if ui.checkbox(&mut on, "Enable").changed() {
+                run(app, element_cmd(sel, |a| a.1 = Some(on)));
+            }
+            ui.label("Name:");
+            if let Some(n) = text_field(ui, egui::Id::new(("render_element_name", sel)), &e.name, 140.0) {
+                if let Err(err) = app.dispatch(element_cmd(sel, |a| a.0 = Some(n))) {
+                    app.last_error = Some(format!("{err}"));
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("File:");
+            if let Some(p) = text_field(ui, egui::Id::new(("render_element_path", sel)), e.path.as_deref().unwrap_or(""), 260.0) {
+                run(app, element_cmd(sel, |a| a.2 = Some(p)));
+            }
+        });
+        if e.kind == ElementKind::ZDepth {
+            ui.horizontal(|ui| {
+                ui.label("Z Min:");
+                let mut z = e.z_min;
+                let r = ui.add(crate::spinner::spin(ui, &mut z, -1.0e6..=1.0e6f32));
+                merge_drag(app, &r);
+                if r.changed() {
+                    run(app, element_cmd(sel, |a| a.3 = Some(z)));
+                }
+                ui.label("Z Max:");
+                let mut z = e.z_max;
+                let r = ui.add(crate::spinner::spin(ui, &mut z, -1.0e6..=1.0e6f32));
+                merge_drag(app, &r);
+                if r.changed() {
+                    run(app, element_cmd(sel, |a| a.4 = Some(z)));
+                }
+            });
+        }
+    }
+    ui.data_mut(|d| d.insert_temp(sel_id, sel));
 }

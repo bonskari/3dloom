@@ -153,6 +153,10 @@ pub fn handles(c: &C) -> bool {
             | C::RenderTimeOutput { .. }
             | C::RenderOptions { .. }
             | C::RenderMessageWindow
+            | C::AddRenderElement { .. }
+            | C::DeleteRenderElement { .. }
+            | C::RenderElementParameters { .. }
+            | C::RenderElements { .. }
             | C::ClearRenderMessages
             | C::AreaToRender { .. }
             | C::EditRegion
@@ -789,8 +793,76 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let s = &state.scene.render;
             Ok(json!({ "time_output": s.time_output, "range": s.range, "frames": s.frames, "every_nth": s.every_nth, "file_number_base": s.file_number_base, "skip_existing": s.skip_existing, "image_file_list": s.image_file_list }))
         }
-        C::RenderOptions { video_color_check, super_black, super_black_threshold } => {
+        C::AddRenderElement { kind, name } => {
             let mut s = state.scene.render.clone();
+            let name = name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| kind.label().to_owned());
+            s.elements.push(loom_scene::render::RenderElement { kind, name, ..Default::default() });
+            let index = s.elements.len() - 1;
+            set_settings(state, "Add Render Element", s)?;
+            Ok(json!({ "index": index, "elements": state.scene.render.elements.len() }))
+        }
+        C::DeleteRenderElement { index } => {
+            let mut s = state.scene.render.clone();
+            if index as usize >= s.elements.len() {
+                return Err(format!("no render element {index}"));
+            }
+            s.elements.remove(index as usize);
+            set_settings(state, "Delete Render Element", s)?;
+            Ok(json!({ "elements": state.scene.render.elements.len() }))
+        }
+        C::RenderElementParameters { index, name, enabled, path, z_min, z_max } => {
+            let mut s = state.scene.render.clone();
+            let e = s.elements.get_mut(index as usize).ok_or_else(|| format!("no render element {index}"))?;
+            if let Some(n) = name {
+                let n = n.trim();
+                if n.is_empty() {
+                    return Err("an element needs a name".into());
+                }
+                e.name = n.to_owned();
+            }
+            if let Some(v) = enabled {
+                e.enabled = v;
+            }
+            if let Some(p) = path {
+                let p = p.trim();
+                e.path = (!p.is_empty()).then(|| p.to_owned());
+            }
+            for (field, v) in [(&mut e.z_min, z_min), (&mut e.z_max, z_max)] {
+                if let Some(v) = v {
+                    if !v.is_finite() {
+                        return Err(format!("Z depth {v}"));
+                    }
+                    *field = v;
+                }
+            }
+            if e.z_max <= e.z_min {
+                return Err(format!("Z Max {} must be beyond Z Min {}", e.z_max, e.z_min));
+            }
+            set_settings(state, "Render Element", s)?;
+            Ok(serde_json::to_value(&state.scene.render.elements[index as usize]).unwrap_or(Value::Null))
+        }
+        C::RenderElements { active, display } => {
+            let mut s = state.scene.render.clone();
+            if let Some(v) = active {
+                s.elements_active = v;
+            }
+            if let Some(v) = display {
+                s.display_elements = v;
+            }
+            set_settings(state, "Render Elements", s)?;
+            Ok(json!({ "active": state.scene.render.elements_active, "display": state.scene.render.display_elements }))
+        }
+        C::RenderOptions { video_color_check, super_black, super_black_threshold, force_wireframe, wire_thickness } => {
+            let mut s = state.scene.render.clone();
+            if let Some(v) = force_wireframe {
+                s.force_wireframe = v;
+            }
+            if let Some(t) = wire_thickness {
+                if !(t.is_finite() && (0.1..=100.0).contains(&t)) {
+                    return Err(format!("wire thickness {t}: 0.1 to 100 pixels"));
+                }
+                s.wire_thickness = t;
+            }
             if let Some(v) = video_color_check {
                 s.video_color_check = v;
             }
@@ -802,7 +874,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             set_settings(state, "Render Setup", s)?;
             let s = &state.scene.render;
-            Ok(json!({ "video_color_check": s.video_color_check, "super_black": s.super_black, "super_black_threshold": s.super_black_threshold }))
+            Ok(json!({ "video_color_check": s.video_color_check, "super_black": s.super_black, "super_black_threshold": s.super_black_threshold, "force_wireframe": s.force_wireframe, "wire_thickness": s.wire_thickness }))
         }
         C::RenderMessageWindow => {
             state.rendered.messages_open = !state.rendered.messages_open;

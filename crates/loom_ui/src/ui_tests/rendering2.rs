@@ -127,3 +127,112 @@ fn super_black_lifts_rendered_geometry() {
     click_text(&mut h, "Video Color Check", win, 0.0);
     assert!(h.app.state.scene.render.video_color_check);
 }
+
+fn opaque(img: &image::RgbaImage) -> usize {
+    img.pixels().filter(|p| p.0[3] > 128).count()
+}
+
+/// Force Wireframe draws the polygon edges only: far fewer opaque pixels
+/// than the solid render, more with a thicker wire, transparent between.
+#[test]
+fn force_wireframe_renders_the_polygon_edges() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("force_wireframe_renders_the_polygon_edges: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [40.0; 3] });
+    framed(&mut h);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 200, "height": 150 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    let render = |h: &mut Harness| {
+        h.cmd(Command::Render { path: None, width: None, height: None });
+        finish_render(h, 100);
+        assert_eq!(h.app.last_error, None);
+        h.app.state.rendered.image.clone().unwrap()
+    };
+    let solid = opaque(&render(&mut h));
+    ok(&mut h, "Render Options", serde_json::json!({ "force_wireframe": true, "wire_thickness": 1.0 }));
+    let thin = opaque(&render(&mut h));
+    ok(&mut h, "Render Options", serde_json::json!({ "wire_thickness": 4.0 }));
+    let thick = opaque(&render(&mut h));
+    assert!(solid > 3000, "the box fills the frame: {solid}");
+    assert!(thin > 100 && thin * 4 < solid, "edges only: {thin} of {solid}");
+    assert!(thick > thin * 2, "a thicker wire: {thick} against {thin}");
+}
+
+/// Render Elements: each enabled element is written next to the render
+/// output and measured: Alpha is the coverage, the lit elements are black
+/// off the objects, Lighting is uncoloured, Shadow darkens the floor under
+/// the teapot, Z Depth grades with distance and Background is opaque.
+#[test]
+fn render_elements_write_their_images() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("render_elements_write_their_images: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [120.0, 120.0, 0.0] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Teapot, position: [0.0; 3], size: [25.0; 3] });
+    framed(&mut h);
+    let dir = std::env::temp_dir().join(format!("loom-ui-elements-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("frame.png");
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120, "output": out.to_string_lossy() }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    for kind in ["Alpha", "Diffuse", "Specular", "Lighting", "Shadow", "ZDepth", "Background"] {
+        ok(&mut h, "Add Render Element", serde_json::json!({ "kind": kind }));
+    }
+    ok(&mut h, "Render Element Parameters", serde_json::json!({ "index": 5, "z_min": 0.0, "z_max": 1000.0 }));
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 100);
+    assert_eq!(h.app.last_error, None, "{:?}", h.app.state.rendered.messages);
+    let main = image::open(&out).unwrap().to_rgba8();
+    let load = |name: &str| image::open(dir.join(format!("frame_{name}.png"))).unwrap_or_else(|e| panic!("{name}: {e}")).to_rgba8();
+    let geo: Vec<(u32, u32)> = main.enumerate_pixels().filter(|p| p.2 .0[3] == 255).map(|p| (p.0, p.1)).collect();
+    let empty: Vec<(u32, u32)> = main.enumerate_pixels().filter(|p| p.2 .0[3] == 0).map(|p| (p.0, p.1)).collect();
+    assert!(geo.len() > 1000 && !empty.is_empty(), "the floor and teapot fill part of the frame");
+    let alpha = load("Alpha");
+    assert!(geo.iter().all(|&(x, y)| alpha.get_pixel(x, y).0 == [255, 255, 255, 255]));
+    assert!(empty.iter().all(|&(x, y)| alpha.get_pixel(x, y).0 == [0, 0, 0, 255]));
+    let mean = |img: &image::RgbaImage| geo.iter().map(|&(x, y)| img.get_pixel(x, y).0[..3].iter().map(|c| *c as f32).sum::<f32>()).sum::<f32>() / geo.len() as f32;
+    let (diffuse, specular, lighting) = (load("Diffuse"), load("Specular"), load("Lighting"));
+    for img in [&diffuse, &specular, &lighting] {
+        assert!(empty.iter().all(|&(x, y)| img.get_pixel(x, y).0[..3] == [0, 0, 0]), "black off the objects");
+    }
+    assert!(mean(&specular) < mean(&diffuse), "highlights only: {} against {}", mean(&specular), mean(&diffuse));
+    let grey = geo.iter().filter(|&&(x, y)| {
+        let p = lighting.get_pixel(x, y).0;
+        p[0].abs_diff(p[1]) <= 3 && p[1].abs_diff(p[2]) <= 3
+    });
+    assert!(grey.count() * 10 >= geo.len() * 9, "white light on a white material is grey");
+    let shadow = load("Shadow");
+    let dark = geo.iter().filter(|&&(x, y)| shadow.get_pixel(x, y).0[0] < 128).count();
+    let lit = geo.iter().filter(|&&(x, y)| shadow.get_pixel(x, y).0[0] > 240).count();
+    assert!(dark > 20 && lit > dark, "the teapot's shadow on the floor: {dark} dark, {lit} lit");
+    let z = load("ZDepth");
+    let greys: std::collections::BTreeSet<u8> = geo.iter().map(|&(x, y)| z.get_pixel(x, y).0[0]).collect();
+    assert!(greys.len() > 10, "depth grades across the scene: {greys:?}");
+    assert!(empty.iter().all(|&(x, y)| z.get_pixel(x, y).0[3] == 0));
+    let bg = load("Background");
+    assert!(bg.pixels().all(|p| p.0 == [0, 0, 0, 255]), "the black background, opaque");
+    // Display Elements: each in its own window.
+    assert_eq!(h.app.state.rendered.clones.len(), 7);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The Render Elements panel: Add... lists the kinds; a click adds one.
+#[test]
+fn render_elements_panel_adds_an_element() {
+    let mut h = Harness::new();
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Render Elements", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Add...", win, 0.0);
+    h.frames(1);
+    click_text(&mut h, "Z Depth", egui::Rect::EVERYTHING, 0.0);
+    assert_eq!(h.app.state.scene.render.elements.len(), 1);
+    assert_eq!(h.app.state.scene.render.elements[0].kind, loom_scene::render::ElementKind::ZDepth);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Enable", win, 0.0);
+    assert!(!h.app.state.scene.render.elements[0].enabled);
+}

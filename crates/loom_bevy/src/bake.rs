@@ -107,6 +107,24 @@ pub(crate) fn linear_to_srgb(x: f32) -> u8 {
     (s * 255.0).round() as u8
 }
 
+/// The shadows of a lit image `shadowed` against the same light without
+/// shadows `open`: white where lit, black in full shadow (pixels with
+/// alpha 0 keep `shadowed`'s, unlit ones are white).
+pub fn shadow_ratio(shadowed: &image::RgbaImage, open: &image::RgbaImage) -> image::RgbaImage {
+    let mut out = shadowed.clone();
+    for (o, (s, u)) in out.pixels_mut().zip(shadowed.pixels().zip(open.pixels())) {
+        if s.0[3] == 0 {
+            continue;
+        }
+        let (ls, lu) = (srgb_to_linear(s.0[0].max(s.0[1]).max(s.0[2])), srgb_to_linear(u.0[0].max(u.0[1]).max(u.0[2])));
+        // Unlit texels have no shadow to show.
+        let v = if lu > 1e-4 { (ls / lu).min(1.0) } else { 1.0 };
+        let g = linear_to_srgb(v);
+        o.0 = [g, g, g, 255];
+    }
+    out
+}
+
 impl BevyRenderer {
     /// Bakes `object` into a `options.size` map (sRGB RGBA; texels off the
     /// mesh have the background colour and alpha 0). Blocks for a few frames.
@@ -124,18 +142,7 @@ impl BevyRenderer {
         let pass = BakeOptions { direct: true, indirect: false, ..*options };
         let shadowed = self.bake_pass(object, BakeLook::Lighting, &BakeOptions { shadows: true, ..pass }, false)?;
         let open = self.bake_pass(object, BakeLook::Lighting, &BakeOptions { shadows: false, ..pass }, false)?;
-        let mut out = shadowed.clone();
-        for (o, (s, u)) in out.pixels_mut().zip(shadowed.pixels().zip(open.pixels())) {
-            if s.0[3] == 0 {
-                continue;
-            }
-            let (ls, lu) = (srgb_to_linear(s.0[0].max(s.0[1]).max(s.0[2])), srgb_to_linear(u.0[0].max(u.0[1]).max(u.0[2])));
-            // Unlit texels have no shadow to show.
-            let v = if lu > 1e-4 { (ls / lu).min(1.0) } else { 1.0 };
-            let g = linear_to_srgb(v);
-            o.0 = [g, g, g, 255];
-        }
-        Ok(out)
+        Ok(shadow_ratio(&shadowed, &open))
     }
 
     /// The material a look draws with, from the object's surface.
