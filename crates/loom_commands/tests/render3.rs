@@ -19,7 +19,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 fn ok(s: &mut AppState, cmd: &str, args: serde_json::Value) -> serde_json::Value {
     let r = execute_json(s, &json!({ "cmd": cmd, "args": args }));
     assert_eq!(r["ok"], true, "{cmd}: {r}");
-    r["result"].clone()
+    if r.get("result").is_some() { r["result"].clone() } else { r }
 }
 
 /// A gradient with a half-transparent band: detail for JPEG, alpha for the rest.
@@ -180,11 +180,11 @@ fn renderer_messages_go_to_the_log_file() {
     loom_commands::render::message(&mut s, loom_commands::render::MessageLevel::Info, "first");
     loom_commands::render::message(&mut s, loom_commands::render::MessageLevel::Error, "second");
     let text = std::fs::read_to_string(&log).unwrap();
-    assert_eq!(text, "Info: first\nError: second\n", "the session's first message starts the file anew");
+    assert_eq!(text, "INFO: first\nERROR: second\n", "the session's first message starts the file anew");
     // Append to File keeps what is there.
     ok(&mut s, "Render Message Log", json!({ "path": log.to_string_lossy(), "append": true }));
     loom_commands::render::message(&mut s, loom_commands::render::MessageLevel::Warning, "third");
-    assert!(std::fs::read_to_string(&log).unwrap().ends_with("Error: second\nWarning: third\n"));
+    assert!(std::fs::read_to_string(&log).unwrap().ends_with("ERROR: second\nWARNING: third\n"));
     ok(&mut s, "Render Message Log", json!({ "write": false }));
     loom_commands::render::message(&mut s, loom_commands::render::MessageLevel::Info, "not logged");
     assert!(!std::fs::read_to_string(&log).unwrap().contains("not logged"));

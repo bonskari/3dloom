@@ -8,7 +8,7 @@ use super::*;
 fn ok(h: &mut Harness, cmd: &str, args: serde_json::Value) -> serde_json::Value {
     let r = h.app.dispatch_json(&serde_json::json!({ "cmd": cmd, "args": args }));
     assert_eq!(r["ok"], true, "{cmd}: {r}");
-    r["result"].clone()
+    if r.get("result").is_some() { r["result"].clone() } else { r }
 }
 
 fn selected(h: &Harness) -> loom_scene::NodeId {
