@@ -36,8 +36,10 @@ fn where_the_os_windows_were_left_is_saved_and_read_at_the_next_start() {
     let mut h = Harness::new();
     h.app.use_settings_file(path.clone());
     h.frames(1);
-    // What the Material Editor's OS window notes each frame where it is.
-    crate::os_window::record(&h.ctx, "Material Editor", [1500.0, 120.0, 420.0, 760.0]);
+    // Where the Material Editor's OS window was left: its viewport records it
+    // inside a frame and the frame keeps it (a record made between frames is
+    // replaced by the next frame's os_window::begin).
+    h.app.os_window_rects.insert("Material Editor".to_owned(), [1500.0, 120.0, 420.0, 760.0]);
     h.frames(1);
     assert!(path.exists(), "a moved window writes the settings file");
     let mut next = Harness::new();
