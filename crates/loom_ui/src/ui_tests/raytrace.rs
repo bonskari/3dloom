@@ -258,7 +258,7 @@ fn ray_traced_and_area_shadows_are_traced_in_the_render() {
     set(&mut h, "Area Width", 80.0);
     set(&mut h, "Shadow Quality", 6.0);
     let (area_dark, area_mid) = tones(&render(&mut h));
-    assert!(area_mid > rt_mid + 150 && area_dark < rt_dark, "the area light's soft shadow: {area_dark} dark / {area_mid} mid against {rt_dark} / {rt_mid}");
+    assert!(area_mid > rt_mid + 50 && area_dark * 4 < rt_dark * 3, "the area light's soft shadow: {area_dark} dark / {area_mid} mid against {rt_dark} / {rt_mid}");
     // Shadows off: nothing is traced.
     set(&mut h, "Shadows On", 0.0);
     let (none, _) = tones(&render(&mut h));
