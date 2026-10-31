@@ -471,6 +471,19 @@ fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     sub(ui, app, "Preview - Grab Viewport", |ui, app| {
         item(ui, app, "Create Preview Animation...", "Create Animated Sequence File...");
         cmd(ui, app, "Capture Still Image...", Command::GrabViewport);
+        cmd(ui, app, "View Animated Sequence File", Command::ViewAnimatedSequenceFile);
+        sub(ui, app, "Rename Animated Sequence File", |ui, app| {
+            let id = egui::Id::new("rename_preview_name");
+            let mut name: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| "preview".into());
+            ui.text_edit_singleline(&mut name);
+            if ui.button("Save").clicked() {
+                if let Err(e) = app.dispatch(Command::RenameAnimatedSequenceFile { name: name.clone() }) {
+                    app.last_error = Some(format!("Rename Animated Sequence File: {e}"));
+                }
+                ui.close_menu();
+            }
+            ui.data_mut(|d| d.insert_temp(id, name));
+        });
     });
     cmd(ui, app, "Grab Viewport", Command::GrabViewport);
     ui.separator();
@@ -792,6 +805,9 @@ fn rendering_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
     cmd(ui, app, "Render Message Window...", Command::RenderMessageWindow);
     cmd(ui, app, "RAM Player...", Command::RamPlayer);
+    cmd(ui, app, "View Image File...", Command::ViewImageFile { path: None, sequence: None });
+    cmd(ui, app, "Batch Render...", Command::BatchRender);
+    cmd(ui, app, "ActiveShade Floater", Command::ActiveShadeFloater);
     ui.separator();
     cmd(ui, app, "Render To Texture...", Command::RenderToTexture);
     cmd(ui, app, "Environment...", Command::EnvironmentDialogToggle);

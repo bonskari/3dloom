@@ -371,6 +371,40 @@ fn output(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             });
         }
+        if e.kind == loom_scene::bake::ElementKind::AmbientOcclusion {
+            ui.label(egui::RichText::new("Selected Element Unique Settings").strong());
+            let ao = |app: &mut LoomApp, mut args: Value| {
+                args["index"] = json!(selected);
+                run(app, "Ambient Occlusion Map Settings", args);
+            };
+            egui::Grid::new("rtt_ao").num_columns(4).show(ui, |ui| {
+                ui.label("Samples:");
+                let mut n = e.ao_samples;
+                if ui.add(egui::DragValue::new(&mut n).range(1..=1024)).changed() {
+                    ao(app, json!({ "samples": n }));
+                }
+                ui.label("Spread:");
+                let mut v = e.ao_spread;
+                if ui.add(egui::DragValue::new(&mut v).range(0.0..=10.0).speed(0.01)).changed() {
+                    ao(app, json!({ "spread": v }));
+                }
+                ui.end_row();
+                ui.label("Max Distance:");
+                let mut d = e.ao_max_distance;
+                if ui.add(egui::DragValue::new(&mut d).range(0.0..=1.0e9).speed(0.5)).changed() {
+                    ao(app, json!({ "max_distance": d }));
+                }
+                ui.end_row();
+                for (label, key, c) in [("Bright:", "bright", e.ao_bright), ("Dark:", "dark", e.ao_dark)] {
+                    ui.label(label);
+                    let mut c = c;
+                    if ui.color_edit_button_rgb(&mut c).changed() {
+                        ao(app, json!({ key: c }));
+                    }
+                }
+                ui.end_row();
+            });
+        }
     });
     ui.data_mut(|d| d.insert_temp(sel_id, selected.min(app.state.scene.render.bake.elements.len().saturating_sub(1))));
 }

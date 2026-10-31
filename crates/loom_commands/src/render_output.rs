@@ -35,6 +35,7 @@ pub fn handles(c: &C) -> bool {
             | C::PanoramaExport { .. }
             | C::PanoramaViewer { .. }
             | C::RenderElementOptions { .. }
+            | C::AmbientOcclusionMapSettings { .. }
     )
 }
 
@@ -519,6 +520,10 @@ pub struct PanoramaViewer {
     pub pitch: f32,
     pub fov: f32,
     pub version: u64,
+    /// The Panorama Exporter rollout: camera, face size and output file.
+    pub camera: Option<u64>,
+    pub size: u32,
+    pub output: String,
 }
 
 fn ranged(name: &str, v: f32, lo: f32, hi: f32) -> Result<f32, String> {
@@ -931,6 +936,36 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             set_settings(state, "Render Element", s)?;
             Ok(serde_json::to_value(&state.scene.render.elements[index as usize]).unwrap_or(Value::Null))
+        }
+        C::AmbientOcclusionMapSettings { index, samples, spread, max_distance, bright, dark } => {
+            let mut s = state.scene.render.clone();
+            let e = s.bake.elements.get_mut(index as usize).ok_or_else(|| format!("no texture element {index}"))?;
+            if e.kind != loom_scene::bake::ElementKind::AmbientOcclusion {
+                return Err(format!("texture element {index} is not an AmbientOcclusionMap"));
+            }
+            if let Some(n) = samples {
+                if !(1..=1024).contains(&n) {
+                    return Err(format!("samples {n}: 1 to 1024"));
+                }
+                e.ao_samples = n;
+            }
+            if let Some(v) = spread {
+                e.ao_spread = ranged("spread", v, 0.0, 10.0)?;
+            }
+            if let Some(v) = max_distance {
+                e.ao_max_distance = ranged("max distance", v, 0.0, 1.0e9)?;
+            }
+            for (field, c) in [(&mut e.ao_bright, bright), (&mut e.ao_dark, dark)] {
+                if let Some(c) = c {
+                    if !c.iter().all(|v| (0.0..=1.0).contains(v)) {
+                        return Err(format!("colour {c:?}: sRGB 0 to 1"));
+                    }
+                    *field = c;
+                }
+            }
+            set_settings(state, "Ambient Occlusion", s)?;
+            let e = &state.scene.render.bake.elements[index as usize];
+            Ok(json!({ "samples": e.ao_samples, "spread": e.ao_spread, "max_distance": e.ao_max_distance, "bright": e.ao_bright, "dark": e.ao_dark }))
         }
         other => Err(format!("{} is not a render output command", other.name())),
     }

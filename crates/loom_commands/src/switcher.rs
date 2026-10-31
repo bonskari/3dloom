@@ -52,7 +52,14 @@ struct DefaultsSet {
 const DEFAULTS_FORMAT: &str = "3dloom-defaults-1";
 
 pub fn handles(c: &C) -> bool {
-    matches!(c, C::GrabViewport | C::CreateAnimatedSequenceFile | C::MakePreview { .. } | C::CustomUiDefaultsSwitcher | C::SwitchUiScheme { .. } | C::SwitchDefaults { .. } | C::SaveDefaultsSet { .. })
+    matches!(c, C::GrabViewport | C::CreateAnimatedSequenceFile | C::MakePreview { .. } | C::ViewAnimatedSequenceFile | C::RenameAnimatedSequenceFile { .. } | C::CustomUiDefaultsSwitcher | C::SwitchUiScheme { .. } | C::SwitchDefaults { .. } | C::SaveDefaultsSet { .. })
+}
+
+/// The preview's file name (as the reference's _scene.avi) and its folder.
+const PREVIEW_NAME: &str = "_scene";
+
+fn preview_dir() -> std::path::PathBuf {
+    crate::autosave::loom_home().join("previews")
 }
 
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
@@ -69,15 +76,66 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         C::MakePreview { start, end, every_nth, percent, path } => {
             let s = start.unwrap_or(state.frame_range.0);
             let e = end.unwrap_or(state.frame_range.1).max(s);
-            let step = every_nth.unwrap_or(1).max(1) as usize;
-            let pct = percent.unwrap_or(50).clamp(1, 100);
+            let step = every_nth.unwrap_or(1).max(1);
+            let pct = percent.unwrap_or(50).clamp(1, 200);
             let w = (state.scene.render.width * pct / 100).max(1);
             let h = (state.scene.render.height * pct / 100).max(1);
-            let frames: Vec<i32> = (s..=e).step_by(step).collect();
-            let out = path.unwrap_or_else(|| crate::autosave::loom_home().join("previews").join("_scene.avi").to_string_lossy().into_owned());
-            state.grab_request = Some(state.active_viewport);
-            state.status_prompt = format!("Preview: {} frame(s) ({w}x{h}) -> {out}", frames.len());
-            Ok(json!({ "frames": frames, "width": w, "height": h, "path": out }))
+            // The preview is a numbered image sequence _sceneNNNN.png in the
+            // folder, listed by _scene.ifl (no video encoder here).
+            let dir = path.map(std::path::PathBuf::from).unwrap_or_else(preview_dir);
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            let out = dir.join(format!("{PREVIEW_NAME}.png")).to_string_lossy().into_owned();
+            let mut settings = state.scene.render.clone();
+            settings.width = w;
+            settings.height = h;
+            settings.area = loom_scene::render::RenderArea::View;
+            settings.time_output = loom_scene::render::TimeOutput::Range;
+            settings.range = [s, e];
+            settings.every_nth = step;
+            settings.file_number_base = 0;
+            settings.image_file_list = true;
+            settings.skip_existing = false;
+            settings.elements_active = false;
+            // A quick look: one pass, no file options or gamma of the output.
+            settings.bevy.passes = 1;
+            settings.output_format = Default::default();
+            settings.gamma = Default::default();
+            let frames = settings.output_frames(state.frame_range, state.current_frame)?;
+            let req = crate::state::RenderRequest { viewport: state.active_viewport, settings, save_path: Some(out.clone()), ..Default::default() };
+            crate::render::start_sequence(state, req, frames.clone())?;
+            let ifl = crate::render::image_file_list_path(&out);
+            state.preview_file = Some(ifl.clone());
+            state.status_prompt = format!("Preview: {} frame(s) ({w}x{h}) -> {ifl}", frames.len());
+            Ok(json!({ "frames": frames, "width": w, "height": h, "path": ifl }))
+        }
+        C::ViewAnimatedSequenceFile => {
+            let ifl = state.preview_file.clone().unwrap_or_else(|| crate::render::image_file_list_path(&preview_dir().join(format!("{PREVIEW_NAME}.png")).to_string_lossy()));
+            if !std::path::Path::new(&ifl).is_file() {
+                return Err("no preview: make one first (Create Animated Sequence File)".into());
+            }
+            crate::execute::execute(state, C::ViewImageFile { path: Some(ifl), sequence: None })
+        }
+        C::RenameAnimatedSequenceFile { name } => {
+            let ifl = state.preview_file.clone().ok_or("no preview to rename: make one first (Create Animated Sequence File)")?;
+            let ifl = std::path::PathBuf::from(ifl);
+            let dir = ifl.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+            let name = name.trim().trim_end_matches(".ifl").to_owned();
+            if name.is_empty() || name.contains(['/', '\\']) {
+                return Err(format!("preview name {name:?}"));
+            }
+            // Each frame file and the list take the new name; the list then names the new files.
+            let text = std::fs::read_to_string(&ifl).map_err(|e| format!("{}: {e}", ifl.display()))?;
+            let mut lines = Vec::new();
+            for l in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                let renamed = format!("{name}{}", l.strip_prefix(PREVIEW_NAME).unwrap_or(l));
+                std::fs::rename(dir.join(l), dir.join(&renamed)).map_err(|e| format!("{l}: {e}"))?;
+                lines.push(renamed);
+            }
+            let to = dir.join(format!("{name}.ifl"));
+            std::fs::write(&to, lines.join("\n") + "\n").map_err(|e| format!("{}: {e}", to.display()))?;
+            let _ = std::fs::remove_file(&ifl);
+            state.preview_file = None;
+            Ok(json!({ "path": to, "files": lines.len() }))
         }
         C::CustomUiDefaultsSwitcher => {
             state.dialog = Some(crate::viewport::Dialog::Switcher);

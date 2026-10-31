@@ -227,6 +227,31 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
     time_output(ui, app, &s);
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Output Size").strong());
+    ui.horizontal(|ui| {
+        let size_format = |format: Option<String>, aperture_width: Option<f32>| Command::OutputSizeFormat { format, aperture_width };
+        let cur = s.film_format.clone().unwrap_or_else(|| "Custom".into());
+        egui::ComboBox::from_id_salt("render_setup_format").selected_text(&cur).width(230.0).show_ui(ui, |ui| {
+            if ui.selectable_label(s.film_format.is_none(), "Custom").clicked() {
+                run(app, size_format(Some("Custom".into()), None));
+            }
+            for f in loom_scene::render::FILM_FORMATS {
+                if ui.selectable_label(cur == f.name, f.name).clicked() {
+                    run(app, size_format(Some(f.name.into()), None));
+                }
+            }
+        });
+        ui.label("Aperture Width(mm):");
+        if s.film_format.is_some() {
+            ui.label(format!("{:.3}", s.aperture_width));
+        } else {
+            let mut a = s.aperture_width;
+            let r = ui.add(crate::spinner::spin(ui, &mut a, 0.1..=1000.0f32).speed(0.1).max_decimals(3));
+            merge_drag(app, &r);
+            if r.changed() {
+                run(app, size_format(None, Some(a)));
+            }
+        }
+    });
     egui::Grid::new("render_setup_size").num_columns(4).show(ui, |ui| {
         let (mut w, mut h) = (s.width, s.height);
         ui.label("Width:");
@@ -337,6 +362,7 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.label(s.output_path.as_deref().unwrap_or("(no output file)"));
+    output_setup(ui, app, &s);
     ui.horizontal(|ui| {
         let mut ifl = s.image_file_list;
         if ui.checkbox(&mut ifl, "Put Image File List in Output Path").on_hover_text("A sequence also writes a .ifl listing its files").changed() {
@@ -350,6 +376,108 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Assign Renderer").strong());
     ui.label("Production: Bevy (PBR rasteriser)");
+}
+
+/// Render Output File > Setup: the output format's options, and the Gamma group.
+fn output_setup(ui: &mut egui::Ui, app: &mut LoomApp, s: &loom_scene::render::RenderSettings) {
+    let ext = s.output_path.as_deref().and_then(|p| std::path::Path::new(p).extension()).and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
+    let f = &s.output_format;
+    let none = Command::RenderOutputSetup { jpeg_quality: None, png_type: None, png_alpha: None, tga_bits: None, tga_compress: None, tga_alpha_split: None, tga_premultiplied: None, exr_full_float: None, exr_alpha: None };
+    egui::CollapsingHeader::new("Setup (file format options)").id_salt("render_output_setup").show(ui, |ui| {
+        let set = |app: &mut LoomApp, edit: &dyn Fn(&mut Command)| {
+            let mut c = none.clone();
+            edit(&mut c);
+            run(app, c);
+        };
+        match ext.as_str() {
+            "jpg" | "jpeg" => {
+                ui.horizontal(|ui| {
+                    ui.label("JPEG Quality:");
+                    let mut q = f.jpeg_quality as u32;
+                    if ui.add(egui::Slider::new(&mut q, 1..=100)).changed() {
+                        set(app, &|c| if let Command::RenderOutputSetup { jpeg_quality, .. } = c { *jpeg_quality = Some(q) });
+                    }
+                });
+            }
+            "png" => {
+                use loom_scene::render::PngType;
+                ui.horizontal(|ui| {
+                    for (t, label) in [(PngType::Rgb24, "RGB 24 bit"), (PngType::Rgb48, "RGB 48 bit"), (PngType::Gray8, "Grayscale 8 bit"), (PngType::Gray16, "Grayscale 16 bit")] {
+                        if ui.radio(f.png_type == t, label).clicked() {
+                            set(app, &|c| if let Command::RenderOutputSetup { png_type, .. } = c { *png_type = Some(t) });
+                        }
+                    }
+                });
+                let mut a = f.png_alpha;
+                if ui.checkbox(&mut a, "Alpha Channel").changed() {
+                    set(app, &|c| if let Command::RenderOutputSetup { png_alpha, .. } = c { *png_alpha = Some(a) });
+                }
+            }
+            "tga" => {
+                ui.horizontal(|ui| {
+                    for b in [24u32, 32] {
+                        if ui.radio(f.tga_bits == b, format!("{b} bits")).clicked() {
+                            set(app, &|c| if let Command::RenderOutputSetup { tga_bits, .. } = c { *tga_bits = Some(b) });
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let (mut z, mut split, mut pre) = (f.tga_compress, f.tga_alpha_split, f.tga_premultiplied);
+                    if ui.checkbox(&mut z, "Compress").changed() {
+                        set(app, &|c| if let Command::RenderOutputSetup { tga_compress, .. } = c { *tga_compress = Some(z) });
+                    }
+                    if ui.checkbox(&mut split, "Alpha Split").changed() {
+                        set(app, &|c| if let Command::RenderOutputSetup { tga_alpha_split, .. } = c { *tga_alpha_split = Some(split) });
+                    }
+                    if ui.checkbox(&mut pre, "Pre-Multiplied Alpha").changed() {
+                        set(app, &|c| if let Command::RenderOutputSetup { tga_premultiplied, .. } = c { *tga_premultiplied = Some(pre) });
+                    }
+                });
+            }
+            "exr" => {
+                ui.horizontal(|ui| {
+                    for (full, label) in [(false, "Half Float (16 bits/Channel)"), (true, "Full Float (32 bits/Channel)")] {
+                        if ui.radio(f.exr_full_float == full, label).clicked() {
+                            set(app, &|c| if let Command::RenderOutputSetup { exr_full_float, .. } = c { *exr_full_float = Some(full) });
+                        }
+                    }
+                });
+                let mut a = f.exr_alpha;
+                if ui.checkbox(&mut a, "RGBA (off: RGB)").changed() {
+                    set(app, &|c| if let Command::RenderOutputSetup { exr_alpha, .. } = c { *exr_alpha = Some(a) });
+                }
+            }
+            _ => {
+                ui.label("No options for this file type.");
+            }
+        }
+        ui.separator();
+        ui.label("Gamma");
+        let g = &s.gamma;
+        let gamma = |enabled, output_gamma, override_gamma, use_system| Command::GammaSettings { enabled, output_gamma, override_gamma, use_system };
+        let mut on = g.enabled;
+        if ui.checkbox(&mut on, "Enable Gamma Correction").changed() {
+            run(app, gamma(Some(on), None, None, None));
+        }
+        ui.add_enabled_ui(g.enabled, |ui| {
+            ui.horizontal(|ui| {
+                if ui.radio(g.override_output.is_none(), format!("Use System Default Gamma ({:.2})", g.output)).clicked() {
+                    run(app, gamma(None, None, None, Some(true)));
+                }
+                if ui.radio(g.override_output.is_some(), "Override").clicked() && g.override_output.is_none() {
+                    run(app, gamma(None, None, Some(g.output), None));
+                }
+                if let Some(v) = g.override_output {
+                    let mut v = v;
+                    let r = ui.add(crate::spinner::spin(ui, &mut v, 0.01..=5.0f32).speed(0.01).max_decimals(2));
+                    merge_drag(app, &r);
+                    if r.changed() {
+                        run(app, gamma(None, None, Some(v), None));
+                    }
+                }
+            });
+        });
+    });
 }
 
 fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -853,6 +981,95 @@ fn text_field(ui: &mut egui::Ui, id: egui::Id, value: &str, width: f32) -> Optio
 
 /// Render Elements panel: Elements Active, Display Elements, Add / Delete,
 /// the list, and the selected element's parameters.
+/// The element's own rollout: Diffuse's Lighting, Lighting's parts, the HDR
+/// elements' Scale Factor, Matte's ID and objects, Blend's parts.
+fn element_options(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, e: &loom_scene::render::RenderElement) {
+    use loom_scene::render::ElementKind as K;
+    let base = Command::RenderElementOptions { index: index as u32, lighting: None, direct: None, indirect: None, shadows: None, scale: None, matte_gbuffer: None, matte_objects: None, matte_exclude: None, blend_parts: None };
+    let set = |app: &mut LoomApp, edit: &dyn Fn(&mut Command)| {
+        let mut c = base.clone();
+        edit(&mut c);
+        run(app, c);
+    };
+    match e.kind {
+        K::Diffuse => {
+            let mut v = e.lighting;
+            if ui.checkbox(&mut v, "Lighting").on_hover_text("Off: the diffuse colour and maps before lighting").changed() {
+                set(app, &|c| if let Command::RenderElementOptions { lighting, .. } = c { *lighting = Some(v) });
+            }
+        }
+        K::Lighting => {
+            ui.horizontal(|ui| {
+                let (mut d, mut i, mut s) = (e.direct, e.indirect, e.shadows);
+                if ui.checkbox(&mut d, "Direct Light On").changed() {
+                    set(app, &|c| if let Command::RenderElementOptions { direct, .. } = c { *direct = Some(d) });
+                }
+                if ui.checkbox(&mut i, "Indirect Light On").changed() {
+                    set(app, &|c| if let Command::RenderElementOptions { indirect, .. } = c { *indirect = Some(i) });
+                }
+                if ui.checkbox(&mut s, "Shadows On").changed() {
+                    set(app, &|c| if let Command::RenderElementOptions { shadows, .. } = c { *shadows = Some(s) });
+                }
+            });
+        }
+        K::IlluminanceHdr | K::LuminanceHdr => {
+            ui.horizontal(|ui| {
+                ui.label("Scale Factor:");
+                let mut v = e.scale;
+                let r = ui.add(crate::spinner::spin(ui, &mut v, 0.0001..=1000.0f32).speed(0.01).max_decimals(4));
+                merge_drag(app, &r);
+                if r.changed() {
+                    set(app, &|c| if let Command::RenderElementOptions { scale, .. } = c { *scale = Some(v) });
+                }
+            });
+        }
+        K::Matte => {
+            ui.horizontal(|ui| {
+                let mut on = e.matte_gbuffer.is_some();
+                let mut id = e.matte_gbuffer.unwrap_or(0) as i32;
+                let a = ui.checkbox(&mut on, "G-Buffer ID").changed();
+                let b = ui.add_enabled(on, egui::DragValue::new(&mut id).range(0..=65535)).changed();
+                if a || b {
+                    let v = if on { id } else { -1 };
+                    set(app, &|c| if let Command::RenderElementOptions { matte_gbuffer, .. } = c { *matte_gbuffer = Some(v) });
+                }
+            });
+            ui.horizontal(|ui| {
+                let sel: Vec<u64> = app.state.selection.iter().map(|n| n.0).collect();
+                if ui.button("Include Selected").on_hover_text("The selected objects render white").clicked() {
+                    set(app, &|c| if let Command::RenderElementOptions { matte_objects, matte_exclude, .. } = c { (*matte_objects, *matte_exclude) = (Some(sel.clone()), Some(false)) });
+                }
+                if ui.button("Exclude Selected").on_hover_text("Everything is white but the selected objects").clicked() {
+                    set(app, &|c| if let Command::RenderElementOptions { matte_objects, matte_exclude, .. } = c { (*matte_objects, *matte_exclude) = (Some(sel.clone()), Some(true)) });
+                }
+                ui.label(format!("{} object(s) {}", e.matte_objects.len(), if e.matte_exclude { "excluded" } else { "included" }));
+            });
+        }
+        K::Blend => {
+            ui.horizontal_wrapped(|ui| {
+                let mut b = e.blend;
+                for name in loom_scene::render::BlendParts::NAMES {
+                    let v = b.get_mut(name).expect("a Blend part");
+                    let mut on = *v;
+                    if ui.checkbox(&mut on, name).changed() {
+                        *v = on;
+                        let mut parts: Vec<String> = Vec::new();
+                        let mut all = b;
+                        for n in loom_scene::render::BlendParts::NAMES {
+                            if *all.get_mut(n).expect("a Blend part") {
+                                parts.push(n.to_owned());
+                            }
+                        }
+                        set(app, &|c| if let Command::RenderElementOptions { blend_parts, .. } = c { *blend_parts = Some(parts.clone()) });
+                        break;
+                    }
+                }
+            });
+        }
+        _ => {}
+    }
+}
+
 fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
     use loom_scene::render::ElementKind;
     let s = app.state.scene.render.clone();
@@ -918,6 +1135,7 @@ fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
                 run(app, element_cmd(sel, |a| a.2 = Some(p)));
             }
         });
+        element_options(ui, app, sel, e);
         if e.kind == ElementKind::ZDepth {
             ui.horizontal(|ui| {
                 ui.label("Z Min:");

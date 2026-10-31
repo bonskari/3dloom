@@ -1947,6 +1947,8 @@ pub struct AppState {
     pub grab_request: Option<usize>,
     /// Panorama Exporter > Viewer.
     pub panorama: crate::render_output::PanoramaViewer,
+    /// The last Make Preview's image file list (View / Rename Animated Sequence File).
+    pub preview_file: Option<String>,
     /// New and reset scenes take the saved startup viewport configuration (the app sets it; tests do not).
     pub use_viewport_defaults: bool,
     pub fps: f32,
@@ -2225,6 +2227,7 @@ impl AppState {
             paths: Default::default(),
             grab_request: None,
             panorama: Default::default(),
+            preview_file: None,
             use_viewport_defaults: false,
             current_frame: 0,
             frame_range: (0, 100),

@@ -88,6 +88,14 @@ pub struct BakeElement {
     pub indirect: bool,
     pub normal_bump: bool,
     pub height_in_alpha: bool,
+    /// Ambient Occlusion: Samples (rays per texel), Spread (0: along the
+    /// normal only, 1: the whole hemisphere), Max Distance (0: the whole
+    /// scene), and the Bright (unoccluded) and Dark (occluded) colours, sRGB 0-1.
+    pub ao_samples: u32,
+    pub ao_spread: f32,
+    pub ao_max_distance: f32,
+    pub ao_bright: [f32; 3],
+    pub ao_dark: [f32; 3],
 }
 
 impl Default for BakeElement {
@@ -114,6 +122,11 @@ impl BakeElement {
             indirect: true,
             normal_bump: false,
             height_in_alpha: false,
+            ao_samples: 16,
+            ao_spread: 0.8,
+            ao_max_distance: 0.0,
+            ao_bright: [1.0; 3],
+            ao_dark: [0.0; 3],
         }
     }
 

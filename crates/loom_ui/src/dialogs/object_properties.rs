@@ -246,7 +246,10 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                 ui.label(egui::RichText::new("G-Buffer").strong());
                 ui.horizontal(|ui| {
                     ui.label("Object ID:");
-                    ui.add_enabled(false, egui::DragValue::new(&mut 0u32)).on_disabled_hover_text("The renderer has no G-buffer channels");
+                    let mut id = node.render.object_channel;
+                    if ui.add(egui::DragValue::new(&mut id).range(0..=65535)).on_hover_text("Object Channel: the Object ID element and the G-buffer tag the object with it").changed() {
+                        let _ = app.dispatch(Command::SetObjectChannel { channel: id });
+                    }
                 });
             });
             ui.group(|ui| {

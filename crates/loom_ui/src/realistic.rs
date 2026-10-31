@@ -67,7 +67,7 @@ const WARMUP: u32 = 3;
 
 /// A render in progress.
 pub struct RenderJob {
-    req: loom_commands::RenderRequest,
+    pub(crate) req: loom_commands::RenderRequest,
     /// What the renderer was given (the Render Elements render with it again).
     options: loom_bevy::RenderOptions,
     camera: loom_bevy::ViewCamera,

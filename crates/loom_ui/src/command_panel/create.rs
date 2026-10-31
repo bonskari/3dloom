@@ -615,10 +615,12 @@ fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         let decimals = app.state.prefs.spinner_precision.max(3);
         egui::Grid::new(("camera_lens", id.0)).num_columns(3).spacing([6.0, 4.0]).show(ui, |ui| {
             ui.label("Lens:");
-            let lens = loom_scene::camera::fov_to_lens(fov);
+            // Measured against Render Setup's Aperture Width: the view stays, the reading follows.
+            let aperture = app.state.scene.render.aperture_width;
+            let lens = loom_commands::render_output::lens_for(fov, aperture);
             let mut v = lens;
             let r = ui.add(crate::spinner::spin(ui, &mut v, 1.0..=100_000.0).speed(app.spinner_speed(0.1)).fixed_decimals(decimals).suffix("mm"));
-            spin(app, id, "Lens", &r, v as f64, lens as f64);
+            spin(app, id, "FOV", &r, loom_commands::render_output::fov_for(v, aperture).clamp(1.0, 175.0) as f64, fov as f64);
             ui.end_row();
             // The FOV spinner shows the FOV measured in the chosen direction.
             ui.label("FOV:");
@@ -641,7 +643,8 @@ fn camera_parameters(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
         egui::Grid::new(("camera_stock", id.0)).num_columns(3).spacing([4.0, 4.0]).show(ui, |ui| {
             for (i, mm) in STOCK_LENSES.iter().enumerate() {
                 if ui.add_sized([52.0, 20.0], egui::Button::new(format!("{mm}mm"))).clicked() {
-                    set(app, "Lens", *mm as f64);
+                    let aperture = app.state.scene.render.aperture_width;
+                    set(app, "FOV", loom_commands::render_output::fov_for(*mm, aperture).clamp(1.0, 175.0) as f64);
                 }
                 if i % 3 == 2 {
                     ui.end_row();

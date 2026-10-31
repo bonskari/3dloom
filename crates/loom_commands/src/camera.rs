@@ -358,7 +358,7 @@ pub enum LineKind {
 /// in the render aspect, the range and clipping rectangles inside it, and
 /// the line to the target.
 pub fn overlay_lines(scene: &loom_scene::Scene, id: NodeId, cone: bool) -> Vec<(Vec3, Vec3, LineKind)> {
-    use loom_scene::camera::{frame_corners, RENDER_ASPECT};
+    use loom_scene::camera::frame_corners;
     let Some(node) = scene.node(id) else { return Vec::new() };
     let ObjectKind::Camera { fov, target, ortho, show_cone, show_ranges, near_range, far_range, clip_manually, near_clip, far_clip, .. } = &node.object else {
         return Vec::new();
@@ -367,7 +367,9 @@ pub fn overlay_lines(scene: &loom_scene::Scene, id: NodeId, cone: bool) -> Vec<(
     let eye = world.w_axis.truncate();
     let distance = target_distance(scene, id).unwrap_or(loom_scene::camera::DEFAULT_TARGET_DISTANCE);
     let ortho = ortho.get().then_some(distance);
-    let at = |d: f32| frame_corners(fov.get(), RENDER_ASPECT, d, ortho).map(|c| world.transform_point3(c));
+    // The cone has the render output's shape (Render Setup's image aspect).
+    let aspect = scene.render.image_aspect().max(0.01);
+    let at = |d: f32| frame_corners(fov.get(), aspect, d, ortho).map(|c| world.transform_point3(c));
     let mut out = Vec::new();
     let rect = |out: &mut Vec<(Vec3, Vec3, LineKind)>, c: [Vec3; 4], kind: LineKind| {
         for i in 0..4 {

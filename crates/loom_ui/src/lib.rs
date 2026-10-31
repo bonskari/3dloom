@@ -18,6 +18,7 @@ pub mod main_toolbar;
 pub mod quad_menu;
 mod realistic;
 pub mod rendered_frame;
+pub mod cli_render;
 pub mod region;
 pub mod time_slider;
 mod menubar;

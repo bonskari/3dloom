@@ -17,6 +17,7 @@ pub enum Utility {
     LinkInheritance,
     ChannelInfo,
     UvwRemove,
+    PanoramaExporter,
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -31,6 +32,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ("Link Inheritance (Selected)", Utility::LinkInheritance),
             ("Channel Info", Utility::ChannelInfo),
             ("UVW Remove", Utility::UvwRemove),
+            ("Panorama Exporter", Utility::PanoramaExporter),
         ] {
             if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.utility == u, label)).clicked() {
                 app.utility = if app.utility == u { Utility::None } else { u };
@@ -40,6 +42,47 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let has = !app.state.selection.is_empty();
     match app.utility {
         Utility::None => {}
+        Utility::PanoramaExporter => rollout(ui, "Panorama Exporter", true, |ui| {
+            let cams: Vec<(u64, String)> = app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).map(|n| (n.id.0, n.name.clone())).collect();
+            let p = &mut app.state.panorama;
+            if p.size == 0 {
+                p.size = 512;
+            }
+            if p.camera.is_none_or(|c| !cams.iter().any(|x| x.0 == c)) {
+                p.camera = cams.first().map(|c| c.0);
+            }
+            ui.horizontal(|ui| {
+                ui.label("Camera:");
+                let cur = p.camera.and_then(|c| cams.iter().find(|x| x.0 == c)).map_or("(no camera)".to_owned(), |x| x.1.clone());
+                egui::ComboBox::from_id_salt("panorama_camera").selected_text(cur).show_ui(ui, |ui| {
+                    for (id, name) in &cams {
+                        if ui.selectable_label(p.camera == Some(*id), name).clicked() {
+                            p.camera = Some(*id);
+                        }
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.label("Face Size:");
+                ui.add(egui::DragValue::new(&mut p.size).range(64..=4096));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Output:");
+                ui.text_edit_singleline(&mut p.output);
+            });
+            let (camera, size, output) = (p.camera, p.size, p.output.clone());
+            ui.horizontal(|ui| {
+                if ui.add_enabled(camera.is_some(), egui::Button::new("Render...")).clicked() {
+                    let r = app.dispatch(Command::PanoramaExport { camera: camera.unwrap_or(0), size: Some(size), output: Some(output) });
+                    if let Err(e) = r {
+                        app.last_error = Some(format!("Panorama Exporter: {e}"));
+                    }
+                }
+                if ui.add_enabled(app.state.panorama.image.is_some(), egui::Button::new("Viewer...")).clicked() {
+                    let _ = app.dispatch(Command::PanoramaViewer { path: None, yaw: None, pitch: None, fov: None });
+                }
+            });
+        }),
         Utility::Measure => rollout(ui, "Measure", true, |ui| {
             let r = measured(app);
             ui.label(r["name"].as_str().unwrap_or("").to_owned());

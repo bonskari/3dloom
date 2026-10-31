@@ -539,9 +539,24 @@ pub fn bake_height(low: &[Triangle], raster: &Raster, proj: Option<&Projection>,
     (img, range)
 }
 
-/// An AmbientOcclusionMap: per covered texel, cosine-weighted hemisphere ray
-/// casting against `occluders` (`0` = fully occluded black, `255` = open sky white).
-pub fn bake_ambient_occlusion(low: &[Triangle], raster: &Raster, proj: Option<&Projection>, occluders: &Bvh, samples: u32, max_dist: f32, bg: [u8; 3]) -> (RgbaImage, Option<(f32, f32)>) {
+/// Ambient Occlusion settings: rays per texel, the cone they spread over
+/// (0: the normal only, 1: the hemisphere), how far occluders count (0:
+/// any distance), and the colours of open and fully occluded texels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AoOptions {
+    pub samples: u32,
+    pub spread: f32,
+    pub max_distance: f32,
+    pub bright: [u8; 3],
+    pub dark: [u8; 3],
+}
+
+/// An AmbientOcclusionMap: per covered texel, cosine-weighted ray casting
+/// over the Spread cone against `occluders`; the texel is Dark where every
+/// ray is blocked, Bright where none is.
+pub fn bake_ambient_occlusion(low: &[Triangle], raster: &Raster, proj: Option<&Projection>, occluders: &Bvh, ao: &AoOptions, bg: [u8; 3]) -> (RgbaImage, Option<(f32, f32)>) {
+    let (samples, spread) = (ao.samples, ao.spread.clamp(0.0, 1.0));
+    let max_dist = if ao.max_distance > 0.0 { ao.max_distance } else { f32::MAX };
     let mut img = RgbaImage::new(raster.width, raster.height);
     background(&mut img, bg);
     let mut range: Option<(f32, f32)> = None;
@@ -566,7 +581,7 @@ pub fn bake_ambient_occlusion(low: &[Triangle], raster: &Raster, proj: Option<&P
             let v = n.cross(u);
             let mut occluded = 0u32;
             for i in 0..n_samples {
-                let r = ((i as f32 + 0.5) / n_samples as f32).sqrt();
+                let r = ((i as f32 + 0.5) / n_samples as f32).sqrt() * spread;
                 let theta = i as f32 * golden;
                 let (dx, dy) = (r * theta.cos(), r * theta.sin());
                 let dz = (1.0 - dx * dx - dy * dy).max(0.0).sqrt();
@@ -575,9 +590,9 @@ pub fn bake_ambient_occlusion(low: &[Triangle], raster: &Raster, proj: Option<&P
                     occluded += 1;
                 }
             }
-            let open = 1.0 - (occluded as f32 / n_samples as f32);
-            let g = (open.clamp(0.0, 1.0) * 255.0).round() as u8;
-            img.put_pixel(x, y, Rgba([g, g, g, 255]));
+            let open = (1.0 - (occluded as f32 / n_samples as f32)).clamp(0.0, 1.0);
+            let c = |k: usize| (ao.dark[k] as f32 + (ao.bright[k] as f32 - ao.dark[k] as f32) * open).round() as u8;
+            img.put_pixel(x, y, Rgba([c(0), c(1), c(2), 255]));
         }
     }
     (img, range)

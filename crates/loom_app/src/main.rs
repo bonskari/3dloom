@@ -14,6 +14,22 @@ fn main() -> eframe::Result<()> {
     // The log file and standard error (RUST_LOG, default warn: wgpu
     // validation errors are otherwise silent).
     logging::init();
+    // Command-line rendering: no window, the files and a non-zero exit on failure.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(parsed) = loom_ui::cli_render::parse(&args) {
+        match parsed.and_then(|a| loom_ui::cli_render::run(&a)) {
+            Ok(files) => {
+                for f in files {
+                    println!("{f}");
+                }
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("loom: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("3dLoom")

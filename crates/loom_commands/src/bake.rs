@@ -224,7 +224,8 @@ fn bake_geometry(e: &BakeElement, low: &[Triangle], high: Option<(&Bvh, f32)>, s
                     &own_bvh
                 }
             };
-            loom_bake::bake_ambient_occlusion(low, &raster, proj.as_ref(), occluders, 16, 100.0, bg)
+            let ao = loom_bake::AoOptions { samples: e.ao_samples.max(1), spread: e.ao_spread, max_distance: e.ao_max_distance, bright: to_u8(e.ao_bright), dark: to_u8(e.ao_dark) };
+            loom_bake::bake_ambient_occlusion(low, &raster, proj.as_ref(), occluders, &ao, bg)
         }
         _ => (loom_bake::bake_alpha(low, &raster, opacity, bg), None),
     };
