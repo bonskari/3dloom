@@ -790,6 +790,7 @@ fn rendering_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Render", Command::Render { path: None, width: None, height: None });
     cmd(ui, app, "Render Setup...", Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
     cmd(ui, app, "Rendered Frame Window...", Command::RenderedFrameWindow);
+    cmd(ui, app, "Render Message Window...", Command::RenderMessageWindow);
     ui.separator();
     cmd(ui, app, "Render To Texture...", Command::RenderToTexture);
     cmd(ui, app, "Environment...", Command::EnvironmentDialogToggle);

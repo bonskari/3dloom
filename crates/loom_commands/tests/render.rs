@@ -356,6 +356,46 @@ fn render_commands_are_named_actions() {
     assert_eq!(s.pending_render.as_ref().map(|r| (r.settings.width, r.settings.height)), Some((64, 48)));
 }
 
+/// Video Color Check flags 100% yellow and blue (past 120 / below -20 IRE)
+/// but not white or 75% bars; Super Black lifts geometry, not the background.
+#[test]
+fn video_color_check_and_super_black_change_the_right_pixels() {
+    use loom_commands::render::{ntsc_unsafe, super_black, video_color_check};
+    assert!(ntsc_unsafe([255, 255, 0]) && ntsc_unsafe([0, 0, 255]));
+    assert!(!ntsc_unsafe([255, 255, 255]) && !ntsc_unsafe([191, 191, 0]) && !ntsc_unsafe([0, 0, 0]));
+    let mut img = image::RgbaImage::from_pixel(2, 1, image::Rgba([255, 255, 0, 255]));
+    img.put_pixel(1, 0, image::Rgba([191, 191, 0, 255]));
+    assert_eq!(video_color_check(&mut img), 1);
+    assert_eq!((img.get_pixel(0, 0).0, img.get_pixel(1, 0).0), ([0, 0, 0, 255], [191, 191, 0, 255]));
+    let mut img = image::RgbaImage::from_pixel(2, 1, image::Rgba([0, 0, 0, 0]));
+    img.put_pixel(1, 0, image::Rgba([3, 40, 0, 255]));
+    super_black(&mut img, 15);
+    assert_eq!((img.get_pixel(0, 0).0, img.get_pixel(1, 0).0), ([0, 0, 0, 0], [15, 40, 15, 255]));
+    let mut s = AppState::new();
+    execute(&mut s, Command::RenderOptions { video_color_check: Some(true), super_black: Some(true), super_black_threshold: Some(20) }).unwrap();
+    assert!(s.scene.render.video_color_check && s.scene.render.super_black);
+    assert_eq!(s.scene.render.super_black_threshold, 20);
+    assert!(execute(&mut s, Command::RenderOptions { video_color_check: None, super_black: None, super_black_threshold: Some(300) }).is_err());
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert!(!s.scene.render.super_black);
+}
+
+/// A sequence without an output file warns in the Render Message Window,
+/// which opens; Clear empties it.
+#[test]
+fn render_message_window_logs_warnings() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::RenderTimeOutput { time_output: Some(loom_scene::render::TimeOutput::Range), range: Some([0, 1]), frames: None, every_nth: None, file_number_base: None, skip_existing: None, image_file_list: None }).unwrap();
+    execute(&mut s, Command::Render { path: None, width: Some(8), height: Some(8) }).unwrap();
+    assert!(s.rendered.messages_open);
+    assert_eq!(s.rendered.messages.len(), 1);
+    assert_eq!(s.rendered.messages[0].level, loom_commands::render::MessageLevel::Warning);
+    execute(&mut s, Command::ClearRenderMessages).unwrap();
+    assert!(s.rendered.messages.is_empty());
+    execute(&mut s, Command::RenderMessageWindow).unwrap();
+    assert!(!s.rendered.messages_open);
+}
+
 fn time_output(s: &mut AppState, t: Option<loom_scene::render::TimeOutput>, range: Option<[i32; 2]>, frames: Option<&str>, base: Option<i32>, skip: Option<bool>, ifl: Option<bool>) -> Result<serde_json::Value, String> {
     execute(s, Command::RenderTimeOutput { time_output: t, range, frames: frames.map(str::to_owned), every_nth: None, file_number_base: base, skip_existing: skip, image_file_list: ifl })
 }

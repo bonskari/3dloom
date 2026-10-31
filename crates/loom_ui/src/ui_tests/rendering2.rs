@@ -88,4 +88,42 @@ fn a_range_renders_an_animation_to_numbered_files() {
     assert_eq!(h.app.state.current_frame, 50, "the time slider is back");
     assert!(h.app.state.rendered.sequence.is_none());
     let _ = std::fs::remove_dir_all(&dir);
+    // Every frame is in the Render Message Window's log.
+    let saved = h.app.state.rendered.messages.iter().filter(|m| m.text.contains("saved to")).count();
+    assert_eq!(saved, 3, "{:?}", h.app.state.rendered.messages);
+}
+
+/// Super Black lifts a black object's pixels to the threshold; the
+/// background stays black. Both checkboxes are clicked in Render Setup.
+#[test]
+fn super_black_lifts_rendered_geometry() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("super_black_lifts_rendered_geometry: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Teapot, position: [0.0; 3], size: [25.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetWireColor { id: id.0, rgb: [0, 0, 0] });
+    framed(&mut h);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 120, "height": 90 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    let darkest = |h: &mut Harness| {
+        h.cmd(Command::Render { path: None, width: None, height: None });
+        finish_render(h, 100);
+        let img = h.app.state.rendered.image.clone().unwrap();
+        let geo: Vec<u8> = img.pixels().filter(|p| p.0[3] == 255).map(|p| p.0[0].min(p.0[1]).min(p.0[2])).collect();
+        assert!(geo.len() > 200, "the teapot is in the frame");
+        (*geo.iter().min().unwrap(), img.get_pixel(0, 0).0)
+    };
+    let (off, _) = darkest(&mut h);
+    assert!(off < 15, "a black teapot has pixels darker than the threshold: {off}");
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Super Black", win, 0.0);
+    assert!(h.app.state.scene.render.super_black);
+    let (on, bg) = darkest(&mut h);
+    assert_eq!(on, 15, "lifted to the threshold");
+    assert_eq!(bg, [0, 0, 0, 0], "the background stays black");
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Video Color Check", win, 0.0);
+    assert!(h.app.state.scene.render.video_color_check);
 }

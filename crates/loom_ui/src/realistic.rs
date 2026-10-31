@@ -259,6 +259,8 @@ impl LoomApp {
         if self.render_job.is_none() {
             if let Some(req) = self.state.pending_render.take() {
                 if let Err(e) = self.start_render(req) {
+                    loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Render: {e}"));
+                    loom_commands::render::end_sequence(&mut self.state);
                     self.last_error = Some(format!("Render: {e}"));
                 }
             }
@@ -607,6 +609,27 @@ impl LoomApp {
                 self.state.rendered.dirty = None;
             }
         }
+        use loom_commands::render::{message, MessageLevel};
+        let s = &job.req.settings;
+        if result.is_ok() && (s.video_color_check || s.super_black) {
+            // Options > Video Color Check and Super Black, on the finished frame.
+            let (check, black, threshold) = (s.video_color_check, s.super_black, s.super_black_threshold);
+            let mut flagged = 0;
+            if let Some(img) = self.state.rendered.image.as_mut() {
+                let img = Arc::make_mut(img);
+                if check {
+                    flagged = loom_commands::render::video_color_check(img);
+                }
+                if black {
+                    loom_commands::render::super_black(img, threshold);
+                }
+                self.state.rendered.version += 1;
+                self.state.rendered.dirty = None;
+            }
+            if flagged > 0 {
+                message(&mut self.state, MessageLevel::Warning, format!("Video Color Check: {flagged} pixel(s) beyond the NTSC limit rendered black"));
+            }
+        }
         self.state.rendered.progress = None;
         self.state.rendered.cancel = false;
         if self.fast_skins() {
@@ -615,18 +638,38 @@ impl LoomApp {
         }
         let secs = job.elapsed().as_secs_f32();
         let ok = result.is_ok();
+        let frame = self.state.current_frame;
         match result {
             Ok(()) => {
                 self.state.status_prompt = format!("Rendered {}x{} in {secs:.1} s", job.out[0], job.out[1]);
+                let mut saved = None;
                 if let (Some(path), Some(img)) = (&job.req.save_path, &self.state.rendered.image) {
                     match loom_commands::render::save_image(img, path) {
-                        Ok(()) => self.state.status_prompt = format!("Rendered {}x{} in {secs:.1} s to {path}", job.out[0], job.out[1]),
-                        Err(e) => self.last_error = Some(format!("Render: {e}")),
+                        Ok(()) => {
+                            self.state.status_prompt = format!("Rendered {}x{} in {secs:.1} s to {path}", job.out[0], job.out[1]);
+                            saved = Some(Ok(path.clone()));
+                        }
+                        Err(e) => saved = Some(Err(e)),
                     }
                 }
+                let text = format!("Frame {frame}: rendered {}x{} in {secs:.1} s", job.out[0], job.out[1]);
+                match saved {
+                    Some(Ok(p)) => message(&mut self.state, MessageLevel::Info, format!("{text}, saved to {p}")),
+                    Some(Err(e)) => {
+                        message(&mut self.state, MessageLevel::Error, format!("{text}, not saved: {e}"));
+                        self.last_error = Some(format!("Render: {e}"));
+                    }
+                    None => message(&mut self.state, MessageLevel::Info, text),
+                }
             }
-            Err(e) if e == "cancelled" => self.state.status_prompt = format!("Render cancelled after {secs:.1} s"),
-            Err(e) => self.last_error = Some(format!("Render: {e}")),
+            Err(e) if e == "cancelled" => {
+                self.state.status_prompt = format!("Render cancelled after {secs:.1} s");
+                message(&mut self.state, MessageLevel::Info, format!("Frame {frame}: render cancelled after {secs:.1} s"));
+            }
+            Err(e) => {
+                message(&mut self.state, MessageLevel::Error, format!("Frame {frame}: {e}"));
+                self.last_error = Some(format!("Render: {e}"));
+            }
         }
         if ok {
             // A Time Output sequence: the next frame (its meshes rebuilt at that frame).

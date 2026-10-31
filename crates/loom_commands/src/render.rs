@@ -114,6 +114,9 @@ pub struct RenderedFrame {
     pub last: Option<RenderRequest>,
     /// Time Output renders more than the current frame: the frames in turn.
     pub sequence: Option<Sequence>,
+    /// Render Message Window: its log and whether it shows.
+    pub messages: Vec<RenderMessage>,
+    pub messages_open: bool,
 }
 
 /// A Production render of a frame sequence (Time Output other than Single).
@@ -148,6 +151,9 @@ pub fn handles(c: &C) -> bool {
             | C::RenderSetup { .. }
             | C::BevyRendererSettings { .. }
             | C::RenderTimeOutput { .. }
+            | C::RenderOptions { .. }
+            | C::RenderMessageWindow
+            | C::ClearRenderMessages
             | C::AreaToRender { .. }
             | C::EditRegion
             | C::RenderViewport { .. }
@@ -328,6 +334,83 @@ pub fn end_sequence(state: &mut AppState) {
     }
 }
 
+/// Video Color Check: whether an sRGB pixel's composite NTSC signal
+/// (luma plus the chroma amplitude, in YIQ) goes past 120 IRE or below -20.
+pub fn ntsc_unsafe(p: [u8; 3]) -> bool {
+    let [r, g, b] = p.map(|c| c as f32 / 255.0);
+    let y = 0.299 * r + 0.587 * g + 0.114 * b;
+    let i = 0.596 * r - 0.274 * g - 0.322 * b;
+    let q = 0.211 * r - 0.523 * g + 0.312 * b;
+    let c = (i * i + q * q).sqrt();
+    y + c > 1.2 || y - c < -0.2
+}
+
+/// Video Color Check (Flag with black): the unsafe pixels turn black.
+/// Returns how many there were.
+pub fn video_color_check(img: &mut image::RgbaImage) -> usize {
+    let mut n = 0;
+    for p in img.pixels_mut() {
+        if p.0[3] > 0 && ntsc_unsafe([p.0[0], p.0[1], p.0[2]]) {
+            p.0[0] = 0;
+            p.0[1] = 0;
+            p.0[2] = 0;
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Super Black: geometry (alpha above 0) is no darker than `threshold` on
+/// any channel; the background (alpha 0) keeps its colour.
+pub fn super_black(img: &mut image::RgbaImage, threshold: u8) {
+    for p in img.pixels_mut() {
+        if p.0[3] > 0 {
+            for c in &mut p.0[..3] {
+                *c = (*c).max(threshold);
+            }
+        }
+    }
+}
+
+/// Render Message Window entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderMessage {
+    pub level: MessageLevel,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum MessageLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+impl MessageLevel {
+    pub fn label(self) -> &'static str {
+        match self {
+            MessageLevel::Info => "INFO",
+            MessageLevel::Warning => "WARNING",
+            MessageLevel::Error => "ERROR",
+        }
+    }
+}
+
+/// Most entries the Render Message Window keeps (the oldest go first).
+pub const MAX_MESSAGES: usize = 1000;
+
+/// Adds an entry to the Render Message Window; a warning or error opens it.
+pub fn message(state: &mut AppState, level: MessageLevel, text: impl Into<String>) {
+    let m = &mut state.rendered.messages;
+    m.push(RenderMessage { level, text: text.into() });
+    if m.len() > MAX_MESSAGES {
+        m.remove(0);
+    }
+    if level != MessageLevel::Info {
+        state.rendered.messages_open = true;
+    }
+}
+
 /// Writes `img` to `path`, the format from its extension.
 pub fn save_image(img: &image::RgbaImage, path: &str) -> Result<(), String> {
     let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
@@ -380,7 +463,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if !iterative && settings.time_output != TimeOutput::Single {
                 let frames = settings.output_frames(state.frame_range, state.current_frame)?;
                 if save_path.is_none() {
-                    state.status_prompt = "Render: no output file is set, the frames are not saved".into();
+                    message(state, MessageLevel::Warning, "Rendering a sequence without an output file: the frames are not saved (Render Output > Files...)");
                 }
                 return start_sequence(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative, preview: false }, frames);
             }
@@ -705,6 +788,29 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Render Setup", s)?;
             let s = &state.scene.render;
             Ok(json!({ "time_output": s.time_output, "range": s.range, "frames": s.frames, "every_nth": s.every_nth, "file_number_base": s.file_number_base, "skip_existing": s.skip_existing, "image_file_list": s.image_file_list }))
+        }
+        C::RenderOptions { video_color_check, super_black, super_black_threshold } => {
+            let mut s = state.scene.render.clone();
+            if let Some(v) = video_color_check {
+                s.video_color_check = v;
+            }
+            if let Some(v) = super_black {
+                s.super_black = v;
+            }
+            if let Some(t) = super_black_threshold {
+                s.super_black_threshold = u8::try_from(t).map_err(|_| format!("super black threshold {t}: 0 to 255"))?;
+            }
+            set_settings(state, "Render Setup", s)?;
+            let s = &state.scene.render;
+            Ok(json!({ "video_color_check": s.video_color_check, "super_black": s.super_black, "super_black_threshold": s.super_black_threshold }))
+        }
+        C::RenderMessageWindow => {
+            state.rendered.messages_open = !state.rendered.messages_open;
+            Ok(json!({ "open": state.rendered.messages_open }))
+        }
+        C::ClearRenderMessages => {
+            state.rendered.messages.clear();
+            Ok(json!({ "cleared": true }))
         }
         C::CancelRender => {
             if state.pending_render.take().is_some() {

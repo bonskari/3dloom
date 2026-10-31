@@ -282,6 +282,17 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
             run(app, Setup { force_two_sided: Some(two), ..Default::default() }.cmd());
         }
     });
+    ui.horizontal(|ui| {
+        let options = |video_color_check, super_black| Command::RenderOptions { video_color_check, super_black, super_black_threshold: None };
+        let mut check = s.video_color_check;
+        if ui.checkbox(&mut check, "Video Color Check").on_hover_text("Pixels beyond the NTSC limit render black").changed() {
+            run(app, options(Some(check), None));
+        }
+        let mut black = s.super_black;
+        if ui.checkbox(&mut black, "Super Black").on_hover_text("Rendered geometry is no darker than the Super Black threshold").changed() {
+            run(app, options(None, Some(black)));
+        }
+    });
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Render Output").strong());
     ui.horizontal(|ui| {

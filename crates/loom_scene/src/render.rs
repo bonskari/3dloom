@@ -423,6 +423,12 @@ pub struct RenderSettings {
     /// Render Output > Put Image File List in Output Path: a sequence also
     /// writes a .ifl next to its frames, listing them.
     pub image_file_list: bool,
+    /// Options > Video Color Check: pixels beyond the NTSC limit render black.
+    pub video_color_check: bool,
+    /// Options > Super Black: rendered geometry is no darker than the
+    /// threshold (0-255; the background stays black for keying).
+    pub super_black: bool,
+    pub super_black_threshold: u8,
     /// Render To Texture.
     pub bake: crate::bake::BakeSettings,
 }
@@ -452,6 +458,9 @@ impl Default for RenderSettings {
             file_number_base: 0,
             skip_existing: false,
             image_file_list: false,
+            video_color_check: false,
+            super_black: false,
+            super_black_threshold: 15,
             bake: crate::bake::BakeSettings::default(),
         }
     }

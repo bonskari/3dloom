@@ -185,6 +185,42 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         }
     }
     clone_windows(ctx, app);
+    if app.state.rendered.messages_open {
+        let mut open = true;
+        message_window(ctx, app, &mut open);
+        if !open {
+            app.state.rendered.messages_open = false;
+        }
+    }
+}
+
+/// Render Message Window: the renders' information, warnings and errors,
+/// with Clear and Copy.
+fn message_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    use loom_commands::render::MessageLevel;
+    let window = egui::Window::new("Render Message Window").resizable(true).default_size(egui::vec2(520.0, 260.0));
+    crate::os_window::OsWindow::new("Render Message Window", "Render Message Window", [520.0, 260.0]).show(ctx, open, window, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Clear").clicked() {
+                let _ = app.dispatch(Command::ClearRenderMessages);
+            }
+            if ui.button("Copy").clicked() {
+                let text: String = app.state.rendered.messages.iter().map(|m| format!("{}: {}\n", m.level.label(), m.text)).collect();
+                ui.ctx().copy_text(text);
+            }
+        });
+        ui.separator();
+        egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false; 2]).show(ui, |ui| {
+            for m in &app.state.rendered.messages {
+                let color = match m.level {
+                    MessageLevel::Info => ui.visuals().text_color(),
+                    MessageLevel::Warning => egui::Color32::from_rgb(200, 150, 0),
+                    MessageLevel::Error => egui::Color32::from_rgb(220, 60, 60),
+                };
+                ui.label(egui::RichText::new(format!("{}: {}", m.level.label(), m.text)).color(color));
+            }
+        });
+    });
 }
 
 fn channel_toggle(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, on: bool, tip: &str, set: fn(bool) -> Command) {
