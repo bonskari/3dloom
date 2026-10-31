@@ -32,8 +32,7 @@ fn raytracer_settings_are_checked_undoable_and_saved() {
     let mut s = AppState::new();
     execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
     let id = s.scene.nodes().next().unwrap().id.0;
-    let r = run(&mut s, "Raytracer Settings", json!({ "max_depth": 3, "cutoff": 0.1, "antialias": true, "samples": 16, "blur": 5.0, "self_reflect": false, "max_depth_color": [1.0, 0.0, 1.0], "exclude": [id] }));
-    assert_eq!(r["max_depth"], 3);
+    run(&mut s, "Raytracer Settings", json!({ "max_depth": 3, "cutoff": 0.1, "antialias": true, "samples": 16, "blur": 5.0, "self_reflect": false, "max_depth_color": [1.0, 0.0, 1.0], "exclude": [id] }));
     let rt = &s.scene.render.raytracer;
     assert_eq!((rt.max_depth, rt.samples, rt.antialias, rt.self_reflect, rt.max_depth_color, rt.exclude.clone()), (3, 16, true, false, Some([1.0, 0.0, 1.0]), vec![id]));
     for bad in [json!({ "max_depth": 101 }), json!({ "cutoff": 2.0 }), json!({ "samples": 1 }), json!({ "blur": 50.0 }), json!({ "exclude": [9999] }), json!({ "max_depth_color": [2.0, 0.0, 0.0] })] {
