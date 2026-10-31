@@ -120,13 +120,13 @@ impl AaFilter {
 /// Exposure Control > the tone mapping curve from scene light to the image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Tonemapper {
-    /// Clamp only.
+    /// Clamp only (the reference's default: no exposure control).
+    #[default]
     None,
     Reinhard,
     /// ACES filmic (fitted).
     Aces,
     /// AgX filmic: soft highlight roll-off.
-    #[default]
     AgX,
     /// Tony McMapface: neutral filmic.
     TonyMcMapface,
@@ -232,17 +232,20 @@ impl Default for BevyRenderSettings {
             passes: 16,
             shadows: true,
             shadow_map_size: 4096,
-            area_shadows: true,
+            // The reference's defaults: shadow maps, black ambient (the
+            // Environment's), no AO, reflections, sky light or exposure
+            // control; each is a Renderer panel option.
+            area_shadows: false,
             background: [0.0; 3],
-            ambient: [1.0; 3],
-            ambient_occlusion: true,
+            ambient: [0.0; 3],
+            ambient_occlusion: false,
             ao_quality: AoQuality::High,
             ao_radius: 10.0,
-            reflections: true,
-            sky_lighting: true,
+            reflections: false,
+            sky_lighting: false,
             sky_intensity: 1.0,
             ground: 0.5,
-            tonemapper: Tonemapper::AgX,
+            tonemapper: Tonemapper::None,
             exposure: 0.0,
             dither: true,
         }
