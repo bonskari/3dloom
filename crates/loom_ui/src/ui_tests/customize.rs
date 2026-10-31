@@ -292,6 +292,8 @@ fn an_action_dropped_into_a_quadrant_shows_in_the_quad_menu_and_a_deleted_entry_
     // The default set's Lower Right quadrant (transform).
     let lr = h.text_rect("Lower Right", win).unwrap();
     h.click(lr.center());
+    // The dialog lays out the quadrant's entries over the next frames.
+    h.frames(2);
     let list = h.text_rect("Clone", customize_ui_rect(&h)).expect("the program's Clone entry is listed");
     // An action at the top of the list, dragged into the entries.
     let win = customize_ui_rect(&h);
