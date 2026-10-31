@@ -503,7 +503,7 @@ pub fn filter_gathered(g: &[Option<(Vec3, Vec3)>], size: [u32; 2], radius: f32) 
     let (w, h) = (size[0] as i64, size[1] as i64);
     per_pixel(size, None, |x, y| {
         let (albedo, _) = g[(y as i64 * w + x as i64) as usize]?;
-        let (mut sum, mut n) = (Vec3::ZERO, 0.0);
+        let (mut sum, mut n) = (Vec3::ZERO, 0.0f32);
         for dy in -r..=r {
             for dx in -r..=r {
                 let (px, py) = (x as i64 + dx, y as i64 + dy);
@@ -608,7 +608,7 @@ pub fn smear_background(img: &image::RgbaImage, vel: &[Option<[f32; 2]>]) -> ima
         let Some(v) = vel[(y * w + x) as usize] else { return own };
         let len = (v[0] * v[0] + v[1] * v[1]).sqrt();
         let taps = (len.ceil() as u32 + 1).clamp(1, 512);
-        let (mut sum, mut n) = (Vec3::ZERO, 0.0);
+        let (mut sum, mut n) = (Vec3::ZERO, 0.0f32);
         for k in 0..taps {
             let f = if taps == 1 { 0.0 } else { k as f32 / (taps - 1) as f32 - 0.5 };
             let (px, py) = ((x as f32 + 0.5 + v[0] * f).floor(), (y as f32 + 0.5 + v[1] * f).floor());
