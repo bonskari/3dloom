@@ -1242,7 +1242,8 @@ impl BevyRenderer {
             return t.clone();
         }
         let img = make();
-        let mut image = Image::new(Extent3d { width: img.width.max(1), height: img.height.max(1), depth_or_array_layers: 1 }, TextureDimension::D2, img.rgba.clone(), format, RenderAssetUsages::RENDER_WORLD);
+        // Kept in the main world too: Filter Maps off changes its sampler for a render.
+        let mut image = Image::new(Extent3d { width: img.width.max(1), height: img.height.max(1), depth_or_array_layers: 1 }, TextureDimension::D2, img.rgba.clone(), format, RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD);
         let mode = |d: bool| if d { ImageAddressMode::ClampToEdge } else { ImageAddressMode::Repeat };
         image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { address_mode_u: mode(decal[0]), address_mode_v: mode(decal[1]), ..ImageSamplerDescriptor::linear() });
         let handle = Some(self.app.world_mut().resource_mut::<Assets<Image>>().add(image));

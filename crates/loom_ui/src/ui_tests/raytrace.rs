@@ -15,7 +15,14 @@ fn render(h: &mut Harness) -> image::RgbaImage {
     h.cmd(Command::Render { path: None, width: None, height: None });
     finish_render(h, 200);
     assert_eq!(h.app.last_error, None, "{:?}", h.app.state.rendered.messages);
-    (*h.app.state.rendered.image.clone().expect("a rendered image")).clone()
+    let img = (*h.app.state.rendered.image.clone().expect("a rendered image")).clone();
+    if let Ok(d) = std::env::var("LOOM_RT_DUMP") {
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let name = std::thread::current().name().unwrap_or("t").replace("::", "_");
+        let _ = img.save(format!("{d}/{name}-{n}.png"));
+    }
+    img
 }
 
 fn selected(h: &Harness) -> loom_scene::NodeId {
