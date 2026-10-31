@@ -395,9 +395,16 @@ fn shadow_colour_density_and_area_size_change_the_shadow() {
     let img = render(&spot);
     let (full, open) = (at(&img, under), at(&img, lit));
     assert!(open[0] > 80 && full[0] < 25, "a black shadow at density 1: under {full:?}, lit {open:?}");
+    // Density 0.5 against the same point unshadowed (the pool is brighter
+    // there than at `lit`, nearer the spot's axis): half the light, linear.
+    spot.shadows = false;
+    let here = at(&render(&spot), under);
+    spot.shadows = true;
     spot.shadow_transmission = Vec3::splat(0.5);
     let half = at(&render(&spot), under);
-    assert!(half[0] as f32 > open[0] as f32 * 0.3 && (half[0] as f32) < open[0] as f32 * 0.85, "density 0.5 lets light in: under {half:?}, lit {open:?}");
+    let lin = |v: u8| (v as f32 / 255.0).powf(2.2);
+    let ratio = lin(half[0]) / lin(here[0]);
+    assert!(ratio > 0.3 && ratio < 0.7, "density 0.5 lets half the light in: under {half:?}, unshadowed there {here:?} ({ratio})");
     spot.shadow_transmission = Vec3::new(0.0, 1.0, 0.0);
     let green = at(&render(&spot), under);
     assert!(green[1] > 60 && green[0] < 25, "a green shadow colour: {green:?}");

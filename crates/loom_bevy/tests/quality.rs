@@ -153,10 +153,12 @@ fn area_shadows_soften_with_the_source_radius() {
     spot.shadows = true;
     spot.map_size = 2048;
     let shot = Shot::new(Vec3::new(40.0, -1.0, 160.0), Vec3::new(40.0, 0.0, 0.0), (256, 256));
-    // The shadow's centre: from the light through the box centre to the floor.
-    let shadow = Vec3::new(-60.0 + 60.0 * 100.0 / 55.0, 0.0, 0.0);
-    // From inside the shadow out across its right edge to the lit floor.
-    let (from, to, lit_at) = (shadow, Vec3::new(70.0, 0.0, 0.0), Vec3::new(70.0, 0.0, 0.0));
+    // box_primitive takes half sizes: the cube is 20 units across, z 30..50.
+    // The shadow's centre: from the light through the box centre (0, 0, 40) to the floor.
+    let shadow = Vec3::new(-60.0 + 60.0 * 100.0 / 60.0, 0.0, 0.0);
+    // From inside the shadow out across its right edge (x 80, from the
+    // box's top corner) to the lit floor.
+    let (from, to, lit_at) = (shadow, Vec3::new(100.0, 0.0, 0.0), Vec3::new(100.0, 0.0, 0.0));
     let mut widths = Vec::new();
     for radius in [0.0, 12.0] {
         spot.source_radius = radius;
