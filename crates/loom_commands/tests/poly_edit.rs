@@ -162,3 +162,26 @@ fn insert_vertex_create_and_turn() {
     execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![diag.0], op: SelectOp::Replace }).unwrap();
     assert!(execute(&mut s, Command::Turn).is_ok() || true, "Turn needs triangles; on quads it errors cleanly");
 }
+
+#[test]
+fn border_level_click_selects_whole_loop_and_shift_extrudes_edges() {
+    let mut s = state();
+    let a = poly_box(&mut s, [0.0; 3]);
+    execute(&mut s, Command::FaceLevel).unwrap();
+    execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::DeleteObjects).unwrap();
+    assert_eq!(faces(&s, a), 5);
+
+    // At Border level, picking a single border edge selects all 4 edges of the open border loop.
+    execute(&mut s, Command::BorderLevel).unwrap();
+    let mesh = s.scene.node(a).unwrap().object.mesh().into_owned();
+    let one_border = loom_mesh::select_ops::border_edges(&mesh)[0];
+    execute(&mut s, Command::SelectSub { node: Some(a.0), ids: vec![one_border.0], op: SelectOp::Replace }).unwrap();
+    assert_eq!(s.sub_selection.len(), 4, "Border level click selects the whole open border loop");
+
+    // Shift+Move on the selected border extrudes 4 new quad faces and selects the 4 new outer edges.
+    execute(&mut s, Command::ShiftExtrudeEdges).unwrap();
+    assert_eq!(faces(&s, a), 9, "Shift extruding a 4-edge border loop adds 4 quad faces");
+    assert_eq!(s.sub_selection.len(), 4, "newly extruded outer border edges are selected");
+}
+

@@ -1073,8 +1073,14 @@ fn bevel_mode_drag_and_ctrl_alt_sub_clicks() {
     h.key(egui::Key::B);
     h.mods = egui::Modifiers::NONE;
     assert_eq!(h.app.state.poly_drag, Some(loom_commands::PolyDrag::Bevel), "Shift+Ctrl+B");
-    h.drag(p, p + egui::vec2(-10.0, -40.0));
-    assert_eq!(face_count(&h, id), before + 4, "one bevel");
+    let p2 = p + egui::vec2(-10.0, -40.0);
+    h.drag(p, p2);
+    assert_eq!(face_count(&h, id), before + 4, "stage 1 bevel height");
+    // Stage 2: moving the pointer adjusts outline, and clicking finishes the bevel.
+    let p3 = p2 + egui::vec2(0.0, -15.0);
+    h.click(p3);
+    assert!(!h.app.poly_dragging, "stage 2 click finishes bevel");
+    assert!(h.app.state.poly_settings.bevel_outline.abs() > 0.0, "stage 2 sets bevel outline");
     h.cmd(Command::UndoSceneOperation);
     h.app.state.poly_drag = None;
     // Ctrl+click adds a polygon, Alt+click removes it (still at polygon level;

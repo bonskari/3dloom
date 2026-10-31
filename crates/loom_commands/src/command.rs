@@ -1130,6 +1130,7 @@ commands! {
     BridgeSettings => "Bridge Settings", EditablePoly, "Open the Bridge settings window.";
     ExtrudeMode => "Extrude Mode", EditablePoly, "Toggle Extrude drag mode: drag the selection to set the extrusion height (Shift+E).";
     ExtrudeSettings => "Extrude Settings", EditablePoly, "Open the Extrude settings window.";
+    ShiftExtrudeEdges => "Shift Extrude Edges", EditablePoly, "Extrude the selected edges or borders into new polygons and select the newly created outer edges for a Shift+Move drag.";
     Turn => "Turn", EditablePoly, "Turn the selected edges between triangles (flip the diagonal).";
     EditTriangulationMode => "Edit Triangulation Mode", EditablePoly, "Toggle Edit Triangulation: pick two vertices of a polygon to add the diagonal.";
     Retriangulate => "Retriangulate", EditablePoly, "Recompute the triangulation of the selected polygons (Loom triangulates on display; no stored diagonals to reset).";

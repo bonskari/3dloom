@@ -578,7 +578,11 @@ pub fn extrude_vertices(mesh: &mut Mesh, verts: &[VertexId], height: f32, width:
 pub fn extrude_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], height: f32, width: f32) -> Result<Vec<FaceId>, String> {
     let selected: BTreeSet<HalfEdgeId> = edges.iter().filter_map(|e| canonical(mesh, *e)).filter(|e| !is_border_edge(mesh, *e)).collect();
     if selected.is_empty() {
-        return Err("select edges with a face on both sides".into());
+        let borders: BTreeSet<HalfEdgeId> = edges.iter().filter_map(|e| canonical(mesh, *e)).filter(|e| is_border_edge(mesh, *e)).collect();
+        if borders.is_empty() {
+            return Err("select edges to extrude".into());
+        }
+        return extrude_border_edges(mesh, &borders, height, width).map(|(faces, _)| faces);
     }
     let CutPlan { mut im, own, kept, corners, .. } = cut_plan(mesh, &selected, width.max(1e-4));
     let first_new = im.faces.len();
@@ -626,6 +630,120 @@ pub fn extrude_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], height: f32, width: 
     let new_faces: Vec<FaceId> = (first_new..im.faces.len()).map(|i| FaceId(i as u32)).collect();
     *mesh = im.build().map_err(|e| format!("Extrude: {e}"))?;
     Ok(new_faces)
+}
+
+fn extrude_border_edges(mesh: &mut Mesh, borders: &BTreeSet<HalfEdgeId>, height: f32, width: f32) -> Result<(Vec<FaceId>, Vec<HalfEdgeId>), String> {
+    let hes = mesh.half_edges();
+    let mut im = IndexedMesh::from_mesh(mesh);
+    let mut b_hes = Vec::new();
+    let mut normals: BTreeMap<u32, Vec3> = BTreeMap::new();
+    let mut out_dirs: BTreeMap<u32, Vec3> = BTreeMap::new();
+    for &e in borders {
+        let b_he = if hes[e.0 as usize].face.is_none() { e } else { hes[e.0 as usize].twin };
+        let t_he = hes[b_he.0 as usize].twin;
+        let Some(f) = hes[t_he.0 as usize].face else { continue };
+        let u = hes[b_he.0 as usize].origin;
+        let v = hes[t_he.0 as usize].origin;
+        let n = mesh.face_normal(f);
+        let pu = mesh.vertex_position(u).unwrap_or_default();
+        let pv = mesh.vertex_position(v).unwrap_or_default();
+        let out = (pv - pu).cross(n).normalize_or_zero();
+        *normals.entry(u.0).or_insert(Vec3::ZERO) += n;
+        *normals.entry(v.0).or_insert(Vec3::ZERO) += n;
+        *out_dirs.entry(u.0).or_insert(Vec3::ZERO) += out;
+        *out_dirs.entry(v.0).or_insert(Vec3::ZERO) += out;
+        b_hes.push((b_he, u.0, v.0, f));
+    }
+    if b_hes.is_empty() {
+        return Err("select border edges to extrude".into());
+    }
+    let mut dup: BTreeMap<u32, u32> = BTreeMap::new();
+    for (&v, n) in &normals {
+        let p = mesh.vertex_position(VertexId(v)).unwrap_or_default();
+        let out = out_dirs.get(&v).copied().unwrap_or(Vec3::ZERO).normalize_or_zero();
+        let offset = n.normalize_or_zero() * height + out * width;
+        dup.insert(v, im.add_vertex(p + offset, Some(v)));
+    }
+    let first_new = im.faces.len();
+    let mut new_pairs = Vec::new();
+    for (_, u, v, f) in b_hes {
+        let (du, dv) = (dup[&u], dup[&v]);
+        let src = IndexedFace::like(&im.faces[f.0 as usize], vec![]);
+        im.faces.push(IndexedFace::like(&src, vec![u, v, dv, du]));
+        new_pairs.push((du, dv));
+    }
+    let new_faces: Vec<FaceId> = (first_new..im.faces.len()).map(|i| FaceId(i as u32)).collect();
+    *mesh = im.build().map_err(|e| format!("Extrude: {e}"))?;
+    let mut new_edges = Vec::new();
+    for (du, dv) in new_pairs {
+        if let Some(e) = edge_between(mesh, VertexId(du), VertexId(dv)).or_else(|| edge_between(mesh, VertexId(dv), VertexId(du))) {
+            if let Some(c) = canonical(mesh, e) {
+                new_edges.push(c);
+            }
+        }
+    }
+    Ok((new_faces, new_edges))
+}
+
+/// Shift+Move on selected edges/borders: creates new quad faces along the
+/// selected edges and returns the newly created outer edges so the transform
+/// drag moves them.
+pub fn shift_extrude_edges(mesh: &mut Mesh, edges: &[HalfEdgeId]) -> Result<Vec<HalfEdgeId>, String> {
+    let borders: BTreeSet<HalfEdgeId> = edges.iter().filter_map(|e| canonical(mesh, *e)).filter(|e| is_border_edge(mesh, *e)).collect();
+    if !borders.is_empty() {
+        return extrude_border_edges(mesh, &borders, 0.0, 0.0).map(|(_, new_edges)| new_edges);
+    }
+    let selected: BTreeSet<HalfEdgeId> = edges.iter().filter_map(|e| canonical(mesh, *e)).filter(|e| !is_border_edge(mesh, *e)).collect();
+    if selected.is_empty() {
+        return Err("select edges to extrude".into());
+    }
+    let CutPlan { mut im, own, kept, corners, .. } = cut_plan(mesh, &selected, 1e-4);
+    let mut ridge: BTreeMap<u32, u32> = BTreeMap::new();
+    for e in &selected {
+        let Some((a, b)) = mesh.edge_vertices(*e) else { continue };
+        for v in [a.0, b.0] {
+            ridge.entry(v).or_insert_with(|| {
+                let p = mesh.vertex_position(VertexId(v)).unwrap_or_default();
+                im.add_vertex(p, Some(v))
+            });
+        }
+    }
+    let mut ridge_pairs = Vec::new();
+    for e in &selected {
+        let Some((a, b)) = mesh.edge_vertices(*e) else { continue };
+        let he = &mesh.half_edges()[e.0 as usize];
+        let (Some(f1), Some(f2)) = (he.face, mesh.half_edges()[he.twin.0 as usize].face) else { continue };
+        let (Some(a1), Some(b1), Some(a2), Some(b2)) = (own.get(&(a.0, f1.0)).copied(), own.get(&(b.0, f1.0)).copied(), own.get(&(a.0, f2.0)).copied(), own.get(&(b.0, f2.0)).copied()) else { continue };
+        let (ra, rb) = (ridge[&a.0], ridge[&b.0]);
+        let src = IndexedFace::like(&im.faces[f1.0 as usize], vec![]);
+        im.faces.push(IndexedFace::like(&src, vec![b1, a1, ra, rb]));
+        im.faces.push(IndexedFace::like(&src, vec![a2, b2, rb, ra]));
+        ridge_pairs.push((ra, rb));
+    }
+    for (v, (c_l, c_r)) in &kept {
+        let r = ridge[v];
+        let src = IndexedFace::like(&im.faces[0], vec![]);
+        im.faces.push(IndexedFace::like(&src, vec![*c_l, *v, r]));
+        im.faces.push(IndexedFace::like(&src, vec![*v, *c_r, r]));
+    }
+    for (v, (_, copies)) in &corners {
+        let r = ridge[v];
+        let src = IndexedFace::like(&im.faces[0], vec![]);
+        let ids: Vec<u32> = copies.iter().rev().copied().collect();
+        for i in 0..ids.len() {
+            im.faces.push(IndexedFace::like(&src, vec![ids[i], ids[(i + 1) % ids.len()], r]));
+        }
+    }
+    *mesh = im.build().map_err(|e| format!("Shift Extrude: {e}"))?;
+    let mut new_edges = Vec::new();
+    for (ra, rb) in ridge_pairs {
+        if let Some(e) = edge_between(mesh, VertexId(ra), VertexId(rb)).or_else(|| edge_between(mesh, VertexId(rb), VertexId(ra))) {
+            if let Some(c) = canonical(mesh, e) {
+                new_edges.push(c);
+            }
+        }
+    }
+    Ok(new_edges)
 }
 
 /// Weld: selected vertices closer than `threshold` merge at their average.
@@ -689,6 +807,45 @@ pub fn weld_pair(mesh: &mut Mesh, from: VertexId, to: VertexId) -> Result<(), St
     im.drop_degenerate();
     *mesh = im.build().map_err(|_| "Target Weld would make the mesh non-manifold".to_string())?;
     Ok(())
+}
+
+/// Target Weld (edges): `from` border edge moves onto `to` border edge and their end vertices merge.
+pub fn weld_edge_pair(mesh: &mut Mesh, from: HalfEdgeId, to: HalfEdgeId) -> Result<(), String> {
+    let (Some(e1), Some(e2)) = (canonical(mesh, from), canonical(mesh, to)) else {
+        return Err("invalid edge".into());
+    };
+    if e1 == e2 {
+        return Ok(());
+    }
+    let (Some((a1, b1)), Some((a2, b2))) = (mesh.edge_vertices(e1), mesh.edge_vertices(e2)) else {
+        return Err("invalid edge".into());
+    };
+    let (pa1, pb1) = (mesh.vertex_position(a1).unwrap_or_default(), mesh.vertex_position(b1).unwrap_or_default());
+    let (pa2, pb2) = (mesh.vertex_position(a2).unwrap_or_default(), mesh.vertex_position(b2).unwrap_or_default());
+    let d_straight = pa1.distance(pa2) + pb1.distance(pb2);
+    let d_crossed = pa1.distance(pb2) + pb1.distance(pa2);
+    let pairs = if d_straight <= d_crossed {
+        [((a1.0, a2.0), (b1.0, b2.0)), ((a1.0, b2.0), (b1.0, a2.0))]
+    } else {
+        [((a1.0, b2.0), (b1.0, a2.0)), ((a1.0, a2.0), (b1.0, b2.0))]
+    };
+    for ((x1, y1), (x2, y2)) in pairs {
+        let mut im = IndexedMesh::from_mesh(mesh);
+        if x1 != y1 {
+            im.remap(x1, y1);
+        }
+        let x2_mapped = if x2 == x1 { y1 } else { x2 };
+        let y2_mapped = if y2 == x1 { y1 } else { y2 };
+        if x2_mapped != y2_mapped {
+            im.remap(x2_mapped, y2_mapped);
+        }
+        im.drop_degenerate();
+        if let Ok(built) = im.build() {
+            *mesh = built;
+            return Ok(());
+        }
+    }
+    Err("Target Weld would make the mesh non-manifold".into())
 }
 
 /// Collapse: every connected cluster of selected vertices becomes one vertex

@@ -1897,7 +1897,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         | C::SoftSelectionSettings { .. } | C::PaintSoftSelectionBlur | C::SoftSelectionRevert | C::PaintSoftSelectionStroke { .. }
         | C::Connect | C::Remove | C::Break | C::SplitEdges | C::TargetWeldMode | C::WeldSettings | C::ChamferMode | C::ChamferSettings
         | C::ConnectEdgeSettings | C::RemoveIsolatedVertices | C::RemoveUnusedMapVertices | C::InsertVertexMode | C::Cap | C::BridgeSettings
-        | C::ExtrudeMode | C::ExtrudeSettings | C::Turn | C::EditTriangulationMode | C::Retriangulate | C::Create | C::RepeatLastOperation
+        | C::ExtrudeMode | C::ExtrudeSettings | C::ShiftExtrudeEdges | C::Turn | C::EditTriangulationMode | C::Retriangulate | C::Create | C::RepeatLastOperation
         | C::Weld { .. } | C::Chamfer { .. } | C::ConnectEdges { .. } | C::ConnectVertices | C::Bridge { .. } | C::Extrude { .. }
         | C::PickSub { .. } | C::InsertVertexOnEdge { .. } | C::InsertVertexInFace { .. } | C::CreateVertex { .. }
         | C::InsetMode | C::InsetSettings | C::BevelMode | C::BevelSettings | C::OutlineMode | C::OutlineSettings | C::HingeFromEdgeMode | C::HingeFromEdgeSettings
@@ -3184,10 +3184,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     SelectionMode::Element => element_of(&mesh, FaceId(raw)).into_iter().map(SubObjectId::Face).collect(),
                     // Loop Mode: an edge brings its whole loop (Alt takes the loop away).
                     SelectionMode::Edge if loop_mode => loom_mesh::select_ops::edge_loop(&mesh, &[HalfEdgeId(raw)]).into_iter().map(SubObjectId::Edge).collect(),
-                    SelectionMode::Border => match mesh.canonical_edge_id(HalfEdgeId(raw)) {
-                        Some(e) if is_border_edge(&mesh, e) => vec![SubObjectId::Edge(e)],
-                        _ => vec![],
-                    },
+                    SelectionMode::Border => loom_mesh::select_ops::border_edge_loop(&mesh, HalfEdgeId(raw)).into_iter().map(SubObjectId::Edge).collect(),
                     // An edge is one id whichever half was given.
                     SelectionMode::Edge => mesh.canonical_edge_id(HalfEdgeId(raw)).map(SubObjectId::Edge).into_iter().collect(),
                     _ => vec![sub_id(mode, raw)],
@@ -5035,10 +5032,7 @@ pub fn set_sub_selection(state: &mut AppState, mode: SelectionMode, per_node: Ve
         for raw in ids {
             let expanded: Vec<SubObjectId> = match mode {
                 SelectionMode::Element => element_of(&mesh, FaceId(raw)).into_iter().map(SubObjectId::Face).collect(),
-                SelectionMode::Border => match mesh.canonical_edge_id(HalfEdgeId(raw)) {
-                    Some(e) if is_border_edge(&mesh, e) => vec![SubObjectId::Edge(e)],
-                    _ => vec![],
-                },
+                SelectionMode::Border => loom_mesh::select_ops::border_edge_loop(&mesh, HalfEdgeId(raw)).into_iter().map(SubObjectId::Edge).collect(),
                 _ => vec![sub_id(mode, raw)],
             };
             for id in expanded {

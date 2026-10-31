@@ -23,6 +23,12 @@ pub fn is_poly_pick(mode: Option<PickMode>) -> bool {
 pub fn click(app: &mut LoomApp, index: usize, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) {
     let view_proj = proj * view;
     match app.state.pick_mode {
+        Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget) if matches!(app.state.selection_mode, SelectionMode::Edge | SelectionMode::Border) => {
+            if let Some(Pick::SubObject { mesh, id: SubObjectId::Edge(e) }) = pick_edge(app, p, rect, view_proj) {
+                let node = app.world_meshes()[mesh].0;
+                let _ = app.dispatch(Command::PickSub { node: node.0, id: e.0 });
+            }
+        }
         Some(PickMode::TargetWeldSource | PickMode::TargetWeldTarget | PickMode::EditTriangulationA | PickMode::EditTriangulationB | PickMode::CreatePolygon) => {
             if let Some(Pick::SubObject { mesh, id: SubObjectId::Vertex(v) }) = pick_vertex(app, p, rect, view_proj) {
                 let node = app.world_meshes()[mesh].0;
@@ -124,18 +130,31 @@ struct DragState {
     start: egui::Pos2,
     upp: f32,
     sel: usize,
+    /// Two-stage Bevel: `Some((height, release_pos))` during the outline stage.
+    bevel_stage2: Option<(f32, egui::Pos2)>,
 }
 
-/// Extrude / Chamfer mode drags: press on the viewport with a sub-object
-/// selection, drag to set the value, release to keep it. Returns true while
-/// the mode owns the pointer.
+/// Extrude / Chamfer / Bevel mode drags: press on the viewport with a sub-object
+/// selection, drag to set the value, release to keep it (Bevel enters a second
+/// pointer-move stage for Outline and finishes on the next click). Returns true
+/// while the mode owns the pointer.
 pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState, hovered: bool, p: egui::Pos2, projection: &Projection) -> bool {
-    let Some(mode) = app.state.poly_drag else { return false };
+    let id = egui::Id::new("poly_drag_state");
+    let sel_id = id.with("selection");
+    let Some(mode) = app.state.poly_drag else {
+        if ctx.data(|d| d.get_temp::<DragState>(id)).is_some() {
+            app.preview_keep();
+            app.poly_dragging = false;
+            ctx.data_mut(|d| {
+                d.remove::<DragState>(id);
+                d.remove::<Vec<(u64, SubObjectId)>>(sel_id);
+            });
+        }
+        return false;
+    };
     if app.state.selection_mode == SelectionMode::Object {
         return false;
     }
-    let id = egui::Id::new("poly_drag_state");
-    let sel_id = id.with("selection");
     let kind = match mode {
         PolyDrag::Extrude => PolySettingsKind::Extrude,
         PolyDrag::Chamfer => PolySettingsKind::Chamfer,
@@ -145,10 +164,10 @@ pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState
         PolyDrag::Hinge => PolySettingsKind::Hinge,
     };
     // Hinge From Edge: without a hinge the first click picks the edge.
-    if pointer.button_released(egui::PointerButton::Primary) {
-        app.poly_dragging = false;
-    }
     if mode == PolyDrag::Hinge && app.state.poly_settings.hinge_edge.is_none() {
+        if pointer.button_released(egui::PointerButton::Primary) {
+            app.poly_dragging = false;
+        }
         if pointer.button_pressed(egui::PointerButton::Primary) && hovered {
             app.poly_dragging = true;
             if let Some(Pick::SubObject { mesh, id: SubObjectId::Edge(e) }) = pick_edge(app, p, projection.rect, projection.proj * projection.view) {
@@ -164,13 +183,13 @@ pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState
         app.poly_dragging = true;
         let centre = selection_centre(app);
         let sel: Vec<(u64, SubObjectId)> = app.state.sub_selection.iter().map(|(n, s)| (n.0, s)).collect();
-        st = Some(DragState { start: p, upp: projection.units_per_pixel(centre).max(1e-6), sel: sel.len() });
+        st = Some(DragState { start: p, upp: projection.units_per_pixel(centre).max(1e-6), sel: sel.len(), bevel_stage2: None });
         ctx.data_mut(|d| {
             d.insert_temp(id, st.unwrap());
             d.insert_temp(sel_id, sel);
         });
     }
-    let Some(s) = st else { return false };
+    let Some(mut s) = st else { return false };
     let sel: Vec<(u64, SubObjectId)> = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_default();
     let delta = s.start - p;
     let ps = app.state.poly_settings;
@@ -179,8 +198,11 @@ pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState
         PolyDrag::Extrude => Command::Extrude { height: delta.y * s.upp, width: ps.extrude_width, kind: ps.extrude_kind },
         PolyDrag::Chamfer => Command::Chamfer { amount: delta.length() * s.upp, segments: ps.chamfer_segments, open: ps.chamfer_open },
         PolyDrag::Inset => Command::Inset { amount: delta.length() * s.upp, by_polygon: ps.inset_by_polygon },
-        // Bevel: up/down = height, sideways = outline (a two-stage drag folded into one).
-        PolyDrag::Bevel => Command::Bevel { height: delta.y * s.upp, outline: -delta.x * s.upp, kind: ps.bevel_kind },
+        // Bevel: stage 1 drag sets height; stage 2 pointer motion sets outline.
+        PolyDrag::Bevel => match s.bevel_stage2 {
+            None => Command::Bevel { height: delta.y * s.upp, outline: 0.0, kind: ps.bevel_kind },
+            Some((h, p2)) => Command::Bevel { height: h, outline: (p2.y - p.y) * s.upp, kind: ps.bevel_kind },
+        },
         PolyDrag::Outline => Command::Outline { amount: delta.y * s.upp },
         // Half a degree per pixel.
         PolyDrag::Hinge => Command::HingeFromEdge { angle: delta.y * 0.5, segments: ps.hinge_segments, edge: None },
@@ -196,8 +218,23 @@ pub fn drag(app: &mut LoomApp, ctx: &egui::Context, pointer: &egui::PointerState
         });
         ctx.request_repaint();
     }
-    if pointer.button_released(egui::PointerButton::Primary) || !pointer.button_down(egui::PointerButton::Primary) {
+    if mode == PolyDrag::Bevel {
+        if s.bevel_stage2.is_none() {
+            if pointer.button_released(egui::PointerButton::Primary) || !pointer.button_down(egui::PointerButton::Primary) {
+                s.bevel_stage2 = Some((delta.y * s.upp, p));
+                ctx.data_mut(|d| d.insert_temp(id, s));
+            }
+        } else if pointer.button_pressed(egui::PointerButton::Primary) || pointer.button_released(egui::PointerButton::Primary) {
+            app.preview_keep();
+            app.poly_dragging = false;
+            ctx.data_mut(|d| {
+                d.remove::<DragState>(id);
+                d.remove::<Vec<(u64, SubObjectId)>>(sel_id);
+            });
+        }
+    } else if pointer.button_released(egui::PointerButton::Primary) || !pointer.button_down(egui::PointerButton::Primary) {
         app.preview_keep();
+        app.poly_dragging = false;
         ctx.data_mut(|d| {
             d.remove::<DragState>(id);
             d.remove::<Vec<(u64, SubObjectId)>>(sel_id);
@@ -322,6 +359,13 @@ fn selection_centre(app: &LoomApp) -> Vec3 {
 fn vertex_screen(app: &LoomApp, projection: &Projection, node: NodeId, v: u32) -> Option<egui::Pos2> {
     let (_, mesh) = app.world_meshes().iter().find(|(id, _)| *id == node)?;
     projection.screen(mesh.vertex_position(loom_mesh::VertexId(v))?)
+}
+
+fn edge_screen(app: &LoomApp, projection: &Projection, node: NodeId, e: u32) -> Option<egui::Pos2> {
+    let (_, mesh) = app.world_meshes().iter().find(|(id, _)| *id == node)?;
+    let (a, b) = mesh.edge_vertices(loom_mesh::HalfEdgeId(e))?;
+    let mid = (mesh.vertex_position(a)? + mesh.vertex_position(b)?) * 0.5;
+    projection.screen(mid)
 }
 
 /// Rubber bands: Target Weld / Edit Tri from the first pick to the pointer,
@@ -526,8 +570,13 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, projection: &Projection, hov
         }
         Some(PickMode::TargetWeldTarget | PickMode::EditTriangulationB) => {
             if let (Some((node, v)), Some(h)) = (app.state.pick_source, hover) {
-                if let Some(sp) = vertex_screen(app, projection, node, v) {
-                    painter.line_segment([sp, h], stroke);
+                let sp = if app.state.pick_mode == Some(PickMode::TargetWeldTarget) && matches!(app.state.selection_mode, SelectionMode::Edge | SelectionMode::Border) {
+                    edge_screen(app, projection, node, v)
+                } else {
+                    vertex_screen(app, projection, node, v)
+                };
+                if let Some(sp) = sp {
+                    painter.add(egui::Shape::dashed_line(&[sp, h], stroke, 4.0, 4.0));
                     painter.circle_stroke(sp, 4.0, stroke);
                 }
             }

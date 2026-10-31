@@ -585,13 +585,17 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     {
                         let layout = gizmo::layout_for(app, index, rect.height());
                         if let Some(handle) = gizmo::hit(app, &layout, &projection, p) {
+                            let object_level = app.state.selection_mode == SelectionMode::Object;
+                            let edge_shift = mods.shift && matches!(app.state.selection_mode, SelectionMode::Edge | SelectionMode::Border) && !app.state.spline_selected();
                             let mut drag = DragState::new(handle, p);
-                            drag.shift = mods.shift;
+                            drag.shift = mods.shift && object_level;
                             app.begin_transform_drag(drag);
-                            if mods.shift {
+                            if drag.shift {
                                 app.shift_sources = app.state.selection.iter().copied().collect();
                                 // Shift+drag: the original stays, a Copy follows the pointer.
                                 let _ = app.dispatch(Command::CloneOptions { kind: loom_commands::CloneKind::Copy, copies: 1, name: None, offset: None, rotate_deg: None, scale: None });
+                            } else if edge_shift {
+                                let _ = app.dispatch(Command::ShiftExtrudeEdges);
                             }
                             set_constraint_from_handle(app, handle);
                         }
@@ -616,10 +620,11 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         && !loom_commands::skin::picks_vertices(&app.state)
                     {
                         let object_level = app.state.selection_mode == SelectionMode::Object;
-                        // Sub-objects (not splines, whose knots have their own drags; no Shift clone).
+                        let edge_shift = mods.shift && matches!(app.state.selection_mode, SelectionMode::Edge | SelectionMode::Border) && !app.state.spline_selected();
+                        // Sub-objects (not splines, whose knots have their own drags; Shift extrudes edges/borders).
                         let pick = if object_level {
                             pick_object(app, p, rect, view, proj)
-                        } else if !mods.shift && !app.state.spline_selected() {
+                        } else if (!mods.shift || edge_shift) && !app.state.spline_selected() {
                             pick_at(app, p, rect, view, proj, view_proj).filter(|k| matches!(k, Pick::SubObject { .. }))
                         } else {
                             None
@@ -630,15 +635,21 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                 Pick::SubObject { mesh, id } => app.state.sub_selection.contains(app.world_meshes()[mesh].0, id),
                             };
                             if !selected {
-                                apply_picks(app, vec![pick], mods);
+                                let mut pick_mods = mods;
+                                if edge_shift {
+                                    pick_mods.shift = false;
+                                }
+                                apply_picks(app, vec![pick], pick_mods);
                             }
                             if app.has_selection() && (object_level || !app.state.sub_selection.is_empty()) {
                                 let mut drag = DragState::new(body_drag_handle(app.state.active_tool, app.state.axis_constraint), p);
-                                drag.shift = mods.shift;
+                                drag.shift = mods.shift && object_level;
                                 app.begin_transform_drag(drag);
-                                if mods.shift {
+                                if drag.shift {
                                     app.shift_sources = app.state.selection.iter().copied().collect();
                                     let _ = app.dispatch(Command::CloneOptions { kind: loom_commands::CloneKind::Copy, copies: 1, name: None, offset: None, rotate_deg: None, scale: None });
+                                } else if edge_shift {
+                                    let _ = app.dispatch(Command::ShiftExtrudeEdges);
                                 }
                             }
                         }
@@ -2255,7 +2266,10 @@ pub(crate) fn pick_edge(
         }
         for (he_i, _) in mesh.half_edges().iter().enumerate() {
             let he_id = HalfEdgeId(he_i as u32);
-            if mesh.canonical_edge_id(he_id) != Some(he_id) || !sub_pickable(app, mesh, SubObjectId::Edge(he_id), view_dir) {
+            if mesh.canonical_edge_id(he_id) != Some(he_id)
+                || !sub_pickable(app, mesh, SubObjectId::Edge(he_id), view_dir)
+                || (app.state.selection_mode == SelectionMode::Border && app.state.pick_mode.is_none() && !loom_mesh::select_ops::is_border_edge(mesh, he_id))
+            {
                 continue;
             }
             let Some((a_id, b_id)) = mesh.edge_vertices(he_id) else {

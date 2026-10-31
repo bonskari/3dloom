@@ -83,6 +83,30 @@ pub fn border_edges(mesh: &Mesh) -> Vec<HalfEdgeId> {
         .collect()
 }
 
+/// All canonical border edges in the connected open border loop containing `edge`.
+pub fn border_edge_loop(mesh: &Mesh, edge: HalfEdgeId) -> Vec<HalfEdgeId> {
+    let hes = mesh.half_edges();
+    let Some(e) = canonical(mesh, edge) else { return Vec::new() };
+    let start = if hes[e.0 as usize].face.is_none() { e } else { hes[e.0 as usize].twin };
+    if hes[start.0 as usize].face.is_some() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut cur = start;
+    for _ in 0..hes.len() {
+        if let Some(c) = canonical(mesh, cur) {
+            if !out.contains(&c) {
+                out.push(c);
+            }
+        }
+        cur = hes[cur.0 as usize].next;
+        if cur == start {
+            break;
+        }
+    }
+    out
+}
+
 /// Every face connected to `seed` through shared edges.
 pub fn element_of(mesh: &Mesh, seed: FaceId) -> Vec<FaceId> {
     let mut seen: BTreeSet<FaceId> = BTreeSet::new();
@@ -220,7 +244,11 @@ pub fn by_vertex(mesh: &Mesh, verts: &[VertexId], level: SubLevel) -> Vec<u32> {
     for v in verts {
         match level {
             SubLevel::Edge => out.extend(vertex_edges(mesh, *v).into_iter().map(|e| e.0)),
-            SubLevel::Border => out.extend(vertex_edges(mesh, *v).into_iter().filter(|e| is_border_edge(mesh, *e)).map(|e| e.0)),
+            SubLevel::Border => {
+                for e in vertex_edges(mesh, *v).into_iter().filter(|e| is_border_edge(mesh, *e)) {
+                    out.extend(border_edge_loop(mesh, e).into_iter().map(|b| b.0));
+                }
+            }
             SubLevel::Face => out.extend(vertex_faces(mesh, *v).into_iter().map(|f| f.0)),
             SubLevel::Element => {
                 for f in vertex_faces(mesh, *v) {

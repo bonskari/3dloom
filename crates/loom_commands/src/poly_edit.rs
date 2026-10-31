@@ -376,6 +376,24 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         }
         C::ExtrudeMode => toggle_drag(state, PolyDrag::Extrude),
         C::ExtrudeSettings => open_settings(state, PolySettingsKind::Extrude),
+        C::ShiftExtrudeEdges => {
+            if !matches!(state.selection_mode, SelectionMode::Edge | SelectionMode::Border) {
+                return Err("Shift Extrude Edges works at Edge and Border level".into());
+            }
+            let edges = selected_edges(state);
+            let mut new_sel: Vec<(NodeId, SubObjectId)> = Vec::new();
+            edit_meshes(state, "Shift Extrude Edges", edges, |mesh, node, ids| {
+                for e in t::shift_extrude_edges(mesh, &ids)? {
+                    new_sel.push((node, SubObjectId::Edge(e)));
+                }
+                Ok(())
+            })?;
+            state.sub_selection.clear();
+            for (n, id) in new_sel {
+                state.sub_selection.insert(n, id);
+            }
+            Ok(selection_json(state))
+        }
         C::Turn => {
             let edges = selected_edges(state);
             edit_meshes(state, "Turn", edges, |mesh, _, ids| {
@@ -626,12 +644,19 @@ fn pick_sub(state: &mut AppState, node: NodeId, id: u32) -> Result<Value, String
             let (sn, sv) = state.pick_source.take().ok_or("no source vertex")?;
             state.pick_mode = Some(PickMode::TargetWeldSource);
             if sn != node {
-                return Err("Target Weld needs two vertices of the same object".into());
+                return Err("Target Weld needs two sub-objects of the same object".into());
             }
             if sv == id {
                 return Ok(json!({ "stage": "source" }));
             }
-            edit_meshes(state, "Target Weld", vec![(node, vec![()])], |mesh, _, _| t::weld_pair(mesh, VertexId(sv), VertexId(id)))?;
+            let edge_level = matches!(state.selection_mode, SelectionMode::Edge | SelectionMode::Border);
+            edit_meshes(state, "Target Weld", vec![(node, vec![()])], |mesh, _, _| {
+                if edge_level {
+                    t::weld_edge_pair(mesh, HalfEdgeId(sv), HalfEdgeId(id))
+                } else {
+                    t::weld_pair(mesh, VertexId(sv), VertexId(id))
+                }
+            })?;
             state.sub_selection.clear();
             Ok(json!({ "stage": "source" }))
         }

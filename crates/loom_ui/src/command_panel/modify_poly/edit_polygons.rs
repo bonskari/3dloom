@@ -29,7 +29,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         ui.horizontal(|ui| {
             let on = app.state.poly_drag == Some(PolyDrag::Bevel);
-            mode_with_settings(ui, app, "Bevel", "Bevel Mode: drag up for height, sideways for outline", on, Command::BevelMode, Command::BevelSettings);
+            mode_with_settings(ui, app, "Bevel", "Bevel Mode: drag for height, then move and click for outline", on, Command::BevelMode, Command::BevelSettings);
             let on = app.state.poly_drag == Some(PolyDrag::Inset);
             mode_with_settings(ui, app, "Inset", "Inset Mode: drag to inset", on, Command::InsetMode, Command::InsetSettings);
         });
