@@ -63,6 +63,12 @@ schema_for! {
     bool => json!({"type":"boolean"}),
     String => json!({"type":"string"}),
     [f32; 3] => json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3}),
+    [i32; 2] => json!({"type":"array","items":{"type":"integer"},"minItems":2,"maxItems":2}),
+}
+impl ArgSchema for loom_scene::render::TimeOutput {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Single","ActiveSegment","Range","Frames"]})
+    }
 }
 impl ArgSchema for loom_scene::render::RenderArea {
     fn schema() -> Value {
