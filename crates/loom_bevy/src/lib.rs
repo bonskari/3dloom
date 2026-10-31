@@ -1293,7 +1293,8 @@ impl BevyRenderer {
                 AoQuality::High => ScreenSpaceAmbientOcclusionQualityLevel::High,
                 AoQuality::Ultra => ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
             };
-            e.insert(ScreenSpaceAmbientOcclusion { quality_level, ..Default::default() });
+            let th: f32 = std::env::var("LOOM_DBG_TH").ok().and_then(|v| v.parse().ok()).unwrap_or(0.25);
+            e.insert(ScreenSpaceAmbientOcclusion { quality_level, constant_object_thickness: th });
         }
         if q.reflections {
             // Glossier than this reflects the view (rougher: only the sky dome).
