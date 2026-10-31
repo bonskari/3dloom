@@ -333,6 +333,10 @@ impl BevyRenderer {
         app.add_plugins(post::EnvPassPlugin);
         app.add_plugins(bake::BakePlugin);
         app.add_plugins(look::LookPlugin);
+        app.add_systems(
+            bevy::app::PostUpdate,
+            keep_spot_shadow_casters_visible.after(bevy::pbr::SimulationLightSystems::CheckLightVisibility).before(bevy::render::view::VisibilitySystems::MarkNewlyHiddenEntitiesInvisible),
+        );
         while app.plugins_state() == PluginsState::Adding {
             bevy::tasks::tick_global_task_pools_on_main_thread();
         }
@@ -1680,4 +1684,17 @@ fn env_uniform(env: &EnvSettings, view: ViewEnv, cam: &Transform, (centre, radiu
         u.dof_loss = Vec4::new(dof.horiz_loss.max(0.0), dof.vert_loss.max(0.0), 0.0, 0.0);
     }
     u
+}
+
+/// Bevy 0.16.1's spot-light visibility check appends its casters into the
+/// light's list before taking them off `PreviousVisibleEntities` (the list is
+/// empty by then), so a mesh only a spot light sees is hidden again every
+/// other frame: its material drops out and it casts no shadow (Render To
+/// Texture, a caster outside every camera). This takes them off as the check means to.
+fn keep_spot_shadow_casters_visible(spots: bevy::ecs::system::Query<&bevy::pbr::VisibleMeshEntities, bevy::ecs::query::With<bevy::pbr::SpotLight>>, mut previous: bevy::ecs::system::ResMut<bevy::render::view::PreviousVisibleEntities>) {
+    for visible in &spots {
+        for e in &visible.entities {
+            previous.remove(e);
+        }
+    }
 }
