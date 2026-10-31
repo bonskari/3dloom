@@ -65,12 +65,13 @@ fn a_flat_mirror_floor_reflects_the_box_on_it() {
     ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
     ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Reflection" }));
     let traced = render(&mut h);
+    // The element of this render (the next one writes it again).
+    let refl = image::open(dir.join("mirror_Reflection.png")).unwrap().to_rgba8();
     ok(&mut h, "Raytracer Settings", serde_json::json!({ "enabled": false }));
     let plain = render(&mut h);
     let (on, off) = (traced.pixels().filter(|p| red(p)).count(), plain.pixels().filter(|p| red(p)).count());
     assert!(off > 300, "the box is in the frame: {off}");
     assert!(on > off + 200, "the mirror adds the box's reflection: {on} red pixels against {off}");
-    let refl = image::open(dir.join("mirror_Reflection.png")).unwrap().to_rgba8();
     let shown = refl.pixels().filter(|p| red(p) && p.0[3] > 0).count();
     assert!(shown > 200, "the Reflection element has the reflected box: {shown}");
     let _ = std::fs::remove_dir_all(&dir);
