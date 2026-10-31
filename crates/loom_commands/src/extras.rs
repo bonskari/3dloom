@@ -6,7 +6,7 @@ use crate::state::{AppState, CloneKind, PickMode};
 use crate::viewport::Dialog;
 use crate::Command;
 use glam::{EulerRot, Mat4, Quat, Vec3};
-use loom_scene::{Change, NodeId, ObjectKind, PolyObject, Transform};
+use loom_scene::{Change, Node, NodeId, ObjectKind, PolyObject, Transform};
 use serde_json::{json, Value};
 
 fn missing(id: NodeId) -> String {
