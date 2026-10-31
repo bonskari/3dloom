@@ -49,7 +49,7 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
         Dialog::ExportFile | Dialog::ExportSelected => Some("Export"),
         Dialog::ArchiveFile => Some("Archives"),
         Dialog::SaveAnimation | Dialog::LoadAnimation => Some("Animations"),
-        Dialog::RenderFile | Dialog::SaveRenderedImage => Some("Render Output"),
+        Dialog::RenderFile | Dialog::SaveRenderedImage | Dialog::ViewImageFile => Some("Render Output"),
         _ => None,
     };
     if let Some(d) = entry.and_then(|e| app.state.paths.dir(e)) {
@@ -140,6 +140,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::RamPlayerFile { save: false, .. } => ("Open File, Channel", IMAGES_READ, "Open"),
         Dialog::RamPlayerFile { save: true, .. } => ("Save File, Channel", IMAGES_WRITE, "Save"),
         Dialog::SaveRenderedImage => ("Save Image", IMAGES_WRITE, "Save"),
+        Dialog::ViewImageFile => ("View File", "png,jpg,jpeg,bmp,tga,tif,tiff,exr,hdr,gif,ifl", "Open"),
         Dialog::LoadUvw => ("Load UVW", "uvw", "Open"),
         Dialog::BipedSaveFig => ("Save File", "fig", "Save"),
         Dialog::BipedLoadFig => ("Open", "fig", "Open"),
@@ -200,6 +201,8 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::SaveUvw => Command::SaveUvw { path: Some(p) },
         Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(p) },
         Dialog::SaveRenderedImage => Command::SaveRenderedImage { path: Some(p) },
+        // The numbered files beside it come along for the frame arrows.
+        Dialog::ViewImageFile => Command::ViewImageFile { path: Some(p), sequence: Some(true) },
         Dialog::SaveRenderPreset => Command::SaveRenderPreset { path: p },
         Dialog::LoadRenderPreset => Command::LoadRenderPreset { path: p, common: None, renderer: None, elements: None },
         Dialog::RamPlayerFile { channel, save: false } => Command::RamPlayerOpen { channel: channel as u32, path: Some(p) },

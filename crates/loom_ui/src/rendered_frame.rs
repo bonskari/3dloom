@@ -49,6 +49,13 @@ pub struct FrameViews {
     ram_image: Option<(u64, Option<image::RgbaImage>)>,
     /// A region handle being dragged in the viewport: which, and the rectangle at the start.
     region_drag: Option<(Handle, [f32; 4])>,
+    /// The G-buffer channel image shown, and the image version and channel it was made for.
+    gimage: Option<(u64, loom_commands::render_output::GChannel, image::RgbaImage)>,
+    /// The ActiveShade window's view.
+    pub active_shade: FrameView,
+    /// The Panorama viewer's view and the image it was made at (viewer version).
+    pub panorama: FrameView,
+    panorama_image: Option<(u64, image::RgbaImage)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,27 +317,15 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let size = egui::vec2((iw + 24.0).clamp(760.0, (screen.x - 40.0).max(760.0)), (ih + 170.0).clamp(320.0, (screen.y - 40.0).max(320.0)));
     let window = egui::Window::new(title.clone()).id(egui::Id::new("Rendered Frame Window")).resizable(true).default_size(size);
     crate::os_window::OsWindow::new("Rendered Frame Window", title, size).show(ctx, open, window, |ui| {
-        // Rendering controls.
-        ui.horizontal(|ui| {
-            ui.label("Area to Render:");
-            let area = app.state.scene.render.area;
-            egui::ComboBox::from_id_salt("rfw_area").selected_text(area.label()).show_ui(ui, |ui| {
-                for a in RenderArea::ALL {
-                    if ui.selectable_label(a == area, a.label()).clicked() {
-                        let _ = app.dispatch(Command::AreaToRender { area: Some(a), region: None });
-                    }
-                }
-            });
-            if ui.selectable_label(app.state.rendered.edit_region, "Edit Region").on_hover_text("Edit the render region in the viewport").clicked() {
-                let _ = app.dispatch(Command::EditRegion);
-            }
-        });
-        viewport_controls(ui, app, "rfw_viewport", "Lock to Viewport");
-        render_buttons(ui, app, "rfw_mode", true);
-        ui.separator();
+        if !app.state.rendered.ui_hidden {
+            rendering_controls(ui, app);
+        }
         // Toolbar.
         let has_image = app.state.rendered.image.is_some();
         ui.horizontal(|ui| {
+            if ui.selectable_label(app.state.rendered.ui_hidden, "Toggle UI").on_hover_text("Hide or show the rendering controls").clicked() {
+                let _ = app.dispatch(Command::RenderedFrameWindowToggleUi);
+            }
             if ui.add_enabled(has_image, egui::Button::new("Save Image")).clicked() {
                 let _ = app.dispatch(Command::SaveRenderedImage { path: None });
             }
@@ -350,6 +345,31 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             channel_toggle(ui, app, "B", c.blue, "Enable Blue Channel", |v| Command::RenderedFrameWindowChannels { red: None, green: None, blue: Some(v), alpha: None, mono: None });
             channel_toggle(ui, app, "Alpha", c.alpha, "Display Alpha Channel", |v| Command::RenderedFrameWindowChannels { red: None, green: None, blue: None, alpha: Some(v), mono: None });
             channel_toggle(ui, app, "Mono", c.mono, "Monochrome", |v| Command::RenderedFrameWindowChannels { red: None, green: None, blue: None, alpha: None, mono: Some(v) });
+            // The channel list: the colour image or a G-buffer channel.
+            let cur = app.state.rendered.gchannel;
+            let has_g = app.state.rendered.gbuffer.is_some();
+            egui::ComboBox::from_id_salt("rfw_gchannel").selected_text(cur.map_or("RGB Alpha", |c| c.label())).show_ui(ui, |ui| {
+                if ui.selectable_label(cur.is_none(), "RGB Alpha").clicked() {
+                    let _ = app.dispatch(Command::RenderedFrameWindowGBuffer { channel: None });
+                }
+                for ch in loom_commands::render_output::GChannel::ALL {
+                    if ui.add_enabled(has_g, egui::SelectableLabel::new(cur == Some(ch), ch.label())).clicked() {
+                        let _ = app.dispatch(Command::RenderedFrameWindowGBuffer { channel: Some(ch) });
+                    }
+                }
+            });
+            // View Image File's frame arrows.
+            if let Some(v) = app.state.rendered.viewer.as_ref().filter(|v| v.files.len() > 1) {
+                let (i, n) = (v.index, v.files.len());
+                ui.separator();
+                if ui.add_enabled(i > 0, egui::Button::new("<")).on_hover_text("Previous frame").clicked() {
+                    let _ = app.dispatch(Command::ViewImageFileStep { step: Some(-1), index: None });
+                }
+                ui.label(format!("{} / {n}", i + 1));
+                if ui.add_enabled(i + 1 < n, egui::Button::new(">")).on_hover_text("Next frame").clicked() {
+                    let _ = app.dispatch(Command::ViewImageFileStep { step: Some(1), index: None });
+                }
+            }
             ui.separator();
             pixel_readout(ui, &app.rfw.main);
         });
@@ -369,10 +389,42 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         }
         let r = &mut app.state.rendered;
         let (version, channels) = (r.version, r.channels);
-        update_texture(ui.ctx(), &mut app.rfw.main, "rendered_frame", r.image.as_deref(), version, channels, &mut r.dirty);
-        let img = app.state.rendered.image.clone();
-        image_area(ui, &mut app.rfw.main, img.as_deref());
+        let shown = match (r.gchannel, r.gbuffer.as_ref()) {
+            (Some(ch), Some(g)) => {
+                if app.rfw.gimage.as_ref().is_none_or(|(v, c, _)| *v != version || *c != ch) {
+                    app.rfw.gimage = Some((version, ch, g.image(ch, r.image.as_deref())));
+                }
+                app.rfw.gimage.as_ref().map(|(_, _, i)| std::sync::Arc::new(i.clone()))
+            }
+            _ => r.image.clone(),
+        };
+        update_texture(ui.ctx(), &mut app.rfw.main, "rendered_frame", shown.as_deref(), version, channels, &mut r.dirty);
+        image_area(ui, &mut app.rfw.main, shown.as_deref());
     });
+}
+
+/// The Rendered Frame Window's rendering controls (Toggle UI hides them).
+fn rendering_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
+    {
+        // Rendering controls.
+        ui.horizontal(|ui| {
+            ui.label("Area to Render:");
+            let area = app.state.scene.render.area;
+            egui::ComboBox::from_id_salt("rfw_area").selected_text(area.label()).show_ui(ui, |ui| {
+                for a in RenderArea::ALL {
+                    if ui.selectable_label(a == area, a.label()).clicked() {
+                        let _ = app.dispatch(Command::AreaToRender { area: Some(a), region: None });
+                    }
+                }
+            });
+            if ui.selectable_label(app.state.rendered.edit_region, "Edit Region").on_hover_text("Edit the render region in the viewport").clicked() {
+                let _ = app.dispatch(Command::EditRegion);
+            }
+        });
+        viewport_controls(ui, app, "rfw_viewport", "Lock to Viewport");
+        render_buttons(ui, app, "rfw_mode", true);
+        ui.separator();
+    }
 }
 
 /// The Viewport list and its lock (Lock to Viewport / Lock View).

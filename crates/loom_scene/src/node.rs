@@ -1942,6 +1942,9 @@ pub struct RenderProps {
     pub motion_blur: MotionBlur,
     pub motion_blur_enabled: bool,
     pub motion_blur_multiplier: f32,
+    /// G-Buffer > Object Channel (Object ID 0-65535): renders tag the
+    /// object's pixels with it (Object ID element, Matte, G-buffer display).
+    pub object_channel: u32,
 }
 
 /// Object Properties > Motion Blur kind.
@@ -1968,6 +1971,7 @@ impl Default for RenderProps {
             motion_blur: MotionBlur::None,
             motion_blur_enabled: true,
             motion_blur_multiplier: 1.0,
+            object_channel: 0,
         }
     }
 }

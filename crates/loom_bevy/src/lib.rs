@@ -117,6 +117,8 @@ pub enum ElementLook {
     Lighting,
     /// The self-illumination only.
     SelfIllumination,
+    /// The diffuse colour and maps before lighting (Diffuse with Lighting off).
+    DiffuseTexture,
 }
 
 impl ElementLook {
@@ -129,6 +131,7 @@ impl ElementLook {
             ElementLook::Specular => no_glow(StandardMaterial { base_color: Color::BLACK.with_alpha(m.base_color.alpha()), base_color_texture: None, ..m.clone() }),
             ElementLook::Lighting => StandardMaterial { base_color: Color::WHITE.with_alpha(m.base_color.alpha()), base_color_texture: None, perceptual_roughness: 1.0, metallic: 0.0, reflectance: 0.0, specular_texture: None, emissive: LinearRgba::BLACK, emissive_texture: None, ..m.clone() },
             ElementLook::SelfIllumination => StandardMaterial { base_color: Color::BLACK.with_alpha(m.base_color.alpha()), base_color_texture: None, reflectance: 0.0, specular_texture: None, metallic: 0.0, ..m.clone() },
+            ElementLook::DiffuseTexture => no_glow(StandardMaterial { unlit: true, reflectance: 0.0, specular_texture: None, ..m.clone() }),
         }
     }
 }

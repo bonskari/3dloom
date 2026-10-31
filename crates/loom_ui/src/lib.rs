@@ -1052,7 +1052,23 @@ impl LoomApp {
     }
 
     pub fn camera_for(&self, index: usize) -> Camera {
-        let vp = &self.state.viewports[index.min(self.state.viewports.len() - 1)];
+        self.camera_for_view(&self.state.viewports[index.min(self.state.viewports.len() - 1)])
+    }
+
+    /// The camera a render request renders through: its own camera node
+    /// (Batch Render), else its viewport's view.
+    pub fn camera_for_request(&self, req: &loom_commands::RenderRequest) -> Camera {
+        match req.camera {
+            Some(id) => {
+                let mut vp = self.state.viewports[req.viewport.min(self.state.viewports.len() - 1)].clone();
+                vp.kind = loom_commands::ViewKind::Camera(id);
+                self.camera_for_view(&vp)
+            }
+            None => self.camera_for(req.viewport),
+        }
+    }
+
+    pub fn camera_for_view(&self, vp: &loom_commands::Viewport) -> Camera {
         if let loom_commands::ViewKind::Camera(id) = vp.kind {
             if let Some(loom_scene::ObjectKind::Light(l)) = self.state.scene.node(id).map(|n| &n.object) {
                 // Light view: a spot's falloff spans the view's width; a

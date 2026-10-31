@@ -491,6 +491,8 @@ pub enum Dialog {
     CloneOptions,
     ConfigureModifierSets,
     MakePreview,
+    /// Rendering > View Image File: the image (or sequence) to show.
+    ViewImageFile,
     ManageSceneStates,
     ParameterWiring,
     AddCustomAttributes,

@@ -113,6 +113,18 @@ pub fn depth(scene: &Bvh, view: &View) -> Vec<Option<f32>> {
     })
 }
 
+/// Per pixel centre: the nearest surface's camera depth, triangle index and
+/// world normal (the G-buffer), None where the ray hits nothing.
+pub fn surfaces(scene: &Bvh, view: &View) -> Vec<Option<(f32, u32, Vec3)>> {
+    let world_from_clip = (view.clip_from_view * view.view).inverse();
+    per_pixel(view.size, None, |x, y| {
+        let (o, d, far) = view.ray(world_from_clip, x as f32 + 0.5, y as f32 + 0.5);
+        let (t, tri, b) = scene.nearest(o, d, 0.0, far, |_| true)?;
+        let n = scene.triangle(tri).normal(b).normalize_or_zero();
+        Some((-(view.view * (o + d * t).extend(1.0)).z, tri, n))
+    })
+}
+
 /// Z Depth element: depth `z_min` white to `z_max` black (and beyond),
 /// nothing hit black with alpha 0.
 pub fn depth_image(depth: &[Option<f32>], size: [u32; 2], z_min: f32, z_max: f32) -> image::RgbaImage {

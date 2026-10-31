@@ -120,6 +120,18 @@ pub struct RenderedFrame {
     /// Render Shortcuts toolbar presets A, B, C (for the session).
     pub shortcuts: [Option<Box<RenderSettings>>; 3],
     pub ram_player: RamPlayer,
+    /// Toggle UI: the window shows the image only, no toolbars.
+    pub ui_hidden: bool,
+    /// The G-buffer of the last Production render and the channel shown
+    /// (None: the colour image).
+    pub gbuffer: Option<Arc<crate::render_output::GBuffer>>,
+    pub gchannel: Option<crate::render_output::GChannel>,
+    /// View Image File: the files the window steps through.
+    pub viewer: Option<crate::render_output::ImageViewer>,
+    /// The renderer log file was started this session (later messages append).
+    pub log_started: bool,
+    pub batch: crate::render_output::BatchRender,
+    pub active_shade: crate::render_output::ActiveShade,
 }
 
 /// Rendering > RAM Player: two image channels, A and B, compared side by
@@ -232,7 +244,7 @@ pub fn handles(c: &C) -> bool {
     )
 }
 
-fn check_size(width: u32, height: u32) -> Result<(), String> {
+pub(crate) fn check_size(width: u32, height: u32) -> Result<(), String> {
     if width == 0 || height == 0 || width > MAX_RENDER_SIZE || height > MAX_RENDER_SIZE {
         return Err(format!("render size {width}x{height}: 1 to {MAX_RENDER_SIZE} pixels"));
     }
@@ -279,7 +291,7 @@ fn color01(name: &str, c: [f32; 3]) -> Result<[f32; 3], String> {
 }
 
 /// One undo step for Render Setup values.
-fn set_settings(state: &mut AppState, label: &str, after: RenderSettings) -> Result<(), String> {
+pub(crate) fn set_settings(state: &mut AppState, label: &str, after: RenderSettings) -> Result<(), String> {
     if after == state.scene.render {
         return Ok(());
     }
@@ -318,8 +330,8 @@ pub(crate) fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Valu
     if req.settings.area == RenderArea::Selected && req.selection.is_empty() {
         return Err("Area to Render is Selected but nothing is selected".into());
     }
-    if req.preview {
-        // Exposure Control's thumbnail: the Rendered Frame Window and Render Last stay as they are.
+    if req.preview || req.active_shade {
+        // Exposure Control's thumbnail and ActiveShade: the Rendered Frame Window and Render Last stay as they are.
         let out = json!({ "pending": true, "preview": true, "width": req.settings.width, "height": req.settings.height });
         state.pending_render = Some(req);
         return Ok(out);
@@ -337,7 +349,7 @@ pub(crate) fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Valu
 /// Starts the frames of a Time Output sequence (`req.save_path` is the
 /// output before numbering). Image File List writes its .ifl first, of all
 /// the frames; Skip Existing Images then leaves out the files already there.
-fn start_sequence(state: &mut AppState, req: RenderRequest, mut frames: Vec<i32>) -> Result<Value, String> {
+pub(crate) fn start_sequence(state: &mut AppState, req: RenderRequest, mut frames: Vec<i32>) -> Result<Value, String> {
     if state.rendered.progress.is_some() || state.pending_render.is_some() {
         return Err("a render is in progress".into());
     }
@@ -403,16 +415,18 @@ fn start_sequence_frame(state: &mut AppState) -> Result<Value, String> {
     }
 }
 
-/// After a sequence frame rendered: the next one starts (None: the
-/// sequence is over, or there is none, and the current frame is back).
+/// After a frame rendered: the next frame of its sequence starts, else the
+/// next Batch Render task or Panorama Exporter face (None: nothing more;
+/// the current frame is back).
 pub fn sequence_next(state: &mut AppState) -> Option<Result<Value, String>> {
-    let seq = state.rendered.sequence.as_mut()?;
-    seq.index += 1;
-    if seq.index >= seq.frames.len() {
+    if let Some(seq) = state.rendered.sequence.as_mut() {
+        seq.index += 1;
+        if seq.index < seq.frames.len() {
+            return Some(start_sequence_frame(state));
+        }
         end_sequence(state);
-        return None;
     }
-    Some(start_sequence_frame(state))
+    crate::render_output::after_render(state)
 }
 
 /// Ends a sequence (finished, cancelled or failed): the current frame goes back.
@@ -489,8 +503,10 @@ pub const MAX_MESSAGES: usize = 1000;
 
 /// Adds an entry to the Render Message Window; a warning or error opens it.
 pub fn message(state: &mut AppState, level: MessageLevel, text: impl Into<String>) {
+    let text = text.into();
+    crate::render_output::log_message(state, level, &text);
     let m = &mut state.rendered.messages;
-    m.push(RenderMessage { level, text: text.into() });
+    m.push(RenderMessage { level, text });
     if m.len() > MAX_MESSAGES {
         m.remove(0);
     }
@@ -499,35 +515,133 @@ pub fn message(state: &mut AppState, level: MessageLevel, text: impl Into<String
     }
 }
 
-/// Writes `img` to `path`, the format from its extension.
+/// Writes `img` to `path`, the format from its extension, with each
+/// format's default options.
 pub fn save_image(img: &image::RgbaImage, path: &str) -> Result<(), String> {
+    save_image_as(img, path, &loom_scene::render::OutputFormat::default(), None)
+}
+
+/// A render's output file: its format's options and the output gamma.
+pub fn save_output(img: &image::RgbaImage, path: &str, s: &RenderSettings) -> Result<(), String> {
+    save_image_as(img, path, &s.output_format, s.gamma.output_gamma())
+}
+
+/// sRGB 8-bit to linear light.
+fn linear(c: u8) -> f32 {
+    let x = c as f32 / 255.0;
+    if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
+}
+
+/// Writes `img` to `path` (format by extension) with the Setup options
+/// `fmt`; `gamma` re-encodes the 8-bit formats for that output gamma.
+pub fn save_image_as(img: &image::RgbaImage, path: &str, fmt: &loom_scene::render::OutputFormat, gamma: Option<f32>) -> Result<(), String> {
+    use image::ImageEncoder;
+    use loom_scene::render::{GammaSettings, PngType};
     let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
     let err = |e: image::ImageError| format!("{path}: {e}");
-    match ext.as_str() {
-        "png" | "tga" | "tif" | "tiff" => img.save(path).map_err(err),
-        // No alpha in these formats.
-        "jpg" | "jpeg" | "bmp" => image::DynamicImage::ImageRgba8(img.clone()).to_rgb8().save(path).map_err(err),
-        "exr" => {
-            // OpenEXR holds linear light.
-            let lin = |c: u8| {
-                let x = c as f32 / 255.0;
-                if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
-            };
-            let mut f = image::Rgba32FImage::new(img.width(), img.height());
-            for (o, p) in f.pixels_mut().zip(img.pixels()) {
-                o.0 = [lin(p.0[0]), lin(p.0[1]), lin(p.0[2]), p.0[3] as f32 / 255.0];
+    // Output gamma applies to the integer formats (EXR and HDR hold linear light).
+    let corrected;
+    let img = match gamma {
+        Some(g) if !matches!(ext.as_str(), "exr" | "hdr") && (g - loom_scene::render::DISPLAY_GAMMA).abs() > 1e-4 => {
+            let lut: Vec<u8> = (0..=255u8).map(|v| GammaSettings::encode(v, g)).collect();
+            let mut out = img.clone();
+            for p in out.pixels_mut() {
+                for c in &mut p.0[..3] {
+                    *c = lut[*c as usize];
+                }
             }
-            f.save(path).map_err(err)
+            corrected = out;
+            &corrected
+        }
+        _ => img,
+    };
+    let (w, h) = img.dimensions();
+    let create = |to: &str| std::fs::File::create(to).map(std::io::BufWriter::new).map_err(|e| format!("{to}: {e}"));
+    match ext.as_str() {
+        "png" => {
+            let dynamic = image::DynamicImage::ImageRgba8(img.clone());
+            let words = |v: Vec<u16>| v.iter().flat_map(|w| w.to_ne_bytes()).collect::<Vec<u8>>();
+            let (bytes, color): (Vec<u8>, image::ExtendedColorType) = match (fmt.png_type, fmt.png_alpha) {
+                (PngType::Rgb24, true) => (img.as_raw().clone(), image::ExtendedColorType::Rgba8),
+                (PngType::Rgb24, false) => (dynamic.to_rgb8().into_raw(), image::ExtendedColorType::Rgb8),
+                (PngType::Gray8, true) => (dynamic.to_luma_alpha8().into_raw(), image::ExtendedColorType::La8),
+                (PngType::Gray8, false) => (dynamic.to_luma8().into_raw(), image::ExtendedColorType::L8),
+                (PngType::Rgb48, true) => (words(dynamic.to_rgba16().into_raw()), image::ExtendedColorType::Rgba16),
+                (PngType::Rgb48, false) => (words(dynamic.to_rgb16().into_raw()), image::ExtendedColorType::Rgb16),
+                (PngType::Gray16, true) => (words(dynamic.to_luma_alpha16().into_raw()), image::ExtendedColorType::La16),
+                (PngType::Gray16, false) => (words(dynamic.to_luma16().into_raw()), image::ExtendedColorType::L16),
+            };
+            image::codecs::png::PngEncoder::new(create(path)?).write_image(&bytes, w, h, color).map_err(err)
+        }
+        "jpg" | "jpeg" => {
+            let rgb = image::DynamicImage::ImageRgba8(img.clone()).to_rgb8();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(create(path)?, fmt.jpeg_quality.clamp(1, 100)).write_image(rgb.as_raw(), w, h, image::ExtendedColorType::Rgb8).map_err(err)
+        }
+        "tga" => {
+            let mut src = img.clone();
+            if fmt.tga_premultiplied {
+                for p in src.pixels_mut() {
+                    let a = p.0[3] as f32 / 255.0;
+                    for c in &mut p.0[..3] {
+                        *c = (*c as f32 * a).round() as u8;
+                    }
+                }
+            }
+            let tga = |bytes: &[u8], color: image::ExtendedColorType, to: &str| -> Result<(), String> {
+                let enc = image::codecs::tga::TgaEncoder::new(create(to)?);
+                let enc = if fmt.tga_compress { enc } else { enc.disable_rle() };
+                enc.write_image(bytes, w, h, color).map_err(|e| format!("{to}: {e}"))
+            };
+            if fmt.tga_bits == 24 {
+                tga(image::DynamicImage::ImageRgba8(src.clone()).to_rgb8().as_raw(), image::ExtendedColorType::Rgb8, path)?;
+            } else {
+                tga(src.as_raw(), image::ExtendedColorType::Rgba8, path)?;
+            }
+            if fmt.tga_alpha_split {
+                // Alpha Split: the alpha as a grey image, a_<name> beside it.
+                let p = std::path::Path::new(path);
+                let name = format!("a_{}", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                let alpha: Vec<u8> = img.pixels().map(|p| p.0[3]).collect();
+                tga(&alpha, image::ExtendedColorType::L8, &p.with_file_name(name).to_string_lossy())?;
+            }
+            Ok(())
+        }
+        "tif" | "tiff" => img.save(path).map_err(err),
+        // No alpha in BMP.
+        "bmp" => image::DynamicImage::ImageRgba8(img.clone()).to_rgb8().save(path).map_err(err),
+        "exr" => {
+            // OpenEXR holds linear light, as 16-bit halves or 32-bit floats.
+            let px = |x: usize, y: usize| {
+                let p = img.get_pixel(x as u32, y as u32).0;
+                [linear(p[0]), linear(p[1]), linear(p[2]), p[3] as f32 / 255.0]
+            };
+            let (w, h) = (w as usize, h as usize);
+            let half = exr::prelude::f16::from_f32;
+            let r = match (fmt.exr_full_float, fmt.exr_alpha) {
+                (true, true) => exr::prelude::write_rgba_file(path, w, h, |x, y| {
+                    let p = px(x, y);
+                    (p[0], p[1], p[2], p[3])
+                }),
+                (true, false) => exr::prelude::write_rgb_file(path, w, h, |x, y| {
+                    let p = px(x, y);
+                    (p[0], p[1], p[2])
+                }),
+                (false, true) => exr::prelude::write_rgba_file(path, w, h, |x, y| {
+                    let p = px(x, y);
+                    (half(p[0]), half(p[1]), half(p[2]), half(p[3]))
+                }),
+                (false, false) => exr::prelude::write_rgb_file(path, w, h, |x, y| {
+                    let p = px(x, y);
+                    (half(p[0]), half(p[1]), half(p[2]))
+                }),
+            };
+            r.map_err(|e| format!("{path}: {e}"))
         }
         // Radiance HDR: linear RGB floats, no alpha.
         "hdr" => {
-            let lin = |c: u8| {
-                let x = c as f32 / 255.0;
-                if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
-            };
-            let mut f = image::Rgb32FImage::new(img.width(), img.height());
+            let mut f = image::Rgb32FImage::new(w, h);
             for (o, p) in f.pixels_mut().zip(img.pixels()) {
-                o.0 = [lin(p.0[0]), lin(p.0[1]), lin(p.0[2])];
+                o.0 = [linear(p.0[0]), linear(p.0[1]), linear(p.0[2])];
             }
             f.save(path).map_err(err)
         }
@@ -553,13 +667,13 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 if save_path.is_none() {
                     message(state, MessageLevel::Warning, "Rendering a sequence without an output file: the frames are not saved (Render Output > Files...)");
                 }
-                return start_sequence(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative, preview: false }, frames);
+                return start_sequence(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative, preview: false, ..Default::default() }, frames);
             }
-            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative, preview: false })
+            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative, preview: false, ..Default::default() })
         }
         C::RenderIterative => {
             let settings = state.scene.render.clone();
-            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path: None, iterative: true, preview: false })
+            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path: None, iterative: true, preview: false, ..Default::default() })
         }
         C::RenderLast => {
             let Some(last) = state.rendered.last.clone() else {
@@ -1226,6 +1340,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({ "cleared": true }))
         }
         C::CancelRender => {
+            crate::render_output::end_runs(state);
             if state.pending_render.take().is_some() {
                 end_sequence(state);
                 return Ok(json!({ "cancelled": true }));

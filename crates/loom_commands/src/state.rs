@@ -859,6 +859,12 @@ pub struct Prefs {
     pub increment_on_save: bool,
     /// Preferences > Files: Zoom Extents on Import.
     pub zoom_extents_on_import: bool,
+    /// Preferences > Rendering > Messages: Write Messages to File, the
+    /// .log file, Append to File (off: the first message of a session
+    /// starts the file anew).
+    pub render_log: bool,
+    pub render_log_path: Option<String>,
+    pub render_log_append: bool,
 }
 
 fn default_nudge() -> f32 {
@@ -901,6 +907,9 @@ impl Default for Prefs {
             backup_on_save: false,
             increment_on_save: false,
             zoom_extents_on_import: true,
+            render_log: false,
+            render_log_path: None,
+            render_log_append: false,
         }
     }
 }
@@ -1936,6 +1945,8 @@ pub struct AppState {
     pub paths: crate::paths::UserPaths,
     /// Grab Viewport asked the UI to capture this viewport.
     pub grab_request: Option<usize>,
+    /// Panorama Exporter > Viewer.
+    pub panorama: crate::render_output::PanoramaViewer,
     /// New and reset scenes take the saved startup viewport configuration (the app sets it; tests do not).
     pub use_viewport_defaults: bool,
     pub fps: f32,
@@ -1995,7 +2006,7 @@ pub struct AppState {
 
 /// A render for the UI's renderer: viewport `viewport` with `settings`
 /// (Render Setup at the time of the request), into the Rendered Frame Window.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct RenderRequest {
     pub viewport: usize,
     pub settings: loom_scene::render::RenderSettings,
@@ -2008,6 +2019,14 @@ pub struct RenderRequest {
     /// Exposure Control > Render Preview: into the rollout's thumbnail
     /// (`AppState::environment_ui`), not the Rendered Frame Window.
     pub preview: bool,
+    /// Render through this camera instead of the viewport's view (Batch
+    /// Render tasks use their own camera).
+    pub camera: Option<NodeId>,
+    /// A Panorama Exporter cube face from `camera`'s position: 0-5 for
+    /// +X, -X, +Y, -Y, +Z, -Z (world axes), a 90 degree square view.
+    pub cube_face: Option<u8>,
+    /// ActiveShade: into its window's image, not the Rendered Frame Window.
+    pub active_shade: bool,
 }
 
 impl Default for AppState {
@@ -2205,6 +2224,7 @@ impl AppState {
             units_mismatch: None,
             paths: Default::default(),
             grab_request: None,
+            panorama: Default::default(),
             use_viewport_defaults: false,
             current_frame: 0,
             frame_range: (0, 100),

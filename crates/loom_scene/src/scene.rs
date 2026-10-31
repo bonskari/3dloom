@@ -538,7 +538,7 @@ impl Scene {
         match self.layer(node.layer) {
             Some(l) if node.render.by_layer => {
                 let r = &node.render;
-                crate::node::RenderProps { by_layer: true, motion_blur: r.motion_blur, motion_blur_enabled: r.motion_blur_enabled, motion_blur_multiplier: r.motion_blur_multiplier, ..l.render.clone() }
+                crate::node::RenderProps { by_layer: true, motion_blur: r.motion_blur, motion_blur_enabled: r.motion_blur_enabled, motion_blur_multiplier: r.motion_blur_multiplier, object_channel: r.object_channel, ..l.render.clone() }
             }
             _ => node.render.clone(),
         }

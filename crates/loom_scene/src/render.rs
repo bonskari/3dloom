@@ -532,14 +532,29 @@ pub enum ElementKind {
     Reflection,
     Refraction,
     Velocity,
+    /// A chosen combination of the shading parts.
+    Blend,
+    /// The light falling on the surfaces (material ignored), scaled.
+    IlluminanceHdr,
+    /// The rendered brightness (material included), scaled.
+    LuminanceHdr,
+    /// White where the chosen objects or G-buffer ID are.
+    Matte,
+    /// Each object's G-buffer Object Channel in its colour.
+    ObjectId,
 }
 
 impl ElementKind {
-    pub const ALL: [ElementKind; 11] = [
+    pub const ALL: [ElementKind; 16] = [
         ElementKind::Alpha,
         ElementKind::Background,
+        ElementKind::Blend,
         ElementKind::Diffuse,
+        ElementKind::IlluminanceHdr,
         ElementKind::Lighting,
+        ElementKind::LuminanceHdr,
+        ElementKind::Matte,
+        ElementKind::ObjectId,
         ElementKind::Reflection,
         ElementKind::Refraction,
         ElementKind::SelfIllumination,
@@ -562,7 +577,50 @@ impl ElementKind {
             ElementKind::Reflection => "Reflection",
             ElementKind::Refraction => "Refraction",
             ElementKind::Velocity => "Velocity",
+            ElementKind::Blend => "Blend",
+            ElementKind::IlluminanceHdr => "Illuminance HDR Data",
+            ElementKind::LuminanceHdr => "Luminance HDR Data",
+            ElementKind::Matte => "Matte",
+            ElementKind::ObjectId => "Object ID",
         }
+    }
+}
+
+/// Blend element: the parts of the shading it adds up.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BlendParts {
+    /// The lit diffuse colour (the ambient light included).
+    pub diffuse: bool,
+    pub specular: bool,
+    pub self_illumination: bool,
+    pub reflection: bool,
+    pub refraction: bool,
+    /// Apply Atmosphere / Apply Shadows.
+    pub atmosphere: bool,
+    pub shadows: bool,
+}
+
+impl Default for BlendParts {
+    fn default() -> Self {
+        Self { diffuse: true, specular: true, self_illumination: true, reflection: true, refraction: true, atmosphere: true, shadows: true }
+    }
+}
+
+impl BlendParts {
+    pub const NAMES: [&'static str; 7] = ["Diffuse", "Specular", "Self-Illumination", "Reflection", "Refraction", "Atmosphere", "Shadows"];
+
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut bool> {
+        Some(match name {
+            "Diffuse" => &mut self.diffuse,
+            "Specular" => &mut self.specular,
+            "Self-Illumination" => &mut self.self_illumination,
+            "Reflection" => &mut self.reflection,
+            "Refraction" => &mut self.refraction,
+            "Atmosphere" => &mut self.atmosphere,
+            "Shadows" => &mut self.shadows,
+            _ => return None,
+        })
     }
 }
 
@@ -578,11 +636,42 @@ pub struct RenderElement {
     /// Z Depth: the depth that is white and the one that is black.
     pub z_min: f32,
     pub z_max: f32,
+    /// Diffuse: Lighting (off: the diffuse colour and maps before lighting).
+    pub lighting: bool,
+    /// Lighting: Direct Light On, Indirect Light On, Shadows On.
+    pub direct: bool,
+    pub indirect: bool,
+    pub shadows: bool,
+    /// Illuminance / Luminance HDR Data: Scale Factor.
+    pub scale: f32,
+    /// Matte: G-Buffer ID (None: off), the Include list (or with
+    /// `matte_exclude` the Exclude list) of object ids.
+    pub matte_gbuffer: Option<u32>,
+    pub matte_objects: Vec<u64>,
+    pub matte_exclude: bool,
+    /// Blend: the parts included.
+    pub blend: BlendParts,
 }
 
 impl Default for RenderElement {
     fn default() -> Self {
-        Self { kind: ElementKind::Diffuse, name: "Diffuse".into(), enabled: true, path: None, z_min: 100.0, z_max: 300.0 }
+        Self {
+            kind: ElementKind::Diffuse,
+            name: "Diffuse".into(),
+            enabled: true,
+            path: None,
+            z_min: 100.0,
+            z_max: 300.0,
+            lighting: true,
+            direct: true,
+            indirect: true,
+            shadows: true,
+            scale: 1.0,
+            matte_gbuffer: None,
+            matte_objects: Vec::new(),
+            matte_exclude: false,
+            blend: BlendParts::default(),
+        }
     }
 }
 
@@ -735,6 +824,15 @@ pub struct RenderSettings {
     /// Common > Options > Area Lights/Shadows as Points: area and soft
     /// ray-traced shadows render sharp, from the light's centre.
     pub area_as_points: bool,
+    /// Render Output File > Setup: the formats' options.
+    pub output_format: OutputFormat,
+    /// Gamma and LUT, and the output's Gamma group.
+    pub gamma: GammaSettings,
+    /// Output Size format (None: Custom) and Aperture Width in millimetres.
+    pub film_format: Option<String>,
+    pub aperture_width: f32,
+    /// Rendering > Batch Render: the task queue (saved with the scene).
+    pub batch: Vec<BatchJob>,
 }
 
 impl Default for RenderSettings {
@@ -774,6 +872,11 @@ impl Default for RenderSettings {
             raytracer: RaytracerSettings::default(),
             advanced: AdvancedLighting::default(),
             area_as_points: false,
+            output_format: OutputFormat::default(),
+            gamma: GammaSettings::default(),
+            film_format: None,
+            aperture_width: DEFAULT_APERTURE,
+            batch: Vec::new(),
         }
     }
 }
@@ -817,7 +920,10 @@ impl RenderSettings {
         if common {
             let (bevy, wire, thickness, list, active, display, bake) = (self.bevy.clone(), self.force_wireframe, self.wire_thickness, self.elements.clone(), self.elements_active, self.display_elements, self.bake.clone());
             let (raytracer, advanced) = (self.raytracer.clone(), self.advanced.clone());
+            // The batch queue and the gamma preferences are not a preset's.
+            let (batch, gamma) = (std::mem::take(&mut self.batch), self.gamma.clone());
             *self = from.clone();
+            (self.batch, self.gamma) = (batch, gamma);
             (self.bevy, self.force_wireframe, self.wire_thickness, self.elements, self.elements_active, self.display_elements, self.bake) = (bevy, wire, thickness, list, active, display, bake);
             (self.raytracer, self.advanced) = (raytracer, advanced);
         }
@@ -843,5 +949,156 @@ impl RenderSettings {
         } else {
             self.region
         }
+    }
+}
+
+/// PNG Configuration: the colour type a .png is written with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PngType {
+    /// RGB 24 bit.
+    #[default]
+    Rgb24,
+    /// RGB 48 bit.
+    Rgb48,
+    /// Grayscale 8 bit.
+    Gray8,
+    /// Grayscale 16 bit.
+    Gray16,
+}
+
+/// Render Output File > Setup: each file format's own options.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutputFormat {
+    /// JPEG Image Control > Quality, 1 (smallest file) to 100 (best).
+    pub jpeg_quality: u8,
+    /// PNG Configuration: colour type and Alpha Channel.
+    pub png_type: PngType,
+    pub png_alpha: bool,
+    /// Targa Image Control: Bits-Per-Pixel 24 or 32 (with alpha), Compress
+    /// (run-length), Alpha Split (the alpha also to a_<name>.tga) and
+    /// Pre-Multiplied Alpha.
+    pub tga_bits: u32,
+    pub tga_compress: bool,
+    pub tga_alpha_split: bool,
+    pub tga_premultiplied: bool,
+    /// OpenEXR Configuration: Format Half Float (16 bits, the default) or
+    /// Full Float (32 bits); Type RGBA (off: RGB, no alpha).
+    pub exr_full_float: bool,
+    pub exr_alpha: bool,
+}
+
+impl Default for OutputFormat {
+    fn default() -> Self {
+        Self { jpeg_quality: 75, png_type: PngType::Rgb24, png_alpha: true, tga_bits: 32, tga_compress: true, tga_alpha_split: false, tga_premultiplied: false, exr_full_float: false, exr_alpha: true }
+    }
+}
+
+/// The gamma the rendered image is encoded for: the renderer writes sRGB,
+/// which a 2.2 display shows as intended.
+pub const DISPLAY_GAMMA: f32 = 2.2;
+
+/// Preferences > Gamma and LUT (saved with the scene, as the reference
+/// does) and the Render Output File dialog's Gamma group.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GammaSettings {
+    /// Enable Gamma/LUT Correction: off, files are written as rendered.
+    pub enabled: bool,
+    /// Bitmap Files > Output Gamma (the system default for saved renders).
+    pub output: f32,
+    /// Render Output File > Gamma > Override: this output's own gamma
+    /// (None: Use System Default Gamma).
+    pub override_output: Option<f32>,
+}
+
+impl Default for GammaSettings {
+    fn default() -> Self {
+        Self { enabled: false, output: DISPLAY_GAMMA, override_output: None }
+    }
+}
+
+impl GammaSettings {
+    /// The gamma a saved render is written with, None when no correction applies.
+    pub fn output_gamma(&self) -> Option<f32> {
+        self.enabled.then(|| self.override_output.unwrap_or(self.output))
+    }
+
+    /// One 8-bit channel re-encoded from the display gamma to `gamma`
+    /// (output = intensity ^ (1 / gamma); 2.2 leaves it as rendered).
+    pub fn encode(value: u8, gamma: f32) -> u8 {
+        let linear = (value as f32 / 255.0).powf(DISPLAY_GAMMA);
+        (linear.powf(1.0 / gamma.max(0.01)) * 255.0).round().clamp(0.0, 255.0) as u8
+    }
+}
+
+/// Common > Output Size: a film or video format. Aspect ratios are the
+/// ones the formats are named by; apertures are the formats' published
+/// camera gate widths; video sizes are the standards' frame sizes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilmFormat {
+    pub name: &'static str,
+    /// Aperture Width in millimetres (None: the format leaves it).
+    pub aperture: Option<f32>,
+    /// Image aspect (width / height of the picture).
+    pub image_aspect: f32,
+    pub pixel_aspect: f32,
+    /// A fixed frame size (video); else the width is kept and the height follows.
+    pub size: Option<[u32; 2]>,
+}
+
+pub const FILM_FORMATS: &[FilmFormat] = &[
+    FilmFormat { name: "35mm 1.316:1 Full Aperture (cine)", aperture: Some(24.892), image_aspect: 1.316, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "35mm 1.37:1 Academy (cine)", aperture: Some(21.946), image_aspect: 1.37, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "35mm 1.66:1 (cine)", aperture: Some(21.946), image_aspect: 1.66, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "35mm 1.75:1 (cine)", aperture: Some(21.946), image_aspect: 1.75, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "35mm 1.85:1 (cine)", aperture: Some(21.946), image_aspect: 1.85, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "35mm Anamorphic (2.35:1)", aperture: Some(21.946), image_aspect: 2.35, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "35mm Anamorphic (2.35:1) (Squeezed)", aperture: Some(21.946), image_aspect: 2.35, pixel_aspect: 2.0, size: None },
+    FilmFormat { name: "70mm Panavision (cine)", aperture: Some(52.476), image_aspect: 2.2, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "70mm IMAX (cine)", aperture: Some(70.409), image_aspect: 1.43, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "VistaVision", aperture: Some(37.719), image_aspect: 1.5, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "35mm (24mm X 36mm) (slide)", aperture: Some(36.0), image_aspect: 1.5, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "6cm X 6cm (2 1/4\" X 2 1/4\") (slide)", aperture: Some(56.0), image_aspect: 1.0, pixel_aspect: 1.0, size: None },
+    FilmFormat { name: "NTSC D-1 (video)", aperture: None, image_aspect: 4.0 / 3.0, pixel_aspect: 0.9, size: Some([720, 486]) },
+    FilmFormat { name: "NTSC DV (video)", aperture: None, image_aspect: 4.0 / 3.0, pixel_aspect: 8.0 / 9.0, size: Some([720, 480]) },
+    FilmFormat { name: "PAL (video)", aperture: None, image_aspect: 4.0 / 3.0, pixel_aspect: 16.0 / 15.0, size: Some([720, 576]) },
+    FilmFormat { name: "PAL DV (video)", aperture: None, image_aspect: 4.0 / 3.0, pixel_aspect: 16.0 / 15.0, size: Some([720, 576]) },
+    FilmFormat { name: "HDTV (video)", aperture: None, image_aspect: 16.0 / 9.0, pixel_aspect: 1.0, size: Some([1920, 1080]) },
+    FilmFormat { name: "HDTV 720 (video)", aperture: None, image_aspect: 16.0 / 9.0, pixel_aspect: 1.0, size: Some([1280, 720]) },
+];
+
+/// Aperture Width of Custom: the 36 mm film the Lens is measured against.
+pub const DEFAULT_APERTURE: f32 = 36.0;
+
+pub fn film_format(name: &str) -> Option<&'static FilmFormat> {
+    FILM_FORMATS.iter().find(|f| f.name.eq_ignore_ascii_case(name.trim()))
+}
+
+/// One Batch Render task: what it renders (a camera, else the render
+/// viewport), the render preset it loads, Override Preset's frames and size,
+/// and the output file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BatchJob {
+    pub name: String,
+    pub enabled: bool,
+    /// Camera node id (None: the viewport).
+    pub camera: Option<u64>,
+    /// A .rps render preset the task renders with.
+    pub preset: Option<String>,
+    /// Override Preset: Frame Start / End, Width, Height, Pixel Aspect.
+    pub override_preset: bool,
+    pub frames: [i32; 2],
+    pub width: u32,
+    pub height: u32,
+    pub pixel_aspect: f32,
+    /// Output Path (a sequence numbers its files); None: not saved.
+    pub output: Option<String>,
+}
+
+impl Default for BatchJob {
+    fn default() -> Self {
+        Self { name: "View01".into(), enabled: true, camera: None, preset: None, override_preset: false, frames: [0, 0], width: 640, height: 480, pixel_aspect: 1.0, output: None }
     }
 }

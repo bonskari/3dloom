@@ -76,6 +76,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::material_library::handles(&c) => crate::material_library::execute(state, c),
         c if crate::display::handles(&c) => crate::display::execute(state, c),
         c if crate::render::handles(&c) => crate::render::execute(state, c),
+        c if crate::render_output::handles(&c) => crate::render_output::execute(state, c),
         c if crate::environment::handles(&c) => crate::environment::execute(state, c),
         c if crate::bake::handles(&c) => crate::bake::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),

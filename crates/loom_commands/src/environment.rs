@@ -196,7 +196,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             settings.area = loom_scene::render::RenderArea::View;
             settings.bevy.supersampling = 1;
             let viewport = crate::render::render_viewport(state);
-            crate::render::start(state, RenderRequest { viewport, settings, selection: Vec::new(), save_path: None, iterative: false, preview: true })
+            crate::render::start(state, RenderRequest { viewport, settings, selection: Vec::new(), save_path: None, iterative: false, preview: true, ..Default::default() })
         }
         C::AddAtmosphere { kind, name } => {
             let k = AtmosphereKind::new(&kind).ok_or_else(|| format!("unknown atmosphere {kind:?} ({})", AtmosphereKind::NAMES.join(", ")))?;
