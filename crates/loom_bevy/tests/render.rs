@@ -417,13 +417,14 @@ fn shadow_colour_density_and_area_size_change_the_shadow() {
             })
             .count()
     };
-    // A render of several passes moves a light with a Source Radius over its
-    // disk: the shadow edge softens by the radius in scene units.
+    // Area Shadows on, several passes: a light with a Source Radius moves over
+    // its disk and the shadow edge softens by the radius in scene units.
     let mut passes = |s: &loom_scene::light::LightSample| {
         r.sync(&objects);
         r.sync_lights(std::slice::from_ref(s));
         let mut o = dark();
         o.quality.passes = 24;
+        o.quality.area_shadows = true;
         r.render_with(size.0, size.1, &camera, o).expect("render")
     };
     spot.shadow_transmission = Vec3::ZERO;
