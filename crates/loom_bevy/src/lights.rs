@@ -124,8 +124,11 @@ pub(crate) fn point(s: &LightSample, centre_distance: f32, scene_radius: f32) ->
         range: range(s, centre_distance, scene_radius),
         radius: s.source_radius,
         shadows_enabled: s.shadows,
-        // Soft shadows from the light's size (Area Shadows, a photometric shape, Source Radius).
-        soft_shadows_enabled: s.source_radius > 0.0,
+        // The radius sizes the specular highlight only. Bevy's soft shadows
+        // (PCSS) read it as shadow-map texels, not scene units (measured: no
+        // penumbra at 20, a dim noisy edge at 320); the renderer's area passes
+        // soften shadows by the Source Radius instead.
+        soft_shadows_enabled: false,
         shadow_depth_bias: depth_bias(s, PointLight::DEFAULT_SHADOW_DEPTH_BIAS),
         shadow_normal_bias: s.shadow_normal_bias,
         ..Default::default()
@@ -142,7 +145,7 @@ pub(crate) fn spot(s: &LightSample, centre_distance: f32, scene_radius: f32) -> 
         range: range(s, centre_distance, scene_radius),
         radius: s.source_radius,
         shadows_enabled: s.shadows,
-        soft_shadows_enabled: s.source_radius > 0.0,
+        soft_shadows_enabled: false,
         shadow_depth_bias: depth_bias(s, SpotLight::DEFAULT_SHADOW_DEPTH_BIAS),
         shadow_normal_bias: s.shadow_normal_bias,
         inner_angle: (hotspot * 0.5).to_radians().min(outer),
@@ -159,7 +162,8 @@ pub(crate) fn directional(s: &LightSample) -> DirectionalLight {
         shadows_enabled: s.shadows,
         // A directional light's softness: the angle a source of the light's
         // radius spans seen from its target distance.
-        soft_shadow_size: (s.source_radius > 0.0).then(|| 2.0 * (s.source_radius / s.target_distance.max(1e-3)).atan()),
+        // Softened by the area passes, as point and spot lights are.
+        soft_shadow_size: None,
         shadow_depth_bias: depth_bias(s, DirectionalLight::DEFAULT_SHADOW_DEPTH_BIAS),
         shadow_normal_bias: s.shadow_normal_bias,
         ..Default::default()

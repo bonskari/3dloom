@@ -459,9 +459,10 @@ impl BevyRenderer {
         let mut map_size = 0usize;
         let samples = self.samples.clone();
         let scale = self.scale;
-        // Area Shadows: each pass moves the lights over their Source Radius
-        // (a point light then has no radius of its own: the passes are its size).
-        let area = options.as_ref().filter(|o| o.quality.area_shadows && o.passes() > 1).map(|o| quality::disk(self.light_pass, o.passes()));
+        // Area shadows: in an offline render of several passes, each pass moves
+        // the lights that have a Source Radius over their disk, so their shadows
+        // soften by it in scene units (the radius still sizes the highlight).
+        let area = options.as_ref().filter(|o| o.passes() > 1).map(|o| quality::disk(self.light_pass, o.passes()));
         for (i, s) in samples.iter().enumerate() {
             let Some(kind) = lights::kind(s) else { continue };
             seen.insert(s.id.0);
@@ -486,7 +487,6 @@ impl BevyRenderer {
             s.color *= light_tint;
             if let (Some(d), true) = (area, s.source_radius > 0.0) {
                 lights::move_over_source(&mut s, d, centre);
-                s.source_radius = 0.0;
             }
             // Shadow colour / density: the part shadows let through is a second, unshadowed light.
             let (main, fill) = match lights::shadow_split(&s) {
@@ -1384,7 +1384,7 @@ impl BevyRenderer {
         let (fx, fy) = ((sub[2] - sub[0]) / size[0] as f32, (sub[3] - sub[1]) / size[1] as f32);
         let (m, dx, dy) = (margin as f32, j[0] / ss * fx, j[1] / ss * fy);
         let sub = [sub[0] - m * fx + dx, sub[1] - m * fy + dy, sub[2] + m * fx + dx, sub[3] + m * fy + dy];
-        if o.quality.area_shadows && pass != self.light_pass {
+        if pass != self.light_pass && self.samples.iter().any(|s| s.source_radius > 0.0) {
             self.light_pass = pass;
             self.apply_lights();
         }
