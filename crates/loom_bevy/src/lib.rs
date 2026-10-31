@@ -17,6 +17,7 @@ mod post;
 use std::collections::{HashMap, HashSet};
 
 use bevy::app::{App, PluginsState, TerminalCtrlCHandlerPlugin};
+use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::asset::{Assets, Handle, RenderAssetUsages};
 use bevy::core_pipeline::core_3d::Camera3d;
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -335,7 +336,7 @@ impl BevyRenderer {
         app.add_plugins(look::LookPlugin);
         app.add_systems(
             bevy::app::PostUpdate,
-            bevy::ecs::schedule::IntoScheduleConfigs::after(keep_spot_shadow_casters_visible, bevy::pbr::SimulationLightSystems::CheckLightVisibility).before(bevy::render::view::VisibilitySystems::MarkNewlyHiddenEntitiesInvisible),
+            keep_spot_shadow_casters_visible.after(bevy::pbr::SimulationLightSystems::CheckLightVisibility).before(bevy::render::view::VisibilitySystems::MarkNewlyHiddenEntitiesInvisible),
         );
         while app.plugins_state() == PluginsState::Adding {
             bevy::tasks::tick_global_task_pools_on_main_thread();
