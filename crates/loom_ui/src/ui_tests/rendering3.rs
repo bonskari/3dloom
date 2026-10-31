@@ -351,9 +351,9 @@ fn render_setup_formats_setup_gamma_and_element_options_are_clicked() {
     ok(&mut h, "Render SetUp...", serde_json::json!({ "output": d.join("out.png").to_string_lossy() }));
     let win = setup_window(&mut h);
     click_text(&mut h, "Custom", win, 0.0);
-    click_text(&mut h, "HDTV (video)", egui::Rect::EVERYTHING, 0.0);
-    assert_eq!((h.app.state.scene.render.width, h.app.state.scene.render.height), (1920, 1080));
-    assert_eq!(h.app.state.scene.render.film_format.as_deref(), Some("HDTV (video)"));
+    click_text(&mut h, "35mm 1.85:1 (cine)", egui::Rect::EVERYTHING, 0.0);
+    assert_eq!((h.app.state.scene.render.width, h.app.state.scene.render.height), (640, 346));
+    assert_eq!(h.app.state.scene.render.film_format.as_deref(), Some("35mm 1.85:1 (cine)"));
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
     click_text(&mut h, "Setup (file format options)", win, 0.0);
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
