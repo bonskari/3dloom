@@ -148,7 +148,7 @@ fn action_list(ui: &mut egui::Ui, height: f32) -> Option<String> {
         let needle = search.to_lowercase();
         let actions: Vec<&'static str> = loom_commands::keymap::group_actions(&group).into_iter().filter(|a| needle.is_empty() || a.to_lowercase().contains(&needle)).collect();
         let row_h = ui.spacing().interact_size.y;
-        egui::ScrollArea::vertical().id_salt("customize_action_list").max_height(height).auto_shrink([false, false]).show_rows(ui, row_h, actions.len(), |ui, range| {
+        egui::ScrollArea::vertical().id_salt("customize_action_list").max_height(height).auto_shrink([false, false]).drag_to_scroll(false).show_rows(ui, row_h, actions.len(), |ui, range| {
             for a in &actions[range] {
                 let text = match crate::icons::for_action(a) {
                     Some(g) => crate::icons::labeled(g, a.trim()),

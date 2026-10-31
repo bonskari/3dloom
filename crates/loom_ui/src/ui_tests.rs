@@ -2709,9 +2709,10 @@ fn modifier_stack_right_click_menus_close() {
     let in_panel = |h: &Harness, t: &str| *h.text_rects(t).iter().find(|r| cp.contains_rect(**r)).unwrap_or_else(|| panic!("{t} in the stack"));
     let bend = in_panel(&h, "Bend").center();
     right_click(&mut h, bend);
-    // Rename, Delete, Off.
+    // Rename, Delete, Cut, Copy, Paste, Paste Instanced, then Off below a separator.
     let m = menus(&h)[0];
-    h.click(menu_row(&h, m, 2));
+    let off = h.find_all(egui::accesskit::Role::Button, "Off").into_iter().find(|r| m.contains_rect(*r)).expect("Off in the menu");
+    h.click(off.center());
     assert!(!h.app.state.scene.node(id).unwrap().modifiers[0].enabled, "Off runs");
     assert!(menus(&h).is_empty(), "and closes the menu");
     let base = in_panel(&h, "Box").center();

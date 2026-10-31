@@ -39,10 +39,16 @@ fn point_at(h: &mut Harness, p: egui::Pos2) {
     h.frames(2);
 }
 
-/// An empty spot of the Main Toolbar (its bottom-right corner, where no button sits).
+/// An empty spot of the Main Toolbar: the rightmost point of its middle row
+/// that no widget covers (the row pans, so a button may sit at its right end).
 fn main_toolbar_blank(h: &Harness) -> egui::Pos2 {
     let r = panel_rect(h, "main_toolbar");
-    egui::pos2(r.max.x - 6.0, r.max.y - 4.0)
+    let controls = [Role::Button, Role::ComboBox, Role::TextInput, Role::CheckBox, Role::ToggleButton];
+    let y = r.center().y;
+    (0..(r.width() as i32 - 12))
+        .map(|dx| egui::pos2(r.max.x - 8.0 - dx as f32, y))
+        .find(|p| !h.widgets.iter().any(|(role, _, w)| controls.contains(role) && w.expand(1.0).contains(*p)))
+        .expect("a blank spot on the Main Toolbar")
 }
 
 /// Customize User Interface on panel `tab`.
