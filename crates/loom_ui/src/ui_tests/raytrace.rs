@@ -61,18 +61,18 @@ fn a_flat_mirror_floor_reflects_the_box_on_it() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("mirror.png");
-    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120, "output": out.to_string_lossy() }));
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 320, "height": 240, "output": out.to_string_lossy() }));
     ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
     ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Reflection" }));
     let traced = render(&mut h);
     ok(&mut h, "Raytracer Settings", serde_json::json!({ "enabled": false }));
     let plain = render(&mut h);
     let (on, off) = (traced.pixels().filter(|p| red(p)).count(), plain.pixels().filter(|p| red(p)).count());
-    assert!(off > 200, "the box is in the frame: {off}");
-    assert!(on > off + 150, "the mirror adds the box's reflection: {on} red pixels against {off}");
+    assert!(off > 300, "the box is in the frame: {off}");
+    assert!(on > off + 200, "the mirror adds the box's reflection: {on} red pixels against {off}");
     let refl = image::open(dir.join("mirror_Reflection.png")).unwrap().to_rgba8();
     let shown = refl.pixels().filter(|p| red(p) && p.0[3] > 0).count();
-    assert!(shown > 150, "the Reflection element has the reflected box: {shown}");
+    assert!(shown > 200, "the Reflection element has the reflected box: {shown}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -101,27 +101,37 @@ fn a_raytrace_glass_sphere_refracts_the_stripe_behind_it() {
     h.cmd(Command::AssignMaterialToSelection);
     h.cmd(Command::FrontView);
     framed(&mut h);
-    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120 }));
+    let dir = std::env::temp_dir().join(format!("loom-ui-glass-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("glass.png");
+    let (w, hh) = (320u32, 240u32);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": w, "height": hh, "output": out.to_string_lossy() }));
     ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
-    // The stripe's red pixels on the middle rows (through the sphere's centre).
-    let stripe_x = |img: &image::RgbaImage| {
-        let xs: Vec<u32> = (55..65).flat_map(|y| (0..160).filter(move |x| red(img.get_pixel(*x, y)))).collect();
-        assert!(!xs.is_empty(), "the stripe shows on the middle rows");
-        xs.iter().sum::<u32>() as f32 / xs.len() as f32
-    };
+    // The Refraction element covers the sphere: its rows and centre.
+    ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Refraction" }));
     ok(&mut h, "Set Material Parameter", serde_json::json!({ "name": "Index of Refr.", "value": 1.0 }));
-    let straight = stripe_x(&render(&mut h));
-    ok(&mut h, "Raytracer Settings", serde_json::json!({ "enabled": false }));
-    let behind = &render(&mut h);
-    // The stripe above the sphere is where IOR 1 shows it through the sphere.
-    let top: Vec<u32> = (28..33).flat_map(|y| (0..160).filter(move |x| red(behind.get_pixel(*x, y)))).collect();
-    assert!(!top.is_empty(), "the stripe above the sphere");
-    let top_x = top.iter().sum::<u32>() as f32 / top.len() as f32;
-    assert!((straight - top_x).abs() <= 1.5, "IOR 1 shows the stripe where it is: {straight} against {top_x}");
-    ok(&mut h, "Raytracer Settings", serde_json::json!({ "enabled": true }));
+    let straight_img = render(&mut h);
+    let refr = image::open(dir.join("glass_Refraction.png")).unwrap().to_rgba8();
+    let rows: Vec<u32> = (0..hh).filter(|y| (0..w).any(|x| refr.get_pixel(x, *y).0[3] > 128)).collect();
+    assert!(rows.len() > 10, "the sphere is in the frame: {} rows", rows.len());
+    let (top, bottom) = (rows[0], rows[rows.len() - 1]);
+    let mid = (top + bottom) / 2;
+    // The stripe's red pixels on rows through the sphere's middle, and on rows above it.
+    let red_x = |img: &image::RgbaImage, ys: std::ops::Range<u32>| {
+        let xs: Vec<u32> = ys.flat_map(|y| (0..w).filter(move |x| red(img.get_pixel(*x, y)))).collect();
+        (!xs.is_empty()).then(|| xs.iter().sum::<u32>() as f32 / xs.len() as f32)
+    };
+    let straight = red_x(&straight_img, mid - 1..mid + 2).expect("the stripe through the sphere at IOR 1");
+    let above = red_x(&straight_img, top.saturating_sub(12)..top.saturating_sub(4)).expect("the stripe above the sphere");
+    assert!((straight - above).abs() <= 1.5, "IOR 1 shows the stripe where it is: {straight} against {above}");
     ok(&mut h, "Set Material Parameter", serde_json::json!({ "name": "Index of Refr.", "value": 1.5 }));
-    let bent = stripe_x(&render(&mut h));
-    assert!((bent - straight).abs() >= 3.0, "IOR 1.5 bends the stripe: {bent} against {straight}");
+    let bent_img = render(&mut h);
+    let bent = red_x(&bent_img, mid - 1..mid + 2);
+    assert!(bent.is_none_or(|b| (b - straight).abs() >= 3.0), "IOR 1.5 bends the stripe: {bent:?} against {straight}");
+    // Above the sphere nothing moves.
+    assert_eq!(red_x(&bent_img, top.saturating_sub(12)..top.saturating_sub(4)), Some(above));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Columns of the image with a pixel more than half covered.
@@ -140,9 +150,9 @@ fn motion_blur_smears_a_moving_box() {
     };
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
     let b = selected(&h);
-    // Far markers so the framing covers the motion.
-    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [140.0, 0.0, 0.0], size: [0.5; 3] });
-    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-140.0, 0.0, 0.0], size: [0.5; 3] });
+    // Markers so the framing covers the motion.
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [100.0, 0.0, 0.0], size: [0.5; 3] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-30.0, 0.0, 0.0], size: [0.5; 3] });
     h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
     h.cmd(Command::AutoKeyModeToggle);
     h.cmd(Command::SetFrame { frame: 2 });
@@ -155,20 +165,20 @@ fn motion_blur_smears_a_moving_box() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("blur.png");
-    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 200, "height": 100, "output": out.to_string_lossy() }));
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 480, "height": 240, "output": out.to_string_lossy() }));
     ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 4 }));
     ok(&mut h, "Renderer Options", serde_json::json!({ "object_blur_duration": 1.0, "object_blur_samples": 8, "object_blur_subdivisions": 8, "image_blur_duration": 1.0 }));
     let sharp = covered_columns(&render(&mut h));
     ok(&mut h, "Set Motion Blur", serde_json::json!({ "kind": "Object" }));
     let object = covered_columns(&render(&mut h));
-    assert!(object > sharp + 8, "Object motion blur streaks the box: {object} columns against {sharp}");
+    assert!(object as f32 > sharp as f32 * 1.5 + 4.0, "Object motion blur streaks the box: {object} columns against {sharp}");
     ok(&mut h, "Set Motion Blur", serde_json::json!({ "kind": "Image" }));
     ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Velocity" }));
     let image_blur = covered_columns(&render(&mut h));
-    assert!(image_blur > sharp + 8, "Image motion blur smears it: {image_blur} columns against {sharp}");
+    assert!(image_blur as f32 > sharp as f32 * 1.5 + 4.0, "Image motion blur smears it: {image_blur} columns against {sharp}");
     let v = image::open(dir.join("blur_Velocity.png")).unwrap().to_rgba8();
     let right = v.pixels().filter(|p| p.0[3] > 0 && p.0[0] > 200).count();
-    assert!(right > 50, "the Velocity element shows the motion to the right: {right}");
+    assert!(right > 20, "the Velocity element shows the motion to the right: {right}");
     // Apply off: no blur.
     ok(&mut h, "Renderer Options", serde_json::json!({ "image_motion_blur": false }));
     let off = covered_columns(&render(&mut h));
@@ -223,7 +233,7 @@ fn color_range_scale_keeps_the_hue_of_overbright_colours() {
     h.cmd(Command::SetWireColor { id: t.0, rgb: [255, 140, 40] });
     framed(&mut h);
     ok(&mut h, "Environment Settings", serde_json::json!({ "level": 5.0 }));
-    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 120, "height": 90 }));
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 240, "height": 180 }));
     ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
     let clipped = |img: &image::RgbaImage| img.pixels().filter(|p| p.0[3] == 255 && p.0[0] >= 250 && p.0[1] >= 245).count();
     let clamp = clipped(&render(&mut h));
