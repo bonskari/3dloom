@@ -52,7 +52,7 @@ struct DefaultsSet {
 const DEFAULTS_FORMAT: &str = "3dloom-defaults-1";
 
 pub fn handles(c: &C) -> bool {
-    matches!(c, C::GrabViewport | C::CustomUiDefaultsSwitcher | C::SwitchUiScheme { .. } | C::SwitchDefaults { .. } | C::SaveDefaultsSet { .. })
+    matches!(c, C::GrabViewport | C::CreateAnimatedSequenceFile | C::MakePreview { .. } | C::CustomUiDefaultsSwitcher | C::SwitchUiScheme { .. } | C::SwitchDefaults { .. } | C::SaveDefaultsSet { .. })
 }
 
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
@@ -61,6 +61,23 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             // The UI takes the picture (the command layer has no screen).
             state.grab_request = Some(state.active_viewport);
             Ok(json!({ "viewport": state.active_viewport }))
+        }
+        C::CreateAnimatedSequenceFile => {
+            state.dialog = Some(crate::viewport::Dialog::MakePreview);
+            Ok(json!({ "dialog": "MakePreview", "start": state.frame_range.0, "end": state.frame_range.1 }))
+        }
+        C::MakePreview { start, end, every_nth, percent, path } => {
+            let s = start.unwrap_or(state.frame_range.0);
+            let e = end.unwrap_or(state.frame_range.1).max(s);
+            let step = every_nth.unwrap_or(1).max(1) as usize;
+            let pct = percent.unwrap_or(50).clamp(1, 100);
+            let w = (state.scene.render.width * pct / 100).max(1);
+            let h = (state.scene.render.height * pct / 100).max(1);
+            let frames: Vec<i32> = (s..=e).step_by(step).collect();
+            let out = path.unwrap_or_else(|| crate::autosave::loom_home().join("previews").join("_scene.avi").to_string_lossy().into_owned());
+            state.grab_request = Some(state.active_viewport);
+            state.status_prompt = format!("Preview: {} frame(s) ({w}x{h}) -> {out}", frames.len());
+            Ok(json!({ "frames": frames, "width": w, "height": h, "path": out }))
         }
         C::CustomUiDefaultsSwitcher => {
             state.dialog = Some(crate::viewport::Dialog::Switcher);

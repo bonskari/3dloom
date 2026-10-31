@@ -54,7 +54,14 @@ pub fn general_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
             v
         }) },
         sep(),
-        MenuEntry { label: "Create Preview".into(), checked: false, action: Action::Submenu(vec![item("Still Image (Grab Viewport)", Command::GrabViewport)]) },
+        MenuEntry {
+            label: "Create Preview".into(),
+            checked: false,
+            action: Action::Submenu(vec![
+                item("Create Preview Animation...", Command::CreateAnimatedSequenceFile),
+                item("Still Image (Grab Viewport)", Command::GrabViewport),
+            ]),
+        },
         sep(),
         item("Configure Viewports...", Command::ConfigureViewports { panel: None }),
     ]

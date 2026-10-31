@@ -550,7 +550,7 @@ impl LoomApp {
                 ElementKind::Specular => BakeLook::Specular { lighting: e.lighting },
                 ElementKind::Lighting => BakeLook::Lighting,
                 ElementKind::Shadows => BakeLook::Shadows,
-                ElementKind::Normals | ElementKind::Alpha | ElementKind::Height => continue,
+                ElementKind::Normals | ElementKind::Alpha | ElementKind::Height | ElementKind::AmbientOcclusion => continue,
             };
             let object = BakeObject { mesh: &mesh, channel: job.channel, surfaces, wire_color: wire };
             let options = BakeOptions { look, shadows: e.shadows, direct: e.direct, indirect: e.indirect, size: [e.width, e.height], background: e.background };

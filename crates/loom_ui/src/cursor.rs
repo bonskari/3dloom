@@ -56,7 +56,7 @@ fn nav_cursor(mode: NavMode, dragging: bool) -> CursorIcon {
             }
         }
         NavMode::Zoom | NavMode::ZoomAll | NavMode::ZoomRegion | NavMode::Fov | NavMode::Perspective => CursorIcon::ZoomIn,
-        NavMode::Orbit | NavMode::OrbitSelected | NavMode::OrbitSubObject | NavMode::OrbitCamera | NavMode::PanCamera | NavMode::RollCamera => CursorIcon::AllScroll,
+        NavMode::Orbit | NavMode::OrbitSelected | NavMode::OrbitSubObject | NavMode::OrbitCamera | NavMode::PanCamera | NavMode::RollCamera | NavMode::WalkThrough => CursorIcon::AllScroll,
         NavMode::DollyCamera | NavMode::DollyTarget | NavMode::DollyBoth | NavMode::LightHotspot | NavMode::LightFalloff => CursorIcon::ResizeVertical,
     }
 }

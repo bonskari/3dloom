@@ -118,6 +118,8 @@ pub enum NavMode {
     /// Light viewport controls: drag to widen or narrow the hotspot / falloff.
     LightHotspot,
     LightFalloff,
+    /// Walkthrough mode: LMB drag turns the view around the eye; WASD/Q/Z step.
+    WalkThrough,
 }
 
 impl NavMode {
@@ -227,7 +229,7 @@ impl ViewportNavigator {
             MouseButton::Middle | MouseButton::Left if mods.alt => Some(DragMode::Orbit),
             MouseButton::Middle => Some(DragMode::Pan),
             MouseButton::Left => match self.mode {
-                NavMode::Orbit | NavMode::OrbitSelected | NavMode::OrbitSubObject | NavMode::OrbitCamera | NavMode::PanCamera => Some(DragMode::Orbit),
+                NavMode::Orbit | NavMode::OrbitSelected | NavMode::OrbitSubObject | NavMode::OrbitCamera | NavMode::PanCamera | NavMode::WalkThrough => Some(DragMode::Orbit),
                 NavMode::Pan | NavMode::TruckCamera => Some(DragMode::Pan),
                 NavMode::Zoom | NavMode::Fov | NavMode::ZoomAll | NavMode::DollyCamera | NavMode::DollyTarget | NavMode::DollyBoth | NavMode::Perspective | NavMode::LightHotspot | NavMode::LightFalloff => Some(DragMode::Zoom),
                 NavMode::RollCamera => Some(DragMode::Roll),
@@ -306,6 +308,7 @@ impl ViewportNavigator {
                         true
                     }
                     DragMode::Orbit => {
+                        let eye = (self.mode == NavMode::WalkThrough && !mods.alt).then(|| cam.eye_position());
                         match self.orbit_snap {
                             Some(step) => {
                                 // Snap the whole drag since the press, not each step.
@@ -315,6 +318,10 @@ impl ViewportNavigator {
                                 cam.orbit(snap(self.orbit_acc.x), snap(self.orbit_acc.y));
                             }
                             None => cam.orbit(delta.x * self.orbit_speed, delta.y * self.orbit_speed),
+                        }
+                        if let Some(eye) = eye {
+                            let (_, _, to_eye) = cam.basis();
+                            cam.target = eye - to_eye * cam.distance;
                         }
                         true
                     }

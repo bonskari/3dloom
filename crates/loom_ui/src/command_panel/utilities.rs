@@ -15,6 +15,8 @@ pub enum Utility {
     ResetXForm,
     AssignVertexColors,
     LinkInheritance,
+    ChannelInfo,
+    UvwRemove,
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
@@ -27,6 +29,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ("Reset XForm", Utility::ResetXForm),
             ("Assign Vertex Colors", Utility::AssignVertexColors),
             ("Link Inheritance (Selected)", Utility::LinkInheritance),
+            ("Channel Info", Utility::ChannelInfo),
+            ("UVW Remove", Utility::UvwRemove),
         ] {
             if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.utility == u, label)).clicked() {
                 app.utility = if app.utility == u { Utility::None } else { u };
@@ -76,6 +80,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }),
         Utility::AssignVertexColors => rollout(ui, "Assign Vertex Colors", true, |ui| assign_vertex_colors(ui, app, false)),
         Utility::LinkInheritance => rollout(ui, "Link Inheritance (Selected)", true, |ui| link_inheritance(ui, app)),
+        Utility::ChannelInfo => rollout(ui, "Channel Info", true, |ui| channel_info(ui, app)),
+        Utility::UvwRemove => rollout(ui, "UVW Remove", true, |ui| uvw_remove(ui, app)),
         Utility::ResetXForm => rollout(ui, "Reset Transform", true, |ui| {
             ui.add_enabled_ui(has, |ui| {
                 if ui.button("Reset Selected").clicked() {
@@ -182,4 +188,90 @@ fn link_inheritance(ui: &mut egui::Ui, app: &mut LoomApp) {
             app.state.status_prompt = e;
         }
     }
+}
+
+fn channel_info(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let sel_id = egui::Id::new("channel_info_selected");
+    let mut picked: Option<(u64, u32)> = ui.ctx().data(|d| d.get_temp(sel_id));
+    let info = app.dispatch(Command::ChannelInfo).unwrap_or_default();
+    let channels = info["channels"].as_array().cloned().unwrap_or_default();
+    if channels.is_empty() {
+        ui.label("Select an object to inspect map channels.");
+        return;
+    }
+    egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+        egui::Grid::new("channel_info_grid").striped(true).num_columns(5).show(ui, |ui| {
+            ui.label("Object");
+            ui.label("ID");
+            ui.label("Channel");
+            ui.label("Verts");
+            ui.label("Faces");
+            ui.end_row();
+            for row in &channels {
+                let id = row["id"].as_u64().unwrap_or(0);
+                let ch = row["channel"].as_u64().map(|c| c as u32);
+                let name = row["object"].as_str().unwrap_or("");
+                let id_str = row["channel_id"].as_str().unwrap_or("");
+                let ch_name = row["name"].as_str().unwrap_or("");
+                let verts = row["num_verts"].as_u64().unwrap_or(0);
+                let faces = row["num_faces"].as_u64().unwrap_or(0);
+                let is_sel = picked.is_some_and(|p| Some(p) == ch.map(|c| (id, c)));
+                if ui.selectable_label(is_sel, name).clicked() {
+                    if let Some(c) = ch {
+                        picked = Some((id, c));
+                    }
+                }
+                ui.label(id_str);
+                ui.label(ch_name);
+                ui.label(verts.to_string());
+                ui.label(faces.to_string());
+                ui.end_row();
+            }
+        });
+    });
+    ui.ctx().data_mut(|d| {
+        if let Some(p) = picked {
+            d.insert_temp(sel_id, p);
+        }
+    });
+    let first_sel = app.state.selection.iter().next().map(|n| n.0);
+    ui.horizontal(|ui| {
+        let can_edit = picked.is_some_and(|(_, c)| c >= 1);
+        if ui.add_enabled(can_edit, egui::Button::new("Copy")).clicked() {
+            if let Some((id, channel)) = picked {
+                let _ = app.dispatch(Command::ChannelInfoCopy { id, channel });
+            }
+        }
+        if ui.add_enabled(can_edit && app.state.channel_clipboard.is_some(), egui::Button::new("Paste")).clicked() {
+            if let Some((id, channel)) = picked {
+                let _ = app.dispatch(Command::ChannelInfoPaste { id, channel });
+            }
+        }
+        if ui.add_enabled(can_edit, egui::Button::new("Clear")).clicked() {
+            if let Some((id, channel)) = picked {
+                let _ = app.dispatch(Command::ChannelInfoClear { id, channel });
+            }
+        }
+        if ui.add_enabled(first_sel.is_some(), egui::Button::new("Add")).clicked() {
+            if let Some(id) = picked.map(|(n, _)| n).or(first_sel) {
+                let _ = app.dispatch(Command::ChannelInfoAdd { id });
+            }
+        }
+    });
+}
+
+fn uvw_remove(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let has = !app.state.selection.is_empty();
+    let grey_id = egui::Id::new("uvw_remove_set_grey");
+    let mut set_gray: bool = ui.ctx().data(|d| d.get_temp(grey_id)).unwrap_or(false);
+    ui.add_enabled_ui(has, |ui| {
+        if ui.button("UVW").clicked() {
+            let _ = app.dispatch(Command::UvwRemove { mode: "uvw".into(), set_gray });
+        }
+        if ui.button("Materials").clicked() {
+            let _ = app.dispatch(Command::UvwRemove { mode: "materials".into(), set_gray });
+        }
+        ui.checkbox(&mut set_gray, "Set Gray");
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(grey_id, set_gray));
 }

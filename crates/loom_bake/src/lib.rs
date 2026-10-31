@@ -478,6 +478,50 @@ pub fn bake_height(low: &[Triangle], raster: &Raster, proj: Option<&Projection>,
     (img, range)
 }
 
+/// An AmbientOcclusionMap: per covered texel, cosine-weighted hemisphere ray
+/// casting against `occluders` (`0` = fully occluded black, `255` = open sky white).
+pub fn bake_ambient_occlusion(low: &[Triangle], raster: &Raster, proj: Option<&Projection>, occluders: &Bvh, samples: u32, max_dist: f32, bg: [u8; 3]) -> (RgbaImage, Option<(f32, f32)>) {
+    let mut img = RgbaImage::new(raster.width, raster.height);
+    background(&mut img, bg);
+    let mut range: Option<(f32, f32)> = None;
+    let n_samples = samples.max(1);
+    let golden = std::f32::consts::PI * (3.0 - 5.0_f32.sqrt());
+    for y in 0..raster.height {
+        for x in 0..raster.width {
+            let Some((ti, b)) = raster.get(x, y) else { continue };
+            let t = &low[ti as usize];
+            let (n, h) = match probe(t, b, proj) {
+                Ok(v) => v,
+                Err(()) => {
+                    img.put_pixel(x, y, Rgba([0, 0, 0, 255]));
+                    continue;
+                }
+            };
+            if proj.is_some() {
+                range = Some(range.map_or((h, h), |(a, c)| (a.min(h), c.max(h))));
+            }
+            let p = t.point(b) + t.normal(b) * h + n * 1e-3;
+            let u = n.any_orthonormal_vector();
+            let v = n.cross(u);
+            let mut occluded = 0u32;
+            for i in 0..n_samples {
+                let r = ((i as f32 + 0.5) / n_samples as f32).sqrt();
+                let theta = i as f32 * golden;
+                let (dx, dy) = (r * theta.cos(), r * theta.sin());
+                let dz = (1.0 - dx * dx - dy * dy).max(0.0).sqrt();
+                let dir = (u * dx + v * dy + n * dz).normalize_or(n);
+                if !occluders.hits(p, dir, 1e-3, max_dist).is_empty() {
+                    occluded += 1;
+                }
+            }
+            let open = 1.0 - (occluded as f32 / n_samples as f32);
+            let g = (open.clamp(0.0, 1.0) * 255.0).round() as u8;
+            img.put_pixel(x, y, Rgba([g, g, g, 255]));
+        }
+    }
+    (img, range)
+}
+
 /// An AlphaMap: the opacity (0–1) of each texel's material, as grey and alpha.
 pub fn bake_alpha(low: &[Triangle], raster: &Raster, opacity: impl Fn(u16) -> f32, bg: [u8; 3]) -> RgbaImage {
     let mut img = RgbaImage::new(raster.width, raster.height);

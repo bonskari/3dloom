@@ -2089,6 +2089,20 @@ commands! {
     ConnectEdgeRing => "Connect Edge Ring", Loom, "Connect the selected edge ring with a new loop.";
     RenameObjectsDialog => "Rename Objects", Loom, "Open Tools > Rename Objects.";
     RenameObjects => "Rename Objects Apply", Loom, "Tools > Rename Objects: rename `ids` (the selection when omitted): Base Name replaces the name, Remove First / Last drop characters, Prefix and Suffix are added, Base Number (+ Step per object) is appended." { ids: Option<Vec<u64>>, base_name: Option<String>, prefix: Option<String>, remove_first: Option<u32>, suffix: Option<String>, remove_last: Option<u32>, base_number: Option<i32>, step: Option<i32> };
+    CreateAnimatedSequenceFile => "Create Animated Sequence File...", MainUI, "Open the Make Preview dialog (Shift+V / Tools > Grab Viewport > Create Animated Sequence File...).";
+    MakePreview => "Make Preview", Loom, "Make Preview: record an animated preview sequence over `start..=end` (default active time segment), every `every_nth` frame, at `percent` % of the render output size." { start: Option<i32>, end: Option<i32>, every_nth: Option<u32>, percent: Option<u32>, path: Option<String> };
+    ManageSceneStates => "Manage Scene States...", MainUI, "Tools > Manage Scene States: open the Manage Scene States dialog.";
+    SaveSceneState => "Save Scene State", Loom, "Tools > Manage Scene States > Save: capture the chosen scene parts (`parts`; default all 9 parts) under `name`." { name: String, parts: Option<Vec<String>> };
+    RestoreSceneState => "Restore Scene State", Loom, "Tools > Manage Scene States > Restore: restore the chosen scene parts (`parts`; default all saved in `name`) from `name`." { name: String, parts: Option<Vec<String>> };
+    DeleteSceneState => "Delete Scene State", Loom, "Tools > Manage Scene States > Delete: delete the scene state `name`." { name: String };
+    WalkThroughViewMode => "Walk Through View Mode", MainUI, "Toggle Walkthrough navigation mode in Perspective and Camera viewports (WASD/Arrow keys move, Q/Z up/down, LMB drag turns the view around the eye).";
+    WalkThroughStep => "Walk Through Step", Loom, "Walkthrough mode step: move the active Perspective or Camera view along its horizontal forward, right, and world up axes." { forward: f32, right: f32, up: f32 };
+    ChannelInfo => "Channel Info", Loom, "Utilities > Channel Info: return the geometry, vertex colour/alpha/illumination, and UV map channels of the selected objects.";
+    ChannelInfoClear => "Channel Info Clear", Loom, "Utilities > Channel Info > Clear: clear UV map channel `channel` (1..=99) on object `id`." { id: u64, channel: u32 };
+    ChannelInfoCopy => "Channel Info Copy", Loom, "Utilities > Channel Info > Copy: copy UV map channel `channel` of object `id` to the channel clipboard." { id: u64, channel: u32 };
+    ChannelInfoPaste => "Channel Info Paste", Loom, "Utilities > Channel Info > Paste: paste the copied UV map channel into channel `channel` of object `id`." { id: u64, channel: u32 };
+    ChannelInfoAdd => "Channel Info Add", Loom, "Utilities > Channel Info > Add: add the next free UV map channel to object `id`." { id: u64 };
+    UvwRemove => "UVW Remove", Loom, "Utilities > UVW Remove: `mode` \"uvw\" removes UVW modifiers and extra map channels from the selection; \"materials\" clears assigned materials (with `set_gray`, sets wire colour to grey)." { mode: String, set_gray: bool };
     Rename => "Rename", Loom, "Rename a node." { id: u64, name: String };
     SetParent => "Set Parent", Loom, "Link a node to a parent (null unlinks), keeping its world transform." { id: u64, parent: Option<u64> };
     Orbit => "Orbit", Loom, "Set the orbit camera (degrees for angles; roll turns the view about its line of sight)." { yaw: Option<f32>, pitch: Option<f32>, distance: Option<f32>, target: Option<[f32; 3]>, roll: Option<f32> };
@@ -2142,7 +2156,6 @@ pub const DEFERRED_SPLINE: &[(&str, &str)] = &[];
 /// Actions that this program deliberately does not implement, with the
 /// spec section that excludes them.
 pub const OUT_OF_SCOPE: &[(&str, &str)] = &[
-    ("Create Animated Sequence File...", "3"),
     ("Hide Particle Systems Toggle", "3"),
     ("Hide Space Warps Toggle", "3"),
     ("Sound Toggle", "3"),

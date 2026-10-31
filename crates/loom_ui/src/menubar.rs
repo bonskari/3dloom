@@ -467,6 +467,11 @@ fn tools_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     cmd(ui, app, "Snapshot...", Command::SnapshotDialog);
     cmd(ui, app, "Rename Objects...", Command::RenameObjectsDialog);
+    cmd(ui, app, "Manage Scene States...", Command::ManageSceneStates);
+    sub(ui, app, "Preview - Grab Viewport", |ui, app| {
+        item(ui, app, "Create Preview Animation...", "Create Animated Sequence File...");
+        cmd(ui, app, "Capture Still Image...", Command::GrabViewport);
+    });
     cmd(ui, app, "Grab Viewport", Command::GrabViewport);
     ui.separator();
     sub(ui, app, "Grids and Snaps", |ui, app| {

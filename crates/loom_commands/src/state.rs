@@ -1656,6 +1656,8 @@ pub struct AppState {
     pub modifier_set: Vec<String>,
     /// Modifier clipboard for Cut / Copy / Paste / Paste Instanced in the stack.
     pub modifier_clipboard: Option<(NodeId, usize, loom_scene::ModifierSlot)>,
+    /// Channel Info clipboard for Copy / Paste map channels.
+    pub channel_clipboard: Option<loom_mesh::half_edge::MapChannel>,
     /// Edit Modifier Stack asked the UI to focus the Modify tab.
     pub focus_modify: bool,
     pub ui_locked: bool,
@@ -2045,6 +2047,7 @@ impl AppState {
             show_modifier_set: false,
             modifier_set: vec!["XForm".into(), "Normal".into(), "Smooth".into(), "Poly Select".into()],
             modifier_clipboard: None,
+            channel_clipboard: None,
             focus_modify: false,
             ui_locked: false,
             shade_selected_faces: false,

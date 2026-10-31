@@ -229,6 +229,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::BipedMultipleFootsteps => biped_footsteps::show(ctx, app, &mut open),
         Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
         Dialog::ManageSceneExplorer => crate::scene_explorer::manage(ctx, app, &mut open),
+        Dialog::MakePreview => make_preview(ctx, app, &mut open),
+        Dialog::ManageSceneStates => manage_scene_states(ctx, app, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
     if !open && app.state.dialog == Some(dialog) {
@@ -417,6 +419,144 @@ fn switcher(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     });
     ctx.data_mut(|d| d.insert_temp(id, picks));
     if done {
+        *open = false;
+    }
+}
+
+fn make_preview(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("make_preview_state");
+    let (mut start, mut end, mut nth, mut pct, mut dir): (i32, i32, u32, u32, String) = ctx
+        .data(|d| d.get_temp(id))
+        .unwrap_or_else(|| (app.state.frame_range.0, app.state.frame_range.1, 1, 100, "_preview".into()));
+    let mut create = false;
+    let mut cancel = false;
+    egui::Window::new("Make Preview").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("Preview Range").strong());
+            ui.horizontal(|ui| {
+                ui.label("Start:");
+                ui.add(egui::DragValue::new(&mut start));
+                ui.label("End:");
+                ui.add(egui::DragValue::new(&mut end));
+                ui.label("Every Nth Frame:");
+                ui.add(egui::DragValue::new(&mut nth).range(1..=100));
+            });
+        });
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("Image Size").strong());
+            ui.horizontal(|ui| {
+                ui.label("Percent of Output:");
+                ui.add(egui::DragValue::new(&mut pct).range(10..=200).suffix("%"));
+            });
+        });
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("Output").strong());
+            ui.horizontal(|ui| {
+                ui.label("Folder:");
+                ui.text_edit_singleline(&mut dir);
+            });
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Create").clicked() {
+                create = true;
+            }
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, (start, end, nth, pct, dir.clone())));
+    if create {
+        let _ = app.dispatch(Command::MakePreview {
+            path: Some(dir),
+            start: Some(start),
+            end: Some(end),
+            every_nth: Some(nth),
+            percent: Some(pct),
+        });
+        *open = false;
+    } else if cancel {
+        *open = false;
+    }
+}
+
+fn manage_scene_states(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("manage_scene_states_ui");
+    let (mut selected, mut new_name, mut parts): (String, String, [bool; 5]) = ctx
+        .data(|d| d.get_temp(id))
+        .unwrap_or_else(|| (String::new(), "SceneState01".into(), [true; 5]));
+    let part_names = [
+        "Light Properties",
+        "Light Transforms",
+        "Object Properties",
+        "Camera Transforms",
+        "Materials",
+    ];
+    let states: Vec<String> = app.state.scene.scene_states.iter().map(|s| s.name.clone()).collect();
+    if selected.is_empty() {
+        if let Some(first) = states.first() {
+            selected = first.clone();
+        }
+    }
+    let mut action: Option<Command> = None;
+    let mut close = false;
+    egui::Window::new("Manage Scene States").open(open).collapsible(false).resizable(true).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Scene States:").strong());
+                egui::ScrollArea::vertical().max_height(160.0).min_scrolled_width(160.0).show(ui, |ui| {
+                    for name in &states {
+                        if ui.selectable_label(&selected == name, name).clicked() {
+                            selected = name.clone();
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.text_edit_singleline(&mut new_name);
+                });
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Parts:").strong());
+                for (i, label) in part_names.iter().enumerate() {
+                    ui.checkbox(&mut parts[i], *label);
+                }
+            });
+        });
+        ui.separator();
+        let chosen_parts: Vec<String> = part_names
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| parts[i].then(|| (*p).to_owned()))
+            .collect();
+        ui.horizontal(|ui| {
+            if ui.button("Save").clicked() && !new_name.trim().is_empty() {
+                selected = new_name.trim().to_owned();
+                action = Some(Command::SaveSceneState {
+                    name: selected.clone(),
+                    parts: Some(chosen_parts.clone()),
+                });
+            }
+            if ui.add_enabled(!selected.is_empty(), egui::Button::new("Restore")).clicked() {
+                action = Some(Command::RestoreSceneState {
+                    name: selected.clone(),
+                    parts: Some(chosen_parts.clone()),
+                });
+            }
+            if ui.add_enabled(!selected.is_empty(), egui::Button::new("Delete")).clicked() {
+                action = Some(Command::DeleteSceneState { name: selected.clone() });
+            }
+            if ui.button("Close").clicked() {
+                close = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, (selected, new_name, parts)));
+    if let Some(cmd) = action {
+        let _ = app.dispatch(cmd);
+    }
+    if close {
         *open = false;
     }
 }

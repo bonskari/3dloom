@@ -95,6 +95,22 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
             }
             continue;
         }
+        // Walk Through navigation: W/S/A/D/E/C and Arrow keys step the eye in the active viewport.
+        if plain && app.state.nav_mode == loom_input::NavMode::WalkThrough {
+            let step = match key {
+                egui::Key::W | egui::Key::ArrowUp => Some((1.0, 0.0, 0.0)),
+                egui::Key::S | egui::Key::ArrowDown => Some((-1.0, 0.0, 0.0)),
+                egui::Key::D | egui::Key::ArrowRight => Some((0.0, 1.0, 0.0)),
+                egui::Key::A | egui::Key::ArrowLeft => Some((0.0, -1.0, 0.0)),
+                egui::Key::E | egui::Key::PageUp => Some((0.0, 0.0, 1.0)),
+                egui::Key::C | egui::Key::PageDown => Some((0.0, 0.0, -1.0)),
+                _ => None,
+            };
+            if let Some((forward, right, up)) = step {
+                let _ = app.dispatch(Command::WalkThroughStep { forward, right, up });
+                continue;
+            }
+        }
         let Some(chord) = chord_of(key, mods) else { continue };
         // A Quad Shortcut (Customize User Interface > Quads) opens its quad set at the pointer.
         if let Some(set) = app.state.ui_custom.quad_for_shortcut(&chord.chart_text()).map(str::to_owned) {

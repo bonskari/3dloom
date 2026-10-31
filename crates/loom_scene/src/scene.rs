@@ -62,6 +62,9 @@ pub struct Scene {
     /// File > XRef Scene / XRef Objects: the referenced files and the nodes they put here.
     #[serde(default)]
     pub xrefs: Vec<XrefRecord>,
+    /// Tools > Manage Scene States: named snapshots of chosen scene parts.
+    #[serde(default)]
+    pub scene_states: Vec<SceneStateRecord>,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -102,6 +105,18 @@ pub struct XrefRecord {
     pub automatic: bool,
     /// Each referenced object's name in the file and its node here.
     pub nodes: Vec<(String, NodeId)>,
+}
+
+/// One saved Scene State (`Tools > Manage Scene States...`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneStateRecord {
+    pub name: String,
+    pub parts: Vec<String>,
+    pub nodes: Vec<(NodeId, crate::node::Transform, crate::node::ObjectKind, crate::node::NodeProps, (bool, bool), u32, Option<crate::material::MaterialId>)>,
+    pub layers: Vec<Layer>,
+    pub current_layer: u32,
+    pub materials: (crate::material::MaterialLibrary, crate::material::MaterialEditorSlots),
+    pub environment: crate::environment::Environment,
 }
 
 fn default_layers() -> Vec<Layer> {
@@ -159,6 +174,7 @@ impl Scene {
             render: Default::default(),
             environment: Default::default(),
             xrefs: Vec::new(),
+            scene_states: Vec::new(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             eval_in_progress: Default::default(),

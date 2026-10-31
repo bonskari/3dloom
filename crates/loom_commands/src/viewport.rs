@@ -485,6 +485,8 @@ pub enum Dialog {
     TransformTypeIn,
     CloneOptions,
     ConfigureModifierSets,
+    MakePreview,
+    ManageSceneStates,
     GridAndSnapSettings,
     Align,
     AlignToView,

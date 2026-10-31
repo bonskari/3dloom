@@ -270,8 +270,302 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({ "on": true }))
         }
         C::PlaceHighlightAt { point, normal, ray } => place_highlight_at(state, Vec3::from(point), Vec3::from(normal), Vec3::from(ray)),
+        C::ManageSceneStates => {
+            state.dialog = Some(Dialog::ManageSceneStates);
+            let names: Vec<String> = state.scene.scene_states.iter().map(|s| s.name.clone()).collect();
+            Ok(json!({ "dialog": "ManageSceneStates", "states": names }))
+        }
+        C::SaveSceneState { name, parts } => save_scene_state(state, &name, parts),
+        C::RestoreSceneState { name, parts } => restore_scene_state(state, &name, parts),
+        C::DeleteSceneState { name } => delete_scene_state(state, &name),
+        C::WalkThroughStep { forward, right, up } => walkthrough_step(state, forward, right, up),
+        C::ChannelInfo => channel_info(state),
+        C::ChannelInfoClear { id, channel } => channel_info_clear(state, NodeId(id), channel),
+        C::ChannelInfoCopy { id, channel } => channel_info_copy(state, NodeId(id), channel),
+        C::ChannelInfoPaste { id, channel } => channel_info_paste(state, NodeId(id), channel),
+        C::ChannelInfoAdd { id } => channel_info_add(state, NodeId(id)),
+        C::UvwRemove { mode, set_gray } => uvw_remove(state, &mode, set_gray),
         _ => Err("not a transform tool command".into()),
     }
+}
+
+/// The 9 scene state part names.
+pub const SCENE_STATE_PARTS: [&str; 9] = [
+    "Light Properties",
+    "Light Transforms",
+    "Object Properties",
+    "Camera Transforms",
+    "Camera Properties",
+    "Layer Properties",
+    "Layer Assignment",
+    "Materials",
+    "Environment",
+];
+
+fn save_scene_state(state: &mut AppState, name: &str, parts: Option<Vec<String>>) -> Result<Value, String> {
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        return Err("a scene state needs a name".into());
+    }
+    let parts = parts.unwrap_or_else(|| SCENE_STATE_PARTS.iter().map(|s| (*s).to_owned()).collect());
+    let nodes = state
+        .scene
+        .nodes()
+        .map(|n| (n.id, n.transform.clone(), n.object.clone(), n.props(), (n.hidden, n.frozen), n.layer, n.material))
+        .collect();
+    let rec = loom_scene::SceneStateRecord {
+        name: name.clone(),
+        parts: parts.clone(),
+        nodes,
+        layers: state.scene.layers.clone(),
+        current_layer: state.scene.current_layer,
+        materials: (state.scene.materials.clone(), state.scene.material_editor.clone()),
+        environment: state.scene.environment.clone(),
+    };
+    let before = state.scene.scene_states.clone();
+    let mut after = before.clone();
+    if let Some(existing) = after.iter_mut().find(|r| r.name == name) {
+        *existing = rec;
+    } else {
+        after.push(rec);
+    }
+    commit(state, "Save Scene State", Change::SetSceneStates { before, after })?;
+    Ok(json!({ "saved": name, "parts": parts }))
+}
+
+fn restore_scene_state(state: &mut AppState, name: &str, parts: Option<Vec<String>>) -> Result<Value, String> {
+    let rec = state.scene.scene_states.iter().find(|r| r.name == name).ok_or_else(|| format!("no scene state {name:?}"))?.clone();
+    let active: Vec<String> = match parts {
+        Some(p) => p.into_iter().filter(|x| rec.parts.contains(x)).collect(),
+        None => rec.parts.clone(),
+    };
+    let has = |p: &str| active.iter().any(|a| a.eq_ignore_ascii_case(p));
+    let mut changes = Vec::new();
+    if has("Environment") && state.scene.environment != rec.environment {
+        changes.push(Change::SetEnvironment { before: Box::new(state.scene.environment.clone()), after: Box::new(rec.environment.clone()) });
+    }
+    if has("Materials") && (state.scene.materials != rec.materials.0 || state.scene.material_editor != rec.materials.1) {
+        changes.push(Change::SetMaterials {
+            before: Box::new((state.scene.materials.clone(), state.scene.material_editor.clone())),
+            after: Box::new(rec.materials.clone()),
+        });
+    }
+    if has("Layer Properties") && (state.scene.layers != rec.layers || state.scene.current_layer != rec.current_layer) {
+        changes.push(Change::SetLayers {
+            before: (state.scene.layers.clone(), state.scene.current_layer),
+            after: (rec.layers.clone(), rec.current_layer),
+        });
+    }
+    for (id, tf, obj, props, flags, layer, mat) in &rec.nodes {
+        let Some(cur) = state.scene.node(*id) else { continue };
+        let is_light = matches!(cur.object, ObjectKind::Light(_));
+        let is_camera = matches!(cur.object, ObjectKind::Camera { .. });
+        if (is_light && has("Light Transforms")) || (is_camera && has("Camera Transforms")) || (!is_light && !is_camera && has("Object Properties")) {
+            if cur.transform != *tf {
+                changes.push(Change::SetTransform { id: *id, before: cur.transform.clone(), after: tf.clone() });
+            }
+        }
+        if (is_light && has("Light Properties")) || (is_camera && has("Camera Properties")) {
+            if cur.object != *obj {
+                changes.push(Change::ReplaceObject { id: *id, before: Box::new(cur.object.clone()), after: Box::new(obj.clone()) });
+            }
+        }
+        if has("Object Properties") {
+            if (cur.hidden, cur.frozen) != *flags {
+                changes.push(Change::SetFlags { id: *id, before: (cur.hidden, cur.frozen), after: *flags });
+            }
+            let cur_props = cur.props();
+            if cur_props != *props {
+                changes.push(Change::SetNodeProps { id: *id, before: Box::new(cur_props), after: Box::new(props.clone()) });
+            }
+        }
+        if has("Layer Assignment") && cur.layer != *layer {
+            changes.push(Change::SetLayer { id: *id, before: cur.layer, after: *layer });
+        }
+        if has("Materials") && cur.material != *mat {
+            changes.push(Change::SetMaterial { id: *id, before: cur.material, after: *mat });
+        }
+    }
+    if !changes.is_empty() {
+        commit(state, "Restore Scene State", Change::Group(changes))?;
+    }
+    Ok(json!({ "restored": name, "parts": active }))
+}
+
+fn delete_scene_state(state: &mut AppState, name: &str) -> Result<Value, String> {
+    let before = state.scene.scene_states.clone();
+    let after: Vec<_> = before.iter().filter(|r| r.name != name).cloned().collect();
+    if after.len() == before.len() {
+        return Err(format!("no scene state {name:?}"));
+    }
+    commit(state, "Delete Scene State", Change::SetSceneStates { before, after })?;
+    Ok(json!({ "deleted": name }))
+}
+
+fn walkthrough_step(state: &mut AppState, forward: f32, right: f32, up: f32) -> Result<Value, String> {
+    state.record_view_as("Walk Through");
+    let cam = &mut state.active_mut().camera;
+    let (r, _, to_eye) = cam.basis();
+    let fwd_horiz = Vec3::new(-to_eye.x, -to_eye.y, 0.0).normalize_or_zero();
+    let fwd = if fwd_horiz != Vec3::ZERO { fwd_horiz } else { -to_eye };
+    let delta = fwd * forward + r * right + Vec3::Z * up;
+    cam.target += delta;
+    let eye = cam.eye_position();
+    Ok(json!({ "eye": [eye.x, eye.y, eye.z], "target": [cam.target.x, cam.target.y, cam.target.z] }))
+}
+
+fn channel_info(state: &AppState) -> Result<Value, String> {
+    let mut rows = Vec::new();
+    for id in &state.selection {
+        let Some(node) = state.scene.node(*id) else { continue };
+        let eval = state.scene.eval_mesh(*id);
+        let mesh = &eval.value.mesh;
+        rows.push(json!({
+            "id": id.0,
+            "object": node.name,
+            "channel_id": "poly",
+            "channel": 0,
+            "name": "mesh",
+            "num_verts": mesh.vertex_count(),
+            "num_faces": mesh.face_count(),
+        }));
+        rows.push(json!({
+            "id": id.0,
+            "object": node.name,
+            "channel_id": "0:vc",
+            "channel": 0,
+            "name": "Vertex Color",
+            "num_verts": mesh.vertex_count(),
+            "num_faces": mesh.face_count(),
+        }));
+        for (&ch, map) in mesh.texture_maps() {
+            rows.push(json!({
+                "id": id.0,
+                "object": node.name,
+                "channel_id": format!("{ch}:map"),
+                "channel": ch,
+                "name": format!("Map Channel {ch}"),
+                "num_verts": map.verts.len(),
+                "num_faces": mesh.face_count(),
+            }));
+        }
+    }
+    Ok(json!({ "channels": rows }))
+}
+
+fn edit_node_mesh(state: &mut AppState, id: NodeId, label: &str, f: impl FnOnce(&mut loom_mesh::Mesh) -> Result<(), String>) -> Result<(), String> {
+    let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+    let mut mesh = match &node.object {
+        ObjectKind::EditablePoly(p) | ObjectKind::EditableMesh(p) => p.mesh.clone(),
+        _ => state.scene.eval_mesh(id).value.mesh.clone(),
+    };
+    f(&mut mesh)?;
+    let after = match &node.object {
+        ObjectKind::EditableMesh(p) => {
+            let mut p = p.clone();
+            p.mesh = mesh;
+            ObjectKind::EditableMesh(p)
+        }
+        ObjectKind::EditablePoly(p) => {
+            let mut p = p.clone();
+            p.mesh = mesh;
+            ObjectKind::EditablePoly(p)
+        }
+        _ => ObjectKind::EditablePoly(PolyObject::from_mesh(mesh)),
+    };
+    commit(state, label, Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(after) })
+}
+
+fn channel_info_clear(state: &mut AppState, id: NodeId, channel: u32) -> Result<Value, String> {
+    edit_node_mesh(state, id, "Channel Info Clear", |m| {
+        m.remove_map(channel);
+        Ok(())
+    })?;
+    Ok(json!({ "id": id.0, "cleared": channel }))
+}
+
+fn channel_info_copy(state: &mut AppState, id: NodeId, channel: u32) -> Result<Value, String> {
+    let eval = state.scene.eval_mesh(id);
+    let map = eval.value.mesh.map(channel).ok_or_else(|| format!("object {} has no map channel {channel}", id.0))?.clone();
+    state.channel_clipboard = Some(map);
+    Ok(json!({ "copied": channel }))
+}
+
+fn channel_info_paste(state: &mut AppState, id: NodeId, channel: u32) -> Result<Value, String> {
+    let clip = state.channel_clipboard.clone().ok_or("channel clipboard is empty")?;
+    edit_node_mesh(state, id, "Channel Info Paste", |m| {
+        let mut map = clip;
+        map.corners.resize(m.half_edge_count(), 0);
+        m.set_map(channel, map);
+        Ok(())
+    })?;
+    Ok(json!({ "id": id.0, "pasted": channel }))
+}
+
+fn channel_info_add(state: &mut AppState, id: NodeId) -> Result<Value, String> {
+    let mut added = 1u32;
+    edit_node_mesh(state, id, "Channel Info Add", |m| {
+        while m.map(added).is_some() && added < 99 {
+            added += 1;
+        }
+        m.ensure_map(added);
+        Ok(())
+    })?;
+    Ok(json!({ "id": id.0, "added": added }))
+}
+
+fn uvw_remove(state: &mut AppState, mode: &str, set_gray: bool) -> Result<Value, String> {
+    let ids: Vec<NodeId> = state.selection.iter().copied().collect();
+    if ids.is_empty() {
+        return Err("select objects first".into());
+    }
+    let mut changes = Vec::new();
+    match mode.to_ascii_lowercase().as_str() {
+        "uvw" => {
+            for id in &ids {
+                let Some(n) = state.scene.node(*id) else { continue };
+                let after_stack: Vec<_> = n
+                    .modifiers
+                    .iter()
+                    .filter(|s| !matches!(s.modifier, loom_scene::Modifier::UnwrapUVW(_) | loom_scene::Modifier::UVWMap { .. } | loom_scene::Modifier::UVWXForm { .. } | loom_scene::Modifier::UvwMappingAdd { .. } | loom_scene::Modifier::UvwMappingClear { .. } | loom_scene::Modifier::MapScaler { .. }))
+                    .cloned()
+                    .collect();
+                if after_stack.len() != n.modifiers.len() {
+                    changes.push(Change::SetStack { id: *id, before: n.modifiers.clone(), after: after_stack });
+                }
+                if let ObjectKind::EditablePoly(p) | ObjectKind::EditableMesh(p) = &n.object {
+                    let mut p2 = p.clone();
+                    let extra: Vec<u32> = p2.mesh.texture_maps().map(|(&c, _)| c).collect();
+                    if !extra.is_empty() {
+                        for c in extra {
+                            p2.mesh.remove_map(c);
+                        }
+                        let after_obj = match &n.object {
+                            ObjectKind::EditableMesh(_) => ObjectKind::EditableMesh(p2),
+                            _ => ObjectKind::EditablePoly(p2),
+                        };
+                        changes.push(Change::ReplaceObject { id: *id, before: Box::new(n.object.clone()), after: Box::new(after_obj) });
+                    }
+                }
+            }
+        }
+        "materials" => {
+            for id in &ids {
+                let Some(n) = state.scene.node(*id) else { continue };
+                if n.material.is_some() {
+                    changes.push(Change::SetMaterial { id: *id, before: n.material, after: None });
+                }
+                if set_gray && n.wire_color != [128, 128, 128] {
+                    changes.push(Change::SetWireColor { id: *id, before: n.wire_color, after: [128, 128, 128] });
+                }
+            }
+        }
+        other => return Err(format!("unknown UVW Remove mode {other:?} (\"uvw\" or \"materials\")")),
+    }
+    if !changes.is_empty() {
+        commit(state, "UVW Remove", Change::Group(changes))?;
+    }
+    Ok(json!({ "mode": mode, "objects": ids.len() }))
 }
 
 /// Clone and Align > Pick: a clicked object joins the destinations (not a

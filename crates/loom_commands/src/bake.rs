@@ -187,7 +187,7 @@ fn to_u8(c: [f32; 3]) -> [u8; 3] {
 /// Bakes a geometry element (Normals, Height, Alpha) of `low` into an image
 /// with edge padding; the heights the projection found come back too.
 #[allow(clippy::too_many_arguments)]
-fn bake_geometry(e: &BakeElement, low: &[Triangle], high: Option<(&Bvh, f32)>, s: &BakeSettings, basis: Mat3, opacity: impl Fn(u16) -> f32, padding: u32) -> (image::RgbaImage, Option<(f32, f32)>) {
+fn bake_geometry(e: &BakeElement, low: &[Triangle], high: Option<(&Bvh, f32)>, scene_bvh: Option<&Bvh>, s: &BakeSettings, basis: Mat3, opacity: impl Fn(u16) -> f32, padding: u32) -> (image::RgbaImage, Option<(f32, f32)>) {
     let raster = loom_bake::rasterize(low, e.width, e.height);
     let o = &s.options;
     let proj = high.map(|(bvh, push)| Projection {
@@ -214,6 +214,18 @@ fn bake_geometry(e: &BakeElement, low: &[Triangle], high: Option<(&Bvh, f32)>, s
             loom_bake::bake_normals(low, &raster, proj.as_ref(), &opts, e.height_in_alpha.then_some((o.min_height, o.max_height)), bg)
         }
         ElementKind::Height => loom_bake::bake_height(low, &raster, proj.as_ref(), o.min_height, o.max_height, bg),
+        ElementKind::AmbientOcclusion => {
+            let own_bvh;
+            let occluders = match (high, scene_bvh) {
+                (Some((bvh, _)), _) => bvh,
+                (None, Some(bvh)) => bvh,
+                (None, None) => {
+                    own_bvh = Bvh::new(low.to_vec());
+                    &own_bvh
+                }
+            };
+            loom_bake::bake_ambient_occlusion(low, &raster, proj.as_ref(), occluders, 16, 100.0, bg)
+        }
         _ => (loom_bake::bake_alpha(low, &raster, opacity, bg), None),
     };
     let mut covered = raster.coverage();
@@ -381,6 +393,14 @@ fn bake(state: &mut AppState) -> Result<Value, String> {
             unwrap_objects(state, &ids, &s, "Render To Texture")?;
         }
         let ch = s.channel();
+        let scene_bvh = elements.iter().any(|e| e.kind == ElementKind::AmbientOcclusion).then(|| {
+            let mut tris = Vec::new();
+            let vis_ids: Vec<NodeId> = state.scene.nodes().filter(|n| is_geometry(n) && state.is_visible(n)).map(|n| n.id).collect();
+            for vid in vis_ids {
+                tris.extend(loom_bake::triangles(&world_mesh(state, vid), 1));
+            }
+            Bvh::new(tris)
+        });
         let mut written = Vec::new();
         let mut skipped = Vec::new();
         let mut jobs = Vec::new();
@@ -435,7 +455,7 @@ fn bake(state: &mut AppState) -> Result<Value, String> {
                     jobs.push(BakeJob { node: *id, element: e.clone(), path: path_s, channel: ch, padding: s.padding });
                     continue;
                 }
-                let (img, range) = bake_geometry(e, &low, high.as_ref().map(|(b, p)| (b, *p)), &s, basis, opacity, s.padding);
+                let (img, range) = bake_geometry(e, &low, high.as_ref().map(|(b, p)| (b, *p)), scene_bvh.as_ref(), &s, basis, opacity, s.padding);
                 if let Some((a, b)) = range {
                     heights = Some(heights.map_or((a, b), |(x, y)| (x.min(a), y.max(b))));
                 }

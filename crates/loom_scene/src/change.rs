@@ -109,6 +109,11 @@ pub enum Change {
         before: Vec<crate::scene::XrefRecord>,
         after: Vec<crate::scene::XrefRecord>,
     },
+    /// Saved Scene States (Tools > Manage Scene States).
+    SetSceneStates {
+        before: Vec<crate::scene::SceneStateRecord>,
+        after: Vec<crate::scene::SceneStateRecord>,
+    },
     Group(Vec<Change>),
 }
 
@@ -246,6 +251,10 @@ impl Change {
                 scene.environment = (**after).clone();
                 Ok(())
             }
+            Change::SetSceneStates { after, .. } => {
+                scene.scene_states = after.clone();
+                Ok(())
+            }
             Change::SetIkChains { after, .. } => {
                 scene.ik_chains = after.clone();
                 scene.bump_version();
@@ -360,6 +369,7 @@ impl Change {
             Change::SetVisibility { id, before: b, after: a } => Change::SetVisibility { id: *id, before: a.clone(), after: b.clone() },
             Change::SetLayers { before: b, after: a } => Change::SetLayers { before: a.clone(), after: b.clone() },
             Change::SetXrefs { before: b, after: a } => Change::SetXrefs { before: a.clone(), after: b.clone() },
+            Change::SetSceneStates { before: b, after: a } => Change::SetSceneStates { before: a.clone(), after: b.clone() },
             Change::SetStack { id, before: b, after: a } => Change::SetStack { id: *id, before: a.clone(), after: b.clone() },
             Change::SetIkChains { before: b, after: a } => Change::SetIkChains { before: a.clone(), after: b.clone() },
             Change::SetMaterials { before: b, after: a } => Change::SetMaterials { before: a.clone(), after: b.clone() },

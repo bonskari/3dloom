@@ -29,7 +29,7 @@ pub mod bake;
 
 pub use node::{Axes3, DisplayProps, RenderProps, TextureDisplay, Node, NodeId, NodeProps, ObjectKind, PaintDeform, PaintDirection, ParamValue, PatchObject, PolyObject, ShapeCommon, ShapeObject, SoftSelection, SubdivSurface, Transform, OBJECT_COLORS};
 pub use param::{Controller, Param};
-pub use scene::{Layer, Scene, XrefRecord};
+pub use scene::{Layer, Scene, SceneStateRecord, XrefRecord};
 pub use material::{Map, MaterialEditorSlots, MaterialId, MaterialLibrary, StandardMaterial};
 pub use modifier::{EvalCtx, Evaluated, Modifier, ModifierSlot, StackValue, StoredSelection, UnwrapUvw};
 pub mod change;

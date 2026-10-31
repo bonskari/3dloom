@@ -1040,6 +1040,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::OrbitViewMode => nav_toggle(state, NavMode::Orbit),
         C::ZoomRegionMode => nav_toggle(state, NavMode::ZoomRegion),
         C::FieldOfViewMode => nav_toggle(state, NavMode::Fov),
+        C::WalkThroughViewMode => nav_toggle(state, NavMode::WalkThrough),
         C::ViewportSafeframesToggle => toggle(&mut state.active_mut().safe_frames, "safe_frames"),
         C::ViewportClipping => toggle(&mut state.active_mut().clipping, "clipping"),
         C::SetViewportClipping { index, near, far } => {
@@ -3422,7 +3423,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c @ (C::BipedFootstepMode { .. } | C::BipedFootstepCreation { .. } | C::BipedCreateMultipleFootsteps { .. } | C::BipedAppendFootstep { .. } | C::BipedActivateFootsteps | C::BipedDeactivateFootsteps | C::BipedDeleteFootsteps) => crate::biped_footsteps::execute(state, c),
         c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::HistoryDependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
-        c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. }) => crate::extras::execute(state, c),
+        c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. } | C::ManageSceneStates | C::SaveSceneState { .. } | C::RestoreSceneState { .. } | C::DeleteSceneState { .. } | C::WalkThroughStep { .. } | C::ChannelInfo | C::ChannelInfoClear { .. } | C::ChannelInfoCopy { .. } | C::ChannelInfoPaste { .. } | C::ChannelInfoAdd { .. } | C::UvwRemove { .. }) => crate::extras::execute(state, c),
         // Every remaining variant is an Unwrap UVW group command.
         other => crate::unwrap::execute(state, other),
     }

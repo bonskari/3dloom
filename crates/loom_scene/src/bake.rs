@@ -17,10 +17,11 @@ pub enum ElementKind {
     Normals,
     Alpha,
     Height,
+    AmbientOcclusion,
 }
 
 impl ElementKind {
-    pub const ALL: [ElementKind; 8] = [ElementKind::Complete, ElementKind::Specular, ElementKind::Diffuse, ElementKind::Shadows, ElementKind::Lighting, ElementKind::Normals, ElementKind::Alpha, ElementKind::Height];
+    pub const ALL: [ElementKind; 9] = [ElementKind::Complete, ElementKind::Specular, ElementKind::Diffuse, ElementKind::Shadows, ElementKind::Lighting, ElementKind::Normals, ElementKind::Alpha, ElementKind::Height, ElementKind::AmbientOcclusion];
 
     /// The element type name (also the default element name).
     pub fn label(self) -> &'static str {
@@ -33,10 +34,14 @@ impl ElementKind {
             ElementKind::Normals => "NormalsMap",
             ElementKind::Alpha => "AlphaMap",
             ElementKind::Height => "HeightMap",
+            ElementKind::AmbientOcclusion => "AmbientOcclusionMap",
         }
     }
 
     pub fn from_label(s: &str) -> Option<Self> {
+        if s.eq_ignore_ascii_case("Ambient Occlusion") || s.eq_ignore_ascii_case("AO") {
+            return Some(ElementKind::AmbientOcclusion);
+        }
         Self::ALL.into_iter().find(|k| k.label().eq_ignore_ascii_case(s) || k.label().trim_end_matches("Map").eq_ignore_ascii_case(s))
     }
 
@@ -47,7 +52,7 @@ impl ElementKind {
             ElementKind::Specular | ElementKind::Diffuse => &["Lighting", "Shadows"],
             ElementKind::Lighting => &["Shadows", "Direct Light On", "Indirect Light On"],
             ElementKind::Normals => &["Output into Normal Bump", "Render Height Map into Alpha Channel"],
-            ElementKind::Shadows | ElementKind::Alpha | ElementKind::Height => &[],
+            ElementKind::Shadows | ElementKind::Alpha | ElementKind::Height | ElementKind::AmbientOcclusion => &[],
         }
     }
 

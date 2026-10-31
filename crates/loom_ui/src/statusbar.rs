@@ -178,7 +178,11 @@ fn navigation_controls(ui: &mut egui::Ui, app: &mut LoomApp) {
                     (icons::ZOOM_REGION, None, "Zoom Region Mode", Command::ZoomRegionMode),
                 ]);
             }
-            nav(ui, app, icons::PAN, "Pan View", NavMode::Pan, Command::PanView);
+            let pan_current = usize::from(app.state.nav_mode == NavMode::WalkThrough);
+            flyout(ui, app, "pan_walk", pan_current, [
+                (icons::PAN, None, "Pan View", Command::PanView),
+                (icons::PAN, Some(icons::SELECTED_VARIANT), "Walk Through", Command::WalkThroughViewMode),
+            ]);
             let orbit_current = match app.state.nav_mode { NavMode::OrbitSelected => 1, NavMode::OrbitSubObject => 2, _ => 0 };
             flyout(ui, app, "orbit", orbit_current, [
                 (icons::ORBIT, None, "Orbit View Mode", Command::OrbitViewMode),
