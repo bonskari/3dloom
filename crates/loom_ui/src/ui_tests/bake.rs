@@ -87,9 +87,7 @@ fn a_lighting_map_renders_on_the_gpu_from_the_dialog() {
     // The dialog grows by the new element's settings over the next frames.
     h.frames(2);
     let rb = button(&h, "Render");
-    eprintln!("DBG renders {:?} at {:?} layer {:?} win {:?} elements {}", h.find_all(Role::Button, "Render"), rb, h.ctx.layer_id_at(rb), window(&h), h.app.state.scene.render.bake.elements.len());
     h.click(rb);
-    eprintln!("DBG after err {:?} prompt {:?} pending {}", h.app.last_error, h.app.state.status_prompt, h.app.state.pending_bake.is_some());
     for _ in 0..10 {
         if h.app.state.pending_bake.is_none() {
             break;
