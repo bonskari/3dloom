@@ -6,7 +6,7 @@
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::Command;
-use loom_scene::render::{AaFilter, AoQuality, TimeOutput, Tonemapper};
+use loom_scene::render::{AaFilter, AdvancedPlugin, AoQuality, ColorRange, TimeOutput, Tonemapper};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Panel {
@@ -14,6 +14,8 @@ pub enum Panel {
     Common,
     Renderer,
     Elements,
+    Raytracer,
+    AdvancedLighting,
 }
 
 const PRESETS: [(u32, u32); 4] = [(320, 240), (640, 480), (1280, 720), (1920, 1080)];
@@ -119,12 +121,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.selectable_value(&mut panel, Panel::Common, "Common");
             ui.selectable_value(&mut panel, Panel::Renderer, "Renderer");
             ui.selectable_value(&mut panel, Panel::Elements, "Render Elements");
+            ui.selectable_value(&mut panel, Panel::Raytracer, "Raytracer");
+            ui.selectable_value(&mut panel, Panel::AdvancedLighting, "Advanced Lighting");
         });
         ui.separator();
         match panel {
             Panel::Common => common(ui, app),
             Panel::Renderer => renderer(ui, app),
             Panel::Elements => elements(ui, app),
+            Panel::Raytracer => raytracer(ui, app),
+            Panel::AdvancedLighting => advanced_lighting(ui, app),
         }
         ui.separator();
         crate::rendered_frame::viewport_controls(ui, app, "render_setup_viewport", "Lock View");
@@ -296,6 +302,12 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
         let mut two = s.force_two_sided;
         if ui.checkbox(&mut two, "Force 2-Sided").changed() {
             run(app, Setup { force_two_sided: Some(two), ..Default::default() }.cmd());
+        }
+    });
+    ui.horizontal(|ui| {
+        let mut use_al = s.advanced.use_advanced;
+        if ui.checkbox(&mut use_al, "Use Advanced Lighting").on_hover_text("Renders trace the Advanced Lighting panel's Light Tracer").changed() {
+            run(app, Light { use_advanced: Some(use_al), ..Default::default() }.cmd());
         }
     });
     ui.horizontal(|ui| {
@@ -479,6 +491,337 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
         if ui.color_edit_button_srgb(&mut amb).changed() {
             run(app, Bevy { ambient: Some(to_f(amb)), ..Default::default() }.cmd());
         }
+    });
+    ui.label(egui::RichText::new("Options").strong());
+    ui.horizontal(|ui| {
+        let mut auto = b.auto_reflect;
+        if ui.checkbox(&mut auto, "Auto Reflect/Refract and Mirrors").on_hover_text("Off: Reflect/Refract and Flat Mirror maps are left out").changed() {
+            run(app, Opts { auto_reflect: Some(auto), ..Default::default() }.cmd());
+        }
+        let mut fm = b.filter_maps;
+        if ui.checkbox(&mut fm, "Filter Maps").on_hover_text("Bitmaps are filtered; off: the nearest texel").changed() {
+            run(app, Opts { filter_maps: Some(fm), ..Default::default() }.cmd());
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Auto Reflect/Refract Maps Rendering Iterations:");
+        let mut it = b.reflect_iterations;
+        let r = ui.add(crate::spinner::spin(ui, &mut it, 1..=10u32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Opts { reflect_iterations: Some(it), ..Default::default() }.cmd());
+        }
+    });
+    ui.label(egui::RichText::new("Global SuperSampling").strong());
+    ui.horizontal(|ui| {
+        let mut off = b.disable_all_samplers;
+        if ui.checkbox(&mut off, "Disable all Samplers").changed() {
+            run(app, Opts { disable_all_samplers: Some(off), ..Default::default() }.cmd());
+        }
+        let mut global = b.global_supersampler;
+        if ui.add_enabled(!b.disable_all_samplers, egui::Checkbox::new(&mut global, "Enable Global Supersampler")).on_hover_text("The Supersampling factor applies").changed() {
+            run(app, Opts { global_supersampler: Some(global), ..Default::default() }.cmd());
+        }
+    });
+    ui.label(egui::RichText::new("Object Motion Blur").strong());
+    ui.horizontal(|ui| {
+        let mut on = b.object_motion_blur;
+        if ui.checkbox(&mut on, "Apply").on_hover_text("Objects whose Motion Blur is Object render over the shutter").changed() {
+            run(app, Opts { object_motion_blur: Some(on), ..Default::default() }.cmd());
+        }
+        ui.label("Duration (frames):");
+        opts_spin(ui, app, b.object_blur_duration, 0.0..=100.0, |v| Opts { object_blur_duration: Some(v), ..Default::default() });
+        ui.label("Samples:");
+        let mut n = b.object_blur_samples;
+        let r = ui.add(crate::spinner::spin(ui, &mut n, 1..=32u32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Opts { object_blur_samples: Some(n), ..Default::default() }.cmd());
+        }
+        ui.label("Duration Subdivisions:");
+        let mut n = b.object_blur_subdivisions;
+        let r = ui.add(crate::spinner::spin(ui, &mut n, 1..=32u32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Opts { object_blur_subdivisions: Some(n), ..Default::default() }.cmd());
+        }
+    });
+    ui.label(egui::RichText::new("Image Motion Blur").strong());
+    ui.horizontal(|ui| {
+        let mut on = b.image_motion_blur;
+        if ui.checkbox(&mut on, "Apply").on_hover_text("Objects whose Motion Blur is Image smear by their motion").changed() {
+            run(app, Opts { image_motion_blur: Some(on), ..Default::default() }.cmd());
+        }
+        ui.label("Duration (frames):");
+        opts_spin(ui, app, b.image_blur_duration, 0.0..=100.0, |v| Opts { image_blur_duration: Some(v), ..Default::default() });
+        let mut env = b.image_blur_environment;
+        if ui.checkbox(&mut env, "Apply to Environment Map").changed() {
+            run(app, Opts { image_blur_environment: Some(env), ..Default::default() }.cmd());
+        }
+    });
+    ui.label(egui::RichText::new("Color Range Limiting").strong());
+    ui.horizontal(|ui| {
+        for (c, label) in [(ColorRange::Clamp, "Clamp"), (ColorRange::Scale, "Scale")] {
+            if ui.radio(b.color_range == c, label).clicked() && b.color_range != c {
+                run(app, Opts { color_range: Some(c), ..Default::default() }.cmd());
+            }
+        }
+    });
+}
+
+/// Renderer Options arguments.
+#[derive(Default)]
+struct Opts {
+    auto_reflect: Option<bool>,
+    reflect_iterations: Option<u32>,
+    filter_maps: Option<bool>,
+    disable_all_samplers: Option<bool>,
+    global_supersampler: Option<bool>,
+    object_motion_blur: Option<bool>,
+    object_blur_duration: Option<f32>,
+    object_blur_samples: Option<u32>,
+    object_blur_subdivisions: Option<u32>,
+    image_motion_blur: Option<bool>,
+    image_blur_duration: Option<f32>,
+    image_blur_environment: Option<bool>,
+    color_range: Option<ColorRange>,
+}
+
+impl Opts {
+    fn cmd(self) -> Command {
+        let Opts { auto_reflect, reflect_iterations, filter_maps, disable_all_samplers, global_supersampler, object_motion_blur, object_blur_duration, object_blur_samples, object_blur_subdivisions, image_motion_blur, image_blur_duration, image_blur_environment, color_range } = self;
+        Command::RendererOptions { auto_reflect, reflect_iterations, filter_maps, disable_all_samplers, global_supersampler, object_motion_blur, object_blur_duration, object_blur_samples, object_blur_subdivisions, image_motion_blur, image_blur_duration, image_blur_environment, color_range }
+    }
+}
+
+fn opts_spin(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::RangeInclusive<f32>, args: impl FnOnce(f32) -> Opts) {
+    let mut v = value;
+    let r = ui.add(crate::spinner::spin(ui, &mut v, range).speed(0.01).max_decimals(3));
+    merge_drag(app, &r);
+    if r.changed() {
+        run(app, args(v).cmd());
+    }
+}
+
+/// Raytracer Settings arguments.
+#[derive(Default)]
+struct Rt {
+    enabled: Option<bool>,
+    max_depth: Option<u32>,
+    cutoff: Option<f32>,
+    max_depth_color: Option<[f32; 3]>,
+    max_depth_background: Option<bool>,
+    antialias: Option<bool>,
+    samples: Option<u32>,
+    blur: Option<f32>,
+    self_reflect: Option<bool>,
+}
+
+impl Rt {
+    fn cmd(self) -> Command {
+        let Rt { enabled, max_depth, cutoff, max_depth_color, max_depth_background, antialias, samples, blur, self_reflect } = self;
+        Command::RaytracerSettings { enabled, max_depth, cutoff, max_depth_color, max_depth_background, antialias, samples, blur, self_reflect, exclude: None }
+    }
+}
+
+fn rt_spin(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::RangeInclusive<f32>, args: impl FnOnce(f32) -> Rt) {
+    let mut v = value;
+    let r = ui.add(crate::spinner::spin(ui, &mut v, range).speed(0.01).max_decimals(3));
+    merge_drag(app, &r);
+    if r.changed() {
+        run(app, args(v).cmd());
+    }
+}
+
+/// Raytracer panel: Raytracer Global Parameters (Ray Depth Control, Global
+/// Ray Antialiaser, Global Raytrace Engine Options, Exclude).
+fn raytracer(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let r = app.state.scene.render.raytracer.clone();
+    ui.label(egui::RichText::new("Raytracer Global Parameters").strong());
+    ui.label(egui::RichText::new("Ray Depth Control").strong());
+    ui.horizontal(|ui| {
+        ui.label("Maximum Depth:");
+        let mut d = r.max_depth;
+        let resp = ui.add(crate::spinner::spin(ui, &mut d, 0..=100u32));
+        merge_drag(app, &resp);
+        if resp.changed() {
+            run(app, Rt { max_depth: Some(d), ..Default::default() }.cmd());
+        }
+        ui.label("Cutoff Threshold:");
+        rt_spin(ui, app, r.cutoff, 0.0..=1.0, |v| Rt { cutoff: Some(v), ..Default::default() });
+    });
+    ui.horizontal(|ui| {
+        ui.label("Color to use at Max. Depth:");
+        if ui.radio(r.max_depth_color.is_some(), "Specify").clicked() && r.max_depth_color.is_none() {
+            run(app, Rt { max_depth_color: Some([0.0; 3]), ..Default::default() }.cmd());
+        }
+        if ui.radio(r.max_depth_color.is_none(), "Background").clicked() && r.max_depth_color.is_some() {
+            run(app, Rt { max_depth_background: Some(true), ..Default::default() }.cmd());
+        }
+        if let Some(c) = r.max_depth_color {
+            let mut rgb = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+            if ui.color_edit_button_srgb(&mut rgb).changed() {
+                run(app, Rt { max_depth_color: Some(rgb.map(|v| v as f32 / 255.0)), ..Default::default() }.cmd());
+            }
+        }
+    });
+    ui.label(egui::RichText::new("Global Ray Antialiaser").strong());
+    ui.horizontal(|ui| {
+        let mut on = r.antialias;
+        if ui.checkbox(&mut on, "On").on_hover_text("Traced rays take several samples: Raytrace reflections and refractions blur by Blur").changed() {
+            run(app, Rt { antialias: Some(on), ..Default::default() }.cmd());
+        }
+        ui.add_enabled_ui(r.antialias, |ui| {
+            ui.label("Rays:");
+            let mut n = r.samples;
+            let resp = ui.add(crate::spinner::spin(ui, &mut n, 2..=64u32));
+            merge_drag(app, &resp);
+            if resp.changed() {
+                run(app, Rt { samples: Some(n), ..Default::default() }.cmd());
+            }
+            ui.label("Blur:");
+            rt_spin(ui, app, r.blur, 0.0..=45.0, |v| Rt { blur: Some(v), ..Default::default() });
+        });
+    });
+    ui.label(egui::RichText::new("Global Raytrace Engine Options").strong());
+    ui.horizontal(|ui| {
+        let mut on = r.enabled;
+        if ui.checkbox(&mut on, "Enable Raytracing").on_hover_text("Off: the renderer's screen-space approximations instead").changed() {
+            run(app, Rt { enabled: Some(on), ..Default::default() }.cmd());
+        }
+        let mut sr = r.self_reflect;
+        if ui.checkbox(&mut sr, "Enable Self Reflect/Refract").changed() {
+            run(app, Rt { self_reflect: Some(sr), ..Default::default() }.cmd());
+        }
+    });
+    ui.horizontal(|ui| {
+        let names: Vec<String> = r.exclude.iter().filter_map(|id| app.state.scene.node(loom_scene::NodeId(*id)).map(|n| n.name.clone())).collect();
+        ui.label(format!("Excluded: {}", if names.is_empty() { "none".to_owned() } else { names.join(", ") }));
+        let selection: Vec<u64> = {
+            let mut v: Vec<u64> = app.state.selection.iter().map(|n| n.0).collect();
+            v.sort();
+            v
+        };
+        if ui.add_enabled(!selection.is_empty(), egui::Button::new("Exclude Selected")).clicked() {
+            let mut list = r.exclude.clone();
+            list.extend(selection.iter().filter(|id| !r.exclude.contains(id)));
+            run(app, Command::RaytracerSettings { enabled: None, max_depth: None, cutoff: None, max_depth_color: None, max_depth_background: None, antialias: None, samples: None, blur: None, self_reflect: None, exclude: Some(list) });
+        }
+        if ui.add_enabled(!r.exclude.is_empty(), egui::Button::new("Clear")).clicked() {
+            run(app, Command::RaytracerSettings { enabled: None, max_depth: None, cutoff: None, max_depth_color: None, max_depth_background: None, antialias: None, samples: None, blur: None, self_reflect: None, exclude: Some(Vec::new()) });
+        }
+    });
+}
+
+/// Advanced Lighting arguments.
+#[derive(Default)]
+struct Light {
+    plugin: Option<AdvancedPlugin>,
+    active: Option<bool>,
+    use_advanced: Option<bool>,
+    global_multiplier: Option<f32>,
+    object_multiplier: Option<f32>,
+    sky_lights_on: Option<bool>,
+    sky_lights: Option<f32>,
+    color_bleed: Option<f32>,
+    rays_per_sample: Option<u32>,
+    color_filter: Option<[f32; 3]>,
+    extra_ambient: Option<[f32; 3]>,
+    filter_size: Option<f32>,
+    ray_bias: Option<f32>,
+    bounces: Option<u32>,
+    cone_angle: Option<f32>,
+}
+
+impl Light {
+    fn cmd(self) -> Command {
+        let Light { plugin, active, use_advanced, global_multiplier, object_multiplier, sky_lights_on, sky_lights, color_bleed, rays_per_sample, color_filter, extra_ambient, filter_size, ray_bias, bounces, cone_angle } = self;
+        Command::AdvancedLighting { plugin, active, use_advanced, global_multiplier, object_multiplier, sky_lights_on, sky_lights, color_bleed, rays_per_sample, color_filter, extra_ambient, filter_size, ray_bias, bounces, cone_angle }
+    }
+}
+
+fn light_spin(ui: &mut egui::Ui, app: &mut LoomApp, value: f32, range: std::ops::RangeInclusive<f32>, args: impl FnOnce(f32) -> Light) {
+    let mut v = value;
+    let r = ui.add(crate::spinner::spin(ui, &mut v, range).speed(0.01).max_decimals(3));
+    merge_drag(app, &r);
+    if r.changed() {
+        run(app, args(v).cmd());
+    }
+}
+
+/// Advanced Lighting panel: Select Advanced Lighting (the plug-in, Active)
+/// and the Light Tracer's Parameters.
+fn advanced_lighting(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let a = app.state.scene.render.advanced.clone();
+    ui.label(egui::RichText::new("Select Advanced Lighting").strong());
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("render_advanced_plugin").selected_text(a.plugin.label()).show_ui(ui, |ui| {
+            for p in AdvancedPlugin::ALL {
+                if ui.selectable_label(p == a.plugin, p.label()).clicked() {
+                    run(app, Light { plugin: Some(p), ..Default::default() }.cmd());
+                }
+            }
+        });
+        let mut active = a.active;
+        if ui.checkbox(&mut active, "Active").changed() {
+            run(app, Light { active: Some(active), ..Default::default() }.cmd());
+        }
+    });
+    if a.plugin != AdvancedPlugin::LightTracer {
+        ui.label(egui::RichText::new("Radiosity is not available: choose the Light Tracer.").small().weak());
+        return;
+    }
+    let to_u8 = |c: [f32; 3]| c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    let to_f = |c: [u8; 3]| c.map(|v| v as f32 / 255.0);
+    ui.label(egui::RichText::new("Parameters").strong());
+    egui::Grid::new("light_tracer_params").num_columns(4).show(ui, |ui| {
+        ui.label("Global Multiplier:");
+        light_spin(ui, app, a.global_multiplier, 0.0..=1000.0, |v| Light { global_multiplier: Some(v), ..Default::default() });
+        ui.label("Object Mult.:");
+        light_spin(ui, app, a.object_multiplier, 0.0..=1000.0, |v| Light { object_multiplier: Some(v), ..Default::default() });
+        ui.end_row();
+        let mut sky = a.sky_lights_on;
+        if ui.checkbox(&mut sky, "Sky Lights:").changed() {
+            run(app, Light { sky_lights_on: Some(sky), ..Default::default() }.cmd());
+        }
+        light_spin(ui, app, a.sky_lights, 0.0..=1000.0, |v| Light { sky_lights: Some(v), ..Default::default() });
+        ui.label("Color Bleed:");
+        light_spin(ui, app, a.color_bleed, 0.0..=1000.0, |v| Light { color_bleed: Some(v), ..Default::default() });
+        ui.end_row();
+        ui.label("Rays/Sample:");
+        let mut rays = a.rays_per_sample;
+        let r = ui.add(crate::spinner::spin(ui, &mut rays, 1..=10000u32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Light { rays_per_sample: Some(rays), ..Default::default() }.cmd());
+        }
+        ui.label("Color Filter:");
+        let mut cf = to_u8(a.color_filter);
+        if ui.color_edit_button_srgb(&mut cf).changed() {
+            run(app, Light { color_filter: Some(to_f(cf)), ..Default::default() }.cmd());
+        }
+        ui.end_row();
+        ui.label("Filter Size:");
+        light_spin(ui, app, a.filter_size, 0.0..=100.0, |v| Light { filter_size: Some(v), ..Default::default() });
+        ui.label("Extra Ambient:");
+        let mut ea = to_u8(a.extra_ambient);
+        if ui.color_edit_button_srgb(&mut ea).changed() {
+            run(app, Light { extra_ambient: Some(to_f(ea)), ..Default::default() }.cmd());
+        }
+        ui.end_row();
+        ui.label("Ray Bias:");
+        light_spin(ui, app, a.ray_bias, 0.0..=100.0, |v| Light { ray_bias: Some(v), ..Default::default() });
+        ui.label("Bounces:");
+        let mut b = a.bounces;
+        let r = ui.add(crate::spinner::spin(ui, &mut b, 0..=10u32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Light { bounces: Some(b), ..Default::default() }.cmd());
+        }
+        ui.end_row();
+        ui.label("Cone Angle:");
+        light_spin(ui, app, a.cone_angle, 33.0..=90.0, |v| Light { cone_angle: Some(v), ..Default::default() });
+        ui.end_row();
     });
 }
 

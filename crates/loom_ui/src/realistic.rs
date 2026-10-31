@@ -12,6 +12,8 @@ use loom_scene::render::RenderArea;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod passes;
+
 pub struct BevyView {
     renderer: loom_bevy::BevyRenderer,
     render_state: egui_wgpu::RenderState,
@@ -376,6 +378,9 @@ impl LoomApp {
             effects: s.effects,
             view,
             element: None,
+            raytrace: s.raytracer.enabled,
+            hide: Vec::new(),
+            light_tracer: s.advanced.light_tracer(),
         };
         let aspect = s.image_aspect();
         let cam = self.camera_for(req.viewport);
@@ -390,7 +395,7 @@ impl LoomApp {
 
         let (full, origin, out, mask) = render_geometry(&s);
         let area = mask.unwrap_or([0, 0, out[0], out[1]]);
-        let bucket = bucket_size(area, s.bevy.supersampling.clamp(1, 4));
+        let bucket = bucket_size(area, s.bevy.samples_per_side());
         let list = buckets(area, bucket);
         let passes = if req.preview { 1 } else { s.bevy.passes.clamp(1, 64) };
         let preview = req.preview.then(|| cleared(out, env.background));
@@ -650,7 +655,7 @@ impl LoomApp {
     /// Render Elements: each enabled element of a finished Production frame,
     /// rendered again with only its part of the shading (or computed: Alpha,
     /// Z Depth), saved to its file and shown in its own window.
-    fn render_elements(&mut self, job: &RenderJob) {
+    fn render_elements(&mut self, job: &RenderJob, layers: &passes::PassLayers) {
         use loom_commands::render::{message, MessageLevel};
         use loom_scene::render::ElementKind;
         let s = job.req.settings.clone();
@@ -707,6 +712,12 @@ impl LoomApp {
                     let depth = loom_bake::gbuffer::depth(&bvh, &Self::gbuffer_view(job));
                     Ok(loom_bake::gbuffer::depth_image(&depth, job.out, e.z_min, e.z_max))
                 }
+                ElementKind::Reflection => Ok(passes::layer_image(layers.traced.as_deref(), job.out, |p| p.reflection)),
+                ElementKind::Refraction => Ok(passes::layer_image(layers.traced.as_deref(), job.out, |p| p.refraction)),
+                ElementKind::Velocity => Ok(match &layers.velocity {
+                    Some((vel, seen)) => loom_bevy::raytrace::velocity_image(vel, seen, job.out),
+                    None => image::RgbaImage::new(job.out[0], job.out[1]),
+                }),
             };
             let img = match img {
                 Ok(i) => i,
@@ -751,8 +762,18 @@ impl LoomApp {
                 b.renderer.sync_hidden(&[]);
             }
         }
+        let mut layers = passes::PassLayers::default();
         if result.is_ok() && job.preview.is_none() && job.req.settings.force_wireframe {
             self.force_wireframe(&job);
+        } else if result.is_ok() && job.preview.is_none() {
+            // Motion blur and ray tracing on the finished frame, before its effects.
+            if let Err(e) = self.object_motion_blur(&job) {
+                loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Object Motion Blur: {e}"));
+            }
+            self.trace_passes(&job, &mut layers);
+            if let Err(e) = self.image_motion_blur(&job, &mut layers) {
+                loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Image Motion Blur: {e}"));
+            }
         }
         if let Some(mut img) = job.preview.take() {
             if result.is_ok() {
@@ -825,7 +846,7 @@ impl LoomApp {
                 }
                 let s = &job.req.settings;
                 if !job.req.iterative && s.elements_active && s.elements.iter().any(|e| e.enabled) {
-                    self.render_elements(&job);
+                    self.render_elements(&job, &layers);
                 }
             }
             Err(e) if e == "cancelled" => {

@@ -18,6 +18,8 @@ const LOOK_SHADER: Handle<Shader> = weak_handle!("6d2f9a41-7c3e-4b85-9e10-2a4f8c
 pub const FALLOFF: u32 = 1;
 pub const TOON: u32 = 2;
 pub const MATTE: u32 = 4;
+/// Color Range Limiting Scale: an over-bright colour scales down to keep its hue.
+pub const COLOR_SCALE: u32 = 8;
 
 pub use uniform::LookParams;
 

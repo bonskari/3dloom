@@ -220,6 +220,187 @@ pub struct BevyRenderSettings {
     pub tonemapper: Tonemapper,
     pub exposure: f32,
     pub dither: bool,
+    /// Options > Auto Reflect/Refract and Mirrors: Reflect/Refract and Flat
+    /// Mirror maps render (off: they are left out).
+    pub auto_reflect: bool,
+    /// Auto Reflect/Refract Maps > Rendering Iterations (1-10): how many
+    /// reflections deep a Reflect/Refract map sees.
+    pub reflect_iterations: u32,
+    /// Antialiasing > Filter Maps: bitmaps are filtered (off: nearest texel).
+    pub filter_maps: bool,
+    /// Global SuperSampling: Disable all Samplers, and Enable Global
+    /// Supersampler (the Supersampling factor applies only with it on).
+    pub disable_all_samplers: bool,
+    pub global_supersampler: bool,
+    /// Object Motion Blur: Apply, Duration (frames the shutter is open),
+    /// Samples and Duration Subdivisions (1-32; Samples of the
+    /// Subdivisions' time slices render).
+    pub object_motion_blur: bool,
+    pub object_blur_duration: f32,
+    pub object_blur_samples: u32,
+    pub object_blur_subdivisions: u32,
+    /// Image Motion Blur: Apply, Duration, Apply to Environment Map.
+    pub image_motion_blur: bool,
+    pub image_blur_duration: f32,
+    pub image_blur_environment: bool,
+    /// Color Range Limiting: Clamp or Scale over-bright colours.
+    pub color_range: ColorRange,
+}
+
+/// Color Range Limiting: what happens to colour components above 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ColorRange {
+    /// Each component above 1 becomes 1 (bright colours go white).
+    #[default]
+    Clamp,
+    /// All three scale down so the largest is 1 (the hue stays).
+    Scale,
+}
+
+impl ColorRange {
+    /// Linear colour `c` brought into 0-1.
+    pub fn limit(self, c: [f32; 3]) -> [f32; 3] {
+        match self {
+            ColorRange::Clamp => c.map(|v| v.clamp(0.0, 1.0)),
+            ColorRange::Scale => {
+                let m = c[0].max(c[1]).max(c[2]);
+                let k = if m > 1.0 { 1.0 / m } else { 1.0 };
+                c.map(|v| (v * k).max(0.0))
+            }
+        }
+    }
+}
+
+impl BevyRenderSettings {
+    /// Samples per output pixel side: the Supersampling factor while Global
+    /// SuperSampling is enabled and not disabled, else 1.
+    pub fn samples_per_side(&self) -> u32 {
+        if self.disable_all_samplers || !self.global_supersampler {
+            1
+        } else {
+            self.supersampling.clamp(1, 4)
+        }
+    }
+
+    /// The shutter times of Object Motion Blur around frame `frame`: Samples
+    /// of the Duration Subdivisions' slices (spread evenly when fewer), each
+    /// at its slice's centre, the shutter centred on the frame.
+    pub fn object_blur_times(&self, frame: f32) -> Vec<f32> {
+        let subs = self.object_blur_subdivisions.clamp(1, 32);
+        let samples = self.object_blur_samples.clamp(1, 32).min(subs);
+        let d = self.object_blur_duration.max(0.0);
+        (0..samples)
+            .map(|i| {
+                let k = (i as u64 * subs as u64 / samples as u64) as u32;
+                frame + d * ((k as f32 + 0.5) / subs as f32 - 0.5)
+            })
+            .collect()
+    }
+}
+
+/// Raytracer Global Parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RaytracerSettings {
+    /// Global Raytrace Engine Options > Enable Raytracing (off: the
+    /// renderer's screen-space approximations instead).
+    pub enabled: bool,
+    /// Ray Depth Control: Maximum Depth (0-100), Cutoff Threshold (0-1),
+    /// and the colour a ray returns at the depth (None: the background).
+    pub max_depth: u32,
+    pub cutoff: f32,
+    pub max_depth_color: Option<[f32; 3]>,
+    /// Global Ray Antialiaser: On, its rays per sample (2-64) and the blur
+    /// spread of Raytrace reflections and refractions in degrees (0-45).
+    pub antialias: bool,
+    pub samples: u32,
+    pub blur: f32,
+    /// Enable Self Reflect/Refract.
+    pub self_reflect: bool,
+    /// Exclude: objects the rays do not see (node ids).
+    pub exclude: Vec<u64>,
+}
+
+impl Default for RaytracerSettings {
+    fn default() -> Self {
+        Self { enabled: true, max_depth: 9, cutoff: 0.05, max_depth_color: None, antialias: false, samples: 8, blur: 0.0, self_reflect: true, exclude: Vec::new() }
+    }
+}
+
+/// Advanced Lighting > Select Advanced Lighting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AdvancedPlugin {
+    #[default]
+    None,
+    LightTracer,
+}
+
+impl AdvancedPlugin {
+    pub const ALL: [AdvancedPlugin; 2] = [AdvancedPlugin::None, AdvancedPlugin::LightTracer];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AdvancedPlugin::None => "<no lighting plug-in>",
+            AdvancedPlugin::LightTracer => "Light Tracer",
+        }
+    }
+}
+
+/// Advanced Lighting panel: the plug-in, Active and the Light Tracer's
+/// Parameters; Common > Options > Use Advanced Lighting.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdvancedLighting {
+    pub plugin: AdvancedPlugin,
+    /// Select Advanced Lighting > Active.
+    pub active: bool,
+    /// Common > Options > Use Advanced Lighting.
+    pub use_advanced: bool,
+    /// Light Tracer General Settings.
+    pub global_multiplier: f32,
+    pub object_multiplier: f32,
+    pub sky_lights_on: bool,
+    pub sky_lights: f32,
+    pub color_bleed: f32,
+    pub rays_per_sample: u32,
+    /// Color Filter and Extra Ambient (sRGB 0-1).
+    pub color_filter: [f32; 3],
+    pub extra_ambient: [f32; 3],
+    /// Filter Size in pixels: the traced light is blurred this much.
+    pub filter_size: f32,
+    pub ray_bias: f32,
+    pub bounces: u32,
+    /// Cone Angle (33-90 degrees) the gathering rays stay within.
+    pub cone_angle: f32,
+}
+
+impl Default for AdvancedLighting {
+    fn default() -> Self {
+        Self {
+            plugin: AdvancedPlugin::None,
+            active: true,
+            use_advanced: true,
+            global_multiplier: 1.0,
+            object_multiplier: 1.0,
+            sky_lights_on: true,
+            sky_lights: 1.0,
+            color_bleed: 1.0,
+            rays_per_sample: 250,
+            color_filter: [1.0; 3],
+            extra_ambient: [0.0; 3],
+            filter_size: 0.5,
+            ray_bias: 0.03,
+            bounces: 0,
+            cone_angle: 88.0,
+        }
+    }
+}
+
+impl AdvancedLighting {
+    /// Whether a render traces the Light Tracer's light.
+    pub fn light_tracer(&self) -> bool {
+        self.plugin == AdvancedPlugin::LightTracer && self.active && self.use_advanced
+    }
 }
 
 impl Default for BevyRenderSettings {
@@ -248,6 +429,21 @@ impl Default for BevyRenderSettings {
             tonemapper: Tonemapper::None,
             exposure: 0.0,
             dither: true,
+            auto_reflect: true,
+            reflect_iterations: 1,
+            filter_maps: true,
+            disable_all_samplers: false,
+            global_supersampler: true,
+            // The reference's defaults: both Apply on (only objects whose
+            // Motion Blur property asks for it blur), Duration 0.5, 10 / 10.
+            object_motion_blur: true,
+            object_blur_duration: 0.5,
+            object_blur_samples: 10,
+            object_blur_subdivisions: 10,
+            image_motion_blur: true,
+            image_blur_duration: 0.5,
+            image_blur_environment: false,
+            color_range: ColorRange::Clamp,
         }
     }
 }
@@ -307,6 +503,13 @@ mod quality_tests {
     }
 
     #[test]
+    fn color_range_clamps_or_scales_over_bright_colours() {
+        assert_eq!(ColorRange::Clamp.limit([2.0, 1.0, 0.5]), [1.0, 1.0, 0.5]);
+        assert_eq!(ColorRange::Scale.limit([2.0, 1.0, 0.5]), [1.0, 0.5, 0.25]);
+        assert_eq!(ColorRange::Scale.limit([0.5, 0.2, -0.1]), [0.5, 0.2, 0.0]);
+    }
+
+    #[test]
     fn old_scenes_load_with_the_new_quality_defaults() {
         let s: BevyRenderSettings = serde_json::from_str(r#"{"antialiasing":false,"supersampling":2}"#).unwrap();
         assert!(!s.antialiasing);
@@ -326,10 +529,25 @@ pub enum ElementKind {
     Shadow,
     Specular,
     ZDepth,
+    Reflection,
+    Refraction,
+    Velocity,
 }
 
 impl ElementKind {
-    pub const ALL: [ElementKind; 8] = [ElementKind::Alpha, ElementKind::Background, ElementKind::Diffuse, ElementKind::Lighting, ElementKind::SelfIllumination, ElementKind::Shadow, ElementKind::Specular, ElementKind::ZDepth];
+    pub const ALL: [ElementKind; 11] = [
+        ElementKind::Alpha,
+        ElementKind::Background,
+        ElementKind::Diffuse,
+        ElementKind::Lighting,
+        ElementKind::Reflection,
+        ElementKind::Refraction,
+        ElementKind::SelfIllumination,
+        ElementKind::Shadow,
+        ElementKind::Specular,
+        ElementKind::Velocity,
+        ElementKind::ZDepth,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -341,6 +559,9 @@ impl ElementKind {
             ElementKind::Shadow => "Shadow",
             ElementKind::Specular => "Specular",
             ElementKind::ZDepth => "Z Depth",
+            ElementKind::Reflection => "Reflection",
+            ElementKind::Refraction => "Refraction",
+            ElementKind::Velocity => "Velocity",
         }
     }
 }
@@ -507,6 +728,10 @@ pub struct RenderSettings {
     pub display_elements: bool,
     /// Render To Texture.
     pub bake: crate::bake::BakeSettings,
+    /// Raytracer panel > Raytracer Global Parameters.
+    pub raytracer: RaytracerSettings,
+    /// Advanced Lighting panel, and Common > Options > Use Advanced Lighting.
+    pub advanced: AdvancedLighting,
 }
 
 impl Default for RenderSettings {
@@ -543,6 +768,8 @@ impl Default for RenderSettings {
             elements_active: true,
             display_elements: true,
             bake: crate::bake::BakeSettings::default(),
+            raytracer: RaytracerSettings::default(),
+            advanced: AdvancedLighting::default(),
         }
     }
 }
@@ -585,10 +812,15 @@ impl RenderSettings {
     pub fn take_categories(&mut self, from: &RenderSettings, common: bool, renderer: bool, elements: bool) {
         if common {
             let (bevy, wire, thickness, list, active, display, bake) = (self.bevy.clone(), self.force_wireframe, self.wire_thickness, self.elements.clone(), self.elements_active, self.display_elements, self.bake.clone());
+            let (raytracer, advanced) = (self.raytracer.clone(), self.advanced.clone());
             *self = from.clone();
             (self.bevy, self.force_wireframe, self.wire_thickness, self.elements, self.elements_active, self.display_elements, self.bake) = (bevy, wire, thickness, list, active, display, bake);
+            (self.raytracer, self.advanced) = (raytracer, advanced);
         }
         if renderer {
+            // The renderer's own panels: Renderer, Raytracer, Advanced Lighting.
+            self.raytracer = from.raytracer.clone();
+            self.advanced = from.advanced.clone();
             self.bevy = from.bevy.clone();
             self.force_wireframe = from.force_wireframe;
             self.wire_thickness = from.wire_thickness;

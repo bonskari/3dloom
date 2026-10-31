@@ -1922,7 +1922,7 @@ impl DisplayProps {
 
 /// Object Properties > Rendering Control, per object: what renders see of
 /// the object. The viewports draw it regardless.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RenderProps {
     /// Off: the object is left out of renders (and casts no shadows there).
@@ -1931,27 +1931,57 @@ pub struct RenderProps {
     pub inherit_visibility: bool,
     /// Off: cameras do not see the object; its shadows still render.
     pub visible_to_camera: bool,
+    /// Off: reflections and refractions do not see the object.
+    pub visible_to_reflection: bool,
     pub receive_shadows: bool,
     pub cast_shadows: bool,
     /// Rendering Control By Layer: the layer's rendering control applies.
     pub by_layer: bool,
+    /// Motion Blur: None, Object or Image, Enabled, Multiplier (Image: the
+    /// streak's length). Always the object's own (not By Layer).
+    pub motion_blur: MotionBlur,
+    pub motion_blur_enabled: bool,
+    pub motion_blur_multiplier: f32,
+}
+
+/// Object Properties > Motion Blur kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MotionBlur {
+    #[default]
+    None,
+    /// Time slices of the object rendered over the shutter (Object Motion Blur).
+    Object,
+    /// The rendered object smeared by its velocity (Image Motion Blur).
+    Image,
 }
 
 impl Default for RenderProps {
     fn default() -> Self {
-        Self { renderable: true, inherit_visibility: true, visible_to_camera: true, receive_shadows: true, cast_shadows: true, by_layer: false }
+        Self {
+            renderable: true,
+            inherit_visibility: true,
+            visible_to_camera: true,
+            visible_to_reflection: true,
+            receive_shadows: true,
+            cast_shadows: true,
+            by_layer: false,
+            motion_blur: MotionBlur::None,
+            motion_blur_enabled: true,
+            motion_blur_multiplier: 1.0,
+        }
     }
 }
 
 impl RenderProps {
     /// Rendering Control checkbox names, in dialog order.
-    pub const NAMES: [&'static str; 5] = ["Renderable", "Inherit Visibility", "Visible to Camera", "Receive Shadows", "Cast Shadows"];
+    pub const NAMES: [&'static str; 6] = ["Renderable", "Inherit Visibility", "Visible to Camera", "Visible to Reflection/Refraction", "Receive Shadows", "Cast Shadows"];
 
     pub fn get(&self, name: &str) -> Option<bool> {
         Some(match name {
             "Renderable" => self.renderable,
             "Inherit Visibility" => self.inherit_visibility,
             "Visible to Camera" => self.visible_to_camera,
+            "Visible to Reflection/Refraction" => self.visible_to_reflection,
             "Receive Shadows" => self.receive_shadows,
             "Cast Shadows" => self.cast_shadows,
             _ => return None,
@@ -1963,11 +1993,21 @@ impl RenderProps {
             "Renderable" => self.renderable = value,
             "Inherit Visibility" => self.inherit_visibility = value,
             "Visible to Camera" => self.visible_to_camera = value,
+            "Visible to Reflection/Refraction" => self.visible_to_reflection = value,
             "Receive Shadows" => self.receive_shadows = value,
             "Cast Shadows" => self.cast_shadows = value,
             _ => return false,
         }
         true
+    }
+
+    /// The motion blur the object renders with (None when off).
+    pub fn blur(&self) -> MotionBlur {
+        if self.motion_blur_enabled {
+            self.motion_blur
+        } else {
+            MotionBlur::None
+        }
     }
 }
 

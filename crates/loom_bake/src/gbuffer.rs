@@ -56,7 +56,7 @@ impl View {
 
     /// The ray through image position (x, y): origin on the near plane,
     /// unit direction and the distance to the far plane.
-    fn ray(&self, world_from_clip: Mat4, x: f32, y: f32) -> (Vec3, Vec3, f32) {
+    pub fn ray(&self, world_from_clip: Mat4, x: f32, y: f32) -> (Vec3, Vec3, f32) {
         let (nx, ny) = self.ndc(x, y);
         let p = |z: f32| {
             let h = world_from_clip * Vec4::new(nx, ny, z, 1.0);
@@ -68,7 +68,7 @@ impl View {
     }
 
     /// Image position in pixels of world point `p` (None behind the camera).
-    fn project(&self, clip_from_world: Mat4, p: Vec3) -> Option<[f32; 2]> {
+    pub fn project(&self, clip_from_world: Mat4, p: Vec3) -> Option<[f32; 2]> {
         let c = clip_from_world * p.extend(1.0);
         if c.w <= 1e-6 {
             return None;
@@ -81,7 +81,7 @@ impl View {
 }
 
 /// Runs `f` for every pixel on all cores, row by row.
-fn per_pixel<T: Send + Clone>(size: [u32; 2], empty: T, f: impl Fn(u32, u32) -> T + Sync) -> Vec<T> {
+pub fn per_pixel<T: Send + Clone>(size: [u32; 2], empty: T, f: impl Fn(u32, u32) -> T + Sync) -> Vec<T> {
     let (w, h) = (size[0] as usize, size[1] as usize);
     let mut out = vec![empty; w * h];
     if w == 0 || h == 0 {

@@ -201,6 +201,10 @@ pub fn handles(c: &C) -> bool {
             | C::BevyRendererSettings { .. }
             | C::RenderTimeOutput { .. }
             | C::RenderOptions { .. }
+            | C::RaytracerSettings { .. }
+            | C::AdvancedLighting { .. }
+            | C::RendererOptions { .. }
+            | C::SetMotionBlur { .. }
             | C::RenderMessageWindow
             | C::RamPlayer
             | C::RamPlayerOpen { .. }
@@ -247,6 +251,30 @@ pub fn viewport_name(state: &AppState, index: usize) -> String {
         Some(crate::ViewKind::Camera(id)) => state.scene.node(id).map(|n| n.name.clone()).unwrap_or_else(|| "Camera".into()),
         Some(k) => k.label().to_owned(),
         None => String::new(),
+    }
+}
+
+fn ranged(name: &str, v: f32, lo: f32, hi: f32) -> Result<f32, String> {
+    if v.is_finite() && (lo..=hi).contains(&v) {
+        Ok(v)
+    } else {
+        Err(format!("{name} {v}: {lo} to {hi}"))
+    }
+}
+
+fn check_u32(name: &str, v: u32, lo: u32, hi: u32) -> Result<u32, String> {
+    if (lo..=hi).contains(&v) {
+        Ok(v)
+    } else {
+        Err(format!("{name} {v}: {lo} to {hi}"))
+    }
+}
+
+fn color01(name: &str, c: [f32; 3]) -> Result<[f32; 3], String> {
+    if c.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) {
+        Ok(c)
+    } else {
+        Err(format!("{name} {c:?}: sRGB 0 to 1"))
     }
 }
 
@@ -907,6 +935,176 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             set_settings(state, "Render Elements", s)?;
             Ok(json!({ "active": state.scene.render.elements_active, "display": state.scene.render.display_elements }))
+        }
+        C::RaytracerSettings { enabled, max_depth, cutoff, max_depth_color, max_depth_background, antialias, samples, blur, self_reflect, exclude } => {
+            let mut s = state.scene.render.clone();
+            let r = &mut s.raytracer;
+            if let Some(v) = enabled {
+                r.enabled = v;
+            }
+            if let Some(v) = max_depth {
+                r.max_depth = check_u32("maximum depth", v, 0, 100)?;
+            }
+            if let Some(v) = cutoff {
+                r.cutoff = ranged("cutoff threshold", v, 0.0, 1.0)?;
+            }
+            if let Some(c) = max_depth_color {
+                r.max_depth_color = Some(color01("max depth color", c)?);
+            }
+            if max_depth_background == Some(true) {
+                r.max_depth_color = None;
+            }
+            if let Some(v) = antialias {
+                r.antialias = v;
+            }
+            if let Some(v) = samples {
+                r.samples = check_u32("samples", v, 2, 64)?;
+            }
+            if let Some(v) = blur {
+                r.blur = ranged("blur", v, 0.0, 45.0)?;
+            }
+            if let Some(v) = self_reflect {
+                r.self_reflect = v;
+            }
+            if let Some(ids) = exclude {
+                if let Some(id) = ids.iter().find(|id| state.scene.node(loom_scene::NodeId(**id)).is_none()) {
+                    return Err(format!("exclude: no object {id}"));
+                }
+                r.exclude = ids;
+            }
+            set_settings(state, "Raytracer Settings", s)?;
+            Ok(serde_json::to_value(&state.scene.render.raytracer).unwrap_or(Value::Null))
+        }
+        C::AdvancedLighting { plugin, active, use_advanced, global_multiplier, object_multiplier, sky_lights_on, sky_lights, color_bleed, rays_per_sample, color_filter, extra_ambient, filter_size, ray_bias, bounces, cone_angle } => {
+            let mut s = state.scene.render.clone();
+            let a = &mut s.advanced;
+            if let Some(v) = plugin {
+                a.plugin = v;
+            }
+            if let Some(v) = active {
+                a.active = v;
+            }
+            if let Some(v) = use_advanced {
+                a.use_advanced = v;
+            }
+            if let Some(v) = global_multiplier {
+                a.global_multiplier = ranged("global multiplier", v, 0.0, 1000.0)?;
+            }
+            if let Some(v) = object_multiplier {
+                a.object_multiplier = ranged("object multiplier", v, 0.0, 1000.0)?;
+            }
+            if let Some(v) = sky_lights_on {
+                a.sky_lights_on = v;
+            }
+            if let Some(v) = sky_lights {
+                a.sky_lights = ranged("sky lights", v, 0.0, 1000.0)?;
+            }
+            if let Some(v) = color_bleed {
+                a.color_bleed = ranged("color bleed", v, 0.0, 1000.0)?;
+            }
+            if let Some(v) = rays_per_sample {
+                a.rays_per_sample = check_u32("rays/sample", v, 1, 10000)?;
+            }
+            if let Some(c) = color_filter {
+                a.color_filter = color01("color filter", c)?;
+            }
+            if let Some(c) = extra_ambient {
+                a.extra_ambient = color01("extra ambient", c)?;
+            }
+            if let Some(v) = filter_size {
+                a.filter_size = ranged("filter size", v, 0.0, 100.0)?;
+            }
+            if let Some(v) = ray_bias {
+                a.ray_bias = ranged("ray bias", v, 0.0, 100.0)?;
+            }
+            if let Some(v) = bounces {
+                a.bounces = check_u32("bounces", v, 0, 10)?;
+            }
+            if let Some(v) = cone_angle {
+                a.cone_angle = ranged("cone angle", v, 33.0, 90.0)?;
+            }
+            set_settings(state, "Advanced Lighting", s)?;
+            Ok(serde_json::to_value(&state.scene.render.advanced).unwrap_or(Value::Null))
+        }
+        C::RendererOptions { auto_reflect, reflect_iterations, filter_maps, disable_all_samplers, global_supersampler, object_motion_blur, object_blur_duration, object_blur_samples, object_blur_subdivisions, image_motion_blur, image_blur_duration, image_blur_environment, color_range } => {
+            let mut s = state.scene.render.clone();
+            let b = &mut s.bevy;
+            if let Some(v) = auto_reflect {
+                b.auto_reflect = v;
+            }
+            if let Some(v) = reflect_iterations {
+                b.reflect_iterations = check_u32("rendering iterations", v, 1, 10)?;
+            }
+            if let Some(v) = filter_maps {
+                b.filter_maps = v;
+            }
+            if let Some(v) = disable_all_samplers {
+                b.disable_all_samplers = v;
+            }
+            if let Some(v) = global_supersampler {
+                b.global_supersampler = v;
+            }
+            if let Some(v) = object_motion_blur {
+                b.object_motion_blur = v;
+            }
+            if let Some(v) = object_blur_duration {
+                b.object_blur_duration = ranged("object blur duration", v, 0.0, 100.0)?;
+            }
+            if let Some(v) = object_blur_samples {
+                b.object_blur_samples = check_u32("object blur samples", v, 1, 32)?;
+            }
+            if let Some(v) = object_blur_subdivisions {
+                b.object_blur_subdivisions = check_u32("duration subdivisions", v, 1, 32)?;
+            }
+            if let Some(v) = image_motion_blur {
+                b.image_motion_blur = v;
+            }
+            if let Some(v) = image_blur_duration {
+                b.image_blur_duration = ranged("image blur duration", v, 0.0, 100.0)?;
+            }
+            if let Some(v) = image_blur_environment {
+                b.image_blur_environment = v;
+            }
+            if let Some(v) = color_range {
+                b.color_range = v;
+            }
+            set_settings(state, "Render Setup", s)?;
+            let b = &state.scene.render.bevy;
+            Ok(json!({
+                "auto_reflect": b.auto_reflect, "reflect_iterations": b.reflect_iterations, "filter_maps": b.filter_maps,
+                "disable_all_samplers": b.disable_all_samplers, "global_supersampler": b.global_supersampler,
+                "object_motion_blur": b.object_motion_blur, "object_blur_duration": b.object_blur_duration, "object_blur_samples": b.object_blur_samples, "object_blur_subdivisions": b.object_blur_subdivisions,
+                "image_motion_blur": b.image_motion_blur, "image_blur_duration": b.image_blur_duration, "image_blur_environment": b.image_blur_environment, "color_range": b.color_range,
+            }))
+        }
+        C::SetMotionBlur { kind, enabled, multiplier } => {
+            if let Some(m) = multiplier {
+                ranged("multiplier", m, 0.0, 10000.0)?;
+            }
+            let mut changes = Vec::new();
+            let mut ids: Vec<loom_scene::NodeId> = state.selection.iter().copied().collect();
+            ids.sort();
+            for id in ids {
+                let Some(n) = state.scene.node(id) else { continue };
+                let before = n.props();
+                let mut after = before.clone();
+                if let Some(k) = kind {
+                    after.render.motion_blur = k;
+                }
+                if let Some(v) = enabled {
+                    after.render.motion_blur_enabled = v;
+                }
+                if let Some(m) = multiplier {
+                    after.render.motion_blur_multiplier = m;
+                }
+                if after != before {
+                    changes.push(Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) });
+                }
+            }
+            if !changes.is_empty() {
+                state.undo.commit("Motion Blur", Change::Group(changes), &mut state.scene)?;
+            }
+            Ok(json!({}))
         }
         C::RenderOptions { video_color_check, super_black, super_black_threshold, force_wireframe, wire_thickness } => {
             let mut s = state.scene.render.clone();

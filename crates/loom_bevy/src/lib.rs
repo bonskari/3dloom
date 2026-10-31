@@ -12,6 +12,7 @@ pub mod environment;
 pub mod lights;
 pub mod look;
 pub mod quality;
+pub mod raytrace;
 mod post;
 
 use std::collections::{HashMap, HashSet};
@@ -92,6 +93,13 @@ pub struct RenderOptions {
     pub view: ViewEnv,
     /// A Render Element: every material draws only that part of its shading.
     pub element: Option<ElementLook>,
+    /// Reflections and refractions are ray traced on the CPU afterwards:
+    /// the traced materials draw without their own approximation of them.
+    pub raytrace: bool,
+    /// Objects (node ids) this render leaves out; their shadows stay.
+    pub hide: Vec<u64>,
+    /// The Light Tracer gathers the skylights afterwards: they leave the ambient light.
+    pub light_tracer: bool,
 }
 
 /// What a lit Render Element keeps of each material.
@@ -144,6 +152,9 @@ impl Default for RenderOptions {
             effects: true,
             view: ViewEnv::default(),
             element: None,
+            raytrace: false,
+            hide: Vec::new(),
+            light_tracer: false,
         }
     }
 }
@@ -209,6 +220,9 @@ struct Object {
     flags: ObjectFlags,
     /// The mesh's triangles (world space) for the ray-traced ambient occlusion.
     triangles: std::sync::Arc<Vec<loom_bake::Triangle>>,
+    /// Parts whose surface traces reflections or refractions: their
+    /// material without its own approximation of them (ray-traced renders).
+    traced: Vec<(Handle<look::LoomMaterial>, StandardMaterial)>,
 }
 
 struct View {
@@ -335,8 +349,12 @@ struct ActiveRender {
     ao: Option<std::sync::Arc<loom_bake::Bvh>>,
     /// The part of the frame the current bucket shows (u0, v0, u1, v1).
     frame: [f32; 4],
-    /// Materials a Render Element changed, with their own values.
+    /// Materials a Render Element or ray tracing changed, with their own values.
     element: Vec<(Handle<look::LoomMaterial>, StandardMaterial)>,
+    /// Bitmaps Filter Maps off made unfiltered, with their own sampler.
+    samplers: Vec<(Handle<Image>, ImageSampler)>,
+    /// Materials Color Range Limiting Scale applies to.
+    scaled: Vec<Handle<look::LoomMaterial>>,
 }
 
 impl BevyRenderer {
@@ -478,6 +496,8 @@ impl BevyRenderer {
         // The Environment's ambient colour (sRGB), plus the skylights and Ambient Only lights.
         let t = Color::srgb(tint[0], tint[1], tint[2]).to_linear();
         let (sky_color, sky) = lights::ambient(&self.samples);
+        // The Light Tracer gathers the skylights itself (shadowed by the scene).
+        let sky = if options.as_ref().is_some_and(|o| o.light_tracer) { 0.0 } else { sky };
         let sky_color = sky_color.to_linear();
         // Skylights are lights: Tint and Level apply to them too.
         let sum = Vec3::new(t.red, t.green, t.blue) * AMBIENT_BRIGHTNESS + Vec3::new(sky_color.red, sky_color.green, sky_color.blue) * Vec3::from(light_tint.to_array()) * sky;
@@ -794,6 +814,47 @@ impl BevyRenderer {
     }
 
     /// The ambient light's colour (largest channel 1) and brightness: the
+    /// The light a CPU pass shades with, in the reference's units (a light
+    /// of multiplier 1 lights a white surface it faces to white), as the
+    /// render's Bevy lights give it: the scene lights (or the default key and
+    /// fill) times Global Lighting Tint and Level, the ambient light, and the
+    /// skylights apart (the Light Tracer gathers them). `ambient` is the
+    /// Render Setup ambient (sRGB), used when the Environment's is black.
+    pub fn trace_lighting(&self, ambient: [f32; 3]) -> raytrace::Lighting {
+        let lin = |c: [f32; 3]| {
+            let l = Color::srgb(c[0], c[1], c[2]).to_linear();
+            glam::Vec3::new(l.red, l.green, l.blue)
+        };
+        let tint = lin(self.env.tint) * self.env.level.max(0.0);
+        let amb = if self.env.ambient != [0.0; 3] { self.env.ambient } else { ambient };
+        let mut lights: Vec<loom_scene::light::LightSample> = Vec::new();
+        let mut sky = glam::Vec3::ZERO;
+        if self.samples.is_empty() {
+            // The default key (shadowed) and fill lights.
+            let mut d = loom_scene::light::default_lights(1, glam::Mat4::IDENTITY);
+            let mut key = d.remove(0);
+            key.direction = -glam::Vec3::from(KEY_LIGHT_FROM.to_array()).normalize();
+            key.color = glam::Vec3::splat(KEY_LIGHT_LUX / lights::LUX_PER_MULTIPLIER) * tint;
+            key.shadows = true;
+            let mut fill = key.clone();
+            fill.direction = -glam::Vec3::from(FILL_LIGHT_FROM.to_array()).normalize();
+            fill.color = glam::Vec3::splat(FILL_LIGHT_LUX / lights::LUX_PER_MULTIPLIER) * tint;
+            fill.shadows = false;
+            lights = vec![key, fill];
+        } else {
+            for s in &self.samples {
+                if s.emitter == loom_scene::light::Emitter::Ambient {
+                    sky += s.color * tint;
+                } else {
+                    let mut s = s.clone();
+                    s.color *= tint;
+                    lights.push(s);
+                }
+            }
+        }
+        raytrace::Lighting { lights, ambient: lin(amb) * (AMBIENT_BRIGHTNESS / lights::AMBIENT_PER_MULTIPLIER), sky }
+    }
+
     /// Render Setup ambient colour (sRGB `tint`), plus the skylights and Ambient Only lights.
     fn ambient_light(&self, tint: [f32; 3]) -> (Color, f32) {
         let t = Color::srgb(tint[0], tint[1], tint[2]).to_linear();
@@ -821,6 +882,11 @@ impl BevyRenderer {
     /// shadowing it through their own layers).
     fn object_layers(&self, id: u64, renderable: bool, flags: ObjectFlags, hidden: bool) -> RenderLayers {
         let renderable = renderable && flags.visibility > 0.0;
+        let mut flags = flags;
+        // Left out of this render (its shadows stay), as if not visible to the camera.
+        if self.render.as_ref().is_some_and(|r| r.options.hide.contains(&id)) {
+            flags.visible_to_camera = false;
+        }
         let mut l = match (hidden, flags.visible_to_camera) {
             (true, true) => vec![HIDDEN_LAYER],
             (true, false) => vec![SHADOW_ONLY_LAYER],
@@ -916,8 +982,18 @@ impl BevyRenderer {
                 self.app.world_mut().despawn(e);
             }
             let mut entities = Vec::new();
+            let mut traced = Vec::new();
             for (id, surface, back) in parts {
                 let mat = self.material(surface.as_ref(), o.wire_color, o.flags.visibility);
+                // Ray-traced renders: the surface without its reflection / refraction approximation.
+                let untraced = surface.as_ref().filter(|s| s.trace.is_some()).map(|s| {
+                    let mut plain = s.clone();
+                    plain.reflect = glam::Vec3::ZERO;
+                    plain.fresnel = false;
+                    plain.transmission = 0.0;
+                    plain.trace = None;
+                    self.material(Some(&plain), o.wire_color, o.flags.visibility)
+                });
                 let faceted = surface.as_ref().is_some_and(|s| s.faceted);
                 let d = if id.is_none() && !faceted {
                     data.clone()
@@ -971,9 +1047,12 @@ impl BevyRenderer {
                         }
                     }
                 }
+                if let Some(m) = untraced {
+                    traced.push((material_handle.clone(), m));
+                }
                 entities.push((entity, material_handle));
             }
-            set.insert(o.id, Object { parts: entities, mesh_hash: hash, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags, triangles: std::sync::Arc::new(loom_bake::triangles(o.mesh, 1)) });
+            set.insert(o.id, Object { parts: entities, mesh_hash: hash, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags, triangles: std::sync::Arc::new(loom_bake::triangles(o.mesh, 1)), traced });
             self.settle = self.settle.max(3);
         }
         let gone: Vec<u64> = set.keys().filter(|id| !seen.contains(id)).copied().collect();
@@ -1331,15 +1410,35 @@ impl BevyRenderer {
     pub fn begin_render(&mut self, options: RenderOptions) {
         self.end_render();
         let handles: Vec<Handle<look::LoomMaterial>> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
+        let traced: HashMap<Handle<look::LoomMaterial>, StandardMaterial> = if options.raytrace { self.objects.values().chain(self.hidden.values()).flat_map(|o| o.traced.iter().cloned()).collect() } else { HashMap::new() };
         let world = self.app.world_mut();
         world.insert_resource(DirectionalLightShadowMap { size: options.shadow_map_size.clamp(512, 8192) as usize });
-        let (mut two_sided, mut deferred, mut element) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut two_sided, mut deferred, mut element, mut scaled) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut textures = Vec::new();
         let mut mats = world.resource_mut::<Assets<look::LoomMaterial>>();
         for h in handles {
             let Some(m) = mats.get_mut(&h) else { continue };
+            let own = m.base.clone();
+            let mut changed = false;
+            if let Some(plain) = traced.get(&h) {
+                // The ray tracer adds the reflections and refractions.
+                m.base = plain.clone();
+                changed = true;
+            }
             if let Some(look) = options.element {
-                element.push((h.clone(), m.base.clone()));
                 m.base = look.apply(&m.base);
+                changed = true;
+            }
+            if changed {
+                element.push((h.clone(), own));
+            }
+            if options.quality.color_range == loom_scene::render::ColorRange::Scale {
+                m.extension.params.flags |= look::COLOR_SCALE;
+                scaled.push(h.clone());
+            }
+            if !options.quality.filter_maps {
+                let b = &m.base;
+                textures.extend([&b.base_color_texture, &b.emissive_texture, &b.normal_map_texture, &b.metallic_roughness_texture, &b.occlusion_texture].into_iter().flatten().cloned());
             }
             if options.force_two_sided {
                 two_sided.push((h.clone(), m.base.double_sided, m.base.cull_mode));
@@ -1352,9 +1451,29 @@ impl BevyRenderer {
                 m.base.opaque_render_method = bevy::pbr::OpaqueRendererMethod::Deferred;
             }
         }
+        drop(mats);
+        // Filter Maps off: every bitmap is read at its nearest texel.
+        let mut samplers = Vec::new();
+        let mut images = world.resource_mut::<Assets<Image>>();
+        for t in textures {
+            if samplers.iter().any(|(h, _)| *h == t) {
+                continue;
+            }
+            let Some(img) = images.get_mut(&t) else { continue };
+            let own = img.sampler.clone();
+            let mut d = match &own {
+                ImageSampler::Descriptor(d) => d.clone(),
+                ImageSampler::Default => ImageSamplerDescriptor::default(),
+            };
+            d.mag_filter = bevy::image::ImageFilterMode::Nearest;
+            d.min_filter = bevy::image::ImageFilterMode::Nearest;
+            d.mipmap_filter = bevy::image::ImageFilterMode::Nearest;
+            img.sampler = ImageSampler::Descriptor(d);
+            samplers.push((t, own));
+        }
         self.scale = options.world_scale();
         self.light_pass = 0;
-        self.render = Some(ActiveRender { options, two_sided, deferred, camera_ready: false, accum: None, ao: None, frame: [0.0, 0.0, 1.0, 1.0], element });
+        self.render = Some(ActiveRender { options, two_sided, deferred, camera_ready: false, accum: None, ao: None, frame: [0.0, 0.0, 1.0, 1.0], element, samplers, scaled });
         self.metered.remove(&RENDER_SLOT);
         self.meter = None;
         self.rescale();
@@ -1394,13 +1513,13 @@ impl BevyRenderer {
         let q = &o.quality;
         let size = [size[0].max(1), size[1].max(1)];
         let radius = if q.antialiasing { q.filter_size.clamp(1.0, 10.0) * 0.5 } else { 0.5 };
-        let margin = if o.passes() > 1 || o.screen_space() || q.supersampling > 1 {
+        let margin = if o.passes() > 1 || o.screen_space() || q.samples_per_side() > 1 {
             radius.ceil() as u32 + 1 + if o.screen_space() { 16 } else { 0 }
         } else {
             0
         };
         if r.accum.as_ref().is_none_or(|a| a.key != (sub, size)) {
-            r.accum = Some(quality::Accum::new((sub, size), margin, q.supersampling.clamp(1, 4)));
+            r.accum = Some(quality::Accum::new((sub, size), margin, q.samples_per_side()));
         }
         let a = r.accum.as_ref().expect("set above");
         let (pass, ss, internal) = (a.pass, a.ss as f32, a.internal_size());
@@ -1534,7 +1653,19 @@ impl BevyRenderer {
                 m.base = base;
             }
         }
-        if r.options.selected_only.is_some() {
+        for h in r.scaled {
+            if let Some(m) = mats.get_mut(&h) {
+                m.extension.params.flags &= !look::COLOR_SCALE;
+            }
+        }
+        drop(mats);
+        let mut images = world.resource_mut::<Assets<Image>>();
+        for (h, sampler) in r.samplers {
+            if let Some(img) = images.get_mut(&h) {
+                img.sampler = sampler;
+            }
+        }
+        if r.options.selected_only.is_some() || !r.options.hide.is_empty() {
             self.relayer();
         }
         self.settle = self.settle.max(3);

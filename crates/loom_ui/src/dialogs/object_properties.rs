@@ -238,9 +238,6 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                     if let Some(v) = tri_checkbox(ui, prop, nodes, |n| n.render.get(prop).unwrap_or(false)) {
                         let _ = app.dispatch(Command::SetRenderProperty { name: prop.to_owned(), value: v });
                     }
-                    if prop == "Visible to Camera" {
-                        ui.add_enabled(false, egui::Checkbox::new(&mut true, "Visible to Reflection/Refraction")).on_disabled_hover_text("The renderer has no reflections or refractions");
-                    }
                 }
                 ui.add_enabled(false, egui::Checkbox::new(&mut true, "Apply Atmospherics")).on_disabled_hover_text("The renderer has no atmospherics");
                 ui.add_enabled(false, egui::Checkbox::new(&mut false, "Render Occluded Objects")).on_disabled_hover_text("The renderer has no G-buffer effects");
@@ -255,19 +252,33 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Motion Blur").strong());
-                    ui.add_enabled(false, egui::Button::new("By Object"));
+                    ui.add_enabled(false, egui::Button::new("By Object")).on_disabled_hover_text("Motion blur is always the object's own");
                 });
-                ui.add_enabled_ui(false, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Multiplier:");
-                        ui.add(egui::DragValue::new(&mut 1.0f32));
-                        ui.checkbox(&mut true, "Enabled");
-                    });
+                let r = &node.render;
+                ui.horizontal(|ui| {
+                    ui.label("Multiplier:");
+                    let mut m = r.motion_blur_multiplier;
+                    let resp = ui.add_enabled(r.motion_blur == loom_scene::MotionBlur::Image, crate::spinner::spin(ui, &mut m, 0.0..=10000.0).speed(0.01).max_decimals(3));
+                    if resp.drag_started() {
+                        app.state.undo.begin("Motion Blur");
+                    }
+                    if resp.changed() {
+                        let _ = app.dispatch(Command::SetMotionBlur { kind: None, enabled: None, multiplier: Some(m) });
+                    }
+                    if resp.drag_stopped() {
+                        app.state.undo.end();
+                    }
+                    if let Some(v) = tri_checkbox(ui, "Enabled", nodes, |n| n.render.motion_blur_enabled) {
+                        let _ = app.dispatch(Command::SetMotionBlur { kind: None, enabled: Some(v), multiplier: None });
+                    }
                 });
                 ui.horizontal(|ui| {
-                    let _ = ui.radio(true, "None");
-                    ui.add_enabled(false, egui::RadioButton::new(false, "Object")).on_disabled_hover_text("The renderer has no motion blur");
-                    ui.add_enabled(false, egui::RadioButton::new(false, "Image")).on_disabled_hover_text("The renderer has no motion blur");
+                    for (k, label) in [(loom_scene::MotionBlur::None, "None"), (loom_scene::MotionBlur::Object, "Object"), (loom_scene::MotionBlur::Image, "Image")] {
+                        let on = nodes.iter().all(|n| n.render.motion_blur == k);
+                        if ui.radio(on, label).clicked() && !on {
+                            let _ = app.dispatch(Command::SetMotionBlur { kind: Some(k), enabled: None, multiplier: None });
+                        }
+                    }
                 });
             });
         });
@@ -275,8 +286,8 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
 }
 
 /// Adv. Lighting: the Selection Information the reference shows. The
-/// radiosity settings do not apply: the Bevy renderer has no radiosity or
-/// light tracer.
+/// per-object radiosity settings do not apply: the renderer's advanced
+/// lighting is the Light Tracer, which has none.
 fn adv_lighting(ui: &mut egui::Ui, nodes: &[&Node]) {
     let is_light = |n: &&&Node| matches!(n.object, loom_scene::ObjectKind::Light(_));
     let lights = nodes.iter().filter(is_light).count();
@@ -292,5 +303,5 @@ fn adv_lighting(ui: &mut egui::Ui, nodes: &[&Node]) {
             ui.end_row();
         });
     });
-    ui.label(egui::RichText::new("Radiosity and light tracer settings do not apply: the renderer has no advanced lighting.").small().weak());
+    ui.label(egui::RichText::new("Per-object radiosity settings do not apply: the renderer has no radiosity (the Light Tracer has no per-object settings).").small().weak());
 }

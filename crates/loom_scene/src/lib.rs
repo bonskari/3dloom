@@ -27,7 +27,7 @@ pub mod render;
 pub mod environment;
 pub mod bake;
 
-pub use node::{Axes3, ContainerInfo, CustomAttribute, DisplayProps, RenderProps, TextureDisplay, Node, NodeId, NodeProps, ObjectKind, PaintDeform, PaintDirection, ParamValue, PatchObject, PolyObject, ShapeCommon, ShapeObject, SoftSelection, SubdivSurface, Transform, OBJECT_COLORS};
+pub use node::{Axes3, ContainerInfo, CustomAttribute, DisplayProps, MotionBlur, RenderProps, TextureDisplay, Node, NodeId, NodeProps, ObjectKind, PaintDeform, PaintDirection, ParamValue, PatchObject, PolyObject, ShapeCommon, ShapeObject, SoftSelection, SubdivSurface, Transform, OBJECT_COLORS};
 pub use param::{Controller, Param};
 pub use scene::{Layer, ParameterWire, Scene, SceneStateRecord, XrefRecord};
 pub use material::{Map, MaterialEditorSlots, MaterialId, MaterialLibrary, StandardMaterial};

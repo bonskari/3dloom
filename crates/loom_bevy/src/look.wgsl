@@ -35,6 +35,7 @@ struct LookParams {
 const FALLOFF: u32 = 1u;
 const TOON: u32 = 2u;
 const MATTE: u32 = 4u;
+const COLOR_SCALE: u32 = 8u;
 
 fn luminance(c: vec3<f32>) -> f32 {
     return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
@@ -143,6 +144,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     }
 
     out.color = apply_pbr_lighting(pbr_input);
+    if ((look.flags & COLOR_SCALE) != 0u) {
+        // Color Range Limiting Scale: the largest component comes down to 1, the hue stays.
+        let m = max(out.color.r, max(out.color.g, out.color.b));
+        if (m > 1.0) {
+            out.color = vec4<f32>(out.color.rgb / m, out.color.a);
+        }
+    }
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;
 }

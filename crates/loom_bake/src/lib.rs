@@ -283,6 +283,65 @@ impl Bvh {
         }
         out
     }
+
+    /// The nearest hit with `t` in `[t0, t1]` of a triangle `keep` accepts:
+    /// (t, triangle index, barycentric coordinates). Both sides count.
+    pub fn nearest(&self, origin: Vec3, dir: Vec3, t0: f32, t1: f32, keep: impl Fn(u32) -> bool) -> Option<(f32, u32, Vec3)> {
+        let mut best: Option<(f32, u32, Vec3)> = None;
+        if self.nodes.is_empty() {
+            return None;
+        }
+        let inv = Vec3::new(1.0 / dir.x, 1.0 / dir.y, 1.0 / dir.z);
+        let mut stack = vec![0usize];
+        while let Some(n) = stack.pop() {
+            let node = &self.nodes[n];
+            let far = best.map_or(t1, |b| b.0);
+            if !slab(node.lo, node.hi, origin, inv, t0, far) {
+                continue;
+            }
+            if node.count > 0 {
+                for &i in &self.order[node.start as usize..(node.start + node.count) as usize] {
+                    if let Some((t, b)) = intersect(&self.tris[i as usize], origin, dir) {
+                        if t >= t0 && t <= best.map_or(t1, |b| b.0) && keep(i) {
+                            best = Some((t, i, b));
+                        }
+                    }
+                }
+            } else {
+                stack.push(node.start as usize);
+                stack.push(node.start as usize + 1);
+            }
+        }
+        best
+    }
+
+    /// Whether the ray meets a triangle `keep` accepts with `t` in `[t0, t1]`.
+    pub fn any(&self, origin: Vec3, dir: Vec3, t0: f32, t1: f32, keep: impl Fn(u32) -> bool) -> bool {
+        if self.nodes.is_empty() {
+            return false;
+        }
+        let inv = Vec3::new(1.0 / dir.x, 1.0 / dir.y, 1.0 / dir.z);
+        let mut stack = vec![0usize];
+        while let Some(n) = stack.pop() {
+            let node = &self.nodes[n];
+            if !slab(node.lo, node.hi, origin, inv, t0, t1) {
+                continue;
+            }
+            if node.count > 0 {
+                for &i in &self.order[node.start as usize..(node.start + node.count) as usize] {
+                    if let Some((t, _)) = intersect(&self.tris[i as usize], origin, dir) {
+                        if t >= t0 && t <= t1 && keep(i) {
+                            return true;
+                        }
+                    }
+                }
+            } else {
+                stack.push(node.start as usize);
+                stack.push(node.start as usize + 1);
+            }
+        }
+        false
+    }
 }
 
 fn slab(lo: Vec3, hi: Vec3, o: Vec3, inv: Vec3, t0: f32, t1: f32) -> bool {

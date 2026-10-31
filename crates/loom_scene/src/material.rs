@@ -1345,6 +1345,84 @@ pub struct Surface {
     pub falloff: Option<FalloffLook>,
     /// Faces of this surface split further (Top/Bottom, Double Sided).
     pub split: Option<Box<Split>>,
+    /// Ray-traced reflections and refractions (Raytrace material, Raytrace,
+    /// Reflect/Refract, Flat Mirror and Thin Wall Refraction maps).
+    pub trace: Option<Box<TraceLook>>,
+}
+
+/// Where a traced reflection or refraction comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceSource {
+    /// The Raytrace material's Reflect / Transparency, or a Raytrace map:
+    /// traced to the Raytracer's Maximum Depth.
+    Raytrace,
+    /// A Reflect/Refract map: the Rendering Iterations deep.
+    ReflectRefract,
+    /// Flat Mirror: the face's own plane reflects (its geometric normal).
+    FlatMirror,
+    /// Thin Wall Refraction: what is behind, offset by the wall's thickness.
+    ThinWall,
+}
+
+/// A surface's ray-traced reflection and refraction as the renderer traces them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraceLook {
+    /// Reflected colour × amount (zero: no traced reflection).
+    pub reflect: Vec3,
+    pub reflect_source: TraceSource,
+    /// The reflection adds over the shading (a Standard material's map);
+    /// else it replaces that share of it (the Raytrace material).
+    pub reflect_adds: bool,
+    /// Blur cone half-angle in degrees (0 sharp) of the maps' Blur.
+    pub reflect_blur: f32,
+    /// Refracted colour × amount (zero: no traced refraction).
+    pub refract: Vec3,
+    pub refract_source: TraceSource,
+    pub refract_blur: f32,
+    pub ior: f32,
+    /// Thin Wall Refraction's Thickness Offset (scene units).
+    pub thickness: f32,
+    /// Fresnel: the reflection grows at grazing angles (Raytrace material).
+    pub fresnel: bool,
+}
+
+impl TraceLook {
+    /// A map's blur spinner (1 = sharp) as a cone half-angle in degrees.
+    pub fn map_blur(env_blur: f32) -> f32 {
+        (env_blur - 1.0).clamp(0.0, 45.0)
+    }
+
+    /// The traced look of a Standard material's Reflection and Refraction
+    /// maps (Raytrace, Reflect/Refract, Flat Mirror, Thin Wall), if any.
+    fn from_maps(reflection: Option<&Map>, refraction: Option<&Map>, ior: f32) -> Option<Self> {
+        let mut t = TraceLook { reflect: Vec3::ZERO, reflect_source: TraceSource::Raytrace, reflect_adds: true, reflect_blur: 0.0, refract: Vec3::ZERO, refract_source: TraceSource::Raytrace, refract_blur: 0.0, ior, thickness: 0.0, fresnel: false };
+        let amount = |m: &Map| (m.amount / 100.0).clamp(0.0, 1.0);
+        // A Raytrace map traces what its Trace Mode says (Auto Detect: its slot).
+        let mode = |m: &Map, slot: u8| if m.extra.trace_mode == 0 { slot } else { m.extra.trace_mode };
+        let mut place = |m: &Map, slot: u8| {
+            let (source, blur) = match m.kind {
+                MapType::Raytrace => (TraceSource::Raytrace, 0.0),
+                MapType::ReflectRefract => (TraceSource::ReflectRefract, Self::map_blur(m.extra.env_blur)),
+                MapType::FlatMirror if slot == 1 => (TraceSource::FlatMirror, Self::map_blur(m.extra.env_blur)),
+                MapType::ThinWall if slot == 2 => (TraceSource::ThinWall, 0.0),
+                _ => return,
+            };
+            let to = if m.kind == MapType::Raytrace { mode(m, slot) } else { slot };
+            if to == 1 {
+                (t.reflect, t.reflect_source, t.reflect_blur) = (Vec3::splat(amount(m)), source, blur);
+            } else {
+                (t.refract, t.refract_source, t.refract_blur) = (Vec3::splat(amount(m)), source, blur);
+                t.thickness = if source == TraceSource::ThinWall { m.extra.thickness_offset } else { 0.0 };
+            }
+        };
+        if let Some(m) = reflection.filter(|m| m.enabled) {
+            place(m, 1);
+        }
+        if let Some(m) = refraction.filter(|m| m.enabled) {
+            place(m, 2);
+        }
+        (t.reflect != Vec3::ZERO || t.refract != Vec3::ZERO).then_some(t)
+    }
 }
 
 /// A Falloff map as the renderer draws it per pixel.
@@ -1435,6 +1513,7 @@ impl Surface {
                 }
             }),
             split: None,
+            trace: TraceLook::from_maps(m.reflection_map.as_ref(), m.refraction_map.as_ref(), m.extended.ior).map(Box::new),
         }
     }
 

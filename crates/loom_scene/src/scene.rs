@@ -536,7 +536,10 @@ impl Scene {
     /// The rendering control a node renders with: its layer's when By Layer.
     pub fn render_of(&self, node: &Node) -> crate::node::RenderProps {
         match self.layer(node.layer) {
-            Some(l) if node.render.by_layer => crate::node::RenderProps { by_layer: true, ..l.render.clone() },
+            Some(l) if node.render.by_layer => {
+                let r = &node.render;
+                crate::node::RenderProps { by_layer: true, motion_blur: r.motion_blur, motion_blur_enabled: r.motion_blur_enabled, motion_blur_multiplier: r.motion_blur_multiplier, ..l.render.clone() }
+            }
             _ => node.render.clone(),
         }
     }
