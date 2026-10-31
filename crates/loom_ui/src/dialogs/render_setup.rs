@@ -206,7 +206,7 @@ fn time_output(ui: &mut egui::Ui, app: &mut LoomApp, s: &loom_scene::render::Ren
         if r.lost_focus() {
             if text != s.frames {
                 if let Err(e) = app.dispatch(Time { frames: Some(text.clone()), ..Default::default() }.cmd()) {
-                    app.last_error = Some(format!("{e}"));
+                    app.last_error = Some(e.to_string());
                 }
             }
             ui.data_mut(|d| d.remove::<String>(id));
@@ -560,7 +560,7 @@ fn elements(ui: &mut egui::Ui, app: &mut LoomApp) {
             ui.label("Name:");
             if let Some(n) = text_field(ui, egui::Id::new(("render_element_name", sel)), &e.name, 140.0) {
                 if let Err(err) = app.dispatch(element_cmd(sel, |a| a.0 = Some(n))) {
-                    app.last_error = Some(format!("{err}"));
+                    app.last_error = Some(err.to_string());
                 }
             }
         });
