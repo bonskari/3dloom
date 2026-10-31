@@ -335,7 +335,7 @@ impl BevyRenderer {
         app.add_plugins(look::LookPlugin);
         app.add_systems(
             bevy::app::PostUpdate,
-            keep_spot_shadow_casters_visible.after(bevy::pbr::SimulationLightSystems::CheckLightVisibility).before(bevy::render::view::VisibilitySystems::MarkNewlyHiddenEntitiesInvisible),
+            bevy::ecs::schedule::IntoScheduleConfigs::after(keep_spot_shadow_casters_visible, bevy::pbr::SimulationLightSystems::CheckLightVisibility).before(bevy::render::view::VisibilitySystems::MarkNewlyHiddenEntitiesInvisible),
         );
         while app.plugins_state() == PluginsState::Adding {
             bevy::tasks::tick_global_task_pools_on_main_thread();
