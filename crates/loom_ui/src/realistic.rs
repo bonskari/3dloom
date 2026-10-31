@@ -381,6 +381,9 @@ impl LoomApp {
             raytrace: s.raytracer.enabled,
             hide: Vec::new(),
             light_tracer: s.advanced.light_tracer(),
+            // Ray Traced / Adv. Ray Traced / Area Shadows lights: traced on the CPU, no shadow maps.
+            traced_shadows: loom_scene::light::scene_lights(&self.state.scene, |n| self.state.scene.is_renderable(n)).iter().filter(|l| l.traced.is_some()).map(|l| l.id.0).collect(),
+            lights_off: Vec::new(),
         };
         let aspect = s.image_aspect();
         let cam = self.camera_for(req.viewport);
@@ -769,6 +772,9 @@ impl LoomApp {
             // Motion blur and ray tracing on the finished frame, before its effects.
             if let Err(e) = self.object_motion_blur(&job) {
                 loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Object Motion Blur: {e}"));
+            }
+            if let Err(e) = self.traced_shadows(&job) {
+                loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Ray-traced shadows: {e}"));
             }
             self.trace_passes(&job, &mut layers);
             if let Err(e) = self.image_motion_blur(&job, &mut layers) {

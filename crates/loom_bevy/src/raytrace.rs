@@ -451,6 +451,78 @@ impl TraceScene {
         sum / rays as f32
     }
 
+    /// Ray-traced shadows of light `l` per output pixel of `view` (`ss`²
+    /// samples per pixel): the share of the light that reaches what the
+    /// camera sees, 1 unshadowed (and where nothing is seen, or the light
+    /// does not reach anyway), traced to `shadow.samples` points over the
+    /// light's emitting disk of `shadow.radius` and through its shadow
+    /// colour and density.
+    pub fn shadows(&self, view: &View, l: &LightSample, shadow: loom_scene::light::TracedShadow, ss: u32) -> Vec<Vec3> {
+        let world_from_clip = (view.clip_from_view * view.view).inverse();
+        let ss = ss.max(1);
+        let samples = shadow.samples.max(1);
+        per_pixel(view.size, Vec3::ONE, |x, y| {
+            let mut sum = Vec3::ZERO;
+            for k in 0..ss * ss {
+                let (sx, sy) = (k % ss, k / ss);
+                let (o, d, far) = view.ray(world_from_clip, x as f32 + (sx as f32 + 0.5) / ss as f32, y as f32 + (sy as f32 + 0.5) / ss as f32);
+                let Some(h) = self.primary(o, d, far) else {
+                    sum += Vec3::ONE;
+                    continue;
+                };
+                if !self.object(h.tri).receive_shadows {
+                    sum += Vec3::ONE;
+                    continue;
+                }
+                let eps = 1e-3 * (1.0 + h.p.abs().max_element());
+                let p = h.p + h.ng * eps;
+                let mut rng = Rng::new(x, y, k + 31);
+                let mut lit = 0.0f32;
+                for i in 0..samples {
+                    // A point of the emitting disk, facing the shaded point.
+                    let (to_light, dist) = match l.emitter {
+                        Emitter::Directional => {
+                            let axis = -l.direction;
+                            let spread = if shadow.radius > 0.0 { (shadow.radius / l.target_distance.max(1e-3)).atan() } else { 0.0 };
+                            (cone(axis, spread, false, &mut rng), f32::MAX)
+                        }
+                        _ => {
+                            let c = l.position - p;
+                            let mut q = l.position;
+                            if shadow.radius > 0.0 {
+                                let axis = c.normalize_or(Vec3::Z);
+                                let (a, b) = (axis.any_orthonormal_vector(), axis.cross(axis.any_orthonormal_vector()));
+                                // Spread over the disk (golden angle spiral, turned per pixel).
+                                let r = shadow.radius * ((i as f32 + 0.5) / samples as f32).sqrt();
+                                let t = i as f32 * 2.399_963 + rng.next() * std::f32::consts::TAU;
+                                q += (a * t.cos() + b * t.sin()) * r;
+                            }
+                            let v = q - p;
+                            let len = v.length();
+                            (v / len.max(1e-6), len)
+                        }
+                    };
+                    if h.n.dot(to_light) <= 0.0 {
+                        continue;
+                    }
+                    let far = if dist == f32::MAX { f32::MAX } else { dist - eps };
+                    let blocked = self.bvh.any(p, to_light, 0.0, far, |t| {
+                        let o = self.object(t);
+                        o.cast_shadows && !l.exclusion.excludes(loom_scene::NodeId(o.id), false)
+                    });
+                    if !blocked {
+                        lit += 1.0;
+                    }
+                }
+                // Points facing away from the light get none of it anyway.
+                let facing = l.emitter == Emitter::Directional && h.n.dot(-l.direction) <= 0.0;
+                let open = if facing { 1.0 } else { lit / samples as f32 };
+                sum += Vec3::splat(open) + l.shadow_transmission * (1.0 - open);
+            }
+            sum / (ss * ss) as f32
+        })
+    }
+
     /// The nearest surface the camera sees through each output pixel's centre:
     /// (object index, world point), None where it sees nothing.
     pub fn visible(&self, view: &View) -> Vec<Option<(u32, Vec3)>> {
@@ -767,6 +839,36 @@ mod tests {
         let sky = scene.gather(&view, &TracerSettings { bounces: 0, sky: Vec3::ONE, ..t });
         let (open, by_wall) = (sky[10 * 20 + 2].unwrap().1.x, near_wall(&sky));
         assert!(open > 0.8 && by_wall < open - 0.2, "the wall hides part of the sky: {open} {by_wall}");
+    }
+
+    /// A point light above a floor with a square between: its traced shadow
+    /// is dark under the square and open beside it; over a disk the edge softens.
+    #[test]
+    fn traced_shadows_are_sharp_from_a_point_and_soft_from_a_disk() {
+        let mut tris = quad(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
+        let mut info = vec![(0, 0); 2];
+        tris.extend(quad(Vec3::new(0.0, 0.0, 5.0), Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0)));
+        info.extend([(1, 0); 2]);
+        let mut blocker = object(2);
+        blocker.camera = false;
+        let scene = TraceScene::new(tris, info, vec![object(1), blocker], vec![plain(Vec3::ONE)], lit(0.0), Vec3::ZERO);
+        let mut l = loom_scene::light::default_lights(1, Mat4::IDENTITY).remove(0);
+        l.emitter = Emitter::Point;
+        l.position = Vec3::new(0.0, 0.0, 10.0);
+        l.direction = Vec3::NEG_Z;
+        let view = View { view: Mat4::look_at_rh(Vec3::new(0.0, 0.0, 30.0), Vec3::ZERO, Vec3::Y), ..front(40) };
+        let sharp = scene.shadows(&view, &l, loom_scene::light::TracedShadow { radius: 0.0, samples: 1 }, 1);
+        // The square (±2 at z 5) shadows ±4 on the floor: pixels 16..24 of 40 over ±10.
+        assert_eq!(sharp[20 * 40 + 20], Vec3::ZERO, "under the square");
+        assert_eq!(sharp[20 * 40 + 2], Vec3::ONE, "beside it");
+        let soft = scene.shadows(&view, &l, loom_scene::light::TracedShadow { radius: 3.0, samples: 64 }, 1);
+        let partial = soft.iter().filter(|v| v.x > 0.05 && v.x < 0.95).count();
+        let sharp_partial = sharp.iter().filter(|v| v.x > 0.05 && v.x < 0.95).count();
+        assert!(partial > sharp_partial + 20, "a disk light's penumbra: {partial} against {sharp_partial}");
+        // Shadow colour / density: the shadow lets part of the light through.
+        l.shadow_transmission = Vec3::splat(0.25);
+        let through = scene.shadows(&view, &l, loom_scene::light::TracedShadow { radius: 0.0, samples: 1 }, 1);
+        assert_eq!(through[20 * 40 + 20], Vec3::splat(0.25));
     }
 
     #[test]

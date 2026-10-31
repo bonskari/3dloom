@@ -100,6 +100,10 @@ pub struct RenderOptions {
     pub hide: Vec<u64>,
     /// The Light Tracer gathers the skylights afterwards: they leave the ambient light.
     pub light_tracer: bool,
+    /// Lights (node ids) whose shadows are traced afterwards: no shadow maps.
+    pub traced_shadows: Vec<u64>,
+    /// Lights (node ids) left dark in this render.
+    pub lights_off: Vec<u64>,
 }
 
 /// What a lit Render Element keeps of each material.
@@ -155,6 +159,8 @@ impl Default for RenderOptions {
             raytrace: false,
             hide: Vec::new(),
             light_tracer: false,
+            traced_shadows: Vec::new(),
+            lights_off: Vec::new(),
         }
     }
 }
@@ -535,6 +541,13 @@ impl BevyRenderer {
             let mut s = s.clone();
             s.shadows &= shadows;
             s.color *= light_tint;
+            if let Some(o) = options.as_ref() {
+                // Ray-traced shadows are traced on the CPU; a light can be left out.
+                s.shadows &= !o.traced_shadows.contains(&s.id.0);
+                if o.lights_off.contains(&s.id.0) {
+                    s.color = glam::Vec3::ZERO;
+                }
+            }
             if let (Some(d), true) = (area, s.source_radius > 0.0) {
                 lights::move_over_source(&mut s, d, centre);
             }

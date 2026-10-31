@@ -221,6 +221,50 @@ fn light_tracer_brightens_the_shadow_by_bounce() {
     assert!((off - before).abs() < 4.0, "{off} against {before}");
 }
 
+/// An omni light's shadow of a box on the floor: Ray Traced Shadows
+/// darken about as much of the floor as the shadow map; Area Shadows
+/// over a large area light soften the edge into many more mid-tones.
+#[test]
+fn ray_traced_and_area_shadows_are_traced_in_the_render() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("ray_traced_and_area_shadows_are_traced_in_the_render: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [200.0, 200.0, 0.0] });
+    let floor = selected(&h);
+    h.cmd(Command::SetWireColor { id: floor.0, rgb: [220, 220, 220] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0, 30.0, 40.0] });
+    let b = selected(&h);
+    h.cmd(Command::SetWireColor { id: b.0, rgb: [220, 220, 220] });
+    ok(&mut h, "Create Light", serde_json::json!({ "kind": "Omni", "position": [50.0, -40.0, 110.0], "target": [0.0, 0.0, 0.0] }));
+    let light = selected(&h);
+    framed(&mut h);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 240, "height": 180 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    let tones = |img: &image::RgbaImage| {
+        let lum = |p: &image::Rgba<u8>| p.0[0].max(p.0[1]).max(p.0[2]);
+        let dark = img.pixels().filter(|p| p.0[3] == 255 && lum(p) < 50).count();
+        let mid = img.pixels().filter(|p| p.0[3] == 255 && (60..150).contains(&lum(p))).count();
+        (dark, mid)
+    };
+    let (map_dark, _) = tones(&render(&mut h));
+    let set = |h: &mut Harness, name: &str, value: f64| h.cmd(Command::SetParameter { id: light.0, name: name.into(), value });
+    set(&mut h, "Shadow Type", 1.0);
+    let (rt_dark, rt_mid) = tones(&render(&mut h));
+    assert!(map_dark > 150, "the shadow map's shadow: {map_dark}");
+    assert!((rt_dark as f32 - map_dark as f32).abs() < map_dark as f32 * 0.5, "a traced shadow of about the same size: {rt_dark} against {map_dark}");
+    set(&mut h, "Shadow Type", 3.0);
+    set(&mut h, "Area Length", 80.0);
+    set(&mut h, "Area Width", 80.0);
+    set(&mut h, "Shadow Quality", 6.0);
+    let (area_dark, area_mid) = tones(&render(&mut h));
+    assert!(area_mid > rt_mid + 150 && area_dark < rt_dark, "the area light's soft shadow: {area_dark} dark / {area_mid} mid against {rt_dark} / {rt_mid}");
+    // Shadows off: nothing is traced.
+    set(&mut h, "Shadows On", 0.0);
+    let (none, _) = tones(&render(&mut h));
+    assert!(none + 100 < rt_dark, "no shadow on the floor: {none} dark against {rt_dark}");
+}
+
 /// Color Range Limiting: an over-lit orange teapot clips to yellow-white
 /// with Clamp; Scale keeps its hue (green stays well under red).
 #[test]

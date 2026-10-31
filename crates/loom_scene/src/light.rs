@@ -1028,6 +1028,43 @@ pub struct LightSample {
     /// Distance to the target (or Target Distance of a free light).
     pub target_distance: f32,
     pub exclusion: Exclusion,
+    /// Ray Traced, Adv. Ray Traced and Area Shadows: renders trace the
+    /// light's shadows (None: a shadow map, or no shadows).
+    pub traced: Option<TracedShadow>,
+}
+
+/// How a light's ray-traced shadows are traced.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TracedShadow {
+    /// Radius of the light's emitting area in scene units (0: a point, sharp shadows).
+    pub radius: f32,
+    /// Shadow rays per point (soft shadows).
+    pub samples: u32,
+}
+
+impl LightObject {
+    /// The shadows a render traces for this light, by Shadow Type: Ray
+    /// Traced sharp; Adv. Ray Traced soft over Shadow Spread (scene units)
+    /// with Shadow Quality² rays; Area Shadows over the area light's size
+    /// with Shadow Quality² rays.
+    pub fn traced_shadow(&self) -> Option<TracedShadow> {
+        if !self.shadows_on.get() {
+            return None;
+        }
+        let rays = || self.shadow_quality.get().clamp(1, 8).pow(2);
+        match self.shadow_type.get() {
+            1 => Some(TracedShadow { radius: 0.0, samples: 1 }),
+            2 => {
+                let radius = self.shadow_spread.get().max(0.0);
+                Some(TracedShadow { radius, samples: if radius > 0.0 { rays() } else { 1 } })
+            }
+            AREA_SHADOWS => {
+                let radius = self.area_radius();
+                Some(TracedShadow { radius, samples: if radius > 0.0 { rays() } else { 1 } })
+            }
+            _ => None,
+        }
+    }
 }
 
 impl LightSample {
@@ -1131,6 +1168,7 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
                 shadow_transmission: l.shadow_transmission(),
                 target_distance: target_distance(scene, n.id).unwrap_or(DEFAULT_TARGET_DISTANCE),
                 exclusion: l.exclusion.clone(),
+                traced: l.traced_shadow(),
             });
             continue;
         }
@@ -1155,6 +1193,7 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             shadow_transmission: l.shadow_transmission(),
             target_distance: target_distance(scene, n.id).unwrap_or(DEFAULT_TARGET_DISTANCE),
             exclusion: l.exclusion.clone(),
+            traced: if emitter == Emitter::Ambient { None } else { l.traced_shadow() },
         });
     }
     out
@@ -1185,6 +1224,7 @@ pub fn default_lights(count: u32, eye_to_world: Mat4) -> Vec<LightSample> {
         shadow_transmission: Vec3::ZERO,
         target_distance: DEFAULT_TARGET_DISTANCE,
         exclusion: Exclusion::default(),
+        traced: None,
     };
     if count >= 2 {
         vec![base(dir(Vec3::new(0.5, -0.5, -1.0)), 0.75), base(dir(Vec3::new(-0.5, 0.6, 1.0)), 0.35)]

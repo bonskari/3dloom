@@ -274,6 +274,54 @@ impl LoomApp {
         layers.traced = traced;
     }
 
+    /// Ray-traced shadows (Ray Traced, Adv. Ray Traced, Area Shadows): the
+    /// frame rendered with each such light off gives its share of the
+    /// light; the share the traced shadow rays find blocked comes off.
+    pub(super) fn traced_shadows(&mut self, job: &RenderJob) -> Result<(), String> {
+        let s = job.req.settings.clone();
+        if !s.bevy.shadows || job.options.traced_shadows.is_empty() {
+            return Ok(());
+        }
+        let lights: Vec<loom_scene::light::LightSample> = match &self.gpu {
+            Gpu::Running(b) => b.renderer.trace_lighting(job.options.ambient).lights,
+            _ => return Ok(()),
+        };
+        let scene = self.trace_scene(job);
+        let view = Self::gbuffer_view(job);
+        let ss = if s.bevy.antialiasing { 2 } else { 1 };
+        let Some(lit) = self.state.rendered.image.as_ref().map(|i| (**i).clone()) else { return Ok(()) };
+        let mut darken = vec![Vec3::ZERO; (job.out[0] * job.out[1]) as usize];
+        for l in lights.iter().filter(|l| job.options.traced_shadows.contains(&l.id.0)) {
+            let Some(shadow) = l.traced else { continue };
+            let open = scene.shadows(&view, l, shadow, ss);
+            let mut options = job.options.clone();
+            options.lights_off = vec![l.id.0];
+            let Gpu::Running(b) = &mut self.gpu else { return Err("no GPU renderer".into()) };
+            let without = b.renderer.render_frame_with(job.out, &job.camera, job.aspect, view.rect, options)?;
+            for (i, (a, b)) in lit.pixels().zip(without.pixels()).enumerate() {
+                // The light's own share of the pixel, and how much of it the shadow stops.
+                let share = (lin_px(a.0) - lin_px(b.0)).max(Vec3::ZERO);
+                darken[i] += share * (Vec3::ONE - open[i]);
+            }
+        }
+        let [x0, y0, x1, y1] = job.mask.unwrap_or([0, 0, job.out[0], job.out[1]]);
+        if let Some(img) = self.state.rendered.image.as_mut() {
+            let img = Arc::make_mut(img);
+            for y in y0..y1.min(img.height()) {
+                for x in x0..x1.min(img.width()) {
+                    let d = darken[(y * job.out[0] + x) as usize];
+                    if d != Vec3::ZERO {
+                        let p = img.get_pixel(x, y).0;
+                        img.put_pixel(x, y, srgb_px((lin_px(p) - d).max(Vec3::ZERO).to_array(), p[3]));
+                    }
+                }
+            }
+            self.state.rendered.version += 1;
+            self.state.rendered.dirty = None;
+        }
+        Ok(())
+    }
+
     /// World transforms taking each traced object from frame `t` to `t0`
     /// and `t1` (None for objects outside `ids`, or that do not move).
     fn motion(&self, scene: &TraceScene, ids: Option<&[u64]>, t: f32, half: impl Fn(u64) -> f32) -> Vec<Option<(Mat4, Mat4)>> {
