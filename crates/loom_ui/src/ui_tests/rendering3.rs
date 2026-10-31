@@ -314,7 +314,7 @@ fn make_preview_view_and_rename_the_sequence() {
     assert_eq!(h.app.last_error, None, "{:?}", h.app.state.rendered.messages);
     for n in 0..3 {
         let p = d.join(format!("_scene{n:04}.png"));
-        assert_eq!(image::open(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display())).dimensions(), (128, 96));
+        assert_eq!(image::open(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display())).to_rgba8().dimensions(), (128, 96));
     }
     h.cmd(Command::ViewAnimatedSequenceFile);
     assert_eq!(h.app.state.rendered.viewer.as_ref().map(|v| (v.index, v.files.len())), Some((0, 3)));
