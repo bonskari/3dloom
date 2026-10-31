@@ -1909,6 +1909,7 @@ fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
         toon: if t < 0.5 { a.toon.clone() } else { b.toon.clone() },
         falloff: if t < 0.5 { a.falloff.clone() } else { b.falloff.clone() },
         split: if t < 0.5 { a.split.clone() } else { b.split.clone() },
+        trace: if t < 0.5 { a.trace.clone() } else { b.trace.clone() },
     }
 }
 
