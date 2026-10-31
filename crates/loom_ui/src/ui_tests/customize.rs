@@ -325,8 +325,11 @@ fn an_action_dropped_into_a_quadrant_shows_in_the_quad_menu_and_a_deleted_entry_
     assert!(h.has(Role::Button, "moves"), "the quadrant shows its label");
     let open = menus(&h);
     assert!(!h.find_all(Role::Button, "Clone").iter().any(|r| open.iter().any(|m| m.contains_rect(*r))), "Clone is gone from the quad");
-    let entry = h.find_all(Role::Button, "Undo Scene Operation").into_iter().find(|r| open.iter().any(|m| m.contains_rect(*r))).expect("Undo Scene Operation in the quad");
+    assert!(h.find_all(Role::Button, "Undo Scene Operation").into_iter().any(|r| open.iter().any(|m| m.contains_rect(*r))), "Undo Scene Operation in the quad");
+    // A new box (selected): the quad shows its object entries too, so the entry is found again.
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let open = menus(&h);
+    let entry = h.find_all(Role::Button, "Undo Scene Operation").into_iter().find(|r| open.iter().any(|m| m.contains_rect(*r))).expect("Undo Scene Operation in the quad");
     h.click(entry.center());
     assert_eq!(h.app.state.scene.len(), 0, "the added entry runs: the box is undone");
 }
