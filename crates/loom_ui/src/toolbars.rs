@@ -64,6 +64,24 @@ pub fn host(ctx: &egui::Context, app: &mut LoomApp, name: &str, edges: &[Dock], 
         bg.context_menu(|ui| customize_display_menu(ui, app, name));
         if vertical {
             ui.vertical(|ui| contents(ui, app));
+        } else if matches!(dock, Dock::Top | Dock::Bottom) {
+            // One row, as in the reference: a narrow window pans it sideways (a
+            // drag on empty toolbar space, or the mouse wheel over it), never wraps.
+            let id = ui.id().with("toolbar_pan");
+            let mut scroll = egui::ScrollArea::horizontal().id_salt(id).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).drag_to_scroll(true);
+            let over = ui.rect_contains_pointer(ui.max_rect());
+            let wheel = ui.input(|i| i.raw_scroll_delta.y);
+            if over && wheel != 0.0 {
+                if let Some(st) = egui::scroll_area::State::load(ui.ctx(), ui.make_persistent_id(id)) {
+                    scroll = scroll.horizontal_scroll_offset((st.offset.x - wheel).max(0.0));
+                }
+            }
+            scroll.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    contents(ui, app)
+                })
+            });
         } else {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
