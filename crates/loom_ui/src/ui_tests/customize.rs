@@ -43,7 +43,7 @@ fn point_at(h: &mut Harness, p: egui::Pos2) {
 /// that no widget covers (the row pans, so a button may sit at its right end).
 fn main_toolbar_blank(h: &Harness) -> egui::Pos2 {
     let r = panel_rect(h, "main_toolbar");
-    let controls = [Role::Button, Role::ComboBox, Role::TextInput, Role::CheckBox, Role::ToggleButton];
+    let controls = [Role::Button, Role::ComboBox, Role::TextInput, Role::CheckBox];
     let y = r.center().y;
     (0..(r.width() as i32 - 12))
         .map(|dx| egui::pos2(r.max.x - 8.0 - dx as f32, y))
