@@ -355,3 +355,53 @@ fn render_commands_are_named_actions() {
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!(s.pending_render.as_ref().map(|r| (r.settings.width, r.settings.height)), Some((64, 48)));
 }
+
+fn time_output(s: &mut AppState, t: Option<loom_scene::render::TimeOutput>, range: Option<[i32; 2]>, frames: Option<&str>, base: Option<i32>, skip: Option<bool>, ifl: Option<bool>) -> Result<serde_json::Value, String> {
+    execute(s, Command::RenderTimeOutput { time_output: t, range, frames: frames.map(str::to_owned), every_nth: None, file_number_base: base, skip_existing: skip, image_file_list: ifl })
+}
+
+/// Time Output Range renders the frames in turn, each to its numbered file;
+/// File Number Base renumbers them, Skip Existing Images leaves out files
+/// already there, the .ifl lists them and the current frame comes back.
+#[test]
+fn a_range_renders_its_frames_to_numbered_files() {
+    use loom_scene::render::TimeOutput;
+    let dir = std::env::temp_dir().join(format!("loom-seq-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let out = dir.join("shot.png").to_string_lossy().into_owned();
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetFrame { frame: 40 }).unwrap();
+    time_output(&mut s, Some(TimeOutput::Range), Some([0, 3]), None, Some(15), Some(true), Some(true)).unwrap();
+    assert!(time_output(&mut s, None, None, Some("1,x"), None, None, None).is_err());
+    std::fs::write(dir.join("shot0016.png"), b"exists").unwrap();
+    let r = execute(&mut s, Command::Render { path: Some(out.clone()), width: Some(8), height: Some(8) }).unwrap();
+    let ifl = std::fs::read_to_string(dir.join("shot.ifl")).unwrap();
+    assert_eq!(ifl, "shot0015.png\nshot0016.png\nshot0017.png\nshot0018.png\n");
+    assert_eq!(r["frame"], 0);
+    assert_eq!(s.current_frame, 0);
+    let req = s.pending_render.take().unwrap();
+    assert_eq!(req.save_path.as_deref(), Some(dir.join("shot0015.png").to_str().unwrap()));
+    // Frame 1's file exists: the next frame is 2.
+    let r = loom_commands::render::sequence_next(&mut s).unwrap().unwrap();
+    assert_eq!((r["frame"].clone(), s.current_frame), (json!(2), 2));
+    assert!(s.pending_render.take().unwrap().save_path.unwrap().ends_with("shot0017.png"));
+    assert!(loom_commands::render::sequence_next(&mut s).unwrap().is_ok());
+    s.pending_render = None;
+    assert!(loom_commands::render::sequence_next(&mut s).is_none(), "the sequence is over");
+    assert_eq!(s.current_frame, 40, "the current frame is back");
+    assert!(s.rendered.sequence.is_none());
+    // Cancel ends a sequence too.
+    time_output(&mut s, Some(TimeOutput::Frames), None, Some("5,7"), None, Some(false), Some(false)).unwrap();
+    execute(&mut s, Command::Render { path: None, width: Some(8), height: Some(8) }).unwrap();
+    assert_eq!(s.current_frame, 5);
+    execute(&mut s, Command::CancelRender).unwrap();
+    assert_eq!(s.current_frame, 40);
+    assert!(s.rendered.sequence.is_none());
+    // Frames outside the time range are refused.
+    time_output(&mut s, Some(TimeOutput::Range), Some([90, 120]), None, None, None, None).unwrap();
+    assert!(execute(&mut s, Command::Render { path: None, width: Some(8), height: Some(8) }).is_err());
+    // Undo puts Time Output back.
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.render.range, [0, 3]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

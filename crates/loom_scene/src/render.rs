@@ -253,6 +253,43 @@ impl Default for BevyRenderSettings {
 }
 
 #[cfg(test)]
+mod time_output_tests {
+    use super::*;
+
+    #[test]
+    fn frames_lists_take_frames_and_ranges() {
+        assert_eq!(parse_frames("2,5").unwrap(), vec![2, 5]);
+        assert_eq!(parse_frames("0-3, 7").unwrap(), vec![0, 1, 2, 3, 7]);
+        assert_eq!(parse_frames("3-1").unwrap(), vec![3, 2, 1]);
+        assert_eq!(parse_frames("-2--1").unwrap(), vec![-2, -1]);
+        assert!(parse_frames("a").is_err());
+        assert!(parse_frames(" , ").is_err());
+    }
+
+    #[test]
+    fn time_output_frames_and_file_numbers() {
+        let mut s = RenderSettings::default();
+        assert_eq!(s.output_frames((0, 100), 7).unwrap(), vec![7]);
+        s.time_output = TimeOutput::ActiveSegment;
+        s.every_nth = 25;
+        assert_eq!(s.output_frames((0, 100), 7).unwrap(), vec![0, 25, 50, 75, 100]);
+        s.time_output = TimeOutput::Range;
+        s.range = [0, 3];
+        s.every_nth = 1;
+        assert_eq!(s.output_frames((0, 100), 7).unwrap(), vec![0, 1, 2, 3]);
+        // The reference's example: Range 0-3, base 15 gives file0015..file0018.
+        s.file_number_base = 15;
+        assert_eq!((0..=3).map(|f| s.file_number(f, 0)).collect::<Vec<_>>(), vec![15, 16, 17, 18]);
+        s.file_number_base = 0;
+        assert_eq!(s.file_number(52, 50), 52);
+        s.range = [5, 1];
+        assert!(s.output_frames((0, 100), 0).is_err());
+        assert_eq!(numbered_path("/tmp/a/out.png", 7), "/tmp/a/out0007.png");
+        assert_eq!(numbered_path("out.png", -50), "out-050.png");
+    }
+}
+
+#[cfg(test)]
 mod quality_tests {
     use super::*;
 
@@ -276,6 +313,69 @@ mod quality_tests {
         assert_eq!(s.supersampling, 2);
         assert_eq!((s.passes, s.tonemapper, s.filter), (16, Tonemapper::None, AaFilter::Area));
     }
+}
+
+/// Common > Time Output: which frames a Render renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TimeOutput {
+    /// The current frame.
+    #[default]
+    Single,
+    /// The time slider's range.
+    ActiveSegment,
+    /// `RenderSettings::range`.
+    Range,
+    /// `RenderSettings::frames`: "1,3,5-12".
+    Frames,
+}
+
+impl TimeOutput {
+    pub const ALL: [TimeOutput; 4] = [TimeOutput::Single, TimeOutput::ActiveSegment, TimeOutput::Range, TimeOutput::Frames];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TimeOutput::Single => "Single",
+            TimeOutput::ActiveSegment => "Active Time Segment",
+            TimeOutput::Range => "Range",
+            TimeOutput::Frames => "Frames",
+        }
+    }
+}
+
+/// Frames list "2,5,7-9" (ranges either way round) in the order written.
+pub fn parse_frames(s: &str) -> Result<Vec<i32>, String> {
+    let mut out = Vec::new();
+    for part in s.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        // A leading minus is a negative frame, not a range.
+        let split = part.char_indices().skip(1).find(|(_, c)| *c == '-').map(|(i, _)| i);
+        let num = |t: &str| t.trim().parse::<i32>().map_err(|_| format!("frames \"{s}\": \"{part}\" is not a frame or a range a-b"));
+        match split {
+            Some(i) => {
+                let (a, b) = (num(&part[..i])?, num(&part[i + 1..])?);
+                if a <= b {
+                    out.extend(a..=b);
+                } else {
+                    out.extend((b..=a).rev());
+                }
+            }
+            None => out.push(num(part)?),
+        }
+    }
+    if out.is_empty() {
+        return Err(format!("frames \"{s}\": no frame"));
+    }
+    Ok(out)
+}
+
+/// `path` with file number `n` before its extension: out.png -> out0007.png.
+pub fn numbered_path(path: &str, n: i32) -> String {
+    let p = std::path::Path::new(path);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let name = match p.extension().and_then(|e| e.to_str()) {
+        Some(ext) => format!("{stem}{n:04}.{ext}"),
+        None => format!("{stem}{n:04}"),
+    };
+    p.with_file_name(name).to_string_lossy().into_owned()
 }
 
 /// Render Setup dialog values (Common and Renderer panels).
@@ -309,6 +409,20 @@ pub struct RenderSettings {
     /// Blowup rectangle (kept apart from Region/Crop, as the reference does).
     pub blowup: [f32; 4],
     pub bevy: BevyRenderSettings,
+    /// Time Output: the frames, Range from-to, Frames list, Every Nth
+    /// Frame (Active Time Segment and Range) and File Number Base (0: a
+    /// file is numbered by its frame, else the first file has this number).
+    pub time_output: TimeOutput,
+    pub range: [i32; 2],
+    pub frames: String,
+    pub every_nth: u32,
+    pub file_number_base: i32,
+    /// Render Output > Skip Existing Images (with Save File, a sequence
+    /// leaves out the frames whose file exists).
+    pub skip_existing: bool,
+    /// Render Output > Put Image File List in Output Path: a sequence also
+    /// writes a .ifl next to its frames, listing them.
+    pub image_file_list: bool,
     /// Render To Texture.
     pub bake: crate::bake::BakeSettings,
 }
@@ -331,6 +445,13 @@ impl Default for RenderSettings {
             region: [0.25, 0.25, 0.75, 0.75],
             blowup: [0.25, 0.25, 0.75, 0.75],
             bevy: BevyRenderSettings::default(),
+            time_output: TimeOutput::Single,
+            range: [0, 100],
+            frames: "1,3,5-12".into(),
+            every_nth: 1,
+            file_number_base: 0,
+            skip_existing: false,
+            image_file_list: false,
             bake: crate::bake::BakeSettings::default(),
         }
     }
@@ -340,6 +461,33 @@ impl RenderSettings {
     /// Image Aspect: width / height of the picture on the output device.
     pub fn image_aspect(&self) -> f32 {
         self.width as f32 * self.pixel_aspect / self.height.max(1) as f32
+    }
+
+    /// The frames Time Output renders, in order: `active` is the time
+    /// slider's range, `current` the current frame.
+    pub fn output_frames(&self, active: (i32, i32), current: i32) -> Result<Vec<i32>, String> {
+        let nth = self.every_nth.max(1) as usize;
+        match self.time_output {
+            TimeOutput::Single => Ok(vec![current]),
+            TimeOutput::ActiveSegment => Ok((active.0..=active.1).step_by(nth).collect()),
+            TimeOutput::Range => {
+                let [a, b] = self.range;
+                if a > b {
+                    return Err(format!("range {a} to {b}: the first frame is after the last"));
+                }
+                Ok((a..=b).step_by(nth).collect())
+            }
+            TimeOutput::Frames => parse_frames(&self.frames),
+        }
+    }
+
+    /// File number of `frame` in a sequence whose first frame is `first`
+    /// (File Number Base applies to Active Time Segment and Range).
+    pub fn file_number(&self, frame: i32, first: i32) -> i32 {
+        match self.time_output {
+            TimeOutput::ActiveSegment | TimeOutput::Range if self.file_number_base != 0 => self.file_number_base + (frame - first),
+            _ => frame,
+        }
     }
 
     /// The rectangle the current area uses (Blowup has its own).

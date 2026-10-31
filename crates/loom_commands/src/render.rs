@@ -6,7 +6,7 @@
 use crate::command::Command as C;
 use crate::state::RenderRequest;
 use crate::{AppState, Dialog};
-use loom_scene::render::{RenderArea, RenderSettings};
+use loom_scene::render::{numbered_path, RenderArea, RenderSettings, TimeOutput};
 use loom_scene::Change;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -112,6 +112,22 @@ pub struct RenderedFrame {
     pub copy_requested: bool,
     /// What Render Last repeats.
     pub last: Option<RenderRequest>,
+    /// Time Output renders more than the current frame: the frames in turn.
+    pub sequence: Option<Sequence>,
+}
+
+/// A Production render of a frame sequence (Time Output other than Single).
+#[derive(Debug, Clone)]
+pub struct Sequence {
+    pub frames: Vec<i32>,
+    /// The frame rendering now, an index into `frames`.
+    pub index: usize,
+    /// What every frame renders; its `save_path` is the output file before numbering.
+    pub request: RenderRequest,
+    /// The sequence's first frame (File Number Base counts from it).
+    pub first: i32,
+    /// The current frame before the sequence, set back when it ends.
+    pub restore: i32,
 }
 
 impl RenderedFrame {
@@ -131,6 +147,7 @@ pub fn handles(c: &C) -> bool {
             | C::RenderLast
             | C::RenderSetup { .. }
             | C::BevyRendererSettings { .. }
+            | C::RenderTimeOutput { .. }
             | C::AreaToRender { .. }
             | C::EditRegion
             | C::RenderViewport { .. }
@@ -223,6 +240,94 @@ pub(crate) fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Valu
     Ok(out)
 }
 
+/// Starts the frames of a Time Output sequence (`req.save_path` is the
+/// output before numbering). Image File List writes its .ifl first, of all
+/// the frames; Skip Existing Images then leaves out the files already there.
+fn start_sequence(state: &mut AppState, req: RenderRequest, mut frames: Vec<i32>) -> Result<Value, String> {
+    if state.rendered.progress.is_some() || state.pending_render.is_some() {
+        return Err("a render is in progress".into());
+    }
+    let (lo, hi) = state.frame_range;
+    if let Some(f) = frames.iter().find(|f| !(lo..=hi).contains(*f)) {
+        return Err(format!("frame {f} is outside the time range {lo} to {hi}"));
+    }
+    let first = frames[0];
+    let s = &req.settings;
+    if let Some(path) = &req.save_path {
+        if s.image_file_list {
+            write_image_file_list(path, frames.iter().map(|f| s.file_number(*f, first)))?;
+        }
+        if s.skip_existing {
+            frames.retain(|f| !std::path::Path::new(&numbered_path(path, s.file_number(*f, first))).exists());
+            if frames.is_empty() {
+                state.status_prompt = "Render: every frame's file exists (Skip Existing Images)".into();
+                return Ok(json!({ "skipped": true, "frames": 0 }));
+            }
+        }
+    }
+    let restore = state.current_frame;
+    state.rendered.sequence = Some(Sequence { frames, index: 0, request: req, first, restore });
+    start_sequence_frame(state)
+}
+
+/// The .ifl Put Image File List writes next to the output: a sequence's file names, one per line.
+pub fn image_file_list_path(path: &str) -> String {
+    std::path::Path::new(path).with_extension("ifl").to_string_lossy().into_owned()
+}
+
+fn write_image_file_list(path: &str, numbers: impl Iterator<Item = i32>) -> Result<(), String> {
+    let mut text = String::new();
+    for n in numbers {
+        let file = numbered_path(path, n);
+        let name = std::path::Path::new(&file).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or(file);
+        text.push_str(&name);
+        text.push('\n');
+    }
+    let ifl = image_file_list_path(path);
+    std::fs::write(&ifl, text).map_err(|e| format!("{ifl}: {e}"))
+}
+
+fn start_sequence_frame(state: &mut AppState) -> Result<Value, String> {
+    let Some(seq) = state.rendered.sequence.as_ref() else { return Err("no sequence".into()) };
+    let (frame, index, count) = (seq.frames[seq.index], seq.index, seq.frames.len());
+    let mut req = seq.request.clone();
+    req.save_path = req.save_path.map(|p| numbered_path(&p, req.settings.file_number(frame, seq.first)));
+    let path = req.save_path.clone();
+    crate::execute::set_frame(state, frame)?;
+    match start(state, req) {
+        Ok(mut out) => {
+            out["frame"] = json!(frame);
+            out["sequence"] = json!([index + 1, count]);
+            out["path"] = json!(path);
+            state.status_prompt = format!("Rendering frame {frame} ({} of {count})", index + 1);
+            Ok(out)
+        }
+        Err(e) => {
+            end_sequence(state);
+            Err(e)
+        }
+    }
+}
+
+/// After a sequence frame rendered: the next one starts (None: the
+/// sequence is over, or there is none, and the current frame is back).
+pub fn sequence_next(state: &mut AppState) -> Option<Result<Value, String>> {
+    let seq = state.rendered.sequence.as_mut()?;
+    seq.index += 1;
+    if seq.index >= seq.frames.len() {
+        end_sequence(state);
+        return None;
+    }
+    Some(start_sequence_frame(state))
+}
+
+/// Ends a sequence (finished, cancelled or failed): the current frame goes back.
+pub fn end_sequence(state: &mut AppState) {
+    if let Some(seq) = state.rendered.sequence.take() {
+        let _ = crate::execute::set_frame(state, seq.restore);
+    }
+}
+
 /// Writes `img` to `path`, the format from its extension.
 pub fn save_image(img: &image::RgbaImage, path: &str) -> Result<(), String> {
     let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
@@ -272,6 +377,13 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             // Production saves the Render Output file when Save File is on;
             // Iterative never writes files.
             let save_path = path.or_else(|| (!iterative && settings.save_file).then(|| settings.output_path.clone()).flatten());
+            if !iterative && settings.time_output != TimeOutput::Single {
+                let frames = settings.output_frames(state.frame_range, state.current_frame)?;
+                if save_path.is_none() {
+                    state.status_prompt = "Render: no output file is set, the frames are not saved".into();
+                }
+                return start_sequence(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative, preview: false }, frames);
+            }
             start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative, preview: false })
         }
         C::RenderIterative => {
@@ -557,8 +669,46 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let c = state.rendered.channels;
             Ok(json!({ "red": c.red, "green": c.green, "blue": c.blue, "alpha": c.alpha, "mono": c.mono }))
         }
+        C::RenderTimeOutput { time_output, range, frames, every_nth, file_number_base, skip_existing, image_file_list } => {
+            let mut s = state.scene.render.clone();
+            if let Some(v) = time_output {
+                s.time_output = v;
+            }
+            if let Some(r) = range {
+                if r[0] > r[1] {
+                    return Err(format!("range {} to {}: the first frame is after the last", r[0], r[1]));
+                }
+                s.range = r;
+            }
+            if let Some(f) = frames {
+                loom_scene::render::parse_frames(&f)?;
+                s.frames = f;
+            }
+            if let Some(n) = every_nth {
+                if !(1..=100_000).contains(&n) {
+                    return Err(format!("every Nth frame {n}: 1 to 100000"));
+                }
+                s.every_nth = n;
+            }
+            if let Some(b) = file_number_base {
+                if !(-99_999..=99_999).contains(&b) {
+                    return Err(format!("file number base {b}: -99999 to 99999"));
+                }
+                s.file_number_base = b;
+            }
+            if let Some(v) = skip_existing {
+                s.skip_existing = v;
+            }
+            if let Some(v) = image_file_list {
+                s.image_file_list = v;
+            }
+            set_settings(state, "Render Setup", s)?;
+            let s = &state.scene.render;
+            Ok(json!({ "time_output": s.time_output, "range": s.range, "frames": s.frames, "every_nth": s.every_nth, "file_number_base": s.file_number_base, "skip_existing": s.skip_existing, "image_file_list": s.image_file_list }))
+        }
         C::CancelRender => {
             if state.pending_render.take().is_some() {
+                end_sequence(state);
                 return Ok(json!({ "cancelled": true }));
             }
             if state.rendered.progress.is_none() {
@@ -593,6 +743,7 @@ pub fn state_json(state: &AppState) -> Value {
         "edit_region": r.edit_region,
         "rendering": r.progress.map(|p| json!({ "done": p.done, "total": p.total, "paused": p.paused })),
         "pending": state.pending_render.is_some(),
+        "sequence": r.sequence.as_ref().map(|q| json!({ "frame": q.frames[q.index], "index": q.index, "count": q.frames.len() })),
         "clones": r.clones.len(),
         "settings": settings_json(&state.scene.render),
     })

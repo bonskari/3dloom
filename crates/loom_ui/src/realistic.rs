@@ -614,6 +614,7 @@ impl LoomApp {
             self.rebuild_world_meshes();
         }
         let secs = job.elapsed().as_secs_f32();
+        let ok = result.is_ok();
         match result {
             Ok(()) => {
                 self.state.status_prompt = format!("Rendered {}x{} in {secs:.1} s", job.out[0], job.out[1]);
@@ -626,6 +627,16 @@ impl LoomApp {
             }
             Err(e) if e == "cancelled" => self.state.status_prompt = format!("Render cancelled after {secs:.1} s"),
             Err(e) => self.last_error = Some(format!("Render: {e}")),
+        }
+        if ok {
+            // A Time Output sequence: the next frame (its meshes rebuilt at that frame).
+            match loom_commands::render::sequence_next(&mut self.state) {
+                Some(Err(e)) => self.last_error = Some(format!("Render: {e}")),
+                Some(Ok(_)) | None => self.sync_after_command(),
+            }
+        } else {
+            loom_commands::render::end_sequence(&mut self.state);
+            self.sync_after_command();
         }
     }
 }

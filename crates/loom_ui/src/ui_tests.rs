@@ -33,6 +33,7 @@ mod materials2;
 mod cursors;
 mod dummy;
 mod oswindows;
+mod rendering2;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 

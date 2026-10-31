@@ -6,7 +6,7 @@
 use crate::LoomApp;
 use eframe::egui;
 use loom_commands::Command;
-use loom_scene::render::{AaFilter, AoQuality, Tonemapper};
+use loom_scene::render::{AaFilter, AoQuality, TimeOutput, Tonemapper};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Panel {
@@ -100,7 +100,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let panel_id = egui::Id::new("render_setup_panel");
     let mut panel: Panel = ctx.data(|d| d.get_temp(panel_id)).unwrap_or_default();
     let window = egui::Window::new("Render Setup").resizable(false).default_width(420.0);
-    crate::os_window::OsWindow::new("Render Setup", "Render Setup", [440.0, 560.0]).fixed().show(ctx, open, window, |ui| {
+    crate::os_window::OsWindow::new("Render Setup", "Render Setup", [440.0, 640.0]).fixed().show(ctx, open, window, |ui| {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut panel, Panel::Common, "Common");
             ui.selectable_value(&mut panel, Panel::Renderer, "Renderer");
@@ -117,10 +117,92 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     ctx.data_mut(|d| d.insert_temp(panel_id, panel));
 }
 
+/// Render Time Output arguments.
+#[derive(Default)]
+struct Time {
+    time_output: Option<TimeOutput>,
+    range: Option<[i32; 2]>,
+    frames: Option<String>,
+    every_nth: Option<u32>,
+    file_number_base: Option<i32>,
+    skip_existing: Option<bool>,
+    image_file_list: Option<bool>,
+}
+
+impl Time {
+    fn cmd(self) -> Command {
+        let Time { time_output, range, frames, every_nth, file_number_base, skip_existing, image_file_list } = self;
+        Command::RenderTimeOutput { time_output, range, frames, every_nth, file_number_base, skip_existing, image_file_list }
+    }
+}
+
+fn time_output(ui: &mut egui::Ui, app: &mut LoomApp, s: &loom_scene::render::RenderSettings) {
+    ui.label(egui::RichText::new("Time Output").strong());
+    let choose = |ui: &mut egui::Ui, app: &mut LoomApp, t: TimeOutput| {
+        if ui.radio(s.time_output == t, t.label()).clicked() && s.time_output != t {
+            run(app, Time { time_output: Some(t), ..Default::default() }.cmd());
+        }
+    };
+    ui.horizontal(|ui| {
+        choose(ui, app, TimeOutput::Single);
+        ui.add_space(12.0);
+        ui.label("Every Nth Frame:");
+        let mut n = s.every_nth;
+        let r = ui.add_enabled(matches!(s.time_output, TimeOutput::ActiveSegment | TimeOutput::Range), crate::spinner::spin(ui, &mut n, 1..=100_000u32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Time { every_nth: Some(n), ..Default::default() }.cmd());
+        }
+    });
+    ui.horizontal(|ui| {
+        choose(ui, app, TimeOutput::ActiveSegment);
+        let (a, b) = app.state.frame_range;
+        ui.label(format!("{a} To {b}"));
+    });
+    ui.horizontal(|ui| {
+        choose(ui, app, TimeOutput::Range);
+        let [mut a, mut b] = s.range;
+        let r = ui.add(crate::spinner::spin(ui, &mut a, -100_000..=100_000i32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Time { range: Some([a, b.max(a)]), ..Default::default() }.cmd());
+        }
+        ui.label("To");
+        let r = ui.add(crate::spinner::spin(ui, &mut b, -100_000..=100_000i32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Time { range: Some([a.min(b), b]), ..Default::default() }.cmd());
+        }
+        ui.label("File Number Base:");
+        let mut base = s.file_number_base;
+        let r = ui.add_enabled(matches!(s.time_output, TimeOutput::ActiveSegment | TimeOutput::Range), crate::spinner::spin(ui, &mut base, -99_999..=99_999i32));
+        merge_drag(app, &r);
+        if r.changed() {
+            run(app, Time { file_number_base: Some(base), ..Default::default() }.cmd());
+        }
+    });
+    ui.horizontal(|ui| {
+        choose(ui, app, TimeOutput::Frames);
+        // Applied when the field loses focus (an unfinished list is not an error yet).
+        let id = egui::Id::new("render_setup_frames");
+        let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| s.frames.clone());
+        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(140.0));
+        if r.lost_focus() {
+            if text != s.frames {
+                if let Err(e) = app.dispatch(Time { frames: Some(text.clone()), ..Default::default() }.cmd()) {
+                    app.last_error = Some(format!("{e}"));
+                }
+            }
+            ui.data_mut(|d| d.remove::<String>(id));
+        } else if r.has_focus() {
+            ui.data_mut(|d| d.insert_temp(id, text));
+        }
+    });
+}
+
 fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
     let s = app.state.scene.render.clone();
-    ui.label(egui::RichText::new("Time Output").strong());
-    ui.label("Single: the current frame");
+    time_output(ui, app, &s);
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Output Size").strong());
     egui::Grid::new("render_setup_size").num_columns(4).show(ui, |ui| {
@@ -212,6 +294,16 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.label(s.output_path.as_deref().unwrap_or("(no output file)"));
+    ui.horizontal(|ui| {
+        let mut ifl = s.image_file_list;
+        if ui.checkbox(&mut ifl, "Put Image File List in Output Path").on_hover_text("A sequence also writes a .ifl listing its files").changed() {
+            run(app, Time { image_file_list: Some(ifl), ..Default::default() }.cmd());
+        }
+        let mut skip = s.skip_existing;
+        if ui.checkbox(&mut skip, "Skip Existing Images").changed() {
+            run(app, Time { skip_existing: Some(skip), ..Default::default() }.cmd());
+        }
+    });
     ui.add_space(4.0);
     ui.label(egui::RichText::new("Assign Renderer").strong());
     ui.label("Production: Bevy (PBR rasteriser)");
