@@ -154,7 +154,9 @@ fn action_list(ui: &mut egui::Ui, height: f32) -> Option<String> {
                     Some(g) => crate::icons::labeled(g, a.trim()),
                     None => format!("      {}", a.trim()),
                 };
-                let r = ui.add(egui::SelectableLabel::new(false, text)).interact(egui::Sense::drag());
+                // Each row's id is its action's, not its place in the shown range, so a
+                // drag keeps carrying the row it started on when the range moves.
+                let r = ui.push_id(a, |ui| ui.add(egui::SelectableLabel::new(false, text)).interact(egui::Sense::drag())).inner;
                 crate::icons::named(&r, egui::WidgetType::SelectableLabel, a.trim());
                 r.dnd_set_drag_payload(ActionDrag((*a).to_owned()));
                 if r.double_clicked() {
