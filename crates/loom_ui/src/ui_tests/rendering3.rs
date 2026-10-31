@@ -334,3 +334,56 @@ fn make_preview_view_and_rename_the_sequence() {
     assert!(!d.join("_scene0002.png").exists());
     assert_eq!(std::fs::read_to_string(d.join("walk.ifl")).unwrap(), "walk0000.png\nwalk0001.png\nwalk0002.png\n");
 }
+
+fn setup_window(h: &mut Harness) -> egui::Rect {
+    h.cmd(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
+    h.frames(2);
+    h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).expect("Render Setup is open")
+}
+
+/// Render Setup's new controls clicked as a person would: the Output Size
+/// format list, the output file's Setup options and Gamma, and a render
+/// element's own rollout; the Rendering menu's new entries.
+#[test]
+fn render_setup_formats_setup_gamma_and_element_options_are_clicked() {
+    let mut h = Harness::new();
+    let d = tmp("ui");
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "output": d.join("out.png").to_string_lossy() }));
+    let win = setup_window(&mut h);
+    click_text(&mut h, "Custom", win, 0.0);
+    click_text(&mut h, "HDTV (video)", egui::Rect::EVERYTHING, 0.0);
+    assert_eq!((h.app.state.scene.render.width, h.app.state.scene.render.height), (1920, 1080));
+    assert_eq!(h.app.state.scene.render.film_format.as_deref(), Some("HDTV (video)"));
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Setup (file format options)", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "RGB 48 bit", win, 0.0);
+    assert_eq!(h.app.state.scene.render.output_format.png_type, loom_scene::render::PngType::Rgb48);
+    click_text(&mut h, "Enable Gamma Correction", win, 0.0);
+    assert!(h.app.state.scene.render.gamma.enabled);
+    // A Diffuse element's Lighting checkbox.
+    ok(&mut h, "Add Render Element", serde_json::json!({ "kind": "Diffuse" }));
+    click_text(&mut h, "Render Elements", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Lighting", win, 0.0);
+    assert!(!h.app.state.scene.render.elements[0].lighting, "Lighting off: the diffuse colour before lighting");
+    h.cmd(Command::UndoSceneOperation);
+    assert!(h.app.state.scene.render.elements[0].lighting);
+}
+
+/// Rendering > Batch Render... and View Image File... from the menu bar.
+#[test]
+fn rendering_menu_opens_batch_render_and_view_image_file() {
+    let mut h = Harness::new();
+    let menu = |h: &mut Harness| {
+        let r = h.text_rect("Rendering", egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1280.0, 24.0))).expect("the Rendering menu");
+        h.click(r.center());
+        h.frames(1);
+    };
+    menu(&mut h);
+    click_text(&mut h, "Batch Render...", egui::Rect::EVERYTHING, 0.0);
+    assert!(h.app.state.rendered.batch.open);
+    menu(&mut h);
+    click_text(&mut h, "View Image File...", egui::Rect::EVERYTHING, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ViewImageFile));
+}
