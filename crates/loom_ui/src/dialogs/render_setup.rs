@@ -103,6 +103,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let window = egui::Window::new("Render Setup").resizable(false).default_width(420.0);
     crate::os_window::OsWindow::new("Render Setup", "Render Setup", [440.0, 640.0]).fixed().show(ctx, open, window, |ui| {
         ui.horizontal(|ui| {
+            ui.label("Preset:");
+            ui.menu_button("Presets", |ui| {
+                if ui.button("Load Preset...").clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::LoadRenderPreset);
+                    ui.close_menu();
+                }
+                if ui.button("Save Preset...").clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::SaveRenderPreset);
+                    ui.close_menu();
+                }
+            });
+        });
+        ui.horizontal(|ui| {
             ui.selectable_value(&mut panel, Panel::Common, "Common");
             ui.selectable_value(&mut panel, Panel::Renderer, "Renderer");
             ui.selectable_value(&mut panel, Panel::Elements, "Render Elements");

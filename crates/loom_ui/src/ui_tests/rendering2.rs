@@ -220,6 +220,22 @@ fn render_elements_write_their_images() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The Render Shortcuts toolbar: Shift+click on B stores the settings, a click brings them back.
+#[test]
+fn render_shortcuts_toolbar_stores_and_applies_a_preset() {
+    let mut h = Harness::new();
+    h.app.state.ui_custom.shown.insert("Render Shortcuts".into(), true);
+    h.frames(2);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 320, "height": 240 }));
+    h.mods = egui::Modifiers::SHIFT;
+    h.click_text_anywhere("B");
+    h.mods = egui::Modifiers::NONE;
+    assert!(h.app.state.rendered.shortcuts[1].is_some());
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 800, "height": 600 }));
+    h.click_text_anywhere("B");
+    assert_eq!(h.app.state.scene.render.width, 320);
+}
+
 /// The Render Elements panel: Add... lists the kinds; a click adds one.
 #[test]
 fn render_elements_panel_adds_an_element() {

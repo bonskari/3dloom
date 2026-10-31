@@ -41,7 +41,7 @@ impl Dock {
 }
 
 /// The toolbars that come with the program, in the Customize Display menu's order.
-pub const BUILTIN_TOOLBARS: [&str; 6] = ["Command Panel", "Main Toolbar", "Axis Constraints", "Layers", "Extras", "Snaps"];
+pub const BUILTIN_TOOLBARS: [&str; 7] = ["Command Panel", "Main Toolbar", "Axis Constraints", "Layers", "Extras", "Snaps", "Render Shortcuts"];
 
 /// A toolbar item that is a separator line.
 pub const SEPARATOR: &str = "-";
@@ -409,7 +409,7 @@ impl UiCustom {
         self.docks.get(name).copied().unwrap_or(match name {
             "Command Panel" => Dock::Right,
             "Main Toolbar" | "Layers" => Dock::Top,
-            "Axis Constraints" | "Extras" | "Snaps" => Dock::Float,
+            "Axis Constraints" | "Extras" | "Snaps" | "Render Shortcuts" => Dock::Float,
             _ => Dock::Float,
         })
     }
@@ -496,7 +496,7 @@ fn set_shown(state: &mut AppState, name: &str, on: Option<bool>) -> Result<bool,
         "Command Panel" => flip(&mut state.show_command_panel),
         "Main Toolbar" => flip(&mut state.show_main_toolbar),
         "Layers" => flip(&mut state.show_layers_toolbar),
-        "Axis Constraints" | "Extras" | "Snaps" => {
+        "Axis Constraints" | "Extras" | "Snaps" | "Render Shortcuts" => {
             let v = state.ui_custom.shown.entry(name.to_owned()).or_insert(false);
             flip(v)
         }
@@ -510,7 +510,7 @@ pub fn is_shown(state: &AppState, name: &str) -> bool {
         "Command Panel" => state.show_command_panel,
         "Main Toolbar" => state.show_main_toolbar,
         "Layers" => state.show_layers_toolbar,
-        "Axis Constraints" | "Extras" | "Snaps" => state.ui_custom.shown.get(name).copied().unwrap_or(false),
+        "Axis Constraints" | "Extras" | "Snaps" | "Render Shortcuts" => state.ui_custom.shown.get(name).copied().unwrap_or(false),
         _ => state.ui_custom.toolbar(name).is_some_and(|t| t.shown),
     }
 }

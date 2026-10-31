@@ -117,6 +117,8 @@ pub struct RenderedFrame {
     /// Render Message Window: its log and whether it shows.
     pub messages: Vec<RenderMessage>,
     pub messages_open: bool,
+    /// Render Shortcuts toolbar presets A, B, C (for the session).
+    pub shortcuts: [Option<Box<RenderSettings>>; 3],
 }
 
 /// A Production render of a frame sequence (Time Output other than Single).
@@ -153,6 +155,9 @@ pub fn handles(c: &C) -> bool {
             | C::RenderTimeOutput { .. }
             | C::RenderOptions { .. }
             | C::RenderMessageWindow
+            | C::SaveRenderPreset { .. }
+            | C::LoadRenderPreset { .. }
+            | C::RenderShortcut { .. }
             | C::AddRenderElement { .. }
             | C::DeleteRenderElement { .. }
             | C::RenderElementParameters { .. }
@@ -875,6 +880,37 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Render Setup", s)?;
             let s = &state.scene.render;
             Ok(json!({ "video_color_check": s.video_color_check, "super_black": s.super_black, "super_black_threshold": s.super_black_threshold, "force_wireframe": s.force_wireframe, "wire_thickness": s.wire_thickness }))
+        }
+        C::SaveRenderPreset { path } => {
+            let text = serde_json::to_string_pretty(&state.scene.render).map_err(|e| e.to_string())?;
+            std::fs::write(&path, text).map_err(|e| format!("{path}: {e}"))?;
+            Ok(json!({ "path": path }))
+        }
+        C::LoadRenderPreset { path, common, renderer, elements } => {
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+            let from: RenderSettings = serde_json::from_str(&text).map_err(|e| format!("{path}: not a render preset: {e}"))?;
+            let mut s = state.scene.render.clone();
+            s.take_categories(&from, common.unwrap_or(true), renderer.unwrap_or(true), elements.unwrap_or(true));
+            check_size(s.width, s.height)?;
+            set_settings(state, "Load Render Preset", s)?;
+            Ok(settings_json(&state.scene.render))
+        }
+        C::RenderShortcut { slot, store } => {
+            let i = slot as usize;
+            if i >= state.rendered.shortcuts.len() {
+                return Err(format!("render shortcut {slot}: 0 to 2 (A, B, C)"));
+            }
+            if store == Some(true) {
+                state.rendered.shortcuts[i] = Some(Box::new(state.scene.render.clone()));
+                return Ok(json!({ "slot": slot, "stored": true }));
+            }
+            let Some(p) = state.rendered.shortcuts[i].clone() else {
+                return Err(format!("render shortcut {} is empty", ["A", "B", "C"][i]));
+            };
+            let mut s = state.scene.render.clone();
+            s.take_categories(&p, true, true, true);
+            set_settings(state, "Render Shortcut", s)?;
+            Ok(json!({ "slot": slot, "applied": true }))
         }
         C::RenderMessageWindow => {
             state.rendered.messages_open = !state.rendered.messages_open;

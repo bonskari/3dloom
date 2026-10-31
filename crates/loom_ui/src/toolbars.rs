@@ -198,11 +198,12 @@ pub fn show_edges(ctx: &egui::Context, app: &mut LoomApp, edges: &[Dock]) {
     if app.state.show_layers_toolbar {
         let _ = host(ctx, app, "Layers", edges, crate::layers_toolbar::contents);
     }
-    for name in ["Axis Constraints", "Extras", "Snaps"] {
+    for name in ["Axis Constraints", "Extras", "Snaps", "Render Shortcuts"] {
         if ui_custom::is_shown(&app.state, name) {
             let _ = host(ctx, app, name, edges, |ui, app| match name {
                 "Axis Constraints" => axis_constraints(ui, app),
                 "Extras" => extras(ui, app),
+                "Render Shortcuts" => render_shortcuts(ui, app),
                 _ => snaps(ui, app),
             });
         }
@@ -350,6 +351,21 @@ fn axis_constraints(ui: &mut egui::Ui, app: &mut LoomApp) {
 }
 
 /// Extras: AutoGrid and the Array flyout (Array, Snapshot, Spacing Tool, Clone and Align).
+/// Render Shortcuts: preset buttons A, B, C; Shift+click keeps the current
+/// Render Setup settings in one, a click makes them current again.
+fn render_shortcuts(ui: &mut egui::Ui, app: &mut LoomApp) {
+    for (slot, label) in ["A", "B", "C"].into_iter().enumerate() {
+        let stored = app.state.rendered.shortcuts[slot].is_some();
+        let r = ui.add(egui::Button::new(label).selected(stored)).on_hover_text(format!("Render preset {label}: click to use it, Shift+click to store the current Render Setup settings"));
+        if r.clicked() {
+            let store = ui.input(|i| i.modifiers.shift);
+            if let Err(e) = app.dispatch(Command::RenderShortcut { slot: slot as u32, store: Some(store) }) {
+                app.state.status_prompt = e;
+            }
+        }
+    }
+}
+
 fn extras(ui: &mut egui::Ui, app: &mut LoomApp) {
     let r = ui.add(egui::Button::new("AutoGrid").selected(app.autogrid)).on_hover_text("AutoGrid: new objects are created on the surface under the cursor");
     if r.clicked() {

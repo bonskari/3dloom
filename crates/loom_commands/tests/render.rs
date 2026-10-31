@@ -429,6 +429,35 @@ fn render_elements_list_is_edited_by_commands() {
     assert_eq!(r["ok"], false);
 }
 
+/// Render presets: saved to a file and loaded back by category; the Render
+/// Shortcuts slots keep settings and bring them back, each an undo step.
+#[test]
+fn render_presets_and_shortcuts_restore_settings() {
+    let path = std::env::temp_dir().join(format!("loom-preset-{}.rps", std::process::id())).to_string_lossy().into_owned();
+    let mut s = AppState::new();
+    setup(&mut s, json!({ "width": 320, "height": 240 }));
+    execute_json(&mut s, &json!({ "cmd": "Bevy Renderer Settings", "args": { "passes": 4 } }));
+    execute(&mut s, Command::AddRenderElement { kind: loom_scene::render::ElementKind::Alpha, name: None }).unwrap();
+    execute(&mut s, Command::SaveRenderPreset { path: path.clone() }).unwrap();
+    execute(&mut s, Command::RenderShortcut { slot: 1, store: Some(true) }).unwrap();
+    let mut t = AppState::new();
+    // Renderer only: the size and elements stay.
+    execute(&mut t, Command::LoadRenderPreset { path: path.clone(), common: Some(false), renderer: Some(true), elements: Some(false) }).unwrap();
+    assert_eq!((t.scene.render.width, t.scene.render.bevy.passes, t.scene.render.elements.len()), (640, 4, 0));
+    execute(&mut t, Command::LoadRenderPreset { path: path.clone(), common: None, renderer: None, elements: None }).unwrap();
+    assert_eq!((t.scene.render.width, t.scene.render.elements.len()), (320, 1));
+    execute(&mut t, Command::UndoSceneOperation).unwrap();
+    assert_eq!(t.scene.render.width, 640);
+    let _ = std::fs::remove_file(&path);
+    assert!(execute(&mut t, Command::LoadRenderPreset { path, common: None, renderer: None, elements: None }).is_err(), "no file");
+    // Shortcuts.
+    setup(&mut s, json!({ "width": 100, "height": 100 }));
+    assert!(execute(&mut s, Command::RenderShortcut { slot: 0, store: None }).is_err(), "A is empty");
+    execute(&mut s, Command::RenderShortcut { slot: 1, store: None }).unwrap();
+    assert_eq!((s.scene.render.width, s.scene.render.height), (320, 240));
+    assert!(execute(&mut s, Command::RenderShortcut { slot: 3, store: None }).is_err());
+}
+
 fn time_output(s: &mut AppState, t: Option<loom_scene::render::TimeOutput>, range: Option<[i32; 2]>, frames: Option<&str>, base: Option<i32>, skip: Option<bool>, ifl: Option<bool>) -> Result<serde_json::Value, String> {
     execute(s, Command::RenderTimeOutput { time_output: t, range, frames: frames.map(str::to_owned), every_nth: None, file_number_base: base, skip_existing: skip, image_file_list: ifl })
 }

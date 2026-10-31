@@ -580,6 +580,26 @@ impl RenderSettings {
         }
     }
 
+    /// A render preset's categories taken from `from`: Common (output, time,
+    /// options, area), Renderer and Render Elements; Render To Texture stays.
+    pub fn take_categories(&mut self, from: &RenderSettings, common: bool, renderer: bool, elements: bool) {
+        if common {
+            let (bevy, wire, thickness, list, active, display, bake) = (self.bevy.clone(), self.force_wireframe, self.wire_thickness, self.elements.clone(), self.elements_active, self.display_elements, self.bake.clone());
+            *self = from.clone();
+            (self.bevy, self.force_wireframe, self.wire_thickness, self.elements, self.elements_active, self.display_elements, self.bake) = (bevy, wire, thickness, list, active, display, bake);
+        }
+        if renderer {
+            self.bevy = from.bevy.clone();
+            self.force_wireframe = from.force_wireframe;
+            self.wire_thickness = from.wire_thickness;
+        }
+        if elements {
+            self.elements = from.elements.clone();
+            self.elements_active = from.elements_active;
+            self.display_elements = from.display_elements;
+        }
+    }
+
     /// The rectangle the current area uses (Blowup has its own).
     pub fn area_rect(&self) -> [f32; 4] {
         if self.area == RenderArea::Blowup {

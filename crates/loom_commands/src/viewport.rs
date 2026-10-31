@@ -428,6 +428,9 @@ pub enum Dialog {
     SelectCamera,
     /// Render Setup > Render Output > Files...: the file a Production render saves to.
     RenderFile,
+    /// Render Setup > Preset > Save Preset... / Load Preset...: a .rps file.
+    SaveRenderPreset,
+    LoadRenderPreset,
     /// Rendering > Render Setup (F10).
     RenderSetup,
     /// Tools > Light Lister.
