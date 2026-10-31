@@ -286,7 +286,8 @@ fn start_task(state: &mut AppState, index: usize) -> Result<Value, String> {
     let req = RenderRequest { viewport: render_viewport(state), settings: settings.clone(), save_path: job.output.clone(), camera, ..Default::default() };
     if settings.time_output != TimeOutput::Single {
         let frames = settings.output_frames(state.frame_range, state.current_frame)?;
-        if frames.len() > 1 || job.override_preset {
+        // One frame other than the current one is a sequence of one (its file numbered).
+        if frames.len() > 1 || frames[0] != state.current_frame {
             return start_sequence(state, req, frames);
         }
     }

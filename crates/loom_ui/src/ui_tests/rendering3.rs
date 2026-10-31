@@ -163,6 +163,8 @@ fn batch_render_writes_each_task() {
     ok(&mut h, "Batch Render Task", serde_json::json!({ "index": 0, "camera": cam, "output": d.join("cam.png").to_string_lossy() }));
     ok(&mut h, "Batch Render Task", serde_json::json!({ "index": 1, "output": d.join("view.png").to_string_lossy() }));
     h.frames(2);
+    // The dialog grew with its two tasks.
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Batch Render"))).unwrap();
     click_text(&mut h, "Render", win, 0.0);
     finish_render(&mut h, 600);
     for _ in 0..600 {

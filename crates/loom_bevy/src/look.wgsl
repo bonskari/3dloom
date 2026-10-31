@@ -143,7 +143,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         return out;
     }
 
-    out.color = apply_pbr_lighting(pbr_input);
+    // An unlit material shows its colour as it is (as Bevy's own fragment does).
+    if ((pbr_input.material.flags & pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u) {
+        out.color = apply_pbr_lighting(pbr_input);
+    } else {
+        out.color = pbr_input.material.base_color;
+    }
     if ((look.flags & COLOR_SCALE) != 0u) {
         // Color Range Limiting Scale: the largest component comes down to 1, the hue stays.
         let m = max(out.color.r, max(out.color.g, out.color.b));
