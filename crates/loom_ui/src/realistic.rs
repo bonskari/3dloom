@@ -373,7 +373,8 @@ impl LoomApp {
             force_two_sided: s.force_two_sided,
             selected_only,
             hidden: s.render_hidden,
-            quality: s.bevy.clone(),
+            // Area Lights/Shadows as Points: no soft shadows.
+            quality: loom_scene::render::BevyRenderSettings { area_shadows: s.bevy.area_shadows && !s.area_as_points, ..s.bevy.clone() },
             atmospherics: s.atmospherics,
             effects: s.effects,
             view,

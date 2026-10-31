@@ -732,6 +732,9 @@ pub struct RenderSettings {
     pub raytracer: RaytracerSettings,
     /// Advanced Lighting panel, and Common > Options > Use Advanced Lighting.
     pub advanced: AdvancedLighting,
+    /// Common > Options > Area Lights/Shadows as Points: area and soft
+    /// ray-traced shadows render sharp, from the light's centre.
+    pub area_as_points: bool,
 }
 
 impl Default for RenderSettings {
@@ -770,6 +773,7 @@ impl Default for RenderSettings {
             bake: crate::bake::BakeSettings::default(),
             raytracer: RaytracerSettings::default(),
             advanced: AdvancedLighting::default(),
+            area_as_points: false,
         }
     }
 }

@@ -15,14 +15,7 @@ fn render(h: &mut Harness) -> image::RgbaImage {
     h.cmd(Command::Render { path: None, width: None, height: None });
     finish_render(h, 200);
     assert_eq!(h.app.last_error, None, "{:?}", h.app.state.rendered.messages);
-    let img = (*h.app.state.rendered.image.clone().expect("a rendered image")).clone();
-    if let Ok(d) = std::env::var("LOOM_RT_DUMP") {
-        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let name = std::thread::current().name().unwrap_or("t").replace("::", "_");
-        let _ = img.save(format!("{d}/{name}-{n}.png"));
-    }
-    img
+    (*h.app.state.rendered.image.clone().expect("a rendered image")).clone()
 }
 
 fn selected(h: &Harness) -> loom_scene::NodeId {
@@ -259,6 +252,11 @@ fn ray_traced_and_area_shadows_are_traced_in_the_render() {
     set(&mut h, "Shadow Quality", 6.0);
     let (area_dark, area_mid) = tones(&render(&mut h));
     assert!(area_mid > rt_mid + 50 && area_dark * 4 < rt_dark * 3, "the area light's soft shadow: {area_dark} dark / {area_mid} mid against {rt_dark} / {rt_mid}");
+    // Common > Area Lights/Shadows as Points: sharp again.
+    ok(&mut h, "Renderer Options", serde_json::json!({ "area_as_points": true }));
+    let (points_dark, _) = tones(&render(&mut h));
+    assert!((points_dark as f32 - rt_dark as f32).abs() < rt_dark as f32 * 0.2, "as points the shadow is the sharp one: {points_dark} against {rt_dark}");
+    ok(&mut h, "Renderer Options", serde_json::json!({ "area_as_points": false }));
     // Shadows off: nothing is traced.
     set(&mut h, "Shadows On", 0.0);
     let (none, _) = tones(&render(&mut h));
@@ -363,6 +361,8 @@ fn raytracer_and_advanced_lighting_panels_are_clicked() {
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
     click_text(&mut h, "Use Advanced Lighting", win, 0.0);
     assert!(!h.app.state.scene.render.advanced.use_advanced);
+    click_text(&mut h, "Area Lights/Shadows as Points", win, 0.0);
+    assert!(h.app.state.scene.render.area_as_points);
     click_text(&mut h, "Renderer", win, 0.0);
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
     click_text(&mut h, "Filter Maps", win, 0.0);

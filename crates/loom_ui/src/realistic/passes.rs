@@ -292,7 +292,10 @@ impl LoomApp {
         let Some(lit) = self.state.rendered.image.as_ref().map(|i| (**i).clone()) else { return Ok(()) };
         let mut darken = vec![Vec3::ZERO; (job.out[0] * job.out[1]) as usize];
         for l in lights.iter().filter(|l| job.options.traced_shadows.contains(&l.id.0)) {
-            let Some(shadow) = l.traced else { continue };
+            let Some(mut shadow) = l.traced else { continue };
+            if s.area_as_points {
+                shadow = loom_scene::light::TracedShadow { radius: 0.0, samples: 1 };
+            }
             let open = scene.shadows(&view, l, shadow, ss);
             let mut options = job.options.clone();
             options.lights_off = vec![l.id.0];

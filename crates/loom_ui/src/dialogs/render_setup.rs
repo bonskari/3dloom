@@ -305,6 +305,10 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.horizontal(|ui| {
+        let mut points = s.area_as_points;
+        if ui.checkbox(&mut points, "Area Lights/Shadows as Points").on_hover_text("Soft shadows render sharp, from each light's centre").changed() {
+            run(app, Opts { area_as_points: Some(points), ..Default::default() }.cmd());
+        }
         let mut use_al = s.advanced.use_advanced;
         if ui.checkbox(&mut use_al, "Use Advanced Lighting").on_hover_text("Renders trace the Advanced Lighting panel's Light Tracer").changed() {
             run(app, Light { use_advanced: Some(use_al), ..Default::default() }.cmd());
@@ -572,6 +576,7 @@ fn renderer(ui: &mut egui::Ui, app: &mut LoomApp) {
 /// Renderer Options arguments.
 #[derive(Default)]
 struct Opts {
+    area_as_points: Option<bool>,
     auto_reflect: Option<bool>,
     reflect_iterations: Option<u32>,
     filter_maps: Option<bool>,
@@ -589,8 +594,8 @@ struct Opts {
 
 impl Opts {
     fn cmd(self) -> Command {
-        let Opts { auto_reflect, reflect_iterations, filter_maps, disable_all_samplers, global_supersampler, object_motion_blur, object_blur_duration, object_blur_samples, object_blur_subdivisions, image_motion_blur, image_blur_duration, image_blur_environment, color_range } = self;
-        Command::RendererOptions { auto_reflect, reflect_iterations, filter_maps, disable_all_samplers, global_supersampler, object_motion_blur, object_blur_duration, object_blur_samples, object_blur_subdivisions, image_motion_blur, image_blur_duration, image_blur_environment, color_range }
+        let Opts { area_as_points, auto_reflect, reflect_iterations, filter_maps, disable_all_samplers, global_supersampler, object_motion_blur, object_blur_duration, object_blur_samples, object_blur_subdivisions, image_motion_blur, image_blur_duration, image_blur_environment, color_range } = self;
+        Command::RendererOptions { area_as_points, auto_reflect, reflect_iterations, filter_maps, disable_all_samplers, global_supersampler, object_motion_blur, object_blur_duration, object_blur_samples, object_blur_subdivisions, image_motion_blur, image_blur_duration, image_blur_environment, color_range }
     }
 }
 

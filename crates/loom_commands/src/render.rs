@@ -1026,8 +1026,11 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Advanced Lighting", s)?;
             Ok(serde_json::to_value(&state.scene.render.advanced).unwrap_or(Value::Null))
         }
-        C::RendererOptions { auto_reflect, reflect_iterations, filter_maps, disable_all_samplers, global_supersampler, object_motion_blur, object_blur_duration, object_blur_samples, object_blur_subdivisions, image_motion_blur, image_blur_duration, image_blur_environment, color_range } => {
+        C::RendererOptions { area_as_points, auto_reflect, reflect_iterations, filter_maps, disable_all_samplers, global_supersampler, object_motion_blur, object_blur_duration, object_blur_samples, object_blur_subdivisions, image_motion_blur, image_blur_duration, image_blur_environment, color_range } => {
             let mut s = state.scene.render.clone();
+            if let Some(v) = area_as_points {
+                s.area_as_points = v;
+            }
             let b = &mut s.bevy;
             if let Some(v) = auto_reflect {
                 b.auto_reflect = v;
@@ -1071,7 +1074,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Render Setup", s)?;
             let b = &state.scene.render.bevy;
             Ok(json!({
-                "auto_reflect": b.auto_reflect, "reflect_iterations": b.reflect_iterations, "filter_maps": b.filter_maps,
+                "area_as_points": state.scene.render.area_as_points, "auto_reflect": b.auto_reflect, "reflect_iterations": b.reflect_iterations, "filter_maps": b.filter_maps,
                 "disable_all_samplers": b.disable_all_samplers, "global_supersampler": b.global_supersampler,
                 "object_motion_blur": b.object_motion_blur, "object_blur_duration": b.object_blur_duration, "object_blur_samples": b.object_blur_samples, "object_blur_subdivisions": b.object_blur_subdivisions,
                 "image_motion_blur": b.image_motion_blur, "image_blur_duration": b.image_blur_duration, "image_blur_environment": b.image_blur_environment, "color_range": b.color_range,
