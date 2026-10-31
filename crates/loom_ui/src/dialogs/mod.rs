@@ -1,6 +1,7 @@
 //! Modeless dialogs opened by commands (`AppState::dialog`).
 
 pub mod rename_objects;
+pub mod wiring;
 pub mod display_floater;
 pub mod configure_paths;
 pub mod align;
@@ -179,6 +180,9 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ConfigurePaths => configure_paths::show(ctx, app, &mut open),
         Dialog::Switcher => switcher(ctx, app, &mut open),
         Dialog::RenameObjects => rename_objects::show(ctx, app, &mut open),
+        Dialog::ParameterWiring => wiring::parameter_wiring(ctx, app, &mut open),
+        Dialog::AddCustomAttributes => wiring::add_custom_attributes(ctx, app, &mut open),
+        Dialog::ParameterCollector => wiring::parameter_collector(ctx, app, &mut open),
         Dialog::CustomizeUI => customize_ui::show(ctx, app, &mut open),
         Dialog::PolySettings(kind) => poly_settings::show(ctx, app, kind, &mut open),
         Dialog::Detach => detach::show(ctx, app, &mut open),
