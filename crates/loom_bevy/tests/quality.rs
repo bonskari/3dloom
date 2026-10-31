@@ -156,7 +156,7 @@ fn area_shadows_soften_with_the_source_radius() {
     // The shadow's centre: from the light through the box centre to the floor.
     let shadow = Vec3::new(-60.0 + 60.0 * 100.0 / 55.0, 0.0, 0.0);
     // From inside the shadow out across its right edge to the lit floor.
-    let (from, to, lit_at) = (shadow, Vec3::new(80.0, 0.0, 0.0), Vec3::new(80.0, 0.0, 0.0));
+    let (from, to, lit_at) = (shadow, Vec3::new(70.0, 0.0, 0.0), Vec3::new(70.0, 0.0, 0.0));
     let mut widths = Vec::new();
     for radius in [0.0, 12.0] {
         spot.source_radius = radius;
