@@ -4,6 +4,8 @@
 //! from high-resolution objects, height and alpha) and edge padding. The
 //! lit elements are rendered by the GPU renderer in the same texture space.
 
+pub mod gbuffer;
+
 use glam::{Mat3, Vec2, Vec3};
 use image::{Rgba, RgbaImage};
 use loom_mesh::{FaceId, Mesh};
