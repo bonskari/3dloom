@@ -376,7 +376,7 @@ impl SkinMorphData {
     pub fn bone_angle(&self, bone: usize, world: &dyn Fn(NodeId) -> Option<Mat4>) -> Option<f32> {
         let b = self.bones.get(bone)?;
         let bw = world(b.node)?;
-        let pw = b.parent.and_then(|p| world(p)).unwrap_or(Mat4::IDENTITY);
+        let pw = b.parent.and_then(world).unwrap_or(Mat4::IDENTITY);
         let bind_dir_parent = b.parent_bind_world.inverse().transform_vector3(b.bind_world.transform_vector3(Vec3::X)).normalize_or_zero();
         let cur_dir_parent = pw.inverse().transform_vector3(bw.transform_vector3(Vec3::X)).normalize_or_zero();
         Some(bind_dir_parent.dot(cur_dir_parent).clamp(-1.0, 1.0).acos().to_degrees())

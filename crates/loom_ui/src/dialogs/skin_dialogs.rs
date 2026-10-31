@@ -650,14 +650,14 @@ pub fn angle_keys_curves(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool
         let colours = [egui::Color32::from_rgb(230, 60, 60), egui::Color32::from_rgb(60, 200, 60), egui::Color32::from_rgb(70, 110, 255)];
         let mut handles: Vec<(egui::Pos2, usize, usize, usize)> = Vec::new();
         for p in &points {
-            for c in 0..3 {
+            for (c, colour) in colours.iter().enumerate() {
                 let line: Vec<egui::Pos2> = keys.iter().map(|(k, a)| egui::pos2(x_of(*a), y_of(offset(*k, *p, c)))).collect();
                 for (i, q) in line.iter().enumerate() {
-                    painter.circle_filled(*q, 2.5, colours[c]);
+                    painter.circle_filled(*q, 2.5, *colour);
                     handles.push((*q, keys[i].0, *p, c));
                 }
                 if line.len() >= 2 {
-                    painter.add(egui::Shape::line(line, egui::Stroke::new(1.0_f32, colours[c])));
+                    painter.add(egui::Shape::line(line, egui::Stroke::new(1.0_f32, *colour)));
                 }
             }
         }

@@ -204,8 +204,7 @@ pub fn edge_loop(mesh: &Mesh, seeds: &[HalfEdgeId]) -> Vec<HalfEdgeId> {
         out.insert(c);
         let Some((a, b)) = mesh.edge_vertices(c) else { continue };
         for (mut e, mut v) in [(c, a), (c, b)] {
-            loop {
-                let Some(n) = loop_continuation(mesh, e, v) else { break };
+            while let Some(n) = loop_continuation(mesh, e, v) {
                 if !out.insert(n) {
                     break;
                 }
