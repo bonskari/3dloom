@@ -45,6 +45,14 @@ pub struct ViewportSave {
     pub background_aspect: crate::viewport::BackgroundAspect,
     #[serde(default = "yes")]
     pub background_display: bool,
+    #[serde(default)]
+    pub transparency: crate::viewport::Transparency,
+    #[serde(default)]
+    pub disable_textures: bool,
+    #[serde(default)]
+    pub force_two_sided: bool,
+    #[serde(default)]
+    pub background_use_environment: bool,
 }
 
 fn yes() -> bool {
@@ -60,7 +68,7 @@ fn default_clip() -> (f32, f32) {
 }
 
 impl ViewportSave {
-    fn from_viewport(v: &Viewport) -> Self {
+    pub(crate) fn from_viewport(v: &Viewport) -> Self {
         Self {
             kind: v.kind,
             target: v.camera.target.to_array(),
@@ -83,10 +91,14 @@ impl ViewportSave {
             background_anchor: v.background_anchor.map(|(t, d)| (t.to_array(), d)),
             background_aspect: v.background_aspect,
             background_display: v.background_display,
+            transparency: v.transparency,
+            disable_textures: v.disable_textures,
+            force_two_sided: v.force_two_sided,
+            background_use_environment: v.background_use_environment,
         }
     }
 
-    fn to_viewport(&self) -> Viewport {
+    pub(crate) fn to_viewport(&self) -> Viewport {
         let mut v = Viewport::new(self.kind);
         v.camera.target = Vec3::from_array(self.target);
         v.camera.distance = self.distance;
@@ -109,6 +121,10 @@ impl ViewportSave {
         v.background_anchor = self.background_locked.then(|| self.background_anchor.map(|(t, d)| (Vec3::from_array(t), d)).unwrap_or((v.camera.target, v.camera.distance)));
         v.background_aspect = self.background_aspect;
         v.background_display = self.background_display;
+        v.transparency = self.transparency;
+        v.disable_textures = self.disable_textures;
+        v.force_two_sided = self.force_two_sided;
+        v.background_use_environment = self.background_use_environment;
         v
     }
 }
@@ -143,6 +159,16 @@ pub struct SceneSettings {
     pub saved_views: BTreeMap<String, crate::state::SavedView>,
     /// File > File Properties and the Summary Info description.
     pub file_properties: FileProperties,
+    /// The status bar's time tags.
+    pub time_tags: Vec<crate::time_tags::TimeTag>,
+    /// Viewport Configuration > Adaptive Degradation.
+    pub degradation: crate::viewport::Degradation,
+    /// Time Configuration > Time Display and Key Steps.
+    pub time_config: crate::time_display::TimeConfig,
+    /// The Scene Explorers (Tools menu), open or closed.
+    pub scene_explorers: crate::explorer::Explorers,
+    /// The Schematic Views (Graph Editors menu), open or closed.
+    pub schematic_views: crate::schematic::Schematics,
 }
 
 /// File > File Properties: the Summary fields, the Summary Info
@@ -226,6 +252,11 @@ impl SceneSettings {
             home_view: s.home_view,
             saved_views: s.saved_views.clone(),
             file_properties: s.file_properties.clone(),
+            time_tags: s.time_tags.clone(),
+            degradation: s.degradation.clone(),
+            time_config: s.time_config,
+            scene_explorers: s.explorers.clone(),
+            schematic_views: s.schematics.clone(),
         }
     }
 
@@ -256,6 +287,11 @@ impl SceneSettings {
         s.home_view = self.home_view;
         s.saved_views = self.saved_views.clone();
         s.file_properties = self.file_properties.clone();
+        s.time_tags = self.time_tags.clone();
+        s.degradation = self.degradation.clone();
+        s.time_config = self.time_config;
+        s.explorers = self.scene_explorers.clone();
+        s.schematics = self.schematic_views.clone();
         s.scene.set_time(s.current_frame as f32);
     }
 }
@@ -294,6 +330,28 @@ pub fn write(path: &Path, doc: &Document) -> Result<(), String> {
     })
 }
 
+/// Files from before the Environment dialog kept the background and ambient
+/// colours in Render Setup's Renderer panel: they become the Environment's.
+fn legacy_environment(value: &mut Value) {
+    let Some(scene) = value.get_mut("scene").and_then(Value::as_object_mut) else { return };
+    if scene.contains_key("environment") {
+        return;
+    }
+    let bevy = scene.get("render").and_then(|r| r.get("bevy"));
+    let colour = |k: &str| bevy.and_then(|b| b.get(k)).and_then(|c| serde_json::from_value::<[f32; 3]>(c.clone()).ok());
+    let (bg, ambient) = (colour("background"), colour("ambient"));
+    let mut env = loom_scene::environment::Environment::default();
+    if let Some(c) = bg {
+        env.background = loom_scene::Param::new(Vec3::from(c));
+    }
+    if let Some(c) = ambient {
+        env.ambient = loom_scene::Param::new(Vec3::from(c));
+    }
+    if let Ok(v) = serde_json::to_value(env) {
+        scene.insert("environment".into(), v);
+    }
+}
+
 /// Reads a `.loom` file. A `format` newer than [`FORMAT`] is refused.
 pub fn read(path: &Path) -> Result<Document, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -302,6 +360,8 @@ pub fn read(path: &Path) -> Result<Document, String> {
     if format > FORMAT as u64 {
         return Err(format!("{}: format {format} is newer than this program's {FORMAT}", path.display()));
     }
+    let mut value = value;
+    legacy_environment(&mut value);
     let mut doc: Document = serde_json::from_value(value).map_err(|e| format!("{}: {e}", path.display()))?;
     let ids: Vec<NodeId> = doc.scene.nodes().map(|n| n.id).collect();
     for id in ids {
@@ -383,7 +443,6 @@ pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, dup
 /// Copies `id` (and the sub-materials it holds) from `src` into `library`,
 /// sharing a library material of the same name and settings; returns its id there.
 pub(crate) fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::MaterialId, library: &mut loom_scene::MaterialLibrary, done: &mut BTreeMap<loom_scene::MaterialId, loom_scene::MaterialId>, depth: u32) -> Option<loom_scene::MaterialId> {
-    use loom_scene::material::MaterialKind;
     if let Some(d) = done.get(&id) {
         return Some(*d);
     }
@@ -391,23 +450,9 @@ pub(crate) fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::
     if depth > 16 {
         return None;
     }
-    match &mut m.kind {
-        MaterialKind::Standard => {}
-        MaterialKind::MultiSub(list) => {
-            for s in list.iter_mut() {
-                s.material = s.material.and_then(|c| carry_material(src, c, library, done, depth + 1));
-            }
-        }
-        MaterialKind::Blend(b) => {
-            for c in b.materials.iter_mut() {
-                *c = c.and_then(|c| carry_material(src, c, library, done, depth + 1));
-            }
-        }
-        MaterialKind::Shell(s) => {
-            for c in s.materials.iter_mut() {
-                *c = c.and_then(|c| carry_material(src, c, library, done, depth + 1));
-            }
-        }
+    // Every sub-material button of every material type.
+    for c in m.children_mut() {
+        *c = c.and_then(|c| carry_material(src, c, library, done, depth + 1));
     }
     let to = match library.iter().find(|(_, x)| **x == m) {
         Some((k, _)) => *k,

@@ -3,6 +3,7 @@
 //! Gradient, Noise, Mix), the scene's material library and the Material
 //! Editor's 24 sample slots with the level being edited.
 
+use crate::material_types::{composite, shellac, Architectural, Composite, DoubleSided, InkPaint, MatteShadow, Raytrace, Shellac, TopBottom};
 use crate::param::Param;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -22,10 +23,70 @@ pub enum MapType {
     Mix,
     /// Normal Bump: a tangent-space normal map in its Normal component.
     NormalBump,
+    Swirl,
+    Tiles,
+    GradientRamp,
+    Cellular,
+    Dent,
+    Marble,
+    PerlinMarble,
+    Planet,
+    Smoke,
+    Speckle,
+    Splat,
+    Stucco,
+    Waves,
+    Wood,
+    Composite,
+    Mask,
+    RgbMultiply,
+    RgbTint,
+    Output,
+    ColorCorrection,
+    VertexColor,
+    Falloff,
+    /// Reflection / refraction maps: the renderer's reflections and refraction.
+    Raytrace,
+    ReflectRefract,
+    FlatMirror,
+    ThinWall,
 }
 
 impl MapType {
-    pub const ALL: [MapType; 6] = [MapType::Bitmap, MapType::Checker, MapType::Gradient, MapType::Mix, MapType::Noise, MapType::NormalBump];
+    pub const ALL: [MapType; 32] = [
+        MapType::Bitmap,
+        MapType::Cellular,
+        MapType::Checker,
+        MapType::ColorCorrection,
+        MapType::Composite,
+        MapType::Dent,
+        MapType::Falloff,
+        MapType::FlatMirror,
+        MapType::Gradient,
+        MapType::GradientRamp,
+        MapType::Marble,
+        MapType::Mask,
+        MapType::Mix,
+        MapType::Noise,
+        MapType::NormalBump,
+        MapType::Output,
+        MapType::PerlinMarble,
+        MapType::Planet,
+        MapType::Raytrace,
+        MapType::ReflectRefract,
+        MapType::RgbMultiply,
+        MapType::RgbTint,
+        MapType::Smoke,
+        MapType::Speckle,
+        MapType::Splat,
+        MapType::Stucco,
+        MapType::Swirl,
+        MapType::ThinWall,
+        MapType::Tiles,
+        MapType::VertexColor,
+        MapType::Waves,
+        MapType::Wood,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -35,6 +96,32 @@ impl MapType {
             MapType::Noise => "Noise",
             MapType::Mix => "Mix",
             MapType::NormalBump => "Normal Bump",
+            MapType::Swirl => "Swirl",
+            MapType::Tiles => "Tiles",
+            MapType::GradientRamp => "Gradient Ramp",
+            MapType::Cellular => "Cellular",
+            MapType::Dent => "Dent",
+            MapType::Marble => "Marble",
+            MapType::PerlinMarble => "Perlin Marble",
+            MapType::Planet => "Planet",
+            MapType::Smoke => "Smoke",
+            MapType::Speckle => "Speckle",
+            MapType::Splat => "Splat",
+            MapType::Stucco => "Stucco",
+            MapType::Waves => "Waves",
+            MapType::Wood => "Wood",
+            MapType::Composite => "Composite",
+            MapType::Mask => "Mask",
+            MapType::RgbMultiply => "RGB Multiply",
+            MapType::RgbTint => "RGB Tint",
+            MapType::Output => "Output",
+            MapType::ColorCorrection => "Color Correction",
+            MapType::VertexColor => "Vertex Color",
+            MapType::Falloff => "Falloff",
+            MapType::Raytrace => "Raytrace",
+            MapType::ReflectRefract => "Reflect/Refract",
+            MapType::FlatMirror => "Flat Mirror",
+            MapType::ThinWall => "Thin Wall Refraction",
         }
     }
 
@@ -42,11 +129,24 @@ impl MapType {
         Self::ALL.into_iter().find(|t| t.label() == s)
     }
 
-    /// The names of the map's colour components (each can hold a sub-map).
+    /// The names of the map's colour components (each can hold a sub-map);
+    /// a Composite's and a Gradient Ramp's grow (`Map::slot_names`).
     pub fn color_slots(self) -> &'static [&'static str] {
         match self {
-            MapType::Bitmap => &[],
+            MapType::Bitmap | MapType::VertexColor | MapType::Raytrace | MapType::ReflectRefract | MapType::FlatMirror | MapType::ThinWall => &[],
             MapType::Checker | MapType::Noise => &["Color #1", "Color #2"],
+            MapType::Dent | MapType::Marble | MapType::PerlinMarble | MapType::Smoke | MapType::Speckle | MapType::Splat | MapType::Stucco | MapType::Waves | MapType::Wood | MapType::RgbMultiply => &["Color #1", "Color #2"],
+            MapType::Swirl => &["Base", "Swirl"],
+            MapType::Tiles => &["Tiles", "Grout"],
+            MapType::GradientRamp => &["Source Map", "Flag #1", "Flag #2", "Flag #3"],
+            MapType::Cellular => &["Cell Color", "Division #1", "Division #2"],
+            MapType::Planet => &["Color #1", "Color #2", "Color #3", "Color #4", "Color #5", "Color #6", "Color #7", "Color #8"],
+            MapType::Composite => &["Layer 1", "Mask 1"],
+            MapType::Mask => &["Map", "Mask"],
+            MapType::RgbTint => &["R", "G", "B", "Map"],
+            MapType::Output => &["Map"],
+            MapType::ColorCorrection => &["Map", "Hue Tint"],
+            MapType::Falloff => &["Front", "Side"],
             MapType::Gradient => &["Color #1", "Color #2", "Color #3"],
             MapType::Mix => &["Color #1", "Color #2", "Mix Amount"],
             MapType::NormalBump => &["Normal"],
@@ -176,6 +276,24 @@ pub struct Map {
     pub sub_maps: [Option<Box<Map>>; 3],
     #[serde(default)]
     pub params: MapParams,
+    /// Coordinates rollout of a 3D map.
+    #[serde(default)]
+    pub coords3: crate::map_params::Coords3,
+    #[serde(default)]
+    pub output: crate::map_params::MapOutput,
+    #[serde(default)]
+    pub extra: crate::map_params::MoreParams,
+    /// Composite layers.
+    #[serde(default)]
+    pub layers: Vec<crate::map_params::CompositeLayer>,
+    /// Gradient Ramp flags.
+    #[serde(default)]
+    pub flags: Vec<crate::map_params::RampFlag>,
+    /// Colour components past the third.
+    #[serde(default)]
+    pub extra_colors: Vec<Vec3>,
+    #[serde(default)]
+    pub extra_maps: Vec<Option<Box<Map>>>,
 }
 
 fn default_map_colors() -> [Vec3; 3] {
@@ -192,7 +310,27 @@ impl Map {
             MapType::NormalBump => [Vec3::new(0.5, 0.5, 1.0), Vec3::ONE, Vec3::ONE],
             _ => [Vec3::ZERO, Vec3::ONE, Vec3::ONE],
         };
-        Self { path: String::new(), amount, enabled: true, kind, name: String::new(), coords: MapCoords::default(), crop: Cropping::default(), colors, sub_maps: [None, None, None], params: MapParams::default() }
+        let mut map = Self {
+            path: String::new(),
+            amount,
+            enabled: true,
+            kind,
+            name: String::new(),
+            coords: MapCoords::default(),
+            crop: Cropping::default(),
+            colors,
+            sub_maps: [None, None, None],
+            params: MapParams::default(),
+            coords3: Default::default(),
+            output: Default::default(),
+            extra: Default::default(),
+            layers: Vec::new(),
+            flags: Vec::new(),
+            extra_colors: Vec::new(),
+            extra_maps: Vec::new(),
+        };
+        map.init_more();
+        map
     }
 
     pub fn bitmap(path: impl Into<String>, amount: f32) -> Self {
@@ -209,7 +347,7 @@ impl Map {
     }
 
     pub fn sub_map_index(&self, slot: &str) -> Option<usize> {
-        self.kind.color_slots().iter().position(|s| *s == slot)
+        self.slot_names().iter().position(|s| s == slot)
     }
 
     /// Sets a parameter by its rollout label (booleans as 0 / 1), clamped to its range.
@@ -242,7 +380,7 @@ impl Map {
                 c.mirror[1] &= !on;
             }
             "Angle W" => c.angle = v,
-            "Map Channel" => c.map_channel = (value.round() as u32).clamp(1, 99),
+            "Map Channel" => c.map_channel = (value.round().max(0.0) as u32).clamp(if self.kind == MapType::VertexColor { 0 } else { 1 }, 99),
             "Blur" => c.blur = v.clamp(0.01, 100.0),
             "Apply" => k.apply = on,
             "Place" => k.place = on,
@@ -268,9 +406,12 @@ impl Map {
             other => {
                 if let Some(slot) = other.strip_suffix(" Map On") {
                     let i = self.sub_map_index(slot).ok_or_else(|| format!("no map component \"{slot}\""))?;
-                    if let Some(m) = self.sub_maps[i].as_mut() {
+                    if let Some(m) = self.sub_map_slot_mut(i).as_mut() {
                         m.enabled = on;
                     }
+                    return Ok(());
+                }
+                if self.set_more_parameter(other, value)? {
                     return Ok(());
                 }
                 return Err(format!("no map parameter \"{other}\""));
@@ -279,15 +420,14 @@ impl Map {
         Ok(())
     }
 
-    /// Color #1–#3 from 0–255 RGB.
+    /// A colour component's swatch (Color #1, Base, Flag #2, R...) from 0–255 RGB.
     pub fn set_color(&mut self, which: &str, rgb: [u8; 3]) -> Result<(), String> {
-        let i = match which {
-            "Color #1" => 0,
-            "Color #2" => 1,
-            "Color #3" => 2,
-            other => return Err(format!("no map colour \"{other}\" (Color #1, Color #2, Color #3)")),
-        };
-        self.colors[i] = Vec3::new(rgb[0] as f32, rgb[1] as f32, rgb[2] as f32) / 255.0;
+        let names = self.slot_names();
+        let i = names.iter().position(|s| s == which).filter(|i| self.slot_has_color(*i)).ok_or_else(|| {
+            let with: Vec<&str> = names.iter().enumerate().filter(|(i, _)| self.slot_has_color(*i)).map(|(_, s)| s.as_str()).collect();
+            format!("no map colour \"{which}\" ({})", with.join(", "))
+        })?;
+        *self.color_mut(i) = Vec3::new(rgb[0] as f32, rgb[1] as f32, rgb[2] as f32) / 255.0;
         Ok(())
     }
 
@@ -353,10 +493,19 @@ pub enum MaterialKind {
     MultiSub(Vec<SubMaterial>),
     Blend(Box<Blend>),
     Shell(Box<Shell>),
+    Raytrace(Box<Raytrace>),
+    Architectural(Box<Architectural>),
+    DoubleSided(Box<DoubleSided>),
+    TopBottom(Box<TopBottom>),
+    Composite(Box<Composite>),
+    Shellac(Box<Shellac>),
+    MatteShadow(Box<MatteShadow>),
+    InkPaint(Box<InkPaint>),
 }
 
 impl MaterialKind {
-    pub const TYPES: [&'static str; 4] = ["Blend", "Multi/Sub-Object", "Shell", "Standard"];
+    /// The Material/Map Browser's material types.
+    pub const TYPES: [&'static str; 12] = ["Architectural", "Blend", "Composite", "Double Sided", "Ink 'n Paint", "Matte/Shadow", "Multi/Sub-Object", "Raytrace", "Shell", "Shellac", "Standard", "Top/Bottom"];
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -364,7 +513,146 @@ impl MaterialKind {
             MaterialKind::MultiSub(_) => "Multi/Sub-Object",
             MaterialKind::Blend(_) => "Blend",
             MaterialKind::Shell(_) => "Shell",
+            MaterialKind::Raytrace(_) => "Raytrace",
+            MaterialKind::Architectural(_) => "Architectural",
+            MaterialKind::DoubleSided(_) => "Double Sided",
+            MaterialKind::TopBottom(_) => "Top/Bottom",
+            MaterialKind::Composite(_) => "Composite",
+            MaterialKind::Shellac(_) => "Shellac",
+            MaterialKind::MatteShadow(_) => "Matte/Shadow",
+            MaterialKind::InkPaint(_) => "Ink 'n Paint",
         }
+    }
+
+    /// Kinds that draw with their own Standard values (shader, colours, maps).
+    pub fn uses_standard_values(&self) -> bool {
+        matches!(self, MaterialKind::Standard | MaterialKind::Raytrace(_) | MaterialKind::Architectural(_))
+    }
+}
+
+/// Shading type: the Shader Basic Parameters drop-down of a Standard material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum Shader {
+    Anisotropic,
+    #[default]
+    Blinn,
+    Metal,
+    MultiLayer,
+    OrenNayarBlinn,
+    Phong,
+    Strauss,
+    Translucent,
+}
+
+impl Shader {
+    pub const ALL: [Shader; 8] = [Shader::Anisotropic, Shader::Blinn, Shader::Metal, Shader::MultiLayer, Shader::OrenNayarBlinn, Shader::Phong, Shader::Strauss, Shader::Translucent];
+
+    /// The drop-down's text (the Basic Parameters rollout is "<name> Basic Parameters").
+    pub fn label(self) -> &'static str {
+        match self {
+            Shader::Anisotropic => "Anisotropic",
+            Shader::Blinn => "Blinn",
+            Shader::Metal => "Metal",
+            Shader::MultiLayer => "Multi-Layer",
+            Shader::OrenNayarBlinn => "Oren-Nayar-Blinn",
+            Shader::Phong => "Phong",
+            Shader::Strauss => "Strauss",
+            Shader::Translucent => "Translucent Shader",
+        }
+    }
+
+    pub fn from_label(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.label() == s || (*t == Shader::Translucent && s == "Translucent"))
+    }
+
+    /// Diffuse Level: Anisotropic, Multi-Layer, Oren-Nayar-Blinn.
+    pub fn has_diffuse_level(self) -> bool {
+        matches!(self, Shader::Anisotropic | Shader::MultiLayer | Shader::OrenNayarBlinn)
+    }
+
+    /// Roughness: Multi-Layer, Oren-Nayar-Blinn.
+    pub fn has_roughness(self) -> bool {
+        matches!(self, Shader::MultiLayer | Shader::OrenNayarBlinn)
+    }
+}
+
+/// The Basic Parameters beyond Blinn's: the other shaders' values, the
+/// Self-Illumination Color mode and the Diffuse/Specular lock.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShaderParams {
+    pub shader: Shader,
+    /// 0–400 (Anisotropic, Multi-Layer, Oren-Nayar-Blinn).
+    pub diffuse_level: f32,
+    /// 0–100 (Multi-Layer, Oren-Nayar-Blinn).
+    pub roughness: f32,
+    /// Anisotropic highlight (Multi-Layer: the first layer's): 0–100 and degrees 0–9999.
+    pub anisotropy: f32,
+    pub orientation: f32,
+    /// Strauss 0–100.
+    pub metalness: f32,
+    /// Multi-Layer Second Specular Layer: Color, Level, Glossiness, Anisotropy, Orientation.
+    pub specular2: Vec3,
+    pub level2: f32,
+    pub glossiness2: f32,
+    pub anisotropy2: f32,
+    pub orientation2: f32,
+    /// Translucent shader: Translucent Clr (its Filter Color is the Extended Parameters' one).
+    pub translucent_color: Vec3,
+    pub backside_specular: bool,
+    /// Self-Illumination Color check box and swatch.
+    pub self_illum_color_on: bool,
+    pub self_illum_color: Vec3,
+    /// The lock between Diffuse and Specular.
+    pub diffuse_specular_locked: bool,
+}
+
+impl Default for ShaderParams {
+    fn default() -> Self {
+        Self {
+            shader: Shader::Blinn,
+            diffuse_level: 100.0,
+            roughness: 0.0,
+            anisotropy: 50.0,
+            orientation: 0.0,
+            metalness: 0.0,
+            specular2: Vec3::splat(229.0 / 255.0),
+            level2: 0.0,
+            glossiness2: 25.0,
+            anisotropy2: 0.0,
+            orientation2: 0.0,
+            translucent_color: Vec3::ZERO,
+            backside_specular: true,
+            self_illum_color_on: false,
+            self_illum_color: Vec3::ZERO,
+            diffuse_specular_locked: false,
+        }
+    }
+}
+
+/// Extended Parameters: Advanced Transparency, Wire, Reflection Dimming.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtendedParams {
+    /// Falloff Out (else In) and its Amt 0–100.
+    pub falloff_out: bool,
+    pub falloff_amount: f32,
+    /// Type: 0 Filter, 1 Subtractive, 2 Additive.
+    pub transparency_type: u8,
+    pub filter_color: Vec3,
+    /// Index of Refraction 0.01–10.
+    pub ior: f32,
+    pub wire_size: f32,
+    /// Wire size In: Units (else Pixels).
+    pub wire_units: bool,
+    pub reflection_dimming: bool,
+    pub dim_level: f32,
+    pub refl_level: f32,
+}
+
+impl Default for ExtendedParams {
+    fn default() -> Self {
+        Self { falloff_out: false, falloff_amount: 0.0, transparency_type: 0, filter_color: Vec3::splat(0.5), ior: 1.5, wire_size: 1.0, wire_units: false, reflection_dimming: false, dim_level: 0.0, refl_level: 3.0 }
     }
 }
 
@@ -416,6 +704,10 @@ pub struct StandardMaterial {
     pub show_map_in_viewport: bool,
     #[serde(default)]
     pub kind: MaterialKind,
+    #[serde(default)]
+    pub shading: ShaderParams,
+    #[serde(default)]
+    pub extended: ExtendedParams,
 }
 
 /// The Maps rollout channels in rollout order, with their default Amount.
@@ -479,6 +771,8 @@ impl StandardMaterial {
             displacement_map: None,
             show_map_in_viewport: false,
             kind: MaterialKind::Standard,
+            shading: ShaderParams::default(),
+            extended: ExtendedParams::default(),
         }
     }
 
@@ -540,9 +834,13 @@ impl StandardMaterial {
     /// The map slots this level shows, in rollout order.
     pub fn map_slots(&self) -> Vec<&'static str> {
         match &self.kind {
-            MaterialKind::Standard => MAP_CHANNELS.iter().map(|c| c.0).collect(),
+            MaterialKind::Standard | MaterialKind::Raytrace(_) => MAP_CHANNELS.iter().map(|c| c.0).collect(),
+            // Physical Qualities (Diffuse, Shininess, Transparency, Translucency, IOR, Luminance) and Special Effects.
+            MaterialKind::Architectural(_) => vec!["Diffuse Color", "Glossiness", "Opacity", "Filter Color", "Refraction", "Self-Illumination", "Bump", "Displacement"],
+            MaterialKind::MatteShadow(_) => vec!["Reflection"],
+            MaterialKind::InkPaint(_) => vec!["Diffuse Color", "Bump", "Displacement"],
             MaterialKind::Blend(_) => vec!["Mask"],
-            MaterialKind::MultiSub(_) | MaterialKind::Shell(_) => Vec::new(),
+            _ => Vec::new(),
         }
     }
 
@@ -553,6 +851,25 @@ impl StandardMaterial {
             MaterialKind::MultiSub(list) => list.iter().map(|s| s.material).collect(),
             MaterialKind::Blend(b) => b.materials.to_vec(),
             MaterialKind::Shell(sh) => sh.materials.to_vec(),
+            MaterialKind::DoubleSided(d) => d.materials.to_vec(),
+            MaterialKind::TopBottom(t) => t.materials.to_vec(),
+            MaterialKind::Shellac(sh) => sh.materials.to_vec(),
+            MaterialKind::Composite(c) => std::iter::once(c.base).chain(c.layers.iter().map(|l| l.material)).collect(),
+            MaterialKind::Raytrace(_) | MaterialKind::Architectural(_) | MaterialKind::MatteShadow(_) | MaterialKind::InkPaint(_) => Vec::new(),
+        }
+    }
+
+    /// The sub-material buttons, as `children` orders them.
+    pub fn children_mut(&mut self) -> Vec<&mut Option<MaterialId>> {
+        match &mut self.kind {
+            MaterialKind::MultiSub(list) => list.iter_mut().map(|s| &mut s.material).collect(),
+            MaterialKind::Blend(b) => b.materials.iter_mut().collect(),
+            MaterialKind::Shell(sh) => sh.materials.iter_mut().collect(),
+            MaterialKind::DoubleSided(d) => d.materials.iter_mut().collect(),
+            MaterialKind::TopBottom(t) => t.materials.iter_mut().collect(),
+            MaterialKind::Shellac(sh) => sh.materials.iter_mut().collect(),
+            MaterialKind::Composite(c) => std::iter::once(&mut c.base).chain(c.layers.iter_mut().map(|l| &mut l.material)).collect(),
+            _ => Vec::new(),
         }
     }
 
@@ -562,6 +879,97 @@ impl StandardMaterial {
     /// Mask On) apply to a Blend material.
     pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
         let v = value as f32;
+        let on = value != 0.0;
+        let on_off = |i: usize, enabled: &mut [bool; 2]| enabled[i] = on;
+        match &mut self.kind {
+            MaterialKind::Raytrace(r) => {
+                if r.set_parameter(name, value)? {
+                    return Ok(());
+                }
+            }
+            MaterialKind::Architectural(a) => {
+                if name == "Template" {
+                    let i = (value.round() as usize).min(crate::material_types::ARCH_TEMPLATES.len() - 1);
+                    let t = crate::material_types::ARCH_TEMPLATES[i];
+                    a.template = i as u8;
+                    // A template sets the physical values it describes.
+                    if i > 0 {
+                        (a.shininess, a.transparency, a.translucency, a.ior) = (t.2, t.3, t.4, t.5);
+                        let c = Vec3::new(t.1[0] as f32, t.1[1] as f32, t.1[2] as f32) / 255.0;
+                        self.diffuse.set(c);
+                        self.ambient.set(c);
+                    }
+                    return Ok(());
+                }
+                if a.set_parameter(name, value)? {
+                    return Ok(());
+                }
+                if !matches!(name, "2-Sided") {
+                    return Err(format!("no Architectural parameter \"{name}\""));
+                }
+            }
+            MaterialKind::DoubleSided(d) => {
+                match name {
+                    "Translucency" => d.translucency = v.clamp(0.0, 100.0),
+                    "Facing Material On" => on_off(0, &mut d.enabled),
+                    "Back Material On" => on_off(1, &mut d.enabled),
+                    other => return Err(format!("no Double Sided parameter \"{other}\"")),
+                }
+                return Ok(());
+            }
+            MaterialKind::TopBottom(t) => {
+                match name {
+                    "Local" => t.local = on,
+                    "Swap" => {
+                        t.materials.swap(0, 1);
+                        t.enabled.swap(0, 1);
+                    }
+                    "Blend" => t.blend = v.clamp(0.0, 100.0),
+                    "Position" => t.position = v.clamp(0.0, 100.0),
+                    "Top Material On" => on_off(0, &mut t.enabled),
+                    "Bottom Material On" => on_off(1, &mut t.enabled),
+                    other => return Err(format!("no Top/Bottom parameter \"{other}\"")),
+                }
+                return Ok(());
+            }
+            MaterialKind::Shellac(sh) => {
+                match name {
+                    "Shellac Color Blend" => sh.blend = v.clamp(0.0, 1000.0),
+                    other => return Err(format!("no Shellac parameter \"{other}\"")),
+                }
+                return Ok(());
+            }
+            MaterialKind::Composite(c) => {
+                // "Mat 3 On", "Mat 3 Mode" (0 A, 1 S, 2 M), "Mat 3 Amount".
+                let parsed = name.strip_prefix("Mat ").and_then(|r| r.split_once(' ')).and_then(|(n, what)| n.parse::<usize>().ok().map(|n| (n, what)));
+                let Some((n, what)) = parsed.filter(|(n, _)| (1..=c.layers.len()).contains(n)) else { return Err(format!("no Composite parameter \"{name}\" (Mat 1-9 On / Mode / Amount)")) };
+                let l = &mut c.layers[n - 1];
+                match what {
+                    "On" => l.enabled = on,
+                    "Mode" => {
+                        l.mode = (value.round() as u8).min(2);
+                        l.amount = l.amount.min(if l.mode == 2 { 100.0 } else { 200.0 });
+                    }
+                    "Amount" => l.amount = v.clamp(0.0, if l.mode == 2 { 100.0 } else { 200.0 }),
+                    other => return Err(format!("no Composite parameter \"Mat {n} {other}\"")),
+                }
+                return Ok(());
+            }
+            MaterialKind::MatteShadow(m) => {
+                match name {
+                    "Opaque Alpha" => m.opaque_alpha = on,
+                    "Apply Atmosphere" => m.apply_atmosphere = on,
+                    "Receive Shadows" => m.receive_shadows = on,
+                    "Affect Alpha" => m.affect_alpha = on,
+                    "Shadow Brightness" => m.shadow_brightness = v.clamp(0.0, 1.0),
+                    "Amount" => m.reflection_amount = v.clamp(0.0, 100.0),
+                    other => return Err(format!("no Matte/Shadow parameter \"{other}\"")),
+                }
+                return Ok(());
+            }
+            MaterialKind::InkPaint(ink) => return ink.set_parameter(name, value),
+            _ => {}
+        }
         if let MaterialKind::Shell(sh) = &mut self.kind {
             let which = (value.round() as u8).min(1);
             match name {
@@ -601,6 +1009,38 @@ impl StandardMaterial {
             "Faceted" => self.faceted = value != 0.0,
             "Ambient/Diffuse Lock" => self.ambient_locked = value != 0.0,
             "Show Map in Viewport" => self.show_map_in_viewport = value != 0.0,
+            other => return self.set_shader_parameter(other, value),
+        }
+        Ok(())
+    }
+
+    /// The other shaders' Basic Parameters and the Extended Parameters.
+    fn set_shader_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
+        let v = value as f32;
+        let on = value != 0.0;
+        let (sh, ex) = (&mut self.shading, &mut self.extended);
+        match name {
+            "Diffuse Level" => sh.diffuse_level = v.clamp(0.0, 400.0),
+            "Roughness" => sh.roughness = v.clamp(0.0, 100.0),
+            "Anisotropy" => sh.anisotropy = v.clamp(0.0, 100.0),
+            "Orientation" => sh.orientation = v.clamp(0.0, 9999.0),
+            "Metalness" => sh.metalness = v.clamp(0.0, 100.0),
+            "Level 2" => sh.level2 = v.clamp(0.0, 999.0),
+            "Glossiness 2" => sh.glossiness2 = v.clamp(0.0, 100.0),
+            "Anisotropy 2" => sh.anisotropy2 = v.clamp(0.0, 100.0),
+            "Orientation 2" => sh.orientation2 = v.clamp(0.0, 9999.0),
+            "Backside Specular" => sh.backside_specular = on,
+            "Self-Illum Color On" => sh.self_illum_color_on = on,
+            "Diffuse/Specular Lock" => sh.diffuse_specular_locked = on,
+            "Falloff Out" => ex.falloff_out = on,
+            "Falloff Amount" => ex.falloff_amount = v.clamp(0.0, 100.0),
+            "Transparency Type" => ex.transparency_type = (value.round() as u8).min(2),
+            "Index of Refraction" => ex.ior = v.clamp(0.01, 10.0),
+            "Wire Size" => ex.wire_size = v.clamp(0.0, 10000.0),
+            "Wire Units" => ex.wire_units = on,
+            "Reflection Dimming" => ex.reflection_dimming = on,
+            "Dim Level" => ex.dim_level = v.clamp(0.0, 1.0),
+            "Refl. Level" => ex.refl_level = v.clamp(0.1, 10.0),
             other => return Err(format!("no material parameter \"{other}\"")),
         }
         Ok(())
@@ -610,6 +1050,19 @@ impl StandardMaterial {
     /// Diffuse while they are locked.
     pub fn set_color(&mut self, which: &str, rgb: [u8; 3]) -> Result<(), String> {
         let c = Vec3::new(rgb[0] as f32, rgb[1] as f32, rgb[2] as f32) / 255.0;
+        match &mut self.kind {
+            MaterialKind::Raytrace(r) => {
+                if r.set_color(which, rgb) {
+                    return Ok(());
+                }
+            }
+            MaterialKind::InkPaint(ink) => return if ink.set_color(which, rgb) { Ok(()) } else { Err(format!("no Ink 'n Paint colour \"{which}\" (Lighted, Shaded, Highlight, Ink Color)")) },
+            MaterialKind::MatteShadow(m) if which == "Color" => {
+                m.color = c;
+                return Ok(());
+            }
+            _ => {}
+        }
         match which {
             "Ambient" => {
                 self.ambient.set(c);
@@ -622,9 +1075,24 @@ impl StandardMaterial {
                 if self.ambient_locked {
                     self.ambient.set(c);
                 }
+                if self.shading.diffuse_specular_locked {
+                    self.specular.set(c);
+                }
             }
-            "Specular" => self.specular.set(c),
-            other => return Err(format!("no colour \"{other}\" (Ambient, Diffuse, Specular)")),
+            "Specular" => {
+                self.specular.set(c);
+                if self.shading.diffuse_specular_locked {
+                    self.diffuse.set(c);
+                    if self.ambient_locked {
+                        self.ambient.set(c);
+                    }
+                }
+            }
+            "Specular 2" => self.shading.specular2 = c,
+            "Translucent Color" => self.shading.translucent_color = c,
+            "Self-Illum Color" => self.shading.self_illum_color = c,
+            "Filter Color" => self.extended.filter_color = c,
+            other => return Err(format!("no colour \"{other}\" (Ambient, Diffuse, Specular, Specular 2, Translucent Color, Self-Illum Color, Filter Color)")),
         }
         Ok(())
     }
@@ -785,7 +1253,7 @@ pub fn resolve_level(lib: &MaterialLibrary, top: MaterialId, path: &[NavStep]) -
                 let exists = if maps.is_empty() {
                     lib.get(&id).and_then(|m| m.map(slot)).is_some()
                 } else {
-                    lib.get(&id).and_then(|m| map_at(m, &maps)).and_then(|m| m.sub_map_index(slot).and_then(|i| m.sub_maps[i].as_ref())).is_some()
+                    lib.get(&id).and_then(|m| map_at(m, &maps)).and_then(|m| m.sub_map_index(slot).and_then(|i| m.sub_map(i))).is_some()
                 };
                 if !exists {
                     return (level, n);
@@ -804,7 +1272,7 @@ pub fn map_at<'a>(m: &'a StandardMaterial, maps: &[String]) -> Option<&'a Map> {
     let (first, rest) = maps.split_first()?;
     let mut map = m.map(first)?;
     for slot in rest {
-        map = map.sub_maps[map.sub_map_index(slot)?].as_deref()?;
+        map = map.sub_map(map.sub_map_index(slot)?)?;
     }
     Some(map)
 }
@@ -814,7 +1282,7 @@ pub fn map_at_mut<'a>(m: &'a mut StandardMaterial, maps: &[String]) -> Option<&'
     let mut map = m.map_slot_mut(first).ok()?.as_mut()?;
     for slot in rest {
         let i = map.sub_map_index(slot)?;
-        map = map.sub_maps[i].as_deref_mut()?;
+        map = map.sub_map_slot_mut(i).as_deref_mut()?;
     }
     Some(map)
 }
@@ -823,8 +1291,8 @@ pub fn map_at_mut<'a>(m: &'a mut StandardMaterial, maps: &[String]) -> Option<&'
 /// (or of the material itself when `maps` is empty).
 pub fn map_slot_at_mut<'a>(m: &'a mut StandardMaterial, maps: &[String], slot: &str) -> Result<&'a mut Option<Box<Map>>, String> {
     let parent = map_at_mut(m, maps).ok_or("no such map level")?;
-    let i = parent.sub_map_index(slot).ok_or_else(|| format!("a {} map has no component \"{slot}\"", parent.kind.label()))?;
-    Ok(&mut parent.sub_maps[i])
+    let i = parent.sub_map_index(slot).filter(|i| parent.slot_has_map(*i)).ok_or_else(|| format!("a {} map has no map component \"{slot}\"", parent.kind.label()))?;
+    Ok(parent.sub_map_slot_mut(i))
 }
 
 /// What one surface draws with, resolved from a (possibly compound)
@@ -851,6 +1319,56 @@ pub struct Surface {
     pub specular_level_map: Option<Map>,
     pub self_illum_map: Option<Map>,
     pub show_map_in_viewport: bool,
+    /// The shader and its values.
+    pub shading: ShaderParams,
+    pub extended: ExtendedParams,
+    /// Self-Illumination Color mode's colour (black in the Diffuse mode).
+    pub self_illum_color: Vec3,
+    /// Metalness 0–1 beyond the shader's (Architectural metal templates).
+    pub metallic: f32,
+    /// Reflection colour (Raytrace Reflect); its value is the amount.
+    pub reflect: Vec3,
+    pub fresnel: bool,
+    /// Refracted share 0–1 (Raytrace Transparency, Architectural Transparency).
+    pub transmission: f32,
+    /// Light scattered through 0–1 (Architectural / Raytrace translucency).
+    pub translucency: f32,
+    /// A clear coat over the surface (Shellac) 0–1 and its glossiness.
+    pub coat: f32,
+    pub coat_glossiness: f32,
+    /// Raw Diffuse Texture: no lighting.
+    pub unlit: bool,
+    pub matte: Option<MatteShadow>,
+    pub toon: Option<InkPaint>,
+    /// A Falloff map in Diffuse Color: the renderer mixes the diffuse (its
+    /// Front) toward the Side colour by the view or light direction.
+    pub falloff: Option<FalloffLook>,
+    /// Faces of this surface split further (Top/Bottom, Double Sided).
+    pub split: Option<Box<Split>>,
+}
+
+/// A Falloff map as the renderer draws it per pixel.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FalloffLook {
+    /// 0 Towards/Away, 1 Perpendicular/Parallel, 2 Fresnel, 3 Shadow/Light, 4 Distance Blend.
+    pub kind: u8,
+    /// The Side colour (sRGB 0–1).
+    pub side: Vec3,
+    /// A fixed world direction (None: the viewing direction).
+    pub direction: Option<Vec3>,
+    /// Distance Blend Near / Far, Fresnel IOR.
+    pub near: f32,
+    pub far: f32,
+    pub ior: f32,
+}
+
+/// How a surface's faces divide: by their normal (Top/Bottom) or into the
+/// front and the back (Double Sided). The surface itself is the top /
+/// facing one.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Split {
+    TopBottom { bottom: Surface, local: bool, blend: f32, position: f32 },
+    DoubleSided { back: Surface },
 }
 
 impl Surface {
@@ -872,7 +1390,8 @@ impl Surface {
             specular: m.specular.get() * (m.specular_level.get() / 100.0),
             specular_level: m.specular_level.get(),
             glossiness: m.glossiness.get(),
-            self_illum: (m.self_illum.get() / 100.0).clamp(0.0, 1.0),
+            // The Color mode replaces the amount spinner.
+            self_illum: if m.shading.self_illum_color_on { 0.0 } else { (m.self_illum.get() / 100.0).clamp(0.0, 1.0) },
             opacity: (m.opacity.get() / 100.0).clamp(0.0, 1.0),
             two_sided: m.two_sided,
             wire: m.wire,
@@ -883,13 +1402,170 @@ impl Surface {
             specular_level_map: on(&m.specular_level_map),
             self_illum_map: on(&m.self_illum_map),
             show_map_in_viewport: m.show_map_in_viewport,
+            shading: m.shading.clone(),
+            extended: m.extended.clone(),
+            self_illum_color: if m.shading.self_illum_color_on { m.shading.self_illum_color } else { Vec3::ZERO },
+            metallic: 0.0,
+            // A Raytrace, Reflect/Refract or Flat Mirror map in Reflection: the renderer reflects by its Amount.
+            reflect: on(&m.reflection_map).filter(|r| matches!(r.kind, MapType::Raytrace | MapType::ReflectRefract | MapType::FlatMirror)).map_or(Vec3::ZERO, |r| Vec3::splat((r.amount / 100.0).clamp(0.0, 1.0))),
+            fresnel: false,
+            // A Raytrace, Reflect/Refract or Thin Wall Refraction map in Refraction: the renderer refracts by its Amount.
+            transmission: on(&m.refraction_map).filter(|r| matches!(r.kind, MapType::Raytrace | MapType::ReflectRefract | MapType::ThinWall)).map_or(0.0, |r| (r.amount / 100.0).clamp(0.0, 1.0)),
+            translucency: 0.0,
+            coat: 0.0,
+            coat_glossiness: 0.0,
+            unlit: false,
+            matte: None,
+            toon: None,
+            falloff: on(&m.diffuse_map).filter(|d| d.kind == MapType::Falloff).map(|d| {
+                let e = &d.extra;
+                FalloffLook {
+                    kind: e.falloff_type,
+                    side: d.color(1),
+                    // The world axes; the view for the camera and object axes (the renderer has no object frame).
+                    direction: match e.falloff_direction {
+                        7 => Some(Vec3::X),
+                        8 => Some(Vec3::Y),
+                        9 => Some(Vec3::Z),
+                        _ => None,
+                    },
+                    near: e.near_distance,
+                    far: e.far_distance,
+                    ior: if e.override_ior { e.ior } else { 1.5 },
+                }
+            }),
+            split: None,
         }
+    }
+
+    /// A Vertex Color map in Diffuse Color: the mesh's vertex colours show.
+    pub fn shows_vertex_colors(&self) -> bool {
+        self.diffuse_map.as_ref().is_some_and(|d| d.kind == MapType::VertexColor)
+    }
+
+    /// A surface of a material that draws with its own values: Standard,
+    /// Raytrace, Architectural, Matte/Shadow, Ink 'n Paint.
+    pub fn from_material(m: &StandardMaterial) -> Self {
+        let mut s = Self::from_standard(m);
+        match &m.kind {
+            MaterialKind::Raytrace(r) => r.apply(&mut s),
+            MaterialKind::Architectural(a) => a.apply(&mut s),
+            MaterialKind::MatteShadow(ms) => {
+                s.matte = Some((**ms).clone());
+                s.specular_level = 0.0;
+                s.specular = Vec3::ZERO;
+            }
+            MaterialKind::InkPaint(ink) => {
+                s.diffuse = ink.lighted;
+                s.ambient = ink.lighted;
+                s.glossiness = ink.glossiness;
+                s.specular = if ink.highlight_on { ink.highlight } else { Vec3::ZERO };
+                s.specular_level = if ink.highlight_on { 100.0 } else { 0.0 };
+                s.toon = Some((**ink).clone());
+            }
+            _ => {}
+        }
+        s
     }
 
     /// The diffuse map the viewport shows (Show Map in Viewport on).
     pub fn viewport_map(&self) -> Option<&Map> {
         self.diffuse_map.as_ref().filter(|_| self.show_map_in_viewport)
     }
+
+    /// How the shaded viewports draw this surface with their one Blinn
+    /// lobe per vertex: each shader's diffuse and highlight folded in.
+    pub fn viewport_look(&self) -> ViewportLook {
+        let sh = &self.shading;
+        let blinn = |gloss: f32| 2.0 * 2f32.powf(gloss / 10.0);
+        let level = self.specular_level / 100.0;
+        let mut color = self.diffuse;
+        let mut specular = self.specular;
+        let mut exponent = blinn(self.glossiness);
+        let mut two_sided = self.two_sided;
+        if sh.shader.has_diffuse_level() {
+            color *= sh.diffuse_level / 100.0;
+        }
+        if sh.shader.has_roughness() {
+            color *= oren_nayar_dim(sh.roughness);
+        }
+        match sh.shader {
+            Shader::Blinn | Shader::OrenNayarBlinn => {}
+            // Phong's highlight is about four times wider at the same Glossiness.
+            Shader::Phong => exponent /= 4.0,
+            // An anisotropic highlight is long one way and narrow the other: on average wider.
+            Shader::Anisotropic => exponent *= 1.0 - 0.75 * sh.anisotropy / 100.0,
+            Shader::MultiLayer => {
+                let second = sh.specular2 * (sh.level2 / 100.0);
+                if sh.level2 > self.specular_level {
+                    exponent = blinn(sh.glossiness2);
+                }
+                specular = (specular + second).min(Vec3::ONE);
+            }
+            // Metal makes its own highlight from the diffuse colour, which dims as the level rises.
+            Shader::Metal => {
+                specular = self.diffuse * level;
+                // Half at most: the one headlight lobe cannot show a metal's glancing reflections.
+                color *= 1.0 - 0.5 * level.min(1.0);
+            }
+            Shader::Strauss => {
+                let (g, m) = (self.glossiness / 100.0, sh.metalness / 100.0);
+                color *= (1.0 - 0.5 * m * g) * (1.0 - 0.5 * g * g * g);
+                specular = Vec3::ONE.lerp(self.diffuse, m) * (0.1 + 0.9 * g);
+            }
+            // Light passes through: both sides show.
+            Shader::Translucent => two_sided = true,
+        }
+        let mut lit = matches!(sh.shader, Shader::Strauss) || self.specular_level > 0.0 || (sh.shader == Shader::MultiLayer && sh.level2 > 0.0);
+        // A metal (Architectural templates) or a Raytrace Reflect colour tints the highlight.
+        if self.metallic > 0.0 {
+            specular = specular.lerp(self.diffuse, self.metallic);
+            color *= 1.0 - 0.75 * self.metallic;
+        }
+        let reflect = self.reflect.max_element();
+        if reflect > 0.0 {
+            specular = specular.max(self.reflect);
+            color *= 1.0 - 0.5 * reflect;
+            lit = true;
+        }
+        if self.coat > 0.0 {
+            specular = (specular + Vec3::splat(self.coat)).min(Vec3::ONE);
+            lit = true;
+        }
+        // The Color mode's glow: toward the colour, unlit by its brightness.
+        let glow = self.self_illum_color.max_element();
+        let (color, mut self_illum) = if glow > 0.0 { (color.lerp(self.self_illum_color, glow), glow) } else { (color, self.self_illum) };
+        if self.unlit {
+            self_illum = 1.0;
+        }
+        // Ink 'n Paint: the flat fill mostly unlit.
+        if self.toon.is_some() {
+            self_illum = self_illum.max(0.6);
+        }
+        // Refracting surfaces show through in the viewports.
+        let alpha = self.opacity * (1.0 - 0.8 * self.transmission.clamp(0.0, 1.0));
+        ViewportLook { color, specular: if lit { specular } else { Vec3::ZERO }, exponent: exponent.max(1.0), self_illum, two_sided, alpha }
+    }
+}
+
+/// Oren-Nayar's darkening of a facing surface at Roughness 0–100 (σ up to 1 radian).
+pub fn oren_nayar_dim(roughness: f32) -> f32 {
+    let s2 = (roughness / 100.0).powi(2);
+    1.0 - 0.5 * s2 / (s2 + 0.33)
+}
+
+/// A surface as the shaded viewports draw it (sRGB 0–1 colours).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewportLook {
+    pub color: Vec3,
+    /// The highlight colour (zero: no highlight).
+    pub specular: Vec3,
+    /// The Blinn exponent.
+    pub exponent: f32,
+    pub self_illum: f32,
+    pub two_sided: bool,
+    /// Opacity 0–1 (refracting surfaces show through).
+    pub alpha: f32,
 }
 
 /// A node's material resolved for drawing: one surface, or one per face
@@ -934,8 +1610,41 @@ pub fn surfaces_for(lib: &MaterialLibrary, id: MaterialId, view: ShellView) -> O
     }
     fn single(lib: &MaterialLibrary, id: Option<MaterialId>, face: Option<u16>, depth: u32, view: ShellView) -> Surface {
         let Some(m) = id.and_then(|i| lib.get(&i)).filter(|_| depth < 16) else { return Surface::black() };
+        let sub = |i: Option<MaterialId>, on: bool| if on { single(lib, i, face, depth + 1, view) } else { Surface::black() };
         match &m.kind {
-            MaterialKind::Standard => Surface::from_standard(m),
+            MaterialKind::Standard | MaterialKind::Raytrace(_) | MaterialKind::Architectural(_) | MaterialKind::MatteShadow(_) | MaterialKind::InkPaint(_) => Surface::from_material(m),
+            MaterialKind::DoubleSided(d) => {
+                let (mut front, mut back) = (sub(d.materials[0], d.enabled[0]), sub(d.materials[1], d.enabled[1]));
+                front.split = None;
+                back.split = None;
+                // Translucency: each side shows that much of the other.
+                let t = (d.translucency / 100.0).clamp(0.0, 1.0);
+                let (f, b) = (blend_surfaces(&front, &back, t), blend_surfaces(&back, &front, t));
+                let mut out = f;
+                out.two_sided = false;
+                let mut back = b;
+                back.two_sided = false;
+                out.split = Some(Box::new(Split::DoubleSided { back }));
+                out
+            }
+            MaterialKind::TopBottom(t) => {
+                let mut top = sub(t.materials[0], t.enabled[0]);
+                let mut bottom = sub(t.materials[1], t.enabled[1]);
+                top.split = None;
+                bottom.split = None;
+                top.split = Some(Box::new(Split::TopBottom { bottom, local: t.local, blend: t.blend, position: t.position }));
+                top
+            }
+            MaterialKind::Composite(c) => {
+                let base = single(lib, c.base, face, depth + 1, view);
+                let layers: Vec<(Surface, u8, f32)> = c.layers.iter().filter(|l| l.enabled && l.material.is_some()).map(|l| (single(lib, l.material, face, depth + 1, view), l.mode, l.amount)).collect();
+                composite(base, &layers)
+            }
+            MaterialKind::Shellac(sh) => {
+                let base = single(lib, sh.materials[0], face, depth + 1, view);
+                let coat = single(lib, sh.materials[1], face, depth + 1, view);
+                shellac(base, &coat, sh.blend)
+            }
             MaterialKind::MultiSub(list) => match list.iter().find(|s| Some(s.id) == face.map(|f| f + 1)) {
                 Some(s) if s.enabled => single(lib, s.material, face, depth + 1, view),
                 _ => Surface::black(),
@@ -962,6 +1671,100 @@ pub fn surfaces_for(lib: &MaterialLibrary, id: MaterialId, view: ShellView) -> O
     })
 }
 
+/// Top/Bottom bands a blended boundary is drawn with, bottom to top.
+pub const TOP_BOTTOM_BANDS: usize = 4;
+
+/// (original face material ID, Local, Blend, Position, the virtual IDs of the bands).
+type SplitEntry = (Option<u16>, bool, f32, f32, [u16; TOP_BOTTOM_BANDS]);
+
+/// Top/Bottom surfaces turned into per-face-ID ones: what `split_surfaces`
+/// returns with them, for `apply_split` to give each face its virtual ID.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceSplit {
+    /// Per original face material ID (None: one surface for every face).
+    entries: Vec<SplitEntry>,
+}
+
+/// The ID faces get when their original ID has no surface: drawn black.
+const NO_SURFACE: u16 = u16::MAX;
+
+/// Top/Bottom surfaces resolved without the mesh: a per-ID surface for
+/// every band of every Top/Bottom surface (blends of its top and bottom),
+/// or None when there is no Top/Bottom surface. `apply_split` then
+/// renumbers the mesh's faces by their normals, so both renderers draw
+/// Top/Bottom through their per-material-ID path.
+pub fn split_surfaces(surfaces: &Surfaces) -> Option<(Surfaces, FaceSplit)> {
+    let list: Vec<(Option<u16>, &Surface)> = match surfaces {
+        Surfaces::Single(s) => vec![(None, s.as_ref())],
+        Surfaces::PerId(m) => m.iter().map(|(k, s)| (Some(*k), s)).collect(),
+    };
+    if !list.iter().any(|(_, s)| matches!(s.split.as_deref(), Some(Split::TopBottom { .. }))) {
+        return None;
+    }
+    let mut out = BTreeMap::new();
+    let mut entries = Vec::new();
+    for (key, s) in list {
+        let next = out.len() as u16;
+        match s.split.as_deref() {
+            Some(Split::TopBottom { bottom, local, blend, position }) => {
+                let mut top = s.clone();
+                top.split = None;
+                let mut ids = [0u16; TOP_BOTTOM_BANDS];
+                for (k, id) in ids.iter_mut().enumerate() {
+                    *id = next + k as u16;
+                    let t = k as f32 / (TOP_BOTTOM_BANDS - 1) as f32;
+                    out.insert(*id, blend_surfaces(bottom, &top, t));
+                }
+                entries.push((key, *local, *blend, *position, ids));
+            }
+            _ => {
+                out.insert(next, s.clone());
+                entries.push((key, false, 0.0, 0.0, [next; TOP_BOTTOM_BANDS]));
+            }
+        }
+    }
+    Some((Surfaces::PerId(out), FaceSplit { entries }))
+}
+
+/// Gives each face of `mesh` its virtual ID from `split`: a Top/Bottom
+/// face's band comes from its normal against `world_up` (World) or
+/// `local_up` (Local, the object's Z), both in the mesh's space.
+pub fn apply_split(mesh: &mut loom_mesh::Mesh, split: &FaceSplit, world_up: Vec3, local_up: Vec3) {
+    let single = split.entries.first().is_some_and(|e| e.0.is_none());
+    let ids: Vec<u16> = (0..mesh.faces().len())
+        .map(|i| {
+            let key = if single { None } else { Some(mesh.faces()[i].material_id) };
+            let Some((_, local, blend, position, bands)) = split.entries.iter().find(|e| e.0 == key) else { return NO_SURFACE };
+            if bands.iter().all(|b| *b == bands[0]) {
+                return bands[0];
+            }
+            let up = if *local { local_up } else { world_up }.normalize_or_zero();
+            let nz = mesh.face_normal(loom_mesh::FaceId(i as u32)).dot(up);
+            // Position 0: all top, 100: all bottom; Blend widens the boundary.
+            let z0 = position / 50.0 - 1.0;
+            let w = blend / 100.0;
+            let t = if w <= 0.0 {
+                if nz > z0 || *position <= 0.0 { 1.0 } else { 0.0 }
+            } else {
+                ((nz - (z0 - w)) / (2.0 * w)).clamp(0.0, 1.0)
+            };
+            bands[(t * (TOP_BOTTOM_BANDS - 1) as f32).round() as usize]
+        })
+        .collect();
+    for (f, id) in mesh.faces_mut().iter_mut().zip(ids) {
+        f.material_id = id;
+    }
+}
+
+/// `a` and `b` mixed by `t` (colours and values; maps and switches from the nearer one).
+pub fn blend_surfaces(a: &Surface, b: &Surface, t: f32) -> Surface {
+    if t <= 0.0 {
+        return a.clone();
+    }
+    let p = Blend { materials: [None; 2], enabled: [true; 2], mask: None, mix_amount: Param::new(t * 100.0), interactive: 0, use_curve: false, upper: 0.75, lower: 0.25 };
+    blend(a, b, &p)
+}
+
 fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
     let mask = p.mask.as_ref().filter(|m| m.enabled);
     let t = (p.mix_amount.get() / 100.0).clamp(0.0, 1.0);
@@ -979,6 +1782,10 @@ fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
                 mix.colors.swap(0, 1);
                 mix.sub_maps.swap(0, 1);
                 mix.sub_maps[2] = Some(Box::new(m.clone()));
+                // The Blend's Mixing curve shapes the mask's transition.
+                mix.extra.use_curve = p.use_curve;
+                mix.extra.upper = p.upper;
+                mix.extra.lower = p.lower;
             }
             None => mix.params.mix_amount = t * 100.0,
         }
@@ -1008,6 +1815,21 @@ fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
         bump_map: if t < 0.5 { a.bump_map.clone() } else { b.bump_map.clone() },
         specular_level_map: if t < 0.5 { a.specular_level_map.clone() } else { b.specular_level_map.clone() },
         self_illum_map: if t < 0.5 { a.self_illum_map.clone() } else { b.self_illum_map.clone() },
+        shading: if t < 0.5 { a.shading.clone() } else { b.shading.clone() },
+        extended: if t < 0.5 { a.extended.clone() } else { b.extended.clone() },
+        self_illum_color: lerp3(a.self_illum_color, b.self_illum_color),
+        metallic: lerp(a.metallic, b.metallic),
+        reflect: lerp3(a.reflect, b.reflect),
+        fresnel: if t < 0.5 { a.fresnel } else { b.fresnel },
+        transmission: lerp(a.transmission, b.transmission),
+        translucency: lerp(a.translucency, b.translucency),
+        coat: lerp(a.coat, b.coat),
+        coat_glossiness: lerp(a.coat_glossiness, b.coat_glossiness),
+        unlit: if t < 0.5 { a.unlit } else { b.unlit },
+        matte: if t < 0.5 { a.matte.clone() } else { b.matte.clone() },
+        toon: if t < 0.5 { a.toon.clone() } else { b.toon.clone() },
+        falloff: if t < 0.5 { a.falloff.clone() } else { b.falloff.clone() },
+        split: if t < 0.5 { a.split.clone() } else { b.split.clone() },
     }
 }
 
@@ -1083,6 +1905,189 @@ mod tests {
         lib.get_mut(&MaterialId(3)).unwrap().set_parameter("Viewport", 0.0).unwrap();
         assert_eq!(diffuse(&lib, ShellView::Viewport), Vec3::X);
         assert_eq!(lib[&MaterialId(3)].children(), vec![Some(MaterialId(1)), Some(MaterialId(2))]);
+    }
+
+    fn single_of(lib: &MaterialLibrary, id: u32) -> Surface {
+        match surfaces(lib, MaterialId(id)).unwrap() {
+            Surfaces::Single(s) => *s,
+            Surfaces::PerId(_) => panic!("single"),
+        }
+    }
+
+    fn coloured(name: &str, c: Vec3) -> StandardMaterial {
+        let mut m = StandardMaterial::new(name);
+        m.diffuse.set(c);
+        m.ambient.set(c);
+        m
+    }
+
+    #[test]
+    fn raytrace_and_architectural_resolve_to_pbr_hints() {
+        let mut rt = StandardMaterial::new("rt");
+        rt.kind = MaterialKind::Raytrace(Box::default());
+        rt.set_color("Reflect", [255, 0, 0]).unwrap();
+        rt.set_color("Transparency", [128, 128, 128]).unwrap();
+        rt.set_color("Luminosity", [0, 0, 255]).unwrap();
+        rt.set_parameter("Index of Refr.", 2.0).unwrap();
+        rt.set_color("Diffuse", [0, 255, 0]).unwrap();
+        let mut arch = StandardMaterial::new("arch");
+        arch.kind = MaterialKind::Architectural(Box::default());
+        arch.set_parameter("Template", 11.0).unwrap();
+        let lib = lib_with(vec![rt, arch]);
+        let s = single_of(&lib, 1);
+        assert_eq!(s.reflect, Vec3::X);
+        assert!((s.transmission - 128.0 / 255.0).abs() < 1e-5 && s.viewport_look().alpha < 0.6, "transparency refracts and the viewports show through it");
+        assert_eq!(s.self_illum_color, Vec3::Z, "luminosity glows");
+        assert_eq!(s.extended.ior, 2.0);
+        assert_eq!(s.diffuse, Vec3::Y, "Diffuse is the Standard value");
+        let a = single_of(&lib, 2);
+        assert_eq!(crate::material_types::ARCH_TEMPLATES[11].0, "Mirror");
+        assert_eq!((a.metallic, a.glossiness), (1.0, 100.0), "the Mirror template is a polished metal");
+    }
+
+    #[test]
+    fn composite_and_shellac_combine_colours() {
+        let mut comp = StandardMaterial::new("comp");
+        comp.kind = MaterialKind::Composite(Box::new(Composite {
+            base: Some(MaterialId(1)),
+            layers: vec![crate::material_types::CompositeLayer { material: Some(MaterialId(2)), enabled: true, mode: 0, amount: 100.0 }, crate::material_types::CompositeLayer { material: None, enabled: true, mode: 0, amount: 100.0 }],
+        }));
+        let mut sh = StandardMaterial::new("shellac");
+        sh.kind = MaterialKind::Shellac(Box::new(Shellac { materials: [Some(MaterialId(1)), Some(MaterialId(2))], blend: 50.0 }));
+        let lib = lib_with(vec![coloured("red", Vec3::new(0.5, 0.0, 0.0)), coloured("blue", Vec3::new(0.0, 0.0, 0.5)), comp, sh]);
+        assert_eq!(single_of(&lib, 3).diffuse, Vec3::new(0.5, 0.0, 0.5), "A adds");
+        let mut lib2 = lib.clone();
+        lib2.get_mut(&MaterialId(3)).unwrap().set_parameter("Mat 1 Mode", 1.0).unwrap();
+        assert_eq!(single_of(&lib2, 3).diffuse, Vec3::new(0.5, 0.0, 0.0), "S subtracts (clamped at black)");
+        lib2.get_mut(&MaterialId(3)).unwrap().set_parameter("Mat 1 Mode", 2.0).unwrap();
+        lib2.get_mut(&MaterialId(3)).unwrap().set_parameter("Mat 1 Amount", 150.0).unwrap();
+        let MaterialKind::Composite(c) = &lib2[&MaterialId(3)].kind else { panic!() };
+        assert_eq!(c.layers[0].amount, 100.0, "Mix amounts stop at 100");
+        assert_eq!(single_of(&lib, 4).diffuse, Vec3::new(0.5, 0.0, 0.25), "Shellac Color Blend 50 adds half the shellac colour");
+    }
+
+    #[test]
+    fn double_sided_and_top_bottom_split_the_faces() {
+        let mut ds = StandardMaterial::new("ds");
+        ds.kind = MaterialKind::DoubleSided(Box::new(DoubleSided { materials: [Some(MaterialId(1)), Some(MaterialId(2))], enabled: [true; 2], translucency: 0.0 }));
+        let mut tb = StandardMaterial::new("tb");
+        tb.kind = MaterialKind::TopBottom(Box::new(TopBottom { materials: [Some(MaterialId(1)), Some(MaterialId(2))], enabled: [true; 2], local: false, blend: 0.0, position: 50.0 }));
+        let mut lib = lib_with(vec![coloured("red", Vec3::X), coloured("blue", Vec3::Z), ds, tb]);
+        let front = single_of(&lib, 3);
+        assert_eq!(front.diffuse, Vec3::X);
+        let Some(Split::DoubleSided { back }) = front.split.as_deref() else { panic!("a back surface") };
+        assert_eq!(back.diffuse, Vec3::Z);
+        lib.get_mut(&MaterialId(3)).unwrap().set_parameter("Translucency", 50.0).unwrap();
+        assert!((single_of(&lib, 3).diffuse - Vec3::new(0.5, 0.0, 0.5)).length() < 1e-5, "translucency shows half the back");
+
+        // Top/Bottom on a box: the top faces red, the bottom and (Position 50) the sides... by their normals.
+        let s = surfaces(&lib, MaterialId(4)).unwrap();
+        let (per_id, split) = split_surfaces(&s).expect("a Top/Bottom split");
+        let mut mesh = loom_mesh::box_primitive(Vec3::splat(5.0));
+        apply_split(&mut mesh, &split, Vec3::Z, Vec3::Z);
+        let colour_of = |mesh: &loom_mesh::Mesh, n: Vec3| {
+            let i = (0..mesh.faces().len()).find(|i| mesh.face_normal(loom_mesh::FaceId(*i as u32)).dot(n) > 0.99).unwrap();
+            per_id.for_face(mesh.faces()[i].material_id).diffuse
+        };
+        assert_eq!(colour_of(&mesh, Vec3::Z), Vec3::X, "the top face shows the top material");
+        assert_eq!(colour_of(&mesh, -Vec3::Z), Vec3::Z, "the bottom face the bottom one");
+        assert_eq!(colour_of(&mesh, Vec3::X), Vec3::Z, "at Position 50 a side (normal z 0) is not above the boundary");
+        // Position 100: everything bottom; Local follows the object's up.
+        lib.get_mut(&MaterialId(4)).unwrap().set_parameter("Position", 100.0).unwrap();
+        let (per_id, split) = split_surfaces(&surfaces(&lib, MaterialId(4)).unwrap()).unwrap();
+        let mut mesh = loom_mesh::box_primitive(Vec3::splat(5.0));
+        apply_split(&mut mesh, &split, Vec3::Z, Vec3::Z);
+        assert!(mesh.faces().iter().all(|f| per_id.for_face(f.material_id).diffuse == Vec3::Z));
+        lib.get_mut(&MaterialId(4)).unwrap().set_parameter("Position", 50.0).unwrap();
+        lib.get_mut(&MaterialId(4)).unwrap().set_parameter("Local", 1.0).unwrap();
+        let (per_id, split) = split_surfaces(&surfaces(&lib, MaterialId(4)).unwrap()).unwrap();
+        let mut mesh = loom_mesh::box_primitive(Vec3::splat(5.0));
+        apply_split(&mut mesh, &split, Vec3::Z, -Vec3::Z);
+        assert_eq!(colour_of(&mesh, -Vec3::Z), Vec3::X, "an upside-down object's local top is world down");
+        let _ = per_id;
+    }
+
+    #[test]
+    fn ink_n_paint_bands_and_matte_shadow_flags() {
+        let ink = InkPaint::default();
+        assert_eq!(ink.paint(1.0), ink.lighted);
+        assert_eq!(ink.paint(0.2), ink.lighted * 0.7, "two Paint Levels: the shaded band is 70% of Lighted");
+        let mut m = StandardMaterial::new("ink");
+        m.kind = MaterialKind::InkPaint(Box::default());
+        m.set_color("Lighted", [255, 0, 0]).unwrap();
+        m.set_parameter("Paint Levels", 4.0).unwrap();
+        let mut matte = StandardMaterial::new("matte");
+        matte.kind = MaterialKind::MatteShadow(Box::default());
+        matte.set_parameter("Shadow Brightness", 0.3).unwrap();
+        let lib = lib_with(vec![m, matte]);
+        let s = single_of(&lib, 1);
+        assert_eq!((s.diffuse, s.toon.as_ref().unwrap().paint_levels), (Vec3::X, 4));
+        let s = single_of(&lib, 2);
+        assert_eq!(s.matte.as_ref().unwrap().shadow_brightness, 0.3);
+    }
+
+    #[test]
+    fn falloff_and_vertex_color_maps_tell_the_renderers() {
+        let mut m = StandardMaterial::new("f");
+        let mut f = Map::new(MapType::Falloff, 100.0);
+        f.set_parameter("Falloff Type", 2.0).unwrap();
+        f.set_parameter("Falloff Direction", 9.0).unwrap();
+        f.set_color("Color #2", [0, 0, 255]).ok();
+        m.diffuse_map = Some(f.clone());
+        let look = Surface::from_standard(&m).falloff.expect("a Falloff look");
+        assert_eq!((look.kind, look.direction), (2, Some(Vec3::Z)));
+        assert_eq!(look.side, f.color(1));
+        m.diffuse_map.as_mut().unwrap().enabled = false;
+        assert!(Surface::from_standard(&m).falloff.is_none(), "an unchecked map shows nothing");
+        m.diffuse_map = Some(Map::new(MapType::VertexColor, 100.0));
+        assert!(Surface::from_standard(&m).shows_vertex_colors());
+        // Reflection and refraction maps become the renderer's reflection and refraction.
+        m.reflection_map = Some(Map::new(MapType::FlatMirror, 60.0));
+        m.refraction_map = Some(Map::new(MapType::ThinWall, 40.0));
+        let s = Surface::from_standard(&m);
+        assert_eq!((s.reflect, s.transmission), (Vec3::splat(0.6), 0.4));
+        m.reflection_map = Some(Map::new(MapType::Checker, 60.0));
+        assert_eq!(Surface::from_standard(&m).reflect, Vec3::ZERO, "a plain map is no reflection");
+    }
+
+    #[test]
+    fn viewport_looks_follow_the_shader() {
+        let mut m = StandardMaterial::new("m");
+        m.diffuse.set(Vec3::new(0.8, 0.4, 0.2));
+        m.specular_level.set(100.0);
+        m.glossiness.set(40.0);
+        let look = |m: &StandardMaterial| Surface::from_standard(m).viewport_look();
+        let blinn = look(&m);
+        assert_eq!(blinn.color, m.diffuse.get());
+        assert_eq!(blinn.exponent, 2.0 * 2f32.powf(4.0));
+        m.shading.shader = Shader::Phong;
+        assert!(look(&m).exponent < blinn.exponent, "Phong's highlight is wider");
+        m.shading.shader = Shader::Metal;
+        let metal = look(&m);
+        assert!((metal.specular - m.diffuse.get()).length() < 1e-5, "Metal's highlight takes the diffuse colour");
+        assert!(metal.color.x < blinn.color.x, "and the diffuse dims");
+        m.shading.shader = Shader::OrenNayarBlinn;
+        m.shading.diffuse_level = 200.0;
+        m.shading.roughness = 100.0;
+        let onb = look(&m);
+        assert!((onb.color.x - 1.6 * oren_nayar_dim(100.0)).abs() < 1e-5, "{onb:?}");
+        m.shading.shader = Shader::Strauss;
+        m.specular_level.set(0.0);
+        m.shading.metalness = 100.0;
+        let strauss = look(&m);
+        assert!(strauss.specular.length() > 0.0, "Strauss always has a highlight");
+        assert!(strauss.specular.x > strauss.specular.z, "a metal Strauss highlight is tinted by the colour");
+        m.shading.shader = Shader::Translucent;
+        assert!(look(&m).two_sided);
+        m.shading.shader = Shader::MultiLayer;
+        m.shading.level2 = 50.0;
+        m.shading.specular2 = Vec3::Z;
+        assert!(look(&m).specular.z > 0.4, "the second layer adds its colour");
+        m.shading.shader = Shader::Blinn;
+        m.shading.self_illum_color_on = true;
+        m.shading.self_illum_color = Vec3::new(0.0, 1.0, 0.0);
+        let glow = look(&m);
+        assert_eq!((glow.color, glow.self_illum), (Vec3::Y, 1.0), "a full-value glow colour shows unlit");
     }
 
     #[test]

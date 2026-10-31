@@ -11,10 +11,17 @@ mod icons;
 mod transforms;
 mod menus;
 mod display;
+mod environment;
 mod mesh_patch;
 mod widgets;
 mod ribbon;
 mod precision;
+mod customize;
+mod rollouts;
+mod statusbar;
+mod viewport_config;
+mod prefs_ui;
+mod track_bar;
 mod skin2;
 mod skin_wrap;
 mod biped;
@@ -25,8 +32,14 @@ mod preview_budget;
 mod playback_cache;
 mod material_previews;
 mod touchpad;
+mod explorer;
 mod lightcam2;
 mod bake;
+mod maps2;
+mod materials2;
+mod cursors;
+mod dummy;
+mod oswindows;
 
 const SCREEN: egui::Rect = egui::Rect { min: egui::pos2(0.0, 0.0), max: egui::pos2(1280.0, 800.0) };
 
@@ -47,11 +60,15 @@ struct Harness {
     textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
     /// Seconds between frames (a loaded machine draws fewer per second).
     frame_time: f64,
+    /// The last frame's mouse cursor.
+    cursor: egui::CursorIcon,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0 };
+        // A test stuck (e.g. in the GPU driver) fails the binary instead of hanging it.
+        loom_bevy::test_watchdog(std::time::Duration::from_secs(1800));
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0, cursor: egui::CursorIcon::Default };
         h.ctx.enable_accesskit();
         h.frames(3);
         h
@@ -60,7 +77,10 @@ impl Harness {
     /// The app on a real GPU (Realistic viewports and Render run), or None
     /// on a machine without a Vulkan / Metal / DirectX 12 adapter.
     fn with_gpu() -> Option<Self> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        // No GL backend: an EGL context torn down while another test thread uses or
+        // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
+        // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
         let rs = pollster::block_on(egui_wgpu::RenderState::create(&crate::wgpu_configuration(), &instance, None, None, 1, false)).ok()?;
         if !loom_bevy::supported(&rs.adapter) {
             return None;
@@ -77,6 +97,7 @@ impl Harness {
         self.app.raw_input_hook(&self.ctx, &mut input);
         let app = &mut self.app;
         let out = self.ctx.run(input, |ctx| app.frame(ctx));
+        self.cursor = out.platform_output.cursor_icon;
         self.commands.extend(out.platform_output.commands);
         self.textures.extend(out.textures_delta.set);
         self.shapes = out.shapes;
@@ -2360,7 +2381,7 @@ fn multi_sub_from_the_type_button_colours_faces_by_material_id() {
     h.frames(12);
     h.click(window_text(&h, "Material/Map Browser", "OK"));
     h.frames(2);
-    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ReplaceMaterial { kind: 1, map: false }));
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ReplaceMaterial { kind: loom_scene::material::MaterialKind::TYPES.iter().position(|t| *t == "Multi/Sub-Object").unwrap() as u8, map: false }));
     h.click(window_text(&h, "Replace Material", "Keep old material as sub-material?"));
     h.frames(12);
     h.click(window_text(&h, "Replace Material", "OK"));
@@ -3053,13 +3074,51 @@ fn render_setup_dialog_sets_the_output_size_and_renderer() {
     assert!(h.app.state.scene.render.force_two_sided);
     click_text(&mut h, "Renderer", win, 0.0);
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
-    for label in ["Antialiasing (4x MSAA)", "Supersampling:", "Shadows", "Map Size:", "Background:", "Ambient:"] {
+    for label in [
+        "Antialiasing", "Filter:", "Filter Size:", "Supersampling:", "Passes:", "Shadows", "Map Size:", "Area Shadows", "Ambient Occlusion", "Quality:", "Radius:", "Reflections", "Sky Lighting", "Intensity:", "Ground:", "Tone Mapping:", "Exposure:", "Dither",
+        "Background:", "Ambient:",
+    ] {
         assert!(h.text_rect(label, win).is_some(), "{label:?} in the Renderer panel");
     }
     click_text(&mut h, "Shadows", win, 0.0);
     assert!(!h.app.state.scene.render.bevy.shadows);
     h.cmd(Command::UndoSceneOperation);
     assert!(h.app.state.scene.render.bevy.shadows, "each change is an undo step");
+}
+
+/// The Renderer panel's quality controls: the antialiasing filter and tone
+/// mapping from their lists, Passes by dragging its spinner (one undo
+/// step), Ambient Occlusion and Reflections by their check boxes.
+#[test]
+fn render_setup_quality_controls_change_the_scene_settings() {
+    use loom_scene::render::{AaFilter, Tonemapper};
+    let mut h = Harness::new();
+    h.key(egui::Key::F10);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Renderer", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    // Filter: Area -> Mitchell-Netravali.
+    click_text(&mut h, "Area", win, 0.0);
+    click_text(&mut h, "Mitchell-Netravali", SCREEN, 0.0);
+    assert_eq!(h.app.state.scene.render.bevy.filter, AaFilter::MitchellNetravali);
+    // Tone Mapping: AgX -> ACES Filmic.
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "AgX", win, 0.0);
+    click_text(&mut h, "ACES Filmic", SCREEN, 0.0);
+    assert_eq!(h.app.state.scene.render.bevy.tonemapper, Tonemapper::Aces);
+    // Passes: a drag right raises it, as one undo step.
+    let before = h.app.state.scene.render.bevy.passes;
+    let spin = h.spinner_after("Passes:");
+    h.drag(spin.center(), spin.center() + egui::vec2(60.0, 0.0));
+    let after = h.app.state.scene.render.bevy.passes;
+    assert!(after > before, "Passes {before} -> {after}");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.render.bevy.passes, before, "the drag is one undo step");
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
+    click_text(&mut h, "Ambient Occlusion", win, 0.0);
+    click_text(&mut h, "Reflections", win, 0.0);
+    let b = &h.app.state.scene.render.bevy;
+    assert!(!b.ambient_occlusion && !b.reflections);
 }
 
 /// Renders until the render in progress ends (at most `frames` frames).
@@ -3088,9 +3147,9 @@ fn a_render_runs_in_buckets_into_the_window_and_saves_its_file() {
     h.mods = egui::Modifiers::SHIFT;
     h.key(egui::Key::Q);
     h.mods = egui::Modifiers::NONE;
-    // 600 x 300 is 3 x 2 buckets: the UI keeps running between them.
+    // 600 x 300 renders whole, in 16 passes: the UI keeps running between them.
     let p = h.app.state.rendered.progress.expect("rendering");
-    assert_eq!(p.total, 6);
+    assert_eq!(p.total, 16);
     assert!(p.done < p.total, "not done in the frame it started");
     finish_render(&mut h, 60);
     assert_eq!(h.app.last_error, None);
@@ -3144,10 +3203,10 @@ fn an_iterative_region_render_keeps_the_rest_of_the_window() {
     // An empty scene: every pixel is background, so the region shows exactly.
     maximized(&mut h);
     h.app.dispatch_json(&serde_json::json!({ "cmd": "Render SetUp...", "args": { "width": 320, "height": 240 } }));
-    h.app.dispatch_json(&serde_json::json!({ "cmd": "Bevy Renderer Settings", "args": { "background": [0.0, 0.0, 1.0] } }));
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Environment Settings", "args": { "background": [0.0, 0.0, 1.0] } }));
     h.cmd(Command::Render { path: None, width: None, height: None });
     finish_render(&mut h, 60);
-    h.app.dispatch_json(&serde_json::json!({ "cmd": "Bevy Renderer Settings", "args": { "background": [0.0, 1.0, 0.0] } }));
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Environment Settings", "args": { "background": [0.0, 1.0, 0.0] } }));
     h.app.dispatch_json(&serde_json::json!({ "cmd": "Area to Render", "args": { "area": "Region", "region": [0.0, 0.0, 0.25, 0.25] } }));
     h.cmd(Command::RenderIterative);
     finish_render(&mut h, 60);
@@ -3226,7 +3285,7 @@ fn autogrid_tripod_follows_the_cursor_over_surfaces() {
 fn viewport_background_dialog_sets_aspect_and_picks_the_viewport() {
     let mut h = Harness::new();
     h.cmd(Command::ActiveViewport { index: 1 }); // Front
-    h.cmd(Command::SetViewportBackground { path: Some("/tmp/ref.png".into()), aspect: None, lock: None, display: None, all_views: None });
+    h.cmd(Command::SetViewportBackground { path: Some("/tmp/ref.png".into()), use_environment: None, aspect: None, lock: None, display: None, all_views: None });
     h.cmd(Command::ViewportBackground);
     let screen = h.ctx.screen_rect();
     click_text(&mut h, "Match Bitmap", screen, 0.0);
@@ -3871,7 +3930,7 @@ fn fbx_import_options_cancel_and_cameras_off() {
     assert_eq!(h.app.state.scene.len(), 0, "Cancel imports nothing");
     h.cmd(Command::ImportFile { path: None });
     choose_file(&mut h, &path, "Open");
-    let win = options_rect(&h, "fbx_import_options");
+    let _win = options_rect(&h, "fbx_import_options");
     click_option(&mut h, "Cameras", "fbx_import_options");
     assert!(!h.app.state.exchange.fbx_import.cameras);
     click_option(&mut h, "OK", "fbx_import_options");
@@ -4057,4 +4116,92 @@ fn skin_display_workers_preserve_serial_geometry_and_sources() {
         }
     }
     assert_eq!(before, meshes.iter().map(|mesh| serde_json::to_value(mesh).unwrap()).collect::<Vec<_>>());
+}
+
+/// The user's case: an imported skinned FBX character, a Bitmap on the
+/// Diffuse map of the material assigned to it, Show Map in Viewport clicked
+/// at the map's level: the posed mesh in the shaded viewport shows the bitmap with varying UVs.
+#[test]
+fn a_bitmap_on_an_imported_skinned_character_shows_in_the_viewport() {
+    let mut h = Harness::new();
+    let png = std::env::temp_dir().join(format!("loom-shadedtex-{}.png", std::process::id()));
+    image::RgbaImage::from_fn(8, 8, |x, y| if (x + y) % 2 == 0 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) }).save(&png).unwrap();
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../loom_fbx/tests/fixtures/sitting_idle.fbx");
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::ImportFile { path: Some(path.into()) });
+    let skinned = h.app.state.scene.nodes().find(|n| !n.modifiers.is_empty()).expect("the skinned mesh").id;
+    h.cmd(Command::SelectNodes { ids: vec![skinned.0], op: loom_commands::SelectOp::Replace });
+    for c in [
+        Command::MaterialEditorToggle,
+        Command::AssignMaterialToSelection,
+        Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() },
+        Command::SetMapBitmap { path: png.to_string_lossy().into() },
+        Command::AssignMaterialToSelection,
+    ] {
+        h.cmd(c);
+    }
+    h.frames(2);
+    let i = h.app.world_meshes().iter().position(|(n, _)| *n == skinned).unwrap();
+    // At the Bitmap's level, as the reference's steps go: Show Standard Map in Viewport.
+    assert!(!h.app.state.scene.material_editor.path.is_empty(), "the editor is at the map level");
+    click_in_editor(&mut h, "Show Map in Viewport", 0.0);
+    h.frames(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.app.texture_previews.pending_count() > 0 {
+        assert!(std::time::Instant::now() < deadline, "texture preview timed out");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        h.frames(1);
+    }
+    let style = h.app.world_styles[i].clone();
+    let loom_render::TextureSel::Bitmap(t) = style.texture else { panic!("the bitmap shows: {:?}", style.texture) };
+    let mesh = h.app.world_display()[i].clone();
+    let (verts, _, _) = loom_render::triangulate_styled(&mesh, &style);
+    assert!(verts.iter().any(|v| v.uv != verts[0].uv), "the posed mesh keeps its UVs");
+    let upload = h.app.pending_upload.lock().unwrap().clone();
+    let bitmaps = upload.map(|u| u.bitmaps).unwrap_or_default();
+    let bm = &bitmaps.get(t as usize).expect("the bitmap is uploaded").1;
+    assert_eq!((bm.width, bm.height), (8, 8));
+}
+
+/// An FBX whose material has a diffuse bitmap (external file, or embedded in
+/// the .fbx) imports with Show Map in Viewport on, and its box shows the
+/// bitmap in the shaded viewport with varying UVs.
+#[test]
+fn an_imported_fbx_with_a_diffuse_bitmap_shows_it_in_the_viewport() {
+    for embed in [false, true] {
+        let mut h = Harness::new();
+        let dir = std::env::temp_dir().join(format!("loom-shadedtex-fbx-{}-{embed}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("checks.png");
+        image::RgbaImage::from_fn(8, 8, |x, y| if (x + y) % 2 == 0 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) }).save(&png).unwrap();
+        poly_box(&mut h);
+        h.cmd(Command::DropBitmap { path: png.to_string_lossy().into(), node: None });
+        h.cmd(Command::SetExchangeOption { dialog: "fbx_export".into(), name: "embed_media".into(), value: serde_json::json!(embed) });
+        let fbx = dir.join("box.fbx");
+        h.cmd(Command::ExportFile { path: Some(fbx.to_string_lossy().into()) });
+        assert!(fbx.exists());
+        if embed {
+            std::fs::remove_file(&png).unwrap();
+        }
+        h.cmd(Command::NewScene);
+        h.cmd(Command::ImportFile { path: Some(fbx.to_string_lossy().into()) });
+        h.frames(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h.app.texture_previews.pending_count() > 0 {
+            assert!(std::time::Instant::now() < deadline, "texture preview timed out");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            h.frames(1);
+        }
+        let scene = &h.app.state.scene;
+        let i = h.app.world_meshes().iter().position(|(n, _)| scene.node(*n).is_some_and(|n| n.material.is_some())).expect("the imported box has its material");
+        let style = h.app.world_styles[i].clone();
+        let loom_render::TextureSel::Bitmap(t) = style.texture else { panic!("embed {embed}: the bitmap shows: {:?} {:?}", style.texture, h.app.last_error) };
+        let (verts, _, _) = loom_render::triangulate_styled(&h.app.world_display()[i], &style);
+        assert!(verts.iter().any(|v| v.uv != verts[0].uv), "the box keeps its UVs");
+        let upload = h.app.pending_upload.lock().unwrap().clone();
+        let bitmaps = upload.map(|u| u.bitmaps).unwrap_or_default();
+        let bm = &bitmaps.get(t as usize).expect("the bitmap is uploaded").1;
+        assert_eq!((bm.width, bm.height, &bm.rgba[..4]), (8, 8, &[255, 0, 0, 255][..]));
+    }
 }

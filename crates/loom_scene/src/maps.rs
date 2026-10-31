@@ -1,13 +1,54 @@
 //! Evaluating maps to pixels: Bitmap (with Cropping/Placement, Mirror and
-//! Tile), Checker, Gradient, Noise and Mix. The viewport, the Realistic
-//! renderer and the Material Editor's sample slots all bake maps here, so
-//! they show the same thing. Colours are 0–1 sRGB values as the editor's
-//! swatches hold them; bitmaps are 8-bit sRGB RGBA as image files store them.
+//! Tile), Checker, Gradient, Noise, Mix and the other 2D, 3D, compositor,
+//! colour modifier and Falloff maps (`procedural`). The viewport, the
+//! Realistic renderer and the Material Editor's sample slots all bake or
+//! evaluate maps here, so they show the same thing. Colours are 0–1 sRGB
+//! values as the editor's swatches hold them; bitmaps are 8-bit sRGB RGBA as
+//! image files store them.
 
 use crate::material::{Map, MapType};
 use glam::Vec3;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+mod procedural;
+
+/// Units across a map channel's 0–1 square when a 3D map reads UVW
+/// (Explicit Map Channel, and every 3D map in a bake or a flat sample):
+/// Noise's default Size 25 then shows four features across.
+pub const UV_UNITS: f32 = 100.0;
+
+/// What a map sees at the point being shaded. 3D maps read the object or
+/// world point, Falloff the normal and view; with only a UV (`Ctx::from_uv`,
+/// as in a bake) the points are the UV square scaled by `UV_UNITS`, the
+/// normal faces the view and the point is fully lit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ctx {
+    /// Surface UV (map channel coordinates).
+    pub uv: [f32; 2],
+    pub p_obj: Vec3,
+    pub p_world: Vec3,
+    /// World-space unit normal.
+    pub normal: Vec3,
+    /// World-space unit vector from the point towards the eye (the camera's Z axis).
+    pub view: Vec3,
+    /// The camera's X and Y axes in world space.
+    pub cam_x: Vec3,
+    pub cam_y: Vec3,
+    /// The object's local axes in world space (columns).
+    pub obj_axes: glam::Mat3,
+    /// Distance from the eye.
+    pub dist: f32,
+    /// Light falling on the point, 0–1 (Falloff's Shadow / Light).
+    pub light: f32,
+}
+
+impl Ctx {
+    pub fn from_uv(uv: [f32; 2]) -> Self {
+        let p = Vec3::new(uv[0], uv[1], 0.0) * UV_UNITS;
+        Self { uv, p_obj: p, p_world: p, normal: Vec3::Z, view: Vec3::Z, cam_x: Vec3::X, cam_y: Vec3::Y, obj_axes: glam::Mat3::IDENTITY, dist: 0.0, light: 1.0 }
+    }
+}
 
 /// An RGBA8 image, rows from the top.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,7 +88,7 @@ pub fn load_images(map: &Map, images: &mut Images, load: &mut dyn FnMut(&str) ->
         let img = load(&map.path);
         images.insert(map.path.clone(), img);
     }
-    for sub in map.sub_maps.iter().flatten() {
+    for sub in map.components() {
         load_images(sub, images, load);
     }
 }
@@ -55,7 +96,18 @@ pub fn load_images(map: &Map, images: &mut Images, load: &mut dyn FnMut(&str) ->
 /// The map's colour at surface UV `uv` (map channel coordinates), 0–1 RGBA;
 /// alpha 0 where a decal or a placed bitmap leaves the surface uncovered.
 pub fn eval(map: &Map, uv: [f32; 2], images: &Images) -> [f32; 4] {
-    eval_at(map, map.coords.apply(uv), uv, images)
+    eval_ctx(map, &Ctx::from_uv(uv), images)
+}
+
+/// The map's colour at a shaded point: 3D maps read its object / world
+/// point, Falloff its normal and view direction.
+pub fn eval_ctx(map: &Map, ctx: &Ctx, images: &Images) -> [f32; 4] {
+    eval_at(map, map.coords.apply(ctx.uv), ctx, images)
+}
+
+/// A Bitmap the GPU can sample as it is (no cropping, mirroring or Output change).
+pub fn is_plain_bitmap(map: &Map) -> bool {
+    map.kind == MapType::Bitmap && !map.crop.apply && !map.coords.mirror[0] && !map.coords.mirror[1] && map.output == crate::map_params::MapOutput::default()
 }
 
 /// Mirror / Tile / decal fold of a map-space coordinate to the image's 0–1.
@@ -70,19 +122,37 @@ fn fold(m: f32, mirror: bool, tile: bool) -> Option<f32> {
     }
 }
 
-/// `m` in map space (after Offset/Tiling/Angle), `uv` the surface UV the
-/// colour components' own maps read.
-fn eval_at(map: &Map, m: [f32; 2], uv: [f32; 2], images: &Images) -> [f32; 4] {
+/// `m` in map space (after Offset/Tiling/Angle), `ctx` the shaded point the
+/// colour components' own maps read; then the Output rollout.
+fn eval_at(map: &Map, m: [f32; 2], ctx: &Ctx, images: &Images) -> [f32; 4] {
+    let c = eval_raw(map, m, ctx, images);
+    if map.kind.has_output() { map.output.apply(c) } else { c }
+}
+
+/// The pattern-space point a 3D map reads (Coordinates rollout Source, Offset, Tiling, Angle).
+fn point3(map: &Map, ctx: &Ctx) -> Vec3 {
+    let p = match map.coords3.source {
+        0 => ctx.p_obj,
+        1 => ctx.p_world,
+        _ => Vec3::new(ctx.uv[0], ctx.uv[1], 0.0) * UV_UNITS,
+    };
+    map.coords3.apply(p)
+}
+
+fn eval_raw(map: &Map, m: [f32; 2], ctx: &Ctx, images: &Images) -> [f32; 4] {
     let c = &map.coords;
-    let (Some(u), Some(v)) = (fold(m[0], c.mirror[0], c.tile[0]), fold(m[1], c.mirror[1], c.tile[1])) else { return [0.0; 4] };
+    let (u, v) = if map.kind.has_2d_coords() {
+        let (Some(u), Some(v)) = (fold(m[0], c.mirror[0], c.tile[0]), fold(m[1], c.mirror[1], c.tile[1])) else { return [0.0; 4] };
+        (u, v)
+    } else {
+        (m[0], m[1])
+    };
     let p = &map.params;
+    let sub = |i: usize| -> Option<[f32; 4]> { map.sub_map(i).filter(|s| s.enabled).map(|s| eval_ctx(s, ctx, images)) };
     let component = |i: usize| -> Vec3 {
-        let col = map.colors[i];
-        match map.sub_maps[i].as_deref().filter(|s| s.enabled) {
-            Some(s) => {
-                let t = eval(s, uv, images);
-                col.lerp(Vec3::new(t[0], t[1], t[2]), t[3])
-            }
+        let col = map.color(i);
+        match sub(i) {
+            Some(t) => col.lerp(Vec3::new(t[0], t[1], t[2]), t[3]),
             None => col,
         }
     };
@@ -131,10 +201,9 @@ fn eval_at(map: &Map, m: [f32; 2], uv: [f32; 2], images: &Images) -> [f32; 4] {
             rgb(c)
         }
         MapType::Noise => {
-            // The reference's noise is 3D in object space; here it runs over the
-            // map's UV square, Size 25 giving four features across.
-            let s = 100.0 / p.size.max(1e-3);
-            let q = Vec3::new(u * s, v * s, p.phase);
+            // 3D at the Coordinates rollout's point; Size 25 gives four
+            // features across a UV square (`UV_UNITS`).
+            let q = point3(map, ctx) / p.size.max(1e-3) + Vec3::new(0.0, 0.0, p.phase);
             let levels = if p.noise_type == 0 { 1 } else { p.levels.max(1.0).round() as u32 };
             let (mut n, mut amp, mut norm) = (0.0, 1.0, 0.0);
             for l in 0..levels {
@@ -150,16 +219,22 @@ fn eval_at(map: &Map, m: [f32; 2], uv: [f32; 2], images: &Images) -> [f32; 4] {
             rgb(component(0).lerp(component(1), t))
         }
         MapType::Mix => {
-            let t = match map.sub_maps[2].as_deref().filter(|s| s.enabled) {
-                Some(mask) => {
-                    let t = eval(mask, uv, images);
-                    (t[0] + t[1] + t[2]) / 3.0
-                }
+            let t = match sub(2) {
+                Some(t) => (t[0] + t[1] + t[2]) / 3.0,
                 None => p.mix_amount / 100.0,
+            };
+            let e = &map.extra;
+            // Mixing Curve: the transition zone between Lower and Upper.
+            let t = if e.use_curve {
+                let (lo, hi) = (e.lower.min(e.upper), e.upper.max(e.lower));
+                if hi - lo < 1e-4 { if t < lo { 0.0 } else { 1.0 } } else { smoothstep(lo, hi, t) }
+            } else {
+                t
             };
             rgb(component(0).lerp(component(1), t.clamp(0.0, 1.0)))
         }
         MapType::NormalBump => rgb(component(0)),
+        _ => procedural::eval(map, [u, v], point3(map, ctx), ctx, &component, &sub),
     }
 }
 
@@ -236,7 +311,7 @@ pub fn bake_with_limit(map: &Map, images: &Images, max_side: u32) -> Option<Imag
         MapType::Bitmap => bitmap_size(map).unwrap_or((256, 256)),
         _ => {
             let mut s = (256u32, 256u32);
-            for sub in map.sub_maps.iter().flatten() {
+            for sub in map.components() {
                 if let Some((w, h)) = bitmap_size(sub) {
                     s = (s.0.max(w), s.1.max(h));
                 }
@@ -255,7 +330,7 @@ pub fn bake_with_limit(map: &Map, images: &Images, max_side: u32) -> Option<Imag
         for x in 0..w {
             let m = [(x as f32 + 0.5) / w as f32, 1.0 - (y as f32 + 0.5) / h as f32];
             let uv = [inv[0] * m[0] + inv[1] * m[1] + inv[2], inv[3] * m[0] + inv[4] * m[1] + inv[5]];
-            let c = eval_at(map, m, uv, images);
+            let c = eval_at(map, m, &Ctx::from_uv(uv), images);
             rgba.extend(c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
         }
     }

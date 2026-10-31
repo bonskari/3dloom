@@ -90,7 +90,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         return;
     };
     let mut open = true;
-    egui::Window::new("Edit UVWs").open(&mut open).default_size([760.0, 640.0]).resizable(true).show(ctx, |ui| {
+    let window = egui::Window::new("Edit UVWs").default_size([760.0, 640.0]).resizable(true);
+    crate::os_window::OsWindow::new("Edit UVWs", "Edit UVWs", [760.0, 640.0]).show(ctx, &mut open, window, |ui| {
         menus(ui, app);
         toolbar(ui, app);
         let bottom_h = 64.0;

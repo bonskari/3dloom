@@ -88,6 +88,9 @@ pub struct Scene {
     /// Render Setup (saved with the scene, as the reference does).
     #[serde(default)]
     pub render: crate::render::RenderSettings,
+    /// Rendering > Environment and Effects (saved with the scene).
+    #[serde(default)]
+    pub environment: crate::environment::Environment,
     /// File > XRef Scene / XRef Objects: the referenced files and the nodes they put here.
     #[serde(default)]
     pub xrefs: Vec<XrefRecord>,
@@ -197,6 +200,7 @@ impl Scene {
             materials: Default::default(),
             material_editor: Default::default(),
             render: Default::default(),
+            environment: Default::default(),
             xrefs: Vec::new(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
@@ -510,6 +514,10 @@ impl Scene {
     /// A fresh layer id (ids are never reused).
     /// The colour a node shows in the viewports: its layer's when its colour is By Layer.
     pub fn display_color(&self, node: &Node) -> [u8; 3] {
+        // A light that is off shows black.
+        if matches!(&node.object, crate::node::ObjectKind::Light(l) if !l.on.get()) {
+            return [0, 0, 0];
+        }
         match self.layer(node.layer) {
             Some(l) if node.display.color_by_layer => l.color,
             _ => node.wire_color,
@@ -544,6 +552,14 @@ impl Scene {
     /// Whether renders include the node (Renderable, from the layer when By Layer).
     pub fn is_renderable(&self, node: &Node) -> bool {
         self.render_of(node).renderable
+    }
+
+    /// Whether renders (Render, bake, the Realistic shading's lit surfaces)
+    /// show the node: geometry with Renderable on. Helpers, cameras, lights,
+    /// light/camera targets and a biped's centre of mass never render;
+    /// bones only when their Renderable is turned on.
+    pub fn renders(&self, node: &Node) -> bool {
+        node.object.has_render_geometry() && self.is_renderable(node)
     }
 
     pub fn next_layer_id(&self) -> u32 {

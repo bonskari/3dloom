@@ -114,11 +114,13 @@ pub struct FbxNode {
     pub skin: Option<FbxSkin>,
     /// Blend shape channels on a mesh node.
     pub blend_shapes: Vec<FbxBlendShape>,
+    /// User-defined properties (name, string value) written on the Model.
+    pub user_props: Vec<(String, String)>,
 }
 
 impl FbxNode {
     pub fn new(name: &str, kind: FbxKind) -> Self {
-        Self { name: name.into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind, skin: None, blend_shapes: Vec::new() }
+        Self { name: name.into(), parent: None, translation: Vec3::ZERO, rotation_deg: Vec3::ZERO, scale: Vec3::ONE, kind, skin: None, blend_shapes: Vec::new(), user_props: Vec::new() }
     }
 }
 

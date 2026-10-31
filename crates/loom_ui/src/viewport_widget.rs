@@ -281,6 +281,7 @@ impl CallbackTrait for ViewportCallback {
                 self.orthographic,
                 textures,
                 res.helper_lines.get(self.slot).and_then(|l| l.as_ref()),
+                self.shading.flags,
             );
         }
     }
@@ -313,8 +314,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             // Labels: [+] [Top] [Wireframe], each opening its menu.
             // Perspective views get a vertical gradient; axis views stay flat.
             // Painted first: everything else, the labels included, goes over it.
-            if !(app.state.viewports[index].background.is_some() && app.state.viewports[index].background_display) && !app.state.viewports[index].is_orthographic() {
-                draw_background_gradient(&painter, rect);
+            let env_background = app.state.viewports[index].background_use_environment && app.state.viewports[index].background_display;
+            if !((app.state.viewports[index].background.is_some() || env_background) && app.state.viewports[index].background_display) && !app.state.viewports[index].is_orthographic() {
+                draw_background_gradient(&painter, rect, app.color("Perspective Background Top"), app.color("Perspective Background Bottom"));
             }
             let over_label = draw_labels(ui, app, index, rect);
 
@@ -377,14 +379,30 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         }
                         if moved {
                             let d = pointer.delta();
-                            app.state.viewports[index].camera.orbit(d.x * 0.006, d.y * 0.006);
+                            let cam = &mut app.state.viewports[index].camera;
+                            cam.orbit(d.x * 0.006, d.y * 0.006);
+                            // Keep Scene Upright: never over the top.
+                            if cube_settings.keep_upright {
+                                let lim = std::f32::consts::FRAC_PI_2 - 1e-3;
+                                cam.pitch = cam.pitch.clamp(-lim, lim);
+                                cam.roll = 0.0;
+                            }
                             ctx.request_repaint();
                         }
                         app.cube_press = Some((start, moved));
                     } else {
                         app.cube_press = None;
+                        if moved && cube_settings.snap_to_closest {
+                            // Snap to Closest View: the nearest of the cube's 26 views.
+                            let north = cube_settings.north.to_radians();
+                            let step = std::f32::consts::FRAC_PI_4;
+                            let cam = &mut app.state.viewports[index].camera;
+                            let yaw = ((cam.yaw - north) / step).round() * step + north;
+                            let pitch = (cam.pitch / step).round() * step;
+                            app.start_view_animation(yaw, pitch, 0.0);
+                        }
                         if !moved {
-                            let cam = app.state.viewports[index].camera.clone();
+                            let cam = cube_frame(&app.state.viewports[index].camera, cube_settings.north);
                             if let Some(hit) = crate::viewport_gizmo::hit_test(start, gizmo_rect, &cam, !app.state.viewports[index].is_orthographic()) {
                                 cube_click(app, index, hit);
                                 ctx.request_repaint();
@@ -1139,6 +1157,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                             app.state.nav_mode = loom_input::NavMode::None;
                         } else if !app.region_points.is_empty() && app.drag_select_start.is_none() {
                             app.region_points.clear();
+                        } else if app.state.prefs.right_click_selected_only && !node_at(app, p).is_some_and(|n| app.state.selection.contains(&n)) {
+                            // Right Click Menu over Selected Only: elsewhere a right-click opens nothing.
+                            app.quad_menu = None;
                         } else {
                             // A right-click elsewhere while one is open reopens it there.
                             let mut open = crate::quad_menu::Open::new(p, index);
@@ -1204,6 +1225,21 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 use loom_commands::state::NavigationDevice as D;
                 let device = app.state.prefs.viewport_navigation_device;
                 let mut wheel = 0.0;
+                let apply_wheel = |app: &mut LoomApp, wheel: f32| -> bool {
+                    let delta = wheel / 50.0 * app.state.prefs.wheel_zoom_increment;
+                    let vp = &app.state.viewports[index];
+                    let about = if vp.is_orthographic() { app.state.prefs.zoom_about_mouse_ortho } else { app.state.prefs.zoom_about_mouse_persp };
+                    let not_camera = !matches!(vp.kind, loom_commands::ViewKind::Camera(_));
+                    let (target, to_eye, d0) = (vp.camera.target, vp.camera.basis().2, vp.camera.distance);
+                    let anchor = ctx.input(|i| i.pointer.hover_pos()).filter(|_| about && not_camera).and_then(|p| plane_hit_at(p, rect, view, proj, target, to_eye));
+                    let changed = nav_event(app, index, rect, InputEvent::Scroll { delta_y: delta, pos: Vec2::ZERO, mods });
+                    if let Some(p) = anchor {
+                        let cam = &mut app.state.viewports[index].camera;
+                        let f = cam.distance / d0.max(1e-6);
+                        cam.target = p + (cam.target - p) * f;
+                    }
+                    changed
+                };
                 for event in events {
                     let gesture = match event {
                         egui::Event::MouseWheel { unit, delta, modifiers } => {
@@ -1230,7 +1266,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         _ => continue,
                     };
                     if wheel != 0.0 {
-                        if nav_event(app, index, rect, InputEvent::Scroll { delta_y: wheel / 50.0, pos: Vec2::ZERO, mods }) { ctx.request_repaint(); }
+                        if apply_wheel(app, wheel) { ctx.request_repaint(); }
                         wheel = 0.0;
                     }
                     if matches!(gesture, ViewNavigation::Orbit(delta) if delta.is_finite() && delta != Vec2::ZERO) && app.state.viewports[index].kind.angles().is_some() {
@@ -1238,7 +1274,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                     if nav_input(app, index, rect, gesture) { ctx.request_repaint(); }
                 }
-                if wheel != 0.0 && nav_event(app, index, rect, InputEvent::Scroll { delta_y: wheel / 50.0, pos: Vec2::ZERO, mods }) {
+                if wheel != 0.0 && apply_wheel(app, wheel) {
                     ctx.request_repaint();
                 }
             }
@@ -1253,6 +1289,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 .map(|(i, _)| i)
                 .collect();
 
+            // Adaptive Degradation: a simpler level while views are navigated too slowly.
+            let level = shown_shading(app, index);
             let (wire, grid_plane, edged_faces, show_grid, view_shading) = {
                 let vp = &app.state.viewports[index];
                 let grid_plane = match vp.kind {
@@ -1260,22 +1298,57 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     loom_commands::ViewKind::Left | loom_commands::ViewKind::Right => loom_render::GridPlane::YZ,
                     _ => loom_render::GridPlane::XY,
                 };
-                let lighting = match vp.shading {
-                    loom_commands::Shading::Flat => 1,
+                use loom_commands::Shading as S;
+                let lighting = match level {
+                    S::Flat => 1,
                     _ => 0,
                 };
                 // Hidden Line: faces in the viewport colour hide the lines behind them.
-                let override_color = (vp.shading == loom_commands::Shading::HiddenLine).then_some([0.0806, 0.0806, 0.0806]);
-                let mut view_shading = loom_render::ViewShading { lighting, override_color, ..Default::default() };
-                if lighting == 0 && override_color.is_none() {
-                    view_shading = crate::light_overlay::view_lighting(app, vp, view, view_shading);
+                let override_color = (level == S::HiddenLine).then_some([0.0806, 0.0806, 0.0806]);
+                let mut flags = 0;
+                if matches!(level, S::Smooth | S::Facets) {
+                    flags |= loom_render::view_flags::NO_HIGHLIGHTS;
                 }
-                let edges = vp.edged_faces || vp.shading == loom_commands::Shading::HiddenLine;
-                (vp.shading == loom_commands::Shading::Wireframe, grid_plane, edges, vp.show_grid, view_shading)
+                if matches!(level, S::Facets | S::FacetsHighlights) {
+                    flags |= loom_render::view_flags::FACETED;
+                }
+                flags |= match vp.transparency {
+                    loom_commands::Transparency::None => loom_render::view_flags::OPAQUE,
+                    loom_commands::Transparency::Simple => loom_render::view_flags::SCREEN_DOOR,
+                    loom_commands::Transparency::Best => 0,
+                };
+                if vp.disable_textures {
+                    flags |= loom_render::view_flags::NO_TEXTURES;
+                }
+                if vp.force_two_sided {
+                    flags |= loom_render::view_flags::TWO_SIDED;
+                }
+                let mut view_shading = loom_render::ViewShading { lighting, override_color, flags, ..Default::default() };
+                if lighting == 0 && override_color.is_none() {
+                    // Degrade to Default Lighting: no scene lights while degraded.
+                    let mut lit = vp.clone();
+                    if app.degrading && app.state.degradation.degrade_to_default_lighting {
+                        lit.scene_lights = false;
+                    }
+                    view_shading = crate::light_overlay::view_lighting(app, &lit, view, view_shading);
+                }
+                let edges = (vp.edged_faces && level != S::BoundingBox) || level == S::HiddenLine;
+                (!level.shaded(), grid_plane, edges, vp.show_grid, view_shading)
             };
             // Viewport background image: fitted by its Aspect Ratio and, with
             // Lock Zoom/Pan, zoomed and panned with the scene since the lock.
-            if let Some(path) = app.state.viewports[index].background.clone().filter(|_| app.state.viewports[index].background_display) {
+            if env_background {
+                // Use Environment Background: the Environment's colour, or
+                // its map (Use Map on) stretched over the view.
+                let env = &app.state.scene.environment;
+                let c = env.background.get().to_array().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(c[0], c[1], c[2]));
+                if let Some(path) = env.map().map(str::to_owned) {
+                    if let Some(tex) = app.background_texture(&ctx, &path, 0) {
+                        painter.image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    }
+                }
+            } else if let Some(path) = app.state.viewports[index].background.clone().filter(|_| app.state.viewports[index].background_display) {
                 let version = app.state.viewports[index].background_version;
                 if let Some(tex) = app.background_texture(&ctx, &path, version) {
                     let target = background_rect(&app.state.viewports[index], rect, tex.size(), (app.state.scene.render.width, app.state.scene.render.height), view_proj);
@@ -1295,10 +1368,13 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     None => ctx.request_repaint(),
                 }
             }
-            let shade_only = if app.state.shade_selected { selected.clone() } else { Vec::new() };
+            // Never Degrade Selected: the selection keeps its own look while the view degrades.
+            let keep_selected = app.degrading && app.state.degradation.never_degrade_selected && app.state.viewports[index].shading.shaded();
+            let shade_only = if app.state.shade_selected || keep_selected { selected.clone() } else { Vec::new() };
             // Shaded views without Edged Faces outline the selection only
             // with Display Selected with Edged Faces (the brackets show it otherwise).
-            let selected = if wire || edged_faces || app.state.display.display_selected_edged || app.state.selection_mode != SelectionMode::Object { selected } else { Vec::new() };
+            let bbox = level == loom_commands::Shading::BoundingBox;
+            let selected = if (wire && !bbox) || edged_faces || app.state.display.display_selected_edged || app.state.selection_mode != SelectionMode::Object { selected } else { Vec::new() };
             // Helper line art: depth-tested on the GPU, drawn over everything
             // with Draw On Top (and in Realistic views, which have no line pass).
             let (helper_depth_lines, helper_top_lines) = crate::helper_overlay::lines(app, view_proj, rect, realistic);
@@ -1311,7 +1387,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     upload: app.pending_upload.clone(),
                     shading: view_shading,
                     selected,
-                    show_edges: edged_faces || wire || app.state.selection_mode.is_edge_level(),
+                    show_edges: (edged_faces || wire || app.state.selection_mode.is_edge_level()) && level != loom_commands::Shading::BoundingBox,
                     shaded: !wire,
                     faces_needed: viewport_faces_needed(app),
                     shade_only,
@@ -1321,7 +1397,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     grid_params: {
                         let g = &app.state.home_grid;
                         let cells = (g.perspective_extent.max(1) * g.major_every.max(1)) as i32;
-                        loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10 }
+                        loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10, colors: [app.color_f32("Home Grid"), app.color_f32("Home Grid Major Lines"), app.color_f32("Home Grid World Axes")] }
                     },
                     helper_lines: helper_depth_lines.clone(),
                 },
@@ -1368,6 +1444,21 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                 }
             }
+            if level == loom_commands::Shading::BoundingBox {
+                draw_bounding_boxes(&painter, app, view_proj, rect, keep_selected);
+            }
+            if app.state.prefs.display_world_axis {
+                draw_world_axis(&painter, app, view, rect);
+            }
+            // Preferences > Viewport Tooltips: the name of the object under a resting pointer.
+            if app.state.prefs.viewport_tooltips && response.hovered() && app.quad_menu.is_none() && app.create.is_none() && app.transform_drag.is_none() {
+                let (rest, still) = ctx.input(|i| (!i.pointer.any_down() && i.pointer.time_since_last_movement() > 0.5, i.pointer.time_since_last_movement()));
+                if !rest {
+                    ctx.request_repaint_after(std::time::Duration::from_secs_f32((0.55 - still).max(0.05)));
+                } else if let Some(name) = ctx.input(|i| i.pointer.hover_pos()).and_then(|p| node_at(app, p)).and_then(|n| app.state.scene.node(n)).map(|n| n.name.clone()) {
+                    egui::show_tooltip_at_pointer(&ctx, ui.layer_id(), egui::Id::new(("viewport_tooltip", index)), |ui| ui.label(name));
+                }
+            }
             if app.state.selection_brackets && app.state.selection_mode == SelectionMode::Object {
                 draw_selection_brackets(&painter, app, view_proj, rect);
                 // Bones tool preview: the joints clicked so far.
@@ -1389,13 +1480,36 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             }
             if app.state.viewports[index].safe_frames {
                 draw_safe_frames(&painter, app, rect);
+                // Safe Frames > Region: the render region's outline stays while it is not being edited.
+                let r = &app.state.scene.render;
+                if app.state.display.safe_frames.region && r.area.uses_region() && !app.state.rendered.edit_region && index == loom_commands::render::render_viewport(&app.state) {
+                    let frame = crate::rendered_frame::output_frame(app, index, rect);
+                    let a = r.area_rect();
+                    let area = egui::Rect::from_min_max(frame.min + egui::vec2(a[0], a[1]) * frame.size(), frame.min + egui::vec2(a[2], a[3]) * frame.size());
+                    painter.rect_stroke(area, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(255, 255, 255)), egui::StrokeKind::Middle);
+                }
             }
             draw_trajectories(&painter, app, view_proj, rect);
             draw_links(&painter, app, view_proj, rect);
+            let mut gizmo_hover = None;
             if is_active && app.has_selection() {
                 let layout = gizmo::layout_for(app, index, rect.height());
                 let hovered = hover_pos.and_then(|p| gizmo::hit(app, &layout, &projection, p));
                 gizmo::draw(&painter, app, &layout, &projection, hovered, app.transform_drag.as_ref());
+                gizmo_hover = hovered;
+            }
+            // What the pointer is over, for this frame's cursor (crate::cursor).
+            if response.hovered() && !over_label && !over_cube {
+                let idle = app.transform_drag.is_none() && !app.camera_controller.is_dragging() && app.state.nav_mode == loom_input::NavMode::None && app.state.pick_mode.is_none() && app.drag_select_start.is_none();
+                let (mut object, mut sub_object) = (false, false);
+                if let Some(p) = hover_pos.filter(|p| idle && gizmo_hover.is_none() && rect.contains(*p)) {
+                    if app.state.selection_mode == SelectionMode::Object {
+                        object = pick_object(app, p, rect, view, proj).is_some();
+                    } else {
+                        sub_object = matches!(pick_at(app, p, rect, view, proj, view_proj), Some(Pick::SubObject { .. }));
+                    }
+                }
+                app.viewport_hover = Some(crate::cursor::ViewportHover { gizmo: gizmo_hover, object, sub_object });
             }
             if is_active {
                 crate::poly_modes::draw(&painter, app, &projection, hover_pos.filter(|h| rect.contains(*h)));
@@ -1440,7 +1554,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
             }
             if cube_shown {
-                let cam = app.state.viewports[index].camera.clone();
+                let cam = cube_frame(&app.state.viewports[index].camera, cube_settings.north);
                 let perspective = !app.state.viewports[index].is_orthographic();
                 let hovered = (over_cube || (is_active && app.cube_press.is_some())).then(|| hover_pos.and_then(|p| crate::viewport_gizmo::hit_test(p, gizmo_rect, &cam, perspective)));
                 crate::viewport_gizmo::draw(&painter, gizmo_rect, &cam, perspective, hovered, &cube_settings);
@@ -1696,8 +1810,28 @@ fn trackball_radius(rect: egui::Rect) -> f32 {
     rect.width().min(rect.height()) * 0.375
 }
 
-/// Animates the active view from its angles before `change` to those after (ViewCube transitions).
+/// The view as the cube sees it: turned back by the Angle of North (degrees).
+fn cube_frame(cam: &loom_input::OrbitCamera, north: f32) -> loom_input::OrbitCamera {
+    let mut c = cam.clone();
+    c.yaw = loom_input::camera_control::wrap_angle(c.yaw - north.to_radians());
+    c
+}
+
+/// Animates the active view from its angles before `change` to those after
+/// (ViewCube transitions; at once with Animated Transitions off). Fit-to-View
+/// on View Change zooms to the scene's extents after it.
 fn animate_view(app: &mut LoomApp, change: impl FnOnce(&mut LoomApp)) {
+    let settings = app.state.viewcube;
+    if !settings.animated {
+        change(app);
+        if settings.fit_to_view {
+            let _ = app.dispatch(Command::ZoomExtents);
+        }
+        return;
+    }
+    if settings.fit_to_view {
+        let _ = app.dispatch(Command::ZoomExtents);
+    }
     let before = app.state.active().camera.clone();
     change(app);
     let after = app.state.active().camera.clone();
@@ -1715,9 +1849,48 @@ fn cube_click(app: &mut LoomApp, index: usize, hit: crate::viewport_gizmo::Hit) 
     if app.state.active_viewport != index {
         let _ = app.dispatch(Command::ActiveViewport { index: index as u32 });
     }
-    let cam = app.state.viewports[index].camera.clone();
+    let north = app.state.viewcube.north.to_radians();
+    let cam = cube_frame(&app.state.viewports[index].camera, app.state.viewcube.north);
     let idx = index as u32;
-    let orbit = |yaw: Option<f32>, pitch: Option<f32>, roll: f32| Command::Orbit { yaw: yaw.map(f32::to_degrees), pitch: pitch.map(f32::to_degrees), distance: None, target: None, roll: Some(roll.to_degrees()) };
+    let orbit = |yaw: Option<f32>, pitch: Option<f32>, roll: f32| Command::Orbit { yaw: yaw.map(|y| (y + north).to_degrees()), pitch: pitch.map(f32::to_degrees), distance: None, target: None, roll: Some(roll.to_degrees()) };
+    if north.abs() > 1e-4 {
+        // The cube is turned: a face is no longer a world axis view, so every
+        // pick is a user view in the cube's frame.
+        let user = if app.state.viewports[index].is_orthographic() { loom_commands::ViewKind::Orthographic } else { loom_commands::ViewKind::Perspective };
+        let target: Option<(f32, f32, f32)> = match hit {
+            Hit::Home => None,
+            Hit::Spot(dir) => {
+                let (yaw, pitch) = match cube::face_of(dir) {
+                    Some(face) => cube::view_kind(face).angles().expect("faces are axis views"),
+                    None => cube::spot_angles(dir),
+                };
+                Some((yaw, pitch, 0.0))
+            }
+            Hit::RollLeft | Hit::RollRight => {
+                let turn = if hit == Hit::RollLeft { -std::f32::consts::FRAC_PI_2 } else { std::f32::consts::FRAC_PI_2 };
+                Some((cam.yaw, cam.pitch, cam.roll + turn))
+            }
+            Hit::Adjacent(side) => {
+                let (eye, up) = cube::adjacent(&cam, side);
+                cube::face_of(eye.round().as_ivec3()).map(|face| {
+                    let (yaw, pitch) = cube::view_kind(face).angles().expect("faces are axis views");
+                    (yaw, pitch, cube::roll_for(yaw, pitch, up))
+                })
+            }
+        };
+        match target {
+            None => animate_view(app, |app| {
+                let _ = app.dispatch(Command::HomeView);
+            }),
+            Some((yaw, pitch, roll)) => animate_view(app, |app| {
+                if app.state.viewports[index].kind != user {
+                    let _ = app.dispatch(Command::ViewportView { index: idx, kind: user });
+                }
+                let _ = app.dispatch(orbit(Some(yaw), Some(pitch), roll));
+            }),
+        }
+        return;
+    }
     match hit {
         Hit::Home => animate_view(app, |app| {
             let _ = app.dispatch(Command::HomeView);
@@ -1777,11 +1950,12 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         (app.state.view_label(index), vp.shading.label(), vp.disabled)
     };
     let font = egui::FontId::proportional(13.0);
+    let label_color = app.color("Viewport Label Text");
     let mut x = rect.min.x + 6.0;
     let y = rect.min.y + 4.0;
     let items: [(String, u8); 3] = [("[ + ]".to_owned(), 0), (format!("[ {kind} ]"), 1), (format!("[ {shading} ]"), 2)];
     for (text, which) in items {
-        let galley = painter.layout_no_wrap(text, font.clone(), egui::Color32::from_gray(225));
+        let galley = painter.layout_no_wrap(text, font.clone(), label_color);
         let size = galley.size();
         let r = egui::Rect::from_min_size(egui::pos2(x, y), size);
         let entries = match which {
@@ -1807,12 +1981,12 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
             });
         let hovered = resp.is_some_and(|r| r.response.hovered()) || ui.rect_contains_pointer(r);
         over |= hovered;
-        let color = if hovered { egui::Color32::WHITE } else { egui::Color32::from_gray(225) };
+        let color = if hovered { egui::Color32::WHITE } else { label_color };
         painter.galley(r.min, galley, color);
         x += size.x + 10.0;
     }
     if disabled {
-        painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font.clone(), egui::Color32::from_gray(225));
+        painter.text(egui::pos2(x, y), egui::Align2::LEFT_TOP, "<Disabled>", font.clone(), label_color);
     }
     // Working Pivot modes show under the viewport name.
     let wp = match (app.state.edit_working_pivot, app.state.use_working_pivot) {
@@ -1821,7 +1995,7 @@ fn draw_labels(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::R
         _ => None,
     };
     if let Some(t) = wp {
-        painter.text(egui::pos2(rect.min.x + 6.0, y + 18.0), egui::Align2::LEFT_TOP, t, font, egui::Color32::from_gray(225));
+        painter.text(egui::pos2(rect.min.x + 6.0, y + 18.0), egui::Align2::LEFT_TOP, t, font, label_color);
     }
     over
 }
@@ -1845,6 +2019,71 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
     let vp = &app.state.viewports[index];
     let height = if vp.is_orthographic() { vp.camera.distance * 0.8284 } else { 2.0 * vp.camera.distance * (vp.fov_y_radians * 0.5).tan() };
     (height / rect.height().max(1.0)).max(1e-4)
+}
+
+/// The level viewport `index` draws at: its own, or while Adaptive
+/// Degradation degrades, the Active or General level.
+pub(crate) fn shown_shading(app: &LoomApp, index: usize) -> loom_commands::Shading {
+    let own = app.state.viewports[index].shading;
+    if !app.degrading || own == loom_commands::Shading::Realistic {
+        return own;
+    }
+    let d = &app.state.degradation;
+    let to = if index == app.state.active_viewport { d.active } else { d.general };
+    // Never more detailed than the view's own level.
+    let rank = |s: loom_commands::Shading| loom_commands::Shading::LEVELS.iter().position(|l| *l == s).unwrap_or(0);
+    if rank(to) > rank(own) { to } else { own }
+}
+
+/// The world axis tripod in the view's lower-left corner: X, Y and Z as the
+/// view sees them, in the gizmo axis colours.
+fn draw_world_axis(painter: &egui::Painter, app: &LoomApp, view: Mat4, rect: egui::Rect) {
+    let origin = egui::pos2(rect.left() + 30.0, rect.bottom() - 30.0);
+    let len = 18.0;
+    let font = egui::FontId::proportional(11.0);
+    for (axis, label, color) in [(Vec3::X, "X", app.color("X Axis")), (Vec3::Y, "Y", app.color("Y Axis")), (Vec3::Z, "Z", app.color("Z Axis"))] {
+        // The axis turned into view space: its screen direction (y down) and how much it faces the eye.
+        let v = view.transform_vector3(axis);
+        let tip = origin + egui::vec2(v.x, -v.y) * len;
+        painter.line_segment([origin, tip], egui::Stroke::new(1.5_f32, color));
+        painter.text(origin + egui::vec2(v.x, -v.y) * (len + 7.0), egui::Align2::CENTER_CENTER, label, font.clone(), color);
+    }
+}
+
+/// Bounding Box: each visible object as its local bounding box, in its
+/// wireframe colour (white when selected; `skip_selected`: the selection is drawn shaded).
+fn draw_bounding_boxes(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, rect: egui::Rect, skip_selected: bool) {
+    for n in app.state.scene.nodes().filter(|n| app.state.is_visible(n)) {
+        let selected = app.state.selection.contains(&n.id);
+        if selected && skip_selected {
+            continue;
+        }
+        let (min, max) = n.cage_mesh().aabb();
+        let m = app.state.scene.object_matrix(n.id);
+        let c = |x: f32, y: f32, z: f32| project_world_to_screen(m.transform_point3(Vec3::new(x, y, z)), view_proj, rect);
+        let corners = [c(min.x, min.y, min.z), c(max.x, min.y, min.z), c(max.x, max.y, min.z), c(min.x, max.y, min.z), c(min.x, min.y, max.z), c(max.x, min.y, max.z), c(max.x, max.y, max.z), c(min.x, max.y, max.z)];
+        let wc = app.state.scene.display_color(n);
+        let color = if selected { app.color("Selection") } else { egui::Color32::from_rgb(wc[0], wc[1], wc[2]) };
+        for (a, b) in [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)] {
+            if let (Some(p), Some(q)) = (corners[a], corners[b]) {
+                painter.line_segment([p, q], egui::Stroke::new(1.0_f32, color));
+            }
+        }
+    }
+}
+
+/// The pointer's world position on the active viewport's construction plane
+/// (the status bar's coordinate display); None when it is not over that viewport.
+pub(crate) fn cursor_world(app: &LoomApp, p: egui::Pos2) -> Option<Vec3> {
+    let i = app.state.active_viewport;
+    let rect = *app.viewport_rects.get(i)?;
+    if !rect.contains(p) {
+        return None;
+    }
+    let camera = app.camera_for(i);
+    let (view, proj) = (camera.view_matrix(), camera.projection_matrix(rect.width() / rect.height().max(1.0)));
+    let (o, _, _, n) = app.state.construction_plane(i);
+    plane_hit_at(p, rect, view, proj, o, n)
 }
 
 /// Pointer on the construction plane: the z = 0 plane in Top/Perspective
@@ -2047,6 +2286,14 @@ fn object_hits(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj:
     for (i, (id, _)) in app.world_meshes().iter().enumerate() {
         let mesh = app.drawn_mesh(i);
         if mesh.face_count() == 0 {
+            // A line-drawn Dummy picks by its drawn lines.
+            if app.state.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Dummy { .. })) {
+                let upp = crate::helper_overlay::units_per_px(view_proj, rect);
+                let t = loom_commands::helpers::helper_lines(&app.state, *id, &upp).into_iter().filter_map(|(a, b, _)| segment_hit(a, b, p, rect, view_proj, origin, dir)).min_by(f32::total_cmp);
+                if let Some(t) = t {
+                    hits.push((true, t, i));
+                }
+            }
             continue;
         }
         let t = if wire { edge_hit(mesh, p, rect, view_proj, origin, dir) } else { loom_render::pick::ray_mesh(origin, dir, mesh) };
@@ -2069,17 +2316,21 @@ fn edge_hit(mesh: &Mesh, p: egui::Pos2, rect: egui::Rect, view_proj: Mat4, origi
         }
         let Some((va, vb)) = mesh.edge_vertices(e) else { continue };
         let (Some(wa), Some(wb)) = (mesh.vertex_position(va), mesh.vertex_position(vb)) else { continue };
-        let (Some(a), Some(b)) = (project_world_to_screen(wa, view_proj, rect), project_world_to_screen(wb, view_proj, rect)) else { continue };
-        let ab = b - a;
-        let s = if ab.length_sq() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
-        if (a + ab * s).distance(p) <= 4.0 {
-            let t = (wa + (wb - wa) * s - origin).dot(dir);
+        if let Some(t) = segment_hit(wa, wb, p, rect, view_proj, origin, dir) {
             if best.is_none_or(|bt| t < bt) {
                 best = Some(t);
             }
         }
     }
     best
+}
+
+/// The distance along the ray of a world segment drawn within 4 px of `p`.
+fn segment_hit(wa: Vec3, wb: Vec3, p: egui::Pos2, rect: egui::Rect, view_proj: Mat4, origin: Vec3, dir: Vec3) -> Option<f32> {
+    let (a, b) = (project_world_to_screen(wa, view_proj, rect)?, project_world_to_screen(wb, view_proj, rect)?);
+    let ab = b - a;
+    let s = if ab.length_sq() < 1e-6 { 0.0 } else { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) };
+    ((a + ab * s).distance(p) <= 4.0).then(|| (wa + (wb - wa) * s - origin).dot(dir))
 }
 
 /// A repeat click within 2 px of the last object click picks the next object
@@ -2981,7 +3232,7 @@ fn draw_statistics(painter: &egui::Painter, app: &LoomApp, rect: egui::Rect, dt:
         rows.push(("FPS:".to_owned(), vec![if dt > 0.0 { format!("{:.3}", 1.0 / dt) } else { "-".to_owned() }]));
     }
     let font = egui::FontId::monospace(12.0);
-    let color = egui::Color32::from_gray(230);
+    let color = app.color("Viewport Statistics Text");
     let top = rect.top() + 24.0;
     for (r, (label, values)) in rows.iter().enumerate() {
         let y = top + r as f32 * 15.0;
@@ -3007,6 +3258,20 @@ fn draw_safe_frames(painter: &egui::Painter, app: &LoomApp, rect: egui::Rect) {
     let (w, h) = (live.width(), live.height());
     let frame = |pct: [f32; 2]| live.shrink2(egui::vec2(w * pct[0] / 200.0, h * pct[1] / 200.0));
     let stroke = |c: [u8; 3]| egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(c[0], c[1], c[2]));
+    // Preferences > Mask Viewport to Safe Region: what lies outside the live area is masked.
+    if app.state.prefs.mask_to_safe_region {
+        let mask = egui::Color32::from_black_alpha(200);
+        for r in [
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, live.min.y)),
+            egui::Rect::from_min_max(egui::pos2(rect.min.x, live.max.y), rect.max),
+            egui::Rect::from_min_max(egui::pos2(rect.min.x, live.min.y), egui::pos2(live.min.x, live.max.y)),
+            egui::Rect::from_min_max(egui::pos2(live.max.x, live.min.y), egui::pos2(rect.max.x, live.max.y)),
+        ] {
+            if r.width() > 0.0 && r.height() > 0.0 {
+                painter.rect_filled(r, 0.0, mask);
+            }
+        }
+    }
     if s.live_area {
         painter.rect_stroke(live, 0.0, stroke([255, 230, 0]), egui::StrokeKind::Middle);
     }
@@ -3336,7 +3601,7 @@ mod tests {
         let mut resources=CallbackResources::default();
         resources.insert(ViewportResources{renderer:ViewportRenderer::new(&device,wgpu::TextureFormat::Rgba8UnormSrgb),mesh_buffers:vec![],cpu_edge_batch:None,mesh_source:None,gpu_edge_program:None,gpu_edges:Default::default(),textures:None,bitmap_cache:Default::default(),base_textures:None,helper_lines:vec![]});
         let upload:crate::PendingUpload=std::sync::Arc::new(std::sync::Mutex::new(Some(crate::GeometryUpload { meshes: std::sync::Arc::new(vec![loom_mesh::box_primitive(Vec3::ONE)]), styles: vec![loom_render::MeshStyle::default()], ..Default::default() })));
-        let mut callback=ViewportCallback{slot:0,view_proj:Mat4::IDENTITY,camera_pos:Vec3::Z,upload:upload.clone(),shading:Default::default(),selected:vec![],show_edges:true,shaded:false,faces_needed:false,shade_only:vec![],grid:None,orthographic:false,grid_params:loom_render::GridParams{spacing:1.,major_every:5,cells:10,ortho_cells:100},helper_lines:vec![]};
+        let mut callback=ViewportCallback{slot:0,view_proj:Mat4::IDENTITY,camera_pos:Vec3::Z,upload:upload.clone(),shading:Default::default(),selected:vec![],show_edges:true,shaded:false,faces_needed:false,shade_only:vec![],grid:None,orthographic:false,grid_params:loom_render::GridParams{spacing:1.,major_every:5,cells:10,ortho_cells:100,colors:loom_render::GRID_COLORS},helper_lines:vec![]};
         let screen=ScreenDescriptor{size_in_pixels:[100,100],pixels_per_point:1.};let mut encoder=device.create_command_encoder(&Default::default());
         callback.prepare(&device,&queue,&screen,&mut encoder,&mut resources);
         assert_eq!(resources.get::<ViewportResources>().unwrap().mesh_buffers[0].index_count,0);
@@ -3355,7 +3620,7 @@ mod tests {
         let mut resources = CallbackResources::default();
         resources.insert(ViewportResources { renderer: ViewportRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb), mesh_buffers: vec![], cpu_edge_batch: Some(Default::default()), mesh_source: None, gpu_edge_program: None, gpu_edges: Default::default(), textures: None, bitmap_cache: Default::default(), base_textures: None, helper_lines: vec![] });
         let upload: crate::PendingUpload = Default::default();
-        let mut callback = ViewportCallback { slot: 0, view_proj: Mat4::IDENTITY, camera_pos: Vec3::Z, upload: upload.clone(), shading: Default::default(), selected: vec![], show_edges: true, shaded: false, faces_needed: false, shade_only: vec![], grid: None, orthographic: false, grid_params: loom_render::GridParams { spacing: 1., major_every: 5, cells: 10, ortho_cells: 100 }, helper_lines: vec![] };
+        let mut callback = ViewportCallback { slot: 0, view_proj: Mat4::IDENTITY, camera_pos: Vec3::Z, upload: upload.clone(), shading: Default::default(), selected: vec![], show_edges: true, shaded: false, faces_needed: false, shade_only: vec![], grid: None, orthographic: false, grid_params: loom_render::GridParams { spacing: 1., major_every: 5, cells: 10, ortho_cells: 100, colors: loom_render::GRID_COLORS }, helper_lines: vec![] };
         let screen = ScreenDescriptor { size_in_pixels: [100, 100], pixels_per_point: 1. };
         let positions = |mesh: &Mesh| mesh.vertices().iter().map(|v| [v.position.x, v.position.y, v.position.z, 1.]).collect::<Vec<_>>();
         let make_source = |mesh: &Mesh| device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: bytemuck::cast_slice(&positions(mesh)), usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST });
@@ -3448,13 +3713,10 @@ mod tests {
 }
 
 /// Perspective background: dark at the top, where the viewport labels sit,
-/// lighter toward the bottom.
-const GRADIENT_TOP: egui::Color32 = egui::Color32::from_rgb(38, 38, 38);
-const GRADIENT_BOTTOM: egui::Color32 = egui::Color32::from_rgb(96, 96, 96);
-
-fn draw_background_gradient(painter: &egui::Painter, rect: egui::Rect) {
+/// lighter toward the bottom (Customize User Interface > Colors).
+fn draw_background_gradient(painter: &egui::Painter, rect: egui::Rect, top: egui::Color32, bottom: egui::Color32) {
     let mut mesh = egui::Mesh::default();
-    for (pos, color) in [(rect.left_top(), GRADIENT_TOP), (rect.right_top(), GRADIENT_TOP), (rect.right_bottom(), GRADIENT_BOTTOM), (rect.left_bottom(), GRADIENT_BOTTOM)] {
+    for (pos, color) in [(rect.left_top(), top), (rect.right_top(), top), (rect.right_bottom(), bottom), (rect.left_bottom(), bottom)] {
         mesh.colored_vertex(pos, color);
     }
     mesh.add_triangle(0, 1, 2);

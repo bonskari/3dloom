@@ -11,7 +11,7 @@ use glam::Mat3;
 use loom_bake::{Bvh, NormalOptions, Projection, Triangle};
 use loom_scene::bake::{BakeElement, BakeObjects, BakeSettings, ElementKind, NormalSpace, ProjectionData, AUTO_UNWRAP_NAME};
 use loom_scene::material::{default_amount, next_material_id, Map, MaterialId, MaterialLibrary, MaterialKind, Shell, ShellView, StandardMaterial};
-use loom_scene::{Change, Modifier, ModifierSlot, Node, NodeId, ObjectKind};
+use loom_scene::{Change, Modifier, ModifierSlot, Node, NodeId};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -71,8 +71,7 @@ pub fn output_dir(s: &BakeSettings) -> PathBuf {
 
 /// Objects that bake: geometry, not helpers, cameras, lights or bones.
 pub fn is_geometry(n: &Node) -> bool {
-    use ObjectKind as K;
-    !matches!(n.object, K::Dummy { .. } | K::Point { .. } | K::Tape { .. } | K::Protractor { .. } | K::Compass { .. } | K::Grid { .. } | K::IkGoal { .. } | K::Group { .. } | K::Camera { .. } | K::Light(_)) && !n.object.is_bone()
+    n.object.has_render_geometry() && !n.object.is_bone()
 }
 
 fn frozen(state: &AppState, n: &Node) -> bool {

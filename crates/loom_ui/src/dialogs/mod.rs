@@ -1,5 +1,8 @@
 //! Modeless dialogs opened by commands (`AppState::dialog`).
 
+pub mod rename_objects;
+pub mod display_floater;
+pub mod configure_paths;
 pub mod align;
 pub mod array;
 pub mod spacing_tool;
@@ -29,6 +32,7 @@ pub mod file_dialog;
 pub mod biped_footsteps;
 pub mod material_editor;
 pub mod render_setup;
+pub mod environment;
 pub mod render_to_texture;
 pub mod lights;
 pub mod assets;
@@ -112,6 +116,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             app.state.material_editor_open = false;
         }
     }
+    // Environment and Effects is a window of its own too (8).
+    environment::show(ctx, app);
     // The VertexPaint dialog floats while a VertexPaint entry is active in the Modify panel.
     vertex_paint::show(ctx, app);
     // Render To Texture is modeless: it stays open beside the other dialogs.
@@ -135,6 +141,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let mut open = true;
     match dialog {
         Dialog::MaterialMap { .. } | Dialog::MaterialBitmap => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::OpenMaterialLibrary | Dialog::MergeMaterialLibrary | Dialog::SaveMaterialLibrary => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::PutToLibrary => material_editor::put_to_library(ctx, app, &mut open),
         Dialog::MaterialBrowser(for_) => material_editor::browser(ctx, app, for_, &mut open),
         Dialog::ReplaceMaterial { kind, map } => material_editor::replace_material(ctx, app, kind, map, &mut open),
         Dialog::MaterialEditorOptions => material_editor::options(ctx, app, &mut open),
@@ -166,17 +174,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ObjectProperties => object_properties::show(ctx, app, &mut open),
         Dialog::Preferences => preferences::show(ctx, app, &mut open),
         Dialog::UnitsSetup => units_setup::show(ctx, app, &mut open),
+        Dialog::UnitsMismatch => units_setup::units_mismatch(ctx, app, &mut open),
+        Dialog::ConfigurePaths => configure_paths::show(ctx, app, &mut open),
+        Dialog::Switcher => switcher(ctx, app, &mut open),
+        Dialog::RenameObjects => rename_objects::show(ctx, app, &mut open),
         Dialog::CustomizeUI => customize_ui::show(ctx, app, &mut open),
         Dialog::PolySettings(kind) => poly_settings::show(ctx, app, kind, &mut open),
         Dialog::Detach => detach::show(ctx, app, &mut open),
         Dialog::DeleteIsolatedVertices => delete_isolated::show(ctx, app, &mut open),
         Dialog::LayerManager => manage_layers::show(ctx, app, &mut open),
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::ImportAnimationClip | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::SaveCustomUiScheme | Dialog::LoadCustomUiScheme | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile | Dialog::XrefObjectsFile | Dialog::XrefSceneFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::ImportFile | Dialog::ImportAnimationClip | Dialog::SaveAnimation | Dialog::LoadAnimation | Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::SaveCustomUiScheme | Dialog::LoadCustomUiScheme | Dialog::UiFile { .. } | Dialog::ExportFile | Dialog::ExportSelected | Dialog::MergeFile | Dialog::XrefObjectsFile | Dialog::XrefSceneFile => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::SaveChanges(action) => save_changes::show(ctx, app, action, &mut open),
         Dialog::CloseSpline => spline_prompts::close_spline(ctx, app, &mut open),
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
-        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::PickTexture | Dialog::BackgroundFile | Dialog::EnvironmentMap | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
         Dialog::FbxImportOptions => exchange_options::fbx_import(ctx, app, &mut open),
@@ -215,12 +227,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::GroupName => scene_dialogs::group_name(ctx, app, &mut open),
         Dialog::BipedMultipleFootsteps => biped_footsteps::show(ctx, app, &mut open),
         Dialog::LayerProperties { layer } => scene_dialogs::layer_properties(ctx, app, layer, &mut open),
+        Dialog::ManageSceneExplorer => crate::scene_explorer::manage(ctx, app, &mut open),
     }
     // A dialog that handed over to another (Save Changes → Open) must not close the new one.
     if !open && app.state.dialog == Some(dialog) {
         let _ = app.dispatch(Command::CloseDialog);
         // A cancelled Keyboard panel Save / Load goes back to the panel.
-        if matches!(dialog, Dialog::SaveShortcuts | Dialog::LoadShortcuts) {
+        if matches!(dialog, Dialog::SaveShortcuts | Dialog::LoadShortcuts | Dialog::UiFile { .. }) {
             let _ = app.dispatch(Command::CustomizeUserInterface);
         }
     }
@@ -287,5 +300,59 @@ fn import_summary(ctx: &egui::Context, app: &mut LoomApp) {
     });
     if !open || ok {
         app.state.import_report.clear();
+    }
+}
+
+/// Custom UI and Defaults Switcher: the defaults set for tool options and the
+/// UI scheme; Set applies both.
+fn switcher(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("switcher_picks");
+    let mut picks: (String, String, String) = ctx.data(|d| d.get_temp(id)).unwrap_or_else(|| ("Default".into(), "Default UI".into(), String::new()));
+    let sets = loom_commands::switcher::defaults_sets();
+    let schemes = loom_commands::switcher::schemes();
+    let mut done = false;
+    egui::Window::new("Choose initial settings for tool options and UI layout").id(egui::Id::new("Custom UI and Defaults Switcher")).open(open).collapsible(false).default_width(520.0).show(ctx, |ui| {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(240.0);
+                ui.label(egui::RichText::new("Initial settings for tool options").strong());
+                for s in &sets {
+                    if ui.selectable_label(picks.0 == *s, s).clicked() {
+                        picks.0 = s.clone();
+                    }
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut picks.2).hint_text("new set name").desired_width(130.0));
+                    if ui.button("Save Current").on_hover_text("Save the current preferences and units as a defaults set").clicked() && app.dispatch(Command::SaveDefaultsSet { name: picks.2.clone() }).is_ok() {
+                        picks.0 = picks.2.trim().to_owned();
+                        picks.2.clear();
+                    }
+                });
+            });
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("UI schemes").strong());
+                for s in &schemes {
+                    if ui.selectable_label(picks.1 == *s, s).clicked() {
+                        picks.1 = s.clone();
+                    }
+                }
+            });
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button("Set").clicked() {
+                let _ = app.dispatch(Command::SwitchDefaults { name: picks.0.clone() });
+                let _ = app.dispatch(Command::SwitchUiScheme { name: picks.1.clone() });
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                done = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, picks));
+    if done {
+        *open = false;
     }
 }

@@ -50,7 +50,7 @@ fn viewcube_toggle_and_options() {
     assert!(!s.viewcube.show);
     execute(&mut s, Command::Hotkey { chord: "Alt+Ctrl+V".into() }).unwrap();
     assert!(s.viewcube.show, "Alt+Ctrl+V shows it again");
-    execute(&mut s, Command::SetViewCubeOptions { show: None, all_views: Some(true), size: Some(3), inactive_opacity: Some(25.0), compass: Some(false) }).unwrap();
+    execute(&mut s, Command::SetViewCubeOptions { show: None, all_views: Some(true), size: Some(3), inactive_opacity: Some(25.0), compass: Some(false), snap_to_closest: None, fit_to_view: None, animated: None, keep_upright: None, north: None }).unwrap();
     assert!(s.viewcube.all_views && !s.viewcube.compass);
     assert_eq!(s.viewcube.size, 3);
     assert!((s.viewcube.inactive_opacity - 0.25).abs() < 1e-6);

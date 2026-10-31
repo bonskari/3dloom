@@ -128,11 +128,11 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
         }
     }
     if l.free_rotation || free_active {
-        painter.circle_stroke(o, l.size_px, egui::Stroke::new(if free_active { 2.0_f32 } else { 1.0 }, if free_active { HOVER } else { SPHERE_GREY }));
+        painter.circle_stroke(o, l.size_px, egui::Stroke::new(if free_active { 2.0_f32 } else { 1.0 }, if free_active { hover() } else { SPHERE_GREY }));
     }
     for a in [Axis::X, Axis::Y, Axis::Z] {
         let active = hl == Some(Handle::Axis(a));
-        let stroke = egui::Stroke::new(if active { 3.0_f32 } else { 2.0 }, if active { HOVER } else { axis_color(a) });
+        let stroke = egui::Stroke::new(if active { 3.0_f32 } else { 2.0 }, if active { hover() } else { axis_color(a) });
         // Only the half facing the viewer is drawn; the back half is behind the sphere.
         let pts = ring_points(l, p, a);
         let mut run: Vec<egui::Pos2> = Vec::new();
@@ -152,7 +152,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
     }
     let screen_active = hl == Some(Handle::Screen);
     if l.screen_handle {
-        painter.circle_stroke(o, l.size_px * SCREEN_RING, egui::Stroke::new(if screen_active { 2.0_f32 } else { 1.0 }, if screen_active { HOVER } else { SCREEN_GREY }));
+        painter.circle_stroke(o, l.size_px * SCREEN_RING, egui::Stroke::new(if screen_active { 2.0_f32 } else { 1.0 }, if screen_active { hover() } else { SCREEN_GREY }));
     }
     let tl = GizmoLayout { size_px: l.size_px * TRIPOD, ..*l };
     for a in [Axis::X, Axis::Y, Axis::Z] {
@@ -176,7 +176,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
                 }
             };
             let top = egui::pos2(o.x, o.y - l.size_px * if l.screen_handle { SCREEN_RING } else { 1.0 } - 4.0);
-            painter.text(top, egui::Align2::CENTER_BOTTOM, format!("[{:.2}, {:.2}, {:.2}]", deg.x, deg.y, deg.z), egui::FontId::proportional(11.0), HOVER);
+            painter.text(top, egui::Align2::CENTER_BOTTOM, format!("[{:.2}, {:.2}, {:.2}]", deg.x, deg.y, deg.z), egui::FontId::proportional(11.0), hover());
         }
     }
 }

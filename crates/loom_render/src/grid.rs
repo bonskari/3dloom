@@ -82,7 +82,7 @@ impl GridPipeline {
         let pipeline = make_pipeline("vs");
         let selected_pipeline = make_pipeline("vs_selected");
 
-        let params = GridParams { spacing: 1.0, major_every: 10, cells: n, ortho_cells: n };
+        let params = GridParams { spacing: 1.0, major_every: 10, cells: n, ortho_cells: n, colors: GRID_COLORS };
         let (planes, ortho_planes) = build_planes(device, params);
         Self { pipeline, selected_pipeline, planes, ortho_planes, params }
     }
@@ -128,14 +128,19 @@ pub struct GridParams {
     pub cells: i32,
     /// Axis views show a larger grid (drawn without bound).
     pub ortho_cells: i32,
+    /// Line colours (Customize User Interface > Colors): grid lines, major lines, world axes.
+    pub colors: [[f32; 3]; 3],
 }
+
+/// The grid's own colours: gray lines, brighter major lines, black axes.
+pub const GRID_COLORS: [[f32; 3]; 3] = [[0.38, 0.38, 0.38], [0.55, 0.55, 0.55], [0.0, 0.0, 0.0]];
 
 type PlaneBuffers = [(Buffer, u32); 3];
 
 fn build_planes(device: &Device, p: GridParams) -> (PlaneBuffers, PlaneBuffers) {
     let build = |cells: i32| {
         [GridPlane::XY, GridPlane::XZ, GridPlane::YZ].map(|plane| {
-            let verts = grid_vertices(cells, plane, p.spacing, p.major_every);
+            let verts = grid_vertices(cells, plane, p.spacing, p.major_every, p.colors);
             let buffer = device.create_buffer_init(&BufferInitDescriptor {
                 label: Some("grid_vertex_buffer"),
                 contents: bytemuck::cast_slice(&verts),
@@ -150,11 +155,9 @@ fn build_planes(device: &Device, p: GridParams) -> (PlaneBuffers, PlaneBuffers) 
 /// Grid lines spanning -n..n cells of `spacing` on the given plane. The
 /// two centre lines are black, every `major_every`th line brighter, the
 /// rest gray; there is no Z axis line.
-fn grid_vertices(n: i32, plane: GridPlane, spacing: f32, major_every: u32) -> Vec<LineVertex> {
-    let gray = [0.38, 0.38, 0.38];
-    let major = [0.55, 0.55, 0.55];
+fn grid_vertices(n: i32, plane: GridPlane, spacing: f32, major_every: u32, colors: [[f32; 3]; 3]) -> Vec<LineVertex> {
+    let [gray, major, center] = colors;
     let major_every = major_every.max(1) as i32;
-    let center = [0.0, 0.0, 0.0];
     // (u axis index, v axis index)
     let (u, v) = match plane {
         GridPlane::XY => (0, 1),
@@ -188,7 +191,7 @@ mod tests {
 
     #[test]
     fn centre_lines_are_black_and_there_is_no_z_line() {
-        let v = grid_vertices(2, GridPlane::XY, 1.0, 10);
+        let v = grid_vertices(2, GridPlane::XY, 1.0, 10, GRID_COLORS);
         // 5 lines each way, 2 vertices per line, nothing else.
         assert_eq!(v.len(), 5 * 2 * 2);
         let black: Vec<_> = v.iter().filter(|l| l.color == [0.0; 3]).collect();

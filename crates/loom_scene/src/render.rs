@@ -1,6 +1,6 @@
 //! Render Setup settings saved with the scene: the Common panel (output
 //! size, options, render output, area to render) and the Bevy renderer's own
-//! panel.
+//! panel. The background and ambient colours are the Environment's.
 
 use serde::{Deserialize, Serialize};
 
@@ -39,27 +39,239 @@ impl RenderArea {
     }
 }
 
+/// Antialiasing > Filter: how the samples around a pixel are weighted into
+/// it (a reconstruction filter Filter Size pixels wide).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AaFilter {
+    /// A box: every sample under the filter counts the same.
+    #[default]
+    Area,
+    /// Blackman window: sharp, little ringing.
+    Blackman,
+    /// Catmull-Rom cubic: sharpening.
+    CatmullRom,
+    /// Cubic B-spline: smooth, slightly blurring.
+    Cubic,
+    /// Mitchell-Netravali cubic (B = C = 1/3): balanced.
+    MitchellNetravali,
+    /// Quadratic B-spline: smooth.
+    Quadratic,
+    /// Gaussian: soft.
+    Soften,
+}
+
+impl AaFilter {
+    pub const ALL: [AaFilter; 7] = [AaFilter::Area, AaFilter::Blackman, AaFilter::CatmullRom, AaFilter::Cubic, AaFilter::MitchellNetravali, AaFilter::Quadratic, AaFilter::Soften];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AaFilter::Area => "Area",
+            AaFilter::Blackman => "Blackman",
+            AaFilter::CatmullRom => "Catmull-Rom",
+            AaFilter::Cubic => "Cubic",
+            AaFilter::MitchellNetravali => "Mitchell-Netravali",
+            AaFilter::Quadratic => "Quadratic",
+            AaFilter::Soften => "Soften",
+        }
+    }
+
+    pub fn from_label(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|f| f.label() == s)
+    }
+
+    /// The filter's weight at `x`, the distance from the pixel centre over
+    /// the filter's radius (0 at the centre, 1 at the edge, 0 beyond).
+    pub fn weight(self, x: f32) -> f32 {
+        let x = x.abs();
+        if x >= 1.0 {
+            return 0.0;
+        }
+        // The cubics at their natural size span 2 pixels each side.
+        let cubic = |b: f32, c: f32| {
+            let t = 2.0 * x;
+            if t < 1.0 {
+                ((12.0 - 9.0 * b - 6.0 * c) * t * t * t + (-18.0 + 12.0 * b + 6.0 * c) * t * t + (6.0 - 2.0 * b)) / 6.0
+            } else {
+                ((-b - 6.0 * c) * t * t * t + (6.0 * b + 30.0 * c) * t * t + (-12.0 * b - 48.0 * c) * t + (8.0 * b + 24.0 * c)) / 6.0
+            }
+        };
+        match self {
+            AaFilter::Area => 1.0,
+            AaFilter::Blackman => {
+                let a = std::f32::consts::PI * (x + 1.0);
+                0.42 - 0.5 * a.cos() + 0.08 * (2.0 * a).cos()
+            }
+            AaFilter::CatmullRom => cubic(0.0, 0.5),
+            AaFilter::Cubic => cubic(1.0, 0.0),
+            AaFilter::MitchellNetravali => cubic(1.0 / 3.0, 1.0 / 3.0),
+            AaFilter::Quadratic => {
+                let t = 1.5 * x;
+                if t < 0.5 {
+                    0.75 - t * t
+                } else {
+                    0.5 * (1.5 - t) * (1.5 - t)
+                }
+            }
+            AaFilter::Soften => (-8.0 * x * x).exp(),
+        }
+    }
+}
+
+/// Exposure Control > the tone mapping curve from scene light to the image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Tonemapper {
+    /// Clamp only.
+    None,
+    Reinhard,
+    /// ACES filmic (fitted).
+    Aces,
+    /// AgX filmic: soft highlight roll-off.
+    #[default]
+    AgX,
+    /// Tony McMapface: neutral filmic.
+    TonyMcMapface,
+    BlenderFilmic,
+}
+
+impl Tonemapper {
+    pub const ALL: [Tonemapper; 6] = [Tonemapper::None, Tonemapper::Reinhard, Tonemapper::Aces, Tonemapper::AgX, Tonemapper::TonyMcMapface, Tonemapper::BlenderFilmic];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Tonemapper::None => "None",
+            Tonemapper::Reinhard => "Reinhard",
+            Tonemapper::Aces => "ACES Filmic",
+            Tonemapper::AgX => "AgX",
+            Tonemapper::TonyMcMapface => "Tony McMapface",
+            Tonemapper::BlenderFilmic => "Blender Filmic",
+        }
+    }
+
+    pub fn from_label(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.label() == s)
+    }
+}
+
+/// Ambient Occlusion quality: samples per pixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AoQuality {
+    Low,
+    Medium,
+    #[default]
+    High,
+    Ultra,
+}
+
+impl AoQuality {
+    pub const ALL: [AoQuality; 4] = [AoQuality::Low, AoQuality::Medium, AoQuality::High, AoQuality::Ultra];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AoQuality::Low => "Low",
+            AoQuality::Medium => "Medium",
+            AoQuality::High => "High",
+            AoQuality::Ultra => "Ultra",
+        }
+    }
+
+    pub fn from_label(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|q| q.label() == s)
+    }
+}
+
 /// Render Setup > Renderer panel of the Bevy renderer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BevyRenderSettings {
-    /// 4x multisample antialiasing.
+    /// Antialiasing: `filter` over samples spread through each pixel (off:
+    /// one sample at each pixel centre).
     pub antialiasing: bool,
-    /// Each output pixel averages `supersampling`² rendered samples (1–4).
+    pub filter: AaFilter,
+    /// Filter width in pixels (1–10).
+    pub filter_size: f32,
+    /// Each output pixel takes `supersampling`² samples per pass (1–4).
     pub supersampling: u32,
-    /// The key light casts shadows.
+    /// Passes per bucket (1–64): each pass moves the samples within their
+    /// pixel (and the lights over their Source Radius); the passes add up.
+    pub passes: u32,
+    /// The lights cast shadows.
     pub shadows: bool,
-    /// Shadow map size in pixels (512–8192).
+    /// Shadow map size in pixels (512–8192); renders give no light a smaller map.
     pub shadow_map_size: u32,
+    /// Area Shadows: soft shadows from each light's Source Radius (over the passes).
+    pub area_shadows: bool,
     /// Background colour, sRGB 0–1 (its alpha is 0: Display Alpha shows it black).
     pub background: [f32; 3],
     /// Ambient (environment) light colour, sRGB 0–1.
     pub ambient: [f32; 3],
+    /// Ambient Occlusion: the ambient light darkens in creases and corners.
+    pub ambient_occlusion: bool,
+    pub ao_quality: AoQuality,
+    /// How far around a point occluders darken it, in scene units.
+    pub ao_radius: f32,
+    /// Reflections: glossy surfaces reflect what the camera sees.
+    pub reflections: bool,
+    /// Sky Lighting: the ambient light comes from a sky dome (`ground` × as
+    /// bright below the horizon) that glossy surfaces reflect, times `sky_intensity`.
+    pub sky_lighting: bool,
+    pub sky_intensity: f32,
+    pub ground: f32,
+    /// Exposure Control: tone mapping, exposure in stops, dithering.
+    pub tonemapper: Tonemapper,
+    pub exposure: f32,
+    pub dither: bool,
 }
 
 impl Default for BevyRenderSettings {
     fn default() -> Self {
-        Self { antialiasing: true, supersampling: 1, shadows: true, shadow_map_size: 4096, background: [0.0; 3], ambient: [1.0; 3] }
+        Self {
+            antialiasing: true,
+            filter: AaFilter::Area,
+            filter_size: 1.5,
+            supersampling: 1,
+            passes: 16,
+            shadows: true,
+            shadow_map_size: 4096,
+            area_shadows: true,
+            background: [0.0; 3],
+            ambient: [1.0; 3],
+            ambient_occlusion: true,
+            ao_quality: AoQuality::High,
+            ao_radius: 10.0,
+            reflections: true,
+            sky_lighting: true,
+            sky_intensity: 1.0,
+            ground: 0.5,
+            tonemapper: Tonemapper::AgX,
+            exposure: 0.0,
+            dither: true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod quality_tests {
+    use super::*;
+
+    #[test]
+    fn filters_peak_at_the_centre_and_end_at_the_edge() {
+        for f in AaFilter::ALL {
+            assert!(f.weight(0.0) > 0.5, "{f:?}");
+            assert_eq!(f.weight(1.0), 0.0, "{f:?}");
+            assert!(f.weight(0.0) >= f.weight(0.5), "{f:?}");
+            assert_eq!(AaFilter::from_label(f.label()), Some(f));
+        }
+        // Catmull-Rom sharpens with a negative lobe; the B-spline never goes negative.
+        assert!(AaFilter::CatmullRom.weight(0.7) < 0.0);
+        assert!((0..100).all(|i| AaFilter::Cubic.weight(i as f32 / 100.0) >= 0.0));
+    }
+
+    #[test]
+    fn old_scenes_load_with_the_new_quality_defaults() {
+        let s: BevyRenderSettings = serde_json::from_str(r#"{"antialiasing":false,"supersampling":2}"#).unwrap();
+        assert!(!s.antialiasing);
+        assert_eq!(s.supersampling, 2);
+        assert_eq!((s.passes, s.tonemapper, s.filter), (16, Tonemapper::AgX, AaFilter::Area));
     }
 }
 
@@ -80,6 +292,10 @@ pub struct RenderSettings {
     pub render_hidden: bool,
     /// Options > Force 2-Sided.
     pub force_two_sided: bool,
+    /// Options > Atmospherics: the Environment's atmosphere list renders.
+    pub atmospherics: bool,
+    /// Options > Effects: the rendering effects list applies.
+    pub effects: bool,
     /// Render Output > Save File, and the file Files... chose.
     pub save_file: bool,
     pub output_path: Option<String>,
@@ -104,6 +320,8 @@ impl Default for RenderSettings {
             lock_pixel_aspect: false,
             render_hidden: false,
             force_two_sided: false,
+            atmospherics: true,
+            effects: true,
             save_file: false,
             output_path: None,
             area: RenderArea::View,

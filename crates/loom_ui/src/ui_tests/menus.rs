@@ -238,6 +238,45 @@ fn modifier_list_t_then_enter_adds_taper() {
     assert_eq!(top.as_deref(), Some("Taper"));
 }
 
+#[test]
+fn tools_rename_objects_renames_the_selection() {
+    let mut h = Harness::new();
+    for x in [0.0, 30.0] {
+        h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [x, 0.0, 0.0], size: [10.0; 3] });
+    }
+    h.cmd(Command::SelectAll);
+    menu_path(&mut h, &["Tools", "Rename Objects..."]);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::RenameObjects));
+    let base = h.find(Role::CheckBox, "Base Name:");
+    h.click(base.center());
+    h.click(right_of(&h, Role::TextInput, base).center());
+    h.run(vec![egui::Event::Text("Pillar".into())]);
+    h.click(h.find(Role::CheckBox, "Numbered").center());
+    h.click(h.find(Role::Button, "Rename").center());
+    let mut names: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    names.sort();
+    assert_eq!(names, ["Pillar0", "Pillar1"], "Base Number 0, Step 1");
+}
+
+#[test]
+fn the_display_floater_freezes_and_hides_beside_any_panel() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    menu_path(&mut h, &["Tools", "Display Floater..."]);
+    assert!(h.app.state.display_floater);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Display Floater"))).expect("the Display Floater window");
+    // The Create panel stays on; the floater has its own Freeze Selected.
+    let freeze = h.find_all(Role::Button, "Freeze Selected").into_iter().find(|r| win.contains_rect(*r)).expect("Freeze Selected on the floater");
+    h.click(freeze.center());
+    assert!(h.app.state.scene.node(id).unwrap().frozen, "frozen from the floater");
+    // Object Level tab: Hide by Category.
+    h.click(h.text_rect("Object Level", win).expect("the Object Level tab").center());
+    let geometry = h.find_all(Role::CheckBox, "Geometry").into_iter().find(|r| win.contains_rect(*r) || r.min.x >= win.min.x).expect("Geometry category");
+    h.click(geometry.center());
+    assert!(h.app.state.hide_category.geometry);
+}
+
 /// File > References > XRef Objects...: the file dialog, then the file's
 /// object list; the highlighted object comes in as a reference.
 #[test]

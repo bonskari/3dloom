@@ -18,6 +18,7 @@ loom_max   = { workspace = true }
 loom_bake  = { workspace = true }
 crc32fast  = "1.5"
 flate2     = "1"
+regex      = "1"
 
 [dev-dependencies]
 loom_render = { workspace = true }

@@ -105,6 +105,11 @@ pub enum Change {
         before: Box<crate::render::RenderSettings>,
         after: Box<crate::render::RenderSettings>,
     },
+    /// Environment and Effects values.
+    SetEnvironment {
+        before: Box<crate::environment::Environment>,
+        after: Box<crate::environment::Environment>,
+    },
     /// The XRef records (File > XRef Scene / XRef Objects).
     SetXrefs {
         before: Vec<crate::scene::XrefRecord>,
@@ -249,6 +254,10 @@ impl Change {
                 Ok(())
             }
             Change::SetLoomRigs { after, .. } => { scene.loom_rigs = after.clone(); scene.bump_version(); Ok(()) },
+            Change::SetEnvironment { after, .. } => {
+                scene.environment = (**after).clone();
+                Ok(())
+            }
             Change::SetIkChains { after, .. } => {
                 scene.ik_chains = after.clone();
                 scene.bump_version();
@@ -376,6 +385,7 @@ impl Change {
             Change::SetMaterials { before: b, after: a } => Change::SetMaterials { before: a.clone(), after: b.clone() },
             Change::SetMaterial { id, before: b, after: a } => Change::SetMaterial { id: *id, before: *a, after: *b },
             Change::SetRenderSettings { before: b, after: a } => Change::SetRenderSettings { before: a.clone(), after: b.clone() },
+            Change::SetEnvironment { before: b, after: a } => Change::SetEnvironment { before: a.clone(), after: b.clone() },
             Change::Group(changes) => {
                 // Inverses must be computed against the progressively
                 // changed scene, so simulate on a copy.

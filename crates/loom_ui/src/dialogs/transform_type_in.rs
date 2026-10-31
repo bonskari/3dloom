@@ -34,7 +34,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     // instead of re-reading the scene every frame.
     let mut absolute: [f32; 3] = ctx.data(|d| d.get_temp(abs_id)).unwrap_or_else(|| loom_commands::type_in_values(&app.state).to_array());
     let mut abs_focus = false;
-    egui::Window::new(title).id(egui::Id::new("transform_type_in")).open(open).resizable(false).show(ctx, |ui| {
+    let window = egui::Window::new(title.clone()).id(egui::Id::new("transform_type_in")).resizable(false);
+    crate::os_window::OsWindow::new("Transform Type-In", title, [380.0, 160.0]).fixed().show(ctx, open, window, |ui| {
         ui.add_enabled_ui(has, |ui| {
             ui.horizontal_top(|ui| {
                 let abs = group(ui, &abs_label, &mut absolute, app, tool == Tool::Scale || tool == Tool::Rotate);

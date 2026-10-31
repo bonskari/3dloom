@@ -42,7 +42,23 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
         Dialog::ExportFile | Dialog::ExportSelected | Dialog::ArchiveFile => app.state.file.as_ref().and_then(|f| f.file_stem()).map(|n| format!("{}.{ext}", n.to_string_lossy())).unwrap_or_else(|| format!("Untitled.{ext}")),
         _ => String::new(),
     };
-    // Set Project Folder: each kind of file starts in its project folder.
+    // Configure User Paths > File I/O: the folder of this kind of file.
+    let entry = match dialog {
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::MergeFile | Dialog::SaveSelected => Some("Scenes"),
+        Dialog::ImportFile => Some("Import"),
+        Dialog::ExportFile | Dialog::ExportSelected => Some("Export"),
+        Dialog::ArchiveFile => Some("Archives"),
+        Dialog::SaveAnimation | Dialog::LoadAnimation => Some("Animations"),
+        Dialog::RenderFile | Dialog::SaveRenderedImage => Some("Render Output"),
+        _ => None,
+    };
+    if let Some(d) = entry.and_then(|e| app.state.paths.dir(e)) {
+        let keep_scene_folder = matches!(dialog, Dialog::SaveFileAs | Dialog::SaveFileAsCopy) && app.state.file.is_some();
+        if !keep_scene_folder {
+            return (d.to_path_buf(), name);
+        }
+    }
+    // Otherwise Set Project Folder: each kind of file starts in its project folder.
     let kind = match dialog {
         Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::ReplaceFile => "scenes",
         Dialog::ImportFile | Dialog::ImportAnimationClip => "import",
@@ -115,6 +131,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::XrefSceneFile => ("Open File (XRef Scene)", "loom,max", "Open"),
         Dialog::PickTexture => ("Select Bitmap Image File", IMAGES_READ, "Open"),
         Dialog::BackgroundFile => ("Select Background Image", IMAGES_READ, "Open"),
+        Dialog::EnvironmentMap => ("Select Environment Map", IMAGES_READ, "Open"),
         Dialog::MaterialMap { .. } | Dialog::MaterialBitmap => ("Select Bitmap Image File", IMAGES_READ, "Open"),
         Dialog::PickUvTexture => ("Pick Texture", IMAGES_READ, "Open"),
         Dialog::SaveUvw => ("Save UVW", "uvw", "Save"),
@@ -127,6 +144,19 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::SaveShortcuts => ("Save Shortcut File As", "kbd", "Save"),
         Dialog::LoadShortcuts => ("Load Shortcut File", "kbd", "Open"),
         Dialog::SaveCustomUiScheme => ("Save Custom UI Scheme", "ui", "Save"),
+        Dialog::UiFile { kind, save } => {
+            use loom_commands::UiFileKind as K;
+            match (kind, save) {
+                (K::Toolbars, true) => ("Save UI File As", "cui", "Save"),
+                (K::Toolbars, false) => ("Load UI File", "cui", "Open"),
+                (K::Menus, true) => ("Save Menu File As", "mnu", "Save"),
+                (K::Menus, false) => ("Load Menu File", "mnu", "Open"),
+                (K::Colors, true) => ("Save Color File As", "clr", "Save"),
+                (K::Colors, false) => ("Load Color File", "clr", "Open"),
+                (K::QuadOptions, true) => ("Save Quad Options File As", "qop", "Save"),
+                (K::QuadOptions, false) => ("Load Quad Options File", "qop", "Open"),
+            }
+        }
         Dialog::LoadCustomUiScheme => ("Load Custom UI Scheme", "ui", "Open"),
         Dialog::SaveAnimation => ("Save Animation", "lxaf", "Save"),
         Dialog::LoadAnimation => ("Load Animation", "lxaf", "Open"),
@@ -134,6 +164,9 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::SkinLoadEnvelopes => ("Load Envelopes", "env", "Open"),
         Dialog::PointCacheRecord { .. } => ("Save Points", "pc2", "Save"),
         Dialog::PointCacheLoad { .. } => ("Load Points", "pc2", "Open"),
+        Dialog::OpenMaterialLibrary => ("Open Material Library", "lmat", "Open"),
+        Dialog::MergeMaterialLibrary => ("Merge Material Library", "lmat", "Open"),
+        Dialog::SaveMaterialLibrary => ("Save Material Library", "lmat", "Save"),
         _ => ("File", "loom", "OK"),
     }
 }
@@ -153,6 +186,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::ReplaceFile => Command::ReplaceFile { path: Some(p), names: None, materials: None },
         Dialog::XrefSceneFile => Command::XrefScene { path: Some(p), automatic: None },
         Dialog::BitmapFit => Command::UvwMapBitmapFit { path: p },
+        Dialog::EnvironmentMap => Command::EnvironmentSettings { background: None, map: Some(p), use_map: None, mapping: None, tint: None, level: None, ambient: None },
         Dialog::PickUvTexture => Command::PickTexture { path: p },
         Dialog::MaterialMap { channel } => Command::SetMaterialMap {
             slot: None,
@@ -162,21 +196,38 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         },
         Dialog::MaterialBitmap => Command::SetMapBitmap { path: p },
         Dialog::SaveUvw => Command::SaveUvw { path: Some(p) },
-        Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: Some(p) },
+        Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(p) },
         Dialog::SaveRenderedImage => Command::SaveRenderedImage { path: Some(p) },
         Dialog::LoadUvw => Command::LoadUvw { path: Some(p) },
         Dialog::BipedSaveFig => Command::BipedSaveFile { path: Some(p) },
         Dialog::BipedLoadFig => Command::BipedLoadFile { path: Some(p) },
         Dialog::SaveShortcuts => Command::SaveShortcuts { path: Some(p) },
         Dialog::LoadShortcuts => Command::LoadShortcuts { path: Some(p) },
-        Dialog::SaveCustomUiScheme => Command::SaveCustomUiScheme { path: Some(p) },
+        Dialog::SaveCustomUiScheme => Command::SaveCustomUiScheme { path: Some(p), parts: None },
         Dialog::LoadCustomUiScheme => Command::LoadCustomUiScheme { path: Some(p) },
+        Dialog::UiFile { kind, save } => {
+            use loom_commands::UiFileKind as K;
+            let path = Some(p);
+            match (kind, save) {
+                (K::Toolbars, true) => Command::SaveToolbars { path },
+                (K::Toolbars, false) => Command::LoadToolbars { path },
+                (K::Menus, true) => Command::SaveMenus { path },
+                (K::Menus, false) => Command::LoadMenus { path },
+                (K::Colors, true) => Command::SaveUiColors { path },
+                (K::Colors, false) => Command::LoadUiColors { path },
+                (K::QuadOptions, true) => Command::SaveQuadOptions { path },
+                (K::QuadOptions, false) => Command::LoadQuadOptions { path },
+            }
+        }
         Dialog::SaveAnimation => Command::SaveAnimation { path: Some(p) },
         Dialog::LoadAnimation => Command::LoadAnimation { path: Some(p), offset: None },
         Dialog::SkinSaveEnvelopes => Command::SkinSaveEnvelopes { path: Some(p) },
         Dialog::SkinLoadEnvelopes => Command::SkinLoadEnvelopes { path: Some(p) },
         Dialog::PointCacheRecord { index, start, end } => Command::PointCacheRecord { index, path: p, start, end },
         Dialog::PointCacheLoad { index } => Command::PointCacheLoad { index, path: p },
+        Dialog::OpenMaterialLibrary => Command::OpenMaterialLibrary { path: p },
+        Dialog::MergeMaterialLibrary => Command::MergeMaterialLibrary { path: p, names: None },
+        Dialog::SaveMaterialLibrary => Command::SaveMaterialLibrary { path: Some(p) },
         _ => return None,
     })
 }

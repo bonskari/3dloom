@@ -136,7 +136,7 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.horizontal(|ui| {
             ui.label("Bevy renderer, the Render Setup values");
             if ui.button("Setup...").clicked() {
-                command(app, Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
+                command(app, Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
             }
         });
     });

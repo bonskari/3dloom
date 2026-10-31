@@ -35,7 +35,8 @@ struct ListerState {
 pub fn light_lister(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let key = egui::Id::new("light_lister_state");
     let mut st: ListerState = ctx.data(|d| d.get_temp(key)).unwrap_or_default();
-    egui::Window::new("Light Lister").open(open).resizable(true).default_width(760.0).show(ctx, |ui| {
+    let window = egui::Window::new("Light Lister").resizable(true).default_width(760.0);
+    crate::os_window::OsWindow::new("Light Lister", "Light Lister", [780.0, 360.0]).show(ctx, open, window, |ui| {
         ui.horizontal(|ui| {
             ui.label("Configuration:");
             ui.radio_value(&mut st.selected_only, false, "All Lights");
@@ -118,7 +119,7 @@ fn lister_row(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, l: &
         return;
     }
     let st = l.shadow_type.get();
-    egui::ComboBox::from_id_salt(("lister_shadow_type", id.0)).selected_text(SHADOW_TYPES[st.min(1) as usize]).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(("lister_shadow_type", id.0)).selected_text(SHADOW_TYPES[(st as usize).min(SHADOW_TYPES.len() - 1)]).show_ui(ui, |ui| {
         for (i, t) in SHADOW_TYPES.iter().enumerate() {
             if ui.selectable_label(st == i as u32, *t).clicked() && st != i as u32 {
                 set(app, id, "Shadow Type", i as f64);

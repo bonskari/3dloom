@@ -290,6 +290,11 @@ impl UndoStack {
         self.undo.iter().map(|e| e.label.clone()).collect()
     }
 
+    /// Labels of redoable operations, the next one last.
+    pub fn redo_labels(&self) -> Vec<String> {
+        self.redo.iter().map(|e| e.label.clone()).collect()
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }

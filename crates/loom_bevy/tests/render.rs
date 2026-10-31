@@ -5,7 +5,11 @@ use glam::{Mat4, Vec3};
 use loom_bevy::{BevyRenderer, SceneObject, ViewCamera};
 
 fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    // No GL backend: an EGL context torn down while another test thread uses or
+    // destroys its Vulkan device deadlocked inside the NVIDIA driver (itx stacks:
+    // eglDestroyContext, vkDestroyDevice and a libvulkan mutex all waiting).
+    loom_bevy::test_watchdog(std::time::Duration::from_secs(600));
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..Default::default() });
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
     if !loom_bevy::supported(&adapter) {
         return None;
@@ -102,7 +106,7 @@ fn bucketed(r: &mut BevyRenderer, camera: &ViewCamera, (w, h): (u32, u32), optio
 /// replaces the default key light and lights only inside its cone (also
 /// in a bucketed render); a box under it shadows the plane unless it is
 /// excluded from shadow casting or Render Setup turns shadows off; the
-/// Render Setup ambient colour adds to the scene lights.
+/// Environment's ambient colour adds to the scene lights.
 #[test]
 fn a_red_spot_lights_a_plane_only_inside_its_cone() {
     let Some((adapter, device, queue)) = gpu() else {
@@ -143,7 +147,9 @@ fn a_red_spot_lights_a_plane_only_inside_its_cone() {
         img.get_pixel(x, y).0
     };
     // No ambient light: what the spot lights is all there is.
-    let dark = || RenderOptions { ambient: [0.0; 3], ..Default::default() };
+    let ambient = |c: [f32; 3]| loom_bevy::environment::EnvSettings { ambient: c, ..Default::default() };
+    r.set_environment(&ambient([0.0; 3]));
+    let dark = RenderOptions::default;
     let (inside_p, outside_p) = (Vec3::new(0.0, 10.0, 0.0), Vec3::new(-20.0, 100.0, 0.0));
 
     r.sync(&objects(false));
@@ -155,10 +161,12 @@ fn a_red_spot_lights_a_plane_only_inside_its_cone() {
         assert!(inside[0] > 80 && inside[1] < 30 && inside[2] < 30, "{buckets} buckets: red inside the cone: {inside:?}");
         assert!(outside[0] < 15 && outside[1] < 15 && outside[2] < 15, "{buckets} buckets: dark outside the cone: {outside:?}");
     }
-    // The Render Setup ambient colour adds to the scene lights.
-    let img = bucketed(&mut r, &camera, size, RenderOptions { ambient: [0.0, 0.0, 1.0], ..Default::default() }, 1);
+    // The Environment's ambient colour adds to the scene lights.
+    r.set_environment(&ambient([0.0, 0.0, 1.0]));
+    let img = bucketed(&mut r, &camera, size, RenderOptions::default(), 1);
     let outside = at(&img, outside_p);
     assert!(outside[2] > 40 && outside[0] < 15, "a blue ambient light outside the cone: {outside:?}");
+    r.set_environment(&ambient([0.0; 3]));
 
     // A box above the centre shadows it ...
     r.sync(&objects(true));
@@ -190,12 +198,19 @@ fn render_buckets(r: &mut BevyRenderer, camera: &ViewCamera, size: u32, tile: u3
             let f = |p: u32| p as f32 / size as f32;
             let sub = [f(bx * tile), f(by * tile), f((bx + 1) * tile), f((by + 1) * tile)];
             // Settle frames for the first bucket only, as the UI does: later
-            // buckets render in the very update that set them.
-            for _ in 0..if bx + by == 0 { 3 } else { 1 } {
+            // buckets render in the very update that set them; every pass.
+            for _ in 0..if bx + by == 0 { 2 } else { 0 } {
                 r.set_render_bucket(camera, 1.0, sub, [tile, tile]).unwrap();
                 r.update();
             }
-            let img = r.read_render().unwrap();
+            let img = loop {
+                r.set_render_bucket(camera, 1.0, sub, [tile, tile]).unwrap();
+                r.update();
+                let img = r.read_render().unwrap();
+                if r.bucket_done() {
+                    break img;
+                }
+            };
             image::imageops::replace(&mut out, &img, (bx * tile) as i64, (by * tile) as i64);
         }
     }
@@ -272,8 +287,9 @@ fn render_layers_pick_what_a_render_shows() {
     r.sync_hidden(&[]);
     let selected = shot(&mut r, loom_bevy::RenderOptions { selected_only: Some(vec![4]), ..Default::default() });
     assert!(count(&selected, 2) > 50 && count(&selected, 0) == 0, "Selected renders only the selection");
-    // The background colour comes with alpha 0.
-    let bg = shot(&mut r, loom_bevy::RenderOptions { background: [0.0, 0.0, 1.0], ..Default::default() });
+    // The Environment's background colour comes with alpha 0.
+    r.set_environment(&loom_bevy::environment::EnvSettings { background: [0.0, 0.0, 1.0], ..Default::default() });
+    let bg = shot(&mut r, Default::default());
     assert_eq!(bg.get_pixel(0, 0).0, [0, 0, 255, 0]);
 }
 
@@ -343,4 +359,80 @@ fn affine_objects_match_world_baked_geometry() {
         let changed = actual.pixels().zip(reference.pixels()).filter(|(a, b)| a.0.iter().zip(b.0).any(|(a, b)| a.abs_diff(b) > 3)).count();
         assert!(changed < 50, "affine rendering differs at {changed} pixels for {transform:?}");
     }
+}
+
+/// Shadow Parameters and Area Shadows reach the render: a white spot over a
+/// box on a white plane. Density 1 and a black shadow colour leave the
+/// shadow dark; density 0.5 lets about half the light in; a green shadow
+/// colour tints the shadow green; a light with a size (an area light)
+/// widens the penumbra.
+#[test]
+fn shadow_colour_density_and_area_size_change_the_shadow() {
+    let Some((adapter, device, queue)) = gpu() else {
+        eprintln!("shadow_colour_density_and_area_size_change_the_shadow: no GPU adapter, skipped");
+        return;
+    };
+    use loom_bevy::RenderOptions;
+    use loom_scene::light::{default_lights, Emitter};
+    let mut r = BevyRenderer::new(adapter, device, queue);
+    let plane = loom_mesh::plane_segmented(400.0, 400.0, 1, 1);
+    let mut blocker = loom_mesh::box_primitive(Vec3::new(15.0, 15.0, 5.0));
+    let _ = loom_mesh::edit_ops::translate_mesh(&mut blocker, Vec3::new(0.0, 0.0, 30.0));
+    let objects = vec![
+        SceneObject { transform: Mat4::IDENTITY, id: 1, mesh: &plane, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() },
+        SceneObject { transform: Mat4::IDENTITY, id: 2, mesh: &blocker, wire_color: [255, 255, 255], surfaces: None, renderable: true, flags: Default::default() },
+    ];
+    let mut spot = default_lights(1, Mat4::IDENTITY)[0].clone();
+    spot.id = loom_scene::NodeId(10);
+    spot.emitter = Emitter::Spot { hotspot: 60.0, falloff: 70.0 };
+    // From the side and above: the box's shadow falls beside it (x 15..46),
+    // where the camera straight above sees it.
+    spot.position = Vec3::new(-60.0, 0.0, 120.0);
+    spot.direction = Vec3::new(60.0, 0.0, -90.0).normalize();
+    spot.color = Vec3::splat(0.8);
+    spot.shadows = true;
+    spot.target_distance = 144.0;
+    let size = (160u32, 160u32);
+    let camera = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -1.0, 400.0), Vec3::ZERO, Vec3::Y), projection: Mat4::perspective_rh(30f32.to_radians(), 1.0, 1.0, 2000.0) };
+    let pixel = |p: Vec3| {
+        let c = camera.projection * camera.view * p.extend(1.0);
+        let n = c.truncate() / c.w;
+        (((n.x + 1.0) * 0.5 * size.0 as f32) as u32, ((1.0 - n.y) * 0.5 * size.1 as f32) as u32)
+    };
+    let dark = || RenderOptions { ambient: [0.0; 3], ..Default::default() };
+    let mut render = |s: &loom_scene::light::LightSample| {
+        r.sync(&objects);
+        r.sync_lights(std::slice::from_ref(s));
+        bucketed(&mut r, &camera, size, dark(), 1)
+    };
+    let at = |img: &image::RgbaImage, p: Vec3| {
+        let (x, y) = pixel(p);
+        img.get_pixel(x, y).0
+    };
+    let (under, lit) = (Vec3::new(28.0, 0.0, 0.0), Vec3::new(70.0, 0.0, 0.0));
+    spot.shadow_transmission = Vec3::ZERO;
+    let img = render(&spot);
+    let (full, open) = (at(&img, under), at(&img, lit));
+    assert!(open[0] > 80 && full[0] < 25, "a black shadow at density 1: under {full:?}, lit {open:?}");
+    spot.shadow_transmission = Vec3::splat(0.5);
+    let half = at(&render(&spot), under);
+    assert!(half[0] as f32 > open[0] as f32 * 0.3 && (half[0] as f32) < open[0] as f32 * 0.85, "density 0.5 lets light in: under {half:?}, lit {open:?}");
+    spot.shadow_transmission = Vec3::new(0.0, 1.0, 0.0);
+    let green = at(&render(&spot), under);
+    assert!(green[1] > 60 && green[0] < 25, "a green shadow colour: {green:?}");
+    // The penumbra: samples across the shadow's edge between dark and lit.
+    let penumbra = |img: &image::RgbaImage| {
+        (0..80)
+            .filter(|i| {
+                let v = at(img, Vec3::new(30.0 + *i as f32 * 0.4, 0.0, 0.0))[0] as f32;
+                v > full[0] as f32 + 15.0 && v < open[0] as f32 - 15.0
+            })
+            .count()
+    };
+    spot.shadow_transmission = Vec3::ZERO;
+    spot.source_radius = 0.0;
+    let hard = penumbra(&render(&spot));
+    spot.source_radius = 20.0;
+    let soft = penumbra(&render(&spot));
+    assert!(soft > hard + 2, "an area light softens the shadow edge: {hard} -> {soft} samples in the penumbra");
 }

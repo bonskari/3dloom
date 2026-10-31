@@ -569,9 +569,37 @@ pub enum ObjectKind {
         #[serde(default = "zero")]
         axis: Param<u32>,
     },
-    /// Helpers > Dummy: a wireframe cube.
+    /// Helpers > Dummy: the reference's wireframe cube (Display Type Box)
+    /// or a line-drawn marker of another Display Type.
     Dummy {
         size: Param<f32>,
+        /// Display Type, an index into `DUMMY_DISPLAY_TYPES` (0 Box).
+        #[serde(default = "zero")]
+        display: Param<u32>,
+        /// Length X / Y / Z: the extent along each axis, as a multiple of Size.
+        #[serde(default = "one_f")]
+        length_x: Param<f32>,
+        #[serde(default = "one_f")]
+        length_y: Param<f32>,
+        #[serde(default = "one_f")]
+        length_z: Param<f32>,
+        /// Use Color: the lines take `color` (0xRRGGBB) instead of the wire colour.
+        #[serde(default = "no")]
+        use_color: Param<bool>,
+        #[serde(default = "zero")]
+        color: Param<u32>,
+        /// Size is in screen pixels instead of world units.
+        #[serde(default = "no")]
+        constant_screen_size: Param<bool>,
+        /// Drawn over everything (X-ray) instead of depth-tested.
+        #[serde(default = "no")]
+        draw_on_top: Param<bool>,
+        /// The node's name as a label next to the marker.
+        #[serde(default = "no")]
+        show_name: Param<bool>,
+        /// An RGB axis tripod at the pivot, on top of the Display Type.
+        #[serde(default = "no")]
+        axis_tripod: Param<bool>,
     },
     /// Helpers > Point.
     Point {
@@ -725,6 +753,9 @@ pub fn grid_plane_axes(plane: u32) -> (Vec3, Vec3) {
         _ => (Vec3::X, Vec3::Y),
     }
 }
+
+/// Helpers > Dummy > Display Type choices.
+pub const DUMMY_DISPLAY_TYPES: [&str; 9] = ["Box", "Sphere", "Cross", "Axis", "Circle", "Diamond", "Arrow", "Square", "Triangle"];
 
 fn no() -> Param<bool> {
     p(false)
@@ -936,7 +967,7 @@ impl ObjectKind {
         Self::Bone { length: p(length), width: p(4.0), height: p(4.0), taper: p(0.9), fins: BoneFins::default(), bone_on: p(true), freeze_length: p(false), stretch: p(0), stretch_axis: p(0), axis: p(0) }
     }
     pub fn dummy(size: f32) -> Self {
-        Self::Dummy { size: p(size) }
+        Self::Dummy { size: p(size), display: zero(), length_x: one_f(), length_y: one_f(), length_z: one_f(), use_color: no(), color: p(0x78C878), constant_screen_size: no(), draw_on_top: no(), show_name: no(), axis_tripod: no() }
     }
     pub fn point(size: f32) -> Self {
         Self::Point { size: p(size), axis_tripod: p(true), cross: p(true), box_: p(false), center_marker: p(false), constant_screen_size: p(false), draw_on_top: p(false) }
@@ -958,6 +989,19 @@ impl ObjectKind {
     /// Helpers and other non-geometry nodes (Dummy, Point, IK goal, Group, Camera).
     pub fn is_helper(&self) -> bool {
         matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
+    }
+    /// Whether the object has a surface renders can show: not helpers,
+    /// cameras, lights or a biped's centre of mass. Bones do (their
+    /// Renderable, off by default, decides).
+    pub fn has_render_geometry(&self) -> bool {
+        !self.is_helper() && !matches!(self, Self::Light(_))
+    }
+    /// A Dummy's extent along X / Y / Z: Size times each Length.
+    pub fn dummy_extents(&self) -> Option<Vec3> {
+        match self {
+            Self::Dummy { size, length_x, length_y, length_z, .. } => Some(size.get() * Vec3::new(length_x.get(), length_y.get(), length_z.get())),
+            _ => None,
+        }
     }
     pub fn is_bone(&self) -> bool {
         matches!(self, Self::Bone { .. })
@@ -1263,6 +1307,7 @@ impl ObjectKind {
             (Self::Camera { .. }, "FOV Direction") => Some(&crate::camera::FOV_DIRECTIONS),
             (Self::Grid { .. }, "Active Color") => Some(&["Gray", "Object Color", "Home Color", "Home Intensity"]),
             (Self::Grid { .. }, "Display") => Some(&["XY Plane", "YZ Plane", "ZX Plane"]),
+            (Self::Dummy { .. }, "Display Type") => Some(&DUMMY_DISPLAY_TYPES),
             (Self::Light(l), name) => l.choices(name),
             _ => None,
         }
@@ -1364,7 +1409,11 @@ impl ObjectKind {
                 ("Back Fins", b(&fins.back)), ("Back Fin Size", f(&fins.back_size)), ("Back Fin Start Taper", f(&fins.back_start_taper)), ("Back Fin End Taper", f(&fins.back_end_taper)),
                 ("Bone On", b(bone_on)), ("Freeze Length", b(freeze_length)), ("Stretch", i(stretch)), ("Stretch Axis", i(stretch_axis)),
             ],
-            Self::Dummy { size } => vec![("Size", f(size))],
+            Self::Dummy { size, display, length_x, length_y, length_z, use_color, color, constant_screen_size, draw_on_top, show_name, axis_tripod } => vec![
+                ("Display Type", i(display)), ("Size", f(size)), ("Length X", f(length_x)), ("Length Y", f(length_y)), ("Length Z", f(length_z)),
+                ("Use Color", b(use_color)), ("Color", i(color)), ("Constant Screen Size", b(constant_screen_size)), ("Draw On Top", b(draw_on_top)),
+                ("Show Name", b(show_name)), ("Axis Tripod", b(axis_tripod)),
+            ],
             Self::Point { size, axis_tripod, cross, box_, center_marker, constant_screen_size, draw_on_top } => vec![
                 ("Center Marker", b(center_marker)), ("Axis Tripod", b(axis_tripod)), ("Cross", b(cross)), ("Box", b(box_)),
                 ("Size", f(size)), ("Constant Screen Size", b(constant_screen_size)), ("Draw On Top", b(draw_on_top)),
@@ -1551,7 +1600,17 @@ impl ObjectKind {
             (Self::Bone { stretch, .. }, "Stretch") => { stretch.set((value.round().max(0.0) as u32).min(2)); ok }
             (Self::Bone { axis, .. }, "Bone Axis") => { axis.set((value.round().max(0.0) as u32).min(5)); ok }
             (Self::Bone { stretch_axis, .. }, "Stretch Axis") => { stretch_axis.set((value.round().max(0.0) as u32).min(2)); ok }
-            (Self::Dummy { size }, "Size") | (Self::Point { size, .. }, "Size") => { fl(size, 0.001); ok }
+            (Self::Dummy { size, .. }, "Size") | (Self::Point { size, .. }, "Size") => { fl(size, 0.001); ok }
+            (Self::Dummy { display, .. }, "Display Type") => { display.set((value.round().max(0.0) as u32).min(DUMMY_DISPLAY_TYPES.len() as u32 - 1)); ok }
+            (Self::Dummy { length_x, .. }, "Length X") => { fl(length_x, 0.001); ok }
+            (Self::Dummy { length_y, .. }, "Length Y") => { fl(length_y, 0.001); ok }
+            (Self::Dummy { length_z, .. }, "Length Z") => { fl(length_z, 0.001); ok }
+            (Self::Dummy { use_color, .. }, "Use Color") => { bl(use_color); ok }
+            (Self::Dummy { color, .. }, "Color") => { color.set((value.round().max(0.0) as u32).min(0xFF_FFFF)); ok }
+            (Self::Dummy { constant_screen_size, .. }, "Constant Screen Size") => { bl(constant_screen_size); ok }
+            (Self::Dummy { draw_on_top, .. }, "Draw On Top") => { bl(draw_on_top); ok }
+            (Self::Dummy { show_name, .. }, "Show Name") => { bl(show_name); ok }
+            (Self::Dummy { axis_tripod, .. }, "Axis Tripod") => { bl(axis_tripod); ok }
             (Self::Point { axis_tripod, .. }, "Axis Tripod") => { bl(axis_tripod); ok }
             (Self::Point { cross, .. }, "Cross") => { bl(cross); ok }
             (Self::Point { box_, .. }, "Box") => { bl(box_); ok }
@@ -1674,7 +1733,20 @@ impl ObjectKind {
                 }
                 Cow::Owned(m)
             }
-            Self::Dummy { size } => Cow::Owned(loom_mesh::dummy_mesh(size.get())),
+            // Box: the reference's cube; the other types (and a screen-sized
+            // box) draw as overlay lines, the mesh only holds their extents.
+            Self::Dummy { display, constant_screen_size, .. } => {
+                let ext = self.dummy_extents().unwrap_or(Vec3::ONE);
+                if display.get() == 0 && !constant_screen_size.get() {
+                    let mut m = loom_mesh::dummy_mesh(1.0);
+                    let _ = loom_mesh::edit_ops::transform_mesh(&mut m, Mat4::from_scale(ext));
+                    Cow::Owned(m)
+                } else {
+                    let h = ext * 0.5;
+                    let s = if constant_screen_size.get() { 0.0 } else { 1.0 };
+                    Cow::Owned(loom_mesh::standard_primitives::points_mesh(&[-h * s, h * s]))
+                }
+            }
             // Point: a small cube a tenth of its size; the tripod/cross draw as an overlay.
             Self::Point { size, .. } => Cow::Owned(box_primitive(Vec3::splat(size.get() * 0.1))),
             Self::IkGoal { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
@@ -2183,6 +2255,8 @@ fn default_wire_color() -> [u8; 3] {
 impl Node {
     /// A node with no id yet; `Scene::add_node` assigns one.
     pub fn new(name: &str, object: ObjectKind) -> Self {
+        // Bones are not Renderable by default, as in the reference.
+        let renderable = !object.is_bone();
         Self {
             id: NodeId(0),
             name: name.to_owned(),
@@ -2203,7 +2277,7 @@ impl Node {
             material: None,
             constraints: Default::default(),
             visibility: None,
-            render: RenderProps::default(),
+            render: RenderProps { renderable, ..RenderProps::default() },
             user_props: String::new(),
             skin_wrap_bake: None,
             version: 0,

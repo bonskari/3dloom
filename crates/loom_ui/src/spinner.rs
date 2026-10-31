@@ -3,7 +3,8 @@
 //! reference ("set a numeric field to 0.0 or its lowest value"). Ctrl while
 //! dragging changes the value faster, Alt slower, and with Preferences > Wrap
 //! Cursor Near Spinner the pointer wraps to the opposite window edge, so a
-//! drag never runs out of room.
+//! drag never runs out of room. A typed value may be an expression
+//! (`2*pi`, `(10+5)/3`), and `R<n>` offsets the current value by n.
 
 use eframe::egui;
 use egui::emath::Numeric;
@@ -20,6 +21,102 @@ fn wrap_id() -> egui::Id {
 /// Preferences > Spinners > Wrap Cursor Near Spinner; the app sets it each frame.
 pub fn set_wrap_cursor(ctx: &egui::Context, on: bool) {
     ctx.data_mut(|d| d.insert_temp(wrap_id(), on));
+}
+
+/// Ticks per second (the TPS constant of a typed expression).
+pub const TPS: f64 = 4800.0;
+
+/// A typed spinner value: an arithmetic expression (+ - * / ^, parentheses,
+/// pi, e, TPS), or `R<expr>` for `current` + expr. `number` reads one
+/// literal (a plain number, or a length with its unit).
+pub fn typed(text: &str, current: f64, number: &dyn Fn(&str) -> Option<f64>) -> Option<f64> {
+    let t = text.trim();
+    if let Some(rest) = t.strip_prefix(['r', 'R']).filter(|r| !r.trim().is_empty()) {
+        return Some(current + typed(rest, 0.0, number)?);
+    }
+    if let Some(v) = number(t) {
+        return Some(v);
+    }
+    let mut p = Expr { s: t.as_bytes(), i: 0, number };
+    let v = p.sum()?;
+    p.skip();
+    (p.i == p.s.len() && v.is_finite()).then_some(v)
+}
+
+struct Expr<'a> {
+    s: &'a [u8],
+    i: usize,
+    number: &'a dyn Fn(&str) -> Option<f64>,
+}
+
+impl Expr<'_> {
+    fn skip(&mut self) {
+        while self.s.get(self.i).is_some_and(|c| c.is_ascii_whitespace()) {
+            self.i += 1;
+        }
+    }
+    fn eat(&mut self, c: u8) -> bool {
+        self.skip();
+        let hit = self.s.get(self.i) == Some(&c);
+        self.i += hit as usize;
+        hit
+    }
+    fn sum(&mut self) -> Option<f64> {
+        let mut v = self.product()?;
+        loop {
+            if self.eat(b'+') {
+                v += self.product()?;
+            } else if self.eat(b'-') {
+                v -= self.product()?;
+            } else {
+                return Some(v);
+            }
+        }
+    }
+    fn product(&mut self) -> Option<f64> {
+        let mut v = self.power()?;
+        loop {
+            if self.eat(b'*') {
+                v *= self.power()?;
+            } else if self.eat(b'/') {
+                v /= self.power()?;
+            } else {
+                return Some(v);
+            }
+        }
+    }
+    fn power(&mut self) -> Option<f64> {
+        let base = self.unary()?;
+        if self.eat(b'^') {
+            return Some(base.powf(self.power()?));
+        }
+        Some(base)
+    }
+    fn unary(&mut self) -> Option<f64> {
+        if self.eat(b'-') {
+            return Some(-self.unary()?);
+        }
+        if self.eat(b'+') {
+            return self.unary();
+        }
+        if self.eat(b'(') {
+            let v = self.sum()?;
+            return self.eat(b')').then_some(v);
+        }
+        self.skip();
+        let start = self.i;
+        while self.s.get(self.i).is_some_and(|c| !b"+-*/^() ".contains(c) || (b"+-".contains(c) && self.i > start && matches!(self.s[self.i - 1], b'e' | b'E') && self.s[start].is_ascii_digit())) {
+            self.i += 1;
+        }
+        let word = std::str::from_utf8(&self.s[start..self.i]).ok()?;
+        match word.to_ascii_lowercase().as_str() {
+            "" => None,
+            "pi" => Some(std::f64::consts::PI),
+            "e" => Some(std::f64::consts::E),
+            "tps" => Some(TPS),
+            _ => (self.number)(word),
+        }
+    }
 }
 
 /// A drag in progress: the last value the DragValue set (`raw`) and the
@@ -44,6 +141,7 @@ pub fn spin<'a, N: Numeric>(ui: &egui::Ui, value: &'a mut N, range: impl RangeBo
     let hi = bound(range.end_bound(), N::from_f64(hi)).to_f64();
     let id = ui.next_auto_id();
     let ctx = ui.ctx().clone();
+    crate::cursor::note_spinner(&ctx, id);
     let reset = ui.is_enabled() && ctx.read_response(id).is_some_and(|r| r.secondary_clicked());
     let before = value.to_f64();
     let dragging = ctx.is_being_dragged(id);
@@ -77,6 +175,7 @@ pub fn spin<'a, N: Numeric>(ui: &egui::Ui, value: &'a mut N, range: impl RangeBo
     // The first read reports the value from before the reset, so the
     // DragValue marks its response changed and the caller applies it.
     let mut first = reset;
+
     let dv = egui::DragValue::from_get_set(move |v| {
         if let Some(mut v) = v {
             if dragging {
@@ -93,7 +192,8 @@ pub fn spin<'a, N: Numeric>(ui: &egui::Ui, value: &'a mut N, range: impl RangeBo
         }
         value.to_f64()
     })
-    .range(lo..=hi);
+    .range(lo..=hi)
+    .custom_parser(move |t| typed(t, before, &|s| s.parse().ok()));
     if N::INTEGRAL {
         dv.max_decimals(0).speed(0.25)
     } else {
@@ -104,6 +204,24 @@ pub fn spin<'a, N: Numeric>(ui: &egui::Ui, value: &'a mut N, range: impl RangeBo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_values_are_expressions_and_r_offsets_the_current_value() {
+        let plain = |s: &str| s.parse::<f64>().ok();
+        assert_eq!(typed("12.5", 3.0, &plain), Some(12.5));
+        assert_eq!(typed("(10+5)/3", 0.0, &plain), Some(5.0));
+        assert_eq!(typed("2^3*-1", 0.0, &plain), Some(-8.0));
+        assert!((typed("2*pi", 0.0, &plain).unwrap() - std::f64::consts::TAU).abs() < 1e-12);
+        assert_eq!(typed("TPS/160", 0.0, &plain), Some(30.0));
+        assert_eq!(typed("1e-2+1", 0.0, &plain), Some(1.01));
+        assert_eq!(typed("R10", 5.0, &plain), Some(15.0));
+        assert_eq!(typed("r-2*3", 5.0, &plain), Some(-1.0));
+        assert_eq!(typed("2+", 0.0, &plain), None);
+        assert_eq!(typed("1/0", 0.0, &plain), None);
+        // A unit-aware literal reader (lengths): 2.5cm + 1 in scene units.
+        let cm = |s: &str| s.strip_suffix("cm").and_then(|n| n.parse::<f64>().ok()).or_else(|| s.parse().ok());
+        assert_eq!(typed("2.5cm+1", 0.0, &cm), Some(3.5));
+    }
 
     /// Runs one frame with `events`; returns whether the spinner reported a change and its rect.
     fn frame(ctx: &egui::Context, value: &mut u32, events: Vec<egui::Event>) -> (bool, egui::Rect) {

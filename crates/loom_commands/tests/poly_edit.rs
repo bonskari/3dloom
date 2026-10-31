@@ -41,6 +41,20 @@ fn chamfer_two_objects_one_undo() {
 }
 
 #[test]
+fn selecting_every_half_edge_of_a_box_counts_twelve_edges() {
+    let mut s = state();
+    let a = poly_box(&mut s, [0.0; 3]);
+    execute(&mut s, Command::EdgeLevel).unwrap();
+    let n = s.scene.node(a).unwrap().object.mesh().half_edges().len() as u32;
+    assert_eq!(n, 24);
+    let r = execute(&mut s, Command::SelectSub { node: Some(a.0), ids: (0..n).collect(), op: SelectOp::Replace }).unwrap();
+    assert_eq!(r["sub_selected"], 12, "an edge and its twin are one edge");
+    assert_eq!(s.sub_selection.len(), 12);
+    execute(&mut s, Command::SelectSub { node: Some(a.0), ids: (0..n).collect(), op: SelectOp::Subtract }).unwrap();
+    assert!(s.sub_selection.is_empty(), "either half takes the edge away");
+}
+
+#[test]
 fn vertex_ops_remove_break_weld_chamfer() {
     let mut s = state();
     execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [20.0, 20.0, 0.0] }).unwrap();

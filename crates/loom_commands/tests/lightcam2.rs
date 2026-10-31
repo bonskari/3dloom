@@ -229,6 +229,40 @@ fn target_distance_moves_the_target_of_target_cameras_and_lights() {
 }
 
 #[test]
+fn a_light_that_is_off_shows_black_and_on_shows_its_colour() {
+    let mut s = AppState::new();
+    let (spot, _) = create(&mut s, LightKind::TargetSpot, [0.0, 0.0, 100.0], [0.0; 3]);
+    let colour = |s: &AppState| s.scene.display_color(s.scene.node(spot).unwrap());
+    assert_eq!(colour(&s), loom_commands::light::LIGHT_COLOR, "yellow when on");
+    set(&mut s, spot, "On", 0.0);
+    assert_eq!(colour(&s), [0, 0, 0], "black when off");
+}
+
+#[test]
+fn shadow_parameters_and_area_shadows_reach_the_renderers() {
+    let mut s = AppState::new();
+    let (spot, _) = create(&mut s, LightKind::TargetSpot, [0.0, 0.0, 100.0], [0.0; 3]);
+    let sample = |s: &AppState| loom_scene::light::scene_lights(&s.scene, |_| true).into_iter().find(|l| l.id == spot).unwrap();
+    assert_eq!(sample(&s).shadow_transmission, Vec3::ZERO);
+    set(&mut s, spot, "Shadow Density", 0.5);
+    assert!((sample(&s).shadow_transmission - Vec3::splat(0.5)).length() < 1e-6);
+    set(&mut s, spot, "Shadow Type", 3.0);
+    set(&mut s, spot, "Area Mode", 4.0);
+    set(&mut s, spot, "Area Length", 30.0);
+    assert_eq!(sample(&s).source_radius, 15.0, "a Sphere Light 30 long: a 15-unit source");
+    set(&mut s, spot, "Absolute Map Bias", 1.0);
+    assert!(sample(&s).absolute_bias);
+    for (name, v) in [("2-Sided Shadows", 0.0), ("Max Quadtree Depth", 9.0), ("Shadow Integrity", 4.0), ("Shadow Quality", 6.0), ("Shadow Spread", 2.0), ("Jitter Amount", 0.5), ("Atmosphere Shadows", 1.0)] {
+        set(&mut s, spot, name, v);
+        let got = s.scene.node(spot).unwrap().object.parameters().into_iter().find(|p| p.0 == name).unwrap().1.as_f64();
+        assert_eq!(got, v, "{name} is kept");
+    }
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    let got = s.scene.node(spot).unwrap().object.parameters().into_iter().find(|p| p.0 == "Atmosphere Shadows").unwrap().1.as_f64();
+    assert_eq!(got, 0.0, "each edit is one undo step");
+}
+
+#[test]
 fn select_target_selects_the_targets_of_the_selection() {
     let mut s = AppState::new();
     let (spot, t) = create(&mut s, LightKind::TargetSpot, [0.0, 0.0, 100.0], [0.0; 3]);

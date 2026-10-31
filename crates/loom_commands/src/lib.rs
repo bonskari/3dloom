@@ -4,8 +4,10 @@
 pub mod command;
 pub mod modifier_list;
 mod material;
+pub mod material_library;
 pub mod display;
 pub mod render;
+pub mod environment;
 pub mod bake;
 pub mod execute;
 pub mod poly;
@@ -53,6 +55,8 @@ pub mod anim_cmds;
 mod animation_clips;
 pub mod controllers;
 pub mod track_view;
+pub mod explorer;
+pub mod schematic;
 pub mod motion;
 pub mod normals;
 pub mod vertex_paint;
@@ -66,9 +70,16 @@ pub use state::{RenderRequest, TvLevel, TvMode, UvEditor, UvTexture, ExtrudeKind
 pub use poly::named_sub_sets;
 pub mod keymap;
 pub mod settings;
+pub mod ui_custom;
+pub mod time_tags;
+pub mod time_display;
+pub mod rename_objects;
+pub mod viewport_config;
+pub mod paths;
+pub mod switcher;
 pub use keymap::{parse_chord, Chord, Key, Keymap};
 pub mod viewport;
-pub use viewport::{default_kinds, HideCategories, LayoutSplits, NavMode, Shading, Viewport, ViewportLayout, BrowserFor, Dialog, NewKeep, PendingFileAction, PolySettingsKind};
+pub use viewport::{default_kinds, Degradation, HideCategories, LayoutSplits, NavMode, Shading, Transparency, Viewport, ViewportLayout, BrowserFor, Dialog, UiFileKind, NewKeep, PendingFileAction, PolySettingsKind};
 pub use transform::{frame_for, frame_for_system, TransformFrame};
 pub use keymap::{keyboard_chart, write_keyboard_chart, ChartRow};
 

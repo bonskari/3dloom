@@ -88,8 +88,10 @@ pub struct BackupCompletion {
 pub fn prepare_now(state: &AppState) -> BackupJob {
     let count = state.prefs.auto_backup_count.max(1);
     let index = state.autosave.next_index.clamp(1, count);
+    // Configure User Paths > Auto Backup, else the data folder's.
+    let dir = state.paths.dir("Auto Backup").map(|d| d.to_path_buf()).unwrap_or_else(autoback_dir);
     BackupJob {
-        path: autoback_dir().join(format!("{}{index:02}.loom", state.prefs.auto_backup_name)),
+        path: dir.join(format!("{}{index:02}.loom", state.prefs.auto_backup_name)),
         document: crate::file::Document {
             format: crate::file::FORMAT,
             app: format!("3dloom {}", env!("CARGO_PKG_VERSION")),

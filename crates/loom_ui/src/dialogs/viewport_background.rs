@@ -1,5 +1,5 @@
 //! Viewport Background dialog (Alt+B): the image file (Files... opens the
-//! file browser), Aspect Ratio, Lock Zoom/Pan, Display Background, Apply
+//! file browser) or Use Environment Background, Aspect Ratio, Lock Zoom/Pan, Display Background, Apply
 //! Source and Display to All Views / Active Only, and the Viewport list that
 //! picks which viewport the dialog sets up. OK applies, Cancel discards.
 
@@ -14,6 +14,7 @@ use loom_commands::{Command, Dialog};
 struct Fields {
     viewport: usize,
     path: String,
+    use_environment: bool,
     aspect: BackgroundAspect,
     lock: bool,
     display: bool,
@@ -26,7 +27,7 @@ fn id() -> egui::Id {
 
 fn fields_of(app: &LoomApp, i: usize) -> Fields {
     let vp = &app.state.viewports[i];
-    Fields { viewport: i, path: vp.background.clone().unwrap_or_default(), aspect: vp.background_aspect, lock: vp.background_locked, display: vp.background_display, all_views: false }
+    Fields { viewport: i, path: vp.background.clone().unwrap_or_default(), use_environment: vp.background_use_environment, aspect: vp.background_aspect, lock: vp.background_locked, display: vp.background_display, all_views: false }
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
@@ -49,6 +50,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.add(egui::TextEdit::singleline(&mut f.path).desired_width(320.0).hint_text("/path/to/image.png"));
         });
         ui.label(format!("Current: {}", if f.path.trim().is_empty() { "None" } else { f.path.trim() }));
+        ui.checkbox(&mut f.use_environment, "Use Environment Background").on_hover_text("Show the Environment's background colour or map (Rendering > Environment)");
         ui.separator();
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -110,7 +112,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     }
     if ok {
         let path = f.path.trim().to_owned();
-        let r = app.dispatch(Command::SetViewportBackground { path: Some(path), aspect: Some(f.aspect.label().into()), lock: Some(f.lock), display: Some(f.display), all_views: Some(f.all_views) });
+        let r = app.dispatch(Command::SetViewportBackground { path: Some(path), use_environment: Some(f.use_environment), aspect: Some(f.aspect.label().into()), lock: Some(f.lock), display: Some(f.display), all_views: Some(f.all_views) });
         if let Err(e) = r {
             app.last_error = Some(e);
         }

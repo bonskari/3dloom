@@ -5,7 +5,8 @@ use crate::state::{ViewKind, ViewUndo};
 use loom_input::OrbitCamera;
 use serde::{Deserialize, Serialize};
 
-/// Legacy shading modes of the Shading viewport label menu.
+/// The Rendering Levels of the Shading viewport label menu and Viewport
+/// Configuration > Rendering Method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Shading {
     SmoothHighlights,
@@ -14,9 +15,20 @@ pub enum Shading {
     Flat,
     /// Physically based shading with lights and shadows (the Bevy renderer).
     Realistic,
+    /// Smooth shading without highlights.
+    Smooth,
+    /// Flat faces with highlights.
+    FacetsHighlights,
+    /// Flat faces, shaded, no highlights.
+    Facets,
+    /// Each object as its bounding box.
+    BoundingBox,
 }
 
 impl Shading {
+    /// Rendering Method's levels in the reference's order (Realistic is the Bevy view).
+    pub const LEVELS: [Shading; 8] = [Shading::SmoothHighlights, Shading::Smooth, Shading::FacetsHighlights, Shading::Facets, Shading::Flat, Shading::HiddenLine, Shading::Wireframe, Shading::BoundingBox];
+
     pub fn label(self) -> &'static str {
         match self {
             Shading::SmoothHighlights => "Smooth + Highlights",
@@ -24,7 +36,66 @@ impl Shading {
             Shading::HiddenLine => "Hidden Line",
             Shading::Flat => "Flat",
             Shading::Realistic => "Realistic",
+            Shading::Smooth => "Smooth",
+            Shading::FacetsHighlights => "Facets + Highlights",
+            Shading::Facets => "Facets",
+            Shading::BoundingBox => "Bounding Box",
         }
+    }
+
+    pub fn parse(s: &str) -> Option<Shading> {
+        Shading::LEVELS.into_iter().chain([Shading::Realistic]).find(|l| l.label().eq_ignore_ascii_case(s.trim()))
+    }
+
+    /// Shaded levels draw faces (Wireframe, Hidden Line and Bounding Box do not shade).
+    pub fn shaded(self) -> bool {
+        !matches!(self, Shading::Wireframe | Shading::BoundingBox)
+    }
+}
+
+/// Viewport Configuration > Rendering Method > Transparency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Transparency {
+    /// See-through objects draw opaque.
+    None,
+    /// A screen-door pattern.
+    Simple,
+    /// Blended (two passes).
+    #[default]
+    Best,
+}
+
+impl Transparency {
+    pub const ALL: [Transparency; 3] = [Transparency::None, Transparency::Simple, Transparency::Best];
+    pub fn label(self) -> &'static str {
+        match self {
+            Transparency::None => "None",
+            Transparency::Simple => "Simple",
+            Transparency::Best => "Best",
+        }
+    }
+}
+
+/// Viewport Configuration > Adaptive Degradation (O turns it on and off):
+/// while a view is being navigated and the frame rate drops under Maintain
+/// FPS, the active view draws at the Active level and the others at the
+/// General level.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Degradation {
+    pub on: bool,
+    /// General Degradation: the level the inactive views drop to.
+    pub general: Shading,
+    /// Active Degradation: the level the active view drops to.
+    pub active: Shading,
+    pub maintain_fps: f32,
+    pub never_degrade_selected: bool,
+    pub degrade_to_default_lighting: bool,
+}
+
+impl Default for Degradation {
+    fn default() -> Self {
+        Degradation { on: false, general: Shading::BoundingBox, active: Shading::Wireframe, maintain_fps: 5.0, never_degrade_selected: false, degrade_to_default_lighting: true }
     }
 }
 
@@ -56,9 +127,18 @@ pub struct Viewport {
     pub background_aspect: BackgroundAspect,
     /// Display Background.
     pub background_display: bool,
+    /// Use Environment Background: the Environment's background colour or
+    /// map shows instead of the image file.
+    pub background_use_environment: bool,
     /// Bumped by Update Background Image so the UI reloads the file.
     pub background_version: u32,
     pub view_undo: ViewUndo,
+    /// Rendering Method > Transparency.
+    pub transparency: Transparency,
+    /// Rendering Options > Disable Textures.
+    pub disable_textures: bool,
+    /// Rendering Options > Force 2-Sided.
+    pub force_two_sided: bool,
 }
 
 /// Viewport Background > Aspect Ratio.
@@ -122,8 +202,12 @@ impl Viewport {
             background_anchor: None,
             background_aspect: BackgroundAspect::Viewport,
             background_display: true,
+            background_use_environment: false,
             background_version: 0,
             view_undo: ViewUndo::default(),
+            transparency: Transparency::Best,
+            disable_textures: false,
+            force_two_sided: false,
         }
     }
 
@@ -303,6 +387,39 @@ pub struct HideCategories {
     pub helpers: bool,
 }
 
+/// Which Customize User Interface file a Save / Load dialog is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UiFileKind {
+    /// .cui: the user's toolbars, docking and button looks.
+    Toolbars,
+    /// .mnu: menus and quad menus.
+    Menus,
+    /// .clr: colours.
+    Colors,
+    /// .qop: Advanced Quad Menu Options.
+    QuadOptions,
+}
+
+impl UiFileKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            UiFileKind::Toolbars => "Toolbars",
+            UiFileKind::Menus => "Menus",
+            UiFileKind::Colors => "Colors",
+            UiFileKind::QuadOptions => "Quad Options",
+        }
+    }
+    /// The file extension.
+    pub fn ext(self) -> &'static str {
+        match self {
+            UiFileKind::Toolbars => "cui",
+            UiFileKind::Menus => "mnu",
+            UiFileKind::Colors => "clr",
+            UiFileKind::QuadOptions => "qop",
+        }
+    }
+}
+
 /// Modeless dialogs the UI shows; commands open them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dialog {
@@ -345,6 +462,12 @@ pub enum Dialog {
     /// current level into the compound type at `MaterialKind::TYPES[kind]`
     /// (a map: `MapType::ALL[kind]`).
     ReplaceMaterial { kind: u8, map: bool },
+    /// Material/Map Browser, Mtl Library > File > Open / Merge / Save As: a library file.
+    OpenMaterialLibrary,
+    MergeMaterialLibrary,
+    SaveMaterialLibrary,
+    /// Material Editor > Put to Library: the name to put the material under.
+    PutToLibrary,
     /// Material Editor Options.
     MaterialEditorOptions,
     /// Bitmap Parameters > View Image: Specify Cropping/Placement.
@@ -356,6 +479,8 @@ pub enum Dialog {
     ViewportBackground,
     /// Viewport Background > Files...: pick the image; then back to the dialog.
     BackgroundFile,
+    /// Environment > Environment Map: pick the background bitmap.
+    EnvironmentMap,
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,
@@ -377,6 +502,16 @@ pub enum Dialog {
     /// Customize User Interface > Keyboard > Save / Load (.kbd).
     SaveShortcuts,
     LoadShortcuts,
+    /// Customize > Configure User Paths.
+    ConfigurePaths,
+    /// Customize > Custom UI and Defaults Switcher.
+    Switcher,
+    /// Tools > Rename Objects.
+    RenameObjects,
+    /// File > Open of a file in other system units: Rescale or Adopt.
+    UnitsMismatch,
+    /// Customize User Interface > Toolbars / Menus / Quads / Colors: Save or Load a file.
+    UiFile { kind: UiFileKind, save: bool },
     /// Customize > Save / Load Custom UI Scheme (.ui).
     SaveCustomUiScheme,
     LoadCustomUiScheme,
@@ -497,6 +632,8 @@ pub enum Dialog {
     GroupName,
     /// Layer Manager > Layer Properties of `layer`.
     LayerProperties { layer: u32 },
+    /// Tools > Manage Scene Explorer.
+    ManageSceneExplorer,
 }
 
 /// What the Material/Map Browser is choosing.

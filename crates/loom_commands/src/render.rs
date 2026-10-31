@@ -77,7 +77,7 @@ pub struct ClonedFrame {
 /// A render in progress (set by the UI's renderer every frame it works).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderProgress {
-    /// Buckets finished and in total.
+    /// Bucket passes finished and in total.
     pub done: u32,
     pub total: u32,
     pub paused: bool,
@@ -198,7 +198,7 @@ fn blowup_rect(r: [f32; 4]) -> [f32; 4] {
     [cx - s * 0.5, cy - s * 0.5, cx + s * 0.5, cy + s * 0.5]
 }
 
-fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Value, String> {
+pub(crate) fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Value, String> {
     if state.rendered.progress.is_some() || state.pending_render.is_some() {
         return Err("a render is in progress".into());
     }
@@ -206,6 +206,12 @@ fn start(state: &mut AppState, mut req: RenderRequest) -> Result<Value, String> 
     req.selection = state.selection.iter().copied().collect();
     if req.settings.area == RenderArea::Selected && req.selection.is_empty() {
         return Err("Area to Render is Selected but nothing is selected".into());
+    }
+    if req.preview {
+        // Exposure Control's thumbnail: the Rendered Frame Window and Render Last stay as they are.
+        let out = json!({ "pending": true, "preview": true, "width": req.settings.width, "height": req.settings.height });
+        state.pending_render = Some(req);
+        return Ok(out);
     }
     let s = &req.settings;
     let name = viewport_name(state, req.viewport);
@@ -266,11 +272,11 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             // Production saves the Render Output file when Save File is on;
             // Iterative never writes files.
             let save_path = path.or_else(|| (!iterative && settings.save_file).then(|| settings.output_path.clone()).flatten());
-            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative })
+            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path, iterative, preview: false })
         }
         C::RenderIterative => {
             let settings = state.scene.render.clone();
-            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path: None, iterative: true })
+            start(state, RenderRequest { viewport: render_viewport(state), settings, selection: Vec::new(), save_path: None, iterative: true, preview: false })
         }
         C::RenderLast => {
             let Some(last) = state.rendered.last.clone() else {
@@ -279,8 +285,8 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             // The same view, area and settings; never saved to a file.
             start(state, RenderRequest { save_path: None, ..last })
         }
-        C::RenderSetup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, save_file, output } => {
-            if [width.is_none(), height.is_none(), image_aspect.is_none(), pixel_aspect.is_none(), lock_image_aspect.is_none(), lock_pixel_aspect.is_none(), render_hidden.is_none(), force_two_sided.is_none(), save_file.is_none(), output.is_none()].iter().all(|n| *n) {
+        C::RenderSetup { width, height, image_aspect, pixel_aspect, lock_image_aspect, lock_pixel_aspect, render_hidden, force_two_sided, atmospherics, effects, save_file, output } => {
+            if [width.is_none(), height.is_none(), image_aspect.is_none(), pixel_aspect.is_none(), lock_image_aspect.is_none(), lock_pixel_aspect.is_none(), render_hidden.is_none(), force_two_sided.is_none(), atmospherics.is_none(), effects.is_none(), save_file.is_none(), output.is_none()].iter().all(|n| *n) {
                 state.dialog = Some(Dialog::RenderSetup);
                 return Ok(json!({ "dialog": "RenderSetup" }));
             }
@@ -332,6 +338,12 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if let Some(v) = force_two_sided {
                 s.force_two_sided = v;
             }
+            if let Some(v) = atmospherics {
+                s.atmospherics = v;
+            }
+            if let Some(v) = effects {
+                s.effects = v;
+            }
             if let Some(p) = output {
                 let p = p.trim().to_owned();
                 // Choosing a file turns Save File on; an empty name clears it.
@@ -347,11 +359,84 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Render Setup", s)?;
             Ok(settings_json(&state.scene.render))
         }
-        C::BevyRendererSettings { antialiasing, supersampling, shadows, shadow_map_size, background, ambient } => {
+        C::BevyRendererSettings {
+            antialiasing,
+            filter,
+            filter_size,
+            supersampling,
+            passes,
+            shadows,
+            shadow_map_size,
+            area_shadows,
+            background,
+            ambient,
+            ambient_occlusion,
+            ao_quality,
+            ao_radius,
+            reflections,
+            sky_lighting,
+            sky_intensity,
+            ground,
+            tonemapper,
+            exposure,
+            dither,
+        } => {
             let mut s = state.scene.render.clone();
             let b = &mut s.bevy;
+            let ranged = |name: &str, v: f32, lo: f32, hi: f32| if v.is_finite() && (lo..=hi).contains(&v) { Ok(v) } else { Err(format!("{name} {v}: {lo} to {hi}")) };
             if let Some(v) = antialiasing {
                 b.antialiasing = v;
+            }
+            if let Some(v) = filter {
+                b.filter = v;
+            }
+            if let Some(v) = filter_size {
+                b.filter_size = ranged("filter size", v, 1.0, 10.0)?;
+            }
+            if let Some(v) = passes {
+                if !(1..=64).contains(&v) {
+                    return Err(format!("passes {v}: 1 to 64"));
+                }
+                b.passes = v;
+            }
+            if let Some(v) = area_shadows {
+                b.area_shadows = v;
+            }
+            if let Some(v) = background {
+                b.background = v;
+            }
+            if let Some(v) = ambient {
+                b.ambient = v;
+            }
+            if let Some(v) = ambient_occlusion {
+                b.ambient_occlusion = v;
+            }
+            if let Some(v) = ao_quality {
+                b.ao_quality = v;
+            }
+            if let Some(v) = ao_radius {
+                b.ao_radius = ranged("AO radius", v, 0.001, 1.0e6)?;
+            }
+            if let Some(v) = reflections {
+                b.reflections = v;
+            }
+            if let Some(v) = sky_lighting {
+                b.sky_lighting = v;
+            }
+            if let Some(v) = sky_intensity {
+                b.sky_intensity = ranged("sky intensity", v, 0.0, 10.0)?;
+            }
+            if let Some(v) = ground {
+                b.ground = ranged("ground", v, 0.0, 1.0)?;
+            }
+            if let Some(v) = tonemapper {
+                b.tonemapper = v;
+            }
+            if let Some(v) = exposure {
+                b.exposure = ranged("exposure", v, -10.0, 10.0)?;
+            }
+            if let Some(v) = dither {
+                b.dither = v;
             }
             if let Some(v) = supersampling {
                 if !(1..=4).contains(&v) {
@@ -367,13 +452,6 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     return Err(format!("shadow map size {v}: 512 to 8192"));
                 }
                 b.shadow_map_size = v;
-            }
-            let colour = |c: [f32; 3]| if c.iter().all(|v| (0.0..=1.0).contains(v)) { Ok(c) } else { Err(format!("colour {c:?}: 0-1")) };
-            if let Some(c) = background {
-                b.background = colour(c)?;
-            }
-            if let Some(c) = ambient {
-                b.ambient = colour(c)?;
             }
             set_settings(state, "Render Setup", s)?;
             Ok(settings_json(&state.scene.render))

@@ -845,6 +845,35 @@ pub struct Prefs {
     /// Preferences > Viewports > Grid Nudge Distance (Nudge Grid Up / Down, default 1.0).
     #[serde(default = "default_nudge")]
     pub grid_nudge_distance: f32,
+    /// Preferences > General > Floating windows as separate OS windows: the
+    /// Material Editor, Track View and the other modeless floaters open as
+    /// windows of their own that can leave the main window (default on; the
+    /// UI falls back to in-app windows where the backend can't).
+    #[serde(default = "default_true")]
+    pub floating_os_windows: bool,
+    /// Preferences > Viewports > Display World Axis (the tripod in each view's corner).
+    pub display_world_axis: bool,
+    /// Preferences > Viewports > Mask Viewport to Safe Region.
+    pub mask_to_safe_region: bool,
+    /// Preferences > Viewports > Mouse Control: Zoom About Mouse Point (orthographic, perspective views).
+    pub zoom_about_mouse_ortho: bool,
+    pub zoom_about_mouse_persp: bool,
+    /// Preferences > Viewports > Mouse Control: Right Click Menu over Selected Only.
+    pub right_click_selected_only: bool,
+    /// Preferences > Viewports > Mouse Control: Wheel Zoom Increment (a multiple of the program's step).
+    pub wheel_zoom_increment: f32,
+    /// Preferences > General > UI Display: Large Toolbar Buttons.
+    pub large_toolbar_buttons: bool,
+    /// Preferences > General > UI Display: Flyout Time (ms a button is held before its flyout opens).
+    pub flyout_time_ms: f32,
+    /// Preferences > General > UI Display: Topology Dependence Warning.
+    pub topology_warning: bool,
+    /// Preferences > Files: Backup on Save (the previous file is kept in the autoback folder).
+    pub backup_on_save: bool,
+    /// Preferences > Files: Increment on Save (Save writes the next numbered name).
+    pub increment_on_save: bool,
+    /// Preferences > Files: Zoom Extents on Import.
+    pub zoom_extents_on_import: bool,
 }
 
 fn default_nudge() -> f32 {
@@ -878,13 +907,26 @@ impl Default for Prefs {
             local_center_during_animate: true,
             recent_files_count: 10,
             grid_nudge_distance: 1.0,
+            floating_os_windows: true,
+            display_world_axis: true,
+            mask_to_safe_region: false,
+            zoom_about_mouse_ortho: true,
+            zoom_about_mouse_persp: false,
+            right_click_selected_only: false,
+            wheel_zoom_increment: 1.0,
+            large_toolbar_buttons: false,
+            flyout_time_ms: 300.0,
+            topology_warning: true,
+            backup_on_save: false,
+            increment_on_save: false,
+            zoom_extents_on_import: true,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 34] = [
+    pub const NAMES: [&'static str; 47] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -892,6 +934,9 @@ impl Prefs {
         "Center Box Handle", "Rotate Free Rotation", "Rotate Show Tripod", "Rotate Screen Handle", "Rotate Show Pie Slice", "Rotate Angle Data",
         "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
         "Grid Nudge Distance", "Viewport Texture Max Size", "Viewport Texture Budget MB",
+        "Floating Windows as OS Windows", "Display World Axis", "Mask Viewport to Safe Region", "Zoom About Mouse Point Orthographic", "Zoom About Mouse Point Perspective",
+        "Right Click Menu over Selected Only", "Wheel Zoom Increment", "Large Toolbar Buttons", "Flyout Time", "Topology Dependence Warning", "Backup on Save",
+        "Increment on Save", "Zoom Extents on Import",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -918,6 +963,19 @@ impl Prefs {
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
             "Recent Files in File Menu" => self.recent_files_count as f64,
             "Grid Nudge Distance" => self.grid_nudge_distance as f64,
+            "Floating Windows as OS Windows" => b(self.floating_os_windows),
+            "Display World Axis" => b(self.display_world_axis),
+            "Mask Viewport to Safe Region" => b(self.mask_to_safe_region),
+            "Zoom About Mouse Point Orthographic" => b(self.zoom_about_mouse_ortho),
+            "Zoom About Mouse Point Perspective" => b(self.zoom_about_mouse_persp),
+            "Right Click Menu over Selected Only" => b(self.right_click_selected_only),
+            "Wheel Zoom Increment" => self.wheel_zoom_increment as f64,
+            "Large Toolbar Buttons" => b(self.large_toolbar_buttons),
+            "Flyout Time" => self.flyout_time_ms as f64,
+            "Topology Dependence Warning" => b(self.topology_warning),
+            "Backup on Save" => b(self.backup_on_save),
+            "Increment on Save" => b(self.increment_on_save),
+            "Zoom Extents on Import" => b(self.zoom_extents_on_import),
             "Transform Gizmos" => b(self.gizmos.enabled),
             "Show Axis Labels" => b(self.gizmos.show_axis_labels),
             "Allow Multiple Gizmos" => b(self.gizmos.allow_multiple),
@@ -968,6 +1026,19 @@ impl Prefs {
             "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
             "Grid Nudge Distance" => self.grid_nudge_distance = f.max(0.0),
+            "Floating Windows as OS Windows" => self.floating_os_windows = on,
+            "Display World Axis" => self.display_world_axis = on,
+            "Mask Viewport to Safe Region" => self.mask_to_safe_region = on,
+            "Zoom About Mouse Point Orthographic" => self.zoom_about_mouse_ortho = on,
+            "Zoom About Mouse Point Perspective" => self.zoom_about_mouse_persp = on,
+            "Right Click Menu over Selected Only" => self.right_click_selected_only = on,
+            "Wheel Zoom Increment" => self.wheel_zoom_increment = f.clamp(0.1, 10.0),
+            "Large Toolbar Buttons" => self.large_toolbar_buttons = on,
+            "Flyout Time" => self.flyout_time_ms = f.clamp(0.0, 2000.0),
+            "Topology Dependence Warning" => self.topology_warning = on,
+            "Backup on Save" => self.backup_on_save = on,
+            "Increment on Save" => self.increment_on_save = on,
+            "Zoom Extents on Import" => self.zoom_extents_on_import = on,
             "Transform Gizmos" => self.gizmos.enabled = on,
             "Show Axis Labels" => self.gizmos.show_axis_labels = on,
             "Allow Multiple Gizmos" => self.gizmos.allow_multiple = on,
@@ -1044,10 +1115,47 @@ pub enum DisplayUnits {
     DecimalFeet,
     FeetDecimalInches,
     Custom { name: String, value: f32, unit: SystemUnit },
+    FractionalInches,
+    FractionalFeet,
+    FeetFractionalInches,
 }
 
 impl DisplayUnits {
-    pub const NAMES: [&'static str; 9] = ["Generic", "Millimeters", "Centimeters", "Meters", "Kilometers", "Decimal Inches", "Decimal Feet", "Feet w/ Decimal Inches", "Custom"];
+    pub const NAMES: [&'static str; 12] = ["Generic", "Millimeters", "Centimeters", "Meters", "Kilometers", "Fractional Inches", "Decimal Inches", "Fractional Feet", "Decimal Feet", "Feet w/ Fractional Inches", "Feet w/ Decimal Inches", "Custom"];
+
+    /// The US Standard units, in the Units Setup list's order.
+    pub const US: [&'static str; 6] = ["Fractional Inches", "Decimal Inches", "Fractional Feet", "Decimal Feet", "Feet w/ Fractional Inches", "Feet w/ Decimal Inches"];
+
+    /// The fraction denominators the fractional units offer.
+    pub const FRACTIONS: [u32; 9] = [1, 2, 4, 8, 10, 16, 32, 64, 100];
+
+    /// A display unit by its Units Setup name (Custom takes its own fields).
+    pub fn by_name(name: &str) -> Option<DisplayUnits> {
+        Some(match name {
+            "Generic" => DisplayUnits::Generic,
+            "Millimeters" => DisplayUnits::Millimeters,
+            "Centimeters" => DisplayUnits::Centimeters,
+            "Meters" => DisplayUnits::Meters,
+            "Kilometers" => DisplayUnits::Kilometers,
+            "Fractional Inches" => DisplayUnits::FractionalInches,
+            "Decimal Inches" => DisplayUnits::DecimalInches,
+            "Fractional Feet" => DisplayUnits::FractionalFeet,
+            "Decimal Feet" => DisplayUnits::DecimalFeet,
+            "Feet w/ Fractional Inches" => DisplayUnits::FeetFractionalInches,
+            "Feet w/ Decimal Inches" => DisplayUnits::FeetDecimalInches,
+            _ => return None,
+        })
+    }
+
+    /// Shown with a fraction (Fractional Inches / Feet, Feet w/ Fractional Inches).
+    pub fn fractional(&self) -> bool {
+        matches!(self, DisplayUnits::FractionalInches | DisplayUnits::FractionalFeet | DisplayUnits::FeetFractionalInches)
+    }
+
+    /// Feet and inches together (where Default Units applies).
+    pub fn feet_and_inches(&self) -> bool {
+        matches!(self, DisplayUnits::FeetDecimalInches | DisplayUnits::FeetFractionalInches)
+    }
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -1060,6 +1168,9 @@ impl DisplayUnits {
             DisplayUnits::DecimalFeet => "Decimal Feet",
             DisplayUnits::FeetDecimalInches => "Feet w/ Decimal Inches",
             DisplayUnits::Custom { .. } => "Custom",
+            DisplayUnits::FractionalInches => "Fractional Inches",
+            DisplayUnits::FractionalFeet => "Fractional Feet",
+            DisplayUnits::FeetFractionalInches => "Feet w/ Fractional Inches",
         }
     }
 
@@ -1071,8 +1182,8 @@ impl DisplayUnits {
             DisplayUnits::Centimeters => (0.01, "cm".into()),
             DisplayUnits::Meters => (1.0, "m".into()),
             DisplayUnits::Kilometers => (1000.0, "km".into()),
-            DisplayUnits::DecimalInches => (0.0254, "\"".into()),
-            DisplayUnits::DecimalFeet | DisplayUnits::FeetDecimalInches => (0.3048, "'".into()),
+            DisplayUnits::DecimalInches | DisplayUnits::FractionalInches => (0.0254, "\"".into()),
+            DisplayUnits::DecimalFeet | DisplayUnits::FeetDecimalInches | DisplayUnits::FractionalFeet | DisplayUnits::FeetFractionalInches => (0.3048, "'".into()),
             DisplayUnits::Custom { name, value, unit } => ((*value as f64) * unit.metres(), name.clone()),
         })
     }
@@ -1084,11 +1195,28 @@ pub struct UnitsSetup {
     /// System Unit Setup: 1 unit = `system_scale` system units.
     pub system_scale: f32,
     pub display: DisplayUnits,
+    /// The fractional units' denominator (1/8 shows eighths).
+    #[serde(default = "eighths")]
+    pub fraction: u32,
+    /// Default Units of Feet w/ Inches: a number typed without a unit is feet (else inches).
+    #[serde(default = "feet")]
+    pub default_feet: bool,
+    /// System Unit Setup > Respect System Units in Files.
+    #[serde(default = "feet")]
+    pub respect_system_units: bool,
+}
+
+fn eighths() -> u32 {
+    8
+}
+
+fn feet() -> bool {
+    true
 }
 
 impl Default for UnitsSetup {
     fn default() -> Self {
-        Self { system_unit: SystemUnit::Inches, system_scale: 1.0, display: DisplayUnits::Generic }
+        Self { system_unit: SystemUnit::Inches, system_scale: 1.0, display: DisplayUnits::Generic, fraction: 8, default_feet: true, respect_system_units: true }
     }
 }
 
@@ -1118,16 +1246,18 @@ impl UnitsSetup {
             .collect();
         let scene_metres = self.system_scale as f64 * self.system_unit.metres();
         if let Some((ft, rest)) = t.split_once('\'') {
-            let feet: f64 = ft.trim().parse().ok()?;
+            let feet: f64 = number(ft)?;
             let rest = rest.trim().trim_end_matches('"').trim();
-            let inches: f64 = if rest.is_empty() { 0.0 } else { rest.parse().ok()? };
+            let inches: f64 = if rest.is_empty() { 0.0 } else { number(rest)? };
             let sign = if ft.trim().starts_with('-') { -1.0 } else { 1.0 };
             return Some((feet + sign * inches / 12.0) * (0.3048 / scene_metres));
         }
         let i = t.find(|c: char| c.is_alphabetic() || c == '"').unwrap_or(t.len());
-        let v: f64 = t[..i].trim().parse().ok()?;
+        let v: f64 = number(&t[..i])?;
         let unit = t[i..].trim().to_ascii_lowercase();
         let metres = match unit.as_str() {
+            // Feet w/ Inches: a bare number is in the Default Units.
+            "" if self.display.feet_and_inches() && !self.default_feet => 0.0254,
             "" => return Some(v / self.display_factor().0),
             "\"" | "in" => 0.0254,
             "ft" => 0.3048,
@@ -1144,6 +1274,38 @@ impl UnitsSetup {
     pub fn format(&self, v: f32, decimals: usize) -> String {
         let (f, suffix) = self.display_factor();
         let d = v as f64 * f;
+        if self.display.fractional() {
+            let den = self.fraction.max(1) as f64;
+            // A whole number and a reduced fraction of `den`: 3 1/8.
+            let frac = |x: f64| {
+                let sign = if x < 0.0 { "-" } else { "" };
+                let n = (x.abs() * den).round() as u64;
+                let (whole, mut num) = (n / den as u64, n % den as u64);
+                let mut d = den as u64;
+                let g = gcd(num, d);
+                if g > 1 {
+                    num /= g;
+                    d /= g;
+                }
+                match (whole, num) {
+                    (w, 0) => format!("{sign}{w}"),
+                    (0, n) => format!("{sign}{n}/{d}"),
+                    (w, n) => format!("{sign}{w} {n}/{d}"),
+                }
+            };
+            return match self.display {
+                DisplayUnits::FeetFractionalInches => {
+                    let total_in = d * 12.0;
+                    let sign = if total_in < 0.0 { "-" } else { "" };
+                    let feet = (total_in.abs() / 12.0).trunc();
+                    let inches = total_in.abs() - feet * 12.0;
+                    // 11 63/64" can round up to a whole foot.
+                    let (feet, inches) = if (inches * den).round() >= 12.0 * den { (feet + 1.0, 0.0) } else { (feet, inches) };
+                    format!("{sign}{}'{}\"", feet as i64, frac(inches))
+                }
+                _ => format!("{}{suffix}", frac(d)),
+            };
+        }
         let rounded = (d * 10f64.powi(decimals as i32)).round() / 10f64.powi(decimals as i32);
         if suffix.is_empty() {
             return trim_float(rounded, decimals);
@@ -1155,6 +1317,29 @@ impl UnitsSetup {
         }
         format!("{}{suffix}", trim_float(rounded, decimals))
     }
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a.max(1) } else { gcd(b, a % b) }
+}
+
+/// A number, a fraction (1/8) or a whole number and a fraction (3 1/8).
+fn number(text: &str) -> Option<f64> {
+    let t = text.trim();
+    if let Ok(v) = t.parse::<f64>() {
+        return Some(v);
+    }
+    let (whole, frac) = match t.rsplit_once(' ') {
+        Some((w, f)) => (w.trim().parse::<f64>().ok()?, f),
+        None => (0.0, t),
+    };
+    let (n, d) = frac.split_once('/')?;
+    let (n, d): (f64, f64) = (n.trim().parse().ok()?, d.trim().parse().ok()?);
+    if d == 0.0 {
+        return None;
+    }
+    let sign = if whole < 0.0 || (whole == 0.0 && t.starts_with('-')) { -1.0 } else { 1.0 };
+    Some(sign * (whole.abs() + n.abs() / d))
 }
 
 /// Decimal string with at most `decimals` places and at least one.
@@ -1294,11 +1479,21 @@ pub struct ViewCubeSettings {
     pub inactive_opacity: f32,
     /// Show Compass Below the ViewCube.
     pub compass: bool,
+    /// When Dragging on the ViewCube > Snap to Closest View.
+    pub snap_to_closest: bool,
+    /// When Clicking on the ViewCube > Fit-to-View on View Change.
+    pub fit_to_view: bool,
+    /// Use Animated Transitions when Switching Views.
+    pub animated: bool,
+    /// Keep Scene Upright (no orbiting over the top while dragging the cube).
+    pub keep_upright: bool,
+    /// Angle of North (degrees): the cube's Front face turned about world Z.
+    pub north: f32,
 }
 
 impl Default for ViewCubeSettings {
     fn default() -> Self {
-        Self { show: true, all_views: false, size: 1, inactive_opacity: 0.5, compass: true }
+        Self { show: true, all_views: false, size: 1, inactive_opacity: 0.5, compass: true, snap_to_closest: true, fit_to_view: false, animated: true, keep_upright: false, north: 0.0 }
     }
 }
 
@@ -1479,6 +1674,8 @@ pub struct AppState {
     /// Nodes hidden by Isolate Selection (restored on exit).
     pub isolation: Option<Vec<NodeId>>,
     pub expert_mode: bool,
+    /// Tools > Display Floater is open.
+    pub display_floater: bool,
     pub show_main_toolbar: bool,
     pub show_ribbon: bool,
     /// Customize > Show UI > Show Command Panel.
@@ -1513,6 +1710,8 @@ pub struct AppState {
     pub material_editor_open: bool,
     /// Material Editor > Material/Map Navigator: its own modeless window.
     pub material_navigator_open: bool,
+    /// The Material Editor's current material library (Put to Library, Mtl Library).
+    pub material_library: crate::material_library::MaterialLibraryState,
     /// Bumped by Reload Bitmaps: the viewports read their image files again.
     pub bitmap_generation: u64,
     /// Display panel and viewport display settings (Display Color, statistics, Object Color dialog...).
@@ -1563,6 +1762,12 @@ pub struct AppState {
     pub default_units: UnitsSetup,
     /// Customize User Interface > Keyboard: the user's shortcut edits.
     pub custom_keys: crate::keymap::CustomKeys,
+    /// Customize User Interface > Toolbars, Quads, Menus, Colors and the rollout order.
+    pub ui_custom: crate::ui_custom::UiCustom,
+    /// `ui_custom` as loaded at startup (Revert to Startup Layout).
+    pub startup_custom: crate::ui_custom::UiCustom,
+    /// Show Quad Menu asked the UI to open this quad set at the pointer.
+    pub quad_request: Option<String>,
     /// File > Recent: opened and saved scenes, newest first.
     pub recent_files: Vec<std::path::PathBuf>,
     /// Set when the selection region shape changes so the UI drops a
@@ -1697,6 +1902,10 @@ pub struct AppState {
     pub soft_edit: bool,
     /// The Track View window (Curve Editor / Dope Sheet).
     pub track_view: crate::track_view::TrackViewState,
+    /// Tools > Scene Explorer windows (saved with the scene).
+    pub explorers: crate::explorer::Explorers,
+    /// Graph Editors > Schematic View windows (saved with the scene).
+    pub schematics: crate::schematic::Schematics,
     /// Track bar: each node's tracks and key times, by (version, geom_version).
     pub key_time_cache: crate::anim_cmds::KeyTimeCache,
     /// Bone Tools > Bone Edit Mode.
@@ -1744,6 +1953,20 @@ pub struct AppState {
     pub bones_ik_chain: bool,
     pub current_frame: i32,
     pub frame_range: (i32, i32),
+    /// The status bar's time tags (saved with the scene).
+    pub time_tags: Vec<crate::time_tags::TimeTag>,
+    /// Time Configuration > Time Display and Key Steps (saved with the scene).
+    pub time_config: crate::time_display::TimeConfig,
+    /// Viewport Configuration > Adaptive Degradation.
+    pub degradation: crate::viewport::Degradation,
+    /// The file the Units Mismatch dialog is open for.
+    pub units_mismatch: Option<std::path::PathBuf>,
+    /// Customize > Configure User Paths (saved in the settings file).
+    pub paths: crate::paths::UserPaths,
+    /// Grab Viewport asked the UI to capture this viewport.
+    pub grab_request: Option<usize>,
+    /// New and reset scenes take the saved startup viewport configuration (the app sets it; tests do not).
+    pub use_viewport_defaults: bool,
     pub fps: f32,
     /// Status bar coordinate display: Offset mode (vs Absolute).
     pub offset_mode: bool,
@@ -1796,6 +2019,8 @@ pub struct AppState {
     pub render_to_texture_open: bool,
     /// The Rendered Frame Window, its image and the render in progress.
     pub rendered: crate::render::RenderedFrame,
+    /// The Environment and Effects dialog (open panel, exposure preview).
+    pub environment_ui: crate::environment::EnvironmentUi,
 }
 
 /// A render for the UI's renderer: viewport `viewport` with `settings`
@@ -1810,6 +2035,9 @@ pub struct RenderRequest {
     pub save_path: Option<String>,
     /// Iterative: Region and Selected keep the rest of the window's image.
     pub iterative: bool,
+    /// Exposure Control > Render Preview: into the rollout's thumbnail
+    /// (`AppState::environment_ui`), not the Rendered Frame Window.
+    pub preview: bool,
 }
 
 impl Default for AppState {
@@ -1840,6 +2068,7 @@ impl AppState {
             show_statistics: false,
             isolation: None,
             expert_mode: false,
+            display_floater: false,
             show_main_toolbar: true,
             show_ribbon: true,
             show_command_panel: true,
@@ -1862,6 +2091,7 @@ impl AppState {
             dialog: None,
             material_editor_open: false,
             material_navigator_open: false,
+            material_library: Default::default(),
             bitmap_generation: 0,
             display: Default::default(),
             dialog_purpose: DialogPurpose::Select,
@@ -1890,6 +2120,9 @@ impl AppState {
             units: UnitsSetup::default(),
             default_units: UnitsSetup::default(),
             custom_keys: Default::default(),
+            ui_custom: Default::default(),
+            startup_custom: Default::default(),
+            quad_request: None,
             recent_files: Vec::new(),
             region_points_reset: false,
             manipulate: false,
@@ -1968,6 +2201,8 @@ impl AppState {
             import_report: Vec::new(),
             soft_edit: false,
             track_view: Default::default(),
+            explorers: Default::default(),
+            schematics: Default::default(),
             key_time_cache: Default::default(),
             bone_edit_mode: false,
             display_bones_only: false,
@@ -1993,6 +2228,13 @@ impl AppState {
             skin_morph_current: None,
             skin_morph_bone: None,
             bones_ik_chain: false,
+            time_tags: Vec::new(),
+            time_config: Default::default(),
+            degradation: Default::default(),
+            units_mismatch: None,
+            paths: Default::default(),
+            grab_request: None,
+            use_viewport_defaults: false,
             current_frame: 0,
             frame_range: (0, 100),
             fps: 30.0,
@@ -2006,6 +2248,7 @@ impl AppState {
             pending_bake: None,
             render_to_texture_open: false,
             rendered: Default::default(),
+            environment_ui: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,

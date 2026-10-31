@@ -27,7 +27,7 @@ pub(crate) const BAKE_LAYER: usize = 1022;
 /// The default key light is on this layer too, so a bake with direct light sees it.
 pub(crate) const BAKE_KEY_LAYER: usize = 1021;
 /// Slot of the bake camera.
-const BAKE_SLOT: u32 = u32::MAX - 1;
+pub(crate) const BAKE_SLOT: u32 = u32::MAX - 1;
 /// Frames a bake renders before it is read (new pipelines, the target image and the shadow maps settle).
 const BAKE_FRAMES: usize = 4;
 
@@ -92,7 +92,7 @@ pub struct BakeObject<'a> {
     pub wire_color: [u8; 3],
 }
 
-fn srgb_to_linear(c: u8) -> f32 {
+pub(crate) fn srgb_to_linear(c: u8) -> f32 {
     let x = c as f32 / 255.0;
     if x <= 0.04045 {
         x / 12.92
@@ -101,7 +101,7 @@ fn srgb_to_linear(c: u8) -> f32 {
     }
 }
 
-fn linear_to_srgb(x: f32) -> u8 {
+pub(crate) fn linear_to_srgb(x: f32) -> u8 {
     let x = x.clamp(0.0, 1.0);
     let s = if x <= 0.0031308 { x * 12.92 } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 };
     (s * 255.0).round() as u8

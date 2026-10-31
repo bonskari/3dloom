@@ -684,6 +684,7 @@ mod tests {
         });
         app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         let light = Some(BevyRenderer::spawn_key_light(&mut app));
+        let fill = Some(BevyRenderer::spawn_fill_light(&mut app));
         BevyRenderer {
             gpu_poses: None,
             app,
@@ -695,12 +696,22 @@ mod tests {
             textures: HashMap::new(),
             images: Default::default(),
             light,
+            fill,
             samples: Vec::new(),
             scene_lights: HashMap::new(),
             bounds: None,
             settle: 3,
             hidden: HashMap::new(),
             render: None,
+            scale: 1.0,
+            light_pass: 0,
+            env: Default::default(),
+            view_envs: HashMap::new(),
+            env_map: None,
+            volumes: Vec::new(),
+            metered: HashMap::new(),
+            meter: None,
+            meter_next: 0,
         }
     }
 

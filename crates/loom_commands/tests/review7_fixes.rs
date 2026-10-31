@@ -172,7 +172,7 @@ fn exported_skin_with_a_pivot_offset_skins_in_place() {
 #[test]
 fn skin_vertex_selection_does_not_leak_between_skins() {
     let mut s = AppState::new();
-    let mut skin = |s: &mut AppState, segs: f64, x: f32| {
+    let skin = |s: &mut AppState, segs: f64, x: f32| {
         execute(s, Command::CreatePrimitive { kind: PrimitiveKind::Cylinder, position: [x, 0.0, 0.0], size: [2.0, 2.0, 20.0] }).unwrap();
         let id = *s.selection.iter().next().unwrap();
         execute(s, Command::SetParameter { id: id.0, name: "Height Segments".into(), value: segs }).unwrap();

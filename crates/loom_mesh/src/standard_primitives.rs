@@ -811,6 +811,14 @@ pub fn dummy_mesh(size: f32) -> Mesh {
     m
 }
 
+/// Isolated vertices only: no faces or edges to draw, just the points that
+/// give a line-drawn helper its extents.
+pub fn points_mesh(points: &[Vec3]) -> Mesh {
+    let mut m = Mesh::new();
+    m.vertices.extend(points.iter().map(|p| Vertex::new(*p, None)));
+    m
+}
+
 #[cfg(test)]
 mod determinism_tests {
     /// Corner data (Edit Normals groups, Unwrap edits) is keyed by half-edge

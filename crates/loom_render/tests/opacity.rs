@@ -131,6 +131,7 @@ fn viewport_opacity_pixels_reveal_background_while_legacy_rgba_keeps_decal_colou
                 true,
                 &textures,
                 None,
+                0,
             );
         }
         encoder.copy_texture_to_buffer(

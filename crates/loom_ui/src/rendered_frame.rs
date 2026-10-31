@@ -199,7 +199,8 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let screen = ctx.screen_rect().size();
     let (iw, ih) = app.state.rendered.image.as_ref().map_or((app.state.scene.render.width as f32, app.state.scene.render.height as f32), |i| (i.width() as f32, i.height() as f32));
     let size = egui::vec2((iw + 24.0).clamp(760.0, (screen.x - 40.0).max(760.0)), (ih + 170.0).clamp(320.0, (screen.y - 40.0).max(320.0)));
-    egui::Window::new(title).id(egui::Id::new("Rendered Frame Window")).open(open).resizable(true).default_size(size).show(ctx, |ui| {
+    let window = egui::Window::new(title.clone()).id(egui::Id::new("Rendered Frame Window")).resizable(true).default_size(size);
+    crate::os_window::OsWindow::new("Rendered Frame Window", title, size).show(ctx, open, window, |ui| {
         // Rendering controls.
         ui.horizontal(|ui| {
             ui.label("Area to Render:");
@@ -247,7 +248,7 @@ fn main_window(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
         if let Some(p) = app.state.rendered.progress {
             ui.horizontal(|ui| {
                 let secs = app.render_job.as_ref().map(|j| j.elapsed().as_secs_f32()).unwrap_or(0.0);
-                let label = format!("Rendering bucket {} of {}  {secs:.1} s", (p.done + 1).min(p.total), p.total);
+                let label = format!("Rendering pass {} of {}  {secs:.1} s", (p.done + 1).min(p.total), p.total);
                 ui.add(egui::ProgressBar::new(p.done as f32 / p.total.max(1) as f32).text(label).desired_width(320.0));
                 if ui.button(if p.paused { "Resume" } else { "Pause" }).clicked() {
                     let _ = app.dispatch(Command::PauseRender);
@@ -289,7 +290,10 @@ pub fn viewport_controls(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, lock_
 pub fn render_buttons(ui: &mut egui::Ui, app: &mut LoomApp, salt: &str, setup_button: bool) {
     ui.horizontal(|ui| {
         if setup_button && ui.button("Render Setup...").clicked() {
-            let _ = app.dispatch(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, save_file: None, output: None });
+            let _ = app.dispatch(Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: None });
+        }
+        if setup_button && ui.button("Environment and Effects").on_hover_text("Environment and Effects dialog (8)").clicked() {
+            let _ = app.dispatch(Command::EnvironmentDialogToggle);
         }
         let iterative = app.state.rendered.iterative;
         egui::ComboBox::from_id_salt(salt).selected_text(if iterative { "Iterative" } else { "Production" }).show_ui(ui, |ui| {
@@ -321,7 +325,8 @@ fn clone_windows(ctx: &egui::Context, app: &mut LoomApp) {
     let mut closed = Vec::new();
     for (id, title) in clones {
         let mut open = true;
-        egui::Window::new(title).id(egui::Id::new(("Rendered Frame Window clone", id))).open(&mut open).resizable(true).default_size(egui::vec2(520.0, 420.0)).show(ctx, |ui| {
+        let window = egui::Window::new(title.clone()).id(egui::Id::new(("Rendered Frame Window clone", id))).resizable(true).default_size(egui::vec2(520.0, 420.0));
+        crate::os_window::OsWindow::new(format!("Rendered Frame Window clone {id}"), title, [520.0, 420.0]).show(ctx, &mut open, window, |ui| {
             let Some(c) = app.state.rendered.clones.iter().find(|c| c.id == id) else { return };
             let (img, channels) = (c.image.clone(), c.channels);
             let zoom = app.rfw.main.zoom;
