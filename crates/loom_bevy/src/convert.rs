@@ -594,6 +594,8 @@ mod tests {
             let mut lm = LoomMaterial::new("m");
             lm.glossiness.set(gloss);
             lm.specular_level.set(level);
+            // A white specular colour (the reference's default is 0.9 grey).
+            lm.specular.set(bevy::math::Vec3::ONE);
             let m = material_from_loom(Some(&lm), [0, 0, 0]);
             let alpha = m.perceptual_roughness.powi(2);
             let f0 = 0.16 * m.reflectance * m.reflectance;
