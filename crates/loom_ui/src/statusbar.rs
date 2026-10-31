@@ -528,8 +528,8 @@ fn tag_dialog(ctx: &egui::Context, app: &mut LoomApp) {
                         // Unlock first so a new time can apply, lock last.
                         let _ = app.dispatch(Command::EditTimeTag { name: name.clone(), new_name: None, time: None, lock: Some(false), relative_to: Some(d.relative_to.clone()) });
                         let moved = (old_time != Some(d.time)).then_some(d.time);
-                        let r = app.dispatch(Command::EditTimeTag { name: name.clone(), new_name: Some(d.name.clone()), time: moved, lock: Some(d.lock), relative_to: None });
-                        r
+
+                        app.dispatch(Command::EditTimeTag { name: name.clone(), new_name: Some(d.name.clone()), time: moved, lock: Some(d.lock), relative_to: None })
                     }
                 };
                 if r.is_ok() {

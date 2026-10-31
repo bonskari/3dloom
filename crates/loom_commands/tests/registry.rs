@@ -25,7 +25,7 @@ fn every_variant_is_in_registry_and_roundtrips_json() {
         assert!(!info.description.is_empty(), "{} lacks description", info.name);
         assert!(info.args_schema.is_object(), "{} schema", info.name);
         // Unit commands must deserialize from just their name.
-        if info.args_schema["properties"].as_object().map_or(true, |p| p.is_empty()) {
+        if info.args_schema["properties"].as_object().is_none_or(|p| p.is_empty()) {
             let cmd: Command = serde_json::from_value(json!({ "cmd": info.name })).unwrap();
             let back = serde_json::to_value(&cmd).unwrap();
             assert_eq!(back["cmd"], info.name);

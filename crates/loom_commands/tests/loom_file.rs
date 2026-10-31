@@ -267,7 +267,7 @@ fn animation_survives_save_and_open() {
     let mut t = AppState::new();
     t.scene = doc.scene.clone();
     doc.settings.apply_to(&mut t);
-    assert_eq!(t.playback.real_time, false);
+    assert!(!t.playback.real_time);
     assert_eq!(t.playback.speed, 2.0);
     assert_eq!(t.playback.direction, loom_commands::anim_cmds::PlayDirection::PingPong);
     assert_eq!(t.default_tangent.0, loom_scene::anim::TangentType::Linear);

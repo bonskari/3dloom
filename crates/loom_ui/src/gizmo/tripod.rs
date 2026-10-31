@@ -26,7 +26,7 @@ pub fn draw(painter: &egui::Painter, app: &LoomApp, l: &GizmoLayout, p: &Project
     for a in [Axis::X, Axis::Y, Axis::Z] {
         if let Some((s, e)) = axis_segment(&l, p, a, 0.0, 1.0) {
             let color = if constrained(app.state.axis_constraint, a) { egui::Color32::from_rgb(230, 60, 60) } else { egui::Color32::from_gray(210) };
-            painter.line_segment([s, e], egui::Stroke::new(1.5, color));
+            painter.line_segment([s, e], egui::Stroke::new(1.5_f32, color));
             let d = pos_sub(e, s).normalize_or_zero();
             painter.text(egui::pos2(e.x + d.x * 8.0, e.y + d.y * 8.0), egui::Align2::CENTER_CENTER, a.label(), egui::FontId::proportional(11.0), color);
         }

@@ -77,15 +77,15 @@ impl<'a> Cfb<'a> {
         }
         let mut cfb = Cfb { data, sector, mini_sector: 1 << mini_shift, mini_cutoff, fat, mini_fat: Vec::new(), mini_stream: Vec::new(), entries: Vec::new() };
         let dir = cfb.read_chain(dir_start, None)?;
-        for e in dir.chunks_exact(128) {
+        for e in dir.as_chunks::<128>().0 {
             let len = (u16_at(e, 64)? as usize).min(64);
-            let units: Vec<u16> = e[..len.saturating_sub(2)].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let units: Vec<u16> = e[..len.saturating_sub(2)].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
             let name = String::from_utf16_lossy(&units);
             cfb.entries.push((name, e[66], u32_at(e, 116)?, u64_at(e, 120)?));
         }
         let root = cfb.entries.first().cloned().ok_or("compound file has no root entry")?;
         let mf = cfb.read_chain(mini_fat_start, None)?;
-        cfb.mini_fat = mf.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        cfb.mini_fat = mf.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
         cfb.mini_stream = cfb.read_chain(root.2, Some(root.3))?;
         Ok(cfb)
     }

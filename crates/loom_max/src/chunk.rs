@@ -18,16 +18,16 @@ impl Chunk {
         self.children.as_deref().unwrap_or(&[])
     }
     pub fn u32s(&self) -> Vec<u32> {
-        self.data.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+        self.data.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
     }
     pub fn i32s(&self) -> Vec<i32> {
-        self.data.chunks_exact(4).map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+        self.data.as_chunks::<4>().0.iter().map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
     }
     pub fn f32s(&self) -> Vec<f32> {
-        self.data.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+        self.data.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
     }
     pub fn utf16(&self) -> String {
-        let u: Vec<u16> = self.data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let u: Vec<u16> = self.data.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
         String::from_utf16_lossy(&u)
     }
 }

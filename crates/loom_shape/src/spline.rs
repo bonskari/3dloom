@@ -454,57 +454,6 @@ impl Shape {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn square() -> Spline {
-        Spline::new(vec![Knot::corner(Vec3::ZERO), Knot::corner(Vec3::X * 10.0), Knot::corner(Vec3::new(10.0, 10.0, 0.0)), Knot::corner(Vec3::Y * 10.0)], true)
-    }
-
-    #[test]
-    fn corner_square_interpolates_to_four_points_with_optimize() {
-        let s = square();
-        assert_eq!(s.polyline(6, true, false).len(), 4);
-        assert_eq!(s.polyline(6, false, false).len(), 4 * 7);
-        assert!((s.length() - 40.0).abs() < 1e-4);
-        let mut r = s.clone();
-        r.refine(0, 0.5);
-        assert_eq!(r.knots.len(), 5);
-        assert_eq!(r.knots[1].pos, Vec3::X * 5.0);
-        assert_eq!(r.knots[1].kind, KnotKind::Corner);
-        let mut d = s.clone();
-        d.divide(1, 3);
-        assert_eq!(d.knots.len(), 7);
-        let mut b = s.clone();
-        assert!(b.break_at(2).is_none());
-        assert!(!b.closed && b.knots.len() == 5);
-        let tail = b.break_at(2).unwrap();
-        assert_eq!((b.knots.len(), tail.knots.len()), (3, 3));
-    }
-
-    #[test]
-    fn smooth_knots_curve_and_the_tube_closes() {
-        let s = Spline::new(vec![Knot::smooth(Vec3::ZERO), Knot::smooth(Vec3::new(10.0, 10.0, 0.0)), Knot::smooth(Vec3::new(20.0, 0.0, 0.0))], false);
-        let pts = s.polyline(6, true, false);
-        assert_eq!(pts.len(), 1 + 2 * 7);
-        assert!(pts[3].y > 3.0, "{:?}", pts[3]);
-        let mut shape = Shape::from_splines(vec![square()]);
-        shape.render.enable_in_viewport = true;
-        let m = shape.tube_mesh();
-        m.check_invariants().unwrap();
-        assert_eq!(m.face_count(), 4 * 12);
-        let mut open = Shape::from_splines(vec![s]);
-        open.render.sides = 6;
-        let t = open.tube_mesh();
-        t.check_invariants().unwrap();
-        assert_eq!(t.face_count(), 14 * 6 + 2);
-        let mut e = shape.clone();
-        e.explode();
-        assert_eq!(e.splines.len(), 4);
-    }
-}
-
 /// Flat sub-object indexing over a shape's splines (vertex = knot, segment,
 /// spline), as the Editable Spline levels address them.
 impl Shape {
@@ -671,5 +620,56 @@ impl Shape {
                 self.splines[si].knots[k].pos = c;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn square() -> Spline {
+        Spline::new(vec![Knot::corner(Vec3::ZERO), Knot::corner(Vec3::X * 10.0), Knot::corner(Vec3::new(10.0, 10.0, 0.0)), Knot::corner(Vec3::Y * 10.0)], true)
+    }
+
+    #[test]
+    fn corner_square_interpolates_to_four_points_with_optimize() {
+        let s = square();
+        assert_eq!(s.polyline(6, true, false).len(), 4);
+        assert_eq!(s.polyline(6, false, false).len(), 4 * 7);
+        assert!((s.length() - 40.0).abs() < 1e-4);
+        let mut r = s.clone();
+        r.refine(0, 0.5);
+        assert_eq!(r.knots.len(), 5);
+        assert_eq!(r.knots[1].pos, Vec3::X * 5.0);
+        assert_eq!(r.knots[1].kind, KnotKind::Corner);
+        let mut d = s.clone();
+        d.divide(1, 3);
+        assert_eq!(d.knots.len(), 7);
+        let mut b = s.clone();
+        assert!(b.break_at(2).is_none());
+        assert!(!b.closed && b.knots.len() == 5);
+        let tail = b.break_at(2).unwrap();
+        assert_eq!((b.knots.len(), tail.knots.len()), (3, 3));
+    }
+
+    #[test]
+    fn smooth_knots_curve_and_the_tube_closes() {
+        let s = Spline::new(vec![Knot::smooth(Vec3::ZERO), Knot::smooth(Vec3::new(10.0, 10.0, 0.0)), Knot::smooth(Vec3::new(20.0, 0.0, 0.0))], false);
+        let pts = s.polyline(6, true, false);
+        assert_eq!(pts.len(), 1 + 2 * 7);
+        assert!(pts[3].y > 3.0, "{:?}", pts[3]);
+        let mut shape = Shape::from_splines(vec![square()]);
+        shape.render.enable_in_viewport = true;
+        let m = shape.tube_mesh();
+        m.check_invariants().unwrap();
+        assert_eq!(m.face_count(), 4 * 12);
+        let mut open = Shape::from_splines(vec![s]);
+        open.render.sides = 6;
+        let t = open.tube_mesh();
+        t.check_invariants().unwrap();
+        assert_eq!(t.face_count(), 14 * 6 + 2);
+        let mut e = shape.clone();
+        e.explode();
+        assert_eq!(e.splines.len(), 4);
     }
 }

@@ -693,7 +693,7 @@ impl LoomApp {
 
     /// File > New / Ctrl+N: the New Scene dialog when the scene has objects, else a new scene.
     pub fn new_scene(&mut self) {
-        if self.state.scene.len() > 0 {
+        if !self.state.scene.is_empty() {
             self.state.dialog = Some(loom_commands::Dialog::NewScene);
         } else {
             self.request_file_action(loom_commands::PendingFileAction::New);

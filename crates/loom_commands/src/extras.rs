@@ -389,16 +389,14 @@ fn restore_scene_state(state: &mut AppState, name: &str, parts: Option<Vec<Strin
         let Some(cur) = state.scene.node(*id) else { continue };
         let is_light = matches!(cur.object, ObjectKind::Light(_));
         let is_camera = matches!(cur.object, ObjectKind::Camera { .. });
-        if (is_light && has("Light Transforms")) || (is_camera && has("Camera Transforms")) || (!is_light && !is_camera && has("Object Properties")) {
-            if cur.transform != *tf {
+        if ((is_light && has("Light Transforms")) || (is_camera && has("Camera Transforms")) || (!is_light && !is_camera && has("Object Properties")))
+            && cur.transform != *tf {
                 changes.push(Change::SetTransform { id: *id, before: cur.transform.clone(), after: tf.clone() });
             }
-        }
-        if (is_light && has("Light Properties")) || (is_camera && has("Camera Properties")) {
-            if cur.object != *obj {
+        if ((is_light && has("Light Properties")) || (is_camera && has("Camera Properties")))
+            && cur.object != *obj {
                 changes.push(Change::ReplaceObject { id: *id, before: Box::new(cur.object.clone()), after: Box::new(obj.clone()) });
             }
-        }
         if has("Object Properties") {
             if (cur.hidden, cur.frozen) != *flags {
                 changes.push(Change::SetFlags { id: *id, before: (cur.hidden, cur.frozen), after: *flags });
@@ -556,7 +554,7 @@ fn uvw_remove(state: &mut AppState, mode: &str, set_gray: bool) -> Result<Value,
                 let after_stack: Vec<_> = n
                     .modifiers
                     .iter()
-                    .filter(|s| !matches!(s.modifier, loom_scene::Modifier::UnwrapUVW(_) | loom_scene::Modifier::UVWMap { .. } | loom_scene::Modifier::UVWXForm { .. } | loom_scene::Modifier::UvwMappingAdd { .. } | loom_scene::Modifier::UvwMappingClear { .. } | loom_scene::Modifier::MapScaler { .. }))
+                    .filter(|s| !matches!(s.modifier, loom_scene::Modifier::UnwrapUVW(_) | loom_scene::Modifier::UVWMap { .. } | loom_scene::Modifier::UVWXForm { .. } | loom_scene::Modifier::UvwMappingAdd | loom_scene::Modifier::UvwMappingClear { .. } | loom_scene::Modifier::MapScaler { .. }))
                     .cloned()
                     .collect();
                 if after_stack.len() != n.modifiers.len() {

@@ -358,10 +358,7 @@ fn set_parameter(state: &mut AppState, id: NodeId, name: &str, value: f64) -> Re
         let (_, fr, fp) = free.to_scale_rotation_translation();
         let mut probe = state.scene.clone();
         if let Some(pn) = probe.node_mut(id) {
-            match &mut pn.constraints.position {
-                Some(PositionConstraint::Position { keep_offset, .. }) => *keep_offset = false,
-                _ => {}
-            }
+            if let Some(PositionConstraint::Position { keep_offset, .. }) = &mut pn.constraints.position { *keep_offset = false }
             match &mut pn.constraints.rotation {
                 Some(RotationConstraint::LookAt { keep_offset, .. }) | Some(RotationConstraint::Orientation { keep_offset, .. }) => *keep_offset = false,
                 _ => {}

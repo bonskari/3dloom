@@ -1391,6 +1391,74 @@ pub fn soft_weights_edges(mesh: &Mesh, ch: u32, tvs: &BTreeSet<u32>, range: u32)
     out
 }
 
+/// Edge Snap: the nearest point on a texture edge within `threshold` of
+/// `p`, skipping edges that touch `exclude` (the tvs being dragged).
+pub fn snap_to_edge(mesh: &Mesh, ch: u32, exclude: &BTreeSet<u32>, p: Vec2, threshold: f32) -> Option<Vec2> {
+    let map = mesh.map(ch)?;
+    let mut best: Option<(f32, Vec2)> = None;
+    for (a, b) in tv_edges(mesh, ch) {
+        if exclude.contains(&a) || exclude.contains(&b) {
+            continue;
+        }
+        let (pa, pb) = (map.verts[a as usize], map.verts[b as usize]);
+        let (pa, pb) = (Vec2::new(pa.x, pa.y), Vec2::new(pb.x, pb.y));
+        let ab = pb - pa;
+        let t = if ab.length_squared() < 1e-12 { 0.0 } else { ((p - pa).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) };
+        let q = pa + ab * t;
+        let d = q.distance(p);
+        if d <= threshold && best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, q));
+        }
+    }
+    best.map(|(_, q)| q)
+}
+
+/// Sketch: `n` evenly spaced positions along the drawn shape. `align`:
+/// 0 Free Form (the drawn points as a polyline), 1 Line (first to last
+/// point, ends included), 2 Box (the rectangle with corners points[0] and
+/// points[1], closed), 3 Circle (centre points[0] through points[1], closed).
+pub fn sketch_points(align: u32, points: &[Vec2], n: usize) -> Vec<Vec2> {
+    if n == 0 || points.is_empty() {
+        return Vec::new();
+    }
+    let (path, closed): (Vec<Vec2>, bool) = match align {
+        1 => (vec![points[0], *points.last().unwrap()], false),
+        2 => {
+            let (a, b) = (points[0], *points.last().unwrap());
+            (vec![a, Vec2::new(b.x, a.y), b, Vec2::new(a.x, b.y)], true)
+        }
+        3 => {
+            let c = points[0];
+            let r = points.last().unwrap().distance(c);
+            let a0 = (*points.last().unwrap() - c).to_angle();
+            return (0..n).map(|i| c + Vec2::from_angle(a0 + std::f32::consts::TAU * i as f32 / n as f32) * r).collect();
+        }
+        _ => (points.to_vec(), false),
+    };
+    let mut pts = path;
+    if closed {
+        pts.push(pts[0]);
+    }
+    let mut acc = vec![0.0f32];
+    for w in pts.windows(2) {
+        acc.push(acc.last().unwrap() + w[0].distance(w[1]));
+    }
+    let total = *acc.last().unwrap();
+    if total < 1e-9 {
+        return vec![pts[0]; n];
+    }
+    // Open shapes include both ends; closed ones do not repeat the start.
+    let steps = if closed { n } else { n.saturating_sub(1).max(1) };
+    (0..n)
+        .map(|i| {
+            let s = total * i as f32 / steps as f32;
+            let k = acc.partition_point(|a| *a <= s).clamp(1, pts.len() - 1);
+            let seg = (acc[k] - acc[k - 1]).max(1e-9);
+            pts[k - 1].lerp(pts[k], ((s - acc[k - 1]) / seg).clamp(0.0, 1.0))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1607,72 +1675,4 @@ mod tests {
         assert!(!overlapped_faces(&m, 1).is_empty(), "top and bottom overlap");
         assert!(!inverted_faces(&m, 1).is_empty(), "the bottom face is inverted");
     }
-}
-
-/// Edge Snap: the nearest point on a texture edge within `threshold` of
-/// `p`, skipping edges that touch `exclude` (the tvs being dragged).
-pub fn snap_to_edge(mesh: &Mesh, ch: u32, exclude: &BTreeSet<u32>, p: Vec2, threshold: f32) -> Option<Vec2> {
-    let map = mesh.map(ch)?;
-    let mut best: Option<(f32, Vec2)> = None;
-    for (a, b) in tv_edges(mesh, ch) {
-        if exclude.contains(&a) || exclude.contains(&b) {
-            continue;
-        }
-        let (pa, pb) = (map.verts[a as usize], map.verts[b as usize]);
-        let (pa, pb) = (Vec2::new(pa.x, pa.y), Vec2::new(pb.x, pb.y));
-        let ab = pb - pa;
-        let t = if ab.length_squared() < 1e-12 { 0.0 } else { ((p - pa).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) };
-        let q = pa + ab * t;
-        let d = q.distance(p);
-        if d <= threshold && best.is_none_or(|(bd, _)| d < bd) {
-            best = Some((d, q));
-        }
-    }
-    best.map(|(_, q)| q)
-}
-
-/// Sketch: `n` evenly spaced positions along the drawn shape. `align`:
-/// 0 Free Form (the drawn points as a polyline), 1 Line (first to last
-/// point, ends included), 2 Box (the rectangle with corners points[0] and
-/// points[1], closed), 3 Circle (centre points[0] through points[1], closed).
-pub fn sketch_points(align: u32, points: &[Vec2], n: usize) -> Vec<Vec2> {
-    if n == 0 || points.is_empty() {
-        return Vec::new();
-    }
-    let (path, closed): (Vec<Vec2>, bool) = match align {
-        1 => (vec![points[0], *points.last().unwrap()], false),
-        2 => {
-            let (a, b) = (points[0], *points.last().unwrap());
-            (vec![a, Vec2::new(b.x, a.y), b, Vec2::new(a.x, b.y)], true)
-        }
-        3 => {
-            let c = points[0];
-            let r = points.last().unwrap().distance(c);
-            let a0 = (*points.last().unwrap() - c).to_angle();
-            return (0..n).map(|i| c + Vec2::from_angle(a0 + std::f32::consts::TAU * i as f32 / n as f32) * r).collect();
-        }
-        _ => (points.to_vec(), false),
-    };
-    let mut pts = path;
-    if closed {
-        pts.push(pts[0]);
-    }
-    let mut acc = vec![0.0f32];
-    for w in pts.windows(2) {
-        acc.push(acc.last().unwrap() + w[0].distance(w[1]));
-    }
-    let total = *acc.last().unwrap();
-    if total < 1e-9 {
-        return vec![pts[0]; n];
-    }
-    // Open shapes include both ends; closed ones do not repeat the start.
-    let steps = if closed { n } else { n.saturating_sub(1).max(1) };
-    (0..n)
-        .map(|i| {
-            let s = total * i as f32 / steps as f32;
-            let k = acc.partition_point(|a| *a <= s).clamp(1, pts.len() - 1);
-            let seg = (acc[k] - acc[k - 1]).max(1e-9);
-            pts[k - 1].lerp(pts[k], ((s - acc[k - 1]) / seg).clamp(0.0, 1.0))
-        })
-        .collect()
 }

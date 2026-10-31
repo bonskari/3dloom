@@ -112,15 +112,15 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
             painter.add(egui::Shape::convex_polygon(q.to_vec(), fill, egui::Stroke::NONE));
             let c = |a: Axis| if active { hover() } else { axis_color(a) };
             // The plane handle is drawn as an open corner bracket (the two outer edges).
-            painter.line_segment([q[1], q[2]], egui::Stroke::new(1.5, c(va)));
-            painter.line_segment([q[3], q[2]], egui::Stroke::new(1.5, c(ua)));
+            painter.line_segment([q[1], q[2]], egui::Stroke::new(1.5_f32, c(va)));
+            painter.line_segment([q[3], q[2]], egui::Stroke::new(1.5_f32, c(ua)));
         }
     }
     for a in [Axis::X, Axis::Y, Axis::Z] {
         if let Some((s, e)) = axis_segment(l, p, a, 0.0, 1.0) {
             let active = hl == Some(Handle::Axis(a));
             let color = if active { hover() } else { axis_color(a) };
-            painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0 }, color));
+            painter.line_segment([s, e], egui::Stroke::new(if active { 3.0 } else { 2.0_f32 }, color));
             arrow_cone(painter, l, p, a, color);
             if l.axis_labels {
                 let d = pos_sub(e, s).normalize_or_zero();

@@ -438,7 +438,7 @@ pub fn export(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, St
             }
         });
         if pending.len() == before {
-            order.extend(pending.drain(..));
+            order.append(&mut pending);
         }
     }
     // Indices first (a skin names bones that may come later in the order), nodes second.

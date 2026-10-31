@@ -69,7 +69,7 @@ impl MeshData {
         for n in out.normals.iter_mut() {
             *n = [-n[0], -n[1], -n[2]];
         }
-        for t in out.indices.chunks_exact_mut(3) {
+        for t in out.indices.as_chunks_mut::<3>().0 {
             t.swap(1, 2);
         }
         out

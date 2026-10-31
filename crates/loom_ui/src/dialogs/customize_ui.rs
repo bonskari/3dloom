@@ -240,7 +240,7 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
     let actions: Vec<&'static str> = loom_commands::keymap::group_actions(&group)
         .into_iter()
         .filter(|a| needle.is_empty() || a.to_lowercase().contains(&needle))
-        .filter(|a| in_category.as_ref().map_or(true, |v| v.iter().any(|x| x == a)))
+        .filter(|a| in_category.as_ref().is_none_or(|v| v.iter().any(|x| x == a)))
         .collect();
     ui.horizontal(|ui| {
         ui.label("Group:");

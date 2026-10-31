@@ -391,7 +391,7 @@ pub fn chamfer_edges(mesh: &mut Mesh, edges: &[HalfEdgeId], amount: f32, segment
         let ring = |im: &mut IndexedMesh, v: VertexId, c1: u32, c2: u32| -> Vec<u32> {
             let mut r = vec![c1];
             if kept.contains_key(&v.0) {
-                r.extend(std::iter::repeat(v.0).take(segs - 1));
+                r.extend(std::iter::repeat_n(v.0, segs - 1));
             } else {
                 for s in 1..segs {
                     let t = s as f32 / segs as f32;
@@ -1526,6 +1526,34 @@ pub fn clean_remove_edges(mesh: &mut Mesh, edges: &[HalfEdgeId]) -> Result<usize
     remove_vertices(mesh, &leftovers)
 }
 
+
+/// A face template holding the corners of two faces (for Turn, where the
+/// new triangles draw their uvs from either source triangle).
+fn merged_uv_source(a: &IndexedFace, b: &IndexedFace) -> IndexedFace {
+    let mut ids = a.ids.clone();
+    let mut uv = a.uv.clone();
+    for (k, id) in b.ids.iter().enumerate() {
+        if ids.contains(id) {
+            continue;
+        }
+        ids.push(*id);
+        for (ch, row) in &mut uv {
+            if let Some(v) = b.uv.get(ch).and_then(|r| r.get(k)) {
+                row.push(*v);
+            }
+        }
+    }
+    for (ch, row) in &mut uv {
+        // A channel b lacks: keep the rows the same length.
+        if row.len() != ids.len() {
+            let avg = if row.is_empty() { glam::Vec3::ZERO } else { row.iter().sum::<glam::Vec3>() / row.len() as f32 };
+            row.resize(ids.len(), avg);
+            let _ = ch;
+        }
+    }
+    IndexedFace { ids, smoothing_groups: a.smoothing_groups, material_id: a.material_id, hidden: a.hidden, uv }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1906,32 +1934,4 @@ mod tests {
         insert_vertex_in_face(&mut m, FaceId(0), Vec3::new(0.0, 0.0, 0.5)).unwrap();
         m.check_invariants().unwrap();
     }
-}
-
-
-/// A face template holding the corners of two faces (for Turn, where the
-/// new triangles draw their uvs from either source triangle).
-fn merged_uv_source(a: &IndexedFace, b: &IndexedFace) -> IndexedFace {
-    let mut ids = a.ids.clone();
-    let mut uv = a.uv.clone();
-    for (k, id) in b.ids.iter().enumerate() {
-        if ids.contains(id) {
-            continue;
-        }
-        ids.push(*id);
-        for (ch, row) in &mut uv {
-            if let Some(v) = b.uv.get(ch).and_then(|r| r.get(k)) {
-                row.push(*v);
-            }
-        }
-    }
-    for (ch, row) in &mut uv {
-        // A channel b lacks: keep the rows the same length.
-        if row.len() != ids.len() {
-            let avg = if row.is_empty() { glam::Vec3::ZERO } else { row.iter().sum::<glam::Vec3>() / row.len() as f32 };
-            row.resize(ids.len(), avg);
-            let _ = ch;
-        }
-    }
-    IndexedFace { ids, smoothing_groups: a.smoothing_groups, material_id: a.material_id, hidden: a.hidden, uv }
 }

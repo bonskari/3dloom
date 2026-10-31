@@ -69,7 +69,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     egui::pos2(rect.left() + 8.0 + t * (rect.width() - 16.0), rect.bottom() - 6.0 - w * (rect.height() - 12.0))
                 })
                 .collect();
-            p.add(egui::Shape::line(pts, egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 200, 80))));
+            p.add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(255, 200, 80))));
             if ui.selectable_label(app.state.soft_edit, "Edit Soft Selection").on_hover_text(crate::shortcuts::tip(&app.state, "Edit Soft Selection: drag in the viewport: Falloff (Ctrl: Pinch, Shift: Bubble)", "Edit Soft Selection")).clicked() {
                 let _ = app.dispatch(Command::EditSoftSelection);
             }

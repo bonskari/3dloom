@@ -37,7 +37,7 @@ fn import_max_keeps_world_placement_and_undoes() {
         for (a, b) in got.to_cols_array().iter().zip(want.to_cols_array()) {
             assert!((a - b).abs() < 1e-2 * (1.0 + b.abs()), "{}: {got} vs {want}", doc.nodes[i].name);
         }
-        assert_eq!(s.scene.node(*id).unwrap().name.is_empty(), false);
+        assert!(!s.scene.node(*id).unwrap().name.is_empty());
     }
     // What was left out is reported for the Import Summary window.
     assert!(s.import_report.iter().any(|w| w.contains("Edit Mesh is not imported")), "{:?}", s.import_report);

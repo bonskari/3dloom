@@ -1556,7 +1556,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::ArrayObjects { mv, rotate, scale, totals, re_orient, uniform, kind, count, row_2d, row_3d } => {
-            if count.iter().any(|c| *c == 0) {
+            if count.contains(&0) {
                 return Err("Array counts must be at least 1".into());
             }
             if scale.iter().any(|v| *v <= 0.0) {
@@ -3181,7 +3181,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Err("not in a sub-object level".into());
             }
             if !state.selection.contains(&node) {
-                return Err(format!("node {} is not selected; a sub-object level edits only the selected objects", node.0).into());
+                return Err(format!("node {} is not selected; a sub-object level edits only the selected objects", node.0));
             }
             if state.scene.node(node).is_some_and(|n| n.edit_spline().is_some()) {
                 return crate::spline::select_sub(state, node, &ids, op);

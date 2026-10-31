@@ -334,7 +334,7 @@ pub fn utilities(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.separator();
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new(UTILS[which]).strong());
-                let mut spin = |ui: &mut egui::Ui, l: &str, v: &mut f32| {
+                let spin = |ui: &mut egui::Ui, l: &str, v: &mut f32| {
                     ui.horizontal(|ui| {
                         ui.label(l);
                         ui.add(crate::spinner::spin(ui, v, ..).speed(0.5));

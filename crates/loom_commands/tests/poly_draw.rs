@@ -34,7 +34,7 @@ fn a_branch_extrudes_one_segment_per_path_point_and_tapers_its_end() {
     let id = poly_box(&mut s, [20.0, 0.0, 0.0]);
     let f = top_face(&s, id);
     let start = centre(&corners(&s, id, f));
-    let path = vec![start, start + Vec3::new(0.0, 0.0, 10.0), start + Vec3::new(5.0, 0.0, 20.0), start + Vec3::new(10.0, 0.0, 25.0)];
+    let path = [start, start + Vec3::new(0.0, 0.0, 10.0), start + Vec3::new(5.0, 0.0, 20.0), start + Vec3::new(10.0, 0.0, 25.0)];
     let faces_before = s.scene.node(id).unwrap().object.mesh().face_count();
     let undo = s.undo.len();
     execute(&mut s, Command::Branch { node: id.0, faces: vec![f.0], path: path.iter().map(|p| p.to_array()).collect(), taper: -0.5 }).unwrap();

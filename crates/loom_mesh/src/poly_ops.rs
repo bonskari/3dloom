@@ -402,6 +402,27 @@ pub fn align_to_plane(mesh: &mut Mesh, verts: &[VertexId], origin: Vec3, normal:
     Ok(())
 }
 
+/// Sweeps polygon groups through `rings` steps: `ring_pos(group, vertex,
+/// position, t)` gives every boundary / interior vertex its position at
+/// fraction `t` (Extrude Along Spline builds its frames on this).
+pub fn sweep_faces(mesh: &mut Mesh, faces: &[FaceId], rings: u32, ring_pos: &dyn Fn(&BTreeSet<FaceId>, VertexId, Vec3, f32) -> Vec3) -> Result<Vec<FaceId>, String> {
+    lift(mesh, faces, ExtrudeKind::Group, rings, ring_pos)
+}
+
+/// Area-weighted normal and centre of a face group.
+pub fn group_frame(mesh: &Mesh, group: &BTreeSet<FaceId>) -> (Vec3, Vec3) {
+    let n = group.iter().map(|f| face_normal_area(mesh, *f)).sum::<Vec3>().normalize_or_zero();
+    let mut c = Vec3::ZERO;
+    let mut count = 0;
+    for f in group {
+        for p in mesh.face_positions(*f).unwrap_or_default() {
+            c += p;
+            count += 1;
+        }
+    }
+    (n, if count > 0 { c / count as f32 } else { Vec3::ZERO })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,25 +533,4 @@ mod tests {
         let zs: Vec<f32> = (0..9).map(|v| m.vertex_position(VertexId(v)).unwrap().z).collect();
         assert!(zs.iter().all(|z| (z - zs[0]).abs() < 1e-4), "{zs:?}");
     }
-}
-
-/// Sweeps polygon groups through `rings` steps: `ring_pos(group, vertex,
-/// position, t)` gives every boundary / interior vertex its position at
-/// fraction `t` (Extrude Along Spline builds its frames on this).
-pub fn sweep_faces(mesh: &mut Mesh, faces: &[FaceId], rings: u32, ring_pos: &dyn Fn(&BTreeSet<FaceId>, VertexId, Vec3, f32) -> Vec3) -> Result<Vec<FaceId>, String> {
-    lift(mesh, faces, ExtrudeKind::Group, rings, ring_pos)
-}
-
-/// Area-weighted normal and centre of a face group.
-pub fn group_frame(mesh: &Mesh, group: &BTreeSet<FaceId>) -> (Vec3, Vec3) {
-    let n = group.iter().map(|f| face_normal_area(mesh, *f)).sum::<Vec3>().normalize_or_zero();
-    let mut c = Vec3::ZERO;
-    let mut count = 0;
-    for f in group {
-        for p in mesh.face_positions(*f).unwrap_or_default() {
-            c += p;
-            count += 1;
-        }
-    }
-    (n, if count > 0 { c / count as f32 } else { Vec3::ZERO })
 }

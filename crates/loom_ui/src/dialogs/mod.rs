@@ -532,7 +532,7 @@ fn manage_scene_states(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) 
         let chosen_parts: Vec<String> = part_names
             .iter()
             .enumerate()
-            .filter_map(|(i, p)| parts[i].then(|| (*p).to_owned()))
+            .filter(|&(i, _p)| parts[i]).map(|(_i, p)| (*p).to_owned())
             .collect();
         ui.horizontal(|ui| {
             if ui.button("Save").clicked() && !new_name.trim().is_empty() {

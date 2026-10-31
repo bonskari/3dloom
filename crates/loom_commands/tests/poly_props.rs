@@ -130,7 +130,7 @@ fn paint_push_pull_moves_along_normal() {
     execute(&mut s, Command::PaintDeformStroke { node: a.0, points: vec![[0.0, 0.0, 0.0]], mode: PaintMode::PushPull, invert: true }).unwrap();
     let z2 = s.scene.node(a).unwrap().object.mesh().vertex_position(loom_mesh::VertexId(centre)).unwrap().z;
     // The brush centre is still at the plane: the raised vertex sits 1 unit from it, so the falloff is 5/6.
-    assert!(z2 < 0.2 && z2 >= 0.0, "Ctrl inverts, got {z2}");
+    assert!((0.0..0.2).contains(&z2), "Ctrl inverts, got {z2}");
     execute(&mut s, Command::PaintDeformStroke { node: a.0, points: vec![[0.0, 0.0, 0.0]], mode: PaintMode::PushPull, invert: false }).unwrap();
     execute(&mut s, Command::PaintDeformCancel).unwrap();
     assert!(s.scene.node(a).unwrap().object.mesh().vertex_position(loom_mesh::VertexId(centre)).unwrap().z.abs() < 1e-6, "Cancel restores");

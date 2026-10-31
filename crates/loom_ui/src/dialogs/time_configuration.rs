@@ -19,7 +19,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let (start, end) = app.state.frame_range;
     let fps = app.state.fps;
     let snap_id = egui::Id::new("time_configuration_snapshot");
-    let snap: Snapshot = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(snap_id, || Snapshot { range: app.state.frame_range, fps: app.state.fps, frame: app.state.current_frame, playback: app.state.playback.clone(), time_config: app.state.time_config }).clone());
+    let snap: Snapshot = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(snap_id, || Snapshot { range: app.state.frame_range, fps: app.state.fps, frame: app.state.current_frame, playback: app.state.playback, time_config: app.state.time_config }).clone());
     let mut done = false;
     egui::Window::new("Time Configuration").open(open).resizable(false).show(ctx, |ui| {
         ui.group(|ui| {

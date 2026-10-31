@@ -224,7 +224,7 @@ fn menu_and_drag(ui: &mut egui::Ui, title: &str, header: &egui::Response) {
             });
         }
     }
-    header.context_menu(|ui| menu(ui));
+    header.context_menu(menu);
 }
 
 /// The rollout menu: every rollout (a click scrolls to it and opens it),

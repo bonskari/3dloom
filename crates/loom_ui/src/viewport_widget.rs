@@ -1505,7 +1505,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 if let Some(h) = pointer.hover_pos() {
                     pts.push(h);
                 }
-                painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(180))));
+                painter.add(egui::Shape::line(pts, egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(180))));
             }
             // The ViewCube's right-click menu.
             if let Some((at, _)) = app.cube_menu.filter(|(_, i)| *i == index) {
@@ -2488,7 +2488,7 @@ fn drag_region(app: &LoomApp, start: egui::Pos2, end: egui::Pos2) -> crate::regi
 fn draw_region(painter: &egui::Painter, region: &crate::region::Region) {
     use crate::region::Region;
     let fill = egui::Color32::from_white_alpha(28);
-    let stroke = egui::Stroke::new(1.0, egui::Color32::from_white_alpha(180));
+    let stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(180));
     match region {
         Region::Rect(r) => {
             painter.rect_filled(*r, 0.0, fill);
@@ -2609,7 +2609,7 @@ fn draw_mode_overlays(
                 if let Some(sp) = project_world_to_screen(vertex.position, view_proj, viewport_rect)
                 {
                     painter.circle_filled(sp, 3.0, color);
-                    painter.circle_stroke(sp, 4.0, egui::Stroke::new(1.0, egui::Color32::BLACK));
+                    painter.circle_stroke(sp, 4.0, egui::Stroke::new(1.0_f32, egui::Color32::BLACK));
                 }
             }
         }
@@ -2652,7 +2652,7 @@ fn draw_subobject_overlay(
     viewport_rect: egui::Rect,
 ) {
     let orange = egui::Color32::from_rgb(255, 150, 40);
-    let stroke = egui::Stroke::new(2.0, orange);
+    let stroke = egui::Stroke::new(2.0_f32, orange);
     for (node, id) in app.state.sub_selection.iter() {
         let Some((_, mesh)) = app.world_meshes().iter().find(|(n, _)| *n == node) else {
             continue;
@@ -2665,7 +2665,7 @@ fn draw_subobject_overlay(
                         painter.circle_stroke(
                             sp,
                             6.0,
-                            egui::Stroke::new(1.0, egui::Color32::BLACK),
+                            egui::Stroke::new(1.0_f32, egui::Color32::BLACK),
                         );
                     }
                 }
@@ -2756,7 +2756,7 @@ fn draw_snap_marker(painter: &egui::Painter, app: &LoomApp, hit: &loom_commands:
     let c = egui::pos2(hit.screen.x, hit.screen.y);
     let r = (s.marker_size * 0.5).max(3.0);
     let color = egui::Color32::from_rgb(s.marker_color[0], s.marker_color[1], s.marker_color[2]);
-    let stroke = egui::Stroke::new(1.5, color);
+    let stroke = egui::Stroke::new(1.5_f32, color);
     match hit.kind {
         K::GridPoint => {
             painter.line_segment([egui::pos2(c.x - r, c.y), egui::pos2(c.x + r, c.y)], stroke);
@@ -2846,8 +2846,8 @@ fn draw_manipulator(painter: &egui::Painter, p: &Projection, m: &Manipulator, ho
         let _ = n;
         let up = {
             let helper = if m.dir.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
-            let v = m.dir.cross(helper).normalize_or_zero();
-            v
+
+            m.dir.cross(helper).normalize_or_zero()
         };
         let pts: Vec<egui::Pos2> = (0..=48)
             .filter_map(|i| {
@@ -3061,7 +3061,7 @@ fn draw_statistics(painter: &egui::Painter, app: &LoomApp, rect: egui::Rect, dt:
         let d = n.to_string();
         let mut out = String::new();
         for (i, ch) in d.chars().enumerate() {
-            if i > 0 && (d.len() - i) % 3 == 0 {
+            if i > 0 && (d.len() - i).is_multiple_of(3) {
                 out.push(',');
             }
             out.push(ch);
@@ -3193,7 +3193,7 @@ fn draw_soft_selection(painter: &egui::Painter, app: &LoomApp, view_proj: Mat4, 
 
 /// One sub-object outline / dot in a colour.
 fn draw_sub_object(painter: &egui::Painter, mesh: &Mesh, id: SubObjectId, view_proj: Mat4, rect: egui::Rect, color: egui::Color32) {
-    let stroke = egui::Stroke::new(2.0, color);
+    let stroke = egui::Stroke::new(2.0_f32, color);
     match id {
         SubObjectId::Vertex(v) => {
             if let Some(sp) = mesh.vertex_position(v).and_then(|p| project_world_to_screen(p, view_proj, rect)) {
@@ -3303,31 +3303,6 @@ pub(crate) fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -
     (t > eps).then_some(t)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn point_segment_distance_hits_segment_body() {
-        let p = egui::Pos2::new(5.0, 3.0);
-        let a = egui::Pos2::new(0.0, 0.0);
-        let b = egui::Pos2::new(10.0, 0.0);
-        assert!((distance_to_segment(p, a, b) - 3.0).abs() < 1e-5);
-    }
-
-    #[test]
-    fn ray_triangle_hits_front_face() {
-        let t = ray_triangle(
-            Vec3::new(0.25, 0.25, 1.0),
-            -Vec3::Z,
-            Vec3::ZERO,
-            Vec3::X,
-            Vec3::Y,
-        );
-        assert!(t.is_some_and(|t| (t - 1.0).abs() < 1e-5));
-    }
-}
-
 /// Perspective background: dark at the top, where the viewport labels sit,
 /// lighter toward the bottom (Customize User Interface > Colors).
 fn draw_background_gradient(painter: &egui::Painter, rect: egui::Rect, top: egui::Color32, bottom: egui::Color32) {
@@ -3379,5 +3354,30 @@ fn clip_slider(ui: &mut egui::Ui, painter: &egui::Painter, app: &mut LoomApp, in
     if let Some((which, d)) = changed {
         let (n, f) = if which == 0 { (d.min(far - 1e-3), far) } else { (near, d.max(near + 1e-3)) };
         let _ = app.dispatch(Command::SetViewportClipping { index: Some(index as u32), near: n, far: f });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn point_segment_distance_hits_segment_body() {
+        let p = egui::Pos2::new(5.0, 3.0);
+        let a = egui::Pos2::new(0.0, 0.0);
+        let b = egui::Pos2::new(10.0, 0.0);
+        assert!((distance_to_segment(p, a, b) - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn ray_triangle_hits_front_face() {
+        let t = ray_triangle(
+            Vec3::new(0.25, 0.25, 1.0),
+            -Vec3::Z,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+        );
+        assert!(t.is_some_and(|t| (t - 1.0).abs() < 1e-5));
     }
 }
