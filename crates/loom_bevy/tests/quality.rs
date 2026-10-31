@@ -106,7 +106,7 @@ fn ambient_occlusion_darkens_the_corner_at_a_box() {
     r.sync(&[object(1, &floor, white.clone()), object(2, &cube, white)]);
     r.sync_lights(&[light(5, Emitter::Ambient, Vec3::ZERO, Vec3::NEG_Z, Vec3::splat(0.6))]);
     let shot = Shot::new(Vec3::new(60.0, -60.0, 50.0), Vec3::new(0.0, 0.0, 5.0), (256, 192));
-    let (corner, open) = (shot.pixel(Vec3::new(11.0, -3.0, 0.0)), shot.pixel(Vec3::new(45.0, -50.0, 0.0)));
+    let (corner, open) = (shot.pixel(Vec3::new(11.0, -3.0, 0.0)), shot.pixel(Vec3::new(-40.0, 40.0, 0.0)));
     let off = shot.render(&mut r, options(|_| {}));
     let on = shot.render(&mut r, options(|q| {
         q.ambient_occlusion = true;
@@ -147,12 +147,16 @@ fn area_shadows_soften_with_the_source_radius() {
     let cube = moved(loom_mesh::box_primitive(Vec3::splat(10.0)), Vec3::new(0.0, 0.0, 40.0));
     let white = surface([0.8, 0.8, 0.8], 0.0, 10.0, 0.0);
     r.sync(&[object(1, &floor, white.clone()), object(2, &cube, white)]);
-    let mut spot = light(5, Emitter::Spot { hotspot: 90.0, falloff: 100.0 }, Vec3::new(0.0, 0.0, 100.0), Vec3::ZERO, Vec3::ONE);
+    // The spot shines from the left so the shadow falls beside the box,
+    // where the camera above can see it (straight below, the box hides it).
+    let mut spot = light(5, Emitter::Spot { hotspot: 90.0, falloff: 100.0 }, Vec3::new(-60.0, 0.0, 100.0), Vec3::ZERO, Vec3::ONE);
     spot.shadows = true;
     spot.map_size = 2048;
-    let shot = Shot::new(Vec3::new(0.0, -1.0, 160.0), Vec3::ZERO, (256, 256));
+    let shot = Shot::new(Vec3::new(40.0, -1.0, 160.0), Vec3::new(40.0, 0.0, 0.0), (256, 256));
+    // The shadow's centre: from the light through the box centre to the floor.
+    let shadow = Vec3::new(-60.0 + 60.0 * 100.0 / 55.0, 0.0, 0.0);
     // From inside the shadow out across its right edge to the lit floor.
-    let (from, to, lit_at) = (Vec3::ZERO, Vec3::new(45.0, 0.0, 0.0), Vec3::new(45.0, 0.0, 0.0));
+    let (from, to, lit_at) = (shadow, Vec3::new(80.0, 0.0, 0.0), Vec3::new(80.0, 0.0, 0.0));
     let mut widths = Vec::new();
     for radius in [0.0, 12.0] {
         spot.source_radius = radius;
@@ -163,7 +167,7 @@ fn area_shadows_soften_with_the_source_radius() {
         }));
         let lit = around(&img, shot.pixel(lit_at));
         assert!(lit > 80.0, "the floor is lit: {lit}");
-        assert!(luma(img.get_pixel(shot.pixel(Vec3::ZERO).0, shot.pixel(Vec3::ZERO).1).0) < lit * 0.3, "radius {radius}: shadow under the box");
+        assert!(luma(img.get_pixel(shot.pixel(shadow).0, shot.pixel(shadow).1).0) < lit * 0.3, "radius {radius}: shadow beside the box");
         widths.push(penumbra(&img, &shot, from, to, lit));
     }
     eprintln!("penumbra pixels: radius 0 {}, radius 12 {}", widths[0], widths[1]);
