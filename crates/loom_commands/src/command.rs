@@ -447,22 +447,22 @@ macro_rules! commands {
 
         pub fn registry() -> &'static [CommandInfo] {
             static REG: OnceLock<Vec<CommandInfo>> = OnceLock::new();
-            REG.get_or_init(|| vec![ $( CommandInfo {
-                name: $name,
-                group: Group::$group,
-                description: $desc,
-                args_schema: {
-                    #[allow(unused_mut)]
-                    let mut props = serde_json::Map::new();
-                    #[allow(unused_mut)]
-                    let mut required: Vec<Value> = Vec::new();
-                    $( $(
-                        props.insert(stringify!($field).to_owned(), <$ty as ArgSchema>::schema());
-                        if !<$ty as ArgSchema>::optional() { required.push(json!(stringify!($field))); }
-                    )* )?
-                    json!({"type":"object","properties": props, "required": required})
-                },
-            }, )* ])
+            // Each schema is built by a function of its own: one function
+            // building them all needs a stack frame that grows with the
+            // number of commands (unoptimised builds overflowed a test
+            // thread's 2 MB stack).
+            static TABLE: &[(&str, Group, &str, fn() -> Value)] = &[ $( ($name, Group::$group, $desc, || {
+                #[allow(unused_mut)]
+                let mut props = serde_json::Map::new();
+                #[allow(unused_mut)]
+                let mut required: Vec<Value> = Vec::new();
+                $( $(
+                    props.insert(stringify!($field).to_owned(), <$ty as ArgSchema>::schema());
+                    if !<$ty as ArgSchema>::optional() { required.push(json!(stringify!($field))); }
+                )* )?
+                json!({"type":"object","properties": props, "required": required})
+            }), )* ];
+            REG.get_or_init(|| TABLE.iter().map(|(name, group, description, schema)| CommandInfo { name, group: *group, description, args_schema: schema() }).collect())
         }
     };
 }
