@@ -1451,7 +1451,6 @@ impl BevyRenderer {
                 m.base.opaque_render_method = bevy::pbr::OpaqueRendererMethod::Deferred;
             }
         }
-        drop(mats);
         // Filter Maps off: every bitmap is read at its nearest texel.
         let mut samplers = Vec::new();
         let mut images = world.resource_mut::<Assets<Image>>();
@@ -1658,7 +1657,6 @@ impl BevyRenderer {
                 m.extension.params.flags &= !look::COLOR_SCALE;
             }
         }
-        drop(mats);
         let mut images = world.resource_mut::<Assets<Image>>();
         for (h, sampler) in r.samplers {
             if let Some(img) = images.get_mut(&h) {

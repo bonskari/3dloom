@@ -136,10 +136,7 @@ fn reflection_maps_and_raytrace_materials_resolve_to_traced_surfaces() {
     assert_eq!((t.reflect.x, t.refract.x), (1.0, 0.0));
     // The Raytrace material's Reflect and Transparency with its IOR.
     let mut m = StandardMaterial::new("glass");
-    let mut rt = loom_scene::material_types::Raytrace::default();
-    rt.reflect = glam::Vec3::splat(0.2);
-    rt.transparency = glam::Vec3::splat(0.9);
-    rt.ior = 1.33;
+    let rt = loom_scene::material_types::Raytrace { reflect: glam::Vec3::splat(0.2), transparency: glam::Vec3::splat(0.9), ior: 1.33, ..Default::default() };
     m.kind = MaterialKind::Raytrace(Box::new(rt));
     let t = Surface::from_material(&m).trace.unwrap();
     assert_eq!((t.reflect.x, t.refract.x, t.ior, t.reflect_adds), (0.2, 0.9, 1.33, false));

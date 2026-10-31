@@ -105,7 +105,7 @@ fn a_raytrace_glass_sphere_refracts_the_stripe_behind_it() {
     ok(&mut h, "Set Material Parameter", serde_json::json!({ "name": "Index of Refr.", "value": 1.0 }));
     let straight = stripe_x(&render(&mut h));
     ok(&mut h, "Raytracer Settings", serde_json::json!({ "enabled": false }));
-    let behind = render(&mut h);
+    let behind = &render(&mut h);
     // The stripe above the sphere is where IOR 1 shows it through the sphere.
     let top: Vec<u32> = (28..33).flat_map(|y| (0..160).filter(move |x| red(behind.get_pixel(*x, y)))).collect();
     assert!(!top.is_empty(), "the stripe above the sphere");

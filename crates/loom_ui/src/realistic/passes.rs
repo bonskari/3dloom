@@ -13,13 +13,15 @@ use loom_scene::{MotionBlur, NodeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Per output pixel: the screen motion, and whether something is seen there.
+pub type Motion = (Vec<Option<[f32; 2]>>, Vec<bool>);
+
 /// What the passes keep for the render elements.
 #[derive(Default)]
 pub struct PassLayers {
     /// Per output pixel: the traced reflection and refraction.
     pub traced: Option<Vec<TracedPixel>>,
-    /// Per output pixel: the screen motion, and whether something is seen there.
-    pub velocity: Option<(Vec<Option<[f32; 2]>>, Vec<bool>)>,
+    pub velocity: Option<Motion>,
 }
 
 fn lin3(c: [f32; 3]) -> Vec3 {
