@@ -149,7 +149,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::MaterialEditorOptions => material_editor::options(ctx, app, &mut open),
         Dialog::SpecifyCropping => material_editor::specify_cropping(ctx, app, &mut open),
         Dialog::CopyMap { from, to } => material_editor::copy_map(ctx, app, from, to, &mut open),
-        Dialog::RenderFile | Dialog::SaveRenderedImage | Dialog::SaveRenderPreset | Dialog::LoadRenderPreset => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::RenderFile | Dialog::SaveRenderedImage | Dialog::SaveRenderPreset | Dialog::LoadRenderPreset | Dialog::RamPlayerFile { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
         Dialog::LightLister => lights::light_lister(ctx, app, &mut open),
         Dialog::LightExclude { light } => lights::light_exclude(ctx, app, light, &mut open),

@@ -431,6 +431,8 @@ pub enum Dialog {
     /// Render Setup > Preset > Save Preset... / Load Preset...: a .rps file.
     SaveRenderPreset,
     LoadRenderPreset,
+    /// RAM Player > Open / Save Channel A (0) or B (1).
+    RamPlayerFile { channel: u8, save: bool },
     /// Rendering > Render Setup (F10).
     RenderSetup,
     /// Tools > Light Lister.

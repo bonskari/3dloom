@@ -458,6 +458,36 @@ fn render_presets_and_shortcuts_restore_settings() {
     assert!(execute(&mut s, Command::RenderShortcut { slot: 3, store: None }).is_err());
 }
 
+/// RAM Player: A from a file, B from the last render, split side by side,
+/// A alone, the alpha display, saved back out.
+#[test]
+fn ram_player_compares_two_channels() {
+    let dir = std::env::temp_dir();
+    let a_path = dir.join(format!("loom-ram-a-{}.png", std::process::id())).to_string_lossy().into_owned();
+    image::RgbaImage::from_pixel(4, 2, image::Rgba([255, 0, 0, 255])).save(&a_path).unwrap();
+    let mut s = AppState::new();
+    execute(&mut s, Command::RamPlayerOpen { channel: 0, path: Some(a_path.clone()) }).unwrap();
+    assert!(execute(&mut s, Command::RamPlayerOpen { channel: 1, path: None }).is_err(), "nothing rendered yet");
+    s.rendered.set_image(Some(Arc::new(image::RgbaImage::from_pixel(4, 2, image::Rgba([0, 0, 255, 128])))));
+    execute(&mut s, Command::RamPlayerOpen { channel: 1, path: None }).unwrap();
+    assert!(s.rendered.ram_player.open);
+    let img = s.rendered.ram_player.composed().unwrap();
+    assert_eq!((img.get_pixel(1, 0).0, img.get_pixel(2, 0).0), ([255, 0, 0, 255], [0, 0, 255, 255]));
+    execute(&mut s, Command::RamPlayerView { split: Some(0.75), compare: None, alpha: Some(true), clear: None }).unwrap();
+    let img = s.rendered.ram_player.composed().unwrap();
+    assert_eq!((img.get_pixel(2, 0).0, img.get_pixel(3, 0).0), ([255, 255, 255, 255], [128, 128, 128, 255]));
+    execute(&mut s, Command::RamPlayerView { split: None, compare: Some(false), alpha: Some(false), clear: None }).unwrap();
+    assert_eq!(s.rendered.ram_player.composed().unwrap().get_pixel(3, 0).0, [255, 0, 0, 255], "A alone");
+    let out = dir.join(format!("loom-ram-b-{}.png", std::process::id())).to_string_lossy().into_owned();
+    execute(&mut s, Command::RamPlayerSave { channel: 1, path: out.clone() }).unwrap();
+    assert_eq!(image::open(&out).unwrap().to_rgba8().get_pixel(0, 0).0, [0, 0, 255, 128]);
+    execute(&mut s, Command::RamPlayerView { split: None, compare: None, alpha: None, clear: Some(1) }).unwrap();
+    assert!(execute(&mut s, Command::RamPlayerSave { channel: 1, path: out.clone() }).is_err());
+    assert!(execute(&mut s, Command::RamPlayerView { split: Some(2.0), compare: None, alpha: None, clear: None }).is_err());
+    let _ = std::fs::remove_file(&a_path);
+    let _ = std::fs::remove_file(&out);
+}
+
 fn time_output(s: &mut AppState, t: Option<loom_scene::render::TimeOutput>, range: Option<[i32; 2]>, frames: Option<&str>, base: Option<i32>, skip: Option<bool>, ifl: Option<bool>) -> Result<serde_json::Value, String> {
     execute(s, Command::RenderTimeOutput { time_output: t, range, frames: frames.map(str::to_owned), every_nth: None, file_number_base: base, skip_existing: skip, image_file_list: ifl })
 }

@@ -43,6 +43,10 @@ impl FrameView {
 pub struct FrameViews {
     pub main: FrameView,
     pub clones: HashMap<u32, FrameView>,
+    /// The RAM Player's view.
+    pub ram: FrameView,
+    /// What the RAM Player shows, and the `RamPlayer::version` it was made at.
+    ram_image: Option<(u64, Option<image::RgbaImage>)>,
     /// A region handle being dragged in the viewport: which, and the rectangle at the start.
     region_drag: Option<(Handle, [f32; 4])>,
 }
@@ -185,6 +189,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         }
     }
     clone_windows(ctx, app);
+    if app.state.rendered.ram_player.open {
+        let mut open = true;
+        ram_player(ctx, app, &mut open);
+        if !open {
+            app.state.rendered.ram_player.open = false;
+        }
+    }
     if app.state.rendered.messages_open {
         let mut open = true;
         message_window(ctx, app, &mut open);
@@ -192,6 +203,68 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             app.state.rendered.messages_open = false;
         }
     }
+}
+
+/// RAM Player: channels A and B (open a file, the last render, save, clear),
+/// compared side by side across the split line, with the alpha display.
+fn ram_player(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let window = egui::Window::new("RAM Player").resizable(true).default_size(egui::vec2(640.0, 480.0));
+    crate::os_window::OsWindow::new("RAM Player", "RAM Player", [640.0, 480.0]).show(ctx, open, window, |ui| {
+        for (c, label) in ["A", "B"].into_iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(format!("Channel {label}:"));
+                if ui.button(format!("Open Channel {label}...")).clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::RamPlayerFile { channel: c as u8, save: false });
+                }
+                if ui.button(format!("Open Last Rendered Image in Channel {label}")).clicked() {
+                    if let Err(e) = app.dispatch(Command::RamPlayerOpen { channel: c as u32, path: None }) {
+                        app.state.status_prompt = e;
+                    }
+                }
+                let has = app.state.rendered.ram_player.channels[c].is_some();
+                if ui.add_enabled(has, egui::Button::new(format!("Save Channel {label}..."))).clicked() {
+                    app.state.dialog = Some(loom_commands::Dialog::RamPlayerFile { channel: c as u8, save: true });
+                }
+                if ui.add_enabled(has, egui::Button::new(format!("Close Channel {label}"))).clicked() {
+                    let _ = app.dispatch(Command::RamPlayerView { split: None, compare: None, alpha: None, clear: Some(c as u32) });
+                }
+                if let Some((name, img)) = &app.state.rendered.ram_player.channels[c] {
+                    ui.label(format!("{name} ({}x{})", img.width(), img.height()));
+                }
+            });
+        }
+        let r = app.state.rendered.ram_player.clone();
+        ui.horizontal(|ui| {
+            let mut compare = r.compare;
+            if ui.checkbox(&mut compare, "A | B").on_hover_text("Both channels, split side by side").changed() {
+                let _ = app.dispatch(Command::RamPlayerView { split: None, compare: Some(compare), alpha: None, clear: None });
+            }
+            let mut alpha = r.alpha;
+            if ui.checkbox(&mut alpha, "Display Alpha Channel").changed() {
+                let _ = app.dispatch(Command::RamPlayerView { split: None, compare: None, alpha: Some(alpha), clear: None });
+            }
+            ui.label("Split:");
+            let mut split = r.split;
+            if ui.add(egui::Slider::new(&mut split, 0.0..=1.0).show_value(false)).changed() {
+                let _ = app.dispatch(Command::RamPlayerView { split: Some(split), compare: None, alpha: None, clear: None });
+            }
+            pixel_readout(ui, &app.rfw.ram);
+        });
+        if app.rfw.ram_image.as_ref().map(|c| c.0) != Some(r.version) {
+            app.rfw.ram_image = Some((r.version, r.composed()));
+        }
+        let FrameViews { ram: view, ram_image, .. } = &mut app.rfw;
+        let img = ram_image.as_ref().and_then(|c| c.1.as_ref());
+        let mut dirty = None;
+        update_texture(ui.ctx(), view, "ram_player", img, r.version, Channels::default(), &mut dirty);
+        image_area(ui, view, img);
+        if r.compare && r.channels.iter().all(|c| c.is_some()) {
+            // The split line.
+            let rect = view.image_rect;
+            let x = rect.left() + rect.width() * r.split;
+            ui.painter().vline(x, rect.y_range(), egui::Stroke::new(1.0, egui::Color32::WHITE));
+        }
+    });
 }
 
 /// Render Message Window: the renders' information, warnings and errors,
@@ -369,7 +442,8 @@ fn clone_windows(ctx: &egui::Context, app: &mut LoomApp) {
             let view = app.rfw.clones.entry(id).or_insert_with(|| FrameView { zoom, ..Default::default() });
             ui.horizontal(|ui| pixel_readout(ui, view));
             let mut dirty = None;
-            update_texture(ui.ctx(), view, &format!("rendered_frame_clone_{id}"), Some(&img), 0, channels, &mut dirty);
+            // A clone's image is replaced whole (Render Elements): its pointer is its version.
+            update_texture(ui.ctx(), view, &format!("rendered_frame_clone_{id}"), Some(&img), std::sync::Arc::as_ptr(&img) as u64, channels, &mut dirty);
             image_area(ui, view, Some(&img));
         });
         if !open {

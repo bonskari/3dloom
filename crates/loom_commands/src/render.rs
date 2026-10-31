@@ -119,6 +119,53 @@ pub struct RenderedFrame {
     pub messages_open: bool,
     /// Render Shortcuts toolbar presets A, B, C (for the session).
     pub shortcuts: [Option<Box<RenderSettings>>; 3],
+    pub ram_player: RamPlayer,
+}
+
+/// Rendering > RAM Player: two image channels, A and B, compared side by
+/// side with a split line (A left of it, B right).
+#[derive(Debug, Clone)]
+pub struct RamPlayer {
+    pub open: bool,
+    pub channels: [Option<(String, Arc<image::RgbaImage>)>; 2],
+    /// Split position, a fraction of the width (A left, B right).
+    pub split: f32,
+    /// Both channels show (off: only A).
+    pub compare: bool,
+    /// Display the alpha channel as grey.
+    pub alpha: bool,
+    /// Bumped whenever what the window shows changes.
+    pub version: u64,
+}
+
+impl Default for RamPlayer {
+    fn default() -> Self {
+        Self { open: false, channels: [None, None], split: 0.5, compare: true, alpha: false, version: 0 }
+    }
+}
+
+impl RamPlayer {
+    /// What the RAM Player shows: A, with B right of the split line when
+    /// comparing (each channel at its own size, the canvas fitting both).
+    pub fn composed(&self) -> Option<image::RgbaImage> {
+        let a = self.channels[0].as_ref().map(|c| &c.1);
+        let b = self.channels[1].as_ref().map(|c| &c.1).filter(|_| self.compare);
+        let (w, h) = match (a, b) {
+            (None, None) => return None,
+            (Some(a), None) => a.dimensions(),
+            (None, Some(b)) => b.dimensions(),
+            (Some(a), Some(b)) => (a.width().max(b.width()), a.height().max(b.height())),
+        };
+        let split = (self.split.clamp(0.0, 1.0) * w as f32).round() as u32;
+        let ch = Channels { alpha: self.alpha, ..Default::default() };
+        Some(image::RgbaImage::from_fn(w, h, |x, y| {
+            let from = if b.is_some() && (x >= split || a.is_none()) { b } else { a };
+            match from.filter(|i| x < i.width() && y < i.height()) {
+                Some(i) => image::Rgba(ch.display(i.get_pixel(x, y).0)),
+                None => image::Rgba([0, 0, 0, 255]),
+            }
+        }))
+    }
 }
 
 /// A Production render of a frame sequence (Time Output other than Single).
@@ -155,6 +202,10 @@ pub fn handles(c: &C) -> bool {
             | C::RenderTimeOutput { .. }
             | C::RenderOptions { .. }
             | C::RenderMessageWindow
+            | C::RamPlayer
+            | C::RamPlayerOpen { .. }
+            | C::RamPlayerSave { .. }
+            | C::RamPlayerView { .. }
             | C::SaveRenderPreset { .. }
             | C::LoadRenderPreset { .. }
             | C::RenderShortcut { .. }
@@ -880,6 +931,59 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_settings(state, "Render Setup", s)?;
             let s = &state.scene.render;
             Ok(json!({ "video_color_check": s.video_color_check, "super_black": s.super_black, "super_black_threshold": s.super_black_threshold, "force_wireframe": s.force_wireframe, "wire_thickness": s.wire_thickness }))
+        }
+        C::RamPlayer => {
+            let r = &mut state.rendered.ram_player;
+            r.open = !r.open;
+            Ok(json!({ "open": r.open }))
+        }
+        C::RamPlayerOpen { channel, path } => {
+            let c = channel as usize;
+            if c > 1 {
+                return Err(format!("RAM Player channel {channel}: 0 (A) or 1 (B)"));
+            }
+            let (name, img) = match path {
+                Some(p) => {
+                    let img = image::open(&p).map_err(|e| format!("{p}: {e}"))?.to_rgba8();
+                    let name = std::path::Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(p.clone());
+                    (name, Arc::new(img))
+                }
+                None => {
+                    let img = state.rendered.image.clone().ok_or("the Rendered Frame Window has no image")?;
+                    (state.rendered.title.clone(), img)
+                }
+            };
+            let (w, h) = img.dimensions();
+            let r = &mut state.rendered.ram_player;
+            r.channels[c] = Some((name, img));
+            r.open = true;
+            r.version += 1;
+            Ok(json!({ "channel": channel, "width": w, "height": h }))
+        }
+        C::RamPlayerSave { channel, path } => {
+            let img = state.rendered.ram_player.channels.get(channel as usize).and_then(|c| c.as_ref()).map(|c| c.1.clone()).ok_or_else(|| format!("RAM Player channel {channel} is empty"))?;
+            save_image(&img, &path)?;
+            Ok(json!({ "path": path }))
+        }
+        C::RamPlayerView { split, compare, alpha, clear } => {
+            let r = &mut state.rendered.ram_player;
+            if let Some(v) = split {
+                if !(0.0..=1.0).contains(&v) {
+                    return Err(format!("split {v}: 0 to 1"));
+                }
+                r.split = v;
+            }
+            if let Some(v) = compare {
+                r.compare = v;
+            }
+            if let Some(v) = alpha {
+                r.alpha = v;
+            }
+            if let Some(c) = clear {
+                *r.channels.get_mut(c as usize).ok_or_else(|| format!("RAM Player channel {c}: 0 (A) or 1 (B)"))? = None;
+            }
+            r.version += 1;
+            Ok(json!({ "split": r.split, "compare": r.compare, "alpha": r.alpha }))
         }
         C::SaveRenderPreset { path } => {
             let text = serde_json::to_string_pretty(&state.scene.render).map_err(|e| e.to_string())?;

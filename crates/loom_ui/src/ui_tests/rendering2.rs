@@ -236,6 +236,20 @@ fn render_shortcuts_toolbar_stores_and_applies_a_preset() {
     assert_eq!(h.app.state.scene.render.width, 320);
 }
 
+/// RAM Player: the last render goes into channel A with a click, and shows.
+#[test]
+fn ram_player_opens_the_last_render() {
+    let mut h = Harness::new();
+    h.app.state.rendered.set_image(Some(std::sync::Arc::new(image::RgbaImage::from_pixel(32, 16, image::Rgba([0, 200, 0, 255])))));
+    h.cmd(Command::RamPlayer);
+    h.frames(2);
+    h.click_text_anywhere("Open Last Rendered Image in Channel A");
+    h.frames(2);
+    let a = h.app.state.rendered.ram_player.channels[0].as_ref().expect("channel A");
+    assert_eq!(a.1.dimensions(), (32, 16));
+    assert!(h.app.rfw.ram.texture_id().is_some(), "the window shows it");
+}
+
 /// The Render Elements panel: Add... lists the kinds; a click adds one.
 #[test]
 fn render_elements_panel_adds_an_element() {
