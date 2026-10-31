@@ -236,7 +236,7 @@ fn ray_traced_and_area_shadows_are_traced_in_the_render() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0, 30.0, 40.0] });
     let b = selected(&h);
     h.cmd(Command::SetWireColor { id: b.0, rgb: [220, 220, 220] });
-    ok(&mut h, "Create Light", serde_json::json!({ "kind": "Omni", "position": [50.0, -40.0, 110.0], "target": [0.0, 0.0, 0.0] }));
+    ok(&mut h, "Create Light", serde_json::json!({ "kind": "omni", "position": [50.0, -40.0, 110.0], "target": [0.0, 0.0, 0.0] }));
     let light = selected(&h);
     framed(&mut h);
     ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 240, "height": 180 }));
