@@ -2717,9 +2717,10 @@ fn modifier_stack_right_click_menus_close() {
     assert!(menus(&h).is_empty(), "and closes the menu");
     let base = in_panel(&h, "Box").center();
     right_click(&mut h, base);
+    // Paste, Paste Instanced, then Convert To below a separator.
     let m = menus(&h)[0];
-    let row = menu_row(&h, m, 0);
-    hover(&mut h, row);
+    let row = h.find_all(egui::accesskit::Role::Button, "Convert To").into_iter().find(|r| m.contains_rect(*r)).expect("Convert To in the menu");
+    hover(&mut h, row.center());
     let open = menus(&h);
     assert_eq!(open.len(), 2, "Convert To opens");
     assert!(open[1].min.x >= m.max.x - 1.0, "to the right: {:?} vs {m:?}", open[1]);

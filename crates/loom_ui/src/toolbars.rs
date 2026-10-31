@@ -78,6 +78,10 @@ pub fn host(ctx: &egui::Context, app: &mut LoomApp, name: &str, edges: &[Dock], 
             }
             scroll.show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    // The blank space between the buttons: the same right-click menu
+                    // (above the pan's drag area, below the buttons).
+                    let blank = ui.interact(ui.max_rect(), ui.id().with("toolbar_blank"), egui::Sense::click());
+                    blank.context_menu(|ui| customize_display_menu(ui, app, name));
                     ui.spacing_mut().item_spacing.x = 4.0;
                     contents(ui, app)
                 })
