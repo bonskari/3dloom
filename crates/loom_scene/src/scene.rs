@@ -65,6 +65,9 @@ pub struct Scene {
     /// Tools > Manage Scene States: named snapshots of chosen scene parts.
     #[serde(default)]
     pub scene_states: Vec<SceneStateRecord>,
+    /// Animation > Wire Parameters: parameter wiring links between node tracks/parameters.
+    #[serde(default)]
+    pub parameter_wires: Vec<ParameterWire>,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -117,6 +120,19 @@ pub struct SceneStateRecord {
     pub current_layer: u32,
     pub materials: (crate::material::MaterialLibrary, crate::material::MaterialEditorSlots),
     pub environment: crate::environment::Environment,
+}
+
+/// One parameter wiring link (`Animation > Wire Parameters > Parameter Wiring Dialog...`, Ctrl+5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterWire {
+    pub source_node: NodeId,
+    pub source_param: String,
+    pub target_node: NodeId,
+    pub target_param: String,
+    pub two_way: bool,
+    pub scale: f32,
+    pub offset: f32,
+    pub expression: String,
 }
 
 fn default_layers() -> Vec<Layer> {
@@ -175,6 +191,7 @@ impl Scene {
             environment: Default::default(),
             xrefs: Vec::new(),
             scene_states: Vec::new(),
+            parameter_wires: Vec::new(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             eval_in_progress: Default::default(),
@@ -898,7 +915,7 @@ impl Scene {
                 .map(|(k, id)| {
                     let n = &self.nodes[id];
                     let tip = self.nodes[&ids[k + 1]].transform.position.get();
-                    crate::ik::IkBone { id: *id, parent_frame: self.parent_frame(*id), position: n.transform.position.get(), rotation: n.transform.rotation_quat(), tip }
+                    crate::ik::IkBone { id: *id, parent_frame: self.parent_frame(*id), position: n.transform.position.get(), rotation: n.transform.rotation_quat(), tip, joints: n.joints }
                 })
                 .collect();
             let goal = self.world_matrix(chain.goal).transform_point3(Vec3::ZERO);

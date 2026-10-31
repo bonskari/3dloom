@@ -427,6 +427,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     }
 
     // Rollouts of the active entry.
+    custom_attributes_and_container_rollouts(ui, app, id);
     match active {
         None => {
             if is_patch {
@@ -474,6 +475,72 @@ fn poly_rollouts(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn run_or_report(app: &mut LoomApp, cmd: Command) {
     if let Err(e) = app.dispatch(cmd) {
         app.state.status_prompt = e;
+    }
+}
+
+fn custom_attributes_and_container_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
+    let (attrs, container) = match app.state.scene.node(id) {
+        Some(n) => (n.custom_attributes.clone(), n.container.clone()),
+        None => return,
+    };
+    if let Some(c) = container {
+        rollout(ui, "Container", true, |ui| {
+            let mut path = c.path.clone();
+            ui.horizontal(|ui| {
+                ui.label("Definition:");
+                if ui.text_edit_singleline(&mut path).lost_focus() && path != c.path {
+                    let _ = app.dispatch(Command::SaveContainer { id: Some(id.0), path: Some(path) });
+                }
+            });
+            ui.horizontal(|ui| {
+                let open_label = if c.open { "Close" } else { "Open" };
+                if ui.add_enabled(!c.unloaded, egui::Button::new(open_label)).clicked() {
+                    let _ = app.dispatch(Command::SetContainerOpen { id: Some(id.0), open: !c.open });
+                }
+                if ui.button("Save").clicked() {
+                    let _ = app.dispatch(Command::SaveContainer { id: Some(id.0), path: None });
+                }
+                if ui.add_enabled(!c.unloaded, egui::Button::new("Unload")).clicked() {
+                    let _ = app.dispatch(Command::UnloadContainer { id: Some(id.0) });
+                }
+                if ui.add_enabled(c.unloaded, egui::Button::new("Reload")).clicked() {
+                    let _ = app.dispatch(Command::ReloadContainer { id: Some(id.0) });
+                }
+            });
+        });
+    }
+    if !attrs.is_empty() {
+        rollout(ui, "Custom Attributes", true, |ui| {
+            let speed = app.spinner_speed(0.1);
+            egui::Grid::new(("custom_attrs_grid", id.0)).num_columns(3).show(ui, |ui| {
+                for a in attrs {
+                    ui.label(&a.name);
+                    let mut v = a.value;
+                    let changed = match a.attr_type.as_str() {
+                        "boolean" | "bool" => {
+                            let mut b = v != 0.0;
+                            let r = ui.checkbox(&mut b, "").changed();
+                            v = if b { 1.0 } else { 0.0 };
+                            r
+                        }
+                        "integer" | "int" => {
+                            let mut iv = v.round() as i32;
+                            let r = ui.add(egui::DragValue::new(&mut iv).range((a.min as i32)..=(a.max as i32))).changed();
+                            v = iv as f32;
+                            r
+                        }
+                        _ => ui.add(crate::spinner::spin(ui, &mut v, a.min..=a.max).speed(speed)).changed(),
+                    };
+                    if changed {
+                        let _ = app.dispatch(Command::SetCustomAttribute { id: id.0, name: a.name.clone(), value: v });
+                    }
+                    if ui.small_button("×").on_hover_text("Delete Custom Attribute").clicked() {
+                        let _ = app.dispatch(Command::DeleteCustomAttribute { id: id.0, name: a.name.clone() });
+                    }
+                    ui.end_row();
+                }
+            });
+        });
     }
 }
 

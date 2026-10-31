@@ -49,6 +49,9 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
     }
     loom_scene::anim::set_animate(animate);
     state.scene.set_time(state.current_frame as f32);
+    if r.is_ok() && !undo_cmd {
+        crate::extras::sync_parameter_wires(state);
+    }
     crate::stack::sync_selection(state);
     if let Some(before) = sel_before {
         crate::sel_undo::record(state, before, position);
@@ -3423,7 +3426,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c @ (C::BipedFootstepMode { .. } | C::BipedFootstepCreation { .. } | C::BipedCreateMultipleFootsteps { .. } | C::BipedAppendFootstep { .. } | C::BipedActivateFootsteps | C::BipedDeactivateFootsteps | C::BipedDeleteFootsteps) => crate::biped_footsteps::execute(state, c),
         c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::HistoryDependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
-        c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. } | C::ManageSceneStates | C::SaveSceneState { .. } | C::RestoreSceneState { .. } | C::DeleteSceneState { .. } | C::WalkThroughStep { .. } | C::ChannelInfo | C::ChannelInfoClear { .. } | C::ChannelInfoCopy { .. } | C::ChannelInfoPaste { .. } | C::ChannelInfoAdd { .. } | C::UvwRemove { .. }) => crate::extras::execute(state, c),
+        c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. } | C::ManageSceneStates | C::SaveSceneState { .. } | C::RestoreSceneState { .. } | C::DeleteSceneState { .. } | C::WalkThroughStep { .. } | C::ChannelInfo | C::ChannelInfoClear { .. } | C::ChannelInfoCopy { .. } | C::ChannelInfoPaste { .. } | C::ChannelInfoAdd { .. } | C::UvwRemove { .. } | C::SetJointLimits { .. } | C::ParameterWiringDialog | C::WireParameter { .. } | C::DisconnectWireParameter { .. } | C::AddCustomAttributesDialog | C::ParameterCollector | C::AddCustomAttribute { .. } | C::SetCustomAttribute { .. } | C::DeleteCustomAttribute { .. } | C::CreateContainer { .. } | C::SaveContainer { .. } | C::UnloadContainer { .. } | C::ReloadContainer { .. } | C::SetContainerOpen { .. }) => crate::extras::execute(state, c),
         // Every remaining variant is an Unwrap UVW group command.
         other => crate::unwrap::execute(state, other),
     }

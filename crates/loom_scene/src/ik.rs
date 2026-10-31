@@ -56,6 +56,116 @@ pub struct IkChain {
     pub ik_for_fk: bool,
 }
 
+/// Per-axis joint parameters (Hierarchy > IK > Rotational Joints / Sliding Joints).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct JointAxis {
+    pub active: bool,
+    pub limited: bool,
+    pub ease: bool,
+    pub from: f32,
+    pub to: f32,
+    pub preferred: f32,
+    pub spring_back: bool,
+    pub spring_back_val: f32,
+    pub spring_tension: f32,
+    pub damping: f32,
+}
+
+impl JointAxis {
+    pub const fn default_rotational() -> Self {
+        Self {
+            active: true,
+            limited: false,
+            ease: false,
+            from: -180.0,
+            to: 180.0,
+            preferred: 0.0,
+            spring_back: false,
+            spring_back_val: 0.0,
+            spring_tension: 0.02,
+            damping: 0.0,
+        }
+    }
+
+    pub const fn default_sliding() -> Self {
+        Self {
+            active: false,
+            limited: false,
+            ease: false,
+            from: -100.0,
+            to: 100.0,
+            preferred: 0.0,
+            spring_back: false,
+            spring_back_val: 0.0,
+            spring_tension: 0.02,
+            damping: 0.0,
+        }
+    }
+}
+
+impl Default for JointAxis {
+    fn default() -> Self {
+        Self::default_rotational()
+    }
+}
+
+/// Rotational and Sliding joint settings of a node (Hierarchy > IK).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct NodeJoints {
+    pub rotational: [JointAxis; 3],
+    pub sliding: [JointAxis; 3],
+}
+
+impl Default for NodeJoints {
+    fn default() -> Self {
+        Self {
+            rotational: [JointAxis::default_rotational(); 3],
+            sliding: [JointAxis::default_sliding(); 3],
+        }
+    }
+}
+
+impl NodeJoints {
+    /// Clamps and damps a solved local rotation `q` against `fk` according to
+    /// the node's Rotational Joints (Active, Limited From..To, Spring Back, Damping).
+    pub fn constrain_rotation(&self, fk: Quat, q: Quat) -> Quat {
+        if self.rotational.iter().all(|a| a.active && !a.limited && !a.spring_back && a.damping == 0.0) {
+            return q;
+        }
+        let (fx, fy, fz) = fk.to_euler(glam::EulerRot::XYZ);
+        let fk_deg = [fx.to_degrees(), fy.to_degrees(), fz.to_degrees()];
+        let (qx, qy, qz) = q.to_euler(glam::EulerRot::XYZ);
+        let mut deg = [qx.to_degrees(), qy.to_degrees(), qz.to_degrees()];
+        for k in 0..3 {
+            let ax = &self.rotational[k];
+            if !ax.active {
+                deg[k] = fk_deg[k];
+                continue;
+            }
+            if ax.damping > 0.0 {
+                let d = ax.damping.clamp(0.0, 1.0);
+                deg[k] = fk_deg[k] + (deg[k] - fk_deg[k]) * (1.0 - d);
+            }
+            if ax.spring_back {
+                let t = ax.spring_tension.clamp(0.0, 1.0);
+                deg[k] += (ax.spring_back_val - deg[k]) * t;
+            }
+            if ax.limited {
+                let lo = ax.from.min(ax.to);
+                let hi = ax.from.max(ax.to);
+                deg[k] = deg[k].clamp(lo, hi);
+            }
+        }
+        Quat::from_euler(
+            glam::EulerRot::XYZ,
+            deg[0].to_radians(),
+            deg[1].to_radians(),
+            deg[2].to_radians(),
+        )
+        .normalize()
+    }
+}
+
 /// One bone of a chain, FK: `position` / `rotation` are the local transform
 /// (the bone's base sits at its parent's tip), `parent_frame` matters for the
 /// first bone only (the rest chain from the bone before). `tip` is the next
@@ -68,6 +178,7 @@ pub struct IkBone {
     pub position: Vec3,
     pub rotation: Quat,
     pub tip: Vec3,
+    pub joints: NodeJoints,
 }
 
 /// A unit vector perpendicular to `v` (the bone's "up" in its own frame).
@@ -138,7 +249,22 @@ pub fn solve(chain: &IkChain, bones: &[IkBone], goal_world: Vec3, spline: Option
     if n == 0 {
         return Vec::new();
     }
-    let mut q: Vec<Quat> = bones.iter().map(|b| b.rotation.normalize()).collect();
+    let mut q: Vec<Quat> = bones
+        .iter()
+        .map(|b| {
+            let base = b.rotation.normalize();
+            let pref = b.joints.rotational;
+            if pref.iter().any(|a| a.preferred.abs() > 1e-4) {
+                let (mut x, mut y, mut z) = base.to_euler(glam::EulerRot::XYZ);
+                if pref[0].active && pref[0].preferred.abs() > 1e-4 { x = pref[0].preferred.to_radians(); }
+                if pref[1].active && pref[1].preferred.abs() > 1e-4 { y = pref[1].preferred.to_radians(); }
+                if pref[2].active && pref[2].preferred.abs() > 1e-4 { z = pref[2].preferred.to_radians(); }
+                Quat::from_euler(glam::EulerRot::XYZ, x, y, z).normalize()
+            } else {
+                base
+            }
+        })
+        .collect();
     match chain.solver {
         IkSolver::HI | IkSolver::HD => {
             let hd = chain.solver == IkSolver::HD;
@@ -165,7 +291,8 @@ pub fn solve(chain: &IkChain, bones: &[IkBone], goal_world: Vec3, spline: Option
                         r
                     };
                     let parent_rot = rot_of(if i == 0 { bones[0].parent_frame } else { ws[i - 1] });
-                    q[i] = (parent_rot.inverse() * r * rot_of(ws[i])).normalize();
+                    let raw = (parent_rot.inverse() * r * rot_of(ws[i])).normalize();
+                    q[i] = bones[i].joints.constrain_rotation(bones[i].rotation, raw);
                 }
             }
             if chain.swivel_deg.abs() > 1e-6 {

@@ -1966,12 +1966,38 @@ impl RenderProps {
     }
 }
 
+/// A user-defined Custom Attribute (`Animation > Add Custom Attributes...` / `Parameter Collector`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomAttribute {
+    pub name: String,
+    /// `"float"`, `"integer"`, or `"boolean"`.
+    pub attr_type: String,
+    pub value: f32,
+    pub min: f32,
+    pub max: f32,
+}
+
+/// Container metadata (`Tools > Containers`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContainerInfo {
+    pub path: String,
+    pub open: bool,
+    pub unloaded: bool,
+    pub saved_children: Vec<Node>,
+}
+
 /// The node settings that Hierarchy and Display panels edit, undone as one unit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeProps {
     pub object_offset: Transform,
     pub locks: Axes3,
     pub inherit: Axes3,
+    #[serde(default)]
+    pub joints: crate::ik::NodeJoints,
+    #[serde(default)]
+    pub custom_attributes: Vec<CustomAttribute>,
+    #[serde(default)]
+    pub container: Option<ContainerInfo>,
     pub display: DisplayProps,
     pub instance_of: Option<NodeId>,
     #[serde(default)]
@@ -2005,6 +2031,15 @@ pub struct Node {
     pub locks: Axes3,
     #[serde(default = "Axes3::all")]
     pub inherit: Axes3,
+    /// Hierarchy > IK > Rotational Joints / Sliding Joints.
+    #[serde(default)]
+    pub joints: crate::ik::NodeJoints,
+    /// Animation > Add Custom Attributes / Parameter Collector.
+    #[serde(default)]
+    pub custom_attributes: Vec<CustomAttribute>,
+    /// Tools > Containers metadata when this node is a Container head.
+    #[serde(default)]
+    pub container: Option<ContainerInfo>,
     #[serde(default)]
     pub display: DisplayProps,
     /// The Layer Manager layer (0 = default).
@@ -2098,6 +2133,9 @@ impl PartialEq for Node {
             && self.wire_color == o.wire_color
             && self.locks == o.locks
             && self.inherit == o.inherit
+            && self.joints == o.joints
+            && self.custom_attributes == o.custom_attributes
+            && self.container == o.container
             && self.display == o.display
             && self.layer == o.layer
             && self.modifiers == o.modifiers
@@ -2240,13 +2278,29 @@ impl Node {
     }
 
     pub fn props(&self) -> NodeProps {
-        NodeProps { object_offset: self.object_offset.clone(), locks: self.locks, inherit: self.inherit, display: self.display.clone(), instance_of: self.instance_of, reference_barrier: self.reference_barrier, render: self.render.clone(), user_props: self.user_props.clone(), skin_wrap_bake: self.skin_wrap_bake.clone() }
+        NodeProps {
+            object_offset: self.object_offset.clone(),
+            locks: self.locks,
+            inherit: self.inherit,
+            joints: self.joints,
+            custom_attributes: self.custom_attributes.clone(),
+            container: self.container.clone(),
+            display: self.display.clone(),
+            instance_of: self.instance_of,
+            reference_barrier: self.reference_barrier,
+            render: self.render.clone(),
+            user_props: self.user_props.clone(),
+            skin_wrap_bake: self.skin_wrap_bake.clone(),
+        }
     }
 
     pub fn set_props(&mut self, p: NodeProps) {
         self.object_offset = p.object_offset;
         self.locks = p.locks;
         self.inherit = p.inherit;
+        self.joints = p.joints;
+        self.custom_attributes = p.custom_attributes;
+        self.container = p.container;
         self.display = p.display.clone();
         self.instance_of = p.instance_of;
         self.reference_barrier = p.reference_barrier;
@@ -2277,6 +2331,9 @@ impl Node {
             wire_color: default_wire_color(),
             locks: Axes3::NONE,
             inherit: Axes3::ALL,
+            joints: crate::ik::NodeJoints::default(),
+            custom_attributes: Vec::new(),
+            container: None,
             display: DisplayProps::default(),
             layer: 0,
             modifiers: Vec::new(),

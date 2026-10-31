@@ -213,31 +213,94 @@ fn ik(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         });
     });
-    let Some(c) = chain else { return };
-    rollout(ui, "IK Solver Properties", true, |ui| {
-        let speed = app.spinner_speed(0.5);
-        egui::Grid::new("ik_props").num_columns(2).show(ui, |ui| {
-            for (label, name, value, range) in [("Swivel Angle:", "Swivel Angle", c.swivel_deg as f64, -360.0..=360.0), ("Threshold:", "Threshold", c.threshold as f64, 0.001..=100.0), ("Iterations:", "Iterations", c.iterations as f64, 1.0..=1000.0)] {
-                ui.label(label);
-                let mut v = value;
-                if ui.add(crate::spinner::spin(ui, &mut v, range).speed(speed)).changed() {
-                    let _ = app.dispatch(Command::SetIkChainParameter { chain: c.id, name: name.into(), value: v });
-                }
-                ui.end_row();
-            }
-        });
-    });
-    if c.solver == IkSolver::Spline {
-        rollout(ui, "Spline IK Solver", true, |ui| {
-            let current = c.spline.and_then(|s| app.state.scene.node(s)).map(|n| n.name.clone()).unwrap_or_else(|| "None".into());
-            let shapes: Vec<(loom_scene::NodeId, String)> = app.state.scene.nodes().filter(|n| n.object.shape().is_some()).map(|n| (n.id, n.name.clone())).collect();
-            egui::ComboBox::from_id_salt("spline_ik_shape").selected_text(format!("Pick Shape: {current}")).show_ui(ui, |ui| {
-                for (id, name) in shapes {
-                    if ui.selectable_label(c.spline == Some(id), name).clicked() {
-                        let _ = app.dispatch(Command::PickSplineIkShape { chain: c.id, node: id.0 });
+    if let Some(c) = chain {
+        rollout(ui, "IK Solver Properties", true, |ui| {
+            let speed = app.spinner_speed(0.5);
+            egui::Grid::new("ik_props").num_columns(2).show(ui, |ui| {
+                for (label, name, value, range) in [("Swivel Angle:", "Swivel Angle", c.swivel_deg as f64, -360.0..=360.0), ("Threshold:", "Threshold", c.threshold as f64, 0.001..=100.0), ("Iterations:", "Iterations", c.iterations as f64, 1.0..=1000.0)] {
+                    ui.label(label);
+                    let mut v = value;
+                    if ui.add(crate::spinner::spin(ui, &mut v, range).speed(speed)).changed() {
+                        let _ = app.dispatch(Command::SetIkChainParameter { chain: c.id, name: name.into(), value: v });
                     }
+                    ui.end_row();
                 }
             });
         });
+        if c.solver == IkSolver::Spline {
+            rollout(ui, "Spline IK Solver", true, |ui| {
+                let current = c.spline.and_then(|s| app.state.scene.node(s)).map(|n| n.name.clone()).unwrap_or_else(|| "None".into());
+                let shapes: Vec<(loom_scene::NodeId, String)> = app.state.scene.nodes().filter(|n| n.object.shape().is_some()).map(|n| (n.id, n.name.clone())).collect();
+                egui::ComboBox::from_id_salt("spline_ik_shape").selected_text(format!("Pick Shape: {current}")).show_ui(ui, |ui| {
+                    for (id, name) in shapes {
+                        if ui.selectable_label(c.spline == Some(id), name).clicked() {
+                            let _ = app.dispatch(Command::PickSplineIkShape { chain: c.id, node: id.0 });
+                        }
+                    }
+                });
+            });
+        }
+    }
+    if let Some(id) = selected {
+        if let Some(joints) = app.state.scene.node(id).map(|n| n.joints) {
+            rollout(ui, "Rotational Joints", true, |ui| joint_rollout(ui, app, id, joints.rotational, false));
+            rollout(ui, "Sliding Joints", false, |ui| joint_rollout(ui, app, id, joints.sliding, true));
+        }
+    }
+}
+
+fn joint_rollout(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, axes: [loom_scene::ik::JointAxis; 3], sliding: bool) {
+    let speed = app.spinner_speed(0.5);
+    let range = if sliding { -10_000.0..=10_000.0 } else { -360.0..=360.0 };
+    for (idx, axis_label) in ["X Axis", "Y Axis", "Z Axis"].iter().enumerate() {
+        let mut ax = axes[idx];
+        let mut changed = false;
+        ui.group(|ui| {
+            ui.label(egui::RichText::new(*axis_label).strong());
+            ui.horizontal(|ui| {
+                changed |= ui.checkbox(&mut ax.active, "Active").changed();
+                changed |= ui.checkbox(&mut ax.limited, "Limited").changed();
+                changed |= ui.checkbox(&mut ax.ease, "Ease").changed();
+            });
+            egui::Grid::new(("joint_grid", sliding, idx)).num_columns(2).show(ui, |ui| {
+                ui.label("From:");
+                changed |= ui.add_enabled(ax.limited, crate::spinner::spin(ui, &mut ax.from, range.clone()).speed(speed)).changed();
+                ui.end_row();
+                ui.label("To:");
+                changed |= ui.add_enabled(ax.limited, crate::spinner::spin(ui, &mut ax.to, range.clone()).speed(speed)).changed();
+                ui.end_row();
+                if !sliding {
+                    ui.label("Preferred Angle:");
+                    changed |= ui.add(crate::spinner::spin(ui, &mut ax.preferred, -360.0..=360.0).speed(speed)).changed();
+                    ui.end_row();
+                }
+                ui.checkbox(&mut ax.spring_back, "Spring Back:");
+                changed |= ui.add_enabled(ax.spring_back, crate::spinner::spin(ui, &mut ax.spring_back_val, range.clone()).speed(speed)).changed();
+                ui.end_row();
+                ui.label("Spring Tension:");
+                changed |= ui.add_enabled(ax.spring_back, crate::spinner::spin(ui, &mut ax.spring_tension, 0.0..=1.0).speed(0.01)).changed();
+                ui.end_row();
+                ui.label("Damping:");
+                changed |= ui.add(crate::spinner::spin(ui, &mut ax.damping, 0.0..=1.0).speed(0.01)).changed();
+                ui.end_row();
+            });
+        });
+        if changed || ax != axes[idx] {
+            let _ = app.dispatch(Command::SetJointLimits {
+                id: id.0,
+                sliding,
+                axis: idx as u32,
+                active: Some(ax.active),
+                limited: Some(ax.limited),
+                ease: Some(ax.ease),
+                from: Some(ax.from),
+                to: Some(ax.to),
+                preferred: Some(ax.preferred),
+                spring_back: Some(ax.spring_back),
+                spring_back_val: Some(ax.spring_back_val),
+                spring_tension: Some(ax.spring_tension),
+                damping: Some(ax.damping),
+            });
+        }
     }
 }
