@@ -7,6 +7,7 @@ use bevy::app::{App, Plugin};
 use bevy::asset::{load_internal_asset, weak_handle, Asset, Handle};
 use bevy::math::Vec4;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial};
+use bevy::image::Image;
 use bevy::reflect::Reflect;
 use bevy::render::render_resource::{AsBindGroup, Shader, ShaderRef, ShaderType};
 use loom_scene::material::Surface;
@@ -56,6 +57,9 @@ mod uniform {
 pub struct Look {
     #[uniform(100)]
     pub params: LookParams,
+    /// Ambient Occlusion of the render pass, per pixel of its view (none: 1).
+    #[texture(101)]
+    pub ao: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for Look {

@@ -118,23 +118,16 @@ impl Default for RenderOptions {
     }
 }
 
-/// The world scale a render with ambient occlusion uses: Bevy's ambient
-/// occlusion reaches a fixed 0.73 world units, so the world shrinks until
-/// that is the AO Radius.
-const AO_REACH: f32 = 0.5 * 1.457;
-
 impl RenderOptions {
     /// Whether the render camera needs the screen-space passes (and so no MSAA).
     fn screen_space(&self) -> bool {
-        self.quality.ambient_occlusion || self.quality.reflections
+        self.quality.reflections
     }
 
+    /// Ambient occlusion is ray traced on the CPU (quality::ambient_occlusion),
+    /// in scene units: the world keeps its size.
     fn world_scale(&self) -> f32 {
-        if self.quality.ambient_occlusion {
-            AO_REACH / self.quality.ao_radius.max(1e-3)
-        } else {
-            1.0
-        }
+        1.0
     }
 
     /// Passes per bucket.
@@ -184,6 +177,8 @@ struct Object {
     wire_color: [u8; 3],
     renderable: bool,
     flags: ObjectFlags,
+    /// The mesh's triangles (world space) for the ray-traced ambient occlusion.
+    triangles: std::sync::Arc<Vec<loom_bake::Triangle>>,
 }
 
 struct View {
@@ -306,6 +301,8 @@ struct ActiveRender {
     camera_ready: bool,
     /// The bucket's passes so far.
     accum: Option<quality::Accum>,
+    /// Ambient Occlusion: the scene's triangles (scene units), built at the first bucket.
+    ao: Option<std::sync::Arc<loom_bake::Bvh>>,
     /// The part of the frame the current bucket shows (u0, v0, u1, v1).
     frame: [f32; 4],
 }
@@ -919,7 +916,7 @@ impl BevyRenderer {
                 }
                 let world = self.app.world_mut();
                 let mesh = world.resource_mut::<Assets<Mesh>>().add(mesh);
-                let material_handle = world.resource_mut::<Assets<look::LoomMaterial>>().add(look::LoomMaterial { base: mat, extension: look::Look { params: look::params(surface.as_ref()) } });
+                let material_handle = world.resource_mut::<Assets<look::LoomMaterial>>().add(look::LoomMaterial { base: mat, extension: look::Look { params: look::params(surface.as_ref()), ao: None } });
                 let e = world.spawn((Transform::from_scale(Vec3::splat(self.scale)), Mesh3d(mesh), MeshMaterial3d(material_handle.clone()), layers.clone()));
                 let mut e = Self::shadow_flags(e, Self::cast_flags(o));
                 // Bevy computes bounds only once per entity: keep them current.
@@ -944,7 +941,7 @@ impl BevyRenderer {
                 }
                 entities.push((entity, material_handle));
             }
-            set.insert(o.id, Object { parts: entities, mesh_hash: hash, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags });
+            set.insert(o.id, Object { parts: entities, mesh_hash: hash, surfaces: o.surfaces.clone(), wire_color: o.wire_color, renderable: o.renderable, flags: o.flags, triangles: std::sync::Arc::new(loom_bake::triangles(o.mesh, 1)) });
             self.settle = self.settle.max(3);
         }
         let gone: Vec<u64> = set.keys().filter(|id| !seen.contains(id)).copied().collect();
@@ -1249,9 +1246,9 @@ impl BevyRenderer {
     /// control, ambient occlusion, reflections and the sky dome.
     fn setup_render_camera(&mut self) {
         use bevy::core_pipeline::tonemapping::DebandDither;
-        use bevy::pbr::{prelude::EnvironmentMapLight, ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceReflections, ShadowFilteringMethod};
+        use bevy::pbr::{prelude::EnvironmentMapLight, ScreenSpaceReflections, ShadowFilteringMethod};
         use bevy::render::camera::Exposure;
-        use loom_scene::render::{AoQuality, Tonemapper};
+        use loom_scene::render::Tonemapper;
         let Some(r) = self.render.as_ref() else { return };
         let Some(v) = self.views.get(&RENDER_SLOT) else { return };
         let o = r.options.clone();
@@ -1286,15 +1283,6 @@ impl BevyRenderer {
         }
         // A filter that changes with every frame adds up over the passes.
         e.insert(if o.passes() > 1 { ShadowFilteringMethod::Temporal } else { ShadowFilteringMethod::Gaussian });
-        if q.ambient_occlusion {
-            let quality_level = match q.ao_quality {
-                AoQuality::Low => ScreenSpaceAmbientOcclusionQualityLevel::Low,
-                AoQuality::Medium => ScreenSpaceAmbientOcclusionQualityLevel::Medium,
-                AoQuality::High => ScreenSpaceAmbientOcclusionQualityLevel::High,
-                AoQuality::Ultra => ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
-            };
-            e.insert(ScreenSpaceAmbientOcclusion { quality_level, ..Default::default() });
-        }
         if q.reflections {
             // Glossier than this reflects the view (rougher: only the sky dome).
             e.insert(ScreenSpaceReflections { perceptual_roughness_threshold: 0.35, ..Default::default() });
@@ -1330,7 +1318,7 @@ impl BevyRenderer {
         }
         self.scale = options.world_scale();
         self.light_pass = 0;
-        self.render = Some(ActiveRender { options, two_sided, deferred, camera_ready: false, accum: None, frame: [0.0, 0.0, 1.0, 1.0] });
+        self.render = Some(ActiveRender { options, two_sided, deferred, camera_ready: false, accum: None, ao: None, frame: [0.0, 0.0, 1.0, 1.0] });
         self.metered.remove(&RENDER_SLOT);
         self.meter = None;
         self.rescale();
@@ -1399,6 +1387,7 @@ impl BevyRenderer {
         }
         // Cleared to transparent black: the environment pass draws the background.
         let clear = [0.0; 4];
+        self.set_ambient_occlusion(camera, aspect, sub, internal, pass);
         let camera = camera.scaled(self.scale);
         self.place_view(RENDER_SLOT, internal, Projection::custom(BucketProjection::new(&camera, aspect, sub)), camera.view, clear, o.msaa, layers.clone());
         if self.render.as_ref().is_some_and(|r| !r.camera_ready) {
@@ -1412,6 +1401,53 @@ impl BevyRenderer {
             self.place_meter(RENDER_SLOT, camera.bevy_projection(aspect), camera.view, layers);
         }
         Ok(())
+    }
+
+    /// Ambient Occlusion of the render's pass `pass` through the bucket
+    /// `frame` (the camera's clip window) at `size` pixels: ray traced over the
+    /// scene's renderable objects to AO Radius scene units, it darkens the
+    /// ambient light of every object (the look shader reads it per pixel).
+    fn set_ambient_occlusion(&mut self, camera: &ViewCamera, aspect: f32, frame: [f32; 4], size: [u32; 2], pass: u32) {
+        use bevy::render::camera::CameraProjection;
+        let Some(r) = self.render.as_mut() else { return };
+        let q = r.options.quality.clone();
+        let image = if q.ambient_occlusion {
+            let objects = &self.objects;
+            let bvh = r.ao.get_or_insert_with(|| {
+                let tris = objects.values().filter(|o| o.renderable && o.flags.visibility > 0.0).flat_map(|o| o.triangles.iter().cloned()).collect();
+                std::sync::Arc::new(loom_bake::Bvh::new(tris))
+            });
+            let samples = match q.ao_quality {
+                loom_scene::render::AoQuality::Low => 8,
+                loom_scene::render::AoQuality::Medium => 16,
+                loom_scene::render::AoQuality::High => 32,
+                loom_scene::render::AoQuality::Ultra => 64,
+            };
+            let clip_from_world = BucketProjection::new(camera, aspect, frame).get_clip_from_view() * camera.view;
+            let ao = quality::ambient_occlusion(bvh, clip_from_world.inverse(), size, q.ao_radius.max(1e-3), samples, pass);
+            let img = Image::new(
+                bevy::render::render_resource::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                bevy::render::render_resource::TextureDimension::D2,
+                ao,
+                bevy::render::render_resource::TextureFormat::R8Unorm,
+                RenderAssetUsages::RENDER_WORLD,
+            );
+            Some(self.app.world_mut().resource_mut::<Assets<Image>>().add(img))
+        } else {
+            None
+        };
+        let handles: Vec<Handle<look::LoomMaterial>> = self.objects.values().chain(self.hidden.values()).flat_map(|o| o.parts.iter().map(|(_, h)| h.clone())).collect();
+        let mut mats = self.app.world_mut().resource_mut::<Assets<look::LoomMaterial>>();
+        for h in handles {
+            if let Some(m) = mats.get(&h) {
+                if m.extension.ao == image {
+                    continue;
+                }
+            }
+            if let Some(m) = mats.get_mut(&h) {
+                m.extension.ao = image.clone();
+            }
+        }
     }
 
     /// Adds the pass rendered last to its bucket and returns the bucket so

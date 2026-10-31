@@ -288,3 +288,64 @@ mod tests {
         assert_eq!(s.data.as_ref().unwrap().len(), 6 * 4 * (64 * 64 + 32 * 32 + 16 * 16 + 8 * 8 + 4 * 4 + 2 * 2 + 1));
     }
 }
+
+/// Ambient Occlusion of a view, one byte per pixel (255 open): each pixel's
+/// ray from `world_from_clip` (a reverse-Z clip space) finds the nearest
+/// surface in `scene`, and `samples` cosine-weighted rays from there over
+/// the surface's side count what lies within `radius` scene units. `pass`
+/// turns the sample pattern, so the passes of a render add up to more samples.
+pub fn ambient_occlusion(scene: &loom_bake::Bvh, world_from_clip: glam::Mat4, size: [u32; 2], radius: f32, samples: u32, pass: u32) -> Vec<u8> {
+    use glam::{Vec3, Vec4};
+    let (w, h) = (size[0] as usize, size[1] as usize);
+    let mut out = vec![255u8; w * h];
+    let golden = std::f32::consts::PI * (3.0 - 5.0_f32.sqrt());
+    let unproject = |x: f32, y: f32, z: f32| {
+        let p = world_from_clip * Vec4::new(x, y, z, 1.0);
+        p.truncate() / p.w
+    };
+    let shade = |px: usize, py: usize| -> u8 {
+        let (x, y) = ((px as f32 + 0.5) / w as f32 * 2.0 - 1.0, 1.0 - (py as f32 + 0.5) / h as f32 * 2.0);
+        let origin = unproject(x, y, 1.0);
+        let dir = (unproject(x, y, 0.5) - origin).normalize_or_zero();
+        if dir == Vec3::ZERO {
+            return 255;
+        }
+        let Some((t, i, b)) = scene.hits(origin, dir, 0.0, f32::MAX).into_iter().min_by(|a, b| a.0.total_cmp(&b.0)) else { return 255 };
+        let tri = scene.triangle(i);
+        let mut n = tri.normal(b).normalize_or_zero();
+        if n.dot(dir) > 0.0 {
+            n = -n;
+        }
+        let p = origin + dir * t + n * (radius * 1e-3).max(1e-4);
+        let u = n.any_orthonormal_vector();
+        let v = n.cross(u);
+        // A turn per pixel and per pass (a hash), so no two neighbours or passes share the pattern.
+        let turn = ((px as u32).wrapping_mul(73_856_093) ^ (py as u32).wrapping_mul(19_349_663) ^ pass.wrapping_mul(83_492_791)) as f32 / u32::MAX as f32 * std::f32::consts::TAU;
+        let n_samples = samples.max(1);
+        let occluded = (0..n_samples)
+            .filter(|s| {
+                let r = ((*s as f32 + 0.5) / n_samples as f32).sqrt();
+                let theta = *s as f32 * golden + turn;
+                let (dx, dy) = (r * theta.cos(), r * theta.sin());
+                let dz = (1.0 - dx * dx - dy * dy).max(0.0).sqrt();
+                let d = (u * dx + v * dy + n * dz).normalize_or(n);
+                !scene.hits(p, d, 0.0, radius).is_empty()
+            })
+            .count();
+        let open = 1.0 - occluded as f32 / n_samples as f32;
+        (open.clamp(0.0, 1.0) * 255.0).round() as u8
+    };
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(h.max(1));
+    let rows = h.div_ceil(threads.max(1)).max(1);
+    std::thread::scope(|s| {
+        for (k, chunk) in out.chunks_mut(rows * w).enumerate() {
+            let shade = &shade;
+            s.spawn(move || {
+                for (j, px) in chunk.iter_mut().enumerate() {
+                    *px = shade(j % w, k * rows + j / w);
+                }
+            });
+        }
+    });
+    out
+}

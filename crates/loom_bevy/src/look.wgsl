@@ -29,6 +29,8 @@ struct LookParams {
 };
 
 @group(2) @binding(100) var<uniform> look: LookParams;
+// A render's ray-traced Ambient Occlusion per pixel (a 1x1 white fallback without).
+@group(2) @binding(101) var ao_texture: texture_2d<f32>;
 
 const FALLOFF: u32 = 1u;
 const TOON: u32 = 2u;
@@ -104,6 +106,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     }
 
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    if (textureDimensions(ao_texture).x > 1u) {
+        pbr_input.diffuse_occlusion *= textureLoad(ao_texture, vec2<i32>(in.position.xy), 0).r;
+    }
 
     if ((look.flags & MATTE) != 0u) {
         // The shadows alone: the light with shadows against the light without them.
