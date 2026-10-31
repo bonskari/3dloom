@@ -769,6 +769,10 @@ commands! {
     CopyModifier => "Copy Modifier", Loom, "Shift-drag (copy) / Ctrl-drag (`instance`) in the stack: a copy of entry `from` is inserted so it ends up at position `to` (0 = bottom, up to the stack length)." { from: u32, to: u32, instance: bool };
     ToggleModifier => "Toggle Modifier", Loom, "Modifier on / off (the stack lightbulb)." { index: u32, on: bool };
     ToggleModifierInViewport => "Toggle Modifier In Viewport", Loom, "Modifier on / off in viewports only." { index: u32, on: bool };
+    ToggleModifierInRenderer => "Toggle Modifier In Renderer", Loom, "Modifier on / off in the renderer only." { index: u32, on: bool };
+    CutModifier => "Cut Modifier", Loom, "Cut stack entry `index` to the modifier clipboard." { index: u32 };
+    CopyModifierToClipboard => "Copy Modifier To Clipboard", Loom, "Copy stack entry `index` to the modifier clipboard." { index: u32 };
+    PasteModifier => "Paste Modifier", Loom, "Paste the modifier clipboard onto the selected objects (as a copy or `instance`)." { instance: bool };
     RenameModifier => "Rename Modifier", Loom, "Rename a stack entry." { index: u32, name: String };
     SelectStackEntry => "Select Stack Entry", Loom, "Make a stack entry current (null = the base object); its rollouts show." { index: Option<u32> };
     SetModifierParameter => "Set Modifier Parameter", Loom, "Set a modifier's rollout value by name; instanced entries edit their source." { index: u32, name: String, value: f64 };
@@ -780,6 +784,7 @@ commands! {
     CollapseTo => "Collapse To", Loom, "Collapse the stack up to entry `index` into the base Editable Poly." { index: u32 };
     CollapseAll => "Collapse All", Loom, "Collapse the whole stack into an Editable Poly.";
     ConfigureModifierSets => "Configure Modifier Sets", Loom, "The modifier button set shown under the Modifier List." { names: Vec<String> };
+    ConfigureModifierSetsDialog => "Configure Modifier Sets Dialog", MainUI, "Open the Configure Modifier Sets dialog.";
     PickModifierNode => "Pick Modifier Node", Loom, "Linked XForm > Pick Control Object / Preserve > Pick Original: the node stack entry `index` follows or references." { index: u32, node: u64 };
     ModifierSetButtonsToggle => "Modifier Set Buttons Toggle", Loom, "Show / hide the modifier button set.";
     SwitchToControlPointLevel => "Switch To Control Point Level", FFD, "FFD: enter the Control Points level of the active FFD entry (Alt+Shift+C).";

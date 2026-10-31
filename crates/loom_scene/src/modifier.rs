@@ -2492,11 +2492,17 @@ fn in_gizmo(mesh: &mut Mesh, gizmo: &Transform, f: impl FnOnce(&mut Mesh) -> Res
 }
 
 /// One entry of a node's modifier stack.
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModifierSlot {
     pub modifier: Modifier,
     pub enabled: bool,
     pub enabled_in_viewport: bool,
+    #[serde(default = "default_true")]
+    pub enabled_in_renderer: bool,
     /// Display name (an entry can be renamed).
     pub name: String,
     /// Active sub-object level of this entry (0 = none), per `sub_levels()`.
@@ -2510,7 +2516,7 @@ pub struct ModifierSlot {
 impl ModifierSlot {
     pub fn new(modifier: Modifier) -> Self {
         let name = modifier.name().to_owned();
-        Self { modifier, enabled: true, enabled_in_viewport: true, name, sub_level: 0, instance_of: None }
+        Self { modifier, enabled: true, enabled_in_viewport: true, enabled_in_renderer: true, name, sub_level: 0, instance_of: None }
     }
 }
 

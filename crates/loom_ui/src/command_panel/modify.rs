@@ -27,8 +27,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let is_spline = node.object.spline().is_some();
     let is_group = matches!(node.object, loom_scene::ObjectKind::Group { .. });
     let node_instanced = node.instance_of.is_some();
-    let entries: Vec<(String, bool, bool, Option<(loom_scene::NodeId, usize)>, &'static [&'static str], u32)> =
-        node.modifiers.iter().map(|s| (s.name.clone(), s.enabled, s.enabled_in_viewport, s.instance_of, s.modifier.sub_levels(), s.sub_level)).collect();
+    let ref_barrier = node.reference_barrier;
+    let has_clip = app.state.modifier_clipboard.is_some();
+    let entries: Vec<(String, bool, bool, bool, Option<(loom_scene::NodeId, usize)>, &'static [&'static str], u32)> =
+        node.modifiers.iter().map(|s| (s.name.clone(), s.enabled, s.enabled_in_viewport, s.enabled_in_renderer, s.instance_of, s.modifier.sub_levels(), s.sub_level)).collect();
     let base_levels = loom_commands::base_sub_levels(&node.object);
     let base_object = node.object.clone();
     let active = node.active_entry;
@@ -164,7 +166,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             })
             .inner
         };
-        for (i, (name, enabled, _in_vp, instance, levels, lvl)) in entries.iter().enumerate().rev() {
+        if ref_barrier == Some(entries.len()) {
+            ui.separator();
+        }
+        for (i, (name, enabled, in_vp, in_rnd, instance, levels, lvl)) in entries.iter().enumerate().rev() {
             let mut open = false;
             ui.horizontal(|ui| {
                 let (o, leave) = expander(ui, (id.0, Some(i)), !levels.is_empty(), active == Some(i) && *lvl > 0);
@@ -203,8 +208,35 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         delete = Some(i);
                         ui.close_menu();
                     }
+                    if ui.button("Cut").clicked() {
+                        let _ = app.dispatch(Command::CutModifier { index: i as u32 });
+                        ui.close_menu();
+                    }
+                    if ui.button("Copy").clicked() {
+                        let _ = app.dispatch(Command::CopyModifierToClipboard { index: i as u32 });
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(has_clip, egui::Button::new("Paste")).clicked() {
+                        let _ = app.dispatch(Command::SelectStackEntry { index: Some(i as u32) });
+                        let _ = app.dispatch(Command::PasteModifier { instance: false });
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(has_clip, egui::Button::new("Paste Instanced")).clicked() {
+                        let _ = app.dispatch(Command::SelectStackEntry { index: Some(i as u32) });
+                        let _ = app.dispatch(Command::PasteModifier { instance: true });
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button(if *enabled { "Off" } else { "On" }).clicked() {
                         toggle = Some((i, !*enabled));
+                        ui.close_menu();
+                    }
+                    if ui.button(if *in_vp { "Off in Viewport" } else { "On in Viewport" }).clicked() {
+                        let _ = app.dispatch(Command::ToggleModifierInViewport { index: i as u32, on: !*in_vp });
+                        ui.close_menu();
+                    }
+                    if ui.button(if *in_rnd { "Off in Renderer" } else { "On in Renderer" }).clicked() {
+                        let _ = app.dispatch(Command::ToggleModifierInRenderer { index: i as u32, on: !*in_rnd });
                         ui.close_menu();
                     }
                     ui.separator();
@@ -232,6 +264,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     }
                 }
             }
+            if ref_barrier == Some(i) {
+                ui.separator();
+            }
         }
         let mode = app.state.selection_mode;
         let base_in_level = active.is_none() && mode != SelectionMode::Object;
@@ -247,8 +282,19 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             if r.clicked() {
                 select = Some(None);
             }
-            // Right-click on the base object: Convert To, Collapse All.
+            // Right-click on the base object: Paste, Convert To, Collapse All.
             r.context_menu(|ui| {
+                if ui.add_enabled(has_clip, egui::Button::new("Paste")).clicked() {
+                    let _ = app.dispatch(Command::SelectStackEntry { index: None });
+                    let _ = app.dispatch(Command::PasteModifier { instance: false });
+                    ui.close_menu();
+                }
+                if ui.add_enabled(has_clip, egui::Button::new("Paste Instanced")).clicked() {
+                    let _ = app.dispatch(Command::SelectStackEntry { index: None });
+                    let _ = app.dispatch(Command::PasteModifier { instance: true });
+                    ui.close_menu();
+                }
+                ui.separator();
                 ui.menu_button("Convert To", |ui| {
                     for (label, cmd) in base_convert_entries(&base_object) {
                         if ui.button(label).clicked() {
@@ -311,7 +357,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         if Icon::new(icons::SHOW_END_RESULT, Command::ShowEndResultToggle.name()).tip("Show End Result On/Off Toggle").on(app.state.show_end_result).show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::ShowEndResultToggle);
         }
-        let instanced = active.and_then(|a| entries.get(a)).is_some_and(|e| e.3.is_some()) || node_instanced;
+        let instanced = active.and_then(|a| entries.get(a)).is_some_and(|e| e.4.is_some()) || node_instanced;
         if Icon::new(icons::MAKE_UNIQUE, Command::MakeUnique.name()).tip("Make Unique").enabled(instanced).show(ui, &app.state).clicked() {
             let _ = app.dispatch(Command::MakeUnique);
         }
@@ -320,9 +366,35 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 delete = Some(a);
             }
         }
-        if Icon::new(icons::CONFIGURE_SETS, Command::ModifierSetButtonsToggle.name()).tip("Configure Modifier Sets").show(ui, &app.state).clicked() {
+        let cfg = Icon::new(icons::CONFIGURE_SETS, Command::ModifierSetButtonsToggle.name()).tip("Configure Modifier Sets").show(ui, &app.state);
+        if cfg.clicked() {
             let _ = app.dispatch(Command::ModifierSetButtonsToggle);
         }
+        cfg.context_menu(|ui| {
+            if ui.button("Configure Modifier Sets...").clicked() {
+                let _ = app.dispatch(Command::ConfigureModifierSetsDialog);
+                ui.close_menu();
+            }
+            let mut show_btns = app.state.show_modifier_set;
+            if ui.checkbox(&mut show_btns, "Show Buttons").changed() {
+                let _ = app.dispatch(Command::ModifierSetButtonsToggle);
+                ui.close_menu();
+            }
+            ui.separator();
+            for (set_name, names) in [
+                ("Mesh Editing", &["Edit Poly", "Edit Mesh", "Cap Holes", "Normal", "Optimize", "Smooth", "STL Check", "Symmetry", "Tessellate", "VertexPaint"][..]),
+                ("Animation Modifiers", &["Morpher", "Skin", "Flex", "Melt", "Linked XForm", "PatchDeform", "PathDeform", "Point Cache", "Spline IK Control", "SurfDeform"][..]),
+                ("UV Coordinates", &["UVW Map", "Unwrap UVW", "MapScaler", "Projection", "UVW Mapping Add", "UVW Mapping Clear", "UVW XForm", "Camera Map"][..]),
+                ("Subdivision Surfaces", &["TurboSmooth", "MeshSmooth", "HSDS", "Tessellate"][..]),
+                ("Selection Modifiers", &["Mesh Select", "Poly Select", "Patch Select", "Spline Select", "Vol. Select", "Turn to Poly", "Turn to Mesh", "Turn to Patch"][..]),
+                ("Parametric Modifiers", &["Bend", "Taper", "Twist", "Noise", "Stretch", "Squeeze", "Push", "Relax", "Ripple", "Wave", "Skew", "Slice", "Spherify", "Affect Region", "Lattice", "Mirror", "Displace", "XForm", "Preserve", "Shell"][..]),
+            ] {
+                if ui.button(set_name).clicked() {
+                    let _ = app.dispatch(Command::ConfigureModifierSets { names: names.iter().map(|s| (*s).to_owned()).collect() });
+                    ui.close_menu();
+                }
+            }
+        });
     });
     if let Some(sel) = select {
         let _ = app.dispatch(Command::SelectStackEntry { index: sel.map(|i| i as u32) });

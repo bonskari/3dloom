@@ -113,6 +113,14 @@ fn pivot(ui: &mut egui::Ui, app: &mut LoomApp) {
             if ui.add_sized([w, 22.0], egui::Button::new("Scale")).clicked() {
                 let _ = app.dispatch(Command::ResetScale);
             }
+            ui.separator();
+            ui.label("Freeze:");
+            if ui.add_sized([w, 22.0], egui::Button::new("Freeze Transform")).clicked() {
+                let _ = app.dispatch(Command::FreezeTransform);
+            }
+            if ui.add_sized([w, 22.0], egui::Button::new("Transform to Zero")).clicked() {
+                let _ = app.dispatch(Command::TransformToZero);
+            }
         });
     });
 }

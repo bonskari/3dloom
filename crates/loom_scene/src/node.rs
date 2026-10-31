@@ -1974,6 +1974,8 @@ pub struct NodeProps {
     pub inherit: Axes3,
     pub display: DisplayProps,
     pub instance_of: Option<NodeId>,
+    #[serde(default)]
+    pub reference_barrier: Option<usize>,
     pub render: RenderProps,
     /// Object Properties > User Defined: free text kept with the scene.
     pub user_props: String,
@@ -2031,6 +2033,10 @@ pub struct Node {
     /// the given source node (parameter edits apply to the whole group).
     #[serde(default)]
     pub instance_of: Option<NodeId>,
+    /// Clone Options > Reference: stack index separating shared modifiers
+    /// below the derived-object line from independent modifiers above it.
+    #[serde(default)]
+    pub reference_barrier: Option<usize>,
     /// Path / Position / Attachment, LookAt / Orientation and Link constraints.
     #[serde(default)]
     pub constraints: crate::constraint::Constraints,
@@ -2097,6 +2103,7 @@ impl PartialEq for Node {
             && self.modifiers == o.modifiers
             && self.active_entry == o.active_entry
             && self.instance_of == o.instance_of
+            && self.reference_barrier == o.reference_barrier
             && self.constraints == o.constraints
             && self.visibility == o.visibility
             && self.render == o.render
@@ -2233,7 +2240,7 @@ impl Node {
     }
 
     pub fn props(&self) -> NodeProps {
-        NodeProps { object_offset: self.object_offset.clone(), locks: self.locks, inherit: self.inherit, display: self.display.clone(), instance_of: self.instance_of, render: self.render.clone(), user_props: self.user_props.clone(), skin_wrap_bake: self.skin_wrap_bake.clone() }
+        NodeProps { object_offset: self.object_offset.clone(), locks: self.locks, inherit: self.inherit, display: self.display.clone(), instance_of: self.instance_of, reference_barrier: self.reference_barrier, render: self.render.clone(), user_props: self.user_props.clone(), skin_wrap_bake: self.skin_wrap_bake.clone() }
     }
 
     pub fn set_props(&mut self, p: NodeProps) {
@@ -2242,6 +2249,7 @@ impl Node {
         self.inherit = p.inherit;
         self.display = p.display.clone();
         self.instance_of = p.instance_of;
+        self.reference_barrier = p.reference_barrier;
         self.render = p.render;
         self.user_props = p.user_props;
         self.skin_wrap_bake = p.skin_wrap_bake;
@@ -2283,6 +2291,7 @@ impl Node {
             version: 0,
             geom_version: 0,
             instance_of: None,
+            reference_barrier: None,
         }
     }
 }

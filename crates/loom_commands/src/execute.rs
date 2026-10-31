@@ -585,7 +585,21 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                             (Some(n), _, _) if !n.is_empty() => sim.next_name(base_of(n)),
                             _ => sim.next_name(base_of(&src.name)),
                         };
-                        node.instance_of = if kind == CloneKind::Copy { None } else { Some(src.instance_of.unwrap_or(*id)) };
+                        let root = src.instance_of.unwrap_or(*id);
+                        node.instance_of = if kind == CloneKind::Copy { None } else { Some(root) };
+                        node.reference_barrier = match kind {
+                            CloneKind::Reference => Some(node.modifiers.len()),
+                            CloneKind::Instance => src.reference_barrier,
+                            CloneKind::Copy => None,
+                        };
+                        if kind != CloneKind::Copy {
+                            let shared = node.reference_barrier.unwrap_or(node.modifiers.len());
+                            for (mi, slot) in node.modifiers.iter_mut().take(shared).enumerate() {
+                                if slot.instance_of.is_none() {
+                                    slot.instance_of = Some((root, mi));
+                                }
+                            }
+                        }
                         if let Some(p) = node.parent.and_then(|p| remap.get(&p)) {
                             node.parent = Some(*p);
                         }
@@ -632,6 +646,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::KeepCreatingToggle => toggle(&mut state.prefs.keep_creating, "keep_creating"),
         C::ShowRibbonToggle => toggle(&mut state.show_ribbon, "show_ribbon"),
         C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
+        | C::ToggleModifierInRenderer { .. } | C::CutModifier { .. } | C::CopyModifierToClipboard { .. } | C::PasteModifier { .. } | C::ConfigureModifierSetsDialog
         | C::RenameModifier { .. } | C::SelectStackEntry { .. } | C::SetModifierParameter { .. } | C::ModifierSubobjectLevel { .. } | C::ShowEndResultToggle | C::PinStackToggle
         | C::MakeUnique | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle
         | C::PickModifierNode { .. } | C::SwitchToControlPointLevel | C::SwitchToLatticeLevel | C::SwitchToSetVolumeLevel | C::SwitchToTopLevel | C::SelectControlPoints { .. }

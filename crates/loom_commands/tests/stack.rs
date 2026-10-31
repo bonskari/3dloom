@@ -259,3 +259,40 @@ fn copy_and_instance_a_modifier_within_the_stack() {
     assert_eq!(angle(&s, 0), 30.0);
     assert!(execute(&mut s, Command::CopyModifier { from: 7, to: 0, instance: false }).is_err());
 }
+
+#[test]
+fn reference_clone_barrier_and_clipboard_ops() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s);
+    execute(&mut s, Command::AddModifier { name: "Bend".into() }).unwrap();
+    // Create a Reference clone of `a`: `b` starts with `reference_barrier == Some(1)` and shares Bend.
+    execute(&mut s, Command::CloneOptions { kind: loom_commands::CloneKind::Reference, copies: 1, name: Some("RefBox".into()), offset: None, rotate_deg: None, scale: None }).unwrap();
+    let b = s.selection.iter().next().copied().unwrap();
+    assert_eq!(s.scene.node(b).unwrap().reference_barrier, Some(1));
+    assert_eq!(s.scene.node(b).unwrap().modifiers[0].instance_of, Some((a, 0)));
+
+    // Adding a modifier to the Reference clone `b` while at the base object puts it ABOVE the barrier.
+    execute(&mut s, Command::SelectStackEntry { index: None }).unwrap();
+    execute(&mut s, Command::AddModifier { name: "Taper".into() }).unwrap();
+    assert_eq!(names(&s, b), vec!["Bend", "Taper"]);
+    assert_eq!(s.scene.node(b).unwrap().reference_barrier, Some(1));
+    assert_eq!(names(&s, a), vec!["Bend"], "modifier above the barrier is local to the Reference clone");
+
+    // Adding a modifier to the source `a` inserts it BELOW `b`'s barrier and shifts `b`'s barrier up.
+    execute(&mut s, Command::SelectNodes { ids: vec![a.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::AddModifier { name: "Twist".into() }).unwrap();
+    assert_eq!(names(&s, a), vec!["Bend", "Twist"]);
+    assert_eq!(names(&s, b), vec!["Bend", "Twist", "Taper"]);
+    assert_eq!(s.scene.node(b).unwrap().reference_barrier, Some(2));
+
+    // Clipboard Copy / Cut / Paste / Paste Instanced and Off in Renderer.
+    execute(&mut s, Command::ToggleModifierInRenderer { index: 1, on: false }).unwrap();
+    assert!(!s.scene.node(a).unwrap().modifiers[1].enabled_in_renderer);
+    execute(&mut s, Command::CopyModifierToClipboard { index: 0 }).unwrap();
+    execute(&mut s, Command::PasteModifier { instance: true }).unwrap();
+    assert_eq!(names(&s, a), vec!["Bend", "Twist", "Bend"]);
+    assert_eq!(s.scene.node(a).unwrap().modifiers[2].instance_of, Some((a, 0)));
+    execute(&mut s, Command::CutModifier { index: 2 }).unwrap();
+    assert_eq!(names(&s, a), vec!["Bend", "Twist"]);
+}
+

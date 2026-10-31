@@ -484,6 +484,7 @@ pub enum Dialog {
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,
+    ConfigureModifierSets,
     GridAndSnapSettings,
     Align,
     AlignToView,

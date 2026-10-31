@@ -55,13 +55,25 @@ pub fn snapshot(state: &mut AppState, range: bool, from: i32, to: i32, copies: u
             node.constraints = Default::default();
             node.transform = Transform::from_matrix(world);
             match method {
-                0 => node.instance_of = None,
-                1 | 2 => node.instance_of = Some(src.instance_of.unwrap_or(*id)),
+                0 => {
+                    node.instance_of = None;
+                    node.reference_barrier = None;
+                }
+                1 => {
+                    node.instance_of = Some(src.instance_of.unwrap_or(*id));
+                    node.reference_barrier = src.reference_barrier;
+                }
+                2 => {
+                    let root = src.instance_of.unwrap_or(*id);
+                    node.instance_of = Some(root);
+                    node.reference_barrier = Some(node.modifiers.len());
+                }
                 _ => {
                     node.object = ObjectKind::EditablePoly(PolyObject::from_mesh(mesh.unwrap_or_default()));
                     node.modifiers.clear();
                     node.active_entry = None;
                     node.instance_of = None;
+                    node.reference_barrier = None;
                 }
             }
             let nid = sim.add_node(node.clone());
@@ -149,6 +161,11 @@ pub fn clone_and_align(state: &mut AppState, destinations: &[NodeId], s: CloneAl
             node.id = NodeId(0);
             node.name = sim.next_name(base_of(&src.name));
             node.instance_of = if s.kind == CloneKind::Copy { None } else { Some(src.instance_of.unwrap_or(*src_id)) };
+            node.reference_barrier = match s.kind {
+                CloneKind::Reference => Some(node.modifiers.len()),
+                CloneKind::Instance => src.reference_barrier,
+                CloneKind::Copy => None,
+            };
             let mut world = delta * state.scene.world_matrix(*src_id);
             if s.match_scale.iter().any(|m| *m) {
                 let (mut sc, q, t) = world.to_scale_rotation_translation();

@@ -67,6 +67,60 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             stack.get_mut(index as usize).ok_or_else(|| format!("no stack entry {index}"))?.enabled_in_viewport = on;
             Ok(())
         }),
+        C::ToggleModifierInRenderer { index, on } => edit_stack(state, "Modifier On in Renderer", |stack| {
+            stack.get_mut(index as usize).ok_or_else(|| format!("no stack entry {index}"))?.enabled_in_renderer = on;
+            Ok(())
+        }),
+        C::CopyModifierToClipboard { index } => {
+            let id = selected_ids(state)?[0];
+            let slot = state.scene.node(id).and_then(|n| n.modifiers.get(index as usize)).ok_or_else(|| format!("no stack entry {index}"))?.clone();
+            state.modifier_clipboard = Some((id, index as usize, slot));
+            Ok(json!({ "copied": index }))
+        }
+        C::CutModifier { index } => {
+            let id = selected_ids(state)?[0];
+            let slot = state.scene.node(id).and_then(|n| n.modifiers.get(index as usize)).ok_or_else(|| format!("no stack entry {index}"))?.clone();
+            state.modifier_clipboard = Some((id, index as usize, slot));
+            execute(state, C::DeleteModifier { index })
+        }
+        C::PasteModifier { instance } => {
+            let (src, si, mut clip) = state.modifier_clipboard.clone().ok_or("modifier clipboard is empty")?;
+            if instance {
+                if state.scene.node(src).and_then(|n| n.modifiers.get(si)).is_some() {
+                    let (root, ri) = clip.instance_of.unwrap_or((src, si));
+                    clip.instance_of = Some((root, ri));
+                }
+            } else {
+                clip.instance_of = None;
+            }
+            let ids = selected_ids(state)?;
+            let mut changes = Vec::new();
+            for id in ids {
+                let node = state.scene.node(id).ok_or("missing node")?;
+                let mut stack = node.modifiers.clone();
+                let mut slot = clip.clone();
+                if instance && slot.instance_of == Some((id, si)) {
+                    // Self-instance points at the source index (adjusted if we insert at or below it).
+                }
+                let at = node.active_entry.map(|a| a + 1).unwrap_or(0).min(stack.len());
+                let at = match node.reference_barrier {
+                    Some(b) if node.active_entry.is_none() => at.max(b).min(stack.len()),
+                    _ => at,
+                };
+                let first_wsm = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
+                let at = if slot.modifier.is_wsm() { stack.len() } else { at.min(first_wsm) };
+                if let Some((r, ri)) = &mut slot.instance_of {
+                    if *r == id && *ri >= at {
+                        *ri += 1;
+                    }
+                }
+                stack.insert(at, slot);
+                changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+                changes.extend(repoint_instances(state, id, &|i| Some(if i >= at { i + 1 } else { i })));
+            }
+            commit_change(state, if instance { "Paste Instanced" } else { "Paste Modifier" }, Change::Group(changes))?;
+            Ok(stack_json(state))
+        }
         C::RenameModifier { index, name } => edit_stack(state, "Rename Modifier", |stack| {
             stack.get_mut(index as usize).ok_or_else(|| format!("no stack entry {index}"))?.name = name.clone();
             Ok(())
@@ -513,6 +567,11 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             state.modifier_set = names.into_iter().filter(|n| Modifier::by_name(n).is_some()).collect();
             Ok(json!({ "set": state.modifier_set }))
         }
+        C::ConfigureModifierSetsDialog => {
+            let d = crate::viewport::Dialog::ConfigureModifierSets;
+            state.dialog = if state.dialog == Some(d) { None } else { Some(d) };
+            Ok(json!({ "open": state.dialog.is_some() }))
+        }
         C::ModifierSetButtonsToggle => {
             state.show_modifier_set = !state.show_modifier_set;
             Ok(json!({ "buttons": state.show_modifier_set }))
@@ -763,7 +822,8 @@ pub fn stack_json(state: &AppState) -> Value {
             json!({
                 "node": n.id.0,
                 "active": n.active_entry,
-                "entries": n.modifiers.iter().map(|s| json!({ "name": s.name, "modifier": s.modifier.name(), "enabled": s.enabled, "in_viewport": s.enabled_in_viewport, "sub_level": s.sub_level, "instance_of": s.instance_of.map(|(n, i)| json!([n.0, i])) })).collect::<Vec<_>>(),
+                "reference_barrier": n.reference_barrier,
+                "entries": n.modifiers.iter().map(|s| json!({ "name": s.name, "modifier": s.modifier.name(), "enabled": s.enabled, "in_viewport": s.enabled_in_viewport, "in_renderer": s.enabled_in_renderer, "sub_level": s.sub_level, "instance_of": s.instance_of.map(|(n, i)| json!([n.0, i])) })).collect::<Vec<_>>(),
                 "warnings": state.scene.eval_mesh(n.id).warnings,
             })
         })
@@ -1119,8 +1179,9 @@ fn add_modifier(state: &mut AppState, name: &str) -> Result<Value, String> {
             for id in &ids {
                 let node = state.scene.node(*id).ok_or("missing node")?;
                 let mut stack = node.modifiers.clone();
-                // Inserts above the active entry (just above the base object when it is active).
-                let at = node.active_entry.map(|a| a + 1).unwrap_or(0).min(stack.len());
+                // Inserts above the active entry (just above the base object when it is active,
+                // or above the derived-object line on a Reference clone when at the base object).
+                let at = node.active_entry.map(|a| a + 1).unwrap_or_else(|| node.reference_barrier.unwrap_or(0)).min(stack.len());
                 // World-space modifiers stay above every object-space one (stack order).
                 let first_wsm = stack.iter().position(|m| m.modifier.is_wsm()).unwrap_or(stack.len());
                 let at = if modifier.is_wsm() { stack.len() } else { at.min(first_wsm) };
@@ -1178,10 +1239,27 @@ fn add_modifier(state: &mut AppState, name: &str) -> Result<Value, String> {
                     // Edit Normals starts at its Normal level: the normals show at once.
                     slot.sub_level = 1;
                 }
-                stack.insert(at, slot);
+                stack.insert(at, slot.clone());
                 inserted.push((*id, at));
                 changes.push(Change::SetStack { id: *id, before: node.modifiers.clone(), after: stack });
                 changes.extend(repoint_instances(state, *id, &|i| Some(if i >= at { i + 1 } else { i })));
+                // Propagate shared modifiers added to an instance/reference root to its Reference clones below their barrier.
+                if node.instance_of.is_none() && node.reference_barrier.is_none() {
+                    let refs: Vec<NodeId> = state.scene.nodes().filter(|r| r.instance_of == Some(*id) && r.reference_barrier.is_some() && !ids.contains(&r.id)).map(|r| r.id).collect();
+                    for rid in refs {
+                        let Some(rnode) = state.scene.node(rid) else { continue };
+                        let b = rnode.reference_barrier.unwrap_or(0).min(rnode.modifiers.len());
+                        let rat = at.min(b);
+                        let mut rstack = rnode.modifiers.clone();
+                        let mut rslot = slot.clone();
+                        rslot.instance_of = Some((*id, at));
+                        rstack.insert(rat, rslot);
+                        let mut props = rnode.props();
+                        props.reference_barrier = Some(b + 1);
+                        changes.push(Change::SetStack { id: rid, before: rnode.modifiers.clone(), after: rstack });
+                        changes.push(Change::SetNodeProps { id: rid, before: Box::new(rnode.props()), after: Box::new(props) });
+                    }
+                }
             }
             commit_change(state, &format!("Add {name}"), Change::Group(changes))?;
             for (id, at) in inserted {

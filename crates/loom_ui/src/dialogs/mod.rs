@@ -162,6 +162,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::ViewportBackground => viewport_background::show(ctx, app, &mut open),
         Dialog::TransformTypeIn => transform_type_in::show(ctx, app, &mut open),
         Dialog::CloneOptions => clone_options::show(ctx, app, &mut open),
+        Dialog::ConfigureModifierSets => configure_modifier_sets(ctx, app, &mut open),
         Dialog::GridAndSnapSettings => grid_and_snap_settings::show(ctx, app, &mut open),
         Dialog::Align => align::show(ctx, app, &mut open),
         Dialog::AlignToView => align_to_view::show(ctx, app, &mut open),
@@ -278,6 +279,69 @@ fn select_camera(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     }
     if cancel {
         ctx.data_mut(|d| d.remove::<loom_scene::NodeId>(id));
+        *open = false;
+    }
+}
+
+fn configure_modifier_sets(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let slot_id = egui::Id::new("cfg_mod_sets_slot");
+    let mut active_slot: usize = ctx.data(|d| d.get_temp(slot_id)).unwrap_or(0);
+    let mut set = app.state.modifier_set.clone();
+    let mut total = set.len().clamp(1, 32) as u32;
+    let mut changed = false;
+    let mut close = false;
+    egui::Window::new("Configure Modifier Sets").open(open).collapsible(false).resizable(true).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label("Modifiers:");
+                egui::ScrollArea::vertical().max_height(220.0).max_width(180.0).show(ui, |ui| {
+                    for name in loom_scene::Modifier::WSM_LIST.iter().chain(loom_scene::Modifier::LIST.iter()) {
+                        if ui.selectable_label(false, *name).clicked() && active_slot < set.len() {
+                            set[active_slot] = (*name).to_owned();
+                            active_slot = (active_slot + 1) % set.len().max(1);
+                            changed = true;
+                        }
+                    }
+                });
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Total Buttons:");
+                    if ui.add(egui::DragValue::new(&mut total).range(1..=32)).changed() {
+                        set.resize_with(total as usize, || "Bend".to_owned());
+                        active_slot = active_slot.min(set.len().saturating_sub(1));
+                        changed = true;
+                    }
+                });
+                ui.separator();
+                egui::Grid::new("cfg_mod_sets_grid").num_columns(2).spacing([4.0, 2.0]).show(ui, |ui| {
+                    for (i, name) in set.iter().enumerate() {
+                        if ui.selectable_label(active_slot == i, name).clicked() {
+                            active_slot = i;
+                        }
+                        if i % 2 == 1 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            });
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                close = true;
+            }
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(slot_id, active_slot));
+    if changed {
+        let _ = app.dispatch(Command::ConfigureModifierSets { names: set });
+    }
+    if close {
         *open = false;
     }
 }
