@@ -132,7 +132,7 @@ fn status_bar_icons_run_their_commands() {
     click_icon(&mut h, "statusbar", icons::ABSOLUTE, "Absolute Mode Transform Type-In");
     assert!(h.app.state.offset_mode);
 
-    click_icon(&mut h, "statusbar", icons::PAN, "Pan View (Ctrl+P)");
+    click_icon(&mut h, "statusbar", icons::PAN, "Pan View (Ctrl+P); hold or right-click: flyout");
     assert_eq!(h.app.state.nav_mode, loom_input::NavMode::Pan);
     click_icon(&mut h, "statusbar", icons::ZOOM, "Zoom Mode (Alt+Z)");
     assert_eq!(h.app.state.nav_mode, loom_input::NavMode::Zoom);

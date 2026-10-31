@@ -67,7 +67,7 @@ pub fn parameter_wiring(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
         });
         ui.separator();
         ui.horizontal(|ui| {
-            ui.radio_value(&mut f.two_way, false, "One-way (Source → Target)");
+            ui.radio_value(&mut f.two_way, false, "One-way (Source -> Target)");
             ui.radio_value(&mut f.two_way, true, "Two-way");
         });
         ui.horizontal(|ui| {
@@ -104,7 +104,7 @@ pub fn parameter_wiring(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
         }
         for (i, w) in wires.iter().enumerate() {
             ui.horizontal(|ui| {
-                let arrow = if w.two_way { "↔" } else { "→" };
+                let arrow = if w.two_way { "↔" } else { "->" };
                 ui.label(format!("{}.{} {arrow} {}.{}", node_name(app, w.source_node), w.source_param, node_name(app, w.target_node), w.target_param));
                 if ui.small_button("Disconnect").clicked() {
                     let _ = app.dispatch(Command::DisconnectWireParameter { index: i as u32 });

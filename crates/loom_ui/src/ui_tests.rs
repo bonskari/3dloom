@@ -3094,9 +3094,10 @@ fn render_setup_quality_controls_change_the_scene_settings() {
     click_text(&mut h, "Area", win, 0.0);
     click_text(&mut h, "Mitchell-Netravali", SCREEN, 0.0);
     assert_eq!(h.app.state.scene.render.bevy.filter, AaFilter::MitchellNetravali);
-    // Tone Mapping: AgX -> ACES Filmic.
+    // Tone Mapping: None (the reference's default) -> ACES Filmic.
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Render Setup"))).unwrap();
-    click_text(&mut h, "AgX", win, 0.0);
+    assert_eq!(h.app.state.scene.render.bevy.tonemapper, Tonemapper::None);
+    click_text(&mut h, "None", win, 0.0);
     click_text(&mut h, "ACES Filmic", SCREEN, 0.0);
     assert_eq!(h.app.state.scene.render.bevy.tonemapper, Tonemapper::Aces);
     // Passes: a drag right raises it, as one undo step.
@@ -3111,7 +3112,8 @@ fn render_setup_quality_controls_change_the_scene_settings() {
     click_text(&mut h, "Ambient Occlusion", win, 0.0);
     click_text(&mut h, "Reflections", win, 0.0);
     let b = &h.app.state.scene.render.bevy;
-    assert!(!b.ambient_occlusion && !b.reflections);
+    // Both start off (the reference's defaults); the clicks turn them on.
+    assert!(b.ambient_occlusion && b.reflections);
 }
 
 /// Renders until the render in progress ends (at most `frames` frames).

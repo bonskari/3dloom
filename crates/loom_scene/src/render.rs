@@ -274,7 +274,7 @@ mod quality_tests {
         let s: BevyRenderSettings = serde_json::from_str(r#"{"antialiasing":false,"supersampling":2}"#).unwrap();
         assert!(!s.antialiasing);
         assert_eq!(s.supersampling, 2);
-        assert_eq!((s.passes, s.tonemapper, s.filter), (16, Tonemapper::AgX, AaFilter::Area));
+        assert_eq!((s.passes, s.tonemapper, s.filter), (16, Tonemapper::None, AaFilter::Area));
     }
 }
 
