@@ -262,7 +262,7 @@ fn ram_player(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             // The split line.
             let rect = view.image_rect;
             let x = rect.left() + rect.width() * r.split;
-            ui.painter().vline(x, rect.y_range(), egui::Stroke::new(1.0, egui::Color32::WHITE));
+            ui.painter().vline(x, rect.y_range(), egui::Stroke::new(1.0_f32, egui::Color32::WHITE));
         }
     });
 }
