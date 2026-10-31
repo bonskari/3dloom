@@ -586,7 +586,7 @@ pub enum ObjectKind {
         /// Use Color: the lines take `color` (0xRRGGBB) instead of the wire colour.
         #[serde(default = "no")]
         use_color: Param<bool>,
-        #[serde(default = "zero")]
+        #[serde(default = "dummy_color")]
         color: Param<u32>,
         /// Size is in screen pixels instead of world units.
         #[serde(default = "no")]
@@ -766,6 +766,11 @@ fn zero() -> Param<u32> {
 fn zero_f() -> Param<f32> {
     p(0.0)
 }
+/// A new Dummy's own line colour (Use Color).
+fn dummy_color() -> Param<u32> {
+    Param::new(0x78C878)
+}
+
 fn one_f() -> Param<f32> {
     p(1.0)
 }

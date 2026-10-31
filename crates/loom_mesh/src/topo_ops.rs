@@ -1749,11 +1749,13 @@ mod tests {
                 chamfer_edges(&mut m, &edges, amount, segs, false).unwrap_or_else(|e| panic!("{what}: {e}"));
                 assert_eq!(m.face_count(), faces, "{what}: face count");
                 assert_clean_solid(&m, centre, &what);
-                // Every vertex stays on the box's surface.
+                // Every vertex stays inside the box and within `amount` of its
+                // surface (a corner patch with segments lies on the cut, not on a face).
                 for v in 0..m.vertex_count() as u32 {
                     let p = m.vertex_position(VertexId(v)).unwrap();
-                    let on = (0..3).any(|i| (p[i] - lo[i]).abs() < 1e-3 || (p[i] - hi[i]).abs() < 1e-3);
-                    assert!(on, "{what}: vertex {p} left the surface");
+                    let inside = (0..3).all(|i| p[i] >= lo[i] - 1e-3 && p[i] <= hi[i] + 1e-3);
+                    let depth = (0..3).map(|i| (p[i] - lo[i]).min(hi[i] - p[i])).fold(f32::MAX, f32::min);
+                    assert!(inside && depth <= amount + 1e-3, "{what}: vertex {p} left the chamfered surface");
                 }
             }
         }
