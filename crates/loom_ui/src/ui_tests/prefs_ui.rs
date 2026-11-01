@@ -168,8 +168,9 @@ fn gizmo_preferences_plane_handles_uniform_two_axis_and_relative_size() {
     assert_eq!(ons.len(), 2, "Transform Gizmos On and Plane Handles On");
     h.click(ons[1].center());
     assert!(!h.app.state.prefs.gizmos.move_plane_handles);
-    h.click(h.find(Role::CheckBox, "Uniform 2-Axis Scaling").center());
-    assert!(h.app.state.prefs.gizmos.uniform_two_axis_scaling);
+    let r = h.find(Role::CheckBox, "Uniform 2-Axis Scaling");
+    h.click(r.center());
+    assert!(h.app.state.prefs.gizmos.uniform_two_axis_scaling, "clicked {r:?} in {:?}", window(&h, "Preference Settings"));
     // The first Relative Size spinner is the Move gizmo's.
     let spin = h.spinner_after("Relative Size (%):");
     h.drag(spin.center(), spin.center() + egui::vec2(0.0, -300.0));
