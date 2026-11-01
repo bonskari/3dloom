@@ -48,6 +48,7 @@ pub fn handles(c: &C) -> bool {
             | C::VolumeLightParameters { .. }
             | C::AddEffect { .. }
             | C::DeleteEffect { .. }
+            | C::MergeEffects { .. }
             | C::EffectEntry { .. }
             | C::GlowParameters { .. }
             | C::LensElementParameters { .. }
@@ -294,6 +295,22 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let index = e.effects.len() - 1;
             commit(state, "Add Effect", e)?;
             Ok(json!({ "index": index }))
+        }
+        C::MergeEffects { path, effects } => {
+            let (doc, _) = crate::file::read_any(std::path::Path::new(&path))?;
+            let from = doc.scene.environment.effects;
+            if let Some(i) = effects.iter().find(|i| **i as usize >= from.len()) {
+                return Err(format!("{path} has no effect {i} (it has {})", from.len()));
+            }
+            let mut names = Vec::new();
+            for (_, fx) in from.into_iter().enumerate().filter(|(i, _)| effects.is_empty() || effects.contains(&(*i as u32))) {
+                let taken: Vec<&str> = e.effects.iter().map(|a| a.name.as_str()).collect();
+                let name = Environment::unique_name(&taken, &fx.name);
+                names.push(name.clone());
+                e.effects.push(RenderEffect { name, ..fx });
+            }
+            commit(state, "Merge Effects", e)?;
+            Ok(json!({ "merged": names }))
         }
         C::DeleteEffect { index } => {
             effect_mut(&mut e, index)?;

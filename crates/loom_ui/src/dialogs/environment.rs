@@ -54,7 +54,7 @@ fn file_name(path: &str) -> String {
     std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned())
 }
 
-fn sel_id(what: &str) -> egui::Id {
+pub(crate) fn sel_id(what: &str) -> egui::Id {
     egui::Id::new("environment_dialog").with(what)
 }
 
@@ -223,12 +223,18 @@ fn list(ui: &mut egui::Ui, app: &mut LoomApp, what: &str, names: &[(String, bool
                     sel = Some(i - 1);
                 }
             }
-            if ui.add_enabled(sel.is_some_and(|i| i + 1 < names.len()), egui::Button::new("Move Down")).clicked() {
-                if let Some(i) = sel {
-                    run(app, entry_cmd, json!({ "index": i, "move_by": 1 }));
-                    sel = Some(i + 1);
+            ui.horizontal(|ui| {
+                if ui.add_enabled(sel.is_some_and(|i| i + 1 < names.len()), egui::Button::new("Move Down")).clicked() {
+                    if let Some(i) = sel {
+                        run(app, entry_cmd, json!({ "index": i, "move_by": 1 }));
+                        sel = Some(i + 1);
+                    }
                 }
-            }
+                // Effects > Merge: effects from another scene file.
+                if what == "effect" && ui.button("Merge").on_hover_text("Merge effects from a scene file").clicked() {
+                    app.state.dialog = Some(Dialog::MergeEffectsFile);
+                }
+            });
         });
     });
     if let Some(i) = sel {
@@ -455,6 +461,43 @@ fn effects_panel(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.label("Effects apply to renders; Depth of Field shows in Realistic viewports too.");
+}
+
+/// Effects > Merge, after the file is chosen: its effects with a checkbox
+/// each (all ticked); OK appends the ticked ones as one undo step.
+pub fn merge_effects(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let Some((path, mut names)) = app.merge_effects.clone() else {
+        *open = false;
+        return;
+    };
+    let mut close = false;
+    egui::Window::new("Merge Effects").collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        if names.is_empty() {
+            ui.label("The file has no effects.");
+        }
+        for (name, on) in names.iter_mut() {
+            ui.checkbox(on, name.as_str());
+        }
+        ui.horizontal(|ui| {
+            if ui.add_enabled(names.iter().any(|n| n.1), egui::Button::new("OK")).clicked() {
+                let effects: Vec<u32> = names.iter().enumerate().filter(|(_, n)| n.1).map(|(i, _)| i as u32).collect();
+                if let Err(e) = app.dispatch(Command::MergeEffects { path: path.to_string_lossy().into_owned(), effects }) {
+                    app.state.status_prompt = e;
+                }
+                close = true;
+            }
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+    });
+    if close {
+        app.merge_effects = None;
+        *open = false;
+    } else {
+        app.merge_effects = Some((path, names));
+    }
 }
 
 fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectKind) {

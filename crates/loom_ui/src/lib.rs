@@ -357,6 +357,8 @@ pub struct LoomApp {
     pub motion_trajectories: bool,
     /// A manipulator drag in progress (Select and Manipulate).
     pub manip_drag: Option<ManipDrag>,
+    /// Effects > Merge: the chosen file and its effects (ticked to merge).
+    pub merge_effects: Option<(std::path::PathBuf, Vec<(String, bool)>)>,
     /// Selection rollout > By Angle: clicking a polygon also selects
     /// neighbours within this many degrees.
     pub by_angle: Option<f32>,
@@ -597,6 +599,7 @@ impl LoomApp {
             track_bar: Default::default(),
             motion_trajectories: false,
             manip_drag: None,
+            merge_effects: None,
             by_angle: None,
             soft_brush: SoftBrush { value: 1.0, size: 20.0, strength: 1.0 },
             soft_painting: false,

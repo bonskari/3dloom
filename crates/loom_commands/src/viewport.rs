@@ -518,6 +518,9 @@ pub enum Dialog {
     BackgroundFile,
     /// Environment > Environment Map: pick the background bitmap.
     EnvironmentMap,
+    /// Effects > Merge: pick the scene file, then choose its effects.
+    MergeEffectsFile,
+    MergeEffects,
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,

@@ -183,3 +183,46 @@ fn lens_effects_star_element_turns_on_from_its_rollout() {
     let EffectKind::Glow(g) = &h.app.state.scene.environment.effects[0].kind else { panic!("Lens Effects") };
     assert!(g.star.on && g.ring.on && !g.streak.on);
 }
+
+/// Effects > Merge: the file dialog takes a scene file, the Merge Effects
+/// list shows its effects (all ticked), an unticked one stays out, a taken
+/// name is renamed, and OK merges as one undo step.
+#[test]
+fn effects_merge_brings_in_effects_from_a_scene_file() {
+    let dir = std::env::temp_dir().join("loom-ui-exchange").join("merge_effects");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("fx.loom");
+    let mut src = Harness::new();
+    src.cmd(Command::AddEffect { kind: "Film Grain".into(), name: None });
+    src.cmd(Command::AddEffect { kind: "Blur".into(), name: Some("Soft".into()) });
+    src.cmd(Command::SaveFileAs { path: Some(path.to_string_lossy().into_owned()) });
+
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::AddEffect { kind: "Blur".into(), name: Some("Soft".into()) });
+    h.key(egui::Key::Num8);
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Effects", win, 0.0);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Merge", win, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeEffectsFile));
+    super::choose_file(&mut h, &path, "Open");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeEffects), "{}", h.app.state.status_prompt);
+    h.frames(2);
+    let list = window(&h, "Merge Effects");
+    let grain = h.app.state.scene.environment.effects.len();
+    assert_eq!(grain, 1);
+    // Untick Film Grain, keep Soft.
+    let name = src.app.state.scene.environment.effects[0].name.clone();
+    click_text(&mut h, &name, list, 0.0);
+    let list = window(&h, "Merge Effects");
+    click_text(&mut h, "OK", list, 0.0);
+    let fx: Vec<String> = h.app.state.scene.environment.effects.iter().map(|e| e.name.clone()).collect();
+    assert_eq!(fx, vec!["Soft".to_owned(), "Soft 1".to_owned()], "only the ticked one, renamed");
+    assert!(matches!(h.app.state.scene.environment.effects[1].kind, EffectKind::Blur(_)));
+    assert_eq!(h.app.state.dialog, None);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.environment.effects.len(), 1, "one undo step");
+}

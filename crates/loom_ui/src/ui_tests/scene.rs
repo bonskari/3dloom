@@ -440,3 +440,54 @@ fn object_properties_by_layer_buttons_and_layer_properties() {
     assert!(h.app.state.scene.layer(props).unwrap().display.see_through);
     assert!(h.app.state.scene.display_of(h.app.state.scene.node(a).unwrap()).see_through, "the By Layer object draws see-through");
 }
+
+/// File > Merge list: Sort By Type puts the light after the geometry, List
+/// Types > Lights off hides it, Display Subtree indents a child under its
+/// parent, and Select Subtree highlights the child with its parent.
+#[test]
+fn merge_list_sorts_filters_and_shows_subtrees() {
+    let dir = std::env::temp_dir().join("loom-ui-merge-sort");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("rig.loom");
+    let names = {
+        let mut src = Harness::new();
+        let zed = named_box(&mut src, "Zed", 0.0);
+        let child = named_box(&mut src, "Arm", 40.0);
+        src.cmd(Command::SetParent { id: child.0, parent: Some(zed.0) });
+        let r = src.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+        let l = NodeId(r["id"].as_u64().unwrap());
+        src.cmd(Command::Rename { id: l.0, name: "Bulb".into() });
+        src.cmd(Command::SaveFile { path: Some(path.to_string_lossy().into_owned()) });
+        src.app.state.scene.nodes().map(|n| n.name.clone()).collect::<Vec<_>>()
+    };
+    let mut h = Harness::new();
+    h.app.state.merge_pending = Some((path.clone(), names));
+    h.app.state.dialog = Some(loom_commands::Dialog::MergeObjects);
+    h.frames(2);
+    let title = "Merge - rig.loom";
+    let ys = |h: &Harness, n: &str| in_window(h, title, n).first().map(|p| p.y);
+    let order = |h: &Harness| {
+        let mut v: Vec<(f32, &str)> = ["Arm", "Bulb", "Zed"].iter().filter_map(|n| ys(h, n).map(|y| (y, *n))).collect();
+        v.sort_by(|a, b| a.0.total_cmp(&b.0));
+        v.into_iter().map(|x| x.1).collect::<Vec<_>>()
+    };
+    assert_eq!(order(&h), vec!["Arm", "Bulb", "Zed"], "alphabetical");
+    h.click(button(&h, title, "By Type"));
+    h.frames(1);
+    assert_eq!(order(&h), vec!["Arm", "Zed", "Bulb"], "geometry, then lights");
+    h.click(button(&h, title, "Lights"));
+    h.frames(1);
+    assert_eq!(order(&h), vec!["Arm", "Zed"], "Lights off hides the light");
+    h.click(button(&h, title, "Display Subtree"));
+    h.frames(1);
+    let arm = in_window(&h, title, "    Arm");
+    assert_eq!(arm.len(), 1, "the child indented under its parent");
+    assert!(arm[0].y > ys(&h, "Zed").unwrap(), "below it");
+    h.click(button(&h, title, "Select Subtree"));
+    h.click(window_text(&h, title, "Zed"));
+    pause(&mut h);
+    h.click(button(&h, title, "OK"));
+    let mut got: Vec<String> = h.app.state.scene.nodes().map(|n| n.name.clone()).collect();
+    got.sort();
+    assert_eq!(got, vec!["Arm".to_owned(), "Zed".to_owned()], "the parent and its child merged");
+}

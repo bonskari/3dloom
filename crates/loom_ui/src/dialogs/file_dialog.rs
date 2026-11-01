@@ -44,7 +44,7 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     };
     // Configure User Paths > File I/O: the folder of this kind of file.
     let entry = match dialog {
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::MergeFile | Dialog::SaveSelected => Some("Scenes"),
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::MergeFile | Dialog::MergeEffectsFile | Dialog::SaveSelected => Some("Scenes"),
         Dialog::ImportFile => Some("Import"),
         Dialog::ExportFile | Dialog::ExportSelected => Some("Export"),
         Dialog::ArchiveFile => Some("Archives"),
@@ -60,7 +60,7 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
     }
     // Otherwise Set Project Folder: each kind of file starts in its project folder.
     let kind = match dialog {
-        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::ReplaceFile => "scenes",
+        Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::MergeEffectsFile | Dialog::ReplaceFile => "scenes",
         Dialog::ImportFile => "import",
         Dialog::ExportFile | Dialog::ExportSelected => "export",
         Dialog::RenderFile | Dialog::SaveRenderedImage => "renderoutput",
@@ -125,6 +125,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::SaveSelected => ("Save Selected", "loom", "Save"),
         Dialog::ArchiveFile => ("Archive", "zip,txt", "Save"),
         Dialog::MergeFile => ("Merge File", "loom,max", "Open"),
+        Dialog::MergeEffectsFile => ("Merge Effects", "loom,max", "Open"),
         Dialog::ReplaceFile => ("Replace", "loom", "Open"),
         Dialog::XrefObjectsFile => ("Open File (XRef Objects)", "loom,max", "Open"),
         Dialog::XrefSceneFile => ("Open File (XRef Scene)", "loom,max", "Open"),
@@ -394,6 +395,21 @@ fn apply(ctx: &egui::Context, app: &mut LoomApp, dialog: Dialog, mut path: PathB
             app.state.dialog = Some(d);
             return false;
         }
+    }
+    if dialog == Dialog::MergeEffectsFile {
+        // The file's Effects list to choose from.
+        return match loom_commands::file::read_any(&path) {
+            Ok((doc, _)) => {
+                let names = doc.scene.environment.effects.iter().map(|e| (e.name.clone(), true)).collect();
+                app.merge_effects = Some((path, names));
+                app.state.dialog = Some(Dialog::MergeEffects);
+                false
+            }
+            Err(e) => {
+                app.state.status_prompt = e;
+                false
+            }
+        };
     }
     if dialog == Dialog::MergeFile || dialog == Dialog::XrefObjectsFile {
         app.state.merge_as_xref = dialog == Dialog::XrefObjectsFile;
