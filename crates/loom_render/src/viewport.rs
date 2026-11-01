@@ -101,8 +101,10 @@ pub struct ViewShading {
     pub ambient: [f32; 3],
     /// Viewport shadows: the shadow maps of the view's lights.
     pub shadow: Option<ShadowSet>,
-    /// Viewport ambient occlusion: (radius in world units, intensity 0-1).
-    pub ao: Option<(f32, f32)>,
+    /// Viewport ambient occlusion: radius in world units, intensity (0-1) and
+    /// the view-projection its depth pass uses (the view's, with near and
+    /// far fitted to the scene so depths rebuild positions precisely).
+    pub ao: Option<(f32, f32, Mat4)>,
     /// The view's rectangle in framebuffer pixels (x, y, width, height).
     pub viewport_px: [f32; 4],
 }
@@ -553,9 +555,9 @@ impl ViewportRenderer {
             }
             shadow = [1.0, if s.soft { 1.0 } else { 0.0 }, 0.0002, s.intensity];
         }
-        let ao = shading.ao.map_or([0.0; 4], |(r, i)| [1.0, r, i, 0.0]);
+        let ao = shading.ao.map_or([0.0; 4], |(r, i, _)| [1.0, r, i, 0.0]);
         let u = ViewUniform {
-            inv_view_proj: view_proj.inverse().to_cols_array_2d(),
+            inv_view_proj: shading.ao.map_or(view_proj, |a| a.2).inverse().to_cols_array_2d(),
             ao,
             viewport_px: shading.viewport_px,
             shadow_vps,

@@ -205,7 +205,8 @@ impl CallbackTrait for ViewportCallback {
         if self.shading.ao.is_some() {
             let refs: Vec<&MeshBuffer> = self.casters.iter().filter_map(|i| res.mesh_buffers.get(*i)).collect();
             let size = [self.shading.viewport_px[2].round() as u32, self.shading.viewport_px[3].round() as u32];
-            res.renderer.render_ao_depth(device, queue, _egui_encoder, self.slot, &refs, self.view_proj, size);
+            let ao_vp = self.shading.ao.map_or(self.view_proj, |a| a.2);
+            res.renderer.render_ao_depth(device, queue, _egui_encoder, self.slot, &refs, ao_vp, size);
         }
         if self.shading.shadow.is_some() || self.shading.ao.is_some() {
             res.renderer.bind_extras(device, self.slot);
@@ -1271,7 +1272,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                 }
                 if vp.ambient_occlusion && override_color.is_none() && !app.degrading {
-                    view_shading.ao = Some((vp.ao_radius, vp.ao_intensity));
+                    view_shading.ao = Some((vp.ao_radius, vp.ao_intensity, ao_view_proj(app, &camera, aspect)));
                 }
                 let edges = (vp.edged_faces && level != S::BoundingBox) || level == S::HiddenLine;
                 (!level.shaded(), grid_plane, edges, vp.show_grid, view_shading)
@@ -1926,6 +1927,29 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
     let height = if vp.is_orthographic() { vp.camera.distance * 0.8284 } else { 2.0 * vp.camera.distance * (vp.fov_y_radians * 0.5).tan() };
     (height / rect.height().max(1.0)).max(1e-4)
 }
+/// The view-projection of the AO depth pass: the view's own, with near and
+/// far fitted to the shadow casters' bounds (depth precision follows far / near).
+pub(crate) fn ao_view_proj(app: &LoomApp, camera: &loom_render::Camera, aspect: f32) -> glam::Mat4 {
+    let eye = camera.orbit.eye_position();
+    let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+    for i in shadow_casters(app) {
+        let (a, b) = app.world_meshes()[i].1.aabb();
+        lo = lo.min(a);
+        hi = hi.max(b);
+    }
+    let mut c = camera.clone();
+    if c.perspective && lo.is_finite() && hi.is_finite() {
+        let far = (0..8)
+            .map(|i| Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z }))
+            .map(|p| (p - eye).length())
+            .fold(0.0, f32::max);
+        let near = (eye.clamp(lo, hi) - eye).length();
+        c.far = far.max(1e-2) * 1.01;
+        c.near = (near * 0.99).max(c.far * 1e-4).max(1e-3);
+    }
+    c.projection_matrix(aspect) * c.view_matrix()
+}
+
 /// The world meshes that cast viewport shadows: geometry with Cast Shadows
 /// on (light, camera and helper icons cast none).
 pub(crate) fn shadow_casters(app: &LoomApp) -> Vec<usize> {
