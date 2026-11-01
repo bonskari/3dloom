@@ -150,7 +150,7 @@ fn status_bar_icons_run_their_commands() {
     assert!(h.app.state.key_step_mode);
     click_icon(&mut h, "statusbar", icons::PLAY, "Play / Stop Animation (Slash); hold: Play flyout");
     assert!(h.app.state.playing);
-    click_icon(&mut h, "statusbar", icons::STOP, "Play / Stop Animation (Slash)");
+    click_icon(&mut h, "statusbar", icons::STOP, "Play / Stop Animation (Slash); hold: Play flyout");
     assert!(!h.app.state.playing);
 }
 
