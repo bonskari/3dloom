@@ -309,3 +309,31 @@ fn file_references_xref_objects_picks_from_the_list() {
     assert_eq!(h.app.state.scene.xrefs.len(), 1);
     assert!(!h.app.state.merge_as_xref, "the next Merge is a plain merge again");
 }
+
+/// Configure Modifier Sets right-click > Show All Sets in List: the Modifier
+/// List shows each set's name with its modifiers, which add as usual.
+#[test]
+fn show_all_sets_in_list_groups_the_modifier_list_by_set() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = selected(&h);
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let cfg = h.find(Role::Button, "Configure Modifier Sets").center();
+    h.run(vec![egui::Event::PointerMoved(cfg)]);
+    h.run(vec![egui::Event::PointerButton { pos: cfg, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.run(vec![egui::Event::PointerButton { pos: cfg, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(1);
+    h.click(h.find(Role::CheckBox, "Show All Sets in List").center());
+    assert!(h.app.state.show_all_sets_in_list);
+    let set_button = h.find(Role::Button, "Show / hide the modifier button set");
+    let list = h.widgets.iter().filter(|(r, _, w)| *r == Role::ComboBox && w.max.x <= set_button.min.x + 1.0 && (w.center().y - set_button.center().y).abs() < set_button.height()).max_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x)).map(|w| w.2).expect("the Modifier List");
+    h.click(list.center());
+    h.frames(1);
+    assert!(!h.text_rects("UV COORDINATES").is_empty(), "the set names head their modifiers");
+    let bend = h.find_all(Role::Button, "Bend");
+    assert_eq!(bend.len(), 2, "Bend under Parametric Modifiers and in the full list");
+    h.click(bend[0].center());
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.last().map(|m| m.name.as_str()), Some("Bend"));
+}

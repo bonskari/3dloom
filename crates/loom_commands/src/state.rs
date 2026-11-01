@@ -1709,6 +1709,8 @@ pub struct AppState {
     pub nav_mode: NavMode,
     /// Walkthrough navigation keys' state (step size, speed toggles, vertical lock).
     pub walk: WalkThrough,
+    /// Configure Modifier Sets > Show All Sets in List.
+    pub show_all_sets_in_list: bool,
     /// Track bar Configure > Show Frame Numbers.
     pub track_bar_frame_numbers: bool,
     pub show_vertices: bool,
@@ -2134,6 +2136,7 @@ impl AppState {
             maximized: false,
             nav_mode: NavMode::None,
             walk: WalkThrough::default(),
+            show_all_sets_in_list: false,
             track_bar_frame_numbers: true,
             show_vertices: false,
             show_statistics: false,

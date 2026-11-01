@@ -14,6 +14,16 @@ use loom_scene::Modifier;
 /// A stack entry being dragged: (node, entry index).
 struct StackDrag(u64, usize);
 
+/// The named modifier sets (Configure Modifier Sets menu, Show All Sets in List).
+const MODIFIER_SETS: [(&str, &[&str]); 6] = [
+    ("Mesh Editing", &["Edit Poly", "Edit Mesh", "Cap Holes", "Normal", "Optimize", "Smooth", "STL Check", "Symmetry", "Tessellate", "VertexPaint"]),
+    ("Animation Modifiers", &["Morpher", "Skin", "Flex", "Melt", "Linked XForm", "PatchDeform", "PathDeform", "Point Cache", "Spline IK Control", "SurfDeform"]),
+    ("UV Coordinates", &["UVW Map", "Unwrap UVW", "MapScaler", "Projection", "UVW Mapping Add", "UVW Mapping Clear", "UVW XForm", "Camera Map"]),
+    ("Subdivision Surfaces", &["TurboSmooth", "MeshSmooth", "HSDS", "Tessellate"]),
+    ("Selection Modifiers", &["Mesh Select", "Poly Select", "Patch Select", "Spline Select", "Vol. Select", "Turn to Poly", "Turn to Mesh", "Turn to Patch"]),
+    ("Parametric Modifiers", &["Bend", "Taper", "Twist", "Noise", "Stretch", "Squeeze", "Push", "Relax", "Ripple", "Wave", "Skew", "Slice", "Spherify", "Affect Region", "Lattice", "Mirror", "Displace", "XForm", "Preserve", "Shell"]),
+];
+
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     create::name_and_color(ui, app);
     let Some(id) = app.state.selection.iter().next().copied() else {
@@ -71,6 +81,17 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 for name in loom_commands::modifier_list::most_used(&app.state.modifier_usage, 8) {
                     if ui.add_enabled(!is_group, egui::Button::new(name.as_str())).clicked() {
                         add = Some(name);
+                    }
+                }
+                if app.state.show_all_sets_in_list {
+                    // Show All Sets in List: each set's modifiers under its name.
+                    for (set_name, names) in MODIFIER_SETS {
+                        ui.add_enabled(false, egui::Button::new(egui::RichText::new(set_name.to_uppercase()).small()));
+                        for name in names.iter().filter(|n| Modifier::LIST.contains(*n) || Modifier::WSM_LIST.contains(*n)) {
+                            if ui.add_enabled(!is_group, egui::Button::new(*name)).clicked() {
+                                add = Some((*name).to_owned());
+                            }
+                        }
                     }
                 }
                 ui.add_enabled(false, egui::Button::new(egui::RichText::new("WORLD-SPACE MODIFIERS").small()));
@@ -381,14 +402,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 ui.close_menu();
             }
             ui.separator();
-            for (set_name, names) in [
-                ("Mesh Editing", &["Edit Poly", "Edit Mesh", "Cap Holes", "Normal", "Optimize", "Smooth", "STL Check", "Symmetry", "Tessellate", "VertexPaint"][..]),
-                ("Animation Modifiers", &["Morpher", "Skin", "Flex", "Melt", "Linked XForm", "PatchDeform", "PathDeform", "Point Cache", "Spline IK Control", "SurfDeform"][..]),
-                ("UV Coordinates", &["UVW Map", "Unwrap UVW", "MapScaler", "Projection", "UVW Mapping Add", "UVW Mapping Clear", "UVW XForm", "Camera Map"][..]),
-                ("Subdivision Surfaces", &["TurboSmooth", "MeshSmooth", "HSDS", "Tessellate"][..]),
-                ("Selection Modifiers", &["Mesh Select", "Poly Select", "Patch Select", "Spline Select", "Vol. Select", "Turn to Poly", "Turn to Mesh", "Turn to Patch"][..]),
-                ("Parametric Modifiers", &["Bend", "Taper", "Twist", "Noise", "Stretch", "Squeeze", "Push", "Relax", "Ripple", "Wave", "Skew", "Slice", "Spherify", "Affect Region", "Lattice", "Mirror", "Displace", "XForm", "Preserve", "Shell"][..]),
-            ] {
+            let mut all = app.state.show_all_sets_in_list;
+            if ui.checkbox(&mut all, "Show All Sets in List").changed() {
+                let _ = app.dispatch(Command::ShowAllSetsInListToggle);
+                ui.close_menu();
+            }
+            ui.separator();
+            for (set_name, names) in MODIFIER_SETS {
                 if ui.button(set_name).clicked() {
                     let _ = app.dispatch(Command::ConfigureModifierSets { names: names.iter().map(|s| (*s).to_owned()).collect() });
                     ui.close_menu();

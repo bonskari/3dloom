@@ -822,6 +822,7 @@ commands! {
     ConfigureModifierSets => "Configure Modifier Sets", Loom, "The modifier button set shown under the Modifier List." { names: Vec<String> };
     ConfigureModifierSetsDialog => "Configure Modifier Sets Dialog", MainUI, "Open the Configure Modifier Sets dialog.";
     PickModifierNode => "Pick Modifier Node", Loom, "Linked XForm > Pick Control Object / Preserve > Pick Original: the node stack entry `index` follows or references." { index: u32, node: u64 };
+    ShowAllSetsInListToggle => "Show All Sets in List Toggle", Loom, "Configure Modifier Sets menu > Show All Sets in List: the Modifier List groups the modifiers under each modifier set's name.";
     ModifierSetButtonsToggle => "Modifier Set Buttons Toggle", Loom, "Show / hide the modifier button set.";
     SwitchToControlPointLevel => "Switch To Control Point Level", FFD, "FFD: enter the Control Points level of the active FFD entry (Alt+Shift+C).";
     SwitchToLatticeLevel => "Switch To Lattice Level", FFD, "FFD: enter the Lattice level of the active FFD entry (Alt+Shift+L).";
