@@ -81,11 +81,11 @@ fn refine(mut p: Params, points: &[(Vec3, Vec2)], size: Vec2, iterations: u32, f
         // Normal equations (J^T J + lambda diag) d = -J^T r.
         let mut a = vec![vec![0.0; n]; n];
         let mut g = vec![0.0; n];
-        for i in 0..n {
-            for j in 0..n {
-                a[i][j] = jac[i].iter().zip(&jac[j]).map(|(x, y)| x * y).sum();
+        for (i, (row, gi)) in a.iter_mut().zip(g.iter_mut()).enumerate() {
+            for (j, v) in row.iter_mut().enumerate() {
+                *v = jac[i].iter().zip(&jac[j]).map(|(x, y)| x * y).sum();
             }
-            g[i] = -jac[i].iter().zip(&r).map(|(x, y)| x * y).sum::<f64>();
+            *gi = -jac[i].iter().zip(&r).map(|(x, y)| x * y).sum::<f64>();
         }
         let mut improved = false;
         for _ in 0..10 {
@@ -98,8 +98,8 @@ fn refine(mut p: Params, points: &[(Vec3, Vec2)], size: Vec2, iterations: u32, f
                 continue;
             };
             let mut q = p;
-            for k in 0..n {
-                q[k] += d[k];
+            for (v, dv) in q.iter_mut().zip(&d) {
+                *v += dv;
             }
             let rq = residuals(&q, points, size);
             let cq = cost(&rq);
@@ -129,10 +129,11 @@ fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
         }
         a.swap(col, piv);
         b.swap(col, piv);
+        let pivot = a[col].clone();
         for row in col + 1..n {
-            let f = a[row][col] / a[col][col];
-            for k in col..n {
-                a[row][k] -= f * a[col][k];
+            let f = a[row][col] / pivot[col];
+            for (v, pv) in a[row].iter_mut().zip(&pivot).skip(col) {
+                *v -= f * pv;
             }
             b[row] -= f * b[col];
         }
