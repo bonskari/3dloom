@@ -586,7 +586,10 @@ fn saved_track_views_from_the_graph_editors_menu() {
     h.frames(2);
     let field = h.widgets.iter().find(|w| w.0 == Role::TextInput && w.1.starts_with("Untitled")).map(|w| w.2).expect("the name field");
     h.click(field.center());
-    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.key(egui::Key::End);
+    for _ in 0..12 {
+        h.key(egui::Key::Backspace);
+    }
     h.run(vec![egui::Event::Text("Keys".into())]);
     h.key(egui::Key::Enter);
     assert_eq!(h.app.state.saved_track_views.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Keys"], "name {:?} field {field:?}", h.app.state.track_view.name);
