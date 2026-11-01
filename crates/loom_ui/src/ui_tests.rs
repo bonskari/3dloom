@@ -4235,3 +4235,27 @@ fn channel_from_the_extended_shapes_class_by_drag() {
     assert!(param(&h, "Width") > 0.0 && param(&h, "Length") > 0.0 && param(&h, "Thickness") > 0.0);
     assert_eq!(n.object.shape().unwrap().splines[0].knots.len(), 8);
 }
+
+/// Shift+right-click a parameter spinner: a key for that parameter at the
+/// current frame (no reset to zero); a plain right-click still resets.
+#[test]
+fn shift_right_click_on_a_spinner_keys_its_parameter() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SetFrame { frame: 15 });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let spin = h.spinner_after("Length Segs");
+    h.mods = egui::Modifiers::SHIFT;
+    right_click(&mut h, spin.center());
+    h.mods = egui::Modifiers::NONE;
+    let keyed = loom_scene::tracks::list_tracks(&h.app.state.scene, id)
+        .into_iter()
+        .find(|t| t.name == "Length Segs")
+        .and_then(|t| loom_scene::tracks::read(&h.app.state.scene, &t))
+        .is_some_and(|p| p.keys().is_some_and(|k| k.tracks.iter().any(|tr| tr.key_at(15.0).is_some())));
+    assert!(keyed, "a key at frame 15");
+    assert_eq!(param(&h, "Length Segs"), 1.0, "the value stays");
+}

@@ -164,6 +164,7 @@ pub fn handles(c: &Command) -> bool {
             | C::SetDefaultTangentAsSpline
             | C::SetDefaultTangentAsStepped
             | C::SetDefaultTangents { .. }
+            | C::KeyParameter { .. }
             | C::PlayAnimation
             | C::NextPreviousKeyModeToggle
             | C::GoToNextKey
@@ -214,6 +215,14 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 start_pose(state);
             }
             Ok(json!({}))
+        }
+        C::KeyParameter { id, name } => {
+            let id = NodeId(id);
+            let found = loom_scene::tracks::list_tracks(&state.scene, id).into_iter().any(|t| t.owner == loom_scene::tracks::TrackOwner::Object && t.name.eq_ignore_ascii_case(&name));
+            if !found {
+                return Err(format!("no animatable parameter {name:?} on that object"));
+            }
+            edit_nodes(state, "Set Key", &[id], |t| t.owner == loom_scene::tracks::TrackOwner::Object && t.name.eq_ignore_ascii_case(&name), |_, p| p.key_now())
         }
         C::SetKeys => {
             // The Selection List's named set stands in for the selection while keying.

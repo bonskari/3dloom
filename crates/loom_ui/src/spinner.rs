@@ -142,7 +142,8 @@ pub fn spin<'a, N: Numeric>(ui: &egui::Ui, value: &'a mut N, range: impl RangeBo
     let id = ui.next_auto_id();
     let ctx = ui.ctx().clone();
     crate::cursor::note_spinner(&ctx, id);
-    let reset = ui.is_enabled() && ctx.read_response(id).is_some_and(|r| r.secondary_clicked());
+    // Shift+right-click keys the parameter (the caller does): no reset.
+    let reset = ui.is_enabled() && ctx.read_response(id).is_some_and(|r| r.secondary_clicked()) && !ui.input(|i| i.modifiers.shift);
     let before = value.to_f64();
     let dragging = ctx.is_being_dragged(id);
     let track_id = id.with("spin_track");
