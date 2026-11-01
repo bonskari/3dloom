@@ -289,7 +289,7 @@ fn lin(a: (f32, f32), b: (f32, f32), segs: u32) -> Vec<(f32, f32)> {
 fn revolve(profile: &[(f32, f32)], sides: u32) -> Mesh {
     let s = sides.max(3);
     let at = |(r, z): (f32, f32), i: u32| {
-        let a = i as f32 / s as f32 * TAU;
+        let a = (i % s) as f32 / s as f32 * TAU;
         Vec3::new(r * a.cos(), r * a.sin(), z)
     };
     let mut polys = Vec::new();
@@ -534,6 +534,17 @@ mod tests {
     fn hedra_families_have_the_platonic_face_counts() {
         let count = |f: f32, d: f32| ExtendedKind::Hedra.build(&[f, d, 10.0]).face_count();
         assert_eq!([count(0.0, 0.0), count(1.0, 0.0), count(1.0, 1.0), count(2.0, 0.0), count(2.0, 1.0)], [4, 8, 6, 20, 12]);
+    }
+
+    /// Large sizes stay closed: the last side meets the first exactly.
+    #[test]
+    fn large_turned_kinds_close_their_seam() {
+        for k in [ExtendedKind::Capsule, ExtendedKind::OilTank, ExtendedKind::ChamferCyl, ExtendedKind::Spindle, ExtendedKind::RingWave] {
+            let mut v = k.defaults();
+            v[0] = 1000.0;
+            let m = k.build(&v);
+            assert!(m.half_edges().iter().all(|h| h.face.is_some()), "{k:?} is closed at radius 1000");
+        }
     }
 
     #[test]
