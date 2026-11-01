@@ -180,6 +180,7 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             e("Object Properties...", Command::ObjectProperties),
             e("Curve Editor...", Command::OpenCurveEditor),
             e("Dope Sheet...", Command::OpenDopeSheet),
+            e("Wire Parameters...", Command::ParameterWiringDialog),
             Entry {
                 label: "Convert To".into(),
                 action: Action::Submenu(vec![
@@ -925,7 +926,7 @@ mod tests {
         assert!(q.tools1.is_none() && q.tools2.is_none(), "no Editable Poly selected: left quadrants hidden");
         let _ = loom_commands::execute(&mut app.state, loom_commands::Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [1.0; 3] });
         let transform: Vec<String> = quadrants(&app).transform.items.iter().map(|i| i.label.clone()).collect();
-        assert_eq!(transform, ["Move", "Rotate", "Scale", "Select", "Select Similar", "Clone", "Object Properties...", "Curve Editor...", "Dope Sheet...", "Convert To"]);
+        assert_eq!(transform, ["Move", "Rotate", "Scale", "Select", "Select Similar", "Clone", "Object Properties...", "Curve Editor...", "Dope Sheet...", "Wire Parameters...", "Convert To"]);
         let _ = loom_commands::execute(&mut app.state, loom_commands::Command::ConvertToEditablePoly);
         let q = quadrants(&app);
         let tools2: Vec<&str> = q.tools2.as_ref().unwrap().items.iter().map(|i| i.label.as_str()).collect();

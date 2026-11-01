@@ -126,5 +126,11 @@ fn display_quad_hides_and_freezes_the_selections_layer_and_opens_scene_states() 
     quad_item(&mut h, "Hide Selection's Layer");
     assert!(h.app.state.scene.layer(walls).unwrap().hidden);
     quad_item(&mut h, "Manage Scene States...");
-    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ManageSceneStates));
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ManageSceneStates));    // Transform quadrant (down and right of the click), with the visible box selected: Wire Parameters.
+    h.cmd(Command::SelectAll);
+    h.cmd(Command::CloseDialog);
+    right_click(&mut h, at);
+    let p = h.text_rects("Wire Parameters...").into_iter().find(|r| r.min.x > at.x && r.min.y > at.y).expect("Wire Parameters in the transform quadrant").center();
+    h.click(p);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ParameterWiring));
 }
