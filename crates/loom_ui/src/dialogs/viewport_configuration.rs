@@ -251,9 +251,26 @@ fn lighting_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
     });
     ui.separator();
     let mut shadows = vp.shadows;
-    if ui.checkbox(&mut shadows, "Shadows").on_hover_text("The first spot or directional scene light casts shadows in this shaded view").changed() {
+    if ui.checkbox(&mut shadows, "Shadows").on_hover_text("The scene lights cast shadows in this shaded view").changed() {
         let _ = app.dispatch(Command::ViewportShadowsToggle);
     }
+    ui.add_enabled_ui(vp.shadows, |ui| {
+        ui.horizontal(|ui| {
+            if ui.radio(!vp.soft_shadows, "Hard Shadows").clicked() {
+                let _ = app.dispatch(Command::SetViewportShadows { on: None, soft: Some(false), intensity: None });
+            }
+            if ui.radio(vp.soft_shadows, "Soft Shadows").clicked() {
+                let _ = app.dispatch(Command::SetViewportShadows { on: None, soft: Some(true), intensity: None });
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Shadow Intensity:");
+            let mut v = vp.shadow_intensity;
+            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+                let _ = app.dispatch(Command::SetViewportShadows { on: None, soft: None, intensity: Some(v) });
+            }
+        });
+    });
     let mut hw = vp.shading == Shading::Realistic;
     if ui.checkbox(&mut hw, "Enable Hardware Shading").on_hover_text("The view shows Realistic shading (lights, shadows) from the Bevy renderer").changed() {
         set(app, None, None, Some(hw));

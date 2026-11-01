@@ -196,9 +196,9 @@ impl CallbackTrait for ViewportCallback {
         }
         res.renderer
             .update_view(queue, self.slot, self.view_proj, self.camera_pos, self.shading);
-        if let Some(caster) = self.shading.shadow {
+        if let Some(set) = self.shading.shadow {
             let refs: Vec<&MeshBuffer> = res.mesh_buffers.iter().collect();
-            res.renderer.render_shadow(device, queue, _egui_encoder, self.slot, &refs, caster);
+            res.renderer.render_shadows(device, queue, _egui_encoder, self.slot, &refs, &set);
         }
         if res.helper_lines.len() <= self.slot {
             res.helper_lines.resize_with(self.slot + 1, || None);
@@ -1256,7 +1256,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                     view_shading = crate::light_overlay::view_lighting(app, &lit, view, view_shading);
                     if vp.shadows && !(app.degrading && app.state.degradation.degrade_to_default_lighting) {
-                        view_shading.shadow = shadow_caster(app, &view_shading);
+                        view_shading.shadow = shadow_set(app, vp, &view_shading);
                     }
                 }
                 let edges = (vp.edged_faces && level != S::BoundingBox) || level == S::HiddenLine;
@@ -1911,9 +1911,9 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
     let height = if vp.is_orthographic() { vp.camera.distance * 0.8284 } else { 2.0 * vp.camera.distance * (vp.fov_y_radians * 0.5).tan() };
     (height / rect.height().max(1.0)).max(1e-4)
 }
-/// Viewport shadows: the first spot or directional light of the view casts
-/// them, framed on the visible objects' bounds.
-pub(crate) fn shadow_caster(app: &LoomApp, shading: &loom_render::ViewShading) -> Option<loom_render::ShadowCaster> {
+/// Viewport shadows: the view's lights cast them (point lights through a
+/// cube), framed on the visible objects' bounds.
+pub(crate) fn shadow_set(app: &LoomApp, vp: &loom_commands::Viewport, shading: &loom_render::ViewShading) -> Option<loom_render::ShadowSet> {
     if shading.lighting != 2 {
         return None;
     }
@@ -1923,10 +1923,7 @@ pub(crate) fn shadow_caster(app: &LoomApp, shading: &loom_render::ViewShading) -
         lo = lo.min(a);
         hi = hi.max(b);
     }
-    shading.lights.iter().enumerate().find_map(|(i, l)| {
-        let l = l.as_ref()?;
-        loom_render::shadow_view_proj(l, (lo, hi)).map(|view_proj| loom_render::ShadowCaster { light: i as u32, view_proj })
-    })
+    loom_render::shadow_set(&shading.lights, (lo, hi), vp.soft_shadows, vp.shadow_intensity)
 }
 
 /// The world meshes a view shades whatever its level: Shade Selected's

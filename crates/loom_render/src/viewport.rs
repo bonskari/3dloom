@@ -17,9 +17,11 @@ struct ViewUniform {
     /// Ambient light (rgb) of mode 2.
     ambient: [f32; 4],
     lights: [GpuLight; MAX_VIEW_LIGHTS],
-    /// The shadow-casting light's view-projection (world to its clip space).
-    shadow_vp: [[f32; 4]; 4],
-    /// x = shadows on, y = the casting light's index, z = depth bias.
+    /// Each shadow map layer's view-projection (world to the light's clip space).
+    shadow_vps: [[[f32; 4]; 4]; MAX_SHADOW_LAYERS],
+    /// Per light: x = its first layer (-1 none), y = layer count (1, or 6 for a point light's cube).
+    light_shadow: [[f32; 4]; MAX_VIEW_LIGHTS],
+    /// x = shadows on, y = soft (filtered edges), z = depth bias, w = intensity (0-1).
     shadow: [f32; 4],
 }
 
@@ -91,20 +93,68 @@ pub struct ViewShading {
     /// Lighting mode 2: up to [`MAX_VIEW_LIGHTS`] lights and the ambient light.
     pub lights: [Option<ViewLight>; MAX_VIEW_LIGHTS],
     pub ambient: [f32; 3],
-    /// Viewport shadows: one light's shadow map.
-    pub shadow: Option<ShadowCaster>,
+    /// Viewport shadows: the shadow maps of the view's lights.
+    pub shadow: Option<ShadowSet>,
 }
 
-/// The light whose shadows a shaded view draws: its index among the view's
-/// lights and its view-projection (world to its clip space).
+/// The shadow maps a shaded view draws: a layer per spot or directional
+/// light and six (a cube) per point light, as many as fit.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ShadowCaster {
-    pub light: u32,
-    pub view_proj: Mat4,
+pub struct ShadowSet {
+    pub layers: [Mat4; MAX_SHADOW_LAYERS],
+    pub layer_count: u32,
+    /// Per light: (first layer, count); count 0 casts none.
+    pub lights: [(u32, u32); MAX_VIEW_LIGHTS],
+    /// Soft: filtered edges; off: hard.
+    pub soft: bool,
+    /// How dark the shadows are (0 none, 1 the light fully blocked).
+    pub intensity: f32,
 }
 
 /// Shadow map size in texels (each side).
-pub const SHADOW_MAP_SIZE: u32 = 2048;
+pub const SHADOW_MAP_SIZE: u32 = 1024;
+/// Shadow map layers a view holds (a point light takes six).
+pub const MAX_SHADOW_LAYERS: usize = 16;
+
+/// A point light's six cube faces (+X, -X, +Y, -Y, +Z, -Z, as the shader
+/// picks them), each a 90° view out to the scene bounds.
+pub fn point_shadow_view_projs(position: Vec3, bounds: (Vec3, Vec3)) -> Option<[Mat4; 6]> {
+    let (lo, hi) = bounds;
+    if !(lo.is_finite() && hi.is_finite()) || lo.cmpgt(hi).any() {
+        return None;
+    }
+    // Out to the farthest corner of the bounds.
+    let far = (0..8)
+        .map(|i| Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z }))
+        .map(|c| (c - position).length())
+        .fold(0.0, f32::max)
+        .max(1e-2);
+    let near = (far * 0.005).max(0.01);
+    let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, near, far);
+    let faces = [(Vec3::X, -Vec3::Y), (-Vec3::X, -Vec3::Y), (Vec3::Y, Vec3::Z), (-Vec3::Y, -Vec3::Z), (Vec3::Z, -Vec3::Y), (-Vec3::Z, -Vec3::Y)];
+    Some(faces.map(|(dir, up)| proj * Mat4::look_to_rh(position, dir, up)))
+}
+
+/// The shadow maps for `lights` framing `bounds`: spot and directional
+/// lights a layer each, point lights a cube, in light order while layers last.
+pub fn shadow_set(lights: &[Option<ViewLight>; MAX_VIEW_LIGHTS], bounds: (Vec3, Vec3), soft: bool, intensity: f32) -> Option<ShadowSet> {
+    let mut set = ShadowSet { layers: [Mat4::IDENTITY; MAX_SHADOW_LAYERS], layer_count: 0, lights: [(0, 0); MAX_VIEW_LIGHTS], soft, intensity: intensity.clamp(0.0, 1.0) };
+    for (i, l) in lights.iter().enumerate() {
+        let Some(l) = l else { continue };
+        let mats: Vec<Mat4> = match l.kind {
+            ViewLightKind::Point => point_shadow_view_projs(l.position, bounds).map(|m| m.to_vec()).unwrap_or_default(),
+            _ => shadow_view_proj(l, bounds).into_iter().collect(),
+        };
+        let start = set.layer_count as usize;
+        if mats.is_empty() || start + mats.len() > MAX_SHADOW_LAYERS {
+            continue;
+        }
+        set.layers[start..start + mats.len()].copy_from_slice(&mats);
+        set.lights[i] = (start as u32, mats.len() as u32);
+        set.layer_count += mats.len() as u32;
+    }
+    (set.layer_count > 0).then_some(set)
+}
 
 /// The view-projection a spot or directional light casts its shadow map
 /// with, framing the scene bounds `(min, max)`; point lights cast none here.
@@ -179,9 +229,8 @@ pub enum GridPlane {
 /// depth pass draws with, and the group the shaded pass samples it through.
 struct ShadowSlot {
     _texture: Texture,
-    view: TextureView,
-    uniform: Buffer,
-    uniform_group: BindGroup,
+    /// One render view, uniform and group per layer.
+    layers: Vec<(TextureView, Buffer, BindGroup)>,
     sample_group: BindGroup,
 }
 
@@ -292,7 +341,7 @@ impl ViewportRenderer {
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture { sample_type: TextureSampleType::Depth, view_dimension: TextureViewDimension::D2, multisampled: false },
+                    ty: BindingType::Texture { sample_type: TextureSampleType::Depth, view_dimension: TextureViewDimension::D2Array, multisampled: false },
                     count: None,
                 },
                 BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::FRAGMENT, ty: BindingType::Sampler(SamplerBindingType::Comparison), count: None },
@@ -317,7 +366,7 @@ impl ViewportRenderer {
             usage: TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        let no_shadow_view = no_shadow_tex.create_view(&TextureViewDescriptor::default());
+        let no_shadow_view = no_shadow_tex.create_view(&TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..Default::default() });
         let no_shadow = device.create_bind_group(&BindGroupDescriptor {
             label: Some("no_shadow"),
             layout: &shadow_layout,
@@ -440,12 +489,23 @@ impl ViewportRenderer {
             count += 1;
         }
         let a = shading.ambient;
-        let (shadow_vp, shadow) = match shading.shadow {
-            Some(s) => (s.view_proj.to_cols_array_2d(), [1.0, s.light as f32, 0.0002, 0.0]),
-            None => (Mat4::IDENTITY.to_cols_array_2d(), [0.0; 4]),
-        };
+        let mut shadow_vps = [Mat4::IDENTITY.to_cols_array_2d(); MAX_SHADOW_LAYERS];
+        let mut light_shadow = [[-1.0, 0.0, 0.0, 0.0]; MAX_VIEW_LIGHTS];
+        let mut shadow = [0.0; 4];
+        if let Some(s) = shading.shadow {
+            for (d, m) in shadow_vps.iter_mut().zip(&s.layers) {
+                *d = m.to_cols_array_2d();
+            }
+            for (d, (start, n)) in light_shadow.iter_mut().zip(s.lights) {
+                if n > 0 {
+                    *d = [start as f32, n as f32, 0.0, 0.0];
+                }
+            }
+            shadow = [1.0, if s.soft { 1.0 } else { 0.0 }, 0.0002, s.intensity];
+        }
         let u = ViewUniform {
-            shadow_vp,
+            shadow_vps,
+            light_shadow,
             shadow,
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: [camera_pos.x, camera_pos.y, camera_pos.z, 0.0],
@@ -458,14 +518,14 @@ impl ViewportRenderer {
         queue.write_buffer(&self.slots[slot].0, 0, bytemuck::bytes_of(&u));
     }
 
-    /// Draws the shadow map of `slot` from `caster` (call before the
-    /// viewport's pass; the map stays for its shaded pass).
-    pub fn render_shadow(&mut self, device: &Device, queue: &Queue, encoder: &mut CommandEncoder, slot: usize, meshes: &[&MeshBuffer], caster: ShadowCaster) {
+    /// Draws the shadow maps of `slot` (call before the viewport's pass;
+    /// the maps stay for its shaded pass).
+    pub fn render_shadows(&mut self, device: &Device, queue: &Queue, encoder: &mut CommandEncoder, slot: usize, meshes: &[&MeshBuffer], set: &ShadowSet) {
         let slot = slot.min(MAX_VIEWPORTS - 1);
         if self.shadow_slots[slot].is_none() {
             let texture = device.create_texture(&TextureDescriptor {
-                label: Some("shadow_map"),
-                size: Extent3d { width: SHADOW_MAP_SIZE, height: SHADOW_MAP_SIZE, depth_or_array_layers: 1 },
+                label: Some("shadow_maps"),
+                size: Extent3d { width: SHADOW_MAP_SIZE, height: SHADOW_MAP_SIZE, depth_or_array_layers: MAX_SHADOW_LAYERS as u32 },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D2,
@@ -473,47 +533,55 @@ impl ViewportRenderer {
                 usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
-            let view = texture.create_view(&TextureViewDescriptor::default());
-            let uniform = device.create_buffer(&BufferDescriptor {
-                label: Some("shadow_view_uniform"),
-                size: std::mem::size_of::<ViewUniform>() as u64,
-                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let uniform_group = device.create_bind_group(&BindGroupDescriptor {
-                label: Some("shadow_view"),
-                layout: &self.view_layout,
-                entries: &[BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
-            });
+            let layers = (0..MAX_SHADOW_LAYERS as u32)
+                .map(|layer| {
+                    let view = texture.create_view(&TextureViewDescriptor { dimension: Some(TextureViewDimension::D2), base_array_layer: layer, array_layer_count: Some(1), ..Default::default() });
+                    let uniform = device.create_buffer(&BufferDescriptor {
+                        label: Some("shadow_view_uniform"),
+                        size: std::mem::size_of::<ViewUniform>() as u64,
+                        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    let group = device.create_bind_group(&BindGroupDescriptor {
+                        label: Some("shadow_view"),
+                        layout: &self.view_layout,
+                        entries: &[BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
+                    });
+                    (view, uniform, group)
+                })
+                .collect();
+            let all = texture.create_view(&TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..Default::default() });
             let sample_group = device.create_bind_group(&BindGroupDescriptor {
                 label: Some("shadow_sample"),
                 layout: &self.shadow_layout,
-                entries: &[BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&view) }, BindGroupEntry { binding: 1, resource: BindingResource::Sampler(&self.shadow_sampler) }],
+                entries: &[BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&all) }, BindGroupEntry { binding: 1, resource: BindingResource::Sampler(&self.shadow_sampler) }],
             });
-            self.shadow_slots[slot] = Some(ShadowSlot { _texture: texture, view, uniform, uniform_group, sample_group });
+            self.shadow_slots[slot] = Some(ShadowSlot { _texture: texture, layers, sample_group });
         }
         let s = self.shadow_slots[slot].as_ref().expect("made above");
-        let mut u = ViewUniform::zeroed();
-        u.view_proj = caster.view_proj.to_cols_array_2d();
-        queue.write_buffer(&s.uniform, 0, bytemuck::bytes_of(&u));
-        let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
-            label: Some("shadow_pass"),
-            color_attachments: &[],
-            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                view: &s.view,
-                depth_ops: Some(Operations { load: LoadOp::Clear(1.0), store: StoreOp::Store }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        pass.set_pipeline(&self.shadow_pipeline);
-        pass.set_bind_group(0, &s.uniform_group, &[]);
-        for mb in meshes.iter().filter(|mb| mb.index_count > 0) {
-            for r in mb.ranges.iter().filter(|r| r.count > 0 && !r.transparent) {
-                pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
-                pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);
-                pass.draw_indexed(r.start..r.start + r.count, 0, 0..1);
+        for (m, (view, uniform, group)) in set.layers.iter().zip(&s.layers).take(set.layer_count as usize) {
+            let mut u = ViewUniform::zeroed();
+            u.view_proj = m.to_cols_array_2d();
+            queue.write_buffer(uniform, 0, bytemuck::bytes_of(&u));
+            let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                label: Some("shadow_pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view,
+                    depth_ops: Some(Operations { load: LoadOp::Clear(1.0), store: StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.shadow_pipeline);
+            pass.set_bind_group(0, group, &[]);
+            for mb in meshes.iter().filter(|mb| mb.index_count > 0) {
+                for r in mb.ranges.iter().filter(|r| r.count > 0 && !r.transparent) {
+                    pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
+                    pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);
+                    pass.draw_indexed(r.start..r.start + r.count, 0, 0..1);
+                }
             }
         }
     }
@@ -700,5 +768,24 @@ mod shadow_tests {
             assert!(top.z < bottom.z, "{kind:?}: the top is nearer the light");
         }
         assert!(shadow_view_proj(&light(ViewLightKind::Point), bounds).is_none());
+    }
+
+    /// A point light takes six layers (a cube), the others one each; the
+    /// cube faces see the points along their axes.
+    #[test]
+    fn a_shadow_set_gives_point_lights_a_cube() {
+        let bounds = (Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 20.0));
+        let mut lights = [None; MAX_VIEW_LIGHTS];
+        lights[0] = Some(light(ViewLightKind::Point));
+        lights[1] = Some(light(ViewLightKind::Directional));
+        let set = shadow_set(&lights, bounds, true, 0.5).expect("shadows");
+        assert_eq!((set.layer_count, set.lights[0], set.lights[1]), (7, (0, 6), (6, 1)));
+        // -Z face (index 5) sees the scene below the light.
+        let p = set.layers[5].project_point3(Vec3::new(0.0, 0.0, 10.0));
+        assert!(p.x.abs() < 1e-3 && p.y.abs() < 1e-3 && (0.0..=1.0).contains(&p.z), "{p}");
+        // Two point lights fill 12 layers; a third no longer fits.
+        let lights = [Some(light(ViewLightKind::Point)); MAX_VIEW_LIGHTS];
+        let set = shadow_set(&lights, bounds, false, 1.0).unwrap();
+        assert_eq!((set.layer_count, set.lights[2]), (12, (0, 0)));
     }
 }

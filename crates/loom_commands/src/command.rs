@@ -1675,6 +1675,7 @@ commands! {
     EulerFilter => "Euler Filter", Loom, "Track View Utilities: remove ±360° flips from the highlighted Euler rotation tracks." { start: Option<i32>, end: Option<i32> };
     CollapseController => "Collapse Controller", Loom, "Controller > Collapse: bake the highlighted tracks to keys every `samples` frames." { start: Option<i32>, end: Option<i32>, samples: Option<u32> };
     ViewportShadowsToggle => "Viewport Shadows Toggle", MainUI, "Lighting and Shadows > Shadows: the active shaded view draws the shadow of its first spot or directional scene light.";
+    SetViewportShadows => "Set Viewport Shadows", Loom, "Viewport Configuration > Lighting and Shadows: Shadows on/off, Hard / Soft and Shadow Intensity (0-1) of the active view (omitted ones stay)." { on: Option<bool>, soft: Option<bool>, intensity: Option<f32> };
     ShowGhostingToggle => "Show Ghosting Toggle", MainUI, "Views > Show Ghosting: wireframe copies of the selected objects at frames before (yellow) and/or after (cyan) the current one (Preferences > Viewports > Ghosting).";
     ShowKeyTimesToggle => "Show Key Times Toggle", MainUI, "Views > Show Key Times: frame numbers beside the key points of the shown trajectories.";
     ShowDependenciesToggle => "Show Dependencies Toggle", MainUI, "Views > Show Dependencies: with the Modify panel open, the objects that share the edited object's base object or its current modifier (instances, references) show magenta.";

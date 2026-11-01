@@ -21,20 +21,41 @@ struct ViewUniform {
     override_color: vec4<f32>,
     ambient: vec4<f32>,
     lights: array<Light, 8>,
-    /// The shadow-casting light's view-projection.
-    shadow_vp: mat4x4<f32>,
-    /// x shadows on, y the casting light's index, z depth bias.
+    /// Each shadow map layer's view-projection.
+    shadow_vps: array<mat4x4<f32>, 16>,
+    /// Per light: x first layer (-1 none), y layer count (6: a point light's cube).
+    light_shadow: array<vec4<f32>, 8>,
+    /// x shadows on, y soft, z depth bias, w intensity.
     shadow: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> view: ViewUniform;
 @group(1) @binding(0) var map_tex: texture_2d<f32>;
 @group(1) @binding(1) var map_samp: sampler;
-@group(2) @binding(0) var shadow_map: texture_depth_2d;
+@group(2) @binding(0) var shadow_map: texture_depth_2d_array;
 @group(2) @binding(1) var shadow_samp: sampler_comparison;
 
-/// How much of the casting light reaches `p` (1 lit, 0 in shadow), 3×3 PCF.
-fn shadow_factor(p: vec3<f32>) -> f32 {
-    let c = view.shadow_vp * vec4<f32>(p, 1.0);
+/// How much of light `i` reaches `p` (1 lit, 0 in shadow): its layer (a
+/// point light's cube face by the major axis from the light), 3×3 PCF when soft.
+fn shadow_factor(i: u32, p: vec3<f32>) -> f32 {
+    let info = view.light_shadow[i];
+    if (info.x < 0.0) {
+        return 1.0;
+    }
+    var layer = i32(info.x);
+    if (info.y > 1.5) {
+        let d = p - view.lights[i].pos_kind.xyz;
+        let a = abs(d);
+        var face = 0;
+        if (a.x >= a.y && a.x >= a.z) {
+            face = select(1, 0, d.x >= 0.0);
+        } else if (a.y >= a.z) {
+            face = select(3, 2, d.y >= 0.0);
+        } else {
+            face = select(5, 4, d.z >= 0.0);
+        }
+        layer = layer + face;
+    }
+    let c = view.shadow_vps[layer] * vec4<f32>(p, 1.0);
     if (c.w <= 0.0) {
         return 1.0;
     }
@@ -43,14 +64,21 @@ fn shadow_factor(p: vec3<f32>) -> f32 {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0) {
         return 1.0;
     }
-    let texel = 1.0 / 2048.0;
-    var sum = 0.0;
-    for (var y = -1; y <= 1; y = y + 1) {
-        for (var x = -1; x <= 1; x = x + 1) {
-            sum = sum + textureSampleCompareLevel(shadow_map, shadow_samp, uv + vec2<f32>(f32(x), f32(y)) * texel, ndc.z - view.shadow.z);
+    let depth = ndc.z - view.shadow.z;
+    var lit = 0.0;
+    if (view.shadow.y > 0.5) {
+        let texel = 1.0 / 1024.0;
+        for (var y = -1; y <= 1; y = y + 1) {
+            for (var x = -1; x <= 1; x = x + 1) {
+                lit = lit + textureSampleCompareLevel(shadow_map, shadow_samp, uv + vec2<f32>(f32(x), f32(y)) * texel, layer, depth);
+            }
         }
+        lit = lit / 9.0;
+    } else {
+        lit = textureSampleCompareLevel(shadow_map, shadow_samp, uv, layer, depth);
     }
-    return sum / 9.0;
+    // Intensity: how much of the light the shadow takes away.
+    return 1.0 - view.shadow.w * (1.0 - lit);
 }
 
 @vertex
@@ -184,8 +212,8 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 to_light = d / max(dist, 1e-6);
             }
             var k = falloff(l, dist, dot(-to_light, l.dir_hot.xyz));
-            if (view.shadow.x > 0.5 && u32(view.shadow.y) == i) {
-                k = k * shadow_factor(in.world_pos);
+            if (view.shadow.x > 0.5) {
+                k = k * shadow_factor(i, in.world_pos);
             }
             lit = lit + l.color_fall.rgb * k * clamp(abs(dot(n, to_light)), 0.0, 1.0);
             if (in.spec.a > 0.0 && highlights) {

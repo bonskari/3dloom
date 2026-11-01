@@ -242,6 +242,31 @@ fn the_lighting_and_shadows_menu_turns_on_viewport_shadows() {
     h.click(menu_entry(&h, "    Shadows"));
     assert!(h.app.state.viewports[i].shadows);
     let shading = crate::light_overlay::view_lighting(&h.app, &h.app.state.viewports[i].clone(), glam::Mat4::IDENTITY, loom_render::ViewShading::default());
-    let caster = crate::viewport_widget::shadow_caster(&h.app, &shading).expect("the spot light casts");
-    assert_eq!(caster.light, 0);
+    let set = crate::viewport_widget::shadow_set(&h.app, &h.app.state.viewports[i].clone(), &shading).expect("the spot light casts");
+    assert_eq!(set.lights[0], (0, 1));
+}
+
+/// Viewport Configuration > Lighting and Shadows: Shadows, Hard Shadows and
+/// Shadow Intensity; an omni light then casts through six shadow layers.
+#[test]
+fn lighting_and_shadows_panel_sets_hard_shadows_and_intensity_and_omni_lights_cast() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [30.0, -30.0, 60.0], target: [0.0; 3] });
+    h.cmd(Command::ConfigureViewports { panel: Some("Lighting and Shadows".into()) });
+    h.frames(2);
+    let w = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("Viewport Configuration"))).expect("the dialog");
+    h.click(h.find(Role::CheckBox, "Shadows").center());
+    assert!(h.app.state.active().shadows);
+    h.click(h.text_rect("Hard Shadows", w(&h)).unwrap().center());
+    assert!(!h.app.state.active().soft_shadows);
+    let spin = h.spinner_after("Shadow Intensity:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, 100.0));
+    let v = h.app.state.active().shadow_intensity;
+    assert!((0.0..1.0).contains(&v), "dragging down lowers it: {v}");
+    let vp = h.app.state.active().clone();
+    let shading = crate::light_overlay::view_lighting(&h.app, &vp, glam::Mat4::IDENTITY, loom_render::ViewShading::default());
+    let set = crate::viewport_widget::shadow_set(&h.app, &vp, &shading).expect("the omni casts");
+    assert_eq!((set.layer_count, set.soft, set.intensity), (6, false, v));
 }

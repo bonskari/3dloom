@@ -120,6 +120,10 @@ pub struct Viewport {
     pub default_lights: u32,
     /// Lighting and Shadows > Shadows: scene lights cast shadows in the shaded view.
     pub shadows: bool,
+    /// Soft shadows (filtered edges); off: hard.
+    pub soft_shadows: bool,
+    /// Shadow Intensity (0-1).
+    pub shadow_intensity: f32,
     pub background: Option<String>,
     pub background_locked: bool,
     /// Lock Zoom/Pan: the view (target, distance) the image was locked in; it
@@ -199,6 +203,8 @@ impl Viewport {
             fov_y_radians: 45f32.to_radians(),
             scene_lights: true,
             shadows: false,
+            soft_shadows: true,
+            shadow_intensity: 1.0,
             default_lights: 1,
             background: None,
             background_locked: false,

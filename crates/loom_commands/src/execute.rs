@@ -1106,6 +1106,19 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ShowFloatingDialogs => toggle(&mut state.hide_floating_dialogs, "hide_floating_dialogs"),
         C::ViewportLightingToggle => toggle(&mut state.active_mut().scene_lights, "scene_lights"),
         C::ViewportShadowsToggle => toggle(&mut state.active_mut().shadows, "shadows"),
+        C::SetViewportShadows { on, soft, intensity } => {
+            let vp = state.active_mut();
+            if let Some(v) = on {
+                vp.shadows = v;
+            }
+            if let Some(v) = soft {
+                vp.soft_shadows = v;
+            }
+            if let Some(v) = intensity {
+                vp.shadow_intensity = v.clamp(0.0, 1.0);
+            }
+            Ok(json!({ "shadows": vp.shadows, "soft": vp.soft_shadows, "intensity": vp.shadow_intensity }))
+        }
         C::ShadeSelectedFacesToggle => toggle(&mut state.shade_selected_faces, "shade_selected_faces"),
         C::SelectionBracketToggle => toggle(&mut state.selection_brackets, "selection_brackets"),
         C::BackgroundLockToggle => {
