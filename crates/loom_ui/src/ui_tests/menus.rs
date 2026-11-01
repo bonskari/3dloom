@@ -534,13 +534,16 @@ fn several_stack_entries_select_with_ctrl_and_delete_together() {
     h.click(row(&h, "Twist").center());
     h.mods = egui::Modifiers::NONE;
     // Off for both.
-    right_click(&mut h, row(&h, "Twist").center());
+    let t = row(&h, "Twist").center();
+    right_click(&mut h, t);
     h.click(h.find(Role::Button, "Off").center());
     let on: Vec<bool> = h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.enabled).collect();
     assert_eq!(on, [false, true, false], "Bend and Twist off, Taper on");
-    right_click(&mut h, row(&h, "Twist").center());
+    let t = row(&h, "Twist").center();
+    right_click(&mut h, t);
     h.click(h.find(Role::Button, "Show All Subtrees").center());
-    right_click(&mut h, row(&h, "Twist").center());
+    let t = row(&h, "Twist").center();
+    right_click(&mut h, t);
     h.click(h.find(Role::Button, "Delete").center());
     let names: Vec<String> = h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.name.clone()).collect();
     assert_eq!(names, ["Taper"]);
