@@ -1038,4 +1038,12 @@ fn command_panel_columns_and_rollout_threshold() {
     h.frames(5);
     let headers: Vec<egui::Rect> = ["Display Color", "Hide by Category", "Hide", "Freeze", "Display Properties", "Link Display"].iter().filter_map(|t| h.text_rects(t).into_iter().find(|r| p.contains(r.center()))).collect();
     assert!(headers.iter().all(|r| r.left() < p.left() + crate::command_panel::rollouts::COLUMN_WIDTH * 0.9), "one column: {headers:?}");
+    // The Modify panel: the modifier stack sits between Name and Color and
+    // the Editable Poly rollouts, which still flow into columns.
+    h.cmd(Command::SetPreference { name: "Rollout Threshold".into(), value: 50.0 });
+    h.cmd(Command::ConvertToEditablePoly);
+    h.app.panel_tab = crate::command_panel::Tab::Modify;
+    h.frames(5);
+    let headers: Vec<egui::Rect> = ["Selection", "Soft Selection", "Edit Geometry", "Subdivision Surface", "Paint Deformation"].iter().filter_map(|t| h.text_rects(t).into_iter().find(|r| p.contains(r.center()))).collect();
+    assert!(headers.iter().any(|r| r.left() > p.left() + crate::command_panel::rollouts::COLUMN_WIDTH * 0.9), "Editable Poly rollouts in a second column: {headers:?}");
 }

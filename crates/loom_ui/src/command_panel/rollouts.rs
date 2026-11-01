@@ -17,6 +17,8 @@ struct Drawn {
     title: String,
     header: egui::Id,
     height: f32,
+    /// Which unbroken run of rollouts it was in (something between rollouts starts a new run).
+    run: usize,
     /// The title bar's rect on screen (where drops land, the menu scrolls to).
     header_rect: egui::Rect,
 }
@@ -58,6 +60,8 @@ struct Frame {
     threshold: f32,
     /// Several columns: the height allocated in the panel so far.
     allocated: f32,
+    /// The current unbroken run of rollouts.
+    run: usize,
 }
 
 /// One command panel column's width; a wider panel holds several.
@@ -101,7 +105,7 @@ pub fn begin(ctx: &egui::Context, panel: &str, order: Option<Vec<String>>, thres
     let memory: Memory = ctx.data(|d| d.get_temp(memory_id(panel))).unwrap_or_default();
     let scroll_to = ctx.data_mut(|d| d.remove_temp::<String>(scroll_id()));
     FRAME.with(|f| {
-        *f.borrow_mut() = Some(Frame { panel: panel.to_owned(), order, memory, drawn: Vec::new(), top: None, expect_y: None, contiguous: true, fallback: false, request: None, scroll_to, threshold, allocated: 0.0 });
+        *f.borrow_mut() = Some(Frame { panel: panel.to_owned(), order, memory, drawn: Vec::new(), top: None, expect_y: None, contiguous: true, fallback: false, request: None, scroll_to, threshold, allocated: 0.0, run: 0 });
     });
 }
 
@@ -147,12 +151,33 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
         let cursor = ui.cursor().min;
         if let Some(y) = f.expect_y {
             if (cursor.y - y).abs() > 0.5 {
-                // Something sits between rollouts: they keep the code's order.
+                // Something sits between rollouts: they keep the code's order,
+                // and the columns start again under it.
                 f.contiguous = false;
+                f.run += 1;
+                f.top = None;
+                f.allocated = 0.0;
             }
         }
         let cols = ((f.top.map_or(ui.available_width(), |t| t.2) / COLUMN_WIDTH).floor() as usize).max(1);
         if f.order.is_none() && cols < 2 {
+            return None;
+        }
+        if cols >= 2 && f.memory.natural.get(k).is_some_and(|d| d.title == title && d.run == f.run) {
+            // Several columns: this run's rollouts (last frame's heights) flow across them.
+            let spacing = ui.spacing().item_spacing.y;
+            let (top, left, width) = *f.top.get_or_insert((cursor.y, cursor.x, ui.available_width()));
+            let run: Vec<&Drawn> = f.memory.natural.iter().filter(|d| d.run == f.run).collect();
+            let at = run.iter().position(|d| d.title == title).unwrap_or(0);
+            let heights: Vec<f32> = run.iter().map(|d| d.height).collect();
+            let (places, lowest) = flow(&heights, top, ui.clip_rect().bottom(), cols, f.threshold, spacing);
+            let col_w = width / cols as f32;
+            let (c, y) = places[at];
+            let need = (lowest - top - f.allocated).max(0.0);
+            f.allocated += need;
+            return Some((egui::pos2(left + c as f32 * col_w, y), col_w - 6.0, need));
+        }
+        if f.order.is_none() {
             return None;
         }
         if f.fallback || !f.contiguous || !f.memory.contiguous || f.memory.natural.get(k).is_none_or(|d| d.title != title) {
@@ -162,22 +187,9 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
         let spacing = ui.spacing().item_spacing.y;
         let (top, left, width) = *f.top.get_or_insert((cursor.y, cursor.x, ui.available_width()));
         let natural: Vec<String> = f.memory.natural.iter().map(|d| d.title.clone()).collect();
-        let shown = match &f.order {
-            Some(order) => shown_order(&natural, order),
-            None => natural.clone(),
-        };
+        let shown = shown_order(&natural, f.order.as_deref().unwrap_or_default());
         let height = |t: &str| f.memory.natural.iter().find(|d| d.title == t).map(|d| d.height).unwrap_or(0.0);
         let at = shown.iter().position(|t| t == title).unwrap_or(k);
-        if cols >= 2 {
-            // Several columns: the rollouts flow across them.
-            let heights: Vec<f32> = shown.iter().map(|t| height(t)).collect();
-            let (places, lowest) = flow(&heights, top, ui.clip_rect().bottom(), cols, f.threshold, spacing);
-            let col_w = width / cols as f32;
-            let (c, y) = places[at];
-            let need = (lowest - top - f.allocated).max(0.0);
-            f.allocated += need;
-            return Some((egui::pos2(left + c as f32 * col_w, y), col_w - 6.0, need));
-        }
         let y = top + shown[..at].iter().map(|t| height(t) + spacing).sum::<f32>();
         let slot = height(&shown[k]);
         Some((egui::pos2(left, y), width, slot))
@@ -221,7 +233,8 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
                 ui.scroll_to_rect(header.rect, Some(egui::Align::Min));
                 f.scroll_to = None;
             }
-            f.drawn.push(Drawn { title: title.to_owned(), header: header_id, height, header_rect: header.rect });
+            let run = f.run;
+            f.drawn.push(Drawn { title: title.to_owned(), header: header_id, height, run, header_rect: header.rect });
         }
     });
 }
