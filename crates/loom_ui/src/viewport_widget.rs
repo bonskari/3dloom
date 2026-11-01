@@ -1287,6 +1287,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     None => ctx.request_repaint(),
                 }
             }
+            let keep_selected = app.degrading && app.state.degradation.never_degrade_selected && app.state.viewports[index].shading.shaded();
             let shade_only = shade_only(app, index, &selected);
             // Shaded views without Edged Faces outline the selection only
             // with Display Selected with Edged Faces (the brackets show it otherwise).
