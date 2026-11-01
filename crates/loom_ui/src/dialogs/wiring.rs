@@ -518,7 +518,8 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
         (vx0, vx1, vy0, vy1) = (vx0 + dm, vx1 + dm, vy0 + dv, vy1 + dv);
         view = Some([vx0, vx1, vy0, vy1]);
     }
-    if let Some(q) = bg.hover_pos() {
+    // (over a point too: the points are widgets of their own)
+    if let Some(q) = ui.input(|i| i.pointer.hover_pos()).filter(|q| rect.contains(*q) && ui.rect_contains_pointer(rect)) {
         let scroll = ui.input(|i| i.raw_scroll_delta.y);
         if scroll != 0.0 {
             let k = (-scroll / 200.0).exp();
