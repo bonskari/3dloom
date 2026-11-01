@@ -344,7 +344,7 @@ fn clean_multi_material_removes_the_sub_materials_no_face_uses() {
     execute(&mut s, Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) }).unwrap();
     execute(&mut s, Command::AssignMaterialToSelection).unwrap();
     let id = top(&s);
-    let used: std::collections::BTreeSet<u16> = s.scene.node(n).unwrap().mesh().faces().iter().map(|f| f.material_id + 1).collect();
+    let used: std::collections::BTreeSet<u16> = s.scene.node(n).unwrap().cage_mesh().faces().iter().map(|f| f.material_id + 1).collect();
     let unused: Vec<u16> = (1..=10).filter(|i| !used.contains(i)).collect();
     assert!(!unused.is_empty() && unused.len() < 10, "a box uses some of the 10 IDs: {used:?}");
     let found = execute(&mut s, Command::CleanMultiMaterial { materials: None, apply: false }).unwrap();

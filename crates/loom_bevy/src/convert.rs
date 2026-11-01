@@ -239,6 +239,44 @@ pub fn glossiness_roughness(img: &MapImage, glossiness: f32, amount: f32, widen:
     MapImage { width: img.width, height: img.height, rgba }
 }
 
+/// The GGX alpha of one Glossiness map texel (grey 0–1): the spinner
+/// blended toward grey × 100 by the Amount (0–1).
+fn gloss_alpha(grey: f32, glossiness: f32, amount: f32) -> f32 {
+    blinn_roughness(glossiness + (grey * 100.0 - glossiness) * amount.clamp(0.0, 1.0)).powi(2)
+}
+
+fn grey_at(img: &MapImage, x: u32, y: u32, w: u32, h: u32) -> f32 {
+    // Nearest texel of `img` at the same place in a w × h image.
+    let sx = (x * img.width / w.max(1)).min(img.width.saturating_sub(1));
+    let sy = (y * img.height / h.max(1)).min(img.height.saturating_sub(1));
+    let i = ((sy * img.width + sx) * 4) as usize;
+    img.rgba.get(i..i + 3).map_or(0.0, |p| (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0 / 255.0)
+}
+
+/// Bevy's specular texture for a Specular Level map (grey × Amount) and a
+/// Glossiness map together: the Blinn-matched reflectance grows with the
+/// lobe's alpha (`blinn_reflectance`), so a texel rougher or glossier than
+/// the spinner scales it by its alpha over the roughest texel's. Returns the
+/// texture and the factor for the material's reflectance (the texture's
+/// alpha 0–1 is reflectance 0–0.5 of it).
+pub fn specular_scale(spec: Option<(&MapImage, f32)>, gloss: Option<(&MapImage, f32, f32)>, glossiness: f32) -> (MapImage, f32) {
+    let (w, h) = spec.map(|(i, _)| (i.width, i.height)).or(gloss.map(|(i, _, _)| (i.width, i.height))).unwrap_or((1, 1));
+    let alphas: Option<Vec<f32>> = gloss.map(|(img, g, a)| (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| gloss_alpha(grey_at(img, x, y, w, h), g, a)).collect());
+    let max = alphas.as_ref().map_or(0.0, |v| v.iter().copied().fold(0.0, f32::max));
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let s = spec.map_or(1.0, |(img, amount)| grey_at(img, x, y, w, h) * amount.clamp(0.0, 1.0));
+            let k = alphas.as_ref().map_or(1.0, |v| if max > 0.0 { v[(y * w + x) as usize] / max } else { 0.0 });
+            let v = ((s * k).clamp(0.0, 1.0) * 255.0).round() as u8;
+            rgba.extend([v, v, v, v]);
+        }
+    }
+    let base = blinn_roughness(glossiness).powi(2);
+    let factor = if alphas.is_some() && base > 0.0 { 2.0 * max / base } else { 2.0 };
+    (MapImage { width: w, height: h, rgba }, factor)
+}
+
 /// The diffuse bitmap a material shows, if any (an enabled Diffuse Color map).
 pub fn diffuse_map_path(material: Option<&LoomMaterial>) -> Option<&str> {
     material.and_then(|m| m.diffuse_map.as_ref()).filter(|b| b.enabled && !b.path.is_empty()).map(|b| b.path.as_str())

@@ -26,7 +26,7 @@ fn peak(r: &mut BevyRenderer, s: Surface) -> u8 {
     l.id = loom_scene::NodeId(10);
     l.emitter = Emitter::Point;
     l.position = Vec3::new(0.0, -30.0, 120.0);
-    l.color = Vec3::ONE;
+    l.color = Vec3::splat(0.5);
     l.shadows = false;
     r.sync_lights(&[l]);
     let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, 30.0, 120.0), Vec3::ZERO, Vec3::Y), projection: Mat4::perspective_rh(50f32.to_radians(), 1.0, 1.0, 1000.0) };
@@ -36,8 +36,9 @@ fn peak(r: &mut BevyRenderer, s: Surface) -> u8 {
 
 fn shiny(gloss: f32, map: Option<f32>) -> Surface {
     let mut m = StandardMaterial::new("m");
-    m.diffuse.set(Vec3::splat(0.2));
-    m.specular_level.set(150.0);
+    m.diffuse.set(Vec3::ZERO);
+    m.ambient.set(Vec3::ZERO);
+    m.specular_level.set(40.0);
     m.glossiness.set(gloss);
     if let Some(grey) = map {
         let mut g = Map::new(MapType::Checker, 100.0);
@@ -59,7 +60,7 @@ fn a_glossiness_map_sets_the_highlight_like_the_spinner() {
     let mapped_sharp = peak(&mut r, shiny(5.0, Some(0.8)));
     let mapped_dull = peak(&mut r, shiny(80.0, Some(0.05)));
     eprintln!("dull {dull} sharp {sharp} mapped_sharp {mapped_sharp} mapped_dull {mapped_dull}");
-    assert!(sharp > dull + 30, "the spinner sharpens the highlight: {dull} vs {sharp}");
+    assert!(sharp as i32 > dull as i32 + 30, "the spinner sharpens the highlight: {dull} vs {sharp}");
     assert!(mapped_sharp.abs_diff(sharp) < 12, "a white-ish map at Amount 100 is Glossiness 80: {mapped_sharp} vs {sharp}");
     assert!(mapped_dull.abs_diff(dull) < 12, "a dark map at Amount 100 is Glossiness 5: {mapped_dull} vs {dull}");
 }

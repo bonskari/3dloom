@@ -1196,24 +1196,25 @@ impl BevyRenderer {
                 };
             }
         }
-        if let Some(map) = s.specular_level_map.as_ref() {
-            if let Some((img, k)) = self.in_frame(map, frame) {
-                let key = format!("spec:{k}:{}", map.amount);
-                m.specular_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::luminance(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
-                // The texture's alpha 0–1 maps to reflectance 0–0.5 times
-                // this: white in the map gives the Specular Level's own.
-                m.reflectance *= 2.0;
+        let spec = s.specular_level_map.as_ref().and_then(|map| self.in_frame(map, frame).map(|(img, k)| (img, k, map.amount)));
+        let gloss = s.glossiness_map.as_ref().and_then(|map| self.in_frame(map, frame).map(|(img, k)| (img, k, map.amount)));
+        if let Some((img, k, amount)) = gloss.as_ref() {
+            // The shader's widening of the Blinn lobe (Phong) carries over per texel.
+            let widen = m.perceptual_roughness / convert::blinn_roughness(s.glossiness);
+            let key = format!("gloss:{k}:{amount}:{}:{widen}", s.glossiness);
+            m.metallic_roughness_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::glossiness_roughness(img, s.glossiness, amount / 100.0, widen));
+            if m.metallic_roughness_texture.is_some() {
+                m.perceptual_roughness = 1.0;
             }
         }
-        if let Some(map) = s.glossiness_map.as_ref() {
-            if let Some((img, k)) = self.in_frame(map, frame) {
-                // The shader's widening of the Blinn lobe (Phong) carries over per texel.
-                let widen = m.perceptual_roughness / convert::blinn_roughness(s.glossiness);
-                let key = format!("gloss:{k}:{}:{}:{widen}", map.amount, s.glossiness);
-                m.metallic_roughness_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::glossiness_roughness(&img, s.glossiness, map.amount / 100.0, widen));
-                if m.metallic_roughness_texture.is_some() {
-                    m.perceptual_roughness = 1.0;
-                }
+        if spec.is_some() || gloss.is_some() {
+            // White in a Specular Level map gives the Specular Level's own;
+            // a Glossiness map scales the highlight's strength with its width.
+            let (t, factor) = convert::specular_scale(spec.as_ref().map(|(i, _, a)| (i.as_ref(), a / 100.0)), gloss.as_ref().map(|(i, _, a)| (i.as_ref(), s.glossiness, a / 100.0)), s.glossiness);
+            let key = format!("spec:{}:{}:{}:{}:{}", spec.as_ref().map(|x| x.1.clone()).unwrap_or_default(), spec.as_ref().map_or(0.0, |x| x.2), gloss.as_ref().map(|x| x.1.clone()).unwrap_or_default(), gloss.as_ref().map_or(0.0, |x| x.2), s.glossiness);
+            m.specular_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || t);
+            if m.specular_texture.is_some() {
+                m.reflectance *= factor;
             }
         }
         if let Some(map) = s.self_illum_map.as_ref() {

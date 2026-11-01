@@ -334,7 +334,7 @@ fn unused_sub_materials(state: &AppState) -> Vec<(MaterialId, Vec<u16>)> {
         let mut used = std::collections::BTreeSet::new();
         for n in users_of(state, *id) {
             if let Some(node) = state.scene.node(n) {
-                used.extend(node.mesh().faces().iter().map(|f| f.material_id + 1));
+                used.extend(node.cage_mesh().faces().iter().map(|f| f.material_id + 1));
             }
         }
         let unused: Vec<u16> = list.iter().map(|s| s.id).filter(|i| !used.contains(i)).collect();
