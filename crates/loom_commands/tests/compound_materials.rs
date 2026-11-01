@@ -453,3 +453,42 @@ fn propagate_materials_to_instances_assigns_to_every_instance() {
     assert!(m.is_some());
     assert_eq!(s.scene.node(a).unwrap().material, m, "the instance's source gets it too");
 }
+
+#[test]
+fn type_button_copy_paste_copy_instance_and_clear() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) }).unwrap();
+    let multi = top(&s);
+    execute(&mut s, Command::MaterialEditorGoToSub { index: 0 }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] }).unwrap();
+    execute(&mut s, Command::TypeButtonCopy { cut: false }).unwrap();
+    let first = sub_list(&s, multi)[0].material.unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToSub { index: 1 }).unwrap();
+    execute(&mut s, Command::TypeButtonPaste { instance: false }).unwrap();
+    let second = sub_list(&s, multi)[1].material.unwrap();
+    assert_ne!(second, first, "Paste (Copy) is a new material");
+    assert_eq!(diffuse(&s, second), [255, 0, 0]);
+    execute(&mut s, Command::TypeButtonPaste { instance: true }).unwrap();
+    assert_eq!(sub_list(&s, multi)[1].material, Some(first), "Paste (Instance) is the copied material itself");
+    execute(&mut s, Command::TypeButtonClear).unwrap();
+    assert_eq!(sub_list(&s, multi)[1].material, None);
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(sub_list(&s, multi)[1].material, Some(first));
+
+    // Maps: copy the Diffuse map, paste it over the Bump map.
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::TypeButtonCopy { cut: false }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    assert!(execute(&mut s, Command::TypeButtonPaste { instance: false }).is_err(), "a map pastes at a map level");
+    execute(&mut s, Command::NewMap { map: "Bump".into(), kind: "Noise".into() }).unwrap();
+    assert!(execute(&mut s, Command::TypeButtonPaste { instance: true }).is_err());
+    execute(&mut s, Command::TypeButtonPaste { instance: false }).unwrap();
+    let m = &s.scene.materials[&top(&s)];
+    assert_eq!(m.map("Bump").map(|x| x.kind), Some(MapType::Checker));
+    // Cut: copied and cleared.
+    execute(&mut s, Command::TypeButtonCopy { cut: true }).unwrap();
+    assert!(s.scene.materials[&top(&s)].map("Bump").is_none());
+    assert!(s.scene.material_editor.path.is_empty(), "back at the parent level");
+}

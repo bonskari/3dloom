@@ -963,9 +963,27 @@ fn name_row(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, maps: &[
             ui.ctx().data_mut(|d| d.remove::<String>(name_id));
         }
         let type_label = map.map(|x| x.kind.label()).unwrap_or(m.kind.label());
-        if ui.button(type_label).on_hover_text("Type: choose a material or map type").clicked() {
+        let r = ui.button(type_label).on_hover_text("Type: choose a material or map type");
+        if r.clicked() {
             app.state.dialog = Some(Dialog::MaterialBrowser(if map.is_some() { BrowserFor::MapType } else { BrowserFor::MaterialType }));
         }
+        // Right-click: Cut / Copy / Paste (Copy) / Paste (Instance) / Clear.
+        let below_top = !app.state.scene.material_editor.path.is_empty();
+        let clip = app.state.material_clip.as_ref().map(|c| matches!(c, loom_commands::material::MaterialClip::Map(_)));
+        r.context_menu(|ui| {
+            let mut run = |ui: &mut egui::Ui, enabled: bool, label: &str, cmd: Command| {
+                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                    let _ = app.dispatch(cmd);
+                    ui.close_menu();
+                }
+            };
+            run(ui, below_top, "Cut", Command::TypeButtonCopy { cut: true });
+            run(ui, true, "Copy", Command::TypeButtonCopy { cut: false });
+            let fits = clip == Some(map.is_some());
+            run(ui, fits, "Paste (Copy)", Command::TypeButtonPaste { instance: false });
+            run(ui, fits && map.is_none(), "Paste (Instance)", Command::TypeButtonPaste { instance: true });
+            run(ui, below_top, "Clear", Command::TypeButtonClear);
+        });
     });
 }
 
@@ -973,11 +991,11 @@ fn name_row(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, maps: &[
 // Rollouts per level
 // ---------------------------------------------------------------------------
 
-/// A colour swatch of the material at the current level (`which` as Set Material Color names it).
 /// A swatch being dragged onto another (Copy or Swap Colors).
 #[derive(Clone)]
 struct SwatchDrag(String);
 
+/// A colour swatch of the material at the current level (`which` as Set Material Color names it).
 fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
     let mut rgb = rgb_of(c);
     let r = ui.color_edit_button_srgb(&mut rgb).on_hover_text(which).interact(egui::Sense::drag());

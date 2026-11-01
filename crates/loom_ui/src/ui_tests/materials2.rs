@@ -355,3 +355,26 @@ fn material_id_channel_flyout_sets_the_channel() {
     h.frames(2);
     assert_eq!(editor_material(&h).effects_channel, 9);
 }
+
+#[test]
+fn type_button_right_click_copy_then_paste_copy() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() });
+    scroll_top(&mut h);
+    let win = material_editor_rect(&h);
+    let ty = h.find_all(Role::Button, "Checker").into_iter().find(|r| win.contains_rect(*r)).expect("the Type button");
+    right_click(&mut h, ty.center());
+    h.click_text_anywhere("Copy");
+    h.frames(2);
+    assert!(matches!(h.app.state.material_clip, Some(loom_commands::material::MaterialClip::Map(_))));
+    h.cmd(Command::MaterialEditorGoToParent);
+    h.cmd(Command::NewMap { map: "Bump".into(), kind: "Noise".into() });
+    h.frames(2);
+    let win = material_editor_rect(&h);
+    let ty = h.find_all(Role::Button, "Noise").into_iter().find(|r| win.contains_rect(*r)).expect("the Type button");
+    right_click(&mut h, ty.center());
+    h.click_text_anywhere("Paste (Copy)");
+    h.frames(2);
+    h.cmd(Command::MaterialEditorGoToParent);
+    assert_eq!(editor_material(&h).map("Bump").map(|m| m.kind), Some(loom_scene::material::MapType::Checker));
+}

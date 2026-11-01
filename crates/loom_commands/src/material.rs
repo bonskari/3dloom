@@ -62,6 +62,9 @@ pub fn handles(c: &C) -> bool {
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
             | C::CleanMultiMaterial { .. }
+            | C::TypeButtonCopy { .. }
+            | C::TypeButtonPaste { .. }
+            | C::TypeButtonClear
             | C::CopyMaterialColor { .. }
             | C::RenderMap { .. }
     )
@@ -288,6 +291,86 @@ fn add_sub(lib: &mut MaterialLibrary, id: MaterialId) -> Result<u16, String> {
 }
 
 /// Gives `m`'s sub-materials (and theirs) copies of their own in `lib`.
+/// The Type button's clipboard: a material with the sub-materials under it
+/// (as they were when copied), or a map.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MaterialClip {
+    Material { source: MaterialId, lib: MaterialLibrary },
+    Map(Map),
+}
+
+/// Material `id` and every material under it.
+fn tree_of(lib: &MaterialLibrary, id: MaterialId) -> MaterialLibrary {
+    let mut out = MaterialLibrary::default();
+    let mut stack = vec![id];
+    while let Some(m) = stack.pop() {
+        if let Some(x) = lib.get(&m) {
+            if out.insert(m, x.clone()).is_none() {
+                stack.extend(x.children().into_iter().flatten());
+            }
+        }
+    }
+    out
+}
+
+/// Copies material `id` of `from` with everything under it into `lib` under new ids.
+fn copy_tree(from: &MaterialLibrary, id: MaterialId, lib: &mut MaterialLibrary) -> Option<MaterialId> {
+    let mut m = from.get(&id)?.clone();
+    for c in m.children_mut() {
+        *c = c.and_then(|c| copy_tree(from, c, lib));
+    }
+    let new = next_material_id(lib);
+    lib.insert(new, m);
+    Some(new)
+}
+
+/// Points the current level (a slot's top material, or a sub-material
+/// button) at material `id` (None clears a sub-material).
+fn set_level_material(lib: &mut MaterialLibrary, slots: &mut MaterialEditorSlots, id: Option<MaterialId>) -> Result<(), String> {
+    let path = slots.path.clone();
+    match path.split_last() {
+        None => {
+            slots.slots[slots.active] = Some(id.ok_or("a slot's top material cannot be cleared")?);
+            Ok(())
+        }
+        Some((NavStep::Sub(i), parent)) => {
+            let top = slots.slots[slots.active].ok_or("missing material")?;
+            let Level::Material(pid) = resolve_level(lib, top, parent).0 else { return Err("no parent material".into()) };
+            let p = lib.get_mut(&pid).ok_or("missing material")?;
+            let mut kids = p.children_mut();
+            let slot = kids.get_mut(*i as usize).ok_or("no such sub-material button")?;
+            **slot = id;
+            Ok(())
+        }
+        Some(_) => Err("not at a material level".into()),
+    }
+}
+
+/// The map slot at the current map level (`owner`, `maps`).
+fn level_map_slot<'a>(lib: &'a mut MaterialLibrary, owner: MaterialId, maps: &[String]) -> Result<MapSlotMut<'a>, String> {
+    let m = lib.get_mut(&owner).ok_or("missing material")?;
+    let (last, parent) = maps.split_last().ok_or("not at a map level")?;
+    if parent.is_empty() {
+        Ok(MapSlotMut::Top(m.map_slot_mut(last)?))
+    } else {
+        Ok(MapSlotMut::Sub(map_slot_at_mut(m, parent, last)?))
+    }
+}
+
+enum MapSlotMut<'a> {
+    Top(&'a mut Option<Map>),
+    Sub(&'a mut Option<Box<Map>>),
+}
+
+impl MapSlotMut<'_> {
+    fn set(self, map: Option<Map>) {
+        match self {
+            MapSlotMut::Top(s) => *s = map,
+            MapSlotMut::Sub(s) => *s = map.map(Box::new),
+        }
+    }
+}
+
 pub(crate) fn deep_copy(lib: &mut MaterialLibrary, m: &mut StandardMaterial) {
     for c in m.children_mut() {
         if let Some(src) = c.and_then(|c| lib.get(&c).cloned()) {
@@ -973,6 +1056,65 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             r.gbuffer = None;
             r.gchannel = None;
             Ok(json!({ "width": width, "height": height, "path": path }))
+        }
+        C::TypeButtonCopy { cut } => {
+            let (mut lib, mut slots) = (state.scene.materials.clone(), state.scene.material_editor.clone());
+            let (owner, maps) = current(&mut lib, &mut slots);
+            let clip = if maps.is_empty() {
+                MaterialClip::Material { source: owner, lib: tree_of(&lib, owner) }
+            } else {
+                MaterialClip::Map(lib.get(&owner).and_then(|m| map_at(m, &maps)).cloned().ok_or("no map at this level")?)
+            };
+            let what = if matches!(clip, MaterialClip::Map(_)) { "map" } else { "material" };
+            state.material_clip = Some(clip);
+            if cut {
+                execute(state, C::TypeButtonClear)?;
+            }
+            Ok(json!({ "copied": what }))
+        }
+        C::TypeButtonClear => {
+            let before = snapshot(state);
+            let mut after = before.clone();
+            let (owner, maps) = current(&mut after.0, &mut after.1);
+            if maps.is_empty() {
+                set_level_material(&mut after.0, &mut after.1, None)?;
+            } else {
+                level_map_slot(&mut after.0, owner, &maps)?.set(None);
+            }
+            after.1.path.pop();
+            commit(state, "Clear", Change::SetMaterials { before, after })?;
+            state.mesh_dirty = true;
+            Ok(json!({ "cleared": true }))
+        }
+        C::TypeButtonPaste { instance } => {
+            let clip = state.material_clip.clone().ok_or("nothing copied: Type button > Copy first")?;
+            let before = snapshot(state);
+            let mut after = before.clone();
+            let (owner, maps) = current(&mut after.0, &mut after.1);
+            match (clip, maps.is_empty()) {
+                (MaterialClip::Material { source, lib }, true) => {
+                    let id = if instance {
+                        if !after.0.contains_key(&source) {
+                            return Err("the copied material is no longer in the scene: Paste (Copy) instead".into());
+                        }
+                        source
+                    } else {
+                        copy_tree(&lib, source, &mut after.0).ok_or("the copied material is empty")?
+                    };
+                    set_level_material(&mut after.0, &mut after.1, Some(id))?;
+                }
+                (MaterialClip::Map(map), false) => {
+                    if instance {
+                        return Err("maps are pasted as copies (Paste (Copy))".into());
+                    }
+                    level_map_slot(&mut after.0, owner, &maps)?.set(Some(map));
+                }
+                (MaterialClip::Material { .. }, false) => return Err("a material pastes at a material level".into()),
+                (MaterialClip::Map(_), true) => return Err("a map pastes at a map level".into()),
+            }
+            commit(state, if instance { "Paste (Instance)" } else { "Paste (Copy)" }, Change::SetMaterials { before, after })?;
+            state.mesh_dirty = true;
+            Ok(json!({ "pasted": true }))
         }
         C::CleanMultiMaterial { materials, apply } => {
             let unused = unused_sub_materials(state);
