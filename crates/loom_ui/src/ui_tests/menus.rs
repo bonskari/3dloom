@@ -598,6 +598,11 @@ fn saved_track_views_from_the_graph_editors_menu() {
     let ge = h.find(Role::Button, "Graph Editors");
     h.click(ge.center());
     h.frames(2);
+    if menus(&h).is_empty() {
+        // The first click after typing in the Track View goes to the window it leaves.
+        h.click(ge.center());
+        h.frames(2);
+    }
     let item = h.find_all(Role::Button, "New Track View...");
     assert!(!item.is_empty(), "menus open: {:?}", menus(&h));
     h.click(item[0].center());
