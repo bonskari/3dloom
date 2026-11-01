@@ -538,6 +538,29 @@ fn export_writes_an_ascii_scene_export_file() {
     assert!(text.starts_with("*3DSMAX_ASCIIEXPORT") && text.contains("*NODE_NAME \"Crate\""), "{text}");
 }
 
+/// File > Import lists .ase files and reads one back: the exported box
+/// returns as an Editable Mesh in the same place, not through the OBJ reader.
+#[test]
+fn import_reads_an_ascii_scene_export_file() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let id = named_box(&mut h, "Crate", 40.0);
+    let path = exchange_dir("ase_import").join("crate.ase");
+    h.cmd(Command::ExportFile { path: Some(path.to_string_lossy().into()) });
+    h.cmd(Command::DeleteObjects);
+    assert!(h.app.state.scene.node(id).is_none());
+    h.cmd(Command::ImportFile { path: None });
+    h.frames(2);
+    assert!(h.text_rect("*.fbx, *.obj, *.max, *.3ds, *.stl, *.dxf, *.ai, *.ase", SCREEN).is_some(), "the file type list offers .ase");
+    choose_file(&mut h, &path, "Open");
+    h.frames(2);
+    let n = h.app.state.scene.nodes().find(|n| n.name == "Crate").unwrap_or_else(|| panic!("{:?}", h.app.last_error));
+    assert!(matches!(n.object, loom_scene::ObjectKind::EditableMesh(_)), "{:?}", n.object);
+    assert!((n.transform.position.get().x - 40.0).abs() < 1e-3);
+    let mesh = h.app.state.scene.eval_mesh(n.id).value.mesh.clone();
+    assert_eq!((mesh.vertex_count(), mesh.face_count()), (8, 12));
+}
+
 /// File > Export takes a .dae name: the Collada file is written.
 #[test]
 fn export_writes_a_collada_file() {

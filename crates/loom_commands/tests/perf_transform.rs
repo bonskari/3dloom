@@ -31,11 +31,3 @@ fn moving_and_rotating_200_nodes() {
     }
 }
 
-#[test]
-#[ignore]
-fn profile_loop() {
-    let mut s = scene(200);
-    for _ in 0..100 {
-        execute(&mut s, Command::MoveSelection { delta: [1.0, 0.0, 0.0], system: None }).unwrap();
-    }
-}

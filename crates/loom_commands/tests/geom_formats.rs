@@ -1,4 +1,4 @@
-//! File > Import / Export of 3D Studio (.3ds), STL and DXF files.
+//! File > Import / Export of 3D Studio (.3ds), STL, DXF and ASCII Scene Export (.ase) files.
 
 use glam::Vec3;
 use loom_commands::{execute, AppState, Command};
@@ -99,4 +99,43 @@ fn dxf_round_trip_puts_each_object_on_its_layer() {
     assert!(close(bounds(&t, ids[0]), wa) && close(bounds(&t, ids[1]), wb));
     let m = t.scene.eval_mesh(ids[0]).value.mesh.clone();
     assert_eq!((m.face_count(), m.invisible_edges().len()), (12, 6), "quads come in as Editable Mesh triangles with hidden diagonals");
+}
+
+#[test]
+fn ase_round_trip_keeps_meshes_pivots_and_multi_sub_materials() {
+    use loom_scene::material::{next_material_id, MaterialKind, StandardMaterial, SubMaterial};
+    let mut s = AppState::new();
+    let b = boxed(&mut s, [20.0, 0.0, 0.0]);
+    execute(&mut s, Command::SetTransform { id: b.0, position: None, rotation_deg: Some([0.0, 0.0, 30.0]), scale: None }).unwrap();
+    let want = bounds(&s, b);
+    let pivot = s.scene.world_matrix(b).w_axis.truncate();
+    let mut red = StandardMaterial::new("Red");
+    red.diffuse.set(Vec3::new(1.0, 0.0, 0.0));
+    let red_id = next_material_id(&s.scene.materials);
+    s.scene.materials.insert(red_id, red);
+    let mut multi = StandardMaterial::new("Multi");
+    multi.kind = MaterialKind::MultiSub(vec![SubMaterial { id: 1, name: String::new(), material: Some(red_id), enabled: true }]);
+    let multi_id = next_material_id(&s.scene.materials);
+    s.scene.materials.insert(multi_id, multi);
+    s.scene.node_mut(b).unwrap().material = Some(multi_id);
+    let path = dir().join("scene.ase").to_string_lossy().into_owned();
+    let r = execute(&mut s, Command::ExportFile { path: Some(path.clone()) }).unwrap();
+    assert_eq!((r["objects"].as_u64(), r["materials"].as_u64()), (Some(1), Some(1)));
+    let mut t = AppState::new();
+    execute(&mut t, Command::ImportFile { path: Some(path) }).unwrap();
+    let n = t.scene.nodes().find(|n| matches!(n.object, ObjectKind::EditableMesh(_))).expect("an Editable Mesh, not the OBJ reader's poly");
+    assert_eq!(n.name, "Box001");
+    let mesh = n.id;
+    assert!(close(bounds(&t, mesh), want), "{:?} vs {want:?}", bounds(&t, mesh));
+    assert!(t.scene.world_matrix(mesh).w_axis.truncate().distance(pivot) < 1e-3, "the pivot comes from the node matrix");
+    let m = t.scene.eval_mesh(mesh).value.mesh.clone();
+    assert_eq!(m.face_count(), 12);
+    assert_eq!(m.invisible_edges().len(), 6, "each quad's diagonal stays hidden");
+    let top = t.scene.materials.get(&n.material.expect("the reference")).unwrap();
+    assert_eq!(top.name, "Multi");
+    let MaterialKind::MultiSub(list) = &top.kind else { panic!("{:?}", top.kind) };
+    let sub = t.scene.materials.get(&list[0].material.unwrap()).unwrap();
+    assert_eq!((list[0].id, sub.name.as_str(), sub.diffuse.get()), (1, "Red", Vec3::new(1.0, 0.0, 0.0)));
+    execute(&mut t, Command::UndoSceneOperation).unwrap();
+    assert_eq!(t.scene.len(), 0, "one undo entry");
 }
