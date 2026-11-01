@@ -2254,6 +2254,7 @@ commands! {
     ToggleSteeringWheels => "Toggle SteeringWheels", MainUI, "Views > SteeringWheels > Toggle SteeringWheels (Shift+W): show or hide the wheel at the cursor.";
     SteeringWheel => "SteeringWheel", Loom, "Views > SteeringWheels / the Wheel menu: show `wheel` (View Object, Tour Building, Full Navigation, or Mini ... of each)." { wheel: String };
     SteeringWheelTool => "SteeringWheel Tool", Loom, "A wheel tool on the active view: `tool` (Zoom, Pan, Orbit, Rewind, Forward, Look, Up/Down, Walk) by a drag of `dx` / `dy` pixels; `begin` at the press (a Rewind entry), `click` for a click (Zoom / Forward 25%)." { tool: String, dx: f32, dy: f32, begin: Option<bool>, click: Option<bool> };
+    SteeringWheelRelease => "SteeringWheel Release", Loom, "The wheel tool's button is released: a camera / light view's drag becomes one undo step.";
     SteeringWheelCenter => "SteeringWheel Center", Loom, "Center tool: the view turns to `point` (on an object), the pivot for Orbit and Forward." { point: [f32; 3] };
     SteeringWheelRewind => "SteeringWheel Rewind", Loom, "Rewind tool: back `steps` views in the wheel's history." { steps: u32 };
     SteeringWheelRestoreCenter => "Restore Original Center", MainUI, "Wheel menu > Restore Original Center: the view pans to the world centre (0,0,0).";

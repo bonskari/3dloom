@@ -199,6 +199,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 d.last = q;
                 drag = Some(d);
             } else {
+                cmds.push(Command::SteeringWheelRelease);
                 match tool {
                     "Center" => center_release = Some(q),
                     "Rewind" => cmds.push(Command::SteeringWheelRewind { steps: 1 }),

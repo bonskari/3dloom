@@ -143,7 +143,7 @@ pub fn orbit_of(scene: &loom_scene::Scene, id: NodeId) -> Option<OrbitCamera> {
 /// camera at the orbit's eye, the target at its target, the roll kept (on a
 /// Target camera as the LookAt constraint's offset). `fov` sets the FOV;
 /// `free_distance` writes a Free camera's Target Distance. One undo step.
-fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: Option<f32>, free_distance: bool, label: &str) -> Result<Value, String> {
+pub(crate) fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: Option<f32>, free_distance: bool, label: &str) -> Result<Value, String> {
     let node = state.scene.node(id).ok_or_else(|| missing(id))?;
     // A light view moves the light the same way.
     let target = match &node.object {

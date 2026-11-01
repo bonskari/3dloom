@@ -76,12 +76,14 @@ pub struct WheelState {
     /// The Center tool's pivot (None: the view's own target).
     pub pivot: Option<Vec3>,
     pub history: Vec<OrbitCamera>,
+    /// A drag on a camera / light view: one undo step until the release.
+    pub transaction: bool,
 }
 
 pub fn handles(c: &C) -> bool {
     matches!(
         c,
-        C::ToggleSteeringWheels | C::SteeringWheel { .. } | C::SteeringWheelTool { .. } | C::SteeringWheelCenter { .. } | C::SteeringWheelRewind { .. } | C::SteeringWheelRestoreCenter | C::SteeringWheelWalkSpeed { .. } | C::SetSteeringWheelPrefs { .. }
+        C::ToggleSteeringWheels | C::SteeringWheel { .. } | C::SteeringWheelTool { .. } | C::SteeringWheelCenter { .. } | C::SteeringWheelRewind { .. } | C::SteeringWheelRestoreCenter | C::SteeringWheelWalkSpeed { .. } | C::SetSteeringWheelPrefs { .. } | C::SteeringWheelRelease
     )
 }
 
@@ -91,6 +93,32 @@ fn status(state: &AppState) -> Value {
 }
 
 const REWIND_LIMIT: usize = 64;
+
+/// The camera or light a camera / light view looks through.
+fn view_object(state: &AppState) -> Option<loom_scene::NodeId> {
+    match state.active().kind {
+        crate::state::ViewKind::Camera(id) if state.scene.node(id).is_some() => Some(id),
+        _ => None,
+    }
+}
+
+/// The active view as an orbit: a camera / light view's object, else the view's own.
+fn current(state: &AppState) -> OrbitCamera {
+    view_object(state).and_then(|id| crate::camera::orbit_of(&state.scene, id)).unwrap_or_else(|| state.active().camera.clone())
+}
+
+/// Puts the active view at `cam`: a camera / light view moves its object
+/// (scene undo), any other view its own camera (view undo).
+fn set_view(state: &mut AppState, cam: OrbitCamera, what: &str) -> Result<(), String> {
+    match view_object(state) {
+        Some(id) => crate::camera::place(state, id, &cam, None, true, what).map(|_| ()),
+        None => {
+            state.record_view_as(what);
+            state.active_mut().camera = cam;
+            Ok(())
+        }
+    }
+}
 
 pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
     match cmd {
@@ -116,13 +144,16 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
         C::SteeringWheelCenter { point } => {
             push_history(state);
             let p = Vec3::from(point);
-            state.record_view_as("Center");
-            let cam = &mut state.active_mut().camera;
-            let eye = cam.eye_position();
-            let up = cam.up();
-            *cam = OrbitCamera::looking(eye, p, up);
+            let cam = current(state);
+            set_view(state, OrbitCamera::looking(cam.eye_position(), p, cam.up()), "Center")?;
             state.wheel.pivot = Some(p);
             Ok(json!({ "pivot": point }))
+        }
+        C::SteeringWheelRelease => {
+            if std::mem::take(&mut state.wheel.transaction) {
+                state.undo.end();
+            }
+            Ok(json!({}))
         }
         C::SteeringWheelRewind { steps } => {
             let n = state.wheel.history.len();
@@ -132,15 +163,14 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             let cam = state.wheel.history[n - back].clone();
             state.wheel.history.truncate(n - back);
-            state.record_view_as("Rewind");
-            state.active_mut().camera = cam;
+            set_view(state, cam, "Rewind")?;
             Ok(status(state))
         }
         C::SteeringWheelRestoreCenter => {
             push_history(state);
-            state.record_view_as("Restore Original Center");
-            let cam = &mut state.active_mut().camera;
+            let mut cam = current(state);
             cam.target = Vec3::ZERO;
+            set_view(state, cam, "Restore Original Center")?;
             state.wheel.pivot = None;
             Ok(status(state))
         }
@@ -178,7 +208,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
 }
 
 fn push_history(state: &mut AppState) {
-    let cam = state.active().camera.clone();
+    let cam = current(state);
     let h = &mut state.wheel.history;
     h.push(cam);
     if h.len() > REWIND_LIMIT {
@@ -202,12 +232,17 @@ fn tool_step(state: &mut AppState, tool: &str, dx: f32, dy: f32, begin: bool, cl
     }
     if begin || click {
         push_history(state);
-        state.record_view_as("SteeringWheels");
+        // A camera / light view: the whole drag is one scene undo step.
+        if begin && view_object(state).is_some() && !state.wheel.transaction {
+            state.undo.begin("SteeringWheels");
+            state.wheel.transaction = true;
+        }
     }
     let prefs = state.prefs.wheels;
     let sel_centre = state.selection_bounds().map(|(a, b)| (a + b) * 0.5);
     let pivot_set = state.wheel.pivot;
-    let cam = &mut state.active_mut().camera;
+    let mut cam_value = current(state);
+    let cam = &mut cam_value;
     let (right, up, to_eye) = cam.basis();
     let eye = cam.eye_position();
     let unit = cam.distance.max(1e-3) * 0.004;
@@ -264,8 +299,8 @@ fn tool_step(state: &mut AppState, tool: &str, dx: f32, dy: f32, begin: bool, cl
         "center" => return Err("Center picks a point on an object (SteeringWheelCenter)".into()),
         _ => return Err(format!("no wheel tool {tool:?} (Zoom, Pan, Orbit, Center, Rewind, Forward, Look, Up/Down, Walk)")),
     }
-    let e = state.active().camera.eye_position();
-    let t = state.active().camera.target;
+    let (e, t) = (cam_value.eye_position(), cam_value.target);
+    set_view(state, cam_value, "SteeringWheels")?;
     Ok(json!({ "eye": [e.x, e.y, e.z], "target": [t.x, t.y, t.z] }))
 }
 
@@ -309,5 +344,26 @@ mod tests {
         assert_eq!(s.prefs.wheels.walk_speed, 5.0);
         execute(&mut s, C::ToggleSteeringWheels).unwrap();
         assert!(!s.wheel.open);
+    }
+
+    #[test]
+    fn in_a_camera_view_the_wheel_moves_the_camera_one_undo_step_per_drag() {
+        let mut s = AppState::default();
+        crate::execute::execute(&mut s, C::CreateCamera { target: false }).unwrap();
+        let cam = *s.selection.iter().next().unwrap();
+        crate::execute::execute(&mut s, C::CameraView).unwrap();
+        assert_eq!(s.active().kind, crate::state::ViewKind::Camera(cam));
+        let p0 = s.scene.node(cam).unwrap().transform.position.get();
+        let undo0 = s.undo.labels();
+        execute(&mut s, C::SteeringWheelTool { tool: "Pan".into(), dx: 30.0, dy: 0.0, begin: Some(true), click: None }).unwrap();
+        execute(&mut s, C::SteeringWheelTool { tool: "Pan".into(), dx: 30.0, dy: 0.0, begin: Some(false), click: None }).unwrap();
+        execute(&mut s, C::SteeringWheelRelease).unwrap();
+        let p1 = s.scene.node(cam).unwrap().transform.position.get();
+        assert!((p1 - p0).length() > 1e-3, "the camera object moved");
+        assert_eq!(s.undo.labels().last().map(String::as_str), Some("SteeringWheels"));
+        assert_eq!(s.undo.labels().len(), undo0.len() + 1, "one step");
+        crate::execute::execute(&mut s, C::UndoSceneOperation).unwrap();
+        assert!((s.scene.node(cam).unwrap().transform.position.get() - p0).length() < 1e-3, "one undo step for the drag");
+        assert_eq!(s.undo.labels(), undo0);
     }
 }
