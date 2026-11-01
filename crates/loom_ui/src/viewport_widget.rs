@@ -159,6 +159,8 @@ struct ViewportCallback {
     grid_params: loom_render::GridParams,
     /// Helper line art drawn with depth (see `helper_overlay`).
     helper_lines: Vec<(Vec3, Vec3, [f32; 3])>,
+    /// The meshes that cast viewport shadows.
+    casters: Vec<usize>,
 }
 
 impl CallbackTrait for ViewportCallback {
@@ -197,7 +199,7 @@ impl CallbackTrait for ViewportCallback {
         res.renderer
             .update_view(queue, self.slot, self.view_proj, self.camera_pos, self.shading);
         if let Some(set) = self.shading.shadow {
-            let refs: Vec<&MeshBuffer> = res.mesh_buffers.iter().collect();
+            let refs: Vec<&MeshBuffer> = self.casters.iter().filter_map(|i| res.mesh_buffers.get(*i)).collect();
             res.renderer.render_shadows(device, queue, _egui_encoder, self.slot, &refs, &set);
         }
         if res.helper_lines.len() <= self.slot {
@@ -1325,6 +1327,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10, colors: [app.color_f32("Home Grid"), app.color_f32("Home Grid Major Lines"), app.color_f32("Home Grid World Axes")] }
                     },
                     helper_lines: helper_depth_lines.clone(),
+                    casters: if view_shading.shadow.is_some() { shadow_casters(app) } else { Vec::new() },
                 },
             ));
             if let Some(cb) = cb {
@@ -1911,6 +1914,17 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
     let height = if vp.is_orthographic() { vp.camera.distance * 0.8284 } else { 2.0 * vp.camera.distance * (vp.fov_y_radians * 0.5).tan() };
     (height / rect.height().max(1.0)).max(1e-4)
 }
+/// The world meshes that cast viewport shadows: geometry with Cast Shadows
+/// on (light, camera and helper icons cast none).
+pub(crate) fn shadow_casters(app: &LoomApp) -> Vec<usize> {
+    app.world_meshes()
+        .iter()
+        .enumerate()
+        .filter(|(_, (id, _))| app.state.scene.node(*id).is_some_and(|n| n.object.has_render_geometry() && app.state.scene.render_of(n).cast_shadows))
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// Viewport shadows: the view's lights cast them (point lights through a
 /// cube), framed on the visible objects' bounds.
 pub(crate) fn shadow_set(app: &LoomApp, vp: &loom_commands::Viewport, shading: &loom_render::ViewShading) -> Option<loom_render::ShadowSet> {
@@ -1918,8 +1932,8 @@ pub(crate) fn shadow_set(app: &LoomApp, vp: &loom_commands::Viewport, shading: &
         return None;
     }
     let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
-    for (_, m) in app.world_meshes() {
-        let (a, b) = m.aabb();
+    for i in shadow_casters(app) {
+        let (a, b) = app.world_meshes()[i].1.aabb();
         lo = lo.min(a);
         hi = hi.max(b);
     }
