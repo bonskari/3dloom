@@ -889,6 +889,66 @@ fn reaction_manager_names_point_types_graph_tools_and_start_end() {
     assert!(h.app.dispatch(Command::SetReactionSlaveRange { reaction: 0, slave: 0, start: Some(30), end: None }).is_err(), "Start after End");
 }
 
+/// Reaction Manager graph: a region drag selects several points, dragging
+/// one moves them all (one undo step), the wheel zooms, Pan drags the view
+/// and Zoom Extents fits it again.
+#[test]
+fn reaction_graph_region_select_moves_together_and_pans_and_zooms() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    menu_path(&mut h, &["Animation", "Reaction Manager..."]);
+    h.cmd(Command::AddReactionMaster { node: a.0, param: "Position X".into() });
+    h.cmd(Command::AddReactionSlave { reaction: 0, node: b.0, param: "Position Z".into() });
+    h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: Some(0), master_value: Some(0.0), slave_value: Some(0.0) });
+    h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: None, master_value: Some(50.0), slave_value: Some(50.0) });
+    h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: None, master_value: Some(100.0), slave_value: Some(0.0) });
+    h.frames(2);
+    h.click(h.text_rects("    Box002 / Position Z")[0].center());
+    h.frames(30);
+    let pts = |h: &Harness| -> Vec<egui::Pos2> { h.ctx.data(|d| d.get_temp(egui::Id::new("reaction_graph_points"))).expect("the graph") };
+    let states = |h: &Harness| h.app.state.scene.reactions[0].slaves[0].states.clone();
+    // A region around the first two points (from empty graph below-left of them).
+    let p = pts(&h);
+    let from = egui::pos2(p[0].x - 5.0, p[1].y - 8.0);
+    let to = egui::pos2((p[1].x + p[2].x) * 0.5, p[0].y + 4.0);
+    h.drag(from, to);
+    h.frames(2);
+    let before = states(&h);
+    let p = pts(&h);
+    h.drag(p[1], p[1] + egui::vec2(0.0, 30.0));
+    h.frames(2);
+    let after = states(&h);
+    assert!(after[0].1 < before[0].1 - 1.0 && after[1].1 < before[1].1 - 1.0, "both selected points moved down: {before:?} -> {after:?}");
+    assert_eq!(after[2], before[2], "the unselected point stays");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(states(&h), before, "one undo step");
+    // The wheel zooms in about the pointer: the points spread apart.
+    let p = pts(&h);
+    let span = p[2].x - p[0].x;
+    h.run(vec![egui::Event::PointerMoved(p[1]), egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 120.0), modifiers: egui::Modifiers::NONE }]);
+    h.frames(2);
+    let q = pts(&h);
+    assert!(q[2].x - q[0].x > span * 1.2, "zoomed in: {span} -> {}", q[2].x - q[0].x);
+    // Pan: drag the empty graph; the points follow the pointer.
+    h.click(h.text_rects("Pan")[0].center());
+    let q = pts(&h);
+    let empty = egui::pos2(q[1].x + 15.0, q[1].y + 40.0);
+    h.drag(empty, empty + egui::vec2(-20.0, 0.0));
+    h.frames(2);
+    let r = pts(&h);
+    assert!((r[1].x - (q[1].x - 20.0)).abs() < 3.0, "panned left: {} -> {}", q[1].x, r[1].x);
+    assert_eq!(states(&h), before, "panning moves no point");
+    // Zoom Extents fits the states again.
+    h.click(h.text_rects("Zoom Extents")[0].center());
+    h.frames(2);
+    let z = pts(&h);
+    assert!((z[2].x - z[0].x - span).abs() < 1.0, "fit again: {span} vs {}", z[2].x - z[0].x);
+}
+
 /// Views > SteeringWheels: the wheel opens at the cursor, a drag on its Pan
 /// wedge pans the active view, Zoom zooms, Rewind (a click) goes back, the
 /// Wheel menu switches to a mini wheel, Esc closes it, the panel sets options.

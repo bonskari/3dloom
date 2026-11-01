@@ -424,6 +424,19 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             sync_parameter_wires(state);
             Ok(json!({ "states": state.scene.reactions[reaction as usize].slaves[slave as usize].states.len() }))
         }
+        C::MoveReactionStates { reaction, slave, states: picked, master_delta, slave_delta, value_scale } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let states = &mut after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?.states;
+            let k = value_scale.unwrap_or(1.0);
+            for i in &picked {
+                let st = states.get_mut(*i as usize).ok_or("no such state")?;
+                *st = (st.0 + master_delta, (st.1 + slave_delta) * k);
+            }
+            commit(state, "Reaction State", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({ "moved": picked.len() }))
+        }
         C::RenameReactionState { reaction, slave, state: index, name } => {
             let before = state.scene.reactions.clone();
             let mut after = before.clone();

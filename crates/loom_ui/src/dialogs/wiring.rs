@@ -446,6 +446,7 @@ pub enum GraphTool {
     Scale,
     AddCorner,
     AddBezier,
+    Pan,
 }
 
 /// Reaction Manager > the graph: master values across, slave values up, the
@@ -459,6 +460,17 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
     let sel_id = egui::Id::new("reaction_graph_selected");
     let mut tool: GraphTool = ui.data(|d| d.get_temp(tool_id)).unwrap_or_default();
     let mut selected: Option<usize> = ui.data(|d| d.get_temp::<Option<usize>>(sel_id)).flatten().filter(|k| *k < s.states.len());
+    // Every selected point (a region drag or Ctrl+click selects several).
+    let multi_id = egui::Id::new("reaction_graph_multi");
+    let mut multi: std::collections::BTreeSet<usize> = ui.data(|d| d.get_temp::<Vec<usize>>(multi_id)).unwrap_or_default().into_iter().filter(|k| *k < s.states.len()).collect();
+    if let Some(k) = selected {
+        if multi.is_empty() {
+            multi.insert(k);
+        }
+    }
+    // The graph's view (master from..to, value from..to); None fits the states.
+    let view_id = egui::Id::new(("reaction_graph_view", ri, si));
+    let mut view: Option<[f32; 4]> = ui.data(|d| d.get_temp(view_id)).flatten();
     ui.horizontal(|ui| {
         for (t, label, tip) in [
             (GraphTool::Move, "Move", "Drag points both ways"),
@@ -467,17 +479,24 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
             (GraphTool::Scale, "Scale Points", "Drag up / down to scale the points' values"),
             (GraphTool::AddCorner, "Add Corner", "Click the graph to add a Corner state"),
             (GraphTool::AddBezier, "Add Bezier", "Click the graph to add a Bezier state"),
+            (GraphTool::Pan, "Pan", "Drag the graph (the middle button pans with any tool; the wheel zooms)"),
         ] {
             if ui.selectable_label(tool == t, label).on_hover_text(tip).clicked() {
                 tool = t;
             }
         }
+        if ui.button("Zoom Extents").on_hover_text("Fit the graph to the states").clicked() {
+            view = None;
+        }
     });
-    let (rect, bg) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(200.0), 160.0), egui::Sense::click());
+    let (rect, bg) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(200.0), 160.0), egui::Sense::click_and_drag());
     let p = ui.painter_at(rect);
     p.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
     if s.states.is_empty() {
-        ui.data_mut(|d| d.insert_temp(tool_id, tool));
+        ui.data_mut(|d| {
+            d.insert_temp(tool_id, tool);
+            d.insert_temp(view_id, view);
+        });
         return;
     }
     let (mut x0, mut x1, mut y0, mut y1) = (f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY);
@@ -488,8 +507,28 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
         y1 = y1.max(*v);
     }
     let (px, py) = (((x1 - x0) * 0.1).max(1.0), ((y1 - y0) * 0.15).max(1.0));
-    let (x0, x1, y0, y1) = (x0 - px, x1 + px, y0 - py, y1 + py);
+    let fit = [x0 - px, x1 + px, y0 - py, y1 + py];
     let inner = rect.shrink(6.0);
+    // Pan: the Pan tool's left drag or a middle drag; zoom: the wheel, about the pointer.
+    let [mut vx0, mut vx1, mut vy0, mut vy1] = view.unwrap_or(fit);
+    let pan_drag = (tool == GraphTool::Pan && bg.dragged_by(egui::PointerButton::Primary)) || bg.dragged_by(egui::PointerButton::Middle);
+    if pan_drag {
+        let d = bg.drag_delta();
+        let (dm, dv) = (-d.x / inner.width() * (vx1 - vx0), d.y / inner.height() * (vy1 - vy0));
+        (vx0, vx1, vy0, vy1) = (vx0 + dm, vx1 + dm, vy0 + dv, vy1 + dv);
+        view = Some([vx0, vx1, vy0, vy1]);
+    }
+    if let Some(q) = bg.hover_pos() {
+        let scroll = ui.input(|i| i.raw_scroll_delta.y);
+        if scroll != 0.0 {
+            let k = (-scroll / 200.0).exp();
+            let cm = vx0 + (q.x - inner.left()) / inner.width() * (vx1 - vx0);
+            let cv = vy0 + (inner.bottom() - q.y) / inner.height() * (vy1 - vy0);
+            (vx0, vx1, vy0, vy1) = (cm + (vx0 - cm) * k, cm + (vx1 - cm) * k, cv + (vy0 - cv) * k, cv + (vy1 - cv) * k);
+            view = Some([vx0, vx1, vy0, vy1]);
+        }
+    }
+    let (x0, x1, y0, y1) = (vx0, vx1, vy0, vy1);
     let to = |m: f32, v: f32| egui::pos2(inner.left() + (m - x0) / (x1 - x0) * inner.width(), inner.bottom() - (v - y0) / (y1 - y0) * inner.height());
     let from = |q: egui::Pos2| (x0 + (q.x - inner.left()) / inner.width() * (x1 - x0), y0 + (inner.bottom() - q.y) / inner.height() * (y1 - y0));
     let pts: Vec<egui::Pos2> = (0..=120).filter_map(|i| {
@@ -545,7 +584,16 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
         let c = to(*m, *v);
         let id = ui.id().with(("reaction_point", ri, si, k));
         let r = ui.interact(egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)), id, egui::Sense::click_and_drag());
-        if r.clicked() || r.drag_started() {
+        let ctrl = ui.input(|i| i.modifiers.command);
+        if r.clicked() && ctrl {
+            if !multi.remove(&k) {
+                multi.insert(k);
+            }
+            selected = Some(k);
+        } else if r.clicked() || (r.drag_started() && !multi.contains(&k)) {
+            multi = std::iter::once(k).collect();
+            selected = Some(k);
+        } else if r.drag_started() {
             selected = Some(k);
         }
         let shown = match (r.dragged(), r.interact_pointer_pos()) {
@@ -556,14 +604,24 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
             },
             _ => c,
         };
-        let fill = if r.dragged() || selected == Some(k) { egui::Color32::WHITE } else { egui::Color32::YELLOW };
+        let fill = if r.dragged() || multi.contains(&k) { egui::Color32::WHITE } else { egui::Color32::YELLOW };
         if s.point_of(k).kind == PointKind::Corner {
             p.rect_filled(egui::Rect::from_center_size(shown, egui::vec2(7.0, 7.0)), 0.0, fill);
         } else {
             p.circle_filled(shown, 4.0, fill);
         }
         if r.drag_stopped() {
-            if let Some(q) = r.interact_pointer_pos() {
+            if let Some(q) = r.interact_pointer_pos().filter(|_| multi.len() > 1 && multi.contains(&k)) {
+                // Several selected: they all move (or scale) with the dragged one, one undo step.
+                let (nm, nv) = from(q);
+                let (dm, dv, scale) = match tool {
+                    GraphTool::MoveHorizontal => (nm - m, 0.0, None),
+                    GraphTool::MoveVertical => (0.0, nv - v, None),
+                    GraphTool::Scale => (0.0, 0.0, Some(2f32.powf((c.y - q.y) / 100.0))),
+                    _ => (nm - m, nv - v, None),
+                };
+                let _ = app.dispatch(Command::MoveReactionStates { reaction: ri as u32, slave: si as u32, states: multi.iter().map(|i| *i as u32).collect(), master_delta: dm, slave_delta: dv, value_scale: scale });
+            } else if let Some(q) = r.interact_pointer_pos() {
                 let (nm, nv) = from(q);
                 match tool {
                     GraphTool::MoveHorizontal => set(app, k, nm, *v),
@@ -584,9 +642,29 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
             }
         });
     }
+    // Region select: a left drag on empty graph with a Move or Scale tool.
+    let region_id = egui::Id::new("reaction_graph_region");
+    if matches!(tool, GraphTool::Move | GraphTool::MoveHorizontal | GraphTool::MoveVertical | GraphTool::Scale) && bg.dragged_by(egui::PointerButton::Primary) {
+        if let (Some(a), Some(b)) = (ui.input(|i| i.pointer.press_origin()), bg.interact_pointer_pos()) {
+            let region = egui::Rect::from_two_pos(a, b);
+            p.rect_stroke(region, 0.0, egui::Stroke::new(1.0_f32, egui::Color32::WHITE), egui::StrokeKind::Inside);
+            ui.data_mut(|d| d.insert_temp(region_id, region));
+        }
+    }
+    if bg.drag_stopped() {
+        if let Some(region) = ui.data_mut(|d| d.remove_temp::<egui::Rect>(region_id)) {
+            if !ui.input(|i| i.modifiers.command) {
+                multi.clear();
+            }
+            multi.extend(s.states.iter().enumerate().filter(|(_, (m, v))| region.contains(to(*m, *v))).map(|(k, _)| k));
+            selected = multi.iter().next().copied();
+        }
+    }
     ui.data_mut(|d| {
         d.insert_temp(tool_id, tool);
         d.insert_temp(sel_id, selected);
+        d.insert_temp(multi_id, multi.into_iter().collect::<Vec<usize>>());
+        d.insert_temp(view_id, view);
     });
 }
 
