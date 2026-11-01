@@ -248,3 +248,26 @@ fn hide_lights_and_the_lights_selection_filter_apply_to_lights() {
     assert!(!s.is_visible(s.scene.node(omni).unwrap()));
     assert!(matches!(s.scene.node(omni).unwrap().object, ObjectKind::Light(_)));
 }
+
+/// Animating lights: with Auto Key on, Multiplier, Color and Hotspot key and
+/// play back between the keys.
+#[test]
+fn light_multiplier_colour_and_hotspot_animate_under_auto_key() {
+    let mut s = AppState::new();
+    let (spot, _) = create(&mut s, LightKind::FreeSpot, [0.0; 3], [0.0, 0.0, -10.0]);
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 20 }).unwrap();
+    set(&mut s, spot, "Multiplier", 3.0);
+    set(&mut s, spot, "Color G", 0.0);
+    set(&mut s, spot, "Hotspot", 20.0);
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    let l = light(&s, spot);
+    assert!(l.multiplier.is_animated() && l.color.is_animated() && l.hotspot.is_animated());
+    assert_eq!(l.multiplier.get_at(0.0), 1.0, "frame 0 keeps the old value");
+    assert_eq!(l.multiplier.get_at(20.0), 3.0);
+    let mid = l.multiplier.get_at(10.0);
+    assert!(mid > 1.0 && mid < 3.0, "in between: {mid}");
+    assert_eq!(l.color.get_at(20.0).y, 0.0);
+    assert!(l.color.get_at(0.0).y > 0.5);
+    assert_eq!(l.hotspot.get_at(20.0), 20.0);
+}
