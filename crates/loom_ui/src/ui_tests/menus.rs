@@ -604,3 +604,16 @@ fn saved_track_views_from_the_graph_editors_menu() {
     menu_path(&mut h, &["Graph Editors", "Delete Track View", "Keys"]);
     assert!(h.app.state.saved_track_views.is_empty());
 }
+
+#[test]
+fn diag_menus_open_while_the_track_view_is_open() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::OpenDopeSheet);
+    h.frames(30);
+    let ge = h.find(Role::Button, "Graph Editors");
+    h.click(ge.center());
+    h.frames(2);
+    let file_btns = h.find_all(Role::Button, "New Track View...");
+    assert!(!file_btns.is_empty(), "ge {ge:?} focused {} menus {:?} widgets at ge {:?}", h.app.state.track_view.focused, menus(&h), h.widgets.iter().filter(|w| w.2.contains(ge.center())).map(|w| (w.0, w.1.clone(), w.2)).collect::<Vec<_>>());
+}
