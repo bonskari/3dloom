@@ -288,6 +288,8 @@ pub struct LoomApp {
     pub utility: Utility,
     /// Utilities > More... is open.
     pub utilities_more: bool,
+    /// Modify panel: the stack display's height (its bar drags it).
+    pub stack_height: f32,
     /// Utilities > Configure Button Sets is open with the buttons being edited.
     pub configure_utility_buttons: Option<Vec<String>>,
     pub rescale_factor: f32,
@@ -538,6 +540,7 @@ impl LoomApp {
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
             utilities_more: false,
+            stack_height: 220.0,
             configure_utility_buttons: None,
             rescale_factor: 1.0,
             measure_lock: None,

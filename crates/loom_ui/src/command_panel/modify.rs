@@ -145,7 +145,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let mut collapse_to: Option<usize> = None;
     let mut dropped: Option<(usize, usize, Option<bool>)> = None;
     let mut rename: Option<(usize, String)> = None;
-    egui::Frame::group(ui.style()).show(ui, |ui| {
+    let stack_height = app.stack_height;
+    egui::Frame::group(ui.style()).show(ui, |ui| { egui::ScrollArea::vertical().id_salt("stack_display").max_height(stack_height).auto_shrink([false, true]).show(ui, |ui| {
         ui.set_min_height(90.0);
         ui.set_min_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = 1.0;
@@ -356,7 +357,17 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
         }
-    });
+    }); });
+    // The bar under the stack display: dragging it makes the display taller or shorter.
+    let bar = ui.allocate_response(egui::vec2(ui.available_width(), 6.0), egui::Sense::drag());
+    ui.painter().hline(bar.rect.x_range(), bar.rect.center().y, egui::Stroke::new(2.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color));
+    icons::named(&bar, egui::WidgetType::Other, "Stack Resize Bar");
+    if bar.hovered() || bar.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    }
+    if bar.dragged() {
+        app.stack_height = (app.stack_height + bar.drag_delta().y).clamp(60.0, 1200.0);
+    }
     // Inline rename box.
     let rename_id = egui::Id::new(("stack_rename", id.0));
     if let Some((i, mut name)) = ui.ctx().data(|d| d.get_temp::<(usize, String)>(rename_id)) {

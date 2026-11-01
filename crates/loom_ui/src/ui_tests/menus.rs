@@ -496,3 +496,19 @@ fn views_show_ghosting_and_its_preferences() {
     h.frames(2);
     assert!(lines(&h, cyan) >= 12, "and a cyan one after");
 }
+
+/// Dragging the bar under the modifier stack makes the stack display taller.
+#[test]
+fn the_stack_resize_bar_makes_the_stack_display_taller() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let before = h.app.stack_height;
+    let bar = h.widget("Stack Resize Bar");
+    h.drag(bar.center(), bar.center() + egui::vec2(0.0, 80.0));
+    assert!(h.app.stack_height > before + 40.0, "{before} -> {}", h.app.stack_height);
+    let bar2 = h.widget("Stack Resize Bar");
+    assert!(bar2.center().y > bar.center().y, "the bar moved down with it");
+}
