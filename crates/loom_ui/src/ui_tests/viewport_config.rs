@@ -167,6 +167,12 @@ fn walkthrough_speed_step_size_lock_and_level_keys() {
     h.key(egui::Key::OpenBracket);
     h.mods = egui::Modifiers::NONE;
     assert!((step(&mut h) - d).abs() < 1e-3 * d.max(1.0), "Alt+[: the default step");
+    // Shift+Up Arrow: straight up by a step.
+    let z = eye(&h).z;
+    h.mods = egui::Modifiers::SHIFT;
+    h.key(egui::Key::ArrowUp);
+    h.mods = egui::Modifiers::NONE;
+    assert!((eye(&h).z - z - d).abs() < 1e-3 * d.max(1.0), "Shift+Up Arrow moves up");
     // Space: a drag turns the view sideways only.
     h.key(egui::Key::Space);
     assert!(h.app.state.walk.lock_vertical);

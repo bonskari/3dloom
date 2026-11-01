@@ -111,6 +111,11 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
                 Some(Command::WalkThroughResetStepSize)
             } else if mods.shift && !mods.ctrl && !mods.alt && key == egui::Key::Space {
                 Some(Command::WalkThroughLevel)
+            } else if mods.shift && !mods.ctrl && !mods.alt && matches!(key, egui::Key::ArrowUp | egui::Key::ArrowDown) {
+                // Shift+Up / Down Arrow: Up / Down.
+                let k = app.state.walk.factor();
+                let up = if key == egui::Key::ArrowUp { k } else { -k };
+                Some(Command::WalkThroughStep { forward: 0.0, right: 0.0, up })
             } else {
                 None
             };
