@@ -132,7 +132,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 "on" => l.on = on,
                 "locked" | "lock" => l.locked = on,
                 "output" => l.output = on,
-                "weight" => l.weight.set(value as f32),
+                "weight" => l.weight.set(value),
                 "name" => return Err("rename with Anim Layer Name".into()),
                 _ => return Err(format!("no layer property {name:?} (On, Locked, Output, Weight)")),
             }
