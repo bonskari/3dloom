@@ -1495,6 +1495,8 @@ commands! {
     SetDefaultTangentAsStepped => "Set Default Tangent As Stepped", MainUI, "New keys get Step In/Out tangents.";
     SetDefaultTangents => "Set Default Tangents", Loom, "Default In / Out tangent picker: Auto, Smooth, Linear, Step, Fast, Slow or Custom; omitted sides keep their type." { tangent_in: Option<loom_scene::anim::TangentType>, tangent_out: Option<loom_scene::anim::TangentType> };
     PlayAnimation => "Play Animation", MainUI, "Play / stop the animation (/).";
+    PlaySelected => "Play Selected", MainUI, "Play flyout > Play Selected: play only the selected objects (the others hidden while it plays); again stops.";
+    TimeSliderCaptureToggle => "Time Slider Capture Toggle", MainUI, "Moving the mouse left and right scrubs the time slider without dragging; the toggle again or any mouse button ends it.";
     NextPreviousKeyModeToggle => "Next/Previous Key Mode Toggle", MainUI, "Key Mode: the previous / next frame buttons (, and .) jump between the selection's keys.";
     GoToNextKey => "Go To Next Key", Loom, "Jump to the selection's next key (Shift+.).";
     GoToPreviousKey => "Go To Previous Key", Loom, "Jump to the selection's previous key (Shift+,).";

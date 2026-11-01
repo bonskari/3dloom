@@ -122,6 +122,8 @@ pub fn handles(c: &Command) -> bool {
     matches!(
         c,
         C::AutoKeyModeToggle
+            | C::PlaySelected
+            | C::TimeSliderCaptureToggle
             | C::ForwardTimeOneUnit
             | C::BackupTimeOneUnit
             | C::SetKeyMode
@@ -311,7 +313,26 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             anim::set_default_tangents(state.default_tangent);
             Ok(state_json(state))
         }
+        C::PlaySelected => {
+            if !state.playing && state.selection.is_empty() {
+                return Err("select the objects to play".into());
+            }
+            state.playing = !state.playing;
+            state.play_selected = state.playing;
+            state.play_flyout_selected = true;
+            state.playback.accum = 0.0;
+            state.playback.sign = 1;
+            Ok(json!({ "playing": state.playing, "selected": true }))
+        }
+        C::TimeSliderCaptureToggle => {
+            state.time_capture = !state.time_capture;
+            Ok(json!({ "capture": state.time_capture }))
+        }
         C::PlayAnimation => {
+            if !state.playing {
+                state.play_flyout_selected = false;
+            }
+            state.play_selected = false;
             state.playing = !state.playing;
             state.playback.accum = 0.0;
             state.playback.sign = 1;

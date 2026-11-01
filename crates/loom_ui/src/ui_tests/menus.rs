@@ -884,3 +884,49 @@ fn brush_presets_toolbar_and_manager() {
     h.cmd(Command::ApplyBrushPreset { index: 0 });
     assert_eq!(h.app.state.skin_painter.size, h.app.state.prefs.brush_presets.presets[0].painter.size);
 }
+
+/// The Play flyout: hold Play, pick Play Selected; while it plays only the
+/// selection shows; the button then repeats Play Selected. Time Slider
+/// Capture: the mouse's x scrubs the slider, a click ends it.
+#[test]
+fn play_selected_flyout_and_time_slider_capture() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.frames(2);
+    let play = h.find_all(egui::accesskit::Role::Button, "Play Animation");
+    let p = play[0].center();
+    // Hold the button to open the flyout.
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    for _ in 0..30 {
+        h.time += 0.05;
+        h.frames(1);
+    }
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(2);
+    let entry = h.find_all(egui::accesskit::Role::Button, "Play Selected");
+    assert!(!entry.is_empty(), "the flyout opened");
+    h.click(entry[0].center());
+    h.frames(2);
+    assert!(h.app.state.playing && h.app.state.play_selected);
+    let other = h.app.state.scene.nodes().find(|n| n.id != a).unwrap().clone();
+    assert!(!h.app.state.is_visible(&other), "only the selection shows");
+    h.cmd(Command::PlaySelected);
+    assert!(!h.app.state.playing && h.app.state.is_visible(&other), "stopped: all back");
+    assert!(h.app.state.play_flyout_selected, "the flyout keeps Play Selected");
+    // Capture: moving to the slider's right end goes to the last frame.
+    h.cmd(Command::TimeSliderCaptureToggle);
+    let r = h.screen;
+    h.run(vec![egui::Event::PointerMoved(egui::pos2(r.right() - 45.0, r.bottom() - 10.0))]);
+    h.frames(2);
+    assert_eq!(h.app.state.current_frame, h.app.state.frame_range.1, "scrubbed to the end");
+    h.run(vec![egui::Event::PointerMoved(egui::pos2(r.left() + 20.0, r.bottom() - 10.0))]);
+    h.frames(2);
+    assert_eq!(h.app.state.current_frame, h.app.state.frame_range.0, "and to the start");
+    h.click(egui::pos2(800.0, 400.0));
+    assert!(!h.app.state.time_capture, "a click ends it");
+}

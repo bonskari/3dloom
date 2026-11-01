@@ -1989,6 +1989,12 @@ pub struct AppState {
     /// Key Mode: , and . jump between keys.
     pub key_step_mode: bool,
     pub playing: bool,
+    /// Play Selected: only the selection plays (the rest hidden meanwhile).
+    pub play_selected: bool,
+    /// The Play flyout shows Play Selected (the last one used).
+    pub play_flyout_selected: bool,
+    /// Time Slider Capture Toggle: the mouse scrubs the time slider.
+    pub time_capture: bool,
     pub playback: crate::anim_cmds::Playback,
     /// Track bar right-click > Filter.
     pub track_bar_filter: crate::anim_cmds::TrackBarFilter,
@@ -2336,6 +2342,9 @@ impl AppState {
             key_filters: Default::default(),
             default_tangent: (loom_scene::anim::TangentType::Auto, loom_scene::anim::TangentType::Auto),
             key_step_mode: false,
+            play_selected: false,
+            play_flyout_selected: false,
+            time_capture: false,
             playing: false,
             playback: Default::default(),
             track_bar_filter: Default::default(),
@@ -2486,6 +2495,9 @@ impl AppState {
 
     /// Whether a node shows in viewports (own flag and Hide by Category).
     pub fn is_visible(&self, node: &Node) -> bool {
+        if self.playing && self.play_selected && !self.selection.contains(&node.id) {
+            return false;
+        }
         if node.hidden || self.scene.layer(node.layer).is_some_and(|l| l.hidden) {
             return false;
         }

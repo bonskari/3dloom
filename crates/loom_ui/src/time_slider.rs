@@ -84,6 +84,18 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
             }
             let avail = ui.available_width() - 40.0;
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(avail, 18.0), egui::Sense::click_and_drag());
+            // Time Slider Capture: the mouse's x scrubs; any mouse button ends it.
+            if app.state.time_capture {
+                if ui.input(|i| i.pointer.any_pressed()) {
+                    run(app, Command::TimeSliderCaptureToggle);
+                } else if let Some(p) = ui.input(|i| i.pointer.hover_pos()) {
+                    let t = ((p.x - rect.left()) / rect.width().max(1.0)).clamp(0.0, 1.0);
+                    let f = start + (t * (end - start) as f32).round() as i32;
+                    if f != app.state.current_frame {
+                        run(app, Command::SetFrame { frame: f });
+                    }
+                }
+            }
             let painter = ui.painter_at(rect);
             // Auto Key turns the slider red.
             let bg = if app.state.auto_key { app.color("Auto Key Background").gamma_multiply(0.65) } else { egui::Color32::from_gray(60) };

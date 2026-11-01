@@ -635,8 +635,31 @@ fn playback_buttons(ui: &mut egui::Ui, app: &mut LoomApp) {
     let r = Icon::new(if key_mode { icons::PREVIOUS_KEY } else { icons::PREVIOUS_FRAME }, Command::BackupTimeOneUnit.name()).tip(if key_mode { "Previous Key" } else { "Previous Frame" }).show(ui, &app.state);
     time_control(app, r, Command::BackupTimeOneUnit);
     let playing = app.state.playing;
-    let r = Icon::new(if playing { icons::STOP } else { icons::PLAY }, Command::PlayAnimation.name()).tip("Play / Stop Animation").on(playing).show(ui, &app.state);
-    time_control(app, r, Command::PlayAnimation);
+    // The Play flyout: Play Animation / Play Selected (hold); it keeps the last one.
+    let sel = app.state.play_flyout_selected;
+    let (name, tip) = if sel { (Command::PlaySelected.name(), "Play Selected") } else { (Command::PlayAnimation.name(), "Play / Stop Animation") };
+    let r = Icon::new(if playing { icons::STOP } else { icons::PLAY }, name).tip(tip).hint("hold: Play flyout").on(playing).show(ui, &app.state);
+    let (open_now, held) = icons::hold_opens(ui, &r);
+    let popup = ui.id().with("play_flyout");
+    if open_now {
+        ui.memory_mut(|m| m.open_popup(popup));
+    }
+    if !held {
+        time_control(app, r.clone(), if sel { Command::PlaySelected } else { Command::PlayAnimation });
+    }
+    egui::popup::popup_above_or_below_widget(ui, popup, &r, egui::AboveOrBelow::Above, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+        ui.set_min_width(120.0);
+        let release = held && ui.input(|i| i.pointer.any_released());
+        for (label, c) in [("Play Animation", Command::PlayAnimation), ("Play Selected", Command::PlaySelected)] {
+            let e = ui.button(label);
+            if e.clicked() || (release && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| e.rect.contains(p))) {
+                ui.memory_mut(|m| m.close_popup());
+                if let Err(e) = app.dispatch(c) {
+                    app.state.status_prompt = e;
+                }
+            }
+        }
+    });
     let r = Icon::new(if key_mode { icons::NEXT_KEY } else { icons::NEXT_FRAME }, Command::ForwardTimeOneUnit.name()).tip(if key_mode { "Next Key" } else { "Next Frame" }).show(ui, &app.state);
     time_control(app, r, Command::ForwardTimeOneUnit);
     let r = Icon::new(icons::GO_TO_END, "Go to End Frame").show(ui, &app.state);
