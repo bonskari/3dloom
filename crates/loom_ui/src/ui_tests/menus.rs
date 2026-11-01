@@ -452,8 +452,8 @@ fn views_show_key_times_numbers_the_trajectory_keys() {
     h.cmd(Command::AutoKeyModeToggle);
     h.cmd(Command::ShowTrajectoriesToggle);
     h.frames(2);
-    assert!(h.text_rects("37").is_empty());
+    let before = h.text_rects("37").len();
     menu_path(&mut h, &["Views", "Show Key Times"]);
     h.frames(2);
-    assert!(!h.text_rects("37").is_empty(), "the key at frame 37 is numbered");
+    assert_eq!(h.text_rects("37").len(), before + 1, "the key at frame 37 is numbered");
 }
