@@ -686,7 +686,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             if !state.missing_coords_continue && !crate::material::missing_map_coords(state).is_empty() {
                 // Missing Map Coordinates: Continue renders, Cancel does not.
-                state.pending_render = Some((path, width, height));
+                state.coords_pending_render = Some((path, width, height));
                 state.dialog = Some(Dialog::MissingMapCoordinates);
                 return Ok(json!({ "asked": "Missing Map Coordinates" }));
             }

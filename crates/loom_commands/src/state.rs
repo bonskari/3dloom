@@ -1700,7 +1700,7 @@ pub struct AppState {
     /// Type button right-click Copy / Cut: what Paste puts back.
     pub material_clip: Option<crate::material::MaterialClip>,
     /// Render asked about missing map coordinates: its path / width / height for Continue.
-    pub pending_render: Option<(Option<String>, Option<u32>, Option<u32>)>,
+    pub coords_pending_render: Option<(Option<String>, Option<u32>, Option<u32>)>,
     /// Continue was chosen: the next Render skips the check.
     pub missing_coords_continue: bool,
     /// Bumped by Reload Bitmaps: the viewports read their image files again.
@@ -2097,7 +2097,7 @@ impl AppState {
             material_explorer_open: false,
             material_library: Default::default(),
             material_clip: None,
-            pending_render: None,
+            coords_pending_render: None,
             missing_coords_continue: false,
             bitmap_generation: 0,
             display: Default::default(),

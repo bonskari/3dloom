@@ -1222,7 +1222,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 None => Ok(json!({ "missing": list })),
                 Some(go) => {
                     state.dialog = None;
-                    let pending = state.pending_render.take();
+                    let pending = state.coords_pending_render.take();
                     if go {
                         if let Some((path, width, height)) = pending {
                             state.missing_coords_continue = true;

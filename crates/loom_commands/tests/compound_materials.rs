@@ -568,7 +568,7 @@ fn missing_map_coordinates_asks_before_rendering_until_a_uvw_map_gives_the_chann
     assert_eq!(s.dialog, Some(loom_commands::Dialog::MissingMapCoordinates));
     execute(&mut s, Command::MissingMapCoordinates { proceed: Some(false) }).unwrap();
     assert_eq!(s.dialog, None);
-    assert!(s.pending_render.is_none(), "Cancel: no render");
+    assert!(s.coords_pending_render.is_none() && s.pending_render.is_none(), "Cancel: no render");
     // A UVW Map on channel 3 supplies the coordinates.
     execute(&mut s, Command::AddModifier { name: "UVW Map".into() }).unwrap();
     execute(&mut s, Command::SetModifierParameter { index: 0, name: "Channel".into(), value: 3.0 }).unwrap();
