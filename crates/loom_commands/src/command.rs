@@ -368,7 +368,7 @@ impl ArgSchema for crate::viewport::ViewportLayout {
 }
 impl ArgSchema for crate::viewport::Shading {
     fn schema() -> Value {
-        json!({"type":"string","enum":["SmoothHighlights","Wireframe","HiddenLine","Flat","Realistic"]})
+        json!({"type":"string","enum":["SmoothHighlights","Smooth","FacetsHighlights","Facets","Flat","HiddenLine","LitWireframes","Wireframe","BoundingBox","Realistic"]})
     }
 }
 impl ArgSchema for crate::state::ViewKind {
