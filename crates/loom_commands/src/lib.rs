@@ -12,7 +12,6 @@ pub mod display;
 pub mod render;
 pub mod render_output;
 pub mod environment;
-pub mod walkthrough;
 pub mod bake;
 pub mod execute;
 pub mod poly;

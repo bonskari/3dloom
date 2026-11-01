@@ -192,3 +192,25 @@ fn list_controller_adds_noise_to_keys() {
     execute(&mut s, Command::MoveSelection { delta: [0.0, 5.0, 0.0], system: None }).unwrap();
     assert!((s.scene.node(b).unwrap().transform.position.get_at(10.0).y - 5.0).abs() < 1e-3);
 }
+
+/// Follow aligns the object to the path, and the object's own rotation
+/// still turns it within that frame: the reference applies Follow as
+/// additional rotation on top of the rotation track (its Collapse
+/// Controller warning: "additional rotation is applied by the Path
+/// constraint").
+#[test]
+fn path_follow_keeps_the_objects_own_rotation_on_top() {
+    let mut s = AppState::new();
+    let path = line(&mut s, &[[0.0, 0.0, 0.0], [0.0, 100.0, 0.0]]);
+    let b = boxed(&mut s, [5.0, 5.0, 5.0]);
+    execute(&mut s, Command::PathConstraint { target: path.0 }).unwrap();
+    execute(&mut s, Command::SetConstraintParameter { id: b.0, name: "Follow".into(), value: 1.0 }).unwrap();
+    let m = world_at(&mut s, b, 50);
+    assert!(m.x_axis.truncate().normalize().distance(Vec3::Y) < 1e-2, "Follow: X along the path (+Y): {:?}", m.x_axis);
+    // Its own 90° about local Z on top: X now points along the path frame's Y (world -X).
+    select(&mut s, b);
+    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 90.0, system: Some(loom_commands::state::CoordSystem::Local) }).unwrap();
+    let m = world_at(&mut s, b, 50);
+    assert!(m.x_axis.truncate().normalize().distance(Vec3::NEG_X) < 1e-2, "{:?}", m.x_axis);
+    assert!(pos(m).distance(Vec3::new(0.0, 50.0, 0.0)) < 1.0, "the position stays on the path: {:?}", pos(m));
+}

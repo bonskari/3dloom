@@ -1002,15 +1002,6 @@ impl LoomApp {
             }
             return;
         }
-        if let Some(mut img) = job.preview.take_if(|_| job.req.walkthrough_preview) {
-            if result.is_ok() {
-                loom_bevy::effects::apply(&mut img, &effects);
-                let w = &mut self.state.walkthrough;
-                w.preview = Some(Arc::new(img));
-                w.preview_version += 1;
-            }
-            return;
-        }
         if let Some(mut img) = job.preview.take() {
             if result.is_ok() {
                 loom_bevy::effects::apply(&mut img, &effects);
