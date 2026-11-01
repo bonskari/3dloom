@@ -136,6 +136,20 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.horizontal(|ui| number(ui, app, "Grid Nudge Distance", "Grid Nudge Distance:", 0.0..=10_000.0, 3));
                 });
                 ui.group(|ui| {
+                    ui.label(egui::RichText::new("Ghosting").strong());
+                    ui.horizontal(|ui| number(ui, app, "Ghosting Frames", "Ghosting Frames:", 1.0..=50.0, 0));
+                    ui.horizontal(|ui| number(ui, app, "Ghosting Nth Frame", "Display Nth Frame:", 1.0..=1000.0, 0));
+                    ui.horizontal(|ui| {
+                        let mode = app.state.prefs.ghost_mode;
+                        for (k, label) in ["Ghost Before Current Frame", "Ghost After Current Frame", "Ghost Before and After"].iter().enumerate() {
+                            if ui.radio(mode == k as u32, *label).clicked() {
+                                set(app, "Ghosting Mode", k as f64);
+                            }
+                        }
+                    });
+                    check(ui, app, "Ghosting Frame Numbers", "Show Frame Numbers");
+                });
+                ui.group(|ui| {
                     ui.label(egui::RichText::new("Mouse Control").strong());
                     ui.label("Zoom About Mouse Point:");
                     ui.horizontal(|ui| {

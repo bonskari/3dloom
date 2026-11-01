@@ -1283,6 +1283,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({ "shading": shading.label(), "edged_faces": vp.edged_faces }))
         }
         C::ShowAllSetsInListToggle => toggle(&mut state.show_all_sets_in_list, "show_all_sets_in_list"),
+        C::ShowGhostingToggle => toggle(&mut state.show_ghosting, "show_ghosting"),
         C::ShowKeyTimesToggle => toggle(&mut state.show_key_times, "show_key_times"),
         C::ShowDependenciesToggle => toggle(&mut state.show_dependencies, "show_dependencies"),
         C::SetUtilityButtons { names } => {

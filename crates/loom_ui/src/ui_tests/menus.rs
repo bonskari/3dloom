@@ -457,3 +457,42 @@ fn views_show_key_times_numbers_the_trajectory_keys() {
     h.frames(2);
     assert_eq!(h.text_rects("37").len(), before + 1, "the key at frame 37 is numbered");
 }
+
+/// Views > Show Ghosting draws the selected box at the frame before in
+/// yellow; Preferences > Ghosting > Before and After adds the frame after in cyan.
+#[test]
+fn views_show_ghosting_and_its_preferences() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 20 });
+    h.cmd(Command::MoveSelection { delta: [40.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 10 });
+    let lines = |h: &Harness, c: egui::Color32| {
+        fn walk(s: &egui::Shape, c: egui::Color32, n: &mut usize) {
+            match s {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, c, n)),
+                egui::Shape::LineSegment { stroke, .. } if stroke.color == c => *n += 1,
+                _ => {}
+            }
+        }
+        let mut n = 0;
+        h.shapes.iter().for_each(|s| walk(&s.shape, c, &mut n));
+        n
+    };
+    let (yellow, cyan) = (egui::Color32::from_rgb(230, 220, 40), egui::Color32::from_rgb(40, 210, 230));
+    menu_path(&mut h, &["Views", "Show Ghosting"]);
+    h.frames(2);
+    assert_eq!(crate::viewport_widget::ghost_frames(&h.app), [(9, true)]);
+    assert!(lines(&h, yellow) >= 12 && lines(&h, cyan) == 0, "a yellow ghost of the box");
+    h.cmd(Command::Preferences);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Preference Settings"))).unwrap();
+    h.click(h.text_rect("Viewports", win).unwrap().center());
+    h.click(h.find(Role::RadioButton, "Ghost Before and After").center());
+    assert_eq!(h.app.state.prefs.ghost_mode, 2);
+    h.cmd(Command::CloseDialog);
+    h.frames(2);
+    assert!(lines(&h, cyan) >= 12, "and a cyan one after");
+}

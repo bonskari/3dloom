@@ -1407,6 +1407,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 }
             }
             draw_trajectories(&painter, app, view_proj, rect);
+            draw_ghosts(&painter, app, view_proj, rect);
             draw_links(&painter, app, view_proj, rect);
             let mut gizmo_hover = None;
             if is_active && app.has_selection() {
@@ -3010,6 +3011,48 @@ fn draw_trajectories(painter: &egui::Painter, app: &LoomApp, view_proj: glam::Ma
             }
             if *f == frame {
                 painter.circle_stroke(*s, 5.0, egui::Stroke::new(1.5_f32, egui::Color32::YELLOW));
+            }
+        }
+    }
+}
+
+/// The frames Show Ghosting draws, with true for those before the current one.
+pub(crate) fn ghost_frames(app: &LoomApp) -> Vec<(i32, bool)> {
+    let p = &app.state.prefs;
+    let f = app.state.current_frame;
+    let mut out = Vec::new();
+    for k in 1..=p.ghost_frames.max(1) as i32 {
+        let d = k * p.ghost_nth.max(1) as i32;
+        if p.ghost_mode != 1 {
+            out.push((f - d, true));
+        }
+        if p.ghost_mode != 0 {
+            out.push((f + d, false));
+        }
+    }
+    out
+}
+
+/// Show Ghosting: each selected object's wireframe at the ghost frames,
+/// yellow before the current frame and cyan after it.
+fn draw_ghosts(painter: &egui::Painter, app: &LoomApp, view_proj: glam::Mat4, rect: egui::Rect) {
+    if !app.state.show_ghosting {
+        return;
+    }
+    let scene = &app.state.scene;
+    for id in &app.state.selection {
+        for (f, before) in ghost_frames(app) {
+            let color = if before { egui::Color32::from_rgb(230, 220, 40) } else { egui::Color32::from_rgb(40, 210, 230) };
+            let (edges, m) = scene.at_time(f as f32, || (scene.eval_mesh(*id).value.mesh.unique_edges(), scene.object_matrix(*id)));
+            for (a, b) in edges {
+                if let (Some(a), Some(b)) = (project_world_to_screen(m.transform_point3(a), view_proj, rect), project_world_to_screen(m.transform_point3(b), view_proj, rect)) {
+                    painter.line_segment([a, b], egui::Stroke::new(1.0_f32, color));
+                }
+            }
+            if app.state.prefs.ghost_frame_numbers {
+                if let Some(s) = project_world_to_screen(m.w_axis.truncate(), view_proj, rect) {
+                    painter.text(s, egui::Align2::LEFT_BOTTOM, f.to_string(), egui::FontId::proportional(11.0), color);
+                }
             }
         }
     }

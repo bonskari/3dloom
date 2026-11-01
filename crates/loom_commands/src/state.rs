@@ -726,6 +726,10 @@ pub const UTILITIES: [&str; 10] = [
     "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter",
 ];
 
+fn one_u32() -> u32 {
+    1
+}
+
 /// Walkthrough navigation: the key step's size and speed, and the vertical rotation lock.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WalkThrough {
@@ -919,6 +923,15 @@ pub struct Prefs {
     pub render_log_append: bool,
     /// Render Setup > Output Size preset buttons (Configure Preset): width, height, pixel aspect.
     pub size_presets: [(u32, u32, f32); 4],
+    /// Ghosting: how many ghosts, every Nth frame, 0 before / 1 after / 2 both, frame numbers beside them.
+    #[serde(default = "one_u32")]
+    pub ghost_frames: u32,
+    #[serde(default = "one_u32")]
+    pub ghost_nth: u32,
+    #[serde(default)]
+    pub ghost_mode: u32,
+    #[serde(default)]
+    pub ghost_frame_numbers: bool,
 }
 
 fn default_nudge() -> f32 {
@@ -965,13 +978,17 @@ impl Default for Prefs {
             render_log_path: None,
             render_log_append: false,
             size_presets: [(320, 240, 1.0), (640, 480, 1.0), (1280, 720, 1.0), (1920, 1080, 1.0)],
+            ghost_frames: 1,
+            ghost_nth: 1,
+            ghost_mode: 0,
+            ghost_frame_numbers: false,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 51] = [
+    pub const NAMES: [&'static str; 55] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -982,6 +999,7 @@ impl Prefs {
         "Right Click Menu over Selected Only", "Wheel Zoom Increment", "Large Toolbar Buttons", "Flyout Time", "Topology Dependence Warning", "Backup on Save",
         "Increment on Save", "Zoom Extents on Import", "Move Gizmo Relative Size", "Rotate Gizmo Relative Size", "Move Plane Handles",
         "Scale Uniform Handle Size", "Scale 2-Axis Handle Size", "Uniform 2-Axis Scaling",
+        "Ghosting Frames", "Ghosting Nth Frame", "Ghosting Mode", "Ghosting Frame Numbers",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1037,6 +1055,10 @@ impl Prefs {
             "Scale Uniform Handle Size" => self.gizmos.scale_uniform_handle as f64,
             "Scale 2-Axis Handle Size" => self.gizmos.scale_two_axis_handle as f64,
             "Uniform 2-Axis Scaling" => b(self.gizmos.uniform_two_axis_scaling),
+            "Ghosting Frames" => self.ghost_frames as f64,
+            "Ghosting Nth Frame" => self.ghost_nth as f64,
+            "Ghosting Mode" => self.ghost_mode as f64,
+            "Ghosting Frame Numbers" => b(self.ghost_frame_numbers),
             "Rotation Increment" => self.gizmos.rotation_increment as f64,
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle as f64,
             _ => return None,
@@ -1097,6 +1119,10 @@ impl Prefs {
             "Scale Uniform Handle Size" => self.gizmos.scale_uniform_handle = f.clamp(1.0, 95.0),
             "Scale 2-Axis Handle Size" => self.gizmos.scale_two_axis_handle = f.clamp(0.0, 99.0),
             "Uniform 2-Axis Scaling" => self.gizmos.uniform_two_axis_scaling = on,
+            "Ghosting Frames" => self.ghost_frames = v.clamp(1.0, 50.0) as u32,
+            "Ghosting Nth Frame" => self.ghost_nth = v.clamp(1.0, 1000.0) as u32,
+            "Ghosting Mode" => self.ghost_mode = v.clamp(0.0, 2.0) as u32,
+            "Ghosting Frame Numbers" => self.ghost_frame_numbers = on,
             "Rotation Increment" => self.gizmos.rotation_increment = f.max(0.0),
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle = f.max(0.0),
             _ => return Err(format!("unknown preference {name:?}")),
@@ -1723,6 +1749,8 @@ pub struct AppState {
     pub show_dependencies: bool,
     /// Views > Show Key Times.
     pub show_key_times: bool,
+    /// Views > Show Ghosting.
+    pub show_ghosting: bool,
     /// Utilities panel buttons (Configure Button Sets), by utility name.
     pub utility_buttons: Vec<String>,
     pub show_vertices: bool,
@@ -2152,6 +2180,7 @@ impl AppState {
             track_bar_frame_numbers: true,
             show_dependencies: false,
             show_key_times: false,
+            show_ghosting: false,
             utility_buttons: UTILITIES.iter().map(|s| (*s).to_owned()).collect(),
             show_vertices: false,
             show_statistics: false,

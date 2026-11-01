@@ -1674,6 +1674,7 @@ commands! {
     SelectKeysByTime => "Select Keys By Time", Loom, "Track View Utilities: select the highlighted tracks' keys between two frames." { start: f32, end: f32, clear: bool };
     EulerFilter => "Euler Filter", Loom, "Track View Utilities: remove ±360° flips from the highlighted Euler rotation tracks." { start: Option<i32>, end: Option<i32> };
     CollapseController => "Collapse Controller", Loom, "Controller > Collapse: bake the highlighted tracks to keys every `samples` frames." { start: Option<i32>, end: Option<i32>, samples: Option<u32> };
+    ShowGhostingToggle => "Show Ghosting Toggle", MainUI, "Views > Show Ghosting: wireframe copies of the selected objects at frames before (yellow) and/or after (cyan) the current one (Preferences > Viewports > Ghosting).";
     ShowKeyTimesToggle => "Show Key Times Toggle", MainUI, "Views > Show Key Times: frame numbers beside the key points of the shown trajectories.";
     ShowDependenciesToggle => "Show Dependencies Toggle", MainUI, "Views > Show Dependencies: with the Modify panel open, the objects that share the edited object's base object or its current modifier (instances, references) show magenta.";
     SetUtilityButtons => "Set Utility Buttons", Loom, "Configure Button Sets > OK: the utilities the Utilities panel shows as buttons, in order (unknown names are dropped)." { names: Vec<String> };
