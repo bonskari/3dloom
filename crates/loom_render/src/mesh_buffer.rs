@@ -239,11 +239,15 @@ impl MeshBuffer {
             "loom_mesh_selected_edge_buffer",
         );
 
-        let lit = lit_edges(mesh, style.wire_color.unwrap_or(style.color));
+        let mut lit = lit_edges(mesh, style.wire_color.unwrap_or(style.color));
         let lit_edge_vertex_count = lit.len() as u32;
+        // wgpu rejects an empty vertex buffer: one unused vertex.
+        if lit.is_empty() {
+            lit.push(GpuVertex::zeroed());
+        }
         let lit_edge_vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("loom_mesh_lit_edge_buffer"),
-            contents: bytemuck::cast_slice(if lit.is_empty() { &[GpuVertex::zeroed()][..] } else { &lit[..] }),
+            contents: bytemuck::cast_slice(&lit),
             usage: BufferUsages::VERTEX,
         });
         let (aabb_min, aabb_max) = mesh.aabb();
