@@ -349,7 +349,7 @@ fn more_dialog(ctx: &egui::Context, app: &mut LoomApp) {
         return;
     }
     let id = egui::Id::new("utilities_more_choice");
-    let mut choice: Option<String> = ctx.data(|d| d.get_temp(id));
+    let mut choice: Option<String> = ctx.data(|d| d.get_temp::<Option<String>>(id)).flatten();
     let mut open = true;
     let mut done: Option<bool> = None;
     egui::Window::new("Utilities").id(egui::Id::new("utilities_more")).open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
