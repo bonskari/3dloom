@@ -1130,6 +1130,8 @@ fn preferences_rotation_method_and_projection() {
     h.frames(1);
     h.click(h.text_rects("Nth Serial Numbering")[0].center());
     assert!(h.app.state.prefs.nth_serial_numbering);
+    h.click(h.text_rects("Use Environment Alpha")[0].center());
+    assert!(h.app.state.prefs.use_environment_alpha, "Rendering > Background > Use Environment Alpha");
     h.cmd(Command::CloseDialog);
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
     let id = *h.app.state.selection.iter().next().unwrap();

@@ -142,6 +142,9 @@ pub struct EnvSettings {
     pub volume_lights: Vec<VolumeLight>,
     pub depth_of_field: Option<DepthOfField>,
     pub effects: Vec<ImageEffect>,
+    /// Preferences > Use Environment Alpha: a render's background takes
+    /// the map's alpha (off: alpha 0).
+    pub use_alpha: bool,
 }
 
 /// Atmospheres the environment pass draws at once.
@@ -275,6 +278,7 @@ impl EnvSettings {
             volume_lights,
             depth_of_field,
             effects,
+            use_alpha: false,
         }
     }
 

@@ -1000,6 +1000,10 @@ pub struct Prefs {
     /// finished frame's geometry outlines are not blended with the
     /// background (render against black).
     pub dont_antialias_background: bool,
+    /// Rendering > Background > Use Environment Alpha: the environment
+    /// map's alpha joins the rendered image's alpha (off: the background
+    /// is transparent).
+    pub use_environment_alpha: bool,
     /// Viewports > Display Driver > Antialiasing: the viewports' MSAA sample
     /// count, 1 (None) or 4. The window takes it when 3dLoom starts.
     pub viewport_antialiasing: u32,
@@ -1072,6 +1076,7 @@ impl Default for Prefs {
             ik_transform_world_children: true,
             render_termination_alert: false,
             dont_antialias_background: false,
+            use_environment_alpha: false,
             viewport_antialiasing: 4,
         }
     }
@@ -1094,7 +1099,7 @@ impl Prefs {
         "Rotation Method", "Planar Angle Threshold", "Move/Rotate Projection", "Persp Sens",
         "Overrides Active", "Delay To Override", "Nth Serial Numbering",
         "Applied IK Threshold", "Applied IK Iterations", "Interactive IK Threshold", "Interactive IK Iterations", "Always Transform Children of the World",
-        "Render Termination Alert", "Don't Antialias Against Background",
+        "Render Termination Alert", "Don't Antialias Against Background", "Use Environment Alpha",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1178,6 +1183,7 @@ impl Prefs {
             "Always Transform Children of the World" => b(self.ik_transform_world_children),
             "Render Termination Alert" => b(self.render_termination_alert),
             "Don't Antialias Against Background" => b(self.dont_antialias_background),
+            "Use Environment Alpha" => b(self.use_environment_alpha),
             "Viewport Antialiasing" => self.viewport_antialiasing as f64,
             _ => return None,
         })
@@ -1265,6 +1271,7 @@ impl Prefs {
             "Always Transform Children of the World" => self.ik_transform_world_children = on,
             "Render Termination Alert" => self.render_termination_alert = on,
             "Don't Antialias Against Background" => self.dont_antialias_background = on,
+            "Use Environment Alpha" => self.use_environment_alpha = on,
             "Viewport Antialiasing" => self.viewport_antialiasing = if v >= 2.0 { 4 } else { 1 },
             _ => return Err(format!("unknown preference {name:?}")),
         }

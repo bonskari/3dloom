@@ -397,3 +397,34 @@ fn volume_light_glows_in_the_air() {
     let foggy = render(&mut r, &cam, size, RenderOptions::default(), 1);
     assert!(air(&foggy) > air(&clear) + 10.0, "the cone glows: {} -> {}", air(&clear), air(&foggy));
 }
+
+/// Preferences > Use Environment Alpha: the render's background takes the
+/// map's alpha instead of 0.
+#[test]
+fn use_environment_alpha_gives_the_background_the_maps_alpha() {
+    let mut r = renderer!("use_environment_alpha_gives_the_background_the_maps_alpha");
+    let b = loom_mesh::box_primitive(Vec3::splat(10.0));
+    r.sync(&[object(1, &b)]);
+    let size = (160, 100);
+    let cam = camera(1.6);
+    let dir = std::env::temp_dir().join(format!("loom-env-alpha-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // Left half opaque, right half half transparent.
+    let path = dir.join("alpha.png");
+    image::RgbaImage::from_fn(64, 32, |x, _| image::Rgba([255, 0, 0, if x < 32 { 255 } else { 128 }])).save(&path).unwrap();
+    let map = Some((path.to_string_lossy().into_owned(), EnvMapping::Screen));
+    r.set_environment(&env(|e| e.map = map.clone()));
+    let img = render(&mut r, &cam, size, RenderOptions::default(), 1);
+    assert_eq!((img.get_pixel(10, 5).0[3], img.get_pixel(150, 5).0[3]), (0, 0), "off: the background is transparent");
+    r.set_environment(&env(|e| {
+        e.map = map.clone();
+        e.use_alpha = true;
+    }));
+    let img = render(&mut r, &cam, size, RenderOptions::default(), 1);
+    let (l, rt) = (img.get_pixel(10, 5).0, img.get_pixel(150, 5).0);
+    assert!(l[3] == 255 && l[0] > 240, "the map's opaque half: {l:?}");
+    assert!((rt[3] as i32 - 128).abs() < 4, "the map's half-transparent half: {rt:?}");
+    let (cx, cy) = pixel(&cam, size, Vec3::new(0.0, -5.0, 5.0));
+    assert_eq!(img.get_pixel(cx, cy).0[3], 255, "the box stays opaque");
+    let _ = std::fs::remove_dir_all(&dir);
+}

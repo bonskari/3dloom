@@ -13,7 +13,8 @@
 struct EnvPass {
     // rgb linear; w: 1 = draw the background.
     background: vec4<f32>,
-    // x: 1 = a map; y: mapping (0 screen, 1 spherical, 2 cylindrical, 3 shrink-wrap).
+    // x: 1 = a map; y: mapping (0 screen, 1 spherical, 2 cylindrical, 3 shrink-wrap);
+    // z: 1 = the map's alpha joins the image's (Use Environment Alpha).
     map: vec4<f32>,
     // The part of the frame this view shows: u0, v0, u1, v1.
     frame: vec4<f32>,
@@ -69,9 +70,9 @@ fn view_depth(p: vec3<f32>) -> f32 {
     return -v.z;
 }
 
-fn background_color(uv: vec2<f32>, dir: vec3<f32>) -> vec3<f32> {
+fn background_color(uv: vec2<f32>, dir: vec3<f32>) -> vec4<f32> {
     if env.map.x < 0.5 {
-        return env.background.rgb;
+        return vec4(env.background.rgb, 0.0);
     }
     var muv: vec2<f32>;
     let mapping = i32(env.map.y + 0.5);
@@ -91,7 +92,7 @@ fn background_color(uv: vec2<f32>, dir: vec3<f32>) -> vec3<f32> {
         muv = vec2(0.5 + 0.5 * a * cos(az), 0.5 - 0.5 * a * sin(az));
     }
     let c = textureSampleLevel(map_texture, map_sampler, muv, 0.0);
-    return c.rgb;
+    return vec4(c.rgb, select(0.0, c.a, env.map.z > 0.5));
 }
 
 // Density of a layered fog at height z (0 outside the layer).
@@ -257,14 +258,16 @@ fn environment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         }
     }
     if env.background.w > 0.5 {
-        var bg = background_color(in.uv, dir);
+        let bg_a = background_color(in.uv, dir);
+        var bg = bg_a.rgb;
         for (var i = 0; i < 4; i += 1) {
             let f = fog_amount(i, near, dir, -1.0, 0.0);
             if f > 0.0 {
                 bg = mix(bg, env.fog_color[i].rgb, f);
             }
         }
-        c = vec4(c.rgb + (1.0 - c.a) * bg, c.a);
+        // Alpha 0 behind the scene, or with Use Environment Alpha the map's.
+        c = vec4(c.rgb + (1.0 - c.a) * bg, c.a + (1.0 - c.a) * bg_a.a);
     }
     if env.vlight_pos[0].w > 0.5 {
         var len = -1.0;

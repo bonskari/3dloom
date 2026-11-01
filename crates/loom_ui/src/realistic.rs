@@ -317,7 +317,9 @@ impl LoomApp {
 
     /// The scene's environment at the current frame, as the renderer takes it.
     pub(crate) fn environment(&self) -> loom_bevy::environment::EnvSettings {
-        loom_bevy::environment::EnvSettings::from_scene(&self.state.scene.environment, self.state.current_frame as f32)
+        let mut env = loom_bevy::environment::EnvSettings::from_scene(&self.state.scene.environment, self.state.current_frame as f32);
+        env.use_alpha = self.state.prefs.use_environment_alpha;
+        env
     }
 
     /// Viewport `index`'s part of the environment: a camera view's

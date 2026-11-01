@@ -1969,7 +1969,7 @@ fn env_uniform(env: &EnvSettings, view: ViewEnv, cam: &Transform, (centre, radiu
                 EnvMapping::Cylindrical => 2.0,
                 EnvMapping::ShrinkWrap => 3.0,
             };
-            u.map = Vec4::new(1.0, m, 0.0, 0.0);
+            u.map = Vec4::new(1.0, m, if env.use_alpha { 1.0 } else { 0.0 }, 0.0);
         }
     }
     // Standard fog without the camera's Environment Ranges: the scene's near and far side.
