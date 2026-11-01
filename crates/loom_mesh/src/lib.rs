@@ -25,6 +25,7 @@ pub mod topo_ops;
 pub mod tri_mesh;
 pub mod patch;
 pub mod standard_primitives;
+pub mod extended_primitives;
 mod teapot_data;
 
 pub use half_edge::{Face, FaceId, HalfEdge, HalfEdgeId, Vertex, VertexId};
