@@ -617,3 +617,21 @@ fn the_dope_sheet_window_does_not_grow_over_the_menu_bar() {
     menu_path(&mut h, &["Graph Editors", "New Track View..."]);
     assert_eq!(h.app.state.track_view.mode, loom_commands::track_view::TvMode::CurveEditor);
 }
+
+/// Views > xView > Open Edges on an Editable Poly plane: its four border
+/// edges are flagged, the active view shows "Open Edges: 4 Edges", and
+/// Select Results makes them the edge selection.
+#[test]
+fn xview_open_edges_and_select_results() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Plane, position: [0.0; 3], size: [20.0, 20.0, 0.0] });
+    h.cmd(Command::ConvertToEditablePoly);
+    menu_path(&mut h, &["Views", "xView", "Open Edges"]);
+    assert_eq!(h.app.state.xview.test, Some(loom_commands::xview::XViewTest::OpenEdges));
+    h.frames(2);
+    assert!(!h.text_rects("Open Edges: 4 Edges").is_empty(), "the result in the active view");
+    menu_path(&mut h, &["Views", "xView", "Select Results"]);
+    assert_eq!(h.app.state.selection_mode, loom_commands::SelectionMode::Edge);
+    assert_eq!(h.sub_count(), 4);
+}

@@ -1687,6 +1687,10 @@ commands! {
     SetViewportShadows => "Set Viewport Shadows", Loom, "Viewport Configuration > Lighting and Shadows: Shadows on/off, Hard / Soft and Shadow Intensity (0-1) of the active view (omitted ones stay)." { on: Option<bool>, soft: Option<bool>, intensity: Option<f32> };
     SetViewportAmbientOcclusion => "Set Viewport Ambient Occlusion", Loom, "Viewport Configuration > Lighting and Shadows > Ambient Occlusion of the active view: on/off, Radius (world units), Intensity (0-1); omitted ones stay." { on: Option<bool>, radius: Option<f32>, intensity: Option<f32> };
     ViewportAmbientOcclusionToggle => "Viewport Ambient Occlusion Toggle", MainUI, "Lighting and Shadows > Ambient Occlusion: the active shaded view darkens creases and contacts.";
+    XViewTest => "xView Test", MainUI, "Views > xView: run the mesh check `test` (Face Orientation, Overlapping Faces, Open Edges, Multiple Edges, Isolated Vertices, Overlapping Vertices, Missing UVW Coordinates, Flipped UVW Faces) on the selected Editable Poly / Mesh objects; null turns xView off. Returns the result." { test: Option<String> };
+    XViewSelectResults => "xView Select Results", MainUI, "xView > Select Results: the flagged sub-objects become the sub-object selection (at their level).";
+    XViewOption => "xView Option", Loom, "xView > See-Through, Auto Update, Display On Top: on / off." { name: String, on: bool };
+    XViewTolerance => "xView Tolerance", Loom, "xView > Configure: the Tolerance (world units) of Overlapping Vertices / Overlapping Faces." { value: f32 };
     ShowGhostingToggle => "Show Ghosting Toggle", MainUI, "Views > Show Ghosting: wireframe copies of the selected objects at frames before (yellow) and/or after (cyan) the current one (Preferences > Viewports > Ghosting).";
     ShowKeyTimesToggle => "Show Key Times Toggle", MainUI, "Views > Show Key Times: frame numbers beside the key points of the shown trajectories.";
     ShowDependenciesToggle => "Show Dependencies Toggle", MainUI, "Views > Show Dependencies: with the Modify panel open, the objects that share the edited object's base object or its current modifier (instances, references) show magenta.";

@@ -1311,6 +1311,42 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({ "shading": shading.label(), "edged_faces": vp.edged_faces }))
         }
         C::ShowAllSetsInListToggle => toggle(&mut state.show_all_sets_in_list, "show_all_sets_in_list"),
+        C::XViewTest { test } => {
+            state.xview.test = match test {
+                None => None,
+                Some(t) => Some(crate::xview::XViewTest::parse(&t).ok_or_else(|| format!("no xView test {t:?} ({})", crate::xview::XViewTest::ALL.map(|t| t.label()).join(", ")))?),
+            };
+            let (hits, message) = crate::xview::results(state, None);
+            Ok(json!({ "test": state.xview.test.map(|t| t.label()), "message": message, "objects": hits.iter().map(|h| json!({ "id": h.node.0, "items": h.items })).collect::<Vec<_>>() }))
+        }
+        C::XViewSelectResults => {
+            let (hits, _) = crate::xview::results(state, None);
+            let Some(first) = hits.iter().find(|h| !h.items.is_empty()) else { return Err("xView flags nothing".into()) };
+            let mode = match first.kind {
+                crate::xview::XViewKind::Vertices => SelectionMode::Vertex,
+                crate::xview::XViewKind::Edges => SelectionMode::Edge,
+                crate::xview::XViewKind::Faces => SelectionMode::Face,
+            };
+            execute(state, C::SelectionMode { mode })?;
+            for h in hits.iter().filter(|h| !h.items.is_empty()) {
+                execute(state, C::SelectSub { node: Some(h.node.0), ids: h.items.clone(), op: crate::SelectOp::Replace })?;
+            }
+            Ok(json!({ "selected": hits.iter().map(|h| h.items.len()).sum::<usize>() }))
+        }
+        C::XViewOption { name, on } => {
+            let x = &mut state.xview;
+            match name.to_ascii_lowercase().as_str() {
+                "see-through" | "see through" => x.see_through = on,
+                "auto update" => x.auto_update = on,
+                "display on top" => x.display_on_top = on,
+                _ => return Err(format!("no xView option {name:?} (See-Through, Auto Update, Display On Top)")),
+            }
+            Ok(json!({}))
+        }
+        C::XViewTolerance { value } => {
+            state.xview.tolerance = value.max(0.0);
+            Ok(json!({ "tolerance": state.xview.tolerance }))
+        }
         C::ShowGhostingToggle => toggle(&mut state.show_ghosting, "show_ghosting"),
         C::ShowKeyTimesToggle => toggle(&mut state.show_key_times, "show_key_times"),
         C::ShowDependenciesToggle => toggle(&mut state.show_dependencies, "show_dependencies"),

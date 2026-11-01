@@ -1751,6 +1751,8 @@ pub struct AppState {
     pub show_key_times: bool,
     /// Views > Show Ghosting.
     pub show_ghosting: bool,
+    /// Views > xView: the active mesh check and its settings.
+    pub xview: crate::xview::XView,
     /// Utilities panel buttons (Configure Button Sets), by utility name.
     pub utility_buttons: Vec<String>,
     pub show_vertices: bool,
@@ -2183,6 +2185,7 @@ impl AppState {
             show_dependencies: false,
             show_key_times: false,
             show_ghosting: false,
+            xview: crate::xview::XView::default(),
             utility_buttons: UTILITIES.iter().map(|s| (*s).to_owned()).collect(),
             show_vertices: false,
             show_statistics: false,

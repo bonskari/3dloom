@@ -54,6 +54,7 @@ pub fn general_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
             v
         }) },
         sep(),
+        MenuEntry { label: "xView".into(), checked: false, action: Action::Submenu(xview_entries(app)) },
         MenuEntry {
             label: "Create Preview".into(),
             checked: false,
@@ -65,6 +66,23 @@ pub fn general_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
         sep(),
         item("Configure Viewports...", Command::ConfigureViewports { panel: None }),
     ]
+}
+
+/// [+] > xView (also Views > xView): the mesh checks, Select Results and the display options.
+pub fn xview_entries(app: &LoomApp) -> Vec<MenuEntry> {
+    let x = &app.state.xview;
+    let mut v = vec![check("Show Statistics", app.state.show_statistics, Command::ShowStatisticsToggle)];
+    for t in loom_commands::xview::XViewTest::ALL {
+        let on = x.test == Some(t);
+        v.push(check(t.label(), on, Command::XViewTest { test: (!on).then(|| t.label().to_owned()) }));
+    }
+    v.push(sep());
+    v.push(item("Select Results", Command::XViewSelectResults));
+    v.push(sep());
+    v.push(check("See-Through", x.see_through, Command::XViewOption { name: "See-Through".into(), on: !x.see_through }));
+    v.push(check("Auto Update", x.auto_update, Command::XViewOption { name: "Auto Update".into(), on: !x.auto_update }));
+    v.push(check("Display On Top", x.display_on_top, Command::XViewOption { name: "Display On Top".into(), on: !x.display_on_top }));
+    v
 }
 
 /// The ViewCube menu (right-click the cube; also [+] > ViewCube).

@@ -18,6 +18,7 @@ pub mod mesh_edit;
 pub(crate) mod patch_edit;
 mod groups;
 pub mod stack;
+pub mod xview;
 pub mod spline;
 pub mod snap;
 pub mod state;

@@ -1435,6 +1435,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             }
             draw_trajectories(&painter, app, view_proj, rect);
             draw_ghosts(&painter, app, view_proj, rect);
+            draw_xview(&painter, app, index, view_proj, rect, camera_pos);
             draw_links(&painter, app, view_proj, rect);
             let mut gizmo_hover = None;
             if is_active && app.has_selection() {
@@ -3131,6 +3132,49 @@ fn draw_ghosts(painter: &egui::Painter, app: &LoomApp, view_proj: glam::Mat4, re
                 }
             }
         }
+    }
+}
+
+/// xView: the flagged sub-objects in green, and in the active view the
+/// test's name and result at the bottom (or top, Display On Top).
+fn draw_xview(painter: &egui::Painter, app: &LoomApp, index: usize, view_proj: glam::Mat4, rect: egui::Rect, eye: Vec3) {
+    let Some(test) = app.state.xview.test else { return };
+    let (hits, message) = loom_commands::xview::results(&app.state, Some(eye));
+    let green = egui::Color32::from_rgb(40, 230, 60);
+    let scr = |p: Vec3| project_world_to_screen(p, view_proj, rect);
+    for h in &hits {
+        let Some(n) = app.state.scene.node(h.node) else { continue };
+        let mesh = n.cage_mesh();
+        let m = app.state.scene.object_matrix(h.node);
+        for i in &h.items {
+            match h.kind {
+                loom_commands::xview::XViewKind::Vertices => {
+                    if let Some(p) = mesh.vertices().get(*i as usize).and_then(|v| scr(m.transform_point3(v.position))) {
+                        painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(5.0, 5.0)), 0.0, green);
+                    }
+                }
+                loom_commands::xview::XViewKind::Edges => {
+                    if let Some((a, b)) = mesh.edge_vertices(loom_mesh::HalfEdgeId(*i)) {
+                        if let (Some(a), Some(b)) = (mesh.vertex_position(a).and_then(|p| scr(m.transform_point3(p))), mesh.vertex_position(b).and_then(|p| scr(m.transform_point3(p)))) {
+                            painter.line_segment([a, b], egui::Stroke::new(2.0_f32, green));
+                        }
+                    }
+                }
+                loom_commands::xview::XViewKind::Faces => {
+                    if let Some(pts) = mesh.face_positions(loom_mesh::FaceId(*i)) {
+                        let s: Vec<egui::Pos2> = pts.iter().filter_map(|p| scr(m.transform_point3(*p))).collect();
+                        if s.len() == pts.len() && s.len() >= 3 {
+                            painter.add(egui::Shape::convex_polygon(s, green.gamma_multiply(0.45), egui::Stroke::new(1.0_f32, green)));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if index == app.state.active_viewport {
+        let text = format!("{}: {}", test.label(), message);
+        let (pos, align) = if app.state.xview.display_on_top { (rect.center_top() + egui::vec2(0.0, 22.0), egui::Align2::CENTER_TOP) } else { (rect.center_bottom() - egui::vec2(0.0, 8.0), egui::Align2::CENTER_BOTTOM) };
+        painter.text(pos, align, text, egui::FontId::proportional(13.0), green);
     }
 }
 

@@ -583,6 +583,22 @@ fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     check_item(ui, app, "Show Dependencies", "Show Dependencies Toggle", deps);
     let key_times = app.state.show_key_times;
     check_item(ui, app, "Show Key Times", "Show Key Times Toggle", key_times);
+    sub(ui, app, "xView", |ui, app| {
+        for e in crate::label_menus::xview_entries(app) {
+            match e.action {
+                crate::label_menus::Action::Command(c) => {
+                    let label = if e.checked { format!("✔ {}", e.label) } else { e.label.clone() };
+                    if ui.button(label).clicked() {
+                        let _ = app.dispatch(c);
+                        ui.close_menu();
+                    }
+                }
+                _ => {
+                    ui.separator();
+                }
+            }
+        }
+    });
     let ghosting = app.state.show_ghosting;
     check_item(ui, app, "Show Ghosting", "Show Ghosting Toggle", ghosting);
     item(ui, app, "Create Camera From View", "Create Camera From View");
