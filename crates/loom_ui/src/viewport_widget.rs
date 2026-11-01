@@ -1709,7 +1709,7 @@ fn camera_match_rect(app: &mut LoomApp, ctx: &egui::Context, index: usize, rect:
 fn camera_match_crosses(painter: &egui::Painter, app: &mut LoomApp, ctx: &egui::Context, index: usize, rect: egui::Rect, view_proj: Mat4) {
     let image = camera_match_rect(app, ctx, index, rect, view_proj);
     let (w, h) = (app.state.scene.render.width.max(1) as f32, app.state.scene.render.height.max(1) as f32);
-    let stroke = egui::Stroke::new(1.5, egui::Color32::RED);
+    let stroke = egui::Stroke::new(1.5_f32, egui::Color32::RED);
     for n in app.state.scene.nodes() {
         let loom_scene::ObjectKind::CamPoint { screen: Some(s), .. } = &n.object else { continue };
         let c = image.min + egui::vec2(s[0] / w * image.width(), s[1] / h * image.height());
