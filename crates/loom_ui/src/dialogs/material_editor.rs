@@ -2134,7 +2134,7 @@ pub fn render_map(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let mut render = false;
     egui::Window::new("Render Map").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
         ui.label(egui::RichText::new("Time Output").strong());
-        ui.radio(true, "Single");
+        let _ = ui.radio(true, "Single");
         ui.label(egui::RichText::new("Dimensions").strong());
         egui::Grid::new("render_map_size").num_columns(2).show(ui, |ui| {
             ui.label("Width:");
