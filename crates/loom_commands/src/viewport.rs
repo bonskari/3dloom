@@ -119,7 +119,6 @@ pub struct Viewport {
     /// Default Lights: 1 light (from the viewer) or 2 (key and fill).
     pub default_lights: u32,
     /// Lighting and Shadows > Shadows: scene lights cast shadows in the shaded view.
-    #[serde(default)]
     pub shadows: bool,
     pub background: Option<String>,
     pub background_locked: bool,
