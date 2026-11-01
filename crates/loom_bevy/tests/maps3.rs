@@ -121,7 +121,12 @@ fn an_unlocked_ambient_map_darkens_the_ambient_light() {
     let mut plane = loom_mesh::plane_segmented(200.0, 200.0, 1, 1);
     loom_mesh::uvmap::auto_map(&mut plane, loom_mesh::uvmap::AutoMap::Planar, 1);
     let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -1.0, 150.0), Vec3::ZERO, Vec3::Y), projection: Mat4::perspective_rh(50f32.to_radians(), 1.0, 1.0, 1000.0) };
-    r.sync_lights(&[]);
+    // One black light: no default key and fill, the ambient light alone.
+    let mut l = default_lights(1, Mat4::IDENTITY)[0].clone();
+    l.id = loom_scene::NodeId(12);
+    l.color = Vec3::ZERO;
+    l.shadows = false;
+    r.sync_lights(&[l]);
     let mut shot = |m: &StandardMaterial| {
         r.sync(&[SceneObject { id: 3, mesh: &plane, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(Surface::from_standard(m)))), renderable: true, flags: Default::default() }]);
         r.render_with(32, 32, &cam, RenderOptions { ambient: [1.0; 3], ..RenderOptions::default() }).unwrap().get_pixel(16, 16).0[1]
