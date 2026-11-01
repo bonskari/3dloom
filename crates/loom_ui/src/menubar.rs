@@ -620,6 +620,17 @@ fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         }
     });
+    sub(ui, app, "Extended Primitives", |ui, app| {
+        for kind in loom_mesh::extended_primitives::ExtendedKind::ALL {
+            if ui.button(kind.label()).clicked() {
+                app.create_extended = true;
+                app.create_category = crate::Category::Geometry;
+                app.panel_tab = crate::Tab::Create;
+                app.start_create(Some(crate::CreateKind::Extended(kind)));
+                ui.close_menu();
+            }
+        }
+    });
     sub(ui, app, "Lights", |ui, app| {
         ui.menu_button("Photometric Lights", |ui| {
             for kind in loom_commands::light::LightKind::PHOTOMETRIC {
@@ -692,6 +703,17 @@ fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
                 app.create_category = crate::Category::Shapes;
                 app.panel_tab = crate::Tab::Create;
                 app.start_create(Some(kind));
+                ui.close_menu();
+            }
+        }
+    });
+    sub(ui, app, "Extended Shapes", |ui, app| {
+        for kind in loom_shape::parametric::ExtendedShape::ALL {
+            if ui.button(kind.label()).clicked() {
+                app.create_extended_shapes = true;
+                app.create_category = crate::Category::Shapes;
+                app.panel_tab = crate::Tab::Create;
+                app.start_create(Some(crate::CreateKind::ExtendedShape(kind)));
                 ui.close_menu();
             }
         }

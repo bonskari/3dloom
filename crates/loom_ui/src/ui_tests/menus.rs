@@ -399,3 +399,13 @@ fn views_show_dependencies_colours_instances_magenta() {
     h.frames(2);
     assert_eq!(magenta(&h), 0, "only with the Modify panel");
 }
+
+/// Create > Extended Primitives / Extended Shapes start their create tools.
+#[test]
+fn create_menu_extended_primitives_and_shapes_start_their_tools() {
+    let mut h = Harness::new();
+    menu_path(&mut h, &["Create", "Extended Primitives", "Capsule"]);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Extended(loom_mesh::extended_primitives::ExtendedKind::Capsule)));
+    menu_path(&mut h, &["Create", "Extended Shapes", "Wide Flange"]);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::ExtendedShape(loom_shape::parametric::ExtendedShape::WideFlange)));
+}
