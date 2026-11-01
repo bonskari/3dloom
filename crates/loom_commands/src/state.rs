@@ -315,6 +315,10 @@ pub enum PickMode {
     PlaceHighlight,
     /// Spacing Tool > Pick Path: the clicked shape is the path.
     SpacingPath,
+    /// Walkthrough Assistant > Pick Path: the clicked shape is the camera's path.
+    WalkthroughPath,
+    /// Walkthrough Assistant > Pick Target Path: the clicked shape / object carries the target.
+    WalkthroughTargetPath,
     /// Skin Morph > Pick Bone: each clicked bone joins the list.
     SkinMorphBone,
     /// Skin Morph > External Mesh: the clicked object becomes the current morph's target.
@@ -2305,6 +2309,8 @@ pub struct AppState {
     pub rendered: crate::render::RenderedFrame,
     /// The Environment and Effects dialog (open panel, exposure preview).
     pub environment_ui: crate::environment::EnvironmentUi,
+    /// Animation > Walkthrough Assistant (camera, path heights, preview).
+    pub walkthrough: crate::walkthrough::WalkthroughUi,
 }
 
 /// A render for the UI's renderer: viewport `viewport` with `settings`
@@ -2330,6 +2336,8 @@ pub struct RenderRequest {
     pub cube_face: Option<u8>,
     /// ActiveShade: into its window's image, not the Rendered Frame Window.
     pub active_shade: bool,
+    /// With `preview`: into the Walkthrough Assistant's preview instead.
+    pub walkthrough_preview: bool,
 }
 
 impl Default for AppState {
@@ -2572,6 +2580,7 @@ impl AppState {
             render_to_texture_open: false,
             rendered: Default::default(),
             environment_ui: Default::default(),
+            walkthrough: Default::default(),
             uv_defaults: UvEditor::default(),
             seam_point: None,
             merge_pending: None,

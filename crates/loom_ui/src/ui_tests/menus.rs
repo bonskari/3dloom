@@ -1262,3 +1262,39 @@ fn command_panel_columns_and_rollout_threshold() {
     let sel = h.text_rects("Selection").into_iter().find(|r| p.contains(r.center())).expect("Selection");
     assert!(pd.left() < p.left() + crate::command_panel::rollouts::COLUMN_WIDTH * 0.9 && pd.top() < sel.top(), "Paint Deformation leads the first column: {pd:?} {sel:?}");
 }
+
+/// Animation > Walkthrough Assistant: Create New Camera in the floater makes
+/// Walkthrough_Cam01, Pick Path then a click on the line puts it on the path,
+/// Reset Eyes Level levels a tilted head.
+#[test]
+fn walkthrough_assistant_create_camera_pick_path_reset_eyes() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let r = h.app.dispatch(Command::LineStart { point: [0.0, 0.0, 0.0] }).unwrap();
+    let line = r["id"].as_u64().unwrap();
+    h.cmd(Command::LineAddKnot { node: line, point: [100.0, 0.0, 0.0], smooth: false });
+    h.cmd(Command::LineEnd { node: line });
+    menu_path(&mut h, &["Animation", "Walkthrough Assistant..."]);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::WalkthroughAssistant));
+    h.frames(2);
+    let create = h.find_all(Role::Button, "Create New Camera");
+    assert_eq!(create.len(), 1);
+    h.click(create[0].center());
+    h.frames(2);
+    let cam = h.app.state.walkthrough.camera.expect("the floater's camera");
+    assert_eq!(h.app.state.scene.node(cam).unwrap().name, "Walkthrough_Cam01");
+    assert!(!h.text_rects("Walkthrough_Cam01").is_empty(), "listed under Cameras");
+    let pick = h.text_rects("Pick Path");
+    assert!(!pick.is_empty());
+    h.click(pick[0].center());
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::WalkthroughPath));
+    h.cmd(Command::PickHit { id: line });
+    assert_eq!(loom_commands::walkthrough::path_of(&h.app.state, cam), Some(loom_scene::NodeId(line)));
+    h.cmd(Command::WalkthroughHead { camera: cam.0, turn: None, tilt: Some(20.0) });
+    h.frames(2);
+    let reset = h.find_all(Role::Button, "Reset Eyes Level");
+    assert_eq!(reset.len(), 1, "View Controls for a free camera");
+    h.click(reset[0].center());
+    let (_, tilt) = loom_commands::walkthrough::head_angles(h.app.state.scene.node(cam).unwrap().transform.rotation_quat());
+    assert!(tilt.abs() < 1e-3, "{tilt}");
+}

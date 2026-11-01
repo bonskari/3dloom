@@ -7,6 +7,7 @@ pub mod configure_paths;
 pub mod align;
 pub mod array;
 pub mod spacing_tool;
+pub mod walkthrough;
 pub mod snapshot;
 pub mod clone_and_align;
 pub mod align_to_view;
@@ -218,6 +219,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::PropagateLayers => propagate_layers(ctx, app, &mut open),
         Dialog::XViewConfigure => xview_configure(ctx, app, &mut open),
         Dialog::ReactionManager => wiring::reaction_manager(ctx, app, &mut open),
+        Dialog::WalkthroughAssistant => walkthrough::show(ctx, app, &mut open),
         Dialog::AnimationLayers => wiring::animation_layers(ctx, app, &mut open),
         Dialog::BrushPresetManager => wiring::brush_preset_manager(ctx, app, &mut open),
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::EnvironmentMap | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),

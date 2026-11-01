@@ -78,6 +78,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c if crate::render::handles(&c) => crate::render::execute(state, c),
         c if crate::render_output::handles(&c) => crate::render_output::execute(state, c),
         c if crate::environment::handles(&c) => crate::environment::execute(state, c),
+        c if crate::walkthrough::handles(&c) => crate::walkthrough::execute(state, c),
         c if crate::bake::handles(&c) => crate::bake::execute(state, c),
         c if crate::controllers::handles(&c) => crate::controllers::execute(state, c),
         c if crate::motion::handles(&c) => crate::motion::execute(state, c),
@@ -3046,6 +3047,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.spacing_points = [None, None];
                     return Ok(json!({ "path": id.0 }));
                 }
+                Some(PickMode::WalkthroughPath | PickMode::WalkthroughTargetPath) => {
+                    let target = state.pick_mode == Some(PickMode::WalkthroughTargetPath);
+                    let cam = state.walkthrough.camera.ok_or("create or choose a camera first")?;
+                    let path = state.scene.node(id).and_then(|n| n.object.shape()).is_some();
+                    let r = if target { execute(state, C::WalkthroughSetTarget { camera: cam.0, path, node: Some(id.0) }) } else { execute(state, C::WalkthroughSetPath { camera: cam.0, path: Some(id.0) }) };
+                    if r.is_ok() {
+                        state.pick_mode = None;
+                    }
+                    return r;
+                }
                 Some(PickMode::PlaceHighlight) => return Err("Place Highlight drags over a surface".into()),
                 Some(PickMode::ProtractorObject(which)) => {
                     state.pick_mode = None;
@@ -4125,7 +4136,7 @@ pub(crate) fn set_frame(state: &mut AppState, frame: i32) -> Result<Value, Strin
     Ok(json!({ "frame": state.current_frame }))
 }
 
-fn set_view(state: &mut AppState, kind: ViewKind) -> Result<Value, String> {
+pub(crate) fn set_view(state: &mut AppState, kind: ViewKind) -> Result<Value, String> {
     state.record_view();
     let vp = state.active_mut();
     vp.kind = kind;

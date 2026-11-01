@@ -818,6 +818,7 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Parameter Collector...", Command::ParameterCollector);
     cmd(ui, app, "Reaction Manager...", Command::ReactionManager);
     cmd(ui, app, "Animation Layers...", Command::AnimationLayers);
+    cmd(ui, app, "Walkthrough Assistant...", Command::WalkthroughAssistant);
     sub(ui, app, "Wire Parameters", |ui, app| {
         cmd(ui, app, "Parameter Wire Dialog...", Command::ParameterWiringDialog);
     });

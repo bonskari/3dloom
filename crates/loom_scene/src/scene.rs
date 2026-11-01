@@ -1051,7 +1051,8 @@ impl Scene {
                             let roll = (-pc.bank_amount * turn * std::f32::consts::PI).clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
                             q = Quat::from_axis_angle(tan.normalize(), roll) * q;
                         }
-                        wrot = q;
+                        // The node's own rotation turns it within the path's frame.
+                        wrot = q * r;
                     }
                 }
             }

@@ -82,7 +82,7 @@ fn for_selection(state: &mut AppState, label: &str, target: Option<NodeId>, f: i
 }
 
 /// % Along Path keyed 0 at the segment start and 100 at its end.
-fn percent_param(state: &AppState) -> Param<f32> {
+pub(crate) fn percent_param(state: &AppState) -> Param<f32> {
     let mut p = Param::new(0.0f32);
     let (s0, s1) = state.frame_range;
     let tangents = state.default_tangent;

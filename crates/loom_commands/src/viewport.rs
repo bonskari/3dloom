@@ -589,6 +589,8 @@ pub enum Dialog {
     XViewConfigure,
     /// Animation > Reaction Manager.
     ReactionManager,
+    /// Animation > Walkthrough Assistant.
+    WalkthroughAssistant,
     /// Animation > Animation Layers.
     AnimationLayers,
     /// Brush Presets toolbar > Brush Preset Manager.
