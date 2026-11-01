@@ -802,6 +802,8 @@ commands! {
     AddModifier => "Add Modifier", Loom, "Add a modifier from the Modifier List above the active entry of the selected objects." { name: String };
     DeleteModifier => "Delete Modifier", Loom, "Remove stack entry `index` (0 = bottom) from the selected objects." { index: u32 };
     MoveModifier => "Move Modifier", Loom, "Reorder the stack: entry `from` goes to position `to`." { from: u32, to: u32 };
+    DeleteModifiers => "Delete Modifiers", Loom, "Delete the stack entries `indices` (several selected in the stack) in one undo step." { indices: Vec<u32> };
+    SetModifiersEnabled => "Set Modifiers Enabled", Loom, "Turn the stack entries `indices` on or off together." { indices: Vec<u32>, on: bool };
     CopyModifier => "Copy Modifier", Loom, "Shift-drag (copy) / Ctrl-drag (`instance`) in the stack: a copy of entry `from` is inserted so it ends up at position `to` (0 = bottom, up to the stack length)." { from: u32, to: u32, instance: bool };
     ToggleModifier => "Toggle Modifier", Loom, "Modifier on / off (the stack lightbulb)." { index: u32, on: bool };
     ToggleModifierInViewport => "Toggle Modifier In Viewport", Loom, "Modifier on / off in viewports only." { index: u32, on: bool };

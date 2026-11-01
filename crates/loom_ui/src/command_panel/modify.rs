@@ -145,6 +145,12 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let mut collapse_to: Option<usize> = None;
     let mut dropped: Option<(usize, usize, Option<bool>)> = None;
     let mut rename: Option<(usize, String)> = None;
+    // Several entries selected with Ctrl / Shift (besides the active one).
+    let multi_id = egui::Id::new(("stack_multi", id.0));
+    let mut multi: std::collections::BTreeSet<usize> = ui.ctx().data(|d| d.get_temp(multi_id)).unwrap_or_default();
+    multi.retain(|k| *k < entries.len());
+    let mut delete_many = false;
+    let entries_len = entries.len();
     let stack_height = app.stack_height;
     let stack_frame = egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_height(stack_height);
@@ -211,9 +217,26 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
                 let label = if instance.is_some() { format!("{name}  (instanced)") } else { name.clone() };
                 let text = if active == Some(i) { egui::RichText::new(label).strong() } else { egui::RichText::new(label) };
-                let r = ui.add(egui::SelectableLabel::new(active == Some(i), text)).interact(egui::Sense::click_and_drag());
+                let r = ui.add(egui::SelectableLabel::new(active == Some(i) || multi.contains(&i), text)).interact(egui::Sense::click_and_drag());
                 if r.clicked() {
-                    select = Some(Some(i));
+                    // Ctrl adds / removes an entry, Shift adds the run from the
+                    // active one; a plain click selects it alone.
+                    let m = ui.input(|inp| inp.modifiers);
+                    if m.ctrl || m.command {
+                        if !multi.remove(&i) {
+                            multi.insert(i);
+                        }
+                        if let Some(a) = active {
+                            multi.insert(a);
+                        }
+                    } else if m.shift {
+                        if let Some(a) = active {
+                            multi.extend(a.min(i)..=a.max(i));
+                        }
+                    } else {
+                        multi.clear();
+                        select = Some(Some(i));
+                    }
                 }
                 // Drag onto another row: moves the entry there; Shift copies it,
                 // Ctrl instances it.
@@ -230,7 +253,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         ui.close_menu();
                     }
                     if ui.button("Delete").clicked() {
-                        delete = Some(i);
+                        if multi.len() > 1 {
+                            delete_many = true;
+                        } else {
+                            delete = Some(i);
+                        }
                         ui.close_menu();
                     }
                     if ui.button("Cut").clicked() {
@@ -253,7 +280,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                     }
                     ui.separator();
                     if ui.button(if *enabled { "Off" } else { "On" }).clicked() {
-                        toggle = Some((i, !*enabled));
+                        if multi.len() > 1 {
+                            let _ = app.dispatch(Command::SetModifiersEnabled { indices: multi.iter().map(|k| *k as u32).collect(), on: !*enabled });
+                        } else {
+                            toggle = Some((i, !*enabled));
+                        }
                         ui.close_menu();
                     }
                     if ui.button(if *in_vp { "Off in Viewport" } else { "On in Viewport" }).clicked() {
@@ -277,6 +308,17 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         let _ = app.dispatch(Command::SelectStackEntry { index: Some(i as u32) });
                         let _ = app.dispatch(Command::MakeUnique);
                         ui.close_menu();
+                    }
+                    ui.separator();
+                    // Every entry's sub-object levels shown / hidden.
+                    for (label, open) in [("Show All Subtrees", true), ("Hide All Subtrees", false)] {
+                        if ui.button(label).clicked() {
+                            for k in 0..=entries_len {
+                                let key = (id.0, if k == entries_len { None } else { Some(k) });
+                                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("stack_open", key)), open));
+                            }
+                            ui.close_menu();
+                        }
                     }
                 });
             });
@@ -358,6 +400,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         }
     });
+    if delete_many {
+        let _ = app.dispatch(Command::DeleteModifiers { indices: multi.iter().map(|k| *k as u32).collect() });
+        multi.clear();
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(multi_id, multi.clone()));
     // The bar under the stack display: dragging it makes the display taller or shorter.
     let frame_rect = stack_frame.response.rect;
     let bar_rect = egui::Rect::from_min_max(egui::pos2(frame_rect.left(), frame_rect.bottom() - 3.0), egui::pos2(frame_rect.right(), frame_rect.bottom() + 2.0));
@@ -398,8 +445,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             // Several selected: ask whether they become unique with respect to each other.
             let _ = app.dispatch(if app.state.selection.len() > 1 { Command::MakeUniqueDialog } else { Command::MakeUnique });
         }
-        if Icon::new(icons::REMOVE_MODIFIER, "Remove modifier from the stack").enabled(active.is_some()).show(ui, &app.state).clicked() {
-            if let Some(a) = active {
+        if Icon::new(icons::REMOVE_MODIFIER, "Remove modifier from the stack").enabled(active.is_some() || !multi.is_empty()).show(ui, &app.state).clicked() {
+            if multi.len() > 1 {
+                let _ = app.dispatch(Command::DeleteModifiers { indices: multi.iter().map(|k| *k as u32).collect() });
+                ui.ctx().data_mut(|d| d.remove::<std::collections::BTreeSet<usize>>(multi_id));
+            } else if let Some(a) = active {
                 delete = Some(a);
             }
         }

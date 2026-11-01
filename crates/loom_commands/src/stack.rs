@@ -21,6 +21,27 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             r
         }
+        C::DeleteModifiers { indices } => {
+            let mut del: Vec<usize> = indices.iter().map(|i| *i as usize).collect();
+            del.sort_unstable();
+            del.dedup();
+            let del2 = del.clone();
+            edit_stack_repointing(state, "Delete Modifiers", move |stack| {
+                if del.iter().any(|i| *i >= stack.len()) {
+                    return Err("stack index out of range".into());
+                }
+                for i in del.iter().rev() {
+                    stack.remove(*i);
+                }
+                Ok(())
+            }, &move |i| if del2.contains(&i) { None } else { Some(i - del2.iter().filter(|d| **d < i).count()) })
+        }
+        C::SetModifiersEnabled { indices, on } => edit_stack(state, if on { "Modifiers On" } else { "Modifiers Off" }, |stack| {
+            for i in &indices {
+                stack.get_mut(*i as usize).ok_or_else(|| format!("no stack entry {i}"))?.enabled = on;
+            }
+            Ok(())
+        }),
         C::DeleteModifier { index } => {
             let idx = index as usize;
             edit_stack_repointing(state, "Delete Modifier", |stack| {

@@ -513,3 +513,37 @@ fn the_stack_resize_bar_makes_the_stack_display_taller() {
     let bar2 = bar_rect(&h);
     assert!(bar2.center().y > bar.center().y, "the bar moved down with it");
 }
+
+/// Ctrl+click selects several stack entries; right-click > Delete removes
+/// them together in one undo step, Off turns them off together; Show All
+/// Subtrees opens every entry's sub-object levels.
+#[test]
+fn several_stack_entries_select_with_ctrl_and_delete_together() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = selected(&h);
+    for m in ["Bend", "Taper", "Twist"] {
+        h.cmd(Command::AddModifier { name: m.into() });
+    }
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let row = |h: &Harness, name: &str| h.text_rects(name).into_iter().filter(|r| r.min.x > SCREEN.max.x * 0.5 || r.min.x > 1000.0).last().unwrap_or_else(|| panic!("the {name} row"));
+    h.click(row(&h, "Bend").center());
+    h.mods = egui::Modifiers::CTRL;
+    h.click(row(&h, "Twist").center());
+    h.mods = egui::Modifiers::NONE;
+    // Off for both.
+    right_click(&mut h, row(&h, "Twist").center());
+    h.click(h.find(Role::Button, "Off").center());
+    let on: Vec<bool> = h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.enabled).collect();
+    assert_eq!(on, [false, true, false], "Bend and Twist off, Taper on");
+    right_click(&mut h, row(&h, "Twist").center());
+    h.click(h.find(Role::Button, "Show All Subtrees").center());
+    right_click(&mut h, row(&h, "Twist").center());
+    h.click(h.find(Role::Button, "Delete").center());
+    let names: Vec<String> = h.app.state.scene.node(id).unwrap().modifiers.iter().map(|m| m.name.clone()).collect();
+    assert_eq!(names, ["Taper"]);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 3, "one undo step");
+}
