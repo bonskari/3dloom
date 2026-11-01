@@ -1317,6 +1317,7 @@ pub struct Surface {
     pub opacity_map: Option<Map>,
     pub bump_map: Option<Map>,
     pub specular_level_map: Option<Map>,
+    pub glossiness_map: Option<Map>,
     pub self_illum_map: Option<Map>,
     pub show_map_in_viewport: bool,
     /// The shader and its values.
@@ -1478,6 +1479,7 @@ impl Surface {
             opacity_map: on(&m.opacity_map),
             bump_map: on(&m.bump_map),
             specular_level_map: on(&m.specular_level_map),
+            glossiness_map: on(&m.glossiness_map),
             self_illum_map: on(&m.self_illum_map),
             show_map_in_viewport: m.show_map_in_viewport,
             shading: m.shading.clone(),
@@ -1893,6 +1895,7 @@ fn blend(a: &Surface, b: &Surface, p: &Blend) -> Surface {
         opacity_map: if t < 0.5 { a.opacity_map.clone() } else { b.opacity_map.clone() },
         bump_map: if t < 0.5 { a.bump_map.clone() } else { b.bump_map.clone() },
         specular_level_map: if t < 0.5 { a.specular_level_map.clone() } else { b.specular_level_map.clone() },
+        glossiness_map: if t < 0.5 { a.glossiness_map.clone() } else { b.glossiness_map.clone() },
         self_illum_map: if t < 0.5 { a.self_illum_map.clone() } else { b.self_illum_map.clone() },
         shading: if t < 0.5 { a.shading.clone() } else { b.shading.clone() },
         extended: if t < 0.5 { a.extended.clone() } else { b.extended.clone() },

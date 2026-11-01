@@ -336,3 +336,29 @@ fn a_bitmap_dropped_on_selected_polygons_gets_its_own_sub_material() {
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(sub_list(&s, multi).len(), list.len());
 }
+
+#[test]
+fn clean_multi_material_removes_the_sub_materials_no_face_uses() {
+    let mut s = AppState::new();
+    let n = boxed(&mut s);
+    execute(&mut s, Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let id = top(&s);
+    let used: std::collections::BTreeSet<u16> = s.scene.node(n).unwrap().mesh().faces().iter().map(|f| f.material_id + 1).collect();
+    let unused: Vec<u16> = (1..=10).filter(|i| !used.contains(i)).collect();
+    assert!(!unused.is_empty() && unused.len() < 10, "a box uses some of the 10 IDs: {used:?}");
+    let found = execute(&mut s, Command::CleanMultiMaterial { materials: None, apply: false }).unwrap();
+    assert_eq!(found["materials"][0]["material"], id.0);
+    assert_eq!(found["materials"][0]["unused"], serde_json::json!(unused));
+    assert_eq!(sub_list(&s, id).len(), 10, "listing changes nothing");
+    // Turned off in the list: left alone.
+    execute(&mut s, Command::CleanMultiMaterial { materials: Some(vec![]), apply: true }).unwrap();
+    assert_eq!(sub_list(&s, id).len(), 10);
+    execute(&mut s, Command::CleanMultiMaterial { materials: None, apply: true }).unwrap();
+    let kept: std::collections::BTreeSet<u16> = sub_list(&s, id).iter().map(|e| e.id).collect();
+    assert_eq!(kept, used.iter().copied().filter(|i| *i <= 10).collect());
+    let after = execute(&mut s, Command::CleanMultiMaterial { materials: None, apply: false }).unwrap();
+    assert_eq!(after["materials"], serde_json::json!([]));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(sub_list(&s, id).len(), 10, "one undo step brings them back");
+}

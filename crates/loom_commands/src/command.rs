@@ -1425,6 +1425,7 @@ commands! {
     MaterialMakeUnique => "Material Make Unique", Loom, "Material Editor > Make Unique: the sub-material at the current level, used in more than one place, gets a copy of its own here.";
     PutMaterialToScene => "Put Material to Scene", Loom, "Material Editor > Put Material to Scene: the objects using a scene material with the active slot material's name get the slot's material.";
     SelectByMaterial => "Select By Material", Loom, "Material Editor > Select By Material: select the objects that use the active slot's material (directly or as a sub-material).";
+    CleanMultiMaterial => "Clean MultiMaterial", Loom, "Material Editor > Utilities > Clean MultiMaterial: the Multi/Sub-Object materials with sub-materials no face in the scene uses (by material ID); `apply` removes those sub-materials from `materials` (omitted = every one listed) in one undo step." { materials: Option<Vec<u32>>, apply: bool };
     MultiSubSort => "Multi/Sub Sort", Loom, "Multi/Sub-Object Basic Parameters: sort the list by `by` = ID, Name or Sub (the sub-materials' names)." { by: String };
     PutToLibrary => "Put to Library", Loom, "Material Editor > Put to Library: the active slot's material (with its sub-materials) into the current material library, under `name` (omitted = the material's name; the same name replaces)." { name: Option<String> };
     GetFromLibrary => "Get From Library", Loom, "Material/Map Browser, Browse From Mtl Library: a copy of the library material `name` goes into the active slot." { name: String };

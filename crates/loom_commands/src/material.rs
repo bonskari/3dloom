@@ -61,6 +61,7 @@ pub fn handles(c: &C) -> bool {
             | C::PutMaterialToScene
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
+            | C::CleanMultiMaterial { .. }
     )
 }
 
@@ -322,6 +323,26 @@ pub fn users_of(state: &AppState, id: MaterialId) -> Vec<NodeId> {
         false
     };
     state.scene.nodes().filter(|n| n.material.is_some_and(uses)).map(|n| n.id).collect()
+}
+
+/// Clean MultiMaterial: each Multi/Sub-Object material in the library with
+/// the IDs of its sub-materials that no face of an object using it has.
+fn unused_sub_materials(state: &AppState) -> Vec<(MaterialId, Vec<u16>)> {
+    let mut out = Vec::new();
+    for (id, m) in state.scene.materials.iter() {
+        let MaterialKind::MultiSub(list) = &m.kind else { continue };
+        let mut used = std::collections::BTreeSet::new();
+        for n in users_of(state, *id) {
+            if let Some(node) = state.scene.node(n) {
+                used.extend(node.mesh().faces().iter().map(|f| f.material_id + 1));
+            }
+        }
+        let unused: Vec<u16> = list.iter().map(|s| s.id).filter(|i| !used.contains(i)).collect();
+        if !unused.is_empty() {
+            out.push((*id, unused));
+        }
+    }
+    out
 }
 
 fn execute_select(state: &mut AppState, ids: Vec<u64>) -> Result<Value, String> {
@@ -897,6 +918,23 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 return Err("no object uses this material".into());
             }
             execute_select(state, ids)
+        }
+        C::CleanMultiMaterial { materials, apply } => {
+            let unused = unused_sub_materials(state);
+            let picked: Vec<(MaterialId, Vec<u16>)> = unused.iter().filter(|(m, _)| materials.as_ref().is_none_or(|l| l.contains(&m.0))).cloned().collect();
+            let list = |v: &[(MaterialId, Vec<u16>)]| -> Vec<Value> { v.iter().map(|(m, ids)| json!({ "material": m.0, "name": state.scene.materials.get(m).map(|x| x.name.clone()).unwrap_or_default(), "unused": ids })).collect() };
+            if !apply || picked.is_empty() {
+                return Ok(json!({ "materials": list(&unused) }));
+            }
+            let before = snapshot(state);
+            let mut after = before.clone();
+            for (m, ids) in &picked {
+                multi_list(&mut after.0, *m)?.retain(|s| !ids.contains(&s.id));
+            }
+            let cleaned = list(&picked);
+            commit(state, "Clean MultiMaterial", Change::SetMaterials { before, after })?;
+            state.mesh_dirty = true;
+            Ok(json!({ "cleaned": cleaned }))
         }
         C::MultiSubSort { by } => edit_level(state, "Sort", |lib, _, id, _| {
             let names: std::collections::BTreeMap<MaterialId, String> = lib.iter().map(|(k, m)| (*k, m.name.clone())).collect();

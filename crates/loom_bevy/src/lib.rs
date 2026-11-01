@@ -1205,6 +1205,17 @@ impl BevyRenderer {
                 m.reflectance *= 2.0;
             }
         }
+        if let Some(map) = s.glossiness_map.as_ref() {
+            if let Some((img, k)) = self.in_frame(map, frame) {
+                // The shader's widening of the Blinn lobe (Phong) carries over per texel.
+                let widen = m.perceptual_roughness / convert::blinn_roughness(s.glossiness);
+                let key = format!("gloss:{k}:{}:{}:{widen}", map.amount, s.glossiness);
+                m.metallic_roughness_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::glossiness_roughness(&img, s.glossiness, map.amount / 100.0, widen));
+                if m.metallic_roughness_texture.is_some() {
+                    m.perceptual_roughness = 1.0;
+                }
+            }
+        }
         if let Some(map) = s.self_illum_map.as_ref() {
             if let Some((img, k)) = self.in_frame(map, frame) {
                 let key = format!("illum:{k}:{}", map.amount);

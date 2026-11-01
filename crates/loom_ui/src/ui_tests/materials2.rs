@@ -212,3 +212,29 @@ fn put_to_library_then_get_it_from_the_mtl_library_in_the_browser() {
     h.frames(3);
     assert_eq!(h.app.state.scene.slot_material(3).name, "Shiny");
 }
+
+#[test]
+fn utilities_clean_multi_material_removes_unused_sub_materials_on_ok() {
+    let mut h = editor();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) });
+    h.cmd(Command::AssignMaterialToSelection);
+    h.frames(2);
+    let id = h.app.state.scene.material_editor.slots[h.app.state.scene.material_editor.active].unwrap();
+    let count = |h: &Harness| match &h.app.state.scene.materials[&id].kind {
+        loom_scene::material::MaterialKind::MultiSub(l) => l.len(),
+        _ => 0,
+    };
+    assert_eq!(count(&h), 10);
+    scroll_top(&mut h);
+    click_in_editor(&mut h, "Utilities", 0.0);
+    h.frames(2);
+    h.click_text_anywhere("Clean MultiMaterial...");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::CleanMultiMaterial));
+    assert!(!h.text_rects("Clean Multi-Materials").is_empty(), "the dialog shows");
+    h.click_text_anywhere("OK");
+    h.frames(2);
+    assert!(count(&h) < 10, "unused sub-materials removed: {}", count(&h));
+    assert_eq!(h.app.state.dialog, None);
+}

@@ -607,6 +607,12 @@ fn menu(ui: &mut egui::Ui, app: &mut LoomApp) {
                 ui.close_menu();
             }
         });
+        ui.menu_button("Utilities", |ui| {
+            if ui.button("Clean MultiMaterial...").clicked() {
+                app.state.dialog = Some(Dialog::CleanMultiMaterial);
+                ui.close_menu();
+            }
+        });
         ui.menu_button("Options", |ui| {
             let o = app.state.scene.material_editor.options.clone();
             for (label, n) in [("3 X 2 Sample Windows", 6u32), ("5 X 3 Sample Windows", 15), ("6 X 4 Sample Windows", 24)] {
@@ -2115,6 +2121,57 @@ pub fn replace_material(ctx: &egui::Context, app: &mut LoomApp, kind: u8, map: b
 }
 
 /// Material Editor Options: lights, background, slots; Apply / OK / Cancel.
+/// Clean MultiMaterial: the Multi/Sub-Object materials with unused
+/// sub-materials, each on by default; OK removes those sub-materials.
+pub fn clean_multi_material(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    // Only a query: straight to the registry, not through dispatch's after-command sync.
+    let found = loom_commands::execute(&mut app.state, Command::CleanMultiMaterial { materials: None, apply: false }).ok();
+    let rows: Vec<(u32, String, usize)> = found
+        .as_ref()
+        .and_then(|v| v["materials"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .map(|m| (m["material"].as_u64().unwrap_or(0) as u32, m["name"].as_str().unwrap_or("").to_owned(), m["unused"].as_array().map_or(0, |a| a.len())))
+        .collect();
+    let id = egui::Id::new("clean_multi_material_off");
+    let mut off: Vec<u32> = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    let mut action = None;
+    egui::Window::new("Clean Multi-Materials").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label(if rows.is_empty() { "No Multi/Sub-Object materials with unused sub-materials.".to_owned() } else { format!("{} Multi/Sub-Object material(s) with unused sub-materials:", rows.len()) });
+        for (m, name, n) in &rows {
+            let mut on = !off.contains(m);
+            if ui.checkbox(&mut on, format!("{name} ({n} unused)")).changed() {
+                off.retain(|x| x != m);
+                if !on {
+                    off.push(*m);
+                }
+            }
+        }
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                action = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                action = Some(false);
+            }
+        });
+    });
+    if let Some(ok) = action {
+        if ok {
+            let picked: Vec<u32> = rows.iter().map(|r| r.0).filter(|m| !off.contains(m)).collect();
+            if !picked.is_empty() {
+                let _ = app.dispatch(Command::CleanMultiMaterial { materials: Some(picked), apply: true });
+            }
+        }
+        *open = false;
+    }
+    if *open {
+        ctx.data_mut(|d| d.insert_temp(id, off));
+    } else {
+        ctx.data_mut(|d| d.remove::<Vec<u32>>(id));
+    }
+}
+
 pub fn options(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let id = egui::Id::new("material_editor_options_edit");
     let current = app.state.scene.material_editor.options.clone();

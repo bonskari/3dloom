@@ -218,6 +218,27 @@ pub fn luminance(img: &MapImage, amount: f32) -> MapImage {
     MapImage { width: img.width, height: img.height, rgba }
 }
 
+/// A Glossiness map as Bevy's metallic-roughness texture: per texel the
+/// Glossiness is the spinner blended toward the map's grey × 100 by the
+/// Amount (0–1), as perceptual roughness (times `widen`) in green; blue
+/// (metallic) is 1 so the material's metallic factor is kept.
+pub fn glossiness_roughness(img: &MapImage, glossiness: f32, amount: f32, widen: f32) -> MapImage {
+    let amount = amount.clamp(0.0, 1.0);
+    let rgba = img
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let grey = (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0 / 255.0;
+            let g = glossiness + (grey * 100.0 - glossiness) * amount;
+            let r = ((blinn_roughness(g) * widen).clamp(0.0, 1.0) * 255.0).round() as u8;
+            [255, r, 255, 255]
+        })
+        .collect();
+    MapImage { width: img.width, height: img.height, rgba }
+}
+
 /// The diffuse bitmap a material shows, if any (an enabled Diffuse Color map).
 pub fn diffuse_map_path(material: Option<&LoomMaterial>) -> Option<&str> {
     material.and_then(|m| m.diffuse_map.as_ref()).filter(|b| b.enabled && !b.path.is_empty()).map(|b| b.path.as_str())

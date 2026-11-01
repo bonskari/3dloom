@@ -475,6 +475,8 @@ pub enum Dialog {
     PutToLibrary,
     /// Material Editor Options.
     MaterialEditorOptions,
+    /// Material Editor > Utilities > Clean MultiMaterial.
+    CleanMultiMaterial,
     /// Bitmap Parameters > View Image: Specify Cropping/Placement.
     SpecifyCropping,
     /// Copy (Instance) Map: dragging map button `from` onto `to` (indexes into MAP_SLOTS).
