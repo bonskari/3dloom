@@ -1035,6 +1035,12 @@ fn preferences_layer_defaults_and_sub_material_assign() {
     let nl = h.text_rects("New Lights Renderable By Layer");
     h.click(nl[0].center());
     assert!(h.app.state.prefs.new_lights_renderable_by_layer);
+    // Default Ambient Light Color: a reset scene starts with it.
+    h.cmd(Command::SetPreference { name: "Default Ambient Light Color G".into(), value: 0.25 });
+    let keep = h.app.state.scene.clone();
+    h.cmd(Command::ResetFile);
+    assert!((h.app.state.scene.environment.ambient.get().y - 0.25).abs() < 1e-6, "the reset scene's ambient");
+    h.app.state.scene = keep;
     h.cmd(Command::CloseDialog);
     let mut layers = h.app.state.scene.layers.clone();
     layers.iter_mut().find(|l| l.id == layer).unwrap().render.renderable = false;
