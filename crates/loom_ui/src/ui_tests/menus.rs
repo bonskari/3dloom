@@ -420,7 +420,9 @@ fn utilities_more_and_configure_button_sets() {
     h.frames(2);
     h.click(h.find(Role::Button, "More...").center());
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("utilities_more"))).expect("the Utilities list");
+    let ci = h.text_rects("Channel Info");
     h.click(h.text_rect("Channel Info", win).unwrap().center());
+    assert!(h.app.utilities_more, "the list stays open: win {win:?}, Channel Info at {ci:?}, utility {:?}", h.app.utility);
     let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("utilities_more"))).unwrap();
     h.click(h.text_rect("OK", win).unwrap_or_else(|| panic!("OK in {win:?}: {:?}", h.text_rects("OK"))).center());
     assert_eq!(h.app.utility, crate::command_panel::utilities::Utility::ChannelInfo);
