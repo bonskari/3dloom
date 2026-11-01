@@ -512,11 +512,18 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
     // Pan: the Pan tool's left drag or a middle drag; zoom: the wheel, about the pointer.
     let [mut vx0, mut vx1, mut vy0, mut vy1] = view.unwrap_or(fit);
     let pan_drag = (tool == GraphTool::Pan && bg.dragged_by(egui::PointerButton::Primary)) || bg.dragged_by(egui::PointerButton::Middle);
+    // The view under the press stays under the pointer (the drag threshold included).
+    let pan_id = egui::Id::new(("reaction_graph_pan", ri, si));
     if pan_drag {
-        let d = bg.drag_delta();
-        let (dm, dv) = (-d.x / inner.width() * (vx1 - vx0), d.y / inner.height() * (vy1 - vy0));
-        (vx0, vx1, vy0, vy1) = (vx0 + dm, vx1 + dm, vy0 + dv, vy1 + dv);
-        view = Some([vx0, vx1, vy0, vy1]);
+        let start: [f32; 4] = ui.data_mut(|d| *d.get_temp_mut_or_insert_with(pan_id, || [vx0, vx1, vy0, vy1]));
+        if let (Some(a), Some(b)) = (ui.input(|i| i.pointer.press_origin()), bg.interact_pointer_pos()) {
+            let d = b - a;
+            let (dm, dv) = (-d.x / inner.width() * (start[1] - start[0]), d.y / inner.height() * (start[3] - start[2]));
+            (vx0, vx1, vy0, vy1) = (start[0] + dm, start[1] + dm, start[2] + dv, start[3] + dv);
+            view = Some([vx0, vx1, vy0, vy1]);
+        }
+    } else {
+        ui.data_mut(|d| d.remove::<[f32; 4]>(pan_id));
     }
     // (over a point too: the points are widgets of their own)
     if let Some(q) = ui.input(|i| i.pointer.hover_pos()).filter(|q| rect.contains(*q) && ui.rect_contains_pointer(rect)) {
