@@ -81,6 +81,21 @@ pub fn frame_corners(fov_deg: f32, aspect: f32, distance: f32, ortho: Option<f32
     [Vec3::new(-half_w, half_h, z), Vec3::new(half_w, half_h, z), Vec3::new(half_w, -half_h, z), Vec3::new(-half_w, -half_h, z)]
 }
 
+/// `frame_corners` of a perspective camera with Camera Correction
+/// (`amount`, `direction` in degrees): the corners of the view it renders
+/// (image plane tilted back, lens shifted to keep the line of sight at the
+/// centre), on the plane `distance` ahead along the line of sight.
+pub fn corrected_frame_corners(fov_deg: f32, aspect: f32, distance: f32, amount: f32, direction: f32) -> [Vec3; 4] {
+    let d = direction.to_radians();
+    let r = glam::Mat3::from_axis_angle(Vec3::new(d.sin(), -d.cos(), 0.0), -amount.to_radians());
+    let c = r.transpose() * Vec3::NEG_Z;
+    let shift = Vec3::new(c.x / -c.z, c.y / -c.z, 0.0);
+    frame_corners(fov_deg, aspect, 1.0, None).map(|p| {
+        let v = r * (p + shift);
+        v * (distance / -v.z)
+    })
+}
+
 /// The camera icon: a box body behind a lens hood that opens toward the
 /// view (local -Z). The pivot is the centre of the hood's opening, so the
 /// whole icon lies behind the eye point.
@@ -118,6 +133,26 @@ pub fn icon_mesh() -> Mesh {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Corrected by 30 degrees (vertical direction), the cone's side planes
+    /// hold the tilted image plane's up (the world's vertical for a camera
+    /// tilted up 30), its centre stays on the line
+    /// of sight, and it differs from the uncorrected frame.
+    #[test]
+    fn corrected_cone_keeps_the_line_of_sight_and_tilts_its_sides() {
+        let c = corrected_frame_corners(45.0, 1.5, 100.0, 30.0, 90.0);
+        let centre = c.iter().copied().sum::<Vec3>() / 4.0;
+        assert!(centre.x.abs() < 1e-3 && (centre.z + 100.0).abs() < 1e-3, "{centre:?}");
+        let up = glam::Quat::from_axis_angle(Vec3::X, -30f32.to_radians()) * Vec3::Y;
+        for (a, b) in [(c[0], c[3]), (c[1], c[2])] {
+            assert!(a.cross(b).normalize().dot(up).abs() < 1e-4, "the side plane holds the tilted up: {a:?} {b:?}");
+        }
+        let plain = frame_corners(45.0, 1.5, 100.0, None);
+        assert!(c.iter().zip(plain).any(|(a, b)| a.distance(b) > 1.0));
+        // No correction: the plain frame.
+        let none = corrected_frame_corners(45.0, 1.5, 100.0, 0.0, 90.0);
+        assert!(none.iter().zip(plain).all(|(a, b)| a.distance(b) < 1e-3));
+    }
 
     #[test]
     fn default_lens_matches_default_fov() {

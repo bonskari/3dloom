@@ -372,7 +372,15 @@ pub fn overlay_lines(scene: &loom_scene::Scene, id: NodeId, cone: bool) -> Vec<(
     let ortho = ortho.get().then_some(distance);
     // The cone has the render output's shape (Render Setup's image aspect).
     let aspect = scene.render.image_aspect().max(0.01);
-    let at = |d: f32| frame_corners(fov.get(), aspect, d, ortho).map(|c| world.transform_point3(c));
+    // Camera Correction tilts the cone to the view the camera renders.
+    let corrected = loom_scene::camera::correction(node).filter(|_| ortho.is_none());
+    let at = |d: f32| {
+        let c = match corrected {
+            Some((amount, direction)) => loom_scene::camera::corrected_frame_corners(fov.get(), aspect, d, amount, direction),
+            None => frame_corners(fov.get(), aspect, d, ortho),
+        };
+        c.map(|c| world.transform_point3(c))
+    };
     let mut out = Vec::new();
     let rect = |out: &mut Vec<(Vec3, Vec3, LineKind)>, c: [Vec3; 4], kind: LineKind| {
         for i in 0..4 {

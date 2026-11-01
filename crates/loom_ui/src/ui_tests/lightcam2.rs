@@ -424,8 +424,13 @@ fn camera_correction_from_the_quad_menu_and_its_guess_button() {
     assert_eq!(loom_scene::camera::correction(node), Some((0.0, 90.0)), "Amount 0, Direction 90");
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(3);
+    let before = loom_commands::camera::overlay_lines(&h.app.state.scene, id, true);
     h.click(h.find(Role::Button, "Guess").center());
     h.frames(2);
+    // The viewports' cone follows the corrected view.
+    let after = loom_commands::camera::overlay_lines(&h.app.state.scene, id, true);
+    assert_eq!(before.len(), after.len());
+    assert!(before.iter().zip(&after).any(|(a, b)| a.1.distance(b.1) > 1.0), "the cone tilts with the correction");
     let want = loom_scene::camera::correction_guess(h.app.state.scene.world_matrix(id));
     assert!(want.abs() > 1.0, "the default view looks down: {want}");
     let (amount, _) = loom_scene::camera::correction(h.app.state.scene.node(id).unwrap()).unwrap();
