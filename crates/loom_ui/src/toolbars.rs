@@ -480,27 +480,6 @@ pub fn button_appearance(ctx: &egui::Context, app: &mut LoomApp) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn drops_land_between_buttons() {
-        let r = |x: f32| egui::Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(20.0, 20.0));
-        let rects = [r(0.0), r(30.0), r(60.0)];
-        assert_eq!(insert_index(&rects, egui::pos2(-5.0, 10.0), false), 0);
-        assert_eq!(insert_index(&rects, egui::pos2(45.0, 10.0), false), 2);
-        assert_eq!(insert_index(&rects, egui::pos2(200.0, 10.0), false), 3);
-    }
-
-    #[test]
-    fn action_icons_name_registered_actions() {
-        for (a, _) in icons::ACTION_ICONS {
-            assert!(loom_commands::registry().iter().any(|i| i.name == *a), "{a:?} is not an action");
-        }
-    }
-}
-
 /// Brush Presets: Brush Preset Manager, Add New Preset and one button per
 /// preset (a disc showing its size within the icon range and its falloff);
 /// enabled while a paint tool is on.
@@ -537,6 +516,27 @@ fn brush_presets(ui: &mut egui::Ui, app: &mut LoomApp) {
     for c in cmds {
         if let Err(e) = app.dispatch(c) {
             app.state.status_prompt = e;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drops_land_between_buttons() {
+        let r = |x: f32| egui::Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(20.0, 20.0));
+        let rects = [r(0.0), r(30.0), r(60.0)];
+        assert_eq!(insert_index(&rects, egui::pos2(-5.0, 10.0), false), 0);
+        assert_eq!(insert_index(&rects, egui::pos2(45.0, 10.0), false), 2);
+        assert_eq!(insert_index(&rects, egui::pos2(200.0, 10.0), false), 3);
+    }
+
+    #[test]
+    fn action_icons_name_registered_actions() {
+        for (a, _) in icons::ACTION_ICONS {
+            assert!(loom_commands::registry().iter().any(|i| i.name == *a), "{a:?} is not an action");
         }
     }
 }
