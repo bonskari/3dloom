@@ -49,7 +49,10 @@ pub fn serve(input: impl Read, mut out: impl Write, tx: &Sender<Request>, waker:
             Ok(v) => v,
             Err(_) => break,
         };
-        if writeln!(out, "{resp}").is_err() {
+        // One write per reply: a JSON value formatted straight into a TCP
+        // stream goes out in many small writes, which Nagle's algorithm
+        // holds back for the client's delayed ACK (about 40 ms a reply).
+        if out.write_all(format!("{resp}\n").as_bytes()).is_err() {
             break;
         }
     }
@@ -61,6 +64,7 @@ pub fn spawn_tcp(port: u16, tx: Sender<Request>, waker: Waker) -> std::io::Resul
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
+            let _ = stream.set_nodelay(true);
             let (tx, waker) = (tx.clone(), waker.clone());
             thread::spawn(move || {
                 if let Ok(out) = stream.try_clone() {
@@ -120,6 +124,7 @@ pub fn spawn_unix(dir: &std::path::Path, tx: Sender<Request>, waker: Waker) -> s
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
+            let _ = stream.set_nodelay(true);
             let (tx, waker) = (tx.clone(), waker.clone());
             thread::spawn(move || {
                 if let Ok(out) = stream.try_clone() {
