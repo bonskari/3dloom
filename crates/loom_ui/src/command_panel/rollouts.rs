@@ -177,9 +177,7 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
             f.allocated += need;
             return Some((egui::pos2(left + c as f32 * col_w, y), col_w - 6.0, need));
         }
-        if f.order.is_none() {
-            return None;
-        }
+        let order = f.order.clone()?;
         if f.fallback || !f.contiguous || !f.memory.contiguous || f.memory.natural.get(k).is_none_or(|d| d.title != title) {
             f.fallback = true;
             return None;
@@ -187,7 +185,7 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
         let spacing = ui.spacing().item_spacing.y;
         let (top, left, width) = *f.top.get_or_insert((cursor.y, cursor.x, ui.available_width()));
         let natural: Vec<String> = f.memory.natural.iter().map(|d| d.title.clone()).collect();
-        let shown = shown_order(&natural, f.order.as_deref().unwrap_or_default());
+        let shown = shown_order(&natural, &order);
         let height = |t: &str| f.memory.natural.iter().find(|d| d.title == t).map(|d| d.height).unwrap_or(0.0);
         let at = shown.iter().position(|t| t == title).unwrap_or(k);
         let y = top + shown[..at].iter().map(|t| height(t) + spacing).sum::<f32>();
