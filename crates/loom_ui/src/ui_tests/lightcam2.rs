@@ -415,7 +415,6 @@ fn camera_correction_from_the_quad_menu_and_its_guess_button() {
     let mut h = Harness::new();
     let r = h.app.dispatch(Command::CreateCamera { target: true }).unwrap();
     let id = NodeId(r["id"].as_u64().unwrap());
-    h.app.state.selection = vec![id];
     let tools1 = crate::quad_menu::create_quadrants(&h.app).tools1.expect("tools 1 for a camera");
     let item = tools1.items.iter().find(|i| i.label == "Apply Camera Correction Modifier").expect("Apply Camera Correction Modifier");
     let crate::quad_menu::Action::Command(c) = &item.action else { panic!("a command") };
