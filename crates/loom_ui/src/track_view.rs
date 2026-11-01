@@ -104,8 +104,10 @@ fn body(ui: &mut egui::Ui, app: &mut LoomApp, curve: bool, min_body_h: f32) {
     toolbar(ui, app);
     ui.separator();
     let avail = ui.available_size();
-    // Room for the bottom bar and the spacing around it, so the window does not grow each frame.
-    let bottom_h = 44.0;
+    // Room for the bottom bar (as tall as it was last frame: the Dope Sheet's
+    // has two rows) and the spacing around it, so the window does not grow each frame.
+    let bottom_id = egui::Id::new(("track_view_bottom_h", curve));
+    let bottom_h = ui.data(|d| d.get_temp::<f32>(bottom_id)).unwrap_or(44.0);
     let body_h = (avail.y - bottom_h).max(min_body_h);
     ui.horizontal_top(|ui| {
         let list_w = 230.0f32.min(avail.x * 0.35);
@@ -122,7 +124,10 @@ fn body(ui: &mut egui::Ui, app: &mut LoomApp, curve: bool, min_body_h: f32) {
             dope_sheet(ui, app, &response, &painter);
         }
     });
+    let top = ui.cursor().min.y;
     bottom_bar(ui, app);
+    let used = ui.min_rect().max.y - top + ui.spacing().item_spacing.y * 2.0;
+    ui.data_mut(|d| d.insert_temp(bottom_id, used.max(44.0)));
 }
 
 /// The track bar's Mini Curve Editor: the Curve Editor docked above the time

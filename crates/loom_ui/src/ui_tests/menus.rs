@@ -594,26 +594,26 @@ fn saved_track_views_from_the_graph_editors_menu() {
     h.run(vec![egui::Event::Text("Keys".into())]);
     h.key(egui::Key::Enter);
     assert_eq!(h.app.state.saved_track_views.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Keys"], "name {:?} field {field:?}", h.app.state.track_view.name);
-    h.cmd(Command::CloseTrackView);
     menu_path(&mut h, &["Graph Editors", "New Track View..."]);
     assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::track_view::TvMode::CurveEditor, "Untitled 1"));
-    assert_eq!(h.app.state.saved_track_views.len(), 1, "still saved");
-    h.frames(30);
     menu_path(&mut h, &["Graph Editors", "Saved Track Views", "Keys"]);
     assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::track_view::TvMode::DopeSheet, "Keys"));
     menu_path(&mut h, &["Graph Editors", "Delete Track View", "Keys"]);
     assert!(h.app.state.saved_track_views.is_empty());
 }
 
+/// The Dope Sheet window keeps its size over the frames (its two-row bottom
+/// bar made it grow until it covered the menu bar) and the menus still open.
 #[test]
-fn diag_menus_open_while_the_track_view_is_open() {
+fn the_dope_sheet_window_does_not_grow_over_the_menu_bar() {
     let mut h = Harness::new();
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
     h.cmd(Command::OpenDopeSheet);
+    h.frames(5);
+    let size = |h: &Harness| h.ctx.memory(|m| m.area_rect(egui::Id::new("track_view"))).expect("the window").size();
+    let first = size(&h);
     h.frames(30);
-    let ge = h.find(Role::Button, "Graph Editors");
-    h.click(ge.center());
-    h.frames(2);
-    let file_btns = h.find_all(Role::Button, "New Track View...");
-    assert!(!file_btns.is_empty(), "ge {ge:?} focused {} menus {:?} widgets at ge {:?}", h.app.state.track_view.focused, menus(&h), h.widgets.iter().filter(|w| w.2.contains(ge.center())).map(|w| (w.0, w.1.clone(), w.2)).collect::<Vec<_>>());
+    assert!((size(&h).y - first.y).abs() < 1.0, "{first:?} -> {:?}", size(&h));
+    menu_path(&mut h, &["Graph Editors", "New Track View..."]);
+    assert_eq!(h.app.state.track_view.mode, loom_commands::track_view::TvMode::CurveEditor);
 }
