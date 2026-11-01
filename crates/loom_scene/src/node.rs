@@ -512,6 +512,13 @@ pub enum ObjectKind {
         #[serde(default = "yes")]
         gen_mapping: Param<bool>,
     },
+    /// Create > Geometry > Extended Primitives: `values` follow `kind.params()`.
+    Extended {
+        kind: loom_mesh::extended_primitives::ExtendedKind,
+        values: Vec<Param<f32>>,
+        #[serde(default = "yes")]
+        gen_mapping: Param<bool>,
+    },
     /// A camera object (Create > Cameras), looking down its local -Z.
     Camera {
         /// Horizontal field of view in degrees (Lens follows it, 36 mm film).
@@ -945,6 +952,10 @@ impl ObjectKind {
     pub fn torus_object(radius1: f32, radius2: f32) -> Self {
         Self::Torus { radius1: p(radius1), radius2: p(radius2), rotation: p(0.0), twist: p(0.0), segments: p(24), sides: p(12), slice_on: p(false), slice_from: p(0.0), slice_to: p(0.0), smooth: p(0), gen_mapping: p(true) }
     }
+    /// An Extended Primitive with its default parameters.
+    pub fn extended_object(kind: loom_mesh::extended_primitives::ExtendedKind) -> Self {
+        Self::Extended { kind, values: kind.defaults().into_iter().map(p).collect(), gen_mapping: p(true) }
+    }
     pub fn pyramid_object(width: f32, depth: f32, height: f32) -> Self {
         Self::Pyramid { width: p(width), depth: p(depth), height: p(height), width_segs: p(1), depth_segs: p(1), height_segs: p(1), gen_mapping: p(true) }
     }
@@ -1270,6 +1281,7 @@ impl ObjectKind {
             Self::Pyramid { .. } => "Pyramid",
             Self::Teapot { .. } => "Teapot",
             Self::Plane { .. } => "Plane",
+            Self::Extended { kind, .. } => kind.label(),
             Self::Camera { .. } => "Camera",
             Self::Group { .. } => "Group",
             Self::Bone { .. } => "Bone",
@@ -1421,6 +1433,16 @@ impl ObjectKind {
                 ("Radius", f(radius)), ("Segments", i(segments)), ("Smooth", b(smooth)), ("Body", b(body)), ("Handle", b(handle)), ("Spout", b(spout)), ("Lid", b(lid)),
             ("Generate Mapping Coords.", b(gen_mapping)),
             ],
+            Self::Extended { kind, values, gen_mapping } => {
+                let mut v: Vec<(&'static str, ParamValue)> = kind
+                    .params()
+                    .iter()
+                    .zip(values)
+                    .map(|(spec, x)| (spec.name, if spec.int { Int(x.get().round().max(0.0) as u32) } else { Float(x.get()) }))
+                    .collect();
+                v.push(("Generate Mapping Coords.", b(gen_mapping)));
+                v
+            }
             Self::Plane { length, width, length_segs, width_segs, gen_mapping } => vec![
                 ("Length", f(length)), ("Width", f(width)), ("Length Segs", i(length_segs)), ("Width Segs", i(width_segs)),
             ("Generate Mapping Coords.", b(gen_mapping)),
@@ -1515,6 +1537,18 @@ impl ObjectKind {
         let int = |x: &mut Param<u32>, min: u32| x.set((value.round().max(0.0) as u32).max(min));
         let bl = |x: &mut Param<bool>| x.set(value != 0.0);
         let ok = Ok(());
+        if let Self::Extended { kind, values, gen_mapping } = self {
+            if name == "Generate Mapping Coords." {
+                bl(gen_mapping);
+                return Ok(());
+            }
+            let i = kind.params().iter().position(|p| p.name == name).ok_or_else(|| format!("{} has no parameter {name:?}", kind.label()))?;
+            let spec = kind.params()[i];
+            values.resize_with(kind.params().len().max(values.len()), || p(0.0));
+            let x = if spec.int { v.round() } else { v };
+            values[i].set(x.max(spec.min));
+            return Ok(());
+        }
         match (self, name) {
             (Self::Box { gen_mapping, .. }, "Generate Mapping Coords.") => { bl(gen_mapping); ok }
             (Self::Cone { gen_mapping, .. }, "Generate Mapping Coords.") => { bl(gen_mapping); ok }
@@ -1743,6 +1777,10 @@ impl ObjectKind {
             Self::Teapot { radius, segments, body, handle, spout, lid, smooth, gen_mapping } => Cow::Owned(smoothed(mapped(teapot_primitive(
                 radius.get(), segments.get(), TeapotParts { body: body.get(), handle: handle.get(), spout: spout.get(), lid: lid.get() },
             ), gen_mapping.get(), AutoMap::Spherical), smooth.get())),
+            Self::Extended { kind, values, gen_mapping } => {
+                let vals: Vec<f32> = values.iter().map(|x| x.get()).collect();
+                Cow::Owned(mapped(kind.build(&vals), gen_mapping.get(), AutoMap::Box))
+            }
             Self::Plane { length, width, length_segs, width_segs, gen_mapping } => {
                 Cow::Owned(mapped(plane_segmented(length.get(), width.get(), length_segs.get(), width_segs.get()), gen_mapping.get(), AutoMap::Planar))
             }

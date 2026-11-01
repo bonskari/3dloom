@@ -119,9 +119,48 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             super::compound::rollouts(ui, app, app.compound_kind);
             parameters(ui, app);
         }
+        Category::Geometry if app.create_extended => {
+            egui::ComboBox::from_id_salt("create_geometry_class").selected_text("Extended Primitives").show_ui(ui, |ui| {
+                if ui.selectable_label(false, "Standard Primitives").clicked() {
+                    app.create_extended = false;
+                    app.create_kind = None;
+                }
+                let _ = ui.selectable_label(true, "Extended Primitives");
+                if ui.selectable_label(false, "Compound Objects").clicked() {
+                    app.create_extended = false;
+                    app.create_compound = true;
+                    app.create_kind = None;
+                }
+                if ui.selectable_label(false, "Patch Grids").clicked() {
+                    app.create_extended = false;
+                    app.create_patch_grids = true;
+                    app.create_kind = None;
+                }
+            });
+            rollout(ui, "Object Type", true, |ui| {
+                autogrid_and_pin(ui, app);
+                egui::Grid::new("extended_type").num_columns(2).show(ui, |ui| {
+                    for (i, kind) in loom_mesh::extended_primitives::ExtendedKind::ALL.iter().enumerate() {
+                        let on = app.create_kind == Some(CreateKind::Extended(*kind));
+                        if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, kind.label())).clicked() {
+                            app.start_create((!on).then_some(CreateKind::Extended(*kind)));
+                        }
+                        if i % 2 == 1 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            });
+            name_and_color(ui, app);
+            parameters(ui, app);
+        }
         Category::Geometry => {
             egui::ComboBox::from_id_salt("create_geometry_class").selected_text("Standard Primitives").show_ui(ui, |ui| {
                 let _ = ui.selectable_label(true, "Standard Primitives");
+                if ui.selectable_label(false, "Extended Primitives").clicked() {
+                    app.create_extended = true;
+                    app.create_kind = None;
+                }
                 if ui.selectable_label(false, "Compound Objects").clicked() {
                     app.create_compound = true;
                     app.create_kind = None;

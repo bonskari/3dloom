@@ -78,6 +78,8 @@ pub struct CreateSession {
     height: f32,
     /// Creation Method rollout choice for this object.
     method: &'static str,
+    /// An Extended Primitive instead of a standard one, with the size its steps set (width, length, height).
+    extended: Option<(loom_mesh::extended_primitives::ExtendedKind, Vec3)>,
 }
 
 impl CreateSession {
@@ -91,16 +93,23 @@ impl CreateSession {
         };
         let (kind, shape) = match what {
             CreateKind::Primitive(k) => (k, None),
+            CreateKind::Extended(_) => (PrimitiveKind::Box, None),
             CreateKind::PatchGrid { .. } => (PrimitiveKind::Plane, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
             CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) | CreateKind::SunSystem { .. } => return None,
         };
-        let label = match patch {
-            Some(q) => format!("Create {}", if q { "Quad Patch" } else { "Tri Patch" }),
-            None => format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label())),
+        let extended = match what {
+            CreateKind::Extended(k) => Some(k),
+            _ => None,
+        };
+        let label = match (patch, extended) {
+            (_, Some(k)) => format!("Create {}", k.label()),
+            (Some(q), None) => format!("Create {}", if q { "Quad Patch" } else { "Tri Patch" }),
+            (None, None) => format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label())),
         };
         app.state.undo.begin(&label);
         let created = match (shape, patch) {
+            _ if extended.is_some() => app.dispatch(Command::CreateExtendedPrimitive { kind: extended.map(|k| k.label().to_owned()).unwrap_or_default(), position: anchor.to_array(), size: [0.0; 3] }).ok(),
             (_, Some(quad)) => app.dispatch(Command::CreatePatchGrid { quad, position: anchor.to_array(), length: 0.0, width: 0.0 }).ok(),
             (Some(sk), None) => app.dispatch(Command::CreateShape { kind: sk, position: anchor.to_array(), size: [0.0, 0.0, 0.0] }).ok(),
             (None, None) => app.dispatch(Command::CreatePrimitive { kind, position: anchor.to_array(), size: [0.0, 0.0, 0.0] }).ok(),
@@ -111,7 +120,7 @@ impl CreateSession {
             return None;
         };
         let method = if shape.is_some() { "" } else if patch.is_some() { "Rectangle" } else { app.creation_method(kind) };
-        let session = Self { kind, shape, node, label, step: Step::Dragging, anchor, basis, step_origin: pointer, units_per_px, radius1: 0.0, height: 0.0, method };
+        let session = Self { kind, shape, node, label, step: Step::Dragging, anchor, basis, step_origin: pointer, units_per_px, radius1: 0.0, height: 0.0, method, extended: extended.map(|k| (k, Vec3::ZERO)) };
         // Orient the object to the construction plane (local Z = plane normal).
         let rot = glam::Quat::from_rotation_arc(Vec3::Z, basis.2);
         let e = rot.to_euler(glam::EulerRot::XYZ);
@@ -145,6 +154,10 @@ impl CreateSession {
         let dx_px = pointer.x - self.step_origin.x;
         if let Some(sk) = self.shape {
             self.shape_move(app, sk, ground, dx_px, dy_px);
+            return;
+        }
+        if self.extended.is_some() {
+            self.extended_move(app, ground, dy_px);
             return;
         }
         match self.step {
@@ -233,6 +246,45 @@ impl CreateSession {
         }
     }
 
+    /// Extended Primitives: the box-like ones (ChamferBox, Prism, L-Ext,
+    /// C-Ext) drag their base corner to corner, the round ones a radius from
+    /// the centre; then mouse moves set the height and, for ChamferBox,
+    /// ChamferCyl and Gengon, the fillet.
+    fn extended_move(&mut self, app: &mut LoomApp, ground: Option<Vec3>, dy_px: f32) {
+        use loom_mesh::extended_primitives::ExtendedKind as E;
+        let Some((k, mut size)) = self.extended else { return };
+        match self.step {
+            Step::Dragging => {
+                let Some(g) = ground else { return };
+                let (u, v) = self.plane_uv(g);
+                match k {
+                    E::ChamferBox => {
+                        self.place(app, self.anchor + self.basis.0 * (u * 0.5) + self.basis.1 * (v * 0.5));
+                        size = Vec3::new(u.abs(), v.abs(), size.z);
+                    }
+                    E::Prism | E::LExt | E::CExt => {
+                        // Built from their corner: it goes to the drag's lower-left corner.
+                        self.place(app, self.anchor + self.basis.0 * u.min(0.0) + self.basis.1 * v.min(0.0));
+                        size = Vec3::new(u.abs(), v.abs(), size.z);
+                    }
+                    _ => {
+                        let r = (g - self.anchor).length();
+                        size = Vec3::new(r * 2.0, r * 2.0, size.z);
+                    }
+                }
+            }
+            Step::Second => size.z = dy_px * self.units_per_px,
+            Step::Third => {
+                self.set(app, "Fillet", (dy_px * self.units_per_px).max(0.0));
+                return;
+            }
+        }
+        self.extended = Some((k, size));
+        for (name, v) in loom_commands::extended_size_params(k, size) {
+            self.set(app, name, v);
+        }
+    }
+
     /// Shapes: Rectangle / Ellipse drag corner to corner; the round ones drag
     /// a radius; Donut, Star and Helix then take a second radius (Helix a
     /// height first) with mouse moves.
@@ -282,6 +334,16 @@ impl CreateSession {
         if self.step != Step::Dragging {
             return false;
         }
+        if let Some((k, _)) = self.extended {
+            use loom_mesh::extended_primitives::ExtendedKind as E;
+            if matches!(k, E::Hedra | E::TorusKnot) {
+                self.finish(app);
+                return true;
+            }
+            self.step = Step::Second;
+            self.step_origin = pointer;
+            return false;
+        }
         if let Some(sk) = self.shape {
             return match sk {
                 ShapeKind::Donut | ShapeKind::Star | ShapeKind::Helix => {
@@ -324,6 +386,19 @@ impl CreateSession {
             self.step = Step::Third;
             self.step_origin = pointer;
             return false;
+        }
+        if let Some((k, _)) = self.extended {
+            use loom_mesh::extended_primitives::ExtendedKind as E;
+            if self.step == Step::Second && matches!(k, E::ChamferBox | E::ChamferCyl | E::Gengon) {
+                self.step = Step::Third;
+                self.step_origin = pointer;
+                return false;
+            }
+            if self.step == Step::Dragging {
+                return false;
+            }
+            self.finish(app);
+            return true;
         }
         match (self.step, self.kind) {
             (Step::Second, K::Cone) | (Step::Second, K::Tube) => {

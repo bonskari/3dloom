@@ -2091,6 +2091,23 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.active_tool = Tool::Select;
             Ok(json!({ "id": id.0, "name": name }))
         }
+        C::CreateExtendedPrimitive { kind, position, size } => {
+            use loom_mesh::extended_primitives::ExtendedKind;
+            let k = ExtendedKind::parse(&kind).ok_or_else(|| format!("no Extended Primitive {kind:?} ({})", ExtendedKind::ALL.map(|k| k.label()).join(", ")))?;
+            let mut object = ObjectKind::extended_object(k);
+            for (name, v) in extended_size_params(k, Vec3::from(size)) {
+                object.set_parameter(name, v as f64)?;
+            }
+            // Hedra and Torus Knot are centred on the pivot: lift them onto the plane.
+            let r = size[0].max(size[1]) * 0.5;
+            let z = match k {
+                ExtendedKind::Hedra => r,
+                ExtendedKind::TorusKnot => r / 3.0 + r * 0.15,
+                _ => 0.0,
+            };
+            let id = add_object(state, object, Vec3::from(position) + Vec3::Z * z)?;
+            Ok(json!({ "id": id.0, "name": state.scene.node(id).map(|n| n.name.clone()) }))
+        }
         C::CreateShape { kind, position, size } => {
             let size = Vec3::from(size);
             let r = size.x.max(size.y) * 0.5;
@@ -4001,6 +4018,25 @@ fn zoom(state: &mut AppState, factor: f32) -> Result<Value, String> {
 fn set_background_lock(vp: &mut Viewport, on: bool) {
     vp.background_locked = on;
     vp.background_anchor = on.then_some((vp.camera.target, vp.camera.distance));
+}
+
+/// The parameters a creation size (width X, length Y, height Z) sets on an Extended Primitive.
+pub fn extended_size_params(kind: loom_mesh::extended_primitives::ExtendedKind, size: Vec3) -> Vec<(&'static str, f32)> {
+    use loom_mesh::extended_primitives::ExtendedKind as K;
+    let r = size.x.max(size.y) * 0.5;
+    let leg = size.x.min(size.y) * 0.25;
+    match kind {
+        K::Hedra => vec![("Radius", r)],
+        K::ChamferBox => vec![("Width", size.x), ("Length", size.y), ("Height", size.z)],
+        K::OilTank | K::Spindle | K::Capsule | K::ChamferCyl | K::Gengon => vec![("Radius", r), ("Height", size.z)],
+        K::Prism => {
+            let side = ((size.x * 0.5).powi(2) + size.y.powi(2)).sqrt();
+            vec![("Side 1 Length", size.x), ("Side 2 Length", side), ("Side 3 Length", side), ("Height", size.z)]
+        }
+        K::TorusKnot => vec![("Radius", r), ("Cross Section Radius", r * 0.15)],
+        K::LExt => vec![("Front Length", size.x), ("Side Length", size.y), ("Side Width", leg), ("Front Width", leg), ("Height", size.z)],
+        K::CExt => vec![("Back Length", size.x), ("Front Length", size.x), ("Side Length", size.y), ("Back Width", leg), ("Side Width", leg), ("Front Width", leg), ("Height", size.z)],
+    }
 }
 
 fn nav_toggle(state: &mut AppState, mode: NavMode) -> Result<Value, String> {

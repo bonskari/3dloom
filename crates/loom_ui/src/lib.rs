@@ -130,6 +130,8 @@ pub struct ShiftClone {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreateKind {
     Primitive(PrimitiveKind),
+    /// Geometry > Extended Primitives.
+    Extended(loom_mesh::extended_primitives::ExtendedKind),
     Shape(ShapeKind),
     Line,
     /// Systems > Bones: clicks lay joints, a right-click ends the chain.
@@ -236,6 +238,8 @@ pub struct LoomApp {
     pub create_kind: Option<CreateKind>,
     /// Create > Geometry class: Standard Primitives or Compound Objects.
     pub create_compound: bool,
+    /// Create > Geometry shows the Extended Primitives object types.
+    pub create_extended: bool,
     /// Create > Geometry shows the Patch Grids object types.
     pub create_patch_grids: bool,
     /// Compound Objects > Object Type button pressed.
@@ -499,6 +503,7 @@ impl LoomApp {
             bitmap_generation: 0,
             create_kind: None,
             create_compound: false,
+            create_extended: false,
             create_patch_grids: false,
             compound_kind: None,
             line: None,
