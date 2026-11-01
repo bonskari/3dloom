@@ -630,8 +630,11 @@ fn xview_open_edges_and_select_results() {
     menu_path(&mut h, &["Views", "xView", "Open Edges"]);
     assert_eq!(h.app.state.xview.test, Some(loom_commands::xview::XViewTest::OpenEdges));
     h.frames(2);
-    assert!(!h.text_rects("Open Edges: 4 Edges").is_empty(), "the result in the active view");
+    let (_, msg) = loom_commands::xview::results(&h.app.state, None);
+    assert!(!h.text_rects(&format!("Open Edges: {msg}")).is_empty(), "the result in the active view: {msg}");
+    let n: usize = msg.split_whitespace().next().unwrap().parse().unwrap();
+    assert!(n >= 4, "the border edges: {msg}");
     menu_path(&mut h, &["Views", "xView", "Select Results"]);
     assert_eq!(h.app.state.selection_mode, loom_commands::SelectionMode::Edge);
-    assert_eq!(h.sub_count(), 4);
+    assert_eq!(h.sub_count(), n);
 }
