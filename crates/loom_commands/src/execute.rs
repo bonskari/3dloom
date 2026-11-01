@@ -1106,6 +1106,20 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::ShowFloatingDialogs => toggle(&mut state.hide_floating_dialogs, "hide_floating_dialogs"),
         C::ViewportLightingToggle => toggle(&mut state.active_mut().scene_lights, "scene_lights"),
         C::ViewportShadowsToggle => toggle(&mut state.active_mut().shadows, "shadows"),
+        C::ViewportAmbientOcclusionToggle => toggle(&mut state.active_mut().ambient_occlusion, "ambient_occlusion"),
+        C::SetViewportAmbientOcclusion { on, radius, intensity } => {
+            let vp = state.active_mut();
+            if let Some(v) = on {
+                vp.ambient_occlusion = v;
+            }
+            if let Some(v) = radius {
+                vp.ao_radius = v.max(0.001);
+            }
+            if let Some(v) = intensity {
+                vp.ao_intensity = v.clamp(0.0, 1.0);
+            }
+            Ok(json!({ "ambient_occlusion": vp.ambient_occlusion, "radius": vp.ao_radius, "intensity": vp.ao_intensity }))
+        }
         C::SetViewportShadows { on, soft, intensity } => {
             let vp = state.active_mut();
             if let Some(v) = on {

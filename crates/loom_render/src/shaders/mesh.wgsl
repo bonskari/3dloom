@@ -27,12 +27,61 @@ struct ViewUniform {
     light_shadow: array<vec4<f32>, 8>,
     /// x shadows on, y soft, z depth bias, w intensity.
     shadow: vec4<f32>,
+    inv_view_proj: mat4x4<f32>,
+    /// x AO on, y radius (world units), z intensity.
+    ao: vec4<f32>,
+    /// The view's rectangle in framebuffer pixels: x, y, width, height.
+    viewport_px: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> view: ViewUniform;
 @group(1) @binding(0) var map_tex: texture_2d<f32>;
 @group(1) @binding(1) var map_samp: sampler;
 @group(2) @binding(0) var shadow_map: texture_depth_2d_array;
 @group(2) @binding(1) var shadow_samp: sampler_comparison;
+@group(2) @binding(2) var ao_depth: texture_depth_2d;
+
+fn screen_of(p: vec3<f32>) -> vec2<f32> {
+    let c = view.view_proj * vec4<f32>(p, 1.0);
+    let ndc = c.xy / max(c.w, 1e-6);
+    return vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * view.viewport_px.zw;
+}
+
+/// Ambient occlusion at `p` (normal `n`, framebuffer pixel `px`): how open
+/// the hemisphere above it is (1 open), from the view's depth around it.
+fn ambient_occlusion(p: vec3<f32>, n: vec3<f32>, px: vec2<f32>) -> f32 {
+    let radius = view.ao.y;
+    let local = px - view.viewport_px.xy;
+    // The radius on screen: the longest of the world axes projected.
+    let o = screen_of(p);
+    let r_px = clamp(max(max(length(screen_of(p + vec3<f32>(radius, 0.0, 0.0)) - o), length(screen_of(p + vec3<f32>(0.0, radius, 0.0)) - o)), length(screen_of(p + vec3<f32>(0.0, 0.0, radius)) - o)), 2.0, 96.0);
+    let size = vec2<i32>(textureDimensions(ao_depth));
+    var occ = 0.0;
+    let count = 16;
+    for (var k = 0; k < count; k = k + 1) {
+        // A spiral of samples out to the radius, turned per pixel.
+        let t = (f32(k) + 0.5) / f32(count);
+        let a = f32(k) * 2.39996 + fract(sin(dot(px, vec2<f32>(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+        let q = local + vec2<f32>(cos(a), sin(a)) * r_px * t;
+        let qi = vec2<i32>(q);
+        if (qi.x < 0 || qi.y < 0 || qi.x >= size.x || qi.y >= size.y) {
+            continue;
+        }
+        let d = textureLoad(ao_depth, qi, 0);
+        if (d >= 1.0) {
+            continue;
+        }
+        let ndc = vec2<f32>(q.x / view.viewport_px.z * 2.0 - 1.0, 1.0 - q.y / view.viewport_px.w * 2.0);
+        let w = view.inv_view_proj * vec4<f32>(ndc, d, 1.0);
+        let s = w.xyz / w.w;
+        let v = s - p;
+        let dist = length(v);
+        if (dist < 1e-4 || dist > radius) {
+            continue;
+        }
+        occ = occ + max(dot(n, v / dist) - 0.1, 0.0) * (1.0 - dist / radius);
+    }
+    return clamp(1.0 - view.ao.z * 2.0 * occ / f32(count), 0.0, 1.0);
+}
 
 /// How much of light `i` reaches `p` (1 lit, 0 in shadow): its layer (a
 /// point light's cube face by the major axis from the light), 3×3 PCF when soft.
@@ -221,12 +270,22 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 spec = spec + l.color_fall.rgb * k * pow(clamp(abs(dot(n, h)), 0.0, 1.0), in.spec.a);
             }
         }
+        if (view.ao.x > 0.5) {
+            // Facing the viewer: two-sided faces turn their normal to the camera.
+            let nf = select(-n, n, dot(n, to_cam) >= 0.0);
+            lit = lit * ambient_occlusion(in.world_pos, nf, in.clip.xy);
+        }
         // Self-Illumination: the colour shows unlit by that much.
         return vec4<f32>(mix(base * lit, base, in.extra.x) + in.spec.rgb * spec, alpha);
     }
     let ambient = select(0.42, 1.0, mode > 0.5 && mode < 1.5);
+    var shade = ambient + (1.0 - ambient) * diff;
+    if (view.ao.x > 0.5) {
+        let nf = select(-n, n, dot(n, to_cam) >= 0.0);
+        shade = shade * ambient_occlusion(in.world_pos, nf, in.clip.xy);
+    }
     // Self-Illumination: the colour shows unlit by that much.
-    var color = mix(base * (ambient + (1.0 - ambient) * diff), base, in.extra.x);
+    var color = mix(base * shade, base, in.extra.x);
     // Blinn highlight of the material (none in Flat or without a material).
     if (in.spec.a > 0.0 && highlights && !(mode > 0.5 && mode < 1.5)) {
         let h = normalize(light + to_cam);

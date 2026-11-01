@@ -202,6 +202,14 @@ impl CallbackTrait for ViewportCallback {
             let refs: Vec<&MeshBuffer> = self.casters.iter().filter_map(|i| res.mesh_buffers.get(*i)).collect();
             res.renderer.render_shadows(device, queue, _egui_encoder, self.slot, &refs, &set);
         }
+        if self.shading.ao.is_some() {
+            let refs: Vec<&MeshBuffer> = self.casters.iter().filter_map(|i| res.mesh_buffers.get(*i)).collect();
+            let size = [self.shading.viewport_px[2].round() as u32, self.shading.viewport_px[3].round() as u32];
+            res.renderer.render_ao_depth(device, queue, _egui_encoder, self.slot, &refs, self.view_proj, size);
+        }
+        if self.shading.shadow.is_some() || self.shading.ao.is_some() {
+            res.renderer.bind_extras(device, self.slot);
+        }
         if res.helper_lines.len() <= self.slot {
             res.helper_lines.resize_with(self.slot + 1, || None);
         }
@@ -232,7 +240,7 @@ impl CallbackTrait for ViewportCallback {
                 textures,
                 res.helper_lines.get(self.slot).and_then(|l| l.as_ref()),
                 self.shading.flags,
-                self.shading.shadow.is_some(),
+                self.shading.shadow.is_some() || self.shading.ao.is_some(),
             );
         }
     }
@@ -1249,7 +1257,8 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 if vp.force_two_sided {
                     flags |= loom_render::view_flags::TWO_SIDED;
                 }
-                let mut view_shading = loom_render::ViewShading { lighting, override_color, flags, ..Default::default() };
+                let ppp = ctx.pixels_per_point();
+                let mut view_shading = loom_render::ViewShading { lighting, override_color, flags, viewport_px: [rect.min.x * ppp, rect.min.y * ppp, rect.width() * ppp, rect.height() * ppp], ..Default::default() };
                 if lighting == 0 && override_color.is_none() {
                     // Degrade to Default Lighting: no scene lights while degraded.
                     let mut lit = vp.clone();
@@ -1260,6 +1269,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     if vp.shadows && !(app.degrading && app.state.degradation.degrade_to_default_lighting) {
                         view_shading.shadow = shadow_set(app, vp, &view_shading);
                     }
+                }
+                if vp.ambient_occlusion && override_color.is_none() && !app.degrading {
+                    view_shading.ao = Some((vp.ao_radius, vp.ao_intensity));
                 }
                 let edges = (vp.edged_faces && level != S::BoundingBox) || level == S::HiddenLine;
                 (!level.shaded(), grid_plane, edges, vp.show_grid, view_shading)
@@ -1327,7 +1339,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                         loom_render::GridParams { spacing: g.spacing, major_every: g.major_every, cells, ortho_cells: cells * 10, colors: [app.color_f32("Home Grid"), app.color_f32("Home Grid Major Lines"), app.color_f32("Home Grid World Axes")] }
                     },
                     helper_lines: helper_depth_lines.clone(),
-                    casters: if view_shading.shadow.is_some() { shadow_casters(app) } else { Vec::new() },
+                    casters: if view_shading.shadow.is_some() || view_shading.ao.is_some() { shadow_casters(app) } else { Vec::new() },
                 },
             ));
             if let Some(cb) = cb {

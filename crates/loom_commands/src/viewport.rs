@@ -124,6 +124,11 @@ pub struct Viewport {
     pub soft_shadows: bool,
     /// Shadow Intensity (0-1).
     pub shadow_intensity: f32,
+    /// Lighting and Shadows > Ambient Occlusion in the shaded view.
+    pub ambient_occlusion: bool,
+    /// Ambient Occlusion Radius (world units) and Intensity (0-1).
+    pub ao_radius: f32,
+    pub ao_intensity: f32,
     pub background: Option<String>,
     pub background_locked: bool,
     /// Lock Zoom/Pan: the view (target, distance) the image was locked in; it
@@ -205,6 +210,9 @@ impl Viewport {
             shadows: false,
             soft_shadows: true,
             shadow_intensity: 1.0,
+            ambient_occlusion: false,
+            ao_radius: 10.0,
+            ao_intensity: 1.0,
             default_lights: 1,
             background: None,
             background_locked: false,

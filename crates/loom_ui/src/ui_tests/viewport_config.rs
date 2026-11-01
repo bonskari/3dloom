@@ -270,3 +270,29 @@ fn lighting_and_shadows_panel_sets_hard_shadows_and_intensity_and_omni_lights_ca
     let set = crate::viewport_widget::shadow_set(&h.app, &vp, &shading).expect("the omni casts");
     assert_eq!((set.layer_count, set.soft, set.intensity), (6, false, v));
 }
+
+/// Viewport Configuration > Lighting and Shadows > Ambient Occlusion with its
+/// Radius and Intensity/Fade; Shading > Lighting and Shadows toggles it too.
+#[test]
+fn ambient_occlusion_from_the_panel_and_the_shading_menu() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::ConfigureViewports { panel: Some("Lighting and Shadows".into()) });
+    h.frames(2);
+    h.click(h.find(Role::CheckBox, "Ambient Occlusion").center());
+    assert!(h.app.state.active().ambient_occlusion);
+    let spin = h.spinner_after("Intensity/Fade:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, 100.0));
+    assert!(h.app.state.active().ao_intensity < 1.0);
+    let spin = h.spinner_after("Radius:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -100.0));
+    assert!(h.app.state.active().ao_radius > 10.0);
+    h.cmd(Command::CloseDialog);
+    maximized(&mut h);
+    h.click(label_rect(&h, 2).center());
+    let p = menu_entry(&h, "Lighting and Shadows");
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.frames(3);
+    h.click(menu_entry(&h, "✔ Ambient Occlusion"));
+    assert!(!h.app.state.active().ambient_occlusion, "the menu turns it off");
+}

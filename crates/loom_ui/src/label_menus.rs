@@ -185,6 +185,7 @@ fn lighting_entries(vp: &loom_commands::Viewport) -> Vec<MenuEntry> {
         check("Default Lights: 2 Lights", vp.default_lights >= 2, Command::ViewportDefaultLights { count: 2 }),
         sep(),
         check("Shadows", vp.shadows, Command::ViewportShadowsToggle),
+        check("Ambient Occlusion", vp.ambient_occlusion, Command::ViewportAmbientOcclusionToggle),
     ]
 }
 

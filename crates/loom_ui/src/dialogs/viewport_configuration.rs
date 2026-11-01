@@ -271,6 +271,24 @@ fn lighting_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
         });
     });
+    let mut ao = vp.ambient_occlusion;
+    if ui.checkbox(&mut ao, "Ambient Occlusion").on_hover_text("Creases and contacts darken in this shaded view").changed() {
+        let _ = app.dispatch(Command::ViewportAmbientOcclusionToggle);
+    }
+    ui.add_enabled_ui(vp.ambient_occlusion, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Radius:");
+            let mut r = vp.ao_radius;
+            if ui.add(crate::spinner::spin(ui, &mut r, 0.001..=100000.0).speed(app.spinner_speed(0.1))).changed() {
+                let _ = app.dispatch(Command::SetViewportAmbientOcclusion { on: None, radius: Some(r), intensity: None });
+            }
+            ui.label("Intensity/Fade:");
+            let mut i = vp.ao_intensity;
+            if ui.add(crate::spinner::spin(ui, &mut i, 0.0..=1.0).speed(0.01).fixed_decimals(2)).changed() {
+                let _ = app.dispatch(Command::SetViewportAmbientOcclusion { on: None, radius: None, intensity: Some(i) });
+            }
+        });
+    });
     let mut hw = vp.shading == Shading::Realistic;
     if ui.checkbox(&mut hw, "Enable Hardware Shading").on_hover_text("The view shows Realistic shading (lights, shadows) from the Bevy renderer").changed() {
         set(app, None, None, Some(hw));
