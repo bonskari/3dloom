@@ -97,16 +97,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     let mut center_release: Option<egui::Pos2> = None;
     egui::Area::new(egui::Id::new("steering_wheel")).order(egui::Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
         let (rect, resp) = ui.allocate_exact_size(area.size(), egui::Sense::click_and_drag());
-        let p = ui.painter();
+        let p = ui.painter().clone();
         let a = (opacity.clamp(0.05, 1.0) * 255.0) as u8;
         p.circle_filled(centre, r, egui::Color32::from_rgba_unmultiplied(60, 64, 72, a));
-        p.circle_stroke(centre, r, egui::Stroke::new(1.0, egui::Color32::from_gray(200)));
+        p.circle_stroke(centre, r, egui::Stroke::new(1.0_f32, egui::Color32::from_gray(200)));
         let n = tools.len();
         let step = std::f32::consts::TAU / n as f32;
         let hover = pointer.and_then(|q| wedge_at(centre, r, n, q));
         for i in 0..n {
             let edge = step * (i as f32 + 0.5);
-            p.line_segment([centre, centre + egui::vec2(edge.sin(), -edge.cos()) * r], egui::Stroke::new(1.0, egui::Color32::from_gray(150)));
+            p.line_segment([centre, centre + egui::vec2(edge.sin(), -edge.cos()) * r], egui::Stroke::new(1.0_f32, egui::Color32::from_gray(150)));
         }
         if let Some(h) = drag.map(|d| d.tool).or(hover) {
             let a0 = step * (h as f32 - 0.5);
@@ -143,10 +143,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
                 entry(ui, "Full Navigation Wheel", Command::SteeringWheel { wheel: "Full Navigation".into() });
                 ui.menu_button("Basic Wheels", |ui| {
                     for k in [WheelKind::ViewObject, WheelKind::TourBuilding] {
-                        if ui.button(format!("{} Wheel", k.name())).clicked() {
-                            cmds.push(Command::SteeringWheel { wheel: k.name().into() });
-                            ui.close_menu();
-                        }
+                        entry(ui, &format!("{} Wheel", k.name()), Command::SteeringWheel { wheel: k.name().into() });
                     }
                 });
                 ui.separator();
