@@ -503,7 +503,7 @@ pub fn merge_effects(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
 fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectKind) {
     match kind {
         EffectKind::Glow(g) => {
-            egui::CollapsingHeader::new("Lens Effects Globals").id_salt(("lens_globals", i)).default_open(true).show(ui, |ui| {
+            egui::CollapsingHeader::new("Lens Effects Globals").id_salt(("lens_globals", i)).default_open(false).show(ui, |ui| {
                 let gl = &g.globals;
                 let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Globals Parameters", json!({ "index": i, k: v }));
                 egui::Grid::new(("env_lens_globals", i)).num_columns(2).show(ui, |ui| {

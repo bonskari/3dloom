@@ -209,7 +209,7 @@ fn effects_list_and_parameters() {
         ok(&mut s, "Add Effect", json!({ "kind": k }));
     }
     assert_eq!(s.scene.environment.effects.len(), 6);
-    assert!(err(&mut s, "Add Effect", json!({ "kind": "Motion Blur" })).contains("Blur"));
+    assert!(err(&mut s, "Add Effect", json!({ "kind": "Hair and Fur" })).contains("Blur"));
     ok(&mut s, "Glow Parameters", json!({ "index": 0, "size": 8.0, "intensity": 150.0, "use_source_color": 0.0, "inner_color": [1.0, 0.9, 0.2], "bright": 180.0 }));
     ok(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Star", "on": true, "qty": 8, "angle": 15.0, "sharp": 4.0 }));
     ok(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Streak", "on": true, "width": 1.5 }));
