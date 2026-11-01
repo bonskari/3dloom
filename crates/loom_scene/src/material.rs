@@ -1261,6 +1261,8 @@ pub struct EditorOptions {
     /// Show End Result: below the top level the active slot shows the whole
     /// material (on) or only the current level (off).
     pub show_end_result: bool,
+    /// Video Color Check: the slots show colours past the NTSC limits black.
+    pub video_color_check: bool,
 }
 
 impl Default for EditorOptions {
@@ -1281,6 +1283,7 @@ impl Default for EditorOptions {
             maps_as_2d: true,
             propagate_to_instances: false,
             show_end_result: true,
+            video_color_check: false,
         }
     }
 }
@@ -1309,6 +1312,7 @@ impl EditorOptions {
             "Display Maps as 2D" => self.maps_as_2d = on,
             "Propagate Materials to Instances" => self.propagate_to_instances = on,
             "Show End Result" => self.show_end_result = on,
+            "Video Color Check" => self.video_color_check = on,
             other => return Err(format!("no Material Editor option \"{other}\"")),
         }
         Ok(())

@@ -439,3 +439,12 @@ fn missing_map_coordinates_dialog_lists_the_object_and_cancels() {
     assert_eq!(h.app.state.dialog, None);
     assert!(h.app.state.rendered.image.is_none(), "nothing rendered");
 }
+
+#[test]
+fn video_color_check_toggle() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    click_in_editor(&mut h, "Video Color Check", 0.0);
+    h.frames(2);
+    assert!(h.app.state.scene.material_editor.options.video_color_check);
+}

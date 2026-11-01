@@ -51,6 +51,8 @@ pub struct PreviewSetup {
     pub ambient: glam::Vec3,
     pub background: Option<f32>,
     pub uv_tiling: f32,
+    /// Video Color Check: unsafe NTSC colours black.
+    pub video_check: bool,
 }
 
 impl PreviewSetup {
@@ -65,6 +67,7 @@ impl PreviewSetup {
             // Background off: a plain grey of Background Intensity; on: the checker.
             background: (!o.background).then_some(o.background_intensity),
             uv_tiling: o.uv_tiling.max(1) as f32,
+            video_check: o.video_color_check,
         }
     }
 }
@@ -314,6 +317,13 @@ pub fn preview_pixels(sample: &Sample, size: usize, setup: &PreviewSetup, images
                 }
             };
             px.push(egui::Color32::from_rgb(to8(c.x), to8(c.y), to8(c.z)));
+        }
+    }
+    if setup.video_check {
+        for p in &mut px {
+            if loom_commands::render::ntsc_unsafe([p.r(), p.g(), p.b()]) {
+                *p = egui::Color32::BLACK;
+            }
         }
     }
     px
@@ -856,6 +866,10 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         if ch != m.effects_channel {
             let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Material ID Channel".into(), value: ch as f64 });
+        }
+        let vc = app.state.scene.material_editor.options.video_color_check;
+        if ui.add(egui::Button::new("Video Color Check").selected(vc)).on_hover_text("Video Color Check: colours past the NTSC limits show black").clicked() {
+            let _ = app.dispatch(Command::SetMaterialEditorOption { name: "Video Color Check".into(), value: if vc { 0.0 } else { 1.0 } });
         }
         let end = app.state.scene.material_editor.options.show_end_result;
         if ui.add(egui::Button::new("Show End Result").selected(end)).on_hover_text("Show End Result: the whole material below the top level").clicked() {
@@ -2666,6 +2680,23 @@ mod tests {
 
     fn setup(kind: SampleType) -> PreviewSetup {
         PreviewSetup::from_options(&loom_scene::material::EditorOptions::default(), kind, (0.0, 0.0))
+    }
+
+    #[test]
+    fn video_color_check_blacks_out_unsafe_colours_in_the_slot() {
+        let size = 32;
+        let mut m = StandardMaterial::slot_default(0);
+        // Saturated magenta self-lit: past the NTSC chroma limit.
+        m.diffuse.set(glam::Vec3::new(1.0, 0.0, 1.0));
+        m.self_illum.set(100.0);
+        let images = loom_scene::maps::Images::new();
+        let s = Sample::Surfaces(Surfaces::Single(Box::new(Surface::from_standard(&m))));
+        let mut set = setup(SampleType::Sphere);
+        let mid = size * (size / 2) + size / 2;
+        let plain = preview_pixels(&s, size, &set, &images)[mid];
+        assert!(plain.r() > 200 && plain.b() > 200, "{plain:?}");
+        set.video_check = true;
+        assert_eq!(preview_pixels(&s, size, &set, &images)[mid], egui::Color32::BLACK);
     }
 
     #[test]
