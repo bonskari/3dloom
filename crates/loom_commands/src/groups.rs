@@ -95,6 +95,26 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 _ => Err("the selected objects are on different layers".into()),
             }
         }
+        C::HideSelectionLayer | C::FreezeSelectionLayer => {
+            let hide = matches!(cmd, C::HideSelectionLayer);
+            let ids: BTreeSet<u32> = state.selection.iter().filter_map(|id| state.scene.node(*id)).map(|n| n.layer).collect();
+            if ids.is_empty() {
+                return Err("select objects first".into());
+            }
+            let mut layers = state.scene.layers.clone();
+            for l in layers.iter_mut().filter(|l| ids.contains(&l.id)) {
+                if hide {
+                    l.hidden = true;
+                } else {
+                    l.frozen = true;
+                }
+            }
+            let cur = state.scene.current_layer;
+            commit_change(state, if hide { "Hide Layer" } else { "Freeze Layer" }, layers_change(state, layers, cur))?;
+            let keep: BTreeSet<NodeId> = state.selection.iter().copied().filter(|id| state.scene.node(*id).is_some_and(|n| state.is_selectable(n))).collect();
+            state.selection = keep;
+            Ok(json!({}))
+        }
         C::SetLayerColor { layer, rgb } => layer_flag(state, layer, |l| l.color = rgb, "Layer Color"),
         C::SetLayerRenderable { layer, on } => layer_flag(state, layer, |l| l.render.renderable = on, "Layer Render"),
         C::LayerProperties { layer } => {

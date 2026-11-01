@@ -97,3 +97,34 @@ fn seven_shows_the_statistics_of_the_scene() {
     h.cmd(Command::SetStatistics { polygons: Some(false), triangles: None, edges: None, vertices: None, fps: None, scope: None, default_settings: None });
     assert!(h.text_rects("Polys:").is_empty(), "Polygon Count off hides its line");
 }
+
+/// Display quad: Hide / Freeze Selection's Layer act on the selected
+/// object's layer (one undo step each); Manage Scene States opens its dialog.
+#[test]
+fn display_quad_hides_and_freezes_the_selections_layer_and_opens_scene_states() {
+    let mut h = Harness::new();
+    let a = boxed(&mut h);
+    h.cmd(Command::CreateLayer { name: Some("Walls".into()) });
+    let walls = h.app.state.scene.node(a).unwrap().layer;
+    assert_ne!(walls, 0, "the new layer took the selection");
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let at = r.center() + egui::vec2(-150.0, 50.0);
+    let quad_item = |h: &mut Harness, label: &str| {
+        right_click(h, at);
+        let display = menus(h).into_iter().find(|m| m.min.x > at.x && m.max.y < at.y).expect("the display quadrant");
+        let p = h.text_rect(label, display).unwrap_or_else(|| panic!("no {label}")).center();
+        h.click(p);
+    };
+    quad_item(&mut h, "Freeze Selection's Layer");
+    assert!(h.app.state.scene.layer(walls).unwrap().frozen);
+    assert!(!h.app.state.scene.layer(0).unwrap().frozen, "the other layer stays");
+    h.cmd(Command::UndoSceneOperation);
+    assert!(!h.app.state.scene.layer(walls).unwrap().frozen, "one undo step");
+    quad_item(&mut h, "Hide Selection's Layer");
+    assert!(h.app.state.scene.layer(walls).unwrap().hidden);
+    quad_item(&mut h, "Manage Scene States...");
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ManageSceneStates));
+}

@@ -2626,9 +2626,9 @@ fn quad_menu_closes_on_an_item_a_click_anywhere_and_escape_and_reopens_on_a_new_
     let at = r.center() + egui::vec2(-150.0, 50.0);
     right_click(&mut h, at);
     assert!(h.app.quad_menu.is_some(), "right-click opens the quad menu");
-    // The display quadrant sits up and right of the click, Hide Selection at its bottom.
+    // The display quadrant sits up and right of the click.
     let display = menus(&h).into_iter().find(|m| m.min.x > at.x && m.max.y < at.y).expect("the display quadrant");
-    h.click(egui::pos2(display.center().x, display.max.y - h.ctx.style().spacing.menu_margin.bottom as f32 - 10.0));
+    h.click(h.text_rect("Hide Selection", display).expect("Hide Selection").center());
     assert!(h.app.state.scene.node(id).unwrap().hidden, "the item runs");
     assert!(h.app.quad_menu.is_none() && menus(&h).is_empty(), "and closes the menu");
     // In the viewport, on the Command Panel, on the empty end of the menu bar.

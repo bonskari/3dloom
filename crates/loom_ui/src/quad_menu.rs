@@ -151,10 +151,14 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
             e("Isolate Selection", Command::IsolateSelection),
             e("Unfreeze All", Command::UnfreezeAll),
             e("Freeze Selection", Command::FreezeSelection),
+            e("Freeze Selection's Layer", Command::FreezeSelectionLayer),
             e("Unhide by Name", Command::UnhideByName),
             e("Unhide All", Command::UnhideAll),
             e("Hide Unselected", Command::HideUnselected),
             e("Hide Selection", Command::HideSelection),
+            e("Hide Selection's Layer", Command::HideSelectionLayer),
+            e("Save Scene State...", Command::ManageSceneStates),
+            e("Manage Scene States...", Command::ManageSceneStates),
         ],
         label: None,
     };
@@ -915,7 +919,7 @@ mod tests {
         assert_eq!(q.display.title, "display");
         assert_eq!(q.transform.title, "transform");
         let display: Vec<&str> = q.display.items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(display, vec!["Isolate Selection", "Unfreeze All", "Freeze Selection", "Unhide by Name", "Unhide All", "Hide Unselected", "Hide Selection"]);
+        assert_eq!(display, vec!["Isolate Selection", "Unfreeze All", "Freeze Selection", "Freeze Selection's Layer", "Unhide by Name", "Unhide All", "Hide Unselected", "Hide Selection", "Hide Selection's Layer", "Save Scene State...", "Manage Scene States..."]);
         let transform: Vec<&str> = q.transform.items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(transform, vec!["Move", "Rotate", "Scale", "Select", "Clone"], "nothing selected: no object items");
         assert!(q.tools1.is_none() && q.tools2.is_none(), "no Editable Poly selected: left quadrants hidden");

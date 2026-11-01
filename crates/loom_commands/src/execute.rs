@@ -770,7 +770,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::Group { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
         | C::CreateLayer { .. } | C::DeleteLayer { .. } | C::RenameLayer { .. } | C::SetCurrentLayer { .. } | C::SetLayerHidden { .. } | C::SetLayerFrozen { .. }
-        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } | C::SetCurrentLayerToSelection | C::SetLayerColor { .. }
+        | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } | C::SetCurrentLayerToSelection | C::HideSelectionLayer | C::FreezeSelectionLayer | C::SetLayerColor { .. }
         | C::SetLayerRenderable { .. } | C::SetAllLayersHidden { .. } | C::SetAllLayersFrozen { .. } | C::SetColorByLayer { .. }
         | C::SetDisplayByLayer { .. } | C::SetRenderByLayer { .. } | C::LayerProperties { .. } | C::SetLayerDisplayProperty { .. } | C::SetLayerRenderProperty { .. } => crate::groups::execute(state, cmd),
         C::NewSceneKeep { .. } | C::SaveSelected { .. } | C::ArchiveFile { .. } | C::SummaryInfo | C::FileProperties | C::SetFileProperty { .. } | C::SetCustomFileProperty { .. } => crate::scene_file::execute(state, cmd),

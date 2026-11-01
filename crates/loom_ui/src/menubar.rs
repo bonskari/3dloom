@@ -758,6 +758,12 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.separator();
+    cmd(ui, app, "Parameter Editor...", Command::AddCustomAttributesDialog);
+    cmd(ui, app, "Parameter Collector...", Command::ParameterCollector);
+    sub(ui, app, "Wire Parameters", |ui, app| {
+        cmd(ui, app, "Parameter Wire Dialog...", Command::ParameterWiringDialog);
+    });
+    ui.separator();
     cmd(ui, app, "Delete Selected Animation", Command::DeleteSelectedAnimation);
     ui.separator();
     sub(ui, app, "IK Solvers", |ui, app| {
