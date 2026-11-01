@@ -78,7 +78,7 @@ mod tests {
         assert!(text.starts_with("*3DSMAX_ASCIIEXPORT\t200"));
         assert!(text.contains("*MESH_NUMVERTEX 4") && text.contains("*MESH_NUMFACES 2"), "{text}");
         assert!(text.contains("*TM_ROW3 100.0000 0.0000 0.0000"), "{text}");
-        let xs: Vec<f32> = text.lines().filter(|l| l.trim_start().starts_with("*MESH_VERTEX ")).map(|l| l.split('\t').nth(1).unwrap().parse().unwrap()).collect();
+        let xs: Vec<f32> = text.lines().filter(|l| l.trim_start().starts_with("*MESH_VERTEX ")).map(|l| l.trim_start().split('\t').nth(1).unwrap().parse().unwrap()).collect();
         assert!(xs.iter().all(|x| (95.0..=105.0).contains(x)), "world space: {xs:?}");
         let faces: Vec<&str> = text.lines().filter(|l| l.trim_start().starts_with("*MESH_FACE ")).collect();
         assert!(faces[0].contains("AB: 1 BC: 1 CA: 0") && faces[1].contains("AB: 0 BC: 1 CA: 1"), "{faces:?}");
