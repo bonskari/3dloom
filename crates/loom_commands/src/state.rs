@@ -745,6 +745,18 @@ pub struct GizmoPrefs {
     pub rotate_angle_data: bool,
     /// Scale gizmo size as a percent of the gizmo size (default 100).
     pub scale_size: f32,
+    /// Move gizmo Relative Size: percent of the gizmo size (0–500, default 100).
+    pub move_size: f32,
+    /// Rotate gizmo Relative Size: percent of the gizmo size (0–500, default 100).
+    pub rotate_size: f32,
+    /// Move gizmo Plane Handles: On.
+    pub move_plane_handles: bool,
+    /// Scale gizmo Uniform Handle Size: centre to the uniform handle's edge, percent of the scale gizmo (default 50).
+    pub scale_uniform_handle: f32,
+    /// Scale gizmo 2-Axis Handle Size: uniform handle's edge to the 2-axis handle's edge, percent of the scale gizmo (default 20).
+    pub scale_two_axis_handle: f32,
+    /// Uniform 2-Axis Scaling: a 2-axis handle scales uniformly.
+    pub uniform_two_axis_scaling: bool,
     /// Keyboard rotation increment in degrees (default 10).
     pub rotation_increment: f32,
     /// Viewport orbit snap angle in degrees (default 10).
@@ -775,6 +787,12 @@ impl Default for GizmoPrefs {
             rotate_show_pie_slice: true,
             rotate_angle_data: true,
             scale_size: 100.0,
+            move_size: 100.0,
+            rotate_size: 100.0,
+            move_plane_handles: true,
+            scale_uniform_handle: 50.0,
+            scale_two_axis_handle: 20.0,
+            uniform_two_axis_scaling: false,
             rotation_increment: 10.0,
             orbit_snap_angle: 10.0,
         }
@@ -919,7 +937,7 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 45] = [
+    pub const NAMES: [&'static str; 51] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -928,7 +946,8 @@ impl Prefs {
         "Scale Size", "Rotation Increment", "Space Locks Selection", "Local Center During Animate", "Recent Files in File Menu", "Keep Creating",
         "Grid Nudge Distance", "Floating Windows as OS Windows", "Display World Axis", "Mask Viewport to Safe Region", "Zoom About Mouse Point Orthographic", "Zoom About Mouse Point Perspective",
         "Right Click Menu over Selected Only", "Wheel Zoom Increment", "Large Toolbar Buttons", "Flyout Time", "Topology Dependence Warning", "Backup on Save",
-        "Increment on Save", "Zoom Extents on Import",
+        "Increment on Save", "Zoom Extents on Import", "Move Gizmo Relative Size", "Rotate Gizmo Relative Size", "Move Plane Handles",
+        "Scale Uniform Handle Size", "Scale 2-Axis Handle Size", "Uniform 2-Axis Scaling",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -978,6 +997,12 @@ impl Prefs {
             "Rotate Show Pie Slice" => b(self.gizmos.rotate_show_pie_slice),
             "Rotate Angle Data" => b(self.gizmos.rotate_angle_data),
             "Scale Size" => self.gizmos.scale_size as f64,
+            "Move Gizmo Relative Size" => self.gizmos.move_size as f64,
+            "Rotate Gizmo Relative Size" => self.gizmos.rotate_size as f64,
+            "Move Plane Handles" => b(self.gizmos.move_plane_handles),
+            "Scale Uniform Handle Size" => self.gizmos.scale_uniform_handle as f64,
+            "Scale 2-Axis Handle Size" => self.gizmos.scale_two_axis_handle as f64,
+            "Uniform 2-Axis Scaling" => b(self.gizmos.uniform_two_axis_scaling),
             "Rotation Increment" => self.gizmos.rotation_increment as f64,
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle as f64,
             _ => return None,
@@ -1032,6 +1057,12 @@ impl Prefs {
             "Rotate Show Pie Slice" => self.gizmos.rotate_show_pie_slice = on,
             "Rotate Angle Data" => self.gizmos.rotate_angle_data = on,
             "Scale Size" => self.gizmos.scale_size = f.clamp(10.0, 400.0),
+            "Move Gizmo Relative Size" => self.gizmos.move_size = f.clamp(0.0, 500.0),
+            "Rotate Gizmo Relative Size" => self.gizmos.rotate_size = f.clamp(0.0, 500.0),
+            "Move Plane Handles" => self.gizmos.move_plane_handles = on,
+            "Scale Uniform Handle Size" => self.gizmos.scale_uniform_handle = f.clamp(1.0, 95.0),
+            "Scale 2-Axis Handle Size" => self.gizmos.scale_two_axis_handle = f.clamp(0.0, 99.0),
+            "Uniform 2-Axis Scaling" => self.gizmos.uniform_two_axis_scaling = on,
             "Rotation Increment" => self.gizmos.rotation_increment = f.max(0.0),
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle = f.max(0.0),
             _ => return Err(format!("unknown preference {name:?}")),

@@ -29,6 +29,9 @@ const CONE_LENGTH: f32 = 0.26;
 const CONE_RADIUS: f32 = 0.08;
 
 pub fn plane_quad(l: &GizmoLayout, p: &Projection, plane: Plane) -> Option<[egui::Pos2; 4]> {
+    if !l.plane_handles {
+        return None;
+    }
     let len = l.world_len(p);
     let (ua, va) = plane.axes();
     let (u, v) = (l.axis(ua) * len, l.axis(va) * len);

@@ -5,10 +5,14 @@
 
 use super::*;
 
-/// Inner triangle corners, as a fraction of the axis length.
-const INNER: f32 = 0.5;
-/// Outer triangle corners: the plane bands span INNER..OUTER.
-const OUTER: f32 = 0.7;
+/// Inner triangle corners, as a fraction of the axis length (Uniform Handle Size).
+fn inner(l: &GizmoLayout) -> f32 {
+    l.scale_uniform / 100.0
+}
+/// Outer triangle corners: the plane bands span inner..outer (2-Axis Handle Size).
+fn outer(l: &GizmoLayout) -> f32 {
+    ((l.scale_uniform + l.scale_two_axis) / 100.0).min(1.0)
+}
 const END_BOX_PX: f32 = 6.0;
 
 const FILL_GREY: egui::Color32 = egui::Color32::from_gray(214);
@@ -25,11 +29,11 @@ fn corner(l: &GizmoLayout, p: &Projection, a: Axis, at: f32) -> Option<egui::Pos
 /// The two-axis handle: the band between the inner and outer edge of `plane`.
 pub fn plane_band(l: &GizmoLayout, p: &Projection, plane: Plane) -> Option<[egui::Pos2; 4]> {
     let (ua, va) = plane.axes();
-    Some([corner(l, p, ua, INNER)?, corner(l, p, ua, OUTER)?, corner(l, p, va, OUTER)?, corner(l, p, va, INNER)?])
+    Some([corner(l, p, ua, inner(l))?, corner(l, p, ua, outer(l))?, corner(l, p, va, outer(l))?, corner(l, p, va, inner(l))?])
 }
 
 pub fn uniform_polygon(l: &GizmoLayout, p: &Projection) -> Option<Vec<egui::Pos2>> {
-    [Axis::X, Axis::Y, Axis::Z].into_iter().map(|a| corner(l, p, a, INNER)).collect()
+    [Axis::X, Axis::Y, Axis::Z].into_iter().map(|a| corner(l, p, a, inner(l))).collect()
 }
 
 pub fn hit(l: &GizmoLayout, p: &Projection, pointer: egui::Pos2) -> Option<Handle> {
@@ -38,7 +42,7 @@ pub fn hit(l: &GizmoLayout, p: &Projection, pointer: egui::Pos2) -> Option<Handl
     // Uniform: inside the inner triangle, including the axis lines within it.
     let on_inner_axis = [Axis::X, Axis::Y, Axis::Z]
         .into_iter()
-        .filter_map(|a| axis_segment(l, p, a, 0.0, INNER))
+        .filter_map(|a| axis_segment(l, p, a, 0.0, inner(l)))
         .any(|(s, e)| distance_to_segment(pointer, s, e) <= HIT_PX);
     if let Some(poly) = uniform_polygon(l, p) {
         if point_in_polygon(pointer, &poly) || on_inner_axis || pointer.distance(o) <= 5.0 {
@@ -124,7 +128,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
             }
         }
         let (ua, va) = plane.axes();
-        for at in [INNER, OUTER] {
+        for at in [inner(sl), outer(sl)] {
             let (Some(a), Some(b)) = (corner(sl, p, ua, at), corner(sl, p, va, at)) else { continue };
             if active || uniform_active {
                 painter.line_segment([a, b], egui::Stroke::new(1.5_f32, hover()));
@@ -142,7 +146,7 @@ pub fn draw(painter: &egui::Painter, l: &GizmoLayout, p: &Projection, hl: Option
         let width = if hl == Some(Handle::Axis(a)) { 3.0_f32 } else { 2.0 };
         painter.line_segment([s, e], egui::Stroke::new(width, color));
         if uniform_active {
-            if let Some((s, m)) = axis_segment(sl, p, a, 0.0, INNER) {
+            if let Some((s, m)) = axis_segment(sl, p, a, 0.0, inner(sl)) {
                 painter.line_segment([s, m], egui::Stroke::new(width, hover()));
             }
         }

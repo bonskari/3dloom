@@ -123,3 +123,68 @@ fn the_switcher_sets_the_modular_toolbars_scheme() {
     assert!(loom_commands::ui_custom::is_shown(&h.app.state, "Axis Constraints"));
     assert!(h.has(Role::Button, "Restrict to X"), "its toolbar is on screen");
 }
+
+/// A point on a gizmo handle of the active tool, searched outward from the pivot.
+fn gizmo_handle_point(h: &Harness, want: impl Fn(crate::gizmo::Handle) -> bool) -> Option<egui::Pos2> {
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let cam = h.app.camera_for(i);
+    let projection = crate::gizmo::Projection::new(cam.view_matrix(), cam.projection_matrix(rect.width() / rect.height()), rect);
+    let layout = crate::gizmo::layout_for(&h.app, i, rect.height());
+    let o = h.screen_of(layout.origin);
+    (0..72)
+        .flat_map(|a| (4..250).map(move |d| (a, d)))
+        .map(|(a, d)| o + egui::Vec2::angled((a as f32 * 5.0).to_radians()) * d as f32)
+        .find(|p| crate::gizmo::hit(&h.app, &layout, &projection, *p).is_some_and(&want))
+}
+
+/// How far right of the pivot the active gizmo still answers the pointer.
+fn gizmo_reach(h: &Harness) -> f32 {
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let cam = h.app.camera_for(i);
+    let projection = crate::gizmo::Projection::new(cam.view_matrix(), cam.projection_matrix(rect.width() / rect.height()), rect);
+    let layout = crate::gizmo::layout_for(&h.app, i, rect.height());
+    let o = h.screen_of(layout.origin);
+    (4..400).filter(|d| (0..72).any(|a| crate::gizmo::hit(&h.app, &layout, &projection, o + egui::Vec2::angled((a as f32 * 5.0).to_radians()) * *d as f32).is_some())).max().unwrap_or(0) as f32
+}
+
+/// Preferences > Gizmos: Plane Handles On off removes the move gizmo's plane
+/// squares, Uniform 2-Axis Scaling makes a scale plane handle uniform, and
+/// the Move Relative Size spinner sizes the move gizmo.
+#[test]
+fn gizmo_preferences_plane_handles_uniform_two_axis_and_relative_size() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [30.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    framed(&mut h);
+    h.key(egui::Key::W);
+    let before = gizmo_reach(&h);
+    h.cmd(Command::Preferences);
+    h.click(h.text_rect("Gizmos", window(&h, "Preference Settings")).unwrap().center());
+    // Plane Handles "On" sits below the Transform Gizmos "On".
+    let ons = h.find_all(Role::CheckBox, "On");
+    assert_eq!(ons.len(), 2, "Transform Gizmos On and Plane Handles On");
+    h.click(ons[1].center());
+    assert!(!h.app.state.prefs.gizmos.move_plane_handles);
+    h.click(h.find(Role::CheckBox, "Uniform 2-Axis Scaling").center());
+    assert!(h.app.state.prefs.gizmos.uniform_two_axis_scaling);
+    // The first Relative Size spinner is the Move gizmo's.
+    let spin = h.spinner_after("Relative Size (%):");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -300.0));
+    assert!(h.app.state.prefs.gizmos.move_size > 150.0, "dragging the spinner up grows it: {}", h.app.state.prefs.gizmos.move_size);
+    h.click(h.text_rect("OK", window(&h, "Preference Settings")).unwrap().center());
+    assert_eq!(h.app.state.dialog, None);
+
+    assert!(gizmo_handle_point(&h, |g| matches!(g, crate::gizmo::Handle::Plane(_))).is_none(), "no move plane handles");
+    let after = gizmo_reach(&h);
+    assert!(after > before * 1.3, "the move gizmo grew: {before} -> {after}");
+
+    h.key(egui::Key::R);
+    h.cmd(Command::ScaleType { kind: loom_commands::ScaleKind::NonUniform });
+    let p = gizmo_handle_point(&h, |g| matches!(g, crate::gizmo::Handle::Plane(_))).expect("a scale 2-axis handle");
+    h.drag(p, p + egui::vec2(40.0, -40.0));
+    let s = h.app.state.scene.node(id).unwrap().transform.scale.get();
+    assert!(s.x > 1.01 && (s.x - s.y).abs() < 1e-4 && (s.x - s.z).abs() < 1e-4, "the 2-axis handle scaled uniformly: {s}");
+}
