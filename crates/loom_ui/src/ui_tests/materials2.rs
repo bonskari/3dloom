@@ -504,3 +504,19 @@ fn swatch_right_click_copy_and_paste() {
     h.frames(2);
     assert_eq!(editor_material(&h).specular.get(), glam::Vec3::X);
 }
+
+#[test]
+fn bitmap_path_editor_strips_a_picked_path() {
+    let mut h = Harness::new();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() });
+    h.cmd(Command::SetMapBitmap { path: "/gone/brick.png".into(), sequence: None });
+    h.cmd(Command::BitmapPathEditor);
+    h.frames(2);
+    h.click_text_anywhere("/gone/brick.png (missing)");
+    h.frames(1);
+    h.click_text_anywhere("Strip Path");
+    h.frames(2);
+    let ed = &h.app.state.scene.material_editor;
+    let top = ed.slots[ed.active].unwrap();
+    assert_eq!(h.app.state.scene.materials[&top].map("Diffuse Color").unwrap().path, "brick.png");
+}

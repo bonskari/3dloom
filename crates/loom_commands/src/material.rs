@@ -62,6 +62,8 @@ pub fn handles(c: &C) -> bool {
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
             | C::CleanMultiMaterial { .. }
+            | C::BitmapPathEditor
+            | C::BitmapPathSet { .. }
             | C::MakeMaterialPreview { .. }
             | C::MissingMapCoordinates { .. }
             | C::MaterialExplorer
@@ -463,6 +465,43 @@ pub fn missing_map_coords(state: &AppState) -> Vec<(NodeId, String, u32)> {
         }
     }
     out
+}
+
+/// Every map of material `m` (its channels and their component maps), mutably.
+fn for_each_map_mut(m: &mut StandardMaterial, f: &mut dyn FnMut(&mut Map)) {
+    fn walk(map: &mut Map, f: &mut dyn FnMut(&mut Map)) {
+        f(map);
+        for s in map.sub_maps.iter_mut().chain(map.extra_maps.iter_mut()).flatten() {
+            walk(s, f);
+        }
+    }
+    for slot in m.map_slots() {
+        if let Ok(Some(map)) = m.map_slot_mut(slot).map(|s| s.as_mut()) {
+            walk(map, f);
+        }
+    }
+}
+
+/// Bitmap/Photometric Path Editor: each bitmap file the materials use,
+/// whether it exists and how many maps use it.
+pub fn bitmap_paths(state: &AppState) -> Vec<Value> {
+    fn walk(map: &Map, out: &mut std::collections::BTreeMap<String, usize>) {
+        if map.kind == MapType::Bitmap && !map.path.is_empty() {
+            *out.entry(map.path.clone()).or_default() += 1;
+        }
+        for c in map.components() {
+            walk(c, out);
+        }
+    }
+    let mut paths = std::collections::BTreeMap::new();
+    for m in state.scene.materials.values() {
+        for slot in m.map_slots() {
+            if let Some(map) = m.map(slot) {
+                walk(map, &mut paths);
+            }
+        }
+    }
+    paths.into_iter().map(|(p, n)| json!({ "path": p, "found": std::path::Path::new(&p).is_file(), "maps": n })).collect()
 }
 
 /// Material Explorer's scene panel: every material objects use (top level),
@@ -1260,6 +1299,38 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let files: Vec<String> = (0..frames.len()).map(|i| loom_scene::render::numbered_path(&path, i as i32)).collect();
             state.material_preview_request = Some(MaterialPreview { slot: state.scene.material_editor.active, frames: frames.clone(), size, files: files.clone() });
             Ok(json!({ "frames": frames, "files": files }))
+        }
+        C::BitmapPathEditor => {
+            state.bitmap_path_editor_open = !state.bitmap_path_editor_open;
+            Ok(json!({ "open": state.bitmap_path_editor_open, "bitmaps": bitmap_paths(state) }))
+        }
+        C::BitmapPathSet { from, to } => {
+            let name = std::path::Path::new(&from).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let new = if to.is_empty() {
+                name
+            } else if std::path::Path::new(&to).is_dir() || to.ends_with('/') || to.ends_with('\\') {
+                std::path::Path::new(&to).join(&name).to_string_lossy().into_owned()
+            } else {
+                to
+            };
+            let before = snapshot(state);
+            let mut after = before.clone();
+            let mut n = 0;
+            for m in after.0.values_mut() {
+                for_each_map_mut(m, &mut |map| {
+                    if map.kind == MapType::Bitmap && map.path == from {
+                        map.path = new.clone();
+                        n += 1;
+                    }
+                });
+            }
+            if n == 0 {
+                return Err(format!("no map uses {from}"));
+            }
+            commit(state, "Set Path", Change::SetMaterials { before, after })?;
+            state.bitmap_generation += 1;
+            state.mesh_dirty = true;
+            Ok(json!({ "path": new, "maps": n }))
         }
         C::CleanMultiMaterial { materials, apply } => {
             let unused = unused_sub_materials(state);

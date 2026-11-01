@@ -1695,6 +1695,8 @@ pub struct AppState {
     pub material_navigator_open: bool,
     /// Rendering > Material Explorer is open.
     pub material_explorer_open: bool,
+    /// Utilities > Bitmap/Photometric Path Editor is open.
+    pub bitmap_path_editor_open: bool,
     /// The Material Editor's current material library (Put to Library, Mtl Library).
     pub material_library: crate::material_library::MaterialLibraryState,
     /// Type button right-click Copy / Cut: what Paste puts back.
@@ -2098,6 +2100,7 @@ impl AppState {
             material_editor_open: false,
             material_navigator_open: false,
             material_explorer_open: false,
+            bitmap_path_editor_open: false,
             material_library: Default::default(),
             material_clip: None,
             coords_pending_render: None,

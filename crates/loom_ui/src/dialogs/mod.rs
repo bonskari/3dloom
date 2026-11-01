@@ -124,6 +124,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     // Render To Texture is modeless: it stays open beside the other dialogs.
     render_to_texture::show(ctx, app);
     material_editor::run_material_preview(app);
+    if app.state.bitmap_path_editor_open {
+        let mut open = true;
+        material_editor::bitmap_path_editor(ctx, app, &mut open);
+        if !open {
+            app.state.bitmap_path_editor_open = false;
+        }
+    }
     if app.state.material_explorer_open {
         let mut open = true;
         material_editor::explorer(ctx, app, &mut open);

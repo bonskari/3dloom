@@ -575,3 +575,22 @@ fn missing_map_coordinates_asks_before_rendering_until_a_uvw_map_gives_the_chann
     let r = execute(&mut s, Command::MissingMapCoordinates { proceed: None }).unwrap();
     assert_eq!(r["missing"], serde_json::json!([]));
 }
+
+#[test]
+fn bitmap_path_editor_lists_and_repaths_bitmaps() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() }).unwrap();
+    execute(&mut s, Command::SetMapBitmap { path: "/gone/brick.png".into(), sequence: None }).unwrap();
+    let r = execute(&mut s, Command::BitmapPathEditor).unwrap();
+    assert_eq!(r["bitmaps"], serde_json::json!([{ "path": "/gone/brick.png", "found": false, "maps": 1 }]));
+    let dir = std::env::temp_dir();
+    let r = execute(&mut s, Command::BitmapPathSet { from: "/gone/brick.png".into(), to: dir.to_string_lossy().into() }).unwrap();
+    let want = dir.join("brick.png").to_string_lossy().into_owned();
+    assert_eq!(r["path"], want, "a folder keeps the file name");
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    assert_eq!(s.scene.materials[&top(&s)].map("Diffuse Color").unwrap().path, want);
+    execute(&mut s, Command::BitmapPathSet { from: want.clone(), to: String::new() }).unwrap();
+    assert_eq!(s.scene.materials[&top(&s)].map("Diffuse Color").unwrap().path, "brick.png", "Strip Path");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.materials[&top(&s)].map("Diffuse Color").unwrap().path, want);
+}

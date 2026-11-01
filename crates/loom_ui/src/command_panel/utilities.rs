@@ -17,6 +17,7 @@ pub enum Utility {
     LinkInheritance,
     ChannelInfo,
     UvwRemove,
+    BitmapPaths,
     PanoramaExporter,
 }
 
@@ -32,6 +33,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             ("Link Inheritance (Selected)", Utility::LinkInheritance),
             ("Channel Info", Utility::ChannelInfo),
             ("UVW Remove", Utility::UvwRemove),
+            ("Bitmap/Photometric Paths", Utility::BitmapPaths),
             ("Panorama Exporter", Utility::PanoramaExporter),
         ] {
             if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.utility == u, label)).clicked() {
@@ -125,6 +127,11 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         Utility::LinkInheritance => rollout(ui, "Link Inheritance (Selected)", true, |ui| link_inheritance(ui, app)),
         Utility::ChannelInfo => rollout(ui, "Channel Info", true, |ui| channel_info(ui, app)),
         Utility::UvwRemove => rollout(ui, "UVW Remove", true, |ui| uvw_remove(ui, app)),
+        Utility::BitmapPaths => rollout(ui, "Path Editor", true, |ui| {
+            if ui.button("Edit Resources...").clicked() && !app.state.bitmap_path_editor_open {
+                let _ = app.dispatch(Command::BitmapPathEditor);
+            }
+        }),
         Utility::ResetXForm => rollout(ui, "Reset Transform", true, |ui| {
             ui.add_enabled_ui(has, |ui| {
                 if ui.button("Reset Selected").clicked() {
