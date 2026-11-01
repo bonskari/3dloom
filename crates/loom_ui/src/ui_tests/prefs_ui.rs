@@ -219,3 +219,19 @@ fn preferences_inverse_kinematics_tab_sets_always_transform_children_of_the_worl
     h.click(h.text_rect("Always Transform Children of the World", win).expect("the checkbox").center());
     assert!(!h.app.state.prefs.ik_transform_world_children);
 }
+
+/// Viewports > Display Driver > Antialiasing: None or 4 samples, saved with
+/// the preferences; the window takes it on the next start.
+#[test]
+fn viewport_antialiasing_preference_switches_to_none_and_back() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    h.click(h.text_rect("Viewports", window(&h, "Preference Settings")).unwrap().center());
+    assert_eq!(h.app.state.prefs.viewport_antialiasing, 4);
+    h.click(h.text_rect("None", window(&h, "Preference Settings")).expect("the None radio").center());
+    assert_eq!(h.app.state.prefs.viewport_antialiasing, 1);
+    let restart = h.text_rect("Takes effect when 3dLoom restarts.", window(&h, "Preference Settings")).is_some();
+    assert_eq!(restart, crate::viewport_msaa() != 1, "the dialog says when the window has another sample count");
+    h.click(h.text_rect("4 Samples", window(&h, "Preference Settings")).expect("the 4 Samples radio").center());
+    assert_eq!(h.app.state.prefs.viewport_antialiasing, 4);
+}

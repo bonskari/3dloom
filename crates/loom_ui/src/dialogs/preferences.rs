@@ -186,6 +186,21 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.horizontal(|ui| number(ui, app, "Grid Nudge Distance", "Grid Nudge Distance:", 0.0..=10_000.0, 3));
                 });
                 ui.group(|ui| {
+                    ui.label(egui::RichText::new("Display Driver").strong());
+                    ui.horizontal(|ui| {
+                        ui.label("Antialiasing:");
+                        let samples = app.state.prefs.viewport_antialiasing;
+                        for (n, label) in [(1, "None"), (4, "4 Samples")] {
+                            if ui.radio(samples == n, label).clicked() {
+                                set(app, "Viewport Antialiasing", n as f64);
+                            }
+                        }
+                    });
+                    if app.state.prefs.viewport_antialiasing != crate::viewport_msaa() {
+                        ui.label("Takes effect when 3dLoom restarts.");
+                    }
+                });
+                ui.group(|ui| {
                     ui.label(egui::RichText::new("Ghosting").strong());
                     ui.horizontal(|ui| number(ui, app, "Ghosting Frames", "Ghosting Frames:", 1.0..=50.0, 0));
                     ui.horizontal(|ui| number(ui, app, "Ghosting Nth Frame", "Display Nth Frame:", 1.0..=1000.0, 0));

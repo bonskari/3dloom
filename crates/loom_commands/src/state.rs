@@ -991,6 +991,9 @@ pub struct Prefs {
     /// Rendering > Render Termination Alert: a finished render asks for the
     /// user's attention (the taskbar entry flashes; no audio in this build).
     pub render_termination_alert: bool,
+    /// Viewports > Display Driver > Antialiasing: the viewports' MSAA sample
+    /// count, 1 (None) or 4. The window takes it when 3dLoom starts.
+    pub viewport_antialiasing: u32,
 }
 
 fn default_nudge() -> f32 {
@@ -1059,6 +1062,7 @@ impl Default for Prefs {
             interactive_ik_iterations: 10,
             ik_transform_world_children: true,
             render_termination_alert: false,
+            viewport_antialiasing: 4,
         }
     }
 }
@@ -1163,6 +1167,7 @@ impl Prefs {
             "Interactive IK Iterations" => self.interactive_ik_iterations as f64,
             "Always Transform Children of the World" => b(self.ik_transform_world_children),
             "Render Termination Alert" => b(self.render_termination_alert),
+            "Viewport Antialiasing" => self.viewport_antialiasing as f64,
             _ => return None,
         })
     }
@@ -1248,6 +1253,7 @@ impl Prefs {
             "Interactive IK Iterations" => self.interactive_ik_iterations = v.clamp(1.0, 10_000.0) as u32,
             "Always Transform Children of the World" => self.ik_transform_world_children = on,
             "Render Termination Alert" => self.render_termination_alert = on,
+            "Viewport Antialiasing" => self.viewport_antialiasing = if v >= 2.0 { 4 } else { 1 },
             _ => return Err(format!("unknown preference {name:?}")),
         }
         Ok(())

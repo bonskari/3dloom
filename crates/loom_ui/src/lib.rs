@@ -1694,7 +1694,15 @@ impl LoomApp {
 /// (Bevy) renderer needs, which shares it.
 /// The window's MSAA sample count: the viewports draw into the window's
 /// pass, so their shaded edges and wireframe lines are antialiased.
-pub const VIEWPORT_MSAA: u32 = 4;
+/// Preferences > Viewports > Antialiasing in the settings file as 3dLoom
+/// started (the window's sample count is fixed while it runs).
+pub fn viewport_msaa() -> u32 {
+    static SAMPLES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *SAMPLES.get_or_init(|| {
+        let saved = loom_commands::settings::settings_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| loom_commands::settings::Settings::from_json(&t).ok());
+        saved.map(|s| s.prefs.viewport_antialiasing).unwrap_or(loom_commands::state::Prefs::default().viewport_antialiasing)
+    })
+}
 
 pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
     egui_wgpu::WgpuConfiguration {
