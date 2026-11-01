@@ -421,3 +421,21 @@ fn use_real_world_scale_check_box() {
     assert!(m.map("Diffuse Color").unwrap().coords.real_world);
     assert!(!h.text_rects("Size").is_empty(), "Tiling reads Size");
 }
+
+#[test]
+fn missing_map_coordinates_dialog_lists_the_object_and_cancels() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() });
+    h.cmd(Command::SetMapParameter { name: "Map Channel".into(), value: 4.0 });
+    h.cmd(Command::AssignMaterialToSelection);
+    h.cmd(Command::Render { path: None, width: Some(8), height: Some(8) });
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MissingMapCoordinates));
+    let name = h.app.state.scene.nodes().next().unwrap().name.clone();
+    assert!(!h.text_rects(&format!("(UVW 4): {name}")).is_empty(), "the channel and the object are listed");
+    h.click_text_anywhere("Cancel");
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, None);
+    assert!(h.app.state.rendered.image.is_none(), "nothing rendered");
+}
