@@ -70,7 +70,9 @@ fn ambient_occlusion(p: vec3<f32>, n: vec3<f32>, px: vec2<f32>) -> f32 {
         if (d >= 1.0) {
             continue;
         }
-        let ndc = vec2<f32>(q.x / view.viewport_px.z * 2.0 - 1.0, 1.0 - q.y / view.viewport_px.w * 2.0);
+        // The depth is the sampled texel's, at its centre.
+        let qc = vec2<f32>(qi) + vec2<f32>(0.5);
+        let ndc = vec2<f32>(qc.x / view.viewport_px.z * 2.0 - 1.0, 1.0 - qc.y / view.viewport_px.w * 2.0);
         let w = view.inv_view_proj * vec4<f32>(ndc, d, 1.0);
         let s = w.xyz / w.w;
         let v = s - p;
