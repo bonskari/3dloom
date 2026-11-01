@@ -53,6 +53,18 @@ pub fn general_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
             v.extend(viewcube_entries(app, index));
             v
         }) },
+        MenuEntry { label: "SteeringWheels".into(), checked: false, action: Action::Submenu({
+            let mut v = vec![check("Toggle SteeringWheels", s.wheel.open, Command::ToggleSteeringWheels), sep()];
+            for w in ["View Object", "Tour Building", "Full Navigation"] {
+                v.push(item(&format!("Mini {w} Wheel"), Command::SteeringWheel { wheel: format!("Mini {w}") }));
+            }
+            v.push(item("Full Navigation Wheel", Command::SteeringWheel { wheel: "Full Navigation".into() }));
+            v.push(item("View Object Wheel", Command::SteeringWheel { wheel: "View Object".into() }));
+            v.push(item("Tour Building Wheel", Command::SteeringWheel { wheel: "Tour Building".into() }));
+            v.push(sep());
+            v.push(item("Configure...", Command::ConfigureViewports { panel: Some("SteeringWheels".into()) }));
+            v
+        }) },
         sep(),
         MenuEntry { label: "xView".into(), checked: false, action: Action::Submenu(xview_entries(app)) },
         MenuEntry {

@@ -845,4 +845,11 @@ fn steering_wheels_open_pan_zoom_rewind_switch_close() {
     let look = h.text_rects("Invert Vertical Axis");
     h.click(look[0].center());
     assert!(h.app.state.prefs.wheels.look_invert, "the SteeringWheels panel");
+    // The [+] label menu carries the same submenu; its Toggle item opens the wheel.
+    let entries = crate::label_menus::general_entries(&h.app, 0);
+    let sub = entries.iter().find(|e| e.label == "SteeringWheels").expect("[+] > SteeringWheels");
+    let crate::label_menus::Action::Submenu(items) = &sub.action else { panic!("a submenu") };
+    let crate::label_menus::Action::Command(c) = &items[0].action else { panic!("Toggle SteeringWheels") };
+    h.cmd(c.clone());
+    assert!(h.app.state.wheel.open);
 }
