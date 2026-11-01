@@ -317,7 +317,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod tests {
+mod flow_tests {
     #[test]
     fn rollouts_flow_into_the_next_column_past_the_threshold() {
         let (p, lowest) = super::flow(&[100.0, 100.0, 100.0], 0.0, 150.0, 2, 20.0, 0.0);
