@@ -115,10 +115,11 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             Some(ObjectKind::Camera { target, .. }) => *target,
             _ => None,
         };
+        let rotation = node.map(|n| n.transform.rotation_quat()).unwrap_or_default();
         match target {
             None => {
                 egui::CollapsingHeader::new("View Controls").default_open(true).show(ui, |ui| {
-                    let (turn, tilt) = loom_commands::walkthrough::head_angles(node.map(|n| n.transform.rotation_quat()).unwrap_or_default());
+                    let (turn, tilt) = loom_commands::walkthrough::head_angles(rotation);
                     ui.label("Turn Head");
                     let (mut t, mut a) = (turn, tilt);
                     ui.horizontal(|ui| {
