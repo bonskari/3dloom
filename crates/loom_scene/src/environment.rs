@@ -208,11 +208,57 @@ pub struct Glow {
     pub outer_color: Param<Vec3>,
     /// Image Filters > Bright: pixels brighter than this (0–255) glow.
     pub bright: Param<f32>,
+    /// The Star and Streak elements of the same Lens Effects entry (Image
+    /// Centers: one per bright area, at its centre).
+    pub star: StarElement,
+    pub streak: StarElement,
 }
 
 impl Default for Glow {
     fn default() -> Self {
-        Self { size: p(5.0), intensity: p(100.0), use_source_color: p(100.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE), bright: p(200.0) }
+        Self { size: p(5.0), intensity: p(100.0), use_source_color: p(100.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE), bright: p(200.0), star: StarElement::star(), streak: StarElement::streak() }
+    }
+}
+
+/// Lens Effects Star / Streak element: spokes from each bright area's centre
+/// (a Streak is a band through it: two opposite spokes).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StarElement {
+    pub on: bool,
+    /// Spoke length, % of the image diagonal.
+    pub size: Param<f32>,
+    /// Brightness and opacity, percent.
+    pub intensity: Param<f32>,
+    /// Spoke width, % of the frame (its diagonal).
+    pub width: Param<f32>,
+    /// Starting angle of the spokes, degrees.
+    pub angle: Param<f32>,
+    /// Tip width as % of the base width: 0 a sharp point, over 100 flared.
+    pub taper: Param<f32>,
+    /// Sharpness 0-10: higher is crisper, lower glows.
+    pub sharp: Param<f32>,
+    /// Number of spokes (Star only; 6 by default).
+    pub qty: u32,
+    pub use_source_color: Param<f32>,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+}
+
+impl StarElement {
+    /// This build's starting values (the reference documents only Qty 6).
+    pub fn star() -> Self {
+        Self { on: false, size: p(10.0), intensity: p(100.0), width: p(1.0), angle: p(0.0), taper: p(0.0), sharp: p(8.0), qty: 6, use_source_color: p(0.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
+    }
+
+    pub fn streak() -> Self {
+        Self { size: p(30.0), width: p(0.5), taper: p(100.0), qty: 2, ..Self::star() }
+    }
+}
+
+impl Default for StarElement {
+    fn default() -> Self {
+        Self::star()
     }
 }
 

@@ -4,7 +4,7 @@
 //! sRGB RGBA; background pixels are the ones with alpha 0 ("Ignore
 //! Background", "Non-Background").
 
-use crate::environment::{Blur, ImageEffect};
+use crate::environment::{Blur, ImageEffect, Star};
 use image::RgbaImage;
 use loom_scene::environment::BlurType;
 
@@ -13,6 +13,7 @@ pub fn apply(img: &mut RgbaImage, effects: &[ImageEffect]) {
     for fx in effects {
         match fx {
             ImageEffect::Glow { size, intensity, use_source_color, inner, outer, bright } => glow(img, *size, *intensity, *use_source_color, *inner, *outer, *bright),
+            ImageEffect::Star(s) => star(img, s),
             ImageEffect::Blur(b) => blur(img, b),
             ImageEffect::BrightnessContrast { brightness, contrast, ignore_background } => per_pixel(img, *ignore_background, |c| brightness_contrast(c, *brightness, *contrast)),
             ImageEffect::ColorBalance { cyan_red, magenta_green, yellow_blue, preserve_luminosity, ignore_background } => {
@@ -172,6 +173,111 @@ fn glow(img: &mut RgbaImage, size: f32, intensity: f32, use_source: f32, inner: 
     }
 }
 
+/// The areas brighter than `threshold` (0-1, any channel; background
+/// excluded), 8-connected: each area's centre and mean colour.
+fn bright_centres(img: &RgbaImage, threshold: f32) -> Vec<([f32; 2], [f32; 3])> {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    let bright: Vec<bool> = img.pixels().map(|p| p.0[3] != 0 && to_f(p.0).iter().cloned().fold(0.0, f32::max) > threshold).collect();
+    let mut seen = vec![false; w * h];
+    let mut out = Vec::new();
+    for start in 0..w * h {
+        if !bright[start] || seen[start] {
+            continue;
+        }
+        seen[start] = true;
+        let mut stack = vec![start];
+        let (mut n, mut sx, mut sy, mut col) = (0.0f32, 0.0f32, 0.0f32, [0.0f32; 3]);
+        while let Some(i) = stack.pop() {
+            let (x, y) = (i % w, i / w);
+            let c = to_f(img.get_pixel(x as u32, y as u32).0);
+            n += 1.0;
+            sx += x as f32;
+            sy += y as f32;
+            for k in 0..3 {
+                col[k] += c[k];
+            }
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                        continue;
+                    }
+                    let j = ny as usize * w + nx as usize;
+                    if bright[j] && !seen[j] {
+                        seen[j] = true;
+                        stack.push(j);
+                    }
+                }
+            }
+        }
+        out.push(([sx / n + 0.5, sy / n + 0.5], col.map(|c| c / n)));
+    }
+    out
+}
+
+/// Lens Effects Star / Streak (Image Centers): `qty` spokes from the centre
+/// of each bright area, `size` % of the image diagonal long and `width` % of
+/// it wide at the base, narrowing to `taper` % at the tip; `sharp` (0-10)
+/// tightens the spokes' soft edge; the colour runs from inner to outer
+/// along a spoke, mixed with the area's own by Use Source Color.
+fn star(img: &mut RgbaImage, s: &Star) {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w == 0 || h == 0 || s.qty == 0 {
+        return;
+    }
+    let diag = ((w * w + h * h) as f32).sqrt();
+    let len = s.size.max(0.0) / 100.0 * diag;
+    let base = (s.width.max(0.0) / 100.0 * diag * 0.5).max(0.5);
+    let soft = 0.25 + (10.0 - s.sharp.clamp(0.0, 10.0)) / 10.0;
+    let k = s.intensity.max(0.0) / 100.0;
+    let mix = (s.use_source_color / 100.0).clamp(0.0, 1.0);
+    let dirs: Vec<[f32; 2]> = (0..s.qty)
+        .map(|i| {
+            let a = (s.angle + i as f32 * 360.0 / s.qty as f32).to_radians();
+            [a.cos(), -a.sin()]
+        })
+        .collect();
+    let mut add = vec![[0.0f32; 3]; w * h];
+    for (c, src) in bright_centres(img, s.bright / 255.0) {
+        let reach = len + base * (1.0 + s.taper.max(0.0) / 100.0) * 2.0 * soft;
+        let (x0, x1) = (((c[0] - reach).floor().max(0.0)) as usize, ((c[0] + reach).ceil().min(w as f32 - 1.0)) as usize);
+        let (y0, y1) = (((c[1] - reach).floor().max(0.0)) as usize, ((c[1] + reach).ceil().min(h as f32 - 1.0)) as usize);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let d = [x as f32 + 0.5 - c[0], y as f32 + 0.5 - c[1]];
+                let mut best = 0.0f32;
+                let mut t_best = 0.0;
+                for dir in &dirs {
+                    let along = d[0] * dir[0] + d[1] * dir[1];
+                    if along < 0.0 || along > len {
+                        continue;
+                    }
+                    let t = along / len.max(1e-6);
+                    let across = (d[0] * dir[1] - d[1] * dir[0]).abs();
+                    let half = base * ((1.0 - t) + t * s.taper.max(0.0) / 100.0);
+                    let a = (-0.5 * (across / (half * soft).max(0.3)).powi(2)).exp() * (1.0 - t);
+                    if a > best {
+                        best = a;
+                        t_best = t;
+                    }
+                }
+                if best <= 1e-4 {
+                    continue;
+                }
+                let i = y * w + x;
+                for j in 0..3 {
+                    let radial = s.inner[j] * (1.0 - t_best) + s.outer[j] * t_best;
+                    add[i][j] += (radial * (1.0 - mix) + src[j] * mix) * best * k;
+                }
+            }
+        }
+    }
+    for (i, p) in img.pixels_mut().enumerate() {
+        let c = to_f(p.0);
+        p.0 = [to_u8(c[0] + add[i][0]), to_u8(c[1] + add[i][1]), to_u8(c[2] + add[i][2]), p.0[3]];
+    }
+}
+
 /// Samples `src` at (x, y) with bilinear filtering, clamped to the edges.
 fn sample(src: &[[f32; 4]], w: usize, h: usize, x: f32, y: f32) -> [f32; 4] {
     let x = x.clamp(0.0, (w - 1) as f32);
@@ -318,6 +424,27 @@ mod tests {
         let mut v = line();
         apply(&mut v, &[ImageEffect::Blur(Blur { rotation: 90.0, ..b })]);
         assert!(v.get_pixel(18, 10).0[0] < 3 && v.get_pixel(16, 10).0[0] > 200, "a blur along the line keeps it");
+    }
+
+    #[test]
+    fn star_spokes_reach_out_from_a_bright_spot_along_their_angles() {
+        let mut i = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        for y in 49..52 {
+            for x in 49..52 {
+                i.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
+            }
+        }
+        let s = Star { qty: 4, size: 30.0, intensity: 100.0, width: 2.0, angle: 0.0, taper: 0.0, sharp: 8.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 };
+        apply(&mut i, &[ImageEffect::Star(s)]);
+        // On a spoke (to the right, 4 px... 15 px out) red; between spokes (45 degrees) dark.
+        assert!(i.get_pixel(65, 50).0[0] > 60, "{:?}", i.get_pixel(65, 50));
+        assert!(i.get_pixel(50, 35).0[0] > 60, "{:?}", i.get_pixel(50, 35));
+        assert!(i.get_pixel(61, 39).0[0] < 10, "{:?}", i.get_pixel(61, 39));
+        // Rotated 45 degrees the spokes run along the diagonals instead.
+        let mut j = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        j.put_pixel(50, 50, image::Rgba([255, 255, 255, 255]));
+        apply(&mut j, &[ImageEffect::Star(Star { angle: 45.0, ..s })]);
+        assert!(j.get_pixel(61, 39).0[0] > 40 && j.get_pixel(65, 50).0[0] < 10, "{:?} {:?}", j.get_pixel(61, 39), j.get_pixel(65, 50));
     }
 
     #[test]

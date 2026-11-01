@@ -71,10 +71,27 @@ pub struct DepthOfField {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImageEffect {
     Glow { size: f32, intensity: f32, use_source_color: f32, inner: [f32; 3], outer: [f32; 3], bright: f32 },
+    /// Lens Effects Star / Streak at the centre of each area brighter than `bright`.
+    Star(Star),
     Blur(Blur),
     BrightnessContrast { brightness: f32, contrast: f32, ignore_background: bool },
     ColorBalance { cyan_red: f32, magenta_green: f32, yellow_blue: f32, preserve_luminosity: bool, ignore_background: bool },
     FilmGrain { grain: f32, ignore_background: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Star {
+    pub qty: u32,
+    pub size: f32,
+    pub intensity: f32,
+    pub width: f32,
+    pub angle: f32,
+    pub taper: f32,
+    pub sharp: f32,
+    pub use_source_color: f32,
+    pub inner: [f32; 3],
+    pub outer: [f32; 3],
+    pub bright: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -166,14 +183,31 @@ impl EnvSettings {
                         focal_limit: d.focal_limit.get_at(t),
                     });
                 }
-                EffectKind::Glow(g) => effects.push(ImageEffect::Glow {
-                    size: g.size.get_at(t),
-                    intensity: g.intensity.get_at(t),
-                    use_source_color: g.use_source_color.get_at(t),
-                    inner: rgb(g.inner_color.get_at(t)),
-                    outer: rgb(g.outer_color.get_at(t)),
-                    bright: g.bright.get_at(t),
-                }),
+                EffectKind::Glow(g) => {
+                    effects.push(ImageEffect::Glow {
+                        size: g.size.get_at(t),
+                        intensity: g.intensity.get_at(t),
+                        use_source_color: g.use_source_color.get_at(t),
+                        inner: rgb(g.inner_color.get_at(t)),
+                        outer: rgb(g.outer_color.get_at(t)),
+                        bright: g.bright.get_at(t),
+                    });
+                    for el in [&g.star, &g.streak].into_iter().filter(|el| el.on) {
+                        effects.push(ImageEffect::Star(Star {
+                            qty: el.qty,
+                            size: el.size.get_at(t),
+                            intensity: el.intensity.get_at(t),
+                            width: el.width.get_at(t),
+                            angle: el.angle.get_at(t),
+                            taper: el.taper.get_at(t),
+                            sharp: el.sharp.get_at(t),
+                            use_source_color: el.use_source_color.get_at(t),
+                            inner: rgb(el.inner_color.get_at(t)),
+                            outer: rgb(el.outer_color.get_at(t)),
+                            bright: g.bright.get_at(t),
+                        }));
+                    }
+                }
                 EffectKind::Blur(b) => effects.push(ImageEffect::Blur(Blur {
                     blur_type: b.blur_type,
                     radius: b.radius.get_at(t),

@@ -142,3 +142,32 @@ fn the_environment_reaches_a_render() {
     assert_eq!(p.get_pixel(1, 1).0[..3], [0, 0, 255], "with the environment's background");
     assert_eq!(h.app.state.rendered.version, version, "the Rendered Frame Window keeps its image");
 }
+
+/// Effects > Lens Effects: the Star Element rollout turns the star on and
+/// shows its Qty spinner.
+#[test]
+fn lens_effects_star_element_turns_on_from_its_rollout() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1400.0));
+    h.key(egui::Key::Num8);
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Effects", win, 0.0);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Add...", win, 0.0);
+    h.frames(12);
+    let add = window(&h, "Add Effect");
+    click_text(&mut h, "Lens Effects", add, 0.0);
+    h.frames(12);
+    let add = window(&h, "Add Effect");
+    click_text(&mut h, "OK", add, 0.0);
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Star Element", win, 0.0);
+    h.frames(12);
+    let win = window(&h, TITLE);
+    assert!(h.text_rect("Qty:", win).is_some(), "the Star's Qty spinner");
+    click_text(&mut h, "On", win, 0.0);
+    let EffectKind::Glow(g) = &h.app.state.scene.environment.effects[0].kind else { panic!("Lens Effects") };
+    assert!(g.star.on && !g.streak.on);
+}

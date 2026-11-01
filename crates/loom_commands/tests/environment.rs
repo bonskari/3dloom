@@ -211,6 +211,15 @@ fn effects_list_and_parameters() {
     assert_eq!(s.scene.environment.effects.len(), 6);
     assert!(err(&mut s, "Add Effect", json!({ "kind": "Motion Blur" })).contains("Blur"));
     ok(&mut s, "Glow Parameters", json!({ "index": 0, "size": 8.0, "intensity": 150.0, "use_source_color": 0.0, "inner_color": [1.0, 0.9, 0.2], "bright": 180.0 }));
+    ok(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Star", "on": true, "qty": 8, "angle": 15.0, "sharp": 4.0 }));
+    ok(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Streak", "on": true, "width": 1.5 }));
+    assert!(err(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Streak", "qty": 4 })).contains("two spokes"));
+    assert!(err(&mut s, "Lens Element Parameters", json!({ "index": 0, "element": "Ring" })).contains("Star, Streak"));
+    {
+        let EffectKind::Glow(g) = &s.scene.environment.effects[0].kind else { panic!() };
+        assert_eq!((g.star.on, g.star.qty, g.star.angle.get(), g.star.sharp.get()), (true, 8, 15.0, 4.0));
+        assert_eq!((g.streak.on, g.streak.qty, g.streak.width.get()), (true, 2, 1.5));
+    }
     ok(&mut s, "Blur Parameters", json!({ "index": 1, "blur_type": "Directional", "u_radius": 6.0, "rotation": 45.0, "non_background": true, "blend": 30.0 }));
     ok(&mut s, "Brightness and Contrast Parameters", json!({ "index": 2, "brightness": 0.7, "contrast": 0.6, "ignore_background": true }));
     ok(&mut s, "Color Balance Parameters", json!({ "index": 3, "cyan_red": 40.0, "yellow_blue": -20.0, "preserve_luminosity": true }));

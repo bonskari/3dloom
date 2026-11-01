@@ -484,6 +484,42 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                 });
                 ui.label("Image source: Whole; filter: Bright.");
             });
+            for (name, el) in [("Star", &g.star), ("Streak", &g.streak)] {
+                egui::CollapsingHeader::new(format!("{name} Element")).id_salt(("lens_element", i, name)).default_open(el.on).show(ui, |ui| {
+                    let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Element Parameters", json!({ "index": i, "element": name, k: v }));
+                    let mut on = el.on;
+                    if ui.checkbox(&mut on, "On").changed() {
+                        set(app, "on", json!(on));
+                    }
+                    egui::Grid::new(("env_lens_element", name)).num_columns(2).show(ui, |ui| {
+                        for (label, key, v, range, speed) in [
+                            ("Size:", "size", el.size.get(), 0.0..=100.0, 0.1),
+                            ("Intensity:", "intensity", el.intensity.get(), 0.0..=1000.0, 1.0),
+                            ("Width:", "width", el.width.get(), 0.0..=100.0, 0.05),
+                            ("Angle:", "angle", el.angle.get(), -3600.0..=3600.0, 1.0),
+                            ("Taper:", "taper", el.taper.get(), 0.0..=1000.0, 1.0),
+                            ("Sharp:", "sharp", el.sharp.get(), 0.0..=10.0, 0.05),
+                            ("Use Source Color:", "use_source_color", el.use_source_color.get(), 0.0..=100.0, 0.5),
+                        ] {
+                            if let Some(v) = spin(ui, app, label, v, range, speed) {
+                                set(app, key, json!(v));
+                            }
+                        }
+                        if name == "Star" {
+                            if let Some(v) = spin(ui, app, "Qty:", el.qty as f32, 0.0..=30.0, 0.1) {
+                                set(app, "qty", json!(v.round() as u32));
+                            }
+                        }
+                        if let Some(c) = swatch(ui, "Radial Color (inner):", el.inner_color.get()) {
+                            set(app, "inner_color", json!(c));
+                        }
+                        if let Some(c) = swatch(ui, "Radial Color (outer):", el.outer_color.get()) {
+                            set(app, "outer_color", json!(c));
+                        }
+                    });
+                    ui.label("Apply Element To: Image Centers (filter: Bright).");
+                });
+            }
         }
         EffectKind::Blur(b) => {
             egui::CollapsingHeader::new("Blur Parameters").default_open(true).show(ui, |ui| {
