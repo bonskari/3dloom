@@ -77,3 +77,42 @@ fn a_file_in_other_system_units_asks_to_rescale_or_adopt() {
     assert_eq!((box_x(&u), u.units.system_unit), (10.0, loom_commands::SystemUnit::Inches));
     assert!(execute(&mut u, Command::UnitsMismatchReply { rescale: true }).is_err(), "nothing waits for an answer");
 }
+
+fn float_param(s: &AppState, id: loom_scene::NodeId, name: &str) -> f32 {
+    match s.scene.node(id).unwrap().object.parameters().into_iter().find(|(n, _)| *n == name) {
+        Some((_, loom_scene::ParamValue::Float(f))) => f,
+        other => panic!("{name}: {other:?}"),
+    }
+}
+
+/// Rescale World Units scales lengths only: a light's Multiplier, Hotspot
+/// and Falloff, a camera's FOV and Lens and a torus's Rotation stay.
+#[test]
+fn rescale_world_units_scales_only_length_parameters() {
+    let mut s = AppState::new();
+    let new_id = |s: &AppState| *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::CreateLight { kind: loom_commands::light::LightKind::FreeSpot, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let spot = new_id(&s);
+    execute(&mut s, Command::CreateCameraAt { target: false, position: [0.0, -100.0, 0.0], look_at: [0.0; 3] }).unwrap();
+    let cam = new_id(&s);
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Torus, position: [0.0; 3], size: [10.0; 3] }).unwrap();
+    let torus = new_id(&s);
+    execute(&mut s, Command::SetParameter { id: torus.0, name: "Rotation".into(), value: 30.0 }).unwrap();
+    let floats = |s: &AppState, id: loom_scene::NodeId| -> Vec<(&'static str, f32)> {
+        s.scene.node(id).unwrap().object.parameters().into_iter().filter_map(|(n, v)| if let loom_scene::ParamValue::Float(f) = v { Some((n, f)) } else { None }).collect()
+    };
+    let before: Vec<(loom_scene::NodeId, &str, f32)> = [spot, cam, torus].into_iter().flat_map(|id| floats(&s, id).into_iter().map(move |(n, f)| (id, n, f))).collect();
+    execute(&mut s, Command::RescaleWorldUnits { factor: 10.0 }).unwrap();
+    let scaled = ["Target Distance", "Decay Start", "Near Start", "Near End", "Far Start", "Far End", "Near Range", "Far Range", "Near Clip", "Far Clip", "Radius 1", "Radius 2"];
+    let kept = ["Multiplier", "Hotspot", "Falloff", "Aspect", "Contrast", "FOV", "Lens", "Rotation", "Twist", "Slice From", "Slice To"];
+    for (id, name, was) in before {
+        let now = float_param(&s, id, name);
+        if scaled.contains(&name) {
+            assert!((now - was * 10.0).abs() <= 1e-3 * was.abs().max(1.0), "{name} scales: {was} -> {now}");
+        } else if kept.contains(&name) {
+            assert!((now - was).abs() <= 1e-4 * was.abs().max(1.0), "{name} stays: {was} -> {now}");
+        }
+    }
+    assert_eq!(float_param(&s, spot, "Multiplier"), 1.0);
+    assert_eq!(float_param(&s, torus, "Rotation"), 30.0);
+}
