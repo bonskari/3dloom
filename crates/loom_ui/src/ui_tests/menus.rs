@@ -897,7 +897,7 @@ fn play_selected_flyout_and_time_slider_capture() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
     h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
     h.frames(2);
-    let play = h.find_all(egui::accesskit::Role::Button, "Play Animation");
+    let play = h.find_all(egui::accesskit::Role::Button, "Play / Stop Animation");
     let p = play[0].center();
     // Hold the button to open the flyout.
     h.run(vec![egui::Event::PointerMoved(p)]);
