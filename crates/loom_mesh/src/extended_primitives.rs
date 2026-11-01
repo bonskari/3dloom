@@ -73,23 +73,23 @@ impl ExtendedKind {
     pub fn params(self) -> &'static [ExtParam] {
         match self {
             // Family: 0 Tetra, 1 Cube/Octa, 2 Dodec/Icos; Dual: 0 the triangle-faced solid, 1 its dual.
-            ExtendedKind::Hedra => &[int("Family", 0.0, 0.0), int("Dual", 0.0, 0.0), fl("Radius", 25.0)],
-            ExtendedKind::ChamferBox => &[
+            ExtendedKind::Hedra => const { &[int("Family", 0.0, 0.0), int("Dual", 0.0, 0.0), fl("Radius", 25.0)] },
+            ExtendedKind::ChamferBox => const { &[
                 fl("Length", 25.0), fl("Width", 25.0), fl("Height", 25.0), fl("Fillet", 2.0),
                 int("Length Segs", 1.0, 1.0), int("Width Segs", 1.0, 1.0), int("Height Segs", 1.0, 1.0), int("Fillet Segs", 3.0, 1.0),
-            ],
-            ExtendedKind::OilTank => &[fl("Radius", 10.0), fl("Height", 40.0), fl("Cap Height", 5.0), int("Sides", 12.0, 3.0), int("Height Segs", 1.0, 1.0), int("Cap Segs", 4.0, 1.0)],
-            ExtendedKind::Spindle => &[fl("Radius", 10.0), fl("Height", 40.0), fl("Cap Height", 10.0), int("Sides", 12.0, 3.0), int("Height Segs", 1.0, 1.0), int("Cap Segs", 1.0, 1.0)],
-            ExtendedKind::Gengon => &[int("Sides", 5.0, 3.0), fl("Radius", 15.0), fl("Fillet", 0.0), fl("Height", 20.0), int("Height Segs", 1.0, 1.0), int("Fillet Segs", 1.0, 1.0)],
-            ExtendedKind::Prism => &[fl("Side 1 Length", 25.0), fl("Side 2 Length", 25.0), fl("Side 3 Length", 25.0), fl("Height", 25.0), int("Height Segs", 1.0, 1.0)],
-            ExtendedKind::TorusKnot => &[fl("Radius", 25.0), int("Segments", 120.0, 3.0), int("P", 2.0, 1.0), int("Q", 3.0, 1.0), fl("Cross Section Radius", 4.0), int("Sides", 12.0, 3.0)],
-            ExtendedKind::ChamferCyl => &[fl("Radius", 10.0), fl("Height", 25.0), fl("Fillet", 2.0), int("Height Segs", 1.0, 1.0), int("Fillet Segs", 3.0, 1.0), int("Sides", 12.0, 3.0)],
-            ExtendedKind::Capsule => &[fl("Radius", 10.0), fl("Height", 40.0), int("Sides", 12.0, 3.0), int("Height Segs", 1.0, 1.0)],
-            ExtendedKind::LExt => &[fl("Side Length", 25.0), fl("Front Length", 25.0), fl("Side Width", 5.0), fl("Front Width", 5.0), fl("Height", 25.0), int("Height Segs", 1.0, 1.0)],
-            ExtendedKind::CExt => &[
+            ] },
+            ExtendedKind::OilTank => const { &[fl("Radius", 10.0), fl("Height", 40.0), fl("Cap Height", 5.0), int("Sides", 12.0, 3.0), int("Height Segs", 1.0, 1.0), int("Cap Segs", 4.0, 1.0)] },
+            ExtendedKind::Spindle => const { &[fl("Radius", 10.0), fl("Height", 40.0), fl("Cap Height", 10.0), int("Sides", 12.0, 3.0), int("Height Segs", 1.0, 1.0), int("Cap Segs", 1.0, 1.0)] },
+            ExtendedKind::Gengon => const { &[int("Sides", 5.0, 3.0), fl("Radius", 15.0), fl("Fillet", 0.0), fl("Height", 20.0), int("Height Segs", 1.0, 1.0), int("Fillet Segs", 1.0, 1.0)] },
+            ExtendedKind::Prism => const { &[fl("Side 1 Length", 25.0), fl("Side 2 Length", 25.0), fl("Side 3 Length", 25.0), fl("Height", 25.0), int("Height Segs", 1.0, 1.0)] },
+            ExtendedKind::TorusKnot => const { &[fl("Radius", 25.0), int("Segments", 120.0, 3.0), int("P", 2.0, 1.0), int("Q", 3.0, 1.0), fl("Cross Section Radius", 4.0), int("Sides", 12.0, 3.0)] },
+            ExtendedKind::ChamferCyl => const { &[fl("Radius", 10.0), fl("Height", 25.0), fl("Fillet", 2.0), int("Height Segs", 1.0, 1.0), int("Fillet Segs", 3.0, 1.0), int("Sides", 12.0, 3.0)] },
+            ExtendedKind::Capsule => const { &[fl("Radius", 10.0), fl("Height", 40.0), int("Sides", 12.0, 3.0), int("Height Segs", 1.0, 1.0)] },
+            ExtendedKind::LExt => const { &[fl("Side Length", 25.0), fl("Front Length", 25.0), fl("Side Width", 5.0), fl("Front Width", 5.0), fl("Height", 25.0), int("Height Segs", 1.0, 1.0)] },
+            ExtendedKind::CExt => const { &[
                 fl("Back Length", 25.0), fl("Side Length", 25.0), fl("Front Length", 25.0),
                 fl("Back Width", 5.0), fl("Side Width", 5.0), fl("Front Width", 5.0), fl("Height", 25.0), int("Height Segs", 1.0, 1.0),
-            ],
+            ] },
         }
     }
 
