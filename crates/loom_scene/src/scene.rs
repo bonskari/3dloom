@@ -841,6 +841,29 @@ impl Scene {
                     }
                 }
             }
+            Some(PositionConstraint::Surface { target, u, v, offset, align, flip }) if self.nodes.contains_key(target) => {
+                let n = &self.nodes[target];
+                let params: Vec<(&str, f32)> = n.object.parameters().into_iter().map(|(k, x)| (k, x.as_f64() as f32)).collect();
+                let (uu, vv) = ((u.get() / 100.0).rem_euclid(1.0 + f32::EPSILON).min(1.0), (v.get() / 100.0).clamp(0.0, 1.0));
+                if let Some((pt, du, dv)) = crate::constraint::surface_point(n.object.base_name(), &params, uu, vv) {
+                    let om = self.object_matrix(*target);
+                    let (du, dv) = (om.transform_vector3(du), om.transform_vector3(dv));
+                    let mut nrm = du.cross(dv).normalize_or_zero();
+                    if *flip {
+                        nrm = -nrm;
+                    }
+                    wpos = om.transform_point3(pt) + nrm * *offset;
+                    let x = match align {
+                        1 => du.normalize_or_zero(),
+                        2 => dv.normalize_or_zero(),
+                        _ => Vec3::ZERO,
+                    };
+                    if x != Vec3::ZERO && nrm != Vec3::ZERO {
+                        let x = (x - nrm * x.dot(nrm)).normalize_or_zero();
+                        wrot = Quat::from_mat3(&glam::Mat3::from_cols(x, nrm.cross(x), nrm)).normalize();
+                    }
+                }
+            }
             _ => {}
         }
         match &c.rotation {

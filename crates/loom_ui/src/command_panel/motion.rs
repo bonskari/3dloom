@@ -276,6 +276,20 @@ fn constraint_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId) {
             target_list(ui, app, id, targets, false);
             param_check(ui, app, id, "Keep Initial Offset", *keep_offset);
         }),
+        Some(PositionConstraint::Surface { target, u, v, offset, align, flip }) => rollout(ui, "Surface Controller Parameters", true, |ui| {
+            ui.label(format!("Current Surface Object: {}", app.state.scene.node(*target).map(|n| n.name.clone()).unwrap_or_default()));
+            pick_button(ui, app, "Pick Surface", "Surface Constraint");
+            param_value(ui, app, id, "U Position", u.get(), 0.5);
+            param_value(ui, app, id, "V Position", v.get(), 0.5);
+            param_value(ui, app, id, "Offset", *offset, 0.1);
+            ui.label("Alignment:");
+            for (k, label) in ["No Alignment", "Align to U", "Align to V"].iter().enumerate() {
+                if ui.radio(*align == k as u32, *label).clicked() {
+                    run(app, Command::SetConstraintParameter { id: id.0, name: "Alignment".into(), value: k as f64 });
+                }
+            }
+            param_check(ui, app, id, "Flip", *flip);
+        }),
         Some(PositionConstraint::Attachment { target, face, a, b, align }) => rollout(ui, "Attachment Parameters", true, |ui| {
             ui.label(format!("Object: {}", app.state.scene.node(*target).map(|n| n.name.clone()).unwrap_or_default()));
             pick_button(ui, app, "Pick Object", "Attachment Constraint");

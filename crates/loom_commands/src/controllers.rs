@@ -22,6 +22,7 @@ pub fn handles(c: &Command) -> bool {
             | C::PathConstraint { .. }
             | C::PositionConstraint { .. }
             | C::AttachmentConstraint { .. }
+            | C::SurfaceConstraint { .. }
             | C::LookAtConstraint { .. }
             | C::OrientationConstraint { .. }
             | C::LinkConstraint { .. }
@@ -187,6 +188,17 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 Ok(())
             })
         }
+        C::SurfaceConstraint { target } => {
+            let t = NodeId(target);
+            let n = state.scene.node(t).ok_or("no such target")?;
+            if !matches!(n.object.base_name(), "Sphere" | "Cylinder" | "Torus" | "Plane" | "QuadPatch") {
+                return Err("Surface Constraint targets a Sphere, Cylinder, Torus, Plane or Quad Patch".into());
+            }
+            for_selection(state, "Surface Constraint", Some(t), move |c, _, _| {
+                c.position = Some(PositionConstraint::Surface { target: t, u: loom_scene::Param::new(0.0), v: loom_scene::Param::new(0.0), offset: 0.0, align: 0, flip: false });
+                Ok(())
+            })
+        }
         C::LookAtConstraint { target } => {
             let t = NodeId(target);
             for_selection(state, "LookAt Constraint", Some(t), move |c, _, _| {
@@ -291,7 +303,7 @@ fn targets_mut(c: &mut Constraints, rotation: bool) -> Option<&mut Vec<Target>> 
         match c.position.as_mut()? {
             PositionConstraint::Path(p) => Some(&mut p.targets),
             PositionConstraint::Position { targets, .. } => Some(targets),
-            PositionConstraint::Attachment { .. } => None,
+            PositionConstraint::Attachment { .. } | PositionConstraint::Surface { .. } => None,
         }
     }
 }
@@ -397,6 +409,17 @@ fn set_parameter(state: &mut AppState, id: NodeId, name: &str, value: f64) -> Re
                 *keep_offset = b;
                 *offset = free_pos - held_pos;
                 done = true;
+            }
+            Some(PositionConstraint::Surface { u, v: vv, offset, align, flip, .. }) => {
+                done = true;
+                match name_l.as_str() {
+                    "u position" => u.set(v),
+                    "v position" => vv.set(v),
+                    "offset" => *offset = v,
+                    "alignment" => *align = (v.max(0.0) as u32).min(2),
+                    "flip" => *flip = b,
+                    _ => done = false,
+                }
             }
             Some(PositionConstraint::Attachment { face, a, b: bb, align, .. }) => {
                 done = true;

@@ -167,3 +167,33 @@ fn animation_quad_pose_quadrant_skin_pose_and_pref_angles() {
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.node(id).unwrap().transform.position.get(), glam::Vec3::new(50.0, 0.0, 0.0), "one undo step");
 }
+
+/// Animation > Constraints > Surface Constraint: pick a sphere, then U / V
+/// Position move the box over it and Align to U turns it to the surface.
+#[test]
+fn surface_constraint_puts_the_selection_on_a_sphere() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Sphere, position: [0.0; 3], size: [40.0, 40.0, 0.0] });
+    let sphere = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [60.0, 0.0, 0.0], size: [4.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SurfaceConstraint { target: sphere.0 });
+    let centre = h.app.state.scene.world_matrix(sphere).w_axis.truncate();
+    let pos = |h: &Harness| h.app.state.scene.world_matrix(b).w_axis.truncate();
+    assert!(((pos(&h) - centre).length() - 20.0).abs() < 1e-2, "on the sphere: {}", pos(&h));
+    h.cmd(Command::SetConstraintParameter { id: b.0, name: "V Position".into(), value: 100.0 });
+    assert!((pos(&h) - (centre + glam::Vec3::Z * 20.0)).length() < 1e-2, "V 100: the top pole {}", pos(&h));
+    h.cmd(Command::SetConstraintParameter { id: b.0, name: "V Position".into(), value: 50.0 });
+    h.cmd(Command::SetConstraintParameter { id: b.0, name: "U Position".into(), value: 25.0 });
+    assert!((pos(&h) - (centre + glam::Vec3::Y * 20.0)).length() < 1e-2, "U 25 on the equator: +Y {}", pos(&h));
+    h.cmd(Command::SetConstraintParameter { id: b.0, name: "Alignment".into(), value: 1.0 });
+    let z = h.app.state.scene.world_matrix(b).z_axis.truncate().normalize();
+    assert!(z.dot(glam::Vec3::Y) > 0.99, "Z on the normal: {z}");
+    // The Motion panel shows its rollout.
+    h.app.panel_tab = crate::Tab::Motion;
+    h.frames(2);
+    assert!(!h.text_rects("Surface Controller Parameters").is_empty());
+    h.click(h.find(Role::RadioButton, "Align to V").center());
+    assert!(matches!(h.app.state.scene.node(b).unwrap().constraints.position, Some(loom_scene::constraint::PositionConstraint::Surface { align: 2, .. })));
+}

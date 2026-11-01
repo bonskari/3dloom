@@ -25,6 +25,47 @@ pub enum PositionConstraint {
     Path(PathConstraint),
     Position { targets: Vec<Target>, keep_offset: bool, offset: Vec3 },
     Attachment { target: NodeId, face: u32, a: f32, b: f32, align: bool },
+    /// Surface Constraint: on a Sphere, Cylinder, Torus, Plane or Quad Patch
+    /// at U / V Position (percent around / along it), lifted by Offset along
+    /// the normal; `align` 0 none, 1 X along U, 2 X along V (Z on the normal).
+    Surface { target: NodeId, u: Param<f32>, v: Param<f32>, offset: f32, align: u32, flip: bool },
+}
+
+/// A point of a parametric surface at `u`, `v` (0-1) of the object `kind`
+/// with its `params` (rollout name, value), in object space: (point, dP/du, dP/dv).
+pub fn surface_point(kind: &str, params: &[(&str, f32)], u: f32, v: f32) -> Option<(Vec3, Vec3, Vec3)> {
+    use std::f32::consts::{PI, TAU};
+    let p = |n: &str| params.iter().find(|(k, _)| *k == n).map(|(_, x)| *x);
+    match kind {
+        "Sphere" => {
+            let r = p("Radius")?;
+            // U around Z, V from the bottom pole to the top.
+            let (a, b) = (u * TAU, (v - 0.5) * PI);
+            let pt = Vec3::new(b.cos() * a.cos(), b.cos() * a.sin(), b.sin()) * r;
+            let du = Vec3::new(-a.sin(), a.cos(), 0.0) * (b.cos().max(1e-3) * r);
+            let dv = Vec3::new(-b.sin() * a.cos(), -b.sin() * a.sin(), b.cos()) * r;
+            Some((pt, du, dv))
+        }
+        "Cylinder" => {
+            let (r, h) = (p("Radius")?, p("Height")?);
+            let a = u * TAU;
+            Some((Vec3::new(r * a.cos(), r * a.sin(), v * h), Vec3::new(-a.sin(), a.cos(), 0.0) * r, Vec3::Z * h.abs().max(1e-3) * h.signum()))
+        }
+        "Torus" => {
+            let (r1, r2) = (p("Radius 1")?, p("Radius 2")?);
+            let (a, b) = (u * TAU, v * TAU);
+            let ring = Vec3::new(a.cos(), a.sin(), 0.0);
+            let pt = ring * (r1 + r2 * b.cos()) + Vec3::Z * r2 * b.sin();
+            let du = Vec3::new(-a.sin(), a.cos(), 0.0) * (r1 + r2 * b.cos());
+            let dv = ring * (-r2 * b.sin()) + Vec3::Z * r2 * b.cos();
+            Some((pt, du, dv))
+        }
+        "Plane" | "QuadPatch" => {
+            let (l, w) = (p("Length")?, p("Width")?);
+            Some((Vec3::new((u - 0.5) * w, (v - 0.5) * l, 0.0), Vec3::X * w, Vec3::Y * l))
+        }
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,7 +130,7 @@ impl Constraints {
         match &self.position {
             Some(PositionConstraint::Path(p)) => out.extend(p.targets.iter().map(|t| t.node)),
             Some(PositionConstraint::Position { targets, .. }) => out.extend(targets.iter().map(|t| t.node)),
-            Some(PositionConstraint::Attachment { target, .. }) => out.push(*target),
+            Some(PositionConstraint::Attachment { target, .. }) | Some(PositionConstraint::Surface { target, .. }) => out.push(*target),
             None => {}
         }
         match &self.rotation {
@@ -111,7 +152,7 @@ impl Constraints {
         match &mut self.position {
             Some(PositionConstraint::Path(p)) => fix(&mut p.targets),
             Some(PositionConstraint::Position { targets, .. }) => fix(targets),
-            Some(PositionConstraint::Attachment { target, .. }) => match f(*target) {
+            Some(PositionConstraint::Attachment { target, .. }) | Some(PositionConstraint::Surface { target, .. }) => match f(*target) {
                 Some(n) => *target = n,
                 None => self.position = None,
             },
@@ -138,6 +179,7 @@ impl Constraints {
             PositionConstraint::Path(_) => "Path Constraint",
             PositionConstraint::Position { .. } => "Position Constraint",
             PositionConstraint::Attachment { .. } => "Attachment",
+            PositionConstraint::Surface { .. } => "Surface",
         })
     }
 

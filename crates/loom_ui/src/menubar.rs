@@ -766,7 +766,7 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Save Animation...", Command::SaveAnimation { path: None });
     ui.separator();
     sub(ui, app, "Constraints", |ui, app| {
-        for (label, kind) in [("Attachment Constraint", "Attachment Constraint"), ("Path Constraint", "Path Constraint"), ("Position Constraint", "Position Constraint"), ("Link Constraint", "Link Constraint"), ("LookAt Constraint", "LookAt Constraint"), ("Orientation Constraint", "Orientation Constraint")] {
+        for (label, kind) in [("Attachment Constraint", "Attachment Constraint"), ("Surface Constraint", "Surface Constraint"), ("Path Constraint", "Path Constraint"), ("Position Constraint", "Position Constraint"), ("Link Constraint", "Link Constraint"), ("LookAt Constraint", "LookAt Constraint"), ("Orientation Constraint", "Orientation Constraint")] {
             cmd(ui, app, label, Command::StartConstraintPick { kind: kind.into() });
         }
     });
