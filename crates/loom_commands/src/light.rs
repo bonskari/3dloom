@@ -397,7 +397,11 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let mut ex = l.exclusion.clone();
             // An Exclude list holds the excluded objects, an Include list the included ones.
             if exclude != ex.include {
-                ex.nodes.extend(objects.iter().filter(|o| !ex.nodes.contains(o)));
+                for o in objects.iter().copied() {
+                    if !ex.nodes.contains(&o) {
+                        ex.nodes.push(o);
+                    }
+                }
             } else {
                 ex.nodes.retain(|n| !objects.contains(n));
             }
