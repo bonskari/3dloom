@@ -174,6 +174,52 @@ fn ik(ui: &mut egui::Ui, app: &mut LoomApp) {
     use loom_scene::ik::IkSolver;
     let selected = app.state.selection.iter().next().copied();
     let chain = selected.and_then(|id| app.state.scene.ik_chain_of(id).cloned());
+    rollout(ui, "Inverse Kinematics", true, |ui| {
+        let w = ui.available_width();
+        if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.state.interactive_ik, "Interactive IK")).clicked() {
+            let _ = app.dispatch(Command::InteractiveIkToggle);
+        }
+        let id = egui::Id::new("applied_ik_options");
+        let (a, b) = app.state.frame_range;
+        let (mut only_keys, mut clear_keys, mut start, mut end) = ui.data(|d| d.get_temp::<(bool, bool, i32, i32)>(id)).unwrap_or((false, true, a, b));
+        if ui.add_sized([w, 22.0], egui::Button::new("Apply IK")).clicked() {
+            let _ = app.dispatch(Command::ApplyIk { start: Some(start), end: Some(end), only_keys: Some(only_keys), clear_keys: Some(clear_keys) });
+        }
+        ui.checkbox(&mut only_keys, "Apply Only to Keys");
+        ui.checkbox(&mut clear_keys, "Clear Keys");
+        ui.horizontal(|ui| {
+            ui.label("Start:");
+            ui.add(egui::DragValue::new(&mut start));
+            ui.label("End:");
+            ui.add(egui::DragValue::new(&mut end));
+        });
+        ui.data_mut(|d| d.insert_temp(id, (only_keys, clear_keys, start, end)));
+    });
+    if let Some(sel) = selected {
+        if let Some(joints) = app.state.scene.node(sel).map(|n| n.joints) {
+            rollout(ui, "Object Parameters", true, |ui| {
+                let mut term = joints.terminator;
+                if ui.checkbox(&mut term, "Terminator").changed() {
+                    let _ = app.dispatch(Command::SetIkObjectParameters { id: sel.0, terminator: Some(term), follow: None, unbind: None });
+                }
+                let current = joints.follow.and_then(|f| app.state.scene.node(f)).map(|n| n.name.clone()).unwrap_or_else(|| "None".into());
+                let others: Vec<(loom_scene::NodeId, String)> = app.state.scene.nodes().filter(|n| n.id != sel).map(|n| (n.id, n.name.clone())).collect();
+                ui.label("Bind to Follow Object:");
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("ik_follow").selected_text(format!("Bind: {current}")).show_ui(ui, |ui| {
+                        for (id, name) in others {
+                            if ui.selectable_label(joints.follow == Some(id), name).clicked() {
+                                let _ = app.dispatch(Command::SetIkObjectParameters { id: sel.0, terminator: None, follow: Some(id.0), unbind: None });
+                            }
+                        }
+                    });
+                    if ui.add_enabled(joints.follow.is_some(), egui::Button::new("Unbind")).clicked() {
+                        let _ = app.dispatch(Command::SetIkObjectParameters { id: sel.0, terminator: None, follow: None, unbind: Some(true) });
+                    }
+                });
+            });
+        }
+    }
     rollout(ui, "IK Solver", true, |ui| {
         let w = ui.available_width();
         let Some(c) = chain.as_ref() else {

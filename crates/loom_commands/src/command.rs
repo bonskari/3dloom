@@ -1881,6 +1881,9 @@ commands! {
     IkTerminatorToggle => "IK Terminator Toggle", MainUI, "The selected bone becomes the start (terminator) of its chain.";
     CreateIkChain => "Create IK Chain", Loom, "An IK chain from bone `start` to bone `end` with a goal node; solver \"hi\", \"limb\" or \"spline\"." { start: u64, end: u64, solver: String, name: Option<String> };
     SetIkChainParameter => "Set IK Chain Parameter", Loom, "Hierarchy > IK rollouts: Enabled, IK For FK Pose, Swivel Angle, Threshold, Iterations." { chain: u32, name: String, value: f64 };
+    InteractiveIkToggle => "Interactive IK", MainUI, "Hierarchy > IK > Interactive IK: Move turns the moved object's ancestors (up to a Terminator or the root, which stays put) so the object reaches the cursor.";
+    SetIkObjectParameters => "Set IK Object Parameters", Loom, "Hierarchy > IK > Object Parameters on node `id`: Terminator, Bind to Follow Object (`follow` node id), Unbind." { id: u64, terminator: Option<bool>, follow: Option<u64>, unbind: Option<bool> };
+    ApplyIk => "Apply IK", Loom, "Hierarchy > IK > Inverse Kinematics > Apply IK: for each frame `start`..`end` (default the active segment) the chains of the selection's hierarchy turn so each bound end effector reaches its follow object, keying their rotations; `only_keys` solves only on the follow objects' key frames, `clear_keys` first removes the chains' old move and rotate keys." { start: Option<i32>, end: Option<i32>, only_keys: Option<bool>, clear_keys: Option<bool> };
     PickSplineIkShape => "Pick Spline IK Shape", Loom, "Spline IK Solver > Pick Shape: the shape node the chain follows." { chain: u32, node: u64 };
     SkinModifier => "Skin Modifier", Skin, "Add a Skin modifier to the selection (bind bones with Add Bones).";
     SkinMorphModifier => "Skin Morph Modifier", Skin, "Add a Skin Morph modifier to the selection.";

@@ -461,6 +461,33 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             set_chains(state, "IK Terminator Toggle", after)?;
             Ok(json!({ "start": state.scene.ik_chains[idx].start.0 }))
         }
+        C::InteractiveIkToggle => {
+            state.interactive_ik = !state.interactive_ik;
+            Ok(json!({ "interactive_ik": state.interactive_ik }))
+        }
+        C::SetIkObjectParameters { id, terminator, follow, unbind } => {
+            let id = NodeId(id);
+            let node = state.scene.node(id).ok_or_else(|| missing(id))?;
+            let before = node.props();
+            let mut after = before.clone();
+            if let Some(t) = terminator {
+                after.joints.terminator = t;
+            }
+            if let Some(f) = follow {
+                let f = NodeId(f);
+                if f == id || state.scene.node(f).is_none() {
+                    return Err(format!("node {} cannot be the follow object", f.0));
+                }
+                after.joints.follow = Some(f);
+            }
+            if unbind == Some(true) {
+                after.joints.follow = None;
+            }
+            commit(state, "IK Object Parameters", Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) })?;
+            let j = state.scene.node(id).map(|n| n.joints).unwrap_or_default();
+            Ok(json!({ "terminator": j.terminator, "follow": j.follow.map(|f| f.0) }))
+        }
+        C::ApplyIk { start, end, only_keys, clear_keys } => apply_ik(state, start, end, only_keys.unwrap_or(false), clear_keys.unwrap_or(true)),
         other => Err(format!("{} is not a rig command", other.name())),
     }
 }
@@ -618,4 +645,157 @@ pub fn bone_edit_adjust(state: &AppState, changes: &mut Vec<Change>) {
             }
         }
     }
+}
+
+/// The ancestors an Interactive / Applied IK chain turns for end effector
+/// `e`, top first: up to the first Terminator, else up to the root.
+fn ik_ancestors(state: &AppState, e: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    for a in state.scene.ancestors(e) {
+        out.push(a);
+        if state.scene.node(a).is_some_and(|n| n.joints.terminator) {
+            break;
+        }
+    }
+    out.reverse();
+    out
+}
+
+/// The chain's bones as the solver wants them, from `transforms` (the
+/// bones' transforms by chain order) at the ambient time; the last bone's
+/// tip is the end effector's position.
+fn ik_bones(state: &AppState, chain: &[NodeId], transforms: &[Transform], e: NodeId) -> Vec<loom_scene::ik::IkBone> {
+    chain
+        .iter()
+        .enumerate()
+        .map(|(k, id)| {
+            let tip = if k + 1 < chain.len() { transforms[k + 1].position.get() } else { state.scene.node(e).map(|n| n.transform.position.get()).unwrap_or_default() };
+            let joints = state.scene.node(*id).map(|n| n.joints).unwrap_or_default();
+            loom_scene::ik::IkBone { id: *id, parent_frame: state.scene.parent_frame(chain[0]), position: transforms[k].position.get(), rotation: transforms[k].rotation_quat(), tip, joints }
+        })
+        .collect()
+}
+
+fn hi_chain(threshold: f32, iterations: u32) -> IkChain {
+    IkChain { id: 0, name: String::new(), solver: IkSolver::HI, start: NodeId(0), end: NodeId(0), goal: NodeId(0), enabled: true, swivel_deg: 0.0, threshold, iterations, spline: None, ik_for_fk: false }
+}
+
+/// Interactive IK Move: each moved object (`moves`: node, world move
+/// matrix) stays linked where it is and its ancestors turn so it reaches the
+/// moved position. A selected unlinked object moves normally when
+/// Always Transform Children of the World is on, else not at all.
+pub fn interactive_ik_move(state: &mut AppState, moves: &[(NodeId, Mat4)]) -> Result<Value, String> {
+    let mut changes = Vec::new();
+    let mut done: BTreeSet<NodeId> = BTreeSet::new();
+    for (e, m) in moves {
+        let Some(node) = state.scene.node(*e) else { continue };
+        if node.parent.is_none() {
+            if state.prefs.ik_transform_world_children {
+                let world = state.scene.world_matrix(*e);
+                let after = Transform::from_matrix_near(*m * world, &node.transform, Vec3::ZERO);
+                changes.push(Change::SetTransform { id: *e, before: node.transform.clone(), after });
+            }
+            continue;
+        }
+        let chain = ik_ancestors(state, *e);
+        if chain.iter().any(|a| done.contains(a)) {
+            continue;
+        }
+        let target = m.transform_point3(state.scene.world_matrix(*e).transform_point3(Vec3::ZERO));
+        let transforms: Vec<Transform> = chain.iter().filter_map(|id| state.scene.node(*id).map(|n| n.transform.clone())).collect();
+        let bones = ik_bones(state, &chain, &transforms, *e);
+        let solved = loom_scene::ik::solve(&hi_chain(state.prefs.interactive_ik_threshold, state.prefs.interactive_ik_iterations), &bones, target, None);
+        for ((id, q), before) in solved.into_iter().zip(transforms) {
+            let mut after = before.clone();
+            after.set_rotation_quat(q);
+            if after != before {
+                changes.push(Change::SetTransform { id, before, after });
+            }
+            done.insert(id);
+        }
+    }
+    if !changes.is_empty() {
+        commit(state, "Move", Change::Group(changes))?;
+    }
+    Ok(json!({}))
+}
+
+/// Apply IK: per frame, every bound end effector in the selection's
+/// hierarchies pulls its chain onto its follow object; the chain's
+/// rotations are keyed on those frames.
+fn apply_ik(state: &mut AppState, start: Option<i32>, end: Option<i32>, only_keys: bool, clear_keys: bool) -> Result<Value, String> {
+    let (a, b) = state.frame_range;
+    let (start, end) = (start.unwrap_or(a), end.unwrap_or(b));
+    if end < start {
+        return Err("End must not be before Start".into());
+    }
+    let mut roots = BTreeSet::new();
+    for id in state.selection.iter() {
+        roots.insert(state.scene.ancestors(*id).last().copied().unwrap_or(*id));
+    }
+    let effectors: Vec<(NodeId, NodeId)> = roots
+        .iter()
+        .flat_map(|r| std::iter::once(*r).chain(state.scene.descendants(*r)))
+        .filter_map(|id| state.scene.node(id).and_then(|n| n.joints.follow.filter(|f| state.scene.node(*f).is_some()).map(|f| (id, f))))
+        .collect();
+    if effectors.is_empty() {
+        return Err("no end effector in the selected hierarchy is bound to a follow object".into());
+    }
+    let threshold = state.prefs.applied_ik_threshold;
+    let iterations = state.prefs.applied_ik_iterations;
+    let mut changes = Vec::new();
+    let mut keyed = 0usize;
+    for (e, follow) in effectors {
+        let chain = ik_ancestors(state, e);
+        if chain.is_empty() {
+            continue;
+        }
+        let mut transforms: Vec<Transform> = chain.iter().filter_map(|id| state.scene.node(*id).map(|n| n.transform.clone())).collect();
+        let befores = transforms.clone();
+        if clear_keys {
+            for t in &mut transforms {
+                let pos = t.position.get_at(start as f32);
+                let rot = t.rotation.get_at(start as f32);
+                t.position = loom_scene::Param::new(pos);
+                t.rotation = loom_scene::Param::new(rot);
+            }
+        }
+        let frames: Vec<i32> = if only_keys {
+            let mut f: Vec<i32> = state
+                .scene
+                .node(follow)
+                .and_then(|n| n.transform.position.keys().map(|k| k.tracks.iter().flat_map(|tr| tr.keys.iter().map(|k| k.time.round() as i32)).collect::<Vec<_>>()))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|t| (start..=end).contains(t))
+                .collect();
+            f.sort_unstable();
+            f.dedup();
+            f
+        } else {
+            (start..=end).collect()
+        };
+        for t in &mut transforms {
+            t.rotation.ensure_keys();
+        }
+        for f in frames {
+            let ft = f as f32;
+            state.scene.at_time(ft, || {
+                let target = state.scene.world_matrix(follow).transform_point3(Vec3::ZERO);
+                let bones = ik_bones(state, &chain, &transforms, e);
+                let solved = loom_scene::ik::solve(&hi_chain(threshold, iterations), &bones, target, None);
+                loom_scene::anim::with(ft, true, || {
+                    for ((_, q), t) in solved.into_iter().zip(transforms.iter_mut()) {
+                        t.set_rotation_quat(q);
+                    }
+                });
+            });
+            keyed += 1;
+        }
+        for ((id, before), after) in chain.iter().zip(befores).zip(transforms) {
+            changes.push(Change::SetTransform { id: *id, before, after });
+        }
+    }
+    commit(state, "Apply IK", Change::Group(changes))?;
+    Ok(json!({ "frames": keyed }))
 }

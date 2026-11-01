@@ -114,6 +114,13 @@ impl Default for JointAxis {
 pub struct NodeJoints {
     pub rotational: [JointAxis; 3],
     pub sliding: [JointAxis; 3],
+    /// Object Parameters > Terminator: Interactive / Applied IK chains stop here.
+    #[serde(default)]
+    pub terminator: bool,
+    /// Object Parameters > Bind to Follow Object: Applied IK pulls this
+    /// node (the end effector) onto the follow object's pivot.
+    #[serde(default)]
+    pub follow: Option<NodeId>,
 }
 
 impl Default for NodeJoints {
@@ -121,6 +128,8 @@ impl Default for NodeJoints {
         Self {
             rotational: [JointAxis::default_rotational(); 3],
             sliding: [JointAxis::default_sliding(); 3],
+            terminator: false,
+            follow: None,
         }
     }
 }

@@ -14,6 +14,7 @@ enum Tab {
     Files,
     Rendering,
     Animation,
+    InverseKinematics,
 }
 
 fn set(app: &mut LoomApp, name: &str, value: f64) {
@@ -55,6 +56,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.selectable_value(&mut tab, Tab::Files, "Files");
             ui.selectable_value(&mut tab, Tab::Rendering, "Rendering");
             ui.selectable_value(&mut tab, Tab::Animation, "Animation");
+            ui.selectable_value(&mut tab, Tab::InverseKinematics, "Inverse Kinematics");
         });
         ui.separator();
         match tab {
@@ -159,6 +161,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.label(egui::RichText::new("Animate").strong());
                     check(ui, app, "Local Center During Animate", "Local Center During Animate");
                 });
+            }
+            Tab::InverseKinematics => {
+                for (group, prefix) in [("Applied IK", "Applied IK"), ("Interactive IK", "Interactive IK")] {
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new(group).strong());
+                        ui.horizontal(|ui| number(ui, app, &format!("{prefix} Threshold"), "Position:", 0.0001..=1000.0, 3));
+                        ui.horizontal(|ui| number(ui, app, &format!("{prefix} Iterations"), "Iterations:", 1.0..=10_000.0, 0));
+                    });
+                }
+                check(ui, app, "Always Transform Children of the World", "Always Transform Children of the World");
             }
             Tab::Viewports => {
                 ui.group(|ui| {

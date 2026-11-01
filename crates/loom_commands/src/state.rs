@@ -979,6 +979,15 @@ pub struct Prefs {
     pub ghost_mode: u32,
     #[serde(default)]
     pub ghost_frame_numbers: bool,
+    /// Inverse Kinematics > Applied IK / Interactive IK: Position threshold
+    /// and Iterations (this build's defaults: Applied 0.1 / 500, Interactive 1.0 / 10).
+    pub applied_ik_threshold: f32,
+    pub applied_ik_iterations: u32,
+    pub interactive_ik_threshold: f32,
+    pub interactive_ik_iterations: u32,
+    /// Inverse Kinematics > Always Transform Children of the World: a
+    /// selected unlinked object moves normally while Interactive IK is on.
+    pub ik_transform_world_children: bool,
 }
 
 fn default_nudge() -> f32 {
@@ -1041,13 +1050,18 @@ impl Default for Prefs {
             ghost_nth: 1,
             ghost_mode: 0,
             ghost_frame_numbers: false,
+            applied_ik_threshold: 0.1,
+            applied_ik_iterations: 500,
+            interactive_ik_threshold: 1.0,
+            interactive_ik_iterations: 10,
+            ik_transform_world_children: true,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 62] = [
+    pub const NAMES: [&'static str; 67] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -1061,6 +1075,7 @@ impl Prefs {
         "Ghosting Frames", "Ghosting Nth Frame", "Ghosting Mode", "Ghosting Frame Numbers",
         "Rotation Method", "Planar Angle Threshold", "Move/Rotate Projection", "Persp Sens",
         "Overrides Active", "Delay To Override", "Nth Serial Numbering",
+        "Applied IK Threshold", "Applied IK Iterations", "Interactive IK Threshold", "Interactive IK Iterations", "Always Transform Children of the World",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1137,6 +1152,11 @@ impl Prefs {
             "Move/Rotate Projection" => b(self.gizmos.move_projection),
             "Persp Sens" => self.gizmos.persp_sens as f64,
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle as f64,
+            "Applied IK Threshold" => self.applied_ik_threshold as f64,
+            "Applied IK Iterations" => self.applied_ik_iterations as f64,
+            "Interactive IK Threshold" => self.interactive_ik_threshold as f64,
+            "Interactive IK Iterations" => self.interactive_ik_iterations as f64,
+            "Always Transform Children of the World" => b(self.ik_transform_world_children),
             _ => return None,
         })
     }
@@ -1216,6 +1236,11 @@ impl Prefs {
             "Move/Rotate Projection" => self.gizmos.move_projection = on,
             "Persp Sens" => self.gizmos.persp_sens = f.clamp(0.01, 100.0),
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle = f.max(0.0),
+            "Applied IK Threshold" => self.applied_ik_threshold = f.max(0.0001),
+            "Applied IK Iterations" => self.applied_ik_iterations = v.clamp(1.0, 10_000.0) as u32,
+            "Interactive IK Threshold" => self.interactive_ik_threshold = f.max(0.0001),
+            "Interactive IK Iterations" => self.interactive_ik_iterations = v.clamp(1.0, 10_000.0) as u32,
+            "Always Transform Children of the World" => self.ik_transform_world_children = on,
             _ => return Err(format!("unknown preference {name:?}")),
         }
         Ok(())
@@ -2125,6 +2150,9 @@ pub struct AppState {
     pub key_time_cache: crate::anim_cmds::KeyTimeCache,
     /// Bone Tools > Bone Edit Mode.
     pub bone_edit_mode: bool,
+    /// Hierarchy > IK > Interactive IK: Move turns the moved object's
+    /// ancestors so it reaches the cursor.
+    pub interactive_ik: bool,
     /// Display Bones: the viewports draw bones only (true) or bones and objects (false).
     pub display_bones_only: bool,
     /// Skin > Edit Envelopes: the selected vertices of the active Skin entry.
@@ -2456,6 +2484,7 @@ impl AppState {
             schematics: Default::default(),
             key_time_cache: Default::default(),
             bone_edit_mode: false,
+            interactive_ik: false,
             display_bones_only: false,
             skin_selection: BTreeSet::new(),
             skin_selection_owner: None,

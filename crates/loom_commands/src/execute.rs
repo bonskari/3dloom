@@ -3164,6 +3164,15 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         // Motion > Trajectories > Sub-Object Keys: the Move tool moves the selected path keys.
         C::MoveSelection { delta, .. } if state.trajectory_keys && !state.trajectory_selected.is_empty() => crate::motion::execute(state, C::TrajectoryMoveKeys { delta }),
+        // Hierarchy > IK > Interactive IK: the moved objects pull their ancestors.
+        C::MoveSelection { delta, system } if state.interactive_ik && state.selection_mode == SelectionMode::Object && !state.skin_active() => {
+            let saved = with_system(state, system);
+            gimbal_as_parent(state);
+            let vp = state.active_viewport;
+            let moves: Vec<(NodeId, Mat4)> = state.selection.iter().map(|id| (*id, frame_for(state, vp, Some(*id)).move_matrix(Vec3::from(delta)))).collect();
+            state.coord_system = saved;
+            crate::rig::interactive_ik_move(state, &moves)
+        }
         C::MoveSelection { delta, system } => {
             let saved = with_system(state, system);
             gimbal_as_parent(state);
@@ -3543,7 +3552,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         c @ (C::CreateBiped { .. } | C::SetBipedStructure { .. } | C::BipedFigureMode { .. } | C::BipedRootName { .. } | C::BipedCreateXtra { .. } | C::BipedDeleteXtra { .. } | C::BipedCreateOppositeXtra { .. } | C::BipedSetXtra { .. } | C::BipedPickXtraParent { .. } | C::BipedSaveFile { .. } | C::BipedLoadFile { .. }) => crate::biped::execute(state, c),
         c @ (C::BipedFootstepMode { .. } | C::BipedFootstepCreation { .. } | C::BipedCreateMultipleFootsteps { .. } | C::BipedAppendFootstep { .. } | C::BipedActivateFootsteps | C::BipedDeactivateFootsteps | C::BipedDeleteFootsteps) => crate::biped_footsteps::execute(state, c),
-        c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::HistoryDependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
+        c @ (C::CreateBoneChain { .. } | C::BoneTools | C::BoneOptions | C::BoneEditModeToggle | C::RefineBone { .. } | C::MirrorBones { .. } | C::ReassignRoot { .. } | C::DeleteBone { .. } | C::ConnectBones { .. } | C::CreateEndBone { .. } | C::SetBoneFins { .. } | C::CreateHelper { .. } | C::Dummy | C::HistoryIndependentIkSolver | C::HistoryDependentIkSolver | C::IkLimbSolver | C::SplineIkSolver | C::BonesIkChain | C::IkSolverToggle | C::IkChainFkSnap | C::IkChainIkSnap | C::IkChainSnapAction | C::IkTerminatorToggle | C::InteractiveIkToggle | C::SetIkObjectParameters { .. } | C::ApplyIk { .. } | C::CreateIkChain { .. } | C::SetIkChainParameter { .. } | C::PickSplineIkShape { .. }) => crate::rig::execute(state, c),
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
         c if crate::anim_layers::handles(&c) => crate::anim_layers::execute(state, c),
         c if crate::steering::handles(&c) => crate::steering::execute(state, c),

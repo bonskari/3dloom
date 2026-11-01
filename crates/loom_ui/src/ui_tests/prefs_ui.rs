@@ -207,3 +207,15 @@ fn time_configuration_custom_frame_rate_radio() {
     h.click(h.find(Role::RadioButton, "PAL").center());
     assert_eq!(h.app.state.fps, 25.0);
 }
+
+#[test]
+fn preferences_inverse_kinematics_tab_sets_always_transform_children_of_the_world() {
+    let mut h = Harness::new();
+    h.cmd(Command::Preferences);
+    h.click(h.text_rect("Inverse Kinematics", window(&h, "Preference Settings")).unwrap().center());
+    let win = window(&h, "Preference Settings");
+    assert!(h.text_rect("Applied IK", win).is_some() && h.text_rect("Interactive IK", win).is_some());
+    assert!(h.app.state.prefs.ik_transform_world_children);
+    h.click(h.text_rect("Always Transform Children of the World", win).expect("the checkbox").center());
+    assert!(!h.app.state.prefs.ik_transform_world_children);
+}

@@ -136,3 +136,29 @@ fn working_pivot_buttons_and_viewport_legend() {
     assert!((wp.origin.z - 20.0).abs() < 1e-2, "on the top face: {}", wp.origin);
     assert!((wp.rotation * Vec3::Z).abs_diff_eq(Vec3::Z, 1e-3), "Z along the face normal");
 }
+
+/// Hierarchy > IK: Interactive IK turns on from its button; Terminator and
+/// Unbind act on the selected node; Apply IK keys the bound chain.
+#[test]
+fn hierarchy_ik_interactive_ik_terminator_and_apply_ik_buttons() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateBoneChain { points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0], [21.0, 0.0, 0.0]], name: None }).unwrap();
+    let ids: Vec<u64> = serde_json::from_value(r["nodes"].clone()).unwrap();
+    h.cmd(Command::CreateHelper { kind: "dummy".into(), position: [15.0, 8.0, 0.0], size: 1.0 });
+    let dummy = h.app.state.selection.iter().next().unwrap().0;
+    h.cmd(Command::SetIkObjectParameters { id: ids[2], terminator: None, follow: Some(dummy), unbind: None });
+    h.cmd(Command::SelectNodes { ids: vec![ids[1]], op: loom_commands::SelectOp::Replace });
+    hierarchy_panel(&mut h);
+    h.app.hierarchy_sub = crate::command_panel::hierarchy::Sub::Ik;
+    h.frames(2);
+    h.click(panel_text(&h, "Interactive IK"));
+    assert!(h.app.state.interactive_ik);
+    h.click(panel_text(&h, "Terminator"));
+    assert!(h.app.state.scene.node(loom_scene::NodeId(ids[1])).unwrap().joints.terminator);
+    h.click(panel_text(&h, "Apply IK"));
+    assert!(h.app.state.scene.node(loom_scene::NodeId(ids[1])).unwrap().transform.rotation.is_animated(), "Apply IK keyed the bone below the terminator");
+    h.cmd(Command::SelectNodes { ids: vec![ids[2]], op: loom_commands::SelectOp::Replace });
+    h.frames(2);
+    h.click(panel_text(&h, "Unbind"));
+    assert_eq!(h.app.state.scene.node(loom_scene::NodeId(ids[2])).unwrap().joints.follow, None);
+}
