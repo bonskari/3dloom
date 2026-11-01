@@ -347,6 +347,18 @@ fn unused_sub_materials(state: &AppState) -> Vec<(MaterialId, Vec<u16>)> {
     out
 }
 
+/// `ids` and every instance of their objects (Propagate Materials to Instances).
+fn with_instances(state: &AppState, ids: Vec<NodeId>) -> Vec<NodeId> {
+    let roots: std::collections::BTreeSet<NodeId> = ids.iter().filter_map(|n| state.scene.node(*n)).map(|n| n.instance_of.unwrap_or(n.id)).collect();
+    let mut out = ids;
+    for n in state.scene.nodes() {
+        if (roots.contains(&n.id) || n.instance_of.is_some_and(|r| roots.contains(&r))) && !out.contains(&n.id) {
+            out.push(n.id);
+        }
+    }
+    out
+}
+
 fn execute_select(state: &mut AppState, ids: Vec<u64>) -> Result<Value, String> {
     crate::execute::execute(state, C::SelectNodes { ids, op: crate::SelectOp::Replace })
 }
@@ -745,6 +757,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if ids.is_empty() {
                 return Err("select the objects to assign the material to".into());
             }
+            let ids = if state.scene.material_editor.options.propagate_to_instances { with_instances(state, ids) } else { ids };
             let before = snapshot(state);
             let mut after = before.clone();
             let id = top_id(&mut after.0, &mut after.1, slot);

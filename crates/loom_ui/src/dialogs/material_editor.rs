@@ -625,6 +625,11 @@ fn menu(ui: &mut egui::Ui, app: &mut LoomApp) {
                 app.state.dialog = Some(Dialog::MaterialEditorOptions);
                 ui.close_menu();
             }
+            let mut propagate = o.propagate_to_instances;
+            if ui.checkbox(&mut propagate, "Propagate Materials to Instances").clicked() {
+                let _ = app.dispatch(Command::SetMaterialEditorOption { name: "Propagate Materials to Instances".into(), value: if propagate { 1.0 } else { 0.0 } });
+                ui.close_menu();
+            }
         });
     });
 }

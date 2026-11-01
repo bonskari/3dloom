@@ -432,3 +432,24 @@ fn auto_key_keys_material_colours_and_values() {
     let mid = m.diffuse.get_at(10.0);
     assert!(mid.x > 0.1 && mid.z > 0.1, "in between: {mid:?}");
 }
+
+#[test]
+fn propagate_materials_to_instances_assigns_to_every_instance() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s);
+    execute(&mut s, Command::MirrorObjects { axis: loom_commands::MirrorAxis::X, offset: 30.0, clone: Some(loom_commands::CloneKind::Instance) }).unwrap();
+    let b = *s.selection.iter().next().unwrap();
+    assert_eq!(s.scene.node(b).unwrap().instance_of, Some(a));
+    // Off (the default): only the selected object.
+    execute(&mut s, Command::SelectNodes { ids: vec![a.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    assert!(s.scene.node(a).unwrap().material.is_some());
+    assert!(s.scene.node(b).unwrap().material.is_none());
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    execute(&mut s, Command::SetMaterialEditorOption { name: "Propagate Materials to Instances".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::SelectNodes { ids: vec![b.0], op: SelectOp::Replace }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let m = s.scene.node(b).unwrap().material;
+    assert!(m.is_some());
+    assert_eq!(s.scene.node(a).unwrap().material, m, "the instance's source gets it too");
+}

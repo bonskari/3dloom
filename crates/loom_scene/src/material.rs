@@ -1168,6 +1168,9 @@ pub struct EditorOptions {
     pub simple_multi: bool,
     /// Display Maps as 2D.
     pub maps_as_2d: bool,
+    /// Options menu > Propagate Materials to Instances: an assignment goes
+    /// to every instance of the object too.
+    pub propagate_to_instances: bool,
 }
 
 impl Default for EditorOptions {
@@ -1186,6 +1189,7 @@ impl Default for EditorOptions {
             antialias: false,
             simple_multi: true,
             maps_as_2d: true,
+            propagate_to_instances: false,
         }
     }
 }
@@ -1212,6 +1216,7 @@ impl EditorOptions {
             "Antialias" => self.antialias = on,
             "Simple Multi Display Below Top Level" => self.simple_multi = on,
             "Display Maps as 2D" => self.maps_as_2d = on,
+            "Propagate Materials to Instances" => self.propagate_to_instances = on,
             other => return Err(format!("no Material Editor option \"{other}\"")),
         }
         Ok(())
