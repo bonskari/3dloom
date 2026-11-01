@@ -484,7 +484,7 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                 });
                 ui.label("Image source: Whole; filter: Bright.");
             });
-            for (name, el) in [("Star", &g.star), ("Streak", &g.streak)] {
+            for (name, el) in [("Star", &g.star), ("Streak", &g.streak), ("Ray", &g.ray)] {
                 egui::CollapsingHeader::new(format!("{name} Element")).id_salt(("lens_element", i, name)).default_open(el.on).show(ui, |ui| {
                     let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Element Parameters", json!({ "index": i, "element": name, k: v }));
                     let mut on = el.on;
@@ -505,8 +505,9 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                                 set(app, key, json!(v));
                             }
                         }
-                        if name == "Star" {
-                            if let Some(v) = spin(ui, app, "Qty:", el.qty as f32, 0.0..=30.0, 0.1) {
+                        if name != "Streak" {
+                            let (label, max) = if name == "Ray" { ("Num:", 1000.0) } else { ("Qty:", 30.0) };
+                            if let Some(v) = spin(ui, app, label, el.qty as f32, 0.0..=max, 0.1) {
                                 set(app, "qty", json!(v.round() as u32));
                             }
                         }

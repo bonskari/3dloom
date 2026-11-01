@@ -212,11 +212,13 @@ pub struct Glow {
     /// Centers: one per bright area, at its centre).
     pub star: StarElement,
     pub streak: StarElement,
+    /// Ray element: `qty` (Num) thin rays, randomly spaced, of random lengths.
+    pub ray: StarElement,
 }
 
 impl Default for Glow {
     fn default() -> Self {
-        Self { size: p(5.0), intensity: p(100.0), use_source_color: p(100.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE), bright: p(200.0), star: StarElement::star(), streak: StarElement::streak() }
+        Self { size: p(5.0), intensity: p(100.0), use_source_color: p(100.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE), bright: p(200.0), star: StarElement::star(), streak: StarElement::streak(), ray: StarElement::ray() }
     }
 }
 
@@ -253,6 +255,10 @@ impl StarElement {
 
     pub fn streak() -> Self {
         Self { size: p(30.0), width: p(0.5), taper: p(100.0), qty: 2, ..Self::star() }
+    }
+
+    pub fn ray() -> Self {
+        Self { size: p(20.0), width: p(0.15), qty: 100, ..Self::star() }
     }
 }
 

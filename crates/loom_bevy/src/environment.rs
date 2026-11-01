@@ -81,6 +81,8 @@ pub enum ImageEffect {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Star {
+    /// Ray: the spokes are randomly spaced and of random lengths.
+    pub scatter: bool,
     pub qty: u32,
     pub size: f32,
     pub intensity: f32,
@@ -192,8 +194,9 @@ impl EnvSettings {
                         outer: rgb(g.outer_color.get_at(t)),
                         bright: g.bright.get_at(t),
                     });
-                    for el in [&g.star, &g.streak].into_iter().filter(|el| el.on) {
+                    for (el, scatter) in [(&g.star, false), (&g.streak, false), (&g.ray, true)].into_iter().filter(|(el, _)| el.on) {
                         effects.push(ImageEffect::Star(Star {
+                            scatter,
                             qty: el.qty,
                             size: el.size.get_at(t),
                             intensity: el.intensity.get_at(t),

@@ -231,10 +231,13 @@ fn star(img: &mut RgbaImage, s: &Star) {
     let soft = 0.25 + (10.0 - s.sharp.clamp(0.0, 10.0)) / 10.0;
     let k = s.intensity.max(0.0) / 100.0;
     let mix = (s.use_source_color / 100.0).clamp(0.0, 1.0);
-    let dirs: Vec<[f32; 2]> = (0..s.qty)
+    // Ray: angles and lengths from a fixed hash, so a frame renders the same each time.
+    let hash = |i: u32, salt: u32| ((i.wrapping_mul(2_654_435_761) ^ salt.wrapping_mul(40_503)).wrapping_mul(2_246_822_519) >> 8) as f32 / (1u32 << 24) as f32;
+    let dirs: Vec<([f32; 2], f32)> = (0..s.qty)
         .map(|i| {
-            let a = (s.angle + i as f32 * 360.0 / s.qty as f32).to_radians();
-            [a.cos(), -a.sin()]
+            let (step, reach) = if s.scatter { (hash(i, 1) * 360.0, 0.3 + 0.7 * hash(i, 2)) } else { (i as f32 * 360.0 / s.qty as f32, 1.0) };
+            let a = (s.angle + step).to_radians();
+            ([a.cos(), -a.sin()], reach)
         })
         .collect();
     let mut add = vec![[0.0f32; 3]; w * h];
@@ -247,7 +250,8 @@ fn star(img: &mut RgbaImage, s: &Star) {
                 let d = [x as f32 + 0.5 - c[0], y as f32 + 0.5 - c[1]];
                 let mut best = 0.0f32;
                 let mut t_best = 0.0;
-                for dir in &dirs {
+                for (dir, reach) in &dirs {
+                    let len = len * reach;
                     let along = d[0] * dir[0] + d[1] * dir[1];
                     if along < 0.0 || along > len {
                         continue;
@@ -434,7 +438,7 @@ mod tests {
                 i.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
             }
         }
-        let s = Star { qty: 4, size: 30.0, intensity: 100.0, width: 2.0, angle: 0.0, taper: 0.0, sharp: 8.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 };
+        let s = Star { scatter: false, qty: 4, size: 30.0, intensity: 100.0, width: 2.0, angle: 0.0, taper: 0.0, sharp: 8.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 };
         apply(&mut i, &[ImageEffect::Star(s)]);
         // On a spoke (to the right, 4 px... 15 px out) red; between spokes (45 degrees) dark.
         assert!(i.get_pixel(65, 50).0[0] > 60, "{:?}", i.get_pixel(65, 50));
@@ -445,6 +449,12 @@ mod tests {
         j.put_pixel(50, 50, image::Rgba([255, 255, 255, 255]));
         apply(&mut j, &[ImageEffect::Star(Star { angle: 45.0, ..s })]);
         assert!(j.get_pixel(61, 39).0[0] > 40 && j.get_pixel(65, 50).0[0] < 10, "{:?} {:?}", j.get_pixel(61, 39), j.get_pixel(65, 50));
+        // Ray: many thin rays all round, not the same each way.
+        let mut r = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        r.put_pixel(50, 50, image::Rgba([255, 255, 255, 255]));
+        apply(&mut r, &[ImageEffect::Star(Star { scatter: true, qty: 60, width: 0.3, ..s })]);
+        let ring: Vec<u8> = (0..72).map(|k| { let a = (k as f32 * 5.0).to_radians(); r.get_pixel((50.0 + 10.0 * a.cos()).round() as u32, (50.0 + 10.0 * a.sin()).round() as u32).0[0] }).collect();
+        assert!(ring.iter().filter(|v| **v > 20).count() > 10 && ring.iter().filter(|v| **v < 5).count() > 5, "{ring:?}");
     }
 
     #[test]

@@ -328,7 +328,8 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             let el = match element.to_ascii_lowercase().as_str() {
                 "star" => &mut g.star,
                 "streak" => &mut g.streak,
-                _ => return Err(format!("unknown lens element {element:?} (Star, Streak)")),
+                "ray" => &mut g.ray,
+                _ => return Err(format!("unknown lens element {element:?} (Star, Streak, Ray)")),
             };
             if let Some(v) = on {
                 el.on = v;
@@ -337,7 +338,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 if element.eq_ignore_ascii_case("streak") && q != 2 {
                     return Err("a Streak has two spokes".into());
                 }
-                el.qty = q.min(30);
+                el.qty = if element.eq_ignore_ascii_case("ray") { q.min(1000) } else { q.min(30) };
             }
             set_opt(&mut el.size, size.map(|v| range("size", v, 0.0, 100.0)).transpose()?);
             set_opt(&mut el.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
