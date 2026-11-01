@@ -587,6 +587,8 @@ pub enum Dialog {
     ReactionManager,
     /// Animation > Animation Layers.
     AnimationLayers,
+    /// Brush Presets toolbar > Brush Preset Manager.
+    BrushPresetManager,
     /// File > Import (FBX, OBJ, .max).
     ImportFile,
     SaveAnimation,

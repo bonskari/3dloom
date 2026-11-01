@@ -198,12 +198,13 @@ pub fn show_edges(ctx: &egui::Context, app: &mut LoomApp, edges: &[Dock]) {
     if app.state.show_layers_toolbar {
         let _ = host(ctx, app, "Layers", edges, crate::layers_toolbar::contents);
     }
-    for name in ["Axis Constraints", "Extras", "Snaps", "Render Shortcuts"] {
+    for name in ["Axis Constraints", "Extras", "Snaps", "Render Shortcuts", "Brush Presets"] {
         if ui_custom::is_shown(&app.state, name) {
             let _ = host(ctx, app, name, edges, |ui, app| match name {
                 "Axis Constraints" => axis_constraints(ui, app),
                 "Extras" => extras(ui, app),
                 "Render Shortcuts" => render_shortcuts(ui, app),
+                "Brush Presets" => brush_presets(ui, app),
                 _ => snaps(ui, app),
             });
         }
@@ -496,6 +497,46 @@ mod tests {
     fn action_icons_name_registered_actions() {
         for (a, _) in icons::ACTION_ICONS {
             assert!(loom_commands::registry().iter().any(|i| i.name == *a), "{a:?} is not an action");
+        }
+    }
+}
+
+/// Brush Presets: Brush Preset Manager, Add New Preset and one button per
+/// preset (a disc showing its size within the icon range and its falloff);
+/// enabled while a paint tool is on.
+fn brush_presets(ui: &mut egui::Ui, app: &mut LoomApp) {
+    loom_commands::brush_presets::follow_active(&mut app.state);
+    let on = loom_commands::brush_presets::context(&app.state).is_some();
+    let mut cmds = Vec::new();
+    ui.add_enabled_ui(on, |ui| {
+        if ui.button("Manager").on_hover_text("Brush Preset Manager").clicked() {
+            cmds.push(Command::BrushPresetManager);
+        }
+        if ui.button("+").on_hover_text("Add New Preset").clicked() {
+            cmds.push(Command::AddBrushPreset { name: None });
+        }
+        let b = app.state.prefs.brush_presets.clone();
+        for (i, p) in b.presets.iter().enumerate() {
+            let active = app.state.active_brush_preset == Some(i);
+            let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 2.0, if active { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.inactive.bg_fill });
+            let t = ((p.painter.size - b.icon_min) / (b.icon_max - b.icon_min).max(1e-3)).clamp(0.08, 1.0);
+            let r = 11.0 * t;
+            // The falloff as a gradient: rings from the edge in, by the curve.
+            for k in (1..=6).rev() {
+                let d = k as f32 / 6.0;
+                let s = p.painter.falloff_at(d);
+                painter.circle_filled(rect.center(), r * d, egui::Color32::from_gray((40.0 + 215.0 * s) as u8));
+            }
+            if resp.on_hover_text(&p.name).clicked() {
+                cmds.push(Command::ApplyBrushPreset { index: i as u32 });
+            }
+        }
+    });
+    for c in cmds {
+        if let Err(e) = app.dispatch(c) {
+            app.state.status_prompt = e;
         }
     }
 }

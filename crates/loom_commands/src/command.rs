@@ -2238,6 +2238,15 @@ commands! {
     AssumePrefAngles => "Assume Pref Angles", MainUI, "Pose quad > Assume Pref Angles: each selected object takes its IK preferred angles as its rotation.";
     SetAsSkinPose => "Set as Skin Pose", MainUI, "Pose quad > Set as Skin Pose: store each selected object's position, rotation and scale as its skin pose.";
     AssumeSkinPoseObjects => "Assume Skin Pose (Objects)", MainUI, "Pose quad > Assume Skin Pose: the selected objects take their stored skin pose.";
+    BrushPresetManager => "Brush Preset Manager", MainUI, "Brush Presets toolbar > Brush Preset Manager: list, add, duplicate, rename, delete, save and load brush presets.";
+    AddBrushPreset => "Add Brush Preset", Loom, "Brush Presets > Add New Preset: the current brush (Painter Options and the paint tool's settings) as preset `name` (at most 50)." { name: Option<String> };
+    ApplyBrushPreset => "Apply Brush Preset", Loom, "Brush Presets toolbar: click preset `index` to use it (clicked again: deactivated, its settings stay)." { index: u32 };
+    DuplicateBrushPreset => "Duplicate Brush Preset", Loom, "Brush Preset Manager > Duplicate." { index: u32, name: Option<String> };
+    DeleteBrushPreset => "Delete Brush Preset", Loom, "Brush Preset Manager > Delete." { index: u32 };
+    RenameBrushPreset => "Rename Brush Preset", Loom, "Brush Preset Manager: rename preset `index`." { index: u32, name: String };
+    SaveBrushPresets => "Save Brush Presets", Loom, "Brush Preset Manager > Save: all presets to a .bpr file (this build's JSON)." { path: String };
+    LoadBrushPresets => "Load Brush Presets", Loom, "Brush Preset Manager > Load: a .bpr file replaces the presets." { path: String };
+    SetBrushIconRange => "Brush Icon Size Range", Loom, "Brush Preset Manager > Icon Size Min / Max: the brush sizes the toolbar icons depict." { min: f32, max: f32 };
     ToggleSteeringWheels => "Toggle SteeringWheels", MainUI, "Views > SteeringWheels > Toggle SteeringWheels (Shift+W): show or hide the wheel at the cursor.";
     SteeringWheel => "SteeringWheel", Loom, "Views > SteeringWheels / the Wheel menu: show `wheel` (View Object, Tour Building, Full Navigation, or Mini ... of each)." { wheel: String };
     SteeringWheelTool => "SteeringWheel Tool", Loom, "A wheel tool on the active view: `tool` (Zoom, Pan, Orbit, Rewind, Forward, Look, Up/Down, Walk) by a drag of `dx` / `dy` pixels; `begin` at the press (a Rewind entry), `click` for a click (Zoom / Forward 25%)." { tool: String, dx: f32, dy: f32, begin: Option<bool>, click: Option<bool> };

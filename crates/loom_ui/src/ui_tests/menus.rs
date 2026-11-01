@@ -853,3 +853,34 @@ fn steering_wheels_open_pan_zoom_rewind_switch_close() {
     h.cmd(c.clone());
     assert!(h.app.state.wheel.open);
 }
+
+/// Brush Presets toolbar: shown from the toolbar right-click list, its
+/// buttons enabled while a paint tool is on; a preset click sets the Painter
+/// size, + adds one, the Manager renames (double-click) and deletes.
+#[test]
+fn brush_presets_toolbar_and_manager() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::ShowToolbar { name: "Brush Presets".into(), on: Some(true) });
+    h.app.state.skin_paint = true;
+    h.frames(3);
+    let presets = h.app.state.prefs.brush_presets.presets.len();
+    let add = h.find_all(egui::accesskit::Role::Button, "+");
+    h.click(add[0].center());
+    h.frames(30);
+    assert_eq!(h.app.state.prefs.brush_presets.presets.len(), presets + 1, "Add New Preset");
+    let manager = h.find_all(egui::accesskit::Role::Button, "Manager");
+    h.click(manager[0].center());
+    h.frames(30);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::BrushPresetManager));
+    let first = h.app.state.prefs.brush_presets.presets[0].name.clone();
+    let row = h.text_rects(&first);
+    h.click(row[0].center());
+    h.frames(30);
+    let del = h.find_all(egui::accesskit::Role::Button, "Delete");
+    h.click(del[0].center());
+    h.frames(30);
+    assert_eq!(h.app.state.prefs.brush_presets.presets.len(), presets, "Delete");
+    h.cmd(Command::ApplyBrushPreset { index: 0 });
+    assert_eq!(h.app.state.skin_painter.size, h.app.state.prefs.brush_presets.presets[0].painter.size);
+}

@@ -458,3 +458,92 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
         }
     }
 }
+
+/// Brush Presets > Brush Preset Manager: the context, the presets with their
+/// settings (double-click a name to rename), Add, Duplicate, Delete, Icon
+/// Size Min / Max, Save and Load (.bpr).
+pub fn brush_preset_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let fid = egui::Id::new("brush_preset_manager_form");
+    let (mut hl, mut renaming, mut path): (Option<usize>, Option<(usize, String)>, String) = ctx.data(|d| d.get_temp(fid)).unwrap_or_default();
+    let mut cmds = Vec::new();
+    egui::Window::new("Brush Preset Manager").open(open).resizable(true).default_width(560.0).show(ctx, |ui| {
+        ui.label(format!("Context: {}", loom_commands::brush_presets::context(&app.state).unwrap_or("none (start a paint tool)")));
+        let b = app.state.prefs.brush_presets.clone();
+        ui.horizontal(|ui| {
+            for (label, c) in [
+                ("Add", Some(Command::AddBrushPreset { name: None })),
+                ("Duplicate", hl.map(|i| Command::DuplicateBrushPreset { index: i as u32, name: None })),
+                ("Delete", hl.map(|i| Command::DeleteBrushPreset { index: i as u32 })),
+            ] {
+                if ui.add_enabled(c.is_some(), egui::Button::new(label)).clicked() {
+                    cmds.extend(c);
+                }
+            }
+            let (mut lo, mut hi) = (b.icon_min, b.icon_max);
+            ui.label("Icon Size Min");
+            let a = ui.add(crate::spinner::spin(ui, &mut lo, 0.0..).speed(0.1)).changed();
+            ui.label("Max");
+            let c = ui.add(crate::spinner::spin(ui, &mut hi, 0.0..).speed(0.1)).changed();
+            if a || c {
+                cmds.push(Command::SetBrushIconRange { min: lo, max: hi });
+            }
+        });
+        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            egui::Grid::new("brush_presets_list").striped(true).show(ui, |ui| {
+                for h in ["Name", "Strength", "Size", "Mirror", "Mode", "Context"] {
+                    ui.strong(h);
+                }
+                ui.end_row();
+                for (i, p) in b.presets.iter().enumerate() {
+                    match &mut renaming {
+                        Some((k, text)) if *k == i => {
+                            let r = ui.text_edit_singleline(text);
+                            if r.lost_focus() {
+                                cmds.push(Command::RenameBrushPreset { index: i as u32, name: text.clone() });
+                                renaming = None;
+                            } else {
+                                r.request_focus();
+                            }
+                        }
+                        _ => {
+                            let r = ui.selectable_label(hl == Some(i), &p.name);
+                            if r.clicked() {
+                                hl = Some(i);
+                            }
+                            if r.double_clicked() {
+                                renaming = Some((i, p.name.clone()));
+                            }
+                        }
+                    }
+                    let q = &p.painter;
+                    ui.label(format!("{:.2}-{:.2}", q.min_strength, q.strength));
+                    ui.label(format!("{:.1}-{:.1}", q.min_size, q.size));
+                    ui.label(if q.mirror { format!("{} {:.1}", ["X", "Y", "Z"][q.mirror_axis.min(2) as usize], q.mirror_offset) } else { "Off".into() });
+                    ui.label(p.deform_mode.clone().or(p.soft_mode.clone()).unwrap_or_default());
+                    ui.label(match p.vp_color {
+                        Some(c) => format!("RGB {:.0} {:.0} {:.0}", c[0] * 255.0, c[1] * 255.0, c[2] * 255.0),
+                        None => String::new(),
+                    });
+                    ui.end_row();
+                }
+            });
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("File");
+            ui.text_edit_singleline(&mut path);
+            if ui.add_enabled(!path.trim().is_empty(), egui::Button::new("Save")).clicked() {
+                cmds.push(Command::SaveBrushPresets { path: path.clone() });
+            }
+            if ui.add_enabled(!path.trim().is_empty(), egui::Button::new("Load")).clicked() {
+                cmds.push(Command::LoadBrushPresets { path: path.clone() });
+            }
+        });
+    });
+    for c in cmds {
+        if let Err(e) = app.dispatch(c) {
+            app.state.status_prompt = e;
+        }
+    }
+    ctx.data_mut(|d| d.insert_temp(fid, (hl, renaming, path)));
+}
