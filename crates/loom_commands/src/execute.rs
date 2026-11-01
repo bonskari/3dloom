@@ -2118,7 +2118,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::UnhideAll => {
-            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| n.hidden).map(|n| n.id).collect();
+            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| n.hidden || state.scene.layer(n.layer).is_some_and(|l| l.hidden)).map(|n| n.id).collect();
             set_flags(state, "Unhide All", ids, |_, f| (false, f))?;
             Ok(json!({}))
         }
@@ -2134,7 +2134,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         C::UnfreezeAll => {
-            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| n.frozen).map(|n| n.id).collect();
+            let ids: Vec<NodeId> = state.scene.nodes().filter(|n| n.frozen || state.scene.layer(n.layer).is_some_and(|l| l.frozen)).map(|n| n.id).collect();
             set_flags(state, "Unfreeze All", ids, |h, _| (h, false))?;
             Ok(json!({}))
         }
@@ -3545,6 +3545,18 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         c @ (C::CreateTape { .. } | C::HelperReadout { .. } | C::ProtractorPickObject { .. } | C::SetProtractorObject { .. } | C::ActivateGridObject | C::ActivateHomeGrid | C::MeasureDistance | C::AlignGridToView | C::NudgeGridUp | C::NudgeGridDown) => crate::helpers::execute(state, c),
         c if crate::anim_layers::handles(&c) => crate::anim_layers::execute(state, c),
         c if crate::steering::handles(&c) => crate::steering::execute(state, c),
+        C::PropagateLayerAnswer { yes } => {
+            let pending = state.pending_layer_propagation.take().ok_or("no unhide / unfreeze is waiting")?;
+            if state.dialog == Some(Dlg::PropagateLayers) {
+                state.dialog = None;
+            }
+            if yes {
+                if let Some(c) = propagate_layer_flags(state, &pending.0, pending.1, pending.2) {
+                    commit(state, "Propagate to Layers", c)?;
+                }
+            }
+            Ok(json!({ "layers": pending.0 }))
+        }
         c if crate::brush_presets::handles(&c) => crate::brush_presets::execute(state, c),
         c @ (C::SnapshotDialog | C::Snapshot { .. } | C::CloneAndAlignDialog | C::CloneAndAlignPick | C::CloneAndAlignSetDestinations { .. } | C::CloneAndAlign { .. } | C::PlaceHighlight | C::PlaceHighlightAt { .. } | C::ManageSceneStates | C::SaveSceneState { .. } | C::RestoreSceneState { .. } | C::DeleteSceneState { .. } | C::WalkThroughStep { .. } | C::SetPrefAngles | C::AssumePrefAngles | C::SetAsSkinPose | C::AssumeSkinPoseObjects | C::WalkThroughAccelerateToggle | C::WalkThroughDecelerateToggle | C::WalkThroughIncreaseStepSize | C::WalkThroughDecreaseStepSize | C::WalkThroughResetStepSize | C::WalkThroughLevel | C::WalkThroughLockVerticalToggle | C::ChannelInfo | C::ChannelInfoClear { .. } | C::ChannelInfoCopy { .. } | C::ChannelInfoPaste { .. } | C::ChannelInfoAdd { .. } | C::UvwRemove { .. } | C::SetJointLimits { .. } | C::ReactionManager | C::AddReactionMaster { .. } | C::AddReactionSlave { .. } | C::SetReactionState { .. } | C::SetReactionSlaveCurve { .. } | C::SetReactionStateBlend { .. } | C::SetReactionCreateMode { .. } | C::ReactionPickFromViewport | C::DeleteReactionState { .. } | C::DeleteReaction { .. } | C::ParameterWiringDialog | C::WireParameter { .. } | C::DisconnectWireParameter { .. } | C::AddCustomAttributesDialog | C::ParameterCollector | C::AddCustomAttribute { .. } | C::SetCustomAttribute { .. } | C::DeleteCustomAttribute { .. } | C::CreateContainer { .. } | C::SaveContainer { .. } | C::UnloadContainer { .. } | C::ReloadContainer { .. } | C::SetContainerOpen { .. }) => crate::extras::execute(state, c),
         // Every remaining variant is an Unwrap UVW group command.
@@ -3730,10 +3742,25 @@ pub(crate) fn commit_change(state: &mut AppState, label: &str, change: Change) -
 
 pub(crate) fn commit(state: &mut AppState, label: &str, change: Change) -> Result<(), String> {
     crate::xref::guard(&state.scene, &change)?;
+    let change = if state.prefs.default_by_layer { by_layer_for_new_nodes(&state.scene, change) } else { change };
     let change = share_with_instances(&state.scene, change);
     state.undo.commit(label, change, &mut state.scene)?;
     state.mesh_dirty = true;
     Ok(())
+}
+
+/// Preferences > Default to By Layer for New Nodes: a node the change adds
+/// takes its display and rendering properties By Layer.
+fn by_layer_for_new_nodes(scene: &loom_scene::Scene, change: Change) -> Change {
+    match change {
+        Change::AddNode(mut n) if scene.node(n.id).is_none() => {
+            n.display.by_layer = true;
+            n.render.by_layer = true;
+            Change::AddNode(n)
+        }
+        Change::Group(v) => Change::Group(v.into_iter().map(|c| by_layer_for_new_nodes(scene, c)).collect()),
+        c => c,
+    }
 }
 
 /// Instances share one object: a replaced object (a sub-object edit, a
@@ -4155,7 +4182,30 @@ fn set_flags(
     ids: Vec<NodeId>,
     f: impl Fn(bool, bool) -> (bool, bool),
 ) -> Result<(), String> {
+    // Unhide / Unfreeze of objects on hidden / frozen layers: Preferences >
+    // Propagate Unhide/Unfreeze Commands to Layers.
+    let (unhide, unfreeze) = { let r = f(true, true); (!r.0, !r.1) };
+    let layers: Vec<u32> = {
+        let mut v: Vec<u32> = ids
+            .iter()
+            .filter_map(|id| state.scene.node(*id))
+            .filter_map(|n| state.scene.layer(n.layer).filter(|l| (unhide && l.hidden) || (unfreeze && l.frozen)).map(|l| l.id))
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
     let mut changes = Vec::new();
+    if !layers.is_empty() {
+        match state.prefs.propagate_layers {
+            0 => changes.extend(propagate_layer_flags(state, &layers, unhide, unfreeze)),
+            2 => {
+                state.pending_layer_propagation = Some((layers, unhide, unfreeze));
+                state.dialog = Some(Dlg::PropagateLayers);
+            }
+            _ => {}
+        }
+    }
     for id in ids {
         let Some(n) = state.scene.node(id) else { continue };
         let before = (n.hidden, n.frozen);
@@ -4168,6 +4218,21 @@ fn set_flags(
         return Ok(());
     }
     commit(state, label, Change::Group(changes))
+}
+
+/// The change that unhides / unfreezes `layers`.
+pub(crate) fn propagate_layer_flags(state: &AppState, layers: &[u32], unhide: bool, unfreeze: bool) -> Option<Change> {
+    let before = (state.scene.layers.clone(), state.scene.current_layer);
+    let mut after = before.clone();
+    for l in after.0.iter_mut().filter(|l| layers.contains(&l.id)) {
+        if unhide {
+            l.hidden = false;
+        }
+        if unfreeze {
+            l.frozen = false;
+        }
+    }
+    (after != before).then_some(Change::SetLayers { before, after })
 }
 
 /// The ids plus every descendant of the group heads among them (closed

@@ -214,6 +214,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
         Dialog::MakeUnique => make_unique(ctx, app, &mut open),
+        Dialog::PropagateLayers => propagate_layers(ctx, app, &mut open),
         Dialog::XViewConfigure => xview_configure(ctx, app, &mut open),
         Dialog::ReactionManager => wiring::reaction_manager(ctx, app, &mut open),
         Dialog::AnimationLayers => wiring::animation_layers(ctx, app, &mut open),
@@ -511,6 +512,30 @@ fn make_preview(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
 
 /// Make Unique with several objects selected: Yes makes each unique, No gives
 /// them one instance of their own, Cancel leaves them.
+/// Unhide / Unfreeze of objects on hidden or frozen layers (Preferences >
+/// Propagate ... > Ask): apply to the layers too?
+fn propagate_layers(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let mut answer = None;
+    let what = match app.state.pending_layer_propagation.as_ref().map(|p| (p.1, p.2)) {
+        Some((true, _)) => "unhide",
+        _ => "unfreeze",
+    };
+    egui::Window::new("Propagate to Layers").open(open).resizable(false).collapsible(false).show(ctx, |ui| {
+        ui.label(format!("Some objects are on layers that are hidden or frozen. Also {what} those layers?"));
+        ui.horizontal(|ui| {
+            if ui.button("Yes").clicked() {
+                answer = Some(true);
+            }
+            if ui.button("No").clicked() {
+                answer = Some(false);
+            }
+        });
+    });
+    if let Some(yes) = answer {
+        let _ = app.dispatch(Command::PropagateLayerAnswer { yes });
+    }
+}
+
 fn make_unique(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let mut answer: Option<Option<Command>> = None;
     egui::Window::new("Make Unique").open(open).resizable(false).collapsible(false).show(ctx, |ui| {

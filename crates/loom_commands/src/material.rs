@@ -954,6 +954,9 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             commit(state, "Copy Material", Change::SetMaterials { before, after })?;
             Ok(json!({ "slot": t, "material": id.0 }))
         }
+        // Preferences > Sub-Materials > Assign Automatically: with polygons
+        // selected the material goes to them through a Multi/Sub-Object.
+        C::AssignMaterialToSelection if state.prefs.sub_material_assign_auto && state.selection_mode.is_face_level() && selected_faces(state).iter().any(|(_, f)| !f.is_empty()) => execute(state, C::AssignMaterialToFaces { slot: None }),
         C::AssignMaterialToSelection | C::AssignMaterialToNode { .. } => {
             let (ids, slot) = match cmd {
                 C::AssignMaterialToNode { node, slot } => {

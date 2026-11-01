@@ -2250,6 +2250,7 @@ commands! {
     SaveBrushPresets => "Save Brush Presets", Loom, "Brush Preset Manager > Save: all presets to a .bpr file (this build's JSON)." { path: String };
     LoadBrushPresets => "Load Brush Presets", Loom, "Brush Preset Manager > Load: a .bpr file replaces the presets." { path: String };
     SetBrushIconRange => "Brush Icon Size Range", Loom, "Brush Preset Manager > Icon Size Min / Max: the brush sizes the toolbar icons depict." { min: f32, max: f32 };
+    PropagateLayerAnswer => "Propagate to Layers", Loom, "The Propagate Unhide/Unfreeze question: `yes` also unhides / unfreezes the objects' layers." { yes: bool };
     ToggleSteeringWheels => "Toggle SteeringWheels", MainUI, "Views > SteeringWheels > Toggle SteeringWheels (Shift+W): show or hide the wheel at the cursor.";
     SteeringWheel => "SteeringWheel", Loom, "Views > SteeringWheels / the Wheel menu: show `wheel` (View Object, Tour Building, Full Navigation, or Mini ... of each)." { wheel: String };
     SteeringWheelTool => "SteeringWheel Tool", Loom, "A wheel tool on the active view: `tool` (Zoom, Pan, Orbit, Rewind, Forward, Look, Up/Down, Walk) by a drag of `dx` / `dy` pixels; `begin` at the press (a Rewind entry), `click` for a click (Zoom / Forward 25%)." { tool: String, dx: f32, dy: f32, begin: Option<bool>, click: Option<bool> };

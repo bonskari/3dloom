@@ -581,6 +581,8 @@ pub enum Dialog {
     TopologyWarning,
     /// Make Unique with several selected: unique with respect to each other? Yes / No / Cancel.
     MakeUnique,
+    /// Unhide / Unfreeze of objects on hidden / frozen layers: propagate to the layers?
+    PropagateLayers,
     /// xView > Configure: the Tolerance.
     XViewConfigure,
     /// Animation > Reaction Manager.

@@ -958,3 +958,42 @@ fn active_viewport_only_freezes_the_inactive_views() {
     h.frames(1);
     assert!(h.app.frozen_views.is_empty(), "stopped: live again");
 }
+
+/// Preferences > General: Layer Defaults (Propagate ... Ask: Unhide All on
+/// a hidden layer asks, Yes unhides the layer; Default to By Layer for New
+/// Nodes) and Sub-Materials Assign Automatically (polygons selected: the
+/// material goes on through a Multi/Sub-Object).
+#[test]
+fn preferences_layer_defaults_and_sub_material_assign() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::Preferences);
+    h.frames(2);
+    let ask = h.text_rects("Ask");
+    h.click(ask[0].center());
+    assert_eq!(h.app.state.prefs.propagate_layers, 2);
+    let by_layer = h.text_rects("Default to By Layer for New Nodes");
+    h.click(by_layer[0].center());
+    assert!(h.app.state.prefs.default_by_layer);
+    h.cmd(Command::CloseDialog);
+    h.cmd(Command::CreateLayer { name: Some("L1".into()) });
+    let layer = h.app.state.scene.current_layer;
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    let n = h.app.state.scene.node(a).unwrap();
+    assert!(n.display.by_layer && n.render.by_layer, "a new node is By Layer");
+    h.cmd(Command::SetLayerHidden { layer, on: true });
+    h.cmd(Command::UnhideAll);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::PropagateLayers), "Ask");
+    h.frames(2);
+    let yes = h.find_all(egui::accesskit::Role::Button, "Yes");
+    h.click(yes[0].center());
+    assert!(!h.app.state.scene.layer(layer).unwrap().hidden, "Yes: the layer is unhidden");
+    // Sub-Materials > Assign Automatically: polygons selected.
+    h.cmd(Command::ConvertToEditablePoly);
+    h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Face });
+    h.cmd(Command::SelectSub { node: None, ids: vec![0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::AssignMaterialToSelection);
+    let m = h.app.state.scene.node(a).unwrap().material.expect("assigned");
+    assert!(matches!(h.app.state.scene.materials.get(&m).map(|x| &x.kind), Some(loom_scene::material::MaterialKind::MultiSub(_))), "a Multi/Sub-Object on the faces");
+}

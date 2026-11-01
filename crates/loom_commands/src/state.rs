@@ -889,6 +889,13 @@ pub struct Prefs {
     pub local_center_during_animate: bool,
     /// Preferences > Files > Recent Files in File Menu (0-50, default 10).
     pub recent_files_count: usize,
+    /// General > Sub-Materials > Assign Automatically (default on).
+    pub sub_material_assign_auto: bool,
+    /// General > Layer Defaults > Default to By Layer for New Nodes.
+    pub default_by_layer: bool,
+    /// General > Layer Defaults > Propagate Unhide/Unfreeze Commands to
+    /// Layers: 0 Propagate, 1 Do Not Propagate, 2 Ask.
+    pub propagate_layers: u8,
     /// Preferences > Viewports > Grid Nudge Distance (Nudge Grid Up / Down, default 1.0).
     #[serde(default = "default_nudge")]
     pub grid_nudge_distance: f32,
@@ -968,6 +975,10 @@ impl Default for Prefs {
             auto_backup_name: "AutoBackup".into(),
             local_center_during_animate: true,
             recent_files_count: 10,
+            sub_material_assign_auto: true,
+            default_by_layer: false,
+            // The reference gives no default; Do Not Propagate keeps this build's old behaviour.
+            propagate_layers: 1,
             grid_nudge_distance: 1.0,
             floating_os_windows: true,
             display_world_axis: true,
@@ -1030,6 +1041,9 @@ impl Prefs {
             "Auto Backup Count" => self.auto_backup_count as f64,
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
             "Recent Files in File Menu" => self.recent_files_count as f64,
+            "Sub-Materials Assign Automatically" => b(self.sub_material_assign_auto),
+            "Default to By Layer for New Nodes" => b(self.default_by_layer),
+            "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers as f64,
             "Grid Nudge Distance" => self.grid_nudge_distance as f64,
             "Floating Windows as OS Windows" => b(self.floating_os_windows),
             "Display World Axis" => b(self.display_world_axis),
@@ -1093,6 +1107,9 @@ impl Prefs {
             "Auto Backup Count" => self.auto_backup_count = v.clamp(1.0, 99.0) as u32,
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
             "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
+            "Sub-Materials Assign Automatically" => self.sub_material_assign_auto = on,
+            "Default to By Layer for New Nodes" => self.default_by_layer = on,
+            "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers = v.clamp(0.0, 2.0) as u8,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
             "Grid Nudge Distance" => self.grid_nudge_distance = f.max(0.0),
             "Floating Windows as OS Windows" => self.floating_os_windows = on,
@@ -2025,6 +2042,9 @@ pub struct AppState {
     pub anim_layer_clipboard: Option<loom_scene::anim_layers::AnimLayer>,
     /// Reaction Manager > Create Mode.
     pub reaction_create_mode: bool,
+    /// Propagate Unhide/Unfreeze > Ask: the layers waiting for an answer
+    /// (layer ids, unhide, unfreeze).
+    pub pending_layer_propagation: Option<(Vec<u32>, bool, bool)>,
     /// Reaction Manager: the object picked in a viewport, its tracks offered.
     pub reaction_picked_node: Option<NodeId>,
     /// Views > SteeringWheels: the open wheel and its Rewind history.
@@ -2362,6 +2382,7 @@ impl AppState {
             saved_track_views: Vec::new(),
             anim_layer_clipboard: None,
             reaction_create_mode: false,
+            pending_layer_propagation: None,
             reaction_picked_node: None,
             wheel: Default::default(),
             active_brush_preset: None,

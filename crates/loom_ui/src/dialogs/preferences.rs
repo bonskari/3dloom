@@ -69,6 +69,19 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         check(ui, app, "Space Locks Selection", "Space locks the selection");
                         ui.label(egui::RichText::new("Create Objects").strong());
                         check(ui, app, "Keep Creating", "Keep Creating");
+                        ui.label(egui::RichText::new("Sub-Materials").strong());
+                        check(ui, app, "Sub-Materials Assign Automatically", "Assign Automatically");
+                        ui.label(egui::RichText::new("Layer Defaults").strong());
+                        check(ui, app, "Default to By Layer for New Nodes", "Default to By Layer for New Nodes");
+                        ui.label("Propagate Unhide/Unfreeze Commands to Layers?");
+                        ui.horizontal(|ui| {
+                            let cur = app.state.prefs.propagate_layers;
+                            for (v, label) in [(0u8, "Propagate"), (1, "Do Not Propagate"), (2, "Ask")] {
+                                if ui.radio(cur == v, label).clicked() {
+                                    let _ = app.dispatch(Command::SetPreference { name: "Propagate Unhide/Unfreeze to Layers".into(), value: v as f64 });
+                                }
+                            }
+                        });
                     });
                     ui.group(|ui| {
                         ui.label(egui::RichText::new("UI Display").strong());
