@@ -1013,6 +1013,31 @@ fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
     }
 }
 
+/// Missing Map Coordinates: each map channel and object; Continue renders anyway.
+pub fn missing_map_coordinates(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let list = loom_commands::material::missing_map_coords(&app.state);
+    let mut choice = None;
+    egui::Window::new("Missing Map Coordinates").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        for (_, name, ch) in &list {
+            ui.label(format!("(UVW {ch}): {name}"));
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Continue").clicked() {
+                choice = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                choice = Some(false);
+            }
+        });
+    });
+    if let Some(go) = choice {
+        let _ = app.dispatch(Command::MissingMapCoordinates { proceed: Some(go) });
+        *open = false;
+    } else if !*open {
+        let _ = app.dispatch(Command::MissingMapCoordinates { proceed: Some(false) });
+    }
+}
+
 /// Copy or Swap Colors: after dropping one swatch on another.
 pub fn copy_swap_colors(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let id = egui::Id::new("copy_swap_colors");

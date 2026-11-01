@@ -684,6 +684,12 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             if path.as_deref().is_some_and(|p| p.trim().is_empty()) {
                 return Err("render path is empty".into());
             }
+            if !state.missing_coords_continue && !crate::material::missing_map_coords(state).is_empty() {
+                // Missing Map Coordinates: Continue renders, Cancel does not.
+                state.pending_render = Some((path, width, height));
+                state.dialog = Some(Dialog::MissingMapCoordinates);
+                return Ok(json!({ "asked": "Missing Map Coordinates" }));
+            }
             let iterative = state.rendered.iterative;
             // Production saves the Render Output file when Save File is on;
             // Iterative never writes files.

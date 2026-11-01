@@ -157,6 +157,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::CleanMultiMaterial => material_editor::clean_multi_material(ctx, app, &mut open),
         Dialog::RenderMap => material_editor::render_map(ctx, app, &mut open),
         Dialog::CopySwapColors => material_editor::copy_swap_colors(ctx, app, &mut open),
+        Dialog::MissingMapCoordinates => material_editor::missing_map_coordinates(ctx, app, &mut open),
         Dialog::SpecifyCropping => material_editor::specify_cropping(ctx, app, &mut open),
         Dialog::CopyMap { from, to } => material_editor::copy_map(ctx, app, from, to, &mut open),
         Dialog::RenderFile | Dialog::ViewImageFile | Dialog::SaveRenderedImage | Dialog::SaveRenderPreset | Dialog::LoadRenderPreset | Dialog::RamPlayerFile { .. } => file_dialog::show(ctx, app, dialog, &mut open),

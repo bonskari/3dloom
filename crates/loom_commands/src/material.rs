@@ -62,6 +62,7 @@ pub fn handles(c: &C) -> bool {
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
             | C::CleanMultiMaterial { .. }
+            | C::MissingMapCoordinates { .. }
             | C::MaterialExplorer
             | C::AssignMaterialById { .. }
             | C::TypeButtonCopy { .. }
@@ -410,6 +411,48 @@ pub fn users_of(state: &AppState, id: MaterialId) -> Vec<NodeId> {
         false
     };
     state.scene.nodes().filter(|n| n.material.is_some_and(uses)).map(|n| n.id).collect()
+}
+
+/// Missing Map Coordinates: (object, its name, channel) for each renderable
+/// object whose material tree has an enabled 2D map on a channel other than
+/// 1 that the object's mesh has no coordinates for.
+pub fn missing_map_coords(state: &AppState) -> Vec<(NodeId, String, u32)> {
+    fn channels(m: &Map, out: &mut std::collections::BTreeSet<u32>) {
+        if m.kind.has_2d_coords() && m.coords.map_channel != 1 && m.kind != MapType::VertexColor {
+            out.insert(m.coords.map_channel);
+        }
+        for c in m.components() {
+            channels(c, out);
+        }
+    }
+    let lib = &state.scene.materials;
+    let mut out = Vec::new();
+    for n in state.scene.nodes().filter(|n| state.scene.renders(n)) {
+        let Some(top) = n.material else { continue };
+        let mut used = std::collections::BTreeSet::new();
+        let mut stack = vec![top];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(id) = stack.pop() {
+            let Some(m) = lib.get(&id).filter(|_| seen.insert(id)) else { continue };
+            for slot in m.map_slots() {
+                if let Some(map) = m.map(slot).filter(|x| x.enabled) {
+                    channels(map, &mut used);
+                }
+            }
+            stack.extend(m.children().into_iter().flatten());
+        }
+        if used.is_empty() {
+            continue;
+        }
+        let eval = state.scene.eval_mesh(n.id);
+        let mesh = &eval.value.mesh;
+        for ch in used {
+            if mesh.map(ch).is_none() {
+                out.push((n.id, n.name.clone(), ch));
+            }
+        }
+    }
+    out
 }
 
 /// Material Explorer's scene panel: every material objects use (top level),
@@ -1172,6 +1215,25 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 state.mesh_dirty = true;
             }
             Ok(json!({ "material": material, "nodes": ids.iter().map(|n| n.0).collect::<Vec<_>>() }))
+        }
+        C::MissingMapCoordinates { proceed } => {
+            let list: Vec<Value> = missing_map_coords(state).into_iter().map(|(n, name, ch)| json!({ "node": n.0, "name": name, "channel": ch })).collect();
+            match proceed {
+                None => Ok(json!({ "missing": list })),
+                Some(go) => {
+                    state.dialog = None;
+                    let pending = state.pending_render.take();
+                    if go {
+                        if let Some((path, width, height)) = pending {
+                            state.missing_coords_continue = true;
+                            let r = execute(state, C::Render { path, width, height });
+                            state.missing_coords_continue = false;
+                            return r;
+                        }
+                    }
+                    Ok(json!({ "missing": list }))
+                }
+            }
         }
         C::CleanMultiMaterial { materials, apply } => {
             let unused = unused_sub_materials(state);

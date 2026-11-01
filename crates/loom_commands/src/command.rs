@@ -1433,6 +1433,7 @@ commands! {
     TypeButtonClear => "Type Button Clear", Loom, "Type button right-click > Clear: the sub-material or map at the current level becomes None.";
     MaterialExplorer => "Material Explorer", MainUI, "Rendering > Material Explorer: open or close it; the result lists the scene's materials (those objects use) with their type and objects.";
     AssignMaterialById => "Assign Material By Id", Loom, "Material Explorer: assign scene material `material` to objects `nodes` (omitted = the selection), one undo step." { material: u32, nodes: Option<Vec<u64>> };
+    MissingMapCoordinates => "Missing Map Coordinates", Loom, "The objects to render whose materials' maps use a map channel other than 1 that the object has no mapping coordinates for (Missing Map Coordinates dialog); `proceed` true is the dialog's Continue (renders as asked), false its Cancel." { proceed: Option<bool> };
     MultiSubSort => "Multi/Sub Sort", Loom, "Multi/Sub-Object Basic Parameters: sort the list by `by` = ID, Name or Sub (the sub-materials' names)." { by: String };
     PutToLibrary => "Put to Library", Loom, "Material Editor > Put to Library: the active slot's material (with its sub-materials) into the current material library, under `name` (omitted = the material's name; the same name replaces)." { name: Option<String> };
     GetFromLibrary => "Get From Library", Loom, "Material/Map Browser, Browse From Mtl Library: a copy of the library material `name` goes into the active slot." { name: String };

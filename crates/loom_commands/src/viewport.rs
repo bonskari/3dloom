@@ -481,6 +481,8 @@ pub enum Dialog {
     RenderMap,
     /// Copy or Swap Colors (a swatch dropped on another).
     CopySwapColors,
+    /// Render: objects lack the mapping coordinates their maps' channels need.
+    MissingMapCoordinates,
     /// Bitmap Parameters > View Image: Specify Cropping/Placement.
     SpecifyCropping,
     /// Copy (Instance) Map: dragging map button `from` onto `to` (indexes into MAP_SLOTS).

@@ -553,3 +553,25 @@ fn real_world_scale_makes_tiling_the_size_one_image_covers() {
     let b = c.apply([50.0, 25.0]);
     assert!((b[0] - a[0] - 1.0).abs() < 1e-5 && (b[1] - a[1] - 1.0).abs() < 1e-5, "{a:?} -> {b:?}");
 }
+
+#[test]
+fn missing_map_coordinates_asks_before_rendering_until_a_uvw_map_gives_the_channel() {
+    let mut s = AppState::new();
+    let n = boxed(&mut s);
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Map Channel".into(), value: 3.0 }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let r = execute(&mut s, Command::MissingMapCoordinates { proceed: None }).unwrap();
+    assert_eq!(r["missing"], serde_json::json!([{ "node": n.0, "name": s.scene.node(n).unwrap().name, "channel": 3 }]));
+    let r = execute(&mut s, Command::Render { path: None, width: Some(8), height: Some(8) }).unwrap();
+    assert_eq!(r["asked"], "Missing Map Coordinates");
+    assert_eq!(s.dialog, Some(loom_commands::Dialog::MissingMapCoordinates));
+    execute(&mut s, Command::MissingMapCoordinates { proceed: Some(false) }).unwrap();
+    assert_eq!(s.dialog, None);
+    assert!(s.pending_render.is_none(), "Cancel: no render");
+    // A UVW Map on channel 3 supplies the coordinates.
+    execute(&mut s, Command::AddModifier { name: "UVW Map".into() }).unwrap();
+    execute(&mut s, Command::SetModifierParameter { index: 0, name: "Channel".into(), value: 3.0 }).unwrap();
+    let r = execute(&mut s, Command::MissingMapCoordinates { proceed: None }).unwrap();
+    assert_eq!(r["missing"], serde_json::json!([]));
+}
