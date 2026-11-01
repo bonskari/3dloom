@@ -414,8 +414,16 @@ pub fn animation_quadrants(app: &LoomApp) -> Quadrants {
         e("Freeze Position", Command::FreezePosition),
         e("Position to Zero", Command::PositionToZero),
     ];
-    let pose = if s.selection.is_empty() { None } else { Some(Quadrant::new("pose", pose)) };
-    Quadrants { display: Quadrant::new("set", set), transform: Quadrant::new("coordinates", coordinates), tools1: pose, tools2: None }
+    let pose = if s.selection.is_empty() { None } else { Some(Quadrant::new("transform", pose)) };
+    // Pose (lower left): preferred angles and the skin pose.
+    let skin = vec![
+        e("Set Pref Angles", Command::SetPrefAngles),
+        e("Assume Pref Angles", Command::AssumePrefAngles),
+        e("Set as Skin Pose", Command::SetAsSkinPose),
+        e("Assume Skin Pose", Command::AssumeSkinPoseObjects),
+    ];
+    let skin = if s.selection.is_empty() { None } else { Some(Quadrant::new("pose", skin)) };
+    Quadrants { display: Quadrant::new("set", set), transform: Quadrant::new("coordinates", coordinates), tools1: pose, tools2: skin }
 }
 
 /// Ctrl+Alt+right-click: the lighting and render quad. Render (upper

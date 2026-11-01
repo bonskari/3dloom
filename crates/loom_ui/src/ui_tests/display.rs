@@ -136,3 +136,34 @@ fn display_quad_hides_and_freezes_the_selections_layer_and_opens_scene_states() 
     h.click(p);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ParameterWiring));
 }
+
+/// Alt+right-click > pose quadrant (lower left): Set as Skin Pose stores the
+/// box's transform and Assume Skin Pose brings it back; Set / Assume Pref
+/// Angles keep and restore its rotation as the IK preferred angles.
+#[test]
+fn animation_quad_pose_quadrant_skin_pose_and_pref_angles() {
+    let mut h = Harness::new();
+    let id = boxed(&mut h);
+    h.cmd(Command::SetTransform { id: id.0, position: None, rotation_deg: Some([10.0, 20.0, 30.0]), scale: None });
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let at = r.center() + egui::vec2(150.0, -50.0);
+    let pick = |h: &mut Harness, label: &str| {
+        h.mods = egui::Modifiers::ALT;
+        right_click(h, at);
+        h.mods = egui::Modifiers::NONE;
+        let p = h.text_rects(label).into_iter().find(|t| t.max.x < at.x && t.min.y > at.y).unwrap_or_else(|| panic!("{label} in the lower-left quadrant")).center();
+        h.click(p);
+    };
+    pick(&mut h, "Set as Skin Pose");
+    pick(&mut h, "Set Pref Angles");
+    assert_eq!(h.app.state.scene.node(id).unwrap().joints.rotational.map(|a| a.preferred), [10.0, 20.0, 30.0]);
+    h.cmd(Command::SetTransform { id: id.0, position: Some([50.0, 0.0, 0.0]), rotation_deg: Some([0.0; 3]), scale: None });
+    pick(&mut h, "Assume Pref Angles");
+    let rot = h.app.state.scene.node(id).unwrap().transform.rotation.get();
+    assert!((rot - glam::Vec3::new(10.0, 20.0, 30.0)).length() < 1e-4, "{rot}");
+    pick(&mut h, "Assume Skin Pose");
+    assert_eq!(h.app.state.scene.node(id).unwrap().transform.position.get(), glam::Vec3::ZERO, "back to the skin pose");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.node(id).unwrap().transform.position.get(), glam::Vec3::new(50.0, 0.0, 0.0), "one undo step");
+}

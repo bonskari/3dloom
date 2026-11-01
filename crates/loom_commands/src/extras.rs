@@ -279,6 +279,61 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::RestoreSceneState { name, parts } => restore_scene_state(state, &name, parts),
         C::DeleteSceneState { name } => delete_scene_state(state, &name),
         C::WalkThroughStep { forward, right, up } => walkthrough_step(state, forward, right, up),
+        C::SetPrefAngles | C::SetAsSkinPose => {
+            let pref = matches!(cmd, C::SetPrefAngles);
+            let mut changes = Vec::new();
+            for id in state.selection.iter().copied() {
+                let Some(n) = state.scene.node(id) else { continue };
+                let before = n.props();
+                let mut after = before.clone();
+                if pref {
+                    let r = n.transform.rotation.get();
+                    for (a, v) in after.joints.rotational.iter_mut().zip([r.x, r.y, r.z]) {
+                        a.preferred = v;
+                    }
+                } else {
+                    after.skin_pose = Some(n.transform.clone());
+                }
+                if after != before {
+                    changes.push(Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) });
+                }
+            }
+            if state.selection.is_empty() {
+                return Err("select objects first".into());
+            }
+            if !changes.is_empty() {
+                commit(state, if pref { "Set Pref Angles" } else { "Set as Skin Pose" }, Change::Group(changes))?;
+            }
+            Ok(json!({}))
+        }
+        C::AssumePrefAngles | C::AssumeSkinPoseObjects => {
+            let pref = matches!(cmd, C::AssumePrefAngles);
+            if state.selection.is_empty() {
+                return Err("select objects first".into());
+            }
+            let mut changes = Vec::new();
+            for id in state.selection.iter().copied() {
+                let Some(n) = state.scene.node(id) else { continue };
+                let after = if pref {
+                    let j = n.joints.rotational;
+                    let mut t = n.transform.clone();
+                    t.rotation.set(Vec3::new(j[0].preferred, j[1].preferred, j[2].preferred));
+                    t
+                } else {
+                    match &n.skin_pose {
+                        Some(t) => t.clone(),
+                        None => continue,
+                    }
+                };
+                if after != n.transform {
+                    changes.push(Change::SetTransform { id, before: n.transform.clone(), after });
+                }
+            }
+            if !changes.is_empty() {
+                commit(state, if pref { "Assume Pref Angles" } else { "Assume Skin Pose" }, Change::Group(changes))?;
+            }
+            Ok(json!({}))
+        }
         C::WalkThroughAccelerateToggle => {
             state.walk.speed = if state.walk.speed == 1 { 0 } else { 1 };
             Ok(json!({ "speed": state.walk.speed }))

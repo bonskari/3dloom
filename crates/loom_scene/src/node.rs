@@ -2091,6 +2091,9 @@ pub struct NodeProps {
     /// Skin Wrap > Bake Control Verts: control-vertex settings kept on a control object.
     #[serde(default)]
     pub skin_wrap_bake: Option<Box<crate::morph::SkinWrapBake>>,
+    /// Set as Skin Pose: the transform Assume Skin Pose returns the object to.
+    #[serde(default)]
+    pub skin_pose: Option<Transform>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2170,6 +2173,9 @@ pub struct Node {
     /// Skin Wrap > Bake Control Verts.
     #[serde(default)]
     pub skin_wrap_bake: Option<Box<crate::morph::SkinWrapBake>>,
+    /// Set as Skin Pose: the transform Assume Skin Pose returns the object to.
+    #[serde(default)]
+    pub skin_pose: Option<Transform>,
 }
 
 impl Node {
@@ -2230,6 +2236,7 @@ impl PartialEq for Node {
             && self.render == o.render
             && self.user_props == o.user_props
             && self.skin_wrap_bake == o.skin_wrap_bake
+            && self.skin_pose == o.skin_pose
     }
 }
 
@@ -2374,6 +2381,7 @@ impl Node {
             render: self.render.clone(),
             user_props: self.user_props.clone(),
             skin_wrap_bake: self.skin_wrap_bake.clone(),
+            skin_pose: self.skin_pose.clone(),
         }
     }
 
@@ -2390,6 +2398,7 @@ impl Node {
         self.render = p.render;
         self.user_props = p.user_props;
         self.skin_wrap_bake = p.skin_wrap_bake;
+        self.skin_pose = p.skin_pose;
     }
 }
 
@@ -2428,6 +2437,7 @@ impl Node {
             render: RenderProps { renderable, ..RenderProps::default() },
             user_props: String::new(),
             skin_wrap_bake: None,
+            skin_pose: None,
             version: 0,
             geom_version: 0,
             instance_of: None,
