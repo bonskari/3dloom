@@ -305,3 +305,17 @@ fn dropping_a_swatch_on_another_asks_copy_or_swap() {
     assert_eq!(editor_material(&h).specular.get(), glam::Vec3::X, "Specular got Diffuse's red");
     assert_eq!(h.app.state.dialog, None);
 }
+
+#[test]
+fn options_menu_propagate_materials_to_instances_toggles() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    let win = material_editor_rect(&h);
+    // The menu bar's Options: the topmost "Options" text in the editor.
+    let menu = h.text_rects("Options").into_iter().filter(|r| win.contains_rect(*r)).min_by(|a, b| a.min.y.total_cmp(&b.min.y)).expect("Options menu");
+    h.click(menu.center());
+    h.frames(2);
+    h.click_text_anywhere("Propagate Materials to Instances");
+    h.frames(2);
+    assert!(h.app.state.scene.material_editor.options.propagate_to_instances);
+}
