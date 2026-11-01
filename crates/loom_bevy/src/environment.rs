@@ -75,6 +75,8 @@ pub enum ImageEffect {
     Star(Star),
     /// Lens Effects Ring round the centre of each area brighter than `bright`.
     Ring(Ring),
+    /// Lens Effects Manual / Auto Secondary flares.
+    Secondary(Secondary),
     Blur(Blur),
     BrightnessContrast { brightness: f32, contrast: f32, ignore_background: bool },
     ColorBalance { cyan_red: f32, magenta_green: f32, yellow_blue: f32, preserve_luminosity: bool, ignore_background: bool },
@@ -83,6 +85,37 @@ pub enum ImageEffect {
     /// to `path` (None: no file, as in previews); `affect_source` passes
     /// the channel on as the image.
     FileOutput { path: Option<String>, channel: u32, affect_source: bool },
+    /// Motion Blur: the renderer smears the Image-blurred objects over
+    /// `duration` frames here (it needs the scene, so `effects::apply` skips it).
+    MotionBlur { duration: f32 },
+}
+
+/// Lens Effects secondary flares: discs (`plane` % of the way from each
+/// bright area's centre to the image centre, radius % of the image diagonal).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Secondary {
+    pub discs: Vec<(f32, f32)>,
+    pub intensity: f32,
+    /// 0 circular, else 3 to 8 sides.
+    pub sides: u32,
+    pub use_source_color: f32,
+    pub inner: [f32; 3],
+    pub outer: [f32; 3],
+    pub bright: f32,
+}
+
+/// Auto Secondary: `qty` discs spread evenly along 0..200 × `axis` % of the
+/// source-to-centre line, each nudged and sized between `min` and `max` by
+/// a hash of `seed`, so a frame renders the same each time.
+pub fn auto_secondary_discs(qty: u32, min: f32, max: f32, axis: f32, seed: u32) -> Vec<(f32, f32)> {
+    let hash = |i: u32, salt: u32| ((i.wrapping_add(seed).wrapping_mul(2_654_435_761) ^ salt.wrapping_mul(40_503)).wrapping_mul(2_246_822_519) >> 8) as f32 / (1u32 << 24) as f32;
+    let (lo, hi) = (min.min(max).max(0.0), max.max(min).max(0.0));
+    (0..qty)
+        .map(|i| {
+            let step = 200.0 * axis.max(0.0) / qty as f32;
+            ((i as f32 + 0.5 + (hash(i, 3) - 0.5) * 0.8) * step, lo + (hi - lo) * hash(i, 4))
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,6 +134,8 @@ pub struct Ring {
 pub struct Star {
     /// Ray: the spokes are randomly spaced and of random lengths.
     pub scatter: bool,
+    /// Lens Effects Globals > Seed (varies the Ray's spokes).
+    pub seed: u32,
     pub qty: u32,
     pub size: f32,
     pub intensity: f32,
@@ -210,9 +245,13 @@ impl EnvSettings {
                     });
                 }
                 EffectKind::Glow(g) => {
+                    // Lens Effects Globals scale every element.
+                    let gs = g.globals.size.get_at(t).max(0.0) / 100.0;
+                    let gi = g.globals.intensity.get_at(t).max(0.0) / 100.0;
+                    let ga = g.globals.angle.get_at(t);
                     effects.push(ImageEffect::Glow {
-                        size: g.size.get_at(t),
-                        intensity: g.intensity.get_at(t),
+                        size: g.size.get_at(t) * gs,
+                        intensity: g.intensity.get_at(t) * gi,
                         use_source_color: g.use_source_color.get_at(t),
                         inner: rgb(g.inner_color.get_at(t)),
                         outer: rgb(g.outer_color.get_at(t)),
@@ -221,8 +260,8 @@ impl EnvSettings {
                     if g.ring.on {
                         let r = &g.ring;
                         effects.push(ImageEffect::Ring(Ring {
-                            size: r.size.get_at(t),
-                            intensity: r.intensity.get_at(t),
+                            size: r.size.get_at(t) * gs,
+                            intensity: r.intensity.get_at(t) * gi,
                             plane: r.plane.get_at(t),
                             thickness: r.thickness.get_at(t),
                             use_source_color: r.use_source_color.get_at(t),
@@ -234,16 +273,41 @@ impl EnvSettings {
                     for (el, scatter) in [(&g.star, false), (&g.streak, false), (&g.ray, true)].into_iter().filter(|(el, _)| el.on) {
                         effects.push(ImageEffect::Star(Star {
                             scatter,
+                            seed: g.globals.seed,
                             qty: el.qty,
-                            size: el.size.get_at(t),
-                            intensity: el.intensity.get_at(t),
+                            size: el.size.get_at(t) * gs,
+                            intensity: el.intensity.get_at(t) * gi,
                             width: el.width.get_at(t),
-                            angle: el.angle.get_at(t),
+                            angle: el.angle.get_at(t) + ga,
                             taper: el.taper.get_at(t),
                             sharp: el.sharp.get_at(t),
                             use_source_color: el.use_source_color.get_at(t),
                             inner: rgb(el.inner_color.get_at(t)),
                             outer: rgb(el.outer_color.get_at(t)),
+                            bright: g.bright.get_at(t),
+                        }));
+                    }
+                    let m = &g.manual_secondary;
+                    if m.on {
+                        effects.push(ImageEffect::Secondary(Secondary {
+                            discs: vec![(m.plane.get_at(t), m.size.get_at(t) * gs)],
+                            intensity: m.intensity.get_at(t) * gi,
+                            sides: m.sides,
+                            use_source_color: m.use_source_color.get_at(t),
+                            inner: rgb(m.inner_color.get_at(t)),
+                            outer: rgb(m.outer_color.get_at(t)),
+                            bright: g.bright.get_at(t),
+                        }));
+                    }
+                    let a = &g.auto_secondary;
+                    if a.on && a.qty > 0 {
+                        effects.push(ImageEffect::Secondary(Secondary {
+                            discs: auto_secondary_discs(a.qty, a.min.get_at(t) * gs, a.max.get_at(t) * gs, a.axis.get_at(t), g.globals.seed),
+                            intensity: a.intensity.get_at(t) * gi,
+                            sides: a.sides,
+                            use_source_color: a.use_source_color.get_at(t),
+                            inner: rgb(a.inner_color.get_at(t)),
+                            outer: rgb(a.outer_color.get_at(t)),
                             bright: g.bright.get_at(t),
                         }));
                     }
@@ -273,6 +337,7 @@ impl EnvSettings {
                 }),
                 EffectKind::FilmGrain(f) => effects.push(ImageEffect::FilmGrain { grain: f.grain.get_at(t), ignore_background: f.ignore_background }),
                 EffectKind::FileOutput(f) => effects.push(ImageEffect::FileOutput { path: f.path.clone(), channel: f.channel, affect_source: f.affect_source }),
+                EffectKind::MotionBlur(m) => effects.push(ImageEffect::MotionBlur { duration: m.duration.get_at(t) }),
             }
         }
         Self {

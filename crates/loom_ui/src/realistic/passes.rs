@@ -385,7 +385,6 @@ impl LoomApp {
             let vel = raytrace::velocities(&visible, &motion, &view);
             layers.velocity = Some((vel, visible.iter().map(|v| v.is_some()).collect()));
         }
-        let mult = |id: u64| self.state.scene.node(NodeId(id)).map_or(1.0, |n| n.render.motion_blur_multiplier);
         let mut img = match self.state.rendered.image.as_ref() {
             Some(i) => (**i).clone(),
             None => return Ok(()),
@@ -419,17 +418,51 @@ impl LoomApp {
             img = raytrace::smear_background(&img, &vel);
         }
         if !ids.is_empty() {
-            let motion = self.motion(&scene, Some(&ids), t, |id| d * 0.5 * mult(id));
-            let vel = raytrace::velocities(&visible, &motion, &view);
-            if vel.iter().any(|v| v.is_some()) {
-                let rect = view.rect;
-                let mut options = job.options.clone();
-                options.hide = ids.clone();
-                let Gpu::Running(b) = &mut self.gpu else { return Err("no GPU renderer".into()) };
-                let behind = b.renderer.render_frame_with(job.out, &job.camera, job.aspect, rect, options)?;
-                img = raytrace::smear(&img, &behind, &vel);
-            }
+            img = self.smear_objects(job, &scene, &view, &visible, &ids, d, img, &[])?;
         }
+        self.put_rendered(job, &img);
+        Ok(())
+    }
+
+    /// The Image-blurred objects `ids` in `img` smeared along their motion
+    /// over `duration` frames (× each one's Multiplier) over the frame
+    /// rendered without them, which first gets the effects `before`.
+    #[allow(clippy::too_many_arguments)]
+    fn smear_objects(&mut self, job: &RenderJob, scene: &TraceScene, view: &loom_bake::gbuffer::View, visible: &[Option<(u32, Vec3)>], ids: &[u64], duration: f32, img: image::RgbaImage, before: &[loom_bevy::environment::ImageEffect]) -> Result<image::RgbaImage, String> {
+        let t = self.state.current_frame as f32;
+        let mult = |id: u64| self.state.scene.node(NodeId(id)).map_or(1.0, |n| n.render.motion_blur_multiplier);
+        let motion = self.motion(scene, Some(ids), t, |id| duration * 0.5 * mult(id));
+        let vel = raytrace::velocities(visible, &motion, view);
+        if !vel.iter().any(|v| v.is_some()) {
+            return Ok(img);
+        }
+        let mut options = job.options.clone();
+        options.hide = ids.to_vec();
+        let Gpu::Running(b) = &mut self.gpu else { return Err("no GPU renderer".into()) };
+        let mut behind = b.renderer.render_frame_with(job.out, &job.camera, job.aspect, view.rect, options)?;
+        loom_bevy::effects::apply(&mut behind, &loom_bevy::effects::without_files(before));
+        Ok(raytrace::smear(&img, &behind, &vel))
+    }
+
+    /// Rendering Effects > Motion Blur at its place in the effects list:
+    /// the objects with Image Motion Blur on smeared over `duration`
+    /// frames; the frame behind them gets the effects `before` it.
+    pub(super) fn motion_blur_effect(&mut self, job: &RenderJob, duration: f32, before: &[loom_bevy::environment::ImageEffect]) -> Result<(), String> {
+        let ids = self.blurred(MotionBlur::Image);
+        let Some(img) = self.state.rendered.image.as_ref().map(|i| (**i).clone()) else { return Ok(()) };
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let scene = self.trace_scene(job);
+        let view = Self::gbuffer_view(job);
+        let visible = scene.visible(&view);
+        let img = self.smear_objects(job, &scene, &view, &visible, &ids, duration.max(0.0), img, before)?;
+        self.put_rendered(job, &img);
+        Ok(())
+    }
+
+    /// Writes `img` into the rendered frame (inside the region mask).
+    fn put_rendered(&mut self, job: &RenderJob, img: &image::RgbaImage) {
         let [x0, y0, x1, y1] = job.mask.unwrap_or([0, 0, job.out[0], job.out[1]]);
         if let Some(out) = self.state.rendered.image.as_mut() {
             let out = Arc::make_mut(out);
@@ -441,7 +474,6 @@ impl LoomApp {
             self.state.rendered.version += 1;
             self.state.rendered.dirty = None;
         }
-        Ok(())
     }
 }
 

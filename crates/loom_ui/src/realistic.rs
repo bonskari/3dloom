@@ -1012,13 +1012,23 @@ impl LoomApp {
             return;
         }
         if result.is_ok() && !effects.is_empty() {
-            // Rendering effects work on the finished frame.
-            if let Some(img) = self.state.rendered.image.as_mut() {
-                for e in loom_bevy::effects::apply(Arc::make_mut(img), &effects) {
-                    loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, e);
+            // Rendering effects work on the finished frame, in order; a
+            // Motion Blur entry smears the Image-blurred objects at its place.
+            let mut start = 0;
+            for end in (0..effects.len()).filter(|i| matches!(effects[*i], loom_bevy::environment::ImageEffect::MotionBlur { .. })).chain([effects.len()]) {
+                if let Some(img) = self.state.rendered.image.as_mut() {
+                    for e in loom_bevy::effects::apply(Arc::make_mut(img), &effects[start..end]) {
+                        loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, e);
+                    }
+                    self.state.rendered.version += 1;
+                    self.state.rendered.dirty = None;
                 }
-                self.state.rendered.version += 1;
-                self.state.rendered.dirty = None;
+                if let Some(loom_bevy::environment::ImageEffect::MotionBlur { duration }) = effects.get(end) {
+                    if let Err(e) = self.motion_blur_effect(&job, *duration, &effects[..end]) {
+                        loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, format!("Motion Blur: {e}"));
+                    }
+                }
+                start = end + 1;
             }
         }
         if result.is_ok() && self.state.prefs.dont_antialias_background {

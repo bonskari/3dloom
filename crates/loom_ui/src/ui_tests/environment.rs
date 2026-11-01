@@ -261,3 +261,64 @@ fn file_output_effect_takes_its_file_channel_and_affect_source() {
     assert_eq!(f.path.as_deref(), Some(path.to_string_lossy().as_ref()));
     assert_eq!((f.channel, f.affect_source), (1, true));
 }
+
+/// Effects > Add > Motion Blur shows Motion Blur Parameters; its Duration
+/// spinner (default 1.0) sets the effect's Duration.
+#[test]
+fn motion_blur_effect_duration_spinner() {
+    let mut h = Harness::new();
+    h.cmd(Command::AddEffect { kind: "Motion Blur".into(), name: None });
+    h.key(egui::Key::Num8);
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Effects", win, 0.0);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Motion Blur", win, 0.0);
+    h.frames(2);
+    let EffectKind::MotionBlur(m) = &h.app.state.scene.environment.effects[0].kind else { panic!("Motion Blur") };
+    assert_eq!(m.duration.get(), 1.0, "the reference's default");
+    let spin = h.spinner_after("Duration:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, 400.0));
+    h.frames(1);
+    let EffectKind::MotionBlur(m) = &h.app.state.scene.environment.effects[0].kind else { panic!("Motion Blur") };
+    assert!(m.duration.get() < 1.0, "dragged down: {}", m.duration.get());
+}
+
+/// Lens Effects: the Globals' Size spinner (first "Size:" of the entry)
+/// scales every element; the Auto Secondary element turns on and takes
+/// a hexagon from its Sides list.
+#[test]
+fn lens_effects_globals_and_auto_secondary() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1400.0));
+    h.cmd(Command::AddEffect { kind: "Lens Effects".into(), name: None });
+    h.key(egui::Key::Num8);
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Effects", win, 0.0);
+    h.frames(2);
+    let spin = h.spinner_after("Seed:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -30.0));
+    h.frames(1);
+    let EffectKind::Glow(g) = &h.app.state.scene.environment.effects[0].kind else { panic!("Lens Effects") };
+    assert_ne!(g.globals.seed, 1357, "the Seed spinner");
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Glow Element", win, 0.0);
+    h.frames(12);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Auto Secondary Element", win, 0.0);
+    h.frames(12);
+    let win = window(&h, TITLE);
+    assert!(h.text_rect("Axis:", win).is_some(), "the Auto Secondary's Axis spinner");
+    click_text(&mut h, "On", win, 0.0);
+    let win = window(&h, TITLE);
+    let combo = h.text_rect("Circular", win).expect("the Sides list");
+    click_text(&mut h, "Circular", win, 0.0);
+    // The list opens below its button.
+    let list = egui::Rect::from_min_size(egui::pos2(combo.min.x - 40.0, combo.max.y), egui::vec2(240.0, 300.0));
+    click_text(&mut h, "6", list, 0.0);
+    h.frames(2);
+    let EffectKind::Glow(g) = &h.app.state.scene.environment.effects[0].kind else { panic!("Lens Effects") };
+    assert!(g.auto_secondary.on && !g.manual_secondary.on);
+    assert_eq!(g.auto_secondary.sides, 6);
+}

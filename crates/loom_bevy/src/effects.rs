@@ -4,7 +4,7 @@
 //! sRGB RGBA; background pixels are the ones with alpha 0 ("Ignore
 //! Background", "Non-Background").
 
-use crate::environment::{Blur, ImageEffect, Ring, Star};
+use crate::environment::{Blur, ImageEffect, Ring, Secondary, Star};
 use image::RgbaImage;
 use loom_scene::environment::BlurType;
 
@@ -16,6 +16,7 @@ pub fn apply(img: &mut RgbaImage, effects: &[ImageEffect]) -> Vec<String> {
             ImageEffect::Glow { size, intensity, use_source_color, inner, outer, bright } => glow(img, *size, *intensity, *use_source_color, *inner, *outer, *bright),
             ImageEffect::Star(s) => star(img, s),
             ImageEffect::Ring(r) => ring(img, r),
+            ImageEffect::Secondary(s) => secondary(img, s),
             ImageEffect::Blur(b) => blur(img, b),
             ImageEffect::BrightnessContrast { brightness, contrast, ignore_background } => per_pixel(img, *ignore_background, |c| brightness_contrast(c, *brightness, *contrast)),
             ImageEffect::ColorBalance { cyan_red, magenta_green, yellow_blue, preserve_luminosity, ignore_background } => {
@@ -33,6 +34,8 @@ pub fn apply(img: &mut RgbaImage, effects: &[ImageEffect]) -> Vec<String> {
                     *img = out;
                 }
             }
+            // Needs the scene: the renderer applies it between the effects around it.
+            ImageEffect::MotionBlur { .. } => {}
         }
     }
     errors
@@ -271,7 +274,7 @@ fn star(img: &mut RgbaImage, s: &Star) {
     let k = s.intensity.max(0.0) / 100.0;
     let mix = (s.use_source_color / 100.0).clamp(0.0, 1.0);
     // Ray: angles and lengths from a fixed hash, so a frame renders the same each time.
-    let hash = |i: u32, salt: u32| ((i.wrapping_mul(2_654_435_761) ^ salt.wrapping_mul(40_503)).wrapping_mul(2_246_822_519) >> 8) as f32 / (1u32 << 24) as f32;
+    let hash = |i: u32, salt: u32| ((i.wrapping_add(s.seed.wrapping_sub(1357)).wrapping_mul(2_654_435_761) ^ salt.wrapping_mul(40_503)).wrapping_mul(2_246_822_519) >> 8) as f32 / (1u32 << 24) as f32;
     let dirs: Vec<([f32; 2], f32)> = (0..s.qty)
         .map(|i| {
             let (step, reach) = if s.scatter { (hash(i, 1) * 360.0, 0.3 + 0.7 * hash(i, 2)) } else { (i as f32 * 360.0 / s.qty as f32, 1.0) };
@@ -354,6 +357,63 @@ fn ring(img: &mut RgbaImage, r: &Ring) {
                 for j in 0..3 {
                     let radial = r.inner[j] * (1.0 - side) + r.outer[j] * side;
                     add[i][j] += (radial * (1.0 - mix) + src[j] * mix) * a * k;
+                }
+            }
+        }
+    }
+    for (i, p) in img.pixels_mut().enumerate() {
+        let c = to_f(p.0);
+        p.0 = [to_u8(c[0] + add[i][0]), to_u8(c[1] + add[i][1]), to_u8(c[2] + add[i][2]), p.0[3]];
+    }
+}
+
+/// Lens Effects secondary flares: for each bright area, discs on the line
+/// from its centre through the image centre (`plane` %), `size` % of the
+/// diagonal in radius, round or with `sides` sides, inner colour in the
+/// middle and outer at the rim, mixed with the area's own by Use Source Color.
+fn secondary(img: &mut RgbaImage, s: &Secondary) {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    let diag = ((w * w + h * h) as f32).sqrt();
+    let k = s.intensity.max(0.0) / 100.0;
+    let mix = (s.use_source_color / 100.0).clamp(0.0, 1.0);
+    let mid = [w as f32 * 0.5, h as f32 * 0.5];
+    let n = if (3..=8).contains(&s.sides) { s.sides as f32 } else { 0.0 };
+    let mut add = vec![[0.0f32; 3]; w * h];
+    for (c, src) in bright_centres(img, s.bright / 255.0) {
+        for &(plane, size) in &s.discs {
+            let r = (size.max(0.0) / 100.0 * diag).max(0.5);
+            let t = plane / 100.0;
+            let p = [c[0] + (mid[0] - c[0]) * t, c[1] + (mid[1] - c[1]) * t];
+            let (x0, x1) = ((p[0] - r - 1.0).floor().max(0.0) as usize, (p[0] + r + 1.0).ceil().clamp(0.0, w as f32 - 1.0) as usize);
+            let (y0, y1) = ((p[1] - r - 1.0).floor().max(0.0) as usize, (p[1] + r + 1.0).ceil().clamp(0.0, h as f32 - 1.0) as usize);
+            if p[0] + r < 0.0 || p[1] + r < 0.0 || p[0] - r > w as f32 || p[1] - r > h as f32 {
+                continue;
+            }
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    let q = [x as f32 + 0.5 - p[0], y as f32 + 0.5 - p[1]];
+                    let mut d = (q[0] * q[0] + q[1] * q[1]).sqrt() / r;
+                    if n > 0.0 {
+                        // A regular polygon with a corner at 0 degrees: its edge
+                        // lies apothem / cos(angle from the edge's normal) away.
+                        let sector = std::f32::consts::TAU / n;
+                        let a = q[1].atan2(q[0]).rem_euclid(sector) - sector * 0.5;
+                        d *= a.cos() / (sector * 0.5).cos();
+                    }
+                    // A soft one-pixel rim.
+                    let a = ((1.0 - d) * r).clamp(0.0, 1.0);
+                    if a <= 0.0 {
+                        continue;
+                    }
+                    let i = y * w + x;
+                    let d = d.clamp(0.0, 1.0);
+                    for j in 0..3 {
+                        let radial = s.inner[j] * (1.0 - d) + s.outer[j] * d;
+                        add[i][j] += (radial * (1.0 - mix) + src[j] * mix) * a * k;
+                    }
                 }
             }
         }
@@ -549,7 +609,7 @@ mod tests {
                 i.put_pixel(x, y, image::Rgba([255, 255, 255, 255]));
             }
         }
-        let s = Star { scatter: false, qty: 4, size: 30.0, intensity: 100.0, width: 2.0, angle: 0.0, taper: 0.0, sharp: 8.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 };
+        let s = Star { scatter: false, seed: 1357, qty: 4, size: 30.0, intensity: 100.0, width: 2.0, angle: 0.0, taper: 0.0, sharp: 8.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 };
         apply(&mut i, &[ImageEffect::Star(s)]);
         // On a spoke (to the right, 4 px... 15 px out) red; between spokes (45 degrees) dark.
         assert!(i.get_pixel(65, 50).0[0] > 60, "{:?}", i.get_pixel(65, 50));
@@ -566,6 +626,30 @@ mod tests {
         apply(&mut r, &[ImageEffect::Star(Star { scatter: true, qty: 60, width: 0.3, ..s })]);
         let ring: Vec<u8> = (0..72).map(|k| { let a = (k as f32 * 5.0).to_radians(); r.get_pixel((50.0 + 10.0 * a.cos()).round() as u32, (50.0 + 10.0 * a.sin()).round() as u32).0[0] }).collect();
         assert!(ring.iter().filter(|v| **v > 20).count() > 10 && ring.iter().filter(|v| **v < 5).count() > 5, "{ring:?}");
+    }
+
+    #[test]
+    fn secondary_flares_sit_on_the_line_through_the_image_centre() {
+        // A bright spot up left of the centre: Plane 200 mirrors it through the centre.
+        let mut i = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        i.put_pixel(30, 30, image::Rgba([255, 255, 255, 255]));
+        let s = Secondary { discs: vec![(200.0, 5.0)], intensity: 100.0, sides: 0, use_source_color: 0.0, inner: [0.0, 1.0, 0.0], outer: [0.0, 1.0, 0.0], bright: 200.0 };
+        apply(&mut i, &[ImageEffect::Secondary(s.clone())]);
+        assert!(i.get_pixel(70, 70).0[1] > 200, "the disc at the mirrored point: {:?}", i.get_pixel(70, 70));
+        assert!(i.get_pixel(70, 78).0[1] < 5, "radius about 7 px: {:?}", i.get_pixel(70, 78));
+        assert!(i.get_pixel(50, 50).0[1] < 5, "nothing at the centre");
+        // Four sides: a diamond (point up at 0 degrees is a corner, the edge between is nearer).
+        let mut d = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        d.put_pixel(30, 30, image::Rgba([255, 255, 255, 255]));
+        apply(&mut d, &[ImageEffect::Secondary(Secondary { sides: 4, ..s.clone() })]);
+        assert!(d.get_pixel(76, 70).0[1] > 100 && d.get_pixel(75, 75).0[1] < 5, "{:?} {:?}", d.get_pixel(76, 70), d.get_pixel(75, 75));
+        // Auto Secondary: Qty discs between Min and Max along the axis, the same for a seed.
+        let a = crate::environment::auto_secondary_discs(5, 1.0, 4.0, 1.0, 1357);
+        assert_eq!(a.len(), 5);
+        assert!(a.iter().all(|(p, r)| (0.0..=200.0).contains(p) && (1.0..=4.0).contains(r)), "{a:?}");
+        assert!(a.windows(2).all(|w| w[0].0 < w[1].0), "spread along the axis: {a:?}");
+        assert_eq!(a, crate::environment::auto_secondary_discs(5, 1.0, 4.0, 1.0, 1357));
+        assert_ne!(a, crate::environment::auto_secondary_discs(5, 1.0, 4.0, 1.0, 7));
     }
 
     #[test]

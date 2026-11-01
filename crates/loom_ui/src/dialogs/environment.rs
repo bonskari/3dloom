@@ -503,6 +503,24 @@ pub fn merge_effects(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
 fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectKind) {
     match kind {
         EffectKind::Glow(g) => {
+            egui::CollapsingHeader::new("Lens Effects Globals").id_salt(("lens_globals", i)).default_open(true).show(ui, |ui| {
+                let gl = &g.globals;
+                let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Globals Parameters", json!({ "index": i, k: v }));
+                egui::Grid::new(("env_lens_globals", i)).num_columns(2).show(ui, |ui| {
+                    for (label, key, v, range, speed) in [
+                        ("Size:", "size", gl.size.get(), 0.0..=1000.0, 0.5),
+                        ("Intensity:", "intensity", gl.intensity.get(), 0.0..=1000.0, 0.5),
+                        ("Angle:", "angle", gl.angle.get(), -3600.0..=3600.0, 1.0),
+                    ] {
+                        if let Some(v) = spin(ui, app, label, v, range, speed) {
+                            set(app, key, json!(v));
+                        }
+                    }
+                    if let Some(v) = spin(ui, app, "Seed:", gl.seed as f32, 0.0..=1_000_000.0, 1.0) {
+                        set(app, "seed", json!(v.round() as u32));
+                    }
+                });
+            });
             egui::CollapsingHeader::new("Glow Element").default_open(true).show(ui, |ui| {
                 let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Glow Parameters", json!({ "index": i, k: v }));
                 egui::Grid::new("env_glow").num_columns(2).show(ui, |ui| {
@@ -591,6 +609,55 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                     }
                 });
             });
+            for (name, on, sides) in [("Manual", g.manual_secondary.on, g.manual_secondary.sides), ("Auto", g.auto_secondary.on, g.auto_secondary.sides)] {
+                egui::CollapsingHeader::new(format!("{name} Secondary Element")).id_salt(("lens_secondary", i, name)).default_open(on).show(ui, |ui| {
+                    let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Secondary Parameters", json!({ "index": i, "element": name, k: v }));
+                    let mut o = on;
+                    if ui.checkbox(&mut o, "On").changed() {
+                        set(app, "on", json!(o));
+                    }
+                    let (m, a) = (&g.manual_secondary, &g.auto_secondary);
+                    let spins: Vec<(&str, &str, f32, std::ops::RangeInclusive<f32>, f32)> = if name == "Manual" {
+                        vec![("Size:", "size", m.size.get(), 0.0..=100.0, 0.1), ("Intensity:", "intensity", m.intensity.get(), 0.0..=1000.0, 1.0), ("Plane:", "plane", m.plane.get(), -1000.0..=1000.0, 1.0), ("Use Source Color:", "use_source_color", m.use_source_color.get(), 0.0..=100.0, 0.5)]
+                    } else {
+                        vec![
+                            ("Min:", "min", a.min.get(), 0.0..=100.0, 0.1),
+                            ("Max:", "max", a.max.get(), 0.0..=100.0, 0.1),
+                            ("Axis:", "axis", a.axis.get(), 0.0..=10.0, 0.01),
+                            ("Intensity:", "intensity", a.intensity.get(), 0.0..=1000.0, 1.0),
+                            ("Use Source Color:", "use_source_color", a.use_source_color.get(), 0.0..=100.0, 0.5),
+                        ]
+                    };
+                    let (inner, outer) = if name == "Manual" { (m.inner_color.get(), m.outer_color.get()) } else { (a.inner_color.get(), a.outer_color.get()) };
+                    egui::Grid::new(("env_lens_secondary", i, name)).num_columns(2).show(ui, |ui| {
+                        for (label, key, v, range, speed) in spins {
+                            if let Some(v) = spin(ui, app, label, v, range, speed) {
+                                set(app, key, json!(v));
+                            }
+                        }
+                        if name == "Auto" {
+                            if let Some(v) = spin(ui, app, "Qty:", a.qty as f32, 0.0..=100.0, 0.1) {
+                                set(app, "qty", json!(v.round() as u32));
+                            }
+                        }
+                        ui.label("Sides:");
+                        egui::ComboBox::from_id_salt(("lens_secondary_sides", i, name)).selected_text(if sides == 0 { "Circular".to_owned() } else { sides.to_string() }).show_ui(ui, |ui| {
+                            for n in [0u32, 3, 4, 5, 6, 7, 8] {
+                                if ui.selectable_label(sides == n, if n == 0 { "Circular".to_owned() } else { n.to_string() }).clicked() {
+                                    set(app, "sides", json!(n));
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        if let Some(c) = swatch(ui, "Radial Color (inner):", inner) {
+                            set(app, "inner_color", json!(c));
+                        }
+                        if let Some(c) = swatch(ui, "Radial Color (outer):", outer) {
+                            set(app, "outer_color", json!(c));
+                        }
+                    });
+                });
+            }
         }
         EffectKind::Blur(b) => {
             egui::CollapsingHeader::new("Blur Parameters").default_open(true).show(ui, |ui| {
@@ -716,6 +783,15 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                 if ui.checkbox(&mut ib, "Ignore Background").changed() {
                     set(app, "ignore_background", json!(ib));
                 }
+            });
+        }
+        EffectKind::MotionBlur(m) => {
+            egui::CollapsingHeader::new("Motion Blur Parameters").default_open(true).show(ui, |ui| {
+                egui::Grid::new("env_motion_blur").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Duration:", m.duration.get(), 0.0..=100.0, 0.01) {
+                        run(app, "Motion Blur Parameters", json!({ "index": i, "duration": v }));
+                    }
+                });
             });
         }
         EffectKind::FileOutput(f) => {

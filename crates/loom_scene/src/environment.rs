@@ -230,11 +230,103 @@ pub struct Glow {
     /// Ray element: `qty` (Num) thin rays, randomly spaced, of random lengths.
     pub ray: StarElement,
     pub ring: RingElement,
+    /// Lens Effects Globals > Parameters: Size and Intensity (%) scale every
+    /// element, Angle turns the Star / Streak / Ray spokes, Seed varies the
+    /// random elements (Ray, Auto Secondary).
+    pub globals: LensGlobals,
+    pub manual_secondary: ManualSecondary,
+    pub auto_secondary: AutoSecondary,
 }
 
 impl Default for Glow {
     fn default() -> Self {
-        Self { size: p(5.0), intensity: p(100.0), use_source_color: p(100.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE), bright: p(200.0), star: StarElement::star(), streak: StarElement::streak(), ray: StarElement::ray(), ring: RingElement::default() }
+        Self {
+            size: p(5.0),
+            intensity: p(100.0),
+            use_source_color: p(100.0),
+            inner_color: p(Vec3::ONE),
+            outer_color: p(Vec3::ONE),
+            bright: p(200.0),
+            star: StarElement::star(),
+            streak: StarElement::streak(),
+            ray: StarElement::ray(),
+            ring: RingElement::default(),
+            globals: LensGlobals::default(),
+            manual_secondary: ManualSecondary::default(),
+            auto_secondary: AutoSecondary::default(),
+        }
+    }
+}
+
+/// Lens Effects Globals > Parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LensGlobals {
+    /// % applied to every element's size.
+    pub size: Param<f32>,
+    /// % applied to every element's intensity.
+    pub intensity: Param<f32>,
+    pub seed: u32,
+    /// Degrees added to the elements' angles.
+    pub angle: Param<f32>,
+}
+
+impl Default for LensGlobals {
+    fn default() -> Self {
+        Self { size: p(100.0), intensity: p(100.0), seed: 1357, angle: p(0.0) }
+    }
+}
+
+/// Manual Secondary element: one flare disc on the line from the source
+/// through the image centre.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ManualSecondary {
+    pub on: bool,
+    /// Radius, % of the image diagonal.
+    pub size: Param<f32>,
+    pub intensity: Param<f32>,
+    /// % of the way from the source to the image centre (200: mirrored through it).
+    pub plane: Param<f32>,
+    pub use_source_color: Param<f32>,
+    /// 0 circular, else 3 to 8 sides.
+    pub sides: u32,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+}
+
+impl Default for ManualSecondary {
+    /// This build's starting values.
+    fn default() -> Self {
+        Self { on: false, size: p(5.0), intensity: p(100.0), plane: p(150.0), use_source_color: p(0.0), sides: 0, inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
+    }
+}
+
+/// Auto Secondary element: Qty flare discs of sizes between Min and Max
+/// spread along the line from the source through the image centre; Axis
+/// sets how far (1: to the source mirrored through the centre).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutoSecondary {
+    pub on: bool,
+    /// Smallest and largest radius, % of the image diagonal.
+    pub min: Param<f32>,
+    pub max: Param<f32>,
+    /// 0 to 10.
+    pub axis: Param<f32>,
+    pub intensity: Param<f32>,
+    pub qty: u32,
+    pub use_source_color: Param<f32>,
+    /// 0 circular, else 3 to 8 sides.
+    pub sides: u32,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+}
+
+impl Default for AutoSecondary {
+    /// This build's starting values.
+    fn default() -> Self {
+        Self { on: false, min: p(1.0), max: p(5.0), axis: p(1.0), intensity: p(50.0), qty: 6, use_source_color: p(0.0), sides: 0, inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
     }
 }
 
@@ -411,6 +503,20 @@ impl Default for FilmGrain {
     }
 }
 
+/// Motion Blur Parameters: the objects with Image Motion Blur smeared over
+/// Duration frames (the virtual shutter) at this place in the effects list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MotionBlurEffect {
+    pub duration: Param<f32>,
+}
+
+impl Default for MotionBlurEffect {
+    fn default() -> Self {
+        Self { duration: p(1.0) }
+    }
+}
+
 /// Depth of Field Parameters (Focal Parameters: Custom).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -443,11 +549,12 @@ pub enum EffectKind {
     FilmGrain(FilmGrain),
     DepthOfField(DepthOfField),
     FileOutput(FileOutput),
+    MotionBlur(MotionBlurEffect),
 }
 
 impl EffectKind {
     /// Add Effect list names.
-    pub const NAMES: [&'static str; 7] = ["Lens Effects", "Blur", "Brightness and Contrast", "Color Balance", "File Output", "Film Grain", "Depth of Field"];
+    pub const NAMES: [&'static str; 8] = ["Lens Effects", "Blur", "Brightness and Contrast", "Color Balance", "File Output", "Film Grain", "Motion Blur", "Depth of Field"];
 
     pub fn new(name: &str) -> Option<Self> {
         match name {
@@ -458,6 +565,7 @@ impl EffectKind {
             "Film Grain" => Some(Self::FilmGrain(FilmGrain::default())),
             "Depth of Field" => Some(Self::DepthOfField(DepthOfField::default())),
             "File Output" => Some(Self::FileOutput(FileOutput::default())),
+            "Motion Blur" => Some(Self::MotionBlur(MotionBlurEffect::default())),
             _ => None,
         }
     }
@@ -471,6 +579,7 @@ impl EffectKind {
             Self::FilmGrain(_) => "Film Grain",
             Self::DepthOfField(_) => "Depth of Field",
             Self::FileOutput(_) => "File Output",
+            Self::MotionBlur(_) => "Motion Blur",
         }
     }
 }

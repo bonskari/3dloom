@@ -53,11 +53,14 @@ pub fn handles(c: &C) -> bool {
             | C::GlowParameters { .. }
             | C::LensElementParameters { .. }
             | C::LensRingParameters { .. }
+            | C::LensGlobalsParameters { .. }
+            | C::LensSecondaryParameters { .. }
             | C::BlurParameters { .. }
             | C::BrightnessContrastParameters { .. }
             | C::ColorBalanceParameters { .. }
             | C::FilmGrainParameters { .. }
             | C::FileOutputParameters { .. }
+            | C::MotionBlurParameters { .. }
             | C::DepthOfFieldParameters { .. }
     )
 }
@@ -371,6 +374,72 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             commit(state, "Lens Element Parameters", e)?;
             Ok(json!({ "index": index }))
         }
+        C::LensGlobalsParameters { index, size, intensity, seed, angle } => {
+            let EffectKind::Glow(g) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Lens Effects")) };
+            let gl = &mut g.globals;
+            set_opt(&mut gl.size, size.map(|v| range("size", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut gl.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut gl.angle, angle.map(|v| range("angle", v, -3600.0, 3600.0)).transpose()?);
+            if let Some(s) = seed {
+                gl.seed = s;
+            }
+            commit(state, "Lens Globals Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::LensSecondaryParameters { index, element, on, size, min, max, axis, plane, intensity, qty, sides, use_source_color, inner_color, outer_color } => {
+            let EffectKind::Glow(g) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Lens Effects")) };
+            if let Some(n) = sides {
+                if n != 0 && !(3..=8).contains(&n) {
+                    return Err(format!("sides {n}: 0 (circular) or 3-8"));
+                }
+            }
+            let manual = match element.to_ascii_lowercase().as_str() {
+                "manual" => true,
+                "auto" => false,
+                _ => return Err(format!("unknown secondary element {element:?} (Manual, Auto)")),
+            };
+            if manual {
+                if min.is_some() || max.is_some() || axis.is_some() || qty.is_some() {
+                    return Err("Min, Max, Axis and Qty belong to the Auto Secondary".into());
+                }
+                let m = &mut g.manual_secondary;
+                if let Some(v) = on {
+                    m.on = v;
+                }
+                if let Some(n) = sides {
+                    m.sides = n;
+                }
+                set_opt(&mut m.size, size.map(|v| range("size", v, 0.0, 100.0)).transpose()?);
+                set_opt(&mut m.plane, plane.map(|v| range("plane", v, -1000.0, 1000.0)).transpose()?);
+                set_opt(&mut m.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
+                set_opt(&mut m.use_source_color, use_source_color.map(|v| percent("use source color", v)).transpose()?);
+                set_opt(&mut m.inner_color, inner_color.map(colour).transpose()?);
+                set_opt(&mut m.outer_color, outer_color.map(colour).transpose()?);
+            } else {
+                if size.is_some() || plane.is_some() {
+                    return Err("Size and Plane belong to the Manual Secondary".into());
+                }
+                let a = &mut g.auto_secondary;
+                if let Some(v) = on {
+                    a.on = v;
+                }
+                if let Some(n) = sides {
+                    a.sides = n;
+                }
+                if let Some(q) = qty {
+                    a.qty = q.min(100);
+                }
+                set_opt(&mut a.min, min.map(|v| range("min", v, 0.0, 100.0)).transpose()?);
+                set_opt(&mut a.max, max.map(|v| range("max", v, 0.0, 100.0)).transpose()?);
+                set_opt(&mut a.axis, axis.map(|v| range("axis", v, 0.0, 10.0)).transpose()?);
+                set_opt(&mut a.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
+                set_opt(&mut a.use_source_color, use_source_color.map(|v| percent("use source color", v)).transpose()?);
+                set_opt(&mut a.inner_color, inner_color.map(colour).transpose()?);
+                set_opt(&mut a.outer_color, outer_color.map(colour).transpose()?);
+            }
+            commit(state, "Lens Secondary Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
         C::LensRingParameters { index, on, size, intensity, plane, thickness, use_source_color, inner_color, outer_color } => {
             let EffectKind::Glow(g) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Lens Effects")) };
             let r = &mut g.ring;
@@ -450,6 +519,12 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 f.ignore_background = v;
             }
             commit(state, "Film Grain Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::MotionBlurParameters { index, duration } => {
+            let EffectKind::MotionBlur(m) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Motion Blur")) };
+            set_opt(&mut m.duration, duration.map(|v| range("duration", v, 0.0, 100.0)).transpose()?);
+            commit(state, "Motion Blur Parameters", e)?;
             Ok(json!({ "index": index }))
         }
         C::FileOutputParameters { index, path, channel, affect_source } => {

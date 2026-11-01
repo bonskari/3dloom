@@ -394,3 +394,37 @@ fn object_properties_motion_blur_is_clicked() {
     h.cmd(Command::UndoSceneOperation);
     assert!(h.app.state.scene.node(id).unwrap().render.visible_to_reflection);
 }
+
+/// Rendering Effects > Motion Blur: with the renderer's Image Motion Blur
+/// off, the effect smears the Image-blurred moving box; Duration 0 leaves
+/// it sharp.
+#[test]
+fn motion_blur_effect_smears_image_blurred_objects() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("motion_blur_effect_smears_image_blurred_objects: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [100.0, 0.0, 0.0], size: [0.5; 3] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-30.0, 0.0, 0.0], size: [0.5; 3] });
+    h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 2 });
+    h.cmd(Command::MoveSelection { delta: [80.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 1 });
+    h.cmd(Command::FrontView);
+    framed(&mut h);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 480, "height": 240 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 4 }));
+    ok(&mut h, "Renderer Options", serde_json::json!({ "image_motion_blur": false }));
+    ok(&mut h, "Set Motion Blur", serde_json::json!({ "kind": "Image" }));
+    let sharp = covered_columns(&render(&mut h));
+    h.cmd(Command::AddEffect { kind: "Motion Blur".into(), name: None });
+    let blurred = covered_columns(&render(&mut h));
+    assert!(blurred as f32 > sharp as f32 * 1.5 + 4.0, "the effect smears it: {blurred} columns against {sharp}");
+    ok(&mut h, "Motion Blur Parameters", serde_json::json!({ "index": 0, "duration": 0.0 }));
+    let zero = covered_columns(&render(&mut h));
+    assert!(zero <= sharp + 2, "Duration 0 leaves it sharp: {zero} against {sharp}");
+}
