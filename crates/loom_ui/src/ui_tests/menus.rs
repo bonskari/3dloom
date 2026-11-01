@@ -506,9 +506,10 @@ fn the_stack_resize_bar_makes_the_stack_display_taller() {
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(2);
     let before = h.app.stack_height;
-    let bar = h.widget("Stack Resize Bar");
+    let bar_rect = |h: &Harness| h.widgets.iter().find(|w| w.1 == "Stack Resize Bar").map(|w| w.2).expect("the bar");
+    let bar = bar_rect(&h);
     h.drag(bar.center(), bar.center() + egui::vec2(0.0, 80.0));
     assert!(h.app.stack_height > before + 40.0, "{before} -> {}", h.app.stack_height);
-    let bar2 = h.widget("Stack Resize Bar");
+    let bar2 = bar_rect(&h);
     assert!(bar2.center().y > bar.center().y, "the bar moved down with it");
 }
