@@ -162,17 +162,18 @@ fn lens_effects_star_element_turns_on_from_its_rollout() {
     let add = window(&h, "Add Effect");
     click_text(&mut h, "OK", add, 0.0);
     h.frames(2);
+    // Fold the Glow so the Star's rollout fits the window.
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Glow Element", win, 0.0);
+    h.frames(12);
     let win = window(&h, TITLE);
     click_text(&mut h, "Star Element", win, 0.0);
     h.frames(12);
     let win = window(&h, TITLE);
     assert!(h.text_rect("Qty:", win).is_some(), "the Star's Qty spinner");
     click_text(&mut h, "On", win, 0.0);
-    // Fold the Star and the Glow, open the Ring: its On is then the only one shown.
+    // Fold the Star, open the Ring: its On is then the only one shown.
     click_text(&mut h, "Star Element", win, 0.0);
-    h.frames(12);
-    let win = window(&h, TITLE);
-    click_text(&mut h, "Glow Element", win, 0.0);
     h.frames(12);
     let win = window(&h, TITLE);
     click_text(&mut h, "Ring Element", win, 0.0);
