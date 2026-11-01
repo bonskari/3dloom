@@ -344,11 +344,12 @@ fn material_id_channel_flyout_sets_the_channel() {
     // The flyout shows the current channel, 0.
     let end = h.text_rects("Show End Result").into_iter().find(|r| win.contains_rect(*r)).expect("toolbar");
     let combo = h.widgets.iter().filter(|(role, _, r)| *role == Role::ComboBox && win.contains_rect(*r) && (r.center().y - end.center().y).abs() < 14.0).map(|w| w.2).min_by(|a, b| (a.center().x - end.min.x).abs().total_cmp(&(b.center().x - end.min.x).abs())).unwrap_or_else(|| panic!("no flyout near {end:?}: {:?}", h.widgets.iter().filter(|w| w.0 == Role::ComboBox).collect::<Vec<_>>()));
-    let before = h.text_rects("9");
+    let nines = |h: &Harness| h.widgets.iter().filter(|w| w.1 == "9").map(|w| w.2).collect::<Vec<_>>();
+    let before = nines(&h);
     h.click(combo.center());
     h.frames(2);
     // The "9" the opened list adds.
-    let after = h.text_rects("9");
+    let after = nines(&h);
     let nine = after.iter().copied().find(|r| !before.contains(r)).unwrap_or_else(|| panic!("the list did not open at {combo:?}: {before:?} -> {after:?}"));
     h.click(nine.center());
     h.frames(2);
