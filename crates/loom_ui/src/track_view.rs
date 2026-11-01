@@ -109,13 +109,16 @@ fn body(ui: &mut egui::Ui, app: &mut LoomApp, curve: bool, min_body_h: f32) {
     let bottom_id = egui::Id::new(("track_view_bottom_h", curve));
     let bottom_h = ui.data(|d| d.get_temp::<f32>(bottom_id)).unwrap_or(44.0);
     let body_h = (avail.y - bottom_h).max(min_body_h);
-    let row_dbg = ui.horizontal_top(|ui| {
+    ui.horizontal_top(|ui| {
         let list_w = 230.0f32.min(avail.x * 0.35);
         ui.allocate_ui_with_layout(egui::vec2(list_w, body_h), egui::Layout::top_down(egui::Align::Min), |ui| {
             ui.set_width(list_w);
             hierarchy(ui, app, body_h)
         });
-        ui.separator();
+        // A separator of the body's height: a plain one spans the whole
+        // remaining height, which pushed the bottom bar out and grew the window each frame.
+        let (sep, _) = ui.allocate_exact_size(egui::vec2(6.0, body_h), egui::Sense::hover());
+        ui.painter().vline(sep.center().x, sep.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
         let w = ui.available_width();
         let (response, painter) = ui.allocate_painter(egui::vec2(w, body_h), egui::Sense::click_and_drag());
         if curve || app.state.track_view.mode == TvMode::CurveEditor {
@@ -124,11 +127,9 @@ fn body(ui: &mut egui::Ui, app: &mut LoomApp, curve: bool, min_body_h: f32) {
             dope_sheet(ui, app, &response, &painter);
         }
     });
-    eprintln!("TVDBG row {:?} cursor_before_toolbar? max_rect {:?}", row_dbg.response.rect, ui.max_rect());
     let top = ui.cursor().min.y;
     bottom_bar(ui, app);
     let used = ui.min_rect().max.y - top + ui.spacing().item_spacing.y * 2.0;
-    eprintln!("TVDBG avail {} bottom_h {} body_h {} top {} used {} min_rect {:?}", avail.y, bottom_h, body_h, top, used, ui.min_rect());
     ui.data_mut(|d| d.insert_temp(bottom_id, used.max(44.0)));
 }
 
