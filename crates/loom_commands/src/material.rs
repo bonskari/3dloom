@@ -20,6 +20,7 @@ pub fn handles(c: &C) -> bool {
         C::MaterialEditorToggle
             | C::MaterialEditorSlot { .. }
             | C::SetMaterialColor { .. }
+            | C::KeyMaterialParameter { .. }
             | C::SetMaterialParameter { .. }
             | C::SetShader { .. }
             | C::SetMaterialMap { .. }
@@ -656,6 +657,10 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 m.set_color(&from, rgb(b))?;
             }
             Ok(())
+        }),
+        C::KeyMaterialParameter { slot, name } => edit(state, slot, "Set Key", |m| match loom_scene::tracks::key_params_named(m, &name)? {
+            0 => Err(format!("no animatable material parameter {name:?}")),
+            _ => Ok(()),
         }),
         C::SetMaterialParameter { slot, name, value } => edit(state, slot, "Material Parameter", |m| m.set_parameter(&name, value)),
         C::SetShader { shader } => {

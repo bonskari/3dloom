@@ -425,6 +425,13 @@ fn spinner_with(ui: &mut egui::Ui, app: &mut LoomApp, label: &str, value: f32, r
         ui.label(label);
         let mut v = value;
         let r = ui.add(crate::spinner::spin(ui, &mut v, range).fixed_decimals(decimals).speed(if decimals > 1 { 0.01 } else { 0.5 }));
+        // Shift+right-click: a key for a material parameter at the current frame.
+        if r.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
+            if let Command::SetMaterialParameter { slot, name, .. } = cmd(value as f64) {
+                let _ = app.dispatch(Command::KeyMaterialParameter { slot, name });
+            }
+            return;
+        }
         if r.drag_started() {
             app.state.undo.begin(label);
         }

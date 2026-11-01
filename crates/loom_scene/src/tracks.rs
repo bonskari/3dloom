@@ -578,3 +578,27 @@ pub fn convert_controller(cur: &AnyParam, role: Role, name: &str, seed: u32) -> 
         }
     })
 }
+
+/// Keys, at the current time, every animatable parameter of `v` whose
+/// display name (as Track View lists it, e.g. "Glossiness", "Specular
+/// Level") is `name`; returns how many were keyed.
+pub fn key_params_named<T: serde::Serialize + serde::de::DeserializeOwned>(v: &mut T, name: &str) -> Result<usize, String> {
+    let mut json = serde_json::to_value(&*v).map_err(|e| e.to_string())?;
+    let mut found = Vec::new();
+    walk(&json, &mut String::new(), &mut found);
+    let mut n = 0;
+    for (pointer, ty) in found {
+        if !display_name(&pointer).eq_ignore_ascii_case(name) {
+            continue;
+        }
+        let Some(slot) = json.pointer_mut(&pointer) else { continue };
+        let Some(mut a) = AnyParam::from_json(slot, ty) else { continue };
+        a.key_now();
+        *slot = a.to_json();
+        n += 1;
+    }
+    if n > 0 {
+        *v = serde_json::from_value(json).map_err(|e| e.to_string())?;
+    }
+    Ok(n)
+}

@@ -520,3 +520,22 @@ fn bitmap_path_editor_strips_a_picked_path() {
     let top = ed.slots[ed.active].unwrap();
     assert_eq!(h.app.state.scene.materials[&top].map("Diffuse Color").unwrap().path, "brick.png");
 }
+
+/// Shift+right-click a Material Editor spinner keys that material value at
+/// the current frame (the value stays).
+#[test]
+fn shift_right_click_on_a_material_spinner_keys_it() {
+    let mut h = editor();
+    h.cmd(Command::SetFrame { frame: 10 });
+    let p = editor_spinner(&mut h, "Glossiness");
+    h.mods = egui::Modifiers::SHIFT;
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: h.mods }]);
+    h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: false, modifiers: h.mods }]);
+    h.mods = egui::Modifiers::NONE;
+    h.frames(1);
+    let m = editor_material(&h);
+    assert!(m.glossiness.is_animated(), "keyed");
+    assert!(m.glossiness.keys().is_some_and(|k| k.tracks.iter().any(|t| t.key_at(10.0).is_some())), "at frame 10");
+    assert!((m.glossiness.get() - 10.0).abs() < 1e-3, "the value stays");
+}

@@ -1301,6 +1301,7 @@ commands! {
     ForwardTimeOneUnit => "Forward Time One Unit", MainUI, "Step one frame forward (.).";
     BackupTimeOneUnit => "Backup Time One Unit", MainUI, "Step one frame back (,).";
     SetKeyMode => "Set Key Mode", MainUI, "Toggle Set Key mode ('): pose freely, then Set Keys commits the pose as keys; changing frame discards it.";
+    KeyMaterialParameter => "Key Material Parameter", Loom, "Shift+right-click a Material Editor spinner: a key at the current frame for the parameter `name` (its label) of the material at the editor's current level (slot omitted = active), its value as it is." { slot: Option<u32>, name: String };
     KeyParameter => "Key Parameter", Loom, "Shift+right-click a spinner: a key for the parameter `name` (its rollout label) of node `id` at the current frame, its value as it is: the object's, or with `modifier` that stack entry's." { id: u64, name: String, modifier: Option<u32> };
     SetKeys => "Set Keys", MainUI, "Key the filtered tracks of the selection at the current frame (K); in Set Key mode, commit the pose.";
     MaterialEditorToggle => "Material Editor Toggle", MainUI, "Open or close the Material Editor (M).";
