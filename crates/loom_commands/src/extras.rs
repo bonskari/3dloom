@@ -1318,8 +1318,8 @@ pub fn reaction_parameters(n: &Node) -> Vec<String> {
     let mut v: Vec<String> = ["Position", "Rotation", "Scale"].iter().flat_map(|t| ["X", "Y", "Z"].iter().map(move |a| format!("{t} {a}"))).collect();
     v.extend(n.custom_attributes.iter().map(|a| a.name.clone()));
     for (k, val) in n.object.parameters() {
-        if val.as_f64().is_finite() && !v.iter().any(|x| x.eq_ignore_ascii_case(&k)) {
-            v.push(k);
+        if val.as_f64().is_finite() && !v.iter().any(|x| x.eq_ignore_ascii_case(k)) {
+            v.push(k.to_string());
         }
     }
     for t in loom_scene::tracks::node_tracks(n) {
