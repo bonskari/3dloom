@@ -1272,7 +1272,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     }
                 }
                 if vp.ambient_occlusion && override_color.is_none() && !app.degrading {
-                    view_shading.ao = Some((vp.ao_radius, vp.ao_intensity, ao_view_proj(app, &camera, aspect)));
+                    view_shading.ao = Some((vp.ao_radius, vp.ao_intensity, ao_view_proj(app, index, aspect)));
                 }
                 let edges = (vp.edged_faces && level != S::BoundingBox) || level == S::HiddenLine;
                 (!level.shaded(), grid_plane, edges, vp.show_grid, view_shading)
@@ -1929,15 +1929,15 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
 }
 /// The view-projection of the AO depth pass: the view's own, with near and
 /// far fitted to the shadow casters' bounds (depth precision follows far / near).
-pub(crate) fn ao_view_proj(app: &LoomApp, camera: &loom_render::Camera, aspect: f32) -> glam::Mat4 {
-    let eye = camera.orbit.eye_position();
+pub(crate) fn ao_view_proj(app: &LoomApp, index: usize, aspect: f32) -> glam::Mat4 {
+    let mut c = app.camera_for(index);
+    let eye = c.orbit.eye_position();
     let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
     for i in shadow_casters(app) {
         let (a, b) = app.world_meshes()[i].1.aabb();
         lo = lo.min(a);
         hi = hi.max(b);
     }
-    let mut c = camera.clone();
     if c.perspective && lo.is_finite() && hi.is_finite() {
         let far = (0..8)
             .map(|i| Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z }))
