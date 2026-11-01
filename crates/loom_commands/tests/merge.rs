@@ -23,7 +23,7 @@ fn p(path: &std::path::Path) -> Option<String> {
 /// A file with: Box001 (parent of Box002), Box003 = instance of Box001 with
 /// an instanced Bend, Circle001 picked as the Linked XForm control of Box002, and
 /// a target camera.
-fn source(path: &PathBuf) -> AppState {
+fn source(path: &std::path::Path) -> AppState {
     let mut s = AppState::new();
     let a = boxed(&mut s, 0.0);
     let b = boxed(&mut s, 20.0);
