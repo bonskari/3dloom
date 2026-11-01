@@ -375,7 +375,7 @@ mod tests {
         let (b, d) = (off.get_pixel(1, 5).0, off.get_pixel(2, 5).0);
         assert!(b[0] == 200 && d[0] == 0, "stripes kept: {b:?} {d:?}");
         let (fb, fd) = (on.get_pixel(1, 5).0, on.get_pixel(2, 5).0);
-        assert!((fb[0] as i32 - fd[0] as i32).abs() < 120, "filtered blurs them: {fb:?} {fd:?}");
+        assert!(fb[0] < 200 && fd[0] > 20, "filtered blurs them: {fb:?} {fd:?}");
         // At and next to the geometry both agree.
         for x in 6..10 {
             assert_eq!(on.get_pixel(x, 5), off.get_pixel(x, 5), "x {x}");
