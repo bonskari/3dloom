@@ -282,6 +282,7 @@ impl EnvSettings {
             depth_of_field,
             effects,
             use_alpha: false,
+            filter_background: false,
         }
     }
 
