@@ -104,12 +104,13 @@ fn seven_shows_the_statistics_of_the_scene() {
 fn display_quad_hides_and_freezes_the_selections_layer_and_opens_scene_states() {
     let mut h = Harness::new();
     let a = boxed(&mut h);
-    h.cmd(Command::CreateLayer { name: Some("Walls".into()) });
-    let walls = h.app.state.scene.node(a).unwrap().layer;
-    assert_ne!(walls, 0, "the new layer took the selection");
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
     let b = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::CreateLayer { name: Some("Walls".into()) });
+    let walls = h.app.state.scene.node(a).unwrap().layer;
+    assert_ne!(walls, 0, "the new layer took the selection");
+    assert_eq!(h.app.state.scene.node(b).unwrap().layer, 0);
     maximized(&mut h);
     let r = h.app.viewport_rects[h.app.state.active_viewport];
     let at = r.center() + egui::vec2(-150.0, 50.0);
