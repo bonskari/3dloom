@@ -4162,3 +4162,51 @@ fn an_imported_fbx_with_a_diffuse_bitmap_shows_it_in_the_viewport() {
         assert_eq!((bm.width, bm.height, &bm.rgba[..4]), (8, 8, &[255, 0, 0, 255][..]));
     }
 }
+
+/// Create > Geometry > Extended Primitives > ChamferBox: drag the base,
+/// move up for the height and click, move up for the fillet and click.
+#[test]
+fn chamfer_box_from_the_extended_primitives_class_by_drag_height_and_fillet() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.app.panel_tab = crate::Tab::Create;
+    h.frames(2);
+    h.click(h.find(Role::ComboBox, "Standard Primitives").center());
+    h.click(h.find(Role::Button, "Extended Primitives").center());
+    assert!(h.app.create_extended);
+    h.frames(1);
+    h.click(h.find(Role::Button, "ChamferBox").center());
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Extended(loom_mesh::extended_primitives::ExtendedKind::ChamferBox)));
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.center() + egui::vec2(-80.0, 60.0);
+    let b = r.center() + egui::vec2(80.0, 140.0);
+    h.drag(a, b);
+    let c = b + egui::vec2(0.0, -60.0);
+    hover_to(&mut h, b, c);
+    h.click(c);
+    let d = c + egui::vec2(0.0, -20.0);
+    hover_to(&mut h, c, d);
+    h.click(d);
+    assert_eq!(h.app.state.scene.len(), 1, "one ChamferBox");
+    assert!(h.app.create.is_none(), "creation finished");
+    let id = *h.app.state.selection.iter().next().unwrap();
+    assert_eq!(h.app.state.scene.node(id).unwrap().object.base_name(), "ChamferBox");
+    for p in ["Length", "Width", "Height", "Fillet"] {
+        assert!(param(&h, p) > 0.0, "{p} was set: {}", param(&h, p));
+    }
+    // One undo step removes it.
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.len(), 0);
+}
+
+/// Every Extended Primitive is created by its command and shows its parameters.
+#[test]
+fn every_extended_primitive_creates_with_its_parameters() {
+    let mut h = Harness::new();
+    for k in loom_mesh::extended_primitives::ExtendedKind::ALL {
+        h.cmd(Command::CreateExtendedPrimitive { kind: k.label().into(), position: [0.0; 3], size: [20.0, 30.0, 10.0] });
+        assert_eq!(h.app.state.scene.node(*h.app.state.selection.iter().next().unwrap()).unwrap().object.base_name(), k.label());
+        assert!(h.app.world_styles().len() == h.app.state.scene.len(), "{k:?} draws");
+    }
+}
