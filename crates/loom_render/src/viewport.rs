@@ -125,8 +125,10 @@ pub fn shadow_view_proj(l: &ViewLight, bounds: (Vec3, Vec3)) -> Option<Mat4> {
         }
         ViewLightKind::Spot { falloff, .. } => {
             let view = Mat4::look_to_rh(l.position, dir, up);
-            let far = (l.position - centre).length() + radius;
-            let near = (far * 0.001).max(0.01);
+            // Near as far out as the scene allows: depth precision follows far / near.
+            let d = (l.position - centre).length();
+            let far = d + radius;
+            let near = (d - radius).max(far * 0.02).max(0.01);
             Some(Mat4::perspective_rh(falloff.clamp(1.0, 170.0).to_radians(), 1.0, near, far.max(near * 2.0)) * view)
         }
         ViewLightKind::Point => None,
@@ -439,7 +441,7 @@ impl ViewportRenderer {
         }
         let a = shading.ambient;
         let (shadow_vp, shadow) = match shading.shadow {
-            Some(s) => (s.view_proj.to_cols_array_2d(), [1.0, s.light as f32, 0.0015, 0.0]),
+            Some(s) => (s.view_proj.to_cols_array_2d(), [1.0, s.light as f32, 0.0002, 0.0]),
             None => (Mat4::IDENTITY.to_cols_array_2d(), [0.0; 4]),
         };
         let u = ViewUniform {
