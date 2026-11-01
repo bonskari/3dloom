@@ -486,3 +486,19 @@ fn reflectance_and_transmittance_show_below_the_slots() {
     // Red at 50% opacity: R 0.5, G B 0 reflected; half of white through.
     assert!(!h.text_rects("Reflectance: Avg: 17% Max: 50%   Transmittance: Avg: 50% Max: 50%").is_empty(), "the fields show the active material");
 }
+
+#[test]
+fn swatch_right_click_copy_and_paste() {
+    let mut h = editor();
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Lock".into(), value: 0.0 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    scroll_top(&mut h);
+    h.frames(2);
+    right_click(&mut h, swatch_after(&h, "Diffuse:"));
+    h.click_text_anywhere("Copy");
+    h.frames(2);
+    right_click(&mut h, swatch_after(&h, "Specular:"));
+    h.click_text_anywhere("Paste");
+    h.frames(2);
+    assert_eq!(editor_material(&h).specular.get(), glam::Vec3::X);
+}

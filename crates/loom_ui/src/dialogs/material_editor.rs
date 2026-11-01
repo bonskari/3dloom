@@ -1038,6 +1038,19 @@ fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
     if r.drag_started() {
         egui::DragAndDrop::set_payload(ui.ctx(), SwatchDrag(which.to_owned()));
     }
+    // Right-click: Copy / Paste the colour (one colour clipboard for every swatch).
+    let clip_id = egui::Id::new("material_colour_clipboard");
+    let clip: Option<[u8; 3]> = ui.ctx().data(|d| d.get_temp(clip_id));
+    r.context_menu(|ui| {
+        if ui.button("Copy").clicked() {
+            ui.ctx().data_mut(|d| d.insert_temp(clip_id, rgb_of(c)));
+            ui.close_menu();
+        }
+        if ui.add_enabled(clip.is_some(), egui::Button::new("Paste")).clicked() {
+            let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: which.into(), rgb: clip.unwrap_or_default() });
+            ui.close_menu();
+        }
+    });
     if let Some(from) = r.dnd_release_payload::<SwatchDrag>() {
         if from.0 != which {
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("copy_swap_colors"), (from.0.clone(), which.to_owned())));
