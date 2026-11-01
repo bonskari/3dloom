@@ -74,7 +74,7 @@ pub struct ViewAnimation {
 }
 
 /// Meshes and colours waiting for GPU upload, shared with the viewport callbacks.
-pub type PendingUpload = std::sync::Arc<std::sync::Mutex<Option<(std::sync::Arc<Vec<Mesh>>, Vec<loom_render::MeshStyle>, Vec<(String, std::sync::Arc<loom_render::Bitmap>)>)>>>;
+pub type PendingUpload = std::sync::Arc<std::sync::Mutex<Option<(std::sync::Arc<Vec<std::sync::Arc<Mesh>>>, Vec<loom_render::MeshStyle>, Vec<(String, std::sync::Arc<loom_render::Bitmap>)>)>>>;
 
 /// Keyboard Entry rollout values.
 #[derive(Debug, Clone, Copy)]
@@ -167,6 +167,8 @@ pub enum HelperKind {
     Compass,
     /// Camera Match > CamPoint.
     CamPoint,
+    /// Assembly Heads > Luminaire.
+    Luminaire,
 }
 
 impl HelperKind {
@@ -179,6 +181,7 @@ impl HelperKind {
             HelperKind::Protractor => "protractor",
             HelperKind::Compass => "compass",
             HelperKind::CamPoint => "campoint",
+            HelperKind::Luminaire => "luminaire",
         }
     }
     pub fn label(self) -> &'static str {
@@ -190,16 +193,26 @@ impl HelperKind {
             HelperKind::Protractor => "Protractor",
             HelperKind::Compass => "Compass",
             HelperKind::CamPoint => "CamPoint",
+            HelperKind::Luminaire => "Luminaire",
         }
     }
     pub fn default_size(self) -> f32 {
         match self {
-            HelperKind::Dummy => 10.0,
+            HelperKind::Dummy | HelperKind::Luminaire => 10.0,
             HelperKind::Point => 20.0,
             HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass | HelperKind::CamPoint => 0.0,
         }
     }
     /// Created by a drag (a session) rather than a click.
+    /// The Create panel's helper class (its drop-down) listing `kind`.
+    pub fn class_of(kind: HelperKind) -> &'static str {
+        match kind {
+            HelperKind::CamPoint => "Camera Match",
+            HelperKind::Luminaire => "Assembly Heads",
+            _ => "Standard",
+        }
+    }
+
     pub fn dragged(self) -> bool {
         matches!(self, HelperKind::Grid | HelperKind::Tape | HelperKind::Compass)
     }
@@ -217,13 +230,18 @@ pub struct LoomApp {
     pub state: AppState,
     pub camera_controller: ViewportNavigator,
     /// World-space meshes of visible nodes, rebuilt when `state.mesh_dirty`.
-    world_meshes: Vec<(NodeId, Mesh)>,
+    world_meshes: Vec<(NodeId, std::sync::Arc<Mesh>)>,
     /// Draw styles parallel to `world_meshes`.
     world_styles: Vec<loom_render::MeshStyle>,
     /// What the viewports draw (the stack result), parallel to `world_meshes`.
-    world_display: std::sync::Arc<Vec<Mesh>>,
+    world_display: std::sync::Arc<Vec<std::sync::Arc<Mesh>>>,
+    /// Each node's world meshes from the last rebuild, reused while what
+    /// they were made from is unchanged.
+    world_cache: std::collections::HashMap<NodeId, WorldEntry>,
     /// Bumped by every `world_meshes` rebuild.
     world_version: u64,
+    /// How long the last `world_meshes` rebuild took (ms; diagnostics).
+    rebuild_ms: f32,
     /// The objects Show Dependencies draws magenta in the current world meshes.
     shown_dependencies: std::collections::BTreeSet<loom_scene::NodeId>,
     /// What Show End Result off applied to at the last rebuild (`end_result_key`).
@@ -294,8 +312,8 @@ pub struct LoomApp {
     pub utility: Utility,
     /// Utilities > More... is open.
     pub utilities_more: bool,
-    /// Create > Helpers list: Camera Match (else Standard).
-    pub camera_match_helpers: bool,
+    /// Create > Helpers list: "Standard", "Assembly Heads" or "Camera Match".
+    pub helper_class: &'static str,
     /// Camera Match utility: Iterations and Freeze FOV.
     pub camera_match_iterations: u32,
     pub camera_match_freeze_fov: bool,
@@ -526,7 +544,9 @@ impl LoomApp {
             world_meshes: Vec::new(),
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
+            world_cache: Default::default(),
             world_version: 0,
+            rebuild_ms: 0.0,
             shown_dependencies: Default::default(),
             shown_end_result_key: None,
             pending_topology: None,
@@ -567,7 +587,7 @@ impl LoomApp {
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
             utilities_more: false,
-            camera_match_helpers: false,
+            helper_class: "Standard",
             camera_match_iterations: 500,
             camera_match_assign: false,
             camera_match_freeze_fov: false,
@@ -803,6 +823,7 @@ impl LoomApp {
     }
 
     pub(crate) fn rebuild_world_meshes(&mut self) {
+        let started = std::time::Instant::now();
         if self.bitmap_generation != self.state.bitmap_generation {
             // Bitmap Parameters > Reload: read the image files again.
             self.bitmap_cache.clear();
@@ -851,7 +872,6 @@ impl LoomApp {
             let n = self.state.scene.node(id).expect("collected above");
             // Display Properties By Layer come from the layer.
             let d = self.state.scene.display_of(n);
-            let mut mesh = n.cage_mesh().into_owned();
             // What the GPU draws: the stack result (NURMS included), or with
             // Show End Result off only up to the active entry of the object
             // the Modify panel edits; the cage stays the base mesh for
@@ -859,28 +879,50 @@ impl LoomApp {
             let nurms = matches!(&n.object, loom_scene::ObjectKind::EditablePoly(p) if p.subdiv.use_nurms.get());
             // An Editable Patch's cage is its lattice: the surface is drawn.
             let patch = n.object.patch().is_some();
-            let mut shown = if n.modifiers.is_empty() && !nurms && !patch {
-                None
-            } else if self.below_end_result(id) {
-                match n.active_entry {
-                    None => Some(n.object.display_output()),
-                    Some(a) => Some(self.state.scene.evaluated(id, Some(a)).value.mesh.clone()),
-                }
-            } else {
-                Some(self.state.scene.eval_mesh(id).value.mesh.clone())
-            };
-            if d.display_as_box {
-                // Display as Box: the object's local bounding box.
-                let (min, max) = mesh.aabb();
-                mesh = loom_mesh::box_primitive((max - min) * 0.5);
-                let _ = loom_mesh::edit_ops::translate_mesh(&mut mesh, (min + max) * 0.5);
-                shown = None;
-            }
+            let modified = !(n.modifiers.is_empty() && !nurms && !patch);
+            let below = self.below_end_result(id);
             let world = self.state.scene.object_matrix(n.id);
-            let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, world);
-            if let Some(d) = shown.as_mut() {
-                let _ = loom_mesh::edit_ops::transform_mesh(d, world);
-            }
+            // The (time-aware, cached) evaluation stands for the object's
+            // geometry: the world meshes are made again only when it, the
+            // versions, the transform or the display options change.
+            let eval = self.state.scene.eval_mesh(id);
+            let partial = match n.active_entry {
+                Some(a) if modified && below => Some(self.state.scene.evaluated(id, Some(a))),
+                _ => None,
+            };
+            let key = WorldKey { eval: eval.clone(), partial: partial.clone(), version: n.version, geom_version: n.geom_version, active: n.active_entry, modified, below, as_box: d.display_as_box, world };
+            let cached = self.world_cache.get(&id).filter(|e| e.key == key).map(|e| (e.cage.clone(), e.shown.clone()));
+            let (mesh, mut shown) = match cached {
+                Some(hit) => hit,
+                None => {
+                    let mut mesh = n.cage_mesh().into_owned();
+                    let mut shown = if !modified {
+                        None
+                    } else if below {
+                        match &partial {
+                            None => Some(n.object.display_output()),
+                            Some(e) => Some(e.value.mesh.clone()),
+                        }
+                    } else {
+                        Some(eval.value.mesh.clone())
+                    };
+                    if d.display_as_box {
+                        // Display as Box: the object's local bounding box.
+                        let (min, max) = mesh.aabb();
+                        mesh = loom_mesh::box_primitive((max - min) * 0.5);
+                        let _ = loom_mesh::edit_ops::translate_mesh(&mut mesh, (min + max) * 0.5);
+                        shown = None;
+                    }
+                    let _ = loom_mesh::edit_ops::transform_mesh(&mut mesh, world);
+                    if let Some(d) = shown.as_mut() {
+                        let _ = loom_mesh::edit_ops::transform_mesh(d, world);
+                    }
+                    let mesh = std::sync::Arc::new(mesh);
+                    let shown = shown.map(std::sync::Arc::new);
+                    self.world_cache.insert(id, WorldEntry { key, cage: mesh.clone(), shown: shown.clone() });
+                    (mesh, shown)
+                }
+            };
             let gray = n.frozen && d.show_frozen_in_gray;
             let color = if gray {
                 self.color_f32("Frozen")
@@ -929,7 +971,7 @@ impl LoomApp {
             }
             if let (Some(d), Some((skinned, colors))) = (shown.as_mut(), loom_commands::skin::colored_faces(&self.state)) {
                 if skinned == id && d.vertex_count() == colors.len() {
-                    for (v, c) in d.vertices_mut().iter_mut().zip(colors) {
+                    for (v, c) in std::sync::Arc::make_mut(d).vertices_mut().iter_mut().zip(colors) {
                         v.color = [srgb(c[0]), srgb(c[1]), srgb(c[2])];
                     }
                     vertex_colors = true;
@@ -960,11 +1002,14 @@ impl LoomApp {
             let mut shown = shown.unwrap_or_else(|| mesh.clone());
             if let Some(split) = splits.next().flatten() {
                 // World Z, or the object's own Z for Local.
-                loom_scene::material::apply_split(&mut shown, &split, glam::Vec3::Z, world.transform_vector3(glam::Vec3::Z));
+                loom_scene::material::apply_split(std::sync::Arc::make_mut(&mut shown), &split, glam::Vec3::Z, world.transform_vector3(glam::Vec3::Z));
             }
             display.push(shown);
             meshes.push((n.id, mesh));
         }
+        // Nodes no longer drawn leave the cache.
+        let drawn: std::collections::HashSet<NodeId> = meshes.iter().map(|(id, _)| *id).collect();
+        self.world_cache.retain(|id, _| drawn.contains(id));
         self.world_meshes = meshes;
         self.world_styles = styles;
         self.world_display = std::sync::Arc::new(display);
@@ -972,6 +1017,7 @@ impl LoomApp {
         if let Ok(mut slot) = self.pending_upload.lock() {
             *slot = Some((self.world_display.clone(), self.world_styles.clone(), bitmaps));
         }
+        self.rebuild_ms = started.elapsed().as_secs_f32() * 1000.0;
     }
 
     /// A node's material as a viewport style: (the whole mesh's style, the
@@ -1110,7 +1156,7 @@ impl LoomApp {
     }
 
     /// Visible nodes with their world-space meshes, in render order.
-    pub fn world_meshes(&self) -> &[(NodeId, Mesh)] {
+    pub fn world_meshes(&self) -> &[(NodeId, std::sync::Arc<Mesh>)] {
         &self.world_meshes
     }
 
@@ -1122,7 +1168,7 @@ impl LoomApp {
 
     /// What the viewports draw for each of `world_meshes` (a Skin's posed
     /// result, not the cage), in the same order.
-    pub fn world_display(&self) -> &[Mesh] {
+    pub fn world_display(&self) -> &[std::sync::Arc<Mesh>] {
         &self.world_display
     }
 
@@ -1790,4 +1836,39 @@ pub fn length_drag_value<'a>(ui: &egui::Ui, units: &loom_commands::UnitsSetup, d
         .speed(speed)
         .custom_formatter(move |v, _| format!("{:.*}{}", decimals, v * factor, suffix))
         .custom_parser(move |text| spinner::typed(text, current, &|s| units.parse(s)))
+}
+
+/// What a node's world meshes were made from (`LoomApp::world_cache`).
+struct WorldKey {
+    eval: std::sync::Arc<loom_scene::Evaluated>,
+    /// Show End Result off: the stack up to the active entry.
+    partial: Option<std::sync::Arc<loom_scene::Evaluated>>,
+    version: u64,
+    geom_version: u64,
+    active: Option<usize>,
+    modified: bool,
+    below: bool,
+    as_box: bool,
+    world: glam::Mat4,
+}
+
+impl PartialEq for WorldKey {
+    fn eq(&self, o: &Self) -> bool {
+        let same = |a: &Option<std::sync::Arc<loom_scene::Evaluated>>, b: &Option<std::sync::Arc<loom_scene::Evaluated>>| match (a, b) {
+            (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        std::sync::Arc::ptr_eq(&self.eval, &o.eval)
+            && same(&self.partial, &o.partial)
+            && (self.version, self.geom_version, self.active, self.modified, self.below, self.as_box) == (o.version, o.geom_version, o.active, o.modified, o.below, o.as_box)
+            && self.world == o.world
+    }
+}
+
+/// A node's world-space cage and drawn mesh (None: the cage is drawn).
+struct WorldEntry {
+    key: WorldKey,
+    cage: std::sync::Arc<Mesh>,
+    shown: Option<std::sync::Arc<Mesh>>,
 }

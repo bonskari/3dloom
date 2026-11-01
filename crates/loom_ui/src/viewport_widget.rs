@@ -18,6 +18,9 @@ use crate::LoomApp;
 pub struct ViewportResources {
     pub renderer: ViewportRenderer,
     pub mesh_buffers: Vec<MeshBuffer>,
+    /// The world mesh each of `mesh_buffers` was made from: a rebuild that
+    /// hands over the same mesh with the same style keeps its buffers.
+    pub mesh_sources: Vec<std::sync::Arc<loom_mesh::Mesh>>,
     /// Built on the first frame (needs the queue) and whenever bitmaps change.
     pub textures: Option<loom_render::TextureSet>,
     /// GPU bitmaps by path: uploaded once, reused across scene rebuilds.
@@ -37,6 +40,7 @@ pub fn init_render_resources(wgpu: &egui_wgpu::RenderState) {
         .insert(ViewportResources {
             renderer,
             mesh_buffers: Vec::new(),
+            mesh_sources: Vec::new(),
             textures: None,
             bitmap_cache: std::collections::HashMap::new(),
             base_textures: None,
@@ -177,11 +181,23 @@ impl CallbackTrait for ViewportCallback {
 
         let pending = self.upload.lock().ok().and_then(|mut slot| slot.take());
         if let Some((meshes, styles, bitmaps)) = pending {
+            let mut old: std::collections::HashMap<*const loom_mesh::Mesh, Vec<MeshBuffer>> = std::collections::HashMap::new();
+            // The old sources stay alive (their addresses unique) until the new list is made.
+            let sources = std::mem::take(&mut res.mesh_sources);
+            for (src, mb) in sources.iter().zip(std::mem::take(&mut res.mesh_buffers)) {
+                old.entry(std::sync::Arc::as_ptr(src)).or_default().push(mb);
+            }
             res.mesh_buffers = meshes
                 .iter()
                 .enumerate()
-                .map(|(i, m)| MeshBuffer::from_mesh(device, m, styles.get(i).cloned().unwrap_or_default()))
+                .map(|(i, m)| {
+                    let style = styles.get(i).cloned().unwrap_or_default();
+                    let kept = old.get_mut(&std::sync::Arc::as_ptr(m)).and_then(|v| v.iter().position(|mb| mb.style == style).map(|j| v.swap_remove(j)));
+                    kept.unwrap_or_else(|| MeshBuffer::from_mesh(device, m, style))
+                })
                 .collect();
+            drop(sources);
+            res.mesh_sources = meshes.iter().cloned().collect();
             // The clear and checker textures are made once; bitmaps once per path.
             let (none, checker) = res.base_textures.get_or_insert_with(|| res.renderer.base_textures(device, queue)).clone();
             let mut groups = Vec::with_capacity(bitmaps.len());

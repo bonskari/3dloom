@@ -648,3 +648,126 @@ fn light_atmospheres_and_effects_add_setup_delete() {
     h.cmd(Command::UndoSceneOperation);
     assert!(h.app.state.scene.environment.atmospheres.is_empty(), "the Add is one undo step");
 }
+
+/// Light Distribution (Type) > Photometric Web shows the Distribution
+/// (Photometric Web) rollout; its file button opens the web file dialog,
+/// the chosen file lights the light, and X Rotation turns the web.
+#[test]
+fn photometric_web_rollout_chooses_a_web_file_and_rotates_it() {
+    let dir = std::env::temp_dir().join(format!("loom-ui-ies-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("downlight.ies");
+    std::fs::write(&path, "IESNA:LM-63-2002\nTILT=NONE\n1 -1 1.0 4 1 1 2 0.1 0.1 0.0\n1.0 1.0 20\n0 30 60 90\n0\n1000 500 0 0\n").unwrap();
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::FreeLight, position: [0.0, 0.0, 80.0], target: [0.0; 3] }).unwrap();
+    let id = NodeId(r["id"].as_u64().unwrap());
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    let cp = panel(&h, "command_panel");
+    assert!(h.text_rect("Distribution (Photometric Web)", cp).is_none());
+    click_text(&mut h, "Uniform Spherical", cp, 0.0);
+    let p = *h.text_centers("Photometric Web").last().expect("the distribution entry");
+    h.click(p);
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    assert!(h.text_rect("Distribution (Photometric Web)", cp).is_some(), "the web rollout appears");
+    click_text(&mut h, "< Choose photometric file >", cp, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::PhotometricWeb { light: id.0 }));
+    super::choose_file(&mut h, &path, "Open");
+    h.frames(2);
+    let ph = light(&h, id).photometric.unwrap();
+    assert_eq!((ph.candela.get(), ph.web.as_ref().map(|w| w.peak)), (1000.0, Some(1000.0)), "{}", h.app.state.status_prompt);
+    let cp = panel(&h, "command_panel");
+    assert!(h.text_rect("downlight", cp).is_some(), "the button names the file");
+    // The icon is the web's shape: nothing above the light.
+    let icon = light(&h, id).icon_mesh();
+    let top = icon.vertices().iter().map(|v| v.position.z).fold(f32::MIN, f32::max);
+    let bottom = icon.vertices().iter().map(|v| v.position.z).fold(f32::MAX, f32::min);
+    assert!(top < 0.5 && bottom < -7.9, "{top} {bottom}");
+    h.cmd(Command::SetParameter { id: id.0, name: "X Rotation".into(), value: 90.0 });
+    assert_eq!(light(&h, id).photometric.unwrap().web_rotation_x.get(), 90.0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Create > Helpers > Assembly Heads > Luminaire: a click in a viewport
+/// makes the head; its Dimmer spinner dims a light linked below it.
+#[test]
+fn assembly_heads_luminaire_is_created_and_its_dimmer_dims_its_lights() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.app.panel_tab = crate::Tab::Create;
+    h.app.create_category = crate::Category::Helpers;
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Standard", cp, 0.0);
+    let p = *h.text_centers("Assembly Heads").last().expect("the helper class");
+    h.click(p);
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Luminaire", cp, 0.0);
+    assert_eq!(h.app.create_kind, Some(crate::CreateKind::Helper(crate::HelperKind::Luminaire)));
+    let p = h.screen_of(Vec3::new(0.0, 0.0, 0.0));
+    h.click(p);
+    let head = *h.app.state.selection.iter().next().expect("the new head is selected");
+    assert!(matches!(h.app.state.scene.node(head).unwrap().object, loom_scene::ObjectKind::Luminaire { .. }));
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 10.0], target: [0.0; 3] }).unwrap();
+    let light = NodeId(r["id"].as_u64().unwrap());
+    h.cmd(Command::SetParent { id: light.0, parent: Some(head.0) });
+    h.cmd(Command::SelectNodes { ids: vec![head.0], op: loom_commands::SelectOp::Replace });
+    h.app.start_create(None);
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    let cp = panel(&h, "command_panel");
+    assert!(h.text_rect("Luminaire Parameters", cp).is_some());
+    assert!(h.text_rect("Filter Color:", cp).is_some(), "the filter is a colour swatch");
+    let lit = |h: &Harness| loom_scene::light::scene_lights(&h.app.state.scene, |_| true).into_iter().find(|l| l.id == light).unwrap().color.x;
+    let full = lit(&h);
+    // Type 25 into the Dimmer spinner.
+    let row = h.text_rect("Dimmer", cp).expect("the Dimmer row");
+    h.click(egui::pos2(row.right() + 60.0, row.center().y));
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Text("25".into())]);
+    h.key(egui::Key::Enter);
+    h.frames(2);
+    assert!((lit(&h) - full * 0.25).abs() < 1e-4, "{} vs {}", lit(&h), full);
+}
+
+/// Utilities > More... > Resource Collector: an output path, Update
+/// Materials and Begin copy the scene's bitmaps there and repath them.
+#[test]
+fn resource_collector_utility_collects_into_the_typed_folder() {
+    let dir = std::env::temp_dir().join(format!("loom-ui-rc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("wood.png");
+    std::fs::write(&src, b"bitmap bytes").unwrap();
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::SetMaterialMap { slot: Some(0), map: "Diffuse Color".into(), path: Some(src.to_string_lossy().into_owned()), amount: None });
+    h.cmd(Command::AssignMaterialToSelection);
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.frames(2);
+    h.click(h.find(Role::Button, "More...").center());
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("utilities_more"))).expect("the Utilities list");
+    // A pause, so this click is not a double-click with the last one.
+    h.frames(30);
+    h.click(h.text_rect("Resource Collector", win).expect("listed under More...").center());
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("utilities_more"))).unwrap();
+    h.click(h.text_rect("OK", win).expect("OK").center());
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    let label = h.text_rect("Output Path:", cp).expect("the output field");
+    h.click(egui::pos2(label.center().x, label.bottom() + 12.0));
+    let out = dir.join("out");
+    h.run(vec![egui::Event::Text(out.to_string_lossy().into_owned())]);
+    click_text(&mut h, "Update Materials", cp, 0.0);
+    click_text(&mut h, "Begin", cp, 0.0);
+    h.frames(2);
+    assert!(out.join("wood.png").is_file(), "{:?} {}", h.app.last_error, h.app.state.status_prompt);
+    assert!(loom_commands::assets::scene_assets(&h.app.state).iter().all(|p| p.starts_with(out.to_str().unwrap())));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -221,6 +221,27 @@ pub fn helper_lines(state: &AppState, id: NodeId, units_per_px: &dyn Fn(Vec3) ->
                 }
             }
         }
+        // Luminaire: a box of its Size with a lamp below it (a cone down -Z).
+        ObjectKind::Luminaire { size, .. } => {
+            let h = size.get() * 0.5;
+            let at = |p: Vec3| world.transform_point3(p);
+            let c = |i: u32| Vec3::new(if i & 1 == 0 { -h } else { h }, if i & 2 == 0 { -h } else { h }, if i & 4 == 0 { -h * 0.4 } else { h * 0.4 });
+            for i in 0..8u32 {
+                for bit in [1u32, 2, 4] {
+                    if i & bit == 0 {
+                        out.push((at(c(i)), at(c(i | bit)), LineKind::Wire));
+                    }
+                }
+            }
+            let apex = Vec3::new(0.0, 0.0, -h * 0.4);
+            for k in 0..8 {
+                let a = k as f32 / 8.0 * std::f32::consts::TAU;
+                let rim = Vec3::new(h * 0.6 * a.cos(), h * 0.6 * a.sin(), -h * 1.2);
+                let next = Vec3::new(h * 0.6 * (a + std::f32::consts::TAU / 8.0).cos(), h * 0.6 * (a + std::f32::consts::TAU / 8.0).sin(), -h * 1.2);
+                out.push((at(apex), at(rim), LineKind::Wire));
+                out.push((at(rim), at(next), LineKind::Wire));
+            }
+        }
         // CamPoint: a small cross at the point and, with Show Axis Tripod, the tripod at Axis Length.
         ObjectKind::CamPoint { show_axis_tripod, axis_length, .. } => {
             let origin = world.w_axis.truncate();

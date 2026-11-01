@@ -654,6 +654,14 @@ pub enum ObjectKind {
         #[serde(default = "yes")]
         use_point: Param<bool>,
     },
+    /// Helpers > Assembly Heads > Luminaire: an assembly's head; the lights
+    /// linked below it shine at its Dimmer and through its Filter Color.
+    Luminaire {
+        size: Param<f32>,
+        /// Percent of the lights' own intensity.
+        dimmer: Param<f32>,
+        filter_color: Param<Vec3>,
+    },
     /// Helpers > Tape: a tape measure from this node to its target node
     /// (aimed down local -Z at it by a LookAt constraint, like a target camera).
     Tape {
@@ -1032,6 +1040,9 @@ impl ObjectKind {
     pub fn cam_point() -> Self {
         Self::CamPoint { show_axis_tripod: p(true), axis_length: p(10.0), screen: None, use_point: p(true) }
     }
+    pub fn luminaire(size: f32) -> Self {
+        Self::Luminaire { size: p(size), dimmer: p(100.0), filter_color: p(Vec3::ONE) }
+    }
     /// A tape of length 0 whose target node is `target`.
     pub fn tape(target: NodeId) -> Self {
         Self::Tape { target: Some(target), specify_length: p(false), length: p(0.0) }
@@ -1048,7 +1059,7 @@ impl ObjectKind {
     }
     /// Helpers and other non-geometry nodes (Dummy, Point, IK goal, Group, Camera).
     pub fn is_helper(&self) -> bool {
-        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::CamPoint { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
+        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::CamPoint { .. } | Self::Luminaire { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
     }
     /// Whether the object has a surface renders can show: not helpers,
     /// cameras, lights or a biped's centre of mass. Bones do (their
@@ -1309,6 +1320,7 @@ impl ObjectKind {
             Self::Dummy { .. } => "Dummy",
             Self::Point { .. } => "Point",
             Self::CamPoint { .. } => "CamPoint",
+            Self::Luminaire { .. } => "Luminaire",
             Self::Tape { .. } => "Tape",
             Self::Protractor { .. } => "Protractor",
             Self::Compass { .. } => "Compass",
@@ -1498,6 +1510,10 @@ impl ObjectKind {
                 ("Size", f(size)), ("Constant Screen Size", b(constant_screen_size)), ("Draw On Top", b(draw_on_top)),
             ],
             Self::CamPoint { show_axis_tripod, axis_length, use_point, .. } => vec![("Show Axis Tripod", b(show_axis_tripod)), ("Axis Length", f(axis_length)), ("Use This Point", b(use_point))],
+            Self::Luminaire { size, dimmer, filter_color } => {
+                let c = filter_color.get();
+                vec![("Size", f(size)), ("Dimmer", f(dimmer)), ("Filter Color R", Float(c.x)), ("Filter Color G", Float(c.y)), ("Filter Color B", Float(c.z))]
+            }
             Self::Tape { specify_length, length, .. } => vec![("Length", f(length)), ("Specify Length", b(specify_length))],
             Self::Protractor { .. } => Vec::new(),
             Self::Compass { show_rose, radius } => vec![("Show Compass Rose", b(show_rose)), ("Radius", f(radius))],
@@ -1724,6 +1740,14 @@ impl ObjectKind {
             (Self::CamPoint { show_axis_tripod, .. }, "Show Axis Tripod") => { bl(show_axis_tripod); ok }
             (Self::CamPoint { axis_length, .. }, "Axis Length") => { fl(axis_length, 0.0); ok }
             (Self::CamPoint { use_point, .. }, "Use This Point") => { bl(use_point); ok }
+            (Self::Luminaire { size, .. }, "Size") => { fl(size, 0.001); ok }
+            (Self::Luminaire { dimmer, .. }, "Dimmer") => { fl(dimmer, 0.0); ok }
+            (Self::Luminaire { filter_color, .. }, "Filter Color R" | "Filter Color G" | "Filter Color B") => {
+                let mut c = filter_color.get();
+                c[["Filter Color R", "Filter Color G", "Filter Color B"].iter().position(|n| *n == name).expect("matched")] = (value as f32).clamp(0.0, 1.0);
+                filter_color.set(c);
+                ok
+            }
             (Self::Tape { length, .. }, "Length") => { fl(length, 0.0); ok }
             (Self::Tape { specify_length, .. }, "Specify Length") => { bl(specify_length); ok }
             (Self::Compass { show_rose, .. }, "Show Compass Rose") => { bl(show_rose); ok }
@@ -1861,6 +1885,11 @@ impl ObjectKind {
             // Point: a small cube a tenth of its size; the tripod/cross draw as an overlay.
             Self::Point { size, .. } => Cow::Owned(box_primitive(Vec3::splat(size.get() * 0.1))),
             Self::IkGoal { .. } | Self::CamPoint { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
+            // Luminaire: its box's corners to pick and frame; the icon draws as an overlay.
+            Self::Luminaire { size, .. } => {
+                let h = size.get() * 0.5;
+                Cow::Owned(loom_mesh::standard_primitives::points_mesh(&[Vec3::splat(-h), Vec3::splat(h)]))
+            }
             // Tape and Protractor: a small box at the pivot to pick; the lines draw as an overlay.
             Self::Tape { .. } | Self::Protractor { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
             // Compass: the four-pointed rose as a flat star (N along +Y).

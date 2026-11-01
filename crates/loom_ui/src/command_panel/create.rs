@@ -338,19 +338,18 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             parameters(ui, app);
         }
         Category::Helpers => {
-            let class = if app.camera_match_helpers { "Camera Match" } else { "Standard" };
-            egui::ComboBox::from_id_salt("create_helper_class").selected_text(class).show_ui(ui, |ui| {
-                for (label, cm) in [("Standard", false), ("Camera Match", true)] {
-                    if ui.selectable_label(app.camera_match_helpers == cm, label).clicked() && app.camera_match_helpers != cm {
-                        app.camera_match_helpers = cm;
+            egui::ComboBox::from_id_salt("create_helper_class").selected_text(app.helper_class).show_ui(ui, |ui| {
+                for label in ["Standard", "Assembly Heads", "Camera Match"] {
+                    if ui.selectable_label(app.helper_class == label, label).clicked() && app.helper_class != label {
+                        app.helper_class = label;
                         app.start_create(None);
                     }
                 }
             });
-            let kinds: &[crate::HelperKind] = if app.camera_match_helpers {
-                &[crate::HelperKind::CamPoint]
-            } else {
-                &[crate::HelperKind::Dummy, crate::HelperKind::Point, crate::HelperKind::Grid, crate::HelperKind::Tape, crate::HelperKind::Protractor, crate::HelperKind::Compass]
+            let kinds: &[crate::HelperKind] = match app.helper_class {
+                "Camera Match" => &[crate::HelperKind::CamPoint],
+                "Assembly Heads" => &[crate::HelperKind::Luminaire],
+                _ => &[crate::HelperKind::Dummy, crate::HelperKind::Point, crate::HelperKind::Grid, crate::HelperKind::Tape, crate::HelperKind::Protractor, crate::HelperKind::Compass],
             };
             rollout(ui, "Object Type", true, |ui| {
                 autogrid_and_pin(ui, app);
@@ -522,6 +521,19 @@ pub fn parameters(ui: &mut egui::Ui, app: &mut LoomApp) {
     }
     if matches!(node.object, loom_scene::ObjectKind::Tape { .. }) {
         tape_parameters(ui, app, id);
+        return;
+    }
+    if let loom_scene::ObjectKind::Luminaire { filter_color, .. } = &node.object {
+        // Luminaire Parameters: Dimmer and Filter Color pass to the lights in its assembly.
+        let filter = filter_color.get();
+        let own: Vec<_> = params.iter().filter(|(n, _)| !n.starts_with("Filter Color")).cloned().collect();
+        rollout(ui, "Luminaire Parameters", true, |ui| {
+            param_grid(ui, app, id, "luminaire", &own);
+            ui.horizontal(|ui| {
+                ui.label("Filter Color:");
+                super::light_rollouts::swatch(ui, app, id, "Filter Color", filter);
+            });
+        });
         return;
     }
     if matches!(node.object, loom_scene::ObjectKind::Protractor { .. }) {

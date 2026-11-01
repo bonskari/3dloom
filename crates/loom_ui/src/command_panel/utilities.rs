@@ -20,6 +20,7 @@ pub enum Utility {
     BitmapPaths,
     PanoramaExporter,
     CameraMatch,
+    ResourceCollector,
 }
 
 /// A utility by its name (the button label).
@@ -36,6 +37,7 @@ pub fn utility_named(name: &str) -> Utility {
         "Bitmap/Photometric Paths" => Utility::BitmapPaths,
         "Panorama Exporter" => Utility::PanoramaExporter,
         "Camera Match" => Utility::CameraMatch,
+        "Resource Collector" => Utility::ResourceCollector,
         _ => Utility::None,
     }
 }
@@ -136,6 +138,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     match app.utility {
         Utility::None => {}
         Utility::CameraMatch => camera_match(ui, app),
+        Utility::ResourceCollector => resource_collector(ui, app),
         Utility::PanoramaExporter => rollout(ui, "Panorama Exporter", true, |ui| {
             let cams: Vec<(u64, String)> = app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. })).map(|n| (n.id.0, n.name.clone())).collect();
             let p = &mut app.state.panorama;
@@ -515,4 +518,41 @@ fn configure_dialog(ctx: &egui::Context, app: &mut LoomApp) {
             app.configure_utility_buttons = Some(buttons);
         }
     }
+}
+
+/// Resource Collector's Parameters: the output folder, Include scene file,
+/// Compress Files, Update Materials and Begin.
+fn resource_collector(ui: &mut egui::Ui, app: &mut LoomApp) {
+    #[derive(Clone, Default)]
+    struct Rc {
+        output: String,
+        scene: bool,
+        compress: bool,
+        update: bool,
+    }
+    let id = egui::Id::new("resource_collector");
+    let mut rc: Rc = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_default();
+    rollout(ui, "Parameters", true, |ui| {
+        ui.label("Output Path:");
+        ui.text_edit_singleline(&mut rc.output);
+        if app.native_file_dialogs && ui.button("Browse").clicked() {
+            if let Some(dir) = rfd::FileDialog::new().set_title("Resource Collector Output Path").pick_folder() {
+                rc.output = dir.to_string_lossy().into_owned();
+            }
+        }
+        ui.checkbox(&mut rc.scene, "Include scene file");
+        ui.checkbox(&mut rc.compress, "Compress Files");
+        ui.checkbox(&mut rc.update, "Update Materials");
+        if ui.add_enabled(!rc.output.trim().is_empty(), egui::Button::new("Begin")).clicked() {
+            match app.dispatch(Command::ResourceCollector { output: rc.output.trim().to_owned(), include_scene: rc.scene, compress: rc.compress, update: rc.update }) {
+                Ok(r) => {
+                    let n = r["written"].as_array().map_or(0, |a| a.len());
+                    let missing = r["missing"].as_array().map_or(0, |a| a.len());
+                    app.state.status_prompt = format!("Resource Collector: {n} file(s) written, {missing} missing");
+                }
+                Err(e) => app.last_error = Some(e),
+            }
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(id, rc));
 }

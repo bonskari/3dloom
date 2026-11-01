@@ -41,6 +41,8 @@ fn main() -> eframe::Result<()> {
         multisampling: loom_ui::viewport_msaa() as u16,
         // The Realistic (Bevy) renderer shares the window's device.
         wgpu_options: loom_ui::wgpu_configuration(),
+        // LOOM_VSYNC=0: frames as fast as they draw (frame time measurements).
+        vsync: std::env::var("LOOM_VSYNC").as_deref() != Ok("0"),
         ..Default::default()
     };
     // Control sockets: always the user's own Unix socket; the localhost TCP

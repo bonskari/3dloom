@@ -274,3 +274,33 @@ fn animation_survives_save_and_open() {
     let p = |st: &AppState, f: f32| st.scene.node(b).unwrap().transform.position.get_at(f);
     assert_eq!(p(&t, 13.0), p(&s, 13.0));
 }
+
+/// Merge with Respect System Units in Files: objects from a file in other
+/// system units are rescaled to keep their real size (off: their numbers
+/// are taken as they are).
+#[test]
+fn merge_rescales_objects_from_a_file_in_other_units() {
+    let units = |u: &str, respect: Option<bool>| Command::SetUnits { system_unit: Some(u.into()), system_scale: None, display: None, custom_name: None, custom_value: None, custom_unit: None, fraction: None, default_feet: None, respect_system_units: respect };
+    let mut m = AppState::new();
+    execute(&mut m, units("Meters", None)).unwrap();
+    execute(&mut m, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [2.0, 0.0, 0.0], size: [1.0; 3] }).unwrap();
+    let path = tmp("metres.loom");
+    execute(&mut m, Command::SaveFile { path: Some(path.to_string_lossy().into_owned()) }).unwrap();
+    let height = |s: &AppState, id: u64| match s.scene.node(loom_scene::NodeId(id)).unwrap().object.parameters().into_iter().find(|(n, _)| *n == "Height").unwrap().1 {
+        loom_scene::ParamValue::Float(f) => f,
+        other => panic!("{other:?}"),
+    };
+    let mut s = AppState::new();
+    execute(&mut s, units("Centimeters", None)).unwrap();
+    let r = execute(&mut s, Command::MergeFile { path: Some(path.to_string_lossy().into_owned()), names: None, duplicates: None }).unwrap();
+    let id = r["nodes"][0].as_u64().unwrap();
+    assert!((height(&s, id) - 100.0).abs() < 1e-3, "1 m is 100 cm: {}", height(&s, id));
+    let x = s.scene.node(loom_scene::NodeId(id)).unwrap().transform.position.get().x;
+    assert!((x - 200.0).abs() < 1e-3, "{x}");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert!(s.scene.is_empty(), "one undo step");
+    let mut t = AppState::new();
+    execute(&mut t, units("Centimeters", Some(false))).unwrap();
+    let r = execute(&mut t, Command::MergeFile { path: Some(path.to_string_lossy().into_owned()), names: None, duplicates: None }).unwrap();
+    assert!((height(&t, r["nodes"][0].as_u64().unwrap()) - 1.0).abs() < 1e-6, "not respected: the numbers as they are");
+}

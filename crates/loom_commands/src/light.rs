@@ -419,6 +419,21 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             commit(state, "Template", Change::ReplaceObject { id: NodeId(id), before, after: Box::new(object) })?;
             Ok(json!({ "template": loom_scene::light::TEMPLATES[index as usize].0 }))
         }
+        Command::PhotometricWebFile { id, path } => {
+            let node = state.scene.node(NodeId(id)).ok_or_else(|| missing(NodeId(id)))?;
+            let mut object = node.object.clone();
+            let ObjectKind::Light(l) = &mut object else { return Err(format!("{} is not a light", node.name)) };
+            let text = std::fs::read(&path).map_err(|e| format!("{path}: {e}"))?;
+            let ph = l.photometric.as_mut().ok_or_else(|| format!("{}: only photometric lights take a web", node.name))?;
+            ph.load_web(&path, &String::from_utf8_lossy(&text))?;
+            ph.distribution.set(loom_scene::light::DIST_WEB);
+            l.light_type = loom_scene::light::LightType::Omni;
+            let web = ph.web.clone().expect("loaded");
+            let before = Box::new(node.object.clone());
+            commit(state, "Choose Photometric File", Change::ReplaceObject { id: NodeId(id), before, after: Box::new(object) })?;
+            let (beam, field) = web.beam_field();
+            Ok(json!({ "file": path, "peak_candela": web.peak, "lumens": web.peak * web.solid_angle, "beam": beam, "field": field }))
+        }
         Command::CreateSunlight { daylight, position, radius, orbital_scale } => create_sun_system(state, daylight, Vec3::from(position), radius, orbital_scale),
         Command::SunlightParameters { id, location, latitude, longitude, time_zone, year, month, day, hour, minute, dst, north, orbital_scale } => set_sunlight(
             state,

@@ -27,7 +27,11 @@ const DEFAULT_AMBIENT: f32 = 0.2;
 /// The shaded viewport's mapping of a light sample.
 fn view_light(s: &LightSample) -> Option<loom_render::ViewLight> {
     let kind = match s.emitter {
-        Emitter::Point => loom_render::ViewLightKind::Point,
+        // A Photometric Web lighting a cone draws as a spot of its beam and field.
+        Emitter::Point => match s.cone() {
+            Some((hotspot, falloff)) => loom_render::ViewLightKind::Spot { hotspot, falloff },
+            None => loom_render::ViewLightKind::Point,
+        },
         Emitter::Spot { hotspot, falloff } => loom_render::ViewLightKind::Spot { hotspot, falloff },
         Emitter::Directional => loom_render::ViewLightKind::Directional,
         Emitter::Ambient => return None,

@@ -66,6 +66,7 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
         Dialog::RenderFile | Dialog::SaveRenderedImage => "renderoutput",
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::MaterialMap { .. } | Dialog::MaterialBitmap | Dialog::PickUvTexture | Dialog::BitmapFit => "sceneassets/images",
         Dialog::ArchiveFile => "archives",
+        Dialog::PhotometricWeb { .. } => "sceneassets/photometric",
         _ => "",
     };
     let project = (!kind.is_empty()).then(|| loom_commands::assets::project_dir(&app.state, kind)).flatten();
@@ -169,6 +170,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::SkinLoadEnvelopes => ("Load Envelopes", "env", "Open"),
         Dialog::PointCacheRecord { .. } => ("Save Points", "pc2", "Save"),
         Dialog::PointCacheLoad { .. } => ("Load Points", "pc2", "Open"),
+        Dialog::PhotometricWeb { .. } => ("Open a Photometric Web File", "ies", "Open"),
         Dialog::OpenMaterialLibrary => ("Open Material Library", "lmat", "Open"),
         Dialog::MergeMaterialLibrary => ("Merge Material Library", "lmat", "Open"),
         Dialog::SaveMaterialLibrary => ("Save Material Library", "lmat", "Save"),
@@ -235,6 +237,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::SkinLoadEnvelopes => Command::SkinLoadEnvelopes { path: Some(p) },
         Dialog::PointCacheRecord { index, start, end } => Command::PointCacheRecord { index, path: p, start, end },
         Dialog::PointCacheLoad { index } => Command::PointCacheLoad { index, path: p },
+        Dialog::PhotometricWeb { light } => Command::PhotometricWebFile { id: light, path: p },
         Dialog::OpenMaterialLibrary => Command::OpenMaterialLibrary { path: p },
         Dialog::MergeMaterialLibrary => Command::MergeMaterialLibrary { path: p, names: None },
         Dialog::SaveMaterialLibrary => Command::SaveMaterialLibrary { path: Some(p) },

@@ -539,6 +539,7 @@ impl LightObject {
             return match ph.distribution.get() {
                 DIST_DIFFUSE => diffuse_icon(),
                 DIST_SPOT => spot_icon(),
+                DIST_WEB if ph.web.is_some() => web_icon(ph.web.as_deref().expect("checked"), ph.web_rotation()),
                 _ => bulb_icon(),
             };
         }
@@ -643,8 +644,17 @@ pub fn kelvin_to_srgb(kelvin: f32) -> Vec3 {
 pub struct Photometric {
     /// Index into [`DISTRIBUTIONS`].
     pub distribution: Param<u32>,
-    /// Photometric Web: the IES file (drawn as Uniform Spherical).
+    /// Photometric Web: the web file's path as it was chosen.
     pub web_file: Option<String>,
+    /// The web read from `web_file` (kept in the scene, so it renders when
+    /// the file is gone).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web: Option<std::sync::Arc<crate::ies::Web>>,
+    /// Distribution (Photometric Web) > X / Y / Z Rotation (degrees): the
+    /// web turned in the light's frame.
+    pub web_rotation_x: Param<f32>,
+    pub web_rotation_y: Param<f32>,
+    pub web_rotation_z: Param<f32>,
     /// Kelvin (true) or the lamp list (false).
     pub use_kelvin: Param<bool>,
     /// Index into [`LAMPS`].
@@ -683,6 +693,10 @@ impl Photometric {
         Self {
             distribution: p(DIST_SPHERICAL),
             web_file: None,
+            web: None,
+            web_rotation_x: p(0.0),
+            web_rotation_y: p(0.0),
+            web_rotation_z: p(0.0),
             use_kelvin: p(false),
             lamp: p(LAMP_D65),
             kelvin: p(3600.0),
@@ -707,6 +721,7 @@ impl Photometric {
         use std::f32::consts::PI;
         match self.distribution.get() {
             DIST_DIFFUSE => PI,
+            DIST_WEB if self.web.is_some() => self.web.as_ref().map_or(4.0 * PI, |w| w.solid_angle),
             DIST_SPOT => 2.0 * PI * (1.0 - (falloff_deg.min(MAX_SPOT_ANGLE) * 0.5).to_radians().cos()),
             _ => 4.0 * PI,
         }
@@ -728,6 +743,21 @@ impl Photometric {
     pub fn to_candela(&self, v: f32, unit: u32, falloff_deg: f32) -> f32 {
         let one = self.from_candela(1.0, unit, falloff_deg);
         v / one.max(1e-9)
+    }
+
+    /// X / Y / Z Rotation of the web as a rotation in the light's frame.
+    pub fn web_rotation(&self) -> glam::Quat {
+        glam::Quat::from_euler(glam::EulerRot::XYZ, self.web_rotation_x.get().to_radians(), self.web_rotation_y.get().to_radians(), self.web_rotation_z.get().to_radians())
+    }
+
+    /// Choose Photometric File: reads the web from `text` (the file at
+    /// `path`); the intensity becomes the web's peak candela.
+    pub fn load_web(&mut self, path: &str, text: &str) -> Result<(), String> {
+        let web = crate::ies::Web::parse(text).map_err(|e| format!("{path}: {e}"))?;
+        self.candela.set(web.peak);
+        self.web = Some(std::sync::Arc::new(web));
+        self.web_file = Some(path.to_string());
+        Ok(())
     }
 
     /// Dimming's fraction of the full intensity.
@@ -785,6 +815,9 @@ impl LightObject {
         ];
         if ph.distribution.get() == DIST_SPOT {
             v.extend([("Hotspot", f(&self.hotspot)), ("Falloff", f(&self.falloff))]);
+        }
+        if ph.distribution.get() == DIST_WEB {
+            v.extend([("X Rotation", f(&ph.web_rotation_x)), ("Y Rotation", f(&ph.web_rotation_y)), ("Z Rotation", f(&ph.web_rotation_z))]);
         }
         v.extend([
             ("Light Shape", i(&ph.shape)), ("Shape Length", f(&ph.shape_length)), ("Shape Width", f(&ph.shape_width)), ("Shape Radius", f(&ph.shape_radius)),
@@ -847,6 +880,9 @@ impl LightObject {
             "Shape Width" => ph.shape_width.set(v.max(0.0)),
             "Shape Radius" => ph.shape_radius.set(v.max(0.0)),
             "Render Shape" => ph.render_shape.set(b),
+            "X Rotation" => ph.web_rotation_x.set(v),
+            "Y Rotation" => ph.web_rotation_y.set(v),
+            "Z Rotation" => ph.web_rotation_z.set(v),
             _ => return false,
         }
         true
@@ -884,6 +920,29 @@ pub fn bulb_icon() -> Mesh {
     for i in 0..8 {
         polys.push(vec![top, first[i], first[(i + 1) % 8]]);
         polys.push(vec![bottom, last[(i + 1) % 8], last[i]]);
+    }
+    loom_mesh::build_merged(&wind_outward(polys, Vec3::ZERO))
+}
+
+/// Photometric Web: the web's shape (radius by the intensity each way,
+/// the peak 8 units out) turned by its X/Y/Z Rotation.
+pub fn web_icon(web: &crate::ies::Web, turn: glam::Quat) -> Mesh {
+    let (nr, ns) = (12, 16);
+    let point = |v: usize, h: usize| {
+        let (a, b) = (v as f32 / nr as f32 * std::f32::consts::PI, h as f32 / ns as f32 * std::f32::consts::TAU);
+        let d = Vec3::new(a.sin() * b.cos(), a.sin() * b.sin(), -a.cos());
+        turn * (d * (8.0 * web.relative(d)).max(0.4))
+    };
+    let rings: Vec<Vec<Vec3>> = (1..nr).map(|v| (0..ns).map(|h| point(v, h)).collect()).collect();
+    let mut polys = Vec::new();
+    for k in 0..rings.len() - 1 {
+        band(&mut polys, &rings[k], &rings[k + 1]);
+    }
+    let (bottom, top) = (point(0, 0), point(nr, 0));
+    let (first, last) = (&rings[0], &rings[rings.len() - 1]);
+    for i in 0..ns {
+        polys.push(vec![bottom, first[(i + 1) % ns], first[i]]);
+        polys.push(vec![top, last[i], last[(i + 1) % ns]]);
     }
     loom_mesh::build_merged(&wind_outward(polys, Vec3::ZERO))
 }
@@ -1045,6 +1104,9 @@ pub struct LightSample {
     /// Ray Traced, Adv. Ray Traced and Area Shadows: renders trace the
     /// light's shadows (None: a shadow map, or no shadows).
     pub traced: Option<TracedShadow>,
+    /// Photometric Web: the web and the rotation from world directions
+    /// into its frame (its nadir is `direction`).
+    pub web: Option<(std::sync::Arc<crate::ies::Web>, glam::Quat)>,
 }
 
 /// How a light's ray-traced shadows are traced.
@@ -1094,6 +1156,30 @@ impl LightObject {
 }
 
 impl LightSample {
+    /// `falloff` towards the unit direction `dir` from the light, with a
+    /// Photometric Web's intensity in that direction.
+    pub fn falloff_towards(&self, distance: f32, dir: Vec3) -> f32 {
+        let k = self.falloff(distance, dir.dot(self.direction));
+        match &self.web {
+            Some((web, to_web)) if k > 0.0 => k * web.relative(*to_web * dir),
+            _ => k,
+        }
+    }
+
+    /// The (hotspot, falloff) cone of a spot, or of a web that lights a
+    /// cone about its nadir (the beam and field angles), for renderers that
+    /// draw a cone rather than the web.
+    pub fn cone(&self) -> Option<(f32, f32)> {
+        match (&self.emitter, &self.web) {
+            (Emitter::Spot { hotspot, falloff }, _) => Some((*hotspot, *falloff)),
+            (_, Some((web, _))) => {
+                let (beam, field) = web.beam_field();
+                (field < 179.0).then_some((beam, field))
+            }
+            _ => None,
+        }
+    }
+
     /// The fraction of the light that reaches `distance` from the light at
     /// an angle with cosine `cos_axis` to its direction: decay, near / far
     /// attenuation and the spot cone, as the reference computes them.
@@ -1165,6 +1251,7 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             }
         };
         let near = l.near_use.get().then(|| (l.near_start.get(), l.near_end.get()));
+        let head = luminaire_factor(scene, n);
         if let Some(ph) = &l.photometric {
             // Physical light: inverse square from 1 m on, the distribution's
             // cone, the emitter's size as the source radius.
@@ -1173,13 +1260,23 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
                 DIST_DIFFUSE => Emitter::Spot { hotspot: 0.0, falloff: DIFFUSE_FALLOFF },
                 _ => Emitter::Point,
             };
+            // Photometric Web: the web turned by the light and its X/Y/Z Rotation.
+            let web = ph.web.as_ref().filter(|_| ph.distribution.get() == DIST_WEB).map(|w| {
+                let (_, rot, _) = world.to_scale_rotation_translation();
+                let turn = rot.normalize() * ph.web_rotation();
+                (w.clone(), turn.inverse())
+            });
+            let direction = match &web {
+                Some((_, to_web)) => (to_web.inverse() * Vec3::NEG_Z).normalize_or(direction),
+                None => direction,
+            };
             let shape_radius = ph.source_radius();
             out.push(LightSample {
                 id: n.id,
                 emitter,
                 position,
                 direction,
-                color: ph.linear_color() * ph.candela.get() * ph.dim() / PHOTOMETRIC_LUX_PER_MULTIPLIER,
+                color: ph.linear_color() * ph.candela.get() * ph.dim() / PHOTOMETRIC_LUX_PER_MULTIPLIER * head,
                 decay: 2,
                 decay_start: 1.0 / ph.unit_metres,
                 near: None,
@@ -1195,6 +1292,7 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
                 target_distance: target_distance(scene, n.id).unwrap_or(DEFAULT_TARGET_DISTANCE),
                 exclusion: l.exclusion.clone(),
                 traced: l.traced_shadow(),
+                web,
             });
             continue;
         }
@@ -1203,7 +1301,7 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             emitter,
             position,
             direction,
-            color: srgb_to_linear(l.color.get()) * l.multiplier.get(),
+            color: srgb_to_linear(l.color.get()) * l.multiplier.get() * head,
             decay: l.decay.get(),
             decay_start: near.map_or(l.decay_start.get(), |(_, e)| e),
             near,
@@ -1220,9 +1318,24 @@ pub fn scene_lights(scene: &Scene, visible: impl Fn(&Node) -> bool) -> Vec<Light
             target_distance: target_distance(scene, n.id).unwrap_or(DEFAULT_TARGET_DISTANCE),
             exclusion: l.exclusion.clone(),
             traced: if emitter == Emitter::Ambient { None } else { l.traced_shadow() },
+            web: None,
         });
     }
     out
+}
+
+/// The Dimmer and Filter Color of the Luminaire heads above a light (the
+/// assemblies it belongs to), as one linear factor.
+pub fn luminaire_factor(scene: &Scene, n: &Node) -> Vec3 {
+    let mut k = Vec3::ONE;
+    let mut cur = n.parent;
+    while let Some(p) = cur.and_then(|p| scene.node(p)) {
+        if let ObjectKind::Luminaire { dimmer, filter_color, .. } = &p.object {
+            k *= srgb_to_linear(filter_color.get()) * (dimmer.get() / 100.0).max(0.0);
+        }
+        cur = p.parent;
+    }
+    k
 }
 
 /// Default lighting for a view whose eye frame is `eye_to_world` (looking
@@ -1251,6 +1364,7 @@ pub fn default_lights(count: u32, eye_to_world: Mat4) -> Vec<LightSample> {
         target_distance: DEFAULT_TARGET_DISTANCE,
         exclusion: Exclusion::default(),
         traced: None,
+        web: None,
     };
     if count >= 2 {
         vec![base(dir(Vec3::new(0.5, -0.5, -1.0)), 0.75), base(dir(Vec3::new(-0.5, 0.6, 1.0)), 0.35)]

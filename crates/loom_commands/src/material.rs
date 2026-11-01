@@ -11,7 +11,7 @@ use loom_scene::material::{
     default_amount, map_at, map_at_mut, map_slot_at_mut, next_material_id, resolve_level, Blend, Level, Map, MapType, MaterialEditorSlots, MaterialKind, MaterialLibrary, NavStep, SampleType, StandardMaterial,
     SubMaterial, SLOT_COUNT,
 };
-use loom_scene::{Change, MaterialId, NodeId, Param};
+use loom_scene::{Change, MaterialId, NodeId, ObjectKind, Param};
 use serde_json::{json, Value};
 
 pub fn handles(c: &C) -> bool {
@@ -494,15 +494,29 @@ pub fn bitmap_paths(state: &AppState) -> Vec<Value> {
             walk(c, out);
         }
     }
-    let mut paths = std::collections::BTreeMap::new();
-    for m in state.scene.materials.values() {
+    // Each file: how many maps use it and who (Resource Information): the
+    // materials and the objects they are on, or the photometric lights.
+    let mut paths: std::collections::BTreeMap<String, (usize, Vec<String>)> = std::collections::BTreeMap::new();
+    for (id, m) in &state.scene.materials {
+        let mut here = std::collections::BTreeMap::new();
         for slot in m.map_slots() {
             if let Some(map) = m.map(slot) {
-                walk(map, &mut paths);
+                walk(map, &mut here);
             }
         }
+        for (p, n) in here {
+            let e = paths.entry(p).or_default();
+            e.0 += n;
+            e.1.push(format!("Material: {}", m.name));
+            e.1.extend(state.scene.nodes().filter(|o| o.material == Some(*id)).map(|o| format!("Object: {}", o.name)));
+        }
     }
-    paths.into_iter().map(|(p, n)| json!({ "path": p, "found": std::path::Path::new(&p).is_file(), "maps": n })).collect()
+    for n in state.scene.nodes() {
+        if let Some(f) = n.object.light().and_then(|l| l.photometric.as_ref()).and_then(|ph| ph.web_file.clone()) {
+            paths.entry(f).or_default().1.push(format!("Photometric light: {}", n.name));
+        }
+    }
+    paths.into_iter().map(|(p, (n, users))| json!({ "path": p, "found": std::path::Path::new(&p).is_file(), "maps": n, "users": users })).collect()
 }
 
 /// Material Explorer's scene panel: every material objects use (top level),
@@ -1332,10 +1346,25 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     }
                 });
             }
-            if n == 0 {
-                return Err(format!("no map uses {from}"));
+            let mut changes = Vec::new();
+            if n > 0 {
+                changes.push(Change::SetMaterials { before, after });
             }
-            commit(state, "Set Path", Change::SetMaterials { before, after })?;
+            // Photometric webs.
+            for node in state.scene.nodes() {
+                let mut object = node.object.clone();
+                if let ObjectKind::Light(l) = &mut object {
+                    if let Some(ph) = l.photometric.as_mut().filter(|ph| ph.web_file.as_deref() == Some(from.as_str())) {
+                        ph.web_file = Some(new.clone());
+                        n += 1;
+                        changes.push(Change::ReplaceObject { id: node.id, before: Box::new(node.object.clone()), after: Box::new(object) });
+                    }
+                }
+            }
+            if n == 0 {
+                return Err(format!("no map or light uses {from}"));
+            }
+            commit(state, "Set Path", Change::Group(changes))?;
             state.bitmap_generation += 1;
             state.mesh_dirty = true;
             Ok(json!({ "path": new, "maps": n }))

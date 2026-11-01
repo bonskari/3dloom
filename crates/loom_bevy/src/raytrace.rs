@@ -271,7 +271,7 @@ impl TraceScene {
             if cos <= 0.0 {
                 continue;
             }
-            let k = l.falloff(if dist == f32::MAX { 0.0 } else { dist }, (-to).dot(l.direction));
+            let k = l.falloff_towards(if dist == f32::MAX { 0.0 } else { dist }, -to);
             if k <= 0.0 {
                 continue;
             }

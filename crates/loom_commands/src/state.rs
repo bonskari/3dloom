@@ -732,9 +732,9 @@ impl CoordSystem {
 }
 
 /// Every utility of the Utilities panel (More... lists them; Configure Button Sets places them).
-pub const UTILITIES: [&str; 11] = [
+pub const UTILITIES: [&str; 12] = [
     "Measure", "Rescale World Units", "Collapse", "Reset XForm", "Assign Vertex Colors", "Link Inheritance (Selected)",
-    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter", "Camera Match",
+    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter", "Camera Match", "Resource Collector",
 ];
 
 fn one_u32() -> u32 {
@@ -2377,7 +2377,8 @@ impl AppState {
             show_key_times: false,
             show_ghosting: false,
             xview: crate::xview::XView::default(),
-            utility_buttons: UTILITIES.iter().map(|s| (*s).to_owned()).collect(),
+            // Resource Collector is under More... only.
+            utility_buttons: UTILITIES.iter().filter(|s| **s != "Resource Collector").map(|s| (*s).to_owned()).collect(),
             show_vertices: false,
             show_statistics: false,
             isolation: None,

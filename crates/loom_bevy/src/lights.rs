@@ -48,11 +48,11 @@ pub(crate) enum Kind {
 
 pub(crate) fn kind(s: &LightSample) -> Option<Kind> {
     match s.emitter {
-        Emitter::Point => Some(Kind::Point),
-        Emitter::Spot { falloff, .. } if falloff < 179.0 => Some(Kind::Spot),
-        Emitter::Spot { .. } => Some(Kind::Point),
         Emitter::Directional => Some(Kind::Directional),
         Emitter::Ambient => None,
+        // A Photometric Web lighting a cone draws as a spot of its beam and field.
+        _ if s.cone().is_some_and(|(_, falloff)| falloff < 179.0) => Some(Kind::Spot),
+        _ => Some(Kind::Point),
     }
 }
 
@@ -137,7 +137,7 @@ pub(crate) fn point(s: &LightSample, centre_distance: f32, scene_radius: f32) ->
 
 pub(crate) fn spot(s: &LightSample, centre_distance: f32, scene_radius: f32) -> SpotLight {
     let (color, _) = split(s.color);
-    let Emitter::Spot { hotspot, falloff } = s.emitter else { unreachable!("spot sample") };
+    let (hotspot, falloff) = s.cone().expect("spot sample");
     let outer = (falloff * 0.5).to_radians().min(std::f32::consts::FRAC_PI_2 - 1e-3);
     SpotLight {
         color,

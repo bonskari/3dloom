@@ -702,9 +702,9 @@ fn create_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     sub(ui, app, "Helpers", |ui, app| {
-        for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass"), (crate::HelperKind::CamPoint, "Camera Point")] {
+        for (kind, label) in [(crate::HelperKind::Dummy, "Dummy"), (crate::HelperKind::Point, "Point"), (crate::HelperKind::Grid, "Grid"), (crate::HelperKind::Tape, "Tape Measure"), (crate::HelperKind::Protractor, "Protractor"), (crate::HelperKind::Compass, "Compass"), (crate::HelperKind::CamPoint, "Camera Point"), (crate::HelperKind::Luminaire, "Luminaire")] {
             if ui.button(label).clicked() {
-                app.camera_match_helpers = kind == crate::HelperKind::CamPoint;
+                app.helper_class = crate::HelperKind::class_of(kind);
                 app.create_category = crate::Category::Helpers;
                 app.panel_tab = crate::Tab::Create;
                 app.start_create(Some(crate::CreateKind::Helper(kind)));

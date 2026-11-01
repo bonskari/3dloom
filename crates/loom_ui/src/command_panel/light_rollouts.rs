@@ -58,7 +58,7 @@ fn int(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, name: &str, label: &str
 }
 
 /// A colour swatch over three 0..1 channel parameters ("<prefix> R/G/B"), one undo step.
-fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, prefix: &str, color: glam::Vec3) {
+pub(crate) fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, prefix: &str, color: glam::Vec3) {
     let supported = loom_bevy::lights::supports(prefix);
     ui.add_enabled_ui(supported, |ui| {
         let mut rgb = [0, 1, 2].map(|i| (color[i].clamp(0.0, 1.0) * 255.0).round() as u8);
@@ -317,9 +317,6 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
         ui.separator();
         ui.label("Light Distribution (Type):");
         combo(ui, app, id, "Distribution", &DISTRIBUTIONS, ph.distribution.get());
-        if ph.distribution.get() == loom_scene::light::DIST_WEB {
-            ui.label(egui::RichText::new("Drawn as Uniform Spherical (the renderers read no IES files).").small());
-        }
     });
     rollout(ui, "Intensity/Color/Attenuation", true, |ui| {
         ui.label("Color:");
@@ -390,6 +387,19 @@ fn photometric(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject
         rollout(ui, "Distribution (Spotlight)", true, |ui| {
             number(ui, app, id, "Hotspot", "Hotspot/Beam:", l.hotspot.get(), false);
             number(ui, app, id, "Falloff", "Falloff/Field:", l.falloff.get(), false);
+        });
+    }
+    if ph.distribution.get() == loom_scene::light::DIST_WEB {
+        rollout(ui, "Distribution (Photometric Web)", true, |ui| {
+            web_diagram(ui, ph.web.as_deref());
+            let name = ph.web_file.as_deref().map(|p| std::path::Path::new(p).file_stem().map_or(p.to_string(), |n| n.to_string_lossy().into_owned()));
+            let label = name.unwrap_or_else(|| "< Choose photometric file >".into());
+            if ui.add_sized([ui.available_width(), 18.0], egui::Button::new(label)).on_hover_text(ph.web_file.clone().unwrap_or_default()).clicked() {
+                app.state.dialog = Some(loom_commands::Dialog::PhotometricWeb { light: id.0 });
+            }
+            number(ui, app, id, "X Rotation", "X Rotation:", ph.web_rotation_x.get(), false);
+            number(ui, app, id, "Y Rotation", "Y Rotation:", ph.web_rotation_y.get(), false);
+            number(ui, app, id, "Z Rotation", "Z Rotation:", ph.web_rotation_z.get(), false);
         });
     }
     rollout(ui, "Shape/Area Shadows", false, |ui| {
@@ -707,4 +717,38 @@ fn sunlight(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightObject) {
             orbital_scale: e.orbital_scale,
         });
     }
+}
+
+/// The web diagram: the web's intensity in its 0°–180° (and 90°–270°)
+/// planes as a polar graph, nadir down, scaled to the peak.
+fn web_diagram(ui: &mut egui::Ui, web: Option<&loom_scene::ies::Web>) {
+    let side = ui.available_width().min(150.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), side), egui::Sense::hover());
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 0.0, egui::Color32::from_gray(24));
+    let (c, r) = (rect.center(), side * 0.46);
+    let grid = egui::Stroke::new(1.0_f32, egui::Color32::from_gray(70));
+    for k in 1..=4 {
+        p.circle_stroke(c, r * k as f32 / 4.0, grid);
+    }
+    p.line_segment([c - egui::vec2(r, 0.0), c + egui::vec2(r, 0.0)], grid);
+    p.line_segment([c - egui::vec2(0.0, r), c + egui::vec2(0.0, r)], grid);
+    let Some(web) = web else { return };
+    // Vertical angle a from the nadir (down); the plane at `h` on the right, `h + 180` on the left.
+    let curve = |h: f32, color: egui::Color32| {
+        let mut pts = Vec::with_capacity(362);
+        for i in 0..=180 {
+            let a = (i as f32).to_radians();
+            let k = web.candela_at(i as f32, h) / web.peak * r;
+            pts.push(c + egui::vec2(a.sin() * k, a.cos() * k));
+        }
+        for i in (0..=180).rev() {
+            let a = (i as f32).to_radians();
+            let k = web.candela_at(i as f32, h + 180.0) / web.peak * r;
+            pts.push(c + egui::vec2(-a.sin() * k, a.cos() * k));
+        }
+        p.add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, color)));
+    };
+    curve(90.0, egui::Color32::from_rgb(90, 140, 230));
+    curve(0.0, egui::Color32::from_rgb(230, 80, 60));
 }

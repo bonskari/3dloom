@@ -514,11 +514,45 @@ fn bitmap_path_editor_strips_a_picked_path() {
     h.frames(2);
     h.click_text_anywhere("/gone/brick.png (missing)");
     h.frames(1);
-    h.click_text_anywhere("Strip Path");
+    h.click_text_anywhere("Strip Selected Paths");
     h.frames(2);
     let ed = &h.app.state.scene.material_editor;
     let top = ed.slots[ed.active].unwrap();
     assert_eq!(h.app.state.scene.materials[&top].map("Diffuse Color").unwrap().path, "brick.png");
+}
+
+/// The Path Editor lists photometric webs too; Select Missing Files picks
+/// the missing ones, Info... shows what uses them (Resource Information),
+/// Strip All Paths strips every path.
+#[test]
+fn bitmap_path_editor_selects_missing_shows_info_and_strips_all() {
+    let mut h = Harness::new();
+    let dir = std::env::temp_dir().join(format!("loom-pathed-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let web = dir.join("down.ies");
+    std::fs::write(&web, "TILT=NONE\n1 -1 1.0 2 1 1 2 0.1 0.1 0.0\n1.0 1.0 20\n0 90\n0\n100 0\n").unwrap();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() });
+    h.cmd(Command::SetMapBitmap { path: "/gone/brick.png".into(), sequence: None });
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::FreeLight, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let light = loom_scene::NodeId(r["id"].as_u64().unwrap());
+    h.cmd(Command::PhotometricWebFile { id: light.0, path: web.to_string_lossy().into_owned() });
+    h.cmd(Command::BitmapPathEditor);
+    h.frames(2);
+    assert!(!h.text_centers(&web.to_string_lossy()).is_empty(), "the web is listed");
+    h.click_text_anywhere("Select Missing Files");
+    h.frames(1);
+    h.click_text_anywhere("Info...");
+    h.frames(2);
+    let ed = &h.app.state.scene.material_editor;
+    let top = ed.slots[ed.active].unwrap();
+    let mat = h.app.state.scene.materials[&top].name.clone();
+    assert!(!h.text_centers(&format!("  Material: {mat}")).is_empty(), "Info names the material using the missing map");
+    h.click_text_anywhere("Strip All Paths");
+    h.frames(2);
+    assert_eq!(h.app.state.scene.materials[&top].map("Diffuse Color").unwrap().path, "brick.png");
+    let ph = h.app.state.scene.node(light).unwrap().object.light().unwrap().photometric.clone().unwrap();
+    assert_eq!(ph.web_file.as_deref(), Some("down.ies"), "the web's path is stripped too");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Shift+right-click a Material Editor spinner keys that material value at

@@ -2397,36 +2397,73 @@ pub fn replace_material(ctx: &egui::Context, app: &mut LoomApp, kind: u8, map: b
 pub fn bitmap_path_editor(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let rows = loom_commands::material::bitmap_paths(&app.state);
     let id = egui::Id::new("bitmap_path_editor");
-    let (mut pick, mut new_path): (Option<String>, String) = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
-    let mut action: Option<String> = None;
+    // The highlighted paths, the New Path field and whether Info is shown.
+    let (mut picks, mut new_path, mut info): (Vec<String>, String, bool) = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+    picks.retain(|p| rows.iter().any(|r| r["path"] == p.as_str()));
+    let mut action: Option<(Vec<String>, String)> = None;
     egui::Window::new("Bitmap/Photometric Path Editor").open(open).default_size([460.0, 240.0]).show(ctx, |ui| {
         for r in &rows {
             let p = r["path"].as_str().unwrap_or("").to_owned();
             let found = r["found"].as_bool().unwrap_or(false);
             let text = if found { p.clone() } else { format!("{p} (missing)") };
-            if ui.selectable_label(pick.as_deref() == Some(p.as_str()), text).clicked() {
-                pick = Some(p);
+            let on = picks.contains(&p);
+            if ui.selectable_label(on, text).clicked() {
+                // Ctrl adds or removes one, a plain click picks only it.
+                if ui.input(|i| i.modifiers.command) {
+                    if on {
+                        picks.retain(|x| *x != p);
+                    } else {
+                        picks.push(p);
+                    }
+                } else {
+                    picks = vec![p];
+                }
             }
         }
+        ui.horizontal(|ui| {
+            if ui.button("Select Missing Files").clicked() {
+                picks = rows.iter().filter(|r| r["found"] == false).filter_map(|r| r["path"].as_str().map(str::to_owned)).collect();
+            }
+            if ui.add_enabled(!picks.is_empty(), egui::Button::new("Info...")).clicked() {
+                info = !info;
+            }
+        });
         ui.horizontal(|ui| {
             ui.label("New Path:");
             ui.text_edit_singleline(&mut new_path);
         });
         ui.horizontal(|ui| {
-            if ui.add_enabled(pick.is_some() && !new_path.is_empty(), egui::Button::new("Set Path")).clicked() {
-                action = Some(new_path.clone());
+            if ui.add_enabled(!picks.is_empty() && !new_path.is_empty(), egui::Button::new("Set Path")).clicked() {
+                action = Some((picks.clone(), new_path.clone()));
             }
-            if ui.add_enabled(pick.is_some(), egui::Button::new("Strip Path")).clicked() {
-                action = Some(String::new());
+            if ui.add_enabled(!picks.is_empty(), egui::Button::new("Strip Selected Paths")).clicked() {
+                action = Some((picks.clone(), String::new()));
+            }
+            if ui.add_enabled(!rows.is_empty(), egui::Button::new("Strip All Paths")).clicked() {
+                action = Some((rows.iter().filter_map(|r| r["path"].as_str().map(str::to_owned)).collect(), String::new()));
             }
         });
+        if info && !picks.is_empty() {
+            // Resource Information: what uses the highlighted files.
+            ui.separator();
+            for r in rows.iter().filter(|r| picks.iter().any(|p| r["path"] == p.as_str())) {
+                ui.label(egui::RichText::new(r["path"].as_str().unwrap_or("")).strong());
+                for u in r["users"].as_array().into_iter().flatten() {
+                    ui.label(format!("  {}", u.as_str().unwrap_or("")));
+                }
+            }
+        }
     });
-    if let (Some(to), Some(from)) = (action, pick.clone()) {
-        if app.dispatch(Command::BitmapPathSet { from, to }).is_ok() {
-            pick = None;
+    if let Some((from, to)) = action {
+        let mut ok = true;
+        for f in from {
+            ok &= app.dispatch(Command::BitmapPathSet { from: f, to: to.clone() }).is_ok();
+        }
+        if ok {
+            picks.clear();
         }
     }
-    ctx.data_mut(|d| d.insert_temp(id, (pick, new_path)));
+    ctx.data_mut(|d| d.insert_temp(id, (picks, new_path, info)));
 }
 
 /// Material Explorer (scene panel): the materials objects use, their type

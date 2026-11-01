@@ -300,3 +300,94 @@ fn rolling_a_target_camera_writes_its_animatable_roll_track() {
     execute(&mut s, Command::SetFrame { frame: 0 }).unwrap();
     assert!(s.scene.world_matrix(id).y_axis.truncate().angle_between(up0) < 1e-3, "frame 0 stays upright");
 }
+
+/// A symmetric downlight web: 1000 cd at the nadir, half at 30°, none from 60° up.
+const DOWNLIGHT_IES: &str = "IESNA:LM-63-2002\n[TEST] downlight\nTILT=NONE\n1 -1 1.0 4 1 1 2 0.1 0.1 0.0\n1.0 1.0 20\n0 30 60 90\n0\n1000 500 0 0\n";
+
+#[test]
+fn photometric_web_file_lights_by_the_web_and_survives_save_and_load() {
+    let mut s = AppState::new();
+    // Aimed down -Z from 100 units up.
+    let (f, _) = create(&mut s, LightKind::FreeLight, [0.0, 0.0, 100.0], [0.0; 3]);
+    let dir = std::env::temp_dir().join(format!("loom-ies-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ies = dir.join("downlight.ies");
+    std::fs::write(&ies, DOWNLIGHT_IES).unwrap();
+    let r = execute(&mut s, Command::PhotometricWebFile { id: f.0, path: ies.to_string_lossy().into_owned() }).unwrap();
+    assert_eq!(r["peak_candela"], 1000.0);
+    let ph = light(&s, f).photometric.unwrap();
+    assert_eq!((ph.distribution.get(), ph.candela.get()), (loom_scene::light::DIST_WEB, 1000.0), "Photometric Web at the web's peak");
+    // Lumens: the web's flux, not a sphere's.
+    set(&mut s, f, "Intensity Unit", 0.0);
+    let lm = s.scene.node(f).unwrap().object.parameters().into_iter().find(|(n, _)| *n == "Intensity").unwrap().1;
+    assert!(matches!(lm, loom_scene::ParamValue::Float(v) if (v - 1087.0).abs() < 10.0), "{lm:?}");
+    let sample = |s: &AppState| loom_scene::light::scene_lights(&s.scene, |_| true).into_iter().find(|l| l.id == f).unwrap();
+    let l = sample(&s);
+    assert!(l.web.is_some());
+    let down = l.falloff_towards(10.0, Vec3::NEG_Z);
+    let off = l.falloff_towards(10.0, Vec3::new(30f32.to_radians().sin(), 0.0, -30f32.to_radians().cos()));
+    let up = l.falloff_towards(10.0, Vec3::new(1.0, 0.0, 0.2).normalize());
+    assert!((off / down - 0.5).abs() < 0.01 && up == 0.0, "{down} {off} {up}");
+    let (beam, field) = l.cone().expect("the web lights a cone");
+    assert!((beam - 60.0).abs() <= 1.5 && (field - 108.0).abs() <= 1.5, "beam and field for cone renderers: {beam} {field}");
+    // Y Rotation 90: the nadir now points along the light's X.
+    set(&mut s, f, "Y Rotation", 90.0);
+    let l = sample(&s);
+    assert!(l.falloff_towards(10.0, Vec3::NEG_Z) < 0.01, "turned away from straight down");
+    assert!((l.direction.length() - 1.0).abs() < 1e-4 && l.direction.z.abs() < 1e-3, "{}", l.direction);
+    // Saved in the scene: renders with the file gone.
+    let path = dir.join("web.loom").to_string_lossy().into_owned();
+    execute(&mut s, Command::SaveFile { path: Some(path.clone()) }).unwrap();
+    std::fs::remove_file(&ies).unwrap();
+    let mut u = AppState::new();
+    execute(&mut u, Command::OpenFile { path: Some(path) }).unwrap();
+    assert_eq!(u.scene.node(f).unwrap(), s.scene.node(f).unwrap());
+    assert!(sample(&u).web.is_some());
+    // One undo step back to Uniform Spherical; a missing file or a standard light is an error.
+    let mut s2 = AppState::new();
+    let (g, _) = create(&mut s2, LightKind::FreeLight, [0.0, 0.0, 100.0], [0.0; 3]);
+    assert!(execute(&mut s2, Command::PhotometricWebFile { id: g.0, path: ies.to_string_lossy().into_owned() }).is_err());
+    let (omni, _) = create(&mut s2, LightKind::Omni, [0.0; 3], [0.0; 3]);
+    std::fs::write(&ies, DOWNLIGHT_IES).unwrap();
+    assert!(execute(&mut s2, Command::PhotometricWebFile { id: omni.0, path: ies.to_string_lossy().into_owned() }).is_err());
+    execute(&mut s2, Command::PhotometricWebFile { id: g.0, path: ies.to_string_lossy().into_owned() }).unwrap();
+    execute(&mut s2, Command::UndoSceneOperation).unwrap();
+    assert_eq!(light(&s2, g).photometric.unwrap().distribution.get(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_luminaire_head_dims_and_filters_the_lights_linked_below_it() {
+    let mut s = AppState::new();
+    let r = execute(&mut s, Command::CreateHelper { kind: "luminaire".into(), position: [0.0, 0.0, 50.0], size: 0.0 }).unwrap();
+    let head = NodeId(r["node"].as_u64().unwrap());
+    assert_eq!(s.scene.node(head).unwrap().name, "Luminaire001");
+    assert!(s.scene.node(head).unwrap().object.is_helper());
+    let (omni, _) = create(&mut s, LightKind::Omni, [0.0, 0.0, 40.0], [0.0; 3]);
+    let (photo, _) = create(&mut s, LightKind::FreeLight, [10.0, 0.0, 40.0], [10.0, 0.0, 0.0]);
+    let (alone, _) = create(&mut s, LightKind::Omni, [50.0, 0.0, 40.0], [0.0; 3]);
+    let color = |s: &AppState, id: NodeId| loom_scene::light::scene_lights(&s.scene, |_| true).into_iter().find(|l| l.id == id).unwrap().color;
+    let before = (color(&s, omni), color(&s, photo), color(&s, alone));
+    for l in [omni, photo] {
+        execute(&mut s, Command::SetParent { id: l.0, parent: Some(head.0) }).unwrap();
+    }
+    assert_eq!((color(&s, omni), color(&s, photo)), (before.0, before.1), "Dimmer 100 and a white filter change nothing");
+    set(&mut s, head, "Dimmer", 50.0);
+    set(&mut s, head, "Filter Color G", 0.0);
+    set(&mut s, head, "Filter Color B", 0.0);
+    let (o, p) = (color(&s, omni), color(&s, photo));
+    assert!((o.x - before.0.x * 0.5).abs() < 1e-4 && o.y == 0.0 && o.z == 0.0, "half as bright, red only: {o}");
+    assert!((p.x - before.1.x * 0.5).abs() < 1e-3 && p.y == 0.0, "photometric lights too: {p}");
+    assert_eq!(color(&s, alone), before.2, "a light outside the assembly keeps its light");
+    // The parameters list for the Modify panel and the scene file.
+    let params = s.scene.node(head).unwrap().object.parameters();
+    assert!(params.iter().any(|(n, v)| *n == "Dimmer" && matches!(v, loom_scene::ParamValue::Float(x) if *x == 50.0)));
+    let dir = std::env::temp_dir().join(format!("loom-luminaire-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("lum.loom").to_string_lossy().into_owned();
+    execute(&mut s, Command::SaveFile { path: Some(path.clone()) }).unwrap();
+    let mut u = AppState::new();
+    execute(&mut u, Command::OpenFile { path: Some(path) }).unwrap();
+    assert_eq!(color(&u, omni), o);
+    let _ = std::fs::remove_dir_all(&dir);
+}

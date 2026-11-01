@@ -413,6 +413,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(Dlg::AssetTracking);
             Ok(crate::assets::asset_list(state))
         }
+        C::ResourceCollector { output, include_scene, compress, update } => crate::assets::collect_resources(state, std::path::Path::new(&output), include_scene, compress, update),
         C::RepathAsset { from, to } => {
             let n = crate::assets::repath(state, &[(from, to)], "Set Path")?;
             Ok(json!({ "changed": n }))
@@ -445,14 +446,25 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 return Ok(json!({ "dialog": "MergeFile" }));
             };
             let path = std::path::PathBuf::from(path);
-            let (doc, warnings) = crate::file::read_any(&path)?;
+            let (mut doc, warnings) = crate::file::read_any(&path)?;
+            // Respect System Units in Files: objects from a file in other units keep their real size.
+            let file_metres = doc.settings.units.system_scale as f64 * doc.settings.units.system_unit.metres();
+            let our_metres = state.units.system_scale as f64 * state.units.system_unit.metres();
+            let factor = file_metres / our_metres;
+            let rescaled = state.units.respect_system_units && !crate::max_io::is_max(&path) && (factor - 1.0).abs() > 1e-6;
+            if rescaled {
+                let mut file = AppState::new();
+                file.scene = std::mem::take(&mut doc.scene);
+                execute(&mut file, C::RescaleWorldUnits { factor: factor as f32 })?;
+                doc.scene = file.scene;
+            }
             let label = format!("Merge {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
             let ids = crate::file::merge(state, &doc, names.as_deref(), duplicates.as_deref().unwrap_or_default(), &label)?;
             if crate::max_io::is_max(&path) {
                 state.import_report = warnings;
             }
             state.selection_mode = SelectionMode::Object;
-            Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
+            Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>(), "rescaled": rescaled.then_some(factor) }))
         }
         C::XrefObjects { path, names, automatic } => {
             let Some(path) = path else {
@@ -2394,7 +2406,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. } | C::CamPointScreen { .. } | C::CameraMatch { .. }) => crate::camera::execute(state, c),
-        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister | C::LightIncludeExcludeTool | C::LightIncludeExcludeAssign { .. } | C::PhotometricTemplate { .. } | C::CreateSunlight { .. } | C::SunlightParameters { .. } | C::AddDefaultLightsToScene { .. } | C::SelectTarget) => crate::light::execute(state, c),
+        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister | C::LightIncludeExcludeTool | C::LightIncludeExcludeAssign { .. } | C::PhotometricTemplate { .. } | C::PhotometricWebFile { .. } | C::CreateSunlight { .. } | C::SunlightParameters { .. } | C::AddDefaultLightsToScene { .. } | C::SelectTarget) => crate::light::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;

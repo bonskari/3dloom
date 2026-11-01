@@ -677,6 +677,8 @@ pub enum Dialog {
     /// Point Cache > Record / Load file pickers for stack entry `index`.
     PointCacheRecord { index: u32, start: i32, end: i32 },
     PointCacheLoad { index: u32 },
+    /// Distribution (Photometric Web) > Choose Photometric File of light `light`.
+    PhotometricWeb { light: u64 },
     /// File > New on a scene with objects: Keep Objects and Hierarchy / Keep Objects / New All.
     NewScene,
     /// File > Reset after the save prompt: "Do you really want to reset?"

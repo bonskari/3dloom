@@ -273,3 +273,69 @@ pub fn replace(state: &mut AppState, path: &Path, names: Option<&[String]>, mate
     state.mesh_dirty = true;
     Ok(json!({ "replaced": replaced }))
 }
+
+/// Bitmaps and photometric webs: the files Resource Collector gathers.
+const RESOURCE_EXT: [&str; 13] = ["png", "jpg", "jpeg", "tga", "bmp", "tif", "tiff", "dds", "hdr", "exr", "gif", "psd", "ies"];
+
+/// Utilities > Resource Collector (see `Command::ResourceCollector`).
+pub fn collect_resources(state: &mut AppState, output: &Path, include_scene: bool, compress: bool, update: bool) -> Result<Value, String> {
+    if output.as_os_str().is_empty() {
+        return Err("Resource Collector: no output folder".into());
+    }
+    std::fs::create_dir_all(output).map_err(|e| format!("{}: {e}", output.display()))?;
+    let files: Vec<String> = scene_assets(state)
+        .into_iter()
+        .filter(|p| Path::new(p).extension().and_then(|e| e.to_str()).is_some_and(|e| RESOURCE_EXT.contains(&e.to_ascii_lowercase().as_str())))
+        .collect();
+    let (found, missing): (Vec<String>, Vec<String>) = files.into_iter().partition(|p| Path::new(p).is_file());
+    // Each file under its own name; a second file of the same name gets a number.
+    let mut names: Vec<(String, String)> = Vec::new();
+    for p in &found {
+        let file = Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut name = file.clone();
+        let mut n = 1;
+        while names.iter().any(|(_, m)| *m == name) {
+            name = format!("{n}_{file}");
+            n += 1;
+        }
+        names.push((p.clone(), name));
+    }
+    if update {
+        let pairs: Vec<(String, String)> = names.iter().map(|(p, n)| (p.clone(), output.join(n).to_string_lossy().into_owned())).collect();
+        repath(state, &pairs, "Resource Collector")?;
+        state.bitmap_generation += 1;
+    }
+    let stem = state.file.as_ref().and_then(|f| f.file_stem()).map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Untitled".into());
+    let scene = include_scene.then(|| {
+        let doc = crate::file::Document { format: crate::file::FORMAT, app: format!("3dloom {}", env!("CARGO_PKG_VERSION")), scene: state.scene.clone(), settings: crate::file::SceneSettings::from_state(state) };
+        serde_json::to_vec_pretty(&doc).map_err(|e| e.to_string())
+    });
+    let scene = scene.transpose()?;
+    let mut written = Vec::new();
+    if compress {
+        let mut entries = Vec::new();
+        for (p, n) in &names {
+            entries.push((n.clone(), std::fs::read(p).map_err(|e| format!("{p}: {e}"))?));
+        }
+        if let Some(text) = scene {
+            entries.push((format!("{stem}.loom"), text));
+        }
+        let zip = output.join(format!("{stem}.zip"));
+        std::fs::write(&zip, crate::scene_file::zip(&entries)?).map_err(|e| format!("{}: {e}", zip.display()))?;
+        written.push(zip.to_string_lossy().into_owned());
+    } else {
+        for (p, n) in &names {
+            let to = output.join(n);
+            if Path::new(p) != to {
+                std::fs::copy(p, &to).map_err(|e| format!("{p} -> {}: {e}", to.display()))?;
+            }
+            written.push(to.to_string_lossy().into_owned());
+        }
+        if let Some(text) = scene {
+            let to = output.join(format!("{stem}.loom"));
+            std::fs::write(&to, text).map_err(|e| format!("{}: {e}", to.display()))?;
+            written.push(to.to_string_lossy().into_owned());
+        }
+    }
+    Ok(json!({ "written": written, "missing": missing }))
+}

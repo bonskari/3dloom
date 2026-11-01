@@ -192,6 +192,7 @@ impl LoomApp {
                 "floating_layers": visible_layers,
                 "interaction": interact,
             },
+            "rebuild_ms": self.rebuild_ms,
             "interaction": {
                 "nav_mode": format!("{:?}", s.nav_mode),
                 "camera_drag": self.camera_controller.drag_mode(),
