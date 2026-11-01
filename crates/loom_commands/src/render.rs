@@ -502,6 +502,27 @@ pub fn super_black(img: &mut image::RgbaImage, threshold: u8) {
     }
 }
 
+/// Preferences > Rendering > Don't Antialias Against Background: outline
+/// pixels (alpha between 0 and 255, blended with a black background) become
+/// geometry (unblended, opaque) from half coverage up, else background
+/// (black, alpha 0). Pixels inside the geometry keep their antialiasing.
+pub fn dont_antialias_against_background(img: &mut image::RgbaImage) {
+    for p in img.pixels_mut() {
+        let a = p.0[3];
+        if a == 0 || a == 255 {
+            continue;
+        }
+        if a >= 128 {
+            for c in &mut p.0[..3] {
+                *c = (*c as u32 * 255 / a as u32).min(255) as u8;
+            }
+            p.0[3] = 255;
+        } else {
+            p.0 = [0, 0, 0, 0];
+        }
+    }
+}
+
 /// Render Message Window entry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderMessage {

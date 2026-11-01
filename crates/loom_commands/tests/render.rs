@@ -380,6 +380,22 @@ fn video_color_check_and_super_black_change_the_right_pixels() {
     assert!(!s.scene.render.super_black);
 }
 
+/// Don't Antialias Against Background: an outline pixel blended with black
+/// becomes the geometry's own colour from half coverage up, else background;
+/// opaque and background pixels stay.
+#[test]
+fn dont_antialias_against_background_hardens_only_the_outline() {
+    use loom_commands::render::dont_antialias_against_background;
+    let px = [[100, 50, 0, 192], [40, 40, 40, 64], [10, 20, 30, 255], [7, 7, 7, 0]];
+    let mut img = image::RgbaImage::from_fn(4, 1, |x, _| image::Rgba(px[x as usize]));
+    dont_antialias_against_background(&mut img);
+    let got: Vec<[u8; 4]> = img.pixels().map(|p| p.0).collect();
+    assert_eq!(got, vec![[132, 66, 0, 255], [0, 0, 0, 0], [10, 20, 30, 255], [7, 7, 7, 0]]);
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetPreference { name: "Don't Antialias Against Background".into(), value: 1.0 }).unwrap();
+    assert!(s.prefs.dont_antialias_background);
+}
+
 /// A sequence without an output file warns in the Render Message Window,
 /// which opens; Clear empties it.
 #[test]

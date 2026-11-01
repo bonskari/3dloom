@@ -159,6 +159,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.label(egui::RichText::new("Render Termination Alert").strong());
                     check(ui, app, "Render Termination Alert", "Flash the taskbar when a render finishes");
                 });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Background").strong());
+                    check(ui, app, "Don't Antialias Against Background", "Don't Antialias Against Background");
+                });
             }
             Tab::Animation => {
                 ui.group(|ui| {

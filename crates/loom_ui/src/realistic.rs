@@ -959,6 +959,12 @@ impl LoomApp {
                 self.state.rendered.dirty = None;
             }
         }
+        if result.is_ok() && self.state.prefs.dont_antialias_background {
+            if let Some(img) = self.state.rendered.image.as_mut() {
+                loom_commands::render::dont_antialias_against_background(Arc::make_mut(img));
+                self.state.rendered.version += 1;
+            }
+        }
         use loom_commands::render::{message, MessageLevel};
         let s = &job.req.settings;
         if result.is_ok() && (s.video_color_check || s.super_black) {
