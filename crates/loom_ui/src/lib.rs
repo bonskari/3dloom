@@ -325,6 +325,8 @@ pub struct LoomApp {
     /// Utilities > Configure Button Sets is open with the buttons being edited.
     pub configure_utility_buttons: Option<Vec<String>>,
     pub rescale_factor: f32,
+    /// Rescale World Units > Affect: Selection (off: Scene).
+    pub rescale_selection: bool,
     /// Utilities > Measure > Lock Selected: the nodes measured while locked.
     pub measure_lock: Option<Vec<u64>>,
     /// Utilities > Measure > New Floater: the modeless Measure window is open.
@@ -594,6 +596,7 @@ impl LoomApp {
             stack_height: 90.0,
             configure_utility_buttons: None,
             rescale_factor: 1.0,
+            rescale_selection: false,
             measure_lock: None,
             measure_floater: false,
             place_highlight_drag: false,

@@ -207,8 +207,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 ui.label("Scale Factor:");
                 ui.add(crate::spinner::spin(ui, &mut app.rescale_factor, 0.0001..=10_000.0).speed(0.01));
             });
+            ui.horizontal(|ui| {
+                ui.label("Affect:");
+                ui.radio_value(&mut app.rescale_selection, false, "Scene");
+                ui.radio_value(&mut app.rescale_selection, true, "Selection");
+            });
             if ui.button("Rescale").clicked() {
-                let _ = app.dispatch(Command::RescaleWorldUnits { factor: app.rescale_factor });
+                let _ = app.dispatch(Command::RescaleWorldUnits { factor: app.rescale_factor, selection: Some(app.rescale_selection) });
             }
         }),
         Utility::Collapse => rollout(ui, "Collapse", true, |ui| {

@@ -453,3 +453,25 @@ fn campoint_keyboard_entry_creates_one_at_the_typed_point() {
     assert_eq!(points.len(), 1);
     assert_eq!(h.app.state.scene.world_matrix(points[0]).w_axis.truncate(), Vec3::new(12.0, -7.0, 30.0));
 }
+
+/// Utilities > Rescale World Units > Affect: Selection rescales only the selected object.
+#[test]
+fn rescale_world_units_affect_selection_radio() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [10.0, 0.0, 0.0], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [-10.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::RescaleWorldUnits;
+    h.app.rescale_factor = 2.0;
+    h.frames(3);
+    h.click_widget("Selection");
+    h.frames(1);
+    assert!(h.app.rescale_selection);
+    h.click_widget("Rescale");
+    h.frames(2);
+    let x = |id| h.app.state.scene.node(id).unwrap().transform.position.get().x;
+    assert_eq!(x(b), -20.0);
+    assert_eq!(x(a), 10.0, "not selected");
+}

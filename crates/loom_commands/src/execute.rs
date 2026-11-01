@@ -202,7 +202,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 // Rescale the file's objects to the system unit scale.
                 state.units.system_unit = ours.system_unit;
                 state.units.system_scale = ours.system_scale;
-                execute(state, C::RescaleWorldUnits { factor: (file_metres / our_metres) as f32 })?;
+                execute(state, C::RescaleWorldUnits { factor: (file_metres / our_metres) as f32, selection: None })?;
             }
             // Adopt: the scene keeps the file's unit scale (new scenes keep the user's).
             Ok(json!({ "nodes": state.scene.len(), "rescaled": rescale }))
@@ -454,7 +454,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             if rescaled {
                 let mut file = AppState::new();
                 file.scene = std::mem::take(&mut doc.scene);
-                execute(&mut file, C::RescaleWorldUnits { factor: factor as f32 })?;
+                execute(&mut file, C::RescaleWorldUnits { factor: factor as f32, selection: None })?;
                 doc.scene = file.scene;
             }
             let label = format!("Merge {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
@@ -3111,12 +3111,12 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        C::RescaleWorldUnits { factor } => {
+        C::RescaleWorldUnits { factor, selection } => {
             if !(factor.is_finite() && factor > 0.0) {
                 return Err("factor must be positive".into());
             }
             let mut changes = Vec::new();
-            let ids: Vec<NodeId> = state.scene.nodes().map(|n| n.id).collect();
+            let ids: Vec<NodeId> = if selection == Some(true) { selected_ids(state) } else { state.scene.nodes().map(|n| n.id).collect() };
             for id in ids {
                 let node = state.scene.node(id).ok_or_else(|| missing(id))?;
                 let mut after_t = node.transform.clone();
@@ -3142,6 +3142,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 changes.push(Change::ReplaceObject { id, before: Box::new(node.object.clone()), after: Box::new(after_obj) });
                 changes.push(Change::SetNodeProps { id, before: Box::new(node.props()), after: Box::new(props) });
                 changes.push(Change::SetTransform { id, before: node.transform.clone(), after: after_t });
+                if !node.modifiers.is_empty() {
+                    let mut stack = node.modifiers.clone();
+                    for slot in &mut stack {
+                        slot.modifier.rescale(factor);
+                    }
+                    changes.push(Change::SetStack { id, before: node.modifiers.clone(), after: stack });
+                }
             }
             if !changes.is_empty() {
                 commit(state, "Rescale World Units", Change::Group(changes))?;

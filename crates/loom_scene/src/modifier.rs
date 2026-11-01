@@ -1714,6 +1714,71 @@ impl Modifier {
         )
     }
 
+    /// Whether `name` (a `parameters()` entry) is a distance in object units.
+    /// Names alone are ambiguous: Threshold is a distance in Vertex Weld but
+    /// an angle in Smooth, Amount a distance in Skew but a ratio in Taper.
+    pub fn is_length_parameter(&self, name: &str) -> bool {
+        if self.deformer().is_some() && matches!(name, "Upper Limit" | "Lower Limit") {
+            return true;
+        }
+        matches!(
+            (self, name),
+            (Modifier::Noise { .. }, "Scale" | "Strength X" | "Strength Y" | "Strength Z")
+                | (Modifier::Skew { .. }, "Amount")
+                | (Modifier::Wave { .. } | Modifier::Ripple { .. }, "Amplitude 1" | "Amplitude 2" | "Wave Length")
+                | (Modifier::Push { .. }, "Push Value")
+                | (Modifier::Displace { .. }, "Strength")
+                | (Modifier::Mirror { .. }, "Offset")
+                | (Modifier::Symmetry { .. } | Modifier::VertexWeld { .. } | Modifier::Surface { .. }, "Threshold")
+                | (Modifier::UVWMap { .. }, "Length" | "Width" | "Height")
+                | (Modifier::Lattice { .. }, "Strut Radius" | "Joint Radius")
+                | (Modifier::EditNormals(_), "Display Length")
+                | (Modifier::SkinWrap(_), "Blend Distance")
+                | (Modifier::Skin(_), "Mirror Offset" | "Mirror Threshold")
+                | (Modifier::NormalizeSpline { .. }, "Seg Length")
+                | (Modifier::FilletChamfer(_), "Radius" | "Distance")
+                | (Modifier::AffectRegion(_), "Falloff")
+                | (Modifier::SplineIkControl(_), "Helper Size")
+                | (Modifier::MapScaler(_), "Scale")
+                | (Modifier::RenderableSpline(_), "Thickness" | "Length" | "Width")
+                | (Modifier::Shell { .. }, "Inner Amount" | "Outer Amount")
+                | (Modifier::Optimize { .. }, "Max Edge Len")
+                | (Modifier::Subdivide { .. }, "Size")
+                | (Modifier::Projection(_), "Push Amount")
+                | (Modifier::FaceExtrude { .. } | Modifier::Extrude { .. }, "Amount")
+                | (
+                    Modifier::Bevel { .. },
+                    "Start Outline" | "Level 1 Height" | "Level 1 Outline" | "Level 2 Height" | "Level 2 Outline" | "Level 3 Height" | "Level 3 Outline"
+                )
+                | (Modifier::Sweep { .. }, "Length" | "Width" | "Thickness" | "Radius" | "Offset X" | "Offset Y")
+        )
+    }
+
+    /// Rescale World Units: lengths, the gizmo position, the deformers' Center
+    /// and an FFD lattice grow by `factor`; angles, ratios and counts stay.
+    pub fn rescale(&mut self, factor: f32) {
+        for (name, v) in self.parameters() {
+            if let ParamValue::Float(f) = v {
+                if self.is_length_parameter(name) {
+                    let _ = self.set_parameter(name, (f * factor) as f64);
+                }
+            }
+        }
+        if let Some(g) = self.gizmo_mut() {
+            g.position.set(g.position.get() * factor);
+        }
+        if let Some(d) = self.deformer_mut() {
+            d.center.set(d.center.get() * factor);
+        }
+        if let Modifier::FFD { points, rest, lo, hi, .. } = self {
+            for p in points.iter_mut().chain(rest.iter_mut()) {
+                *p *= factor;
+            }
+            *lo *= factor;
+            *hi *= factor;
+        }
+    }
+
     pub fn deformer_mut(&mut self) -> Option<&mut Deformer> {
         match self {
             Modifier::Bend { d, .. } | Modifier::Taper { d, .. } | Modifier::Twist { d, .. } | Modifier::Noise { d, .. } | Modifier::Stretch { d, .. } | Modifier::Squeeze { d, .. }

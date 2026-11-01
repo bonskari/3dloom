@@ -102,7 +102,7 @@ fn rescale_world_units_scales_only_length_parameters() {
         s.scene.node(id).unwrap().object.parameters().into_iter().filter_map(|(n, v)| if let loom_scene::ParamValue::Float(f) = v { Some((n, f)) } else { None }).collect()
     };
     let before: Vec<(loom_scene::NodeId, &str, f32)> = [spot, cam, torus].into_iter().flat_map(|id| floats(&s, id).into_iter().map(move |(n, f)| (id, n, f))).collect();
-    execute(&mut s, Command::RescaleWorldUnits { factor: 10.0 }).unwrap();
+    execute(&mut s, Command::RescaleWorldUnits { factor: 10.0, selection: None }).unwrap();
     let scaled = ["Target Distance", "Decay Start", "Near Start", "Near End", "Far Start", "Far End", "Near Range", "Far Range", "Near Clip", "Far Clip", "Radius 1", "Radius 2"];
     let kept = ["Multiplier", "Hotspot", "Falloff", "Aspect", "Contrast", "FOV", "Lens", "Rotation", "Twist", "Slice From", "Slice To"];
     for (id, name, was) in before {
@@ -115,4 +115,60 @@ fn rescale_world_units_scales_only_length_parameters() {
     }
     assert_eq!(float_param(&s, spot, "Multiplier"), 1.0);
     assert_eq!(float_param(&s, torus, "Rotation"), 30.0);
+}
+
+fn mod_param(s: &AppState, id: loom_scene::NodeId, slot: usize, name: &str) -> f32 {
+    match s.scene.node(id).unwrap().modifiers[slot].modifier.parameters().into_iter().find(|(n, _)| *n == name) {
+        Some((_, loom_scene::ParamValue::Float(f))) => f,
+        other => panic!("{name}: {other:?}"),
+    }
+}
+
+/// Rescale World Units scales the modifiers' lengths too: limits, amounts,
+/// gizmo extents, gizmo positions and Centers; angles stay.
+#[test]
+fn rescale_world_units_scales_modifier_lengths_and_gizmos() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] }).unwrap();
+    let id = *s.selection.iter().next().unwrap();
+    for (name, param, value) in [("Bend", "Upper Limit", 4.0), ("Push", "Push Value", 2.0), ("Shell", "Outer Amount", 3.0), ("UVW Map", "Length", 12.0)] {
+        execute(&mut s, Command::AddModifier { name: name.into() }).unwrap();
+        let slot = s.scene.node(id).unwrap().modifiers.iter().position(|m| m.name == name).unwrap();
+        execute(&mut s, Command::SetModifierParameter { index: slot as u32, name: param.into(), value }).unwrap();
+    }
+    let bend = s.scene.node(id).unwrap().modifiers.iter().position(|m| m.name == "Bend").unwrap();
+    execute(&mut s, Command::SetModifierParameter { index: bend as u32, name: "Angle".into(), value: 45.0 }).unwrap();
+    {
+        let m = &mut s.scene.node_mut(id).unwrap().modifiers[bend].modifier;
+        m.gizmo_mut().unwrap().position.set(glam::Vec3::new(1.0, 2.0, 3.0));
+        if let loom_scene::modifier::Modifier::Bend { d, .. } = m {
+            d.center.set(glam::Vec3::new(0.0, 0.0, 5.0));
+        }
+    }
+    let slots: Vec<(String, usize)> = s.scene.node(id).unwrap().modifiers.iter().enumerate().map(|(i, m)| (m.name.clone(), i)).collect();
+    let at = |n: &str| slots.iter().find(|(m, _)| m == n).unwrap().1;
+    execute(&mut s, Command::RescaleWorldUnits { factor: 10.0, selection: None }).unwrap();
+    assert_eq!(mod_param(&s, id, at("Bend"), "Upper Limit"), 40.0);
+    assert_eq!(mod_param(&s, id, at("Bend"), "Angle"), 45.0, "angles stay");
+    assert_eq!(mod_param(&s, id, at("Push"), "Push Value"), 20.0);
+    assert_eq!(mod_param(&s, id, at("Shell"), "Outer Amount"), 30.0);
+    assert_eq!(mod_param(&s, id, at("UVW Map"), "Length"), 120.0);
+    let m = &s.scene.node(id).unwrap().modifiers[at("Bend")].modifier;
+    assert_eq!(m.gizmo().unwrap().position.get(), glam::Vec3::new(10.0, 20.0, 30.0));
+    assert_eq!(m.deformer().unwrap().center.get(), glam::Vec3::new(0.0, 0.0, 50.0));
+}
+
+/// Affect: Selection rescales only the selected objects, about the world origin.
+#[test]
+fn rescale_world_units_selection_only_touches_the_selection() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [5.0, 0.0, 0.0], size: [10.0; 3] }).unwrap();
+    let a = *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-5.0, 0.0, 0.0], size: [10.0; 3] }).unwrap();
+    let b = *s.selection.iter().next().unwrap();
+    execute(&mut s, Command::RescaleWorldUnits { factor: 2.0, selection: Some(true) }).unwrap();
+    assert_eq!(float_param(&s, b, "Length"), 20.0);
+    assert_eq!(s.scene.node(b).unwrap().transform.position.get(), glam::Vec3::new(-10.0, 0.0, 0.0));
+    assert_eq!(float_param(&s, a, "Length"), 10.0, "not selected");
+    assert_eq!(s.scene.node(a).unwrap().transform.position.get(), glam::Vec3::new(5.0, 0.0, 0.0));
 }
