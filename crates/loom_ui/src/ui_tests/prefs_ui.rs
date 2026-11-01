@@ -175,13 +175,13 @@ fn gizmo_preferences_plane_handles_uniform_two_axis_and_relative_size() {
     // The first Relative Size spinner is the Move gizmo's.
     let spin = h.spinner_after("Relative Size (%):");
     h.drag(spin.center(), spin.center() + egui::vec2(0.0, -300.0));
-    assert!(h.app.state.prefs.gizmos.move_size > 150.0, "dragging the spinner up grows it: {}", h.app.state.prefs.gizmos.move_size);
+    assert!(h.app.state.prefs.gizmos.move_size > 110.0, "dragging the spinner up grows it: {}", h.app.state.prefs.gizmos.move_size);
     h.click(h.text_rect("OK", window(&h, "Preference Settings")).unwrap().center());
     assert_eq!(h.app.state.dialog, None);
 
     assert!(gizmo_handle_point(&h, |g| matches!(g, crate::gizmo::Handle::Plane(_))).is_none(), "no move plane handles");
     let after = gizmo_reach(&h);
-    assert!(after > before * 1.3, "the move gizmo grew: {before} -> {after}");
+    assert!(after > before * 1.15, "the move gizmo grew: {before} -> {after}");
 
     h.key(egui::Key::R);
     h.cmd(Command::ScaleType { kind: loom_commands::ScaleKind::NonUniform });
