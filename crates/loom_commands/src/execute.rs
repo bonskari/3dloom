@@ -3981,6 +3981,8 @@ fn export_any(state: &AppState, ids: &[NodeId], path: &std::path::Path) -> Resul
         crate::geom_io::export_dxf(state, ids, path)
     } else if crate::geom_io::is_ase(path) {
         crate::geom_io::export_ase(state, ids, path)
+    } else if crate::geom_io::is_dae(path) {
+        crate::geom_io::export_dae(state, ids, path)
     } else {
         crate::obj_io::export(state, ids, path)
     }

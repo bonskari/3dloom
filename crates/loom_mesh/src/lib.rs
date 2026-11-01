@@ -1,6 +1,7 @@
 //! Half-edge mesh data structure and modeling operations.
 
 pub mod ase;
+pub mod dae;
 pub mod deform;
 pub mod edit_ops;
 pub mod csg;

@@ -27,6 +27,10 @@ pub fn is_ase(path: &Path) -> bool {
     ext(path) == "ase"
 }
 
+pub fn is_dae(path: &Path) -> bool {
+    ext(path) == "dae"
+}
+
 pub fn is_stl(path: &Path) -> bool {
     ext(path) == "stl"
 }
@@ -385,6 +389,18 @@ pub fn export_ase(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value
         return Err("nothing to export: no geometry objects".into());
     }
     std::fs::write(path, loom_mesh::ase::write(&objects)).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(json!({ "path": path, "objects": objects.len() }))
+}
+
+/// Collada export: the geometry objects, placed by their world matrices,
+/// in the scene's system unit.
+pub fn export_dae(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, String> {
+    let objects = geometry(state, ids);
+    if objects.is_empty() {
+        return Err("nothing to export: no geometry objects".into());
+    }
+    let metres = state.units.system_scale as f64 * state.units.system_unit.metres();
+    std::fs::write(path, loom_mesh::dae::write(&objects, metres)).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(json!({ "path": path, "objects": objects.len() }))
 }
 

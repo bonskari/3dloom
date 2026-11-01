@@ -537,3 +537,16 @@ fn export_writes_an_ascii_scene_export_file() {
     let text = std::fs::read_to_string(&path).expect("the .ase is written");
     assert!(text.starts_with("*3DSMAX_ASCIIEXPORT") && text.contains("*NODE_NAME \"Crate\""), "{text}");
 }
+
+/// File > Export takes a .dae name: the Collada file is written.
+#[test]
+fn export_writes_a_collada_file() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    named_box(&mut h, "Crate", 0.0);
+    let path = exchange_dir("dae_export").join("crate.dae");
+    h.cmd(Command::ExportFile { path: None });
+    choose_file(&mut h, &path, "Save");
+    let text = std::fs::read_to_string(&path).expect("the .dae is written");
+    assert!(text.contains("<COLLADA") && text.contains("name=\"Crate\"") && text.contains("<polylist"), "{text}");
+}
