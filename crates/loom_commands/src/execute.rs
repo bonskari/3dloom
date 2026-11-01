@@ -1343,6 +1343,13 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
+        C::XViewConfigure => {
+            if !state.xview.test.is_some_and(|t| t.configurable()) {
+                return Err("the active xView test has nothing to configure".into());
+            }
+            state.dialog = Some(crate::viewport::Dialog::XViewConfigure);
+            Ok(json!({}))
+        }
         C::XViewTolerance { value } => {
             state.xview.tolerance = value.max(0.0);
             Ok(json!({ "tolerance": state.xview.tolerance }))

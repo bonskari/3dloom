@@ -638,3 +638,24 @@ fn xview_open_edges_and_select_results() {
     assert_eq!(h.app.state.selection_mode, loom_commands::SelectionMode::Edge);
     assert_eq!(h.sub_count(), n);
 }
+
+/// xView > Overlapping Vertices > Configure: the Tolerance spinner widens the
+/// check; a box's corners overlap at a tolerance larger than its size.
+#[test]
+fn xview_configure_sets_the_overlapping_vertices_tolerance() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [2.0; 3] });
+    h.cmd(Command::ConvertToEditablePoly);
+    menu_path(&mut h, &["Views", "xView", "Overlapping Vertices"]);
+    assert_eq!(loom_commands::xview::results(&h.app.state, None).1, "0 Vertices");
+    menu_path(&mut h, &["Views", "xView", "Configure..."]);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::XViewConfigure));
+    let spin = h.spinner_after("Tolerance:");
+    h.click(spin.center());
+    h.run(vec![egui::Event::Text("50".into())]);
+    h.key(egui::Key::Enter);
+    h.frames(1);
+    assert!(h.app.state.xview.tolerance > 2.0, "{}", h.app.state.xview.tolerance);
+    assert_eq!(loom_commands::xview::results(&h.app.state, None).1, "8 Vertices");
+}

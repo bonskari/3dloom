@@ -78,6 +78,9 @@ pub fn xview_entries(app: &LoomApp) -> Vec<MenuEntry> {
     }
     v.push(sep());
     v.push(item("Select Results", Command::XViewSelectResults));
+    if x.test.is_some_and(|t| t.configurable()) {
+        v.push(item("Configure...", Command::XViewConfigure));
+    }
     v.push(sep());
     v.push(check("See-Through", x.see_through, Command::XViewOption { name: "See-Through".into(), on: !x.see_through }));
     v.push(check("Auto Update", x.auto_update, Command::XViewOption { name: "Auto Update".into(), on: !x.auto_update }));

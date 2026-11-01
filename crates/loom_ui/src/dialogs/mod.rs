@@ -214,6 +214,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::RefineVertex => spline_prompts::refine_vertex(ctx, app, &mut open),
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
         Dialog::MakeUnique => make_unique(ctx, app, &mut open),
+        Dialog::XViewConfigure => xview_configure(ctx, app, &mut open),
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::EnvironmentMap | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
@@ -529,6 +530,23 @@ fn make_unique(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             let _ = app.dispatch(c);
         }
     }
+}
+
+/// xView > Configure: the active test's Tolerance (world units).
+fn xview_configure(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let title = app.state.xview.test.map_or("xView", |t| t.label()).to_owned();
+    egui::Window::new(title).id(egui::Id::new("xview_configure")).open(open).resizable(false).collapsible(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Tolerance:");
+            let mut v = app.state.xview.tolerance;
+            if ui.add(crate::spinner::spin(ui, &mut v, 0.0..=1_000_000.0).speed(0.001).fixed_decimals(3)).changed() {
+                let _ = app.dispatch(Command::XViewTolerance { value: v });
+            }
+        });
+        if ui.button("OK").clicked() {
+            let _ = app.dispatch(Command::CloseDialog);
+        }
+    });
 }
 
 fn manage_scene_states(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {

@@ -1690,6 +1690,7 @@ commands! {
     XViewTest => "xView Test", MainUI, "Views > xView: run the mesh check `test` (Face Orientation, Overlapping Faces, Open Edges, Multiple Edges, Isolated Vertices, Overlapping Vertices, Missing UVW Coordinates, Flipped UVW Faces) on the selected Editable Poly / Mesh objects; null turns xView off. Returns the result." { test: Option<String> };
     XViewSelectResults => "xView Select Results", MainUI, "xView > Select Results: the flagged sub-objects become the sub-object selection (at their level).";
     XViewOption => "xView Option", Loom, "xView > See-Through, Auto Update, Display On Top: on / off." { name: String, on: bool };
+    XViewConfigure => "xView Configure", MainUI, "xView > Configure: the dialog with the active test's Tolerance (Overlapping Vertices / Faces).";
     XViewTolerance => "xView Tolerance", Loom, "xView > Configure: the Tolerance (world units) of Overlapping Vertices / Overlapping Faces." { value: f32 };
     ShowGhostingToggle => "Show Ghosting Toggle", MainUI, "Views > Show Ghosting: wireframe copies of the selected objects at frames before (yellow) and/or after (cyan) the current one (Preferences > Viewports > Ghosting).";
     ShowKeyTimesToggle => "Show Key Times Toggle", MainUI, "Views > Show Key Times: frame numbers beside the key points of the shown trajectories.";

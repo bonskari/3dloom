@@ -581,6 +581,8 @@ pub enum Dialog {
     TopologyWarning,
     /// Make Unique with several selected: unique with respect to each other? Yes / No / Cancel.
     MakeUnique,
+    /// xView > Configure: the Tolerance.
+    XViewConfigure,
     /// File > Import (FBX, OBJ, .max).
     ImportFile,
     SaveAnimation,
