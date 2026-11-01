@@ -528,7 +528,7 @@ fn several_stack_entries_select_with_ctrl_and_delete_together() {
     }
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(2);
-    let row = |h: &Harness, name: &str| h.text_rects(name).into_iter().filter(|r| r.min.x > SCREEN.max.x * 0.5 || r.min.x > 1000.0).next_back().unwrap_or_else(|| panic!("the {name} row"));
+    let row = |h: &Harness, name: &str| h.text_rects(name).into_iter().rfind(|r| r.min.x > SCREEN.max.x * 0.5 || r.min.x > 1000.0).unwrap_or_else(|| panic!("the {name} row"));
     h.click(row(&h, "Bend").center());
     h.mods = egui::Modifiers::CTRL;
     h.click(row(&h, "Twist").center());
@@ -564,7 +564,7 @@ fn make_reference_from_the_stack_keeps_later_modifiers_apart() {
     assert_ne!(a, b);
     h.app.panel_tab = crate::Tab::Modify;
     h.frames(2);
-    let base = h.text_rects("Box").into_iter().filter(|r| r.min.x > 1000.0).next_back().expect("the base object row");
+    let base = h.text_rects("Box").into_iter().rfind(|r| r.min.x > 1000.0).expect("the base object row");
     right_click(&mut h, base.center());
     h.click(h.find(Role::Button, "Make Reference").center());
     assert!(h.app.state.scene.node(b).unwrap().reference_barrier.is_some());
