@@ -266,6 +266,8 @@ pub struct ViewportRenderer {
     mesh_pipeline: RenderPipeline,
     /// Depth only, from a light: the shadow maps.
     shadow_pipeline: RenderPipeline,
+    /// Depth only, from the view's camera, unbiased: the AO depth.
+    depth_pipeline: RenderPipeline,
     view_layout: BindGroupLayout,
     shadow_layout: BindGroupLayout,
     shadow_sampler: Sampler,
@@ -424,8 +426,8 @@ impl ViewportRenderer {
             bind_group_layouts: &[&view_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let shadow_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("shadow_pipeline"),
+        let make_depth = |label: &str, bias: DepthBiasState| device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some(label),
             layout: Some(&shadow_pipeline_layout),
             vertex: VertexState {
                 module: &shader,
@@ -444,12 +446,15 @@ impl ViewportRenderer {
                 depth_write_enabled: true,
                 depth_compare: CompareFunction::Less,
                 stencil: StencilState::default(),
-                bias: DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
+                bias,
             }),
             multisample: MultisampleState::default(),
             multiview: None,
             cache: None,
         });
+        let shadow_pipeline = make_depth("shadow_pipeline", DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 });
+        // The view's own depth for AO: no bias, positions rebuild exactly.
+        let depth_pipeline = make_depth("depth_pipeline", DepthBiasState::default());
 
         let make_pipeline = |label: &str, cull: Option<Face>, blend: BlendState, depth_write: bool| {
             device.create_render_pipeline(&RenderPipelineDescriptor {
@@ -503,6 +508,7 @@ impl ViewportRenderer {
         Self {
             mesh_pipeline,
             shadow_pipeline,
+            depth_pipeline,
             view_layout: view_bind_group_layout,
             shadow_layout,
             shadow_sampler,
@@ -674,7 +680,7 @@ impl ViewportRenderer {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        pass.set_pipeline(&self.shadow_pipeline);
+        pass.set_pipeline(&self.depth_pipeline);
         pass.set_bind_group(0, &a.group, &[]);
         for mb in meshes.iter().filter(|mb| mb.index_count > 0) {
             for r in mb.ranges.iter().filter(|r| r.count > 0 && !r.transparent) {

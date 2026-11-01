@@ -274,8 +274,6 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             // Facing the viewer: two-sided faces turn their normal to the camera.
             let nf = select(-n, n, dot(n, to_cam) >= 0.0);
             lit = lit * ambient_occlusion(in.world_pos, nf, in.clip.xy);
-            let dbg = ambient_occlusion(in.world_pos, nf, in.clip.xy);
-            return vec4<f32>(dbg, fract(in.world_pos.z * 0.1), f32(textureLoad(ao_depth, vec2<i32>(in.clip.xy - view.viewport_px.xy), 0) < 1.0), 1.0);
         }
         // Self-Illumination: the colour shows unlit by that much.
         return vec4<f32>(mix(base * lit, base, in.extra.x) + in.spec.rgb * spec, alpha);
