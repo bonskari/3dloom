@@ -4079,6 +4079,8 @@ pub fn extended_size_params(kind: loom_mesh::extended_primitives::ExtendedKind, 
         }
         K::TorusKnot => vec![("Radius", r), ("Cross Section Radius", r * 0.15)],
         K::LExt => vec![("Front Length", size.x), ("Side Length", size.y), ("Side Width", leg), ("Front Width", leg), ("Height", size.z)],
+        K::RingWave => vec![("Radius", r), ("Ring Width", r * 0.2), ("Height", size.z)],
+        K::Hose => vec![("Hose Diameter", r * 2.0), ("Height", size.z)],
         K::CExt => vec![("Back Length", size.x), ("Front Length", size.x), ("Side Length", size.y), ("Back Width", leg), ("Side Width", leg), ("Front Width", leg), ("Height", size.z)],
     }
 }

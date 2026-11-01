@@ -23,6 +23,8 @@ pub enum ExtendedKind {
     Capsule,
     LExt,
     CExt,
+    RingWave,
+    Hose,
 }
 
 /// One rollout parameter: name, default, whether it is a whole number, and its minimum.
@@ -43,9 +45,10 @@ const fn int(name: &'static str, default: f32, min: f32) -> ExtParam {
 
 impl ExtendedKind {
     /// Object Type rollout order.
-    pub const ALL: [ExtendedKind; 11] = [
-        ExtendedKind::Hedra, ExtendedKind::ChamferBox, ExtendedKind::OilTank, ExtendedKind::Spindle, ExtendedKind::Gengon, ExtendedKind::Prism,
-        ExtendedKind::TorusKnot, ExtendedKind::ChamferCyl, ExtendedKind::Capsule, ExtendedKind::LExt, ExtendedKind::CExt,
+    pub const ALL: [ExtendedKind; 13] = [
+        ExtendedKind::Hedra, ExtendedKind::ChamferBox, ExtendedKind::OilTank, ExtendedKind::Spindle, ExtendedKind::Gengon, ExtendedKind::RingWave,
+        ExtendedKind::Prism, ExtendedKind::TorusKnot, ExtendedKind::ChamferCyl, ExtendedKind::Capsule, ExtendedKind::LExt, ExtendedKind::CExt,
+        ExtendedKind::Hose,
     ];
 
     pub fn label(self) -> &'static str {
@@ -61,6 +64,8 @@ impl ExtendedKind {
             ExtendedKind::Capsule => "Capsule",
             ExtendedKind::LExt => "L-Ext",
             ExtendedKind::CExt => "C-Ext",
+            ExtendedKind::RingWave => "RingWave",
+            ExtendedKind::Hose => "Hose",
         }
     }
 
@@ -86,6 +91,15 @@ impl ExtendedKind {
             ExtendedKind::ChamferCyl => const { &[fl("Radius", 10.0), fl("Height", 25.0), fl("Fillet", 2.0), int("Height Segs", 1.0, 1.0), int("Fillet Segs", 3.0, 1.0), int("Sides", 12.0, 3.0)] },
             ExtendedKind::Capsule => const { &[fl("Radius", 10.0), fl("Height", 40.0), int("Sides", 12.0, 3.0), int("Height Segs", 1.0, 1.0)] },
             ExtendedKind::LExt => const { &[fl("Side Length", 25.0), fl("Front Length", 25.0), fl("Side Width", 5.0), fl("Front Width", 5.0), fl("Height", 25.0), int("Height Segs", 1.0, 1.0)] },
+            ExtendedKind::RingWave => const { &[
+                fl("Radius", 50.0), int("Radial Segs", 1.0, 1.0), fl("Ring Width", 10.0), int("Sides", 64.0, 3.0), fl("Height", 2.0), int("Height Segs", 1.0, 1.0),
+                int("Outer Edge Cycles", 3.0, 0.0), fl("Outer Edge Amplitude", 2.0), int("Inner Edge Cycles", 0.0, 0.0), fl("Inner Edge Amplitude", 0.0),
+            ] },
+            // Free Hose: a round tube up Z; the flex section between Starts and Ends (percent of the height) ripples Cycles times by Diameter (percent).
+            ExtendedKind::Hose => const { &[
+                fl("Height", 30.0), int("Segments", 45.0, 2.0), fl("Hose Diameter", 10.0), int("Sides", 8.0, 3.0),
+                int("Flex Section", 1.0, 0.0), fl("Starts", 10.0), fl("Ends", 90.0), int("Cycles", 5.0, 0.0), int("Flex Diameter", -20.0, -50.0),
+            ] },
             ExtendedKind::CExt => const { &[
                 fl("Back Length", 25.0), fl("Side Length", 25.0), fl("Front Length", 25.0),
                 fl("Back Width", 5.0), fl("Side Width", 5.0), fl("Front Width", 5.0), fl("Height", 25.0), int("Height Segs", 1.0, 1.0),
@@ -193,6 +207,56 @@ impl ExtendedKind {
                 // The corner at the origin; the side leg runs along +Y, the front leg along +X.
                 let outline = [Vec2::ZERO, Vec2::new(fl_, 0.0), Vec2::new(fl_, fw), Vec2::new(sw, fw), Vec2::new(sw, sl), Vec2::new(0.0, sl)];
                 extrude(&outline, v("Height"), n("Height Segs"))
+            }
+            ExtendedKind::RingWave => {
+                let (r, w, sides, rs) = (v("Radius"), v("Ring Width").min(v("Radius")), n("Sides").max(3), n("Radial Segs").max(1));
+                let (oc, oa, ic, ia) = (v("Outer Edge Cycles"), v("Outer Edge Amplitude"), v("Inner Edge Cycles"), v("Inner Edge Amplitude"));
+                let ring = |k: u32, t: f32| {
+                    let a = k as f32 / sides as f32 * TAU;
+                    let outer = r + oa * (oc * a).sin();
+                    let inner = (r - w + ia * (ic * a).sin()).max(0.0);
+                    Vec2::from_angle(a) * (inner + (outer - inner) * t)
+                };
+                let (h, hs) = (v("Height"), n("Height Segs").max(1));
+                let at = |p: Vec2, z: f32| Vec3::new(p.x, p.y, z);
+                let mut polys = Vec::new();
+                for k in 0..sides {
+                    for j in 0..rs {
+                        let (t0, t1) = (j as f32 / rs as f32, (j + 1) as f32 / rs as f32);
+                        // Top up, bottom down.
+                        polys.push(vec![at(ring(k, t0), h), at(ring(k, t1), h), at(ring(k + 1, t1), h), at(ring(k + 1, t0), h)]);
+                        polys.push(vec![at(ring(k, t0), 0.0), at(ring(k + 1, t0), 0.0), at(ring(k + 1, t1), 0.0), at(ring(k, t1), 0.0)]);
+                    }
+                    for q in 0..hs {
+                        let (z0, z1) = (h * q as f32 / hs as f32, h * (q + 1) as f32 / hs as f32);
+                        let (o0, o1, i0, i1) = (ring(k, 1.0), ring(k + 1, 1.0), ring(k, 0.0), ring(k + 1, 0.0));
+                        polys.push(vec![at(o0, z0), at(o1, z0), at(o1, z1), at(o0, z1)]);
+                        polys.push(vec![at(i1, z0), at(i0, z0), at(i0, z1), at(i1, z1)]);
+                    }
+                }
+                finish_oriented_each_side(polys)
+            }
+            ExtendedKind::Hose => {
+                let (h, segs, d, sides) = (v("Height"), n("Segments").max(2), v("Hose Diameter"), n("Sides").max(3));
+                let flex = n("Flex Section") != 0;
+                let (s0, s1) = ((v("Starts") / 100.0).clamp(0.0, 1.0), (v("Ends") / 100.0).clamp(0.0, 1.0));
+                let (cycles, fd) = (v("Cycles"), v("Flex Diameter") / 100.0);
+                let radius = |t: f32| {
+                    let r = d * 0.5;
+                    if flex && s1 > s0 && t > s0 && t < s1 {
+                        let u = (t - s0) / (s1 - s0);
+                        r * (1.0 + fd * 0.5 * (1.0 - (TAU * cycles * u).cos()))
+                    } else {
+                        r
+                    }
+                };
+                let mut prof = vec![(0.0, 0.0)];
+                prof.extend((0..=segs).map(|k| {
+                    let t = k as f32 / segs as f32;
+                    (radius(t), h * t)
+                }));
+                prof.push((0.0, h));
+                revolve(&prof, sides)
             }
             ExtendedKind::CExt => {
                 let (bl, sl, fl_) = (v("Back Length"), v("Side Length"), v("Front Length"));
@@ -434,6 +498,11 @@ fn finish(mut polys: Vec<Vec<Vec3>>) -> Mesh {
     build_merged(&polys)
 }
 
+/// A closed solid whose polygons are already wound outward (each one's own way).
+fn finish_oriented_each_side(polys: Vec<Vec<Vec3>>) -> Mesh {
+    build_merged(&polys)
+}
+
 /// Convex solids around the origin: each polygon faces away from the centre.
 fn finish_oriented_each(mut polys: Vec<Vec<Vec3>>) -> Mesh {
     for p in &mut polys {
@@ -464,6 +533,17 @@ mod tests {
     fn hedra_families_have_the_platonic_face_counts() {
         let count = |f: f32, d: f32| ExtendedKind::Hedra.build(&[f, d, 10.0]).face_count();
         assert_eq!([count(0.0, 0.0), count(1.0, 0.0), count(1.0, 1.0), count(2.0, 0.0), count(2.0, 1.0)], [4, 8, 6, 20, 12]);
+    }
+
+    #[test]
+    fn ringwave_outer_edge_waves_and_hose_flex_pinches() {
+        let m = ExtendedKind::RingWave.build(&ExtendedKind::RingWave.defaults());
+        let (lo, hi) = m.aabb();
+        // The outer edge reaches Radius + Amplitude somewhere.
+        assert!(hi.x > 50.5 && hi.x <= 52.0 + 1e-3 && (hi.z - 2.0).abs() < 1e-4 && lo.z.abs() < 1e-4, "{lo} {hi}");
+        let hose = ExtendedKind::Hose.build(&ExtendedKind::Hose.defaults());
+        let mid: Vec<f32> = hose.vertices().iter().map(|v| v.position).filter(|p| (p.z - 15.0).abs() < 0.5).map(|p| p.truncate().length()).collect();
+        assert!(mid.iter().any(|r| *r < 4.9), "the flex section narrows the 10-wide hose: {mid:?}");
     }
 
     #[test]
