@@ -585,6 +585,8 @@ pub enum Dialog {
     XViewConfigure,
     /// Animation > Reaction Manager.
     ReactionManager,
+    /// Animation > Animation Layers.
+    AnimationLayers,
     /// File > Import (FBX, OBJ, .max).
     ImportFile,
     SaveAnimation,

@@ -694,3 +694,45 @@ fn reaction_manager_master_slave_and_states() {
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.reactions[0].slaves[0].states.len(), 2, "undoable");
 }
+
+/// Animation > Animation Layers: Enable, Add Layer, a move goes into the
+/// layer (the Base Layer keeps its position), the light bulb hides it, the
+/// Base Layer made active takes moves again, Collapse merges, undoable.
+#[test]
+fn animation_layers_toolbar_enable_add_move_toggle_collapse() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    menu_path(&mut h, &["Animation", "Animation Layers..."]);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::AnimationLayers));
+    h.frames(2);
+    let enable = h.find_all(egui::accesskit::Role::Button, "Enable Anim Layers");
+    h.click(enable[0].center());
+    h.frames(30);
+    let add = h.find_all(egui::accesskit::Role::Button, "Add Layer");
+    h.click(add[0].center());
+    h.frames(30);
+    let al = h.app.state.scene.node(a).unwrap().anim_layers.clone().expect("enabled");
+    assert_eq!((al.layers.len(), al.active), (1, 1), "the new layer is active");
+    h.cmd(Command::SetTransform { id: a.0, position: Some([20.0, 0.0, 0.0]), rotation_deg: None, scale: None });
+    let world_x = |h: &Harness| h.app.state.scene.world_matrix(a).w_axis.x;
+    assert_eq!(h.app.state.scene.node(a).unwrap().transform.position.get().x, 0.0, "the Base Layer keeps its position");
+    assert!((world_x(&h) - 20.0).abs() < 1e-3, "the layer moves it: {}", world_x(&h));
+    h.frames(2);
+    let on = h.text_rects("On");
+    h.click(on[0].center());
+    h.frames(30);
+    assert!(world_x(&h).abs() < 1e-3, "light bulb off: hidden");
+    h.click(on[0].center());
+    h.frames(30);
+    assert!((world_x(&h) - 20.0).abs() < 1e-3, "on again");
+    let collapse = h.find_all(egui::accesskit::Role::Button, "Collapse");
+    h.click(collapse[0].center());
+    h.frames(30);
+    let n = h.app.state.scene.node(a).unwrap();
+    assert!(n.anim_layers.as_ref().unwrap().layers.is_empty());
+    assert!((n.transform.position.get().x - 20.0).abs() < 1e-3, "merged into the Base Layer");
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.node(a).unwrap().anim_layers.as_ref().unwrap().layers.len(), 1, "undoable");
+}

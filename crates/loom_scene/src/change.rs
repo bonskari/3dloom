@@ -141,6 +141,20 @@ impl Change {
                     let Some(cur) = latest.get(&id).cloned().or_else(|| scene.node(id).map(|n| n.transform.clone())) else {
                         return Change::SetTransform { id, before: after.clone(), after };
                     };
+                    // Animation Layers: with another layer active the edit goes to its
+                    // offset tracks; a locked active layer takes none.
+                    if let Some(n) = scene.node(id).filter(|n| n.anim_layers.is_some()) {
+                        let al = n.anim_layers.as_ref().expect("checked");
+                        if al.active > 0 || al.base_locked {
+                            let before = n.props();
+                            let mut props = before.clone();
+                            let taken = props.anim_layers.as_mut().and_then(|l| l.take_edit(&cur, &after));
+                            if taken.is_none() || props == before {
+                                return Change::Group(Vec::new());
+                            }
+                            return Change::SetNodeProps { id, before: Box::new(before), after: Box::new(props) };
+                        }
+                    }
                     let after = cur.merged(&after);
                     latest.insert(id, after.clone());
                     Change::SetTransform { id, before: cur, after }

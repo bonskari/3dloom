@@ -730,7 +730,7 @@ impl Scene {
 
     /// The local matrix as the user set it, IK ignored (FK).
     pub fn fk_local_matrix(&self, id: NodeId) -> Mat4 {
-        self.nodes.get(&id).map(|n| n.transform.matrix()).unwrap_or(Mat4::IDENTITY)
+        self.nodes.get(&id).map(|n| n.layered_matrix()).unwrap_or(Mat4::IDENTITY)
     }
 
     /// World matrix with every IK chain ignored.
@@ -741,7 +741,7 @@ impl Scene {
             Some(p) => Self::frame_from(self.fk_world_matrix(p), node.inherit),
             None => Mat4::IDENTITY,
         };
-        frame * node.transform.matrix()
+        frame * node.layered_matrix()
     }
 
     /// The local matrix: the IK solution for a bone of an enabled chain, else FK.
@@ -806,7 +806,7 @@ impl Scene {
     fn constrained_local(&self, id: NodeId) -> Mat4 {
         use crate::constraint::{aim, blend_rotations, path_point, weights, PositionConstraint, RotationConstraint};
         let Some(n) = self.nodes.get(&id) else { return Mat4::IDENTITY };
-        let base = n.transform.matrix();
+        let base = n.layered_matrix();
         let c = &n.constraints;
         if c.position.is_none() && c.rotation.is_none() {
             return base;

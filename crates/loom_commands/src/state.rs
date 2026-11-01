@@ -2007,6 +2007,8 @@ pub struct AppState {
     pub track_view: crate::track_view::TrackViewState,
     /// Graph Editors > Saved Track Views: named Track View settings.
     pub saved_track_views: Vec<crate::track_view::TrackViewState>,
+    /// Animation Layers > Copy Animation Layer.
+    pub anim_layer_clipboard: Option<loom_scene::anim_layers::AnimLayer>,
     /// Tools > Scene Explorer windows (saved with the scene).
     pub explorers: crate::explorer::Explorers,
     /// Graph Editors > Schematic View windows (saved with the scene).
@@ -2333,6 +2335,7 @@ impl AppState {
             soft_edit: false,
             track_view: Default::default(),
             saved_track_views: Vec::new(),
+            anim_layer_clipboard: None,
             explorers: Default::default(),
             schematics: Default::default(),
             key_time_cache: Default::default(),

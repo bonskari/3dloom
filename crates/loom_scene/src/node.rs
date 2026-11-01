@@ -2152,6 +2152,9 @@ pub struct NodeProps {
     /// Set as Skin Pose: the transform Assume Skin Pose returns the object to.
     #[serde(default)]
     pub skin_pose: Option<Transform>,
+    /// Animation Layers: the Layer controller on the transform tracks.
+    #[serde(default)]
+    pub anim_layers: Option<crate::anim_layers::AnimLayers>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2234,6 +2237,9 @@ pub struct Node {
     /// Set as Skin Pose: the transform Assume Skin Pose returns the object to.
     #[serde(default)]
     pub skin_pose: Option<Transform>,
+    /// Animation Layers: the Layer controller on the transform tracks.
+    #[serde(default)]
+    pub anim_layers: Option<crate::anim_layers::AnimLayers>,
 }
 
 impl Node {
@@ -2295,6 +2301,7 @@ impl PartialEq for Node {
             && self.user_props == o.user_props
             && self.skin_wrap_bake == o.skin_wrap_bake
             && self.skin_pose == o.skin_pose
+            && self.anim_layers == o.anim_layers
     }
 }
 
@@ -2425,6 +2432,18 @@ impl Node {
         self.transform.rotation.get()
     }
 
+    /// The local transform matrix with the Animation Layers added.
+    pub fn layered_matrix(&self) -> glam::Mat4 {
+        match &self.anim_layers {
+            Some(al) if !al.layers.is_empty() => {
+                let (p, r, s) = al.apply(&self.transform, false);
+                let q = glam::Quat::from_euler(glam::EulerRot::XYZ, r.x.to_radians(), r.y.to_radians(), r.z.to_radians());
+                glam::Mat4::from_scale_rotation_translation(s, q, p)
+            }
+            _ => self.transform.matrix(),
+        }
+    }
+
     pub fn props(&self) -> NodeProps {
         NodeProps {
             object_offset: self.object_offset.clone(),
@@ -2440,6 +2459,7 @@ impl Node {
             user_props: self.user_props.clone(),
             skin_wrap_bake: self.skin_wrap_bake.clone(),
             skin_pose: self.skin_pose.clone(),
+            anim_layers: self.anim_layers.clone(),
         }
     }
 
@@ -2457,6 +2477,7 @@ impl Node {
         self.user_props = p.user_props;
         self.skin_wrap_bake = p.skin_wrap_bake;
         self.skin_pose = p.skin_pose;
+        self.anim_layers = p.anim_layers;
     }
 }
 
@@ -2496,6 +2517,7 @@ impl Node {
             user_props: String::new(),
             skin_wrap_bake: None,
             skin_pose: None,
+            anim_layers: None,
             version: 0,
             geom_version: 0,
             instance_of: None,

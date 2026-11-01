@@ -305,3 +305,71 @@ pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
     });
     ctx.data_mut(|d| d.insert_temp(fid, (pick, hl)));
 }
+
+/// Animation > Animation Layers: the layer toolbar for the selected objects
+/// (Enable, the layer list with its bulb / lock / output / weight, Add,
+/// Delete, Copy, Paste, Collapse, Disable).
+pub fn animation_layers(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    egui::Window::new("Animation Layers").open(open).resizable(false).default_width(420.0).show(ctx, |ui| {
+        let al = app.state.selection.iter().find_map(|id| app.state.scene.node(*id).and_then(|n| n.anim_layers.clone()));
+        let Some(al) = al else {
+            ui.label("Select objects, then enable their transform tracks for layers.");
+            if ui.add_enabled(!app.state.selection.is_empty(), egui::Button::new("Enable Anim Layers")).clicked() {
+                let _ = app.dispatch(Command::EnableAnimLayers { position: true, rotation: true, scale: true });
+            }
+            return;
+        };
+        let mut cmds = Vec::new();
+        egui::Grid::new("anim_layers_list").striped(true).show(ui, |ui| {
+            for i in (0..=al.layers.len()).rev() {
+                let idx = i as u32;
+                if ui.selectable_label(al.active == i, al.names()[i].as_str()).clicked() {
+                    cmds.push(Command::SetActiveAnimLayer { index: idx });
+                }
+                let prop = |name: &str, value: f32| Command::SetAnimLayerProperty { index: idx, name: name.into(), value };
+                if i == 0 {
+                    ui.label("");
+                    if ui.selectable_label(al.base_locked, "Lock").clicked() {
+                        cmds.push(prop("locked", if al.base_locked { 0.0 } else { 1.0 }));
+                    }
+                    ui.label("");
+                    ui.label("");
+                } else {
+                    let l = &al.layers[i - 1];
+                    if ui.selectable_label(l.on, "On").on_hover_text("Light bulb: the layer's animation shows").clicked() {
+                        cmds.push(prop("on", if l.on { 0.0 } else { 1.0 }));
+                    }
+                    if ui.selectable_label(l.locked, "Lock").clicked() {
+                        cmds.push(prop("locked", if l.locked { 0.0 } else { 1.0 }));
+                    }
+                    if ui.selectable_label(l.output, if l.output { "+" } else { "-" }).on_hover_text("Include in the output track").clicked() {
+                        cmds.push(prop("output", if l.output { 0.0 } else { 1.0 }));
+                    }
+                    let mut w = l.weight.get();
+                    if ui.add(egui::DragValue::new(&mut w).range(0.0..=100.0).suffix("%")).changed() {
+                        cmds.push(prop("weight", w));
+                    }
+                }
+                ui.end_row();
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            for (label, c) in [
+                ("Add Layer", Command::AddAnimLayer { name: None }),
+                ("Delete Layer", Command::DeleteAnimLayer),
+                ("Copy", Command::CopyAnimLayer),
+                ("Paste Active", Command::PasteActiveAnimLayer),
+                ("Paste New", Command::PasteNewAnimLayer { name: None }),
+                ("Collapse", Command::CollapseAnimLayer),
+                ("Disable", Command::DisableAnimLayers),
+            ] {
+                if ui.button(label).clicked() {
+                    cmds.push(c);
+                }
+            }
+        });
+        for c in cmds {
+            let _ = app.dispatch(c);
+        }
+    });
+}

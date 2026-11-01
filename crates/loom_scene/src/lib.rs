@@ -1,5 +1,6 @@
 //! Scene graph: nodes with animatable parameters, parametric objects, undo.
 
+pub mod anim_layers;
 pub mod biped;
 pub mod camera;
 pub mod light;

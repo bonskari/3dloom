@@ -2243,6 +2243,17 @@ commands! {
     AddReactionSlave => "Add Reaction Slave", Loom, "Reaction Manager > Add Slave: parameter `param` of node `node` reacts to master `reaction`; its first state pairs the master's and the slave's current values." { reaction: u32, node: u64, param: String };
     SetReactionState => "Set Reaction State", Loom, "Reaction Manager > States: state `state` of slave `slave` of reaction `reaction` (null: a new state) pairs `master_value` with `slave_value` (omitted: the current values)." { reaction: u32, slave: u32, state: Option<u32>, master_value: Option<f32>, slave_value: Option<f32> };
     DeleteReactionState => "Delete Reaction State", Loom, "Reaction Manager > Delete State." { reaction: u32, slave: u32, state: u32 };
+    AnimationLayers => "Animation Layers", MainUI, "Animation > Animation Layers: open the Animation Layers toolbar for the selected objects.";
+    EnableAnimLayers => "Enable Anim Layers", Loom, "Animation Layers > Enable Anim Layers: put a Layer controller on the selected objects' `position` / `rotation` / `scale` tracks (the Base Layer)." { position: bool, rotation: bool, scale: bool };
+    AddAnimLayer => "Add Anim Layer", Loom, "Animation Layers > Add Animation Layer: a new layer (`name`, default AnimLayerNN) on the selected objects; it becomes active." { name: Option<String> };
+    DeleteAnimLayer => "Delete Anim Layer", Loom, "Animation Layers > Delete Animation Layer: the active layer.";
+    SetActiveAnimLayer => "Set Active Anim Layer", Loom, "Animation Layers > the layer list: make layer `index` (0 = Base Layer) active; transforms then edit it." { index: u32 };
+    SetAnimLayerProperty => "Set Anim Layer Property", Loom, "Animation Layers: layer `index`'s `name` On (light bulb), Locked, Output (in the output track) as 0/1, or Weight in percent (animatable)." { index: u32, name: String, value: f32 };
+    CopyAnimLayer => "Copy Anim Layer", Loom, "Animation Layers > Copy Animation Layer: the active layer.";
+    PasteActiveAnimLayer => "Paste Active Anim Layer", Loom, "Animation Layers > Paste Active Animation Layer: the copied layer replaces the active one.";
+    PasteNewAnimLayer => "Paste New Anim Layer", Loom, "Animation Layers > Paste New Layer: the copied layer as a new layer (`name`)." { name: Option<String> };
+    CollapseAnimLayer => "Collapse Anim Layer", Loom, "Animation Layers > Collapse Animation Layer: the active layer merges into the one below it.";
+    DisableAnimLayers => "Disable Anim Layers", Loom, "Animation Layers > Disable Anim Layer: remove the Layer controller (only the Base Layer left).";
     DeleteReaction => "Delete Reaction", Loom, "Reaction Manager > Delete Selected: a master (with its slaves; `slave` omitted) or one slave." { reaction: u32, slave: Option<u32> };
     ParameterWiringDialog => "Parameter Wiring Dialog...", MainUI, "Open the Parameter Wiring dialog (Ctrl+5 / Animation > Wire Parameters > Wire Parameters...).";
     WireParameter => "Wire Parameter", Loom, "Animation > Wire Parameters: connect `source_param` on `source_node` to `target_param` on `target_node` (`two_way`, `scale`, `offset`, `expression`)." { source_node: u64, source_param: String, target_node: u64, target_param: String, two_way: Option<bool>, scale: Option<f32>, offset: Option<f32>, expression: Option<String> };
