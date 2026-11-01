@@ -168,7 +168,7 @@ fn gizmo_preferences_plane_handles_uniform_two_axis_and_relative_size() {
     let ons = h.find_all(Role::CheckBox, "On");
     assert_eq!(ons.len(), 2, "Transform Gizmos On and Plane Handles On");
     h.click(ons[1].center());
-    assert!(!h.app.state.prefs.gizmos.move_plane_handles, "clicked {:?} in {:?}", ons[1], window(&h, "Preference Settings"));
+    assert!(!h.app.state.prefs.gizmos.move_plane_handles, "clicked {:?} in {:?}: {:?}", ons[1], window(&h, "Preference Settings"), h.widgets.iter().filter(|w| w.0 == Role::CheckBox || w.0 == Role::Label).map(|w| (w.1.clone(), w.2.min)).collect::<Vec<_>>());
     let r = h.find(Role::CheckBox, "Uniform 2-Axis Scaling");
     h.click(r.center());
     assert!(h.app.state.prefs.gizmos.uniform_two_axis_scaling, "clicked {r:?} in {:?}", window(&h, "Preference Settings"));
