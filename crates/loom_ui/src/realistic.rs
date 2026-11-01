@@ -389,6 +389,7 @@ impl LoomApp {
             // Ray Traced / Adv. Ray Traced / Area Shadows lights: traced on the CPU, no shadow maps.
             traced_shadows: loom_scene::light::scene_lights(&self.state.scene, |n| self.state.scene.is_renderable(n)).iter().filter(|l| l.traced.is_some()).map(|l| l.id.0).collect(),
             lights_off: Vec::new(),
+            lens: None,
         };
         let mut options = options;
         // A camera's Multi-Pass Depth of Field: its passes move the lens.
