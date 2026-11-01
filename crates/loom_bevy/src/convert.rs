@@ -277,6 +277,23 @@ pub fn specular_scale(spec: Option<(&MapImage, f32)>, gloss: Option<(&MapImage, 
     (MapImage { width: w, height: h, rgba }, factor)
 }
 
+/// An Ambient Color map as Bevy's occlusion texture (red): its grey at
+/// Amount 1, white (no change) at Amount 0.
+pub fn ambient_occlusion(img: &MapImage, amount: f32) -> MapImage {
+    let rgba = img
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let g = (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0;
+            let v = (255.0 + (g - 255.0) * amount).round().clamp(0.0, 255.0) as u8;
+            [v, v, v, 255]
+        })
+        .collect();
+    MapImage { width: img.width, height: img.height, rgba }
+}
+
 /// A Displacement map as Bevy's parallax depth map: grey inverted (white in
 /// the map is the surface top, black the deepest), in red.
 pub fn inverted_luminance(img: &MapImage) -> MapImage {

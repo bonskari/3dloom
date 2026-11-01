@@ -1217,6 +1217,13 @@ impl BevyRenderer {
                 m.reflectance *= factor;
             }
         }
+        if let Some(map) = s.ambient_map.as_ref() {
+            if let Some((img, k)) = self.in_frame(map, frame) {
+                // An unlocked Ambient Color map scales the ambient (indirect) light by its grey: Bevy's occlusion texture.
+                let key = format!("amb:{k}:{}", map.amount);
+                m.occlusion_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::ambient_occlusion(&img, (map.amount / 100.0).clamp(0.0, 1.0)));
+            }
+        }
         if let Some(map) = s.displacement_map.as_ref() {
             if let Some((img, k)) = self.in_frame(map, frame) {
                 // Displacement as parallax: white raised (the depth map's black), Amount 100 = 0.1 UV deep.

@@ -110,3 +110,34 @@ fn a_displacement_map_shifts_the_texture_by_its_heights() {
     assert!(diff(&flat, &displaced) > 300, "the raised squares shift the checker");
     assert!(diff(&flat, &zero) < 30, "Amount 0 displaces nothing");
 }
+
+#[test]
+fn an_unlocked_ambient_map_darkens_the_ambient_light() {
+    let Some((adapter, device, queue)) = gpu() else {
+        eprintln!("ambient map: no GPU adapter, skipped");
+        return;
+    };
+    let mut r = BevyRenderer::new(adapter, device, queue);
+    let mut plane = loom_mesh::plane_segmented(200.0, 200.0, 1, 1);
+    loom_mesh::uvmap::auto_map(&mut plane, loom_mesh::uvmap::AutoMap::Planar, 1);
+    let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -1.0, 150.0), Vec3::ZERO, Vec3::Y), projection: Mat4::perspective_rh(50f32.to_radians(), 1.0, 1.0, 1000.0) };
+    r.sync_lights(&[]);
+    let mut shot = |m: &StandardMaterial| {
+        r.sync(&[SceneObject { id: 3, mesh: &plane, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(Surface::from_standard(m)))), renderable: true, flags: Default::default() }]);
+        r.render_with(32, 32, &cam, RenderOptions { ambient: [1.0; 3], ..RenderOptions::default() }).unwrap().get_pixel(16, 16).0[1]
+    };
+    let mut m = StandardMaterial::new("m");
+    m.diffuse.set(Vec3::splat(0.8));
+    m.ambient.set(Vec3::splat(0.8));
+    let plain = shot(&m);
+    let mut dark = Map::new(MapType::Checker, 100.0);
+    dark.colors = [Vec3::splat(0.1), Vec3::splat(0.1), Vec3::ONE];
+    m.ambient_map = Some(dark);
+    let locked = shot(&m);
+    m.ambient_map_locked = false;
+    let mapped = shot(&m);
+    eprintln!("plain {plain} locked {locked} mapped {mapped}");
+    assert!(plain > 30, "ambient light shows: {plain}");
+    assert_eq!(locked, plain, "locked: the Diffuse map serves, the Ambient one is unused");
+    assert!((mapped as f32) < plain as f32 * 0.5, "a dark Ambient map darkens the ambient light: {plain} -> {mapped}");
+}
