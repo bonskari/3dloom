@@ -797,8 +797,22 @@ pub struct GizmoPrefs {
     pub scale_two_axis_handle: f32,
     /// Uniform 2-Axis Scaling: a 2-axis handle scales uniformly.
     pub uniform_two_axis_scaling: bool,
-    /// Keyboard rotation increment in degrees (default 10).
-    pub rotation_increment: f32,
+    /// Rotation Increment: degrees per pixel of mouse movement for the
+    /// Linear Roll and Legacy R4 rotation methods (default 0.5).
+    pub rotation_increment_per_px: f32,
+    /// Rotate gizmo Rotation Method: 0 Linear Roll, 1 Circular Crank, 2
+    /// Legacy R4 (Circular Crank is this build's default).
+    pub rotation_method: u8,
+    /// Rotate gizmo Planar Angle Threshold (degrees): Circular Crank acts as
+    /// Linear Roll on an axis at this angle or less to the view plane
+    /// (5 is this build's default).
+    pub planar_angle_threshold: f32,
+    /// Move/Rotate Transforms: Projection (on) or Intersection (off, the
+    /// default) for plane drags in perspective views.
+    pub move_projection: bool,
+    /// Move/Rotate Transforms: Persp Sens, the Projection drag's sensitivity
+    /// (1.0 is this build's default).
+    pub persp_sens: f32,
     /// Viewport orbit snap angle in degrees (default 10).
     pub orbit_snap_angle: f32,
 }
@@ -833,7 +847,11 @@ impl Default for GizmoPrefs {
             scale_uniform_handle: 50.0,
             scale_two_axis_handle: 20.0,
             uniform_two_axis_scaling: false,
-            rotation_increment: 10.0,
+            rotation_increment_per_px: 0.5,
+            rotation_method: 1,
+            planar_angle_threshold: 5.0,
+            move_projection: false,
+            persp_sens: 1.0,
             orbit_snap_angle: 10.0,
         }
     }
@@ -1013,7 +1031,7 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 55] = [
+    pub const NAMES: [&'static str; 59] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -1025,6 +1043,7 @@ impl Prefs {
         "Increment on Save", "Zoom Extents on Import", "Move Gizmo Relative Size", "Rotate Gizmo Relative Size", "Move Plane Handles",
         "Scale Uniform Handle Size", "Scale 2-Axis Handle Size", "Uniform 2-Axis Scaling",
         "Ghosting Frames", "Ghosting Nth Frame", "Ghosting Mode", "Ghosting Frame Numbers",
+        "Rotation Method", "Planar Angle Threshold", "Move/Rotate Projection", "Persp Sens",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1089,7 +1108,11 @@ impl Prefs {
             "Ghosting Nth Frame" => self.ghost_nth as f64,
             "Ghosting Mode" => self.ghost_mode as f64,
             "Ghosting Frame Numbers" => b(self.ghost_frame_numbers),
-            "Rotation Increment" => self.gizmos.rotation_increment as f64,
+            "Rotation Increment" => self.gizmos.rotation_increment_per_px as f64,
+            "Rotation Method" => self.gizmos.rotation_method as f64,
+            "Planar Angle Threshold" => self.gizmos.planar_angle_threshold as f64,
+            "Move/Rotate Projection" => b(self.gizmos.move_projection),
+            "Persp Sens" => self.gizmos.persp_sens as f64,
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle as f64,
             _ => return None,
         })
@@ -1158,7 +1181,11 @@ impl Prefs {
             "Ghosting Nth Frame" => self.ghost_nth = v.clamp(1.0, 1000.0) as u32,
             "Ghosting Mode" => self.ghost_mode = v.clamp(0.0, 2.0) as u32,
             "Ghosting Frame Numbers" => self.ghost_frame_numbers = on,
-            "Rotation Increment" => self.gizmos.rotation_increment = f.max(0.0),
+            "Rotation Increment" => self.gizmos.rotation_increment_per_px = f.clamp(0.0, 180.0),
+            "Rotation Method" => self.gizmos.rotation_method = v.clamp(0.0, 2.0) as u8,
+            "Planar Angle Threshold" => self.gizmos.planar_angle_threshold = f.clamp(0.0, 90.0),
+            "Move/Rotate Projection" => self.gizmos.move_projection = on,
+            "Persp Sens" => self.gizmos.persp_sens = f.clamp(0.01, 100.0),
             "Viewport Orbit Snap Angle" => self.gizmos.orbit_snap_angle = f.max(0.0),
             _ => return Err(format!("unknown preference {name:?}")),
         }

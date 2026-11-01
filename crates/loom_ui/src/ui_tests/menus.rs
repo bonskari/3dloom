@@ -959,6 +959,53 @@ fn active_viewport_only_freezes_the_inactive_views() {
     assert!(h.app.frozen_views.is_empty(), "stopped: live again");
 }
 
+/// Preferences > Gizmos: Rotation Method (Linear Roll turns by Rotation
+/// Increment per pixel along the tangent; Legacy R4 by vertical motion only)
+/// and Move/Rotate Transforms Intersection / Projection.
+#[test]
+fn preferences_rotation_method_and_projection() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::Preferences);
+    h.frames(2);
+    let tab = h.text_rects("Gizmos");
+    h.click(tab[0].center());
+    h.frames(1);
+    h.click(h.text_rects("Linear Roll")[0].center());
+    assert_eq!(h.app.state.prefs.gizmos.rotation_method, 0);
+    h.click(h.text_rects("Projection")[0].center());
+    assert!(h.app.state.prefs.gizmos.move_projection);
+    assert_eq!(h.app.state.prefs.gizmos.rotation_increment_per_px, 0.5);
+    h.cmd(Command::CloseDialog);
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::SelectAndRotate);
+    h.frames(1);
+    let i = h.app.state.active_viewport;
+    let rect = h.app.viewport_rects[i];
+    let cam = h.app.camera_for(i);
+    let projection = crate::gizmo::Projection::new(cam.view_matrix(), cam.projection_matrix(rect.width() / rect.height()), rect);
+    let layout = crate::gizmo::layout_for(&h.app, i, rect.height());
+    let o = projection.screen(layout.origin).unwrap();
+    let start = (0..360)
+        .flat_map(|deg| (10..800).step_by(2).map(move |r| (deg as f32, r as f32)))
+        .map(|(deg, r)| o + egui::vec2(deg.to_radians().cos(), deg.to_radians().sin()) * r)
+        .find(|p| matches!(crate::gizmo::hit(&h.app, &layout, &projection, *p), Some(crate::gizmo::Handle::Axis(_))))
+        .expect("an axis ring on screen");
+    let turned = |h: &Harness| {
+        h.app.state.scene.node(id).unwrap().euler_deg().abs().max_element()
+    };
+    // Linear Roll: 40 px along the tangent at 0.5 degrees a pixel.
+    let tangent = egui::vec2(start.y - o.y, -(start.x - o.x)).normalized() * 40.0;
+    h.drag(start, start + tangent);
+    assert!((turned(&h) - 20.0).abs() < 0.5, "{}", turned(&h));
+    h.cmd(Command::UndoSceneOperation);
+    // Legacy R4: sideways motion turns nothing.
+    h.cmd(Command::SetPreference { name: "Rotation Method".into(), value: 2.0 });
+    h.drag(start, start + egui::vec2(40.0, 0.0));
+    assert!(turned(&h) < 1e-3, "{}", turned(&h));
+}
+
 /// Preferences > General: Layer Defaults (Propagate ... Ask: Unhide All on
 /// a hidden layer asks, Yes unhides the layer; Default to By Layer for New
 /// Nodes) and Sub-Materials Assign Automatically (polygons selected: the

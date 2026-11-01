@@ -1,6 +1,6 @@
 use super::*;
 use eframe::egui;
-use glam::{Mat3, Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec2, Vec3};
 
 /// Top view: orthographic, looking down -Z, 1 world unit = 10 px, origin at
 /// the viewport centre (400, 300).
@@ -196,4 +196,63 @@ fn preview_undo_only_removes_its_own_entry() {
     let _ = app.dispatch(Command::MoveSelection { delta: [0.0, 1.0, 0.0], system: None });
     app.preview_undo();
     assert_eq!(app.state.undo.len(), 4, "the user's later move stays");
+}
+
+#[test]
+fn rotation_methods_linear_roll_crank_and_legacy() {
+    let p = top_projection();
+    let l = layout();
+    // Grabbed at the ring's right: the tangent points up the screen.
+    let start = egui::pos2(440.0, 300.0);
+    let t = rotate_gizmo::roll_tangent(&l, &p, start).unwrap();
+    assert!((t - Vec2::new(0.0, -1.0)).length() < 1e-5, "{t}");
+    // Linear Roll: 10 px along the tangent at 0.5 degrees per pixel.
+    let (deg, roll) = rotate_gizmo::axis_drag_deg(&l, &p, Axis::Z, start, start, egui::pos2(440.0, 290.0), 0, 5.0, 0.5);
+    assert!(roll && (deg - 5.0).abs() < 1e-4, "{deg}");
+    // Moving across the tangent rolls nothing.
+    let (deg, _) = rotate_gizmo::axis_drag_deg(&l, &p, Axis::Z, start, start, egui::pos2(450.0, 300.0), 0, 5.0, 0.5);
+    assert!(deg.abs() < 1e-4);
+    // Circular Crank: the sweep around the centre (Z faces the viewer in Top).
+    let now = egui::pos2(400.0 + 40.0 * 10f32.to_radians().cos(), 300.0 - 40.0 * 10f32.to_radians().sin());
+    let (deg, roll) = rotate_gizmo::axis_drag_deg(&l, &p, Axis::Z, start, start, now, 1, 5.0, 0.5);
+    assert!(!roll && (deg - 10.0).abs() < 1e-3, "{deg}");
+    // Legacy R4: vertical motion only.
+    let (deg, roll) = rotate_gizmo::axis_drag_deg(&l, &p, Axis::Z, start, start, egui::pos2(460.0, 280.0), 2, 5.0, 0.5);
+    assert!(!roll && (deg - 10.0).abs() < 1e-4, "{deg}");
+}
+
+#[test]
+fn planar_angle_threshold_turns_crank_into_roll() {
+    // The Z axis 3 degrees out of the view plane.
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let eye = Vec3::new(0.0, -100.0 * 3f32.to_radians().cos(), 100.0 * 3f32.to_radians().sin());
+    let view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Z);
+    let proj = Mat4::orthographic_rh(-40.0, 40.0, -30.0, 30.0, 0.1, 1000.0);
+    let p = Projection::new(view, proj, rect);
+    let l = layout();
+    let start = egui::pos2(440.0, 300.0);
+    let (_, roll) = rotate_gizmo::axis_drag_deg(&l, &p, Axis::Z, start, start, egui::pos2(440.0, 290.0), 1, 5.0, 0.5);
+    assert!(roll, "3 degrees is under a 5 degree threshold");
+    let (_, roll) = rotate_gizmo::axis_drag_deg(&l, &p, Axis::Z, start, start, egui::pos2(440.0, 290.0), 1, 2.0, 0.5);
+    assert!(!roll, "over a 2 degree threshold it cranks");
+}
+
+#[test]
+fn projection_plane_drag_follows_the_screen_with_persp_sens() {
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let view = Mat4::look_at_rh(Vec3::new(0.0, -100.0, 20.0), Vec3::ZERO, Vec3::Z);
+    let proj = Mat4::perspective_rh(45f32.to_radians(), 800.0 / 600.0, 0.1, 1000.0);
+    let p = Projection::new(view, proj, rect);
+    assert!(p.perspective() && !top_projection().perspective());
+    let l = layout();
+    let o = p.screen(Vec3::ZERO).unwrap();
+    // Up the screen toward the horizon: Intersection runs away, Projection stays proportional.
+    let far = egui::pos2(o.x, o.y - 30.0);
+    let inter = move_gizmo::drag_delta(&l, &p, Handle::Plane(Plane::XY), o, far).unwrap();
+    let proj1 = move_gizmo::plane_projection_delta(&l, &p, Plane::XY, o, far, 1.0).unwrap();
+    let (_, py) = move_gizmo::axis_screen_dir(&l, &p, Axis::Y).unwrap();
+    assert!((proj1.y - 30.0 / py).abs() < 1e-3, "{proj1}");
+    assert!(inter.y > proj1.y * 1.1, "intersection {inter} vs projection {proj1}");
+    let proj2 = move_gizmo::plane_projection_delta(&l, &p, Plane::XY, o, far, 2.0).unwrap();
+    assert!((proj2 - proj1 * 2.0).length() < 1e-4, "Persp Sens scales it");
 }

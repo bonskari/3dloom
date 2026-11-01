@@ -98,6 +98,23 @@ pub fn drag_delta(l: &GizmoLayout, p: &Projection, handle: Handle, last: egui::P
     }
 }
 
+/// Move/Rotate Transforms > Projection: the pointer motion split along the
+/// screen directions of the plane's two axes (no ray hits, so no runaway at
+/// the horizon), scaled by Persp Sens.
+pub fn plane_projection_delta(l: &GizmoLayout, p: &Projection, plane: Plane, last: egui::Pos2, now: egui::Pos2, sens: f32) -> Option<Vec3> {
+    let (ua, va) = plane.axes();
+    let (du, lu) = axis_screen_dir(l, p, ua)?;
+    let (dv, lv) = axis_screen_dir(l, p, va)?;
+    let (su, sv) = (du * lu, dv * lv);
+    let det = su.perp_dot(sv);
+    if det.abs() < 1e-6 {
+        return None;
+    }
+    let d = pos_sub(now, last);
+    let (a, b) = (d.perp_dot(sv) / det, su.perp_dot(d) / det);
+    Some((unit(ua) * a + unit(va) * b) * sens)
+}
+
 pub fn unit(a: Axis) -> Vec3 {
     match a {
         Axis::X => Vec3::X,

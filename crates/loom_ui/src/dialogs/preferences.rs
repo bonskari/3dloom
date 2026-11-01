@@ -207,6 +207,14 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                             check(ui, app, "Rotate Screen Handle", "Screen Handle");
                             check(ui, app, "Rotate Show Pie Slice", "Show Pie Slice");
                             check(ui, app, "Rotate Angle Data", "Angle Data");
+                            ui.label("Rotation Method:");
+                            let m = app.state.prefs.gizmos.rotation_method;
+                            for (v, label) in [(0u8, "Linear Roll"), (1, "Circular Crank"), (2, "Legacy R4")] {
+                                if ui.radio(m == v, label).clicked() {
+                                    set(app, "Rotation Method", v as f64);
+                                }
+                            }
+                            ui.horizontal(|ui| number(ui, app, "Planar Angle Threshold", "Planar Angle Threshold:", 0.0..=90.0, 1));
                         });
                     });
                     ui.group(|ui| {
@@ -216,8 +224,17 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                             ui.horizontal(|ui| number(ui, app, "Scale Uniform Handle Size", "Uniform Handle Size (%):", 1.0..=95.0, 0));
                             ui.horizontal(|ui| number(ui, app, "Scale 2-Axis Handle Size", "2-Axis Handle Size (%):", 0.0..=99.0, 0));
                             check(ui, app, "Uniform 2-Axis Scaling", "Uniform 2-Axis Scaling");
-                            ui.label(egui::RichText::new("Rotation Increment").strong());
-                            ui.horizontal(|ui| number(ui, app, "Rotation Increment", "Degrees:", 0.0..=180.0, 1));
+                            ui.label(egui::RichText::new("Move/Rotate Transforms").strong());
+                            let proj = app.state.prefs.gizmos.move_projection;
+                            ui.horizontal(|ui| {
+                                for (v, label) in [(false, "Intersection"), (true, "Projection")] {
+                                    if ui.radio(proj == v, label).clicked() {
+                                        set(app, "Move/Rotate Projection", if v { 1.0 } else { 0.0 });
+                                    }
+                                }
+                            });
+                            ui.horizontal(|ui| number(ui, app, "Persp Sens", "Persp Sens:", 0.01..=100.0, 2));
+                            ui.horizontal(|ui| number(ui, app, "Rotation Increment", "Rotation Increment:", 0.0..=180.0, 2));
                             ui.horizontal(|ui| number(ui, app, "Viewport Orbit Snap Angle", "Orbit Snap Angle:", 0.0..=90.0, 1));
                         });
                     });

@@ -180,6 +180,11 @@ impl Projection {
         self.toward_viewer()
     }
 
+    /// A perspective (not orthographic) projection.
+    pub fn perspective(&self) -> bool {
+        self.proj.w_axis.w.abs() < 0.5
+    }
+
     pub fn camera_right(&self) -> Vec3 {
         self.inv_view.x_axis.truncate().normalize_or_zero()
     }
@@ -235,11 +240,13 @@ pub struct DragState {
     pub snap_start: Option<Vec3>,
     /// Undo depth before the drag, so a right-click can cancel exactly it.
     pub undo_len: usize,
+    /// Rotate: the drag is a Linear Roll (the tangent handle shows).
+    pub roll: bool,
 }
 
 impl DragState {
     pub fn new(handle: Handle, start: egui::Pos2) -> Self {
-        Self { handle, start, last: start, angle_deg: 0.0, raw_angle_deg: 0.0, quat: Quat::IDENTITY, factor: 1.0, raw_factor: 1.0, offset: Vec3::ZERO, rotate_deg: Vec3::ZERO, factors: Vec3::ONE, shift: false, snap_start: None, undo_len: 0 }
+        Self { handle, start, last: start, angle_deg: 0.0, raw_angle_deg: 0.0, quat: Quat::IDENTITY, factor: 1.0, raw_factor: 1.0, offset: Vec3::ZERO, rotate_deg: Vec3::ZERO, factors: Vec3::ONE, shift: false, snap_start: None, undo_len: 0, roll: false }
     }
 }
 
@@ -390,7 +397,13 @@ pub fn drag(app: &mut LoomApp, drag: &mut DragState, l: &GizmoLayout, p: &Projec
                 }
                 l.axes.transpose() * world
             });
-            let free = move_gizmo::drag_delta(&l.relative(l.move_size), p, drag.handle, drag.last, pointer);
+            let g = app.state.prefs.gizmos;
+            let ml = l.relative(l.move_size);
+            // Move/Rotate Transforms > Projection: plane drags in perspective views follow the pointer's screen motion.
+            let free = match drag.handle {
+                Handle::Plane(plane) if g.move_projection && p.perspective() => move_gizmo::plane_projection_delta(&ml, p, plane, drag.last, pointer, g.persp_sens),
+                _ => move_gizmo::drag_delta(&ml, p, drag.handle, drag.last, pointer),
+            };
             if let Some(delta) = snapped.or(free) {
                 if delta.length_squared() > 0.0 {
                     drag.offset += delta;
@@ -409,7 +422,16 @@ pub fn drag(app: &mut LoomApp, drag: &mut DragState, l: &GizmoLayout, p: &Projec
                     Handle::Axis(a) => Some(a),
                     _ => None,
                 };
-                let raw = rotate_gizmo::drag_angle_deg_handle(&l.relative(l.rotate_size), p, drag.handle, drag.last, pointer);
+                let g = app.state.prefs.gizmos;
+                let rl = l.relative(l.rotate_size);
+                let raw = match axis {
+                    Some(a) => {
+                        let (deg, roll) = rotate_gizmo::axis_drag_deg(&rl, p, a, drag.start, drag.last, pointer, g.rotation_method, g.planar_angle_threshold, g.rotation_increment_per_px);
+                        drag.roll = roll;
+                        deg
+                    }
+                    None => rotate_gizmo::drag_angle_deg_handle(&rl, p, drag.handle, drag.last, pointer),
+                };
                 drag.raw_angle_deg += raw;
                 let target = app.state.snap_angle_deg(drag.raw_angle_deg);
                 let step = target - drag.angle_deg;
