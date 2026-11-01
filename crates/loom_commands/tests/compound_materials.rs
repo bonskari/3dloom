@@ -415,3 +415,20 @@ fn copy_or_swap_colors_between_swatches() {
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_ne!(s.scene.materials[&id].extended.filter_color, glam::Vec3::X);
 }
+
+#[test]
+fn auto_key_keys_material_colours_and_values() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] }).unwrap();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 20 }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [0, 0, 255] }).unwrap();
+    execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Glossiness".into(), value: 80.0 }).unwrap();
+    let m = &s.scene.materials[&top(&s)];
+    assert!(m.diffuse.is_animated() && m.glossiness.is_animated(), "keyed under Auto Key");
+    assert_eq!(m.diffuse.get_at(0.0), glam::Vec3::X);
+    assert_eq!(m.diffuse.get_at(20.0), glam::Vec3::Z);
+    assert!((m.glossiness.get_at(20.0) - 80.0).abs() < 1e-3 && (m.glossiness.get_at(0.0) - 10.0).abs() < 1e-3);
+    let mid = m.diffuse.get_at(10.0);
+    assert!(mid.x > 0.1 && mid.z > 0.1, "in between: {mid:?}");
+}
