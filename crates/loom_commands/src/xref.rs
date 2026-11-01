@@ -27,7 +27,7 @@ pub fn add(state: &mut AppState, path: &Path, names: Option<&[String]>, scene: b
         return Err(format!("{key} is already an XRef Scene here"));
     }
     let (doc, warnings) = read_any(path)?;
-    let (mut changes, map) = merge_changes(state, &doc, if scene { None } else { names }, &[])?;
+    let (mut changes, map) = merge_changes(state, &doc, if scene { None } else { names }, &[], &[])?;
     if map.is_empty() {
         return Err("nothing to reference".into());
     }
@@ -92,7 +92,7 @@ pub fn update(state: &mut AppState, path: Option<&str>) -> Result<Value, String>
             let known: std::collections::BTreeSet<&str> = r.nodes.iter().map(|(n, _)| n.as_str()).collect();
             let gained: Vec<String> = doc.scene.nodes().map(|n| n.name.clone()).filter(|n| !known.contains(n.as_str())).collect();
             if !gained.is_empty() {
-                let (more, map) = merge_changes(state, &doc, Some(&gained), &[])?;
+                let (more, map) = merge_changes(state, &doc, Some(&gained), &[], &[])?;
                 for c in more {
                     match c {
                         Change::AddNode(mut n) => {

@@ -432,10 +432,12 @@ pub struct MergeDuplicate {
 /// turned into copies, layers kept by name (created when the scene lacks
 /// them). A name the scene already has follows its answer in `duplicates`
 /// (auto-renamed without one). Their materials come along (a library
-/// material of the same name and settings is shared). Returns the new ids.
-pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], label: &str) -> Result<Vec<NodeId>, String> {
+/// material of the same name and settings is shared). An object named in
+/// `reparent` whose parent stays behind links to the scene object of the
+/// parent's name instead (world transform kept). Returns the new ids.
+pub fn merge(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], reparent: &[String], label: &str) -> Result<Vec<NodeId>, String> {
     // New ids follow the merge order (parents first).
-    let mut ids: Vec<NodeId> = merge_map(state, doc, names, duplicates, label)?.into_values().collect();
+    let mut ids: Vec<NodeId> = merge_map(state, doc, names, duplicates, reparent, label)?.into_values().collect();
     ids.sort();
     Ok(ids)
 }
@@ -467,8 +469,8 @@ pub(crate) fn carry_material(src: &loom_scene::MaterialLibrary, id: loom_scene::
 }
 
 /// `merge`, returning each merged node's file id → its new id.
-pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], label: &str) -> Result<BTreeMap<NodeId, NodeId>, String> {
-    let (changes, map) = merge_changes(state, doc, names, duplicates)?;
+pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], reparent: &[String], label: &str) -> Result<BTreeMap<NodeId, NodeId>, String> {
+    let (changes, map) = merge_changes(state, doc, names, duplicates, reparent)?;
     if changes.is_empty() {
         return Ok(map);
     }
@@ -483,7 +485,7 @@ pub fn merge_map(state: &mut AppState, doc: &Document, names: Option<&[String]>,
 
 /// What `merge` commits (layers, materials, the deleted old objects, the new
 /// nodes) and the file id → new id map, without committing.
-pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate]) -> Result<(Vec<Change>, BTreeMap<NodeId, NodeId>), String> {
+pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[String]>, duplicates: &[MergeDuplicate], reparent: &[String]) -> Result<(Vec<Change>, BTreeMap<NodeId, NodeId>), String> {
     let src = &doc.scene;
     let mut chosen: Vec<NodeId> = match names {
         None => src.nodes().map(|n| n.id).collect(),
@@ -567,9 +569,16 @@ pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[St
     let mut taken: std::collections::BTreeSet<String> = state.scene.nodes().filter(|n| !old.contains(&n.id)).map(|n| n.name.clone()).collect();
     for old_id in &chosen {
         let mut node = src.node(*old_id).expect("chosen from the file").clone();
-        // A parent left behind: keep the world transform.
-        if node.parent.is_some_and(|p| !map.contains_key(&p)) {
-            node.transform = loom_scene::Transform::from_matrix(src.world_matrix(*old_id));
+        // A parent left behind: keep the world transform, under the scene's
+        // object of the parent's name when the answer was to reparent.
+        let mut linked = None;
+        if let Some(p) = node.parent.filter(|p| !map.contains_key(p)) {
+            let world = src.world_matrix(*old_id);
+            let pname = src.node(p).map(|n| n.name.as_str()).unwrap_or_default();
+            let new_parent = state.scene.nodes().find(|n| n.name == pname && !old.contains(&n.id)).map(|n| n.id).filter(|_| reparent.contains(&node.name));
+            let frame = new_parent.map(|np| loom_scene::Scene::frame_from(state.scene.world_matrix(np), node.inherit)).unwrap_or(glam::Mat4::IDENTITY);
+            node.transform = loom_scene::Transform::from_matrix(frame.inverse() * world);
+            linked = new_parent;
         }
         // An instance whose source stays behind becomes a copy with the resolved stack.
         if node.instance_of.is_some_and(|s| !map.contains_key(&s)) {
@@ -584,6 +593,7 @@ pub(crate) fn merge_changes(state: &AppState, doc: &Document, names: Option<&[St
             }
         }
         node.remap_ids(&remap);
+        node.parent = node.parent.or(linked);
         node.layer = layer_map.get(&node.layer).copied().unwrap_or(state.scene.current_layer);
         node.material = node.material.and_then(|m| material_map.get(&m).copied());
         let action = if in_scene.contains(&node.name) { answer(&node.name).map(|d| d.action.as_str()).unwrap_or("auto_rename") } else { "auto_rename" };

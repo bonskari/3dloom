@@ -439,7 +439,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let ids: Vec<NodeId> = state.selection.iter().copied().collect();
             export_any(state, &ids, std::path::Path::new(&path))
         }
-        C::MergeFile { path, names, duplicates } => {
+        C::MergeFile { path, names, duplicates, reparent } => {
             let Some(path) = path else {
                 state.dialog = Some(Dlg::MergeFile);
                 return Ok(json!({ "dialog": "MergeFile" }));
@@ -458,7 +458,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 doc.scene = file.scene;
             }
             let label = format!("Merge {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-            let ids = crate::file::merge(state, &doc, names.as_deref(), duplicates.as_deref().unwrap_or_default(), &label)?;
+            let ids = crate::file::merge(state, &doc, names.as_deref(), duplicates.as_deref().unwrap_or_default(), reparent.as_deref().unwrap_or_default(), &label)?;
             if crate::max_io::is_max(&path) {
                 state.import_report = warnings;
             }

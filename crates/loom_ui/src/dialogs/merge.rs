@@ -55,6 +55,31 @@ struct St {
     select_subtree: bool,
     /// After OK: the chosen names, the duplicates still to answer and the answers so far.
     asking: Option<Asking>,
+    /// Then: the merged objects whose parent stays behind while the scene
+    /// has an object of that name, asked one by one.
+    reparenting: Option<Reparenting>,
+}
+
+#[derive(Clone)]
+struct Reparenting {
+    names: Vec<String>,
+    answers: Vec<MergeDuplicate>,
+    /// (object, its file parent's name) still to ask.
+    pending: Vec<(String, String)>,
+    yes: Vec<String>,
+}
+
+/// The chosen objects whose file parent is not chosen while the scene has
+/// an object of the parent's name: (object, parent name).
+fn reparent_candidates(app: &LoomApp, names: &[String], info: &[Info], chosen: &[String]) -> Vec<(String, String)> {
+    chosen
+        .iter()
+        .filter_map(|n| {
+            let i = names.iter().position(|x| x == n)?;
+            let parent = &names[info.get(i)?.parent?];
+            (!chosen.contains(parent) && app.state.scene.nodes().any(|x| &x.name == parent)).then(|| (n.clone(), parent.clone()))
+        })
+        .collect()
 }
 
 #[derive(Clone)]
@@ -169,11 +194,37 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     };
     let mut st: St = ctx.data(|d| d.get_temp(state_id())).unwrap_or_default();
     let mut done = false;
-    let mut run: Option<(Vec<String>, Vec<MergeDuplicate>)> = None;
+    let mut run: Option<(Vec<String>, Vec<MergeDuplicate>, Vec<String>)> = None;
+    let mut ready: Option<(Vec<String>, Vec<MergeDuplicate>)> = None;
     let info = st.info.get_or_insert_with(|| file_info(&path, &names)).clone();
     let order = list_order(&names, &info, &st);
     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    if let Some(ask) = st.asking.as_mut() {
+    if let Some(r) = st.reparenting.as_mut() {
+        // Reparent: one question per object whose parent stays behind.
+        let (child, parent) = r.pending[0].clone();
+        let mut answer: Option<(bool, bool)> = None;
+        egui::Window::new("Reparent").collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.label(format!("Reparent {child:?} to the existing {parent:?}?"));
+            ui.horizontal(|ui| {
+                for (label, yes, all) in [("Yes", true, false), ("Yes to All", true, true), ("No", false, false), ("No to All", false, true)] {
+                    if ui.button(label).clicked() {
+                        answer = Some((yes, all));
+                    }
+                }
+            });
+        });
+        if let Some((yes, all)) = answer {
+            let n = if all { r.pending.len() } else { 1 };
+            for (c, _) in r.pending.drain(..n) {
+                if yes {
+                    r.yes.push(c);
+                }
+            }
+            if r.pending.is_empty() {
+                run = Some((r.names.clone(), r.answers.clone(), r.yes.clone()));
+            }
+        }
+    } else if let Some(ask) = st.asking.as_mut() {
         // Duplicate Name: one question per name the scene already has.
         let name = ask.pending[0].clone();
         let mut answer: Option<MergeDuplicate> = None;
@@ -213,7 +264,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ask.answers.push(a);
             match ask.pending.first() {
                 Some(next) => ask.rename = next.clone(),
-                None => run = Some((ask.names.clone(), ask.answers.clone())),
+                None => ready = Some((ask.names.clone(), ask.answers.clone())),
             }
         }
     } else {
@@ -291,7 +342,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     pending.dedup();
                     // XRef objects keep their file names (renamed here when taken), no question.
                     if pending.is_empty() || app.state.merge_as_xref {
-                        run = Some((chosen, Vec::new()));
+                        ready = Some((chosen, Vec::new()));
                     } else {
                         st.asking = Some(Asking { names: chosen, rename: pending[0].clone(), pending, answers: Vec::new(), apply_to_all: false });
                     }
@@ -302,14 +353,24 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             });
         });
     }
-    if let Some((chosen, answers)) = run {
+    if let Some((chosen, answers)) = ready {
+        let pending = if app.state.merge_as_xref { Vec::new() } else { reparent_candidates(app, &names, &info, &chosen) };
+        if pending.is_empty() {
+            run = Some((chosen, answers, Vec::new()));
+        } else {
+            st.asking = None;
+            st.reparenting = Some(Reparenting { names: chosen, answers, pending, yes: Vec::new() });
+        }
+    }
+    if let Some((chosen, answers, reparent)) = run {
         let p = path.to_string_lossy().into_owned();
-        let cmd = if app.state.merge_as_xref { Command::XrefObjects { path: Some(p), names: Some(chosen), automatic: None } } else { Command::MergeFile { path: Some(p), names: Some(chosen), duplicates: Some(answers) } };
+        let cmd = if app.state.merge_as_xref { Command::XrefObjects { path: Some(p), names: Some(chosen), automatic: None } } else { Command::MergeFile { path: Some(p), names: Some(chosen), duplicates: Some(answers), reparent: Some(reparent) } };
         match app.dispatch(cmd) {
             Ok(_) => done = true,
             Err(e) => {
                 app.state.status_prompt = e;
                 st.asking = None;
+                st.reparenting = None;
             }
         }
     }

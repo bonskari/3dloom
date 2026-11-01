@@ -1593,7 +1593,7 @@ pub fn dropped_scene_command(path: &std::path::Path) -> Option<Command> {
     let p = Some(path.to_string_lossy().into_owned());
     match ext.as_str() {
         "fbx" | "obj" | "3ds" | "stl" | "dxf" | "max" => Some(Command::ImportFile { path: p }),
-        "loom" => Some(Command::MergeFile { path: p, names: None, duplicates: None }),
+        "loom" => Some(Command::MergeFile { path: p, names: None, duplicates: None, reparent: None }),
         _ => None,
     }
 }

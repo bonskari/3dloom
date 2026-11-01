@@ -3997,7 +3997,7 @@ fn merge_lists_and_brings_in_max_objects() {
     }
     let mut h = Harness::new();
     h.app.native_file_dialogs = false;
-    h.cmd(Command::MergeFile { path: None, names: None, duplicates: None });
+    h.cmd(Command::MergeFile { path: None, names: None, duplicates: None, reparent: None });
     choose_file(&mut h, &path, "Open");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MergeObjects), "{}", h.app.state.status_prompt);
     h.frames(2);

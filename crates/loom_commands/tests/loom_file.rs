@@ -292,7 +292,7 @@ fn merge_rescales_objects_from_a_file_in_other_units() {
     };
     let mut s = AppState::new();
     execute(&mut s, units("Centimeters", None)).unwrap();
-    let r = execute(&mut s, Command::MergeFile { path: Some(path.to_string_lossy().into_owned()), names: None, duplicates: None }).unwrap();
+    let r = execute(&mut s, Command::MergeFile { path: Some(path.to_string_lossy().into_owned()), names: None, duplicates: None, reparent: None }).unwrap();
     let id = r["nodes"][0].as_u64().unwrap();
     assert!((height(&s, id) - 100.0).abs() < 1e-3, "1 m is 100 cm: {}", height(&s, id));
     let x = s.scene.node(loom_scene::NodeId(id)).unwrap().transform.position.get().x;
@@ -301,6 +301,6 @@ fn merge_rescales_objects_from_a_file_in_other_units() {
     assert!(s.scene.is_empty(), "one undo step");
     let mut t = AppState::new();
     execute(&mut t, units("Centimeters", Some(false))).unwrap();
-    let r = execute(&mut t, Command::MergeFile { path: Some(path.to_string_lossy().into_owned()), names: None, duplicates: None }).unwrap();
+    let r = execute(&mut t, Command::MergeFile { path: Some(path.to_string_lossy().into_owned()), names: None, duplicates: None, reparent: None }).unwrap();
     assert!((height(&t, r["nodes"][0].as_u64().unwrap()) - 1.0).abs() < 1e-6, "not respected: the numbers as they are");
 }

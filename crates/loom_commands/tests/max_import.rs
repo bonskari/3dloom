@@ -174,7 +174,7 @@ fn imported_materials_lights_and_unwrap() {
 fn merge_reads_max_files() {
     let Some(p) = asset("Monster/Monster_HEad.max") else { return };
     let mut s = AppState::new();
-    let r = execute(&mut s, Command::MergeFile { path: Some(p.to_string_lossy().into_owned()), names: Some(vec!["Direct02".into(), "Direct02.Target".into()]), duplicates: None }).unwrap();
+    let r = execute(&mut s, Command::MergeFile { path: Some(p.to_string_lossy().into_owned()), names: Some(vec!["Direct02".into(), "Direct02.Target".into()]), duplicates: None, reparent: None }).unwrap();
     assert_eq!(r["nodes"].as_array().unwrap().len(), 2);
     assert_eq!(s.scene.nodes().count(), 2);
     let (d, t) = (by_name(&s, "Direct02"), by_name(&s, "Direct02.Target"));
@@ -182,7 +182,7 @@ fn merge_reads_max_files() {
     assert_eq!(l.target, Some(t));
     // A light left without its target keeps none.
     let mut s = AppState::new();
-    execute(&mut s, Command::MergeFile { path: Some(p.to_string_lossy().into_owned()), names: Some(vec!["Direct02".into()]), duplicates: None }).unwrap();
+    execute(&mut s, Command::MergeFile { path: Some(p.to_string_lossy().into_owned()), names: Some(vec!["Direct02".into()]), duplicates: None, reparent: None }).unwrap();
     let ObjectKind::Light(l) = &s.scene.node(by_name(&s, "Direct02")).unwrap().object else { panic!() };
     assert_eq!(l.target, None);
     execute(&mut s, Command::UndoSceneOperation).unwrap();

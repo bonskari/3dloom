@@ -271,6 +271,39 @@ fn merge_starts_with_nothing_highlighted_and_asks_about_duplicate_names() {
     assert_eq!(h.app.state.dialog, None);
 }
 
+/// Merging a child without its parent while the scene has an object of
+/// the parent's name: the Reparent question; Yes links it there.
+#[test]
+fn merge_asks_to_reparent_to_an_existing_object_of_the_parents_name() {
+    let dir = std::env::temp_dir().join("loom-ui-merge-reparent");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("rig.loom");
+    {
+        let mut src = Harness::new();
+        let hub = named_box(&mut src, "Hub", 0.0);
+        let blade = named_box(&mut src, "Blade", 30.0);
+        src.cmd(Command::SetParent { id: blade.0, parent: Some(hub.0) });
+        src.cmd(Command::SaveFile { path: Some(path.to_string_lossy().into_owned()) });
+    }
+    let mut h = Harness::new();
+    let hub = named_box(&mut h, "Hub", 200.0);
+    h.app.state.merge_pending = Some((path.clone(), vec!["Hub".into(), "Blade".into()]));
+    h.app.state.dialog = Some(loom_commands::Dialog::MergeObjects);
+    h.frames(2);
+    let title = "Merge - rig.loom";
+    let p = window_text(&h, title, "Blade");
+    h.click(p);
+    let ok = window_text(&h, title, "OK");
+    h.click(ok);
+    h.frames(2);
+    let p = window_text(&h, "Reparent", "Yes");
+    h.click(p);
+    let blade = h.app.state.scene.nodes().find(|n| n.name == "Blade").expect("merged").id;
+    assert_eq!(h.app.state.scene.node(blade).unwrap().parent, Some(hub), "linked to the scene's Hub");
+    assert!((h.app.state.scene.world_matrix(blade).w_axis.x - 30.0).abs() < 1e-3, "stays where it was");
+    assert_eq!(h.app.state.dialog, None);
+}
+
 #[test]
 fn layer_manager_render_colour_hide_all_and_the_object_list() {
     let mut h = Harness::new();
