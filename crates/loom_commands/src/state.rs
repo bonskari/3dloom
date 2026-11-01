@@ -1703,6 +1703,9 @@ pub struct AppState {
     pub coords_pending_render: Option<(Option<String>, Option<u32>, Option<u32>)>,
     /// Continue was chosen: the next Render skips the check.
     pub missing_coords_continue: bool,
+    /// Make Preview of the active slot waiting for the UI (which draws the samples):
+    /// frames, size and the first file of the numbered PNG sequence.
+    pub material_preview_request: Option<crate::material::MaterialPreview>,
     /// Bumped by Reload Bitmaps: the viewports read their image files again.
     pub bitmap_generation: u64,
     /// Display panel and viewport display settings (Display Color, statistics, Object Color dialog...).
@@ -2099,6 +2102,7 @@ impl AppState {
             material_clip: None,
             coords_pending_render: None,
             missing_coords_continue: false,
+            material_preview_request: None,
             bitmap_generation: 0,
             display: Default::default(),
             dialog_purpose: DialogPurpose::Select,

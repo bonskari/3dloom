@@ -867,6 +867,9 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         if ch != m.effects_channel {
             let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Material ID Channel".into(), value: ch as f64 });
         }
+        if ui.button("Make Preview").on_hover_text("Make Preview: the active slot over a frame range").clicked() {
+            app.state.dialog = Some(Dialog::MaterialPreview);
+        }
         let vc = app.state.scene.material_editor.options.video_color_check;
         if ui.add(egui::Button::new("Video Color Check").selected(vc)).on_hover_text("Video Color Check: colours past the NTSC limits show black").clicked() {
             let _ = app.dispatch(Command::SetMaterialEditorOption { name: "Video Color Check".into(), value: if vc { 0.0 } else { 1.0 } });
@@ -1025,6 +1028,70 @@ fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
             app.state.dialog = Some(Dialog::CopySwapColors);
         }
     }
+}
+
+/// Make Preview waiting: draws the slot's sample at each frame and saves
+/// the numbered PNGs (the samples are drawn here, on the UI side).
+pub fn run_material_preview(app: &mut LoomApp) {
+    let Some(req) = app.state.material_preview_request.take() else { return };
+    let ed = &app.state.scene.material_editor;
+    let setup = PreviewSetup::from_options(&ed.options, ed.sample_type(req.slot), (0.0, 0.0));
+    let size = req.size as usize;
+    for (frame, file) in req.frames.iter().zip(&req.files) {
+        let px = loom_scene::anim::with(*frame as f32, false, || {
+            let sample = slot_sample(app, req.slot);
+            let images = sample_images(app, &sample);
+            preview_pixels(&sample, size, &setup, &images)
+        });
+        let img = image::RgbaImage::from_fn(req.size, req.size, |x, y| {
+            let c = px[y as usize * size + x as usize];
+            image::Rgba([c.r(), c.g(), c.b(), 255])
+        });
+        if let Err(e) = img.save(file) {
+            app.last_error = Some(format!("Make Preview: {file}: {e}"));
+            return;
+        }
+    }
+}
+
+/// Create Material Preview: the frame range, every Nth frame, the size and
+/// the file; Play Preview shows the made sequence.
+pub fn material_preview(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("material_preview_dialog");
+    let (s0, e0) = app.state.frame_range;
+    let (mut start, mut end, mut every, mut size, mut file): (i32, i32, u32, u32, String) = ctx.data(|d| d.get_temp(id)).unwrap_or((s0, e0, 1, 64, String::new()));
+    let mut make = false;
+    let mut play = false;
+    egui::Window::new("Create Material Preview").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        egui::Grid::new("material_preview_grid").num_columns(2).show(ui, |ui| {
+            ui.label("Start:");
+            ui.add(egui::DragValue::new(&mut start));
+            ui.end_row();
+            ui.label("End:");
+            ui.add(egui::DragValue::new(&mut end));
+            ui.end_row();
+            ui.label("Every Nth Frame:");
+            ui.add(egui::DragValue::new(&mut every).range(1..=1000));
+            ui.end_row();
+            ui.label("Size:");
+            ui.add(egui::DragValue::new(&mut size).range(16..=1024));
+            ui.end_row();
+            ui.label("File:");
+            ui.text_edit_singleline(&mut file);
+            ui.end_row();
+        });
+        ui.horizontal(|ui| {
+            make = ui.add_enabled(!file.trim().is_empty(), egui::Button::new("Make")).clicked();
+            play = ui.add_enabled(!file.trim().is_empty(), egui::Button::new("Play")).clicked();
+        });
+    });
+    if make {
+        let _ = app.dispatch(Command::MakeMaterialPreview { start, end, every: Some(every), size, path: file.clone() });
+    }
+    if play {
+        let _ = app.dispatch(Command::ViewImageFile { path: Some(loom_scene::render::numbered_path(&file, 0)), sequence: Some(true) });
+    }
+    ctx.data_mut(|d| d.insert_temp(id, (start, end, every, size, file)));
 }
 
 /// Missing Map Coordinates: each map channel and object; Continue renders anyway.

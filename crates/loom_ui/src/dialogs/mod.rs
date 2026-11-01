@@ -123,6 +123,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     vertex_paint::show(ctx, app);
     // Render To Texture is modeless: it stays open beside the other dialogs.
     render_to_texture::show(ctx, app);
+    material_editor::run_material_preview(app);
     if app.state.material_explorer_open {
         let mut open = true;
         material_editor::explorer(ctx, app, &mut open);
@@ -158,6 +159,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::RenderMap => material_editor::render_map(ctx, app, &mut open),
         Dialog::CopySwapColors => material_editor::copy_swap_colors(ctx, app, &mut open),
         Dialog::MissingMapCoordinates => material_editor::missing_map_coordinates(ctx, app, &mut open),
+        Dialog::MaterialPreview => material_editor::material_preview(ctx, app, &mut open),
         Dialog::SpecifyCropping => material_editor::specify_cropping(ctx, app, &mut open),
         Dialog::CopyMap { from, to } => material_editor::copy_map(ctx, app, from, to, &mut open),
         Dialog::RenderFile | Dialog::ViewImageFile | Dialog::SaveRenderedImage | Dialog::SaveRenderPreset | Dialog::LoadRenderPreset | Dialog::RamPlayerFile { .. } => file_dialog::show(ctx, app, dialog, &mut open),

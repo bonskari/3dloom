@@ -483,6 +483,8 @@ pub enum Dialog {
     CopySwapColors,
     /// Render: objects lack the mapping coordinates their maps' channels need.
     MissingMapCoordinates,
+    /// Material Editor > Make Preview: Create Material Preview.
+    MaterialPreview,
     /// Bitmap Parameters > View Image: Specify Cropping/Placement.
     SpecifyCropping,
     /// Copy (Instance) Map: dragging map button `from` onto `to` (indexes into MAP_SLOTS).

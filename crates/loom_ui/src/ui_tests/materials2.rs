@@ -448,3 +448,29 @@ fn video_color_check_toggle() {
     h.frames(2);
     assert!(h.app.state.scene.material_editor.options.video_color_check);
 }
+
+#[test]
+fn make_preview_saves_the_slot_animating_over_the_frames() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    click_in_editor(&mut h, "Make Preview", 0.0);
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::MaterialPreview));
+    // Diffuse red at 0, blue at 10 (Auto Key).
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Self-Illumination".into(), value: 100.0 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 10 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [0, 0, 255] });
+    h.cmd(Command::AutoKeyModeToggle);
+    let dir = std::env::temp_dir().join(format!("loom_mtl_preview_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("p.png").to_string_lossy().into_owned();
+    h.cmd(Command::MakeMaterialPreview { start: 0, end: 10, every: Some(5), size: 32, path: path.clone() });
+    h.frames(2);
+    let px = |n: i32| image::open(loom_scene::render::numbered_path(&path, n)).unwrap().to_rgba8().get_pixel(16, 16).0;
+    let (a, c) = (px(0), px(2));
+    assert!(a[0] > a[2] + 100, "frame 0 red: {a:?}");
+    assert!(c[2] > c[0] + 100, "frame 10 blue: {c:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

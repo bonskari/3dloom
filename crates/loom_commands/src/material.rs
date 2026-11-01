@@ -62,6 +62,7 @@ pub fn handles(c: &C) -> bool {
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
             | C::CleanMultiMaterial { .. }
+            | C::MakeMaterialPreview { .. }
             | C::MissingMapCoordinates { .. }
             | C::MaterialExplorer
             | C::AssignMaterialById { .. }
@@ -294,6 +295,15 @@ fn add_sub(lib: &mut MaterialLibrary, id: MaterialId) -> Result<u16, String> {
 }
 
 /// Gives `m`'s sub-materials (and theirs) copies of their own in `lib`.
+/// Make Preview waiting for the UI to draw and save the samples.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaterialPreview {
+    pub slot: usize,
+    pub frames: Vec<i32>,
+    pub size: u32,
+    pub files: Vec<String>,
+}
+
 /// The Type button's clipboard: a material with the sub-materials under it
 /// (as they were when copied), or a map.
 #[derive(Debug, Clone, PartialEq)]
@@ -1234,6 +1244,22 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     Ok(json!({ "missing": list }))
                 }
             }
+        }
+        C::MakeMaterialPreview { start, end, every, size, path } => {
+            if end < start {
+                return Err(format!("preview range {start} to {end}: the end is before the start"));
+            }
+            if !(16..=1024).contains(&size) {
+                return Err(format!("preview size {size}: 16 to 1024 pixels"));
+            }
+            if path.trim().is_empty() {
+                return Err("no preview file name".into());
+            }
+            let every = every.unwrap_or(1).max(1);
+            let frames: Vec<i32> = (start..=end).step_by(every as usize).collect();
+            let files: Vec<String> = (0..frames.len()).map(|i| loom_scene::render::numbered_path(&path, i as i32)).collect();
+            state.material_preview_request = Some(MaterialPreview { slot: state.scene.material_editor.active, frames: frames.clone(), size, files: files.clone() });
+            Ok(json!({ "frames": frames, "files": files }))
         }
         C::CleanMultiMaterial { materials, apply } => {
             let unused = unused_sub_materials(state);
