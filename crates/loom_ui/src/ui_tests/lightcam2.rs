@@ -516,7 +516,9 @@ fn area_shadows_shadow_quality_spinner_sets_the_rays() {
     h.app.panel_tab = crate::Tab::Modify;
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
     h.frames(3);
-    h.click_widget("Area Shadows");
+    // The rollout header (below the Shadow Type list showing the same name).
+    let header = *h.widgets_labelled("Area Shadows").last().expect("the Area Shadows rollout");
+    h.click(header.center());
     h.frames(2);
     let before = light(&h, l).shadow_quality.get();
     let spin = h.spinner_after("Shadow Quality:");
