@@ -108,6 +108,7 @@ fn display_quad_hides_and_freezes_the_selections_layer_and_opens_scene_states() 
     let walls = h.app.state.scene.node(a).unwrap().layer;
     assert_ne!(walls, 0, "the new layer took the selection");
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
     h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
     maximized(&mut h);
     let r = h.app.viewport_rects[h.app.state.active_viewport];
@@ -127,10 +128,10 @@ fn display_quad_hides_and_freezes_the_selections_layer_and_opens_scene_states() 
     assert!(h.app.state.scene.layer(walls).unwrap().hidden);
     quad_item(&mut h, "Manage Scene States...");
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ManageSceneStates));    // Transform quadrant (down and right of the click), with the visible box selected: Wire Parameters.
-    h.cmd(Command::SelectAll);
+    h.cmd(Command::SelectNodes { ids: vec![b.0], op: loom_commands::SelectOp::Replace });
     h.cmd(Command::CloseDialog);
     right_click(&mut h, at);
-    let p = h.text_rects("Wire Parameters...").into_iter().find(|r| r.min.x > at.x && r.min.y > at.y).expect("Wire Parameters in the transform quadrant").center();
+    let p = h.text_rects("Wire Parameters...").into_iter().find(|r| r.min.x > at.x && r.min.y > at.y).unwrap_or_else(|| panic!("Wire Parameters in the transform quadrant: {:?} {:?}", h.text_rects("Wire Parameters..."), h.app.state.selection)).center();
     h.click(p);
     assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ParameterWiring));
 }

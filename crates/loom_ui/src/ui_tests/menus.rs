@@ -331,9 +331,11 @@ fn show_all_sets_in_list_groups_the_modifier_list_by_set() {
     let list = h.widgets.iter().filter(|(r, _, w)| *r == Role::ComboBox && w.max.x <= set_button.min.x + 1.0 && (w.center().y - set_button.center().y).abs() < set_button.height()).max_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x)).map(|w| w.2).expect("the Modifier List");
     h.click(list.center());
     h.frames(1);
-    assert!(!h.text_rects("UV COORDINATES").is_empty(), "the set names head their modifiers");
-    let bend = h.find_all(Role::Button, "Bend");
-    assert_eq!(bend.len(), 2, "Bend under Parametric Modifiers and in the full list");
-    h.click(bend[0].center());
-    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.last().map(|m| m.name.as_str()), Some("Bend"));
+    let head = h.text_rects("MESH EDITING");
+    assert_eq!(head.len(), 1, "the set names head their modifiers");
+    // The set's first modifier sits right under its name.
+    let edit_poly = h.find_all(Role::Button, "Edit Poly").into_iter().find(|r| r.min.y >= head[0].max.y - 2.0).expect("Edit Poly under Mesh Editing");
+    assert!(edit_poly.min.y - head[0].max.y < 30.0);
+    h.click(edit_poly.center());
+    assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.last().map(|m| m.name.as_str()), Some("Edit Poly"));
 }
