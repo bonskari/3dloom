@@ -124,7 +124,6 @@ pub fn spawn_unix(dir: &std::path::Path, tx: Sender<Request>, waker: Waker) -> s
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
-            let _ = stream.set_nodelay(true);
             let (tx, waker) = (tx.clone(), waker.clone());
             thread::spawn(move || {
                 if let Ok(out) = stream.try_clone() {
