@@ -784,7 +784,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let ids: Vec<u64> = state.scene.nodes().filter(|n| kinds.contains(&(n.object.base_name(), n.layer, n.material))).map(|n| n.id.0).collect();
             execute(state, C::SelectNodes { ids, op: SelectOp::Replace })
         }
-        C::Group { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
+        C::Group { .. } | C::Assemble { .. } | C::Ungroup | C::GroupOpen | C::GroupClose | C::GroupAttach | C::GroupDetach | C::GroupExplode | C::LayerManager
         | C::CreateLayer { .. } | C::DeleteLayer { .. } | C::RenameLayer { .. } | C::SetCurrentLayer { .. } | C::SetLayerHidden { .. } | C::SetLayerFrozen { .. }
         | C::MoveToLayer { .. } | C::AddSelectionToCurrentLayer | C::SelectLayerObjects { .. } | C::SetCurrentLayerToSelection | C::HideSelectionLayer | C::FreezeSelectionLayer | C::SetLayerColor { .. }
         | C::SetLayerRenderable { .. } | C::SetAllLayersHidden { .. } | C::SetAllLayersFrozen { .. } | C::SetColorByLayer { .. }
@@ -4300,7 +4300,7 @@ fn with_group_members(state: &AppState, ids: Vec<NodeId>) -> Vec<NodeId> {
         if !out.contains(&id) {
             out.push(id);
         }
-        if state.scene.node(id).is_some_and(|n| matches!(n.object, ObjectKind::Group { .. })) {
+        if state.scene.node(id).is_some_and(|n| n.object.is_group_head()) {
             for d in state.scene.descendants(id) {
                 if !out.contains(&d) {
                     out.push(d);

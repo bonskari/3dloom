@@ -333,7 +333,7 @@ fn in_closed_group(state: &AppState, n: &Node) -> bool {
     let mut cur = n.parent;
     while let Some(p) = cur {
         let Some(pn) = state.scene.node(p) else { return false };
-        if matches!(pn.object, ObjectKind::Group { open: false }) {
+        if pn.object.group_open() == Some(false) {
             return true;
         }
         cur = pn.parent;

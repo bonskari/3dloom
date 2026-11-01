@@ -565,3 +565,28 @@ fn import_reads_illustrator_paths_as_splines() {
     assert_eq!(shapes.len(), 2, "{:?}", h.app.last_error);
     assert!(shapes.iter().any(|n| n.object.shape().is_some_and(|s| s.splines[0].closed && s.splines[0].knots.len() == 3)));
 }
+
+/// Group > Assembly > Assemble...: OK puts the selection under a closed
+/// Luminaire head; Open lets a member be picked alone, Disassemble frees them.
+#[test]
+fn assemble_makes_a_luminaire_headed_group() {
+    let mut h = Harness::new();
+    let a = named_box(&mut h, "A", 0.0);
+    let b = named_box(&mut h, "B", 20.0);
+    h.cmd(Command::SelectNodes { ids: vec![a.0, b.0], op: loom_commands::SelectOp::Replace });
+    h.app.state.dialog = Some(loom_commands::Dialog::AssembleName);
+    h.frames(2);
+    assert!(!in_window(&h, "Create Assembly", "Luminaire").is_empty(), "the head object list");
+    let p = window_text(&h, "Create Assembly", "OK");
+    h.click(p);
+    let head = sel(&h)[0];
+    let n = h.app.state.scene.node(head).unwrap();
+    assert!(matches!(n.object, loom_scene::ObjectKind::Luminaire { assembly: Some(false), .. }), "{:?}", n.object);
+    assert_eq!(n.name, "Assembly001");
+    assert_eq!(h.app.state.scene.closed_group_of(a), Some(head), "closed: members go with the head");
+    h.cmd(Command::GroupOpen);
+    assert_eq!(h.app.state.scene.closed_group_of(a), None);
+    h.cmd(Command::SelectNodes { ids: vec![head.0], op: loom_commands::SelectOp::Replace });
+    h.cmd(Command::Ungroup);
+    assert!(h.app.state.scene.node(head).is_none() && h.app.state.scene.node(a).unwrap().parent.is_none(), "Disassemble");
+}

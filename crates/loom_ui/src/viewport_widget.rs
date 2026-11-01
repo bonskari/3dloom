@@ -3186,7 +3186,7 @@ pub(crate) fn selection_bracket_boxes(app: &LoomApp) -> Vec<(Vec3, Vec3)> {
     let mut boxes: Vec<(Vec3, Vec3)> = Vec::new();
     for id in app.state.selection.iter() {
         let Some(n) = app.state.scene.node(*id) else { continue };
-        if matches!(n.object, loom_scene::ObjectKind::Group { .. }) {
+        if n.object.is_group_head() {
             let members = app.state.scene.descendants(*id).into_iter().filter_map(drawn);
             if let Some(b) = members.reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))) {
                 boxes.push(b);

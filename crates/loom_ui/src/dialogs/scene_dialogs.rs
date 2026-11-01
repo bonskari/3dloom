@@ -219,6 +219,37 @@ pub fn group_name(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     }
 }
 
+/// Group > Assembly > Assemble: the assembly's name and its head object
+/// (Assembly Heads: Luminaire).
+pub fn assemble_name(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("assemble_name_edit");
+    let mut name: String = ctx.data(|d| d.get_temp(id)).unwrap_or_else(|| app.state.scene.next_name("Assembly"));
+    let mut done = false;
+    egui::Window::new("Create Assembly").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.label("Name:");
+        ui.text_edit_singleline(&mut name);
+        ui.label("Head Object:");
+        let _ = ui.selectable_label(true, "Luminaire");
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("OK")).clicked() {
+                if let Err(e) = app.dispatch(Command::Assemble { name: Some(name.trim().to_owned()), size: None }) {
+                    app.state.status_prompt = e;
+                }
+                done = true;
+            }
+            if ui.button("Cancel").clicked() {
+                done = true;
+            }
+        });
+    });
+    if done || !*open {
+        ctx.data_mut(|d| d.remove::<String>(id));
+        *open = false;
+    } else {
+        ctx.data_mut(|d| d.insert_temp(id, name));
+    }
+}
+
 /// Layer Properties: the layer's name, Hide / Freeze, and the Display
 /// Properties and Rendering Control its objects set By Layer take.
 pub fn layer_properties(ctx: &egui::Context, app: &mut LoomApp, layer: u32, open: &mut bool) {

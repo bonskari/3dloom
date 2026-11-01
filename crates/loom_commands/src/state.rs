@@ -2674,7 +2674,7 @@ impl AppState {
         let mut cur = node.parent;
         while let Some(p) = cur {
             let Some(pn) = self.scene.node(p) else { break };
-            if matches!(pn.object, ObjectKind::Group { .. }) && pn.hidden {
+            if pn.object.is_group_head() && pn.hidden {
                 return false;
             }
             cur = pn.parent;

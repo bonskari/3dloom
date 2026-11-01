@@ -933,6 +933,7 @@ commands! {
     GroupClose => "Close Group", MainUI, "Close the selected (or the selected members') open groups.";
     GroupAttach => "Attach to Group", MainUI, "Toggle Attach: click a group to add the selected objects to it.";
     GroupDetach => "Detach from Group", MainUI, "Detach the selected members from their open group.";
+    Assemble => "Assemble", MainUI, "Group > Assembly > Assemble: group the selected objects under a new Luminaire assembly head of `size` (default 10); Open / Close / Attach / Detach / Disassemble (Ungroup) / Explode work on it as on a group." { name: Option<String>, size: Option<f32> };
     GroupExplode => "Explode Group", MainUI, "Ungroup the selected groups and every nested group inside them.";
     LayerManager => "Layer Manager", MainUI, "Open or close the Layer Manager (Manage Layers button).";
     CreateLayer => "Create Layer", Loom, "Layer Manager > New Layer: a new layer (named or Layer001…) that becomes current; the selection moves onto it." { name: Option<String> };

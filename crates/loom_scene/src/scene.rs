@@ -813,7 +813,7 @@ impl Scene {
         let mut cur = self.node(id).and_then(|n| n.parent);
         while let Some(p) = cur {
             let node = self.node(p)?;
-            if let crate::node::ObjectKind::Group { open } = node.object {
+            if let Some(open) = node.object.group_open() {
                 if !open {
                     out = Some(p);
                 }

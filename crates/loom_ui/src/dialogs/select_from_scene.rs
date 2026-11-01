@@ -153,7 +153,7 @@ fn candidate(app: &LoomApp, purpose: DialogPurpose, o: &Options, n: &Node) -> bo
         DialogPurpose::Freeze => !n.frozen && (o.show_hidden || !hidden),
         DialogPurpose::Attach => !hidden && !frozen && !s.selection.contains(&n.id) && !n.object.is_helper() && !n.object.is_shape(),
         DialogPurpose::LinkParent => !hidden && !frozen && !s.selection.iter().any(|c| *c == n.id || s.scene.is_descendant(n.id, *c)),
-        DialogPurpose::GroupAttach => !hidden && matches!(n.object, ObjectKind::Group { .. }) && !s.selection.contains(&n.id),
+        DialogPurpose::GroupAttach => !hidden && n.object.is_group_head() && !s.selection.contains(&n.id),
         DialogPurpose::Select | DialogPurpose::SkinAddBones => (o.show_hidden || !hidden) && (o.show_frozen || !frozen),
     };
     shown && (matches!(purpose, DialogPurpose::Unhide | DialogPurpose::Unfreeze | DialogPurpose::GroupAttach) || type_ok(o, n))

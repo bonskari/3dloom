@@ -661,6 +661,10 @@ pub enum ObjectKind {
         /// Percent of the lights' own intensity.
         dimmer: Param<f32>,
         filter_color: Param<Vec3>,
+        /// Group > Assembly > Assemble: the head of an assembly, open or
+        /// closed as a group head is (None: a plain helper).
+        #[serde(default)]
+        assembly: Option<bool>,
     },
     /// Helpers > Tape: a tape measure from this node to its target node
     /// (aimed down local -Z at it by a LookAt constraint, like a target camera).
@@ -1041,7 +1045,7 @@ impl ObjectKind {
         Self::CamPoint { show_axis_tripod: p(true), axis_length: p(10.0), screen: None, use_point: p(true) }
     }
     pub fn luminaire(size: f32) -> Self {
-        Self::Luminaire { size: p(size), dimmer: p(100.0), filter_color: p(Vec3::ONE) }
+        Self::Luminaire { size: p(size), dimmer: p(100.0), filter_color: p(Vec3::ONE), assembly: None }
     }
     /// A tape of length 0 whose target node is `target`.
     pub fn tape(target: NodeId) -> Self {
@@ -1189,6 +1193,31 @@ impl ObjectKind {
             Self::EditableMesh(p) => Some(p),
             _ => None,
         }
+    }
+
+    /// Whether a group or assembly head is open (None: not a head).
+    pub fn group_open(&self) -> Option<bool> {
+        match self {
+            Self::Group { open } => Some(*open),
+            Self::Luminaire { assembly, .. } => *assembly,
+            _ => None,
+        }
+    }
+
+    /// A group or assembly head.
+    pub fn is_group_head(&self) -> bool {
+        self.group_open().is_some()
+    }
+
+    /// The head with its open state set (unchanged when not a head).
+    pub fn with_group_open(&self, open: bool) -> Self {
+        let mut o = self.clone();
+        match &mut o {
+            Self::Group { open: g } => *g = open,
+            Self::Luminaire { assembly: Some(a), .. } => *a = open,
+            _ => {}
+        }
+        o
     }
 
     pub fn line_object(shape: loom_shape::Shape) -> Self {
@@ -1510,7 +1539,7 @@ impl ObjectKind {
                 ("Size", f(size)), ("Constant Screen Size", b(constant_screen_size)), ("Draw On Top", b(draw_on_top)),
             ],
             Self::CamPoint { show_axis_tripod, axis_length, use_point, .. } => vec![("Show Axis Tripod", b(show_axis_tripod)), ("Axis Length", f(axis_length)), ("Use This Point", b(use_point))],
-            Self::Luminaire { size, dimmer, filter_color } => {
+            Self::Luminaire { size, dimmer, filter_color, .. } => {
                 let c = filter_color.get();
                 vec![("Size", f(size)), ("Dimmer", f(dimmer)), ("Filter Color R", Float(c.x)), ("Filter Color G", Float(c.y)), ("Filter Color B", Float(c.z))]
             }

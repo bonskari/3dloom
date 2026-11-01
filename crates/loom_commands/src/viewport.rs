@@ -693,6 +693,8 @@ pub enum Dialog {
     FileProperties,
     /// Group > Group: the group name.
     GroupName,
+    /// Group > Assembly > Assemble...: the name and head object.
+    AssembleName,
     /// Layer Manager > Layer Properties of `layer`.
     LayerProperties { layer: u32 },
     /// Tools > Manage Scene Explorer.

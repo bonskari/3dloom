@@ -553,7 +553,25 @@ fn group_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.separator();
     cmd(ui, app, "Explode", Command::GroupExplode);
     ui.separator();
-    ui.add_enabled(false, egui::Button::new("Assembly")).on_disabled_hover_text("Assemblies (luminaires) are out of scope");
+    ui.menu_button("Assembly", |ui| {
+        if ui.button("Assemble...").clicked() {
+            if app.state.selection.is_empty() {
+                app.state.status_prompt = "select objects to assemble".into();
+            } else {
+                app.state.dialog = Some(loom_commands::Dialog::AssembleName);
+            }
+            ui.close_menu();
+        }
+        cmd(ui, app, "Disassemble", Command::Ungroup);
+        ui.separator();
+        cmd(ui, app, "Open", Command::GroupOpen);
+        cmd(ui, app, "Close", Command::GroupClose);
+        ui.separator();
+        cmd(ui, app, "Attach", Command::GroupAttach);
+        cmd(ui, app, "Detach", Command::GroupDetach);
+        ui.separator();
+        cmd(ui, app, "Explode", Command::GroupExplode);
+    });
 }
 
 fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
