@@ -2686,15 +2686,15 @@ mod tests {
     fn video_color_check_blacks_out_unsafe_colours_in_the_slot() {
         let size = 32;
         let mut m = StandardMaterial::slot_default(0);
-        // Saturated magenta self-lit: past the NTSC chroma limit.
-        m.diffuse.set(glam::Vec3::new(1.0, 0.0, 1.0));
+        // Saturated yellow self-lit: past 120 IRE (luma plus chroma).
+        m.diffuse.set(glam::Vec3::new(1.0, 1.0, 0.0));
         m.self_illum.set(100.0);
         let images = loom_scene::maps::Images::new();
         let s = Sample::Surfaces(Surfaces::Single(Box::new(Surface::from_standard(&m))));
         let mut set = setup(SampleType::Sphere);
         let mid = size * (size / 2) + size / 2;
         let plain = preview_pixels(&s, size, &set, &images)[mid];
-        assert!(plain.r() > 200 && plain.b() > 200, "{plain:?}");
+        assert!(plain.r() > 200 && plain.g() > 200, "{plain:?}");
         set.video_check = true;
         assert_eq!(preview_pixels(&s, size, &set, &images)[mid], egui::Color32::BLACK);
     }
