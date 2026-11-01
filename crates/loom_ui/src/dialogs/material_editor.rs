@@ -680,6 +680,22 @@ fn slots(ui: &mut egui::Ui, app: &mut LoomApp) {
         });
         side_toolbar(ui, app);
     });
+    if app.state.scene.material_editor.options.reflectance_display {
+        if let Some(s) = active_surface(app) {
+            let ((ra, rm), (ta, tm)) = loom_scene::material::reflectance_transmittance(&s);
+            let pc = |v: f32| (v * 100.0).round() as i32;
+            ui.label(format!("Reflectance: Avg: {}% Max: {}%   Transmittance: Avg: {}% Max: {}%", pc(ra), pc(rm), pc(ta), pc(tm)));
+        }
+    }
+}
+
+/// The surface the active slot shows (a map level: none).
+fn active_surface(app: &LoomApp) -> Option<Surface> {
+    match slot_sample(app, app.state.scene.material_editor.active) {
+        Sample::Surfaces(Surfaces::Single(s)) => Some(*s),
+        Sample::Surfaces(Surfaces::PerId(list)) => list.into_iter().next().map(|(_, s)| s),
+        _ => None,
+    }
 }
 
 fn slot_widget(ui: &mut egui::Ui, app: &mut LoomApp, ctx: &egui::Context, slot: usize, size: usize) {

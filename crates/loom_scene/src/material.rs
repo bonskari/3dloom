@@ -729,6 +729,18 @@ impl Default for ExtendedParams {
 /// a compound material (its own Standard values are then unused).
 static NO_MAP: Option<Map> = None;
 
+/// Reflectance and Transmittance display: the share (0–1) of light a
+/// surface reflects diffusely (its diffuse colour times its opacity) and
+/// passes (the rest through its Filter colour), each as (average, maximum)
+/// over the RGB channels.
+pub fn reflectance_transmittance(s: &Surface) -> ((f32, f32), (f32, f32)) {
+    let a = s.opacity.clamp(0.0, 1.0);
+    let r = s.diffuse * a;
+    let t = s.extended.filter_color * (1.0 - a);
+    let stat = |v: Vec3| ((v.x + v.y + v.z) / 3.0, v.max_element());
+    (stat(r), stat(t))
+}
+
 /// The Material ID Channel a face (0-based material ID) of an object with
 /// material `top` renders with: a Multi/Sub-Object's sub-material's own,
 /// else the top material's.
@@ -1263,6 +1275,8 @@ pub struct EditorOptions {
     pub show_end_result: bool,
     /// Video Color Check: the slots show colours past the NTSC limits black.
     pub video_color_check: bool,
+    /// Display Reflectance & Transmittance Information (below the slots).
+    pub reflectance_display: bool,
 }
 
 impl Default for EditorOptions {
@@ -1284,6 +1298,7 @@ impl Default for EditorOptions {
             propagate_to_instances: false,
             show_end_result: true,
             video_color_check: false,
+            reflectance_display: true,
         }
     }
 }
@@ -1313,6 +1328,7 @@ impl EditorOptions {
             "Propagate Materials to Instances" => self.propagate_to_instances = on,
             "Show End Result" => self.show_end_result = on,
             "Video Color Check" => self.video_color_check = on,
+            "Display Reflectance & Transmittance" => self.reflectance_display = on,
             other => return Err(format!("no Material Editor option \"{other}\"")),
         }
         Ok(())

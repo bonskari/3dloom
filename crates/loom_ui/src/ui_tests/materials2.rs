@@ -474,3 +474,15 @@ fn make_preview_saves_the_slot_animating_over_the_frames() {
     assert!(c[2] > c[0] + 100, "frame 10 blue: {c:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn reflectance_and_transmittance_show_below_the_slots() {
+    let mut h = editor();
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Opacity".into(), value: 50.0 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Filter Color".into(), rgb: [255, 255, 255] });
+    scroll_top(&mut h);
+    h.frames(2);
+    // Red at 50% opacity: R 0.5, G B 0 reflected; half of white through.
+    assert!(!h.text_rects("Reflectance: Avg: 17% Max: 50%   Transmittance: Avg: 50% Max: 50%").is_empty(), "the fields show the active material");
+}
