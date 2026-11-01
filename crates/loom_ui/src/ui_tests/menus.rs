@@ -591,9 +591,9 @@ fn saved_track_views_from_the_graph_editors_menu() {
     h.key(egui::Key::Enter);
     assert_eq!(h.app.state.saved_track_views.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Keys"]);
     menu_path(&mut h, &["Graph Editors", "New Track View..."]);
-    assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::TvMode::CurveEditor, "Untitled 1"));
+    assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::track_view::TvMode::CurveEditor, "Untitled 1"));
     menu_path(&mut h, &["Graph Editors", "Saved Track Views", "Keys"]);
-    assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::TvMode::DopeSheet, "Keys"));
+    assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::track_view::TvMode::DopeSheet, "Keys"));
     menu_path(&mut h, &["Graph Editors", "Delete Track View", "Keys"]);
     assert!(h.app.state.saved_track_views.is_empty());
 }
