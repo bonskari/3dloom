@@ -301,6 +301,11 @@ pub fn test_watchdog(limit: std::time::Duration) {
     });
 }
 
+/// How every GPU adapter is asked for: the discrete GPU first, so a machine
+/// with an integrated one too never renders on it.
+pub const ADAPTER_OPTIONS: wgpu::RequestAdapterOptions<'static, 'static> =
+    wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, force_fallback_adapter: false, compatible_surface: None };
+
 /// Whether Bevy can run on `adapter` (not on the GL fallback).
 pub fn supported(adapter: &wgpu::Adapter) -> bool {
     adapter.get_info().backend != wgpu::Backend::Gl
@@ -380,6 +385,7 @@ impl BevyRenderer {
     /// only used by Bevy to make window surfaces, which a headless app never does.
     pub fn new(adapter: wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let info = adapter.get_info();
+        eprintln!("3dLoom Bevy adapter: {} ({:?}, {:?})", info.name, info.device_type, info.backend);
         let resources = RenderResources(
             RenderDevice::from(device.clone()),
             RenderQueue(std::sync::Arc::new(WgpuWrapper::new(queue.clone()))),

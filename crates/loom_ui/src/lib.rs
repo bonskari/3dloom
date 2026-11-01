@@ -1721,7 +1721,10 @@ pub fn viewport_msaa() -> u32 {
 pub fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
     egui_wgpu::WgpuConfiguration {
         wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
+            power_preference: loom_bevy::ADAPTER_OPTIONS.power_preference,
             device_descriptor: std::sync::Arc::new(|adapter: &wgpu::Adapter| {
+                let info = adapter.get_info();
+                eprintln!("3dLoom wgpu adapter: {} ({:?}, {:?})", info.name, info.device_type, info.backend);
                 if loom_bevy::supported(adapter) {
                     loom_bevy::device_descriptor(adapter)
                 } else {
