@@ -1106,13 +1106,14 @@ impl Scene {
             _ => {}
         }
         match &c.rotation {
-            Some(RotationConstraint::LookAt { targets, axis, flip, upnode, keep_offset, offset }) => {
+            Some(RotationConstraint::LookAt { targets, axis, flip, upnode, keep_offset, offset, roll }) => {
                 let owned: Vec<crate::constraint::Target> = targets.iter().filter(|t| self.nodes.contains_key(&t.node)).cloned().collect();
                 if !owned.is_empty() {
                     let w = weights(&owned);
                     let at: Vec3 = owned.iter().zip(&w).map(|(t, w)| pos_of(t.node) * *w).sum();
                     let up = upnode.filter(|u| self.nodes.contains_key(u)).map(|u| self.world_matrix(u).z_axis.truncate()).unwrap_or(Vec3::Z);
-                    wrot = aim(at - wpos, *axis, *flip, up) * if *keep_offset { *offset } else { Quat::IDENTITY };
+                    let spin = Quat::from_axis_angle(Vec3::AXES[(*axis as usize).min(2)], roll.get().to_radians());
+                    wrot = aim(at - wpos, *axis, *flip, up) * spin * if *keep_offset { *offset } else { Quat::IDENTITY };
                 }
             }
             Some(RotationConstraint::Orientation { targets, keep_offset, offset }) => {

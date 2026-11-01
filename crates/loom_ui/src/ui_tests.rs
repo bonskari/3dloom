@@ -817,6 +817,24 @@ fn dragging_a_target_camera_puts_the_camera_at_the_press_and_the_target_at_the_r
 }
 
 #[test]
+fn clicking_the_line_from_a_camera_to_its_target_selects_both() {
+    let mut h = Harness::new();
+    wide_view(&mut h);
+    h.app.create_kind = Some(crate::CreateKind::Camera { target: true });
+    let (from, to) = (Vec3::new(-80.0, -80.0, 0.0), Vec3::new(60.0, 40.0, 0.0));
+    let (a, b) = (h.screen_of(from), h.screen_of(to));
+    h.drag(a, b);
+    let cam = *h.app.state.selection.iter().next().expect("the new camera");
+    let t = camera_target(&h, cam).expect("a target camera");
+    h.app.create_kind = None;
+    h.cmd(Command::SelectNone);
+    let mid = h.screen_of((from + to) * 0.5);
+    h.click(mid);
+    h.frames(1);
+    assert_eq!(h.app.state.selection, std::collections::BTreeSet::from([cam, t]));
+}
+
+#[test]
 fn clicking_a_free_camera_places_it_looking_down_and_its_icon_selects_it() {
     let mut h = Harness::new();
     wide_view(&mut h);

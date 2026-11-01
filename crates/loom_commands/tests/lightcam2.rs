@@ -273,3 +273,30 @@ fn select_target_selects_the_targets_of_the_selection() {
     let _ = omni;
     assert!(execute(&mut s, Command::SelectTarget).is_err());
 }
+
+#[test]
+fn rolling_a_target_camera_writes_its_animatable_roll_track() {
+    use loom_scene::constraint::RotationConstraint;
+    let mut s = AppState::new();
+    let id = NodeId(execute(&mut s, Command::CreateCamera { target: true }).unwrap()["id"].as_u64().unwrap());
+    let roll = |s: &AppState| match &s.scene.node(id).unwrap().constraints.rotation {
+        Some(RotationConstraint::LookAt { roll, .. }) => roll.clone(),
+        _ => panic!("a LookAt"),
+    };
+    execute(&mut s, Command::SelectNone).unwrap();
+    execute(&mut s, Command::CameraView).unwrap();
+    assert_eq!(s.active().kind, ViewKind::Camera(id));
+    let tracks: Vec<String> = loom_scene::tracks::list_tracks(&s.scene, id).into_iter().map(|t| t.name).collect();
+    assert!(tracks.iter().any(|n| n == "LookAt Constraint / Roll"), "{tracks:?}");
+    let up0 = s.scene.world_matrix(id).y_axis.truncate();
+    execute(&mut s, Command::AutoKeyModeToggle).unwrap();
+    execute(&mut s, Command::SetFrame { frame: 10 }).unwrap();
+    execute(&mut s, Command::NavigateCamera { op: "roll".into(), x: 30.0, y: None }).unwrap();
+    let r = roll(&s);
+    assert!((r.get().abs() - 30.0).abs() < 1e-2, "roll {}", r.get());
+    assert!(r.is_animated(), "Auto Key keys the Roll track");
+    let up = s.scene.world_matrix(id).y_axis.truncate();
+    assert!((up.angle_between(up0).to_degrees() - 30.0).abs() < 0.1, "the camera turned about its line of sight");
+    execute(&mut s, Command::SetFrame { frame: 0 }).unwrap();
+    assert!(s.scene.world_matrix(id).y_axis.truncate().angle_between(up0) < 1e-3, "frame 0 stays upright");
+}

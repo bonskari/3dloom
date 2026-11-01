@@ -96,8 +96,22 @@ impl Default for PathConstraint {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RotationConstraint {
-    LookAt { targets: Vec<Target>, axis: u32, flip: bool, upnode: Option<NodeId>, keep_offset: bool, offset: Quat },
+    /// `roll`: degrees about the aiming axis (the target camera's Roll track).
+    LookAt {
+        targets: Vec<Target>,
+        axis: u32,
+        flip: bool,
+        upnode: Option<NodeId>,
+        keep_offset: bool,
+        offset: Quat,
+        #[serde(default = "no_roll")]
+        roll: Param<f32>,
+    },
     Orientation { targets: Vec<Target>, keep_offset: bool, offset: Quat },
+}
+
+fn no_roll() -> Param<f32> {
+    Param::new(0.0)
 }
 
 /// Link Constraint: from each frame on, the node hangs from that target

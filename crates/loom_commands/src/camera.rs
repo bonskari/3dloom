@@ -23,7 +23,7 @@ fn missing(id: NodeId) -> String {
 
 /// The LookAt constraint that aims a camera's -Z at `target`.
 pub fn look_at_target(target: NodeId) -> RotationConstraint {
-    RotationConstraint::LookAt { targets: vec![Target::new(target)], axis: 2, flip: true, upnode: None, keep_offset: false, offset: Quat::IDENTITY }
+    RotationConstraint::LookAt { targets: vec![Target::new(target)], axis: 2, flip: true, upnode: None, keep_offset: false, offset: Quat::IDENTITY, roll: loom_scene::param::Param::new(0.0) }
 }
 
 /// Rotation that points local -Z along `dir` with local +Y as close to world +Z as it allows.
@@ -167,15 +167,18 @@ pub(crate) fn place(state: &mut AppState, id: NodeId, orbit: &OrbitCamera, fov: 
             let mut tafter = tnode.transform.clone();
             tafter.position.set(parent_of(tnode).inverse().transform_point3(orbit.target));
             changes.push(Change::SetTransform { id: t, before: tnode.transform.clone(), after: tafter });
-            // The LookAt keeps the camera upright; its offset carries the roll.
+            // The LookAt keeps the camera upright; its Roll track carries the roll.
             let upright = loom_scene::constraint::aim(orbit.target - eye, 2, true, Vec3::Z);
             let (_, wrot, _) = world.to_scale_rotation_translation();
-            let offset = (upright.inverse() * wrot).normalize();
-            let rolled = offset.angle_between(Quat::IDENTITY) > 1e-4;
             let mut constraints = node.constraints.clone();
-            if let Some(RotationConstraint::LookAt { keep_offset, offset: o, .. }) = constraints.rotation.as_mut() {
-                *keep_offset = rolled;
-                *o = if rolled { offset } else { Quat::IDENTITY };
+            if let Some(RotationConstraint::LookAt { keep_offset, offset, roll, .. }) = constraints.rotation.as_mut() {
+                let kept = if *keep_offset { *offset } else { Quat::IDENTITY };
+                let spin = (upright.inverse() * wrot * kept.inverse()).normalize();
+                let angle = (2.0 * spin.z.atan2(spin.w)).to_degrees();
+                let angle = (angle + 180.0).rem_euclid(360.0) - 180.0;
+                if (angle - roll.get()).abs() > 1e-3 {
+                    roll.set(if angle.abs() < 1e-3 { 0.0 } else { angle });
+                }
             }
             if constraints != node.constraints {
                 changes.push(Change::SetConstraints { id, before: Box::new(node.constraints.clone()), after: Box::new(constraints) });

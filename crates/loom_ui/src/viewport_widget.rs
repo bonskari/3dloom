@@ -2179,7 +2179,37 @@ fn picks_at(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Ma
         }
         return Vec::new();
     }
-    pick_at(app, p, rect, view, proj, view_proj).into_iter().collect()
+    let pick = pick_at(app, p, rect, view, proj, view_proj);
+    if pick.is_none() && mode == SelectionMode::Object {
+        return target_line_picks(app, p, rect, view, proj);
+    }
+    pick.into_iter().collect()
+}
+
+/// Clicking the line from a target camera or light to its target picks both.
+fn target_line_picks(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj: Mat4) -> Vec<Pick> {
+    let view_proj = proj * view;
+    let local = p - rect.min;
+    let (origin, dir) = loom_render::pick::screen_to_world_ray(Vec2::new(local.x, local.y), Vec2::new(rect.width(), rect.height()), view, proj);
+    let index = |id: NodeId| app.world_meshes().iter().position(|(n, _)| *n == id);
+    let mut best: Option<(f32, Vec<Pick>)> = None;
+    for (i, (id, _)) in app.world_meshes().iter().enumerate() {
+        let Some(node) = app.state.scene.node(*id) else { continue };
+        let target = match &node.object {
+            loom_scene::ObjectKind::Camera { target, .. } => *target,
+            loom_scene::ObjectKind::Light(l) => l.target,
+            _ => None,
+        };
+        let Some(ti) = target.and_then(index) else { continue };
+        let a = app.state.scene.world_matrix(*id).w_axis.truncate();
+        let b = app.state.scene.world_matrix(app.world_meshes()[ti].0).w_axis.truncate();
+        if let Some(t) = segment_hit(a, b, p, rect, view_proj, origin, dir) {
+            if best.as_ref().is_none_or(|(bt, _)| t < *bt) {
+                best = Some((t, vec![Pick::Object(i), Pick::Object(ti)]));
+            }
+        }
+    }
+    best.map(|(_, picks)| picks).unwrap_or_default()
 }
 
 fn pick_at(

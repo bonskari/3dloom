@@ -208,7 +208,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                             targets.push(Target::new(t));
                         }
                     }
-                    _ => c.rotation = Some(RotationConstraint::LookAt { targets: vec![Target::new(t)], axis: 0, flip: false, upnode: None, keep_offset: false, offset: Quat::IDENTITY }),
+                    _ => c.rotation = Some(RotationConstraint::LookAt { targets: vec![Target::new(t)], axis: 0, flip: false, upnode: None, keep_offset: false, offset: Quat::IDENTITY, roll: loom_scene::param::Param::new(0.0) }),
                 }
                 Ok(())
             })
@@ -335,7 +335,7 @@ fn assign(state: &mut AppState, id: NodeId, track: &str, controller: &str) -> Re
                 "Path Constraint" if !matches!(c.position, Some(PositionConstraint::Path(_))) => c.position = Some(PositionConstraint::Path(PathConstraint { percent, ..Default::default() })),
                 "Position Constraint" if !matches!(c.position, Some(PositionConstraint::Position { .. })) => c.position = Some(PositionConstraint::Position { targets: Vec::new(), keep_offset: false, offset: Vec3::ZERO }),
                 "Attachment" => return Err("Attachment needs a target: use Attachment Constraint".into()),
-                "LookAt Constraint" if !matches!(c.rotation, Some(RotationConstraint::LookAt { .. })) => c.rotation = Some(RotationConstraint::LookAt { targets: Vec::new(), axis: 0, flip: false, upnode: None, keep_offset: false, offset: Quat::IDENTITY }),
+                "LookAt Constraint" if !matches!(c.rotation, Some(RotationConstraint::LookAt { .. })) => c.rotation = Some(RotationConstraint::LookAt { targets: Vec::new(), axis: 0, flip: false, upnode: None, keep_offset: false, offset: Quat::IDENTITY, roll: loom_scene::param::Param::new(0.0) }),
                 "Orientation Constraint" if !matches!(c.rotation, Some(RotationConstraint::Orientation { .. })) => c.rotation = Some(RotationConstraint::Orientation { targets: Vec::new(), keep_offset: false, offset: Quat::IDENTITY }),
                 _ => {}
             }
