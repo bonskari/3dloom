@@ -191,3 +191,37 @@ fn walkthrough_speed_step_size_lock_and_level_keys() {
     assert!(h.app.state.active().camera.pitch.abs() < 1e-6 && h.app.state.active().camera.roll == 0.0);
     assert!((eye(&h) - before).length() < 1e-3, "the eye stays");
 }
+
+/// Object Properties > Never Degrade: the box keeps its shading while the
+/// view degrades to wireframe; the other box degrades.
+#[test]
+fn never_degrade_keeps_an_object_shaded_while_the_view_degrades() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [20.0; 3] });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::ObjectProperties);
+    h.click(h.find(Role::CheckBox, "Never Degrade").center());
+    assert!(h.app.state.scene.node(id).unwrap().display.never_degrade);
+    h.cmd(Command::CloseDialog);
+    h.cmd(Command::SelectNone);
+    maximized(&mut h);
+    h.cmd(Command::SetAdaptiveDegradation { general: None, active: Some("Wireframe".into()), maintain_fps: Some(100.0), never_degrade_selected: None, degrade_to_default_lighting: None });
+    h.cmd(Command::AdaptiveDegradationToggle);
+    let i = h.app.state.active_viewport;
+    let c = h.app.viewport_rects[i].center();
+    h.mods = egui::Modifiers::ALT;
+    h.run(vec![egui::Event::PointerMoved(c)]);
+    h.run(vec![egui::Event::PointerButton { pos: c, button: egui::PointerButton::Middle, pressed: true, modifiers: h.mods }]);
+    for k in 1..6 {
+        h.run(vec![egui::Event::PointerMoved(c + egui::vec2(k as f32 * 10.0, 0.0))]);
+    }
+    assert!(h.app.degrading);
+    let kept: Vec<loom_scene::NodeId> = crate::viewport_widget::shade_only(&h.app, i, &[]).into_iter().map(|k| h.app.world_meshes()[k].0).collect();
+    assert_eq!(kept, [id], "only the Never Degrade box stays shaded");
+    h.run(vec![egui::Event::PointerButton { pos: c + egui::vec2(50.0, 0.0), button: egui::PointerButton::Middle, pressed: false, modifiers: h.mods }]);
+    h.mods = egui::Modifiers::NONE;
+    h.frames(2);
+    assert!(crate::viewport_widget::shade_only(&h.app, i, &[]).is_empty(), "not degrading: nothing special");
+}

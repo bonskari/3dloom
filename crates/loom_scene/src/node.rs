@@ -1934,6 +1934,9 @@ pub struct DisplayProps {
     /// Link Display > Link Replaces Object: only the link is drawn.
     #[serde(default)]
     pub link_replaces_object: bool,
+    /// Object Properties > Never Degrade: Adaptive Degradation leaves the object's look.
+    #[serde(default)]
+    pub never_degrade: bool,
 }
 
 fn default_true() -> bool {
@@ -1956,6 +1959,7 @@ impl Default for DisplayProps {
             vertex_colors_shaded: false,
             display_links: false,
             link_replaces_object: false,
+            never_degrade: false,
             color_by_layer: false,
             by_layer: false,
         }
@@ -1982,6 +1986,7 @@ impl DisplayProps {
             "Vertex Color Shaded" => self.vertex_colors_shaded,
             "Display Links" => self.display_links,
             "Link Replaces Object" => self.link_replaces_object,
+            "Never Degrade" => self.never_degrade,
             _ => return None,
         })
     }
@@ -2000,6 +2005,7 @@ impl DisplayProps {
             "Vertex Color Shaded" => self.vertex_colors_shaded = value,
             "Display Links" => self.display_links = value,
             "Link Replaces Object" => self.link_replaces_object = value,
+            "Never Degrade" => self.never_degrade = value,
             _ => return false,
         }
         true

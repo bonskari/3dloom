@@ -188,8 +188,11 @@ fn general(ui: &mut egui::Ui, app: &mut LoomApp, node: &Node, nodes: &[&Node], i
                         }
                     }
                     if prop == "Show Frozen in Gray" {
-                        // Adaptive degradation does not exist here (the viewports never degrade).
-                        ui.add_enabled(false, egui::Checkbox::new(&mut false, "Never Degrade")).on_disabled_hover_text("The viewports never degrade");
+                        if let Some(v) = tri_checkbox(ui, "Never Degrade", nodes, |n| n.display.never_degrade) {
+                            for id in ids {
+                                let _ = app.dispatch(Command::SetDisplayProperty { id: id.0, name: "Never Degrade".to_owned(), value: v });
+                            }
+                        }
                     }
                 }
                 ui.horizontal(|ui| {

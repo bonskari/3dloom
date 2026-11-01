@@ -1287,9 +1287,7 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                     None => ctx.request_repaint(),
                 }
             }
-            // Never Degrade Selected: the selection keeps its own look while the view degrades.
-            let keep_selected = app.degrading && app.state.degradation.never_degrade_selected && app.state.viewports[index].shading.shaded();
-            let shade_only = if app.state.shade_selected || keep_selected { selected.clone() } else { Vec::new() };
+            let shade_only = shade_only(app, index, &selected);
             // Shaded views without Edged Faces outline the selection only
             // with Display Selected with Edged Faces (the brackets show it otherwise).
             let bbox = level == loom_commands::Shading::BoundingBox;
@@ -1903,6 +1901,23 @@ fn units_per_pixel(app: &LoomApp, index: usize, rect: egui::Rect) -> f32 {
     let height = if vp.is_orthographic() { vp.camera.distance * 0.8284 } else { 2.0 * vp.camera.distance * (vp.fov_y_radians * 0.5).tan() };
     (height / rect.height().max(1.0)).max(1e-4)
 }
+/// The world meshes a view shades whatever its level: Shade Selected's
+/// selection, and while the view degrades the selection with Never Degrade
+/// Selected and the objects set to Never Degrade.
+pub(crate) fn shade_only(app: &LoomApp, index: usize, selected: &[usize]) -> Vec<usize> {
+    let degrading = app.degrading && app.state.viewports[index].shading.shaded();
+    let keep_selected = degrading && app.state.degradation.never_degrade_selected;
+    let mut out = if app.state.shade_selected || keep_selected { selected.to_vec() } else { Vec::new() };
+    if degrading {
+        for (i, (id, _)) in app.world_meshes().iter().enumerate() {
+            if app.state.scene.node(*id).is_some_and(|n| n.display.never_degrade) && !out.contains(&i) {
+                out.push(i);
+            }
+        }
+    }
+    out
+}
+
 
 /// The level viewport `index` draws at: its own, or while Adaptive
 /// Degradation degrades, the Active or General level.
