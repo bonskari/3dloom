@@ -4964,7 +4964,8 @@ fn transform_selection_each(state: &mut AppState, label: &str, matrix_for: Matri
         for id in state.selection.iter().copied().filter(|id| !has_selected_ancestor(*id)) {
             let (m, hint) = matrix_for(state, Some(id));
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
-            let parent_world = state.scene.parent_frame(id);
+            // The frame the node's own transform sits in (a constraint's, e.g. a Follow path's).
+            let parent_world = state.scene.own_frame(id);
             let world = state.scene.world_matrix(id);
             if state.affect_pivot_only && label == "Scale" {
                 // A Scale transform has no effect on the pivot.

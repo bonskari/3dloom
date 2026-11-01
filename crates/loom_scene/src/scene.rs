@@ -964,6 +964,21 @@ impl Scene {
         self.link_frame(id).unwrap_or_else(|| self.parent_frame(id))
     }
 
+    /// The frame the node's own transform acts in (world = own frame ·
+    /// own local): `frame_of`, or with a Position / Rotation constraint
+    /// the frame the constraint puts it in (a Follow path's tangent frame).
+    pub fn own_frame(&self, id: NodeId) -> Mat4 {
+        let Some(n) = self.nodes.get(&id) else { return Mat4::IDENTITY };
+        if n.constraints.position.is_none() && n.constraints.rotation.is_none() {
+            return self.frame_of(id);
+        }
+        let local = n.layered_matrix();
+        if local.determinant().abs() < 1e-12 {
+            return self.frame_of(id);
+        }
+        self.world_matrix(id) * local.inverse()
+    }
+
     fn link_frame(&self, id: NodeId) -> Option<Mat4> {
         let l = self.nodes.get(&id)?.constraints.link.as_ref()?;
         let t = self.time.get();
