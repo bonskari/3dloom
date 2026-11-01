@@ -589,7 +589,7 @@ fn saved_track_views_from_the_graph_editors_menu() {
     h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
     h.run(vec![egui::Event::Text("Keys".into())]);
     h.key(egui::Key::Enter);
-    assert_eq!(h.app.state.saved_track_views.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Keys"]);
+    assert_eq!(h.app.state.saved_track_views.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Keys"], "name {:?} field {field:?}", h.app.state.track_view.name);
     menu_path(&mut h, &["Graph Editors", "New Track View..."]);
     assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::track_view::TvMode::CurveEditor, "Untitled 1"));
     menu_path(&mut h, &["Graph Editors", "Saved Track Views", "Keys"]);
