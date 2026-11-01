@@ -450,7 +450,8 @@ fn shadow_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: NodeId, l: &LightOb
                 ui.separator();
                 ui.label("Antialiasing Options:");
                 disabled_int(ui, app, "Shadow Integrity", "Shadow Integrity:", l.shadow_integrity.get());
-                disabled_int(ui, app, "Shadow Quality", "Shadow Quality:", l.shadow_quality.get());
+                // The traced shadows take Shadow Quality² rays.
+                int(ui, app, id, "Shadow Quality", "Shadow Quality:", l.shadow_quality.get());
                 number(ui, app, id, "Shadow Spread", "Sample Spread:", l.shadow_spread.get(), false);
                 number(ui, app, id, "Shadow Bias", "Shadow Bias:", l.area_bias.get(), false);
                 number(ui, app, id, "Jitter Amount", "Jitter Amount:", l.jitter.get(), false);

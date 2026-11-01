@@ -505,3 +505,21 @@ fn the_light_include_exclude_tool_excludes_the_selection_from_a_picked_light() {
     h.frames(1);
     assert_eq!(off(&h), Some(0), "cleared: lit again");
 }
+
+/// Area Shadows > Shadow Quality: the traced shadows' rays, so the spinner works.
+#[test]
+fn area_shadows_shadow_quality_spinner_sets_the_rays() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let l = NodeId(r["id"].as_u64().unwrap());
+    h.cmd(Command::SetParameter { id: l.0, name: "Shadow Type".into(), value: 3.0 });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 2400.0));
+    h.frames(3);
+    h.click_widget("Area Shadows");
+    h.frames(2);
+    let before = light(&h, l).shadow_quality.get();
+    let spin = h.spinner_after("Shadow Quality:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -40.0));
+    assert!(light(&h, l).shadow_quality.get() > before, "Shadow Quality went up from {before}");
+}
