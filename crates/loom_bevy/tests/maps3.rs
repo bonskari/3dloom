@@ -17,8 +17,9 @@ fn gpu() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     Some((adapter, device, queue))
 }
 
-/// A grey plane's brightest pixel under a point light beside the camera.
-fn peak(r: &mut BevyRenderer, s: Surface) -> u8 {
+/// A black plane's highlight under a point light beside the camera: its
+/// peak and how many pixels are over half of it (its width).
+fn peak(r: &mut BevyRenderer, s: Surface) -> (u8, usize) {
     let mut plane = loom_mesh::plane_segmented(200.0, 200.0, 1, 1);
     loom_mesh::uvmap::auto_map(&mut plane, loom_mesh::uvmap::AutoMap::Planar, 1);
     r.sync(&[SceneObject { id: 1, mesh: &plane, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(s))), renderable: true, flags: Default::default() }]);
@@ -31,7 +32,9 @@ fn peak(r: &mut BevyRenderer, s: Surface) -> u8 {
     r.sync_lights(&[l]);
     let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, 30.0, 120.0), Vec3::ZERO, Vec3::Y), projection: Mat4::perspective_rh(50f32.to_radians(), 1.0, 1.0, 1000.0) };
     let img = r.render_with(128, 128, &cam, RenderOptions { ambient: [0.0; 3], ..RenderOptions::default() }).unwrap();
-    img.pixels().map(|p| p.0[0].max(p.0[1]).max(p.0[2])).max().unwrap()
+    let v: Vec<u8> = img.pixels().map(|p| p.0[0].max(p.0[1]).max(p.0[2])).collect();
+    let top = *v.iter().max().unwrap();
+    (top, v.iter().filter(|x| **x > top / 2).count())
 }
 
 fn shiny(gloss: f32, map: Option<f32>) -> Surface {
@@ -59,8 +62,9 @@ fn a_glossiness_map_sets_the_highlight_like_the_spinner() {
     let sharp = peak(&mut r, shiny(80.0, None));
     let mapped_sharp = peak(&mut r, shiny(5.0, Some(0.8)));
     let mapped_dull = peak(&mut r, shiny(80.0, Some(0.05)));
-    eprintln!("dull {dull} sharp {sharp} mapped_sharp {mapped_sharp} mapped_dull {mapped_dull}");
-    assert!(sharp as i32 > dull as i32 + 30, "the spinner sharpens the highlight: {dull} vs {sharp}");
-    assert!(mapped_sharp.abs_diff(sharp) < 12, "a white-ish map at Amount 100 is Glossiness 80: {mapped_sharp} vs {sharp}");
-    assert!(mapped_dull.abs_diff(dull) < 12, "a dark map at Amount 100 is Glossiness 5: {mapped_dull} vs {dull}");
+    eprintln!("dull {dull:?} sharp {sharp:?} mapped_sharp {mapped_sharp:?} mapped_dull {mapped_dull:?}");
+    assert!(sharp.1 * 3 < dull.1, "the spinner narrows the highlight: {dull:?} vs {sharp:?}");
+    let near = |a: (u8, usize), b: (u8, usize)| a.0.abs_diff(b.0) < 8 && a.1.abs_diff(b.1) * 10 <= b.1.max(10);
+    assert!(near(mapped_sharp, sharp), "a light map at Amount 100 is Glossiness 80: {mapped_sharp:?} vs {sharp:?}");
+    assert!(near(mapped_dull, dull), "a dark map at Amount 100 is Glossiness 5: {mapped_dull:?} vs {dull:?}");
 }
