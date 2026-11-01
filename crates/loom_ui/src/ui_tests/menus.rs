@@ -828,7 +828,7 @@ fn reaction_manager_names_point_types_graph_tools_and_start_end() {
     // Rename State02 in place.
     // The name fields are the text inputs under Create State, one per state.
     let cs = h.text_rects("Create State")[0];
-    let mut names: Vec<egui::Rect> = h.widgets.iter().filter(|w| w.0 == egui::accesskit::Role::TextInput && w.2.min.y > cs.max.y).map(|w| w.2).collect();
+    let mut names: Vec<egui::Rect> = h.widgets.iter().filter(|w| w.0 == egui::accesskit::Role::TextInput && w.2.min.y > cs.max.y && (w.2.min.x - cs.min.x).abs() < 120.0 && w.2.width() < 120.0).map(|w| w.2).collect();
     names.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
     assert_eq!(names.len(), 3, "a name field per state");
     h.click(names[1].center());
