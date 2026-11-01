@@ -1,7 +1,7 @@
 //! What Bevy's PBR material cannot show by itself, drawn by a fragment
 //! shader over it (`look.wgsl`): the Falloff map's view-dependent mix,
 //! Ink 'n Paint's paint bands and ink outline, and Matte/Shadow's
-//! shadow catching.
+//! shadow catching, and the lights a light's Exclude leaves out.
 
 use bevy::app::{App, Plugin};
 use bevy::asset::{load_internal_asset, weak_handle, Asset, Handle};
@@ -20,6 +20,9 @@ pub const TOON: u32 = 2;
 pub const MATTE: u32 = 4;
 /// Color Range Limiting Scale: an over-bright colour scales down to keep its hue.
 pub const COLOR_SCALE: u32 = 8;
+
+/// The most lights one object's material can be excluded from.
+pub const MAX_EXCLUDED: usize = 8;
 
 pub use uniform::LookParams;
 
@@ -51,6 +54,9 @@ mod uniform {
         /// Matte/Shadow: shadow colour (w = Shadow Brightness); x of `matte_flags` Receive Shadows.
         pub matte: Vec4,
         pub matte_flags: Vec4,
+        /// The lights that exclude the object from illumination, as `light_keys`
+        /// finds them (w 0: none).
+        pub excluded: [Vec4; MAX_EXCLUDED],
     }
 }
 

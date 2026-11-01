@@ -322,6 +322,10 @@ pub struct BevyRenderer {
     fill: Option<Entity>,
     /// The scene's lights (from `sync_lights`) and their Bevy entities by node id.
     samples: Vec<loom_scene::light::LightSample>,
+    /// Each Bevy scene light as the shader finds it, by scene light id:
+    /// xyz the position (point, spot; w 1) or the direction to the light
+    /// (directional; w 2).
+    light_keys: Vec<(u64, bevy::math::Vec4)>,
     scene_lights: HashMap<u64, lights::Synced>,
     /// Scene bounds (centre, radius) for the shadow range.
     bounds: Option<(Vec3, f32)>,
@@ -420,6 +424,7 @@ impl BevyRenderer {
             light,
             fill,
             samples: Vec::new(),
+            light_keys: Vec::new(),
             scene_lights: HashMap::new(),
             bounds: None,
             settle: 3,
@@ -519,6 +524,7 @@ impl BevyRenderer {
         let color = if b > 0.0 { Color::linear_rgb(sum.x / b, sum.y / b, sum.z / b) } else { Color::BLACK };
         self.app.insert_resource(AmbientLight { color, brightness: b.max(0.0), affects_lightmapped_meshes: true });
         let mut seen = HashSet::new();
+        let mut keys = Vec::new();
         let mut map_size = 0usize;
         let samples = self.samples.clone();
         let scale = self.scale;
@@ -580,6 +586,10 @@ impl BevyRenderer {
             for (entity, part) in std::iter::once((entity, &main)).chain(fill_entity.zip(fill.as_ref())) {
                 let mut transform = lights::transform(part);
                 transform.translation *= scale;
+                keys.push((s.id.0, match kind {
+                    lights::Kind::Directional => transform.back().as_vec3().extend(2.0),
+                    _ => transform.translation.extend(1.0),
+                }));
                 let mut e = world.entity_mut(entity);
                 e.insert((transform, layers.clone()));
                 match kind {
@@ -614,7 +624,33 @@ impl BevyRenderer {
         if map_size > 0 {
             self.app.insert_resource(PointLightShadowMap { size: map_size.clamp(128, 8192) });
         }
+        self.light_keys = keys;
         self.apply_volume_lights();
+        self.apply_light_exclusion();
+    }
+
+    /// Exclude/Include of illumination: each object's material leaves out
+    /// the lights that exclude it (the shader finds them by `light_keys`).
+    fn apply_light_exclusion(&mut self) {
+        let parts: Vec<(u64, Handle<look::LoomMaterial>)> =
+            self.objects.iter().chain(self.hidden.iter()).flat_map(|(id, o)| o.parts.iter().map(|(_, m)| (*id, m.clone()))).collect();
+        let mut mats = self.app.world_mut().resource_mut::<Assets<look::LoomMaterial>>();
+        for (id, m) in parts {
+            let excluded: Vec<bevy::math::Vec4> = self
+                .light_keys
+                .iter()
+                .filter(|(l, _)| self.samples.iter().any(|s| s.id.0 == *l && s.exclusion.excludes(loom_scene::NodeId(id), true)))
+                .map(|(_, k)| *k)
+                .take(look::MAX_EXCLUDED)
+                .collect();
+            let mut keys = [bevy::math::Vec4::ZERO; look::MAX_EXCLUDED];
+            keys[..excluded.len()].copy_from_slice(&excluded);
+            if mats.get(&m).is_some_and(|x| x.extension.params.excluded != keys) {
+                if let Some(x) = mats.get_mut(&m) {
+                    x.extension.params.excluded = keys;
+                }
+            }
+        }
     }
 
     /// Volume Light of directional lights: Bevy's volumetric fog in a fog
@@ -936,6 +972,7 @@ impl BevyRenderer {
         let mut set = std::mem::take(&mut self.objects);
         self.bounds = self.sync_set(&mut set, objects, false);
         self.objects = set;
+        self.apply_light_exclusion();
     }
 
     /// The hidden objects a Render Hidden Geometry render draws (seen by

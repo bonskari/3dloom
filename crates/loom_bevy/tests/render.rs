@@ -105,7 +105,8 @@ fn bucketed(r: &mut BevyRenderer, camera: &ViewCamera, (w, h): (u32, u32), optio
 /// A red spot light straight down onto a white plane: the scene light
 /// replaces the default key light and lights only inside its cone (also
 /// in a bucketed render); a box under it shadows the plane unless it is
-/// excluded from shadow casting or Render Setup turns shadows off; the
+/// excluded from shadow casting or Render Setup turns shadows off; a plane
+/// excluded from illumination stays dark; the
 /// Environment's ambient colour adds to the scene lights.
 #[test]
 fn a_red_spot_lights_a_plane_only_inside_its_cone() {
@@ -181,6 +182,16 @@ fn a_red_spot_lights_a_plane_only_inside_its_cone() {
     r.sync_lights(std::slice::from_ref(&spot));
     let under = at(&bucketed(&mut r, &camera, size, dark(), 1), Vec3::ZERO);
     assert!(under[0] > 80, "an excluded box casts no shadow: {under:?}");
+    // Excluding the plane from illumination leaves it dark; including only it lights it again.
+    r.sync(&objects(false));
+    spot.exclusion = Exclusion { include: false, scope: 0, nodes: vec![loom_scene::NodeId(1)] };
+    r.sync_lights(std::slice::from_ref(&spot));
+    let c = at(&bucketed(&mut r, &camera, size, dark(), 1), inside_p);
+    assert!(c[0] < 15, "a plane excluded from illumination stays dark: {c:?}");
+    spot.exclusion = Exclusion { include: true, scope: 0, nodes: vec![loom_scene::NodeId(1)] };
+    r.sync_lights(std::slice::from_ref(&spot));
+    let c = at(&bucketed(&mut r, &camera, size, dark(), 1), inside_p);
+    assert!(c[0] > 80, "a plane the spot includes is lit: {c:?}");
 
     // No lights again: the default lighting comes back.
     r.sync_lights(&[]);
