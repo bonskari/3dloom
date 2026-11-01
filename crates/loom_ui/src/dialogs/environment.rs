@@ -484,33 +484,6 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                 });
                 ui.label("Image source: Whole; filter: Bright.");
             });
-            egui::CollapsingHeader::new("Ring Element").id_salt(("lens_ring", i)).default_open(g.ring.on).show(ui, |ui| {
-                let r = &g.ring;
-                let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Ring Parameters", json!({ "index": i, k: v }));
-                let mut on = r.on;
-                if ui.checkbox(&mut on, "On").changed() {
-                    set(app, "on", json!(on));
-                }
-                egui::Grid::new(("env_lens_ring", i)).num_columns(2).show(ui, |ui| {
-                    for (label, key, v, range, speed) in [
-                        ("Size:", "size", r.size.get(), 0.0..=100.0, 0.1),
-                        ("Intensity:", "intensity", r.intensity.get(), 0.0..=1000.0, 1.0),
-                        ("Plane:", "plane", r.plane.get(), -1000.0..=1000.0, 1.0),
-                        ("Thickness:", "thickness", r.thickness.get(), 0.0..=1000.0, 0.1),
-                        ("Use Source Color:", "use_source_color", r.use_source_color.get(), 0.0..=100.0, 0.5),
-                    ] {
-                        if let Some(v) = spin(ui, app, label, v, range, speed) {
-                            set(app, key, json!(v));
-                        }
-                    }
-                    if let Some(c) = swatch(ui, "Radial Color (inner):", r.inner_color.get()) {
-                        set(app, "inner_color", json!(c));
-                    }
-                    if let Some(c) = swatch(ui, "Radial Color (outer):", r.outer_color.get()) {
-                        set(app, "outer_color", json!(c));
-                    }
-                });
-            });
             for (name, el) in [("Star", &g.star), ("Streak", &g.streak), ("Ray", &g.ray)] {
                 egui::CollapsingHeader::new(format!("{name} Element")).id_salt(("lens_element", i, name)).default_open(el.on).show(ui, |ui| {
                     let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Element Parameters", json!({ "index": i, "element": name, k: v }));
@@ -548,6 +521,33 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                     ui.label("Apply Element To: Image Centers (filter: Bright).");
                 });
             }
+            egui::CollapsingHeader::new("Ring Element").id_salt(("lens_ring", i)).default_open(g.ring.on).show(ui, |ui| {
+                let r = &g.ring;
+                let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Lens Ring Parameters", json!({ "index": i, k: v }));
+                let mut on = r.on;
+                if ui.checkbox(&mut on, "On").changed() {
+                    set(app, "on", json!(on));
+                }
+                egui::Grid::new(("env_lens_ring", i)).num_columns(2).show(ui, |ui| {
+                    for (label, key, v, range, speed) in [
+                        ("Size:", "size", r.size.get(), 0.0..=100.0, 0.1),
+                        ("Intensity:", "intensity", r.intensity.get(), 0.0..=1000.0, 1.0),
+                        ("Plane:", "plane", r.plane.get(), -1000.0..=1000.0, 1.0),
+                        ("Thickness:", "thickness", r.thickness.get(), 0.0..=1000.0, 0.1),
+                        ("Use Source Color:", "use_source_color", r.use_source_color.get(), 0.0..=100.0, 0.5),
+                    ] {
+                        if let Some(v) = spin(ui, app, label, v, range, speed) {
+                            set(app, key, json!(v));
+                        }
+                    }
+                    if let Some(c) = swatch(ui, "Radial Color (inner):", r.inner_color.get()) {
+                        set(app, "inner_color", json!(c));
+                    }
+                    if let Some(c) = swatch(ui, "Radial Color (outer):", r.outer_color.get()) {
+                        set(app, "outer_color", json!(c));
+                    }
+                });
+            });
         }
         EffectKind::Blur(b) => {
             egui::CollapsingHeader::new("Blur Parameters").default_open(true).show(ui, |ui| {
