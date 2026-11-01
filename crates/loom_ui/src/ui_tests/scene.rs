@@ -550,3 +550,18 @@ fn export_writes_a_collada_file() {
     let text = std::fs::read_to_string(&path).expect("the .dae is written");
     assert!(text.contains("<COLLADA") && text.contains("name=\"Crate\"") && text.contains("<polylist"), "{text}");
 }
+
+/// File > Import takes an Illustrator 88 .ai file: its paths become Line objects.
+#[test]
+fn import_reads_illustrator_paths_as_splines() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    let path = exchange_dir("ai_import").join("logo.ai");
+    std::fs::write(&path, "%!PS-Adobe-2.0 EPSF-1.2\n%%EndSetup\n0 0 m\n100 0 l\n100 100 l\nf\n0 120 m\n50 170 100 170 100 120 c\nS\n").unwrap();
+    h.cmd(Command::ImportFile { path: None });
+    choose_file(&mut h, &path, "Open");
+    h.frames(2);
+    let shapes: Vec<_> = h.app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::EditableSpline(_))).collect();
+    assert_eq!(shapes.len(), 2, "{:?}", h.app.last_error);
+    assert!(shapes.iter().any(|n| n.object.shape().is_some_and(|s| s.splines[0].closed && s.splines[0].knots.len() == 3)));
+}

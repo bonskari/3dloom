@@ -2,6 +2,7 @@
 //! Bezier knots, interpolation, 2D spline operations and the viewport
 //! rendering tube.
 
+pub mod ai;
 pub mod boolean2d;
 pub mod interp;
 pub mod loft;

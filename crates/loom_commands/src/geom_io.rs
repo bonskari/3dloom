@@ -27,6 +27,10 @@ pub fn is_ase(path: &Path) -> bool {
     ext(path) == "ase"
 }
 
+pub fn is_ai(path: &Path) -> bool {
+    ext(path) == "ai"
+}
+
 pub fn is_dae(path: &Path) -> bool {
     ext(path) == "dae"
 }
@@ -402,6 +406,16 @@ pub fn export_dae(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value
     let metres = state.units.system_scale as f64 * state.units.system_unit.metres();
     std::fs::write(path, loom_mesh::dae::write(&objects, metres)).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(json!({ "path": path, "objects": objects.len() }))
+}
+
+/// Adobe Illustrator 88 import: each path as a Line object (Editable
+/// Spline) on the XY plane, one point per unit.
+pub fn import_ai(state: &mut AppState, path: &Path) -> Result<Value, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let splines = loom_shape::ai::read(&String::from_utf8_lossy(&bytes)).map_err(|e| format!("{}: {e}", path.display()))?;
+    let nodes = splines.into_iter().enumerate().map(|(i, s)| Node::new(&format!("Shape{:03}", i + 1), ObjectKind::line_object(loom_shape::Shape::from_splines(vec![s])))).collect();
+    let ids = add_nodes(state, &label("Import", path), Vec::new(), nodes)?;
+    Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>() }))
 }
 
 // ---- DXF -------------------------------------------------------------------

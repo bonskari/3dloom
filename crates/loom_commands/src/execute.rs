@@ -360,6 +360,8 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 crate::geom_io::import_stl(state, &path)
             } else if crate::geom_io::is_dxf(&path) {
                 crate::geom_io::import_dxf(state, &path)
+            } else if crate::geom_io::is_ai(&path) {
+                crate::geom_io::import_ai(state, &path)
             } else {
                 crate::obj_io::import(state, &path)
             }?;
