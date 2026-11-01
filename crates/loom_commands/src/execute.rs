@@ -649,7 +649,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SpinnerSnapToggle => toggle(&mut state.prefs.spinner_snap, "spinner_snap"),
         C::KeepCreatingToggle => toggle(&mut state.prefs.keep_creating, "keep_creating"),
         C::ShowRibbonToggle => toggle(&mut state.show_ribbon, "show_ribbon"),
-        C::EditModifierStack | C::AddModifier { .. } | C::DeleteModifiers { .. } | C::SetModifiersEnabled { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
+        C::EditModifierStack | C::AddModifier { .. } | C::MakeReference | C::DeleteModifiers { .. } | C::SetModifiersEnabled { .. } | C::DeleteModifier { .. } | C::MoveModifier { .. } | C::CopyModifier { .. } | C::ToggleModifier { .. } | C::ToggleModifierInViewport { .. }
         | C::ToggleModifierInRenderer { .. } | C::CutModifier { .. } | C::CopyModifierToClipboard { .. } | C::PasteModifier { .. } | C::ConfigureModifierSetsDialog
         | C::RenameModifier { .. } | C::SelectStackEntry { .. } | C::SetModifierParameter { .. } | C::ModifierSubobjectLevel { .. } | C::ShowEndResultToggle | C::PinStackToggle
         | C::MakeUnique | C::MakeUniqueDialog | C::MakeUniqueShared | C::InstanceModifier { .. } | C::CollapseTo { .. } | C::CollapseAll | C::ConfigureModifierSets { .. } | C::ModifierSetButtonsToggle

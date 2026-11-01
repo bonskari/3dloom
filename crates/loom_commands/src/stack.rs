@@ -21,6 +21,25 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             r
         }
+        C::MakeReference => {
+            let ids = selected_ids(state)?;
+            let mut changes = Vec::new();
+            for id in ids {
+                let node = state.scene.node(id).ok_or("missing node")?;
+                if node.instance_of.is_none() || node.reference_barrier.is_some() {
+                    continue;
+                }
+                let before = node.props();
+                let mut after = before.clone();
+                after.reference_barrier = Some(node.modifiers.len());
+                changes.push(Change::SetNodeProps { id, before: Box::new(before), after: Box::new(after) });
+            }
+            if changes.is_empty() {
+                return Err("select an instanced object".into());
+            }
+            commit_change(state, "Make Reference", Change::Group(changes))?;
+            Ok(stack_json(state))
+        }
         C::DeleteModifiers { indices } => {
             let mut del: Vec<usize> = indices.iter().map(|i| *i as usize).collect();
             del.sort_unstable();

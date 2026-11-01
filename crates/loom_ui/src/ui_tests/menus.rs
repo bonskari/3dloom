@@ -550,3 +550,27 @@ fn several_stack_entries_select_with_ctrl_and_delete_together() {
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.node(id).unwrap().modifiers.len(), 3, "one undo step");
 }
+
+/// Right-click an instance's base object in the stack > Make Reference: a
+/// modifier added to it afterwards stays its own (above the reference line).
+#[test]
+fn make_reference_from_the_stack_keeps_later_modifiers_apart() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = selected(&h);
+    h.cmd(Command::CloneOptions { kind: loom_commands::CloneKind::Instance, copies: 1, name: None, offset: Some([30.0, 0.0, 0.0]), rotate_deg: None, scale: None });
+    let b = selected(&h);
+    assert_ne!(a, b);
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let base = h.text_rects("Box").into_iter().filter(|r| r.min.x > 1000.0).last().expect("the base object row");
+    right_click(&mut h, base.center());
+    h.click(h.find(Role::Button, "Make Reference").center());
+    assert!(h.app.state.scene.node(b).unwrap().reference_barrier.is_some());
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    assert!(h.app.state.scene.node(a).unwrap().modifiers.is_empty(), "the original stays without the Bend");
+    h.cmd(Command::UndoSceneOperation);
+    h.cmd(Command::UndoSceneOperation);
+    assert!(h.app.state.scene.node(b).unwrap().reference_barrier.is_none(), "one undo step");
+}

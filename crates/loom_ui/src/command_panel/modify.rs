@@ -309,6 +309,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                         let _ = app.dispatch(Command::MakeUnique);
                         ui.close_menu();
                     }
+                    if ui.add_enabled(node_instanced && ref_barrier.is_none(), egui::Button::new("Make Reference")).clicked() {
+                        let _ = app.dispatch(Command::MakeReference);
+                        ui.close_menu();
+                    }
                     ui.separator();
                     // Every entry's sub-object levels shown / hidden.
                     for (label, open) in [("Show All Subtrees", true), ("Hide All Subtrees", false)] {
@@ -372,6 +376,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 });
                 if ui.add_enabled(!entries.is_empty(), egui::Button::new("Collapse All")).clicked() {
                     let _ = app.dispatch(Command::CollapseAll);
+                    ui.close_menu();
+                }
+                if ui.add_enabled(node_instanced && ref_barrier.is_none(), egui::Button::new("Make Reference")).clicked() {
+                    let _ = app.dispatch(Command::MakeReference);
                     ui.close_menu();
                 }
             });
