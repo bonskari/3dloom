@@ -79,6 +79,10 @@ pub enum ImageEffect {
     BrightnessContrast { brightness: f32, contrast: f32, ignore_background: bool },
     ColorBalance { cyan_red: f32, magenta_green: f32, yellow_blue: f32, preserve_luminosity: bool, ignore_background: bool },
     FilmGrain { grain: f32, ignore_background: bool },
+    /// File Output: writes the image (channel 0 whole, 1 luminance, 2 alpha)
+    /// to `path` (None: no file, as in previews); `affect_source` passes
+    /// the channel on as the image.
+    FileOutput { path: Option<String>, channel: u32, affect_source: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -268,6 +272,7 @@ impl EnvSettings {
                     ignore_background: c.ignore_background,
                 }),
                 EffectKind::FilmGrain(f) => effects.push(ImageEffect::FilmGrain { grain: f.grain.get_at(t), ignore_background: f.ignore_background }),
+                EffectKind::FileOutput(f) => effects.push(ImageEffect::FileOutput { path: f.path.clone(), channel: f.channel, affect_source: f.affect_source }),
             }
         }
         Self {

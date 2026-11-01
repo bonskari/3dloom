@@ -154,6 +154,21 @@ impl Default for VolumeLight {
     }
 }
 
+/// File Output Parameters: the image as it is at this point of the
+/// effects list goes to a file. Channel: 0 Whole Image, 1 Luminance,
+/// 2 Alpha; Affect Source Bitmap passes that channel on as the image.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FileOutput {
+    pub path: Option<String>,
+    pub channel: u32,
+    pub affect_source: bool,
+}
+
+impl FileOutput {
+    pub const CHANNELS: [&'static str; 3] = ["Whole Image", "Luminance", "Alpha"];
+}
+
 // A handful of entries in a list: boxing the larger kinds buys nothing.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -427,11 +442,12 @@ pub enum EffectKind {
     ColorBalance(ColorBalance),
     FilmGrain(FilmGrain),
     DepthOfField(DepthOfField),
+    FileOutput(FileOutput),
 }
 
 impl EffectKind {
     /// Add Effect list names.
-    pub const NAMES: [&'static str; 6] = ["Lens Effects", "Blur", "Brightness and Contrast", "Color Balance", "Film Grain", "Depth of Field"];
+    pub const NAMES: [&'static str; 7] = ["Lens Effects", "Blur", "Brightness and Contrast", "Color Balance", "File Output", "Film Grain", "Depth of Field"];
 
     pub fn new(name: &str) -> Option<Self> {
         match name {
@@ -441,6 +457,7 @@ impl EffectKind {
             "Color Balance" => Some(Self::ColorBalance(ColorBalance::default())),
             "Film Grain" => Some(Self::FilmGrain(FilmGrain::default())),
             "Depth of Field" => Some(Self::DepthOfField(DepthOfField::default())),
+            "File Output" => Some(Self::FileOutput(FileOutput::default())),
             _ => None,
         }
     }
@@ -453,6 +470,7 @@ impl EffectKind {
             Self::ColorBalance(_) => "Color Balance",
             Self::FilmGrain(_) => "Film Grain",
             Self::DepthOfField(_) => "Depth of Field",
+            Self::FileOutput(_) => "File Output",
         }
     }
 }

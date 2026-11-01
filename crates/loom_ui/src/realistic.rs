@@ -994,7 +994,7 @@ impl LoomApp {
         }
         if job.req.active_shade {
             if let (Ok(()), Some(mut img)) = (&result, job.preview.take()) {
-                loom_bevy::effects::apply(&mut img, &effects);
+                loom_bevy::effects::apply(&mut img, &loom_bevy::effects::without_files(&effects));
                 let a = &mut self.state.rendered.active_shade;
                 a.image = Some(Arc::new(img));
                 a.version += 1;
@@ -1004,7 +1004,7 @@ impl LoomApp {
         }
         if let Some(mut img) = job.preview.take() {
             if result.is_ok() {
-                loom_bevy::effects::apply(&mut img, &effects);
+                loom_bevy::effects::apply(&mut img, &loom_bevy::effects::without_files(&effects));
                 let ui = &mut self.state.environment_ui;
                 ui.preview = Some(Arc::new(img));
                 ui.preview_version += 1;
@@ -1014,7 +1014,9 @@ impl LoomApp {
         if result.is_ok() && !effects.is_empty() {
             // Rendering effects work on the finished frame.
             if let Some(img) = self.state.rendered.image.as_mut() {
-                loom_bevy::effects::apply(Arc::make_mut(img), &effects);
+                for e in loom_bevy::effects::apply(Arc::make_mut(img), &effects) {
+                    loom_commands::render::message(&mut self.state, loom_commands::render::MessageLevel::Error, e);
+                }
                 self.state.rendered.version += 1;
                 self.state.rendered.dirty = None;
             }

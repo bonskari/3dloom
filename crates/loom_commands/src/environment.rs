@@ -57,6 +57,7 @@ pub fn handles(c: &C) -> bool {
             | C::BrightnessContrastParameters { .. }
             | C::ColorBalanceParameters { .. }
             | C::FilmGrainParameters { .. }
+            | C::FileOutputParameters { .. }
             | C::DepthOfFieldParameters { .. }
     )
 }
@@ -449,6 +450,23 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                 f.ignore_background = v;
             }
             commit(state, "Film Grain Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::FileOutputParameters { index, path, channel, affect_source } => {
+            let EffectKind::FileOutput(f) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "File Output")) };
+            if let Some(p) = path {
+                f.path = Some(p).filter(|p| !p.is_empty());
+            }
+            if let Some(c) = channel {
+                if c as usize >= loom_scene::environment::FileOutput::CHANNELS.len() {
+                    return Err(format!("channel {c}: 0 Whole Image, 1 Luminance, 2 Alpha"));
+                }
+                f.channel = c;
+            }
+            if let Some(v) = affect_source {
+                f.affect_source = v;
+            }
+            commit(state, "File Output Parameters", e)?;
             Ok(json!({ "index": index }))
         }
         C::DepthOfFieldParameters { index, focal_node, horiz_loss, vert_loss, focal_range, focal_limit } => {

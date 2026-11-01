@@ -718,6 +718,28 @@ fn effect_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &EffectK
                 }
             });
         }
+        EffectKind::FileOutput(f) => {
+            egui::CollapsingHeader::new("File Output Parameters").default_open(true).show(ui, |ui| {
+                let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "File Output Parameters", json!({ "index": i, k: v }));
+                ui.label(egui::RichText::new("Image File").strong());
+                if ui.button("Files...").clicked() {
+                    app.state.dialog = Some(Dialog::FileOutputFile { index: i as u32 });
+                }
+                ui.label(f.path.as_deref().unwrap_or("(no file)"));
+                ui.label(egui::RichText::new("Parameters").strong());
+                egui::ComboBox::from_label("Channel").selected_text(loom_scene::environment::FileOutput::CHANNELS[f.channel.min(2) as usize]).show_ui(ui, |ui| {
+                    for (c, name) in loom_scene::environment::FileOutput::CHANNELS.iter().enumerate() {
+                        if ui.selectable_label(f.channel as usize == c, *name).clicked() {
+                            set(app, "channel", json!(c));
+                        }
+                    }
+                });
+                let mut a = f.affect_source;
+                if ui.add_enabled(f.channel != 0, egui::Checkbox::new(&mut a, "Affect Source Bitmap")).changed() {
+                    set(app, "affect_source", json!(a));
+                }
+            });
+        }
         EffectKind::DepthOfField(d) => {
             egui::CollapsingHeader::new("Depth of Field Parameters").default_open(true).show(ui, |ui| {
                 let set = |app: &mut LoomApp, k: &str, v: Value| run(app, "Depth of Field Parameters", json!({ "index": i, k: v }));

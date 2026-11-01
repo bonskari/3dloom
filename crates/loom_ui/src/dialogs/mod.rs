@@ -223,7 +223,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::EnvironmentMap | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } | Dialog::PhotometricWeb { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
-        Dialog::MergeEffectsFile => file_dialog::show(ctx, app, dialog, &mut open),
+        Dialog::MergeEffectsFile | Dialog::FileOutputFile { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::MergeEffects => environment::merge_effects(ctx, app, &mut open),
         Dialog::FbxImportOptions => exchange_options::fbx_import(ctx, app, &mut open),
         Dialog::FbxExportOptions => exchange_options::fbx_export(ctx, app, &mut open),

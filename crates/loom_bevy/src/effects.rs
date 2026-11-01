@@ -1,6 +1,6 @@
 //! Rendering effects applied to a finished render, in the effects list's
 //! order, as the reference applies them after rendering: Lens Effects Glow,
-//! Blur, Brightness and Contrast, Color Balance and Film Grain. The image is
+//! Blur, Brightness and Contrast, Color Balance, File Output and Film Grain. The image is
 //! sRGB RGBA; background pixels are the ones with alpha 0 ("Ignore
 //! Background", "Non-Background").
 
@@ -8,8 +8,9 @@ use crate::environment::{Blur, ImageEffect, Ring, Star};
 use image::RgbaImage;
 use loom_scene::environment::BlurType;
 
-/// Applies `effects` to `img` in order.
-pub fn apply(img: &mut RgbaImage, effects: &[ImageEffect]) {
+/// Applies `effects` to `img` in order; returns the File Output errors.
+pub fn apply(img: &mut RgbaImage, effects: &[ImageEffect]) -> Vec<String> {
+    let mut errors = Vec::new();
     for fx in effects {
         match fx {
             ImageEffect::Glow { size, intensity, use_source_color, inner, outer, bright } => glow(img, *size, *intensity, *use_source_color, *inner, *outer, *bright),
@@ -21,7 +22,44 @@ pub fn apply(img: &mut RgbaImage, effects: &[ImageEffect]) {
                 per_pixel(img, *ignore_background, |c| color_balance(c, [*cyan_red, *magenta_green, *yellow_blue], *preserve_luminosity))
             }
             ImageEffect::FilmGrain { grain, ignore_background } => film_grain(img, *grain, *ignore_background),
+            ImageEffect::FileOutput { path, channel, affect_source } => {
+                let out = file_output_channel(img, *channel);
+                if let Some(path) = path {
+                    if let Err(e) = out.as_ref().unwrap_or(&*img).save(path) {
+                        errors.push(format!("File Output {path}: {e}"));
+                    }
+                }
+                if let (Some(out), true) = (out, *affect_source) {
+                    *img = out;
+                }
+            }
         }
+    }
+    errors
+}
+
+/// The same effects without writing files (previews and ActiveShade).
+pub fn without_files(effects: &[ImageEffect]) -> Vec<ImageEffect> {
+    effects
+        .iter()
+        .map(|fx| match fx {
+            ImageEffect::FileOutput { channel, affect_source, .. } => ImageEffect::FileOutput { path: None, channel: *channel, affect_source: *affect_source },
+            other => other.clone(),
+        })
+        .collect()
+}
+
+/// File Output's channel as a grey image (alpha kept for Luminance,
+/// opaque for Alpha); None for Whole Image.
+fn file_output_channel(img: &RgbaImage, channel: u32) -> Option<RgbaImage> {
+    let grey = |v: f32, a: u8| image::Rgba([to_u8(v), to_u8(v), to_u8(v), a]);
+    match channel {
+        1 => Some(RgbaImage::from_fn(img.width(), img.height(), |x, y| {
+            let p = img.get_pixel(x, y).0;
+            grey(luma(to_f(p)), p[3])
+        })),
+        2 => Some(RgbaImage::from_fn(img.width(), img.height(), |x, y| grey(img.get_pixel(x, y).0[3] as f32 / 255.0, 255))),
+        _ => None,
     }
 }
 
@@ -414,6 +452,35 @@ mod tests {
 
     fn img(f: impl Fn(u32, u32) -> [u8; 4]) -> RgbaImage {
         RgbaImage::from_fn(32, 32, |x, y| image::Rgba(f(x, y)))
+    }
+
+    /// File Output writes the image as it is at its place in the list;
+    /// Luminance with Affect Source Bitmap passes grey on; previews write nothing.
+    #[test]
+    fn file_output_writes_the_image_at_its_place_in_the_list() {
+        let dir = std::env::temp_dir().join(format!("loom-file-output-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("mid.png");
+        let _ = std::fs::remove_file(&path);
+        let src = img(|x, _| if x < 16 { [255, 0, 0, 255] } else { [0, 0, 255, 0] });
+        let out = |channel, affect_source| ImageEffect::FileOutput { path: Some(path.to_string_lossy().into_owned()), channel, affect_source };
+        let mut g = src.clone();
+        assert!(apply(&mut g, &without_files(&[out(0, false)])).is_empty());
+        assert!(!path.exists(), "a preview writes no file");
+        assert!(apply(&mut g, &[out(0, false), ImageEffect::BrightnessContrast { brightness: 1.0, contrast: 0.5, ignore_background: false }]).is_empty());
+        assert_eq!(image::open(&path).unwrap().to_rgba8(), src, "written before the effects after it");
+        let mut g = src.clone();
+        apply(&mut g, &[out(1, true)]);
+        let l = (0.299f32 * 255.0).round() as u8;
+        assert_eq!(g.get_pixel(0, 0).0, [l, l, l, 255], "luminance passed on");
+        assert_eq!(image::open(&path).unwrap().to_rgba8().get_pixel(0, 0).0, [l, l, l, 255]);
+        let mut g = src.clone();
+        apply(&mut g, &[out(2, false)]);
+        assert_eq!(g, src, "without Affect Source Bitmap the image stays");
+        assert_eq!(image::open(&path).unwrap().to_rgba8().get_pixel(20, 0).0, [0, 0, 0, 255], "alpha 0 as black");
+        let bad = ImageEffect::FileOutput { path: Some(dir.join("no/such/dir/x.png").to_string_lossy().into_owned()), channel: 0, affect_source: false };
+        assert_eq!(apply(&mut g, &[bad]).len(), 1, "a failed write is reported");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

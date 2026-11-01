@@ -49,7 +49,7 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
         Dialog::ExportFile | Dialog::ExportSelected => Some("Export"),
         Dialog::ArchiveFile => Some("Archives"),
         Dialog::SaveAnimation | Dialog::LoadAnimation => Some("Animations"),
-        Dialog::RenderFile | Dialog::SaveRenderedImage | Dialog::ViewImageFile => Some("Render Output"),
+        Dialog::RenderFile | Dialog::SaveRenderedImage | Dialog::ViewImageFile | Dialog::FileOutputFile { .. } => Some("Render Output"),
         _ => None,
     };
     if let Some(d) = entry.and_then(|e| app.state.paths.dir(e)) {
@@ -63,7 +63,7 @@ fn defaults(app: &LoomApp, dialog: Dialog, ext: &str) -> (PathBuf, String) {
         Dialog::OpenFile | Dialog::SaveFileAs | Dialog::SaveFileAsCopy | Dialog::SaveSelected | Dialog::MergeFile | Dialog::MergeEffectsFile | Dialog::ReplaceFile => "scenes",
         Dialog::ImportFile => "import",
         Dialog::ExportFile | Dialog::ExportSelected => "export",
-        Dialog::RenderFile | Dialog::SaveRenderedImage => "renderoutput",
+        Dialog::RenderFile | Dialog::SaveRenderedImage | Dialog::FileOutputFile { .. } => "renderoutput",
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::MaterialMap { .. } | Dialog::MaterialBitmap | Dialog::PickUvTexture | Dialog::BitmapFit => "sceneassets/images",
         Dialog::ArchiveFile => "archives",
         Dialog::PhotometricWeb { .. } => "sceneassets/photometric",
@@ -137,6 +137,7 @@ fn purpose(dialog: Dialog) -> (&'static str, &'static str, &'static str) {
         Dialog::PickUvTexture => ("Pick Texture", IMAGES_READ, "Open"),
         Dialog::SaveUvw => ("Save UVW", "uvw", "Save"),
         Dialog::RenderFile => ("Render Output File", IMAGES_WRITE, "Save"),
+        Dialog::FileOutputFile { .. } => ("File Output", IMAGES_WRITE, "Save"),
         Dialog::SaveRenderPreset => ("Render Preset Save", "rps", "Save"),
         Dialog::LoadRenderPreset => ("Render Preset Load", "rps", "Open"),
         Dialog::RamPlayerFile { save: false, .. } => ("Open File, Channel", IMAGES_READ, "Open"),
@@ -204,6 +205,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
         Dialog::SaveUvw => Command::SaveUvw { path: Some(p) },
         Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(p) },
         Dialog::SaveRenderedImage => Command::SaveRenderedImage { path: Some(p) },
+        Dialog::FileOutputFile { index } => Command::FileOutputParameters { index, path: Some(p), channel: None, affect_source: None },
         // The numbered files beside it come along for the frame arrows.
         Dialog::ViewImageFile => Command::ViewImageFile { path: Some(p), sequence: Some(true) },
         Dialog::SaveRenderPreset => Command::SaveRenderPreset { path: p },

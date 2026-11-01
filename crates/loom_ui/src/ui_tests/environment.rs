@@ -226,3 +226,38 @@ fn effects_merge_brings_in_effects_from_a_scene_file() {
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.environment.effects.len(), 1, "one undo step");
 }
+
+/// Effects > File Output: Files... takes the image path through the file
+/// dialog, the Channel drop-down picks Luminance and Affect Source Bitmap
+/// ticks on.
+#[test]
+fn file_output_effect_takes_its_file_channel_and_affect_source() {
+    let dir = std::env::temp_dir().join("loom-ui-exchange").join("file_output");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("mid.png");
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    h.cmd(Command::AddEffect { kind: "File Output".into(), name: None });
+    h.key(egui::Key::Num8);
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Effects", win, 0.0);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "File Output", win, 0.0);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Files...", win, 0.0);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::FileOutputFile { index: 0 }));
+    super::choose_file(&mut h, &path, "Save");
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Whole Image", win, 0.0);
+    let full = h.screen;
+    click_text(&mut h, "Luminance", full, 0.0);
+    h.frames(2);
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Affect Source Bitmap", win, 0.0);
+    let EffectKind::FileOutput(f) = &h.app.state.scene.environment.effects[0].kind else { panic!("File Output") };
+    assert_eq!(f.path.as_deref(), Some(path.to_string_lossy().as_ref()));
+    assert_eq!((f.channel, f.affect_source), (1, true));
+}

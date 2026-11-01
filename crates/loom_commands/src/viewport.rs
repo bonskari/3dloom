@@ -521,6 +521,8 @@ pub enum Dialog {
     /// Effects > Merge: pick the scene file, then choose its effects.
     MergeEffectsFile,
     MergeEffects,
+    /// Effects > File Output > Files...: the image file of effect `index`.
+    FileOutputFile { index: u32 },
     NamedSelectionSets,
     TransformTypeIn,
     CloneOptions,
