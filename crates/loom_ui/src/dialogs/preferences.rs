@@ -158,6 +158,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 });
                 ui.horizontal_top(|ui| {
                     ui.group(|ui| {
+                        ui.set_max_width(250.0);
                         ui.label(egui::RichText::new("Move Gizmo").strong());
                         ui.horizontal(|ui| number(ui, app, "Move Gizmo Relative Size", "Relative Size (%):", 0.0..=500.0, 0));
                         ui.label("Plane Handles");
@@ -167,6 +168,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         check(ui, app, "Center Box Handle", "Center Box Handle: Move in Screen Space");
                     });
                     ui.group(|ui| {
+                        ui.set_max_width(250.0);
                         ui.label(egui::RichText::new("Rotate Gizmo").strong());
                         ui.horizontal(|ui| number(ui, app, "Rotate Gizmo Relative Size", "Relative Size (%):", 0.0..=500.0, 0));
                         check(ui, app, "Rotate Free Rotation", "Free Rotation");
@@ -176,6 +178,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         check(ui, app, "Rotate Angle Data", "Angle Data");
                     });
                     ui.group(|ui| {
+                        ui.set_max_width(250.0);
                         ui.label(egui::RichText::new("Scale Gizmo").strong());
                         ui.horizontal(|ui| number(ui, app, "Scale Size", "Relative Size (%):", 10.0..=400.0, 0));
                         ui.horizontal(|ui| number(ui, app, "Scale Uniform Handle Size", "Uniform Handle Size (%):", 1.0..=95.0, 0));
