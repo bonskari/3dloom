@@ -378,3 +378,24 @@ fn make_unique_with_several_selected_asks_yes_or_no() {
     h.click(h.find(Role::Button, "Yes").center());
     assert_eq!((inst(&h, 1), inst(&h, 2)), (None, None), "Yes: each unique");
 }
+
+/// Views > Show Dependencies: with the Modify panel on a box, its instance
+/// shows magenta; an unrelated box keeps its colour; other tabs show none.
+#[test]
+fn views_show_dependencies_colours_instances_magenta() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = selected(&h);
+    h.cmd(Command::CloneOptions { kind: loom_commands::CloneKind::Instance, copies: 1, name: None, offset: Some([30.0, 0.0, 0.0]), rotate_deg: None, scale: None });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [-40.0, 0.0, 0.0], size: [10.0; 3] });
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.app.panel_tab = crate::Tab::Modify;
+    menu_path(&mut h, &["Views", "Show Dependencies"]);
+    assert!(h.app.state.show_dependencies);
+    h.frames(2);
+    let magenta = |h: &Harness| h.app.world_styles().iter().filter(|s| s.color == [1.0, 0.0, 1.0]).count();
+    assert_eq!(magenta(&h), 1, "the instance alone");
+    h.app.panel_tab = crate::Tab::Create;
+    h.frames(2);
+    assert_eq!(magenta(&h), 0, "only with the Modify panel");
+}

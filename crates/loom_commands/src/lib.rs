@@ -17,7 +17,7 @@ mod poly_props;
 pub mod mesh_edit;
 pub(crate) mod patch_edit;
 mod groups;
-mod stack;
+pub mod stack;
 pub mod spline;
 pub mod snap;
 pub mod state;

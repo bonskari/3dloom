@@ -214,6 +214,8 @@ pub struct LoomApp {
     world_display: std::sync::Arc<Vec<Mesh>>,
     /// Bumped by every `world_meshes` rebuild.
     world_version: u64,
+    /// The objects Show Dependencies draws magenta in the current world meshes.
+    shown_dependencies: std::collections::BTreeSet<loom_scene::NodeId>,
     /// What Show End Result off applied to at the last rebuild (`end_result_key`).
     shown_end_result_key: Option<Vec<NodeId>>,
     /// A base parameter change held back by the topology-dependence warning.
@@ -484,6 +486,7 @@ impl LoomApp {
             world_styles: Vec::new(),
             world_display: std::sync::Arc::new(Vec::new()),
             world_version: 0,
+            shown_dependencies: Default::default(),
             shown_end_result_key: None,
             pending_topology: None,
             topology_ack: None,
@@ -665,6 +668,14 @@ impl LoomApp {
         r
     }
 
+    /// Show Dependencies: the objects shown magenta (with the Modify panel on the selected object).
+    fn dependencies_shown(&self) -> std::collections::BTreeSet<loom_scene::NodeId> {
+        match self.state.selection.iter().next() {
+            Some(id) if self.state.show_dependencies && self.panel_tab == Tab::Modify && self.state.selection.len() == 1 => loom_commands::stack::dependents(&self.state, *id),
+            _ => Default::default(),
+        }
+    }
+
     /// Runs a command by its action name (hotkeys, menus).
     pub fn dispatch_named(&mut self, name: &str) {
         let body = serde_json::json!({ "cmd": name });
@@ -678,6 +689,11 @@ impl LoomApp {
         let key = self.end_result_key();
         if key != self.shown_end_result_key {
             self.shown_end_result_key = key;
+            self.state.mesh_dirty = true;
+        }
+        let deps = self.dependencies_shown();
+        if deps != self.shown_dependencies {
+            self.shown_dependencies = deps;
             self.state.mesh_dirty = true;
         }
         // Update During Spinner Drag off: the viewports catch up on release.
@@ -815,6 +831,8 @@ impl LoomApp {
                 let c = self.state.scene.display_color(n);
                 [srgb(c[0]), srgb(c[1]), srgb(c[2])]
             };
+            // Show Dependencies: the edited object's dependents show magenta.
+            let color = if self.shown_dependencies.contains(&id) { [1.0, 0.0, 1.0] } else { color };
             let see_through = d.see_through || draws_see_through(n);
             // An assigned material colours the faces (its diffuse, opacity,
             // highlight and self-illumination; a Multi/Sub-Object material per
@@ -828,6 +846,7 @@ impl LoomApp {
                 }
                 _ => Some(color),
             };
+            let wire_color = if self.shown_dependencies.contains(&id) { Some(color) } else { wire_color };
             if !has_material {
                 base.color = color;
             }
@@ -1507,6 +1526,10 @@ impl LoomApp {
         let was = self.spinner_drag;
         self.spinner_drag = ctx.dragged_id().is_some() && ctx.input(|i| i.pointer.press_origin()).is_some_and(|p| !self.viewport_rects.iter().any(|r| r.contains(p)));
         if was && !self.spinner_drag && self.state.mesh_dirty {
+            self.sync_after_command();
+        }
+        // Show Dependencies follows the Command Panel tab, which changes without a command.
+        if (self.state.show_dependencies || !self.shown_dependencies.is_empty()) && self.dependencies_shown() != self.shown_dependencies {
             self.sync_after_command();
         }
         // An image file dropped on an object: a material with it as the Diffuse map.

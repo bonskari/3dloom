@@ -1203,6 +1203,26 @@ pub fn point_cache_load(state: &mut AppState, index: usize, path: Option<&str>) 
     Ok(json!({ "path": path }))
 }
 
+/// Show Dependencies: the other objects sharing `id`'s base object (instances
+/// and references) or its active stack entry (an instanced modifier).
+pub fn dependents(state: &AppState, id: NodeId) -> std::collections::BTreeSet<NodeId> {
+    let mut out = std::collections::BTreeSet::new();
+    let Some(node) = state.scene.node(id) else { return out };
+    let root = node.instance_of.unwrap_or(id);
+    let entry = node.active_entry.and_then(|a| node.modifiers.get(a).map(|s| s.instance_of.unwrap_or((id, a))));
+    for n in state.scene.nodes() {
+        if n.id == id {
+            continue;
+        }
+        let shares_object = n.id == root || n.instance_of == Some(root);
+        let shares_entry = entry.is_some_and(|e| e.0 == n.id && n.modifiers.get(e.1).is_some() || n.modifiers.iter().any(|s| s.instance_of == Some(e)));
+        if shares_object || shares_entry {
+            out.insert(n.id);
+        }
+    }
+    out
+}
+
 fn add_modifier(state: &mut AppState, name: &str) -> Result<Value, String> {
     {
             let modifier = Modifier::by_name(name).ok_or_else(|| format!("no modifier {name:?} (Modifier List: {}, {})", Modifier::WSM_LIST.join(", "), Modifier::LIST.join(", ")))?;

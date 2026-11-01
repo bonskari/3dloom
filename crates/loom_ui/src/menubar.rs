@@ -579,6 +579,8 @@ fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     check_item(ui, app, "Adaptive Degradation", "Adaptive Degradation Toggle", degrade);
     let spinner = app.state.update_during_spinner_drag;
     check_item(ui, app, "Update During Spinner Drag", "Update During Spinner Drag", spinner);
+    let deps = app.state.show_dependencies;
+    check_item(ui, app, "Show Dependencies", "Show Dependencies Toggle", deps);
     item(ui, app, "Create Camera From View", "Create Camera From View");
     item(ui, app, "Add Default Lights to Scene...", "Add Default Lights to Scene");
     item(ui, app, "Redraw All Views", "Redraw All Views");

@@ -1713,6 +1713,8 @@ pub struct AppState {
     pub show_all_sets_in_list: bool,
     /// Track bar Configure > Show Frame Numbers.
     pub track_bar_frame_numbers: bool,
+    /// Views > Show Dependencies.
+    pub show_dependencies: bool,
     pub show_vertices: bool,
     pub show_statistics: bool,
     /// Nodes hidden by Isolate Selection (restored on exit).
@@ -2138,6 +2140,7 @@ impl AppState {
             walk: WalkThrough::default(),
             show_all_sets_in_list: false,
             track_bar_frame_numbers: true,
+            show_dependencies: false,
             show_vertices: false,
             show_statistics: false,
             isolation: None,

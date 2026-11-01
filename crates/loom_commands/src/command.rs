@@ -1674,6 +1674,7 @@ commands! {
     SelectKeysByTime => "Select Keys By Time", Loom, "Track View Utilities: select the highlighted tracks' keys between two frames." { start: f32, end: f32, clear: bool };
     EulerFilter => "Euler Filter", Loom, "Track View Utilities: remove ±360° flips from the highlighted Euler rotation tracks." { start: Option<i32>, end: Option<i32> };
     CollapseController => "Collapse Controller", Loom, "Controller > Collapse: bake the highlighted tracks to keys every `samples` frames." { start: Option<i32>, end: Option<i32>, samples: Option<u32> };
+    ShowDependenciesToggle => "Show Dependencies Toggle", MainUI, "Views > Show Dependencies: with the Modify panel open, the objects that share the edited object's base object or its current modifier (instances, references) show magenta.";
     TrackBarShowFrameNumbersToggle => "Track Bar Show Frame Numbers Toggle", Loom, "Track bar right-click > Configure > Show Frame Numbers: the frame numbers along the track bar on / off.";
     SetTrackBarFilter => "Set Track Bar Filter", Loom, "Track bar right-click > Filter: All Keys, All Transform Keys, Current Transform, Object, Material." { filter: crate::anim_cmds::TrackBarFilter };
     ShowTrackBarToggle => "Show Track Bar Toggle", MainUI, "Show or hide the track bar under the time slider.";
