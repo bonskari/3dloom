@@ -4259,3 +4259,26 @@ fn shift_right_click_on_a_spinner_keys_its_parameter() {
     assert!(keyed, "a key at frame 15");
     assert_eq!(param(&h, "Length Segs"), 1.0, "the value stays");
 }
+
+/// Shift+right-click a modifier's spinner keys that modifier parameter.
+#[test]
+fn shift_right_click_on_a_modifier_spinner_keys_it() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1400.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let id = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::AddModifier { name: "Bend".into() });
+    h.cmd(Command::SetFrame { frame: 20 });
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(2);
+    let spin = h.spinner_after("Angle");
+    h.mods = egui::Modifiers::SHIFT;
+    right_click(&mut h, spin.center());
+    h.mods = egui::Modifiers::NONE;
+    let keyed = loom_scene::tracks::list_tracks(&h.app.state.scene, id)
+        .into_iter()
+        .find(|t| t.name == "Bend / Angle")
+        .and_then(|t| loom_scene::tracks::read(&h.app.state.scene, &t))
+        .is_some_and(|p| p.keys().is_some_and(|k| k.tracks.iter().any(|tr| tr.key_at(20.0).is_some())));
+    assert!(keyed, "a Bend Angle key at frame 20");
+}

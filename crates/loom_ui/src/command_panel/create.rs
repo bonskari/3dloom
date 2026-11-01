@@ -578,7 +578,7 @@ fn param_grid(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId, salt
 pub(super) fn spin(app: &mut LoomApp, id: loom_scene::NodeId, name: &str, r: &egui::Response, new: f64, old: f64) {
     // Shift+right-click: a key for this parameter at the current frame.
     if r.secondary_clicked() && r.ctx.input(|i| i.modifiers.shift) {
-        let _ = app.dispatch(Command::KeyParameter { id: id.0, name: name.into() });
+        let _ = app.dispatch(Command::KeyParameter { id: id.0, name: name.into(), modifier: None });
         return;
     }
     if r.drag_started() {

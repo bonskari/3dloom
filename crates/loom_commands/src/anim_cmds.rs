@@ -216,13 +216,18 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({}))
         }
-        C::KeyParameter { id, name } => {
+        C::KeyParameter { id, name, modifier } => {
             let id = NodeId(id);
-            let found = loom_scene::tracks::list_tracks(&state.scene, id).into_iter().any(|t| t.owner == loom_scene::tracks::TrackOwner::Object && t.name.eq_ignore_ascii_case(&name));
-            if !found {
-                return Err(format!("no animatable parameter {name:?} on that object"));
+            // Object tracks are named by the label; a modifier's "<entry> / <label>".
+            let suffix = format!(" / {}", name.to_ascii_lowercase());
+            let wanted = move |t: &TrackPath| match modifier {
+                None => t.owner == TrackOwner::Object && t.name.eq_ignore_ascii_case(&name),
+                Some(m) => t.owner == TrackOwner::Modifier(m as usize) && t.name.to_ascii_lowercase().ends_with(&suffix),
+            };
+            if !tracks::list_tracks(&state.scene, id).iter().any(&wanted) {
+                return Err("no animatable parameter of that name".into());
             }
-            edit_nodes(state, "Set Key", &[id], |t| t.owner == loom_scene::tracks::TrackOwner::Object && t.name.eq_ignore_ascii_case(&name), |_, p| p.key_now())
+            edit_nodes(state, "Set Key", &[id], wanted, |_, p| p.key_now())
         }
         C::SetKeys => {
             // The Selection List's named set stands in for the selection while keying.

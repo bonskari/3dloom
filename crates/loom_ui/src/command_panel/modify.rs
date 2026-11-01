@@ -1158,6 +1158,9 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                     loom_scene::ParamValue::Float(f) => {
                         let mut v = f;
                         let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision));
+                        if r.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
+                            let _ = app.dispatch(Command::KeyParameter { id: id.0, name: pname.into(), modifier: Some(index as u32) });
+                        }
                         if r.drag_started() {
                             app.state.undo.begin(pname);
                         }
@@ -1181,6 +1184,9 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
                     loom_scene::ParamValue::Int(i) => {
                         let mut v = i;
                         let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.1)));
+                        if r.secondary_clicked() && ui.input(|i| i.modifiers.shift) {
+                            let _ = app.dispatch(Command::KeyParameter { id: id.0, name: pname.into(), modifier: Some(index as u32) });
+                        }
                         if r.drag_started() {
                             app.state.undo.begin(pname);
                         }
