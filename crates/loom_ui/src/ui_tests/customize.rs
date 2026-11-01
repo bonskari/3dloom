@@ -537,3 +537,46 @@ fn the_keyboard_category_lists_one_menus_actions() {
     search_for(&mut h, "Save Active");
     assert!(h.text_rect("Save Active View", customize_ui_rect(&h)).is_some(), "a Views menu action");
 }
+
+/// Keyboard panel > Overrides Active: holding Shift+Ctrl+B past Delay To
+/// Override bevels only while held, then the interrupted Extrude comes back;
+/// a short press toggles Bevel as before; off, holding toggles too.
+#[test]
+fn overrides_active_holds_an_editable_poly_mode_while_the_key_is_down() {
+    use loom_commands::PolyDrag;
+    let mut h = Harness::new();
+    let win = customize(&mut h, "Keyboard");
+    let r = h.text_rect("Overrides Active", win).expect("Overrides Active");
+    h.click(r.center());
+    assert!(!h.app.state.prefs.overrides_active, "on by default, clicked off");
+    h.click(r.center());
+    assert!(h.app.state.prefs.overrides_active);
+    assert!(h.text_rect("Delay To Override (ms):", customize_ui_rect(&h)).is_some());
+    h.cmd(Command::CloseDialog);
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    h.cmd(Command::ConvertToEditablePoly);
+    h.cmd(Command::SelectionMode { mode: loom_commands::SelectionMode::Face });
+    h.cmd(Command::ExtrudeMode);
+    assert_eq!(h.app.state.poly_drag, Some(PolyDrag::Extrude));
+    let hold = |h: &mut Harness, frames: usize| {
+        h.mods = egui::Modifiers { ctrl: true, shift: true, ..egui::Modifiers::NONE };
+        let m = h.mods;
+        h.run(vec![egui::Event::Key { key: egui::Key::B, physical_key: None, pressed: true, repeat: false, modifiers: m }]);
+        h.frames(frames);
+        let held = h.app.state.poly_drag;
+        h.run(vec![egui::Event::Key { key: egui::Key::B, physical_key: None, pressed: false, repeat: false, modifiers: m }]);
+        h.mods = egui::Modifiers::NONE;
+        h.frames(1);
+        held
+    };
+    // Held half a second (past 250 ms): Bevel while down, Extrude again after.
+    assert_eq!(hold(&mut h, 15), Some(PolyDrag::Bevel));
+    assert_eq!(h.app.state.poly_drag, Some(PolyDrag::Extrude), "back to the interrupted operation");
+    // A short press toggles.
+    assert_eq!(hold(&mut h, 1), Some(PolyDrag::Bevel));
+    assert_eq!(h.app.state.poly_drag, Some(PolyDrag::Bevel), "a tap keeps Bevel on");
+    // Overrides off: holding toggles like a tap.
+    h.cmd(Command::SetPreference { name: "Overrides Active".into(), value: 0.0 });
+    assert_eq!(hold(&mut h, 15), None);
+    assert_eq!(h.app.state.poly_drag, None);
+}

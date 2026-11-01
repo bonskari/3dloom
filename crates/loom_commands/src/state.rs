@@ -915,6 +915,13 @@ pub struct Prefs {
     pub rollout_threshold: f32,
     /// General > Layer Defaults > Default to By Layer for New Nodes.
     pub default_by_layer: bool,
+    /// Customize User Interface > Keyboard > Overrides Active: holding an
+    /// Editable Poly mode's shortcut turns the mode on only while held
+    /// (on is this build's default).
+    pub overrides_active: bool,
+    /// Keyboard > Delay To Override (ms, 250 is this build's default): a key
+    /// held this long is a temporary override; a shorter press toggles.
+    pub override_delay_ms: f32,
     /// General > Layer Defaults > New Lights Renderable By Layer.
     pub new_lights_renderable_by_layer: bool,
     /// General > Layer Defaults > Propagate Unhide/Unfreeze Commands to
@@ -1004,6 +1011,8 @@ impl Default for Prefs {
             rollout_threshold: 50.0,
             default_by_layer: false,
             new_lights_renderable_by_layer: false,
+            overrides_active: true,
+            override_delay_ms: 250.0,
             // The reference gives no default; Do Not Propagate keeps this build's old behaviour.
             propagate_layers: 1,
             grid_nudge_distance: 1.0,
@@ -1034,7 +1043,7 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 59] = [
+    pub const NAMES: [&'static str; 61] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -1047,6 +1056,7 @@ impl Prefs {
         "Scale Uniform Handle Size", "Scale 2-Axis Handle Size", "Uniform 2-Axis Scaling",
         "Ghosting Frames", "Ghosting Nth Frame", "Ghosting Mode", "Ghosting Frame Numbers",
         "Rotation Method", "Planar Angle Threshold", "Move/Rotate Projection", "Persp Sens",
+        "Overrides Active", "Delay To Override",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1076,6 +1086,8 @@ impl Prefs {
             "Rollout Threshold" => self.rollout_threshold as f64,
             "Default to By Layer for New Nodes" => b(self.default_by_layer),
             "New Lights Renderable By Layer" => b(self.new_lights_renderable_by_layer),
+            "Overrides Active" => b(self.overrides_active),
+            "Delay To Override" => self.override_delay_ms as f64,
             "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers as f64,
             "Grid Nudge Distance" => self.grid_nudge_distance as f64,
             "Floating Windows as OS Windows" => b(self.floating_os_windows),
@@ -1151,6 +1163,8 @@ impl Prefs {
             "Rollout Threshold" => self.rollout_threshold = f.clamp(0.0, 2000.0),
             "Default to By Layer for New Nodes" => self.default_by_layer = on,
             "New Lights Renderable By Layer" => self.new_lights_renderable_by_layer = on,
+            "Overrides Active" => self.overrides_active = on,
+            "Delay To Override" => self.override_delay_ms = f.clamp(0.0, 5000.0),
             "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers = v.clamp(0.0, 2.0) as u8,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
             "Grid Nudge Distance" => self.grid_nudge_distance = f.max(0.0),

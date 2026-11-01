@@ -64,6 +64,20 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
         return;
     }
     let pressed = ctx.input(|i| pressed_keys(&i.events));
+    // Overrides Active: the held mode's key came up after Delay To Override, so the mode ends.
+    if let Some((key, name, since, before)) = app.held_override {
+        let (released, now) = ctx.input(|i| (i.events.iter().any(|e| matches!(e, egui::Event::Key { key: k, pressed: false, .. } if *k == key)), i.time));
+        if released {
+            app.held_override = None;
+            if app.state.prefs.overrides_active && (now - since) * 1000.0 >= app.state.prefs.override_delay_ms as f64 {
+                app.dispatch_named(name);
+                // Back to the operation the override interrupted.
+                if let Some(m) = before.filter(|_| app.state.poly_drag.is_none()) {
+                    app.dispatch_named(drag_mode_name(m));
+                }
+            }
+        }
+    }
     for (key, mods) in pressed {
         // Backspace at an edge level removes edges (hard-coded).
         let plain = !(mods.ctrl || mods.alt || mods.shift || mods.command);
@@ -161,9 +175,34 @@ pub fn handle(ctx: &egui::Context, app: &mut LoomApp) {
                         app.last_error = Some(e);
                     }
                 }
-                _ => app.dispatch_named(name),
+                _ => {
+                    let before = app.state.poly_drag;
+                    app.dispatch_named(name);
+                    // Overrides Active: an Editable Poly mode turned on by this key may be a temporary override.
+                    if app.state.prefs.overrides_active && is_override_mode(name) && !ctx.input(|i| i.key_released(key)) {
+                        app.held_override = Some((key, name, ctx.input(|i| i.time), before));
+                    }
+                }
             }
         }
+    }
+}
+
+/// The Editable Poly modes a held shortcut can override the current
+/// operation with.
+fn is_override_mode(name: &str) -> bool {
+    name.ends_with(" Mode") && name != "Preview Select Mode" && loom_commands::registry().iter().any(|i| i.name == name && i.group == loom_commands::Group::EditablePoly)
+}
+
+fn drag_mode_name(m: loom_commands::PolyDrag) -> &'static str {
+    use loom_commands::PolyDrag as D;
+    match m {
+        D::Extrude => "Extrude Mode",
+        D::Chamfer => "Chamfer Mode",
+        D::Inset => "Inset Mode",
+        D::Bevel => "Bevel Mode",
+        D::Outline => "Outline Mode",
+        D::Hinge => "Hinge from Edge Mode",
     }
 }
 

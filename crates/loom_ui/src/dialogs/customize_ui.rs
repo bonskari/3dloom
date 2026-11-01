@@ -265,6 +265,17 @@ fn keyboard(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.label("Search:");
         ui.add(egui::TextEdit::singleline(&mut search).desired_width(160.0));
     });
+    ui.horizontal(|ui| {
+        let mut on = app.state.prefs.overrides_active;
+        if ui.checkbox(&mut on, "Overrides Active").on_hover_text("Holding an Editable Poly mode's shortcut turns the mode on until the key comes up").changed() {
+            let _ = app.dispatch(Command::SetPreference { name: "Overrides Active".into(), value: if on { 1.0 } else { 0.0 } });
+        }
+        ui.label("Delay To Override (ms):");
+        let mut ms = app.state.prefs.override_delay_ms as f64;
+        if ui.add(crate::spinner::spin(ui, &mut ms, 0.0..=5000.0).speed(app.spinner_speed(1.0)).fixed_decimals(0)).changed() {
+            let _ = app.dispatch(Command::SetPreference { name: "Delay To Override".into(), value: ms });
+        }
+    });
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(430.0);

@@ -406,6 +406,10 @@ pub struct LoomApp {
     /// started (from a screenshot), shown until it stops.
     pub frozen_views: std::collections::HashMap<usize, egui::TextureHandle>,
     pub freeze_pending: Option<Vec<(usize, egui::Rect)>>,
+    /// Overrides Active: an Editable Poly mode a held shortcut turned on (its
+    /// key, the time it went down and the drag mode it overrode), turned off
+    /// again when the key comes up after Delay To Override.
+    pub held_override: Option<(egui::Key, &'static str, f64, Option<loom_commands::PolyDrag>)>,
     pub was_playing: bool,
     /// The Add / Edit Time Tag dialog.
     pub tag_dialog: Option<statusbar::TagDialog>,
@@ -604,6 +608,7 @@ impl LoomApp {
             grab_pending: None,
             frozen_views: Default::default(),
             freeze_pending: None,
+            held_override: None,
             was_playing: false,
             tag_dialog: None,
             input_log: Default::default(),
