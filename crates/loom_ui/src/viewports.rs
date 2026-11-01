@@ -65,6 +65,16 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         });
 }
 
+/// Right-click a split line (or where two cross) > Reset Layout.
+fn reset_menu(resp: &egui::Response, app: &mut LoomApp) {
+    resp.context_menu(|ui| {
+        if ui.button("Reset Layout").clicked() {
+            let _ = app.dispatch(Command::ResetLayout);
+            ui.close_menu();
+        }
+    });
+}
+
 /// Drag handles on the layout's split lines → `Set Splits`.
 fn splitters(ui: &mut egui::Ui, app: &mut LoomApp, panel: egui::Rect) {
     use loom_commands::ViewportLayout as L;
@@ -75,7 +85,8 @@ fn splitters(ui: &mut egui::Ui, app: &mut LoomApp, panel: egui::Rect) {
     if uses_x {
         let x = panel.min.x + s.x * panel.width();
         let r = egui::Rect::from_center_size(egui::pos2(x, panel.center().y), egui::vec2(6.0, panel.height()));
-        let resp = ui.interact(r, ui.id().with("split_x"), egui::Sense::drag());
+        let resp = ui.interact(r, ui.id().with("split_x"), egui::Sense::click_and_drag());
+        reset_menu(&resp, app);
         if resp.hovered() || resp.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
@@ -89,7 +100,8 @@ fn splitters(ui: &mut egui::Ui, app: &mut LoomApp, panel: egui::Rect) {
     if uses_y {
         let y = panel.min.y + s.y * panel.height();
         let r = egui::Rect::from_center_size(egui::pos2(panel.center().x, y), egui::vec2(panel.width(), 6.0));
-        let resp = ui.interact(r, ui.id().with("split_y"), egui::Sense::drag());
+        let resp = ui.interact(r, ui.id().with("split_y"), egui::Sense::click_and_drag());
+        reset_menu(&resp, app);
         if resp.hovered() || resp.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
         }

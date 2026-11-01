@@ -1282,6 +1282,10 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             Ok(json!({ "shading": shading.label(), "edged_faces": vp.edged_faces }))
         }
+        C::ResetLayout => {
+            state.splits = crate::viewport::LayoutSplits::default();
+            Ok(json!({ "x": state.splits.x, "y": state.splits.y }))
+        }
         C::SetSplits { x, y } => {
             if let Some(x) = x {
                 state.splits.set_x(x);

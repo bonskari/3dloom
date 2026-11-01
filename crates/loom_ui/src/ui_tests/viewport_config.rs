@@ -124,3 +124,20 @@ fn grab_viewport_puts_the_active_view_into_the_rendered_frame_window() {
     assert_eq!(img.get_pixel(2, 2).0, [10, 20, 30, 255]);
     assert!(h.app.state.rendered.open);
 }
+
+/// Dragging the vertical split line moves it; right-clicking a split line >
+/// Reset Layout puts both lines back.
+#[test]
+fn right_click_a_splitter_resets_the_layout() {
+    let mut h = Harness::new();
+    let default = loom_commands::viewport::LayoutSplits::default();
+    let [a, b] = [h.app.viewport_rects[0], h.app.viewport_rects[1]];
+    let split = egui::pos2((a.max.x + b.min.x) * 0.5, a.center().y);
+    h.drag(split, split + egui::vec2(-120.0, 0.0));
+    assert!(h.app.state.splits.x < default.x - 0.05, "the drag moved the line: {:?}", h.app.state.splits.x);
+    let [a, b] = [h.app.viewport_rects[0], h.app.viewport_rects[1]];
+    let split = egui::pos2((a.max.x + b.min.x) * 0.5, a.center().y);
+    right_click(&mut h, split);
+    h.click(menu_entry(&h, "Reset Layout"));
+    assert_eq!((h.app.state.splits.x, h.app.state.splits.y), (default.x, default.y));
+}
