@@ -222,13 +222,16 @@ pub fn parameter_collector(ctx: &egui::Context, app: &mut LoomApp, open: &mut bo
     });
 }
 
+/// The Reaction Manager's picked track and highlighted row (reaction, slave).
+type ReactionForm = (Option<(NodeId, String)>, Option<(usize, Option<usize>)>);
+
 /// Animation > Reaction Manager: the Reactions list (masters with their
 /// slaves), a parameter picker to add masters and slaves, and the States of
 /// the highlighted slave (master value, slave value) with Create State and
 /// Delete State.
 pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     let fid = egui::Id::new("reaction_manager_form");
-    let (mut pick, mut hl): (Option<(NodeId, String)>, Option<(usize, Option<usize>)>) = ctx.data(|d| d.get_temp(fid)).unwrap_or_default();
+    let (mut pick, mut hl): ReactionForm = ctx.data(|d| d.get_temp(fid)).unwrap_or_default();
     egui::Window::new("Reaction Manager").open(open).resizable(true).default_width(620.0).show(ctx, |ui| {
         ui.columns(2, |c| {
             c[0].label(egui::RichText::new("Pick a track").strong());
