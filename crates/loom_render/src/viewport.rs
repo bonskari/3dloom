@@ -650,7 +650,9 @@ impl ViewportRenderer {
             self.extras[slot].shadow = Some(ShadowSlot { _texture: texture, layers, all });
         }
         let s = self.extras[slot].shadow.as_ref().expect("made above");
-        for (m, (view, uniform, group)) in set.layers.iter().zip(&s.layers).take(set.layer_count as usize) {
+        for (layer, (m, (view, uniform, group))) in set.layers.iter().zip(&s.layers).take(set.layer_count as usize).enumerate() {
+            // The light this layer belongs to: objects it excludes from shadow casting stay out.
+            let bit = set.lights.iter().position(|&(start, count)| (start..start + count).contains(&(layer as u32))).map_or(0, |i| 1u32 << i);
             let mut u = ViewUniform::zeroed();
             u.view_proj = m.to_cols_array_2d();
             queue.write_buffer(uniform, 0, bytemuck::bytes_of(&u));
@@ -667,7 +669,7 @@ impl ViewportRenderer {
             });
             pass.set_pipeline(&self.shadow_pipeline);
             pass.set_bind_group(0, group, &[]);
-            for mb in meshes.iter().filter(|mb| mb.index_count > 0) {
+            for mb in meshes.iter().filter(|mb| mb.index_count > 0 && mb.style.shadows_off & bit == 0) {
                 for r in mb.ranges.iter().filter(|r| r.count > 0 && !r.transparent) {
                     pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
                     pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);

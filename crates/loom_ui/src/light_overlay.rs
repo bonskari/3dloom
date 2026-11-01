@@ -55,9 +55,10 @@ pub fn view_lighting(app: &LoomApp, vp: &loom_commands::Viewport, view: Mat4, sh
 }
 
 /// Light Exclude/Include in the shaded viewports: per object, bit i set
-/// when scene light i of `view_lighting` excludes it from illumination.
-pub fn lights_off(samples: &[LightSample], id: loom_scene::NodeId) -> u32 {
-    samples.iter().filter(|s| view_light(s).is_some()).take(loom_render::MAX_VIEW_LIGHTS).enumerate().filter(|(_, s)| s.exclusion.excludes(id, true)).fold(0, |m, (i, _)| m | 1 << i)
+/// when scene light i of `view_lighting` excludes it from illumination
+/// (`illumination` false: from shadow casting).
+pub fn lights_off(samples: &[LightSample], id: loom_scene::NodeId, illumination: bool) -> u32 {
+    samples.iter().filter(|s| view_light(s).is_some()).take(loom_render::MAX_VIEW_LIGHTS).enumerate().filter(|(_, s)| s.exclusion.excludes(id, illumination)).fold(0, |m, (i, _)| m | 1 << i)
 }
 
 pub fn draw(painter: &egui::Painter, app: &LoomApp, index: usize, view_proj: Mat4, rect: egui::Rect, realistic: bool) {

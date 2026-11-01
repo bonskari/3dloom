@@ -500,6 +500,15 @@ fn the_light_include_exclude_tool_excludes_the_selection_from_a_picked_light() {
     vp.scene_lights = true;
     let shading = crate::light_overlay::view_lighting(&h.app, &vp, glam::Mat4::IDENTITY, loom_render::ViewShading::default());
     assert!(shading.flags & loom_render::view_flags::SCENE_LIGHTS != 0, "a view lit by the scene lights applies the exclusion");
+    // Both: the light's viewport shadow map leaves the box out too; Illumination only keeps it casting.
+    let shadows = |h: &Harness| h.app.world_meshes().iter().position(|(id, _)| *id == b).map(|i| h.app.world_styles()[i].shadows_off);
+    assert_eq!(shadows(&h), Some(1), "the box casts no shadow from light 0");
+    h.cmd(Command::SetLightExclusion { id: l.0, include: false, scope: 0, nodes: vec![b.0] });
+    h.frames(1);
+    assert_eq!((off(&h), shadows(&h)), (Some(1), Some(0)), "Illumination only: unlit but casting");
+    h.cmd(Command::SetLightExclusion { id: l.0, include: false, scope: 1, nodes: vec![b.0] });
+    h.frames(1);
+    assert_eq!((off(&h), shadows(&h)), (Some(0), Some(1)), "Shadow Casting only: lit, no shadow");
     h.click(in_window(&h, "Light Incl/Excl", "Clear Light")[0]);
     assert!(light(&h, l).exclusion.nodes.is_empty());
     h.frames(1);

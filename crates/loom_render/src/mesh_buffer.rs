@@ -106,6 +106,9 @@ pub struct MeshStyle {
     /// Light Exclude/Include: bit i set, scene light i of a shaded viewport
     /// (the first [`crate::MAX_VIEW_LIGHTS`]) leaves the object unlit.
     pub lights_off: u32,
+    /// Light Exclude/Include, Shadow Casting: bit i set, scene light i
+    /// casts no shadow of the object.
+    pub shadows_off: u32,
 }
 
 impl Default for MeshStyle {
@@ -130,6 +133,7 @@ impl Default for MeshStyle {
             unlit: false,
             selection_color: [1.0, 1.0, 1.0],
             lights_off: 0,
+            shadows_off: 0,
         }
     }
 }

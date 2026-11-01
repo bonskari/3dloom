@@ -949,7 +949,8 @@ impl LoomApp {
                 unlit,
                 selection_color: self.color_f32("Selection"),
                 sub: sub.map(std::sync::Arc::new),
-                lights_off: crate::light_overlay::lights_off(&lights, id),
+                lights_off: crate::light_overlay::lights_off(&lights, id, true),
+                shadows_off: crate::light_overlay::lights_off(&lights, id, false),
                 ..base
             });
             let mut shown = shown.unwrap_or_else(|| mesh.clone());
