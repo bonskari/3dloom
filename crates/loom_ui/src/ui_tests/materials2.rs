@@ -319,3 +319,19 @@ fn options_menu_propagate_materials_to_instances_toggles() {
     h.frames(2);
     assert!(h.app.state.scene.material_editor.options.propagate_to_instances);
 }
+
+#[test]
+fn show_end_result_shows_the_whole_material_below_the_top_level() {
+    use crate::dialogs::material_editor::{slot_sample, Sample};
+    let mut h = editor();
+    h.cmd(Command::SetMaterialType { kind: "Multi/Sub-Object".into(), keep_old: Some(false) });
+    h.cmd(Command::MaterialEditorGoToSub { index: 1 });
+    h.frames(2);
+    let multi = |s: &Sample| matches!(s, Sample::Surfaces(loom_scene::material::Surfaces::PerId(_)));
+    assert!(multi(&slot_sample(&h.app, 0)), "on (the default): the whole Multi/Sub-Object material");
+    scroll_top(&mut h);
+    click_in_editor(&mut h, "Show End Result", 0.0);
+    h.frames(2);
+    assert!(!h.app.state.scene.material_editor.options.show_end_result);
+    assert!(!multi(&slot_sample(&h.app, 0)), "off: only the sub-material");
+}

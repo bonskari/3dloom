@@ -365,7 +365,7 @@ fn rotation(ctx: &egui::Context, slot: usize) -> (f32, f32) {
 
 /// What slot `slot` shows: the active slot at a map level its map (Display
 /// Maps as 2D), at a sub-material level that sub-material.
-fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
+pub(crate) fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
     let ed = &app.state.scene.material_editor;
     let m = app.state.scene.slot_material(slot);
     let top = ed.slots[slot];
@@ -374,6 +374,13 @@ fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
             let (level, _) = resolve_level(&app.state.scene.materials, top, &ed.path);
             match level {
                 Level::Map { owner, maps } => {
+                    // Show End Result: a map's component map shows as the map it belongs to,
+                    // and a sub-material's map as the whole material.
+                    let end = ed.options.show_end_result;
+                    if end && owner != top {
+                        return material_sample(app, Some(top), &m);
+                    }
+                    let maps = if end { maps[..1].to_vec() } else { maps };
                     if let Some(map) = app.state.scene.materials.get(&owner).and_then(|o| map_at(o, &maps)) {
                         if ed.options.maps_as_2d {
                             return Sample::Map(Box::new(map.clone()));
@@ -383,6 +390,7 @@ fn slot_sample(app: &LoomApp, slot: usize) -> Sample {
                         return Sample::Surfaces(Surfaces::Single(Box::new(s)));
                     }
                 }
+                Level::Material(id) if ed.options.show_end_result && id != top => return material_sample(app, Some(top), &m),
                 Level::Material(id) => {
                     let sub = app.state.scene.materials.get(&id).cloned().unwrap_or(m);
                     return material_sample(app, Some(id), &sub);
@@ -838,6 +846,10 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         let shown = m.show_map_in_viewport;
         if ui.add(egui::Button::new("Show Map in Viewport").selected(shown)).on_hover_text("Show Standard Map in Viewport").clicked() {
             let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Show Map in Viewport".into(), value: if shown { 0.0 } else { 1.0 } });
+        }
+        let end = app.state.scene.material_editor.options.show_end_result;
+        if ui.add(egui::Button::new("Show End Result").selected(end)).on_hover_text("Show End Result: the whole material below the top level").clicked() {
+            let _ = app.dispatch(Command::SetMaterialEditorOption { name: "Show End Result".into(), value: if end { 0.0 } else { 1.0 } });
         }
         if ui.add_enabled(below_top, egui::Button::new("Go to Parent")).clicked() {
             let _ = app.dispatch(Command::MaterialEditorGoToParent);
