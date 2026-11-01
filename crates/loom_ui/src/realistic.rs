@@ -944,7 +944,7 @@ impl LoomApp {
             }
             return;
         }
-        if let (true, Some(mut img)) = (job.req.walkthrough_preview, job.preview.take()) {
+        if let Some(mut img) = job.preview.take_if(|_| job.req.walkthrough_preview) {
             if result.is_ok() {
                 loom_bevy::effects::apply(&mut img, &effects);
                 let w = &mut self.state.walkthrough;
