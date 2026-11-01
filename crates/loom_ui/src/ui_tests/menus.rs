@@ -434,7 +434,7 @@ fn utilities_more_and_configure_button_sets() {
     let spin = h.spinner_after("Total Buttons:");
     h.drag(spin.center(), spin.center() + egui::vec2(0.0, 200.0));
     h.click(h.text_rect("Panorama Exporter", win).unwrap().center());
-    let first = h.find_all(Role::Button, "Measure").into_iter().find(|r| win.contains_rect(*r)).expect("the first button");
+    let first = h.find_all(Role::Button, "Measure").into_iter().filter(|r| win.contains_rect(*r)).max_by(|a, b| a.min.x.total_cmp(&b.min.x)).expect("the first button (right of the list)");
     h.click(first.center());
     h.click(h.text_rect("OK", h.ctx.memory(|m| m.area_rect(egui::Id::new("Configure Button Sets"))).unwrap()).unwrap().center());
     assert_eq!(h.app.state.utility_buttons.first().map(String::as_str), Some("Panorama Exporter"));
