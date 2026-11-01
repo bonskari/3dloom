@@ -148,11 +148,35 @@ pub struct RamPlayer {
     pub alpha: bool,
     /// Bumped whenever what the window shows changes.
     pub version: u64,
+    pub config: RamPlayerConfig,
+}
+
+/// RAM Player Configuration: the size files load at (None: their own),
+/// Lock Aspect Ratio, Filter Input, and Alpha > Load Into Other Channels.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RamPlayerConfig {
+    pub size: Option<[u32; 2]>,
+    pub lock_aspect: bool,
+    pub filter: bool,
+    pub alpha_to_other: bool,
+}
+
+impl RamPlayerConfig {
+    /// `img` at the configured size (Lock Aspect Ratio: the width sets it, the file's aspect kept).
+    pub fn load(&self, img: image::RgbaImage) -> image::RgbaImage {
+        let Some([w, h]) = self.size else { return img };
+        let h = if self.lock_aspect { ((w as f32 * img.height() as f32 / img.width().max(1) as f32).round() as u32).max(1) } else { h };
+        if (w, h) == img.dimensions() {
+            return img;
+        }
+        let filter = if self.filter { image::imageops::FilterType::Triangle } else { image::imageops::FilterType::Nearest };
+        image::imageops::resize(&img, w.max(1), h, filter)
+    }
 }
 
 impl Default for RamPlayer {
     fn default() -> Self {
-        Self { open: false, channels: [None, None], split: 0.5, compare: true, alpha: false, version: 0 }
+        Self { open: false, channels: [None, None], split: 0.5, compare: true, alpha: false, version: 0, config: RamPlayerConfig::default() }
     }
 }
 
@@ -222,6 +246,8 @@ pub fn handles(c: &C) -> bool {
             | C::RamPlayerOpen { .. }
             | C::RamPlayerSave { .. }
             | C::RamPlayerView { .. }
+            | C::RamPlayerConfiguration { .. }
+            | C::ConfigurePreset { .. }
             | C::SaveRenderPreset { .. }
             | C::LoadRenderPreset { .. }
             | C::RenderShortcut { .. }
@@ -1268,12 +1294,39 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     (state.rendered.title.clone(), img)
                 }
             };
-            let (w, h) = img.dimensions();
             let r = &mut state.rendered.ram_player;
+            let img = Arc::new(r.config.load((*img).clone()));
+            let (w, h) = img.dimensions();
+            if r.config.alpha_to_other {
+                // Load Into Other Channels: the alpha, as grey, in the other channel.
+                let alpha = image::RgbaImage::from_fn(w, h, |x, y| {
+                    let a = img.get_pixel(x, y).0[3];
+                    image::Rgba([a, a, a, 255])
+                });
+                r.channels[1 - c] = Some((format!("{name} (alpha)"), Arc::new(alpha)));
+            }
             r.channels[c] = Some((name, img));
             r.open = true;
             r.version += 1;
             Ok(json!({ "channel": channel, "width": w, "height": h }))
+        }
+        C::RamPlayerConfiguration { width, height, lock_aspect, filter, alpha_to_other, original } => {
+            let c = &mut state.rendered.ram_player.config;
+            if width.is_some() || height.is_some() {
+                let [w0, h0] = c.size.unwrap_or([state.scene.render.width, state.scene.render.height]);
+                let (w, h) = (width.unwrap_or(w0), height.unwrap_or(h0));
+                check_size(w, h)?;
+                c.size = Some([w, h]);
+            }
+            if original == Some(true) {
+                c.size = None;
+            }
+            for (field, v) in [(&mut c.lock_aspect, lock_aspect), (&mut c.filter, filter), (&mut c.alpha_to_other, alpha_to_other)] {
+                if let Some(v) = v {
+                    *field = v;
+                }
+            }
+            Ok(json!({ "size": c.size, "lock_aspect": c.lock_aspect, "filter": c.filter, "alpha_to_other": c.alpha_to_other }))
         }
         C::RamPlayerSave { channel, path } => {
             let img = state.rendered.ram_player.channels.get(channel as usize).and_then(|c| c.as_ref()).map(|c| c.1.clone()).ok_or_else(|| format!("RAM Player channel {channel} is empty"))?;
@@ -1313,6 +1366,27 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             check_size(s.width, s.height)?;
             set_settings(state, "Load Render Preset", s)?;
             Ok(settings_json(&state.scene.render))
+        }
+        C::ConfigurePreset { button, width, height, pixel_aspect, get_current } => {
+            let i = button as usize;
+            let presets = &mut state.prefs.size_presets;
+            let p = presets.get_mut(i).ok_or_else(|| format!("preset button {button}: 0 to 3"))?;
+            if get_current == Some(true) {
+                let s = &state.scene.render;
+                *p = (s.width, s.height, s.pixel_aspect);
+            }
+            if let Some(w) = width {
+                p.0 = w;
+            }
+            if let Some(h) = height {
+                p.1 = h;
+            }
+            if let Some(a) = pixel_aspect {
+                p.2 = ranged("pixel aspect", a, 0.001, 1000.0)?;
+            }
+            check_size(p.0, p.1)?;
+            let p = *p;
+            Ok(json!({ "button": button, "width": p.0, "height": p.1, "pixel_aspect": p.2 }))
         }
         C::RenderShortcut { slot, store } => {
             let i = slot as usize;

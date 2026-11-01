@@ -865,6 +865,8 @@ pub struct Prefs {
     pub render_log: bool,
     pub render_log_path: Option<String>,
     pub render_log_append: bool,
+    /// Render Setup > Output Size preset buttons (Configure Preset): width, height, pixel aspect.
+    pub size_presets: [(u32, u32, f32); 4],
 }
 
 fn default_nudge() -> f32 {
@@ -910,6 +912,7 @@ impl Default for Prefs {
             render_log: false,
             render_log_path: None,
             render_log_append: false,
+            size_presets: [(320, 240, 1.0), (640, 480, 1.0), (1280, 720, 1.0), (1920, 1080, 1.0)],
         }
     }
 }

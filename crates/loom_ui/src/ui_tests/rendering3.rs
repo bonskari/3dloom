@@ -420,3 +420,17 @@ fn camera_multi_pass_depth_of_field_blurs_away_from_the_focus() {
     assert!(far1 > 3.0 * far0.max(4.0), "the far box blurs: {far0} -> {far1} partly covered pixels");
     assert!(near1 < 2.0 * near0.max(4.0) + 8.0, "the box at the focus stays sharp: {near0} -> {near1}");
 }
+
+/// RAM Player > Configuration's checkboxes, clicked.
+#[test]
+fn ram_player_configuration_is_clicked() {
+    let mut h = Harness::new();
+    h.cmd(Command::RamPlayer);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("RAM Player"))).expect("the RAM Player is open");
+    click_text(&mut h, "Configuration", win, 0.0);
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("RAM Player"))).unwrap();
+    click_text(&mut h, "Load Into Other Channels", win, 0.0);
+    click_text(&mut h, "Lock Aspect Ratio", win, 0.0);
+    let c = &h.app.state.rendered.ram_player.config;
+    assert!(c.alpha_to_other && c.lock_aspect, "{c:?}");
+}

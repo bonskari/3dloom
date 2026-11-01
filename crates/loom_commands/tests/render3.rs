@@ -431,3 +431,33 @@ fn make_preview_renders_a_numbered_sequence_with_its_list() {
     assert_eq!((req.settings.width, req.settings.bevy.passes), (320, 1));
     assert!(req.save_path.as_ref().unwrap().ends_with("_scene0000.png"));
 }
+
+#[test]
+fn configure_preset_sets_a_size_button() {
+    let mut s = AppState::new();
+    let r = ok(&mut s, "Configure Preset", json!({ "button": 2, "width": 720, "height": 486, "pixel_aspect": 0.9 }));
+    assert_eq!((r["width"].as_u64(), r["height"].as_u64()), (Some(720), Some(486)));
+    assert_eq!(s.prefs.size_presets[2], (720, 486, 0.9));
+    ok(&mut s, "Render SetUp...", json!({ "width": 400, "height": 300 }));
+    ok(&mut s, "Configure Preset", json!({ "button": 0, "get_current": true }));
+    assert_eq!(s.prefs.size_presets[0], (400, 300, 1.0), "Get Current Settings");
+    assert!(execute_json(&mut s, &json!({ "cmd": "Configure Preset", "args": { "button": 4 } }))["ok"] == false);
+}
+
+#[test]
+fn ram_player_configuration_resizes_and_splits_the_alpha() {
+    let d = tmp("ram");
+    let p = d.join("a.png");
+    image::RgbaImage::from_fn(40, 20, |x, _| image::Rgba([200, 10, 10, (x * 6) as u8])).save(&p).unwrap();
+    let mut s = AppState::new();
+    ok(&mut s, "RAM Player Configuration", json!({ "width": 20, "height": 99, "lock_aspect": true, "filter": true, "alpha_to_other": true }));
+    let r = ok(&mut s, "RAM Player Open", json!({ "channel": 0, "path": p.to_string_lossy() }));
+    assert_eq!((r["width"].as_u64(), r["height"].as_u64()), (Some(20), Some(10)), "the width sets the size, the aspect kept");
+    let other = s.rendered.ram_player.channels[1].clone().expect("the alpha loads into channel B");
+    let a = other.1.get_pixel(10, 5).0;
+    assert_eq!(a[0], a[1]);
+    assert!((a[0] as i32 - 123).abs() < 8, "the alpha as grey: {a:?}");
+    ok(&mut s, "RAM Player Configuration", json!({ "original": true, "alpha_to_other": false, "lock_aspect": false }));
+    let r = ok(&mut s, "RAM Player Open", json!({ "channel": 0, "path": p.to_string_lossy() }));
+    assert_eq!((r["width"].as_u64(), r["height"].as_u64()), (Some(40), Some(20)));
+}

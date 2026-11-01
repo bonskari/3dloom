@@ -467,6 +467,38 @@ fn ram_player(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             });
         }
         let r = app.state.rendered.ram_player.clone();
+        egui::CollapsingHeader::new("Configuration").id_salt("ram_player_config").show(ui, |ui| {
+            let c = &r.config;
+            let cfg = |app: &mut LoomApp, width, height, lock_aspect, filter, alpha_to_other, original| {
+                let _ = app.dispatch(Command::RamPlayerConfiguration { width, height, lock_aspect, filter, alpha_to_other, original });
+            };
+            ui.horizontal(|ui| {
+                let [mut w, mut h] = c.size.unwrap_or([app.state.scene.render.width, app.state.scene.render.height]);
+                ui.label("Width:");
+                if ui.add(egui::DragValue::new(&mut w).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                    cfg(app, Some(w), None, None, None, None, None);
+                }
+                ui.label("Height:");
+                if ui.add_enabled(!c.lock_aspect, egui::DragValue::new(&mut h).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                    cfg(app, None, Some(h), None, None, None, None);
+                }
+                if ui.add_enabled(c.size.is_some(), egui::Button::new("Original Size")).clicked() {
+                    cfg(app, None, None, None, None, None, Some(true));
+                }
+            });
+            ui.horizontal(|ui| {
+                let (mut lock, mut filter, mut other) = (c.lock_aspect, c.filter, c.alpha_to_other);
+                if ui.checkbox(&mut lock, "Lock Aspect Ratio").changed() {
+                    cfg(app, None, None, Some(lock), None, None, None);
+                }
+                if ui.checkbox(&mut filter, "Filter Input").changed() {
+                    cfg(app, None, None, None, Some(filter), None, None);
+                }
+                if ui.checkbox(&mut other, "Load Into Other Channels").on_hover_text("Alpha: the alpha loads, as grey, into the other channel").changed() {
+                    cfg(app, None, None, None, None, Some(other), None);
+                }
+            });
+        });
         ui.horizontal(|ui| {
             let mut compare = r.compare;
             if ui.checkbox(&mut compare, "A | B").on_hover_text("Both channels, split side by side").changed() {

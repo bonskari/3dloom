@@ -18,8 +18,6 @@ pub enum Panel {
     AdvancedLighting,
 }
 
-const PRESETS: [(u32, u32); 4] = [(320, 240), (640, 480), (1280, 720), (1920, 1080)];
-
 /// Render SetUp... arguments; the omitted ones keep their value.
 #[derive(Default)]
 struct Setup {
@@ -301,10 +299,38 @@ fn common(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.end_row();
     });
     ui.horizontal(|ui| {
-        for (pw, ph) in PRESETS {
-            if ui.selectable_label((s.width, s.height) == (pw, ph), format!("{pw}x{ph}")).clicked() {
-                run(app, Setup { width: Some(pw), height: Some(ph), ..Default::default() }.cmd());
+        let presets = app.state.prefs.size_presets;
+        for (i, (pw, ph, pa)) in presets.into_iter().enumerate() {
+            let r = ui.selectable_label((s.width, s.height) == (pw, ph), format!("{pw}x{ph}"));
+            if r.clicked() {
+                run(app, Setup { width: Some(pw), height: Some(ph), pixel_aspect: (pa != s.pixel_aspect).then_some(pa), ..Default::default() }.cmd());
             }
+            // Right-click: Configure Preset.
+            r.context_menu(|ui| {
+                ui.label("Configure Preset");
+                let configure = |app: &mut LoomApp, width, height, pixel_aspect, get_current| run(app, Command::ConfigurePreset { button: i as u32, width, height, pixel_aspect, get_current });
+                let (mut w, mut h, mut a) = (pw, ph, pa);
+                egui::Grid::new(("configure_preset", i)).num_columns(2).show(ui, |ui| {
+                    ui.label("Width:");
+                    if ui.add(egui::DragValue::new(&mut w).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                        configure(app, Some(w), None, None, None);
+                    }
+                    ui.end_row();
+                    ui.label("Height:");
+                    if ui.add(egui::DragValue::new(&mut h).range(1..=loom_commands::render::MAX_RENDER_SIZE)).changed() {
+                        configure(app, None, Some(h), None, None);
+                    }
+                    ui.end_row();
+                    ui.label("Pixel Aspect:");
+                    if ui.add(egui::DragValue::new(&mut a).range(0.001..=1000.0).speed(0.01)).changed() {
+                        configure(app, None, None, Some(a), None);
+                    }
+                    ui.end_row();
+                });
+                if ui.button("Get Current Settings").clicked() {
+                    configure(app, None, None, None, Some(true));
+                }
+            });
         }
     });
     ui.add_space(4.0);
