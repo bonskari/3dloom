@@ -3131,7 +3131,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                         let mut o = other.clone();
                         for (name, v) in other.parameters() {
                             if let loom_scene::ParamValue::Float(f) = v {
-                                if !matches!(name, "Slice From" | "Slice To" | "Rotation" | "Twist" | "Hemisphere" | "FOV") {
+                                if ObjectKind::is_length_parameter(name) {
                                     let _ = o.set_parameter(name, (f * factor) as f64);
                                 }
                             }

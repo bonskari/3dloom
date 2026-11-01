@@ -1548,6 +1548,23 @@ impl ObjectKind {
         }
     }
 
+    /// Whether a float parameter of `parameters()` is a length in scene
+    /// units (Rescale World Units scales these; angles, percents,
+    /// multipliers, biases and the camera's Lens stay).
+    pub fn is_length_parameter(name: &str) -> bool {
+        matches!(
+            name,
+            "Length" | "Width" | "Height" | "Depth" | "Radius" | "Radius 1" | "Radius 2" | "Corner Radius" | "Corner Radius 1" | "Corner Radius 2"
+                | "Fillet" | "Fillet Radius 1" | "Fillet Radius 2" | "Thickness" | "Rect Length" | "Rect Width" | "Cap Height"
+                | "Side 1 Length" | "Side 2 Length" | "Side 3 Length" | "Cross Section Radius" | "Side Length" | "Front Length" | "Back Length"
+                | "Side Width" | "Front Width" | "Back Width" | "Ring Width" | "Outer Edge Amplitude" | "Inner Edge Amplitude" | "Hose Diameter"
+                | "Size" | "Length X" | "Length Y" | "Length Z" | "Axis Length" | "Grid" | "Side Fin Size" | "Front Fin Size" | "Back Fin Size"
+                | "Near Range" | "Far Range" | "Near Clip" | "Far Clip" | "Target Distance" | "Focal Depth" | "Sample Radius"
+                | "Decay Start" | "Near Start" | "Near End" | "Far Start" | "Far End" | "Source Radius" | "Area Length" | "Area Width" | "Area Height"
+                | "Shape Length" | "Shape Width" | "Shape Radius" | "Lux Distance"
+        )
+    }
+
     /// Sets a parameter by its rollout name, clamping to the minimums.
     pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
         if let Self::EditablePoly(p) = self {
