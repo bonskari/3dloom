@@ -21,10 +21,42 @@ struct ViewUniform {
     override_color: vec4<f32>,
     ambient: vec4<f32>,
     lights: array<Light, 8>,
+    /// The shadow-casting light's view-projection.
+    shadow_vp: mat4x4<f32>,
+    /// x shadows on, y the casting light's index, z depth bias.
+    shadow: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> view: ViewUniform;
 @group(1) @binding(0) var map_tex: texture_2d<f32>;
 @group(1) @binding(1) var map_samp: sampler;
+@group(2) @binding(0) var shadow_map: texture_depth_2d;
+@group(2) @binding(1) var shadow_samp: sampler_comparison;
+
+/// How much of the casting light reaches `p` (1 lit, 0 in shadow), 3×3 PCF.
+fn shadow_factor(p: vec3<f32>) -> f32 {
+    let c = view.shadow_vp * vec4<f32>(p, 1.0);
+    if (c.w <= 0.0) {
+        return 1.0;
+    }
+    let ndc = c.xyz / c.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0) {
+        return 1.0;
+    }
+    let texel = 1.0 / 2048.0;
+    var sum = 0.0;
+    for (var y = -1; y <= 1; y = y + 1) {
+        for (var x = -1; x <= 1; x = x + 1) {
+            sum = sum + textureSampleCompareLevel(shadow_map, shadow_samp, uv + vec2<f32>(f32(x), f32(y)) * texel, ndc.z - view.shadow.z);
+        }
+    }
+    return sum / 9.0;
+}
+
+@vertex
+fn vs_depth(in: VsIn) -> @builtin(position) vec4<f32> {
+    return view.view_proj * vec4<f32>(in.position, 1.0);
+}
 
 struct VsIn {
     @location(0) position: vec3<f32>,
@@ -151,7 +183,10 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
                 dist = length(d);
                 to_light = d / max(dist, 1e-6);
             }
-            let k = falloff(l, dist, dot(-to_light, l.dir_hot.xyz));
+            var k = falloff(l, dist, dot(-to_light, l.dir_hot.xyz));
+            if (view.shadow.x > 0.5 && u32(view.shadow.y) == i) {
+                k = k * shadow_factor(in.world_pos);
+            }
             lit = lit + l.color_fall.rgb * k * clamp(abs(dot(n, to_light)), 0.0, 1.0);
             if (in.spec.a > 0.0 && highlights) {
                 let h = normalize(to_light + to_cam);

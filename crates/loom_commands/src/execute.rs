@@ -1105,6 +1105,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::ShowFloatingDialogs => toggle(&mut state.hide_floating_dialogs, "hide_floating_dialogs"),
         C::ViewportLightingToggle => toggle(&mut state.active_mut().scene_lights, "scene_lights"),
+        C::ViewportShadowsToggle => toggle(&mut state.active_mut().shadows, "shadows"),
         C::ShadeSelectedFacesToggle => toggle(&mut state.shade_selected_faces, "shade_selected_faces"),
         C::SelectionBracketToggle => toggle(&mut state.selection_brackets, "selection_brackets"),
         C::BackgroundLockToggle => {

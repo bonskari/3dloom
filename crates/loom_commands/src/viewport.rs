@@ -118,6 +118,9 @@ pub struct Viewport {
     pub scene_lights: bool,
     /// Default Lights: 1 light (from the viewer) or 2 (key and fill).
     pub default_lights: u32,
+    /// Lighting and Shadows > Shadows: scene lights cast shadows in the shaded view.
+    #[serde(default)]
+    pub shadows: bool,
     pub background: Option<String>,
     pub background_locked: bool,
     /// Lock Zoom/Pan: the view (target, distance) the image was locked in; it
@@ -196,6 +199,7 @@ impl Viewport {
             clip: (0.0, 1000.0),
             fov_y_radians: 45f32.to_radians(),
             scene_lights: true,
+            shadows: false,
             default_lights: 1,
             background: None,
             background_locked: false,

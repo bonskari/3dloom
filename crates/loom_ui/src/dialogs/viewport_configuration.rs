@@ -250,6 +250,10 @@ fn lighting_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     ui.separator();
+    let mut shadows = vp.shadows;
+    if ui.checkbox(&mut shadows, "Shadows").on_hover_text("The first spot or directional scene light casts shadows in this shaded view").changed() {
+        let _ = app.dispatch(Command::ViewportShadowsToggle);
+    }
     let mut hw = vp.shading == Shading::Realistic;
     if ui.checkbox(&mut hw, "Enable Hardware Shading").on_hover_text("The view shows Realistic shading (lights, shadows) from the Bevy renderer").changed() {
         set(app, None, None, Some(hw));

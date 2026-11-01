@@ -17,6 +17,10 @@ struct ViewUniform {
     /// Ambient light (rgb) of mode 2.
     ambient: [f32; 4],
     lights: [GpuLight; MAX_VIEW_LIGHTS],
+    /// The shadow-casting light's view-projection (world to its clip space).
+    shadow_vp: [[f32; 4]; 4],
+    /// x = shadows on, y = the casting light's index, z = depth bias.
+    shadow: [f32; 4],
 }
 
 #[repr(C)]
@@ -87,6 +91,46 @@ pub struct ViewShading {
     /// Lighting mode 2: up to [`MAX_VIEW_LIGHTS`] lights and the ambient light.
     pub lights: [Option<ViewLight>; MAX_VIEW_LIGHTS],
     pub ambient: [f32; 3],
+    /// Viewport shadows: one light's shadow map.
+    pub shadow: Option<ShadowCaster>,
+}
+
+/// The light whose shadows a shaded view draws: its index among the view's
+/// lights and its view-projection (world to its clip space).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShadowCaster {
+    pub light: u32,
+    pub view_proj: Mat4,
+}
+
+/// Shadow map size in texels (each side).
+pub const SHADOW_MAP_SIZE: u32 = 2048;
+
+/// The view-projection a spot or directional light casts its shadow map
+/// with, framing the scene bounds `(min, max)`; point lights cast none here.
+pub fn shadow_view_proj(l: &ViewLight, bounds: (Vec3, Vec3)) -> Option<Mat4> {
+    let (lo, hi) = bounds;
+    if !(lo.is_finite() && hi.is_finite()) || lo.cmpgt(hi).any() {
+        return None;
+    }
+    let centre = (lo + hi) * 0.5;
+    let radius = ((hi - lo).length() * 0.5).max(1e-3);
+    let dir = l.direction.try_normalize()?;
+    let up = if dir.cross(Vec3::Z).length_squared() < 1e-6 { Vec3::Y } else { Vec3::Z };
+    match l.kind {
+        ViewLightKind::Directional => {
+            let eye = centre - dir * radius * 2.0;
+            let view = Mat4::look_at_rh(eye, centre, up);
+            Some(Mat4::orthographic_rh(-radius, radius, -radius, radius, radius * 0.01, radius * 4.0) * view)
+        }
+        ViewLightKind::Spot { falloff, .. } => {
+            let view = Mat4::look_to_rh(l.position, dir, up);
+            let far = (l.position - centre).length() + radius;
+            let near = (far * 0.001).max(0.01);
+            Some(Mat4::perspective_rh(falloff.clamp(1.0, 170.0).to_radians(), 1.0, near, far.max(near * 2.0)) * view)
+        }
+        ViewLightKind::Point => None,
+    }
 }
 
 impl ViewShading {
@@ -129,8 +173,26 @@ pub enum GridPlane {
     YZ,
 }
 
+/// One viewport's shadow map: its depth texture, the light-view uniform the
+/// depth pass draws with, and the group the shaded pass samples it through.
+struct ShadowSlot {
+    _texture: Texture,
+    view: TextureView,
+    uniform: Buffer,
+    uniform_group: BindGroup,
+    sample_group: BindGroup,
+}
+
 pub struct ViewportRenderer {
     mesh_pipeline: RenderPipeline,
+    /// Depth only, from a light: the shadow maps.
+    shadow_pipeline: RenderPipeline,
+    view_layout: BindGroupLayout,
+    shadow_layout: BindGroupLayout,
+    shadow_sampler: Sampler,
+    /// A 1×1 shadow map for views without shadows.
+    no_shadow: BindGroup,
+    shadow_slots: Vec<Option<ShadowSlot>>,
     /// Backface Cull display property.
     mesh_pipeline_cull: RenderPipeline,
     /// See-Through display property (alpha blended, no depth write).
@@ -222,10 +284,78 @@ impl ViewportRenderer {
             mipmap_filter: FilterMode::Nearest,
             ..Default::default()
         });
+        let shadow_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("shadow_bind_group_layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture { sample_type: TextureSampleType::Depth, view_dimension: TextureViewDimension::D2, multisampled: false },
+                    count: None,
+                },
+                BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::FRAGMENT, ty: BindingType::Sampler(SamplerBindingType::Comparison), count: None },
+            ],
+        });
+        let shadow_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("shadow_sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            compare: Some(CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        let no_shadow_tex = device.create_texture(&TextureDescriptor {
+            label: Some("no_shadow"),
+            size: Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Depth32Float,
+            usage: TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let no_shadow_view = no_shadow_tex.create_view(&TextureViewDescriptor::default());
+        let no_shadow = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("no_shadow"),
+            layout: &shadow_layout,
+            entries: &[BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&no_shadow_view) }, BindGroupEntry { binding: 1, resource: BindingResource::Sampler(&shadow_sampler) }],
+        });
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("mesh_pipeline_layout"),
-            bind_group_layouts: &[&view_bind_group_layout, &texture_layout],
+            bind_group_layouts: &[&view_bind_group_layout, &texture_layout, &shadow_layout],
             push_constant_ranges: &[],
+        });
+        let shadow_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("shadow_pipeline_layout"),
+            bind_group_layouts: &[&view_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let shadow_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some("shadow_pipeline"),
+            layout: Some(&shadow_pipeline_layout),
+            vertex: VertexState {
+                module: &shader,
+                entry_point: Some("vs_depth"),
+                compilation_options: PipelineCompilationOptions::default(),
+                buffers: &[VertexBufferLayout {
+                    array_stride: std::mem::size_of::<GpuVertex>() as u64,
+                    step_mode: VertexStepMode::Vertex,
+                    attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4],
+                }],
+            },
+            fragment: None,
+            primitive: PrimitiveState { topology: PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
+            depth_stencil: Some(DepthStencilState {
+                format: TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: CompareFunction::Less,
+                stencil: StencilState::default(),
+                bias: DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
+            }),
+            multisample: MultisampleState::default(),
+            multiview: None,
+            cache: None,
         });
 
         let make_pipeline = |label: &str, cull: Option<Face>, blend: BlendState, depth_write: bool| {
@@ -279,6 +409,12 @@ impl ViewportRenderer {
 
         Self {
             mesh_pipeline,
+            shadow_pipeline,
+            view_layout: view_bind_group_layout,
+            shadow_layout,
+            shadow_sampler,
+            no_shadow,
+            shadow_slots: (0..MAX_VIEWPORTS).map(|_| None).collect(),
             mesh_pipeline_cull,
             mesh_pipeline_blend,
             slots,
@@ -302,7 +438,13 @@ impl ViewportRenderer {
             count += 1;
         }
         let a = shading.ambient;
+        let (shadow_vp, shadow) = match shading.shadow {
+            Some(s) => (s.view_proj.to_cols_array_2d(), [1.0, s.light as f32, 0.0015, 0.0]),
+            None => (Mat4::IDENTITY.to_cols_array_2d(), [0.0; 4]),
+        };
         let u = ViewUniform {
+            shadow_vp,
+            shadow,
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: [camera_pos.x, camera_pos.y, camera_pos.z, 0.0],
             params: [shading.lighting as f32, count as f32, shading.flags as f32, 0.0],
@@ -312,6 +454,66 @@ impl ViewportRenderer {
         };
         let slot = slot.min(MAX_VIEWPORTS - 1);
         queue.write_buffer(&self.slots[slot].0, 0, bytemuck::bytes_of(&u));
+    }
+
+    /// Draws the shadow map of `slot` from `caster` (call before the
+    /// viewport's pass; the map stays for its shaded pass).
+    pub fn render_shadow(&mut self, device: &Device, queue: &Queue, encoder: &mut CommandEncoder, slot: usize, meshes: &[&MeshBuffer], caster: ShadowCaster) {
+        let slot = slot.min(MAX_VIEWPORTS - 1);
+        if self.shadow_slots[slot].is_none() {
+            let texture = device.create_texture(&TextureDescriptor {
+                label: Some("shadow_map"),
+                size: Extent3d { width: SHADOW_MAP_SIZE, height: SHADOW_MAP_SIZE, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&TextureViewDescriptor::default());
+            let uniform = device.create_buffer(&BufferDescriptor {
+                label: Some("shadow_view_uniform"),
+                size: std::mem::size_of::<ViewUniform>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let uniform_group = device.create_bind_group(&BindGroupDescriptor {
+                label: Some("shadow_view"),
+                layout: &self.view_layout,
+                entries: &[BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
+            });
+            let sample_group = device.create_bind_group(&BindGroupDescriptor {
+                label: Some("shadow_sample"),
+                layout: &self.shadow_layout,
+                entries: &[BindGroupEntry { binding: 0, resource: BindingResource::TextureView(&view) }, BindGroupEntry { binding: 1, resource: BindingResource::Sampler(&self.shadow_sampler) }],
+            });
+            self.shadow_slots[slot] = Some(ShadowSlot { _texture: texture, view, uniform, uniform_group, sample_group });
+        }
+        let s = self.shadow_slots[slot].as_ref().expect("made above");
+        let mut u = ViewUniform::zeroed();
+        u.view_proj = caster.view_proj.to_cols_array_2d();
+        queue.write_buffer(&s.uniform, 0, bytemuck::bytes_of(&u));
+        let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("shadow_pass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                view: &s.view,
+                depth_ops: Some(Operations { load: LoadOp::Clear(1.0), store: StoreOp::Store }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&self.shadow_pipeline);
+        pass.set_bind_group(0, &s.uniform_group, &[]);
+        for mb in meshes.iter().filter(|mb| mb.index_count > 0) {
+            for r in mb.ranges.iter().filter(|r| r.count > 0 && !r.transparent) {
+                pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
+                pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);
+                pass.draw_indexed(r.start..r.start + r.count, 0, 0..1);
+            }
+        }
     }
 
     /// Records draw commands into an already-active render pass.
@@ -336,12 +538,14 @@ impl ViewportRenderer {
         textures: &TextureSet,
         lines: Option<&crate::mesh_buffer::LineBuffer>,
         flags: u32,
+        shadowed: bool,
     ) {
         let bind_group = &self.slots[slot.min(MAX_VIEWPORTS - 1)].1;
         if let Some(plane) = grid {
             self.grid.record(pass, bind_group, plane, orthographic);
         }
         let shade = shaded_meshes(meshes.len(), shaded, shade_only);
+        let shadow_group = self.shadow_slots[slot.min(MAX_VIEWPORTS - 1)].as_ref().filter(|_| shadowed).map_or(&self.no_shadow, |s| &s.sample_group);
         if !shade.is_empty() {
             // Opaque faces first (per-surface cull setting), then see-through;
             // one draw per range (texture / transparency / culling).
@@ -360,6 +564,7 @@ impl ViewportRenderer {
                         pass.set_pipeline(pipeline);
                         pass.set_bind_group(0, bind_group, &[]);
                         pass.set_bind_group(1, textures.bind_group(r.texture), &[]);
+                        pass.set_bind_group(2, shadow_group, &[]);
                         pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
                         pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);
                         pass.draw_indexed(r.start..r.start + r.count, 0, 0..1);
