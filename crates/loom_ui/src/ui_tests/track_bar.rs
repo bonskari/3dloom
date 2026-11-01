@@ -104,8 +104,8 @@ fn a_right_click_cancels_a_key_drag() {
 fn track_bar_configure_show_frame_numbers() {
     let mut h = Harness::new();
     let (y, x) = keyed(&mut h, &[10, 20]);
-    let band = egui::Rect::from_x_y_ranges(0.0..=SCREEN.max.x, (y - 9.0)..=(y + 9.0));
-    assert!(h.text_rect("0", band).is_some(), "frame numbers along the track bar");
+    let band = egui::Rect::from_x_y_ranges(0.0..=SCREEN.max.x, (y - 14.0)..=(y + 9.0));
+    assert!(h.text_rects("0").iter().any(|r| band.contains_rect(*r)), "frame numbers along the track bar");
     let p = egui::pos2(x(30.0), y);
     h.run(vec![egui::Event::PointerMoved(p)]);
     h.run(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }]);
@@ -117,5 +117,5 @@ fn track_bar_configure_show_frame_numbers() {
     h.click(h.find(egui::accesskit::Role::CheckBox, "Show Frame Numbers").center());
     assert!(!h.app.state.track_bar_frame_numbers);
     h.frames(1);
-    assert!(h.text_rect("0", band).is_none(), "no frame numbers");
+    assert!(!h.text_rects("0").iter().any(|r| band.contains_rect(*r)), "no frame numbers");
 }
