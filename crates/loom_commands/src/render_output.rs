@@ -67,6 +67,8 @@ pub struct GBuffer {
     pub object: Vec<u32>,
     /// The surface's node id (0: none).
     pub node: Vec<u64>,
+    /// The surface's Material ID Channel (Material Effects).
+    pub material: Vec<u8>,
     /// The surface's world normal.
     pub normal: Vec<[f32; 3]>,
 }
@@ -79,10 +81,11 @@ pub enum GChannel {
     NodeRenderId,
     Normal,
     Coverage,
+    MaterialEffects,
 }
 
 impl GChannel {
-    pub const ALL: [GChannel; 5] = [GChannel::ZDepth, GChannel::ObjectId, GChannel::NodeRenderId, GChannel::Normal, GChannel::Coverage];
+    pub const ALL: [GChannel; 6] = [GChannel::ZDepth, GChannel::ObjectId, GChannel::MaterialEffects, GChannel::NodeRenderId, GChannel::Normal, GChannel::Coverage];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -91,6 +94,7 @@ impl GChannel {
             GChannel::NodeRenderId => "Node Render ID",
             GChannel::Normal => "Normal",
             GChannel::Coverage => "Coverage",
+            GChannel::MaterialEffects => "Material Effects",
         }
     }
 }
@@ -137,6 +141,10 @@ impl GBuffer {
                 },
                 GChannel::ObjectId => {
                     let c = if hit.is_some() { id_color(self.object[i] as u64) } else { [0; 3] };
+                    [c[0], c[1], c[2], 255]
+                }
+                GChannel::MaterialEffects => {
+                    let c = if hit.is_some() { id_color(self.material.get(i).copied().unwrap_or(0) as u64) } else { [0; 3] };
                     [c[0], c[1], c[2], 255]
                 }
                 GChannel::NodeRenderId => {

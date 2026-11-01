@@ -434,3 +434,27 @@ fn ram_player_configuration_is_clicked() {
     let c = &h.app.state.rendered.ram_player.config;
     assert!(c.alpha_to_other && c.lock_aspect, "{c:?}");
 }
+
+/// Material ID Channel: the toolbar flyout sets it, and the render's
+/// G-buffer Material Effects channel carries it on the object's pixels.
+#[test]
+fn material_id_channel_tags_the_g_buffer_material_effects() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("material_id_channel...: no GPU adapter, skipped");
+        return;
+    };
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [25.0; 3] });
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Material ID Channel".into(), value: 7.0 });
+    h.cmd(Command::AssignMaterialToSelection);
+    framed(&mut h);
+    ok(&mut h, "Render SetUp...", serde_json::json!({ "width": 160, "height": 120 }));
+    ok(&mut h, "Bevy Renderer Settings", serde_json::json!({ "passes": 1 }));
+    render(&mut h);
+    let g = h.app.state.rendered.gbuffer.clone().expect("the G-buffer of the render");
+    let hit: std::collections::BTreeSet<u8> = g.material.iter().zip(&g.depth).filter(|(_, d)| d.is_some()).map(|(m, _)| *m).collect();
+    assert_eq!(hit, [7].into_iter().collect(), "the box's pixels carry Material ID Channel 7");
+    let img = g.image(loom_commands::render_output::GChannel::MaterialEffects, None);
+    let c = loom_commands::render_output::id_color(7);
+    let i = g.depth.iter().position(|d| d.is_some()).unwrap();
+    assert_eq!(&img.as_raw()[i * 4..i * 4 + 3], &c[..]);
+}

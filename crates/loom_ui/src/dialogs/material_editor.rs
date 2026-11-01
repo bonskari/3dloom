@@ -847,6 +847,16 @@ fn toolbar(ui: &mut egui::Ui, app: &mut LoomApp) {
         if ui.add(egui::Button::new("Show Map in Viewport").selected(shown)).on_hover_text("Show Standard Map in Viewport").clicked() {
             let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Show Map in Viewport".into(), value: if shown { 0.0 } else { 1.0 } });
         }
+        // Material ID Channel flyout: the G-buffer Material Effects channel 0-15.
+        let mut ch = m.effects_channel;
+        egui::ComboBox::from_id_salt("material_id_channel").width(36.0).selected_text(ch.to_string()).show_ui(ui, |ui| {
+            for c in 0..16u8 {
+                ui.selectable_value(&mut ch, c, c.to_string());
+            }
+        });
+        if ch != m.effects_channel {
+            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Material ID Channel".into(), value: ch as f64 });
+        }
         let end = app.state.scene.material_editor.options.show_end_result;
         if ui.add(egui::Button::new("Show End Result").selected(end)).on_hover_text("Show End Result: the whole material below the top level").clicked() {
             let _ = app.dispatch(Command::SetMaterialEditorOption { name: "Show End Result".into(), value: if end { 0.0 } else { 1.0 } });

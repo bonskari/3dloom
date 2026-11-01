@@ -671,6 +671,7 @@ impl LoomApp {
     /// depth, Object Channel, node and normal (ray cast on the CPU).
     fn gbuffer(&self, job: &RenderJob) -> loom_commands::render_output::GBuffer {
         let (tris, _, nodes) = self.camera_triangle_nodes(&job.options);
+        let face_ids: Vec<u16> = tris.iter().map(|t| t.tri.material_id).collect();
         let bvh = loom_bake::Bvh::new(tris.into_iter().map(|t| t.tri).collect());
         let hits = loom_bake::gbuffer::surfaces(&bvh, &Self::gbuffer_view(job));
         let scene = &self.state.scene;
@@ -681,6 +682,7 @@ impl LoomApp {
             let node = h.map(|h| nodes[h.1 as usize]);
             g.object.push(node.map_or(0, channel));
             g.node.push(node.map_or(0, |n| n.0));
+            g.material.push(h.and_then(|h| scene.node(nodes[h.1 as usize]).and_then(|n| n.material).map(|m| loom_scene::material::effects_channel(&scene.materials, m, face_ids[h.1 as usize]))).unwrap_or(0));
             g.normal.push(h.map_or([0.0; 3], |h| h.2.to_array()));
         }
         g

@@ -335,3 +335,18 @@ fn show_end_result_shows_the_whole_material_below_the_top_level() {
     assert!(!h.app.state.scene.material_editor.options.show_end_result);
     assert!(!multi(&slot_sample(&h.app, 0)), "off: only the sub-material");
 }
+
+#[test]
+fn material_id_channel_flyout_sets_the_channel() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    let win = material_editor_rect(&h);
+    // The flyout shows the current channel, 0.
+    let end = h.text_rects("Show End Result").into_iter().find(|r| win.contains_rect(*r)).expect("toolbar");
+    let combo = h.text_rects("0").into_iter().filter(|r| win.contains_rect(*r) && (r.center().y - end.center().y).abs() < 12.0).min_by(|a, b| (a.center().x - end.min.x).abs().total_cmp(&(b.center().x - end.min.x).abs())).expect("the Material ID Channel flyout");
+    h.click(combo.center());
+    h.frames(2);
+    h.click_text_anywhere("9");
+    h.frames(2);
+    assert_eq!(editor_material(&h).effects_channel, 9);
+}

@@ -660,6 +660,19 @@ impl Default for ExtendedParams {
 /// a compound material (its own Standard values are then unused).
 static NO_MAP: Option<Map> = None;
 
+/// The Material ID Channel a face (0-based material ID) of an object with
+/// material `top` renders with: a Multi/Sub-Object's sub-material's own,
+/// else the top material's.
+pub fn effects_channel(lib: &MaterialLibrary, top: MaterialId, face: u16) -> u8 {
+    let Some(m) = lib.get(&top) else { return 0 };
+    if let MaterialKind::MultiSub(list) = &m.kind {
+        if let Some(sub) = list.iter().find(|s| s.id == face + 1).and_then(|s| s.material).and_then(|id| lib.get(&id)) {
+            return sub.effects_channel;
+        }
+    }
+    m.effects_channel
+}
+
 fn map_lock_default() -> bool {
     true
 }
@@ -712,6 +725,9 @@ pub struct StandardMaterial {
     pub displacement_map: Option<Map>,
     /// Show Standard Map in Viewport (the diffuse map in shaded views).
     pub show_map_in_viewport: bool,
+    /// Material ID Channel 0–15 (the G-buffer's Material Effects channel).
+    #[serde(default)]
+    pub effects_channel: u8,
     #[serde(default)]
     pub kind: MaterialKind,
     #[serde(default)]
@@ -781,6 +797,7 @@ impl StandardMaterial {
             refraction_map: None,
             displacement_map: None,
             show_map_in_viewport: false,
+            effects_channel: 0,
             kind: MaterialKind::Standard,
             shading: ShaderParams::default(),
             extended: ExtendedParams::default(),
@@ -1023,6 +1040,7 @@ impl StandardMaterial {
             "Faceted" => self.faceted = value != 0.0,
             "Ambient/Diffuse Lock" => self.ambient_locked = value != 0.0,
             "Ambient/Diffuse Map Lock" => self.ambient_map_locked = value != 0.0,
+            "Material ID Channel" => self.effects_channel = value.clamp(0.0, 15.0) as u8,
             "Show Map in Viewport" => self.show_map_in_viewport = value != 0.0,
             other => return self.set_shader_parameter(other, value),
         }
