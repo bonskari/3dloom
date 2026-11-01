@@ -998,3 +998,30 @@ fn preferences_layer_defaults_and_sub_material_assign() {
     let m = h.app.state.scene.node(a).unwrap().material.expect("assigned");
     assert!(matches!(h.app.state.scene.materials.get(&m).map(|x| &x.kind), Some(loom_scene::material::MaterialKind::MultiSub(_))), "a Multi/Sub-Object on the faces");
 }
+
+/// The command panel widened by its edge holds several columns: the Display
+/// panel's rollouts flow into a second one once they run past the panel's
+/// bottom by more than Preferences > Rollout Threshold.
+#[test]
+fn command_panel_columns_and_rollout_threshold() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 700.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.app.panel_tab = crate::command_panel::Tab::Display;
+    h.frames(3);
+    let p = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).expect("panel").rect;
+    let edge = egui::pos2(p.left() + 1.0, p.center().y);
+    h.drag(edge, edge - egui::vec2(crate::command_panel::rollouts::COLUMN_WIDTH * 1.2, 0.0));
+    h.frames(5);
+    let p = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("command_panel")).expect("panel").rect;
+    assert!(p.width() >= crate::command_panel::rollouts::COLUMN_WIDTH * 2.0, "widened: {}", p.width());
+    let headers: Vec<egui::Rect> = ["Display Color", "Hide by Category", "Hide", "Freeze", "Display Properties", "Link Display"].iter().filter_map(|t| h.text_rects(t).into_iter().find(|r| p.contains(r.center()))).collect();
+    assert!(headers.len() >= 4, "the Display rollouts: {headers:?}");
+    let second = headers.iter().any(|r| r.left() > p.left() + crate::command_panel::rollouts::COLUMN_WIDTH * 0.9);
+    assert!(second, "a rollout in the second column: {headers:?}");
+    // A huge threshold keeps them in one column.
+    h.cmd(Command::SetPreference { name: "Rollout Threshold".into(), value: 2000.0 });
+    h.frames(5);
+    let headers: Vec<egui::Rect> = ["Display Color", "Hide by Category", "Hide", "Freeze", "Display Properties", "Link Display"].iter().filter_map(|t| h.text_rects(t).into_iter().find(|r| p.contains(r.center()))).collect();
+    assert!(headers.iter().all(|r| r.left() < p.left() + crate::command_panel::rollouts::COLUMN_WIDTH * 0.9), "one column: {headers:?}");
+}

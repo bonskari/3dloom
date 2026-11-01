@@ -53,6 +53,33 @@ struct Frame {
     fallback: bool,
     request: Option<Request>,
     scroll_to: Option<String>,
+    /// Preferences > Rollout Threshold: how far (pixels) a rollout may run
+    /// past the panel's bottom before it moves to the next column.
+    threshold: f32,
+    /// Several columns: the height allocated in the panel so far.
+    allocated: f32,
+}
+
+/// One command panel column's width; a wider panel holds several.
+pub const COLUMN_WIDTH: f32 = 260.0;
+
+/// Where each rollout goes when the panel holds `cols` columns: rollouts
+/// flow down a column and move to the next one when they would run more
+/// than `threshold` past `bottom`. Returns (column, y) per rollout and the
+/// tallest column's bottom.
+pub fn flow(heights: &[f32], top: f32, bottom: f32, cols: usize, threshold: f32, spacing: f32) -> (Vec<(usize, f32)>, f32) {
+    let (mut c, mut y, mut lowest) = (0usize, top, top);
+    let mut out = Vec::with_capacity(heights.len());
+    for h in heights {
+        if y > top && y + h - bottom > threshold && c + 1 < cols {
+            c += 1;
+            y = top;
+        }
+        out.push((c, y));
+        y += h + spacing;
+        lowest = lowest.max(y);
+    }
+    (out, lowest)
 }
 
 thread_local! {
@@ -70,11 +97,11 @@ fn scroll_id() -> egui::Id {
 }
 
 /// Starts the command panel tab `panel`'s rollouts (`order`: the user's order).
-pub fn begin(ctx: &egui::Context, panel: &str, order: Option<Vec<String>>) {
+pub fn begin(ctx: &egui::Context, panel: &str, order: Option<Vec<String>>, threshold: f32) {
     let memory: Memory = ctx.data(|d| d.get_temp(memory_id(panel))).unwrap_or_default();
     let scroll_to = ctx.data_mut(|d| d.remove_temp::<String>(scroll_id()));
     FRAME.with(|f| {
-        *f.borrow_mut() = Some(Frame { panel: panel.to_owned(), order, memory, drawn: Vec::new(), top: None, expect_y: None, contiguous: true, fallback: false, request: None, scroll_to });
+        *f.borrow_mut() = Some(Frame { panel: panel.to_owned(), order, memory, drawn: Vec::new(), top: None, expect_y: None, contiguous: true, fallback: false, request: None, scroll_to, threshold, allocated: 0.0 });
     });
 }
 
@@ -124,7 +151,10 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
                 f.contiguous = false;
             }
         }
-        let order = f.order.clone()?;
+        let cols = ((f.top.map_or(ui.available_width(), |t| t.2) / COLUMN_WIDTH).floor() as usize).max(1);
+        if f.order.is_none() && cols < 2 {
+            return None;
+        }
         if f.fallback || !f.contiguous || !f.memory.contiguous || f.memory.natural.get(k).is_none_or(|d| d.title != title) {
             f.fallback = true;
             return None;
@@ -132,9 +162,22 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
         let spacing = ui.spacing().item_spacing.y;
         let (top, left, width) = *f.top.get_or_insert((cursor.y, cursor.x, ui.available_width()));
         let natural: Vec<String> = f.memory.natural.iter().map(|d| d.title.clone()).collect();
-        let shown = shown_order(&natural, &order);
+        let shown = match &f.order {
+            Some(order) => shown_order(&natural, order),
+            None => natural.clone(),
+        };
         let height = |t: &str| f.memory.natural.iter().find(|d| d.title == t).map(|d| d.height).unwrap_or(0.0);
         let at = shown.iter().position(|t| t == title).unwrap_or(k);
+        if cols >= 2 {
+            // Several columns: the rollouts flow across them.
+            let heights: Vec<f32> = shown.iter().map(|t| height(t)).collect();
+            let (places, lowest) = flow(&heights, top, ui.clip_rect().bottom(), cols, f.threshold, spacing);
+            let col_w = width / cols as f32;
+            let (c, y) = places[at];
+            let need = (lowest - top - f.allocated).max(0.0);
+            f.allocated += need;
+            return Some((egui::pos2(left + c as f32 * col_w, y), col_w - 6.0, need));
+        }
         let y = top + shown[..at].iter().map(|t| height(t) + spacing).sum::<f32>();
         let slot = height(&shown[k]);
         Some((egui::pos2(left, y), width, slot))
@@ -154,6 +197,10 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
             let (id, header) = draw(&mut child);
             let h = child.min_rect().height();
             ui.allocate_space(egui::vec2(width, slot));
+            // With several columns the next rollout's run is not this one's.
+            if slot == 0.0 {
+                ui.add_space(-ui.spacing().item_spacing.y);
+            }
             (id, header, h)
         }
         None => {
@@ -266,5 +313,19 @@ mod tests {
         let n = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
         assert_eq!(shown_order(&n(&["A", "B", "C", "D"]), &n(&["C", "A"])), n(&["C", "A", "B", "D"]));
         assert_eq!(shown_order(&n(&["A", "B"]), &n(&["X"])), n(&["A", "B"]));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rollouts_flow_into_the_next_column_past_the_threshold() {
+        let (p, lowest) = super::flow(&[100.0, 100.0, 100.0], 0.0, 150.0, 2, 20.0, 0.0);
+        assert_eq!(p, vec![(0, 0.0), (1, 0.0), (1, 100.0)], "the second would run 50 past the bottom");
+        assert_eq!(lowest, 200.0);
+        let (p, _) = super::flow(&[100.0, 100.0], 0.0, 150.0, 2, 60.0, 0.0);
+        assert_eq!(p, vec![(0, 0.0), (0, 100.0)], "within the threshold it stays");
+        let (p, _) = super::flow(&[100.0, 100.0, 100.0], 0.0, 50.0, 2, 0.0, 0.0);
+        assert_eq!(p[2].0, 1, "no third column to move to");
     }
 }

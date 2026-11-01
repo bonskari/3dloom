@@ -71,6 +71,8 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         check(ui, app, "Keep Creating", "Keep Creating");
                         ui.label(egui::RichText::new("Sub-Materials").strong());
                         check(ui, app, "Sub-Materials Assign Automatically", "Assign Automatically");
+                        ui.label(egui::RichText::new("Command Panel").strong());
+                        ui.horizontal(|ui| number(ui, app, "Rollout Threshold", "Rollout Threshold:", 0.0..=2000.0, 0));
                         ui.label(egui::RichText::new("Layer Defaults").strong());
                         check(ui, app, "Default to By Layer for New Nodes", "Default to By Layer for New Nodes");
                         ui.label("Propagate Unhide/Unfreeze Commands to Layers?");

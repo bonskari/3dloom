@@ -891,6 +891,8 @@ pub struct Prefs {
     pub recent_files_count: usize,
     /// General > Sub-Materials > Assign Automatically (default on).
     pub sub_material_assign_auto: bool,
+    /// General > Command Panel > Rollout Threshold (pixels; 50 is this build's default).
+    pub rollout_threshold: f32,
     /// General > Layer Defaults > Default to By Layer for New Nodes.
     pub default_by_layer: bool,
     /// General > Layer Defaults > Propagate Unhide/Unfreeze Commands to
@@ -976,6 +978,7 @@ impl Default for Prefs {
             local_center_during_animate: true,
             recent_files_count: 10,
             sub_material_assign_auto: true,
+            rollout_threshold: 50.0,
             default_by_layer: false,
             // The reference gives no default; Do Not Propagate keeps this build's old behaviour.
             propagate_layers: 1,
@@ -1042,6 +1045,7 @@ impl Prefs {
             "Auto Backup Interval" => self.auto_backup_interval_min as f64,
             "Recent Files in File Menu" => self.recent_files_count as f64,
             "Sub-Materials Assign Automatically" => b(self.sub_material_assign_auto),
+            "Rollout Threshold" => self.rollout_threshold as f64,
             "Default to By Layer for New Nodes" => b(self.default_by_layer),
             "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers as f64,
             "Grid Nudge Distance" => self.grid_nudge_distance as f64,
@@ -1108,6 +1112,7 @@ impl Prefs {
             "Auto Backup Interval" => self.auto_backup_interval_min = f.clamp(0.1, 1440.0),
             "Recent Files in File Menu" => self.recent_files_count = v.clamp(0.0, 50.0) as usize,
             "Sub-Materials Assign Automatically" => self.sub_material_assign_auto = on,
+            "Rollout Threshold" => self.rollout_threshold = f.clamp(0.0, 2000.0),
             "Default to By Layer for New Nodes" => self.default_by_layer = on,
             "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers = v.clamp(0.0, 2.0) as u8,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,
