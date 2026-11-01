@@ -87,6 +87,8 @@ pub mod view_flags {
     pub const NO_TEXTURES: u32 = 16;
     /// Force 2-Sided: back faces draw too.
     pub const TWO_SIDED: u32 = 32;
+    /// Lit Wireframes: the edges take the view's lighting.
+    pub const LIT_WIRE: u32 = 64;
 }
 
 /// Shading viewport label menu modes the renderer understands.
@@ -266,6 +268,8 @@ struct Extras {
 
 pub struct ViewportRenderer {
     mesh_pipeline: RenderPipeline,
+    /// Lit Wireframes: edges in the mesh vertex format, lit.
+    lit_line_pipeline: RenderPipeline,
     /// Depth only, from a light: the shadow maps.
     shadow_pipeline: RenderPipeline,
     /// Depth only, from the view's camera, unbiased: the AO depth.
@@ -502,6 +506,37 @@ impl ViewportRenderer {
             })
         };
         let mesh_pipeline = make_pipeline("mesh_pipeline", None, BlendState::REPLACE, true);
+        let lit_line_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some("lit_line_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: VertexState {
+                module: &shader,
+                entry_point: Some("vs"),
+                compilation_options: PipelineCompilationOptions::default(),
+                buffers: &[VertexBufferLayout {
+                    array_stride: std::mem::size_of::<GpuVertex>() as u64,
+                    step_mode: VertexStepMode::Vertex,
+                    attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4],
+                }],
+            },
+            fragment: Some(FragmentState {
+                module: &shader,
+                entry_point: Some("fs_line_lit"),
+                compilation_options: PipelineCompilationOptions::default(),
+                targets: &[Some(ColorTargetState { format: target_format, blend: Some(BlendState::REPLACE), write_mask: ColorWrites::ALL })],
+            }),
+            primitive: PrimitiveState { topology: PrimitiveTopology::LineList, ..Default::default() },
+            depth_stencil: Some(DepthStencilState {
+                format: TextureFormat::Depth24Plus,
+                depth_write_enabled: true,
+                depth_compare: CompareFunction::LessEqual,
+                stencil: StencilState::default(),
+                bias: DepthBiasState::default(),
+            }),
+            multisample: MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
         let mesh_pipeline_cull = make_pipeline("mesh_pipeline_cull", Some(Face::Back), BlendState::REPLACE, true);
         let mesh_pipeline_blend = make_pipeline("mesh_pipeline_blend", None, BlendState::ALPHA_BLENDING, false);
 
@@ -509,6 +544,7 @@ impl ViewportRenderer {
 
         Self {
             mesh_pipeline,
+            lit_line_pipeline,
             shadow_pipeline,
             depth_pipeline,
             view_layout: view_bind_group_layout,
@@ -775,10 +811,20 @@ impl ViewportRenderer {
                 pass.draw(0..mb.wire_vertex_count, 0..1);
             }
         }
+        if show_edges && flags & view_flags::LIT_WIRE != 0 {
+            pass.set_pipeline(&self.lit_line_pipeline);
+            pass.set_bind_group(0, bind_group, &[]);
+            pass.set_bind_group(1, textures.bind_group(crate::mesh_buffer::TextureSel::None), &[]);
+            pass.set_bind_group(2, shadow_group, &[]);
+            for mb in meshes.iter().filter(|mb| mb.lit_edge_vertex_count > 0) {
+                pass.set_vertex_buffer(0, mb.lit_edge_vertex_buffer.slice(..));
+                pass.draw(0..mb.lit_edge_vertex_count, 0..1);
+            }
+        }
         if show_edges || !selected.is_empty() {
             pass.set_pipeline(self.grid.line_pipeline());
             pass.set_bind_group(0, bind_group, &[]);
-            if show_edges {
+            if show_edges && flags & view_flags::LIT_WIRE == 0 {
                 for mb in meshes.iter().filter(|mb| mb.edge_vertex_count > 0) {
                     pass.set_vertex_buffer(0, mb.edge_vertex_buffer.slice(..));
                     pass.draw(0..mb.edge_vertex_count, 0..1);

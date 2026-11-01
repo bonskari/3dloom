@@ -296,3 +296,27 @@ fn ambient_occlusion_from_the_panel_and_the_shading_menu() {
     h.click(menu_entry(&h, "✔ Ambient Occlusion"));
     assert!(!h.app.state.active().ambient_occlusion, "the menu turns it off");
 }
+
+/// Shading > Other > Lit Wireframes: the view draws wireframe (no shaded
+/// faces) with its edges lit.
+#[test]
+fn the_shading_menu_sets_lit_wireframes() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    maximized(&mut h);
+    h.click(label_rect(&h, 2).center());
+    h.run(vec![egui::Event::PointerMoved(menu_entry(&h, "Other"))]);
+    h.frames(2);
+    h.click(menu_entry(&h, "    Lit Wireframes"));
+    assert_eq!(h.app.state.active().shading, loom_commands::Shading::LitWireframes);
+    assert!(!loom_commands::Shading::LitWireframes.shaded(), "no shaded faces");
+    // The box's twelve edges with corner normals: each end's normal is the
+    // average of the three faces at that corner.
+    let m = &h.app.world_meshes()[0].1;
+    let v = loom_render::mesh_buffer::lit_edges(m, [1.0; 3]);
+    assert_eq!(v.len(), 24);
+    for g in &v {
+        let n = glam::Vec3::from(g.normal);
+        assert!((n.length() - 1.0).abs() < 1e-4 && n.x.abs() > 0.5 && n.y.abs() > 0.5 && n.z.abs() > 0.5, "{n}");
+    }
+}

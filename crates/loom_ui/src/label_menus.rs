@@ -153,7 +153,7 @@ pub fn shading_entries(app: &LoomApp, index: usize) -> Vec<MenuEntry> {
         MenuEntry {
             label: "Other".into(),
             checked: false,
-            action: Action::Submenu(vec![level(Shading::Smooth), level(Shading::FacetsHighlights), level(Shading::Facets), level(Shading::Flat), level(Shading::HiddenLine), level(Shading::BoundingBox)]),
+            action: Action::Submenu(vec![level(Shading::Smooth), level(Shading::FacetsHighlights), level(Shading::Facets), level(Shading::Flat), level(Shading::HiddenLine), level(Shading::LitWireframes), level(Shading::BoundingBox)]),
         },
         sep(),
         check("Edged Faces", vp.edged_faces, Command::ViewEdgedFacesToggle),

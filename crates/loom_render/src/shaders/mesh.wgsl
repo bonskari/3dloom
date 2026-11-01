@@ -295,3 +295,34 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(color, alpha);
 }
+
+/// Lit Wireframes: an edge's colour lit like a surface with its corner
+/// normal (two-sided), by the headlight or the view's lights.
+@fragment
+fn fs_line_lit(in: VsOut) -> @location(0) vec4<f32> {
+    let n = normalize(in.world_normal);
+    let to_cam = normalize(view.camera_pos.xyz - in.world_pos);
+    let base = in.color.rgb;
+    if (view.params.x > 1.5) {
+        var lit = view.ambient.rgb;
+        let count = u32(view.params.y);
+        for (var i = 0u; i < count; i = i + 1u) {
+            let l = view.lights[i];
+            var to_light = -l.dir_hot.xyz;
+            var dist = 0.0;
+            if (l.pos_kind.w < 1.5) {
+                let d = l.pos_kind.xyz - in.world_pos;
+                dist = length(d);
+                to_light = d / max(dist, 1e-6);
+            }
+            var k = falloff(l, dist, dot(-to_light, l.dir_hot.xyz));
+            if (view.shadow.x > 0.5) {
+                k = k * shadow_factor(i, in.world_pos);
+            }
+            lit = lit + l.color_fall.rgb * k * clamp(abs(dot(n, to_light)), 0.0, 1.0);
+        }
+        return vec4<f32>(base * lit, 1.0);
+    }
+    let diff = clamp(abs(dot(n, to_cam)), 0.0, 1.0);
+    return vec4<f32>(base * (0.42 + 0.58 * diff), 1.0);
+}

@@ -199,6 +199,9 @@ pub struct MeshBuffer {
     /// Faces of a Wire material: their edges, always drawn in shaded views.
     pub wire_vertex_buffer: Buffer,
     pub wire_vertex_count: u32,
+    /// Lit Wireframes: the visible edges with the vertex normals (mesh vertex format).
+    pub lit_edge_vertex_buffer: Buffer,
+    pub lit_edge_vertex_count: u32,
 }
 
 impl MeshBuffer {
@@ -236,9 +239,18 @@ impl MeshBuffer {
             "loom_mesh_selected_edge_buffer",
         );
 
+        let lit = lit_edges(mesh, style.wire_color.unwrap_or(style.color));
+        let lit_edge_vertex_count = lit.len() as u32;
+        let lit_edge_vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("loom_mesh_lit_edge_buffer"),
+            contents: bytemuck::cast_slice(if lit.is_empty() { &[GpuVertex::zeroed()][..] } else { &lit[..] }),
+            usage: BufferUsages::VERTEX,
+        });
         let (aabb_min, aabb_max) = mesh.aabb();
 
         Self {
+            lit_edge_vertex_buffer,
+            lit_edge_vertex_count,
             vertex_buffer,
             index_buffer,
             index_count: indices.len() as u32,
@@ -311,6 +323,39 @@ impl LineBuffer {
         let buffer = device.create_buffer_init(&BufferInitDescriptor { label: Some("loom_helper_lines"), contents: bytemuck::cast_slice(&verts), usage: BufferUsages::VERTEX });
         Some(Self { buffer, count: verts.len() as u32 })
     }
+}
+
+/// Lit Wireframes: each visible edge's ends with the normal of the faces
+/// around that corner (averaged), in the mesh vertex format, `color`ed.
+pub fn lit_edges(mesh: &Mesh, color: [f32; 3]) -> Vec<GpuVertex> {
+    let key = |p: Vec3| ((p.x * 1e4).round() as i64, (p.y * 1e4).round() as i64, (p.z * 1e4).round() as i64);
+    let mut normals: std::collections::HashMap<(i64, i64, i64), Vec3> = std::collections::HashMap::new();
+    for (i, face) in mesh.faces().iter().enumerate() {
+        if face.hidden {
+            continue;
+        }
+        let Some(pts) = mesh.face_positions(loom_mesh::FaceId(i as u32)) else { continue };
+        if pts.len() < 3 {
+            continue;
+        }
+        let mut n = Vec3::ZERO;
+        for k in 0..pts.len() {
+            n += pts[k].cross(pts[(k + 1) % pts.len()]);
+        }
+        let n = n.normalize_or_zero();
+        for p in pts {
+            *normals.entry(key(p)).or_insert(Vec3::ZERO) += n;
+        }
+    }
+    let vertex = |p: Vec3| GpuVertex {
+        position: p.into(),
+        normal: normals.get(&key(p)).copied().unwrap_or(Vec3::Z).normalize_or_zero().into(),
+        uv: [0.0; 2],
+        color: [color[0], color[1], color[2], 1.0],
+        spec: [0.0; 4],
+        extra: [0.0, 1.0, 0.0, 0.0],
+    };
+    mesh.unique_edges().into_iter().flat_map(|(a, b)| [vertex(a), vertex(b)]).collect()
 }
 
 fn edge_buffer(device: &Device, edges: &[(Vec3, Vec3)], color: [f32; 3], label: &str) -> Buffer {

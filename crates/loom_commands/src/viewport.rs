@@ -23,17 +23,20 @@ pub enum Shading {
     Facets,
     /// Each object as its bounding box.
     BoundingBox,
+    /// The wireframe lit by the view's lights.
+    LitWireframes,
 }
 
 impl Shading {
     /// Rendering Method's levels in the reference's order (Realistic is the Bevy view).
-    pub const LEVELS: [Shading; 8] = [Shading::SmoothHighlights, Shading::Smooth, Shading::FacetsHighlights, Shading::Facets, Shading::Flat, Shading::HiddenLine, Shading::Wireframe, Shading::BoundingBox];
+    pub const LEVELS: [Shading; 9] = [Shading::SmoothHighlights, Shading::Smooth, Shading::FacetsHighlights, Shading::Facets, Shading::Flat, Shading::HiddenLine, Shading::LitWireframes, Shading::Wireframe, Shading::BoundingBox];
 
     pub fn label(self) -> &'static str {
         match self {
             Shading::SmoothHighlights => "Smooth + Highlights",
             Shading::Wireframe => "Wireframe",
             Shading::HiddenLine => "Hidden Line",
+            Shading::LitWireframes => "Lit Wireframes",
             Shading::Flat => "Flat",
             Shading::Realistic => "Realistic",
             Shading::Smooth => "Smooth",
@@ -49,7 +52,7 @@ impl Shading {
 
     /// Shaded levels draw faces (Wireframe, Hidden Line and Bounding Box do not shade).
     pub fn shaded(self) -> bool {
-        !matches!(self, Shading::Wireframe | Shading::BoundingBox)
+        !matches!(self, Shading::Wireframe | Shading::BoundingBox | Shading::LitWireframes)
     }
 }
 

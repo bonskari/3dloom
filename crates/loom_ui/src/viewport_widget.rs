@@ -1258,6 +1258,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                 if vp.force_two_sided {
                     flags |= loom_render::view_flags::TWO_SIDED;
                 }
+                if level == S::LitWireframes {
+                    flags |= loom_render::view_flags::LIT_WIRE;
+                }
                 let ppp = ctx.pixels_per_point();
                 let mut view_shading = loom_render::ViewShading { lighting, override_color, flags, viewport_px: [rect.min.x * ppp, rect.min.y * ppp, rect.width() * ppp, rect.height() * ppp], ..Default::default() };
                 if lighting == 0 && override_color.is_none() {
