@@ -321,6 +321,23 @@ fn a_target_lights_quad_menu_selects_its_target_and_the_animation_quad_freezes()
     assert!(labels.contains(&"Freeze Transform") && labels.contains(&"Transform to Zero"), "{labels:?}");
 }
 
+/// Tools 1 > Cast Shadows turns the selected light's shadows on and off.
+#[test]
+fn a_lights_quad_menu_cast_shadows_toggles_its_shadows() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let id = NodeId(r["id"].as_u64().unwrap());
+    for _ in 0..2 {
+        let before = light(&h, id).shadows_on.get();
+        let tools1 = crate::quad_menu::create_quadrants(&h.app).tools1.expect("tools 1 for a light");
+        let item = tools1.items.iter().find(|i| i.label.ends_with("Cast Shadows")).expect("Cast Shadows");
+        assert_eq!(item.label.starts_with('✔'), before, "the check mark shows Shadows On");
+        let crate::quad_menu::Action::Command(c) = &item.action else { panic!("a command") };
+        let _ = h.app.dispatch(c.clone());
+        assert_eq!(light(&h, id).shadows_on.get(), !before);
+    }
+}
+
 #[test]
 fn a_model_file_dropped_on_the_window_is_imported() {
     let dir = std::env::temp_dir().join(format!("loom-ui-drop-{}", std::process::id()));

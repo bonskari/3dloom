@@ -367,17 +367,32 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
     } else if s.selection.iter().any(|id| s.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Grid { .. }))) {
         // A selected grid object: tools 1 activates it or the home grid.
         (Some(Quadrant::new("tools 1", vec![e("Activate Grid", Command::ActivateGridObject), e("Activate Home Grid", Command::ActivateHomeGrid), e("Align Grid to View", Command::AlignGridToView)])), None)
-    } else if s.selection.iter().any(|id| match s.scene.node(*id).map(|n| &n.object) {
-        Some(loom_scene::ObjectKind::Camera { target, .. }) => target.is_some_and(|t| s.scene.node(t).is_some()),
-        Some(loom_scene::ObjectKind::Light(l)) => l.target.is_some_and(|t| s.scene.node(t).is_some()),
-        _ => false,
-    }) {
-        // A target camera or light: tools 1 selects its target.
-        (Some(Quadrant::new("tools 1", vec![e("Select Target", Command::SelectTarget)])), None)
+    } else if let Some(t1) = camera_light_tools(s) {
+        (Some(Quadrant::new("tools 1", t1)), None)
     } else {
         (None, None)
     };
     Quadrants { display, transform, tools1, tools2 }
+}
+
+/// Tools 1 for selected cameras and lights: Select Target for a target
+/// camera or light, Cast Shadows (the first selected light's Shadows On).
+fn camera_light_tools(s: &loom_commands::AppState) -> Option<Vec<Entry>> {
+    let mut out = Vec::new();
+    let targeted = s.selection.iter().any(|id| match s.scene.node(*id).map(|n| &n.object) {
+        Some(loom_scene::ObjectKind::Camera { target, .. }) => target.is_some_and(|t| s.scene.node(t).is_some()),
+        Some(loom_scene::ObjectKind::Light(l)) => l.target.is_some_and(|t| s.scene.node(t).is_some()),
+        _ => false,
+    });
+    if targeted {
+        out.push(e("Select Target", Command::SelectTarget));
+    }
+    let light = s.selection.iter().find_map(|id| s.scene.node(*id).and_then(|n| n.object.light().map(|l| (*id, l))));
+    if let Some((id, l)) = light.filter(|(_, l)| l.light_type != loom_scene::light::LightType::Skylight) {
+        let on = l.shadows_on.get();
+        out.push(check("Cast Shadows", on, Command::SetParameter { id: id.0, name: "Shadows On".into(), value: if on { 0.0 } else { 1.0 } }));
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// Ctrl+right-click: the modeling quad. Standard Primitives and cameras on
