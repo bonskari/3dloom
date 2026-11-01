@@ -3171,6 +3171,28 @@ fn a_render_runs_in_buckets_into_the_window_and_saves_its_file() {
     assert!(!path.exists(), "Render Last does not save");
 }
 
+/// Preferences > Rendering > Render Termination Alert: a finished render
+/// asks for the user's attention (off: it does not).
+#[test]
+fn render_termination_alert_requests_attention_when_a_render_ends() {
+    let Some(mut h) = Harness::with_gpu() else {
+        eprintln!("render_termination_alert_requests_attention_when_a_render_ends: no GPU adapter, skipped");
+        return;
+    };
+    let attention = |h: &Harness| h.viewport_cmds.iter().filter(|c| matches!(c, egui::ViewportCommand::RequestUserAttention(_))).count();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Teapot, position: [0.0; 3], size: [25.0; 3] });
+    h.app.dispatch_json(&serde_json::json!({ "cmd": "Render SetUp...", "args": { "width": 160, "height": 100 } }));
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 60);
+    h.frames(2);
+    assert_eq!(attention(&h), 0, "off by default");
+    h.cmd(Command::SetPreference { name: "Render Termination Alert".into(), value: 1.0 });
+    h.cmd(Command::Render { path: None, width: None, height: None });
+    finish_render(&mut h, 60);
+    h.frames(2);
+    assert_eq!(attention(&h), 1, "one request when the render ends");
+}
+
 #[test]
 fn cancel_stops_a_render_and_keeps_the_buckets_done() {
     let Some(mut h) = Harness::with_gpu() else {
