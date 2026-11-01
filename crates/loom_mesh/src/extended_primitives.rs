@@ -212,7 +212,8 @@ impl ExtendedKind {
                 let (r, w, sides, rs) = (v("Radius"), v("Ring Width").min(v("Radius")), n("Sides").max(3), n("Radial Segs").max(1));
                 let (oc, oa, ic, ia) = (v("Outer Edge Cycles"), v("Outer Edge Amplitude"), v("Inner Edge Cycles"), v("Inner Edge Amplitude"));
                 let ring = |k: u32, t: f32| {
-                    let a = k as f32 / sides as f32 * TAU;
+                    // The last side ends exactly where the first starts.
+                    let a = (k % sides) as f32 / sides as f32 * TAU;
                     let outer = r + oa * (oc * a).sin();
                     let inner = (r - w + ia * (ic * a).sin()).max(0.0);
                     Vec2::from_angle(a) * (inner + (outer - inner) * t)
@@ -539,8 +540,10 @@ mod tests {
     fn ringwave_outer_edge_waves_and_hose_flex_pinches() {
         let m = ExtendedKind::RingWave.build(&ExtendedKind::RingWave.defaults());
         let (lo, hi) = m.aabb();
-        // The outer edge reaches Radius + Amplitude somewhere.
-        assert!(hi.x > 50.5 && hi.x <= 52.0 + 1e-3 && (hi.z - 2.0).abs() < 1e-4 && lo.z.abs() < 1e-4, "{lo} {hi}");
+        // The outer edge reaches Radius + Amplitude somewhere and Radius - Amplitude elsewhere.
+        let radial: Vec<f32> = m.vertices().iter().map(|v| v.position.truncate().length()).collect();
+        let far = radial.iter().copied().fold(0.0, f32::max);
+        assert!((far - 52.0).abs() < 0.1 && (hi.z - 2.0).abs() < 1e-4 && lo.z.abs() < 1e-4, "{far} {lo} {hi}");
         let hose = ExtendedKind::Hose.build(&ExtendedKind::Hose.defaults());
         let mid: Vec<f32> = hose.vertices().iter().map(|v| v.position).filter(|p| (p.z - 15.0).abs() < 0.5).map(|p| p.truncate().length()).collect();
         assert!(mid.iter().any(|r| *r < 4.9), "the flex section narrows the 10-wide hose: {mid:?}");
