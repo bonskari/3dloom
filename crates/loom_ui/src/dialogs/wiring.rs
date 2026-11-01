@@ -277,6 +277,16 @@ pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
                         if ui.selectable_label(hl == Some((ri, Some(si))), format!("    {} / {}", node_name(app, s.node), s.param)).clicked() {
                             hl = Some((ri, Some(si)));
                         }
+                        // Start / End: the frames the reaction drives this slave in.
+                        let [mut a, mut b] = s.range.unwrap_or([app.state.frame_range.0, app.state.frame_range.1]);
+                        ui.label("Start");
+                        if ui.add(crate::spinner::spin(ui, &mut a, ..).speed(0.2)).changed() {
+                            let _ = app.dispatch(Command::SetReactionSlaveRange { reaction: ri as u32, slave: si as u32, start: Some(a), end: None });
+                        }
+                        ui.label("End");
+                        if ui.add(crate::spinner::spin(ui, &mut b, ..).speed(0.2)).changed() {
+                            let _ = app.dispatch(Command::SetReactionSlaveRange { reaction: ri as u32, slave: si as u32, start: None, end: Some(b) });
+                        }
                         let mut curve = s.curve;
                         if ui.checkbox(&mut curve, "Curve").on_hover_text("Off: Strength / Influence / Falloff blend the states").changed() {
                             let _ = app.dispatch(Command::SetReactionSlaveCurve { reaction: ri as u32, slave: si as u32, curve });
@@ -309,7 +319,18 @@ pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
                         }
                         ui.end_row();
                         for (k, (m, v)) in s.states.iter().enumerate() {
-                            ui.label(format!("State{:02}", k + 1));
+                            // The state's name: edit it in place (Enter or clicking away renames).
+                            let nid = egui::Id::new(("reaction_state_name", ri, si, k));
+                            let mut name: String = ui.data(|d| d.get_temp(nid)).unwrap_or_else(|| s.name_of(k));
+                            let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(80.0));
+                            if r.lost_focus() {
+                                if name != s.name_of(k) {
+                                    let _ = app.dispatch(Command::RenameReactionState { reaction: ri as u32, slave: si as u32, state: k as u32, name: name.clone() });
+                                }
+                                ui.data_mut(|d| d.remove::<String>(nid));
+                            } else if r.has_focus() {
+                                ui.data_mut(|d| d.insert_temp(nid, name));
+                            }
                             let (mut m2, mut v2) = (*m, *v);
                             if ui.add(crate::spinner::spin(ui, &mut m2, ..).speed(0.1)).changed() {
                                 let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: Some(k as u32), master_value: Some(m2), slave_value: Some(*v) });
@@ -415,13 +436,48 @@ pub fn animation_layers(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool)
     });
 }
 
+/// The Reaction Manager graph's toolbar tool.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum GraphTool {
+    #[default]
+    Move,
+    MoveHorizontal,
+    MoveVertical,
+    Scale,
+    AddCorner,
+    AddBezier,
+}
+
 /// Reaction Manager > the graph: master values across, slave values up, the
-/// slave's curve and its states as points; dragging a point moves its state.
+/// slave's curve and its states as points. The toolbar's Move (both ways,
+/// horizontal, vertical) and Scale Points drag the points, Add Point adds a
+/// Corner or Bezier state where the graph is clicked; right-clicking a point
+/// sets its type, and a selected Bezier point's handles drag.
 fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s: &loom_scene::ReactionSlave) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(200.0), 160.0), egui::Sense::hover());
+    use loom_scene::PointKind;
+    let tool_id = egui::Id::new("reaction_graph_tool");
+    let sel_id = egui::Id::new("reaction_graph_selected");
+    let mut tool: GraphTool = ui.data(|d| d.get_temp(tool_id)).unwrap_or_default();
+    let mut selected: Option<usize> = ui.data(|d| d.get_temp::<Option<usize>>(sel_id)).flatten().filter(|k| *k < s.states.len());
+    ui.horizontal(|ui| {
+        for (t, label, tip) in [
+            (GraphTool::Move, "Move", "Drag points both ways"),
+            (GraphTool::MoveHorizontal, "Move H", "Drag points along the master axis only"),
+            (GraphTool::MoveVertical, "Move V", "Drag points along the value axis only"),
+            (GraphTool::Scale, "Scale Points", "Drag up / down to scale the points' values"),
+            (GraphTool::AddCorner, "Add Corner", "Click the graph to add a Corner state"),
+            (GraphTool::AddBezier, "Add Bezier", "Click the graph to add a Bezier state"),
+        ] {
+            if ui.selectable_label(tool == t, label).on_hover_text(tip).clicked() {
+                tool = t;
+            }
+        }
+    });
+    let (rect, bg) = ui.allocate_exact_size(egui::vec2(ui.available_width().max(200.0), 160.0), egui::Sense::click());
     let p = ui.painter_at(rect);
     p.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
     if s.states.is_empty() {
+        ui.data_mut(|d| d.insert_temp(tool_id, tool));
         return;
     }
     let (mut x0, mut x1, mut y0, mut y1) = (f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY);
@@ -441,22 +497,97 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
         s.value(m).map(|v| to(m, v))
     }).collect();
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(220, 60, 60))));
+    let set = |app: &mut LoomApp, k: usize, m: f32, v: f32| {
+        let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: Some(k as u32), master_value: Some(m), slave_value: Some(v) });
+    };
+    // Add Point: a click on the graph adds a state there.
+    if matches!(tool, GraphTool::AddCorner | GraphTool::AddBezier) && bg.clicked() {
+        if let Some(q) = bg.interact_pointer_pos() {
+            let (m, v) = from(q);
+            let n = s.states.len() as u32;
+            let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: None, master_value: Some(m), slave_value: Some(v) });
+            let kind = if tool == GraphTool::AddCorner { PointKind::Corner } else { PointKind::Bezier };
+            let _ = app.dispatch(Command::SetReactionPoint { reaction: ri as u32, slave: si as u32, state: n, kind: Some(kind), in_handle: None, out_handle: None });
+            selected = Some(n as usize);
+        }
+    }
     // Where the points are, for the regression tests' drags.
     let centres: Vec<egui::Pos2> = s.states.iter().map(|(m, v)| to(*m, *v)).collect();
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("reaction_graph_points"), centres));
-    for (k, (m, v)) in s.states.iter().enumerate() {
-        let c = to(*m, *v);
-        let id = ui.id().with(("reaction_point", ri, si, k));
-        let r = ui.interact(egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)), id, egui::Sense::drag());
-        let at = r.interact_pointer_pos().filter(|_| r.dragged()).unwrap_or(c);
-        p.rect_filled(egui::Rect::from_center_size(at, egui::vec2(7.0, 7.0)), 0.0, if r.dragged() { egui::Color32::WHITE } else { egui::Color32::YELLOW });
-        if r.drag_stopped() {
-            if let Some(q) = r.interact_pointer_pos() {
-                let (nm, nv) = from(q);
-                let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: Some(k as u32), master_value: Some(nm), slave_value: Some(nv) });
+    // The selected Bezier point's handles.
+    let mut handle_ends = Vec::new();
+    if let Some(k) = selected.filter(|k| s.point_of(*k).kind != PointKind::Corner) {
+        let (m, v) = s.states[k];
+        let c = to(m, v);
+        for (side, h) in s.handles(k).into_iter().enumerate() {
+            let end = to(m + h[0], v + h[1]);
+            if end.distance(c) < 1.0 {
+                continue;
+            }
+            p.line_segment([c, end], egui::Stroke::new(1.0_f32, egui::Color32::LIGHT_GRAY));
+            let id = ui.id().with(("reaction_handle", ri, si, k, side));
+            let r = ui.interact(egui::Rect::from_center_size(end, egui::vec2(9.0, 9.0)), id, egui::Sense::drag());
+            let at = r.interact_pointer_pos().filter(|_| r.dragged()).unwrap_or(end);
+            p.circle_filled(at, 3.5, egui::Color32::LIGHT_GRAY);
+            handle_ends.push((side, end));
+            if r.drag_stopped() {
+                if let Some(q) = r.interact_pointer_pos() {
+                    let (hm, hv) = from(q);
+                    let off = [hm - m, hv - v];
+                    let (inn, out) = if side == 0 { (Some(off), None) } else { (None, Some(off)) };
+                    let _ = app.dispatch(Command::SetReactionPoint { reaction: ri as u32, slave: si as u32, state: k as u32, kind: None, in_handle: inn, out_handle: out });
+                }
             }
         }
     }
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("reaction_graph_handles"), handle_ends));
+    for (k, (m, v)) in s.states.iter().enumerate() {
+        let c = to(*m, *v);
+        let id = ui.id().with(("reaction_point", ri, si, k));
+        let r = ui.interact(egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)), id, egui::Sense::click_and_drag());
+        if r.clicked() || r.drag_started() {
+            selected = Some(k);
+        }
+        let shown = match (r.dragged(), r.interact_pointer_pos()) {
+            (true, Some(q)) => match tool {
+                GraphTool::MoveHorizontal => egui::pos2(q.x, c.y),
+                GraphTool::MoveVertical | GraphTool::Scale => egui::pos2(c.x, q.y),
+                _ => q,
+            },
+            _ => c,
+        };
+        let fill = if r.dragged() || selected == Some(k) { egui::Color32::WHITE } else { egui::Color32::YELLOW };
+        if s.point_of(k).kind == PointKind::Corner {
+            p.rect_filled(egui::Rect::from_center_size(shown, egui::vec2(7.0, 7.0)), 0.0, fill);
+        } else {
+            p.circle_filled(shown, 4.0, fill);
+        }
+        if r.drag_stopped() {
+            if let Some(q) = r.interact_pointer_pos() {
+                let (nm, nv) = from(q);
+                match tool {
+                    GraphTool::MoveHorizontal => set(app, k, nm, *v),
+                    GraphTool::MoveVertical => set(app, k, *m, nv),
+                    // Scale Points: up doubles the value per 100 px, down halves it.
+                    GraphTool::Scale => set(app, k, *m, *v * 2f32.powf((c.y - q.y) / 100.0)),
+                    _ => set(app, k, nm, nv),
+                }
+            }
+        }
+        r.context_menu(|ui| {
+            for (kind, label) in [(PointKind::Corner, "Corner"), (PointKind::Bezier, "Bezier Smooth"), (PointKind::BezierCorner, "Bezier Corner")] {
+                if ui.radio(s.point_of(k).kind == kind, label).clicked() {
+                    let _ = app.dispatch(Command::SetReactionPoint { reaction: ri as u32, slave: si as u32, state: k as u32, kind: Some(kind), in_handle: None, out_handle: None });
+                    selected = Some(k);
+                    ui.close_menu();
+                }
+            }
+        });
+    }
+    ui.data_mut(|d| {
+        d.insert_temp(tool_id, tool);
+        d.insert_temp(sel_id, selected);
+    });
 }
 
 /// Brush Presets > Brush Preset Manager: the context, the presets with their

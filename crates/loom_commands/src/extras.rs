@@ -396,7 +396,9 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             }
             let before = state.scene.reactions.clone();
             let mut after = before.clone();
-            after[reaction as usize].slaves.push(loom_scene::ReactionSlave::new(id, param, vec![(m, v)]));
+            // Start / End default to the active time segment.
+            let (a, b) = state.frame_range;
+            after[reaction as usize].slaves.push(loom_scene::ReactionSlave { range: Some([a, b]), ..loom_scene::ReactionSlave::new(id, param, vec![(m, v)]) });
             commit(state, "Add Slave", Change::SetReactions { before, after })?;
             Ok(json!({ "slave": state.scene.reactions[reaction as usize].slaves.len() - 1 }))
         }
@@ -421,6 +423,80 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             commit(state, "Reaction State", Change::SetReactions { before, after })?;
             sync_parameter_wires(state);
             Ok(json!({ "states": state.scene.reactions[reaction as usize].slaves[slave as usize].states.len() }))
+        }
+        C::RenameReactionState { reaction, slave, state: index, name } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let s = after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?;
+            let i = index as usize;
+            if i >= s.states.len() {
+                return Err("no such state".into());
+            }
+            s.names.resize(s.names.len().max(i + 1), String::new());
+            s.names[i] = name.trim().to_owned();
+            commit(state, "Rename State", Change::SetReactions { before, after })?;
+            Ok(json!({ "name": state.scene.reactions[reaction as usize].slaves[slave as usize].name_of(i) }))
+        }
+        C::SetReactionSlaveRange { reaction, slave, start, end } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let s = after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?;
+            let [a, b] = s.range.unwrap_or([state.frame_range.0, state.frame_range.1]);
+            let (a, b) = (start.unwrap_or(a), end.unwrap_or(b));
+            if a > b {
+                return Err(format!("Start {a} is after End {b}"));
+            }
+            s.range = Some([a, b]);
+            commit(state, "Reaction Range", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({ "start": a, "end": b }))
+        }
+        C::SetReactionPoint { reaction, slave, state: index, kind, in_handle, out_handle } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let s = after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?;
+            let i = index as usize;
+            if i >= s.states.len() {
+                return Err("no such state".into());
+            }
+            let mut h = s.handles(i);
+            let mut p = s.point_of(i);
+            if let Some(k) = kind {
+                // A Corner has no handles; a point turned Bezier starts from the automatic ones.
+                if p.kind == loom_scene::PointKind::Corner && k != loom_scene::PointKind::Corner {
+                    s.points.resize(s.points.len().max(i + 1), Default::default());
+                    s.points[i].kind = k;
+                    s.points[i].handles = None;
+                    h = s.handles(i);
+                }
+                p.kind = k;
+            }
+            let smooth = p.kind == loom_scene::PointKind::Bezier;
+            // A Bezier's handles stay in line: moving one turns the other to match, keeping its length.
+            let opposite = |from: [f32; 2], keep: [f32; 2]| {
+                let len = (keep[0] * keep[0] + keep[1] * keep[1]).sqrt();
+                let l = (from[0] * from[0] + from[1] * from[1]).sqrt();
+                if l < 1e-9 { keep } else { [-from[0] / l * len, -from[1] / l * len] }
+            };
+            if let Some(v) = in_handle {
+                h[0] = [v[0].min(0.0), v[1]];
+                if smooth {
+                    h[1] = opposite(h[0], h[1]);
+                }
+            }
+            if let Some(v) = out_handle {
+                h[1] = [v[0].max(0.0), v[1]];
+                if smooth {
+                    h[0] = opposite(h[1], h[0]);
+                }
+            }
+            p.handles = (p.kind != loom_scene::PointKind::Corner && (in_handle.is_some() || out_handle.is_some() || p.handles.is_some())).then_some(h);
+            s.points.resize(s.points.len().max(i + 1), Default::default());
+            s.points[i] = p;
+            commit(state, "Reaction Point", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            let s = &state.scene.reactions[reaction as usize].slaves[slave as usize];
+            Ok(json!({ "kind": format!("{:?}", s.point_of(i).kind), "handles": s.handles(i) }))
         }
         C::SetReactionSlaveCurve { reaction, slave, curve } => {
             let before = state.scene.reactions.clone();
@@ -477,6 +553,12 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let s = &mut after[reaction as usize].slaves[slave as usize];
             if (index as usize) < s.blend.len() {
                 s.blend.remove(index as usize);
+            }
+            if (index as usize) < s.points.len() {
+                s.points.remove(index as usize);
+            }
+            if (index as usize) < s.names.len() {
+                s.names.remove(index as usize);
             }
             commit(state, "Delete State", Change::SetReactions { before, after })?;
             sync_parameter_wires(state);
@@ -999,6 +1081,10 @@ pub fn sync_parameter_wires(state: &mut AppState) {
     for r in reactions {
         let Some(m) = read_node_wire_param(&state.scene, r.master_node, &r.master_param) else { continue };
         for s in &r.slaves {
+            // Start / End: outside them the slave keeps its own value.
+            if !s.active_at(state.current_frame) {
+                continue;
+            }
             let Some(v) = s.value(m) else { continue };
             if let Some(ch) = write_node_wire_change(&state.scene, s.node, &s.param, v) {
                 let _ = ch.apply(&mut state.scene);

@@ -152,6 +152,36 @@ pub struct ReactionSlave {
     /// Per state (parallel to `states`; missing entries take the defaults).
     #[serde(default)]
     pub blend: Vec<StateBlend>,
+    /// Per state: its graph point's type and handles (parallel to `states`;
+    /// missing entries are smooth Bezier points with automatic handles).
+    #[serde(default)]
+    pub points: Vec<ReactionPoint>,
+    /// Per state: its name in the States list (missing or empty: StateNN).
+    #[serde(default)]
+    pub names: Vec<String>,
+    /// Start / End: the frames the reaction drives the slave in (None: always).
+    #[serde(default)]
+    pub range: Option<[i32; 2]>,
+}
+
+/// A Reaction Manager graph point's type (its right-click menu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PointKind {
+    /// No handles: straight lines meet at the point.
+    Corner,
+    /// Smooth: the two handles stay in line.
+    #[default]
+    Bezier,
+    /// The two handles move independently.
+    BezierCorner,
+}
+
+/// A graph point's type and handles: offsets (master, value) from the point
+/// to its in and out handles; None = automatic smooth handles.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct ReactionPoint {
+    pub kind: PointKind,
+    pub handles: Option<[[f32; 2]; 2]>,
 }
 
 fn yes() -> bool {
@@ -176,7 +206,50 @@ impl Default for StateBlend {
 
 impl ReactionSlave {
     pub fn new(node: NodeId, param: String, states: Vec<(f32, f32)>) -> Self {
-        Self { node, param, states, curve: true, blend: Vec::new() }
+        Self { node, param, states, curve: true, blend: Vec::new(), points: Vec::new(), names: Vec::new(), range: None }
+    }
+
+    pub fn point_of(&self, i: usize) -> ReactionPoint {
+        self.points.get(i).copied().unwrap_or_default()
+    }
+
+    /// The state's name in the States list.
+    pub fn name_of(&self, i: usize) -> String {
+        self.names.get(i).filter(|n| !n.is_empty()).cloned().unwrap_or_else(|| format!("State{:02}", i + 1))
+    }
+
+    /// Whether the reaction drives the slave at `frame` (Start / End).
+    pub fn active_at(&self, frame: i32) -> bool {
+        self.range.is_none_or(|[a, b]| frame >= a && frame <= b)
+    }
+
+    /// State `i`'s in and out handles as offsets (master, value): its own,
+    /// none for a Corner, or the automatic smooth ones (a third of the
+    /// neighbouring span along the Catmull-Rom slope).
+    pub fn handles(&self, i: usize) -> [[f32; 2]; 2] {
+        let p = self.point_of(i);
+        if p.kind == PointKind::Corner {
+            return [[0.0; 2]; 2];
+        }
+        if let Some(h) = p.handles {
+            return h;
+        }
+        let order = self.sorted_order();
+        let Some(k) = order.iter().position(|&j| j == i) else { return [[0.0; 2]; 2] };
+        let at = |k: usize| self.states[order[k]];
+        let (l, r) = (at(k.saturating_sub(1)), at((k + 1).min(order.len() - 1)));
+        let slope = if (r.0 - l.0).abs() < 1e-9 { 0.0 } else { (r.1 - l.1) / (r.0 - l.0) };
+        let me = at(k);
+        let back = if k > 0 { (me.0 - at(k - 1).0) / 3.0 } else { 0.0 };
+        let fwd = if k + 1 < order.len() { (at(k + 1).0 - me.0) / 3.0 } else { 0.0 };
+        [[-back, -back * slope], [fwd, fwd * slope]]
+    }
+
+    /// State indices sorted by master value.
+    fn sorted_order(&self) -> Vec<usize> {
+        let mut o: Vec<usize> = (0..self.states.len()).collect();
+        o.sort_by(|a, b| self.states[*a].0.total_cmp(&self.states[*b].0));
+        o
     }
 
     pub fn blend_of(&self, i: usize) -> StateBlend {
@@ -195,6 +268,9 @@ impl ReactionSlave {
     /// The graph curve: a smooth (Catmull-Rom tangent) cubic through the
     /// states sorted by master value, the end states' values beyond them.
     pub fn curve_value(&self, master: f32) -> Option<f32> {
+        if self.points.iter().any(|p| *p != ReactionPoint::default()) {
+            return self.bezier_value(master);
+        }
         let mut s = self.states.clone();
         s.sort_by(|a, b| a.0.total_cmp(&b.0));
         let first = *s.first()?;
@@ -220,6 +296,46 @@ impl ReactionSlave {
         let t = (master - a.0) / span;
         let (t2, t3) = (t * t, t * t * t);
         Some((2.0 * t3 - 3.0 * t2 + 1.0) * a.1 + (t3 - 2.0 * t2 + t) * m0 + (-2.0 * t3 + 3.0 * t2) * b.1 + (t3 - t2) * m1)
+    }
+
+    /// The graph curve through points with their own types and handles: a
+    /// cubic Bezier between each pair of neighbours (handles kept inside the
+    /// span so the curve is a function of the master value).
+    fn bezier_value(&self, master: f32) -> Option<f32> {
+        let order = self.sorted_order();
+        let (first, last) = (self.states[*order.first()?], self.states[*order.last()?]);
+        if master <= first.0 {
+            return Some(first.1);
+        }
+        if master >= last.0 {
+            return Some(last.1);
+        }
+        let k = order.windows(2).position(|w| master >= self.states[w[0]].0 && master <= self.states[w[1]].0)?;
+        let (ia, ib) = (order[k], order[k + 1]);
+        let (a, b) = (self.states[ia], self.states[ib]);
+        let span = b.0 - a.0;
+        if span.abs() < 1e-9 {
+            return Some(a.1);
+        }
+        let out = self.handles(ia)[1];
+        let inn = self.handles(ib)[0];
+        let x1 = a.0 + out[0].clamp(0.0, span);
+        let x2 = b.0 + inn[0].clamp(-span, 0.0);
+        let (y1, y2) = (a.1 + out[1], b.1 + inn[1]);
+        let cubic = |p0: f32, p1: f32, p2: f32, p3: f32, t: f32| {
+            let u = 1.0 - t;
+            u * u * u * p0 + 3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t * p3
+        };
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            if cubic(a.0, x1, x2, b.0, mid) < master {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        Some(cubic(a.1, y1, y2, b.1, 0.5 * (lo + hi)))
     }
 
     /// Curve off: each state weighs in by Strength x (1 - distance /
@@ -1325,5 +1441,29 @@ mod reaction_tests {
         assert!(s.value(50.0).unwrap() > 25.0, "Strength pulls towards the state");
         s.blend = vec![StateBlend { strength: 1.0, influence: 10.0, falloff: 1.0 }; 3];
         assert_eq!(s.value(40.0), Some(0.0), "out of reach: the nearest state");
+    }
+
+    #[test]
+    fn reaction_point_types_names_and_range() {
+        let mut s = ReactionSlave::new(NodeId(1), "Position Z".into(), vec![(0.0, 0.0), (100.0, 50.0), (200.0, 0.0)]);
+        let smooth: Vec<f32> = [30.0, 100.0, 150.0, 170.0].iter().map(|m| s.value(*m).unwrap()).collect();
+        // Explicit points with automatic handles give the same smooth curve.
+        s.points = vec![ReactionPoint::default(); 3];
+        s.points[0].handles = Some(s.handles(0));
+        for (m, v) in [30.0, 100.0, 150.0, 170.0].iter().zip(&smooth) {
+            assert!((s.bezier_value(*m).unwrap() - v).abs() < 1e-3, "{m}: {} vs {v}", s.bezier_value(*m).unwrap());
+        }
+        // A Corner peak: straight lines.
+        s.points[1].kind = PointKind::Corner;
+        assert!((s.value(150.0).unwrap() - 25.0).abs() < 1e-3);
+        assert_eq!(s.handles(1), [[0.0; 2]; 2]);
+        s.points[1] = ReactionPoint { kind: PointKind::BezierCorner, handles: Some([[-30.0, 0.0], [30.0, 40.0]]) };
+        assert!(s.value(110.0).unwrap() > 50.0, "the out handle lifts the curve after the point");
+        assert_eq!(s.name_of(1), "State02");
+        s.names = vec![String::new(), "Peak".into()];
+        assert_eq!((s.name_of(0).as_str(), s.name_of(1).as_str()), ("State01", "Peak"));
+        assert!(s.active_at(-1000));
+        s.range = Some([10, 20]);
+        assert!(s.active_at(10) && s.active_at(20) && !s.active_at(21) && !s.active_at(9));
     }
 }

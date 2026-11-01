@@ -801,6 +801,89 @@ fn reaction_manager_any_track_blend_create_mode_pick_and_graph() {
     assert_eq!(h.app.state.scene.reactions[0].slaves[0].states[1], before, "undoable");
 }
 
+/// Reaction Manager: a state renamed in place, a point set to Corner (straight
+/// lines) and back to Bezier with its handle dragged, the graph's Move V and
+/// Add Corner tools, and Start / End limiting the frames the slave follows.
+#[test]
+fn reaction_manager_names_point_types_graph_tools_and_start_end() {
+    use loom_scene::PointKind;
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    menu_path(&mut h, &["Animation", "Reaction Manager..."]);
+    h.cmd(Command::AddReactionMaster { node: a.0, param: "Position X".into() });
+    h.cmd(Command::AddReactionSlave { reaction: 0, node: b.0, param: "Position Z".into() });
+    assert_eq!(h.app.state.scene.reactions[0].slaves[0].range, Some([h.app.state.frame_range.0, h.app.state.frame_range.1]), "Start / End default to the active segment");
+    h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: Some(0), master_value: Some(0.0), slave_value: Some(0.0) });
+    h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: None, master_value: Some(50.0), slave_value: Some(50.0) });
+    h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: None, master_value: Some(100.0), slave_value: Some(0.0) });
+    h.frames(2);
+    h.click(h.text_rects("    Box002 / Position Z")[0].center());
+    h.frames(3);
+    assert!(!h.text_rects("Start").is_empty() && !h.text_rects("End").is_empty(), "the Start / End columns");
+    let slave = |h: &Harness| h.app.state.scene.reactions[0].slaves[0].clone();
+    // Rename State02 in place.
+    h.click(h.text_rects("State02")[0].center());
+    let select_all = egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
+    h.run(vec![select_all]);
+    type_text(&mut h, "Peak");
+    h.frames(2);
+    assert_eq!(slave(&h).name_of(1), "Peak");
+    // Right-click the middle point: Corner gives straight lines.
+    let pts: Vec<egui::Pos2> = h.ctx.data(|d| d.get_temp(egui::Id::new("reaction_graph_points"))).expect("the graph");
+    let smooth25 = slave(&h).value(25.0).unwrap();
+    right_click(&mut h, pts[1]);
+    h.frames(2);
+    h.click(h.text_rects("Corner")[0].center());
+    h.frames(2);
+    assert_eq!(slave(&h).point_of(1).kind, PointKind::Corner);
+    assert!((slave(&h).value(25.0).unwrap() - 25.0).abs() < 1e-2, "Corner: straight, not {smooth25}");
+    assert!((smooth25 - 25.0).abs() > 0.5, "the smooth curve bowed");
+    // Back to Bezier Smooth: the selected point shows its handles; drag the out handle up.
+    right_click(&mut h, pts[1]);
+    h.frames(2);
+    h.click(h.text_rects("Bezier Smooth")[0].center());
+    h.frames(3);
+    assert_eq!(slave(&h).point_of(1).kind, PointKind::Bezier);
+    let handles: Vec<(usize, egui::Pos2)> = h.ctx.data(|d| d.get_temp(egui::Id::new("reaction_graph_handles"))).expect("handles");
+    let out = handles.iter().find(|(s, _)| *s == 1).expect("the out handle").1;
+    let before75 = slave(&h).value(75.0).unwrap();
+    h.drag(out, out + egui::vec2(0.0, -40.0));
+    h.frames(2);
+    let hs = slave(&h).handles(1);
+    assert!(hs[1][1] > 0.0 && hs[0][1] < 0.0, "out up, the in handle turned down with it: {hs:?}");
+    assert!(slave(&h).value(75.0).unwrap() > before75 + 1.0, "the curve follows the handle");
+    // Move V: dragging diagonally keeps the master value.
+    h.click(h.text_rects("Move V")[0].center());
+    let pts: Vec<egui::Pos2> = h.ctx.data(|d| d.get_temp(egui::Id::new("reaction_graph_points"))).expect("the graph");
+    let s0 = slave(&h).states[0];
+    h.drag(pts[0], pts[0] + egui::vec2(30.0, -30.0));
+    h.frames(2);
+    let s1 = slave(&h).states[0];
+    assert!((s1.0 - s0.0).abs() < 1e-4 && s1.1 > s0.1 + 1.0, "{s0:?} -> {s1:?}");
+    // Add Corner: a click on an empty part of the graph adds a Corner state.
+    h.click(h.text_rects("Add Corner")[0].center());
+    let pts: Vec<egui::Pos2> = h.ctx.data(|d| d.get_temp(egui::Id::new("reaction_graph_points"))).expect("the graph");
+    h.click(egui::pos2((pts[1].x + pts[2].x) * 0.5, pts[2].y - 10.0));
+    h.frames(2);
+    assert_eq!(slave(&h).states.len(), 4);
+    assert_eq!(slave(&h).point_of(3).kind, PointKind::Corner);
+    // Start / End: outside them the slave stops following.
+    h.cmd(Command::SetReactionSlaveRange { reaction: 0, slave: 0, start: Some(10), end: Some(20) });
+    let z = |h: &Harness| h.app.state.scene.node(b).unwrap().transform.position.get().z;
+    h.cmd(Command::SetFrame { frame: 15 });
+    h.cmd(Command::SetTransform { id: a.0, position: Some([50.0, 0.0, 0.0]), rotation_deg: None, scale: None });
+    let inside = z(&h);
+    assert!((inside - slave(&h).value(50.0).unwrap()).abs() < 1e-3, "inside Start / End it follows");
+    h.cmd(Command::SetFrame { frame: 30 });
+    h.cmd(Command::SetTransform { id: a.0, position: Some([0.0, 0.0, 0.0]), rotation_deg: None, scale: None });
+    assert!((z(&h) - inside).abs() < 1e-3, "outside it keeps its value");
+    assert!(h.app.dispatch(Command::SetReactionSlaveRange { reaction: 0, slave: 0, start: Some(30), end: None }).is_err(), "Start after End");
+}
+
 /// Views > SteeringWheels: the wheel opens at the cursor, a drag on its Pan
 /// wedge pans the active view, Zoom zooms, Rewind (a click) goes back, the
 /// Wheel menu switches to a mini wheel, Esc closes it, the panel sets options.

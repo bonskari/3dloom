@@ -105,6 +105,11 @@ impl ArgSchema for loom_scene::render::RenderArea {
         json!({"type":"string","enum":["View","Selected","Region","Crop","Blowup"]})
     }
 }
+impl ArgSchema for loom_scene::PointKind {
+    fn schema() -> Value {
+        json!({"type":"string","enum":["Corner","Bezier","BezierCorner"]})
+    }
+}
 impl ArgSchema for loom_scene::render::AaFilter {
     fn schema() -> Value {
         json!({"type":"string","enum":["Area","Blackman","CatmullRom","Cubic","MitchellNetravali","Quadratic","Soften"]})
@@ -2265,6 +2270,9 @@ commands! {
     AddReactionSlave => "Add Reaction Slave", Loom, "Reaction Manager > Add Slave: parameter `param` of node `node` reacts to master `reaction`; its first state pairs the master's and the slave's current values." { reaction: u32, node: u64, param: String };
     SetReactionState => "Set Reaction State", Loom, "Reaction Manager > States: state `state` of slave `slave` of reaction `reaction` (null: a new state) pairs `master_value` with `slave_value` (omitted: the current values)." { reaction: u32, slave: u32, state: Option<u32>, master_value: Option<f32>, slave_value: Option<f32> };
     SetReactionSlaveCurve => "Reaction Slave Curve", Loom, "Reaction Manager > Curve column: slave `slave` of reaction `reaction` follows the graph curve (true) or blends its states by Strength / Influence / Falloff (false)." { reaction: u32, slave: u32, curve: bool };
+    RenameReactionState => "Rename Reaction State", Loom, "Reaction Manager > States: rename state `state` of slave `slave` (an empty name goes back to StateNN)." { reaction: u32, slave: u32, state: u32, name: String };
+    SetReactionSlaveRange => "Reaction Slave Range", Loom, "Reaction Manager > Start / End columns: the frames slave `slave` of reaction `reaction` is driven in (omitted ends keep their value)." { reaction: u32, slave: u32, start: Option<i32>, end: Option<i32> };
+    SetReactionPoint => "Reaction Graph Point", Loom, "Reaction Manager > graph: state `state`'s point type (Corner, Bezier, BezierCorner) and its in / out handles as (master, value) offsets from the point; a Bezier's handles stay in line." { reaction: u32, slave: u32, state: u32, kind: Option<loom_scene::PointKind>, in_handle: Option<[f32; 2]>, out_handle: Option<[f32; 2]> };
     SetReactionStateBlend => "Reaction State Blend", Loom, "Reaction Manager > States: a state's Strength, Influence (master distance; 0 = all states' span) and Falloff, used with Curve off." { reaction: u32, slave: u32, state: u32, strength: Option<f32>, influence: Option<f32>, falloff: Option<f32> };
     SetReactionCreateMode => "Reaction Create Mode", Loom, "Reaction Manager > Create Mode: while on, slaves stop following so master and slaves can be posed for Create State." { on: bool };
     ReactionPickFromViewport => "Reaction Pick From Viewport", MainUI, "Reaction Manager > Add Master / Add Slave: pick an object in a viewport, then one of its tracks.";
