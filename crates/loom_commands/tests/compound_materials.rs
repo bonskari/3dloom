@@ -492,3 +492,20 @@ fn type_button_copy_paste_copy_instance_and_clear() {
     assert!(s.scene.materials[&top(&s)].map("Bump").is_none());
     assert!(s.scene.material_editor.path.is_empty(), "back at the parent level");
 }
+
+#[test]
+fn material_explorer_lists_scene_materials_and_reassigns() {
+    let mut s = AppState::new();
+    let a = boxed(&mut s);
+    execute(&mut s, Command::RenameMaterial { slot: None, name: "Brick".into() }).unwrap();
+    execute(&mut s, Command::AssignMaterialToSelection).unwrap();
+    let brick = top(&s);
+    let b = boxed(&mut s);
+    let r = execute(&mut s, Command::MaterialExplorer).unwrap();
+    assert_eq!(r["open"], true);
+    assert_eq!(r["materials"], serde_json::json!([{ "material": brick.0, "name": "Brick", "type": "Standard", "nodes": [a.0] }]));
+    execute(&mut s, Command::AssignMaterialById { material: brick.0, nodes: Some(vec![b.0]) }).unwrap();
+    assert_eq!(s.scene.node(b).unwrap().material, Some(brick));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.node(b).unwrap().material, None);
+}

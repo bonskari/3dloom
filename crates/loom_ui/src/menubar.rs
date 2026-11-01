@@ -814,6 +814,7 @@ fn rendering_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Effects...", Command::RenderingEffects);
     ui.separator();
     cmd(ui, app, "Material Editor...", Command::MaterialEditorToggle);
+    cmd(ui, app, "Material Explorer...", Command::MaterialExplorer);
 }
 
 fn customize_menu(ui: &mut egui::Ui, app: &mut LoomApp) {

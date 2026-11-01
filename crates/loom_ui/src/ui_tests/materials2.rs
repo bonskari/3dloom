@@ -378,3 +378,21 @@ fn type_button_right_click_copy_then_paste_copy() {
     h.cmd(Command::MaterialEditorGoToParent);
     assert_eq!(editor_material(&h).map("Bump").map(|m| m.kind), Some(loom_scene::material::MapType::Checker));
 }
+
+#[test]
+fn material_explorer_assigns_the_picked_material_to_the_selection() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::RenameMaterial { slot: None, name: "Brick".into() });
+    h.cmd(Command::AssignMaterialToSelection);
+    let brick = h.app.state.scene.material_editor.slots[0].unwrap();
+    h.cmd(Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::MaterialExplorer);
+    h.frames(2);
+    h.click_text_anywhere("Brick");
+    h.frames(1);
+    h.click_text_anywhere("Assign to Selection");
+    h.frames(2);
+    assert_eq!(h.app.state.scene.node(b).unwrap().material, Some(brick));
+}

@@ -1693,6 +1693,8 @@ pub struct AppState {
     pub material_editor_open: bool,
     /// Material Editor > Material/Map Navigator: its own modeless window.
     pub material_navigator_open: bool,
+    /// Rendering > Material Explorer is open.
+    pub material_explorer_open: bool,
     /// The Material Editor's current material library (Put to Library, Mtl Library).
     pub material_library: crate::material_library::MaterialLibraryState,
     /// Type button right-click Copy / Cut: what Paste puts back.
@@ -2088,6 +2090,7 @@ impl AppState {
             dialog: None,
             material_editor_open: false,
             material_navigator_open: false,
+            material_explorer_open: false,
             material_library: Default::default(),
             material_clip: None,
             bitmap_generation: 0,

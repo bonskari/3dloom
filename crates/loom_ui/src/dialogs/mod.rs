@@ -123,6 +123,13 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
     vertex_paint::show(ctx, app);
     // Render To Texture is modeless: it stays open beside the other dialogs.
     render_to_texture::show(ctx, app);
+    if app.state.material_explorer_open {
+        let mut open = true;
+        material_editor::explorer(ctx, app, &mut open);
+        if !open {
+            app.state.material_explorer_open = false;
+        }
+    }
     if app.state.material_navigator_open {
         let mut open = true;
         material_editor::navigator(ctx, app, &mut open);

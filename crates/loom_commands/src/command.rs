@@ -1431,6 +1431,8 @@ commands! {
     TypeButtonCopy => "Type Button Copy", Loom, "Type button right-click > Copy (or Cut with `cut`): the material or map at the Material Editor's current level to the material clipboard; Cut also clears a sub-material or map (not a slot's top material)." { cut: bool };
     TypeButtonPaste => "Type Button Paste", Loom, "Type button right-click > Paste (Copy) or, with `instance`, Paste (Instance) (materials only): the clipboard's material or map replaces the current level." { instance: bool };
     TypeButtonClear => "Type Button Clear", Loom, "Type button right-click > Clear: the sub-material or map at the current level becomes None.";
+    MaterialExplorer => "Material Explorer", MainUI, "Rendering > Material Explorer: open or close it; the result lists the scene's materials (those objects use) with their type and objects.";
+    AssignMaterialById => "Assign Material By Id", Loom, "Material Explorer: assign scene material `material` to objects `nodes` (omitted = the selection), one undo step." { material: u32, nodes: Option<Vec<u64>> };
     MultiSubSort => "Multi/Sub Sort", Loom, "Multi/Sub-Object Basic Parameters: sort the list by `by` = ID, Name or Sub (the sub-materials' names)." { by: String };
     PutToLibrary => "Put to Library", Loom, "Material Editor > Put to Library: the active slot's material (with its sub-materials) into the current material library, under `name` (omitted = the material's name; the same name replaces)." { name: Option<String> };
     GetFromLibrary => "Get From Library", Loom, "Material/Map Browser, Browse From Mtl Library: a copy of the library material `name` goes into the active slot." { name: String };

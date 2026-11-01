@@ -62,6 +62,8 @@ pub fn handles(c: &C) -> bool {
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
             | C::CleanMultiMaterial { .. }
+            | C::MaterialExplorer
+            | C::AssignMaterialById { .. }
             | C::TypeButtonCopy { .. }
             | C::TypeButtonPaste { .. }
             | C::TypeButtonClear
@@ -408,6 +410,26 @@ pub fn users_of(state: &AppState, id: MaterialId) -> Vec<NodeId> {
         false
     };
     state.scene.nodes().filter(|n| n.material.is_some_and(uses)).map(|n| n.id).collect()
+}
+
+/// Material Explorer's scene panel: every material objects use (top level),
+/// by name, with its type and the objects using it.
+pub fn scene_materials(state: &AppState) -> Vec<Value> {
+    let mut used: std::collections::BTreeMap<MaterialId, Vec<u64>> = std::collections::BTreeMap::new();
+    for n in state.scene.nodes() {
+        if let Some(m) = n.material.filter(|m| state.scene.materials.contains_key(m)) {
+            used.entry(m).or_default().push(n.id.0);
+        }
+    }
+    let mut out: Vec<Value> = used
+        .into_iter()
+        .map(|(id, nodes)| {
+            let m = &state.scene.materials[&id];
+            json!({ "material": id.0, "name": m.name, "type": m.kind.label(), "nodes": nodes })
+        })
+        .collect();
+    out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    out
 }
 
 /// Clean MultiMaterial: each Multi/Sub-Object material in the library with
@@ -1115,6 +1137,35 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             commit(state, if instance { "Paste (Instance)" } else { "Paste (Copy)" }, Change::SetMaterials { before, after })?;
             state.mesh_dirty = true;
             Ok(json!({ "pasted": true }))
+        }
+        C::MaterialExplorer => {
+            state.material_explorer_open = !state.material_explorer_open;
+            Ok(json!({ "open": state.material_explorer_open, "materials": scene_materials(state) }))
+        }
+        C::AssignMaterialById { material, nodes } => {
+            let id = MaterialId(material);
+            if !state.scene.materials.contains_key(&id) {
+                return Err(format!("no material {material}"));
+            }
+            let ids: Vec<NodeId> = match nodes {
+                Some(n) => n.into_iter().map(NodeId).collect(),
+                None => state.selection.iter().copied().collect(),
+            };
+            if ids.is_empty() {
+                return Err("select the objects to assign the material to".into());
+            }
+            let mut changes = Vec::new();
+            for n in &ids {
+                let old = state.scene.node(*n).ok_or_else(|| format!("no node {}", n.0))?.material;
+                if old != Some(id) {
+                    changes.push(Change::SetMaterial { id: *n, before: old, after: Some(id) });
+                }
+            }
+            if !changes.is_empty() {
+                commit(state, "Assign Material", Change::Group(changes))?;
+                state.mesh_dirty = true;
+            }
+            Ok(json!({ "material": material, "nodes": ids.iter().map(|n| n.0).collect::<Vec<_>>() }))
         }
         C::CleanMultiMaterial { materials, apply } => {
             let unused = unused_sub_materials(state);

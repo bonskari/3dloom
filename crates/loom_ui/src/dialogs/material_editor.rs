@@ -2227,6 +2227,46 @@ pub fn replace_material(ctx: &egui::Context, app: &mut LoomApp, kind: u8, map: b
 }
 
 /// Material Editor Options: lights, background, slots; Apply / OK / Cancel.
+/// Material Explorer (scene panel): the materials objects use, their type
+/// and objects; Select Objects selects a material's users, Assign to
+/// Selection gives the selected objects the picked material.
+pub fn explorer(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let rows = loom_commands::material::scene_materials(&app.state);
+    let id = egui::Id::new("material_explorer_pick");
+    let mut pick: Option<u32> = ctx.data(|d| d.get_temp(id));
+    egui::Window::new("Material Explorer").open(open).default_size([420.0, 260.0]).show(ctx, |ui| {
+        egui::Grid::new("material_explorer_rows").striped(true).num_columns(3).show(ui, |ui| {
+            ui.strong("Name");
+            ui.strong("Type");
+            ui.strong("Objects");
+            ui.end_row();
+            for r in &rows {
+                let m = r["material"].as_u64().unwrap_or(0) as u32;
+                if ui.selectable_label(pick == Some(m), r["name"].as_str().unwrap_or("")).clicked() {
+                    pick = Some(m);
+                }
+                ui.label(r["type"].as_str().unwrap_or(""));
+                let names: Vec<String> = r["nodes"].as_array().into_iter().flatten().filter_map(|n| app.state.scene.node(loom_scene::NodeId(n.as_u64()?)).map(|n| n.name.clone())).collect();
+                ui.label(names.join(", "));
+                ui.end_row();
+            }
+        });
+        ui.horizontal(|ui| {
+            let users: Option<Vec<u64>> = pick.and_then(|m| rows.iter().find(|r| r["material"] == m)).map(|r| r["nodes"].as_array().into_iter().flatten().filter_map(|n| n.as_u64()).collect());
+            if ui.add_enabled(users.is_some(), egui::Button::new("Select Objects")).clicked() {
+                let _ = app.dispatch(Command::SelectNodes { ids: users.unwrap_or_default(), op: loom_commands::SelectOp::Replace });
+            }
+            if ui.add_enabled(pick.is_some() && !app.state.selection.is_empty(), egui::Button::new("Assign to Selection")).clicked() {
+                let _ = app.dispatch(Command::AssignMaterialById { material: pick.unwrap_or(0), nodes: None });
+            }
+        });
+    });
+    ctx.data_mut(|d| match pick {
+        Some(p) => d.insert_temp(id, p),
+        None => d.remove::<u32>(id),
+    });
+}
+
 /// Render Map: Dimensions and an optional file; Render shows the map in the
 /// Rendered Frame Window (and saves it with Save to File).
 pub fn render_map(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
