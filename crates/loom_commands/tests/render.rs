@@ -537,3 +537,26 @@ fn a_range_renders_its_frames_to_numbered_files() {
     assert_eq!(s.scene.render.range, [0, 3]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Preferences > Rendering > Nth Serial Numbering: every 5th frame of 0-10
+/// is written to files 0, 1, 2 (off: 0, 5, 10).
+#[test]
+fn nth_serial_numbering_numbers_stepped_frames_one_apart() {
+    use loom_scene::render::TimeOutput;
+    let dir = std::env::temp_dir().join(format!("loom-nth-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let out = dir.join("shot.png").to_string_lossy().into_owned();
+    let mut s = AppState::new();
+    execute(&mut s, Command::RenderTimeOutput { time_output: Some(TimeOutput::Range), range: Some([0, 10]), frames: None, every_nth: Some(5), file_number_base: None, skip_existing: None, image_file_list: Some(true) }).unwrap();
+    execute(&mut s, Command::Render { path: Some(out.clone()), width: Some(8), height: Some(8) }).unwrap();
+    assert_eq!(std::fs::read_to_string(dir.join("shot.ifl")).unwrap(), "shot0000.png\nshot0005.png\nshot0010.png\n");
+    execute(&mut s, Command::CancelRender).unwrap();
+    s.pending_render = None;
+    execute(&mut s, Command::SetPreference { name: "Nth Serial Numbering".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::Render { path: Some(out.clone()), width: Some(8), height: Some(8) }).unwrap();
+    assert_eq!(std::fs::read_to_string(dir.join("shot.ifl")).unwrap(), "shot0000.png\nshot0001.png\nshot0002.png\n");
+    s.pending_render = None;
+    let _ = loom_commands::render::sequence_next(&mut s).unwrap();
+    assert!(s.pending_render.take().unwrap().save_path.unwrap().ends_with("shot0001.png"), "frame 5's file");
+    let _ = std::fs::remove_dir_all(&dir);
+}

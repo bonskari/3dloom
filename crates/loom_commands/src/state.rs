@@ -919,6 +919,9 @@ pub struct Prefs {
     /// Editable Poly mode's shortcut turns the mode on only while held
     /// (on is this build's default).
     pub overrides_active: bool,
+    /// Rendering > Output File Sequencing > Nth Serial Numbering: frames
+    /// rendered every Nth number their files one apart (off: by frame).
+    pub nth_serial_numbering: bool,
     /// Keyboard > Delay To Override (ms, 250 is this build's default): a key
     /// held this long is a temporary override; a shorter press toggles.
     pub override_delay_ms: f32,
@@ -1012,6 +1015,7 @@ impl Default for Prefs {
             default_by_layer: false,
             new_lights_renderable_by_layer: false,
             overrides_active: true,
+            nth_serial_numbering: false,
             override_delay_ms: 250.0,
             // The reference gives no default; Do Not Propagate keeps this build's old behaviour.
             propagate_layers: 1,
@@ -1043,7 +1047,7 @@ impl Default for Prefs {
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 61] = [
+    pub const NAMES: [&'static str; 62] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -1056,7 +1060,7 @@ impl Prefs {
         "Scale Uniform Handle Size", "Scale 2-Axis Handle Size", "Uniform 2-Axis Scaling",
         "Ghosting Frames", "Ghosting Nth Frame", "Ghosting Mode", "Ghosting Frame Numbers",
         "Rotation Method", "Planar Angle Threshold", "Move/Rotate Projection", "Persp Sens",
-        "Overrides Active", "Delay To Override",
+        "Overrides Active", "Delay To Override", "Nth Serial Numbering",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1087,6 +1091,7 @@ impl Prefs {
             "Default to By Layer for New Nodes" => b(self.default_by_layer),
             "New Lights Renderable By Layer" => b(self.new_lights_renderable_by_layer),
             "Overrides Active" => b(self.overrides_active),
+            "Nth Serial Numbering" => b(self.nth_serial_numbering),
             "Delay To Override" => self.override_delay_ms as f64,
             "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers as f64,
             "Grid Nudge Distance" => self.grid_nudge_distance as f64,
@@ -1164,6 +1169,7 @@ impl Prefs {
             "Default to By Layer for New Nodes" => self.default_by_layer = on,
             "New Lights Renderable By Layer" => self.new_lights_renderable_by_layer = on,
             "Overrides Active" => self.overrides_active = on,
+            "Nth Serial Numbering" => self.nth_serial_numbering = on,
             "Delay To Override" => self.override_delay_ms = f.clamp(0.0, 5000.0),
             "Propagate Unhide/Unfreeze to Layers" => self.propagate_layers = v.clamp(0.0, 2.0) as u8,
             "Show Cross Hair Cursor" => self.show_cross_hair = on,

@@ -475,9 +475,17 @@ mod time_output_tests {
         assert_eq!(s.output_frames((0, 100), 7).unwrap(), vec![0, 1, 2, 3]);
         // The reference's example: Range 0-3, base 15 gives file0015..file0018.
         s.file_number_base = 15;
-        assert_eq!((0..=3).map(|f| s.file_number(f, 0)).collect::<Vec<_>>(), vec![15, 16, 17, 18]);
+        assert_eq!((0..=3).map(|f| s.file_number(f, 0, false)).collect::<Vec<_>>(), vec![15, 16, 17, 18]);
         s.file_number_base = 0;
-        assert_eq!(s.file_number(52, 50), 52);
+        assert_eq!(s.file_number(52, 50, false), 52);
+        // Nth Serial Numbering: every 5th frame from 10 numbers 10, 11, 12; off, 10, 15, 20.
+        s.every_nth = 5;
+        assert_eq!([10, 15, 20].map(|f| s.file_number(f, 10, true)), [10, 11, 12]);
+        assert_eq!([10, 15, 20].map(|f| s.file_number(f, 10, false)), [10, 15, 20]);
+        s.file_number_base = 100;
+        assert_eq!([10, 15, 20].map(|f| s.file_number(f, 10, true)), [100, 101, 102]);
+        s.file_number_base = 0;
+        s.every_nth = 1;
         s.range = [5, 1];
         assert!(s.output_frames((0, 100), 0).is_err());
         assert_eq!(numbered_path("/tmp/a/out.png", 7), "/tmp/a/out0007.png");
@@ -906,10 +914,15 @@ impl RenderSettings {
     }
 
     /// File number of `frame` in a sequence whose first frame is `first`
-    /// (File Number Base applies to Active Time Segment and Range).
-    pub fn file_number(&self, frame: i32, first: i32) -> i32 {
+    /// (File Number Base applies to Active Time Segment and Range). `serial`
+    /// (Preferences > Rendering > Nth Serial Numbering): with Every Nth Frame
+    /// over 1 the files count up by one instead of by their frame numbers.
+    pub fn file_number(&self, frame: i32, first: i32, serial: bool) -> i32 {
+        let stepped = matches!(self.time_output, TimeOutput::ActiveSegment | TimeOutput::Range);
+        let offset = if serial && stepped { (frame - first) / self.every_nth.max(1) as i32 } else { frame - first };
         match self.time_output {
-            TimeOutput::ActiveSegment | TimeOutput::Range if self.file_number_base != 0 => self.file_number_base + (frame - first),
+            TimeOutput::ActiveSegment | TimeOutput::Range if self.file_number_base != 0 => self.file_number_base + offset,
+            _ if stepped => first + offset,
             _ => frame,
         }
     }

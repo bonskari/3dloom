@@ -976,6 +976,12 @@ fn preferences_rotation_method_and_projection() {
     h.click(h.text_rects("Projection")[0].center());
     assert!(h.app.state.prefs.gizmos.move_projection);
     assert_eq!(h.app.state.prefs.gizmos.rotation_increment_per_px, 0.5);
+    // Rendering > Nth Serial Numbering.
+    let tab = h.text_rects("Rendering").into_iter().max_by(|a, b| a.min.y.total_cmp(&b.min.y)).expect("the Rendering tab");
+    h.click(tab.center());
+    h.frames(1);
+    h.click(h.text_rects("Nth Serial Numbering")[0].center());
+    assert!(h.app.state.prefs.nth_serial_numbering);
     h.cmd(Command::CloseDialog);
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
     let id = *h.app.state.selection.iter().next().unwrap();

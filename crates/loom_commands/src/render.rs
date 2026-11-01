@@ -385,12 +385,13 @@ pub(crate) fn start_sequence(state: &mut AppState, req: RenderRequest, mut frame
     }
     let first = frames[0];
     let s = &req.settings;
+    let serial = state.prefs.nth_serial_numbering;
     if let Some(path) = &req.save_path {
         if s.image_file_list {
-            write_image_file_list(path, frames.iter().map(|f| s.file_number(*f, first)))?;
+            write_image_file_list(path, frames.iter().map(|f| s.file_number(*f, first, serial)))?;
         }
         if s.skip_existing {
-            frames.retain(|f| !std::path::Path::new(&numbered_path(path, s.file_number(*f, first))).exists());
+            frames.retain(|f| !std::path::Path::new(&numbered_path(path, s.file_number(*f, first, serial))).exists());
             if frames.is_empty() {
                 state.status_prompt = "Render: every frame's file exists (Skip Existing Images)".into();
                 return Ok(json!({ "skipped": true, "frames": 0 }));
@@ -423,7 +424,8 @@ fn start_sequence_frame(state: &mut AppState) -> Result<Value, String> {
     let Some(seq) = state.rendered.sequence.as_ref() else { return Err("no sequence".into()) };
     let (frame, index, count) = (seq.frames[seq.index], seq.index, seq.frames.len());
     let mut req = seq.request.clone();
-    req.save_path = req.save_path.map(|p| numbered_path(&p, req.settings.file_number(frame, seq.first)));
+    let serial = state.prefs.nth_serial_numbering;
+    req.save_path = req.save_path.map(|p| numbered_path(&p, req.settings.file_number(frame, seq.first, serial)));
     let path = req.save_path.clone();
     crate::execute::set_frame(state, frame)?;
     match start(state, req) {

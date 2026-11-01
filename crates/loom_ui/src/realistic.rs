@@ -728,7 +728,7 @@ impl LoomApp {
         let s = job.req.settings.clone();
         let Some(main) = self.state.rendered.image.clone() else { return };
         // The unnumbered output (a sequence numbers each element's file too).
-        let numbering = self.state.rendered.sequence.as_ref().map(|q| (q.request.save_path.clone(), s.file_number(q.frames[q.index], q.first)));
+        let numbering = self.state.rendered.sequence.as_ref().map(|q| (q.request.save_path.clone(), s.file_number(q.frames[q.index], q.first, self.state.prefs.nth_serial_numbering)));
         let base = match &numbering {
             Some((p, _)) => p.clone(),
             None => job.req.save_path.clone(),

@@ -12,6 +12,7 @@ enum Tab {
     Viewports,
     Gizmos,
     Files,
+    Rendering,
     Animation,
 }
 
@@ -52,6 +53,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             ui.selectable_value(&mut tab, Tab::Viewports, "Viewports");
             ui.selectable_value(&mut tab, Tab::Gizmos, "Gizmos");
             ui.selectable_value(&mut tab, Tab::Files, "Files");
+            ui.selectable_value(&mut tab, Tab::Rendering, "Rendering");
             ui.selectable_value(&mut tab, Tab::Animation, "Animation");
         });
         ui.separator();
@@ -144,6 +146,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                         }
                     });
                     ui.label(format!("Folder: {}", loom_commands::autosave::autoback_dir().display()));
+                });
+            }
+            Tab::Rendering => {
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Output File Sequencing").strong());
+                    check(ui, app, "Nth Serial Numbering", "Nth Serial Numbering");
                 });
             }
             Tab::Animation => {

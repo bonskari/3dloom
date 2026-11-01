@@ -818,7 +818,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
                     Some(o) => {
                         let s = task_settings(&state.scene.render, j)?;
                         let frames = s.output_frames(state.frame_range, state.current_frame)?;
-                        let files: Vec<String> = if frames.len() > 1 || j.override_preset { frames.iter().map(|f| loom_scene::render::numbered_path(o, s.file_number(*f, frames[0]))).collect() } else { vec![o.clone()] };
+                        let files: Vec<String> = if frames.len() > 1 || j.override_preset { frames.iter().map(|f| loom_scene::render::numbered_path(o, s.file_number(*f, frames[0], state.prefs.nth_serial_numbering))).collect() } else { vec![o.clone()] };
                         if files.iter().any(|f| std::path::Path::new(f).exists()) {
                             warn.push(format!("{}: {o} would be overwritten", j.name));
                         }
