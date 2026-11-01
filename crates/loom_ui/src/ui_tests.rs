@@ -4171,11 +4171,11 @@ fn chamfer_box_from_the_extended_primitives_class_by_drag_height_and_fillet() {
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
     h.app.panel_tab = crate::Tab::Create;
     h.frames(2);
-    h.click(h.find(Role::ComboBox, "Standard Primitives").center());
-    h.click(h.find(Role::Button, "Extended Primitives").center());
+    h.click(h.find(egui::accesskit::Role::ComboBox, "Standard Primitives").center());
+    h.click(h.find(egui::accesskit::Role::Button, "Extended Primitives").center());
     assert!(h.app.create_extended);
     h.frames(1);
-    h.click(h.find(Role::Button, "ChamferBox").center());
+    h.click(h.find(egui::accesskit::Role::Button, "ChamferBox").center());
     assert_eq!(h.app.create_kind, Some(crate::CreateKind::Extended(loom_mesh::extended_primitives::ExtendedKind::ChamferBox)));
     maximized(&mut h);
     let r = h.app.viewport_rects[h.app.state.active_viewport];
