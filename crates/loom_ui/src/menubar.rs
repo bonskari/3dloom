@@ -804,6 +804,7 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     ui.separator();
     cmd(ui, app, "Parameter Editor...", Command::AddCustomAttributesDialog);
     cmd(ui, app, "Parameter Collector...", Command::ParameterCollector);
+    cmd(ui, app, "Reaction Manager...", Command::ReactionManager);
     sub(ui, app, "Wire Parameters", |ui, app| {
         cmd(ui, app, "Parameter Wire Dialog...", Command::ParameterWiringDialog);
     });

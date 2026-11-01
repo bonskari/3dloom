@@ -373,6 +373,83 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         C::SetJointLimits { id, sliding, axis, active, limited, ease, from, to, preferred, spring_back, spring_back_val, spring_tension, damping } => {
             set_joint_limits(state, NodeId(id), sliding, axis, active, limited, ease, from, to, preferred, spring_back, spring_back_val, spring_tension, damping)
         }
+        C::ReactionManager => {
+            state.dialog = Some(Dialog::ReactionManager);
+            Ok(json!({ "reactions": state.scene.reactions.len() }))
+        }
+        C::AddReactionMaster { node, param } => {
+            let id = NodeId(node);
+            read_node_wire_param(&state.scene, id, &param).ok_or_else(|| format!("node {node} has no parameter {param:?} to react to"))?;
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            after.push(loom_scene::Reaction { master_node: id, master_param: param, slaves: Vec::new() });
+            commit(state, "Add Master", Change::SetReactions { before, after })?;
+            Ok(json!({ "reaction": state.scene.reactions.len() - 1 }))
+        }
+        C::AddReactionSlave { reaction, node, param } => {
+            let id = NodeId(node);
+            let r = state.scene.reactions.get(reaction as usize).ok_or("no such reaction")?.clone();
+            let m = read_node_wire_param(&state.scene, r.master_node, &r.master_param).ok_or("the master parameter is gone")?;
+            let v = read_node_wire_param(&state.scene, id, &param).ok_or_else(|| format!("node {node} has no parameter {param:?}"))?;
+            if r.master_node == id && r.master_param == param {
+                return Err("a track cannot react to itself".into());
+            }
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            after[reaction as usize].slaves.push(loom_scene::ReactionSlave { node: id, param, states: vec![(m, v)] });
+            commit(state, "Add Slave", Change::SetReactions { before, after })?;
+            Ok(json!({ "slave": state.scene.reactions[reaction as usize].slaves.len() - 1 }))
+        }
+        C::SetReactionState { reaction, slave, state: index, master_value, slave_value } => {
+            let r = state.scene.reactions.get(reaction as usize).ok_or("no such reaction")?.clone();
+            let s = r.slaves.get(slave as usize).ok_or("no such slave")?;
+            let m = match master_value {
+                Some(v) => v,
+                None => read_node_wire_param(&state.scene, r.master_node, &r.master_param).ok_or("the master parameter is gone")?,
+            };
+            let v = match slave_value {
+                Some(v) => v,
+                None => read_node_wire_param(&state.scene, s.node, &s.param).ok_or("the slave parameter is gone")?,
+            };
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let states = &mut after[reaction as usize].slaves[slave as usize].states;
+            match index {
+                Some(i) => *states.get_mut(i as usize).ok_or("no such state")? = (m, v),
+                None => states.push((m, v)),
+            }
+            commit(state, "Reaction State", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({ "states": state.scene.reactions[reaction as usize].slaves[slave as usize].states.len() }))
+        }
+        C::DeleteReactionState { reaction, slave, state: index } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let states = &mut after.get_mut(reaction as usize).ok_or("no such reaction")?.slaves.get_mut(slave as usize).ok_or("no such slave")?.states;
+            if (index as usize) >= states.len() {
+                return Err("no such state".into());
+            }
+            states.remove(index as usize);
+            commit(state, "Delete State", Change::SetReactions { before, after })?;
+            sync_parameter_wires(state);
+            Ok(json!({}))
+        }
+        C::DeleteReaction { reaction, slave } => {
+            let before = state.scene.reactions.clone();
+            let mut after = before.clone();
+            let r = after.get_mut(reaction as usize).ok_or("no such reaction")?;
+            match slave {
+                Some(s) if (s as usize) < r.slaves.len() => {
+                    r.slaves.remove(s as usize);
+                }
+                Some(_) => return Err("no such slave".into()),
+                None => {
+                    after.remove(reaction as usize);
+                }
+            }
+            commit(state, "Delete Reaction", Change::SetReactions { before, after })?;
+            Ok(json!({}))
+        }
         C::ParameterWiringDialog => {
             state.dialog = Some(Dialog::ParameterWiring);
             Ok(json!({ "dialog": "ParameterWiring", "wires": state.scene.parameter_wires.len() }))
@@ -839,8 +916,18 @@ pub fn write_node_wire_change(scene: &loom_scene::Scene, id: NodeId, param: &str
     }
 }
 
-/// Propagates all active Parameter Wiring links across `state.scene`.
+/// Propagates all active Parameter Wiring links and reactions across `state.scene`.
 pub fn sync_parameter_wires(state: &mut AppState) {
+    for r in state.scene.reactions.clone() {
+        let Some(m) = read_node_wire_param(&state.scene, r.master_node, &r.master_param) else { continue };
+        for s in &r.slaves {
+            let Some(v) = s.value(m) else { continue };
+            if let Some(ch) = write_node_wire_change(&state.scene, s.node, &s.param, v) {
+                let _ = ch.apply(&mut state.scene);
+                state.mesh_dirty = true;
+            }
+        }
+    }
     if state.scene.parameter_wires.is_empty() {
         return;
     }

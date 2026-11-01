@@ -116,6 +116,11 @@ pub enum Change {
         before: Vec<crate::scene::SceneStateRecord>,
         after: Vec<crate::scene::SceneStateRecord>,
     },
+    /// Animation > Reaction Manager: the reactions.
+    SetReactions {
+        before: Vec<crate::scene::Reaction>,
+        after: Vec<crate::scene::Reaction>,
+    },
     /// Parameter Wiring links (Animation > Wire Parameters).
     SetParameterWires {
         before: Vec<crate::scene::ParameterWire>,
@@ -262,6 +267,11 @@ impl Change {
                 scene.scene_states = after.clone();
                 Ok(())
             }
+            Change::SetReactions { after, .. } => {
+                scene.reactions = after.clone();
+                scene.bump_version();
+                Ok(())
+            }
             Change::SetParameterWires { after, .. } => {
                 scene.parameter_wires = after.clone();
                 scene.bump_version();
@@ -383,6 +393,7 @@ impl Change {
             Change::SetXrefs { before: b, after: a } => Change::SetXrefs { before: a.clone(), after: b.clone() },
             Change::SetSceneStates { before: b, after: a } => Change::SetSceneStates { before: a.clone(), after: b.clone() },
             Change::SetParameterWires { before: b, after: a } => Change::SetParameterWires { before: a.clone(), after: b.clone() },
+            Change::SetReactions { before: b, after: a } => Change::SetReactions { before: a.clone(), after: b.clone() },
             Change::SetStack { id, before: b, after: a } => Change::SetStack { id: *id, before: a.clone(), after: b.clone() },
             Change::SetIkChains { before: b, after: a } => Change::SetIkChains { before: a.clone(), after: b.clone() },
             Change::SetMaterials { before: b, after: a } => Change::SetMaterials { before: a.clone(), after: b.clone() },

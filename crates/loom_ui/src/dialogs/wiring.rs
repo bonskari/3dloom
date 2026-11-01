@@ -221,3 +221,84 @@ pub fn parameter_collector(ctx: &egui::Context, app: &mut LoomApp, open: &mut bo
         }
     });
 }
+
+/// Animation > Reaction Manager: the Reactions list (masters with their
+/// slaves), a parameter picker to add masters and slaves, and the States of
+/// the highlighted slave (master value, slave value) with Create State and
+/// Delete State.
+pub fn reaction_manager(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let fid = egui::Id::new("reaction_manager_form");
+    let (mut pick, mut hl): (Option<(NodeId, String)>, Option<(usize, Option<usize>)>) = ctx.data(|d| d.get_temp(fid)).unwrap_or_default();
+    egui::Window::new("Reaction Manager").open(open).resizable(true).default_width(620.0).show(ctx, |ui| {
+        ui.columns(2, |c| {
+            c[0].label(egui::RichText::new("Pick a track").strong());
+            side(&mut c[0], app, "reaction_pick", &mut pick);
+            let ui = &mut c[1];
+            ui.label(egui::RichText::new("Reactions").strong());
+            ui.horizontal(|ui| {
+                if ui.add_enabled(pick.is_some(), egui::Button::new("Add Master")).clicked() {
+                    if let Some((n, p)) = pick.clone() {
+                        let _ = app.dispatch(Command::AddReactionMaster { node: n.0, param: p });
+                        hl = Some((app.state.scene.reactions.len().saturating_sub(1), None));
+                    }
+                }
+                let master = hl.map(|h| h.0);
+                if ui.add_enabled(pick.is_some() && master.is_some(), egui::Button::new("Add Slave")).clicked() {
+                    if let (Some((n, p)), Some(r)) = (pick.clone(), master) {
+                        let _ = app.dispatch(Command::AddReactionSlave { reaction: r as u32, node: n.0, param: p });
+                        hl = Some((r, app.state.scene.reactions.get(r).map(|x| x.slaves.len().saturating_sub(1))));
+                    }
+                }
+                if ui.add_enabled(hl.is_some(), egui::Button::new("Delete Selected")).clicked() {
+                    if let Some((r, s)) = hl {
+                        let _ = app.dispatch(Command::DeleteReaction { reaction: r as u32, slave: s.map(|s| s as u32) });
+                        hl = None;
+                    }
+                }
+            });
+            let reactions = app.state.scene.reactions.clone();
+            for (ri, r) in reactions.iter().enumerate() {
+                if ui.selectable_label(hl == Some((ri, None)), format!("{} / {}", node_name(app, r.master_node), r.master_param)).clicked() {
+                    hl = Some((ri, None));
+                }
+                for (si, s) in r.slaves.iter().enumerate() {
+                    if ui.selectable_label(hl == Some((ri, Some(si))), format!("    {} / {}", node_name(app, s.node), s.param)).clicked() {
+                        hl = Some((ri, Some(si)));
+                    }
+                }
+            }
+            ui.separator();
+            ui.label(egui::RichText::new("States").strong());
+            if let Some((ri, Some(si))) = hl {
+                if let Some(s) = reactions.get(ri).and_then(|r| r.slaves.get(si)) {
+                    if ui.button("Create State").on_hover_text("A state from the master's and the slave's current values").clicked() {
+                        let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: None, master_value: None, slave_value: None });
+                    }
+                    egui::Grid::new("reaction_states").num_columns(4).show(ui, |ui| {
+                        ui.label("State");
+                        ui.label("Master Value");
+                        ui.label("Slave Value");
+                        ui.end_row();
+                        for (k, (m, v)) in s.states.iter().enumerate() {
+                            ui.label(format!("State{:02}", k + 1));
+                            let (mut m2, mut v2) = (*m, *v);
+                            if ui.add(crate::spinner::spin(ui, &mut m2, ..).speed(0.1)).changed() {
+                                let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: Some(k as u32), master_value: Some(m2), slave_value: Some(*v) });
+                            }
+                            if ui.add(crate::spinner::spin(ui, &mut v2, ..).speed(0.1)).changed() {
+                                let _ = app.dispatch(Command::SetReactionState { reaction: ri as u32, slave: si as u32, state: Some(k as u32), master_value: Some(*m), slave_value: Some(v2) });
+                            }
+                            if ui.small_button("Delete State").clicked() {
+                                let _ = app.dispatch(Command::DeleteReactionState { reaction: ri as u32, slave: si as u32, state: k as u32 });
+                            }
+                            ui.end_row();
+                        }
+                    });
+                }
+            } else {
+                ui.weak("Highlight a slave to see its states.");
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(fid, (pick, hl)));
+}

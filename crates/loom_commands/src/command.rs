@@ -2238,6 +2238,12 @@ commands! {
     AssumePrefAngles => "Assume Pref Angles", MainUI, "Pose quad > Assume Pref Angles: each selected object takes its IK preferred angles as its rotation.";
     SetAsSkinPose => "Set as Skin Pose", MainUI, "Pose quad > Set as Skin Pose: store each selected object's position, rotation and scale as its skin pose.";
     AssumeSkinPoseObjects => "Assume Skin Pose (Objects)", MainUI, "Pose quad > Assume Skin Pose: the selected objects take their stored skin pose.";
+    ReactionManager => "Reaction Manager", MainUI, "Animation > Reaction Manager: open the Reaction Manager dialog.";
+    AddReactionMaster => "Add Reaction Master", Loom, "Reaction Manager > Add Master: parameter `param` of node `node` (e.g. \"Position X\", an object parameter) drives slaves. Returns its reaction index." { node: u64, param: String };
+    AddReactionSlave => "Add Reaction Slave", Loom, "Reaction Manager > Add Slave: parameter `param` of node `node` reacts to master `reaction`; its first state pairs the master's and the slave's current values." { reaction: u32, node: u64, param: String };
+    SetReactionState => "Set Reaction State", Loom, "Reaction Manager > States: state `state` of slave `slave` of reaction `reaction` (null: a new state) pairs `master_value` with `slave_value` (omitted: the current values)." { reaction: u32, slave: u32, state: Option<u32>, master_value: Option<f32>, slave_value: Option<f32> };
+    DeleteReactionState => "Delete Reaction State", Loom, "Reaction Manager > Delete State." { reaction: u32, slave: u32, state: u32 };
+    DeleteReaction => "Delete Reaction", Loom, "Reaction Manager > Delete Selected: a master (with its slaves; `slave` omitted) or one slave." { reaction: u32, slave: Option<u32> };
     ParameterWiringDialog => "Parameter Wiring Dialog...", MainUI, "Open the Parameter Wiring dialog (Ctrl+5 / Animation > Wire Parameters > Wire Parameters...).";
     WireParameter => "Wire Parameter", Loom, "Animation > Wire Parameters: connect `source_param` on `source_node` to `target_param` on `target_node` (`two_way`, `scale`, `offset`, `expression`)." { source_node: u64, source_param: String, target_node: u64, target_param: String, two_way: Option<bool>, scale: Option<f32>, offset: Option<f32>, expression: Option<String> };
     DisconnectWireParameter => "Disconnect Wire Parameter", Loom, "Animation > Wire Parameters > Disconnect: remove parameter wire `index`." { index: u32 };

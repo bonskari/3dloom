@@ -68,6 +68,9 @@ pub struct Scene {
     /// Animation > Wire Parameters: parameter wiring links between node tracks/parameters.
     #[serde(default)]
     pub parameter_wires: Vec<ParameterWire>,
+    /// Animation > Reaction Manager: masters and the slaves that react to them.
+    #[serde(default)]
+    pub reactions: Vec<Reaction>,
     /// Solved local matrices of the chains' bones, for the scene version they were solved at.
     #[serde(skip)]
     ik_cache: std::cell::RefCell<(u64, Option<f32>, std::collections::HashMap<NodeId, Mat4>)>,
@@ -129,6 +132,43 @@ pub struct SceneStateRecord {
 }
 
 /// One parameter wiring link (`Animation > Wire Parameters > Parameter Wiring Dialog...`, Ctrl+5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Reaction {
+    pub master_node: NodeId,
+    pub master_param: String,
+    pub slaves: Vec<ReactionSlave>,
+}
+
+/// A slave track and its states: (master value, slave value) pairs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReactionSlave {
+    pub node: NodeId,
+    pub param: String,
+    pub states: Vec<(f32, f32)>,
+}
+
+impl ReactionSlave {
+    /// The slave value for `master`: straight between the states around it
+    /// (sorted by master value), the end states' values beyond them.
+    pub fn value(&self, master: f32) -> Option<f32> {
+        let mut s = self.states.clone();
+        s.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let first = *s.first()?;
+        let last = *s.last()?;
+        if master <= first.0 {
+            return Some(first.1);
+        }
+        if master >= last.0 {
+            return Some(last.1);
+        }
+        s.windows(2).find(|w| master >= w[0].0 && master <= w[1].0).map(|w| {
+            let span = w[1].0 - w[0].0;
+            let t = if span.abs() < 1e-9 { 0.0 } else { (master - w[0].0) / span };
+            w[0].1 + (w[1].1 - w[0].1) * t
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParameterWire {
     pub source_node: NodeId,
@@ -198,6 +238,7 @@ impl Scene {
             xrefs: Vec::new(),
             scene_states: Vec::new(),
             parameter_wires: Vec::new(),
+            reactions: Vec::new(),
             ik_cache: Default::default(),
             ik_solving: std::cell::Cell::new(false),
             eval_in_progress: Default::default(),

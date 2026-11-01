@@ -659,3 +659,38 @@ fn xview_configure_sets_the_overlapping_vertices_tolerance() {
     assert!(h.app.state.xview.tolerance > 2.0, "{}", h.app.state.xview.tolerance);
     assert_eq!(loom_commands::xview::results(&h.app.state, None).1, "8 Vertices");
 }
+
+/// Animation > Reaction Manager: box A's X Position is the master, box B's Z
+/// Position the slave; two states (A at 0 → B at 0, A at 100 → B at 50) make
+/// B follow A in between, and Delete State in the dialog removes one.
+#[test]
+fn reaction_manager_master_slave_and_states() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = *h.app.state.selection.iter().next().unwrap();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [40.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = *h.app.state.selection.iter().next().unwrap();
+    menu_path(&mut h, &["Animation", "Reaction Manager..."]);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::ReactionManager));
+    h.cmd(Command::AddReactionMaster { node: a.0, param: "Position X".into() });
+    h.cmd(Command::AddReactionSlave { reaction: 0, node: b.0, param: "Position Z".into() });
+    h.cmd(Command::SetReactionState { reaction: 0, slave: 0, state: None, master_value: Some(100.0), slave_value: Some(50.0) });
+    h.cmd(Command::SetTransform { id: a.0, position: Some([50.0, 0.0, 0.0]), rotation_deg: None, scale: None });
+    let z = h.app.state.scene.node(b).unwrap().transform.position.get().z;
+    assert!((z - 25.0).abs() < 1e-3, "halfway: {z}");
+    h.cmd(Command::SetTransform { id: a.0, position: Some([200.0, 0.0, 0.0]), rotation_deg: None, scale: None });
+    assert!((h.app.state.scene.node(b).unwrap().transform.position.get().z - 50.0).abs() < 1e-3, "past the last state: its value");
+    // The dialog: highlight the slave, delete its second state.
+    h.frames(2);
+    let slave = h.text_rects("    Box002 / Position Z");
+    assert!(!slave.is_empty(), "the slave row");
+    h.click(slave[0].center());
+    h.frames(1);
+    let del = h.find_all(egui::accesskit::Role::Button, "Delete State");
+    assert_eq!(del.len(), 2, "a Delete State per state");
+    h.click(del[1].center());
+    assert_eq!(h.app.state.scene.reactions[0].slaves[0].states.len(), 1);
+    h.cmd(Command::UndoSceneOperation);
+    assert_eq!(h.app.state.scene.reactions[0].slaves[0].states.len(), 2, "undoable");
+}

@@ -583,6 +583,8 @@ pub enum Dialog {
     MakeUnique,
     /// xView > Configure: the Tolerance.
     XViewConfigure,
+    /// Animation > Reaction Manager.
+    ReactionManager,
     /// File > Import (FBX, OBJ, .max).
     ImportFile,
     SaveAnimation,

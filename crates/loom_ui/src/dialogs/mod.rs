@@ -215,6 +215,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::TopologyWarning => topology_warning::show(ctx, app, &mut open),
         Dialog::MakeUnique => make_unique(ctx, app, &mut open),
         Dialog::XViewConfigure => xview_configure(ctx, app, &mut open),
+        Dialog::ReactionManager => wiring::reaction_manager(ctx, app, &mut open),
         Dialog::PickTexture | Dialog::BackgroundFile | Dialog::EnvironmentMap | Dialog::BitmapFit | Dialog::SaveUvw | Dialog::LoadUvw | Dialog::BipedSaveFig | Dialog::BipedLoadFig | Dialog::PickUvTexture | Dialog::PointCacheRecord { .. } | Dialog::PointCacheLoad { .. } => file_dialog::show(ctx, app, dialog, &mut open),
         Dialog::UnwrapOptions | Dialog::StitchTool | Dialog::RelaxTool | Dialog::PackUvs | Dialog::FlattenMapping | Dialog::NormalMapping | Dialog::UnfoldMapping | Dialog::PeltMap | Dialog::RenderUvwTemplate => unwrap_dialogs::show(ctx, app, dialog, &mut open),
         Dialog::MergeObjects => merge::show(ctx, app, &mut open),
