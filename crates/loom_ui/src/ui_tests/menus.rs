@@ -826,6 +826,7 @@ fn reaction_manager_names_point_types_graph_tools_and_start_end() {
     assert!(!h.text_rects("Start").is_empty() && !h.text_rects("End").is_empty(), "the Start / End columns");
     let slave = |h: &Harness| h.app.state.scene.reactions[0].slaves[0].clone();
     // Rename State02 in place.
+    assert!(!h.text_rects("Create State").is_empty(), "states shown; hl={:?} start={} master={}", h.ctx.data(|d| d.get_temp::<(Option<(loom_scene::NodeId, String)>, Option<(usize, Option<usize>)>)>(egui::Id::new("reaction_manager_form"))).map(|f| f.1), h.text_rects("Start").len(), h.text_rects("Box001 / Position X").len());
     h.click(h.text_rects("State02")[0].center());
     let select_all = egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
     h.run(vec![select_all]);
