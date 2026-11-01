@@ -352,7 +352,7 @@ fn more_dialog(ctx: &egui::Context, app: &mut LoomApp) {
     let mut choice: Option<String> = ctx.data(|d| d.get_temp(id));
     let mut open = true;
     let mut done: Option<bool> = None;
-    egui::Window::new("Utilities").open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
+    egui::Window::new("Utilities").id(egui::Id::new("utilities_more")).open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
         for name in loom_commands::state::UTILITIES {
             let r = ui.selectable_label(choice.as_deref() == Some(name), name);
             if r.clicked() {

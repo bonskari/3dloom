@@ -419,9 +419,9 @@ fn utilities_more_and_configure_button_sets() {
     h.app.panel_tab = crate::Tab::Utilities;
     h.frames(2);
     h.click(h.find(Role::Button, "More...").center());
-    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Utilities"))).expect("the Utilities list");
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("utilities_more"))).expect("the Utilities list");
     h.click(h.text_rect("Channel Info", win).unwrap().center());
-    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Utilities"))).unwrap();
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("utilities_more"))).unwrap();
     h.click(h.text_rect("OK", win).unwrap_or_else(|| panic!("OK in {win:?}: {:?}", h.text_rects("OK"))).center());
     assert_eq!(h.app.utility, crate::command_panel::utilities::Utility::ChannelInfo);
     assert!(!h.app.utilities_more);
