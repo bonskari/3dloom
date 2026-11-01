@@ -652,7 +652,7 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
         }
     }
     if bg.drag_stopped() {
-        if let Some(region) = ui.data_mut(|d| d.remove_temp::<egui::Rect>(region_id)) {
+        if let Some(region) = ui.data_mut(|d| { let r = d.get_temp::<egui::Rect>(region_id); d.remove::<egui::Rect>(region_id); r }) {
             if !ui.input(|i| i.modifiers.command) {
                 multi.clear();
             }
