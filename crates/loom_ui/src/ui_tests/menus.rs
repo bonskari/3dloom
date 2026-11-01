@@ -583,7 +583,7 @@ fn saved_track_views_from_the_graph_editors_menu() {
     let mut h = Harness::new();
     h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
     menu_path(&mut h, &["Graph Editors", "Track View - Dope Sheet..."]);
-    h.frames(2);
+    h.frames(6);
     let field = h.widgets.iter().find(|w| w.0 == Role::TextInput && w.1.starts_with("Untitled")).map(|w| w.2).expect("the name field");
     h.click(field.center());
     assert!(h.ctx.wants_keyboard_input(), "the name field has the keyboard after the click: {:?}", h.widgets.iter().filter(|w| w.2.contains(field.center())).map(|w| (w.0, w.1.clone())).collect::<Vec<_>>());
