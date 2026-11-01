@@ -16,6 +16,7 @@ mod light_overlay;
 pub mod live;
 pub mod main_toolbar;
 pub mod quad_menu;
+pub mod steering_wheel;
 mod realistic;
 pub mod rendered_frame;
 pub mod cli_render;
@@ -1608,6 +1609,7 @@ impl LoomApp {
                 self.quad_menu = None;
             }
         }
+        steering_wheel::show(ctx, self);
         os_window::begin(ctx, self.state.prefs.floating_os_windows, &self.os_window_rects);
         dialogs::show(ctx, self);
         dialogs::display_floater::show(ctx, self);

@@ -583,6 +583,17 @@ fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     check_item(ui, app, "Show Dependencies", "Show Dependencies Toggle", deps);
     let key_times = app.state.show_key_times;
     check_item(ui, app, "Show Key Times", "Show Key Times Toggle", key_times);
+    sub(ui, app, "SteeringWheels", |ui, app| {
+        cmd(ui, app, "Toggle SteeringWheels", Command::ToggleSteeringWheels);
+        for w in ["View Object", "Tour Building", "Full Navigation"] {
+            cmd(ui, app, &format!("Mini {w} Wheel"), Command::SteeringWheel { wheel: format!("Mini {w}") });
+        }
+        cmd(ui, app, "Full Navigation Wheel", Command::SteeringWheel { wheel: "Full Navigation".into() });
+        cmd(ui, app, "View Object Wheel", Command::SteeringWheel { wheel: "View Object".into() });
+        cmd(ui, app, "Tour Building Wheel", Command::SteeringWheel { wheel: "Tour Building".into() });
+        ui.separator();
+        cmd(ui, app, "Configure...", Command::ConfigureViewports { panel: Some("SteeringWheels".into()) });
+    });
     sub(ui, app, "xView", |ui, app| {
         for e in crate::label_menus::xview_entries(app) {
             match e.action {

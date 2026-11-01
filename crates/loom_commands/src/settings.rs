@@ -115,6 +115,8 @@ impl Settings {
     pub fn apply(&self, state: &mut AppState) {
         state.prefs = self.prefs.clone();
         state.undo.set_limit(state.prefs.undo_levels);
+        // Always Show the Pinned Wheel on Start.
+        state.wheel.open |= state.prefs.wheels.pinned_on_start;
         state.units = self.units.clone();
         state.default_units = self.units.clone();
         self.ui.apply(state);

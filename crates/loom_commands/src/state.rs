@@ -847,6 +847,8 @@ pub const KEEP_CREATING_DEFAULT: bool = false;
 #[serde(default)]
 pub struct Prefs {
     pub gizmos: GizmoPrefs,
+    /// Viewport Configuration > SteeringWheels.
+    pub wheels: crate::steering::WheelPrefs,
     /// Preferences > General > Spinners > Use Snap (Spinner Snap Toggle).
     pub spinner_snap: bool,
     /// Preferences > General > Spinners > Snap value (default 1.0).
@@ -944,6 +946,7 @@ impl Default for Prefs {
     fn default() -> Self {
         Self {
             gizmos: GizmoPrefs::default(),
+            wheels: Default::default(),
             spinner_snap: false,
             spinner_snap_value: 1.0,
             spinner_precision: 3,
@@ -2015,6 +2018,8 @@ pub struct AppState {
     pub reaction_create_mode: bool,
     /// Reaction Manager: the object picked in a viewport, its tracks offered.
     pub reaction_picked_node: Option<NodeId>,
+    /// Views > SteeringWheels: the open wheel and its Rewind history.
+    pub wheel: crate::steering::WheelState,
     /// Tools > Scene Explorer windows (saved with the scene).
     pub explorers: crate::explorer::Explorers,
     /// Graph Editors > Schematic View windows (saved with the scene).
@@ -2344,6 +2349,7 @@ impl AppState {
             anim_layer_clipboard: None,
             reaction_create_mode: false,
             reaction_picked_node: None,
+            wheel: Default::default(),
             explorers: Default::default(),
             schematics: Default::default(),
             key_time_cache: Default::default(),

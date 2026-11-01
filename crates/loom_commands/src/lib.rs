@@ -3,6 +3,7 @@
 
 pub mod command;
 pub mod anim_layers;
+pub mod steering;
 pub mod modifier_list;
 pub mod material;
 pub mod material_library;

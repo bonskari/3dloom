@@ -800,3 +800,49 @@ fn reaction_manager_any_track_blend_create_mode_pick_and_graph() {
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.reactions[0].slaves[0].states[1], before, "undoable");
 }
+
+/// Views > SteeringWheels: the wheel opens at the cursor, a drag on its Pan
+/// wedge pans the active view, Zoom zooms, Rewind (a click) goes back, the
+/// Wheel menu switches to a mini wheel, Esc closes it, the panel sets options.
+#[test]
+fn steering_wheels_open_pan_zoom_rewind_switch_close() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    h.frames(2);
+    let c = h.app.viewport_rects[h.app.state.active_viewport].center();
+    menu_path(&mut h, &["Views", "SteeringWheels", "Toggle SteeringWheels"]);
+    assert!(h.app.state.wheel.open);
+    h.run(vec![egui::Event::PointerMoved(c)]);
+    h.frames(30);
+    let at = |h: &Harness, name: &str| crate::steering_wheel::wedge_centres(&h.app, &h.ctx).into_iter().find(|(t, _)| t == name).map(|(_, p)| p).unwrap();
+    let t0 = h.app.state.active().camera.target;
+    let d0 = h.app.state.active().camera.distance;
+    let pan = at(&h, "Pan");
+    h.drag(pan, pan + egui::vec2(60.0, 0.0));
+    h.frames(30);
+    assert_ne!(h.app.state.active().camera.target, t0, "Pan moved the view");
+    let zoom = at(&h, "Zoom");
+    h.drag(zoom, zoom + egui::vec2(0.0, -40.0));
+    h.frames(30);
+    assert!(h.app.state.active().camera.distance < d0, "Zoom in");
+    let rewind = at(&h, "Rewind");
+    h.click(rewind);
+    h.frames(30);
+    assert!((h.app.state.active().camera.distance - d0).abs() < 1e-3, "Rewind undid the zoom");
+    let rewind = at(&h, "Rewind");
+    h.click(rewind);
+    h.frames(30);
+    assert!((h.app.state.active().camera.target - t0).length() < 1e-3, "and the pan");
+    h.cmd(Command::SteeringWheel { wheel: "Mini Tour Building".into() });
+    assert!(h.app.state.wheel.mini);
+    h.key(egui::Key::Escape);
+    assert!(!h.app.state.wheel.open, "Esc closes");
+    menu_path(&mut h, &["Views", "SteeringWheels", "Configure..."]);
+    h.frames(2);
+    let speed = h.app.state.prefs.wheels.walk_speed;
+    h.cmd(Command::SteeringWheelWalkSpeed { increase: false });
+    assert_eq!(h.app.state.prefs.wheels.walk_speed, speed * 0.5);
+    let look = h.text_rects("Invert Vertical Axis");
+    h.click(look[0].center());
+    assert!(h.app.state.prefs.wheels.look_invert, "the SteeringWheels panel");
+}

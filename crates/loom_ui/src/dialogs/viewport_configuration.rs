@@ -19,6 +19,7 @@ enum Tab {
     Statistics,
     Lighting,
     ViewCube,
+    SteeringWheels,
 }
 
 pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
@@ -34,6 +35,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
             "Statistics" => Tab::Statistics,
             "Lighting and Shadows" => Tab::Lighting,
             "ViewCube" => Tab::ViewCube,
+            "SteeringWheels" => Tab::SteeringWheels,
             _ => Tab::Layout,
         };
     }
@@ -51,6 +53,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 ui.selectable_value(&mut tab, Tab::Statistics, "Statistics");
                 ui.selectable_value(&mut tab, Tab::Lighting, "Lighting and Shadows");
                 ui.selectable_value(&mut tab, Tab::ViewCube, "ViewCube");
+                ui.selectable_value(&mut tab, Tab::SteeringWheels, "SteeringWheels");
             });
             ui.separator();
             match tab {
@@ -62,6 +65,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 Tab::Regions => regions_tab(ui, app),
                 Tab::Lighting => lighting_tab(ui, app),
                 Tab::ViewCube => viewcube_tab(ui, app),
+                Tab::SteeringWheels => wheels_tab(ui, app),
             }
             ui.separator();
             if ui.button("Save as Default").on_hover_text("New and reset scenes start with this viewport configuration").clicked() {
@@ -546,5 +550,76 @@ fn layout_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
         });
+    }
+}
+
+/// SteeringWheels panel: big / mini size and opacity, tool messages and
+/// tips, pinned on start, Look, Walk, Zoom and Orbit options.
+fn wheels_tab(ui: &mut egui::Ui, app: &mut LoomApp) {
+    let w = app.state.prefs.wheels;
+    let none = || Command::SetSteeringWheelPrefs { big_size: None, big_opacity: None, mini_size: None, mini_opacity: None, tool_messages: None, tool_tips: None, pinned_on_start: None, look_invert: None, walk_constrain: None, walk_speed: None, incremental_zoom: None, orbit_upright: None, orbit_selection: None };
+    let mut cmds = Vec::new();
+    ui.label(egui::RichText::new("Display Options").strong());
+    for (label, mini) in [("Big Wheels", false), ("Mini Wheels", true)] {
+        ui.label(label);
+        let (mut size, mut op) = if mini { (w.mini_size as u32, w.mini_opacity * 100.0) } else { (w.big_size as u32, w.big_opacity * 100.0) };
+        ui.horizontal(|ui| {
+            if ui.add(egui::Slider::new(&mut size, 0..=2).text("Size")).changed() {
+                let mut c = none();
+                if let Command::SetSteeringWheelPrefs { big_size, mini_size, .. } = &mut c {
+                    *if mini { mini_size } else { big_size } = Some(size);
+                }
+                cmds.push(c);
+            }
+            if ui.add(egui::Slider::new(&mut op, 0.0..=100.0).text("Opacity").suffix("%")).changed() {
+                let mut c = none();
+                if let Command::SetSteeringWheelPrefs { big_opacity, mini_opacity, .. } = &mut c {
+                    *if mini { mini_opacity } else { big_opacity } = Some(op);
+                }
+                cmds.push(c);
+            }
+        });
+    }
+    let mut flag = |ui: &mut egui::Ui, label: &str, v: bool, f: fn(&mut Command, bool)| {
+        let mut on = v;
+        if ui.checkbox(&mut on, label).changed() {
+            let mut c = none();
+            f(&mut c, on);
+            cmds.push(c);
+        }
+    };
+    macro_rules! field {
+        ($name:ident) => {
+            |c: &mut Command, on: bool| {
+                if let Command::SetSteeringWheelPrefs { $name, .. } = c {
+                    *$name = Some(on);
+                }
+            }
+        };
+    }
+    flag(ui, "Show Tool Messages", w.tool_messages, field!(tool_messages));
+    flag(ui, "Show Tool Tips", w.tool_tips, field!(tool_tips));
+    flag(ui, "Always Show the Pinned Wheel on Start", w.pinned_on_start, field!(pinned_on_start));
+    ui.separator();
+    ui.label(egui::RichText::new("Look Tool").strong());
+    flag(ui, "Invert Vertical Axis", w.look_invert, field!(look_invert));
+    ui.label(egui::RichText::new("Walk Tool").strong());
+    flag(ui, "Constrain Walk Movement Angle to Ground Plane", w.walk_constrain, field!(walk_constrain));
+    let mut speed = w.walk_speed;
+    let speed_changed = ui.add(egui::Slider::new(&mut speed, 0.1..=10.0).text("Speed Factor")).changed();
+    ui.label(egui::RichText::new("Zoom Tool").strong());
+    flag(ui, "Incremental Zoom-in", w.incremental_zoom, field!(incremental_zoom));
+    ui.label(egui::RichText::new("Orbit Tool").strong());
+    flag(ui, "Keep the Scene Upright", w.orbit_upright, field!(orbit_upright));
+    flag(ui, "Selection Sensitivity", w.orbit_selection, field!(orbit_selection));
+    if speed_changed {
+        let mut c = none();
+        if let Command::SetSteeringWheelPrefs { walk_speed, .. } = &mut c {
+            *walk_speed = Some(speed);
+        }
+        cmds.push(c);
+    }
+    for c in cmds {
+        let _ = app.dispatch(c);
     }
 }
