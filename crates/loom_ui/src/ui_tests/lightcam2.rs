@@ -493,6 +493,15 @@ fn the_light_include_exclude_tool_excludes_the_selection_from_a_picked_light() {
     assert!(!ex.include && ex.nodes == vec![b] && ex.scope == 2, "{ex:?}");
     let name = h.app.state.scene.node(b).unwrap().name.clone();
     assert!(!in_window(&h, "Light Incl/Excl", &name).is_empty(), "the Objects list shows {name}");
+    // The shaded viewports leave the box unlit by the light (its first scene light).
+    let off = |h: &Harness| h.app.world_meshes().iter().position(|(id, _)| *id == b).map(|i| h.app.world_styles()[i].lights_off);
+    assert_eq!(off(&h), Some(1), "the box is excluded from light 0");
+    let mut vp = h.app.state.viewports[0].clone();
+    vp.scene_lights = true;
+    let shading = crate::light_overlay::view_lighting(&h.app, &vp, glam::Mat4::IDENTITY, loom_render::ViewShading::default());
+    assert!(shading.flags & loom_render::view_flags::SCENE_LIGHTS != 0, "a view lit by the scene lights applies the exclusion");
     h.click(in_window(&h, "Light Incl/Excl", "Clear Light")[0]);
     assert!(light(&h, l).exclusion.nodes.is_empty());
+    h.frames(1);
+    assert_eq!(off(&h), Some(0), "cleared: lit again");
 }

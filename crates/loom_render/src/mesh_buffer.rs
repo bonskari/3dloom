@@ -103,6 +103,9 @@ pub struct MeshStyle {
     pub sub: Option<std::sync::Arc<SubStyles>>,
     /// The wireframe colour of a selected object (Customize User Interface > Colors > Selection).
     pub selection_color: [f32; 3],
+    /// Light Exclude/Include: bit i set, scene light i of a shaded viewport
+    /// (the first [`crate::MAX_VIEW_LIGHTS`]) leaves the object unlit.
+    pub lights_off: u32,
 }
 
 impl Default for MeshStyle {
@@ -126,6 +129,7 @@ impl Default for MeshStyle {
             diagonals: false,
             unlit: false,
             selection_color: [1.0, 1.0, 1.0],
+            lights_off: 0,
         }
     }
 }

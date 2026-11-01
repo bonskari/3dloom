@@ -89,6 +89,8 @@ pub mod view_flags {
     pub const TWO_SIDED: u32 = 32;
     /// Lit Wireframes: the edges take the view's lighting.
     pub const LIT_WIRE: u32 = 64;
+    /// The view's lights are the scene's: each object's `lights_off` applies.
+    pub const SCENE_LIGHTS: u32 = 128;
 }
 
 /// Shading viewport label menu modes the renderer understands.
@@ -801,7 +803,9 @@ impl ViewportRenderer {
                         pass.set_bind_group(2, shadow_group, &[]);
                         pass.set_vertex_buffer(0, mb.vertex_buffer.slice(..));
                         pass.set_index_buffer(mb.index_buffer.slice(..), IndexFormat::Uint32);
-                        pass.draw_indexed(r.start..r.start + r.count, 0, 0..1);
+                        // The instance index carries the lights the object is excluded from.
+                        let off = if flags & view_flags::SCENE_LIGHTS != 0 { mb.style.lights_off } else { 0 };
+                        pass.draw_indexed(r.start..r.start + r.count, 0, off..off + 1);
                     }
                 }
             }

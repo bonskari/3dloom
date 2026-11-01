@@ -154,6 +154,8 @@ struct VsOut {
     @location(3) color:        vec4<f32>,
     @location(4) spec:         vec4<f32>,
     @location(5) extra:        vec4<f32>,
+    /// Bit i: light i leaves the object unlit (Exclude/Include).
+    @location(6) @interpolate(flat) lights_off: u32,
 };
 
 fn ramp(x: f32, s: f32, e: f32) -> f32 {
@@ -187,7 +189,7 @@ fn falloff(l: Light, dist: f32, cos_axis: f32) -> f32 {
 }
 
 @vertex
-fn vs(in: VsIn) -> VsOut {
+fn vs(in: VsIn, @builtin(instance_index) lights_off: u32) -> VsOut {
     var out: VsOut;
     out.clip = view.view_proj * vec4<f32>(in.position, 1.0);
     out.world_normal = in.normal;
@@ -196,6 +198,7 @@ fn vs(in: VsIn) -> VsOut {
     out.color = in.color;
     out.spec = in.spec;
     out.extra = in.extra;
+    out.lights_off = lights_off;
     return out;
 }
 
@@ -254,6 +257,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         var spec = vec3<f32>(0.0);
         let count = u32(view.params.y);
         for (var i = 0u; i < count; i = i + 1u) {
+            if ((in.lights_off & (1u << i)) != 0u) {
+                continue;
+            }
             let l = view.lights[i];
             var to_light = -l.dir_hot.xyz;
             var dist = 0.0;

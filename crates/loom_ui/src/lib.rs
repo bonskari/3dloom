@@ -838,6 +838,7 @@ impl LoomApp {
         }
         let mut splits = splits.into_iter();
         let mut looks = looks.into_iter();
+        let lights = loom_scene::light::scene_lights(&self.state.scene, |_| true);
         for id in visible {
             let n = self.state.scene.node(id).expect("collected above");
             // Display Properties By Layer come from the layer.
@@ -944,6 +945,7 @@ impl LoomApp {
                 unlit,
                 selection_color: self.color_f32("Selection"),
                 sub: sub.map(std::sync::Arc::new),
+                lights_off: crate::light_overlay::lights_off(&lights, id),
                 ..base
             });
             let mut shown = shown.unwrap_or_else(|| mesh.clone());
