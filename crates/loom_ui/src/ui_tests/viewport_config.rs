@@ -225,3 +225,23 @@ fn never_degrade_keeps_an_object_shaded_while_the_view_degrades() {
     h.frames(2);
     assert!(crate::viewport_widget::shade_only(&h.app, i, &[]).is_empty(), "not degrading: nothing special");
 }
+
+/// Shading > Lighting and Shadows > Shadows turns the view's shadows on: the
+/// spot light casts them.
+#[test]
+fn the_lighting_and_shadows_menu_turns_on_viewport_shadows() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [20.0; 3] });
+    h.cmd(Command::CreateLight { kind: loom_commands::light::LightKind::TargetSpot, position: [50.0, -50.0, 100.0], target: [0.0; 3] });
+    maximized(&mut h);
+    let i = h.app.state.active_viewport;
+    h.click(label_rect(&h, 2).center());
+    let p = menu_entry(&h, "Lighting and Shadows");
+    h.run(vec![egui::Event::PointerMoved(p)]);
+    h.frames(3);
+    h.click(menu_entry(&h, "    Shadows"));
+    assert!(h.app.state.viewports[i].shadows);
+    let shading = crate::light_overlay::view_lighting(&h.app, &h.app.state.viewports[i].clone(), glam::Mat4::IDENTITY, loom_render::ViewShading::default());
+    let caster = crate::viewport_widget::shadow_caster(&h.app, &shading).expect("the spot light casts");
+    assert_eq!(caster.light, 0);
+}

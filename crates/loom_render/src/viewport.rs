@@ -675,3 +675,28 @@ mod shade_tests {
         assert_eq!(shaded_meshes(3, false, &[2, 7]), vec![2]);
     }
 }
+
+#[cfg(test)]
+mod shadow_tests {
+    use super::*;
+
+    fn light(kind: ViewLightKind) -> ViewLight {
+        ViewLight { kind, position: Vec3::new(0.0, 0.0, 100.0), direction: -Vec3::Z, color: Vec3::ONE, ..Default::default() }
+    }
+
+    /// The scene bounds land inside the light's clip space, nearer points at a smaller depth.
+    #[test]
+    fn spot_and_directional_lights_frame_the_scene_and_point_lights_cast_none() {
+        let bounds = (Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 20.0));
+        for kind in [ViewLightKind::Directional, ViewLightKind::Spot { hotspot: 40.0, falloff: 60.0 }] {
+            let m = shadow_view_proj(&light(kind), bounds).expect("a shadow map");
+            let top = m.project_point3(Vec3::new(5.0, 5.0, 20.0));
+            let bottom = m.project_point3(Vec3::new(5.0, 5.0, 0.0));
+            for p in [top, bottom] {
+                assert!(p.x.abs() <= 1.0 && p.y.abs() <= 1.0 && (0.0..=1.0).contains(&p.z), "{kind:?}: {p}");
+            }
+            assert!(top.z < bottom.z, "{kind:?}: the top is nearer the light");
+        }
+        assert!(shadow_view_proj(&light(ViewLightKind::Point), bounds).is_none());
+    }
+}
