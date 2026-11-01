@@ -163,11 +163,12 @@ fn gizmo_preferences_plane_handles_uniform_two_axis_and_relative_size() {
     let before = gizmo_reach(&h);
     h.cmd(Command::Preferences);
     h.click(h.text_rect("Gizmos", window(&h, "Preference Settings")).unwrap().center());
+    h.frames(2);
     // Plane Handles "On" sits below the Transform Gizmos "On".
     let ons = h.find_all(Role::CheckBox, "On");
     assert_eq!(ons.len(), 2, "Transform Gizmos On and Plane Handles On");
     h.click(ons[1].center());
-    assert!(!h.app.state.prefs.gizmos.move_plane_handles);
+    assert!(!h.app.state.prefs.gizmos.move_plane_handles, "clicked {:?} in {:?}", ons[1], window(&h, "Preference Settings"));
     let r = h.find(Role::CheckBox, "Uniform 2-Axis Scaling");
     h.click(r.center());
     assert!(h.app.state.prefs.gizmos.uniform_two_axis_scaling, "clicked {r:?} in {:?}", window(&h, "Preference Settings"));
