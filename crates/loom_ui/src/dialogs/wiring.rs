@@ -516,7 +516,7 @@ fn reaction_graph(ui: &mut egui::Ui, app: &mut LoomApp, ri: usize, si: usize, s:
     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("reaction_graph_points"), centres));
     // The selected Bezier point's handles.
     let mut handle_ends = Vec::new();
-    if let Some(k) = selected.filter(|k| s.point_of(*k).kind != PointKind::Corner) {
+    if let Some(k) = selected.filter(|k| *k < s.states.len() && s.point_of(*k).kind != PointKind::Corner) {
         let (m, v) = s.states[k];
         let c = to(m, v);
         for (side, h) in s.handles(k).into_iter().enumerate() {
