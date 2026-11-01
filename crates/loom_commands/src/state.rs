@@ -1008,6 +1008,10 @@ pub struct Prefs {
     /// map's alpha joins the rendered image's alpha (off: the background
     /// is transparent).
     pub use_environment_alpha: bool,
+    /// Rendering > Background > Filter Background: the antialiasing filter
+    /// also runs over the background map (off: it stays as sharp as the
+    /// pixels sample it).
+    pub filter_background: bool,
     /// Viewports > Display Driver > Antialiasing: the viewports' MSAA sample
     /// count, 1 (None) or 4. The window takes it when 3dLoom starts.
     pub viewport_antialiasing: u32,
@@ -1081,6 +1085,7 @@ impl Default for Prefs {
             render_termination_alert: false,
             dont_antialias_background: false,
             use_environment_alpha: false,
+            filter_background: false,
             viewport_antialiasing: 4,
         }
     }
@@ -1103,7 +1108,7 @@ impl Prefs {
         "Rotation Method", "Planar Angle Threshold", "Move/Rotate Projection", "Persp Sens",
         "Overrides Active", "Delay To Override", "Nth Serial Numbering",
         "Applied IK Threshold", "Applied IK Iterations", "Interactive IK Threshold", "Interactive IK Iterations", "Always Transform Children of the World",
-        "Render Termination Alert", "Don't Antialias Against Background", "Use Environment Alpha",
+        "Render Termination Alert", "Don't Antialias Against Background", "Use Environment Alpha", "Filter Background",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1188,6 +1193,7 @@ impl Prefs {
             "Render Termination Alert" => b(self.render_termination_alert),
             "Don't Antialias Against Background" => b(self.dont_antialias_background),
             "Use Environment Alpha" => b(self.use_environment_alpha),
+            "Filter Background" => b(self.filter_background),
             "Viewport Antialiasing" => self.viewport_antialiasing as f64,
             _ => return None,
         })
@@ -1276,6 +1282,7 @@ impl Prefs {
             "Render Termination Alert" => self.render_termination_alert = on,
             "Don't Antialias Against Background" => self.dont_antialias_background = on,
             "Use Environment Alpha" => self.use_environment_alpha = on,
+            "Filter Background" => self.filter_background = on,
             "Viewport Antialiasing" => self.viewport_antialiasing = if v >= 2.0 { 4 } else { 1 },
             _ => return Err(format!("unknown preference {name:?}")),
         }

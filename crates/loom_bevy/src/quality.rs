@@ -53,12 +53,22 @@ pub struct Accum {
     pub pass: u32,
     /// Per output pixel: weighted linear RGB, alpha and the weight.
     sum: Vec<[f32; 5]>,
+    /// The same through a one-pixel box: the background where no
+    /// geometry reaches (Filter Background off).
+    bg: Option<Vec<[f32; 5]>>,
 }
 
 impl Accum {
     pub fn new(key: ([f32; 4], [u32; 2]), margin: u32, ss: u32) -> Self {
         let n = (key.1[0] * key.1[1]) as usize;
-        Self { key, margin, ss: ss.max(1), pass: 0, sum: vec![[0.0; 5]; n] }
+        Self { key, margin, ss: ss.max(1), pass: 0, sum: vec![[0.0; 5]; n], bg: None }
+    }
+
+    /// Filter Background off: pixels the geometry does not reach keep the
+    /// background as their own pixel area samples it, unfiltered.
+    pub fn with_unfiltered_background(mut self) -> Self {
+        self.bg = Some(vec![[0.0; 5]; self.sum.len()]);
+        self
     }
 
     /// The size each pass renders at.
@@ -98,30 +108,12 @@ impl Accum {
         let cols = self.taps(iw, ow, jitter[0], filter, radius);
         let rows = self.taps(ih, oh, jitter[1], filter, radius);
         let lut: Vec<f32> = (0..=255u8).map(srgb_to_linear).collect();
-        // Rows first: each rendered row into the output columns.
-        let mut tmp = vec![[0.0f32; 5]; (ow * ih) as usize];
-        for y in 0..ih {
-            let line = &mut tmp[(y * ow) as usize..((y + 1) * ow) as usize];
-            for (x, taps) in cols.iter().enumerate() {
-                let p = img.get_pixel(x as u32, y).0;
-                let c = [lut[p[0] as usize], lut[p[1] as usize], lut[p[2] as usize], p[3] as f32 / 255.0, 1.0];
-                for &(o, w) in taps {
-                    let t = &mut line[o as usize];
-                    for k in 0..5 {
-                        t[k] += w * c[k];
-                    }
-                }
-            }
-        }
-        for (y, taps) in rows.iter().enumerate() {
-            for &(o, w) in taps {
-                for x in 0..ow as usize {
-                    let t = tmp[y * ow as usize + x];
-                    let s = &mut self.sum[o as usize * ow as usize + x];
-                    for k in 0..5 {
-                        s[k] += w * t[k];
-                    }
-                }
+        accumulate(&mut self.sum, img, &cols, &rows, &lut, ow);
+        if self.bg.is_some() {
+            let cols = self.taps(iw, ow, jitter[0], AaFilter::Area, 0.5);
+            let rows = self.taps(ih, oh, jitter[1], AaFilter::Area, 0.5);
+            if let Some(bg) = self.bg.as_mut() {
+                accumulate(bg, img, &cols, &rows, &lut, ow);
             }
         }
         self.pass += 1;
@@ -134,12 +126,49 @@ impl Accum {
         let [w, h] = self.key.1;
         let bg = background.map(|c| srgb_to_linear((c.clamp(0.0, 1.0) * 255.0).round() as u8));
         image::RgbaImage::from_fn(w, h, |x, y| {
-            let s = self.sum[(y * w + x) as usize];
+            let i = (y * w + x) as usize;
+            let mut s = self.sum[i];
+            // Filter Background off: where neither the filter nor the pixel
+            // itself sees geometry, the pixel's own (box) background.
+            if let Some(b) = self.bg.as_ref().map(|b| b[i]).filter(|b| b[4] > 1e-6 && b[3] <= 0.0 && s[3].abs() * 512.0 < s[4].abs().max(1e-6)) {
+                s = b;
+            }
             let n = if s[4] > 1e-6 { s[4] } else { 1.0 };
             let a = (s[3] / n).clamp(0.0, 1.0);
             let c = |k: usize| s[k] / n + bg[k] * (1.0 - a);
             image::Rgba([linear_to_srgb(c(0)), linear_to_srgb(c(1)), linear_to_srgb(c(2)), (a * 255.0).round() as u8])
         })
+    }
+}
+
+/// Adds `img` into `sum` through the per-axis `cols` / `rows` taps.
+fn accumulate(sum: &mut [[f32; 5]], img: &image::RgbaImage, cols: &[Vec<(u32, f32)>], rows: &[Vec<(u32, f32)>], lut: &[f32], ow: u32) {
+    let ih = img.height();
+    // Rows first: each rendered row into the output columns.
+    let mut tmp = vec![[0.0f32; 5]; (ow * ih) as usize];
+    for y in 0..ih {
+        let line = &mut tmp[(y * ow) as usize..((y + 1) * ow) as usize];
+        for (x, taps) in cols.iter().enumerate() {
+            let p = img.get_pixel(x as u32, y).0;
+            let c = [lut[p[0] as usize], lut[p[1] as usize], lut[p[2] as usize], p[3] as f32 / 255.0, 1.0];
+            for &(o, w) in taps {
+                let t = &mut line[o as usize];
+                for k in 0..5 {
+                    t[k] += w * c[k];
+                }
+            }
+        }
+    }
+    for (y, taps) in rows.iter().enumerate() {
+        for &(o, w) in taps {
+            for x in 0..ow as usize {
+                let t = tmp[y * ow as usize + x];
+                let s = &mut sum[o as usize * ow as usize + x];
+                for k in 0..5 {
+                    s[k] += w * t[k];
+                }
+            }
+        }
     }
 }
 
@@ -322,6 +351,34 @@ mod tests {
                 let img = a.image([1.0, 0.0, 0.0]);
                 assert!(img.pixels().all(|p| (p.0[0] as i32 - 128).abs() <= 1 && p.0[1] == 128 && p.0[3] == 255), "{f:?} ss {ss}");
             }
+        }
+    }
+
+    /// Filter Background off: a Soften filter blurs a striped background map
+    /// with it on, but off the stripes stay as the pixels sample them, while
+    /// pixels the geometry reaches keep the filtered result.
+    #[test]
+    fn an_unfiltered_background_keeps_its_stripes_and_the_geometry_stays_filtered() {
+        // 10x10 output, margin 3: background stripes (alpha 0) on even
+        // columns, a geometry block (alpha 255) at output pixels 7..=9 of x.
+        let img = image::RgbaImage::from_fn(16, 16, |x, _| if x >= 10 { image::Rgba([0, 0, 200, 255]) } else if x % 2 == 0 { image::Rgba([200, 200, 200, 0]) } else { image::Rgba([0, 0, 0, 0]) });
+        let render = |unfiltered: bool| {
+            let mut a = Accum::new(([0.0, 0.0, 1.0, 1.0], [10, 10]), 3, 1);
+            if unfiltered {
+                a = a.with_unfiltered_background();
+            }
+            a.add(&img, [0.0; 2], AaFilter::Soften, 3.0).unwrap();
+            a.image([0.0; 3])
+        };
+        let (on, off) = (render(false), render(true));
+        // Output x 1 is input column 4 (bright), x 2 is column 5 (dark).
+        let (b, d) = (off.get_pixel(1, 5).0, off.get_pixel(2, 5).0);
+        assert!(b[0] == 200 && d[0] == 0, "stripes kept: {b:?} {d:?}");
+        let (fb, fd) = (on.get_pixel(1, 5).0, on.get_pixel(2, 5).0);
+        assert!((fb[0] as i32 - fd[0] as i32).abs() < 120, "filtered blurs them: {fb:?} {fd:?}");
+        // At and next to the geometry both agree.
+        for x in 6..10 {
+            assert_eq!(on.get_pixel(x, 5), off.get_pixel(x, 5), "x {x}");
         }
     }
 

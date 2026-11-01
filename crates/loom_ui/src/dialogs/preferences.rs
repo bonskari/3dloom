@@ -161,6 +161,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 });
                 ui.group(|ui| {
                     ui.label(egui::RichText::new("Background").strong());
+                    check(ui, app, "Filter Background", "Filter Background");
                     check(ui, app, "Don't Antialias Against Background", "Don't Antialias Against Background");
                     check(ui, app, "Use Environment Alpha", "Use Environment Alpha");
                 });

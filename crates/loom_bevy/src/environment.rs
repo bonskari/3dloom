@@ -145,6 +145,9 @@ pub struct EnvSettings {
     /// Preferences > Use Environment Alpha: a render's background takes
     /// the map's alpha (off: alpha 0).
     pub use_alpha: bool,
+    /// Preferences > Filter Background: a render's antialiasing filter also
+    /// runs over the background map (off: the background stays unfiltered).
+    pub filter_background: bool,
 }
 
 /// Atmospheres the environment pass draws at once.

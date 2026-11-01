@@ -1614,7 +1614,14 @@ impl BevyRenderer {
             0
         };
         if r.accum.as_ref().is_none_or(|a| a.key != (sub, size)) {
-            r.accum = Some(quality::Accum::new((sub, size), margin, q.samples_per_side()));
+            let mut a = quality::Accum::new((sub, size), margin, q.samples_per_side());
+            // Filter Background off: a background map outside the geometry is
+            // not widened or sharpened by the filter (a plain colour stays
+            // the same through any filter, so only a map needs it).
+            if q.antialiasing && !self.env.filter_background && !self.env.use_alpha && self.env.map.is_some() && !(q.filter == loom_scene::render::AaFilter::Area && q.filter_size <= 1.0) {
+                a = a.with_unfiltered_background();
+            }
+            r.accum = Some(a);
         }
         let a = r.accum.as_ref().expect("set above");
         let (pass, ss, internal) = (a.pass, a.ss as f32, a.internal_size());
