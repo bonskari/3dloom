@@ -109,11 +109,13 @@ pub struct Playback {
     pub accum: f32,
     /// Ping Pong: +1 forward, -1 back.
     pub sign: i32,
+    /// Active Viewport Only: the other views hold the frame playback started on.
+    pub active_viewport_only: bool,
 }
 
 impl Default for Playback {
     fn default() -> Self {
-        Self { real_time: true, loop_playback: true, speed: 1.0, direction: PlayDirection::Forward, accum: 0.0, sign: 1 }
+        Self { real_time: true, loop_playback: true, speed: 1.0, direction: PlayDirection::Forward, accum: 0.0, sign: 1, active_viewport_only: true }
     }
 }
 
@@ -175,6 +177,7 @@ pub fn handles(c: &Command) -> bool {
             | C::MoveKeysInTime { .. }
             | C::CopyKeys { .. }
             | C::SetPlayback { .. }
+            | C::SetActiveViewportOnly { .. }
             | C::RescaleTime { .. }
             | C::TickPlayback { .. }
             | C::SaveAnimation { .. }
@@ -366,6 +369,10 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
         }
         C::MoveKeysInTime { from, to, delta } => shift_keys(state, from, to, delta, false),
         C::CopyKeys { from, to, delta } => shift_keys(state, from, to, delta, true),
+        C::SetActiveViewportOnly { on } => {
+            state.playback.active_viewport_only = on;
+            Ok(json!({ "active_viewport_only": on }))
+        }
         C::SetPlayback { real_time, loop_playback, speed, direction } => {
             let p = &mut state.playback;
             if let Some(v) = real_time {

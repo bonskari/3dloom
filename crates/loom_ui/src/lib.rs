@@ -402,6 +402,11 @@ pub struct LoomApp {
     pub degrading: bool,
     /// Grab Viewport: the screenshot asked for, and the viewport rect (points) to cut from it.
     pub grab_pending: Option<(usize, egui::Rect)>,
+    /// Active Viewport Only: the inactive views as they were when playback
+    /// started (from a screenshot), shown until it stops.
+    pub frozen_views: std::collections::HashMap<usize, egui::TextureHandle>,
+    pub freeze_pending: Option<Vec<(usize, egui::Rect)>>,
+    pub was_playing: bool,
     /// The Add / Edit Time Tag dialog.
     pub tag_dialog: Option<statusbar::TagDialog>,
     /// The last raw input events (live diagnostics).
@@ -597,6 +602,9 @@ impl LoomApp {
             button_look: None,
             degrading: false,
             grab_pending: None,
+            frozen_views: Default::default(),
+            freeze_pending: None,
+            was_playing: false,
             tag_dialog: None,
             input_log: Default::default(),
         }
@@ -1363,6 +1371,48 @@ impl LoomApp {
     /// Grab Viewport: asks the window for a screenshot, then cuts the
     /// viewport out of it into the Rendered Frame Window (and the Viewport
     /// Captures folder, when one is set).
+    /// Active Viewport Only: on the frame playback starts, a screenshot keeps
+    /// every other visible view; they show it until playback stops.
+    fn freeze_inactive_views(&mut self, ctx: &egui::Context) {
+        let playing = self.state.playing;
+        if playing && !self.was_playing && self.state.playback.active_viewport_only {
+            let active = self.state.active_viewport;
+            let others: Vec<(usize, egui::Rect)> = self.viewport_rects.iter().copied().enumerate().filter(|(i, r)| *i != active && r.width() >= 2.0 && r.height() >= 2.0).collect();
+            if !others.is_empty() {
+                self.freeze_pending = Some(others);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new("freeze")));
+            }
+        }
+        self.was_playing = playing;
+        if !playing {
+            self.frozen_views.clear();
+            self.freeze_pending = None;
+            return;
+        }
+        let Some(others) = self.freeze_pending.clone() else { return };
+        let shot = ctx.input(|i| i.events.iter().find_map(|e| match e {
+            egui::Event::Screenshot { image, .. } => Some(image.clone()),
+            _ => None,
+        }));
+        let Some(image) = shot else { return };
+        self.freeze_pending = None;
+        let ppp = ctx.pixels_per_point();
+        let [w, h] = image.size;
+        for (index, rect) in others {
+            let x0 = ((rect.min.x * ppp).round().max(0.0) as usize).min(w);
+            let y0 = ((rect.min.y * ppp).round().max(0.0) as usize).min(h);
+            let x1 = ((rect.max.x * ppp).round().max(0.0) as usize).clamp(x0, w);
+            let y1 = ((rect.max.y * ppp).round().max(0.0) as usize).clamp(y0, h);
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            let pixels: Vec<egui::Color32> = (y0..y1).flat_map(|y| image.pixels[y * w + x0..y * w + x1].iter().copied()).collect();
+            let img = egui::ColorImage { size: [x1 - x0, y1 - y0], pixels };
+            let tex = ctx.load_texture(format!("frozen_view_{index}"), img, egui::TextureOptions::LINEAR);
+            self.frozen_views.insert(index, tex);
+        }
+    }
+
     fn grab_viewport(&mut self, ctx: &egui::Context) {
         if let Some(index) = self.state.grab_request.take() {
             if let Some(rect) = self.viewport_rects.get(index).copied() {
@@ -1614,6 +1664,7 @@ impl LoomApp {
         dialogs::show(ctx, self);
         dialogs::display_floater::show(ctx, self);
         self.grab_viewport(ctx);
+        self.freeze_inactive_views(ctx);
         menubar::help_windows(ctx, self);
         toolbars::button_appearance(ctx, self);
         command_panel::utilities::measure_floater(ctx, self);

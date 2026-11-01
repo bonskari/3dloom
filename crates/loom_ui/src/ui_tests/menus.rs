@@ -930,3 +930,31 @@ fn play_selected_flyout_and_time_slider_capture() {
     h.click(egui::pos2(800.0, 400.0));
     assert!(!h.app.state.time_capture, "a click ends it");
 }
+
+/// Time Configuration > Active Viewport Only: playback starting asks for a
+/// screenshot; the other views then show their part of it until it stops.
+#[test]
+fn active_viewport_only_freezes_the_inactive_views() {
+    let mut h = Harness::new();
+    h.frames(2);
+    assert!(h.app.state.playback.active_viewport_only, "on by default");
+    h.cmd(Command::TimeConfiguration);
+    h.frames(2);
+    let avo = h.text_rects("Active Viewport Only");
+    h.click(avo[0].center());
+    assert!(!h.app.state.playback.active_viewport_only);
+    h.click(avo[0].center());
+    assert!(h.app.state.playback.active_viewport_only);
+    h.cmd(Command::PlayAnimation);
+    h.frames(1);
+    assert!(h.app.freeze_pending.is_some(), "a screenshot was asked for");
+    let size = [(h.screen.width()) as usize, (h.screen.height()) as usize];
+    let image = std::sync::Arc::new(egui::ColorImage::new(size, egui::Color32::from_rgb(10, 200, 30)));
+    h.run(vec![egui::Event::Screenshot { viewport_id: egui::ViewportId::ROOT, user_data: egui::UserData::new("freeze"), image }]);
+    let shown = h.app.viewport_rects.iter().enumerate().filter(|(i, r)| *i != h.app.state.active_viewport && r.width() >= 2.0).count();
+    assert_eq!(h.app.frozen_views.len(), shown, "every other view frozen");
+    assert!(!h.app.frozen_views.contains_key(&h.app.state.active_viewport), "not the active one");
+    h.cmd(Command::PlayAnimation);
+    h.frames(1);
+    assert!(h.app.frozen_views.is_empty(), "stopped: live again");
+}

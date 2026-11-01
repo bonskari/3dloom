@@ -67,6 +67,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 if ui.checkbox(&mut rt, "Real Time").changed() {
                     let _ = app.dispatch(Command::SetPlayback { real_time: Some(rt), loop_playback: None, speed: None, direction: None });
                 }
+                let mut avo = pb.active_viewport_only;
+                if ui.checkbox(&mut avo, "Active Viewport Only").changed() {
+                    let _ = app.dispatch(Command::SetActiveViewportOnly { on: avo });
+                }
                 let mut lp = pb.loop_playback;
                 if ui.checkbox(&mut lp, "Loop").changed() {
                     let _ = app.dispatch(Command::SetPlayback { real_time: None, loop_playback: Some(lp), speed: None, direction: None });

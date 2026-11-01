@@ -1358,6 +1358,12 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             crate::spline_modes::draw(&painter, app, &projection);
             draw_mode_overlays(&painter, app, view_proj, rect);
             draw_soft_selection(&painter, app, view_proj, rect);
+            // Active Viewport Only: an inactive view holds the frame playback started on.
+            if app.state.playing && !is_active {
+                if let Some(tex) = app.frozen_views.get(&index) {
+                    painter.image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                }
+            }
             draw_patch_lattice(&painter, app, view_proj, rect);
             draw_subobject_overlay(&painter, app, view_proj, rect);
             // Preview Selection: the sub-object under the cursor glows yellow.
