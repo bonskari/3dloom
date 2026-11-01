@@ -440,3 +440,20 @@ fn utilities_more_and_configure_button_sets() {
     assert_eq!(h.app.state.utility_buttons.first().map(String::as_str), Some("Panorama Exporter"));
     assert!(h.app.state.utility_buttons.len() < 10, "fewer buttons: {:?}", h.app.state.utility_buttons);
 }
+
+/// Views > Show Key Times: the key points of a shown trajectory get their frame numbers.
+#[test]
+fn views_show_key_times_numbers_the_trajectory_keys() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::SetFrame { frame: 37 });
+    h.cmd(Command::MoveSelection { delta: [40.0, 0.0, 0.0], system: None });
+    h.cmd(Command::AutoKeyModeToggle);
+    h.cmd(Command::ShowTrajectoriesToggle);
+    h.frames(2);
+    assert!(h.text_rects("37").is_empty());
+    menu_path(&mut h, &["Views", "Show Key Times"]);
+    h.frames(2);
+    assert!(!h.text_rects("37").is_empty(), "the key at frame 37 is numbered");
+}

@@ -3002,6 +3002,9 @@ fn draw_trajectories(painter: &egui::Painter, app: &LoomApp, view_proj: glam::Ma
                 let sel = app.state.trajectory_keys && app.state.trajectory_selected.contains(f);
                 let r = egui::Rect::from_center_size(*s, egui::vec2(7.0, 7.0));
                 painter.rect_filled(r, 0.0, if sel { egui::Color32::WHITE } else { egui::Color32::from_rgb(220, 40, 40) });
+                if app.state.show_key_times {
+                    painter.text(*s + egui::vec2(6.0, -6.0), egui::Align2::LEFT_BOTTOM, f.to_string(), egui::FontId::proportional(11.0), egui::Color32::WHITE);
+                }
             } else {
                 painter.circle_filled(*s, 1.5, egui::Color32::WHITE);
             }

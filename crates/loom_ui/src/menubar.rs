@@ -581,6 +581,8 @@ fn views_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     check_item(ui, app, "Update During Spinner Drag", "Update During Spinner Drag", spinner);
     let deps = app.state.show_dependencies;
     check_item(ui, app, "Show Dependencies", "Show Dependencies Toggle", deps);
+    let key_times = app.state.show_key_times;
+    check_item(ui, app, "Show Key Times", "Show Key Times Toggle", key_times);
     item(ui, app, "Create Camera From View", "Create Camera From View");
     item(ui, app, "Add Default Lights to Scene...", "Add Default Lights to Scene");
     item(ui, app, "Redraw All Views", "Redraw All Views");

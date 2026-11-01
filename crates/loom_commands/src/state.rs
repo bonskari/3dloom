@@ -1721,6 +1721,8 @@ pub struct AppState {
     pub track_bar_frame_numbers: bool,
     /// Views > Show Dependencies.
     pub show_dependencies: bool,
+    /// Views > Show Key Times.
+    pub show_key_times: bool,
     /// Utilities panel buttons (Configure Button Sets), by utility name.
     pub utility_buttons: Vec<String>,
     pub show_vertices: bool,
@@ -2149,6 +2151,7 @@ impl AppState {
             show_all_sets_in_list: false,
             track_bar_frame_numbers: true,
             show_dependencies: false,
+            show_key_times: false,
             utility_buttons: UTILITIES.iter().map(|s| (*s).to_owned()).collect(),
             show_vertices: false,
             show_statistics: false,
