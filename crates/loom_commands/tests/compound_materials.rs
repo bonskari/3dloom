@@ -538,3 +538,18 @@ fn a_bitmap_sequence_plays_by_bitmap_time() {
     assert_eq!(red_at(&mut s, 3), colours[1], "from frame 1 at half rate: frame 3 is file 2");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn real_world_scale_makes_tiling_the_size_one_image_covers() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Use Real-World Scale".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Tiling U".into(), value: 50.0 }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Tiling V".into(), value: 25.0 }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    let c = s.scene.materials[&top(&s)].map("Diffuse Color").unwrap().coords.clone();
+    // Real-world UVs are scene units: 50 units across U, 25 across V is one image.
+    let a = c.apply([0.0, 0.0]);
+    let b = c.apply([50.0, 25.0]);
+    assert!((b[0] - a[0] - 1.0).abs() < 1e-5 && (b[1] - a[1] - 1.0).abs() < 1e-5, "{a:?} -> {b:?}");
+}

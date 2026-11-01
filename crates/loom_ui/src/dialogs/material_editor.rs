@@ -1822,8 +1822,9 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
         crate::command_panel::rollout(ui, "Coordinates", true, |ui| {
             let c = &map.coords;
             ui.label("Texture: Explicit Map Channel");
+            map_check(ui, app, "Use Real-World Scale", "Use Real-World Scale", c.real_world);
             egui::Grid::new("map_coords").num_columns(5).show(ui, |ui| {
-                for h in ["", "Offset", "Tiling", "Mirror", "Tile"] {
+                for h in ["", "Offset", if c.real_world { "Size" } else { "Tiling" }, "Mirror", "Tile"] {
                     ui.label(h);
                 }
                 ui.end_row();

@@ -408,3 +408,16 @@ fn bitmap_time_end_condition_radio() {
     let m = &h.app.state.scene.materials[&ed.slots[ed.active].unwrap()];
     assert_eq!(m.map("Diffuse Color").unwrap().time.end, 1);
 }
+
+#[test]
+fn use_real_world_scale_check_box() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() });
+    scroll_to(&mut h, "Use Real-World Scale");
+    click_in_editor(&mut h, "Use Real-World Scale", 0.0);
+    h.frames(2);
+    let ed = &h.app.state.scene.material_editor;
+    let m = &h.app.state.scene.materials[&ed.slots[ed.active].unwrap()];
+    assert!(m.map("Diffuse Color").unwrap().coords.real_world);
+    assert!(!h.text_rects("Size").is_empty(), "Tiling reads Size");
+}

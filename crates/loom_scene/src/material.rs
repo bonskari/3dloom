@@ -166,11 +166,14 @@ pub struct MapCoords {
     pub angle: f32,
     pub map_channel: u32,
     pub blur: f32,
+    /// Use Real-World Scale: `tiling` holds the Width / Height (scene
+    /// units) one image covers on real-world UVs (UVW Map's Real-World Map Size).
+    pub real_world: bool,
 }
 
 impl Default for MapCoords {
     fn default() -> Self {
-        Self { offset: [0.0; 2], tiling: [1.0; 2], mirror: [false; 2], tile: [true; 2], angle: 0.0, map_channel: 1, blur: 1.0 }
+        Self { offset: [0.0; 2], tiling: [1.0; 2], mirror: [false; 2], tile: [true; 2], angle: 0.0, map_channel: 1, blur: 1.0, real_world: false }
     }
 }
 
@@ -183,7 +186,8 @@ impl MapCoords {
         let u = uv[0] - 0.5 - self.offset[0];
         let v = uv[1] - 0.5 - self.offset[1];
         let (ru, rv) = (u * c - v * s, u * s + v * c);
-        [ru * self.tiling[0] + 0.5, rv * self.tiling[1] + 0.5]
+        let t = if self.real_world { self.tiling.map(|w| if w.abs() > 1e-6 { 1.0 / w } else { 0.0 }) } else { self.tiling };
+        [ru * t[0] + 0.5, rv * t[1] + 0.5]
     }
 
     /// As `apply`, as a 2×3 matrix [a, b, c, d, e, f]: u' = a u + b v + c, v' = d u + e v + f.
@@ -424,6 +428,7 @@ impl Map {
             "End Condition" => self.time.end = (value.clamp(0.0, 2.0)) as u8,
             "Offset U" => c.offset[0] = v,
             "Offset V" => c.offset[1] = v,
+            "Use Real-World Scale" => c.real_world = on,
             "Tiling U" => c.tiling[0] = v,
             "Tiling V" => c.tiling[1] = v,
             // Mirror and Tile exclude each other on an axis.
