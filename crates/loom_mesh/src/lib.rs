@@ -16,6 +16,7 @@ pub mod stl;
 pub mod tds;
 pub mod dxf;
 pub mod uvmap;
+pub mod vrml;
 pub mod unwrap;
 pub mod optimize;
 pub mod pc2;

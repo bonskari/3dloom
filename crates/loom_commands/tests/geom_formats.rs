@@ -139,3 +139,20 @@ fn ase_round_trip_keeps_meshes_pivots_and_multi_sub_materials() {
     execute(&mut t, Command::UndoSceneOperation).unwrap();
     assert_eq!(t.scene.len(), 0, "one undo entry");
 }
+
+#[test]
+fn vrml_import_places_shapes_with_their_materials_z_up() {
+    let path = dir().join("world.wrl");
+    std::fs::write(&path, "#VRML V2.0 utf8\nDEF Post Transform { translation 0 5 0 children [ Shape { appearance Appearance { material Material { diffuseColor 1 0 0 } } geometry Box { size 2 10 2 } } ] }\n").unwrap();
+    let mut s = AppState::new();
+    let r = execute(&mut s, Command::ImportFile { path: Some(path.to_string_lossy().into_owned()) }).unwrap();
+    assert_eq!(r["nodes"].as_array().map(|a| a.len()), Some(1));
+    let n = s.scene.nodes().find(|n| n.name == "Post").expect("named after its DEF");
+    assert!(matches!(n.object, ObjectKind::EditableMesh(_)));
+    let (lo, hi) = bounds(&s, n.id);
+    assert!(close((lo, hi), (Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, 1.0, 10.0))), "VRML +Y up is +Z: {lo} {hi}");
+    let m = s.scene.materials.get(&n.material.unwrap()).unwrap();
+    assert_eq!(m.diffuse.get(), Vec3::new(1.0, 0.0, 0.0));
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_eq!(s.scene.len(), 0, "one undo entry");
+}

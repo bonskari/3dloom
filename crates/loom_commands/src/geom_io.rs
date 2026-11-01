@@ -35,6 +35,10 @@ pub fn is_dae(path: &Path) -> bool {
     ext(path) == "dae"
 }
 
+pub fn is_vrml(path: &Path) -> bool {
+    matches!(ext(path).as_str(), "wrl" | "wrz")
+}
+
 pub fn is_stl(path: &Path) -> bool {
     ext(path) == "stl"
 }
@@ -388,6 +392,66 @@ pub fn export_stl(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value
     let bytes = if state.exchange.stl_export.binary { loom_mesh::stl::write_binary(&name, &tris) } else { loom_mesh::stl::write_ascii(&name, &tris).into_bytes() };
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(json!({ "path": path, "triangles": tris.len(), "binary": state.exchange.stl_export.binary }))
+}
+
+/// VRML97 import (.wrl, gzipped .wrz): each Shape as an Editable Mesh at its
+/// frame (Turn to 3DS Coordinates: +Y up becomes +Z), named after the
+/// nearest DEF above it; each distinct Appearance becomes a Standard
+/// material (diffuse, specular, shininess, transparency, ImageTexture).
+pub fn import_vrml(state: &mut AppState, path: &Path) -> Result<Value, String> {
+    let bytes = read_bytes(path)?;
+    let bytes = if bytes.starts_with(&[0x1f, 0x8b]) {
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut out).map_err(|e| format!("{}: {e}", path.display()))?;
+        out
+    } else {
+        bytes
+    };
+    let shapes = loom_mesh::vrml::read(&String::from_utf8_lossy(&bytes), true).map_err(|e| format!("{}: {e}", path.display()))?;
+    if shapes.is_empty() {
+        return Err(format!("{}: no geometry", path.display()));
+    }
+    let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let mut library = state.scene.materials.clone();
+    let mut made: Vec<(loom_mesh::vrml::VrmlMaterial, MaterialId)> = Vec::new();
+    let mut nodes = Vec::new();
+    for sh in shapes {
+        let mut node = mesh_node(&sh.name, sh.mesh);
+        node.transform = Transform::from_matrix(sh.matrix);
+        if let Some(m) = sh.material {
+            let id = match made.iter().find(|(v, _)| *v == m) {
+                Some((_, id)) => *id,
+                None => {
+                    let id = loom_scene::material::next_material_id(&library);
+                    let mut s = StandardMaterial::new(m.name.clone().unwrap_or_else(|| format!("Material #{}", made.len() + 1)));
+                    let v = |c: [f32; 3]| Vec3::from(c).clamp(Vec3::ZERO, Vec3::ONE);
+                    s.diffuse.set(v(m.diffuse));
+                    s.ambient.set(v(m.diffuse));
+                    s.specular.set(v(m.specular));
+                    s.glossiness.set((m.shininess * 100.0).clamp(0.0, 100.0));
+                    s.opacity.set(((1.0 - m.transparency) * 100.0).clamp(0.0, 100.0));
+                    if let Some(t) = &m.texture {
+                        s.diffuse_map = Some(BitmapMap::bitmap(resolve(&dir, t), 100.0));
+                        s.show_map_in_viewport = true;
+                    }
+                    library.insert(id, s);
+                    made.push((m, id));
+                    id
+                }
+            };
+            node.material = Some(id);
+        }
+        nodes.push(node);
+    }
+    let mut changes = Vec::new();
+    if library != state.scene.materials {
+        changes.push(Change::SetMaterials {
+            before: Box::new((state.scene.materials.clone(), state.scene.material_editor.clone())),
+            after: Box::new((library, state.scene.material_editor.clone())),
+        });
+    }
+    let ids = add_nodes(state, &label("Import", path), changes, nodes)?;
+    Ok(json!({ "nodes": ids.iter().map(|i| i.0).collect::<Vec<_>>(), "materials": made.len() }))
 }
 
 /// ASCII Scene Export import: each GEOMOBJECT as an Editable Mesh (its

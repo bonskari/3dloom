@@ -551,7 +551,7 @@ fn import_reads_an_ascii_scene_export_file() {
     assert!(h.app.state.scene.node(id).is_none());
     h.cmd(Command::ImportFile { path: None });
     h.frames(2);
-    assert!(h.text_rect("*.fbx, *.obj, *.max, *.3ds, *.stl, *.dxf, *.ai, *.ase", SCREEN).is_some(), "the file type list offers .ase");
+    assert!(h.text_rect("*.fbx, *.obj, *.max, *.3ds, *.stl, *.dxf, *.ai, *.ase, *.wrl, *.wrz", SCREEN).is_some(), "the file type list offers .ase");
     choose_file(&mut h, &path, "Open");
     h.frames(2);
     let n = h.app.state.scene.nodes().find(|n| n.name == "Crate").unwrap_or_else(|| panic!("{:?}", h.app.last_error));
