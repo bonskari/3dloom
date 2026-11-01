@@ -62,6 +62,10 @@ fn material(m: &MaxMaterial, ids: &[MaterialId], max: &Path, w: &mut Vec<String>
                     w.push(format!("{}: map file {path} was not found", s.name));
                     path.clone()
                 });
+                if *slot == "Ambient Color" {
+                    // A map of its own in the file: the Ambient map is not locked to Diffuse.
+                    out.ambient_map_locked = false;
+                }
                 if let Ok(slot) = out.map_slot_mut(slot) {
                     *slot = Some(loom_scene::material::Map::bitmap(file, *amount));
                 }
