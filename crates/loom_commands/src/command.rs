@@ -1755,6 +1755,7 @@ commands! {
     // --- Loom (agent API, no UI action) ---
     State => "State", Loom, "Scene snapshot: nodes, selection, tool, view and camera.";
     CreateExtendedPrimitive => "Create Extended Primitive", Loom, "Create an Extended Primitive (Hedra, ChamferBox, OilTank, Spindle, Gengon, Prism, Torus Knot, ChamferCyl, Capsule, L-Ext, C-Ext) at a base position with a size (width X, length Y, height Z) its dimensions follow." { kind: String, position: [f32; 3], size: [f32; 3] };
+    CreateExtendedShape => "Create Extended Shape", Loom, "Create an Extended Shape (WRectangle, Channel, Angle, Tee, Wide Flange) centred at `position` with `size` (width X, length Y; thickness a fifth of the smaller)." { kind: String, position: [f32; 3], size: [f32; 3] };
     CreatePrimitive => "Create Primitive", Loom, "Create a standard primitive at a base-centre position with a size (width X, length Y, height Z); radii derive from the size." { kind: PrimitiveKind, position: [f32; 3], size: [f32; 3] };
     CreateShape => "Create Shape", Loom, "Create > Shapes: a parametric shape at `position` (size: [width, length, height] of its bounds)." { kind: ShapeKind, position: [f32; 3], size: [f32; 3] };
     ConvertToEditableSpline => "Convert to Editable Spline", Loom, "Convert the selected shapes to Editable Splines (quad menu > Convert To).";

@@ -4210,3 +4210,28 @@ fn every_extended_primitive_creates_with_its_parameters() {
         assert!(h.app.world_styles().len() == h.app.state.scene.len(), "{k:?} draws");
     }
 }
+
+/// Create > Shapes > Extended Shapes > Channel: a drag corner to corner sets
+/// its width and length; its splines follow.
+#[test]
+fn channel_from_the_extended_shapes_class_by_drag() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.app.panel_tab = crate::Tab::Create;
+    h.app.create_category = crate::Category::Shapes;
+    h.frames(2);
+    h.click(h.text_rects("Splines")[0].center());
+    h.click(h.text_rects("Extended Shapes")[0].center());
+    h.frames(1);
+    h.click(h.text_rects("Channel")[0].center());
+    maximized(&mut h);
+    let r = h.app.viewport_rects[h.app.state.active_viewport];
+    let a = r.center() + egui::vec2(-80.0, 60.0);
+    h.drag(a, a + egui::vec2(160.0, 80.0));
+    assert!(h.app.create.is_none(), "one drag makes it");
+    let id = *h.app.state.selection.iter().next().unwrap();
+    let n = h.app.state.scene.node(id).unwrap();
+    assert_eq!(n.object.base_name(), "Channel");
+    assert!(param(&h, "Width") > 0.0 && param(&h, "Length") > 0.0 && param(&h, "Thickness") > 0.0);
+    assert_eq!(n.object.shape().unwrap().splines[0].knots.len(), 8);
+}

@@ -353,6 +353,8 @@ pub enum ObjectKind {
     Ellipse { length: Param<f32>, width: Param<f32>, common: ShapeCommon },
     Arc { radius: Param<f32>, from: Param<f32>, to: Param<f32>, pie_slice: Param<bool>, reverse: Param<bool>, common: ShapeCommon },
     Donut { radius1: Param<f32>, radius2: Param<f32>, common: ShapeCommon },
+    /// Create > Shapes > Extended Shapes: `values` follow `kind.params()`.
+    ExtendedShape { kind: loom_shape::parametric::ExtendedShape, values: Vec<Param<f32>>, common: ShapeCommon },
     NGon { radius: Param<f32>, inscribed: Param<bool>, sides: Param<u32>, corner_radius: Param<f32>, circular: Param<bool>, common: ShapeCommon },
     Star { radius1: Param<f32>, radius2: Param<f32>, points: Param<u32>, distortion: Param<f32>, fillet1: Param<f32>, fillet2: Param<f32>, common: ShapeCommon },
     Helix { radius1: Param<f32>, radius2: Param<f32>, height: Param<f32>, turns: Param<f32>, bias: Param<f32>, cw: Param<bool>, common: ShapeCommon },
@@ -1070,6 +1072,9 @@ impl ObjectKind {
     pub fn rectangle_object(length: f32, width: f32) -> Self {
         Self::Rectangle { length: p(length), width: p(width), corner_radius: p(0.0), common: ShapeCommon::default() }
     }
+    pub fn extended_shape_object(kind: loom_shape::parametric::ExtendedShape) -> Self {
+        Self::ExtendedShape { kind, values: kind.defaults().into_iter().map(p).collect(), common: ShapeCommon::default() }
+    }
     pub fn circle_object(radius: f32) -> Self {
         Self::Circle { radius: p(radius), common: ShapeCommon::default() }
     }
@@ -1175,6 +1180,7 @@ impl ObjectKind {
             Self::Ellipse { length, width, common } => common.apply(Shape::from_splines(vec![sp::ellipse(length.get(), width.get())])),
             Self::Arc { radius, from, to, pie_slice, reverse, common } => common.apply(Shape::from_splines(vec![sp::arc(radius.get(), from.get(), to.get(), pie_slice.get(), reverse.get())])),
             Self::Donut { radius1, radius2, common } => common.apply(Shape::from_splines(sp::donut(radius1.get(), radius2.get()))),
+            Self::ExtendedShape { kind, values, common } => common.apply(Shape::from_splines(kind.splines(&values.iter().map(|x| x.get()).collect::<Vec<f32>>()))),
             Self::NGon { radius, inscribed, sides, corner_radius, circular, common } => common.apply(Shape::from_splines(vec![sp::ngon(radius.get(), inscribed.get(), sides.get(), corner_radius.get(), circular.get())])),
             Self::Star { radius1, radius2, points, distortion, fillet1, fillet2, common } => common.apply(Shape::from_splines(vec![sp::star(radius1.get(), radius2.get(), points.get(), distortion.get(), fillet1.get(), fillet2.get())])),
             Self::Helix { radius1, radius2, height, turns, bias, cw, common } => common.apply(Shape::from_splines(vec![sp::helix(radius1.get(), radius2.get(), height.get(), turns.get(), bias.get(), cw.get())])),
@@ -1183,7 +1189,7 @@ impl ObjectKind {
     }
 
     pub fn is_shape(&self) -> bool {
-        matches!(self, Self::EditableSpline(_) | Self::Rectangle { .. } | Self::Circle { .. } | Self::Ellipse { .. } | Self::Arc { .. } | Self::Donut { .. } | Self::NGon { .. } | Self::Star { .. } | Self::Helix { .. })
+        matches!(self, Self::EditableSpline(_) | Self::Rectangle { .. } | Self::Circle { .. } | Self::Ellipse { .. } | Self::Arc { .. } | Self::Donut { .. } | Self::ExtendedShape { .. } | Self::NGon { .. } | Self::Star { .. } | Self::Helix { .. })
     }
 
     pub fn spline(&self) -> Option<&ShapeObject> {
@@ -1212,7 +1218,7 @@ impl ObjectKind {
     fn shape_common(&self) -> Option<ShapeCommon> {
         match self {
             Self::EditableSpline(s) => Some(ShapeCommon { steps: p(s.shape.steps), optimize: p(s.shape.optimize), adaptive: p(s.shape.adaptive), render: s.shape.render.clone() }),
-            Self::Rectangle { common, .. } | Self::Circle { common, .. } | Self::Ellipse { common, .. } | Self::Arc { common, .. } | Self::Donut { common, .. } | Self::NGon { common, .. } | Self::Star { common, .. } | Self::Helix { common, .. } => Some(common.clone()),
+            Self::Rectangle { common, .. } | Self::Circle { common, .. } | Self::Ellipse { common, .. } | Self::Arc { common, .. } | Self::Donut { common, .. } | Self::ExtendedShape { common, .. } | Self::NGon { common, .. } | Self::Star { common, .. } | Self::Helix { common, .. } => Some(common.clone()),
             _ => None,
         }
     }
@@ -1247,7 +1253,7 @@ impl ObjectKind {
                 s.shape.adaptive = c.adaptive.get();
                 s.shape.render = c.render;
             }
-            Self::Rectangle { common, .. } | Self::Circle { common, .. } | Self::Ellipse { common, .. } | Self::Arc { common, .. } | Self::Donut { common, .. } | Self::NGon { common, .. } | Self::Star { common, .. } | Self::Helix { common, .. } => *common = c,
+            Self::Rectangle { common, .. } | Self::Circle { common, .. } | Self::Ellipse { common, .. } | Self::Arc { common, .. } | Self::Donut { common, .. } | Self::ExtendedShape { common, .. } | Self::NGon { common, .. } | Self::Star { common, .. } | Self::Helix { common, .. } => *common = c,
             _ => {}
         }
         Some(Ok(()))
@@ -1300,6 +1306,7 @@ impl ObjectKind {
             Self::Ellipse { .. } => "Ellipse",
             Self::Arc { .. } => "Arc",
             Self::Donut { .. } => "Donut",
+            Self::ExtendedShape { kind, .. } => kind.label(),
             Self::NGon { .. } => "NGon",
             Self::Star { .. } => "Star",
             Self::Helix { .. } => "Helix",
@@ -1494,6 +1501,7 @@ impl ObjectKind {
             Self::Circle { radius, .. } => [vec![("Radius", f(radius))], self.shape_common_params()].concat(),
             Self::Ellipse { length, width, .. } => [vec![("Length", f(length)), ("Width", f(width))], self.shape_common_params()].concat(),
             Self::Arc { radius, from, to, pie_slice, reverse, .. } => [vec![("Radius", f(radius)), ("From", f(from)), ("To", f(to)), ("Pie Slice", b(pie_slice)), ("Reverse", b(reverse))], self.shape_common_params()].concat(),
+            Self::ExtendedShape { kind, values, .. } => [kind.params().iter().zip(values).map(|(spec, x)| (spec.0, f(x))).collect::<Vec<_>>(), self.shape_common_params()].concat(),
             Self::Donut { radius1, radius2, .. } => [vec![("Radius 1", f(radius1)), ("Radius 2", f(radius2))], self.shape_common_params()].concat(),
             Self::NGon { radius, inscribed, sides, corner_radius, circular, .. } => [vec![("Radius", f(radius)), ("Inscribed", b(inscribed)), ("Sides", i(sides)), ("Corner Radius", f(corner_radius)), ("Circular", b(circular))], self.shape_common_params()].concat(),
             Self::Star { radius1, radius2, points, distortion, fillet1, fillet2, .. } => [vec![("Radius 1", f(radius1)), ("Radius 2", f(radius2)), ("Points", i(points)), ("Distortion", f(distortion)), ("Fillet Radius 1", f(fillet1)), ("Fillet Radius 2", f(fillet2))], self.shape_common_params()].concat(),
@@ -1537,6 +1545,12 @@ impl ObjectKind {
         let int = |x: &mut Param<u32>, min: u32| x.set((value.round().max(0.0) as u32).max(min));
         let bl = |x: &mut Param<bool>| x.set(value != 0.0);
         let ok = Ok(());
+        if let Self::ExtendedShape { kind, values, .. } = self {
+            let i = kind.params().iter().position(|p| p.0 == name).ok_or_else(|| format!("{} has no parameter {name:?}", kind.label()))?;
+            values.resize_with(kind.params().len().max(values.len()), || p(0.0));
+            values[i].set(v.max(0.0));
+            return Ok(());
+        }
         if let Self::Extended { kind, values, gen_mapping } = self {
             if name == "Generate Mapping Coords." {
                 bl(gen_mapping);

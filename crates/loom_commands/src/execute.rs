@@ -2108,6 +2108,16 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let id = add_object(state, object, Vec3::from(position) + Vec3::Z * z)?;
             Ok(json!({ "id": id.0, "name": state.scene.node(id).map(|n| n.name.clone()) }))
         }
+        C::CreateExtendedShape { kind, position, size } => {
+            use loom_shape::parametric::ExtendedShape;
+            let k = ExtendedShape::parse(&kind).ok_or_else(|| format!("no Extended Shape {kind:?} ({})", ExtendedShape::ALL.map(|k| k.label()).join(", ")))?;
+            let mut object = ObjectKind::extended_shape_object(k);
+            object.set_parameter("Width", size[0] as f64)?;
+            object.set_parameter("Length", size[1] as f64)?;
+            object.set_parameter("Thickness", (size[0].min(size[1]) * 0.2) as f64)?;
+            let id = add_object(state, object, Vec3::from(position))?;
+            Ok(json!({ "id": id.0, "name": state.scene.node(id).map(|n| n.name.clone()) }))
+        }
         C::CreateShape { kind, position, size } => {
             let size = Vec3::from(size);
             let r = size.x.max(size.y) * 0.5;

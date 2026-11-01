@@ -187,3 +187,120 @@ mod tests {
         assert!((hi.x - 5.0).abs() < 0.02 && (lo.y + 5.0).abs() < 0.02);
     }
 }
+
+/// Create > Shapes > Extended Shapes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ExtendedShape {
+    WRectangle,
+    Channel,
+    Angle,
+    Tee,
+    WideFlange,
+}
+
+impl ExtendedShape {
+    pub const ALL: [ExtendedShape; 5] = [ExtendedShape::WRectangle, ExtendedShape::Channel, ExtendedShape::Angle, ExtendedShape::Tee, ExtendedShape::WideFlange];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ExtendedShape::WRectangle => "WRectangle",
+            ExtendedShape::Channel => "Channel",
+            ExtendedShape::Angle => "Angle",
+            ExtendedShape::Tee => "Tee",
+            ExtendedShape::WideFlange => "Wide Flange",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<ExtendedShape> {
+        let k = s.trim().replace(' ', "").to_ascii_lowercase();
+        Self::ALL.into_iter().find(|e| e.label().replace(' ', "").to_ascii_lowercase() == k)
+    }
+
+    /// The Parameters rollout, in order, with defaults.
+    pub fn params(self) -> &'static [(&'static str, f32)] {
+        match self {
+            ExtendedShape::WRectangle | ExtendedShape::Channel | ExtendedShape::Angle => {
+                &[("Length", 50.0), ("Width", 30.0), ("Thickness", 5.0), ("Corner Radius 1", 0.0), ("Corner Radius 2", 0.0)]
+            }
+            ExtendedShape::Tee | ExtendedShape::WideFlange => &[("Length", 50.0), ("Width", 30.0), ("Thickness", 5.0), ("Corner Radius", 0.0)],
+        }
+    }
+
+    pub fn defaults(self) -> Vec<f32> {
+        self.params().iter().map(|p| p.1).collect()
+    }
+
+    /// The splines for `values` (in [`Self::params`] order), centred on the
+    /// origin: `length` along Y, `width` along X.
+    pub fn splines(self, values: &[f32]) -> Vec<Spline> {
+        let get = |i: usize| values.get(i).copied().unwrap_or(self.params()[i].1).max(0.0);
+        let (l, w) = (get(0), get(1));
+        let t = get(2).min(w * 0.5).min(l * 0.5);
+        let (hw, hl) = (w * 0.5, l * 0.5);
+        match self {
+            ExtendedShape::WRectangle => {
+                let (r1, r2) = (get(3), get(4));
+                vec![outline(&[(v(-hw, -hl), r1), (v(hw, -hl), r1), (v(hw, hl), r1), (v(-hw, hl), r1)]), outline(&[(v(-hw + t, -hl + t), r2), (v(hw - t, -hl + t), r2), (v(hw - t, hl - t), r2), (v(-hw + t, hl - t), r2)])]
+            }
+            ExtendedShape::Channel => {
+                // Open towards +X: the back runs along the left side.
+                let (r1, r2) = (get(3), get(4));
+                vec![outline(&[
+                    (v(-hw, -hl), r1), (v(hw, -hl), 0.0), (v(hw, -hl + t), 0.0), (v(-hw + t, -hl + t), r2),
+                    (v(-hw + t, hl - t), r2), (v(hw, hl - t), 0.0), (v(hw, hl), 0.0), (v(-hw, hl), r1),
+                ])]
+            }
+            ExtendedShape::Angle => {
+                let (r1, r2) = (get(3), get(4));
+                vec![outline(&[(v(-hw, -hl), r1), (v(hw, -hl), 0.0), (v(hw, -hl + t), 0.0), (v(-hw + t, -hl + t), r2), (v(-hw + t, hl), 0.0), (v(-hw, hl), 0.0)])]
+            }
+            ExtendedShape::Tee => {
+                // The flange across the top, the stem down the middle.
+                let r = get(3);
+                let ht = t * 0.5;
+                vec![outline(&[
+                    (v(-ht, -hl), 0.0), (v(ht, -hl), 0.0), (v(ht, hl - t), r), (v(hw, hl - t), 0.0),
+                    (v(hw, hl), 0.0), (v(-hw, hl), 0.0), (v(-hw, hl - t), 0.0), (v(-ht, hl - t), r),
+                ])]
+            }
+            ExtendedShape::WideFlange => {
+                let r = get(3);
+                let ht = t * 0.5;
+                vec![outline(&[
+                    (v(-hw, -hl), 0.0), (v(hw, -hl), 0.0), (v(hw, -hl + t), 0.0), (v(ht, -hl + t), r),
+                    (v(ht, hl - t), r), (v(hw, hl - t), 0.0), (v(hw, hl), 0.0), (v(-hw, hl), 0.0),
+                    (v(-hw, hl - t), 0.0), (v(-ht, hl - t), r), (v(-ht, -hl + t), r), (v(-hw, -hl + t), 0.0),
+                ])]
+            }
+        }
+    }
+}
+
+/// A closed outline of corner knots, each rounded by its radius.
+fn outline(corners: &[(Vec3, f32)]) -> Spline {
+    let mut s = Spline::new(corners.iter().map(|(p, _)| Knot::corner(*p)).collect(), true);
+    // From the last corner back, so the indices of those still to round stay put.
+    for (i, (_, r)) in corners.iter().enumerate().rev() {
+        if *r > 1e-6 {
+            fillet_or_chamfer(&mut s, i, *r, true);
+        }
+    }
+    s
+}
+
+#[cfg(test)]
+mod extended_tests {
+    use super::*;
+
+    #[test]
+    fn extended_shapes_have_their_outlines() {
+        let counts: Vec<(usize, usize)> = ExtendedShape::ALL.iter().map(|k| {
+            let s = k.splines(&k.defaults());
+            (s.len(), s[0].knots.len())
+        }).collect();
+        assert_eq!(counts, [(2, 4), (1, 8), (1, 6), (1, 8), (1, 12)]);
+        // Rounded corners add a knot each.
+        let s = ExtendedShape::WRectangle.splines(&[50.0, 30.0, 5.0, 3.0, 0.0]);
+        assert_eq!((s[0].knots.len(), s[1].knots.len()), (8, 4));
+    }
+}

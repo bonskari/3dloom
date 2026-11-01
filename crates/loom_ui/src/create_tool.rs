@@ -80,6 +80,8 @@ pub struct CreateSession {
     method: &'static str,
     /// An Extended Primitive instead of a standard one, with the size its steps set (width, length, height).
     extended: Option<(loom_mesh::extended_primitives::ExtendedKind, Vec3)>,
+    /// An Extended Shape, dragged corner to corner in one step.
+    ext_shape: Option<loom_shape::parametric::ExtendedShape>,
 }
 
 impl CreateSession {
@@ -94,6 +96,7 @@ impl CreateSession {
         let (kind, shape) = match what {
             CreateKind::Primitive(k) => (k, None),
             CreateKind::Extended(_) => (PrimitiveKind::Box, None),
+            CreateKind::ExtendedShape(_) => (PrimitiveKind::Box, None),
             CreateKind::PatchGrid { .. } => (PrimitiveKind::Plane, None),
             CreateKind::Shape(sk) => (PrimitiveKind::Box, Some(sk)),
             CreateKind::Line | CreateKind::Bones | CreateKind::Biped | CreateKind::Helper(_) | CreateKind::Camera { .. } | CreateKind::Light(_) | CreateKind::SunSystem { .. } => return None,
@@ -102,13 +105,19 @@ impl CreateSession {
             CreateKind::Extended(k) => Some(k),
             _ => None,
         };
+        let ext_shape = match what {
+            CreateKind::ExtendedShape(k) => Some(k),
+            _ => None,
+        };
         let label = match (patch, extended) {
             (_, Some(k)) => format!("Create {}", k.label()),
+            _ if ext_shape.is_some() => format!("Create {}", ext_shape.map(|k| k.label()).unwrap_or_default()),
             (Some(q), None) => format!("Create {}", if q { "Quad Patch" } else { "Tri Patch" }),
             (None, None) => format!("Create {}", shape.map(|s| s.label()).unwrap_or(kind.label())),
         };
         app.state.undo.begin(&label);
         let created = match (shape, patch) {
+            _ if ext_shape.is_some() => app.dispatch(Command::CreateExtendedShape { kind: ext_shape.map(|k| k.label().to_owned()).unwrap_or_default(), position: anchor.to_array(), size: [0.0; 3] }).ok(),
             _ if extended.is_some() => app.dispatch(Command::CreateExtendedPrimitive { kind: extended.map(|k| k.label().to_owned()).unwrap_or_default(), position: anchor.to_array(), size: [0.0; 3] }).ok(),
             (_, Some(quad)) => app.dispatch(Command::CreatePatchGrid { quad, position: anchor.to_array(), length: 0.0, width: 0.0 }).ok(),
             (Some(sk), None) => app.dispatch(Command::CreateShape { kind: sk, position: anchor.to_array(), size: [0.0, 0.0, 0.0] }).ok(),
@@ -120,7 +129,7 @@ impl CreateSession {
             return None;
         };
         let method = if shape.is_some() { "" } else if patch.is_some() { "Rectangle" } else { app.creation_method(kind) };
-        let session = Self { kind, shape, node, label, step: Step::Dragging, anchor, basis, step_origin: pointer, units_per_px, radius1: 0.0, height: 0.0, method, extended: extended.map(|k| (k, Vec3::ZERO)) };
+        let session = Self { kind, shape, node, label, step: Step::Dragging, anchor, basis, step_origin: pointer, units_per_px, radius1: 0.0, height: 0.0, method, extended: extended.map(|k| (k, Vec3::ZERO)), ext_shape };
         // Orient the object to the construction plane (local Z = plane normal).
         let rot = glam::Quat::from_rotation_arc(Vec3::Z, basis.2);
         let e = rot.to_euler(glam::EulerRot::XYZ);
@@ -158,6 +167,16 @@ impl CreateSession {
         }
         if self.extended.is_some() {
             self.extended_move(app, ground, dy_px);
+            return;
+        }
+        if self.ext_shape.is_some() {
+            if let Some(g) = ground {
+                let (u, v) = self.plane_uv(g);
+                self.place(app, self.anchor + self.basis.0 * (u * 0.5) + self.basis.1 * (v * 0.5));
+                self.set(app, "Width", u.abs());
+                self.set(app, "Length", v.abs());
+                self.set(app, "Thickness", u.abs().min(v.abs()) * 0.2);
+            }
             return;
         }
         match self.step {
@@ -333,6 +352,10 @@ impl CreateSession {
         use PrimitiveKind as K;
         if self.step != Step::Dragging {
             return false;
+        }
+        if self.ext_shape.is_some() {
+            self.finish(app);
+            return true;
         }
         if let Some((k, _)) = self.extended {
             use loom_mesh::extended_primitives::ExtendedKind as E;

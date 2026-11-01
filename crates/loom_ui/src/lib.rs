@@ -132,6 +132,8 @@ pub enum CreateKind {
     Primitive(PrimitiveKind),
     /// Geometry > Extended Primitives.
     Extended(loom_mesh::extended_primitives::ExtendedKind),
+    /// Shapes > Extended Shapes, dragged corner to corner.
+    ExtendedShape(loom_shape::parametric::ExtendedShape),
     Shape(ShapeKind),
     Line,
     /// Systems > Bones: clicks lay joints, a right-click ends the chain.
@@ -240,6 +242,8 @@ pub struct LoomApp {
     pub create_compound: bool,
     /// Create > Geometry shows the Extended Primitives object types.
     pub create_extended: bool,
+    /// Create > Shapes shows the Extended Shapes object types.
+    pub create_extended_shapes: bool,
     /// Create > Geometry shows the Patch Grids object types.
     pub create_patch_grids: bool,
     /// Compound Objects > Object Type button pressed.
@@ -504,6 +508,7 @@ impl LoomApp {
             create_kind: None,
             create_compound: false,
             create_extended: false,
+            create_extended_shapes: false,
             create_patch_grids: false,
             compound_kind: None,
             line: None,

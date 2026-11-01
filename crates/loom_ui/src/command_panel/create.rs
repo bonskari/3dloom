@@ -198,9 +198,38 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             }
             parameters(ui, app);
         }
+        Category::Shapes if app.create_extended_shapes => {
+            egui::ComboBox::from_id_salt("create_shape_class").selected_text("Extended Shapes").show_ui(ui, |ui| {
+                if ui.selectable_label(false, "Splines").clicked() {
+                    app.create_extended_shapes = false;
+                    app.create_kind = None;
+                }
+                let _ = ui.selectable_label(true, "Extended Shapes");
+            });
+            rollout(ui, "Object Type", true, |ui| {
+                autogrid_and_pin(ui, app);
+                egui::Grid::new("extended_shape_type").num_columns(2).show(ui, |ui| {
+                    for (i, kind) in loom_shape::parametric::ExtendedShape::ALL.iter().enumerate() {
+                        let on = app.create_kind == Some(CreateKind::ExtendedShape(*kind));
+                        if ui.add_sized([110.0, 22.0], egui::SelectableLabel::new(on, kind.label())).clicked() {
+                            app.start_create((!on).then_some(CreateKind::ExtendedShape(*kind)));
+                        }
+                        if i % 2 == 1 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            });
+            name_and_color(ui, app);
+            parameters(ui, app);
+        }
         Category::Shapes => {
             egui::ComboBox::from_id_salt("create_shape_class").selected_text("Splines").show_ui(ui, |ui| {
                 let _ = ui.selectable_label(true, "Splines");
+                if ui.selectable_label(false, "Extended Shapes").clicked() {
+                    app.create_extended_shapes = true;
+                    app.create_kind = None;
+                }
             });
             rollout(ui, "Object Type", true, |ui| {
                 autogrid_and_pin(ui, app);
