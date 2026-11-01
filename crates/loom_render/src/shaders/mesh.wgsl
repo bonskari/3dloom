@@ -75,10 +75,10 @@ fn ambient_occlusion(p: vec3<f32>, n: vec3<f32>, px: vec2<f32>) -> f32 {
         let s = w.xyz / w.w;
         let v = s - p;
         let dist = length(v);
-        if (dist < 1e-4 || dist > radius) {
+        if (dist < radius * 0.05 || dist > radius) {
             continue;
         }
-        occ = occ + max(dot(n, v / dist) - 0.1, 0.0) * (1.0 - dist / radius);
+        occ = occ + max(dot(n, v / dist) - 0.25, 0.0) * (1.0 - dist / radius);
     }
     return clamp(1.0 - view.ao.z * 2.0 * occ / f32(count), 0.0, 1.0);
 }
