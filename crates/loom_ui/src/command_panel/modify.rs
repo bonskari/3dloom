@@ -146,7 +146,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let mut dropped: Option<(usize, usize, Option<bool>)> = None;
     let mut rename: Option<(usize, String)> = None;
     let stack_height = app.stack_height;
-    egui::Frame::group(ui.style()).show(ui, |ui| {
+    let stack_frame = egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_min_height(stack_height);
         ui.set_min_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = 1.0;
@@ -359,8 +359,9 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
     });
     // The bar under the stack display: dragging it makes the display taller or shorter.
-    let bar = ui.allocate_response(egui::vec2(ui.available_width(), 6.0), egui::Sense::drag());
-    ui.painter().hline(bar.rect.x_range(), bar.rect.center().y, egui::Stroke::new(2.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color));
+    let frame_rect = stack_frame.response.rect;
+    let bar_rect = egui::Rect::from_min_max(egui::pos2(frame_rect.left(), frame_rect.bottom() - 3.0), egui::pos2(frame_rect.right(), frame_rect.bottom() + 2.0));
+    let bar = ui.interact(bar_rect, egui::Id::new("stack_resize_bar"), egui::Sense::drag());
     icons::named(&bar, egui::WidgetType::Other, "Stack Resize Bar");
     if bar.hovered() || bar.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
