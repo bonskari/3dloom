@@ -222,6 +222,11 @@ fn effects_list_and_parameters() {
         assert_eq!((g.streak.on, g.streak.qty, g.streak.width.get()), (true, 2, 1.5));
         assert_eq!((g.ray.on, g.ray.qty), (true, 250));
     }
+    ok(&mut s, "Lens Ring Parameters", json!({ "index": 0, "on": true, "size": 12.0, "thickness": 6.0, "plane": 50.0 }));
+    {
+        let EffectKind::Glow(g) = &s.scene.environment.effects[0].kind else { panic!() };
+        assert_eq!((g.ring.on, g.ring.size.get(), g.ring.thickness.get(), g.ring.plane.get()), (true, 12.0, 6.0, 50.0));
+    }
     ok(&mut s, "Blur Parameters", json!({ "index": 1, "blur_type": "Directional", "u_radius": 6.0, "rotation": 45.0, "non_background": true, "blend": 30.0 }));
     ok(&mut s, "Brightness and Contrast Parameters", json!({ "index": 2, "brightness": 0.7, "contrast": 0.6, "ignore_background": true }));
     ok(&mut s, "Color Balance Parameters", json!({ "index": 3, "cyan_red": 40.0, "yellow_blue": -20.0, "preserve_luminosity": true }));

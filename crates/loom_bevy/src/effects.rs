@@ -4,7 +4,7 @@
 //! sRGB RGBA; background pixels are the ones with alpha 0 ("Ignore
 //! Background", "Non-Background").
 
-use crate::environment::{Blur, ImageEffect, Star};
+use crate::environment::{Blur, ImageEffect, Ring, Star};
 use image::RgbaImage;
 use loom_scene::environment::BlurType;
 
@@ -14,6 +14,7 @@ pub fn apply(img: &mut RgbaImage, effects: &[ImageEffect]) {
         match fx {
             ImageEffect::Glow { size, intensity, use_source_color, inner, outer, bright } => glow(img, *size, *intensity, *use_source_color, *inner, *outer, *bright),
             ImageEffect::Star(s) => star(img, s),
+            ImageEffect::Ring(r) => ring(img, r),
             ImageEffect::Blur(b) => blur(img, b),
             ImageEffect::BrightnessContrast { brightness, contrast, ignore_background } => per_pixel(img, *ignore_background, |c| brightness_contrast(c, *brightness, *contrast)),
             ImageEffect::ColorBalance { cyan_red, magenta_green, yellow_blue, preserve_luminosity, ignore_background } => {
@@ -282,6 +283,49 @@ fn star(img: &mut RgbaImage, s: &Star) {
     }
 }
 
+/// Lens Effects Ring: a band `thickness` pixels wide, `size` % of the image
+/// diagonal in radius, round each bright area's centre moved `plane` % of
+/// the way towards the image centre; inner colour on its inside edge, outer
+/// on its outside.
+fn ring(img: &mut RgbaImage, r: &Ring) {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    let radius = r.size.max(0.0) / 100.0 * ((w * w + h * h) as f32).sqrt();
+    let half = (r.thickness.max(0.0) * 0.5).max(0.5);
+    let k = r.intensity.max(0.0) / 100.0;
+    let mix = (r.use_source_color / 100.0).clamp(0.0, 1.0);
+    let mid = [w as f32 * 0.5, h as f32 * 0.5];
+    let mut add = vec![[0.0f32; 3]; w * h];
+    for (c, src) in bright_centres(img, r.bright / 255.0) {
+        let t = r.plane / 100.0;
+        let c = [c[0] + (mid[0] - c[0]) * t, c[1] + (mid[1] - c[1]) * t];
+        let reach = radius + half * 3.0;
+        let (x0, x1) = ((c[0] - reach).floor().max(0.0) as usize, (c[0] + reach).ceil().clamp(0.0, w as f32 - 1.0) as usize);
+        let (y0, y1) = ((c[1] - reach).floor().max(0.0) as usize, (c[1] + reach).ceil().clamp(0.0, h as f32 - 1.0) as usize);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let d = ((x as f32 + 0.5 - c[0]).powi(2) + (y as f32 + 0.5 - c[1]).powi(2)).sqrt() - radius;
+                let a = (-0.5 * (d / half).powi(2)).exp();
+                if a < 1e-3 {
+                    continue;
+                }
+                let side = ((d / half) * 0.5 + 0.5).clamp(0.0, 1.0);
+                let i = y * w + x;
+                for j in 0..3 {
+                    let radial = r.inner[j] * (1.0 - side) + r.outer[j] * side;
+                    add[i][j] += (radial * (1.0 - mix) + src[j] * mix) * a * k;
+                }
+            }
+        }
+    }
+    for (i, p) in img.pixels_mut().enumerate() {
+        let c = to_f(p.0);
+        p.0 = [to_u8(c[0] + add[i][0]), to_u8(c[1] + add[i][1]), to_u8(c[2] + add[i][2]), p.0[3]];
+    }
+}
+
 /// Samples `src` at (x, y) with bilinear filtering, clamped to the edges.
 fn sample(src: &[[f32; 4]], w: usize, h: usize, x: f32, y: f32) -> [f32; 4] {
     let x = x.clamp(0.0, (w - 1) as f32);
@@ -455,6 +499,18 @@ mod tests {
         apply(&mut r, &[ImageEffect::Star(Star { scatter: true, qty: 60, width: 0.3, ..s })]);
         let ring: Vec<u8> = (0..72).map(|k| { let a = (k as f32 * 5.0).to_radians(); r.get_pixel((50.0 + 10.0 * a.cos()).round() as u32, (50.0 + 10.0 * a.sin()).round() as u32).0[0] }).collect();
         assert!(ring.iter().filter(|v| **v > 20).count() > 10 && ring.iter().filter(|v| **v < 5).count() > 5, "{ring:?}");
+    }
+
+    #[test]
+    fn ring_circles_a_bright_spot_at_its_radius() {
+        let mut i = RgbaImage::from_pixel(101, 101, image::Rgba([0, 0, 0, 255]));
+        i.put_pixel(50, 50, image::Rgba([255, 255, 255, 255]));
+        // Radius 10% of the diagonal (about 14 px), 3 px thick, red.
+        apply(&mut i, &[ImageEffect::Ring(Ring { size: 10.0, intensity: 100.0, plane: 0.0, thickness: 3.0, use_source_color: 0.0, inner: [1.0, 0.0, 0.0], outer: [1.0, 0.0, 0.0], bright: 200.0 })]);
+        for (x, y) in [(64, 50), (36, 50), (50, 64), (50, 36)] {
+            assert!(i.get_pixel(x, y).0[0] > 120, "on the ring at ({x}, {y}): {:?}", i.get_pixel(x, y));
+        }
+        assert!(i.get_pixel(57, 50).0[0] < 10, "inside it dark: {:?}", i.get_pixel(57, 50));
     }
 
     #[test]

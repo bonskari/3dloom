@@ -73,10 +73,24 @@ pub enum ImageEffect {
     Glow { size: f32, intensity: f32, use_source_color: f32, inner: [f32; 3], outer: [f32; 3], bright: f32 },
     /// Lens Effects Star / Streak at the centre of each area brighter than `bright`.
     Star(Star),
+    /// Lens Effects Ring round the centre of each area brighter than `bright`.
+    Ring(Ring),
     Blur(Blur),
     BrightnessContrast { brightness: f32, contrast: f32, ignore_background: bool },
     ColorBalance { cyan_red: f32, magenta_green: f32, yellow_blue: f32, preserve_luminosity: bool, ignore_background: bool },
     FilmGrain { grain: f32, ignore_background: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ring {
+    pub size: f32,
+    pub intensity: f32,
+    pub plane: f32,
+    pub thickness: f32,
+    pub use_source_color: f32,
+    pub inner: [f32; 3],
+    pub outer: [f32; 3],
+    pub bright: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -194,6 +208,19 @@ impl EnvSettings {
                         outer: rgb(g.outer_color.get_at(t)),
                         bright: g.bright.get_at(t),
                     });
+                    if g.ring.on {
+                        let r = &g.ring;
+                        effects.push(ImageEffect::Ring(Ring {
+                            size: r.size.get_at(t),
+                            intensity: r.intensity.get_at(t),
+                            plane: r.plane.get_at(t),
+                            thickness: r.thickness.get_at(t),
+                            use_source_color: r.use_source_color.get_at(t),
+                            inner: rgb(r.inner_color.get_at(t)),
+                            outer: rgb(r.outer_color.get_at(t)),
+                            bright: g.bright.get_at(t),
+                        }));
+                    }
                     for (el, scatter) in [(&g.star, false), (&g.streak, false), (&g.ray, true)].into_iter().filter(|(el, _)| el.on) {
                         effects.push(ImageEffect::Star(Star {
                             scatter,

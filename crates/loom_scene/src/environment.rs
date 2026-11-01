@@ -214,11 +214,12 @@ pub struct Glow {
     pub streak: StarElement,
     /// Ray element: `qty` (Num) thin rays, randomly spaced, of random lengths.
     pub ray: StarElement,
+    pub ring: RingElement,
 }
 
 impl Default for Glow {
     fn default() -> Self {
-        Self { size: p(5.0), intensity: p(100.0), use_source_color: p(100.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE), bright: p(200.0), star: StarElement::star(), streak: StarElement::streak(), ray: StarElement::ray() }
+        Self { size: p(5.0), intensity: p(100.0), use_source_color: p(100.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE), bright: p(200.0), star: StarElement::star(), streak: StarElement::streak(), ray: StarElement::ray(), ring: RingElement::default() }
     }
 }
 
@@ -259,6 +260,31 @@ impl StarElement {
 
     pub fn ray() -> Self {
         Self { size: p(20.0), width: p(0.15), qty: 100, ..Self::star() }
+    }
+}
+
+/// Lens Effects Ring element: a colour band round each bright area's centre.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RingElement {
+    pub on: bool,
+    /// Radius, % of the image diagonal.
+    pub size: Param<f32>,
+    pub intensity: Param<f32>,
+    /// Where the ring sits on the line from the source through the image
+    /// centre: % of that distance (0 at the source; this build's unit).
+    pub plane: Param<f32>,
+    /// Band thickness, pixels.
+    pub thickness: Param<f32>,
+    pub use_source_color: Param<f32>,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+}
+
+impl Default for RingElement {
+    /// This build's starting values.
+    fn default() -> Self {
+        Self { on: false, size: p(5.0), intensity: p(100.0), plane: p(0.0), thickness: p(4.0), use_source_color: p(0.0), inner_color: p(Vec3::ONE), outer_color: p(Vec3::ONE) }
     }
 }
 

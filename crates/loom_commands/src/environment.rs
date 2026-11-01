@@ -51,6 +51,7 @@ pub fn handles(c: &C) -> bool {
             | C::EffectEntry { .. }
             | C::GlowParameters { .. }
             | C::LensElementParameters { .. }
+            | C::LensRingParameters { .. }
             | C::BlurParameters { .. }
             | C::BrightnessContrastParameters { .. }
             | C::ColorBalanceParameters { .. }
@@ -350,6 +351,22 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_opt(&mut el.inner_color, inner_color.map(colour).transpose()?);
             set_opt(&mut el.outer_color, outer_color.map(colour).transpose()?);
             commit(state, "Lens Element Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::LensRingParameters { index, on, size, intensity, plane, thickness, use_source_color, inner_color, outer_color } => {
+            let EffectKind::Glow(g) = &mut effect_mut(&mut e, index)?.kind else { return Err(not_a(index, "Lens Effects")) };
+            let r = &mut g.ring;
+            if let Some(v) = on {
+                r.on = v;
+            }
+            set_opt(&mut r.size, size.map(|v| range("size", v, 0.0, 100.0)).transpose()?);
+            set_opt(&mut r.intensity, intensity.map(|v| range("intensity", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut r.plane, plane.map(|v| range("plane", v, -1000.0, 1000.0)).transpose()?);
+            set_opt(&mut r.thickness, thickness.map(|v| range("thickness", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut r.use_source_color, use_source_color.map(|v| percent("use source color", v)).transpose()?);
+            set_opt(&mut r.inner_color, inner_color.map(colour).transpose()?);
+            set_opt(&mut r.outer_color, outer_color.map(colour).transpose()?);
+            commit(state, "Lens Ring Parameters", e)?;
             Ok(json!({ "index": index }))
         }
         C::BlurParameters { index, blur_type, radius, u_radius, v_radius, u_trail, v_trail, rotation, radial_trail, origin, affect_alpha, non_background, brighten, blend } => {
