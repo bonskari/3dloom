@@ -387,7 +387,8 @@ fn file_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn edit_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     let undo = app.state.undo.labels().last().cloned().unwrap_or_default();
     item(ui, app, &format!("Undo {undo}"), "Undo Scene Operation");
-    item(ui, app, "Redo", "Redo Scene Operation");
+    let redo = app.state.undo.redo_labels().last().cloned().unwrap_or_default();
+    item(ui, app, &format!("Redo {redo}"), "Redo Scene Operation");
     ui.separator();
     item(ui, app, "Hold", "Hold");
     item(ui, app, "Fetch", "Fetch");

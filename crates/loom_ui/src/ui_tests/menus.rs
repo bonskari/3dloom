@@ -1309,3 +1309,49 @@ fn reaction_manager_influence_manipulators_in_viewport() {
     h.cmd(Command::UndoSceneOperation);
     assert_eq!(h.app.state.scene.reactions[0].slaves[0].states[1].0, 10.0, "one undo step");
 }
+
+/// Display > Hide: Unhide by Name... is unavailable while nothing is
+/// hidden; after Hide Selected it opens its dialog.
+#[test]
+fn unhide_buttons_wait_for_something_hidden() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    h.app.panel_tab = crate::Tab::Display;
+    h.frames(3);
+    h.click(h.find(Role::Button, "Unhide by Name...").center());
+    assert!(h.app.state.dialog.is_none(), "nothing hidden: the button is unavailable");
+    h.cmd(Command::HideSelection);
+    h.frames(2);
+    h.click(h.find(Role::Button, "Unhide by Name...").center());
+    assert!(h.app.state.dialog.is_some(), "now it opens Unhide Objects");
+}
+
+/// Edit > Redo names the operation it redoes.
+#[test]
+fn redo_menu_item_names_its_operation() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let label = h.app.state.undo.labels().last().cloned().unwrap();
+    h.cmd(Command::UndoSceneOperation);
+    h.click(h.find(Role::Button, "Edit").center());
+    h.frames(2);
+    assert!(h.has(Role::Button, &format!("Redo {label}")), "Redo {label} in the Edit menu");
+}
+
+/// Edit Named Selection Sets: Add Selected / Subtract Selected change a set's members.
+#[test]
+fn named_set_add_and_subtract_selected() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let a = selected(&h);
+    h.cmd(Command::NamedSelectionSet { name: "props".into() });
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [30.0, 0.0, 0.0], size: [10.0; 3] });
+    let b = selected(&h);
+    h.cmd(Command::EditNamedSelectionSets);
+    h.frames(2);
+    h.click(h.find(Role::Button, "Add Selected").center());
+    assert_eq!(h.app.state.named_sets.get("props"), Some(&vec![a, b]));
+    h.cmd(Command::SelectNodes { ids: vec![a.0], op: loom_commands::SelectOp::Replace });
+    h.click(h.find(Role::Button, "Subtract Selected").center());
+    assert_eq!(h.app.state.named_sets.get("props"), Some(&vec![b]));
+}

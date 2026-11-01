@@ -2559,6 +2559,21 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.named_sets.insert(name.clone(), state.selection.iter().copied().collect());
             Ok(json!({ "set": name, "count": state.selection.len() }))
         }
+        // Edit Named Selections > Add / Subtract Selected Objects.
+        C::NamedSetAddSelected { name } => {
+            let set = state.named_sets.get_mut(&name).ok_or_else(|| format!("no named set `{name}`"))?;
+            for id in state.selection.iter().copied() {
+                if !set.contains(&id) {
+                    set.push(id);
+                }
+            }
+            Ok(json!({ "set": name, "count": set.len() }))
+        }
+        C::NamedSetSubtractSelected { name } => {
+            let set = state.named_sets.get_mut(&name).ok_or_else(|| format!("no named set `{name}`"))?;
+            set.retain(|id| !state.selection.contains(id));
+            Ok(json!({ "set": name, "count": set.len() }))
+        }
         C::SelectNamedSet { name } => {
             let ids = state.named_sets.get(&name).cloned().ok_or_else(|| format!("no named set `{name}`"))?;
             state.selection = ids.into_iter().filter(|id| state.scene.node(*id).is_some()).collect();

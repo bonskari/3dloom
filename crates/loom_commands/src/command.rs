@@ -2116,6 +2116,8 @@ commands! {
     UnlinkSelection => "Unlink Selection", Loom, "Main Toolbar > Unlink Selection: unlink the selected objects from their parents.";
     NamedSelectionSet => "Named Selection Set", Loom, "Create or update a named selection set from the current selection." { name: String };
     SelectNamedSet => "Select Named Set", Loom, "Select the objects of a named selection set." { name: String };
+    NamedSetAddSelected => "Named Set Add Selected", Loom, "Named Selection Sets > Add Selected Objects: the selected objects join set `name`." { name: String };
+    NamedSetSubtractSelected => "Named Set Subtract Selected", Loom, "Named Selection Sets > Subtract Selected Objects: the selected objects leave set `name`." { name: String };
     DeleteNamedSet => "Delete Named Set", Loom, "Delete a named selection set." { name: String };
     EditNamedSelectionSets => "Edit Named Selection Sets", Loom, "Open the Named Selection Sets dialog.";
     NewSceneExplorer => "New Scene Explorer", Loom, "Tools > New Scene Explorer: open another Scene Explorer window (Scene Explorer 1, 2, ...) with the default setup.";

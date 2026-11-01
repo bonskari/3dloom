@@ -26,6 +26,12 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                 if ui.button("Update").clicked() {
                     let _ = app.dispatch(Command::NamedSelectionSet { name: name.clone() });
                 }
+                if ui.button("Add Selected").on_hover_text("Add Selected Objects").clicked() {
+                    let _ = app.dispatch(Command::NamedSetAddSelected { name: name.clone() });
+                }
+                if ui.button("Subtract Selected").on_hover_text("Subtract Selected Objects").clicked() {
+                    let _ = app.dispatch(Command::NamedSetSubtractSelected { name: name.clone() });
+                }
                 if ui.button("Remove").clicked() {
                     let _ = app.dispatch(Command::DeleteNamedSet { name: name.clone() });
                 }

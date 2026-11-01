@@ -112,8 +112,10 @@ pub fn hide(ui: &mut egui::Ui, app: &mut LoomApp) {
     wide(ui, app, "Hide Unselected", true, Command::HideUnselected);
     wide(ui, app, "Hide by Name...", true, Command::HideByName);
     mode_button(ui, app, "Hide by Hit", PickMode::HideByHit, Command::HideByHit);
-    wide(ui, app, "Unhide All", true, Command::UnhideAll);
-    wide(ui, app, "Unhide by Name...", true, Command::UnhideByName);
+    // Unavailable while nothing is hidden.
+    let any = app.state.scene.nodes().any(|n| n.hidden);
+    wide(ui, app, "Unhide All", any, Command::UnhideAll);
+    wide(ui, app, "Unhide by Name...", any, Command::UnhideByName);
     let mut hide_frozen = app.state.display.hide_frozen;
     if ui.checkbox(&mut hide_frozen, "Hide Frozen Objects").changed() {
         let _ = app.dispatch(Command::HideFrozenObjectsToggle);
@@ -127,8 +129,10 @@ pub fn freeze(ui: &mut egui::Ui, app: &mut LoomApp) {
     wide(ui, app, "Freeze Unselected", true, Command::FreezeUnselected);
     wide(ui, app, "Freeze by Name...", true, Command::FreezeByName);
     mode_button(ui, app, "Freeze by Hit", PickMode::FreezeByHit, Command::FreezeByHit);
-    wide(ui, app, "Unfreeze All", true, Command::UnfreezeAll);
-    wide(ui, app, "Unfreeze by Name...", true, Command::UnfreezeByName);
+    // Unavailable while nothing is frozen.
+    let any = app.state.scene.nodes().any(|n| n.frozen);
+    wide(ui, app, "Unfreeze All", any, Command::UnfreezeAll);
+    wide(ui, app, "Unfreeze by Name...", any, Command::UnfreezeByName);
     mode_button(ui, app, "Unfreeze by Hit", PickMode::UnfreezeByHit, Command::UnfreezeByHit);
 }
 
