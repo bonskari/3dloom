@@ -135,7 +135,20 @@ impl Change {
     /// transform then keys under Auto Key, and edits or offsets keys
     /// otherwise, instead of wiping the animation.
     pub fn merged_transforms(self, scene: &Scene) -> Change {
-        fn walk(c: Change, scene: &Scene, latest: &mut std::collections::HashMap<NodeId, Transform>) -> Change {
+        // Nodes whose props (and so their layers) the change itself sets: their
+        // transform edits are meant for the Base Layer (Collapse).
+        fn props_set(c: &Change, out: &mut std::collections::HashSet<NodeId>) {
+            match c {
+                Change::SetNodeProps { id, .. } => {
+                    out.insert(*id);
+                }
+                Change::Group(steps) => steps.iter().for_each(|s| props_set(s, out)),
+                _ => {}
+            }
+        }
+        let mut own = std::collections::HashSet::new();
+        props_set(&self, &mut own);
+        fn walk(c: Change, scene: &Scene, own: &std::collections::HashSet<NodeId>, latest: &mut std::collections::HashMap<NodeId, Transform>) -> Change {
             match c {
                 Change::SetTransform { id, after, .. } => {
                     let Some(cur) = latest.get(&id).cloned().or_else(|| scene.node(id).map(|n| n.transform.clone())) else {
@@ -143,7 +156,7 @@ impl Change {
                     };
                     // Animation Layers: with another layer active the edit goes to its
                     // offset tracks; a locked active layer takes none.
-                    if let Some(n) = scene.node(id).filter(|n| n.anim_layers.is_some()) {
+                    if let Some(n) = scene.node(id).filter(|n| n.anim_layers.is_some() && !own.contains(&n.id)) {
                         let al = n.anim_layers.as_ref().expect("checked");
                         if al.active > 0 || al.base_locked {
                             let before = n.props();
@@ -159,11 +172,11 @@ impl Change {
                     latest.insert(id, after.clone());
                     Change::SetTransform { id, before: cur, after }
                 }
-                Change::Group(steps) => Change::Group(steps.into_iter().map(|s| walk(s, scene, latest)).collect()),
+                Change::Group(steps) => Change::Group(steps.into_iter().map(|s| walk(s, scene, own, latest)).collect()),
                 other => other,
             }
         }
-        walk(self, scene, &mut Default::default())
+        walk(self, scene, &own, &mut Default::default())
     }
 
     /// Applies the change. On error the scene is left exactly as it was.
