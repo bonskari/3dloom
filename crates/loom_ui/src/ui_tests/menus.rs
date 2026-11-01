@@ -1046,4 +1046,10 @@ fn command_panel_columns_and_rollout_threshold() {
     h.frames(5);
     let headers: Vec<egui::Rect> = ["Selection", "Soft Selection", "Edit Geometry", "Subdivision Surface", "Paint Deformation"].iter().filter_map(|t| h.text_rects(t).into_iter().find(|r| p.contains(r.center()))).collect();
     assert!(headers.iter().any(|r| r.left() > p.left() + crate::command_panel::rollouts::COLUMN_WIDTH * 0.9), "Editable Poly rollouts in a second column: {headers:?}");
+    // A user order applies in columns too: Paint Deformation first.
+    h.cmd(Command::SetRolloutOrder { panel: "Modify".into(), order: vec!["Paint Deformation".into()] });
+    h.frames(5);
+    let pd = h.text_rects("Paint Deformation").into_iter().find(|r| p.contains(r.center())).expect("Paint Deformation");
+    let sel = h.text_rects("Selection").into_iter().find(|r| p.contains(r.center())).expect("Selection");
+    assert!(pd.left() < p.left() + crate::command_panel::rollouts::COLUMN_WIDTH * 0.9 && pd.top() < sel.top(), "Paint Deformation leads the first column: {pd:?} {sel:?}");
 }

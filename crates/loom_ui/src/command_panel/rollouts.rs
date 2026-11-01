@@ -167,7 +167,13 @@ pub fn rollout(ui: &mut egui::Ui, title: &str, default_open: bool, body: impl Fn
             // Several columns: this run's rollouts (last frame's heights) flow across them.
             let spacing = ui.spacing().item_spacing.y;
             let (top, left, width) = *f.top.get_or_insert((cursor.y, cursor.x, ui.available_width()));
-            let run: Vec<&Drawn> = f.memory.natural.iter().filter(|d| d.run == f.run).collect();
+            let mut run: Vec<&Drawn> = f.memory.natural.iter().filter(|d| d.run == f.run).collect();
+            // The user's rollout order applies within the run.
+            if let Some(order) = &f.order {
+                let titles: Vec<String> = run.iter().map(|d| d.title.clone()).collect();
+                let shown = shown_order(&titles, order);
+                run.sort_by_key(|d| shown.iter().position(|t| *t == d.title).unwrap_or(usize::MAX));
+            }
             let at = run.iter().position(|d| d.title == title).unwrap_or(0);
             let heights: Vec<f32> = run.iter().map(|d| d.height).collect();
             let (places, lowest) = flow(&heights, top, ui.clip_rect().bottom(), cols, f.threshold, spacing);
