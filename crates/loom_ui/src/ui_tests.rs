@@ -52,6 +52,8 @@ struct Harness {
     screen: egui::Rect,
     /// Every output command so far (clipboard copies).
     commands: Vec<egui::OutputCommand>,
+    /// Every viewport command the app sent (window title, user attention, ...).
+    viewport_cmds: Vec<egui::ViewportCommand>,
     /// Every texture upload so far.
     textures: Vec<(egui::TextureId, egui::epaint::ImageDelta)>,
     /// Seconds between frames (a loaded machine draws fewer per second).
@@ -64,7 +66,7 @@ impl Harness {
     fn new() -> Self {
         // A test stuck (e.g. in the GPU driver) fails the binary instead of hanging it.
         loom_bevy::test_watchdog(std::time::Duration::from_secs(1800));
-        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0, cursor: egui::CursorIcon::Default };
+        let mut h = Harness { ctx: egui::Context::default(), app: LoomApp::headless(), time: 0.0, mods: egui::Modifiers::NONE, widgets: Vec::new(), shapes: Vec::new(), screen: SCREEN, commands: Vec::new(), viewport_cmds: Vec::new(), textures: Vec::new(), frame_time: 1.0 / 30.0, cursor: egui::CursorIcon::Default };
         h.ctx.enable_accesskit();
         h.frames(3);
         h
@@ -95,6 +97,7 @@ impl Harness {
         let out = self.ctx.run(input, |ctx| app.frame(ctx));
         self.cursor = out.platform_output.cursor_icon;
         self.commands.extend(out.platform_output.commands);
+        self.viewport_cmds.extend(out.viewport_output.into_values().flat_map(|v| v.commands));
         self.textures.extend(out.textures_delta.set);
         self.shapes = out.shapes;
         if let Some(tree) = out.platform_output.accesskit_update {

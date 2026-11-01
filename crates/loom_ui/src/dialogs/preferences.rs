@@ -155,6 +155,10 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
                     ui.label(egui::RichText::new("Output File Sequencing").strong());
                     check(ui, app, "Nth Serial Numbering", "Nth Serial Numbering");
                 });
+                ui.group(|ui| {
+                    ui.label(egui::RichText::new("Render Termination Alert").strong());
+                    check(ui, app, "Render Termination Alert", "Flash the taskbar when a render finishes");
+                });
             }
             Tab::Animation => {
                 ui.group(|ui| {

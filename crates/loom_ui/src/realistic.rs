@@ -992,6 +992,9 @@ impl LoomApp {
         match result {
             Ok(()) => {
                 self.state.status_prompt = format!("Rendered {}x{} in {secs:.1} s", job.out[0], job.out[1]);
+                // Render Termination Alert: the taskbar entry asks for attention
+                // (this build has no audio output, so no beep or sound file).
+                self.render_attention = self.state.prefs.render_termination_alert;
                 let mut saved = None;
                 if let (Some(path), Some(img)) = (&job.req.save_path, &self.state.rendered.image) {
                     match loom_commands::render::save_output(img, path, &job.req.settings) {

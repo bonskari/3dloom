@@ -318,6 +318,8 @@ pub struct LoomApp {
     pub native_file_dialogs: bool,
     /// Title last sent to the window, so it is only resent on change.
     pub last_title: String,
+    /// Preferences > Rendering > Render Termination Alert: a finished render asks for the user's attention next frame.
+    pub render_attention: bool,
     /// Each viewport's screen rectangle last frame (tests aim clicks with it).
     pub viewport_rects: Vec<egui::Rect>,
     /// The Modifier List use counts as last written to disk (None in tests: never written).
@@ -564,6 +566,7 @@ impl LoomApp {
             os_window_rects: Default::default(),
             native_file_dialogs: dialogs::file_dialog::use_native(std::env::var("LOOM_CONTROL_PORT").ok().as_deref()),
             last_title: String::new(),
+            render_attention: false,
             viewport_rects: Vec::new(),
             saved_modifier_usage: Default::default(),
             persist_modifier_usage: false,
@@ -1574,6 +1577,9 @@ impl LoomApp {
             }
         }
         ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        if std::mem::take(&mut self.render_attention) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+        }
         let title = format!("{}  [{}]", self.state.title(), env!("LOOM_VERSION"));
         if title != self.last_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));

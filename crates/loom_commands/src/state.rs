@@ -988,6 +988,9 @@ pub struct Prefs {
     /// Inverse Kinematics > Always Transform Children of the World: a
     /// selected unlinked object moves normally while Interactive IK is on.
     pub ik_transform_world_children: bool,
+    /// Rendering > Render Termination Alert: a finished render asks for the
+    /// user's attention (the taskbar entry flashes; no audio in this build).
+    pub render_termination_alert: bool,
 }
 
 fn default_nudge() -> f32 {
@@ -1055,13 +1058,14 @@ impl Default for Prefs {
             interactive_ik_threshold: 1.0,
             interactive_ik_iterations: 10,
             ik_transform_world_children: true,
+            render_termination_alert: false,
         }
     }
 }
 
 impl Prefs {
     /// Preference names for `Set Preference`, with their current values.
-    pub const NAMES: [&'static str; 67] = [
+    pub const NAMES: [&'static str; 68] = [
         "Auto Backup Enable", "Auto Backup Count", "Auto Backup Interval",
         "Scene Undo Levels", "Reference Coordinate System Constant", "Auto Window/Crossing by Direction", "Paint Selection Brush Size",
         "Spinner Precision", "Spinner Snap", "Spinner Use Snap", "Spinner Wrap Cursor", "Viewport Tooltips", "Show Cross Hair Cursor",
@@ -1076,6 +1080,7 @@ impl Prefs {
         "Rotation Method", "Planar Angle Threshold", "Move/Rotate Projection", "Persp Sens",
         "Overrides Active", "Delay To Override", "Nth Serial Numbering",
         "Applied IK Threshold", "Applied IK Iterations", "Interactive IK Threshold", "Interactive IK Iterations", "Always Transform Children of the World",
+        "Render Termination Alert",
     ];
 
     pub fn get(&self, name: &str) -> Option<f64> {
@@ -1157,6 +1162,7 @@ impl Prefs {
             "Interactive IK Threshold" => self.interactive_ik_threshold as f64,
             "Interactive IK Iterations" => self.interactive_ik_iterations as f64,
             "Always Transform Children of the World" => b(self.ik_transform_world_children),
+            "Render Termination Alert" => b(self.render_termination_alert),
             _ => return None,
         })
     }
@@ -1241,6 +1247,7 @@ impl Prefs {
             "Interactive IK Threshold" => self.interactive_ik_threshold = f.max(0.0001),
             "Interactive IK Iterations" => self.interactive_ik_iterations = v.clamp(1.0, 10_000.0) as u32,
             "Always Transform Children of the World" => self.ik_transform_world_children = on,
+            "Render Termination Alert" => self.render_termination_alert = on,
             _ => return Err(format!("unknown preference {name:?}")),
         }
         Ok(())
