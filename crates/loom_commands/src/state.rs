@@ -2003,6 +2003,8 @@ pub struct AppState {
     pub soft_edit: bool,
     /// The Track View window (Curve Editor / Dope Sheet).
     pub track_view: crate::track_view::TrackViewState,
+    /// Graph Editors > Saved Track Views: named Track View settings.
+    pub saved_track_views: Vec<crate::track_view::TrackViewState>,
     /// Tools > Scene Explorer windows (saved with the scene).
     pub explorers: crate::explorer::Explorers,
     /// Graph Editors > Schematic View windows (saved with the scene).
@@ -2327,6 +2329,7 @@ impl AppState {
             import_report: Vec::new(),
             soft_edit: false,
             track_view: Default::default(),
+            saved_track_views: Vec::new(),
             explorers: Default::default(),
             schematics: Default::default(),
             key_time_cache: Default::default(),

@@ -574,3 +574,26 @@ fn make_reference_from_the_stack_keeps_later_modifiers_apart() {
     h.cmd(Command::UndoSceneOperation);
     assert!(h.app.state.scene.node(b).unwrap().reference_barrier.is_none(), "one undo step");
 }
+
+/// Track View name + Enter saves it; Graph Editors > Saved Track Views opens
+/// it again with its settings, New Track View starts a fresh one, Delete
+/// Track View forgets it.
+#[test]
+fn saved_track_views_from_the_graph_editors_menu() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    menu_path(&mut h, &["Graph Editors", "Track View - Dope Sheet..."]);
+    h.frames(2);
+    let field = h.widgets.iter().find(|w| w.0 == Role::TextInput && w.1.starts_with("Untitled")).map(|w| w.2).expect("the name field");
+    h.click(field.center());
+    h.run(vec![egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }]);
+    h.run(vec![egui::Event::Text("Keys".into())]);
+    h.key(egui::Key::Enter);
+    assert_eq!(h.app.state.saved_track_views.iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Keys"]);
+    menu_path(&mut h, &["Graph Editors", "New Track View..."]);
+    assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::TvMode::CurveEditor, "Untitled 1"));
+    menu_path(&mut h, &["Graph Editors", "Saved Track Views", "Keys"]);
+    assert_eq!((h.app.state.track_view.mode, h.app.state.track_view.name.as_str()), (loom_commands::TvMode::DopeSheet, "Keys"));
+    menu_path(&mut h, &["Graph Editors", "Delete Track View", "Keys"]);
+    assert!(h.app.state.saved_track_views.is_empty());
+}

@@ -810,6 +810,26 @@ fn animation_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
 fn graph_editors_menu(ui: &mut egui::Ui, app: &mut LoomApp) {
     cmd(ui, app, "Track View - Curve Editor...", Command::OpenCurveEditor);
     cmd(ui, app, "Track View - Dope Sheet...", Command::OpenDopeSheet);
+    cmd(ui, app, "New Track View...", Command::NewTrackView);
+    let saved: Vec<String> = app.state.saved_track_views.iter().map(|v| v.name.clone()).collect();
+    if !saved.is_empty() {
+        sub(ui, app, "Delete Track View", |ui, app| {
+            for n in &saved {
+                if ui.button(n).clicked() {
+                    let _ = app.dispatch(Command::DeleteTrackView { name: n.clone() });
+                    ui.close_menu();
+                }
+            }
+        });
+        sub(ui, app, "Saved Track Views", |ui, app| {
+            for n in &saved {
+                if ui.button(n).clicked() {
+                    let _ = app.dispatch(Command::OpenSavedTrackView { name: n.clone() });
+                    ui.close_menu();
+                }
+            }
+        });
+    }
     ui.separator();
     cmd(ui, app, "New Schematic View...", Command::NewSchematicView);
     let views: Vec<String> = app.state.schematics.list.iter().map(|v| v.name.clone()).collect();

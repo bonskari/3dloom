@@ -1065,6 +1065,10 @@ fn bottom_bar(ui: &mut egui::Ui, app: &mut LoomApp) {
             rn.request_focus();
             app.state.track_view.focus_field = None;
         }
+        // Enter keeps this Track View under the name (Saved Track Views).
+        if rn.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            run(app, Command::SaveTrackView { name: name.clone() });
+        }
         app.state.track_view.name = name;
     });
 }

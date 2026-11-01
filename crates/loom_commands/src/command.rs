@@ -1636,6 +1636,10 @@ commands! {
     // --- Track View window and agent API ---
     TrackViewFloater => "Track View Floater", MainUI, "Open the Track View (Curve Editor).";
     OpenCurveEditor => "Open Curve Editor", Loom, "Graph Editors > Track View - Curve Editor.";
+    NewTrackView => "New Track View", MainUI, "Graph Editors > New Track View: a Track View with its default settings (Untitled n).";
+    SaveTrackView => "Save Track View", Loom, "Track View name field + Enter: keep this Track View's settings under `name` (Graph Editors > Saved Track Views lists it)." { name: String };
+    OpenSavedTrackView => "Open Saved Track View", Loom, "Graph Editors > Saved Track Views: open the Track View saved as `name`." { name: String };
+    DeleteTrackView => "Delete Track View", Loom, "Graph Editors > Delete Track View: forget the Track View saved as `name`." { name: String };
     OpenDopeSheet => "Open Dope Sheet", Loom, "Graph Editors > Track View - Dope Sheet.";
     CloseTrackView => "Close Track View", Loom, "Close the Track View window.";
     TrackViewHighlight => "Track View Highlight", Loom, "Highlight hierarchy items by id: \"12\" (object), \"12:Transform\" (group), \"12:Position\" (track by name), \"12:note:0\"." { items: Vec<String>, op: SelectOp };

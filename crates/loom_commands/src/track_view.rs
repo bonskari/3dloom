@@ -668,6 +668,41 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.track_view.mode = TvMode::CurveEditor;
             Ok(json!({ "open": true, "mode": "Curve Editor" }))
         }
+        C::NewTrackView => {
+            let n = (1..).find(|k| {
+                let name = format!("Untitled {k}");
+                state.track_view.name != name && !state.saved_track_views.iter().any(|v| v.name == name)
+            }).unwrap_or(1);
+            state.track_view = TrackViewState { open: true, name: format!("Untitled {n}"), ..TrackViewState::default() };
+            Ok(json!({ "open": true, "name": state.track_view.name }))
+        }
+        C::SaveTrackView { name } => {
+            let name = name.trim().to_owned();
+            if name.is_empty() {
+                return Err("a Track View needs a name".into());
+            }
+            state.track_view.name = name.clone();
+            let mut saved = state.track_view.clone();
+            saved.focused = false;
+            match state.saved_track_views.iter_mut().find(|v| v.name == name) {
+                Some(v) => *v = saved,
+                None => state.saved_track_views.push(saved),
+            }
+            Ok(json!({ "saved": state.saved_track_views.iter().map(|v| v.name.clone()).collect::<Vec<_>>() }))
+        }
+        C::OpenSavedTrackView { name } => {
+            let v = state.saved_track_views.iter().find(|v| v.name == name).cloned().ok_or_else(|| format!("no saved Track View \"{name}\""))?;
+            state.track_view = TrackViewState { open: true, ..v };
+            Ok(json!({ "open": true, "name": name }))
+        }
+        C::DeleteTrackView { name } => {
+            let before = state.saved_track_views.len();
+            state.saved_track_views.retain(|v| v.name != name);
+            if state.saved_track_views.len() == before {
+                return Err(format!("no saved Track View \"{name}\""));
+            }
+            Ok(json!({ "saved": state.saved_track_views.iter().map(|v| v.name.clone()).collect::<Vec<_>>() }))
+        }
         C::OpenDopeSheet => {
             state.track_view.open = true;
             state.track_view.mode = TvMode::DopeSheet;
@@ -1878,6 +1913,10 @@ pub fn handles(c: &Command) -> bool {
     matches!(
         c,
         C::TrackViewFloater
+            | C::NewTrackView
+            | C::SaveTrackView { .. }
+            | C::OpenSavedTrackView { .. }
+            | C::DeleteTrackView { .. }
             | C::OpenCurveEditor
             | C::OpenDopeSheet
             | C::CloseTrackView
