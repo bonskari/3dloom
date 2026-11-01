@@ -173,6 +173,7 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp) {
         Dialog::RenderSetup => render_setup::show(ctx, app, &mut open),
         Dialog::LightLister => lights::light_lister(ctx, app, &mut open),
         Dialog::LightExclude { light } => lights::light_exclude(ctx, app, light, &mut open),
+        Dialog::LightIncludeExclude => lights::light_include_exclude(ctx, app, &mut open),
         Dialog::AddDefaultLights => lights::add_default_lights(ctx, app, &mut open),
         Dialog::GeographicLocation { sun } => lights::geographic_location(ctx, app, sun, &mut open),
         Dialog::ViewportConfiguration => viewport_configuration::show(ctx, app, &mut open),

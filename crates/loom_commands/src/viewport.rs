@@ -475,6 +475,8 @@ pub enum Dialog {
     SelectByLayer,
     /// General Parameters > Exclude...: the Exclude/Include dialog of a light.
     LightExclude { light: u64 },
+    /// The Light Include/Exclude tool (a Customize User Interface action).
+    LightIncludeExclude,
     /// Rendered Frame Window > Save Image.
     SaveRenderedImage,
     /// Material Editor > Maps: choose the bitmap for channel `channel` (MAP_CHANNELS order).

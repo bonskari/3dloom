@@ -2393,7 +2393,7 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             Ok(json!({}))
         }
         c @ (C::CreateCamera { .. } | C::CreateCameraAt { .. } | C::CameraType { .. } | C::CreateCameraFromView | C::NavigateCamera { .. }) => crate::camera::execute(state, c),
-        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister | C::PhotometricTemplate { .. } | C::CreateSunlight { .. } | C::SunlightParameters { .. } | C::AddDefaultLightsToScene { .. } | C::SelectTarget) => crate::light::execute(state, c),
+        c @ (C::CreateLight { .. } | C::LightType { .. } | C::SetLightExclusion { .. } | C::SetLightProjectorMap { .. } | C::LightLister | C::LightIncludeExcludeTool | C::LightIncludeExcludeAssign { .. } | C::PhotometricTemplate { .. } | C::CreateSunlight { .. } | C::SunlightParameters { .. } | C::AddDefaultLightsToScene { .. } | C::SelectTarget) => crate::light::execute(state, c),
         C::SetParameter { id, name, value } => {
             let id = NodeId(id);
             let node = state.scene.node(id).ok_or_else(|| missing(id))?;
@@ -2949,6 +2949,17 @@ fn execute_inner(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                     state.pick_mode = None;
                     let morph = state.skin_morph_current.ok_or("no morph is highlighted")? as u32;
                     return crate::morph::execute(state, C::SkinMorphSetExternal { morph, node: Some(id.0) });
+                }
+                Some(PickMode::LightInclExclAssign) => {
+                    state.pick_mode = None;
+                    let exclude = state.incl_excl_exclude;
+                    return crate::light::execute(state, C::LightIncludeExcludeAssign { light: id.0, exclude });
+                }
+                Some(PickMode::LightInclExclChoose) => {
+                    state.scene.node(id).and_then(|n| n.object.light()).ok_or("pick a light")?;
+                    state.pick_mode = None;
+                    state.incl_excl_light = Some(id);
+                    return Ok(json!({ "light": id.0 }));
                 }
                 Some(PickMode::ModifierNode) => {
                     let Some(index) = state.selection.iter().next().and_then(|n| state.scene.node(*n)).and_then(|n| n.active_entry) else { return Err("no active stack entry".into()) };

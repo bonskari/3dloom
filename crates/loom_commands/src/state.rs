@@ -232,6 +232,11 @@ pub enum PickMode {
     NormalAlignTarget,
     /// Align Camera: pick a face; the selected camera looks down its normal.
     AlignCamera,
+    /// Light Include/Exclude tool > Assign to Light: the light the selected
+    /// objects are included in or excluded from.
+    LightInclExclAssign,
+    /// Light Include/Exclude tool > Choose Light: the light the list shows.
+    LightInclExclChoose,
     /// Unwrap UVW > Point To Point Edge Selection: first and next vertex.
     SeamPointA,
     SeamPointB,
@@ -2046,6 +2051,10 @@ pub struct AppState {
     pub last_poly_op: Option<crate::command::Command>,
     /// Biped Xtras > Pick Parent: the biped, the tail and Reorient to Parent.
     pub biped_xtra_pick: Option<(NodeId, String, bool)>,
+    /// Light Include/Exclude tool: the light its list shows.
+    pub incl_excl_light: Option<NodeId>,
+    /// Light Include/Exclude tool, Geometry group: Exclude (else Include).
+    pub incl_excl_exclude: bool,
     /// Target Weld / Edit Triangulation first pick.
     pub pick_source: Option<(NodeId, u32)>,
     /// Create (polygon level): vertices picked so far.
@@ -2441,6 +2450,8 @@ impl AppState {
             preserve_uvs: false,
             pick_point_a: None,
             biped_xtra_pick: None,
+            incl_excl_light: None,
+            incl_excl_exclude: false,
             paint_deform: None,
             branches: false,
             soft_cache: Default::default(),

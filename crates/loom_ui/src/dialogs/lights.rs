@@ -265,6 +265,54 @@ pub fn light_exclude(ctx: &egui::Context, app: &mut LoomApp, light: u64, open: &
     }
 }
 
+/// The Light Include/Exclude tool: Geometry group (Include / Exclude, Assign
+/// to Light picks the light for the selected objects) and List Light
+/// Properties (the displayed light, Choose Light, Clear Light, its list's
+/// Include / Exclude and Objects).
+pub fn light_include_exclude(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    use loom_commands::PickMode;
+    let shown = app.state.incl_excl_light.and_then(|id| app.state.scene.node(id).and_then(|n| n.object.light().map(|l| (id, n.name.clone(), l.exclusion.clone()))));
+    egui::Window::new("Light Incl/Excl").open(open).resizable(false).show(ctx, |ui| {
+        ui.label(egui::RichText::new("Geometry").strong());
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut app.state.incl_excl_exclude, false, "Include");
+            ui.radio_value(&mut app.state.incl_excl_exclude, true, "Exclude");
+        });
+        let assigning = app.state.pick_mode == Some(PickMode::LightInclExclAssign);
+        if ui.selectable_label(assigning, "Assign to Light").clicked() {
+            app.state.pick_mode = if assigning { None } else { Some(PickMode::LightInclExclAssign) };
+        }
+        ui.separator();
+        ui.label(egui::RichText::new("List Light Properties").strong());
+        ui.label(shown.as_ref().map_or("None".to_owned(), |(_, name, _)| name.clone()));
+        ui.horizontal(|ui| {
+            let choosing = app.state.pick_mode == Some(PickMode::LightInclExclChoose);
+            if ui.selectable_label(choosing, "Choose Light").clicked() {
+                app.state.pick_mode = if choosing { None } else { Some(PickMode::LightInclExclChoose) };
+            }
+            if let Some((id, _, ex)) = &shown {
+                if ui.button("Clear Light").clicked() {
+                    let _ = app.dispatch(Command::SetLightExclusion { id: id.0, include: ex.include, scope: ex.scope, nodes: Vec::new() });
+                }
+            }
+        });
+        let Some((id, _, ex)) = shown else { return };
+        ui.horizontal(|ui| {
+            for (include, label) in [(true, "Include"), (false, "Exclude")] {
+                if ui.radio(ex.include == include, label).clicked() && ex.include != include {
+                    let _ = app.dispatch(Command::SetLightExclusion { id: id.0, include, scope: ex.scope, nodes: ex.nodes.iter().map(|n| n.0).collect() });
+                }
+            }
+        });
+        ui.label("Objects");
+        egui::ScrollArea::vertical().id_salt("incl_excl_objects").max_height(160.0).show(ui, |ui| {
+            for n in &ex.nodes {
+                ui.label(app.state.scene.node(*n).map_or_else(|| format!("#{}", n.0), |n| n.name.clone()));
+            }
+        });
+    });
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct DefaultLightsState {
     key: bool,

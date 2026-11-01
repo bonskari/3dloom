@@ -443,3 +443,51 @@ fn camera_correction_only_goes_on_cameras() {
     h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
     assert!(h.app.dispatch(Command::AddModifier { name: "Camera Correction".into() }).is_err());
 }
+
+/// A light's Name and Color rollout: renaming a target light renames its
+/// target, and the colour swatch colours the light's geometry only.
+#[test]
+fn a_lights_name_and_color_rollout_renames_its_target_and_colours_its_geometry() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::TargetSpot, position: [0.0, -100.0, 50.0], target: [0.0; 3] }).unwrap();
+    let (id, t) = (NodeId(r["id"].as_u64().unwrap()), NodeId(r["target"].as_u64().unwrap()));
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    let cp = panel(&h, "command_panel");
+    assert!(h.text_rect("Name and Color", cp).is_some(), "the Modify panel shows Name and Color for a light");
+    h.cmd(Command::Rename { id: id.0, name: "Key".into() });
+    assert_eq!(h.app.state.scene.node(t).unwrap().name, "Key.Target");
+    let color = light(&h, id).color.get();
+    h.cmd(Command::SetWireColor { id: id.0, rgb: [200, 10, 10] });
+    let n = h.app.state.scene.node(id).unwrap();
+    assert_eq!(h.app.state.scene.display_color(n), [200, 10, 10], "the geometry shows the colour");
+    assert_eq!(light(&h, id).color.get(), color, "the emitted colour stays");
+}
+
+/// The Light Include/Exclude tool: Exclude + Assign to Light puts the
+/// selected object on the picked light's exclude list, the list shows it, and
+/// Clear Light empties it.
+#[test]
+fn the_light_include_exclude_tool_excludes_the_selection_from_a_picked_light() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    let b = sel(&h)[0];
+    let r = h.app.dispatch(Command::CreateLight { kind: loom_commands::light::LightKind::Omni, position: [0.0, 0.0, 50.0], target: [0.0; 3] }).unwrap();
+    let l = NodeId(r["id"].as_u64().unwrap());
+    h.app.state.selection = [b].into_iter().collect();
+    h.cmd(Command::LightIncludeExcludeTool);
+    h.frames(3);
+    let exclude = *in_window(&h, "Light Incl/Excl", "Exclude").iter().min_by(|a, b| a.y.total_cmp(&b.y)).expect("the Geometry group's Exclude");
+    h.click(exclude);
+    assert!(h.app.state.incl_excl_exclude);
+    h.click(in_window(&h, "Light Incl/Excl", "Assign to Light")[0]);
+    assert_eq!(h.app.state.pick_mode, Some(loom_commands::PickMode::LightInclExclAssign));
+    h.cmd(Command::PickHit { id: l.0 });
+    h.frames(2);
+    let ex = light(&h, l).exclusion;
+    assert!(!ex.include && ex.nodes == vec![b] && ex.scope == 2, "{ex:?}");
+    let name = h.app.state.scene.node(b).unwrap().name.clone();
+    assert!(!in_window(&h, "Light Incl/Excl", &name).is_empty(), "the Objects list shows {name}");
+    h.click(in_window(&h, "Light Incl/Excl", "Clear Light")[0]);
+    assert!(light(&h, l).exclusion.nodes.is_empty());
+}

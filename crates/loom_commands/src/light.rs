@@ -382,6 +382,30 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             state.dialog = Some(crate::Dialog::LightLister);
             Ok(json!({ "dialog": "LightLister" }))
         }
+        Command::LightIncludeExcludeTool => {
+            state.dialog = Some(crate::Dialog::LightIncludeExclude);
+            Ok(json!({ "dialog": "LightIncludeExclude" }))
+        }
+        Command::LightIncludeExcludeAssign { light, exclude } => {
+            let id = NodeId(light);
+            let l = state.scene.node(id).and_then(|n| n.object.light()).ok_or("pick a light")?;
+            // Excluded objects receive neither its light nor its shadows.
+            let objects: Vec<NodeId> = state.selection.iter().copied().filter(|n| *n != id).collect();
+            if objects.is_empty() {
+                return Err("select the objects to include or exclude".into());
+            }
+            let mut ex = l.exclusion.clone();
+            // An Exclude list holds the excluded objects, an Include list the included ones.
+            if exclude != ex.include {
+                ex.nodes.extend(objects.iter().filter(|o| !ex.nodes.contains(o)));
+            } else {
+                ex.nodes.retain(|n| !objects.contains(n));
+            }
+            ex.scope = 2;
+            replace_light(state, id, "Light Include/Exclude", |l| l.exclusion = ex)?;
+            state.incl_excl_light = Some(id);
+            Ok(json!({ "light": light, "nodes": state.scene.node(id).and_then(|n| n.object.light()).map(|l| l.exclusion.nodes.iter().map(|n| n.0).collect::<Vec<_>>()) }))
+        }
         Command::PhotometricTemplate { id, index } => {
             let node = state.scene.node(NodeId(id)).ok_or_else(|| missing(NodeId(id)))?;
             let mut object = node.object.clone();
