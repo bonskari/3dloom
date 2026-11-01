@@ -1282,21 +1282,25 @@ impl Scene {
     /// Reparents `id`, adjusting its local transform so the world
     /// transform is unchanged. Refuses to create a cycle.
     pub fn set_parent(&mut self, id: NodeId, parent: Option<NodeId>) {
-        if !self.nodes.contains_key(&id) {
-            return;
-        }
+        let Some(transform) = self.reparented_transform(id, parent) else { return };
+        let node = self.nodes.get_mut(&id).expect("checked by reparented_transform");
+        node.parent = parent;
+        node.transform = transform;
+    }
+
+    /// The local transform `set_parent(id, parent)` gives `id` (its world
+    /// transform kept); None when that link is refused.
+    pub fn reparented_transform(&self, id: NodeId, parent: Option<NodeId>) -> Option<Transform> {
+        let node = self.nodes.get(&id)?;
         if let Some(p) = parent {
             if p == id || !self.nodes.contains_key(&p) || self.is_descendant(p, id) {
-                return;
+                return None;
             }
         }
         let world = self.world_matrix(id);
-        let inherit = self.nodes.get(&id).map(|n| n.inherit).unwrap_or(crate::node::Axes3::ALL);
-        let frame = parent.map_or(Mat4::IDENTITY, |p| Self::frame_from(self.world_matrix(p), inherit));
+        let frame = parent.map_or(Mat4::IDENTITY, |p| Self::frame_from(self.world_matrix(p), node.inherit));
         let local = frame.inverse() * world;
-        let node = self.nodes.get_mut(&id).expect("checked above");
-        node.parent = parent;
-        node.transform = Transform::from_matrix_near(local, &node.transform, glam::Vec3::ZERO);
+        Some(Transform::from_matrix_near(local, &node.transform, glam::Vec3::ZERO))
     }
 
     /// Number of ancestors above `id` (0 for a root).

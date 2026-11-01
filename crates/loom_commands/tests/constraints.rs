@@ -207,9 +207,9 @@ fn path_follow_keeps_the_objects_own_rotation_on_top() {
     execute(&mut s, Command::SetConstraintParameter { id: b.0, name: "Follow".into(), value: 1.0 }).unwrap();
     let m = world_at(&mut s, b, 50);
     assert!(m.x_axis.truncate().normalize().distance(Vec3::Y) < 1e-2, "Follow: X along the path (+Y): {:?}", m.x_axis);
-    // Its own 90° about local Z on top: X now points along the path frame's Y (world -X).
-    select(&mut s, b);
-    execute(&mut s, Command::RotateSelection { axis: loom_commands::Axis::Z, degrees: 90.0, system: Some(loom_commands::state::CoordSystem::Local) }).unwrap();
+    // Its own rotation track at 90° about Z on top: X now points along the
+    // path frame's Y (world -X).
+    execute(&mut s, Command::SetTransform { id: b.0, position: None, rotation_deg: Some([0.0, 0.0, 90.0]), scale: None }).unwrap();
     let m = world_at(&mut s, b, 50);
     assert!(m.x_axis.truncate().normalize().distance(Vec3::NEG_X) < 1e-2, "{:?}", m.x_axis);
     assert!(pos(m).distance(Vec3::new(0.0, 50.0, 0.0)) < 1.0, "the position stays on the path: {:?}", pos(m));

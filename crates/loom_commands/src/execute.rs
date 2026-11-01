@@ -4462,9 +4462,8 @@ pub(crate) fn link_change(state: &AppState, id: NodeId, parent: Option<NodeId>) 
         }
     }
     let t_before = state.scene.node(id).ok_or_else(|| missing(id))?.transform.clone();
-    let mut sim = state.scene.clone();
-    sim.set_parent(id, parent);
-    let t_after = sim.node(id).ok_or_else(|| missing(id))?.transform.clone();
+    // What set_parent would make, without copying the scene.
+    let t_after = state.scene.reparented_transform(id, parent).unwrap_or_else(|| t_before.clone());
     Ok(Change::Group(vec![Change::SetTransform { id, before: t_before, after: t_after }, Change::SetParent { id, before, after: parent }]))
 }
 
