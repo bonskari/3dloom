@@ -720,6 +720,12 @@ impl CoordSystem {
     }
 }
 
+/// Every utility of the Utilities panel (More... lists them; Configure Button Sets places them).
+pub const UTILITIES: [&str; 10] = [
+    "Measure", "Rescale World Units", "Collapse", "Reset XForm", "Assign Vertex Colors", "Link Inheritance (Selected)",
+    "Channel Info", "UVW Remove", "Bitmap/Photometric Paths", "Panorama Exporter",
+];
+
 /// Walkthrough navigation: the key step's size and speed, and the vertical rotation lock.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WalkThrough {
@@ -1715,6 +1721,8 @@ pub struct AppState {
     pub track_bar_frame_numbers: bool,
     /// Views > Show Dependencies.
     pub show_dependencies: bool,
+    /// Utilities panel buttons (Configure Button Sets), by utility name.
+    pub utility_buttons: Vec<String>,
     pub show_vertices: bool,
     pub show_statistics: bool,
     /// Nodes hidden by Isolate Selection (restored on exit).
@@ -2141,6 +2149,7 @@ impl AppState {
             show_all_sets_in_list: false,
             track_bar_frame_numbers: true,
             show_dependencies: false,
+            utility_buttons: UTILITIES.iter().map(|s| (*s).to_owned()).collect(),
             show_vertices: false,
             show_statistics: false,
             isolation: None,

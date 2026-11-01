@@ -286,6 +286,10 @@ pub struct LoomApp {
     pub panel_tab: Tab,
     pub hierarchy_sub: HierarchySub,
     pub utility: Utility,
+    /// Utilities > More... is open.
+    pub utilities_more: bool,
+    /// Utilities > Configure Button Sets is open with the buttons being edited.
+    pub configure_utility_buttons: Option<Vec<String>>,
     pub rescale_factor: f32,
     /// Utilities > Measure > Lock Selected: the nodes measured while locked.
     pub measure_lock: Option<Vec<u64>>,
@@ -533,6 +537,8 @@ impl LoomApp {
             panel_tab: Tab::Create,
             hierarchy_sub: HierarchySub::Pivot,
             utility: Utility::None,
+            utilities_more: false,
+            configure_utility_buttons: None,
             rescale_factor: 1.0,
             measure_lock: None,
             measure_floater: false,

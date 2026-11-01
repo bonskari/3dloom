@@ -409,3 +409,30 @@ fn create_menu_extended_primitives_and_shapes_start_their_tools() {
     menu_path(&mut h, &["Create", "Extended Shapes", "Wide Flange"]);
     assert_eq!(h.app.create_kind, Some(crate::CreateKind::ExtendedShape(loom_shape::parametric::ExtendedShape::WideFlange)));
 }
+
+/// Utilities: More... lists every utility and opens the chosen one;
+/// Configure Button Sets puts a utility on a button and sets how many there are.
+#[test]
+fn utilities_more_and_configure_button_sets() {
+    let mut h = Harness::new();
+    h.screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0));
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.frames(2);
+    h.click(h.find(Role::Button, "More...").center());
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Utilities"))).expect("the Utilities list");
+    h.click(h.text_rect("Channel Info", win).unwrap().center());
+    h.click(h.text_rect("OK", win).unwrap().center());
+    assert_eq!(h.app.utility, crate::command_panel::utilities::Utility::ChannelInfo);
+    assert!(!h.app.utilities_more);
+    h.click(h.find(Role::Button, "Configure Button Sets").center());
+    let win = h.ctx.memory(|m| m.area_rect(egui::Id::new("Configure Button Sets"))).expect("the dialog");
+    // Total Buttons 2, then Panorama Exporter onto the first.
+    let spin = h.spinner_after("Total Buttons:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, 200.0));
+    h.click(h.text_rect("Panorama Exporter", win).unwrap().center());
+    let first = h.find_all(Role::Button, "Measure").into_iter().find(|r| win.contains_rect(*r)).expect("the first button");
+    h.click(first.center());
+    h.click(h.text_rect("OK", h.ctx.memory(|m| m.area_rect(egui::Id::new("Configure Button Sets"))).unwrap()).unwrap().center());
+    assert_eq!(h.app.state.utility_buttons.first().map(String::as_str), Some("Panorama Exporter"));
+    assert!(h.app.state.utility_buttons.len() < 10, "fewer buttons: {:?}", h.app.state.utility_buttons);
+}

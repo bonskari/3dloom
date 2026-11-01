@@ -21,26 +21,43 @@ pub enum Utility {
     PanoramaExporter,
 }
 
+/// A utility by its name (the button label).
+pub fn utility_named(name: &str) -> Utility {
+    match name {
+        "Measure" => Utility::Measure,
+        "Rescale World Units" => Utility::RescaleWorldUnits,
+        "Collapse" => Utility::Collapse,
+        "Reset XForm" => Utility::ResetXForm,
+        "Assign Vertex Colors" => Utility::AssignVertexColors,
+        "Link Inheritance (Selected)" => Utility::LinkInheritance,
+        "Channel Info" => Utility::ChannelInfo,
+        "UVW Remove" => Utility::UvwRemove,
+        "Bitmap/Photometric Paths" => Utility::BitmapPaths,
+        "Panorama Exporter" => Utility::PanoramaExporter,
+        _ => Utility::None,
+    }
+}
+
 pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     rollout(ui, "Utilities", true, |ui| {
         let w = ui.available_width();
-        for (label, u) in [
-            ("Measure", Utility::Measure),
-            ("Rescale World Units", Utility::RescaleWorldUnits),
-            ("Collapse", Utility::Collapse),
-            ("Reset XForm", Utility::ResetXForm),
-            ("Assign Vertex Colors", Utility::AssignVertexColors),
-            ("Link Inheritance (Selected)", Utility::LinkInheritance),
-            ("Channel Info", Utility::ChannelInfo),
-            ("UVW Remove", Utility::UvwRemove),
-            ("Bitmap/Photometric Paths", Utility::BitmapPaths),
-            ("Panorama Exporter", Utility::PanoramaExporter),
-        ] {
-            if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.utility == u, label)).clicked() {
+        ui.horizontal(|ui| {
+            if ui.button("More...").clicked() {
+                app.utilities_more = true;
+            }
+            if ui.button("Configure Button Sets").clicked() {
+                app.configure_utility_buttons = Some(app.state.utility_buttons.clone());
+            }
+        });
+        for label in app.state.utility_buttons.clone() {
+            let u = utility_named(&label);
+            if ui.add_sized([w, 22.0], egui::SelectableLabel::new(app.utility == u, label.as_str())).clicked() {
                 app.utility = if app.utility == u { Utility::None } else { u };
             }
         }
     });
+    more_dialog(ui.ctx(), app);
+    configure_dialog(ui.ctx(), app);
     let has = !app.state.selection.is_empty();
     match app.utility {
         Utility::None => {}
@@ -324,4 +341,103 @@ fn uvw_remove(ui: &mut egui::Ui, app: &mut LoomApp) {
         ui.checkbox(&mut set_gray, "Set Gray");
     });
     ui.ctx().data_mut(|d| d.insert_temp(grey_id, set_gray));
+}
+
+/// Utilities > More...: every utility in a list; OK (or a double-click) opens the chosen one.
+fn more_dialog(ctx: &egui::Context, app: &mut LoomApp) {
+    if !app.utilities_more {
+        return;
+    }
+    let id = egui::Id::new("utilities_more_choice");
+    let mut choice: Option<String> = ctx.data(|d| d.get_temp(id));
+    let mut open = true;
+    let mut done: Option<bool> = None;
+    egui::Window::new("Utilities").open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
+        for name in loom_commands::state::UTILITIES {
+            let r = ui.selectable_label(choice.as_deref() == Some(name), name);
+            if r.clicked() {
+                choice = Some(name.to_owned());
+            }
+            if r.double_clicked() {
+                done = Some(true);
+            }
+        }
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                done = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                done = Some(false);
+            }
+        });
+    });
+    ctx.data_mut(|d| d.insert_temp(id, choice.clone()));
+    if done == Some(true) {
+        if let Some(c) = &choice {
+            app.utility = utility_named(c);
+        }
+    }
+    if done.is_some() || !open {
+        app.utilities_more = false;
+        ctx.data_mut(|d| d.remove::<Option<String>>(id));
+    }
+}
+
+/// Configure Button Sets: the utilities on the left, the panel's buttons on
+/// the right; click a utility, then a button to put it there; Total Buttons
+/// sets how many there are.
+fn configure_dialog(ctx: &egui::Context, app: &mut LoomApp) {
+    let Some(mut buttons) = app.configure_utility_buttons.take() else { return };
+    let id = egui::Id::new("configure_utility_pick");
+    let mut pick: Option<String> = ctx.data(|d| d.get_temp(id)).flatten();
+    let mut open = true;
+    let mut done: Option<bool> = None;
+    egui::Window::new("Configure Button Sets").open(&mut open).resizable(false).collapsible(false).show(ctx, |ui| {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.label("Utilities:");
+                for name in loom_commands::state::UTILITIES {
+                    if ui.selectable_label(pick.as_deref() == Some(name), name).clicked() {
+                        pick = Some(name.to_owned());
+                    }
+                }
+            });
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Total Buttons:");
+                    let mut n = buttons.len() as u32;
+                    if ui.add(crate::spinner::spin(ui, &mut n, 1..=32)).changed() {
+                        buttons.resize(n as usize, String::new());
+                    }
+                });
+                for (k, b) in buttons.iter_mut().enumerate() {
+                    let text = if b.is_empty() { format!("(button {})", k + 1) } else { b.clone() };
+                    if ui.add_sized([180.0, 20.0], egui::Button::new(text)).clicked() {
+                        if let Some(p) = &pick {
+                            *b = p.clone();
+                        }
+                    }
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            if ui.button("OK").clicked() {
+                done = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                done = Some(false);
+            }
+        });
+    });
+    match (done, open) {
+        (Some(true), _) => {
+            let _ = app.dispatch(Command::SetUtilityButtons { names: buttons.into_iter().filter(|b| !b.is_empty()).collect() });
+            ctx.data_mut(|d| d.remove::<Option<String>>(id));
+        }
+        (Some(false), _) | (None, false) => ctx.data_mut(|d| d.remove::<Option<String>>(id)),
+        (None, true) => {
+            ctx.data_mut(|d| d.insert_temp(id, pick));
+            app.configure_utility_buttons = Some(buttons);
+        }
+    }
 }
