@@ -162,6 +162,15 @@ fn lens_effects_star_element_turns_on_from_its_rollout() {
     let add = window(&h, "Add Effect");
     click_text(&mut h, "OK", add, 0.0);
     h.frames(2);
+    // The Ring first (the only open element, so one On box shows).
+    let win = window(&h, TITLE);
+    click_text(&mut h, "Ring Element", win, 0.0);
+    h.frames(12);
+    let win = window(&h, TITLE);
+    assert!(h.text_rect("Thickness:", win).is_some(), "the Ring's Thickness spinner");
+    click_text(&mut h, "On", win, 0.0);
+    click_text(&mut h, "Ring Element", win, 0.0);
+    h.frames(12);
     let win = window(&h, TITLE);
     click_text(&mut h, "Star Element", win, 0.0);
     h.frames(12);
@@ -169,5 +178,5 @@ fn lens_effects_star_element_turns_on_from_its_rollout() {
     assert!(h.text_rect("Qty:", win).is_some(), "the Star's Qty spinner");
     click_text(&mut h, "On", win, 0.0);
     let EffectKind::Glow(g) = &h.app.state.scene.environment.effects[0].kind else { panic!("Lens Effects") };
-    assert!(g.star.on && !g.streak.on);
+    assert!(g.star.on && g.ring.on && !g.streak.on);
 }
