@@ -494,10 +494,12 @@ fn swatch_right_click_copy_and_paste() {
     h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
     scroll_top(&mut h);
     h.frames(2);
-    right_click(&mut h, swatch_after(&h, "Diffuse:"));
+    let d = swatch_after(&h, "Diffuse:");
+    right_click(&mut h, d);
     h.click_text_anywhere("Copy");
     h.frames(2);
-    right_click(&mut h, swatch_after(&h, "Specular:"));
+    let sp = swatch_after(&h, "Specular:");
+    right_click(&mut h, sp);
     h.click_text_anywhere("Paste");
     h.frames(2);
     assert_eq!(editor_material(&h).specular.get(), glam::Vec3::X);
