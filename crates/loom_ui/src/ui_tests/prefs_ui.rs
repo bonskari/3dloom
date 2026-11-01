@@ -190,3 +190,20 @@ fn gizmo_preferences_plane_handles_uniform_two_axis_and_relative_size() {
     let s = h.app.state.scene.node(id).unwrap().transform.scale.get();
     assert!(s.x > 1.01 && (s.x - s.y).abs() < 1e-4 && (s.x - s.z).abs() < 1e-4, "the 2-axis handle scaled uniformly: {s}");
 }
+
+/// Time Configuration: the FPS spinner is live only with Custom chosen;
+/// the standard buttons set their rate.
+#[test]
+fn time_configuration_custom_frame_rate_radio() {
+    let mut h = Harness::new();
+    h.cmd(Command::TimeConfiguration);
+    let spin = h.spinner_after("FPS:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -60.0));
+    assert_eq!(h.app.state.fps, 30.0, "NTSC: the FPS spinner is off");
+    h.click(h.find(Role::RadioButton, "Custom").center());
+    let spin = h.spinner_after("FPS:");
+    h.drag(spin.center(), spin.center() + egui::vec2(0.0, -60.0));
+    assert!(h.app.state.fps > 30.0, "Custom: the spinner sets the rate ({})", h.app.state.fps);
+    h.click(h.find(Role::RadioButton, "PAL").center());
+    assert_eq!(h.app.state.fps, 25.0);
+}

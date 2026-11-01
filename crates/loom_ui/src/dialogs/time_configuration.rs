@@ -24,21 +24,29 @@ pub fn show(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
     egui::Window::new("Time Configuration").open(open).resizable(false).show(ctx, |ui| {
         ui.group(|ui| {
             ui.label(egui::RichText::new("Frame Rate").strong());
+            // Custom: chosen with its button (the FPS spinner is live only then) or by a non-standard rate.
+            let custom_id = egui::Id::new("time_configuration_custom");
+            let mut custom = ui.data(|d| d.get_temp::<bool>(custom_id)).unwrap_or(false) || ![30.0, 24.0, 25.0].iter().any(|f| (fps - f).abs() < 1e-3);
             ui.horizontal(|ui| {
                 for (label, f) in [("NTSC", 30.0), ("Film", 24.0), ("PAL", 25.0)] {
-                    if ui.radio((fps - f).abs() < 1e-3, label).clicked() {
+                    if ui.radio(!custom && (fps - f).abs() < 1e-3, label).clicked() {
+                        custom = false;
                         let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: None, fps: Some(f) });
                     }
                 }
-                let custom = ![30.0, 24.0, 25.0].iter().any(|f| (fps - f).abs() < 1e-3);
-                let _ = ui.radio(custom, "Custom");
-            });
-            ui.horizontal(|ui| {
-                ui.label("FPS:");
-                let mut v = fps;
-                if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=1000.0)).changed() {
-                    let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: None, fps: Some(v) });
+                if ui.radio(custom, "Custom").clicked() {
+                    custom = true;
                 }
+            });
+            ui.data_mut(|d| d.insert_temp(custom_id, custom));
+            ui.add_enabled_ui(custom, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("FPS:");
+                    let mut v = fps;
+                    if ui.add(crate::spinner::spin(ui, &mut v, 1.0..=1000.0)).changed() {
+                        let _ = app.dispatch(Command::SetTimeConfiguration { start: None, end: None, fps: Some(v) });
+                    }
+                });
             });
         });
         ui.group(|ui| {
