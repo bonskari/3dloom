@@ -475,3 +475,55 @@ fn rescale_world_units_affect_selection_radio() {
     assert_eq!(x(b), -20.0);
     assert_eq!(x(a), 10.0, "not selected");
 }
+
+/// Helpers > Atmospheric Apparatus: SphereGizmo drags out to its radius;
+/// on the Modify panel Atmospheres & Effects > Add opens Add Atmosphere,
+/// OK gives it a new Fire Effect, Setup shows that in Environment and Effects.
+#[test]
+fn sphere_gizmo_drag_and_add_atmosphere() {
+    let mut h = Harness::new();
+    keep_creating(&mut h, false);
+    wide_view(&mut h);
+    helpers_panel(&mut h);
+    h.frames(2);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Standard", cp, 0.0);
+    h.frames(2);
+    let full = h.screen;
+    click_text(&mut h, "Atmospheric Apparatus", full, 0.0);
+    h.frames(2);
+    for label in ["BoxGizmo", "SphereGizmo", "CylGizmo"] {
+        assert_eq!(h.widgets_labelled(label).len(), 1, "{label} button");
+    }
+    h.click_widget("SphereGizmo");
+    let (a, b) = (h.screen_of(Vec3::ZERO), h.screen_of(Vec3::new(30.0, 0.0, 0.0)));
+    h.drag(a, b);
+    let g = helper_nodes(&h, |o| matches!(o, ObjectKind::AtmosApparatus { shape: 1, .. }));
+    assert_eq!(g.len(), 1);
+    let ObjectKind::AtmosApparatus { radius, .. } = &h.app.state.scene.node(g[0]).unwrap().object else { panic!() };
+    assert!((radius.get() - 30.0).abs() < 2.0, "{}", radius.get());
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    let cp = panel(&h, "command_panel");
+    assert!(h.text_rect("Sphere Gizmo Parameters", cp).is_some());
+    click_text(&mut h, "Add", cp, 0.0);
+    h.frames(3);
+    let full = h.screen;
+    assert!(h.text_rect("Volume Fog", full).is_some(), "the kinds an apparatus takes");
+    click_text(&mut h, "OK", full, 0.0);
+    let atm = &h.app.state.scene.environment.atmospheres;
+    assert_eq!(atm.len(), 1);
+    assert!(matches!(&atm[0].kind, loom_scene::environment::AtmosphereKind::Fire(f) if f.gizmos == g), "{:?}", atm[0]);
+    h.frames(3);
+    let cp = panel(&h, "command_panel");
+    click_text(&mut h, "Fire Effect", cp, 0.0);
+    click_text(&mut h, "Setup", cp, 0.0);
+    assert!(h.app.state.environment_ui.open.is_some());
+    h.frames(4);
+    // Room for the atmosphere's rollout: fold the two rollouts above it.
+    click_text(&mut h, "Common Parameters", full, 0.0);
+    h.frames(12);
+    click_text(&mut h, "Exposure Control", full, 0.0);
+    h.frames(12);
+    assert!(h.text_rect("Fire Effect Parameters", full).is_some(), "Setup shows the fire's rollout");
+}

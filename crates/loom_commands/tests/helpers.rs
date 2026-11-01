@@ -290,3 +290,17 @@ fn align_grid_to_view_turns_the_grid_to_face_the_view() {
     assert!(w.w_axis.truncate().distance(Vec3::splat(5.0)) < 1e-4, "it stays where it is");
     assert!(s.construction_plane(0).3.distance(-Vec3::Y) < 1e-4);
 }
+
+/// Atmospheric apparatus draw as outlines (no shaded faces): a box gizmo's
+/// 12 edges standing on its pivot, a cylinder's two rings and four sides.
+#[test]
+fn atmospheric_apparatus_draw_their_outlines() {
+    let mut s = AppState::new();
+    let b = NodeId(execute(&mut s, Command::CreateHelper { kind: "boxgizmo".into(), position: [0.0; 3], size: 10.0 }).unwrap()["node"].as_u64().unwrap());
+    let lines = loom_commands::helpers::helper_lines(&s, b, &|_| 1.0);
+    assert_eq!(lines.len(), 12);
+    assert!(lines.iter().all(|(a, c, _)| a.z >= -1e-4 && c.z <= 10.0 + 1e-4), "it stands on its pivot");
+    assert_eq!(s.scene.node(b).unwrap().object.mesh().face_count(), 0, "nothing shaded");
+    let c = NodeId(execute(&mut s, Command::CreateHelper { kind: "cylgizmo".into(), position: [0.0; 3], size: 10.0 }).unwrap()["node"].as_u64().unwrap());
+    assert_eq!(loom_commands::helpers::helper_lines(&s, c, &|_| 1.0).len(), 24 * 2 + 4);
+}

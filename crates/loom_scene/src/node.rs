@@ -684,6 +684,18 @@ pub enum ObjectKind {
         show_rose: Param<bool>,
         radius: Param<f32>,
     },
+    /// Helpers > Atmospheric Apparatus: BoxGizmo (`shape` 0), SphereGizmo
+    /// (1) or CylGizmo (2), the volume a Fire or Volume Fog atmosphere fills.
+    /// Box and cylinder stand on their pivot; the sphere is centred on it.
+    AtmosApparatus {
+        shape: u32,
+        length: Param<f32>,
+        width: Param<f32>,
+        height: Param<f32>,
+        radius: Param<f32>,
+        hemisphere: Param<bool>,
+        seed: Param<u32>,
+    },
     /// Helpers > Grid: a user grid; the active one is the construction plane.
     Grid {
         length: Param<f32>,
@@ -1054,6 +1066,10 @@ impl ObjectKind {
     pub fn protractor() -> Self {
         Self::Protractor { object1: None, object2: None }
     }
+    /// An atmospheric apparatus of `shape` (0 box, 1 sphere, 2 cylinder).
+    pub fn atmos_apparatus(shape: u32, size: f32, seed: u32) -> Self {
+        Self::AtmosApparatus { shape: shape.min(2), length: p(size), width: p(size), height: p(size), radius: p(size), hemisphere: p(false), seed: p(seed) }
+    }
     pub fn compass(radius: f32) -> Self {
         Self::Compass { show_rose: p(true), radius: p(radius) }
     }
@@ -1063,7 +1079,7 @@ impl ObjectKind {
     }
     /// Helpers and other non-geometry nodes (Dummy, Point, IK goal, Group, Camera).
     pub fn is_helper(&self) -> bool {
-        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::CamPoint { .. } | Self::Luminaire { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
+        matches!(self, Self::Dummy { .. } | Self::Point { .. } | Self::CamPoint { .. } | Self::Luminaire { .. } | Self::Tape { .. } | Self::Protractor { .. } | Self::Compass { .. } | Self::AtmosApparatus { .. } | Self::Grid { .. } | Self::IkGoal { .. } | Self::Group { .. } | Self::Camera { .. } | Self::Biped(_))
     }
     /// Whether the object has a surface renders can show: not helpers,
     /// cameras, lights or a biped's centre of mass. Bones do (their
@@ -1353,6 +1369,9 @@ impl ObjectKind {
             Self::Tape { .. } => "Tape",
             Self::Protractor { .. } => "Protractor",
             Self::Compass { .. } => "Compass",
+            Self::AtmosApparatus { shape: 0, .. } => "BoxGizmo",
+            Self::AtmosApparatus { shape: 1, .. } => "SphereGizmo",
+            Self::AtmosApparatus { .. } => "CylGizmo",
             Self::Grid { .. } => "Grid",
             Self::IkGoal { .. } => "IK Chain",
             Self::Biped(_) => "Biped",
@@ -1546,6 +1565,9 @@ impl ObjectKind {
             Self::Tape { specify_length, length, .. } => vec![("Length", f(length)), ("Specify Length", b(specify_length))],
             Self::Protractor { .. } => Vec::new(),
             Self::Compass { show_rose, radius } => vec![("Show Compass Rose", b(show_rose)), ("Radius", f(radius))],
+            Self::AtmosApparatus { shape: 0, length, width, height, seed, .. } => vec![("Length", f(length)), ("Width", f(width)), ("Height", f(height)), ("Seed", i(seed))],
+            Self::AtmosApparatus { shape: 1, radius, hemisphere, seed, .. } => vec![("Radius", f(radius)), ("Hemisphere", b(hemisphere)), ("Seed", i(seed))],
+            Self::AtmosApparatus { radius, height, seed, .. } => vec![("Radius", f(radius)), ("Height", f(height)), ("Seed", i(seed))],
             Self::Grid { length, width, spacing, color, plane } => vec![("Length", f(length)), ("Width", f(width)), ("Grid", f(spacing)), ("Active Color", i(color)), ("Display", i(plane))],
             Self::IkGoal { .. } => Vec::new(),
             Self::Biped(bs) => {
@@ -1798,6 +1820,12 @@ impl ObjectKind {
             (Self::Tape { specify_length, .. }, "Specify Length") => { bl(specify_length); ok }
             (Self::Compass { show_rose, .. }, "Show Compass Rose") => { bl(show_rose); ok }
             (Self::Compass { radius, .. }, "Radius") => { fl(radius, 0.001); ok }
+            (Self::AtmosApparatus { length, .. }, "Length") => { fl(length, 0.0); ok }
+            (Self::AtmosApparatus { width, .. }, "Width") => { fl(width, 0.0); ok }
+            (Self::AtmosApparatus { height, .. }, "Height") => { fl(height, 0.0); ok }
+            (Self::AtmosApparatus { radius, .. }, "Radius") => { fl(radius, 0.0); ok }
+            (Self::AtmosApparatus { hemisphere, .. }, "Hemisphere") => { bl(hemisphere); ok }
+            (Self::AtmosApparatus { seed, .. }, "Seed") => { seed.set(value.round().clamp(0.0, 99_999_999.0) as u32); ok }
             (Self::Grid { length, .. }, "Length") => { fl(length, 0.001); ok }
             (Self::Grid { width, .. }, "Width") => { fl(width, 0.001); ok }
             (Self::Grid { spacing, .. }, "Grid") => { fl(spacing, 0.001); ok }
@@ -1940,6 +1968,16 @@ impl ObjectKind {
             Self::Tape { .. } | Self::Protractor { .. } => Cow::Owned(box_primitive(Vec3::splat(1.0))),
             // Compass: the four-pointed rose as a flat star (N along +Y).
             Self::Compass { radius, .. } => Cow::Owned(compass_rose_mesh(radius.get())),
+            // Atmospheric apparatus: its bounds' corners to frame; the outline
+            // draws as helper lines (never shaded or rendered).
+            Self::AtmosApparatus { shape, length, width, height, radius, hemisphere, .. } => {
+                let (lo, hi) = match shape {
+                    0 => (Vec3::new(-width.get() * 0.5, -length.get() * 0.5, 0.0), Vec3::new(width.get() * 0.5, length.get() * 0.5, height.get())),
+                    1 => (Vec3::new(-radius.get(), -radius.get(), if hemisphere.get() { 0.0 } else { -radius.get() }), Vec3::splat(radius.get())),
+                    _ => (Vec3::new(-radius.get(), -radius.get(), 0.0), Vec3::new(radius.get(), radius.get(), height.get())),
+                };
+                Cow::Owned(loom_mesh::standard_primitives::points_mesh(&[lo, hi]))
+            }
             // Grid: its displayed plane as a flat rectangle; the grid lines draw as an overlay.
             Self::Grid { length, width, plane, .. } => Cow::Owned(grid_plane_mesh(length.get(), width.get(), plane.get())),
             // The centre of mass: an octahedron.

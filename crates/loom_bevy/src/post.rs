@@ -68,6 +68,16 @@ mod uniform {
         pub vlight_dir: [Vec4; 4],
         pub vlight_color: [Vec4; 4],
         pub vlight_range: [Vec4; 4],
+        /// Atmospheric apparatus: world to local, shape and size, seed.
+        pub gizmo_inv: [bevy::math::Mat4; 8],
+        pub gizmo_shape: [Vec4; 8],
+        pub gizmo_seed: [Vec4; 8],
+        /// Fire atmospheres (see `env_pass.wgsl`).
+        pub fire_inner: [Vec4; 4],
+        pub fire_outer: [Vec4; 4],
+        pub fire_smoke: [Vec4; 4],
+        pub fire_shape: [Vec4; 4],
+        pub fire_motion: [Vec4; 4],
     }
 }
 

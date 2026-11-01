@@ -396,9 +396,84 @@ fn atmosphere_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &Atm
                 });
             });
         }
+        AtmosphereKind::Fire(f) => {
+            egui::CollapsingHeader::new("Fire Effect Parameters").default_open(true).show(ui, |ui| {
+                gizmos_group(ui, app, i, &f.gizmos);
+                let set = |app: &mut LoomApp, k: &str, val: Value| run(app, "Fire Effect Parameters", json!({ "index": i, k: val }));
+                ui.label(egui::RichText::new("Colors").strong());
+                ui.horizontal(|ui| {
+                    for (label, key, c) in [("Inner Color:", "inner_color", f.inner_color.get()), ("Outer Color:", "outer_color", f.outer_color.get()), ("Smoke Color:", "smoke_color", f.smoke_color.get())] {
+                        if let Some(c) = swatch(ui, label, c) {
+                            set(app, key, json!(c));
+                        }
+                    }
+                });
+                ui.label(egui::RichText::new("Shape").strong());
+                ui.horizontal(|ui| {
+                    ui.label("Flame Type:");
+                    if ui.radio(f.tendril, "Tendril").clicked() {
+                        set(app, "tendril", json!(true));
+                    }
+                    if ui.radio(!f.tendril, "Fire Ball").clicked() {
+                        set(app, "tendril", json!(false));
+                    }
+                });
+                egui::Grid::new("env_fire_shape").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Stretch:", f.stretch.get(), 0.0..=1000.0, 0.01) {
+                        set(app, "stretch", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Regularity:", f.regularity.get(), 0.0..=1.0, 0.01) {
+                        set(app, "regularity", json!(v));
+                    }
+                });
+                ui.label(egui::RichText::new("Characteristics").strong());
+                egui::Grid::new("env_fire_char").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Flame Size:", f.flame_size.get(), 0.0..=10000.0, 0.1) {
+                        set(app, "flame_size", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Flame Detail:", f.flame_detail.get(), 0.0..=10.0, 0.05) {
+                        set(app, "flame_detail", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Density:", f.density.get(), 0.0..=10000.0, 0.1) {
+                        set(app, "density", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Samples:", f.samples.get() as f32, 1.0..=50.0, 0.1) {
+                        set(app, "samples", json!(v.round() as u32));
+                    }
+                });
+                ui.label(egui::RichText::new("Motion").strong());
+                egui::Grid::new("env_fire_motion").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Phase:", f.phase.get(), -100000.0..=100000.0, 0.5) {
+                        set(app, "phase", json!(v));
+                    }
+                    if let Some(v) = spin(ui, app, "Drift:", f.drift.get(), -100000.0..=100000.0, 0.5) {
+                        set(app, "drift", json!(v));
+                    }
+                });
+                ui.label(egui::RichText::new("Explosion").strong());
+                ui.horizontal(|ui| {
+                    let mut ex = f.explosion;
+                    if ui.checkbox(&mut ex, "Explosion").changed() {
+                        set(app, "explosion", json!(ex));
+                    }
+                    let mut sm = f.smoke;
+                    if ui.checkbox(&mut sm, "Smoke").changed() {
+                        set(app, "smoke", json!(sm));
+                    }
+                });
+                egui::Grid::new("env_fire_explosion").num_columns(2).show(ui, |ui| {
+                    if let Some(v) = spin(ui, app, "Fury:", f.fury.get(), 0.0..=1000.0, 0.01) {
+                        set(app, "fury", json!(v));
+                    }
+                });
+            });
+        }
         AtmosphereKind::VolumeFog(v) => {
             egui::CollapsingHeader::new("Volume Fog Parameters").default_open(true).show(ui, |ui| {
-                ui.label("No gizmo: the fog fills the scene.");
+                gizmos_group(ui, app, i, &v.gizmos);
+                if v.gizmos.is_empty() {
+                    ui.label("No gizmo: the fog fills the scene.");
+                }
                 let set = |app: &mut LoomApp, k: &str, val: Value| run(app, "Volume Fog Parameters", json!({ "index": i, k: val }));
                 egui::Grid::new("env_volume_fog").num_columns(2).show(ui, |ui| {
                     if let Some(c) = swatch(ui, "Color:", v.color.get()) {
@@ -447,6 +522,29 @@ fn atmosphere_rollout(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, kind: &Atm
                 });
             });
         }
+    }
+}
+
+/// Gizmos group (Fire Effect, Volume Fog): Pick Gizmo lists the scene's
+/// atmospheric apparatus, each picked one with Remove Gizmo.
+fn gizmos_group(ui: &mut egui::Ui, app: &mut LoomApp, i: usize, gizmos: &[loom_scene::NodeId]) {
+    ui.label(egui::RichText::new("Gizmos").strong());
+    let apparatus: Vec<(u64, String)> = app.state.scene.nodes().filter(|n| matches!(n.object, loom_scene::ObjectKind::AtmosApparatus { .. })).map(|n| (n.id.0, n.name.clone())).collect();
+    egui::ComboBox::from_id_salt(("env_pick_gizmo", i)).selected_text("Pick Gizmo").show_ui(ui, |ui| {
+        for (id, name) in apparatus.iter().filter(|(id, _)| !gizmos.iter().any(|n| n.0 == *id)) {
+            if ui.selectable_label(false, name).clicked() {
+                run(app, "Atmosphere Gizmo", json!({ "index": i, "add": id }));
+            }
+        }
+    });
+    for n in gizmos {
+        let name = apparatus.iter().find(|(id, _)| *id == n.0).map(|(_, s)| s.clone()).unwrap_or_else(|| format!("(deleted {})", n.0));
+        ui.horizontal(|ui| {
+            ui.label(name);
+            if ui.small_button("Remove Gizmo").clicked() {
+                run(app, "Atmosphere Gizmo", json!({ "index": i, "remove": n.0 }));
+            }
+        });
     }
 }
 

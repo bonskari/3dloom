@@ -1,7 +1,8 @@
 // The environment pass: after the main pass it draws the environment
 // background (colour or map) behind the scene, the atmospheres (standard,
-// layered and volume fog) over it in list order, and the Depth of Field
-// blur (two passes: horizontal, then vertical).
+// layered and volume fog) over it in list order, the Fire effects in their
+// atmospheric apparatus, and the Depth of Field blur (two passes:
+// horizontal, then vertical).
 //
 // Colours are premultiplied: the main pass clears to transparent black, so
 // an edge pixel is `coverage * colour`; the background fills what the
@@ -18,13 +19,14 @@ struct EnvPass {
     map: vec4<f32>,
     // The part of the frame this view shows: u0, v0, u1, v1.
     frame: vec4<f32>,
-    // Per atmosphere: rgb linear colour, w: kind (0 none, 1 standard, 2 layered, 3 volume).
+    // Per atmosphere: rgb linear colour, w: kind (0 none, 1 standard, 2 layered, 3 volume, 4 fire).
     fog_color: array<vec4<f32>, 4>,
     // Standard: near distance, far distance, near density, far density.
     // Layered: bottom, top, extinction, falloff (0 none, 1 top, 2 bottom).
     // Volume: extinction, the centre of the sphere it fills.
     fog_a: array<vec4<f32>, 4>,
-    // x: fog background, y: exponential (standard), z: the volume's radius.
+    // x: fog background, y: exponential (standard) / 1 = in gizmos (volume),
+    // z: the volume's radius, w: the gizmos it fills (bit mask, volume and fire).
     fog_b: array<vec4<f32>, 4>,
     // x: 1 = depth of field; y: focal distance; z: focal range; w: focal limit.
     dof: vec4<f32>,
@@ -39,6 +41,20 @@ struct EnvPass {
     vlight_dir: array<vec4<f32>, 4>,
     vlight_color: array<vec4<f32>, 4>,
     vlight_range: array<vec4<f32>, 4>,
+    // Atmospheric apparatus: world to local, x: shape (0 box, 1 sphere,
+    // 2 cylinder) and its size (box: width, length, height; sphere: radius,
+    // hemisphere; cylinder: radius, height), x: seed.
+    gizmo_inv: array<mat4x4<f32>, 8>,
+    gizmo_shape: array<vec4<f32>, 8>,
+    gizmo_seed: array<vec4<f32>, 8>,
+    // Fire: inner colour + tendril, outer colour + stretch, smoke colour +
+    // regularity; flame size, detail, density, samples; phase, drift,
+    // flags (1 explosion, 2 smoke), fury.
+    fire_inner: array<vec4<f32>, 4>,
+    fire_outer: array<vec4<f32>, 4>,
+    fire_smoke: array<vec4<f32>, 4>,
+    fire_shape: array<vec4<f32>, 4>,
+    fire_motion: array<vec4<f32>, 4>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -133,6 +149,23 @@ fn fog_amount(i: i32, o: vec3<f32>, d: vec3<f32>, len: f32, depth: f32) -> f32 {
         }
         return mix(a.z, a.w, t);
     }
+    if kind == 3 && b.y > 0.5 {
+        // The fog fills its gizmos: the parts of the ray inside them.
+        var inside = 0.0;
+        let mask = u32(b.w + 0.5);
+        for (var g = 0; g < 8; g += 1) {
+            if (mask & (1u << u32(g))) == 0u {
+                continue;
+            }
+            let span = gizmo_span(g, o, d);
+            var t1 = span.y;
+            if !background {
+                t1 = min(t1, len);
+            }
+            inside += max(t1 - max(span.x, 0.0), 0.0);
+        }
+        return 1.0 - exp(-a.x * inside);
+    }
     if kind == 3 {
         // The fog fills the scene: the part of the ray inside its sphere
         // (centre a.yzw, radius b.z).
@@ -184,6 +217,230 @@ fn fog_amount(i: i32, o: vec3<f32>, d: vec3<f32>, len: f32, depth: f32) -> f32 {
         return 1.0 - exp(-optical);
     }
     return 0.0;
+}
+
+// Entry and exit of the ray o + t d (world t) through apparatus g; exit <
+// entry when it misses.
+fn gizmo_span(g: i32, o: vec3<f32>, d: vec3<f32>) -> vec2<f32> {
+    let m = env.gizmo_inv[g];
+    let lo = (m * vec4(o, 1.0)).xyz;
+    let ld = (m * vec4(d, 0.0)).xyz;
+    let sh = env.gizmo_shape[g];
+    let shape = i32(sh.x + 0.5);
+    let miss = vec2(1.0, 0.0);
+    if shape == 0 {
+        let half = vec3(sh.y, sh.z, sh.w) * 0.5;
+        let c = lo - vec3(0.0, 0.0, half.z);
+        let inv = 1.0 / select(ld, vec3(1e-9), abs(ld) < vec3(1e-9));
+        let ta = (-half - c) * inv;
+        let tb = (half - c) * inv;
+        let t0 = max(max(min(ta.x, tb.x), min(ta.y, tb.y)), min(ta.z, tb.z));
+        let t1 = min(min(max(ta.x, tb.x), max(ta.y, tb.y)), max(ta.z, tb.z));
+        return vec2(t0, t1);
+    }
+    // Sphere and cylinder: the quadratic of the radius (in xyz or xy).
+    var p = lo;
+    var q = ld;
+    if shape == 2 {
+        p.z = 0.0;
+        q.z = 0.0;
+    }
+    let qa = dot(q, q);
+    var t0 = -1e30;
+    var t1 = 1e30;
+    if qa > 1e-12 {
+        let hb = dot(p, q);
+        let disc = hb * hb - qa * (dot(p, p) - sh.y * sh.y);
+        if disc <= 0.0 {
+            return miss;
+        }
+        let s = sqrt(disc);
+        t0 = (-hb - s) / qa;
+        t1 = (-hb + s) / qa;
+    } else if dot(p, p) > sh.y * sh.y {
+        return miss;
+    }
+    // The cylinder's height, the hemisphere's base.
+    let top = select(1e30, sh.z, shape == 2);
+    let cut = shape == 2 || (shape == 1 && sh.z > 0.5);
+    if cut {
+        if abs(ld.z) < 1e-9 {
+            if lo.z < 0.0 || lo.z > top {
+                return miss;
+            }
+        } else {
+            let za = (0.0 - lo.z) / ld.z;
+            let zb = (top - lo.z) / ld.z;
+            t0 = max(t0, min(za, zb));
+            t1 = min(t1, max(za, zb));
+        }
+    }
+    return vec2(t0, t1);
+}
+
+// Apparatus g's local point at world p: xyz, and w how far out (0 at the
+// centre, 1 at the boundary); `zr` (returned in the caller) is the height
+// within it.
+fn gizmo_local(g: i32, p: vec3<f32>) -> vec4<f32> {
+    let lp = (env.gizmo_inv[g] * vec4(p, 1.0)).xyz;
+    let sh = env.gizmo_shape[g];
+    let shape = i32(sh.x + 0.5);
+    var r = 0.0;
+    if shape == 0 {
+        let half = max(vec3(sh.y, sh.z, sh.w) * 0.5, vec3(1e-4));
+        let c = abs(lp - vec3(0.0, 0.0, half.z)) / half;
+        r = max(max(c.x, c.y), c.z);
+    } else if shape == 1 {
+        r = length(lp) / max(sh.y, 1e-4);
+    } else {
+        let hh = max(sh.z * 0.5, 1e-4);
+        r = max(length(lp.xy) / max(sh.y, 1e-4), abs(lp.z - hh) / hh);
+    }
+    return vec4(lp, r);
+}
+
+// Height within apparatus g, 0 at its base (the sphere's centre) to 1 at its top.
+fn gizmo_height(g: i32, lp: vec3<f32>) -> f32 {
+    let sh = env.gizmo_shape[g];
+    let shape = i32(sh.x + 0.5);
+    if shape == 1 {
+        return clamp(lp.z / max(sh.y, 1e-4), -1.0, 1.0);
+    }
+    return clamp(lp.z / max(select(sh.w, sh.z, shape == 2), 1e-4), 0.0, 1.0);
+}
+
+fn hash3(p: vec3<f32>) -> f32 {
+    let q = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    let r = q + dot(q, q.yxz + 33.33);
+    return fract((r.x + r.y) * r.z);
+}
+
+fn value_noise(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let n000 = hash3(i);
+    let n100 = hash3(i + vec3(1.0, 0.0, 0.0));
+    let n010 = hash3(i + vec3(0.0, 1.0, 0.0));
+    let n110 = hash3(i + vec3(1.0, 1.0, 0.0));
+    let n001 = hash3(i + vec3(0.0, 0.0, 1.0));
+    let n101 = hash3(i + vec3(1.0, 0.0, 1.0));
+    let n011 = hash3(i + vec3(0.0, 1.0, 1.0));
+    let n111 = hash3(i + vec3(1.0, 1.0, 1.0));
+    return mix(mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y), mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y), u.z);
+}
+
+// Fractal noise, `octaves` (fractional) of halving size: 0..1.
+fn fbm(p: vec3<f32>, octaves: f32, ridged: bool) -> f32 {
+    var sum = 0.0;
+    var amp = 0.5;
+    var norm = 0.0;
+    var x = p;
+    let n = i32(ceil(octaves));
+    for (var k = 0; k < n; k += 1) {
+        var v = value_noise(x);
+        if ridged {
+            v = 1.0 - abs(2.0 * v - 1.0);
+        }
+        let w = amp * clamp(octaves - f32(k), 0.0, 1.0);
+        sum += v * w;
+        norm += w;
+        amp *= 0.5;
+        x = x * 2.03 + vec3(17.1, 9.3, 4.7);
+    }
+    return sum / max(norm, 1e-4);
+}
+
+// Fire atmosphere i along o + t d up to `len` (< 0: unbounded): emitted
+// light (premultiplied) and the transmittance left.
+fn fire(i: i32, o: vec3<f32>, d: vec3<f32>, len: f32) -> vec4<f32> {
+    let inner = env.fire_inner[i];
+    let outer = env.fire_outer[i];
+    let smoke = env.fire_smoke[i];
+    let shp = env.fire_shape[i];
+    let mot = env.fire_motion[i];
+    let tendril = inner.w > 0.5;
+    let stretch = max(outer.w, 1e-3);
+    let regularity = clamp(smoke.w, 0.0, 1.0);
+    let size = max(shp.x, 1e-3);
+    let octaves = 1.0 + clamp(shp.y, 0.0, 10.0) * 0.5;
+    var density = max(shp.z, 0.0);
+    let samples = clamp(i32(shp.w + 0.5), 1, 50);
+    let flags = u32(mot.z + 0.5);
+    let phase = mot.x;
+    // Explosion: density grows to its peak by phase 100; between 100 and 200
+    // the colours turn to smoke (or stay); between 200 and 300 it clears.
+    var smoke_mix = 0.0;
+    var scale = 1.0;
+    if (flags & 1u) != 0u {
+        let grow = clamp(phase / 100.0, 0.0, 1.0);
+        density *= grow;
+        scale = max(grow, 0.05);
+        if (flags & 2u) != 0u {
+            smoke_mix = clamp((phase - 100.0) / 100.0, 0.0, 1.0);
+        }
+        density *= 1.0 - clamp((phase - 200.0) / 100.0, 0.0, 1.0);
+    }
+    // Churning: the noise moves through a fourth dimension with the phase.
+    let churn = phase * max(mot.w, 0.0) * 0.02;
+    let slice = floor(churn);
+    let blend = churn - slice;
+    var emit = vec3(0.0);
+    var trans = 1.0;
+    let mask = u32(env.fog_b[i].w + 0.5);
+    for (var g = 0; g < 8; g += 1) {
+        if (mask & (1u << u32(g))) == 0u {
+            continue;
+        }
+        let span = gizmo_span(g, o, d);
+        let t0 = max(span.x, 0.0);
+        var t1 = span.y;
+        if len >= 0.0 {
+            t1 = min(t1, len);
+        }
+        if t1 <= t0 {
+            continue;
+        }
+        let seed = vec3(env.gizmo_seed[g].x * 0.6180339, env.gizmo_seed[g].x * 0.3819660, 0.0) % 1000.0;
+        let steps = samples * 4;
+        let dt = (t1 - t0) / f32(steps);
+        for (var k = 0; k < steps; k += 1) {
+            let p = o + d * (t0 + (f32(k) + 0.5) * dt);
+            let l = gizmo_local(g, p);
+            let r = l.w / scale;
+            if r >= 1.0 {
+                continue;
+            }
+            // Flames rise along local Z; Stretch lengthens them, Drift moves them up.
+            let x = vec3(l.x, l.y, (l.z - mot.y) / stretch) / size + seed;
+            let n0 = fbm(x + vec3(0.0, 0.0, slice * 3.7), octaves, tendril);
+            let n1 = fbm(x + vec3(0.0, 0.0, (slice + 1.0) * 3.7), octaves, tendril);
+            let n = mix(n0, n1, blend);
+            var shape = 1.0 - r;
+            if tendril {
+                // Pointed flames: they thin out towards the top.
+                let h = max(gizmo_height(g, l.xyz), 0.0);
+                shape *= 1.0 - h * h;
+            }
+            // Regularity 1 fills the apparatus; 0 leaves it to the noise.
+            let v = clamp(mix(n * 1.6 - 0.55, 1.0, regularity * 0.5) * mix(1.0, shape * 2.0, regularity) + (shape - 0.5) * (1.0 - regularity), 0.0, 1.0) * smoothstep(0.0, 0.15, 1.0 - r);
+            if v <= 0.0 {
+                continue;
+            }
+            let a = 1.0 - exp(-v * density * 0.02 * dt);
+            // Dense parts take the inner colour, sparse ones the outer; high
+            // densities whiten the core.
+            var col = mix(outer.rgb, inner.rgb, clamp(v * 1.5, 0.0, 1.0));
+            col = mix(col, vec3(1.0), clamp(v * density / 120.0, 0.0, 0.8) * v);
+            col = mix(col, smoke.rgb, smoke_mix);
+            emit += trans * a * col * 2.0;
+            trans *= 1.0 - a;
+            if trans < 0.003 {
+                break;
+            }
+        }
+    }
+    return vec4(emit, trans);
 }
 
 // Light a Volume Light scatters towards the eye along o + t d, t in
@@ -268,6 +525,19 @@ fn environment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         }
         // Alpha 0 behind the scene, or with Use Environment Alpha the map's.
         c = vec4(c.rgb + (1.0 - c.a) * bg, c.a + (1.0 - c.a) * bg_a.a);
+    }
+    // Fire renders in perspective and camera views only.
+    if view.clip_from_view[3][3] < 0.5 {
+        var flen = -1.0;
+        if geometry {
+            flen = length(world_at(in.uv, depth) - near);
+        }
+        for (var i = 0; i < 4; i += 1) {
+            if i32(env.fog_color[i].w + 0.5) == 4 {
+                let f = fire(i, near, dir, flen);
+                c = vec4(c.rgb * f.w + f.rgb, 1.0 - (1.0 - c.a) * f.w);
+            }
+        }
     }
     if env.vlight_pos[0].w > 0.5 {
         var len = -1.0;

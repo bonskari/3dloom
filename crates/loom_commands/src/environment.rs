@@ -46,6 +46,9 @@ pub fn handles(c: &C) -> bool {
             | C::FogParameters { .. }
             | C::VolumeFogParameters { .. }
             | C::VolumeLightParameters { .. }
+            | C::FireEffectParameters { .. }
+            | C::AtmosphereGizmo { .. }
+            | C::ApparatusAddAtmosphere { .. }
             | C::AddEffect { .. }
             | C::DeleteEffect { .. }
             | C::MergeEffects { .. }
@@ -121,6 +124,15 @@ fn atmosphere_mut(e: &mut Environment, index: u32) -> Result<&mut Atmosphere, St
 
 fn effect_mut(e: &mut Environment, index: u32) -> Result<&mut RenderEffect, String> {
     e.effects.get_mut(index as usize).ok_or_else(|| format!("no effect {index}"))
+}
+
+/// Checks that `id` is an atmospheric apparatus.
+fn apparatus(state: &AppState, id: u64) -> Result<(), String> {
+    match state.scene.node(NodeId(id)).map(|n| &n.object) {
+        Some(ObjectKind::AtmosApparatus { .. }) => Ok(()),
+        Some(_) => Err(format!("node {id} is not an atmospheric apparatus")),
+        None => Err(format!("no node {id}")),
+    }
 }
 
 fn not_a(index: u32, what: &str) -> String {
@@ -289,6 +301,77 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             set_opt(&mut l.fog_color, fog_color.map(colour).transpose()?);
             set_opt(&mut l.density, density.map(|v| percent("density", v)).transpose()?);
             commit(state, "Volume Light Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::FireEffectParameters { index, inner_color, outer_color, smoke_color, tendril, stretch, regularity, flame_size, flame_detail, density, samples, phase, drift, explosion, smoke, fury } => {
+            let AtmosphereKind::Fire(f) = &mut atmosphere_mut(&mut e, index)?.kind else { return Err(not_a(index, "Fire Effect")) };
+            set_opt(&mut f.inner_color, inner_color.map(colour).transpose()?);
+            set_opt(&mut f.outer_color, outer_color.map(colour).transpose()?);
+            set_opt(&mut f.smoke_color, smoke_color.map(colour).transpose()?);
+            if let Some(v) = tendril {
+                f.tendril = v;
+            }
+            set_opt(&mut f.stretch, stretch.map(|v| range("stretch", v, 0.0, 1000.0)).transpose()?);
+            set_opt(&mut f.regularity, regularity.map(|v| range("regularity", v, 0.0, 1.0)).transpose()?);
+            set_opt(&mut f.flame_size, flame_size.map(|v| range("flame size", v, 0.0, 10000.0)).transpose()?);
+            set_opt(&mut f.flame_detail, flame_detail.map(|v| range("flame detail", v, 0.0, 10.0)).transpose()?);
+            set_opt(&mut f.density, density.map(|v| range("density", v, 0.0, 10000.0)).transpose()?);
+            set_opt(&mut f.samples, samples.map(|v| v.clamp(1, 50)));
+            set_opt(&mut f.phase, phase.map(|v| range("phase", v, -100000.0, 100000.0)).transpose()?);
+            set_opt(&mut f.drift, drift.map(|v| range("drift", v, -100000.0, 100000.0)).transpose()?);
+            if let Some(v) = explosion {
+                f.explosion = v;
+            }
+            if let Some(v) = smoke {
+                f.smoke = v;
+            }
+            set_opt(&mut f.fury, fury.map(|v| range("fury", v, 0.0, 1000.0)).transpose()?);
+            commit(state, "Fire Effect Parameters", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::AtmosphereGizmo { index, add, remove } => {
+            if let Some(id) = add {
+                apparatus(state, id)?;
+            }
+            let a = atmosphere_mut(&mut e, index)?;
+            let what = a.kind.type_name();
+            let gizmos = a.kind.gizmos_mut().ok_or_else(|| format!("{what} takes no gizmos (Fire Effect, Volume Fog do)"))?;
+            if let Some(id) = add {
+                if !gizmos.contains(&NodeId(id)) {
+                    gizmos.push(NodeId(id));
+                }
+            }
+            if let Some(id) = remove {
+                gizmos.retain(|n| n.0 != id);
+            }
+            commit(state, "Atmosphere Gizmo", e)?;
+            Ok(json!({ "index": index }))
+        }
+        C::ApparatusAddAtmosphere { id, kind, existing } => {
+            apparatus(state, id)?;
+            let mut a = match (existing, kind) {
+                // Existing: a new atmosphere whose settings start as the chosen one's.
+                (Some(i), _) => {
+                    let src = atmosphere_mut(&mut e, i)?.clone();
+                    if src.kind.gizmos().is_none() {
+                        return Err(not_a(i, "Fire Effect or Volume Fog"));
+                    }
+                    src
+                }
+                (None, Some(k)) => {
+                    let kind = AtmosphereKind::new(&k).filter(|k| k.gizmos().is_some()).ok_or_else(|| format!("an apparatus takes {} (not {k:?})", AtmosphereKind::GIZMO_NAMES.join(", ")))?;
+                    Atmosphere { name: String::new(), active: true, kind }
+                }
+                (None, None) => return Err("give a `kind` or an `existing` entry".into()),
+            };
+            let names: Vec<&str> = e.atmospheres.iter().map(|a| a.name.as_str()).collect();
+            a.name = Environment::unique_name(&names, a.kind.type_name());
+            if let Some(g) = a.kind.gizmos_mut() {
+                *g = vec![NodeId(id)];
+            }
+            e.atmospheres.push(a);
+            let index = e.atmospheres.len() - 1;
+            commit(state, "Add Atmosphere", e)?;
             Ok(json!({ "index": index }))
         }
         C::AddEffect { kind, name } => {

@@ -153,7 +153,7 @@ fn atmosphere_list_add_rename_activate_move_delete() {
     ok(&mut s, "Add Atmosphere", json!({ "kind": "Fog" }));
     let names: Vec<String> = s.scene.environment.atmospheres.iter().map(|a| a.name.clone()).collect();
     assert_eq!(names, ["Fog", "Volume Fog", "Fog 1"]);
-    assert!(err(&mut s, "Add Atmosphere", json!({ "kind": "Fire Effect" })).contains("Fog"));
+    assert!(err(&mut s, "Add Atmosphere", json!({ "kind": "Smoke" })).contains("Fog"));
 
     ok(&mut s, "Atmosphere Entry", json!({ "index": 2, "name": "Ground Fog", "active": false }));
     ok(&mut s, "Atmosphere Entry", json!({ "index": 2, "move_by": -2 }));
@@ -284,4 +284,44 @@ fn viewport_background_can_use_the_environment_background() {
     assert!(vp.background_use_environment && vp.background_display);
     ok(&mut s, "Set Viewport Background", json!({ "use_environment": false }));
     assert!(!s.active().background_use_environment);
+}
+
+/// Atmospheric apparatus: Create Helper makes the three gizmos; Add
+/// Atmosphere gives one a new Fire Effect, or a copy of an existing Volume
+/// Fog; Pick / Remove Gizmo edit the list; Fire Effect Parameters set values.
+#[test]
+fn atmospheric_apparatus_take_fire_and_volume_fog() {
+    use loom_scene::{NodeId, ObjectKind};
+    let mut s = AppState::new();
+    let make = |s: &mut AppState, kind: &str| NodeId(execute(s, Command::CreateHelper { kind: kind.into(), position: [0.0; 3], size: 20.0 }).unwrap()["node"].as_u64().unwrap());
+    let (b, sp, c) = (make(&mut s, "boxgizmo"), make(&mut s, "spheregizmo"), make(&mut s, "cylgizmo"));
+    let names: Vec<String> = [b, sp, c].iter().map(|id| s.scene.node(*id).unwrap().name.clone()).collect();
+    assert_eq!(names, ["BoxGizmo001", "SphereGizmo001", "CylGizmo001"]);
+    assert!(s.scene.node(sp).unwrap().object.is_helper());
+    let seed = |s: &AppState, id: NodeId| match &s.scene.node(id).unwrap().object {
+        ObjectKind::AtmosApparatus { seed, .. } => seed.get(),
+        o => panic!("{o:?}"),
+    };
+    assert_ne!(seed(&s, b), seed(&s, sp), "each apparatus its own seed");
+    let i = execute(&mut s, Command::ApparatusAddAtmosphere { id: sp.0, kind: Some("Fire Effect".into()), existing: None }).unwrap()["index"].as_u64().unwrap() as u32;
+    let a = &s.scene.environment.atmospheres[i as usize];
+    assert_eq!(a.name, "Fire Effect");
+    assert!(matches!(&a.kind, AtmosphereKind::Fire(f) if f.gizmos == vec![sp] && f.tendril && f.density.get() == 15.0));
+    execute(&mut s, Command::FireEffectParameters { index: i, inner_color: None, outer_color: None, smoke_color: None, tendril: Some(false), stretch: Some(0.8), regularity: None, flame_size: Some(18.0), flame_detail: None, density: Some(30.0), samples: None, phase: None, drift: None, explosion: None, smoke: None, fury: None }).unwrap();
+    execute(&mut s, Command::AtmosphereGizmo { index: i, add: Some(c.0), remove: Some(sp.0) }).unwrap();
+    let AtmosphereKind::Fire(f) = &s.scene.environment.atmospheres[i as usize].kind else { panic!() };
+    assert_eq!((f.tendril, f.stretch.get(), f.flame_size.get(), f.density.get(), f.gizmos.clone()), (false, 0.8, 18.0, 30.0, vec![c]));
+    let v = execute(&mut s, Command::ApparatusAddAtmosphere { id: b.0, kind: Some("Volume Fog".into()), existing: None }).unwrap()["index"].as_u64().unwrap() as u32;
+    execute(&mut s, Command::VolumeFogParameters { index: v, color: None, density: Some(12.0), fog_background: None }).unwrap();
+    // Existing: a copy with this apparatus as its gizmo.
+    let copy = execute(&mut s, Command::ApparatusAddAtmosphere { id: sp.0, kind: None, existing: Some(v) }).unwrap()["index"].as_u64().unwrap() as usize;
+    let atm = &s.scene.environment.atmospheres;
+    assert_eq!(atm.len(), 3);
+    assert!(matches!(&atm[copy].kind, AtmosphereKind::VolumeFog(f) if f.gizmos == vec![sp] && f.density.get() == 12.0), "{:?}", atm[copy]);
+    assert!(matches!(&atm[v as usize].kind, AtmosphereKind::VolumeFog(f) if f.gizmos == vec![b]), "the original keeps its gizmo");
+    assert_ne!(atm[copy].name, atm[v as usize].name);
+    assert!(execute(&mut s, Command::ApparatusAddAtmosphere { id: sp.0, kind: Some("Fog".into()), existing: None }).is_err(), "plain Fog takes no gizmo");
+    execute(&mut s, Command::CreatePrimitive { kind: loom_commands::PrimitiveKind::Box, position: [0.0; 3], size: [1.0; 3] }).unwrap();
+    let box_id = *s.selection.iter().next().unwrap();
+    assert!(execute(&mut s, Command::AtmosphereGizmo { index: i, add: Some(box_id.0), remove: None }).is_err(), "only apparatus are gizmos");
 }

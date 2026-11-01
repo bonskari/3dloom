@@ -120,8 +120,9 @@ impl Default for Fog {
     }
 }
 
-/// Volume Fog Parameters (no gizmo: the fog fills the scene; without noise
-/// its density is even, so it is drawn exactly, with no steps to set).
+/// Volume Fog Parameters: without gizmos the fog fills the scene; with
+/// atmospheric apparatus picked it fills them. Without noise its density is
+/// even, so it is drawn exactly, with no steps to set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VolumeFog {
@@ -129,11 +130,63 @@ pub struct VolumeFog {
     /// 0–20.
     pub density: Param<f32>,
     pub fog_background: bool,
+    /// Gizmos > Pick Gizmo: atmospheric apparatus nodes.
+    pub gizmos: Vec<NodeId>,
 }
 
 impl Default for VolumeFog {
     fn default() -> Self {
-        Self { color: p(Vec3::ONE), density: p(5.0), fog_background: true }
+        Self { color: p(Vec3::ONE), density: p(5.0), fog_background: true, gizmos: Vec::new() }
+    }
+}
+
+/// Fire Effect Parameters: flames, fireballs or an explosion inside the
+/// picked atmospheric apparatus (nothing renders without one).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FireEffect {
+    pub gizmos: Vec<NodeId>,
+    pub inner_color: Param<Vec3>,
+    pub outer_color: Param<Vec3>,
+    pub smoke_color: Param<Vec3>,
+    /// Shape: Tendril (true) or Fireball.
+    pub tendril: bool,
+    pub stretch: Param<f32>,
+    /// 0–1.
+    pub regularity: Param<f32>,
+    pub flame_size: Param<f32>,
+    /// 0–10.
+    pub flame_detail: Param<f32>,
+    pub density: Param<f32>,
+    pub samples: Param<u32>,
+    pub phase: Param<f32>,
+    pub drift: Param<f32>,
+    pub explosion: bool,
+    pub smoke: bool,
+    pub fury: Param<f32>,
+}
+
+impl Default for FireEffect {
+    fn default() -> Self {
+        let c = |r: f32, g: f32, b: f32| p(Vec3::new(r, g, b) / 255.0);
+        Self {
+            gizmos: Vec::new(),
+            inner_color: c(252.0, 202.0, 0.0),
+            outer_color: c(225.0, 30.0, 30.0),
+            smoke_color: c(25.0, 25.0, 25.0),
+            tendril: true,
+            stretch: p(1.0),
+            regularity: p(0.2),
+            flame_size: p(35.0),
+            flame_detail: p(3.0),
+            density: p(15.0),
+            samples: p(15),
+            phase: p(0.0),
+            drift: p(0.0),
+            explosion: false,
+            smoke: true,
+            fury: p(1.0),
+        }
     }
 }
 
@@ -173,6 +226,7 @@ impl FileOutput {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AtmosphereKind {
+    Fire(FireEffect),
     Fog(Fog),
     VolumeFog(VolumeFog),
     VolumeLight(VolumeLight),
@@ -180,10 +234,13 @@ pub enum AtmosphereKind {
 
 impl AtmosphereKind {
     /// Add Atmospheric Effect list names.
-    pub const NAMES: [&'static str; 3] = ["Fog", "Volume Fog", "Volume Light"];
+    pub const NAMES: [&'static str; 4] = ["Fire Effect", "Fog", "Volume Fog", "Volume Light"];
+    /// The kinds an atmospheric apparatus takes (Add Atmosphere dialog).
+    pub const GIZMO_NAMES: [&'static str; 2] = ["Fire Effect", "Volume Fog"];
 
     pub fn new(name: &str) -> Option<Self> {
         match name {
+            "Fire Effect" => Some(Self::Fire(FireEffect::default())),
             "Fog" => Some(Self::Fog(Fog::default())),
             "Volume Fog" => Some(Self::VolumeFog(VolumeFog::default())),
             "Volume Light" => Some(Self::VolumeLight(VolumeLight::default())),
@@ -193,9 +250,27 @@ impl AtmosphereKind {
 
     pub fn type_name(&self) -> &'static str {
         match self {
+            Self::Fire(_) => "Fire Effect",
             Self::Fog(_) => "Fog",
             Self::VolumeFog(_) => "Volume Fog",
             Self::VolumeLight(_) => "Volume Light",
+        }
+    }
+
+    /// The atmospheric apparatus a Fire Effect or Volume Fog fills.
+    pub fn gizmos(&self) -> Option<&Vec<NodeId>> {
+        match self {
+            Self::Fire(f) => Some(&f.gizmos),
+            Self::VolumeFog(v) => Some(&v.gizmos),
+            _ => None,
+        }
+    }
+
+    pub fn gizmos_mut(&mut self) -> Option<&mut Vec<NodeId>> {
+        match self {
+            Self::Fire(f) => Some(&mut f.gizmos),
+            Self::VolumeFog(v) => Some(&mut v.gizmos),
+            _ => None,
         }
     }
 }

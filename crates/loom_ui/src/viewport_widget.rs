@@ -2319,8 +2319,8 @@ fn object_hits(app: &LoomApp, p: egui::Pos2, rect: egui::Rect, view: Mat4, proj:
     for (i, (id, _)) in app.world_meshes().iter().enumerate() {
         let mesh = app.drawn_mesh(i);
         if mesh.face_count() == 0 {
-            // A line-drawn Dummy picks by its drawn lines.
-            if app.state.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Dummy { .. })) {
+            // A line-drawn Dummy or atmospheric apparatus picks by its drawn lines.
+            if app.state.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Dummy { .. } | loom_scene::ObjectKind::AtmosApparatus { .. })) {
                 let upp = crate::helper_overlay::units_per_px(view_proj, rect);
                 let t = loom_commands::helpers::helper_lines(&app.state, *id, &upp).into_iter().filter_map(|(a, b, _)| segment_hit(a, b, p, rect, view_proj, origin, dir)).min_by(f32::total_cmp);
                 if let Some(t) = t {

@@ -221,6 +221,64 @@ pub fn helper_lines(state: &AppState, id: NodeId, units_per_px: &dyn Fn(Vec3) ->
                 }
             }
         }
+        // Atmospheric apparatus: the volume's outline in its own frame.
+        ObjectKind::AtmosApparatus { shape, length, width, height, radius, hemisphere, .. } => {
+            let at = |p: Vec3| world.transform_point3(p);
+            let mut seg = |a: Vec3, b: Vec3| out.push((at(a), at(b), LineKind::Wire));
+            let ring = |seg: &mut dyn FnMut(Vec3, Vec3), r: f32, z: f32| {
+                let n = 24;
+                for i in 0..n {
+                    let a = |k: u32| std::f32::consts::TAU * k as f32 / n as f32;
+                    seg(Vec3::new(r * a(i).cos(), r * a(i).sin(), z), Vec3::new(r * a(i + 1).cos(), r * a(i + 1).sin(), z));
+                }
+            };
+            match shape {
+                0 => {
+                    let (hx, hy, h) = (width.get() * 0.5, length.get() * 0.5, height.get());
+                    let c = |i: u32| Vec3::new(if i & 1 == 0 { -hx } else { hx }, if i & 2 == 0 { -hy } else { hy }, if i & 4 == 0 { 0.0 } else { h });
+                    for i in 0..8u32 {
+                        for bit in [1u32, 2, 4] {
+                            if i & bit == 0 {
+                                seg(c(i), c(i | bit));
+                            }
+                        }
+                    }
+                }
+                1 => {
+                    // Parallels and meridians (the hemisphere: its upper half and base ring).
+                    let r = radius.get();
+                    let half = hemisphere.get();
+                    let lat0 = if half { 0 } else { -2 };
+                    for k in lat0..=2 {
+                        let phi = k as f32 * std::f32::consts::FRAC_PI_6;
+                        ring(&mut seg, r * phi.cos(), r * phi.sin());
+                    }
+                    let n = 12;
+                    for m in 0..4u32 {
+                        let th = std::f32::consts::FRAC_PI_4 * m as f32;
+                        let lo = if half { 0 } else { -n };
+                        for k in lo..n {
+                            let p = |k: i32| {
+                                let phi = std::f32::consts::FRAC_PI_2 * k as f32 / n as f32;
+                                Vec3::new(r * phi.cos() * th.cos(), r * phi.cos() * th.sin(), r * phi.sin())
+                            };
+                            seg(p(k), p(k + 1));
+                            seg(p(k) * Vec3::new(-1.0, -1.0, 1.0), p(k + 1) * Vec3::new(-1.0, -1.0, 1.0));
+                        }
+                    }
+                }
+                _ => {
+                    let (r, h) = (radius.get(), height.get());
+                    ring(&mut seg, r, 0.0);
+                    ring(&mut seg, r, h);
+                    for k in 0..4 {
+                        let a = std::f32::consts::FRAC_PI_2 * k as f32;
+                        let p = Vec3::new(r * a.cos(), r * a.sin(), 0.0);
+                        seg(p, p + Vec3::Z * h);
+                    }
+                }
+            }
+        }
         // Luminaire: a box of its Size with a lamp below it (a cone down -Z).
         ObjectKind::Luminaire { size, .. } => {
             let h = size.get() * 0.5;

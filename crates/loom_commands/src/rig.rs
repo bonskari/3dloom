@@ -365,8 +365,14 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
                 "protractor" => (ObjectKind::protractor(), "Protractor", [120, 200, 120]),
                 "compass" => (ObjectKind::compass(size.max(0.001)), "Compass", [120, 200, 120]),
                 "grid" => (ObjectKind::grid(size.max(0.001), size.max(0.001)), "Grid", [120, 200, 120]),
+                // Atmospheric apparatus: each gets its own seed, as New Seed would.
+                "boxgizmo" | "spheregizmo" | "cylgizmo" => {
+                    let shape = ["boxgizmo", "spheregizmo", "cylgizmo"].iter().position(|k| *k == kind).unwrap_or(0) as u32;
+                    let seed = (state.scene.next_id().wrapping_mul(2_654_435_761) % 100_000) as u32;
+                    (ObjectKind::atmos_apparatus(shape, size.max(0.0), seed), ["BoxGizmo", "SphereGizmo", "CylGizmo"][shape as usize], [120, 200, 120])
+                }
                 "ikgoal" => (ObjectKind::IkGoal { chain: 0 }, "IK Chain", [0, 200, 255]),
-                other => return Err(format!("unknown helper kind {other:?} (dummy, point, campoint, luminaire, protractor, compass, grid, ikgoal)")),
+                other => return Err(format!("unknown helper kind {other:?} (dummy, point, campoint, luminaire, protractor, compass, grid, boxgizmo, spheregizmo, cylgizmo, ikgoal)")),
             };
             let mut node = Node::new(&state.scene.next_name(base), object);
             node.transform.position.set(Vec3::from(position));

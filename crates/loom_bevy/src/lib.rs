@@ -2000,13 +2000,27 @@ fn env_uniform(env: &EnvSettings, view: ViewEnv, cam: &Transform, (centre, radiu
                 u.fog_a[i] = Vec4::new(bottom, top, environment::layer_extinction(density, bottom, top), fall);
                 u.fog_b[i] = Vec4::new(flag(fog_background), 0.0, 0.0, 0.0);
             }
-            Fog::Volume { color, density, fog_background } => {
+            Fog::Volume { color, density, fog_background, in_gizmos, gizmos } => {
                 u.fog_color[i] = linear(color).with_w(3.0);
-                // The fog fills a sphere a little larger than the scene's bounds.
+                // Without gizmos the fog fills a sphere a little larger than the scene's bounds.
                 u.fog_a[i] = Vec4::new(environment::volume_extinction(density, radius), centre.x, centre.y, centre.z);
-                u.fog_b[i] = Vec4::new(flag(fog_background), 0.0, radius * 1.1, 0.0);
+                u.fog_b[i] = Vec4::new(flag(fog_background && !in_gizmos), flag(in_gizmos), radius * 1.1, gizmos as f32);
+            }
+            Fog::Fire(f) => {
+                u.fog_color[i] = Vec4::new(0.0, 0.0, 0.0, 4.0);
+                u.fog_b[i] = Vec4::new(0.0, 0.0, 0.0, f.gizmos as f32);
+                u.fire_inner[i] = linear(f.inner).with_w(flag(f.tendril));
+                u.fire_outer[i] = linear(f.outer).with_w(f.stretch);
+                u.fire_smoke[i] = linear(f.smoke).with_w(f.regularity);
+                u.fire_shape[i] = Vec4::new(f.flame_size, f.flame_detail, f.density, f.samples as f32);
+                u.fire_motion[i] = Vec4::new(f.phase, f.drift, flag(f.explosion) + 2.0 * flag(f.smoke_on), f.fury);
             }
         }
+    }
+    for (g, z) in env.gizmos.iter().take(environment::MAX_GIZMOS).enumerate() {
+        u.gizmo_inv[g] = bevy::math::Mat4::from_cols_array(&z.world_to_local.to_cols_array());
+        u.gizmo_shape[g] = Vec4::new(z.shape as f32, z.size[0], z.size[1], z.size[2]);
+        u.gizmo_seed[g] = Vec4::new(z.seed as f32, 0.0, 0.0, 0.0);
     }
     if let (Some(dof), Some(focus)) = (env.depth_of_field, view.focus) {
         u.dof = Vec4::new(1.0, focus, dof.focal_range.max(0.0), dof.focal_limit.max(dof.focal_range + 1e-3));

@@ -375,6 +375,7 @@ impl LoomApp {
     /// The scene's environment at the current frame, as the renderer takes it.
     pub(crate) fn environment(&self) -> loom_bevy::environment::EnvSettings {
         let mut env = loom_bevy::environment::EnvSettings::from_scene(&self.state.scene.environment, self.state.current_frame as f32);
+        env.resolve_gizmos(&self.state.scene);
         env.use_alpha = self.state.prefs.use_environment_alpha;
         env.filter_background = self.state.prefs.filter_background;
         env

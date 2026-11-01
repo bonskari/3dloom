@@ -339,7 +339,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
         }
         Category::Helpers => {
             egui::ComboBox::from_id_salt("create_helper_class").selected_text(app.helper_class).show_ui(ui, |ui| {
-                for label in ["Standard", "Assembly Heads", "Camera Match"] {
+                for label in ["Standard", "Atmospheric Apparatus", "Assembly Heads", "Camera Match"] {
                     if ui.selectable_label(app.helper_class == label, label).clicked() && app.helper_class != label {
                         app.helper_class = label;
                         app.start_create(None);
@@ -349,6 +349,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
             let kinds: &[crate::HelperKind] = match app.helper_class {
                 "Camera Match" => &[crate::HelperKind::CamPoint],
                 "Assembly Heads" => &[crate::HelperKind::Luminaire],
+                "Atmospheric Apparatus" => &[crate::HelperKind::BoxGizmo, crate::HelperKind::SphereGizmo, crate::HelperKind::CylGizmo],
                 _ => &[crate::HelperKind::Dummy, crate::HelperKind::Point, crate::HelperKind::Grid, crate::HelperKind::Tape, crate::HelperKind::Protractor, crate::HelperKind::Compass],
             };
             rollout(ui, "Object Type", true, |ui| {
@@ -540,6 +541,22 @@ pub fn parameters(ui: &mut egui::Ui, app: &mut LoomApp) {
         protractor_parameters(ui, app, id);
         return;
     }
+    if let loom_scene::ObjectKind::AtmosApparatus { shape, seed, .. } = &node.object {
+        let title = ["Box Gizmo Parameters", "Sphere Gizmo Parameters", "Cylinder Gizmo Parameters"][(*shape as usize).min(2)];
+        let seed = seed.get();
+        rollout(ui, title, true, |ui| {
+            param_grid(ui, app, id, "apparatus", &params);
+            // New Seed: another seed, picked from the current one.
+            if ui.button("New Seed").clicked() {
+                let next = (seed.wrapping_mul(1_103_515_245).wrapping_add(12_345) >> 3) % 100_000;
+                let _ = app.dispatch(Command::SetParameter { id: id.0, name: "Seed".into(), value: next as f64 });
+            }
+        });
+        if !matches!(app.panel_tab, crate::Tab::Create) {
+            apparatus_atmospheres(ui, app, id);
+        }
+        return;
+    }
     let (is_compound, is_shape) = (node.object.is_compound(), node.object.is_shape());
     if is_compound && !matches!(app.panel_tab, crate::Tab::Create) {
         super::compound::rollouts(ui, app, None);
@@ -562,6 +579,111 @@ pub fn parameters(ui: &mut egui::Ui, app: &mut LoomApp) {
         return;
     }
     rollout(ui, "Parameters", true, |ui| param_grid(ui, app, id, "parameters", &params));
+}
+
+/// Atmospheric apparatus > Atmospheres & Effects: the Fire Effect / Volume
+/// Fog entries this gizmo fills. Add opens Add Atmosphere (New or Existing),
+/// Delete takes the gizmo out of the highlighted one, Setup opens it in
+/// Environment and Effects.
+fn apparatus_atmospheres(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeId) {
+    let state_id = egui::Id::new("apparatus_atmospheres").with(id.0);
+    let entries: Vec<(usize, String)> =
+        app.state.scene.environment.atmospheres.iter().enumerate().filter(|(_, a)| a.kind.gizmos().is_some_and(|g| g.contains(&id))).map(|(i, a)| (i, a.name.clone())).collect();
+    rollout(ui, "Atmospheres & Effects", true, |ui| {
+        let mut sel: Option<usize> = ui.ctx().data(|d| d.get_temp(state_id)).filter(|i| entries.iter().any(|e| e.0 == *i));
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_size(egui::vec2(160.0, 50.0));
+            for (i, name) in &entries {
+                if ui.selectable_label(sel == Some(*i), name.as_str()).clicked() {
+                    sel = Some(*i);
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Add").clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("add_atmosphere"), (id.0, true, Some(0usize))));
+            }
+            if ui.add_enabled(sel.is_some(), egui::Button::new("Delete")).clicked() {
+                if let Some(i) = sel.take() {
+                    let _ = app.dispatch(Command::AtmosphereGizmo { index: i as u32, add: None, remove: Some(id.0) });
+                }
+            }
+            if ui.add_enabled(sel.is_some(), egui::Button::new("Setup")).clicked() {
+                if let Some(i) = sel {
+                    ui.ctx().data_mut(|d| d.insert_temp(crate::dialogs::environment::sel_id("atmosphere"), i));
+                    app.state.environment_ui.open = Some(loom_commands::environment::EnvironmentTab::Environment);
+                }
+            }
+        });
+        ui.ctx().data_mut(|d| match sel {
+            Some(i) => d.insert_temp(state_id, i),
+            None => d.remove::<usize>(state_id),
+        });
+    });
+    add_atmosphere_dialog(ui.ctx(), app);
+}
+
+/// Add Atmosphere (from an atmospheric apparatus): New lists the kinds an
+/// apparatus takes; Existing the Fire Effect / Volume Fog entries other
+/// apparatus use, and adds a copy. OK adds it with this apparatus as its gizmo.
+fn add_atmosphere_dialog(ctx: &egui::Context, app: &mut LoomApp) {
+    use loom_scene::environment::AtmosphereKind;
+    let key = egui::Id::new("add_atmosphere");
+    let Some((gizmo, mut new, mut pick)) = ctx.data(|d| d.get_temp::<(u64, bool, Option<usize>)>(key)) else { return };
+    let mut close = false;
+    let existing: Vec<(usize, String)> = app
+        .state
+        .scene
+        .environment
+        .atmospheres
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| a.kind.gizmos().is_some_and(|g| !g.is_empty() && !g.contains(&loom_scene::NodeId(gizmo))))
+        .map(|(i, a)| (i, a.name.clone()))
+        .collect();
+    egui::Window::new("Add Atmosphere").collapsible(false).resizable(false).show(ctx, |ui| {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_min_size(egui::vec2(180.0, 60.0));
+            if new {
+                for (i, name) in AtmosphereKind::GIZMO_NAMES.iter().enumerate() {
+                    if ui.selectable_label(pick == Some(i), *name).clicked() {
+                        pick = Some(i);
+                    }
+                }
+            } else {
+                for (i, name) in &existing {
+                    if ui.selectable_label(pick == Some(*i), name.as_str()).clicked() {
+                        pick = Some(*i);
+                    }
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui.radio(new, "New").clicked() && !new {
+                new = true;
+                pick = Some(0);
+            }
+            if ui.radio(!new, "Existing").clicked() && new {
+                new = false;
+                pick = existing.first().map(|e| e.0);
+            }
+        });
+        ui.horizontal(|ui| {
+            let ok = if new { pick.is_some_and(|i| i < AtmosphereKind::GIZMO_NAMES.len()) } else { pick.is_some_and(|i| existing.iter().any(|e| e.0 == i)) };
+            if ui.add_enabled(ok, egui::Button::new("OK")).clicked() {
+                let cmd = match (new, pick) {
+                    (true, Some(i)) => Command::ApparatusAddAtmosphere { id: gizmo, kind: Some(AtmosphereKind::GIZMO_NAMES[i].into()), existing: None },
+                    (_, i) => Command::ApparatusAddAtmosphere { id: gizmo, kind: None, existing: i.map(|i| i as u32) },
+                };
+                let _ = app.dispatch(cmd);
+                close = true;
+            }
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+    });
+    ctx.data_mut(|d| if close { d.remove::<(u64, bool, Option<usize>)>(key) } else { d.insert_temp(key, (gizmo, new, pick)) });
 }
 
 /// One grid of spinners / checkboxes for the given parameters.

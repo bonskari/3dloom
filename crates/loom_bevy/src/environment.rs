@@ -43,9 +43,47 @@ pub enum Fog {
     Standard { color: [f32; 3], near: f32, far: f32, exponential: bool, fog_background: bool },
     /// Layered fog between `bottom` and `top` (world Z).
     Layered { color: [f32; 3], bottom: f32, top: f32, density: f32, falloff: LayerFalloff, fog_background: bool },
-    /// Volume Fog without gizmos: the whole scene, density 0–20.
-    Volume { color: [f32; 3], density: f32, fog_background: bool },
+    /// Volume Fog, density 0–20: in its gizmos (`in_gizmos`, the bits of
+    /// [`EnvSettings::gizmos`] in `gizmos`), else the whole scene.
+    Volume { color: [f32; 3], density: f32, fog_background: bool, in_gizmos: bool, gizmos: u32 },
+    /// Fire Effect in the gizmos `gizmos` (bits of [`EnvSettings::gizmos`]).
+    Fire(Fire),
 }
+
+/// A Fire Effect's values at one time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fire {
+    pub inner: [f32; 3],
+    pub outer: [f32; 3],
+    pub smoke: [f32; 3],
+    pub tendril: bool,
+    pub stretch: f32,
+    pub regularity: f32,
+    pub flame_size: f32,
+    pub flame_detail: f32,
+    pub density: f32,
+    pub samples: u32,
+    pub phase: f32,
+    pub drift: f32,
+    pub explosion: bool,
+    pub smoke_on: bool,
+    pub fury: f32,
+    pub gizmos: u32,
+}
+
+/// An atmospheric apparatus the environment pass fills: world to local,
+/// shape (0 box, 1 sphere, 2 cylinder), size (box width, length, height;
+/// sphere radius, hemisphere 0/1; cylinder radius, height) and seed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Gizmo {
+    pub world_to_local: glam::Mat4,
+    pub shape: u32,
+    pub size: [f32; 3],
+    pub seed: u32,
+}
+
+/// Apparatus the environment pass handles at once.
+pub const MAX_GIZMOS: usize = 8;
 
 /// A Volume Light atmosphere.
 #[derive(Debug, Clone, PartialEq)]
@@ -178,6 +216,10 @@ pub struct EnvSettings {
     pub exposure: Option<Exposure>,
     /// At most [`MAX_FOGS`] are drawn.
     pub fogs: Vec<Fog>,
+    /// Per entry of `fogs`: the apparatus node ids it fills (Volume Fog, Fire).
+    pub fog_gizmo_ids: Vec<Vec<u64>>,
+    /// The apparatus [`EnvSettings::resolve_gizmos`] found, at most [`MAX_GIZMOS`].
+    pub gizmos: Vec<Gizmo>,
     pub volume_lights: Vec<VolumeLight>,
     pub depth_of_field: Option<DepthOfField>,
     pub effects: Vec<ImageEffect>,
@@ -215,8 +257,12 @@ impl EnvSettings {
             mid_tones: x.mid_tones.get_at(t),
         });
         let mut fogs = Vec::new();
+        let mut fog_gizmo_ids = Vec::new();
         let mut volume_lights = Vec::new();
         for a in e.atmospheres.iter().filter(|a| a.active) {
+            if !matches!(a.kind, AtmosphereKind::VolumeLight(_)) {
+                fog_gizmo_ids.push(a.kind.gizmos().map(|g| g.iter().map(|n| n.0).collect()).unwrap_or_default());
+            }
             match &a.kind {
                 AtmosphereKind::Fog(f) if f.layered => fogs.push(Fog::Layered {
                     color: rgb(f.color.get_at(t)),
@@ -227,7 +273,25 @@ impl EnvSettings {
                     fog_background: f.fog_background,
                 }),
                 AtmosphereKind::Fog(f) => fogs.push(Fog::Standard { color: rgb(f.color.get_at(t)), near: f.near.get_at(t) / 100.0, far: f.far.get_at(t) / 100.0, exponential: f.exponential, fog_background: f.fog_background }),
-                AtmosphereKind::VolumeFog(v) => fogs.push(Fog::Volume { color: rgb(v.color.get_at(t)), density: v.density.get_at(t), fog_background: v.fog_background }),
+                AtmosphereKind::VolumeFog(v) => fogs.push(Fog::Volume { color: rgb(v.color.get_at(t)), density: v.density.get_at(t), fog_background: v.fog_background, in_gizmos: !v.gizmos.is_empty(), gizmos: 0 }),
+                AtmosphereKind::Fire(f) => fogs.push(Fog::Fire(Fire {
+                    inner: rgb(f.inner_color.get_at(t)),
+                    outer: rgb(f.outer_color.get_at(t)),
+                    smoke: rgb(f.smoke_color.get_at(t)),
+                    tendril: f.tendril,
+                    stretch: f.stretch.get_at(t),
+                    regularity: f.regularity.get_at(t),
+                    flame_size: f.flame_size.get_at(t),
+                    flame_detail: f.flame_detail.get_at(t),
+                    density: f.density.get_at(t),
+                    samples: f.samples.get_at(t),
+                    phase: f.phase.get_at(t),
+                    drift: f.drift.get_at(t),
+                    explosion: f.explosion,
+                    smoke_on: f.smoke,
+                    fury: f.fury.get_at(t),
+                    gizmos: 0,
+                })),
                 AtmosphereKind::VolumeLight(l) => volume_lights.push(VolumeLight { lights: l.lights.iter().map(|n| n.0).collect(), color: rgb(l.fog_color.get_at(t)), density: l.density.get_at(t) }),
             }
         }
@@ -348,6 +412,8 @@ impl EnvSettings {
             ambient: rgb(e.ambient.get_at(t)),
             exposure,
             fogs,
+            fog_gizmo_ids,
+            gizmos: Vec::new(),
             volume_lights,
             depth_of_field,
             effects,
@@ -358,7 +424,46 @@ impl EnvSettings {
 
     /// Without atmospheres (Render Setup > Atmospherics off).
     pub fn without_atmospherics(&self) -> Self {
-        Self { fogs: Vec::new(), volume_lights: Vec::new(), ..self.clone() }
+        Self { fogs: Vec::new(), fog_gizmo_ids: Vec::new(), gizmos: Vec::new(), volume_lights: Vec::new(), ..self.clone() }
+    }
+
+    /// Looks up the atmospheric apparatus the atmospheres fill in `scene`
+    /// (their world matrices now) and sets each atmosphere's gizmo bits;
+    /// deleted or other nodes are left out.
+    pub fn resolve_gizmos(&mut self, scene: &loom_scene::Scene) {
+        self.gizmos.clear();
+        let mut index: Vec<u64> = Vec::new();
+        for (f, ids) in self.fogs.iter_mut().zip(&self.fog_gizmo_ids) {
+            let mut mask = 0u32;
+            for id in ids {
+                let i = match index.iter().position(|x| x == id) {
+                    Some(i) => i,
+                    None => {
+                        let Some(n) = scene.node(loom_scene::NodeId(*id)) else { continue };
+                        let loom_scene::ObjectKind::AtmosApparatus { shape, length, width, height, radius, hemisphere, seed } = &n.object else { continue };
+                        if self.gizmos.len() == MAX_GIZMOS {
+                            continue;
+                        }
+                        let size = match shape {
+                            0 => [width.get(), length.get(), height.get()],
+                            1 => [radius.get(), if hemisphere.get() { 1.0 } else { 0.0 }, 0.0],
+                            _ => [radius.get(), height.get(), 0.0],
+                        };
+                        let world = scene.world_matrix(n.id);
+                        let world_to_local = if world.determinant().abs() > 1e-12 { world.inverse() } else { continue };
+                        self.gizmos.push(Gizmo { world_to_local, shape: *shape, size, seed: seed.get() });
+                        index.push(*id);
+                        index.len() - 1
+                    }
+                };
+                mask |= 1 << i;
+            }
+            match f {
+                Fog::Volume { gizmos, .. } => *gizmos = mask,
+                Fog::Fire(fire) => fire.gizmos = mask,
+                _ => {}
+            }
+        }
     }
 
     /// Without rendering effects (Render Setup > Effects off).

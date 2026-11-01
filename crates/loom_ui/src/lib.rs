@@ -169,6 +169,10 @@ pub enum HelperKind {
     CamPoint,
     /// Assembly Heads > Luminaire.
     Luminaire,
+    /// Atmospheric Apparatus: dragged out to its radius (Box: its footprint).
+    BoxGizmo,
+    SphereGizmo,
+    CylGizmo,
 }
 
 impl HelperKind {
@@ -182,6 +186,9 @@ impl HelperKind {
             HelperKind::Compass => "compass",
             HelperKind::CamPoint => "campoint",
             HelperKind::Luminaire => "luminaire",
+            HelperKind::BoxGizmo => "boxgizmo",
+            HelperKind::SphereGizmo => "spheregizmo",
+            HelperKind::CylGizmo => "cylgizmo",
         }
     }
     pub fn label(self) -> &'static str {
@@ -194,13 +201,16 @@ impl HelperKind {
             HelperKind::Compass => "Compass",
             HelperKind::CamPoint => "CamPoint",
             HelperKind::Luminaire => "Luminaire",
+            HelperKind::BoxGizmo => "BoxGizmo",
+            HelperKind::SphereGizmo => "SphereGizmo",
+            HelperKind::CylGizmo => "CylGizmo",
         }
     }
     pub fn default_size(self) -> f32 {
         match self {
             HelperKind::Dummy | HelperKind::Luminaire => 10.0,
             HelperKind::Point => 20.0,
-            HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass | HelperKind::CamPoint => 0.0,
+            HelperKind::Grid | HelperKind::Tape | HelperKind::Protractor | HelperKind::Compass | HelperKind::CamPoint | HelperKind::BoxGizmo | HelperKind::SphereGizmo | HelperKind::CylGizmo => 0.0,
         }
     }
     /// Created by a drag (a session) rather than a click.
@@ -209,12 +219,13 @@ impl HelperKind {
         match kind {
             HelperKind::CamPoint => "Camera Match",
             HelperKind::Luminaire => "Assembly Heads",
+            HelperKind::BoxGizmo | HelperKind::SphereGizmo | HelperKind::CylGizmo => "Atmospheric Apparatus",
             _ => "Standard",
         }
     }
 
     pub fn dragged(self) -> bool {
-        matches!(self, HelperKind::Grid | HelperKind::Tape | HelperKind::Compass)
+        matches!(self, HelperKind::Grid | HelperKind::Tape | HelperKind::Compass | HelperKind::BoxGizmo | HelperKind::SphereGizmo | HelperKind::CylGizmo)
     }
 }
 
