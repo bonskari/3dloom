@@ -197,7 +197,7 @@ fn command(dialog: Dialog, path: &Path) -> Option<Command> {
             path: Some(p),
             amount: None,
         },
-        Dialog::MaterialBitmap => Command::SetMapBitmap { path: p },
+        Dialog::MaterialBitmap => Command::SetMapBitmap { path: p, sequence: None },
         Dialog::SaveUvw => Command::SaveUvw { path: Some(p) },
         Dialog::RenderFile => Command::RenderSetup { width: None, height: None, image_aspect: None, pixel_aspect: None, lock_image_aspect: None, lock_pixel_aspect: None, render_hidden: None, force_two_sided: None, atmospherics: None, effects: None, save_file: None, output: Some(p) },
         Dialog::SaveRenderedImage => Command::SaveRenderedImage { path: Some(p) },

@@ -112,7 +112,7 @@ fn maps_through_the_browser_with_coordinates_cropping_and_sub_maps() {
     let mut s = AppState::new();
     execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() }).unwrap();
     assert_eq!(s.scene.material_editor.path, vec![NavStep::Map("Diffuse Color".into())], "the editor goes to the new map");
-    execute(&mut s, Command::SetMapBitmap { path: "/x/sign.png".into() }).unwrap();
+    execute(&mut s, Command::SetMapBitmap { path: "/x/sign.png".into(), sequence: None }).unwrap();
     for (name, v) in [("Tiling U", 2.0), ("Offset V", 0.25), ("Angle W", 30.0), ("Apply", 1.0), ("Place", 1.0), ("U", 0.11), ("V", 0.45), ("W", 0.8), ("H", 0.15)] {
         execute(&mut s, Command::SetMapParameter { name: name.into(), value: v }).unwrap();
     }
@@ -173,7 +173,7 @@ fn blend_keeps_the_old_material_and_takes_a_mask() {
     assert_eq!(diffuse(&s, b.materials[0].unwrap()), [10, 20, 30]);
     assert_eq!(s.scene.material_editor.path, vec![NavStep::Sub(1)], "still at the same level, now a Blend");
     execute(&mut s, Command::NewMap { map: "Mask".into(), kind: "Bitmap".into() }).unwrap();
-    execute(&mut s, Command::SetMapBitmap { path: "/x/mask.png".into() }).unwrap();
+    execute(&mut s, Command::SetMapBitmap { path: "/x/mask.png".into(), sequence: None }).unwrap();
     execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
     execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Mix Amount".into(), value: 140.0 }).unwrap();
     let MaterialKind::Blend(b) = s.scene.materials[&old].kind.clone() else { panic!() };
@@ -508,4 +508,33 @@ fn material_explorer_lists_scene_materials_and_reassigns() {
     assert_eq!(s.scene.node(b).unwrap().material, Some(brick));
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     assert_eq!(s.scene.node(b).unwrap().material, None);
+}
+
+#[test]
+fn a_bitmap_sequence_plays_by_bitmap_time() {
+    let dir = std::env::temp_dir().join(format!("loom_seq_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let colours = [[255u8, 0, 0], [0, 255, 0], [0, 0, 255]];
+    for (i, c) in colours.iter().enumerate() {
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([c[0], c[1], c[2], 255])).save(dir.join(format!("frame{:04}.png", i + 1))).unwrap();
+    }
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() }).unwrap();
+    execute(&mut s, Command::SetMapBitmap { path: dir.join("frame0001.png").to_string_lossy().into(), sequence: Some(true) }).unwrap();
+    let red_at = |s: &mut AppState, frame: i32| -> [u8; 3] {
+        execute(s, Command::SetFrame { frame }).unwrap();
+        execute(s, Command::RenderMap { width: 2, height: 2, path: None }).unwrap();
+        let p = s.rendered.image.as_ref().unwrap().get_pixel(0, 0).0;
+        [p[0], p[1], p[2]]
+    };
+    // Loop: frames 0, 1, 2, 3 show files 1, 2, 3, 1.
+    assert_eq!([red_at(&mut s, 0), red_at(&mut s, 1), red_at(&mut s, 2), red_at(&mut s, 3)], [colours[0], colours[1], colours[2], colours[0]]);
+    execute(&mut s, Command::SetMapParameter { name: "End Condition".into(), value: 1.0 }).unwrap();
+    assert_eq!(red_at(&mut s, 3), colours[1], "Ping Pong comes back");
+    execute(&mut s, Command::SetMapParameter { name: "End Condition".into(), value: 2.0 }).unwrap();
+    assert_eq!(red_at(&mut s, 9), colours[2], "Hold stays on the last");
+    execute(&mut s, Command::SetMapParameter { name: "Start Frame".into(), value: 1.0 }).unwrap();
+    execute(&mut s, Command::SetMapParameter { name: "Playback Rate".into(), value: 0.5 }).unwrap();
+    assert_eq!(red_at(&mut s, 3), colours[1], "from frame 1 at half rate: frame 3 is file 2");
+    let _ = std::fs::remove_dir_all(&dir);
 }

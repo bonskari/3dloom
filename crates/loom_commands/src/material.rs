@@ -798,11 +798,17 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             m.swap();
             Ok(())
         }),
-        C::SetMapBitmap { path } => edit_map(state, "Bitmap", |m| {
+        C::SetMapBitmap { path, sequence } => edit_map(state, "Bitmap", |m| {
             if m.kind != MapType::Bitmap {
                 return Err("the map at this level is not a Bitmap".into());
             }
-            m.path = path;
+            // An .ifl, or Sequence on a numbered file: the Bitmap Time files.
+            let ifl = path.to_ascii_lowercase().ends_with(".ifl");
+            m.time.files = if ifl || sequence == Some(true) { crate::render_output::sequence_files(&path, true)?.0 } else { Vec::new() };
+            if m.time.files.len() == 1 && !ifl {
+                m.time.files.clear();
+            }
+            m.path = m.time.files.first().cloned().unwrap_or(path);
             Ok(())
         }),
         C::ReloadBitmaps => {
@@ -1054,7 +1060,7 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             }
             let (mut lib, mut slots) = (state.scene.materials.clone(), state.scene.material_editor.clone());
             let (owner, maps) = current(&mut lib, &mut slots);
-            let map = lib.get(&owner).and_then(|m| map_at(m, &maps)).cloned().ok_or("Render Map renders a map: go to a map level first")?;
+            let map = lib.get(&owner).and_then(|m| map_at(m, &maps)).map(|m| m.at_time(loom_scene::anim::time())).ok_or("Render Map renders a map: go to a map level first")?;
             let mut images = loom_scene::maps::Images::default();
             loom_scene::maps::load_images(&map, &mut images, &mut |p| {
                 image::open(p).ok().map(|i| {

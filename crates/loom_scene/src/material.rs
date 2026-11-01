@@ -294,6 +294,48 @@ pub struct Map {
     pub extra_colors: Vec<Vec3>,
     #[serde(default)]
     pub extra_maps: Vec<Option<Box<Map>>>,
+    /// Bitmap Time rollout: an image sequence (.ifl or numbered files).
+    #[serde(default)]
+    pub time: BitmapTime,
+}
+
+/// Bitmap Time: the files of a sequence, the frame it starts at, the
+/// playback rate (frames of the sequence per scene frame) and what it does
+/// past its end.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BitmapTime {
+    pub files: Vec<String>,
+    pub start_frame: f32,
+    pub rate: f32,
+    /// End Condition: 0 Loop, 1 Ping Pong, 2 Hold.
+    pub end: u8,
+}
+
+impl Default for BitmapTime {
+    fn default() -> Self {
+        Self { files: Vec::new(), start_frame: 0.0, rate: 1.0, end: 0 }
+    }
+}
+
+impl BitmapTime {
+    /// The sequence's file at scene frame `frame` (None: not a sequence).
+    pub fn file_at(&self, frame: f32) -> Option<&str> {
+        let n = self.files.len() as i64;
+        if n == 0 {
+            return None;
+        }
+        let f = ((frame - self.start_frame) * self.rate).floor() as i64;
+        let i = match self.end {
+            1 if n > 1 => {
+                let p = f.rem_euclid(2 * n - 2);
+                if p < n { p } else { 2 * n - 2 - p }
+            }
+            2 => f.clamp(0, n - 1),
+            _ => f.rem_euclid(n),
+        };
+        self.files.get(i as usize).map(String::as_str)
+    }
 }
 
 fn default_map_colors() -> [Vec3; 3] {
@@ -301,6 +343,24 @@ fn default_map_colors() -> [Vec3; 3] {
 }
 
 impl Map {
+    /// The map at scene frame `frame`: a Bitmap sequence's path is that frame's file (here and in its component maps).
+    pub fn at_time(&self, frame: f32) -> Map {
+        let mut m = self.clone();
+        m.set_time(frame);
+        m
+    }
+
+    fn set_time(&mut self, frame: f32) {
+        if let Some(f) = self.time.file_at(frame) {
+            // The surface now depends on time, as an animated parameter does.
+            crate::anim::note_animated_read();
+            self.path = f.to_owned();
+        }
+        for s in self.sub_maps.iter_mut().chain(self.extra_maps.iter_mut()).flatten() {
+            s.set_time(frame);
+        }
+    }
+
     /// A new map of `kind` with the reference's defaults: Checker black/white,
     /// Gradient black / grey / white, Noise and Mix black and white.
     pub fn new(kind: MapType, amount: f32) -> Self {
@@ -328,6 +388,7 @@ impl Map {
             flags: Vec::new(),
             extra_colors: Vec::new(),
             extra_maps: Vec::new(),
+            time: BitmapTime::default(),
         };
         map.init_more();
         map
@@ -358,6 +419,9 @@ impl Map {
         let k = &mut self.crop;
         let p = &mut self.params;
         match name {
+            "Start Frame" => self.time.start_frame = v,
+            "Playback Rate" => self.time.rate = v,
+            "End Condition" => self.time.end = (value.clamp(0.0, 2.0)) as u8,
             "Offset U" => c.offset[0] = v,
             "Offset V" => c.offset[1] = v,
             "Tiling U" => c.tiling[0] = v,
@@ -1520,7 +1584,7 @@ impl Surface {
     }
 
     pub fn from_standard(m: &StandardMaterial) -> Self {
-        let on = |m: &Option<Map>| m.as_ref().filter(|b| b.enabled).cloned();
+        let on = |m: &Option<Map>| m.as_ref().filter(|b| b.enabled).map(|b| b.at_time(crate::anim::time()));
         Self {
             diffuse: m.diffuse.get(),
             ambient: m.ambient.get(),

@@ -396,3 +396,15 @@ fn material_explorer_assigns_the_picked_material_to_the_selection() {
     h.frames(2);
     assert_eq!(h.app.state.scene.node(b).unwrap().material, Some(brick));
 }
+
+#[test]
+fn bitmap_time_end_condition_radio() {
+    let mut h = editor();
+    h.cmd(Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() });
+    scroll_to(&mut h, "Ping Pong");
+    click_in_editor(&mut h, "Ping Pong", 0.0);
+    h.frames(2);
+    let ed = &h.app.state.scene.material_editor;
+    let m = &h.app.state.scene.materials[&ed.slots[ed.active].unwrap()];
+    assert_eq!(m.map("Diffuse Color").unwrap().time.end, 1);
+}

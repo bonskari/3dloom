@@ -1877,6 +1877,27 @@ fn map_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, map: &Map) {
                 map_spinner(ui, app, "V:", "V", k.v, 0.0..=1.0, 3);
                 map_spinner(ui, app, "H:", "H", k.h, 0.0..=1.0, 3);
             });
+            // Time rollout: an image sequence (.ifl, or Sequence on a numbered file).
+            ui.label(egui::RichText::new("Time").strong());
+            let t = &map.time;
+            let mut seq = !t.files.is_empty();
+            if ui.add_enabled(!map.path.is_empty(), egui::Checkbox::new(&mut seq, "Sequence")).changed() {
+                let path = t.files.first().cloned().unwrap_or_else(|| map.path.clone());
+                let _ = app.dispatch(Command::SetMapBitmap { path, sequence: Some(seq) });
+            }
+            if !t.files.is_empty() {
+                ui.label(format!("{} files", t.files.len()));
+            }
+            map_spinner(ui, app, "Start Frame:", "Start Frame", t.start_frame, -100_000.0..=100_000.0, 0);
+            map_spinner(ui, app, "Playback Rate:", "Playback Rate", t.rate, 0.0..=100.0, 2);
+            ui.horizontal(|ui| {
+                ui.label("End Condition:");
+                for (i, label) in ["Loop", "Ping Pong", "Hold"].iter().enumerate() {
+                    if ui.radio(t.end == i as u8, *label).clicked() {
+                        let _ = app.dispatch(Command::SetMapParameter { name: "End Condition".into(), value: i as f64 });
+                    }
+                }
+            });
         }),
         MapType::Checker => crate::command_panel::rollout(ui, "Checker Parameters", true, |ui| {
             map_spinner(ui, app, "Soften:", "Soften", map.params.soften, 0.0..=1.0, 3);

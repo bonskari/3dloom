@@ -4104,7 +4104,7 @@ fn a_bitmap_on_an_imported_skinned_character_shows_in_the_viewport() {
         Command::MaterialEditorToggle,
         Command::AssignMaterialToSelection,
         Command::NewMap { map: "Diffuse Color".into(), kind: "Bitmap".into() },
-        Command::SetMapBitmap { path: png.to_string_lossy().into() },
+        Command::SetMapBitmap { path: png.to_string_lossy().into(), sequence: None },
         Command::AssignMaterialToSelection,
     ] {
         h.cmd(c);
