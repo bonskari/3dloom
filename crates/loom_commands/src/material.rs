@@ -62,6 +62,7 @@ pub fn handles(c: &C) -> bool {
             | C::SelectByMaterial
             | C::MultiSubSort { .. }
             | C::CleanMultiMaterial { .. }
+            | C::CopyMaterialColor { .. }
             | C::RenderMap { .. }
     )
 }
@@ -438,6 +439,15 @@ pub fn execute(state: &mut AppState, cmd: C) -> Result<Value, String> {
             Ok(json!({ "slot": i }))
         }
         C::SetMaterialColor { slot, which, rgb } => edit(state, slot, "Material Color", |m| m.set_color(&which, rgb)),
+        C::CopyMaterialColor { from, to, swap } => edit(state, None, if swap { "Swap Colors" } else { "Copy Color" }, |m| {
+            let rgb = |c: glam::Vec3| [c.x, c.y, c.z].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+            let (a, b) = (m.color(&from)?, m.color(&to)?);
+            m.set_color(&to, rgb(a))?;
+            if swap {
+                m.set_color(&from, rgb(b))?;
+            }
+            Ok(())
+        }),
         C::SetMaterialParameter { slot, name, value } => edit(state, slot, "Material Parameter", |m| m.set_parameter(&name, value)),
         C::SetShader { shader } => {
             let sh = loom_scene::material::Shader::from_label(&shader).ok_or_else(|| format!("no shader \"{shader}\" ({})", loom_scene::material::Shader::ALL.map(|s| s.label()).join(", ")))?;

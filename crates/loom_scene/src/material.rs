@@ -658,6 +658,12 @@ impl Default for ExtendedParams {
 
 /// Standard material, Blinn Basic Parameters plus the maps; `kind` makes it
 /// a compound material (its own Standard values are then unused).
+static NO_MAP: Option<Map> = None;
+
+fn map_lock_default() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StandardMaterial {
     pub name: String,
@@ -667,6 +673,10 @@ pub struct StandardMaterial {
     pub specular: Param<Vec3>,
     /// The lock between Ambient and Diffuse (on by default).
     pub ambient_locked: bool,
+    /// The Maps rollout lock right of the Ambient and Diffuse map buttons:
+    /// on (the default), the Diffuse Color map is the Ambient Color map too.
+    #[serde(default = "map_lock_default")]
+    pub ambient_map_locked: bool,
     /// 0–999.
     pub specular_level: Param<f32>,
     /// 0–100.
@@ -749,6 +759,7 @@ impl StandardMaterial {
             diffuse: Param::new(grey),
             specular: Param::new(Vec3::splat(229.0 / 255.0)),
             ambient_locked: true,
+            ambient_map_locked: true,
             specular_level: Param::new(0.0),
             glossiness: Param::new(10.0),
             soften: Param::new(0.1),
@@ -794,6 +805,7 @@ impl StandardMaterial {
             };
         }
         Ok(match channel {
+            "Ambient Color" if self.ambient_map_locked => return Err("the Ambient Color map is locked to the Diffuse Color map: turn off the lock first".into()),
             "Ambient Color" => &mut self.ambient_map,
             "Diffuse Color" => &mut self.diffuse_map,
             "Specular Color" => &mut self.specular_color_map,
@@ -815,6 +827,8 @@ impl StandardMaterial {
             return if channel == "Mask" { Ok(&b.mask) } else { Err(format!("no map \"{channel}\"")) };
         }
         Ok(match channel {
+            // Locked: the Diffuse Color map serves; the Ambient button holds none.
+            "Ambient Color" if self.ambient_map_locked => &NO_MAP,
             "Ambient Color" => &self.ambient_map,
             "Diffuse Color" => &self.diffuse_map,
             "Specular Color" => &self.specular_color_map,
@@ -1008,6 +1022,7 @@ impl StandardMaterial {
             "Wire" => self.wire = value != 0.0,
             "Faceted" => self.faceted = value != 0.0,
             "Ambient/Diffuse Lock" => self.ambient_locked = value != 0.0,
+            "Ambient/Diffuse Map Lock" => self.ambient_map_locked = value != 0.0,
             "Show Map in Viewport" => self.show_map_in_viewport = value != 0.0,
             other => return self.set_shader_parameter(other, value),
         }
@@ -1048,6 +1063,20 @@ impl StandardMaterial {
 
     /// Sets Ambient, Diffuse or Specular from 0–255 RGB; Ambient follows
     /// Diffuse while they are locked.
+    /// A Standard colour by its `set_color` name, 0–1.
+    pub fn color(&self, which: &str) -> Result<Vec3, String> {
+        Ok(match which {
+            "Ambient" => self.ambient.get(),
+            "Diffuse" => self.diffuse.get(),
+            "Specular" => self.specular.get(),
+            "Specular 2" => self.shading.specular2,
+            "Translucent Color" => self.shading.translucent_color,
+            "Self-Illum Color" => self.shading.self_illum_color,
+            "Filter Color" => self.extended.filter_color,
+            other => return Err(format!("no colour \"{other}\" (Ambient, Diffuse, Specular, Specular 2, Translucent Color, Self-Illum Color, Filter Color)")),
+        })
+    }
+
     pub fn set_color(&mut self, which: &str, rgb: [u8; 3]) -> Result<(), String> {
         let c = Vec3::new(rgb[0] as f32, rgb[1] as f32, rgb[2] as f32) / 255.0;
         match &mut self.kind {

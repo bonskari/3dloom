@@ -266,3 +266,42 @@ fn slot_right_click_render_map_shows_the_map_in_the_frame_window() {
     let (a, b) = (img.get_pixel(40, 40).0, img.get_pixel(280, 40).0);
     assert!(a[0].abs_diff(b[0]) > 200, "the checker's two squares: {a:?} {b:?}");
 }
+
+#[test]
+fn lock_ambient_and_diffuse_maps_check_box_unlocks_the_ambient_map() {
+    let mut h = editor();
+    scroll_top(&mut h);
+    assert!(editor_material(&h).ambient_map_locked);
+    click_in_editor(&mut h, "Lock Ambient and Diffuse Maps", 0.0);
+    h.frames(2);
+    assert!(!editor_material(&h).ambient_map_locked);
+}
+
+/// The colour swatch right of the Basic Parameters label `label` ("Diffuse:").
+fn swatch_after(h: &Harness, label: &str) -> egui::Pos2 {
+    let win = material_editor_rect(h);
+    let l = h.text_rects(label).into_iter().find(|r| win.contains_rect(*r)).unwrap_or_else(|| panic!("no {label:?}"));
+    h.widgets
+        .iter()
+        .filter(|(_, _, w)| w.min.x >= l.max.x - 1.0 && (w.center().y - l.center().y).abs() < l.height() && w.width() > 8.0)
+        .min_by(|a, b| a.2.min.x.total_cmp(&b.2.min.x))
+        .map(|w| w.2.center())
+        .unwrap_or_else(|| panic!("no swatch after {label:?}"))
+}
+
+#[test]
+fn dropping_a_swatch_on_another_asks_copy_or_swap() {
+    let mut h = editor();
+    h.cmd(Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Lock".into(), value: 0.0 });
+    h.cmd(Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] });
+    scroll_top(&mut h);
+    h.frames(2);
+    let (d, sp) = (swatch_after(&h, "Diffuse:"), swatch_after(&h, "Specular:"));
+    h.drag(d, sp);
+    h.frames(2);
+    assert_eq!(h.app.state.dialog, Some(loom_commands::Dialog::CopySwapColors));
+    h.click_text_anywhere("Copy");
+    h.frames(2);
+    assert_eq!(editor_material(&h).specular.get(), glam::Vec3::X, "Specular got Diffuse's red");
+    assert_eq!(h.app.state.dialog, None);
+}

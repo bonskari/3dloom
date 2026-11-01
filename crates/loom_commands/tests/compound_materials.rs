@@ -381,3 +381,37 @@ fn render_map_renders_the_map_level_into_the_frame_window_and_a_file() {
     assert_eq!(saved.as_raw(), img.as_raw(), "Save to File writes the same pixels");
     let _ = std::fs::remove_file(&file);
 }
+
+#[test]
+fn ambient_map_is_locked_to_diffuse_by_default_and_unlocks() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::NewMap { map: "Diffuse Color".into(), kind: "Checker".into() }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    let m = &s.scene.materials[&top(&s)];
+    assert!(m.ambient_map_locked);
+    assert!(m.map("Ambient Color").is_none(), "locked: the Ambient button holds no map of its own");
+    assert!(execute(&mut s, Command::NewMap { map: "Ambient Color".into(), kind: "Noise".into() }).is_err());
+    execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Map Lock".into(), value: 0.0 }).unwrap();
+    execute(&mut s, Command::NewMap { map: "Ambient Color".into(), kind: "Noise".into() }).unwrap();
+    execute(&mut s, Command::MaterialEditorGoToParent).unwrap();
+    let m = &s.scene.materials[&top(&s)];
+    assert_eq!(m.map("Ambient Color").map(|x| x.kind), Some(MapType::Noise));
+    assert_eq!(m.map("Diffuse Color").map(|x| x.kind), Some(MapType::Checker));
+}
+
+#[test]
+fn copy_or_swap_colors_between_swatches() {
+    let mut s = AppState::new();
+    execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Lock".into(), value: 0.0 }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Diffuse".into(), rgb: [255, 0, 0] }).unwrap();
+    execute(&mut s, Command::SetMaterialColor { slot: None, which: "Specular".into(), rgb: [0, 0, 255] }).unwrap();
+    execute(&mut s, Command::CopyMaterialColor { from: "Diffuse".into(), to: "Specular".into(), swap: true }).unwrap();
+    let id = top(&s);
+    assert_eq!(diffuse(&s, id), [0, 0, 255]);
+    assert_eq!(s.scene.materials[&id].specular.get(), glam::Vec3::X);
+    execute(&mut s, Command::CopyMaterialColor { from: "Specular".into(), to: "Filter Color".into(), swap: false }).unwrap();
+    assert_eq!(s.scene.materials[&id].extended.filter_color, glam::Vec3::X);
+    assert_eq!(s.scene.materials[&id].specular.get(), glam::Vec3::X, "Copy leaves the source");
+    execute(&mut s, Command::UndoSceneOperation).unwrap();
+    assert_ne!(s.scene.materials[&id].extended.filter_color, glam::Vec3::X);
+}

@@ -225,6 +225,10 @@ fn every_map_type_round_trips_through_the_loom_file() {
             slot += 1;
             execute(&mut s, Command::MaterialEditorSlot { slot }).unwrap();
         }
+        if i % channels.len() == 0 {
+            // The Ambient Color map button is locked to Diffuse by default.
+            execute(&mut s, Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Map Lock".into(), value: 0.0 }).unwrap();
+        }
         execute(&mut s, Command::NewMap { map: channels[i % channels.len()].into(), kind: ty.label().into() }).unwrap();
         // One non-default parameter each where the type has one.
         let _ = execute(&mut s, Command::SetMapParameter { name: "Random Seed".into(), value: 7.0 });

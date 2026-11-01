@@ -947,10 +947,56 @@ fn name_row(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial, maps: &[
 // ---------------------------------------------------------------------------
 
 /// A colour swatch of the material at the current level (`which` as Set Material Color names it).
+/// A swatch being dragged onto another (Copy or Swap Colors).
+#[derive(Clone)]
+struct SwatchDrag(String);
+
 fn swatch(ui: &mut egui::Ui, app: &mut LoomApp, which: &str, c: glam::Vec3) {
     let mut rgb = rgb_of(c);
-    if ui.color_edit_button_srgb(&mut rgb).on_hover_text(which).changed() {
+    let r = ui.color_edit_button_srgb(&mut rgb).on_hover_text(which).interact(egui::Sense::drag());
+    if r.changed() {
         let _ = app.dispatch(Command::SetMaterialColor { slot: None, which: which.into(), rgb });
+    }
+    if r.drag_started() {
+        egui::DragAndDrop::set_payload(ui.ctx(), SwatchDrag(which.to_owned()));
+    }
+    if let Some(from) = r.dnd_release_payload::<SwatchDrag>() {
+        if from.0 != which {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("copy_swap_colors"), (from.0.clone(), which.to_owned())));
+            app.state.dialog = Some(Dialog::CopySwapColors);
+        }
+    }
+}
+
+/// Copy or Swap Colors: after dropping one swatch on another.
+pub fn copy_swap_colors(ctx: &egui::Context, app: &mut LoomApp, open: &mut bool) {
+    let id = egui::Id::new("copy_swap_colors");
+    let Some((from, to)) = ctx.data(|d| d.get_temp::<(String, String)>(id)) else {
+        *open = false;
+        return;
+    };
+    let mut pick = None;
+    egui::Window::new("Copy or Swap Colors").open(open).collapsible(false).resizable(false).show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            if ui.button("Swap").clicked() {
+                pick = Some(Some(true));
+            }
+            if ui.button("Copy").clicked() {
+                pick = Some(Some(false));
+            }
+            if ui.button("Cancel").clicked() {
+                pick = Some(None);
+            }
+        });
+    });
+    if let Some(p) = pick {
+        if let Some(swap) = p {
+            let _ = app.dispatch(Command::CopyMaterialColor { from, to, swap });
+        }
+        *open = false;
+    }
+    if !*open {
+        ctx.data_mut(|d| d.remove::<(String, String)>(id));
     }
 }
 
@@ -1016,13 +1062,15 @@ fn standard_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial)
                 };
                 ui.label(format!("{label}:"));
                 swatch(ui, app, which, c);
-                map_button(ui, app, channel, m.map(channel), true);
+                // Locked maps: the Ambient map button is unavailable (the Diffuse map serves).
+                ui.add_enabled_ui(!(*channel == "Ambient Color" && m.ambient_map_locked), |ui| map_button(ui, app, channel, m.map(channel), true));
                 ui.end_row();
             }
         });
         if sh.shader != Shader::Strauss {
             ui.horizontal(|ui| {
                 check(ui, app, "Lock Ambient and Diffuse", "Ambient/Diffuse Lock", m.ambient_locked);
+                check(ui, app, "Lock Ambient and Diffuse Maps", "Ambient/Diffuse Map Lock", m.ambient_map_locked);
                 if !matches!(sh.shader, Shader::Metal | Shader::MultiLayer) {
                     check(ui, app, "Lock Diffuse and Specular", "Diffuse/Specular Lock", sh.diffuse_specular_locked);
                 }
@@ -1152,7 +1200,15 @@ fn maps_rollout(ui: &mut egui::Ui, app: &mut LoomApp, m: &StandardMaterial) {
                     app.state.undo.end();
                 }
                 ui.horizontal(|ui| {
-                    map_button(ui, app, channel, map.as_ref(), false);
+                    let locked = *channel == "Ambient Color" && m.ambient_map_locked;
+                    ui.add_enabled_ui(!locked, |ui| map_button(ui, app, channel, map.as_ref(), false));
+                    if *channel == "Ambient Color" {
+                        // The lock right of the Ambient and Diffuse map buttons.
+                        let icon = if m.ambient_map_locked { crate::icons::LOCKED } else { crate::icons::UNLOCKED };
+                        if crate::icons::small(ui, icon, "Lock Ambient and Diffuse Maps").clicked() {
+                            let _ = app.dispatch(Command::SetMaterialParameter { slot: None, name: "Ambient/Diffuse Map Lock".into(), value: if m.ambient_map_locked { 0.0 } else { 1.0 } });
+                        }
+                    }
                     if map.is_some() && crate::icons::small(ui, crate::icons::CLEAR, "Clear the map").clicked() {
                         let _ = app.dispatch(Command::SetMaterialMap { slot: None, map: (*channel).into(), path: None, amount: None });
                     }

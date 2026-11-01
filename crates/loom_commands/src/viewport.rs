@@ -479,6 +479,8 @@ pub enum Dialog {
     CleanMultiMaterial,
     /// Sample slot right-click > Render Map.
     RenderMap,
+    /// Copy or Swap Colors (a swatch dropped on another).
+    CopySwapColors,
     /// Bitmap Parameters > View Image: Specify Cropping/Placement.
     SpecifyCropping,
     /// Copy (Instance) Map: dragging map button `from` onto `to` (indexes into MAP_SLOTS).
