@@ -524,3 +524,16 @@ fn merge_list_sorts_filters_and_shows_subtrees() {
     got.sort();
     assert_eq!(got, vec!["Arm".to_owned(), "Zed".to_owned()], "the parent and its child merged");
 }
+
+/// File > Export takes an .ase name: the ASCII Scene Export file is written.
+#[test]
+fn export_writes_an_ascii_scene_export_file() {
+    let mut h = Harness::new();
+    h.app.native_file_dialogs = false;
+    named_box(&mut h, "Crate", 0.0);
+    let path = exchange_dir("ase_export").join("crate.ase");
+    h.cmd(Command::ExportFile { path: None });
+    choose_file(&mut h, &path, "Save");
+    let text = std::fs::read_to_string(&path).expect("the .ase is written");
+    assert!(text.starts_with("*3DSMAX_ASCIIEXPORT") && text.contains("*NODE_NAME \"Crate\""), "{text}");
+}

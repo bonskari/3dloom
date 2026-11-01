@@ -23,6 +23,10 @@ pub fn is_3ds(path: &Path) -> bool {
     ext(path) == "3ds"
 }
 
+pub fn is_ase(path: &Path) -> bool {
+    ext(path) == "ase"
+}
+
 pub fn is_stl(path: &Path) -> bool {
     ext(path) == "stl"
 }
@@ -372,6 +376,16 @@ pub fn export_stl(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value
     let bytes = if state.exchange.stl_export.binary { loom_mesh::stl::write_binary(&name, &tris) } else { loom_mesh::stl::write_ascii(&name, &tris).into_bytes() };
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(json!({ "path": path, "triangles": tris.len(), "binary": state.exchange.stl_export.binary }))
+}
+
+/// ASCII Scene Export: the geometry objects, world-space vertices.
+pub fn export_ase(state: &AppState, ids: &[NodeId], path: &Path) -> Result<Value, String> {
+    let objects = geometry(state, ids);
+    if objects.is_empty() {
+        return Err("nothing to export: no geometry objects".into());
+    }
+    std::fs::write(path, loom_mesh::ase::write(&objects)).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(json!({ "path": path, "objects": objects.len() }))
 }
 
 // ---- DXF -------------------------------------------------------------------
