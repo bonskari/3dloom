@@ -1749,7 +1749,7 @@ commands! {
     ListDeleteController => "List Delete Controller", Loom, "List controller: delete an entry (the last one stays)." { id: u64, track: String, index: u32 };
     PathConstraint => "Path Constraint", Loom, "Animation > Constraints > Path Constraint: the selection follows the shape `target` (% Along Path keyed 0 → 100 over the active segment; another path adds a weighted target)." { target: u64 };
     PositionConstraint => "Position Constraint", Loom, "Animation > Constraints > Position Constraint: add `target` (weight 50) to the selection's position targets." { target: u64 };
-    SurfaceConstraint => "Surface Constraint", Loom, "Animation > Constraints > Surface Constraint: the selection moves on the surface of `target` (a Sphere, Cylinder, Torus, Plane or Quad Patch) at U / V Position.";
+    SurfaceConstraint => "Surface Constraint", Loom, "Animation > Constraints > Surface Constraint: the selection moves on the surface of `target` (a Sphere, Cylinder, Torus, Plane or Quad Patch) at U / V Position." { target: u64 };
     AttachmentConstraint => "Attachment Constraint", Loom, "Animation > Constraints > Attachment Constraint: stick the selection to face `face` of `target` at barycentric A, B (Align to Surface on)." { target: u64, face: Option<u32>, a: Option<f32>, b: Option<f32> };
     LookAtConstraint => "LookAt Constraint", Loom, "Animation > Constraints > LookAt Constraint: aim the selection's X axis at `target` (more targets blend by weight)." { target: u64 };
     OrientationConstraint => "Orientation Constraint", Loom, "Animation > Constraints > Orientation Constraint: add `target` to the selection's orientation targets." { target: u64 };
