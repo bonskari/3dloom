@@ -407,3 +407,31 @@ fn campoints_and_the_camera_match_utility() {
     let e = h.app.state.camera_match_error.unwrap();
     assert!(h.text_centers(&format!("{e:.3}")).len() == 1, "the Current Camera Error shows");
 }
+
+/// Camera Match > Assign Position: with it on, a click in a viewport puts
+/// the selected CamPoint's screen coordinates under the pointer (render
+/// output pixels over the view), shown as a red cross.
+#[test]
+fn camera_match_assign_position_places_the_selected_campoint_by_a_click() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreateHelper { kind: "campoint".into(), position: [0.0; 3], size: 1.0 });
+    let id = helper_nodes(&h, |o| matches!(o, ObjectKind::CamPoint { .. }))[0];
+    h.app.state.selection = [id].into_iter().collect();
+    h.app.panel_tab = crate::Tab::Utilities;
+    h.app.utility = crate::command_panel::utilities::Utility::CameraMatch;
+    h.frames(3);
+    h.click_widget("Assign Position");
+    assert!(h.app.camera_match_assign);
+    let rect = h.app.viewport_rects[h.app.state.active_viewport];
+    let p = rect.center() + egui::vec2(30.0, -20.0);
+    h.click(p);
+    let screen = match &h.app.state.scene.node(id).unwrap().object {
+        ObjectKind::CamPoint { screen, .. } => screen.expect("assigned"),
+        _ => unreachable!(),
+    };
+    let (w, hh) = (h.app.state.scene.render.width as f32, h.app.state.scene.render.height as f32);
+    // Match Viewport (the default): the output stretches over the view.
+    let want = [(p.x - rect.min.x) / rect.width() * w, (p.y - rect.min.y) / rect.height() * hh];
+    assert!((screen[0] - want[0]).abs() < 1.0 && (screen[1] - want[1]).abs() < 1.0, "{screen:?} vs {want:?}");
+    assert_eq!(h.app.state.selection.iter().copied().collect::<Vec<_>>(), vec![id], "the click does not select");
+}

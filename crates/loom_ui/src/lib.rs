@@ -298,6 +298,9 @@ pub struct LoomApp {
     /// Camera Match utility: Iterations and Freeze FOV.
     pub camera_match_iterations: u32,
     pub camera_match_freeze_fov: bool,
+    /// Camera Match > Assign Position: a click in a viewport places the
+    /// selected CamPoint's screen coordinates.
+    pub camera_match_assign: bool,
     /// Modify panel: the stack display's least height (its bar drags it).
     pub stack_height: f32,
     /// Utilities > Configure Button Sets is open with the buttons being edited.
@@ -563,6 +566,7 @@ impl LoomApp {
             utilities_more: false,
             camera_match_helpers: false,
             camera_match_iterations: 500,
+            camera_match_assign: false,
             camera_match_freeze_fov: false,
             stack_height: 90.0,
             configure_utility_buttons: None,

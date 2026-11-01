@@ -83,6 +83,11 @@ fn camera_match(ui: &mut egui::Ui, app: &mut LoomApp) {
         if let (true, Some(p)) = (changed, &current) {
             let _ = app.dispatch(Command::CamPointScreen { id: p.0, screen: Some(xy) });
         }
+        let w = ui.available_width();
+        let assign = app.camera_match_assign;
+        if ui.add_sized([w, 22.0], egui::Button::new("Assign Position").selected(assign)).clicked() {
+            app.camera_match_assign = !assign;
+        }
     });
     rollout(ui, "Camera Match", true, |ui| {
         let w = ui.available_width();

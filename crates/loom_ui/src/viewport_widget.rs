@@ -974,6 +974,15 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
                                             let node = app.world_meshes()[mesh].0;
                                             let _ = app.dispatch(Command::ToggleSeamEdge { node: node.0, edge: e.0 });
                                         }
+                                    } else if app.camera_match_assign && app.utility == crate::command_panel::utilities::Utility::CameraMatch {
+                                        // Camera Match > Assign Position: the selected CamPoint's pixel.
+                                        let point = app.state.selection.iter().copied().find(|id| matches!(app.state.scene.node(*id).map(|n| &n.object), Some(loom_scene::ObjectKind::CamPoint { .. })));
+                                        if let Some(id) = point {
+                                            let image = camera_match_rect(app, &ctx, index, rect, view_proj);
+                                            let (w, h) = (app.state.scene.render.width as f32, app.state.scene.render.height as f32);
+                                            let xy = [(p.x - image.min.x) / image.width().max(1e-3) * w, (p.y - image.min.y) / image.height().max(1e-3) * h];
+                                            let _ = app.dispatch(Command::CamPointScreen { id: id.0, screen: Some(xy) });
+                                        }
                                     } else if app.state.pick_mode == Some(loom_commands::PickMode::WorkingPivotView) {
                                         if let Some(pt) = working_pivot_view_point(app, index, p, rect, view, proj) {
                                             let _ = app.dispatch(Command::PickPoint { point: pt.to_array() });
@@ -1355,6 +1364,9 @@ pub fn show_one(ui: &mut egui::Ui, app: &mut LoomApp, index: usize, rect: egui::
             crate::camera_overlay::draw(&painter, app, index, view_proj, rect);
             crate::helper_overlay::draw(&painter, app, view_proj, rect, &helper_top_lines);
             crate::light_overlay::draw(&painter, app, index, view_proj, rect, realistic);
+            if app.utility == crate::command_panel::utilities::Utility::CameraMatch {
+                camera_match_crosses(&painter, app, &ctx, index, rect, view_proj);
+            }
             crate::spline_modes::draw(&painter, app, &projection);
             draw_mode_overlays(&painter, app, view_proj, rect);
             draw_soft_selection(&painter, app, view_proj, rect);
@@ -1680,6 +1692,29 @@ pub(crate) fn background_rect(vp: &loom_commands::Viewport, rect: egui::Rect, im
             egui::Rect::from_center_size(centre, size * (distance / vp.camera.distance.max(1e-6)))
         }
         None => egui::Rect::from_center_size(rect.center(), size),
+    }
+}
+
+/// Where Camera Match screen coordinates lie in viewport `index`: over its
+/// background image when one shows, else as the render output fits the view.
+fn camera_match_rect(app: &mut LoomApp, ctx: &egui::Context, index: usize, rect: egui::Rect, view_proj: Mat4) -> egui::Rect {
+    let render = (app.state.scene.render.width, app.state.scene.render.height);
+    let vp = &app.state.viewports[index];
+    let shown = vp.background.clone().filter(|_| vp.background_display).map(|path| (path, vp.background_version));
+    let image = shown.and_then(|(path, version)| app.background_texture(ctx, &path, version)).map_or([render.0 as usize, render.1 as usize], |t| t.size());
+    background_rect(&app.state.viewports[index], rect, image, render, view_proj)
+}
+
+/// Camera Match: each CamPoint's screen coordinates as a small red cross.
+fn camera_match_crosses(painter: &egui::Painter, app: &mut LoomApp, ctx: &egui::Context, index: usize, rect: egui::Rect, view_proj: Mat4) {
+    let image = camera_match_rect(app, ctx, index, rect, view_proj);
+    let (w, h) = (app.state.scene.render.width.max(1) as f32, app.state.scene.render.height.max(1) as f32);
+    let stroke = egui::Stroke::new(1.5, egui::Color32::RED);
+    for n in app.state.scene.nodes() {
+        let loom_scene::ObjectKind::CamPoint { screen: Some(s), .. } = &n.object else { continue };
+        let c = image.min + egui::vec2(s[0] / w * image.width(), s[1] / h * image.height());
+        painter.line_segment([c - egui::vec2(4.0, 0.0), c + egui::vec2(4.0, 0.0)], stroke);
+        painter.line_segment([c - egui::vec2(0.0, 4.0), c + egui::vec2(0.0, 4.0)], stroke);
     }
 }
 
