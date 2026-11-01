@@ -146,8 +146,8 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
     let mut dropped: Option<(usize, usize, Option<bool>)> = None;
     let mut rename: Option<(usize, String)> = None;
     let stack_height = app.stack_height;
-    egui::Frame::group(ui.style()).show(ui, |ui| { egui::ScrollArea::vertical().id_salt("stack_display").max_height(stack_height).auto_shrink([false, true]).show(ui, |ui| {
-        ui.set_min_height(90.0);
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_min_height(stack_height);
         ui.set_min_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = 1.0;
         // `+` / `−` in front of entries with sub-object levels. Entering a level
@@ -357,7 +357,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut LoomApp) {
                 }
             }
         }
-    }); });
+    });
     // The bar under the stack display: dragging it makes the display taller or shorter.
     let bar = ui.allocate_response(egui::vec2(ui.available_width(), 6.0), egui::Sense::drag());
     ui.painter().hline(bar.rect.x_range(), bar.rect.center().y, egui::Stroke::new(2.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color));

@@ -38,7 +38,6 @@ fn click_named(h: &mut Harness, name: &str) {
 
 fn click_text(h: &mut Harness, label: &str) {
     let r = find_text(h, label).unwrap_or_else(|| panic!("no widget labelled {label:?}"));
-    eprintln!("click_text {label:?} at {r:?}");
     h.click(r.center());
 }
 
