@@ -406,3 +406,41 @@ fn link_inheritance_utility_unchecks_an_axis_on_every_selected_object() {
         assert_eq!(h.app.state.scene.node(id).unwrap().inherit.rotate_axes, [false, true, true]);
     }
 }
+
+/// Tools 1 > Apply Camera Correction Modifier puts Camera Correction on the
+/// selected camera; its Guess button sets the Amount that levels the camera,
+/// and a view through the camera then uses it.
+#[test]
+fn camera_correction_from_the_quad_menu_and_its_guess_button() {
+    let mut h = Harness::new();
+    let r = h.app.dispatch(Command::CreateCamera { target: true }).unwrap();
+    let id = NodeId(r["id"].as_u64().unwrap());
+    h.app.state.selection = vec![id];
+    let tools1 = crate::quad_menu::create_quadrants(&h.app).tools1.expect("tools 1 for a camera");
+    let item = tools1.items.iter().find(|i| i.label == "Apply Camera Correction Modifier").expect("Apply Camera Correction Modifier");
+    let crate::quad_menu::Action::Command(c) = &item.action else { panic!("a command") };
+    h.app.dispatch(c.clone()).unwrap();
+    let node = h.app.state.scene.node(id).unwrap();
+    assert_eq!(node.modifiers.len(), 1);
+    assert_eq!(loom_scene::camera::correction(node), Some((0.0, 90.0)), "Amount 0, Direction 90");
+    h.app.panel_tab = crate::Tab::Modify;
+    h.frames(3);
+    h.click(h.find(Role::Button, "Guess").center());
+    h.frames(2);
+    let want = loom_scene::camera::correction_guess(h.app.state.scene.world_matrix(id));
+    assert!(want.abs() > 1.0, "the default view looks down: {want}");
+    let (amount, _) = loom_scene::camera::correction(h.app.state.scene.node(id).unwrap()).unwrap();
+    assert!((amount - want).abs() < 1e-3, "Guess set Amount {amount}, want {want}");
+    let mut vp = h.app.state.viewports[0].clone();
+    vp.kind = loom_commands::ViewKind::Camera(id);
+    let cam = h.app.camera_for_view(&vp);
+    assert!(cam.correction.is_some_and(|(a, d)| (a - want.to_radians()).abs() < 1e-4 && (d - 90f32.to_radians()).abs() < 1e-4));
+}
+
+/// Camera Correction is refused on anything but a camera.
+#[test]
+fn camera_correction_only_goes_on_cameras() {
+    let mut h = Harness::new();
+    h.cmd(Command::CreatePrimitive { kind: PrimitiveKind::Box, position: [0.0; 3], size: [10.0; 3] });
+    assert!(h.app.dispatch(Command::AddModifier { name: "Camera Correction".into() }).is_err());
+}

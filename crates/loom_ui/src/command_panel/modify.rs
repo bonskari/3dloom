@@ -1137,6 +1137,34 @@ fn modifier_rollouts(ui: &mut egui::Ui, app: &mut LoomApp, id: loom_scene::NodeI
             });
         });
     }
+    if let Modifier::CameraCorrection { amount, direction } = &modifier {
+        // Camera Correction: Amount, Direction and Guess.
+        let (amount, direction) = (amount.get(), direction.get());
+        rollout(ui, "2-Point Perspective Correction", true, |ui| {
+            egui::Grid::new(("camera_correction", id.0, index)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                for (pname, f) in [("Amount", amount), ("Direction", direction)] {
+                    ui.label(pname);
+                    let mut v = f;
+                    let r = ui.add(crate::spinner::spin(ui, &mut v, ..).speed(app.spinner_speed(0.05)).fixed_decimals(app.state.prefs.spinner_precision));
+                    if r.drag_started() {
+                        app.state.undo.begin(pname);
+                    }
+                    if r.changed() && (v - f).abs() > 1e-9 {
+                        let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: pname.into(), value: v as f64 });
+                    }
+                    if r.drag_stopped() {
+                        app.state.undo.end();
+                    }
+                    ui.end_row();
+                }
+            });
+            if ui.button("Guess").clicked() {
+                let guess = loom_scene::camera::correction_guess(app.state.scene.world_matrix(id));
+                let _ = app.dispatch(Command::SetModifierParameter { index: index as u32, name: "Amount".into(), value: guess as f64 });
+            }
+        });
+        return;
+    }
     let params = modifier.parameters();
     // Skin, Morpher and Skin Morph draw their own rollouts.
     if params.is_empty() || matches!(modifier, Modifier::Skin(_) | Modifier::Morpher(_) | Modifier::SkinMorph(_) | Modifier::SkinWrap(_) | Modifier::SkinWrapPatch(_) | Modifier::EditNormals(_)) {

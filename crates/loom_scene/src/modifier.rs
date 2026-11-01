@@ -499,6 +499,10 @@ pub enum Modifier {
         world: bool,
     },
     CapHoles,
+    /// Camera Correction (cameras only): two-point perspective. `amount`
+    /// tilts the image plane back by that many degrees about the image axis
+    /// across `direction` (90 = vertical lines stay vertical).
+    CameraCorrection { amount: Param<f32>, direction: Param<f32> },
     STLCheck { check: Param<bool>, test: Param<u32>, select_faces: Param<bool> },
     DeleteMesh,
     FaceExtrude { amount: Param<f32>, scale: Param<f32> },
@@ -624,6 +628,10 @@ impl Modifier {
     /// above the object-space modifiers).
     pub const WSM_LIST: &'static [&'static str] = &["Camera Map (WSM)", "MapScaler (WSM)", "PathDeform (WSM)", "Point Cache (WSM)", "Subdivide (WSM)"];
 
+    /// Modifiers for cameras: not on the Modifier List, only on the
+    /// Modifiers menu > Cameras and a camera's quad menu.
+    pub const CAMERA_LIST: &'static [&'static str] = &["Camera Correction"];
+
     /// Whether the result depends on the node's own placement (world-space
     /// modifiers, Flex), so moving the node re-evaluates the stack.
     pub fn uses_own_transform(&self) -> bool {
@@ -728,6 +736,7 @@ impl Modifier {
             "Projection" => Modifier::Projection(Box::default()),
             "Point Cache (WSM)" => Modifier::PointCache(Box::new(crate::caches9::PointCacheData { world: true, ..Default::default() })),
             "Cap Holes" => Modifier::CapHoles,
+            "Camera Correction" => Modifier::CameraCorrection { amount: f(0.0), direction: f(90.0) },
             "STL Check" => Modifier::STLCheck { check: Param::new(false), test: Param::new(4), select_faces: Param::new(false) },
             "DeleteMesh" => Modifier::DeleteMesh,
             "Face Extrude" => Modifier::FaceExtrude { amount: f(0.0), scale: f(100.0) },
@@ -817,6 +826,7 @@ impl Modifier {
             Modifier::PointCache(d) => if d.world { "Point Cache (WSM)" } else { "Point Cache" },
             Modifier::Projection(_) => "Projection",
             Modifier::CapHoles => "Cap Holes",
+            Modifier::CameraCorrection { .. } => "Camera Correction",
             Modifier::STLCheck { .. } => "STL Check",
             Modifier::DeleteMesh => "DeleteMesh",
             Modifier::FaceExtrude { .. } => "Face Extrude",
@@ -1340,6 +1350,7 @@ impl Modifier {
             Modifier::PointCache(d) => vec![("Strength", Float(d.strength.get())), ("Relative Offset", Bool(d.relative)), ("Playback Type", Int(d.playback)), ("Start Frame", Float(d.start_frame))],
             Modifier::Projection(d) => vec![("Push Amount", Float(d.push.get()))],
             Modifier::CapHoles | Modifier::DeleteMesh | Modifier::TurnToMesh => Vec::new(),
+            Modifier::CameraCorrection { amount, direction } => vec![("Amount", Float(amount.get())), ("Direction", Float(direction.get()))],
             Modifier::STLCheck { check, test, select_faces } => vec![("Check", Bool(check.get())), ("Test", Int(test.get())), ("Select Faces", Bool(select_faces.get()))],
             Modifier::FaceExtrude { amount, scale } => vec![("Amount", Float(amount.get())), ("Scale", Float(scale.get()))],
             Modifier::TurnToPoly { keep_convex, limit_size, max_size, threshold } => vec![
@@ -1423,6 +1434,8 @@ impl Modifier {
             (Modifier::Melt { solidity, .. }, "Solidity") => solidity.set(v.clamp(0.0, 1.0)),
             (Modifier::Melt { flip, .. }, "Flip Axis") => flip.set(b),
             (Modifier::Push { amount }, "Push Value") => amount.set(v),
+            (Modifier::CameraCorrection { amount, .. }, "Amount") => amount.set(v),
+            (Modifier::CameraCorrection { direction, .. }, "Direction") => direction.set(v),
             (Modifier::Displace { strength, .. }, "Strength") => strength.set(v),
             (Modifier::Displace { decay, .. }, "Decay") => decay.set(v),
             (Modifier::Skew { amount, .. }, "Amount") => amount.set(v),
@@ -2184,6 +2197,8 @@ impl Modifier {
                 v.selection = None;
                 Ok(v)
             }
+            // Camera Correction changes the camera's view, not geometry.
+            Modifier::CameraCorrection { .. } => Ok(v),
             Modifier::CapHoles => {
                 loom_mesh::mesh_mods::cap_holes(&mut v.mesh)?;
                 v.selection = None;

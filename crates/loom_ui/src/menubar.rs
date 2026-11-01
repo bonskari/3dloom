@@ -1142,7 +1142,7 @@ const REPO_URL: &str = "https://github.com/bonskari/3dloom";
 
 /// Modifiers menu: the reference's categories, each with the modifiers of
 /// the Modifier List that belong to it (label, Modifier List name).
-/// Categories with no modifier in Loom (NURBS Editing, Cameras) are left out.
+/// Categories with no modifier in Loom (NURBS Editing) are left out.
 pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
     ("Selection Modifiers", &[("Mesh Select", "Mesh Select"), ("Poly Select", "Poly Select"), ("Spline Select", "Spline Select"), ("Vol. Select", "Vol. Select")]),
     ("Patch/Spline Editing", &[
@@ -1174,6 +1174,7 @@ pub const MODIFIERS_MENU: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("Surface", &[("Material", "Material"), ("Material By Element", "Material By Element")]),
     ("Radiosity", &[("Subdivide", "Subdivide"), ("Subdivide (WSM)", "Subdivide (WSM)")]),
+    ("Cameras", &[("Camera Correction", "Camera Correction")]),
 ];
 
 #[cfg(test)]
@@ -1188,7 +1189,7 @@ mod tests {
             assert!(Modifier::by_name(n).is_some(), "{n} is not a modifier");
         }
         names.sort();
-        let mut list: Vec<&str> = Modifier::LIST.iter().chain(Modifier::WSM_LIST.iter()).copied().collect();
+        let mut list: Vec<&str> = Modifier::LIST.iter().chain(Modifier::WSM_LIST).chain(Modifier::CAMERA_LIST).copied().collect();
         list.sort();
         assert_eq!(names, list);
     }

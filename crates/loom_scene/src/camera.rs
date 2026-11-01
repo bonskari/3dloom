@@ -27,6 +27,22 @@ pub fn fov_to_lens(fov_deg: f32) -> f32 {
     FILM_WIDTH_MM * 0.5 / (fov_deg.to_radians() * 0.5).tan()
 }
 
+/// Camera Correction on a camera node: the first enabled entry's (Amount,
+/// Direction) in degrees.
+pub fn correction(node: &crate::node::Node) -> Option<(f32, f32)> {
+    node.modifiers.iter().filter(|s| s.enabled).find_map(|s| match &s.modifier {
+        crate::modifier::Modifier::CameraCorrection { amount, direction } => Some((amount.get(), direction.get())),
+        _ => None,
+    })
+}
+
+/// Camera Correction's Guess: the Amount that levels a camera with this
+/// world matrix (its line of sight's angle above the horizon, Z up).
+pub fn correction_guess(world: glam::Mat4) -> f32 {
+    let forward = -world.z_axis.truncate().normalize_or_zero();
+    forward.z.clamp(-1.0, 1.0).asin().to_degrees()
+}
+
 /// Horizontal field of view in degrees for a focal length in millimetres.
 pub fn lens_to_fov(lens_mm: f32) -> f32 {
     2.0 * (FILM_WIDTH_MM * 0.5 / lens_mm.max(1e-3)).atan().to_degrees()

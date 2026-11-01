@@ -17,6 +17,12 @@ pub struct Camera {
     /// Looking through a camera object: its horizontal field of view, which
     /// spans the viewport's width (orthographic: the width at `orbit.distance`).
     pub fov_x_radians: Option<f32>,
+    /// Looking through a perspective camera with Camera Correction: (amount,
+    /// direction) in radians. The image plane tilts back by `amount` about
+    /// the image axis across `direction` (pi/2: vertical lines stay
+    /// vertical) and the lens shifts so the camera's line of sight stays at
+    /// the centre (two-point perspective).
+    pub correction: Option<(f32, f32)>,
 }
 
 impl Default for Camera {
@@ -30,6 +36,7 @@ impl Default for Camera {
             clip: None,
             frame: None,
             fov_x_radians: None,
+            correction: None,
         }
     }
 }
@@ -48,9 +55,22 @@ impl Camera {
         ((d * 1e-3).max(1e-4), (d * 1e3).max(1000.0))
     }
 
+    /// Camera Correction's tilt of the image plane, in the camera's own
+    /// frame: about the image axis across `direction`, by `-amount`.
+    fn correction_rotation(&self) -> Option<glam::Mat3> {
+        let (amount, direction) = self.correction.filter(|_| self.perspective && self.frame.is_some())?;
+        let axis = glam::Vec3::new(direction.sin(), -direction.cos(), 0.0);
+        Some(glam::Mat3::from_axis_angle(axis, -amount))
+    }
+
     pub fn view_matrix(&self) -> Mat4 {
         if let Some(f) = self.frame {
-            let (x, y, z) = (f.x_axis.truncate().normalize_or_zero(), f.y_axis.truncate().normalize_or_zero(), f.z_axis.truncate().normalize_or_zero());
+            let (mut x, mut y, mut z) = (f.x_axis.truncate().normalize_or_zero(), f.y_axis.truncate().normalize_or_zero(), f.z_axis.truncate().normalize_or_zero());
+            if let Some(r) = self.correction_rotation() {
+                // Camera Correction: the image plane tilted back.
+                let basis = glam::Mat3::from_cols(x, y, z) * r;
+                (x, y, z) = (basis.x_axis, basis.y_axis, basis.z_axis);
+            }
             let mut eye = f.w_axis.truncate();
             if !self.perspective {
                 // Orthographic: the projection's eye sits ORTHO_EYE behind the view's eye point.
@@ -71,7 +91,14 @@ impl Camera {
         let half_x = self.fov_x_radians.map(|f| (f * 0.5).tan());
         if self.perspective {
             let fov_y = half_x.map_or(self.fov_y_radians, |t| 2.0 * (t / aspect.max(1e-6)).atan());
-            Mat4::perspective_rh(fov_y, aspect, self.near, self.far)
+            let p = Mat4::perspective_rh(fov_y, aspect, self.near, self.far);
+            let Some(r) = self.correction_rotation() else { return p };
+            // The lens shift: the camera's line of sight, seen in the tilted
+            // frame, moves back to the centre of the view.
+            let c = r.transpose() * glam::Vec3::NEG_Z;
+            let half_y = (fov_y * 0.5).tan();
+            let (sx, sy) = (c.x / -c.z / (half_y * aspect), c.y / -c.z / half_y);
+            Mat4::from_cols(glam::Vec4::X, glam::Vec4::Y, glam::Vec4::Z, glam::Vec4::new(-sx, -sy, 0.0, 1.0)) * p
         } else {
             // Zoom level comes from `distance` alone (not the perspective FOV),
             // except through a camera, whose FOV spans the width at `distance`.
@@ -204,5 +231,22 @@ mod tests {
         let ortho = Camera { perspective: false, orbit: OrbitCamera { distance: 100.0, ..OrbitCamera::default() }, ..cam };
         let vp = ortho.view_projection(2.0);
         assert!((vp.project_point3(Vec3::new(100.0, 0.0, -30.0)).x - 1.0).abs() < 1e-4, "orthographic width is the FOV's width at the distance");
+    }
+
+    /// Camera Correction: a camera tilted up 30 degrees, corrected by 30 at
+    /// Direction 90, keeps vertical lines vertical and its line of sight centred.
+    #[test]
+    fn camera_correction_keeps_vertical_lines_vertical() {
+        let (s, c) = 30f32.to_radians().sin_cos();
+        let frame = Mat4::from_cols(Vec3::X.extend(0.0), Vec3::new(0.0, -s, c).extend(0.0), Vec3::new(0.0, -c, -s).extend(0.0), glam::Vec4::W);
+        let mut cam = Camera { frame: Some(frame), fov_x_radians: Some(60f32.to_radians()), near: 1.0, far: 1000.0, ..Camera::default() };
+        let (lo, hi) = (Vec3::new(5.0, 20.0, 0.0), Vec3::new(5.0, 20.0, 25.0));
+        let vp = cam.view_projection(1.5);
+        assert!((vp.project_point3(lo).x - vp.project_point3(hi).x).abs() > 0.02, "uncorrected, the vertical converges");
+        cam.correction = Some((30f32.to_radians(), 90f32.to_radians()));
+        let vp = cam.view_projection(1.5);
+        assert!((vp.project_point3(lo).x - vp.project_point3(hi).x).abs() < 1e-4, "corrected, it stays vertical");
+        let centre = vp.project_point3(Vec3::new(0.0, c, s) * 50.0);
+        assert!(centre.x.abs() < 1e-4 && centre.y.abs() < 1e-4, "the line of sight stays centred: {centre}");
     }
 }

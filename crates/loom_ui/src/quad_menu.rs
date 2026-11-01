@@ -376,7 +376,8 @@ pub fn quadrants(app: &LoomApp) -> Quadrants {
 }
 
 /// Tools 1 for selected cameras and lights: Select Target for a target
-/// camera or light, Cast Shadows (the first selected light's Shadows On).
+/// camera or light, Apply Camera Correction Modifier for cameras, Cast
+/// Shadows (the first selected light's Shadows On).
 fn camera_light_tools(s: &loom_commands::AppState) -> Option<Vec<Entry>> {
     let mut out = Vec::new();
     let targeted = s.selection.iter().any(|id| match s.scene.node(*id).map(|n| &n.object) {
@@ -386,6 +387,9 @@ fn camera_light_tools(s: &loom_commands::AppState) -> Option<Vec<Entry>> {
     });
     if targeted {
         out.push(e("Select Target", Command::SelectTarget));
+    }
+    if !s.selection.is_empty() && s.selection.iter().all(|id| s.scene.node(*id).is_some_and(|n| matches!(n.object, loom_scene::ObjectKind::Camera { .. }))) {
+        out.push(e("Apply Camera Correction Modifier", Command::AddModifier { name: "Camera Correction".into() }));
     }
     let light = s.selection.iter().find_map(|id| s.scene.node(*id).and_then(|n| n.object.light().map(|l| (*id, l))));
     if let Some((id, l)) = light.filter(|(_, l)| l.light_type != loom_scene::light::LightType::Skylight) {

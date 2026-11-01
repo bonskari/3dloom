@@ -1267,6 +1267,9 @@ fn add_modifier(state: &mut AppState, name: &str) -> Result<Value, String> {
     {
             let modifier = Modifier::by_name(name).ok_or_else(|| format!("no modifier {name:?} (Modifier List: {}, {})", Modifier::WSM_LIST.join(", "), Modifier::LIST.join(", ")))?;
             let ids = selected_ids(state)?;
+            if matches!(modifier, Modifier::CameraCorrection { .. }) && !ids.iter().all(|id| state.scene.node(*id).is_some_and(|n| matches!(n.object, ObjectKind::Camera { .. }))) {
+                return Err("Camera Correction applies to cameras: select a camera".into());
+            }
             // The sub-object selection the poly being edited passes up stays
             // with it (the Editable Poly's level stays under the new entry).
             freeze_passes_up(state, &ids);
