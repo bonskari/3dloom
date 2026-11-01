@@ -181,7 +181,7 @@ pub fn execute(state: &mut AppState, cmd: Command) -> Result<Value, String> {
             let mut after = before.clone();
             let (x, y, z) = head_rotation(0.0, 0.0).to_euler(glam::EulerRot::XYZ);
             after.rotation = loom_scene::param::Param::new(Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees()));
-            commit(state, "Remove All Head Animation", Change::SetTransform { id: cam, before, after })?;
+            crate::execute::commit_exact(state, "Remove All Head Animation", Change::SetTransform { id: cam, before, after })?;
             Ok(json!({}))
         }
         C::WalkthroughSetTarget { camera: cam, path, node } => {
