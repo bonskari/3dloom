@@ -48,7 +48,7 @@ fn interactive_ik_moves_an_unlinked_object_only_with_always_transform_children_o
     execute(&mut s, Command::SetPreference { name: "Always Transform Children of the World".into(), value: 0.0 }).unwrap();
     execute(&mut s, Command::MoveSelection { delta: [0.0, 0.0, 5.0], system: None }).unwrap();
     assert!((world(&s, ids[0]).z - 5.0).abs() < 1e-4, "the root stays put");
-    for (name, v) in [("Interactive IK Threshold", 0.5), ("Interactive IK Iterations", 20.0), ("Applied IK Threshold", 0.01), ("Applied IK Iterations", 100.0)] {
+    for (name, v) in [("Interactive IK Threshold", 0.5), ("Interactive IK Iterations", 20.0), ("Applied IK Threshold", 0.25), ("Applied IK Iterations", 100.0)] {
         execute(&mut s, Command::SetPreference { name: name.into(), value: v }).unwrap();
         assert_eq!(s.prefs.get(name), Some(v));
     }
@@ -78,8 +78,9 @@ fn apply_ik_keys_the_chain_onto_a_bound_follow_object() {
     // Apply Only to Keys: keys only where the follow object has keys (0 and 10).
     execute(&mut s, Command::UndoSceneOperation).unwrap();
     execute(&mut s, Command::ApplyIk { start: None, end: None, only_keys: Some(true), clear_keys: Some(true) }).unwrap();
-    let keys = s.scene.node(NodeId(ids[1])).unwrap().transform.rotation.keys().unwrap().tracks[0].keys.iter().map(|k| k.time).collect::<Vec<_>>();
-    assert_eq!(keys, vec![0.0, 10.0]);
+    for track in &s.scene.node(NodeId(ids[1])).unwrap().transform.rotation.keys().unwrap().tracks {
+        assert_eq!(track.keys.iter().map(|k| k.time).collect::<Vec<_>>(), vec![0.0, 10.0]);
+    }
     // Unbind: nothing left to apply.
     execute(&mut s, Command::SetIkObjectParameters { id: ids[2], terminator: None, follow: None, unbind: Some(true) }).unwrap();
     assert!(execute(&mut s, Command::ApplyIk { start: None, end: None, only_keys: None, clear_keys: None }).is_err());

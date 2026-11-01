@@ -787,6 +787,7 @@ fn apply_ik(state: &mut AppState, start: Option<i32>, end: Option<i32>, only_key
                 loom_scene::anim::with(ft, true, || {
                     for ((_, q), t) in solved.into_iter().zip(transforms.iter_mut()) {
                         t.set_rotation_quat(q);
+                        t.rotation.key_now();
                     }
                 });
             });
