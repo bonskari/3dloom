@@ -68,3 +68,45 @@ fn a_glossiness_map_sets_the_highlight_like_the_spinner() {
     assert!(near(mapped_sharp, sharp), "a light map at Amount 100 is Glossiness 80: {mapped_sharp:?} vs {sharp:?}");
     assert!(near(mapped_dull, dull), "a dark map at Amount 100 is Glossiness 5: {mapped_dull:?} vs {dull:?}");
 }
+
+/// A plane seen at a grazing angle, lit from above.
+fn grazing(r: &mut BevyRenderer, s: Surface) -> image::RgbaImage {
+    let mut plane = loom_mesh::plane_segmented(200.0, 200.0, 1, 1);
+    loom_mesh::uvmap::auto_map(&mut plane, loom_mesh::uvmap::AutoMap::Planar, 1);
+    r.sync(&[SceneObject { id: 2, mesh: &plane, wire_color: [200, 200, 200], surfaces: Some(Surfaces::Single(Box::new(s))), renderable: true, flags: Default::default() }]);
+    let mut l = default_lights(1, Mat4::IDENTITY)[0].clone();
+    l.id = loom_scene::NodeId(11);
+    l.emitter = Emitter::Point;
+    l.position = Vec3::new(0.0, 0.0, 200.0);
+    l.color = Vec3::ONE;
+    l.shadows = false;
+    r.sync_lights(&[l]);
+    let cam = ViewCamera { view: Mat4::look_at_rh(Vec3::new(0.0, -150.0, 60.0), Vec3::ZERO, Vec3::Z), projection: Mat4::perspective_rh(50f32.to_radians(), 1.0, 1.0, 1000.0) };
+    r.render_with(128, 128, &cam, RenderOptions { ambient: [0.0; 3], ..RenderOptions::default() }).unwrap()
+}
+
+#[test]
+fn a_displacement_map_shifts_the_texture_by_its_heights() {
+    let Some((adapter, device, queue)) = gpu() else {
+        eprintln!("displacement map: no GPU adapter, skipped");
+        return;
+    };
+    let mut r = BevyRenderer::new(adapter, device, queue);
+    let checker = |tiles: f32| {
+        let mut c = Map::new(MapType::Checker, 100.0);
+        c.coords.tiling = [tiles, tiles];
+        c
+    };
+    let mut m = StandardMaterial::new("m");
+    m.diffuse_map = Some(checker(8.0));
+    let flat = grazing(&mut r, Surface::from_standard(&m));
+    let mut d = m.clone();
+    d.displacement_map = Some(checker(8.0));
+    let displaced = grazing(&mut r, Surface::from_standard(&d));
+    d.displacement_map.as_mut().unwrap().amount = 0.0;
+    let zero = grazing(&mut r, Surface::from_standard(&d));
+    let diff = |a: &image::RgbaImage, b: &image::RgbaImage| a.pixels().zip(b.pixels()).filter(|(p, q)| p.0[0].abs_diff(q.0[0]) > 60).count();
+    eprintln!("displaced differs at {} px, Amount 0 at {} px", diff(&flat, &displaced), diff(&flat, &zero));
+    assert!(diff(&flat, &displaced) > 300, "the raised squares shift the checker");
+    assert!(diff(&flat, &zero) < 30, "Amount 0 displaces nothing");
+}

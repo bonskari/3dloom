@@ -277,6 +277,22 @@ pub fn specular_scale(spec: Option<(&MapImage, f32)>, gloss: Option<(&MapImage, 
     (MapImage { width: w, height: h, rgba }, factor)
 }
 
+/// A Displacement map as Bevy's parallax depth map: grey inverted (white in
+/// the map is the surface top, black the deepest), in red.
+pub fn inverted_luminance(img: &MapImage) -> MapImage {
+    let rgba = img
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let l = 255 - ((p[0] as u32 + p[1] as u32 + p[2] as u32) / 3) as u8;
+            [l, l, l, 255]
+        })
+        .collect();
+    MapImage { width: img.width, height: img.height, rgba }
+}
+
 /// The diffuse bitmap a material shows, if any (an enabled Diffuse Color map).
 pub fn diffuse_map_path(material: Option<&LoomMaterial>) -> Option<&str> {
     material.and_then(|m| m.diffuse_map.as_ref()).filter(|b| b.enabled && !b.path.is_empty()).map(|b| b.path.as_str())

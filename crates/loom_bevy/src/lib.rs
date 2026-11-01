@@ -1039,8 +1039,8 @@ impl BevyRenderer {
                     }
                     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, convert::vertex_colors(&part));
                 }
-                if mat.normal_map_texture.is_some() || mat.anisotropy_strength > 0.0 {
-                    // A normal map and an anisotropic highlight need tangents (from the UVs).
+                if mat.normal_map_texture.is_some() || mat.depth_map.is_some() || mat.anisotropy_strength > 0.0 {
+                    // A normal map, parallax and an anisotropic highlight need tangents (from the UVs).
                     let _ = mesh.generate_tangents();
                 }
                 let world = self.app.world_mut();
@@ -1215,6 +1215,18 @@ impl BevyRenderer {
             m.specular_texture = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || t);
             if m.specular_texture.is_some() {
                 m.reflectance *= factor;
+            }
+        }
+        if let Some(map) = s.displacement_map.as_ref() {
+            if let Some((img, k)) = self.in_frame(map, frame) {
+                // Displacement as parallax: white raised (the depth map's black), Amount 100 = 0.1 UV deep.
+                let key = format!("disp:{k}");
+                m.depth_map = self.texture_from(&key, TextureFormat::Rgba8Unorm, [false; 2], || convert::inverted_luminance(&img));
+                if m.depth_map.is_some() {
+                    m.parallax_depth_scale = (map.amount / 100.0).clamp(0.0, 10.0) * 0.1;
+                    m.parallax_mapping_method = bevy::pbr::ParallaxMappingMethod::Relief { max_steps: 8 };
+                    m.max_parallax_layer_count = 32.0;
+                }
             }
         }
         if let Some(map) = s.self_illum_map.as_ref() {
